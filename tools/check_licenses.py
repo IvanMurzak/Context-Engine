@@ -80,8 +80,13 @@ def main() -> int:
 
     components: list[dict] = []
     vcpkg_manifest_path = REPO_ROOT / "src" / "vcpkg.json"
-    if vcpkg_manifest_path.is_file():
-        components.extend(vcpkg_dependencies(load_json(vcpkg_manifest_path)))
+    if not vcpkg_manifest_path.is_file():
+        # Deny-by-default extends to the manifest itself: a missing manifest must be a loud
+        # configuration error, never a vacuous pass with zero scanned components.
+        print(f"[license-gate] ERROR: vcpkg manifest not found at {vcpkg_manifest_path} — "
+              "refusing to pass with nothing to scan.")
+        return 2
+    components.extend(vcpkg_dependencies(load_json(vcpkg_manifest_path)))
     for pkg_path in find_package_jsons(REPO_ROOT):
         components.extend(npm_dependencies(load_json(pkg_path), pkg_path.relative_to(REPO_ROOT)))
 
@@ -99,7 +104,7 @@ def main() -> int:
                 f"is not on the allowlist")
 
     # Minimal CycloneDX-shaped SBOM (grows into a full CycloneDX document with real deps).
-    project = load_json(vcpkg_manifest_path) if vcpkg_manifest_path.is_file() else {}
+    project = load_json(vcpkg_manifest_path)
     sbom = {
         "bomFormat": "CycloneDX",
         "specVersion": "1.5",

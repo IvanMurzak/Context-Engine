@@ -1,0 +1,63 @@
+<!doctype html>
+<!-- spikes/cef-compositing test page. Transparent body: the engine's spinning triangle shows
+     through everywhere except the opaque editor-chrome toolbar. Solid #2266CC button flips to
+     #FF8800 on :hover; a click turns the state strip #22CC44 — the demo reads those exact
+     pixels back from the composited UI texture. Events report via document.title ("EV|name|n")
+     so the native side can timestamp the input->JS round-trip. The spinner forces continuous
+     compositor activity (sustained paint-rate measurement, like a busy editor UI). -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>ctx-cef-spike</title>
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden;
+               font: 14px system-ui, sans-serif; }
+  #toolbar { position: fixed; left: 0; top: 0; right: 0; height: 140px;
+             background: #141820; color: #dde3ee; }
+  #btn   { position: absolute; left: 40px; top: 40px; width: 200px; height: 40px;
+           background: #2266CC; border: none; cursor: pointer; }
+  #btn:hover { background: #FF8800; }
+  #state { position: absolute; left: 40px; top: 100px; width: 200px; height: 20px;
+           background: #444444; }
+  #label { position: absolute; left: 260px; top: 40px; }
+  #count { position: absolute; left: 260px; top: 70px; font-weight: 700; }
+  #keys  { position: absolute; left: 260px; top: 100px; color: #9aa7bd; }
+  #spin  { position: absolute; right: 30px; top: 35px; width: 70px; height: 70px;
+           border: 8px solid #26304a; border-top-color: #4d8dff; border-radius: 50%;
+           animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #foot { position: fixed; left: 0; bottom: 0; right: 0; height: 34px;
+          background: rgba(20, 24, 32, 0.75); color: #9aa7bd;
+          display: flex; align-items: center; padding-left: 12px; }
+</style>
+</head>
+<body>
+  <div id="toolbar">
+    <button id="btn" aria-label="spike button"></button>
+    <div id="state"></div>
+    <div id="label">CEF accelerated-OSR spike &mdash; UI layer</div>
+    <div id="count">clicks: 0</div>
+    <div id="keys">keys: &mdash;</div>
+    <div id="spin"></div>
+  </div>
+  <div id="foot">transparent page body &rarr; engine viewport visible below this chrome</div>
+<script>
+  let n = 0, seq = 0;
+  const btn = document.getElementById('btn');
+  const state = document.getElementById('state');
+  const count = document.getElementById('count');
+  const keys = document.getElementById('keys');
+  btn.addEventListener('mouseenter', () => { document.title = 'EV|hover|' + (++seq); });
+  btn.addEventListener('click', () => {
+    n++;
+    state.style.background = '#22CC44';
+    count.textContent = 'clicks: ' + n;
+    document.title = 'EV|click|' + n;
+  });
+  document.addEventListener('keydown', (e) => {
+    keys.textContent = 'keys: ' + e.key;
+    document.title = 'EV|key|' + e.key + '|' + (++seq);
+  });
+</script>
+</body>
+</html>
