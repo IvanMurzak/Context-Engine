@@ -27,6 +27,14 @@ option(CONTEXT_BUILD_SPIKES "Build the M0 de-risking spike targets under spikes/
 option(CONTEXT_BUILD_SPIKE_WASM "Build ONLY spikes/wasm (subset of CONTEXT_BUILD_SPIKES; acquires its own runtimes — needs no vcpkg toolchain), so CI can exercise the WASM spike without configuring the vcpkg-dependent spikes" OFF)
 option(CONTEXT_BUILD_SPIKE_CEF "Build the CEF accelerated-OSR compositing spike (L-41) — downloads the pinned ~162 MB CEF binary distribution; Windows/MSVC-only, local runs only, NEVER enabled in CI" OFF)
 
+# spikes/wasm builds WAMR (a C library): the C language must be enabled HERE — at top-level
+# scope, BEFORE any add_subdirectory — not inside the spike's directory. Enabling C mid-tree
+# under a chainloaded vcpkg toolchain leaves earlier-processed directories with a stale
+# no-C-compiler snapshot and generation fails with "No known features for C compiler".
+if(CONTEXT_BUILD_SPIKES OR CONTEXT_BUILD_SPIKE_WASM)
+    enable_language(C)
+endif()
+
 # Warnings-as-errors baseline: the `context_warnings` interface target (../cmake/ContextWarnings.cmake).
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextWarnings.cmake)
 
@@ -63,6 +71,7 @@ endif()
 
 # spikes/wasm acquires its own pinned runtimes (wasmtime prebuilt C API + WAMR from source) and
 # needs no vcpkg toolchain, so it also has a stand-alone toggle the spikes CI job uses.
+# (The C language WAMR needs is enabled at the top of this file, before any add_subdirectory.)
 if(CONTEXT_BUILD_SPIKES OR CONTEXT_BUILD_SPIKE_WASM)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/wasm ${CMAKE_BINARY_DIR}/spikes/wasm)
 endif()

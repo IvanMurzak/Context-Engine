@@ -114,10 +114,12 @@ if(CONTEXT_SPIKE_WASM_WAMR)
 
     set(WAMR_ROOT_DIR ${wamr_SOURCE_DIR})
     # WAMR is C (plus one invoke-native asm file) and its config_common.cmake try_runs a .c
-    # probe; the enclosing project() is CXX-only, so both languages must be enabled here.
-    # (MSBuild compiles .c without this; Ninja on linux/macos silently DROPS .c sources from
-    # the target when C is not enabled — every wasm_runtime_* symbol goes missing at link.)
-    enable_language(C)
+    # probe. The C language is enabled at the TOP level (src/CMakeLists.txt) when this spike
+    # is on: enable_language(C) from inside a subdirectory breaks C-feature detection under a
+    # chainloaded vcpkg toolchain ("No known features for C compiler" at generate time), while
+    # a missing C language makes Ninja on linux/macos silently DROP every .c source from the
+    # target (all wasm_runtime_* symbols gone at link; MSBuild masks both). ASM stays here —
+    # it has no feature detection, so subdirectory enabling is safe.
     if(WIN32)
         set(WAMR_BUILD_PLATFORM "windows")
         enable_language(ASM_MASM)
