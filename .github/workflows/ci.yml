@@ -76,6 +76,56 @@ jobs:
       - name: Run context-hello under ASan+UBSan
         run: ctest --preset sanitize --verbose
 
+  # R-FILE-011 benchmark baseline on a SMALL corpus (10k files). GH-hosted runners are
+  # NOT the R-QA-009 perf-isolated runner class — this job is a trend gauge + harness
+  # smoke (results archived as artifacts), not a gating floor. The full 100k corpus run
+  # stays local/perf-box. Spike targets are opt-in (CONTEXT_BUILD_SPIKES=ON), so the
+  # default build matrix above stays vcpkg-free.
+  bench-baseline:
+    name: bench baseline (10k corpus, ubuntu)
+    runs-on: ubuntu-latest
+    env:
+      CMAKE_GENERATOR: Ninja
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate seeded 10k corpus
+        run: python3 bench/gen_corpus.py --size 10000 --out bench/corpora/corpus-10k --jobs 4
+
+      - name: Configure (spikes ON, vcpkg toolchain)
+        run: >
+          cmake -B build/bench -S .
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake
+          -DVCPKG_MANIFEST_FEATURES=spikes
+          -DCONTEXT_BUILD_SPIKES=ON
+
+      - name: Build parse-bench
+        run: cmake --build build/bench --target context-parse-bench
+
+      - name: Canonical fixpoint check (serialize∘parse == identity on canonical input)
+        run: >
+          ./build/bench/spikes/parse-bench/context-parse-bench canon-check
+          --corpus bench/corpora/corpus-10k --sample 500
+
+      - name: Run harness (median-of-5, R-QA-009 discipline)
+        run: >
+          python3 bench/harness.py
+          --subject ./build/bench/spikes/parse-bench/context-parse-bench
+          --corpus bench/corpora/corpus-10k
+          --runs 5 --single-thread-attach --count 2000
+          --out bench/results/ci-ubuntu-10k --label ci-ubuntu-10k
+
+      - name: Upload bench results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: bench/results/
+          if-no-files-found: error
+
   license-gate:
     name: dependency-license gate (deny-by-default)
     runs-on: ubuntu-latest
