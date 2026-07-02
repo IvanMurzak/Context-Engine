@@ -1,0 +1,43 @@
+spikes/js-engine/FINDINGS.md
+  s_4dcafa08bfb269::t_d83eacd8e63be7 1-219
+spikes/js-engine/include/ctx/js_engine.hpp
+  s_4dcafa08bfb269::t_d83eacd8e63be7 1-94
+vcpkg.json
+  s_4dcafa08bfb269::t_e64840de3a8905 14
+spikes/js-engine/CMakeLists.txt
+  s_4dcafa08bfb269::t_d83eacd8e63be7 1-122
+spikes/js-engine/run_bench.py
+  s_4dcafa08bfb269::t_d83eacd8e63be7 1-183
+spikes/js-engine/src/engine_v8.cpp
+  s_4dcafa08bfb269::t_d83eacd8e63be7 1-326
+spikes/js-engine/results/2026-07-02-ryzen9950x.json
+  s_4dcafa08bfb269::t_d83eacd8e63be7 1-456
+spikes/js-engine/src/engine_quickjs.cpp
+  s_4dcafa08bfb269::t_d83eacd8e63be7 1-252
+spikes/js-engine/src/bench_main.cpp
+  s_4dcafa08bfb269::t_d83eacd8e63be7 1-564
+CMakeLists.txt
+  s_4dcafa08bfb269::t_e64840de3a8905 21
+  s_4dcafa08bfb269::t_d83eacd8e63be7 43-44,48
+spikes/js-engine/README.md
+  s_4dcafa08bfb269::t_d83eacd8e63be7 1-42
+tools/license-allowlist.json
+  s_4dcafa08bfb269::t_d83eacd8e63be7 16,18
+  s_4dcafa08bfb269::t_e64840de3a8905 2,17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "dd61851eb26595e50c1e652b5792119e71f9eb84",
+  "prompts": {},
+  "sessions": {
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
