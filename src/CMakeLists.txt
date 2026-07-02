@@ -24,6 +24,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(CONTEXT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors (baseline: ON)" ON)
 option(CONTEXT_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer (non-MSVC only)" OFF)
 option(CONTEXT_BUILD_SPIKES "Build the M0 de-risking spike targets under spikes/ (opt-in; the default CI matrix stays spike-free; some spikes require the vcpkg toolchain with VCPKG_MANIFEST_FEATURES=spikes)" OFF)
+option(CONTEXT_BUILD_SPIKE_WASM "Build ONLY spikes/wasm (subset of CONTEXT_BUILD_SPIKES; acquires its own runtimes — needs no vcpkg toolchain), so CI can exercise the WASM spike without configuring the vcpkg-dependent spikes" OFF)
 
 # Warnings-as-errors baseline: the `context_warnings` interface target (../cmake/ContextWarnings.cmake).
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextWarnings.cmake)
@@ -54,4 +55,10 @@ if(CONTEXT_BUILD_SPIKES)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/ecs ${CMAKE_BINARY_DIR}/spikes/ecs)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/parse-bench ${CMAKE_BINARY_DIR}/spikes/parse-bench)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/js-engine ${CMAKE_BINARY_DIR}/spikes/js-engine)
+endif()
+
+# spikes/wasm acquires its own pinned runtimes (wasmtime prebuilt C API + WAMR from source) and
+# needs no vcpkg toolchain, so it also has a stand-alone toggle the spikes CI job uses.
+if(CONTEXT_BUILD_SPIKES OR CONTEXT_BUILD_SPIKE_WASM)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/wasm ${CMAKE_BINARY_DIR}/spikes/wasm)
 endif()
