@@ -1,0 +1,29 @@
+CMakeLists.txt
+  s_de4a534a20842f::t_e903d4c2ca3a5a 37-38
+README.md
+  s_de4a534a20842f::t_ad157055fb1f01 28-31
+src/editor/README.md
+  s_de4a534a20842f::t_d884fa83d306ba 1
+src/kernel/README.md
+  s_de4a534a20842f::t_080ef6eac2f383 1
+src/packages/README.md
+  s_de4a534a20842f::t_58b23df731b8d6 1
+src/runtime/README.md
+  s_de4a534a20842f::t_a836b59d5f1aac 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "0c503ce769c19b342d1d9283abcc23d7216db380",
+  "prompts": {},
+  "sessions": {
+    "s_de4a534a20842f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2f7ba192-cf2d-431f-901d-3d275f59f0dd",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
