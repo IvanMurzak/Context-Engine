@@ -1,0 +1,21 @@
+.github/CONTRIBUTING.md
+  s_4dcafa08bfb269::t_31c1954d602989 29-43
+.gitignore
+  s_4dcafa08bfb269::t_7885095b1a9705 30-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "6524596a1d859044fedc8507f922217420211a2a",
+  "prompts": {},
+  "sessions": {
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
