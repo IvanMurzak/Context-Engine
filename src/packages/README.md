@@ -1,4 +1,4 @@
-# packages/
+# src/packages/
 
 First-party feature packages. In Context **every engine feature is a package** over the
 microkernel — rendering, 2D, physics, audio, input, netcode — so builds scale from a tiny

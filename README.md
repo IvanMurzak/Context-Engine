@@ -25,10 +25,10 @@ directory README stubs below name the documents that govern them.
 
 | Directory | Contents |
 |---|---|
-| `kernel/` | The microkernel — the ~6 stable interfaces everything else plugs into |
-| `editor/` | **EditorKernel** — the headless, file-authoritative project language server |
-| `runtime/` | **RuntimeKernel** — the runtime the editor embeds and shipped builds use |
-| `packages/` | First-party feature packages (every feature is a package) |
+| `src/kernel/` | The microkernel — the ~6 stable interfaces everything else plugs into |
+| `src/editor/` | **EditorKernel** — the headless, file-authoritative project language server |
+| `src/runtime/` | **RuntimeKernel** — the runtime the editor embeds and shipped builds use |
+| `src/packages/` | First-party feature packages (every feature is a package) |
 | `spikes/` | M0 de-risking spikes — throwaway proof code, never production code |
 | `tools/` | Repository/CI tooling (dependency-license gate, SBOM) |
 | `docs/` | Engineering docs that live with the code |
