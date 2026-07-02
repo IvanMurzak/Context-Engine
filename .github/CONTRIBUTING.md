@@ -26,6 +26,21 @@ Once the CLA is in place, contributions will additionally need to pass the stand
 - **Dependency-license gate** — `tools/check_licenses.py` is deny-by-default: any new
   dependency whose license is unknown or not on `tools/license-allowlist.json` fails CI.
 
+## Tests are part of the feature (R-QA-013)
+
+Test delivery is **PR-granular** (engine-design requirement R-QA-013, owner-ruled
+2026-07-02): a behavior change merges only together with the tests that pin it down —
+happy path, edge cases, **and** failure paths — never in a later "hardening pass".
+Concretely:
+
+- **Engine/tool code (C++/Python/TS)** ships with a test suite in the same PR
+  (Python tooling: pytest under `tools/tests/` and `bench/tests/`, run per-PR by the
+  `python-tests` CI job; C++ targets: ctest registrations).
+- **Spikes** are exempt from full suites but must carry a **runnable self-check
+  registered with ctest** under the `spikes` preset (e.g. `ecs-spike-zerocopy-runs`,
+  `context-parse-bench-canon-check`, `context-spike-jsengine-quickjs-smoke`).
+- A PR that changes behavior with no accompanying tests is incomplete by definition.
+
 ## Commit style
 
 Conventional commits (`feat:`, `fix:`, `build:`, `ci:`, `docs:`, `chore:` …).
