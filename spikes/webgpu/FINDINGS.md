@@ -31,17 +31,19 @@ hardens), but the acquisition asymmetry is decisive for development velocity:
 | Windows 11 local, offscreen readback (`render --fallback`) | **WARP** D3D12, CPU-software | **PASS** — hash `0xafcee6df1f620383` (differs only by float→unorm rounding: clear-red 26 vs 25 from 0.1·255 = 25.5) |
 | Windows 11 local, windowed (`window`) | NVIDIA RTX 4090, Vulkan surface (BGRA8UnormSrgb) | **PASS** — triangle visually confirmed on screen (screenshot captured locally; not committed — no binaries) |
 | Web, Chrome on this box | **BrowserWebGPU** (emdawnwebgpu → `navigator.gpu`) | **PASS** in the real browser — console shows the same asserts + `PASS`; hash **identical to the native Vulkan run** (`0xcf4023193eb64383`) |
-| CI ubuntu-latest, offscreen readback | lavapipe (Mesa software Vulkan, `mesa-vulkan-drivers`) | *pending — filled from the PR's CI run before merge* |
-| CI windows-latest, offscreen readback | WARP D3D12 | *pending — filled from the PR's CI run before merge* |
-| CI macos-latest, offscreen readback | Apple Paravirtual device, **Metal** | *pending — filled from the PR's CI run before merge* |
-| CI web leg | emsdk latest, emdawnwebgpu | *pending — artifact build on CI; the in-browser run itself was proven locally (row above)* |
+| CI ubuntu-latest, offscreen readback | llvmpipe (LLVM 20.1.2), Mesa software **Vulkan** | **PASS on CI** (PR #7 run) — rendered for real, coverage 12.50%, hash `0xafcee6df1f620383` |
+| CI windows-latest, offscreen readback | **WARP** D3D12 (Microsoft Basic Render Driver) | **PASS on CI** — hash `0xafcee6df1f620383` (identical to llvmpipe AND to local WARP — same rounding + edge rules across three software rasterizer runs) |
+| CI macos-latest, offscreen readback | Apple Paravirtual device, **Metal**, IntegratedGPU | **PASS on CI** — rendered for real (bg `26,51,77` — a third legal rounding variant), coverage 12.50%, hash `0x9b142828eb7c8383`. **macOS render proof is REAL, not residual.** |
+| CI web leg | emsdk latest (emcc 6.x), emdawnwebgpu | **wasm+js+html artifact builds green on CI**; the in-browser render run itself was proven locally (Chrome row above), not on CI (runners have no browser+WebGPU) |
 
 Coverage assert is analytic, not golden-image: the triangle covers 0.5·128·128 = 8192 px of
 256² = **12.50%** of the target; every PASS above measured exactly 12.50%.
 
 The **hash is informational, deliberately NOT asserted cross-platform**: float→unorm rounding
-at 0.5 ULP (25.5 → 25 or 26) legally differs per backend (observed Vulkan/NVIDIA vs
-D3D12-WARP), and edge fill rules may too. Same-backend runs are hash-stable.
+at 0.5 ULP (25.5 → 25 or 26) legally differs per backend (three variants observed:
+NVIDIA-Vulkan/Chrome `25,51,76`, WARP/llvmpipe `26,51,76`, Apple-Metal `26,51,77`), and edge
+fill rules may too. Same-backend runs are hash-stable, and notably WARP (D3D12) and llvmpipe
+(Vulkan) agreed byte-for-byte.
 
 ## Build-cost comparison (Dawn vs wgpu-native) — measured vs researched
 
@@ -155,9 +157,9 @@ deviation does not hide an unpayable debt.
 
 ## Residual risks
 
-- **macOS render proof** is delegated to the CI leg (this box is Windows-only); if
-  macos-latest exposes no usable Metal device the check SKIPs and macOS render proof remains
-  a documented residual (plus the windowed CAMetalLayer path, not exercised anywhere).
+- ~~macOS render proof~~ — **cleared**: the PR's CI run rendered for real on macos-latest's
+  paravirtual Metal device (PASS, proof-matrix row above). The remaining macOS residual is
+  only the *windowed* path (CAMetalLayer glue, not exercised anywhere).
 - The `-sALLOW_MEMORY_GROWTH` × emdawnwebgpu breakage (divergence note 4) is the single
   sharpest web-path risk found; cheap to re-test per emsdk/Dawn release.
 - emdawnwebgpu's link-time download of the Dawn pkg makes web builds network-dependent
