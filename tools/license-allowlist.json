@@ -9,5 +9,8 @@
         "Zlib",
         "BSL-1.0"
     ],
-    "dependency_licenses": {}
+    "dependency_licenses": {
+        "entt": "MIT",
+        "flecs": "MIT"
+    }
 }

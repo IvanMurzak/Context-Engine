@@ -27,6 +27,17 @@
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CONTEXT_SANITIZE": "ON"
             }
+        },
+        {
+            "name": "spikes",
+            "displayName": "Spikes (opt-in M0 spike targets; Release; vcpkg toolchain via $env{VCPKG_ROOT})",
+            "inherits": "base",
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CONTEXT_BUILD_SPIKES": "ON",
+                "VCPKG_MANIFEST_FEATURES": "spikes"
+            }
         }
     ],
     "buildPresets": [
@@ -39,6 +50,11 @@
             "name": "sanitize",
             "configurePreset": "sanitize",
             "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+        },
+        {
+            "name": "spikes",
+            "configurePreset": "spikes",
+            "configuration": "Release"
         }
     ],
     "testPresets": [
@@ -52,6 +68,12 @@
             "name": "sanitize",
             "configurePreset": "sanitize",
             "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "spikes",
+            "configurePreset": "spikes",
+            "configuration": "Release",
             "output": { "outputOnFailure": true }
         }
     ]
