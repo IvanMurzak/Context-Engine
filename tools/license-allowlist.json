@@ -1,0 +1,13 @@
+{
+    "$comment": "Deny-by-default dependency-license allowlist (design lock L-57 / O-7). 'allowed_licenses' are SPDX identifiers acceptable for code linked into shipped engine cores. 'dependency_licenses' maps each declared dependency name to its verified SPDX license; a dependency missing from this map counts as UNKNOWN and fails CI.",
+    "allowed_licenses": [
+        "MIT",
+        "BSD-2-Clause",
+        "BSD-3-Clause",
+        "Apache-2.0",
+        "ISC",
+        "Zlib",
+        "BSL-1.0"
+    ],
+    "dependency_licenses": {}
+}

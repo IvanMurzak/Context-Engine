@@ -1,0 +1,94 @@
+# Context Engine CI — M0 bootstrap.
+#
+# GH-hosted runners ONLY for now: migrating the Windows leg to the org's self-hosted Windows
+# runner is a deliberate later follow-up, not part of the M0 bootstrap.
+#
+# Toolchain note: these jobs use the runner-default toolchains (Clang on Linux, Apple Clang on
+# macOS, MSVC on Windows). The L-42 per-target pinned Clang toolchain manifest is an M0
+# follow-up and will replace the defaults here.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            generator: Ninja
+            cc: clang
+            cxx: clang++
+          - os: macos-latest
+            generator: Ninja
+            cc: ''
+            cxx: ''
+          - os: windows-latest # default generator (Visual Studio) — no MSVC env setup needed
+            generator: ''
+            cc: ''
+            cxx: ''
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure environment
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.generator }}" ]; then
+            echo "CMAKE_GENERATOR=${{ matrix.generator }}" >> "$GITHUB_ENV"
+          fi
+          if [ -n "${{ matrix.cc }}" ]; then
+            echo "CC=${{ matrix.cc }}" >> "$GITHUB_ENV"
+            echo "CXX=${{ matrix.cxx }}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Configure
+        run: cmake --preset dev
+
+      - name: Build
+        run: cmake --build --preset dev
+
+      - name: Run context-hello
+        run: ctest --preset dev --verbose
+
+  sanitize:
+    name: sanitize (ASan+UBSan, ubuntu)
+    runs-on: ubuntu-latest
+    env:
+      CMAKE_GENERATOR: Ninja
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (sanitize preset)
+        run: cmake --preset sanitize
+
+      - name: Build
+        run: cmake --build --preset sanitize
+
+      - name: Run context-hello under ASan+UBSan
+        run: ctest --preset sanitize --verbose
+
+  license-gate:
+    name: dependency-license gate (deny-by-default)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run license gate
+        run: python3 tools/check_licenses.py
+
+      - name: Upload SBOM
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
+          if-no-files-found: error
