@@ -16,10 +16,12 @@
 include(FetchContent)
 
 option(CONTEXT_SPIKE_JSENGINE_QUICKJS "js-engine spike: build the QuickJS backend" ON)
-if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
-    option(CONTEXT_SPIKE_JSENGINE_V8 "js-engine spike: build the V8 backend (prebuilt NuGet, win-x64)" ON)
+# The V8 prebuilt is MSVC-v143-only: its import libs use MSVC name mangling, so GCC/Clang-GNU
+# on Windows cannot link it (measured: MinGW ld fails with undefined v8:: references).
+if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND MSVC)
+    option(CONTEXT_SPIKE_JSENGINE_V8 "js-engine spike: build the V8 backend (prebuilt NuGet, win-x64 MSVC only)" ON)
 else()
-    option(CONTEXT_SPIKE_JSENGINE_V8 "js-engine spike: build the V8 backend (prebuilt NuGet, win-x64)" OFF)
+    option(CONTEXT_SPIKE_JSENGINE_V8 "js-engine spike: build the V8 backend (prebuilt NuGet, win-x64 MSVC only)" OFF)
 endif()
 
 set(SPIKE_SOURCES src/bench_main.cpp)
@@ -42,8 +44,9 @@ endif()
 
 # --- V8 backend (prebuilt NuGet monolith) ---------------------------------------------------
 if(CONTEXT_SPIKE_JSENGINE_V8)
-    if(NOT (WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8))
-        message(FATAL_ERROR "CONTEXT_SPIKE_JSENGINE_V8 uses the win-x64 NuGet package only.")
+    if(NOT (WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND MSVC))
+        message(FATAL_ERROR "CONTEXT_SPIKE_JSENGINE_V8 uses the win-x64 MSVC-v143 NuGet package only "
+                            "(MSVC import libs; not linkable from GCC/MinGW).")
     endif()
     set(CONTEXT_SPIKE_V8_DIR "" CACHE PATH
         "Pre-extracted v8-v143-x64 + v8.redist-v143-x64 NuGet roots (dev under /v8, redist under /v8redist); empty = download")
