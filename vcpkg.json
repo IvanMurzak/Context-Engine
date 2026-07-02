@@ -6,10 +6,12 @@
     "dependencies": [],
     "features": {
         "spikes": {
-            "description": "Dependencies for the opt-in M0 measurement spikes (CONTEXT_BUILD_SPIKES=ON)",
+            "description": "Dependencies for the opt-in M0 de-risking spikes (CONTEXT_BUILD_SPIKES=ON); never part of the default build",
             "dependencies": [
-                "simdjson",
-                "blake3"
+                "blake3",
+                "entt",
+                "flecs",
+                "simdjson"
             ]
         }
     }

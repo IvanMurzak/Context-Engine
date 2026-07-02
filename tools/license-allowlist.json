@@ -10,7 +10,9 @@
         "BSL-1.0"
     ],
     "dependency_licenses": {
-        "simdjson": "Apache-2.0",
-        "blake3": "Apache-2.0"
+        "blake3": "Apache-2.0",
+        "entt": "MIT",
+        "flecs": "MIT",
+        "simdjson": "Apache-2.0"
     }
 }
