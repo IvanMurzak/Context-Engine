@@ -113,6 +113,11 @@ if(CONTEXT_SPIKE_WASM_WAMR)
     FetchContent_MakeAvailable(wamr)
 
     set(WAMR_ROOT_DIR ${wamr_SOURCE_DIR})
+    # WAMR is C (plus one invoke-native asm file) and its config_common.cmake try_runs a .c
+    # probe; the enclosing project() is CXX-only, so both languages must be enabled here.
+    # (MSBuild compiles .c without this; Ninja on linux/macos silently DROPS .c sources from
+    # the target when C is not enabled — every wasm_runtime_* symbol goes missing at link.)
+    enable_language(C)
     if(WIN32)
         set(WAMR_BUILD_PLATFORM "windows")
         enable_language(ASM_MASM)
