@@ -1,4 +1,4 @@
-# editor/
+# src/editor/
 
 **EditorKernel** (formerly "EditorCore") — the headless, file-authoritative project language
 server: a live derived index over project files where every authored mutation is a file write,
