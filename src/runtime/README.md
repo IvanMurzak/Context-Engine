@@ -1,4 +1,4 @@
-# runtime/
+# src/runtime/
 
 **RuntimeKernel** (formerly "RuntimeCore") — the runtime that the editor embeds for
 play-in-editor and that packaged builds ship, so what you play in the editor is exactly what

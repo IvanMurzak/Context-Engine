@@ -19,11 +19,18 @@ the deliverable, not this code.
 
 ## Build & run (opt-in; the default CI matrix never builds this)
 
+Canonical path — the `spikes` preset (needs `VCPKG_ROOT`; builds every spike, QuickJS comes
+from the vcpkg `spikes` manifest feature):
+
 ```sh
-cmake -S . -B build/spike -DCONTEXT_BUILD_SPIKES=ON        # win-x64 builds both backends
-cmake --build build/spike --config Release --target context-spike-jsengine
-python spikes/js-engine/run_bench.py --exe build/spike/spikes/js-engine/Release/context-spike-jsengine.exe
+cmake --preset spikes
+cmake --build --preset spikes --target context-spike-jsengine
+python spikes/js-engine/run_bench.py --exe build/spikes/spikes/js-engine/Release/context-spike-jsengine.exe
 ```
+
+Without vcpkg, this spike alone still builds (QuickJS falls back to pinned FetchContent), but
+`CONTEXT_BUILD_SPIKES=ON` also configures `spikes/ecs`, which requires the vcpkg toolchain —
+use the preset unless you point the build at a tree without the other spikes.
 
 Dependency acquisition (throwaway-spike rules; the recorded L-42 deviation is in FINDINGS.md):
 

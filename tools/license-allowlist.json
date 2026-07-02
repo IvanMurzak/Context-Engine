@@ -10,6 +10,8 @@
         "BSL-1.0"
     ],
     "dependency_licenses": {
+        "entt": "MIT",
+        "flecs": "MIT",
         "quickjs-ng": "MIT",
         "v8": "BSD-3-Clause"
     }

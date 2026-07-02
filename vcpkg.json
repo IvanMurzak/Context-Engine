@@ -6,8 +6,10 @@
     "dependencies": [],
     "features": {
         "spikes": {
-            "description": "M0 de-risking spike dependencies (spikes/ — throwaway, never shipped; opt-in via CONTEXT_BUILD_SPIKES)",
+            "description": "Dependencies for the opt-in M0 de-risking spikes (CONTEXT_BUILD_SPIKES=ON); never part of the default build",
             "dependencies": [
+                "entt",
+                "flecs",
                 "quickjs-ng"
             ]
         }
