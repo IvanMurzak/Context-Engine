@@ -1,5 +1,5 @@
 {
-    "$comment": "Deny-by-default dependency-license allowlist (design lock L-57 / O-7). 'allowed_licenses' are SPDX identifiers acceptable for code linked into shipped engine cores. 'dependency_licenses' maps each declared dependency name to its verified SPDX license; a dependency missing from this map counts as UNKNOWN and fails CI.",
+    "$comment": "Deny-by-default dependency-license allowlist (design lock L-57 / O-7). 'allowed_licenses' are SPDX identifiers acceptable for code linked into shipped engine cores. 'dependency_licenses' maps each declared dependency name to its verified SPDX license; a dependency missing from this map counts as UNKNOWN and fails CI. 'v8' is the js-engine M0 spike's prebuilt NuGet monolith (v8-v143-x64 13.0.245.25) — spike-only, never shipped, acquired outside vcpkg (recorded here so its license clearance is on the books; the recorded L-42 deviation lives in spikes/js-engine/FINDINGS.md).",
     "allowed_licenses": [
         "MIT",
         "BSD-2-Clause",
@@ -9,5 +9,8 @@
         "Zlib",
         "BSL-1.0"
     ],
-    "dependency_licenses": {}
+    "dependency_licenses": {
+        "quickjs-ng": "MIT",
+        "v8": "BSD-3-Clause"
+    }
 }

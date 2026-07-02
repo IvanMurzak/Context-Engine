@@ -18,6 +18,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(CONTEXT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors (baseline: ON)" ON)
 option(CONTEXT_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer (non-MSVC only)" OFF)
+option(CONTEXT_BUILD_SPIKES "Build the M0 de-risking spike targets under spikes/ (opt-in; the default CI matrix stays spike-free)" OFF)
 
 # Warnings-as-errors baseline: the `context_warnings` interface target (cmake/ContextWarnings.cmake).
 include(cmake/ContextWarnings.cmake)
@@ -34,6 +35,9 @@ endif()
 
 enable_testing()
 
-# M0: the only buildable target is the hello spike. Engine components (kernel/, editor/,
-# runtime/, packages/) gain targets starting at M1.
+# M0: the only always-on target is the hello spike. Engine components (kernel/, editor/,
+# runtime/, packages/) gain targets starting at M1. De-risking spikes are opt-in (OFF by default).
 add_subdirectory(spikes/hello)
+if(CONTEXT_BUILD_SPIKES)
+    add_subdirectory(spikes/js-engine)
+endif()
