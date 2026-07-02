@@ -1,0 +1,58 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "dev",
+            "displayName": "Dev (Ninja via $CMAKE_GENERATOR if available, else platform default generator)",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "sanitize",
+            "displayName": "Sanitize (ASan + UBSan, non-MSVC)",
+            "inherits": "base",
+            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CONTEXT_SANITIZE": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "dev",
+            "configurePreset": "dev",
+            "configuration": "Release"
+        },
+        {
+            "name": "sanitize",
+            "configurePreset": "sanitize",
+            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "dev",
+            "configurePreset": "dev",
+            "configuration": "Release",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "sanitize",
+            "configurePreset": "sanitize",
+            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+            "output": { "outputOnFailure": true }
+        }
+    ]
+}

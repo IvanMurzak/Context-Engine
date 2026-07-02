@@ -1,0 +1,15 @@
+# Context Engine C++ formatting — LLVM-based, 100 columns.
+BasedOnStyle: LLVM
+ColumnLimit: 100
+IndentWidth: 4
+AccessModifierOffset: -4
+NamespaceIndentation: None
+BreakBeforeBraces: Allman
+PointerAlignment: Left
+DerivePointerAlignment: false
+SortIncludes: CaseSensitive
+IncludeBlocks: Preserve
+AllowShortFunctionsOnASingleLine: InlineOnly
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakTemplateDeclarations: Yes

@@ -1,0 +1,9 @@
+{
+    "$comment": "Registry stub. The default registry is pinned to the same baseline as vcpkg.json. The custom Context engine registry (from-source ports with per-triplet patches, design lock L-42) will be added to 'registries' when the first native dependency lands.",
+    "default-registry": {
+        "kind": "git",
+        "repository": "https://github.com/microsoft/vcpkg",
+        "baseline": "b6b57c2520804b639f8e9e6a769697f47432d6af"
+    },
+    "registries": []
+}

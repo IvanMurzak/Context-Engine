@@ -1,0 +1,7 @@
+{
+    "name": "context-engine",
+    "version": "0.0.1",
+    "description": "Context Game Engine — AI-first, file-authoritative, headless-complete game engine",
+    "builtin-baseline": "b6b57c2520804b639f8e9e6a769697f47432d6af",
+    "dependencies": []
+}
