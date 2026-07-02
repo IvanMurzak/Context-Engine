@@ -18,6 +18,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(CONTEXT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors (baseline: ON)" ON)
 option(CONTEXT_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer (non-MSVC only)" OFF)
+option(CONTEXT_BUILD_SPIKES "Build the M0 de-risking spike targets (opt-in; requires the vcpkg toolchain with VCPKG_MANIFEST_FEATURES=spikes)" OFF)
 
 # Warnings-as-errors baseline: the `context_warnings` interface target (cmake/ContextWarnings.cmake).
 include(cmake/ContextWarnings.cmake)
@@ -34,6 +35,12 @@ endif()
 
 enable_testing()
 
-# M0: the only buildable target is the hello spike. Engine components (src/kernel/, src/editor/,
+# M0: the only always-on target is the hello spike. Engine components (src/kernel/, src/editor/,
 # src/runtime/, src/packages/) gain targets starting at M1.
 add_subdirectory(spikes/hello)
+
+# M0 de-risking spikes are OPT-IN (CONTEXT_BUILD_SPIKES=ON): the default CI matrix stays
+# untouched; spike dependencies come from the vcpkg manifest's `spikes` feature.
+if(CONTEXT_BUILD_SPIKES)
+    add_subdirectory(spikes/ecs)
+endif()
