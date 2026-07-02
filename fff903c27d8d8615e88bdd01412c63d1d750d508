@@ -1,0 +1,64 @@
+spikes/cef-compositing/src/renderer_d3d11.hpp
+  s_4dcafa08bfb269::t_7c342595b8e8e7 36-37
+  s_4dcafa08bfb269::t_d92229af0e1721 86,91-92
+  s_4dcafa08bfb269::t_e530fa4ba584e9 1-35,38-85,87-90,93-105
+spikes/cef-compositing/README.md
+  s_4dcafa08bfb269::t_53f1ef22f033f2 1-52
+src/CMakeLists.txt
+  s_4dcafa08bfb269::t_c063eb24819586 27
+  s_4dcafa08bfb269::t_e5accf5748d5b6 59-68
+spikes/cef-compositing/assets/ui.html
+  s_4dcafa08bfb269::t_53bf4826b89c83 1-63
+.github/workflows/ci.yml
+  s_4dcafa08bfb269::t_e228ce01e3e888 106-113
+spikes/README.md
+  s_4dcafa08bfb269::t_bd1107357625f4 10-19
+spikes/cef-compositing/src/renderer_d3d11.cpp
+  s_4dcafa08bfb269::t_95000c194653b4 1-24,26-33,35-144,146-241,254-256,258-293,296-316,319,322-325,328-337,340-430
+  s_4dcafa08bfb269::t_6048cfe86e11d4 145
+  s_4dcafa08bfb269::t_975d1b3691cf8a 317-318,320-321,326-327,338-339
+  s_4dcafa08bfb269::t_f6134859425042 294-295
+  s_4dcafa08bfb269::t_e6e7c6dba02d65 25,34
+  s_4dcafa08bfb269::t_2c2da4c11b277d 242-253,257
+tools/license-allowlist.json
+  s_4dcafa08bfb269::t_81f8968edcff5e 2
+  s_de4a534a20842f::t_383c166b14a234 14
+spikes/cef-compositing/src/main.cpp
+  s_4dcafa08bfb269::t_1269d89088ea7d 459,465-470
+  s_4dcafa08bfb269::t_2504589e06e1ff 571-575,578
+  s_4dcafa08bfb269::t_3f0161339ba1bb 492
+  s_4dcafa08bfb269::t_76d43f98c9c865 39-43
+  s_4dcafa08bfb269::t_f41b3b77f6e2f0 1-38,44-281,284-294,297-306,308-458,460-464,471-491,493-570,576-577,579-694
+  s_4dcafa08bfb269::t_839a4d73a15937 282-283
+  s_4dcafa08bfb269::t_850d11f3b49617 295-296
+  s_4dcafa08bfb269::t_014f735980fba9 307
+spikes/cef-compositing/CMakeLists.txt
+  s_4dcafa08bfb269::t_d52301f438e9e6 51-60,67-69
+  s_4dcafa08bfb269::t_78f13af65c3cdd 1-50,61-66,70-102
+spikes/cef-compositing/FINDINGS.md
+  s_4dcafa08bfb269::t_94a4b71d5ad3e8 1-167
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "fff903c27d8d8615e88bdd01412c63d1d750d508",
+  "prompts": {},
+  "sessions": {
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_de4a534a20842f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2f7ba192-cf2d-431f-901d-3d275f59f0dd",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
