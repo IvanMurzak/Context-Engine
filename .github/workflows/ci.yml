@@ -135,6 +135,104 @@ jobs:
           path: bench/results/
           if-no-files-found: error
 
+  # WebGPU spike (spikes/webgpu): native build on all three desktop platforms + the offscreen
+  # render/readback self-check. The spike is standalone-configurable (no vcpkg — it pins its own
+  # wgpu-native prebuilt), so this job stays light: no other spike's deps are configured here.
+  # The readback test RUNS wherever a software adapter exists (lavapipe on ubuntu, WARP on
+  # windows, the paravirtual Metal device on macos) and SKIPs cleanly (exit 77) where none does.
+  spike-webgpu:
+    name: spike webgpu (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            generator: Ninja
+            cc: clang
+            cxx: clang++
+          - os: macos-latest
+            generator: Ninja
+            cc: ''
+            cxx: ''
+          - os: windows-latest # default generator (Visual Studio)
+            generator: ''
+            cc: ''
+            cxx: ''
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure environment
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.generator }}" ]; then
+            echo "CMAKE_GENERATOR=${{ matrix.generator }}" >> "$GITHUB_ENV"
+          fi
+          if [ -n "${{ matrix.cc }}" ]; then
+            echo "CC=${{ matrix.cc }}" >> "$GITHUB_ENV"
+            echo "CXX=${{ matrix.cxx }}" >> "$GITHUB_ENV"
+          fi
+
+      # lavapipe (Mesa's software Vulkan rasterizer) gives the ubuntu leg a real adapter, so the
+      # readback self-check actually renders on CI instead of skipping.
+      - name: Install software Vulkan adapter (lavapipe)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+
+      - name: Configure (standalone spike)
+        run: cmake -S spikes/webgpu -B build/spike-webgpu -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build/spike-webgpu --config Release
+
+      - name: Run probe + offscreen render/readback self-check
+        run: ctest --test-dir build/spike-webgpu -C Release --verbose
+
+      # Wiring check (ubuntu only): the spike must also build through the integrated
+      # CONTEXT_BUILD_SPIKES=ON path used by the spikes preset (vcpkg toolchain, since the
+      # sibling spikes' deps come from the manifest's `spikes` feature; V8 leg off — win-only).
+      - name: Configure + build via CONTEXT_BUILD_SPIKES (integration check)
+        if: runner.os == 'Linux'
+        run: >
+          cmake -B build/spikes-integrated -S src
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake
+          -DVCPKG_MANIFEST_FEATURES=spikes
+          -DCONTEXT_BUILD_SPIKES=ON
+          -DCONTEXT_SPIKE_JSENGINE_V8=OFF
+          && cmake --build build/spikes-integrated --target context-spike-webgpu
+
+  # WebGPU spike, web leg: Emscripten + the emdawnwebgpu port binding the BROWSER's WebGPU (the
+  # locked web path — NOT a Dawn cross-compile). Proves the same spike source compiles to
+  # wasm+JS; the in-browser render run is a local/manual step (see spikes/webgpu/README.md).
+  spike-webgpu-web:
+    name: spike webgpu (web, emscripten)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install emsdk (latest)
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install latest
+          "$RUNNER_TEMP/emsdk/emsdk" activate latest
+
+      - name: Configure + build (wasm)
+        run: |
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          emcmake cmake -S spikes/webgpu -B build/spike-webgpu-web -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/spike-webgpu-web
+
+      - name: Upload wasm artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: spike-webgpu-web
+          path: |
+            build/spike-webgpu-web/context-spike-webgpu.html
+            build/spike-webgpu-web/context-spike-webgpu.js
+            build/spike-webgpu-web/context-spike-webgpu.wasm
+          if-no-files-found: error
+
   license-gate:
     name: dependency-license gate (deny-by-default)
     runs-on: ubuntu-latest
