@@ -1,0 +1,49 @@
+spikes/parse-bench/src/merge.cpp
+  s_4dcafa08bfb269::t_e90b71240537e9 1-182
+CMakeLists.txt
+  s_4dcafa08bfb269::t_9ab7b9c3ac54c3 21
+  s_4dcafa08bfb269::t_f000a1d75e32d9 38-39,41-45
+spikes/parse-bench/src/canonical.h
+  s_4dcafa08bfb269::t_6cae5156ef6d19 1-24
+spikes/parse-bench/src/merge.h
+  s_4dcafa08bfb269::t_6c32aadc7b1ed1 1-36
+spikes/parse-bench/CMakeLists.txt
+  s_4dcafa08bfb269::t_8d254583b2c1f3 1-20
+spikes/parse-bench/src/json_value.h
+  s_4dcafa08bfb269::t_08f25b978c8505 1-90
+spikes/parse-bench/src/canonical.cpp
+  s_4dcafa08bfb269::t_86574f85047b57 1-170
+spikes/parse-bench/src/main.cpp
+  s_4dcafa08bfb269::t_d543537a3e4673 1-727
+tools/license-allowlist.json
+  s_4dcafa08bfb269::t_9706c122c6c720 12-15
+  s_4dcafa08bfb269::t_48dd6a4eb7ab1c 2
+spikes/README.md
+  s_4dcafa08bfb269::t_ba24bb6d7badd5 9-17
+vcpkg.json
+  s_de4a534a20842f::t_0542d6fdabf82c 6-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "2cf698b8266799806078da7d6b8a3deec37270ca",
+  "prompts": {},
+  "sessions": {
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_de4a534a20842f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2f7ba192-cf2d-431f-901d-3d275f59f0dd",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

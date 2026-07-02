@@ -1,0 +1,20 @@
+spikes/js-engine/CMakeLists.txt
+  s_4dcafa08bfb269::t_77d68eb2bb27a6 47-49
+  s_4dcafa08bfb269::t_c4d19c9382214f 19-22,24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "e944be635f9a50e6e904bd471c923427723f52e5",
+  "prompts": {},
+  "sessions": {
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
