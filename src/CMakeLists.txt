@@ -24,6 +24,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(CONTEXT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors (baseline: ON)" ON)
 option(CONTEXT_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer (non-MSVC only)" OFF)
 option(CONTEXT_BUILD_SPIKES "Build the M0 de-risking spike targets under spikes/ (opt-in; the default CI matrix stays spike-free; some spikes require the vcpkg toolchain with VCPKG_MANIFEST_FEATURES=spikes)" OFF)
+option(CONTEXT_BUILD_SPIKE_CEF "Build the CEF accelerated-OSR compositing spike (L-41) — downloads the pinned ~162 MB CEF binary distribution; Windows/MSVC-only, local runs only, NEVER enabled in CI" OFF)
 
 # Warnings-as-errors baseline: the `context_warnings` interface target (../cmake/ContextWarnings.cmake).
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextWarnings.cmake)
@@ -54,4 +55,14 @@ if(CONTEXT_BUILD_SPIKES)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/ecs ${CMAKE_BINARY_DIR}/spikes/ecs)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/parse-bench ${CMAKE_BINARY_DIR}/spikes/parse-bench)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/js-engine ${CMAKE_BINARY_DIR}/spikes/js-engine)
+endif()
+
+# spikes/cef-compositing (L-41) is DOUBLY gated: CEF's binary distribution is a ~162 MB
+# download, so the spike hides behind its own CONTEXT_BUILD_SPIKE_CEF switch and is never
+# built in CI. With CONTEXT_BUILD_SPIKES=ON but the CEF switch OFF (the CI bench job) the
+# directory is entered and returns early — configure-only exercise, no download. With
+# CONTEXT_BUILD_SPIKE_CEF=ON alone (the local Windows run) the spike builds WITHOUT dragging
+# in the vcpkg-dependent spikes above.
+if(CONTEXT_BUILD_SPIKES OR CONTEXT_BUILD_SPIKE_CEF)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/cef-compositing ${CMAKE_BINARY_DIR}/spikes/cef-compositing)
 endif()
