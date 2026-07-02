@@ -1,0 +1,456 @@
+{
+  "hardware": {
+    "os": "Windows 10 (10.0.26200)",
+    "machine": "AMD64",
+    "cpu": "AMD Ryzen 9 9950X 16-Core Processor",
+    "ram_gb": 61.4
+  },
+  "binary_footprint_mb": {
+    "context-spike-jsengine.exe": 0.99,
+    "icudtl.dat": 9.98,
+    "icuuc.dll": 1.61,
+    "third_party_abseil-cpp_absl.dll": 1.57,
+    "third_party_icu_icui18n.dll": 2.58,
+    "third_party_zlib.dll": 0.11,
+    "v8.dll": 31.64,
+    "v8_libbase.dll": 0.31,
+    "v8_libplatform.dll": 0.11
+  },
+  "configs": {
+    "quickjs": {
+      "version": "0.15.1",
+      "startup_to_first_eval_ms": {
+        "median": 0.328,
+        "min": 0.3086,
+        "max": 0.7717
+      },
+      "memory_floor_private_mb": {
+        "median": 0.0859375,
+        "min": 0.0820312,
+        "max": 0.09375
+      },
+      "memory_floor_working_set_mb": {
+        "median": 0.554688,
+        "min": 0.550781,
+        "max": 0.5625
+      },
+      "calls": {
+        "host_to_js_empty": {
+          "n_per_rep": 8388610.0,
+          "ns_per_op": {
+            "median": 22.9857,
+            "min": 22.493,
+            "max": 24.0153
+          },
+          "ops_per_sec": {
+            "median": 43505300.0,
+            "min": 41640100.0,
+            "max": 44458300.0
+          }
+        },
+        "host_to_js_add3": {
+          "n_per_rep": 4194300.0,
+          "ns_per_op": {
+            "median": 29.8484,
+            "min": 29.1905,
+            "max": 30.9256
+          },
+          "ops_per_sec": {
+            "median": 33502700.0,
+            "min": 32335700.0,
+            "max": 34257800.0
+          }
+        },
+        "js_loop_nop_baseline": {
+          "n_per_rep": 4194300.0,
+          "ns_per_op": {
+            "median": 24.1544,
+            "min": 23.0415,
+            "max": 25.2357
+          },
+          "ops_per_sec": {
+            "median": 41400300.0,
+            "min": 39626400.0,
+            "max": 43399900.0
+          }
+        },
+        "js_to_host_empty": {
+          "n_per_rep": 4194300.0,
+          "ns_per_op": {
+            "median": 53.6135,
+            "min": 52.9082,
+            "max": 54.0681
+          },
+          "ops_per_sec": {
+            "median": 18652000.0,
+            "min": 18495200.0,
+            "max": 18900700.0
+          }
+        },
+        "js_to_host_add3": {
+          "n_per_rep": 2097150.0,
+          "ns_per_op": {
+            "median": 69.9179,
+            "min": 67.1784,
+            "max": 72.2912
+          },
+          "ops_per_sec": {
+            "median": 14302500.0,
+            "min": 13832900.0,
+            "max": 14885700.0
+          }
+        }
+      },
+      "zerocopy": {
+        "wrap_host_memory": {
+          "supported": true,
+          "js_reads_shared_memory": true,
+          "js_write_visible_to_host": true,
+          "host_write_visible_to_js": true,
+          "detach_kills_retained_view": true,
+          "post_detach_read": "undefined",
+          "post_detach_new_view_throws": true,
+          "memory_untouched_after_detach": true,
+          "attach_ns": {
+            "median": 155.554,
+            "min": 144.702,
+            "max": 205.737
+          },
+          "detach_ns": {
+            "median": 79.9438,
+            "min": 65.7593,
+            "max": 84.3262
+          },
+          "attach_touch_detach_cycle_ns": {
+            "median": 2405.96,
+            "min": 2209.67,
+            "max": 2525.78
+          }
+        },
+        "vm_allocated_shared": {
+          "supported": true,
+          "js_reads_shared_memory": true,
+          "js_write_visible_to_host": true,
+          "host_write_visible_to_js": true,
+          "detach_kills_retained_view": true,
+          "post_detach_read": "undefined",
+          "post_detach_new_view_throws": true,
+          "memory_untouched_after_detach": true,
+          "attach_ns": {
+            "median": 144.47,
+            "min": 131.079,
+            "max": 206.702
+          },
+          "detach_ns": {
+            "median": 64.7827,
+            "min": 54.6387,
+            "max": 89.1846
+          },
+          "attach_touch_detach_cycle_ns": {
+            "median": 2481.05,
+            "min": 2352.83,
+            "max": 2604.79
+          }
+        }
+      },
+      "compute": {
+        "kernel_checksum": 175162,
+        "kernel_reps_per_measurement": 16,
+        "kernel_runs_per_sec": {
+          "median": 47.4597,
+          "min": 46.906,
+          "max": 49.3369
+        }
+      },
+      "gc": {
+        "alloc_loop_max_gap_ms": {
+          "median": 0.3727,
+          "min": 0.236,
+          "max": 0.7212
+        },
+        "alloc_loop_p99_gap_ms": {
+          "median": 0.0572,
+          "min": 0.0458,
+          "max": 0.1274
+        },
+        "note": "proxy metric: worst sampled gap in a 1M-iteration small-object allocation loop (64-iteration sampling stride); includes all engine hiccups, not GC alone"
+      }
+    },
+    "v8": {
+      "version": "13.0.245.25",
+      "startup_to_first_eval_ms": {
+        "median": 6.8599,
+        "min": 6.297,
+        "max": 8.1447
+      },
+      "memory_floor_private_mb": {
+        "median": 13.8281,
+        "min": 13.8242,
+        "max": 15.9922
+      },
+      "memory_floor_working_set_mb": {
+        "median": 16.4531,
+        "min": 16.4258,
+        "max": 18.5859
+      },
+      "calls": {
+        "host_to_js_empty": {
+          "n_per_rep": 4194300.0,
+          "ns_per_op": {
+            "median": 45.4209,
+            "min": 44.6411,
+            "max": 45.9797
+          },
+          "ops_per_sec": {
+            "median": 22016300.0,
+            "min": 21748700.0,
+            "max": 22400900.0
+          }
+        },
+        "host_to_js_add3": {
+          "n_per_rep": 2097150.0,
+          "ns_per_op": {
+            "median": 57.6307,
+            "min": 57.2085,
+            "max": 60.6271
+          },
+          "ops_per_sec": {
+            "median": 17351900.0,
+            "min": 16494300.0,
+            "max": 17479900.0
+          }
+        },
+        "js_loop_nop_baseline": {
+          "n_per_rep": 1073740000.0,
+          "ns_per_op": {
+            "median": 0.299867,
+            "min": 0.232412,
+            "max": 0.318877
+          },
+          "ops_per_sec": {
+            "median": 3334810000.0,
+            "min": 3136010000.0,
+            "max": 4302710000.0
+          }
+        },
+        "js_to_host_empty": {
+          "n_per_rep": 8388610.0,
+          "ns_per_op": {
+            "median": 12.1552,
+            "min": 11.8511,
+            "max": 12.6989
+          },
+          "ops_per_sec": {
+            "median": 82269600.0,
+            "min": 78746900.0,
+            "max": 84380200.0
+          }
+        },
+        "js_to_host_add3": {
+          "n_per_rep": 8388610.0,
+          "ns_per_op": {
+            "median": 23.3351,
+            "min": 22.9997,
+            "max": 23.5558
+          },
+          "ops_per_sec": {
+            "median": 42853900.0,
+            "min": 42452400.0,
+            "max": 43478800.0
+          }
+        }
+      },
+      "zerocopy": {
+        "wrap_host_memory": {
+          "supported": false,
+          "error": "V8 sandbox forbids external backing stores (fatal abort observed); wrap-host-memory zero-copy is impossible on sandbox-enabled V8 builds"
+        },
+        "vm_allocated_shared": {
+          "supported": true,
+          "js_reads_shared_memory": true,
+          "js_write_visible_to_host": true,
+          "host_write_visible_to_js": true,
+          "detach_kills_retained_view": true,
+          "post_detach_read": "undefined",
+          "post_detach_new_view_throws": true,
+          "memory_untouched_after_detach": true,
+          "attach_ns": {
+            "median": 524.67,
+            "min": 496.167,
+            "max": 596.155
+          },
+          "detach_ns": {
+            "median": 54.6875,
+            "min": 51.1719,
+            "max": 56.3599
+          },
+          "attach_touch_detach_cycle_ns": {
+            "median": 989.551,
+            "min": 833.496,
+            "max": 1054.3
+          }
+        }
+      },
+      "compute": {
+        "kernel_checksum": 175162,
+        "kernel_reps_per_measurement": 1024,
+        "kernel_runs_per_sec": {
+          "median": 3175.12,
+          "min": 3098.2,
+          "max": 3268.74
+        }
+      },
+      "gc": {
+        "alloc_loop_max_gap_ms": {
+          "median": 0.238,
+          "min": 0.1731,
+          "max": 0.4169
+        },
+        "alloc_loop_p99_gap_ms": {
+          "median": 0.00130004,
+          "min": 0.000999987,
+          "max": 0.00380003
+        },
+        "note": "proxy metric: worst sampled gap in a 1M-iteration small-object allocation loop (64-iteration sampling stride); includes all engine hiccups, not GC alone"
+      }
+    },
+    "v8-jitless": {
+      "version": "13.0.245.25",
+      "startup_to_first_eval_ms": {
+        "median": 6.8556,
+        "min": 6.5312,
+        "max": 7.8789
+      },
+      "memory_floor_private_mb": {
+        "median": 13.8359,
+        "min": 13.8203,
+        "max": 13.8789
+      },
+      "memory_floor_working_set_mb": {
+        "median": 16.418,
+        "min": 16.3828,
+        "max": 16.4297
+      },
+      "calls": {
+        "host_to_js_empty": {
+          "n_per_rep": 4194300.0,
+          "ns_per_op": {
+            "median": 46.5158,
+            "min": 45.3599,
+            "max": 48.8449
+          },
+          "ops_per_sec": {
+            "median": 21498100.0,
+            "min": 20473000.0,
+            "max": 22045900.0
+          }
+        },
+        "host_to_js_add3": {
+          "n_per_rep": 2097150.0,
+          "ns_per_op": {
+            "median": 66.3974,
+            "min": 62.9449,
+            "max": 72.3544
+          },
+          "ops_per_sec": {
+            "median": 15060800.0,
+            "min": 13820900.0,
+            "max": 15886900.0
+          }
+        },
+        "js_loop_nop_baseline": {
+          "n_per_rep": 33554400.0,
+          "ns_per_op": {
+            "median": 3.86789,
+            "min": 3.62109,
+            "max": 6.63913
+          },
+          "ops_per_sec": {
+            "median": 258539000.0,
+            "min": 150622000.0,
+            "max": 276160000.0
+          }
+        },
+        "js_to_host_empty": {
+          "n_per_rep": 8388610.0,
+          "ns_per_op": {
+            "median": 25.6451,
+            "min": 20.5163,
+            "max": 27.4588
+          },
+          "ops_per_sec": {
+            "median": 38993800.0,
+            "min": 36418200.0,
+            "max": 48741600.0
+          }
+        },
+        "js_to_host_add3": {
+          "n_per_rep": 4194300.0,
+          "ns_per_op": {
+            "median": 39.1471,
+            "min": 37.2219,
+            "max": 41.4628
+          },
+          "ops_per_sec": {
+            "median": 25544700.0,
+            "min": 24118000.0,
+            "max": 26865900.0
+          }
+        }
+      },
+      "zerocopy": {
+        "wrap_host_memory": {
+          "supported": false,
+          "error": "V8 sandbox forbids external backing stores (fatal abort observed); wrap-host-memory zero-copy is impossible on sandbox-enabled V8 builds"
+        },
+        "vm_allocated_shared": {
+          "supported": true,
+          "js_reads_shared_memory": true,
+          "js_write_visible_to_host": true,
+          "host_write_visible_to_js": true,
+          "detach_kills_retained_view": true,
+          "post_detach_read": "undefined",
+          "post_detach_new_view_throws": true,
+          "memory_untouched_after_detach": true,
+          "attach_ns": {
+            "median": 482.703,
+            "min": 453.809,
+            "max": 589.551
+          },
+          "detach_ns": {
+            "median": 45.5566,
+            "min": 42.9932,
+            "max": 57.6538
+          },
+          "attach_touch_detach_cycle_ns": {
+            "median": 915.918,
+            "min": 857.91,
+            "max": 933.301
+          }
+        }
+      },
+      "compute": {
+        "kernel_checksum": 175162,
+        "kernel_reps_per_measurement": 64,
+        "kernel_runs_per_sec": {
+          "median": 173.546,
+          "min": 166.674,
+          "max": 179.567
+        }
+      },
+      "gc": {
+        "alloc_loop_max_gap_ms": {
+          "median": 0.3184,
+          "min": 0.2932,
+          "max": 0.3654
+        },
+        "alloc_loop_p99_gap_ms": {
+          "median": 0.00650001,
+          "min": 0.00550002,
+          "max": 0.0068
+        },
+        "note": "proxy metric: worst sampled gap in a 1M-iteration small-object allocation loop (64-iteration sampling stride); includes all engine hiccups, not GC alone"
+      }
+    }
+  }
+}

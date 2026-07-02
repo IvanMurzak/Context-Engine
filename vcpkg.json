@@ -11,6 +11,7 @@
                 "blake3",
                 "entt",
                 "flecs",
+                "quickjs-ng",
                 "simdjson"
             ]
         }
