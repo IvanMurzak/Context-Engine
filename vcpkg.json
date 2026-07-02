@@ -9,7 +9,8 @@
             "description": "Dependencies for the opt-in M0 de-risking spikes (CONTEXT_BUILD_SPIKES=ON); never part of the default build",
             "dependencies": [
                 "entt",
-                "flecs"
+                "flecs",
+                "quickjs-ng"
             ]
         }
     }
