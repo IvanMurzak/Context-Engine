@@ -27,3 +27,7 @@ CMakeUserPresets.json
 # OS noise
 .DS_Store
 Thumbs.db
+
+# Python test/tooling caches
+__pycache__/
+.pytest_cache/

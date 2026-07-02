@@ -19,6 +19,16 @@ Opt-in build (`-DCONTEXT_BUILD_SPIKE_WASM=ON` stand-alone — no vcpkg needed �
 `-DCONTEXT_BUILD_SPIKES=ON`); the default CI matrix never builds it; the `spike-wasm` CI job
 smokes it on all three platforms.
 
+## cef-compositing/
+
+The L-41 editor-seam spike: CEF **accelerated OSR** (shared D3D11 textures via
+`OnAcceleratedPaint`) composited over an engine-rendered D3D11 viewport, with input round-trip,
+resize, and the measured software-OSR fallback delta — plus the per-platform (Win/macOS/Linux)
+fallback-tree recommendation for M5. Verdict and measurements:
+[`cef-compositing/FINDINGS.md`](cef-compositing/FINDINGS.md). DOUBLY opt-in
+(`-DCONTEXT_BUILD_SPIKE_CEF=ON`; CEF is a ~162 MB pinned binary download) and **never built in
+CI** — the CI bench job only configure-exercises its early-return path.
+
 ## parse-bench/
 
 The moat-perf spike: parse → canonicalize → hash throughput (the R-FILE-011(a)

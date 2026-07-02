@@ -597,24 +597,23 @@ def _gen_bin_range(args_tuple) -> dict:
     return stats
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--size", type=int, required=True,
-                    help="total corpus file count (e.g. 1000, 10000, 100000)")
-    ap.add_argument("--out", required=True, help="output corpus directory")
-    ap.add_argument("--seed", type=int, default=20260702, help="deterministic seed")
-    ap.add_argument("--variant", choices=["standard", "dense"], default="standard",
-                    help="dense = high ref-fan-out corpus (edges O(refs) > O(files))")
-    ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4,
-                    help="parallel workers (output is identical for any worker count)")
-    args = ap.parse_args()
+def generate(size: int, out: Path | str, seed: int = 20260702,
+             variant: str = "standard", jobs: int | None = None) -> dict:
+    """Importable generation API (the CLI in main() is a thin wrapper around this).
 
-    out = Path(args.out)
+    Generates a corpus of `size` files under `out` and returns the manifest dict
+    (also written to <out>/corpus-manifest.json). Raises FileExistsError when `out`
+    exists and is not empty, ValueError for an unknown variant.
+    """
+    out = Path(out)
     if out.exists() and any(out.iterdir()):
-        print(f"error: output dir {out} exists and is not empty", file=sys.stderr)
-        return 2
-    dense = args.variant == "dense"
-    counts = plan_counts(args.size)
+        raise FileExistsError(f"output dir {out} exists and is not empty")
+    if variant not in ("standard", "dense"):
+        raise ValueError(f"unknown variant: {variant!r}")
+    if jobs is None:
+        jobs = os.cpu_count() or 4
+    dense = variant == "dense"
+    counts = plan_counts(size)
 
     # Pre-create shard directories (workers then never race on mkdir).
     for shard in range(256):
@@ -623,17 +622,17 @@ def main() -> int:
 
     t0 = time.perf_counter()
     tasks = []
-    chunk = max(64, counts["scene"] // (args.jobs * 8) or 1)
+    chunk = max(64, counts["scene"] // (jobs * 8) or 1)
     for lo in range(0, counts["scene"], chunk):
-        tasks.append(("scene", (args.seed, lo, min(lo + chunk, counts["scene"]),
+        tasks.append(("scene", (seed, lo, min(lo + chunk, counts["scene"]),
                                 str(out), counts, dense)))
-    bchunk = max(64, counts["bin"] // (args.jobs * 4) or 1)
+    bchunk = max(64, counts["bin"] // (jobs * 4) or 1)
     for lo in range(0, counts["bin"], bchunk):
-        tasks.append(("bin", (args.seed, lo, min(lo + bchunk, counts["bin"]), str(out))))
+        tasks.append(("bin", (seed, lo, min(lo + bchunk, counts["bin"]), str(out))))
 
     totals: dict[str, int] = {}
-    if args.jobs > 1:
-        with ProcessPoolExecutor(max_workers=args.jobs) as ex:
+    if jobs > 1:
+        with ProcessPoolExecutor(max_workers=jobs) as ex:
             futs = [ex.submit(_gen_range if k == "scene" else _gen_bin_range, a)
                     for k, a in tasks]
             for f in futs:
@@ -648,9 +647,9 @@ def main() -> int:
 
     manifest = {
         "generator": "bench/gen_corpus.py",
-        "seed": args.seed,
-        "variant": args.variant,
-        "requested_size": args.size,
+        "seed": seed,
+        "variant": variant,
+        "requested_size": size,
         "counts": {
             "total_files": totals["files"],
             "scenes": totals["scenes"],
@@ -664,9 +663,30 @@ def main() -> int:
         "edges_per_file": round(totals["edges"] / max(1, totals["files"]), 2),
     }
     write_canonical(out / "corpus-manifest.json", manifest)
-    print(json.dumps(manifest, indent=2))
     print(f"[gen_corpus] wrote {totals['files']} files "
           f"({totals['bytes'] / 1e6:.1f} MB) in {dt:.1f}s", file=sys.stderr)
+    return manifest
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--size", type=int, required=True,
+                    help="total corpus file count (e.g. 1000, 10000, 100000)")
+    ap.add_argument("--out", required=True, help="output corpus directory")
+    ap.add_argument("--seed", type=int, default=20260702, help="deterministic seed")
+    ap.add_argument("--variant", choices=["standard", "dense"], default="standard",
+                    help="dense = high ref-fan-out corpus (edges O(refs) > O(files))")
+    ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4,
+                    help="parallel workers (output is identical for any worker count)")
+    args = ap.parse_args()
+
+    try:
+        manifest = generate(size=args.size, out=Path(args.out), seed=args.seed,
+                            variant=args.variant, jobs=args.jobs)
+    except FileExistsError:
+        print(f"error: output dir {Path(args.out)} exists and is not empty", file=sys.stderr)
+        return 2
+    print(json.dumps(manifest, indent=2))
     return 0
 
 
