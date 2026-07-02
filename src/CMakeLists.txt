@@ -50,11 +50,14 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/hello ${CMAKE_BINARY_DIR}
 
 # M0 de-risking spikes are OPT-IN (CONTEXT_BUILD_SPIKES=ON): the default CI matrix stays
 # untouched. spikes/ecs takes its dependencies from the vcpkg manifest's `spikes` feature;
-# spikes/js-engine acquires its pinned backends itself (FetchContent + NuGet — see its README).
+# spikes/js-engine acquires its pinned backends itself (FetchContent + NuGet — see its README);
+# spikes/webgpu downloads the pinned wgpu-native prebuilt itself (no vcpkg port exists) and is
+# also standalone-configurable for its Emscripten web leg — see its CMakeLists.txt.
 if(CONTEXT_BUILD_SPIKES)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/ecs ${CMAKE_BINARY_DIR}/spikes/ecs)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/parse-bench ${CMAKE_BINARY_DIR}/spikes/parse-bench)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/js-engine ${CMAKE_BINARY_DIR}/spikes/js-engine)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/webgpu ${CMAKE_BINARY_DIR}/spikes/webgpu)
 endif()
 
 # spikes/cef-compositing (L-41) is DOUBLY gated: CEF's binary distribution is a ~162 MB
