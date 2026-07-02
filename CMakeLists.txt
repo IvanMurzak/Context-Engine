@@ -18,7 +18,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(CONTEXT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors (baseline: ON)" ON)
 option(CONTEXT_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer (non-MSVC only)" OFF)
-option(CONTEXT_BUILD_SPIKES "Build the M0 de-risking spike targets under spikes/ (opt-in; the default CI matrix stays spike-free; spikes/ecs requires the vcpkg toolchain with VCPKG_MANIFEST_FEATURES=spikes)" OFF)
+option(CONTEXT_BUILD_SPIKES "Build the M0 de-risking spike targets under spikes/ (opt-in; the default CI matrix stays spike-free; some spikes require the vcpkg toolchain with VCPKG_MANIFEST_FEATURES=spikes)" OFF)
 
 # Warnings-as-errors baseline: the `context_warnings` interface target (cmake/ContextWarnings.cmake).
 include(cmake/ContextWarnings.cmake)
@@ -44,5 +44,6 @@ add_subdirectory(spikes/hello)
 # spikes/js-engine acquires its pinned backends itself (FetchContent + NuGet — see its README).
 if(CONTEXT_BUILD_SPIKES)
     add_subdirectory(spikes/ecs)
+    add_subdirectory(spikes/parse-bench)
     add_subdirectory(spikes/js-engine)
 endif()

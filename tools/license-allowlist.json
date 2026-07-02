@@ -1,5 +1,5 @@
 {
-    "$comment": "Deny-by-default dependency-license allowlist (design lock L-57 / O-7). 'allowed_licenses' are SPDX identifiers acceptable for code linked into shipped engine cores. 'dependency_licenses' maps each declared dependency name to its verified SPDX license; a dependency missing from this map counts as UNKNOWN and fails CI. 'v8' is the js-engine M0 spike's prebuilt NuGet monolith (v8-v143-x64 13.0.245.25) — spike-only, never shipped, acquired outside vcpkg (recorded here so its license clearance is on the books; the recorded L-42 deviation lives in spikes/js-engine/FINDINGS.md).",
+    "$comment": "Deny-by-default dependency-license allowlist (design lock L-57 / O-7). 'allowed_licenses' are SPDX identifiers acceptable for code linked into shipped engine cores. 'dependency_licenses' maps each declared dependency name to its verified SPDX license; a dependency missing from this map counts as UNKNOWN and fails CI. 'v8' is the js-engine M0 spike's prebuilt NuGet monolith (v8-v143-x64 13.0.245.25) — spike-only, never shipped, acquired outside vcpkg (recorded here so its license clearance is on the books; the recorded L-42 deviation lives in spikes/js-engine/FINDINGS.md). Note: blake3 is dual-licensed 'CC0-1.0 OR Apache-2.0' — we elect Apache-2.0.",
     "allowed_licenses": [
         "MIT",
         "BSD-2-Clause",
@@ -10,9 +10,11 @@
         "BSL-1.0"
     ],
     "dependency_licenses": {
+        "blake3": "Apache-2.0",
         "entt": "MIT",
         "flecs": "MIT",
         "quickjs-ng": "MIT",
+        "simdjson": "Apache-2.0",
         "v8": "BSD-3-Clause"
     }
 }
