@@ -1,0 +1,61 @@
+.github/CONTRIBUTING.md
+  s_4dcafa08bfb269::t_2fb230a0b672b1 29-43
+.github/workflows/ci.yml
+  s_4dcafa08bfb269::t_43d9ec1af87489 106-113,260-273
+.gitignore
+  s_4dcafa08bfb269::t_20b193360894d3 31-34
+bench/gen_corpus.py
+  s_4dcafa08bfb269::t_b4a47b0845f972 600-602,604-608,610-616,625,627,629,631,634-635,650-652,668-689
+bench/tests/test_gen_corpus.py
+  s_4dcafa08bfb269::t_64a7b5b0b66544 1-328
+spikes/README.md
+  s_4dcafa08bfb269::t_369e387164c518 10-19
+spikes/cef-compositing/CMakeLists.txt
+  s_4dcafa08bfb269::t_3d386df32ce9aa 1-102
+spikes/cef-compositing/FINDINGS.md
+  s_4dcafa08bfb269::t_c162a80be2cf59 1-167
+spikes/cef-compositing/README.md
+  s_4dcafa08bfb269::t_571248c270cc72 1-52
+spikes/cef-compositing/assets/ui.html
+  s_4dcafa08bfb269::t_c98795dd962e52 1-63
+spikes/cef-compositing/src/main.cpp
+  s_4dcafa08bfb269::t_47bcf3e388e792 1-694
+spikes/cef-compositing/src/renderer_d3d11.cpp
+  s_4dcafa08bfb269::t_02de03b60cbb6c 1-430
+spikes/cef-compositing/src/renderer_d3d11.hpp
+  s_4dcafa08bfb269::t_bc1f4d8401f5f2 1-105
+spikes/parse-bench/CMakeLists.txt
+  s_4dcafa08bfb269::t_776e3bcfd274fd 21-42
+src/CMakeLists.txt
+  s_4dcafa08bfb269::t_1bf18eb629b83b 27,62-71
+tools/check_licenses.py
+  s_4dcafa08bfb269::t_d48a62be3131cb 83-89,107
+tools/license-allowlist.json
+  s_de4a534a20842f::t_93db64b80b0572 2,14
+tools/tests/test_check_licenses.py
+  s_4dcafa08bfb269::t_55b5eaae2de13f 1-304
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "b68c6c558a5d0236454677f4842f763b5452092c",
+  "prompts": {},
+  "sessions": {
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_de4a534a20842f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2f7ba192-cf2d-431f-901d-3d275f59f0dd",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
