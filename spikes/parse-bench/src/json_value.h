@@ -33,20 +33,14 @@ struct JsonValue {
     std::vector<JsonValue> arr;
     std::vector<JsonMember> obj;  // incomplete element type: OK for the declaration
 
-    static JsonValue makeString(std::string s) {
-        JsonValue v;
-        v.type = Type::String;
-        v.str = std::move(s);
-        return v;
-    }
-    static JsonValue makeDouble(double d) {
-        JsonValue v;
-        v.type = Type::Double;
-        v.dbl = d;
-        return v;
-    }
-
-    const JsonValue* find(const std::string& key) const;  // defined after JsonMember
+    // NOTE: no member-function BODIES inside this class. An in-class body (even a
+    // static factory constructing a JsonValue) ODR-uses the implicit default ctor +
+    // dtor, which instantiates vector<JsonMember>'s element destruction while
+    // JsonMember is still incomplete — clang/libstdc++ reject that (MSVC and GCC
+    // happen to defer the instantiation). Everything is defined after JsonMember.
+    static JsonValue makeString(std::string s);
+    static JsonValue makeDouble(double d);
+    const JsonValue* find(const std::string& key) const;
     JsonValue* find(const std::string& key);
 };
 
@@ -57,6 +51,22 @@ struct JsonMember {
     JsonMember() = default;
     JsonMember(std::string k, JsonValue v) : key(std::move(k)), value(std::move(v)) {}
 };
+
+// --- JsonValue members: defined only now, with both types complete. ---
+
+inline JsonValue JsonValue::makeString(std::string s) {
+    JsonValue v;
+    v.type = Type::String;
+    v.str = std::move(s);
+    return v;
+}
+
+inline JsonValue JsonValue::makeDouble(double d) {
+    JsonValue v;
+    v.type = Type::Double;
+    v.dbl = d;
+    return v;
+}
 
 inline const JsonValue* JsonValue::find(const std::string& key) const {
     if (type != Type::Object) return nullptr;
