@@ -103,6 +103,14 @@ jobs:
       # -S src (build files live there); -B stays repo-root-relative, and src/CMakeLists.txt
       # pins spike binary dirs to ${CMAKE_BINARY_DIR}/spikes/<x>, so the subject path below
       # (build/bench/spikes/parse-bench/...) is unchanged by the src/ move.
+      #
+      # CEF spike stays OUT of CI by design: CONTEXT_BUILD_SPIKE_CEF is deliberately NOT set
+      # here (CEF's pinned binary distribution is a ~162 MB download / ~460 MB extracted —
+      # would wreck job time and runner cache for zero signal, since the spike's render/input
+      # proof needs a GPU + interactive desktop anyway). With CONTEXT_BUILD_SPIKES=ON this
+      # configure still ENTERS spikes/cef-compositing/CMakeLists.txt, which early-returns —
+      # that configure-only exercise is the CI-side proof the spike's CMake stays valid.
+      # Measured results live in spikes/cef-compositing/FINDINGS.md (local Windows runs).
       - name: Configure (spikes ON, vcpkg toolchain)
         run: >
           cmake -B build/bench -S src

@@ -1,5 +1,5 @@
 {
-    "$comment": "Deny-by-default dependency-license allowlist (design lock L-57 / O-7). 'allowed_licenses' are SPDX identifiers acceptable for code linked into shipped engine cores. 'dependency_licenses' maps each declared dependency name to its verified SPDX license; a dependency missing from this map counts as UNKNOWN and fails CI. 'v8' is the js-engine M0 spike's prebuilt NuGet monolith (v8-v143-x64 13.0.245.25) — spike-only, never shipped, acquired outside vcpkg (recorded here so its license clearance is on the books; the recorded L-42 deviation lives in spikes/js-engine/FINDINGS.md). Note: blake3 is dual-licensed 'CC0-1.0 OR Apache-2.0' — we elect Apache-2.0.",
+    "$comment": "Deny-by-default dependency-license allowlist (design lock L-57 / O-7). 'allowed_licenses' are SPDX identifiers acceptable for code linked into shipped engine cores. 'dependency_licenses' maps each declared dependency name to its verified SPDX license; a dependency missing from this map counts as UNKNOWN and fails CI. 'v8' is the js-engine M0 spike's prebuilt NuGet monolith (v8-v143-x64 13.0.245.25) — spike-only, never shipped, acquired outside vcpkg (recorded here so its license clearance is on the books; the recorded L-42 deviation lives in spikes/js-engine/FINDINGS.md). 'cef' is the cef-compositing M0 spike's pinned binary distribution (149.0.6+g0d0eeb6+chromium-149.0.7827.201, Spotify CDN) — same spike-only, outside-vcpkg treatment; CEF itself is BSD-3-Clause and the distribution bundles Chromium/third-party notices in CREDITS.html (a shipped-editor CEF integration needs a fuller third-party notice pass — an M5 concern, not M0). Note: blake3 is dual-licensed 'CC0-1.0 OR Apache-2.0' — we elect Apache-2.0.",
     "allowed_licenses": [
         "MIT",
         "BSD-2-Clause",
@@ -11,6 +11,7 @@
     ],
     "dependency_licenses": {
         "blake3": "Apache-2.0",
+        "cef": "BSD-3-Clause",
         "entt": "MIT",
         "flecs": "MIT",
         "quickjs-ng": "MIT",
