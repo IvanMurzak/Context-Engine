@@ -1,0 +1,58 @@
+src/CMakeLists.txt
+  s_4dcafa08bfb269::t_38fcb66d5fd8c1 59
+  s_4dcafa08bfb269::t_b74a6a517f60f5 52-54
+spikes/webgpu/CMakeLists.txt
+  s_4dcafa08bfb269::t_ca8f5806422003 1-42,47-130
+  s_4dcafa08bfb269::t_bb625ec4e9170e 43-46
+tools/license-allowlist.json
+  s_4dcafa08bfb269::t_03dd0d2d5c5190 2
+  s_1bd773bd70c74b::t_128d5264c9979d 18-19
+spikes/webgpu/README.md
+  s_4dcafa08bfb269::t_b553aa6b971c4f 1-57
+spikes/README.md
+  s_4dcafa08bfb269::t_3524126617f897 18-26
+spikes/webgpu/src/main.cpp
+  s_4dcafa08bfb269::t_04acf87059a1d7 51
+  s_4dcafa08bfb269::t_c4300a7e9e4d61 624
+  s_4dcafa08bfb269::t_da9b88c0ccfcb7 514-515
+  s_4dcafa08bfb269::t_0699c2de3471ba 564-565,567
+  s_4dcafa08bfb269::t_6530d287d9d0fc 512
+  s_4dcafa08bfb269::t_6db68a26bc3791 628-629
+  s_4dcafa08bfb269::t_2517f988a41bb3 142-145,150
+  s_4dcafa08bfb269::t_0ff0eaed6f2a97 1-21,26-50,52-117,121-141,146-149,151-300,303-305,307-505,507-511,513,516-563,566,568-623,625-627,630-642
+  s_4dcafa08bfb269::t_3ca509d716b228 118-120
+  s_4dcafa08bfb269::t_780836c2b768df 22-25
+  s_4dcafa08bfb269::t_6bb2f4ecd8f4b7 301-302
+  s_4dcafa08bfb269::t_563d62218e4f6a 306
+  s_4dcafa08bfb269::t_109ffed038fbe3 506
+.github/workflows/ci.yml
+  s_4dcafa08bfb269::t_137c9dc99fe7ec 138-235
+.gitignore
+  s_4dcafa08bfb269::t_e9d3487c5ad41b 3
+spikes/webgpu/FINDINGS.md
+  s_4dcafa08bfb269::t_7d0e39a108c3c9 1-166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "cfdb7bfec31c34c98c195e17b1199184523a224c",
+  "prompts": {},
+  "sessions": {
+    "s_1bd773bd70c74b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aa684e1ca1bb21ef3",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
