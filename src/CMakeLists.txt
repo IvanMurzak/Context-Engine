@@ -1,7 +1,12 @@
 # Context Game Engine — top-level build.
 #
+# Build files live in src/ (owner ruling 2026-07-02: the repo root stays minimal), so configure
+# from the repo root with an explicit source dir:
+#     cmake -S src --preset dev
+# Sibling directories (spikes/, bench/, cmake/) are reached via ../ with explicit binary dirs.
+#
 # NOTE: vcpkg is deliberately NOT required to configure or build this skeleton. The manifest
-# (vcpkg.json) activates only when the vcpkg toolchain file is passed explicitly
+# (src/vcpkg.json) activates only when the vcpkg toolchain file is passed explicitly
 # (-DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake); a plain configure works
 # on a machine with no vcpkg at all.
 
@@ -20,8 +25,8 @@ option(CONTEXT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors (baseline: 
 option(CONTEXT_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer (non-MSVC only)" OFF)
 option(CONTEXT_BUILD_SPIKES "Build the M0 de-risking spike targets under spikes/ (opt-in; the default CI matrix stays spike-free; some spikes require the vcpkg toolchain with VCPKG_MANIFEST_FEATURES=spikes)" OFF)
 
-# Warnings-as-errors baseline: the `context_warnings` interface target (cmake/ContextWarnings.cmake).
-include(cmake/ContextWarnings.cmake)
+# Warnings-as-errors baseline: the `context_warnings` interface target (../cmake/ContextWarnings.cmake).
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextWarnings.cmake)
 
 if(CONTEXT_SANITIZE)
     if(MSVC)
@@ -37,13 +42,16 @@ enable_testing()
 
 # M0: the only always-on target is the hello spike. Engine components (src/kernel/, src/editor/,
 # src/runtime/, src/packages/) gain targets starting at M1.
-add_subdirectory(spikes/hello)
+# spikes/ lives OUTSIDE the source dir (sibling of src/), so every add_subdirectory names an
+# explicit binary dir; the ${CMAKE_BINARY_DIR}/spikes/<x> layout keeps output paths identical
+# to the pre-move tree (the CI bench job depends on build/bench/spikes/parse-bench/...).
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/hello ${CMAKE_BINARY_DIR}/spikes/hello)
 
 # M0 de-risking spikes are OPT-IN (CONTEXT_BUILD_SPIKES=ON): the default CI matrix stays
 # untouched. spikes/ecs takes its dependencies from the vcpkg manifest's `spikes` feature;
 # spikes/js-engine acquires its pinned backends itself (FetchContent + NuGet — see its README).
 if(CONTEXT_BUILD_SPIKES)
-    add_subdirectory(spikes/ecs)
-    add_subdirectory(spikes/parse-bench)
-    add_subdirectory(spikes/js-engine)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/ecs ${CMAKE_BINARY_DIR}/spikes/ecs)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/parse-bench ${CMAKE_BINARY_DIR}/spikes/parse-bench)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/js-engine ${CMAKE_BINARY_DIR}/spikes/js-engine)
 endif()

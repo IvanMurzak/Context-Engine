@@ -68,7 +68,7 @@ newline. The spike's `canon-check` mode asserts the **re-canonicalization fixpoi
 
 ```bash
 # build the M0 subject (opt-in spike target; needs the vcpkg toolchain):
-cmake -B build/bench -S . -DCMAKE_BUILD_TYPE=Release \
+cmake -B build/bench -S src -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
     -DVCPKG_MANIFEST_FEATURES=spikes -DCONTEXT_BUILD_SPIKES=ON
 cmake --build build/bench --target context-parse-bench

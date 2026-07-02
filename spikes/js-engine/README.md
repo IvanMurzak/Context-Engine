@@ -23,9 +23,9 @@ Canonical path — the `spikes` preset (needs `VCPKG_ROOT`; builds every spike, 
 from the vcpkg `spikes` manifest feature):
 
 ```sh
-cmake --preset spikes
-cmake --build --preset spikes --target context-spike-jsengine
-python spikes/js-engine/run_bench.py --exe build/spikes/spikes/js-engine/Release/context-spike-jsengine.exe
+cmake -S src --preset spikes    # build files live in src/ — configure from the repo root
+cmake --build src/build/spikes --config Release --target context-spike-jsengine
+python spikes/js-engine/run_bench.py --exe src/build/spikes/spikes/js-engine/Release/context-spike-jsengine.exe
 ```
 
 Without vcpkg, this spike alone still builds (QuickJS falls back to pinned FetchContent), but
@@ -35,7 +35,7 @@ use the preset unless you point the build at a tree without the other spikes.
 Dependency acquisition (throwaway-spike rules; the recorded L-42 deviation is in FINDINGS.md):
 
 - **QuickJS** — pinned FetchContent of quickjs-ng v0.15.1 (same upstream+version as the pinned
-  vcpkg baseline's `quickjs-ng` port, which is declared in `vcpkg.json` feature `spikes` for the
+  vcpkg baseline's `quickjs-ng` port, which is declared in `src/vcpkg.json` feature `spikes` for the
   license gate). Builds from source inside the spike build tree.
 - **V8** — pinned, hash-verified NuGet prebuilt monolith (`v8-v143-x64` 13.0.245.25 +
   `v8.redist-v143-x64`), downloaded at configure time (or point `CONTEXT_SPIKE_V8_DIR` at
