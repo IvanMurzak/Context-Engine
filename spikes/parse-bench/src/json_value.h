@@ -4,6 +4,12 @@
 // need a mutable, ordered tree. This is the minimal such tree: object members keep
 // authored order (the canonical writer sorts keys at serialization time), arrays keep
 // authored order (stable array ordering, R-FILE-001).
+//
+// Portability note: object members are a named struct (JsonMember), NOT
+// std::pair<std::string, JsonValue> — pair's SFINAE-heavy special members eagerly
+// evaluate destructibility traits of a recursively-incomplete element type, which
+// libstdc++ rejects (static assert in <type_traits>); a plain struct with defaulted
+// special members defers those instantiations until both types are complete.
 #pragma once
 
 #include <cstdint>
@@ -12,6 +18,8 @@
 #include <vector>
 
 namespace ctx {
+
+struct JsonMember;
 
 struct JsonValue {
     enum class Type : uint8_t { Null, Bool, Int, Uint, Double, String, Array, Object };
@@ -23,7 +31,7 @@ struct JsonValue {
     double dbl = 0.0;
     std::string str;
     std::vector<JsonValue> arr;
-    std::vector<std::pair<std::string, JsonValue>> obj;
+    std::vector<JsonMember> obj;  // incomplete element type: OK for the declaration
 
     static JsonValue makeString(std::string s) {
         JsonValue v;
@@ -38,19 +46,31 @@ struct JsonValue {
         return v;
     }
 
-    const JsonValue* find(const std::string& key) const {
-        if (type != Type::Object) return nullptr;
-        for (const auto& [k, v] : obj)
-            if (k == key) return &v;
-        return nullptr;
-    }
-    JsonValue* find(const std::string& key) {
-        if (type != Type::Object) return nullptr;
-        for (auto& [k, v] : obj)
-            if (k == key) return &v;
-        return nullptr;
-    }
+    const JsonValue* find(const std::string& key) const;  // defined after JsonMember
+    JsonValue* find(const std::string& key);
 };
+
+struct JsonMember {
+    std::string key;
+    JsonValue value;
+
+    JsonMember() = default;
+    JsonMember(std::string k, JsonValue v) : key(std::move(k)), value(std::move(v)) {}
+};
+
+inline const JsonValue* JsonValue::find(const std::string& key) const {
+    if (type != Type::Object) return nullptr;
+    for (const JsonMember& m : obj)
+        if (m.key == key) return &m.value;
+    return nullptr;
+}
+
+inline JsonValue* JsonValue::find(const std::string& key) {
+    if (type != Type::Object) return nullptr;
+    for (JsonMember& m : obj)
+        if (m.key == key) return &m.value;
+    return nullptr;
+}
 
 // Deep structural equality (numbers compare by value within their lexical class;
 // the corpus contains no NaN — R-FILE-001 bans it).
@@ -74,11 +94,11 @@ inline bool deepEquals(const JsonValue& a, const JsonValue& b) {
             // Canonical files have deterministically ordered keys, so positional
             // comparison is valid for corpus data; fall back to lookup if order drifts.
             for (size_t i = 0; i < a.obj.size(); ++i) {
-                if (a.obj[i].first == b.obj[i].first) {
-                    if (!deepEquals(a.obj[i].second, b.obj[i].second)) return false;
+                if (a.obj[i].key == b.obj[i].key) {
+                    if (!deepEquals(a.obj[i].value, b.obj[i].value)) return false;
                 } else {
-                    const JsonValue* other = b.find(a.obj[i].first);
-                    if (!other || !deepEquals(a.obj[i].second, *other)) return false;
+                    const JsonValue* other = b.find(a.obj[i].key);
+                    if (other == nullptr || !deepEquals(a.obj[i].value, *other)) return false;
                 }
             }
             return true;

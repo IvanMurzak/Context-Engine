@@ -119,6 +119,11 @@ ctx::JsonValue buildTree(simdjson::dom::element el) {
                 v.obj.emplace_back(std::string(kv.key), buildTree(kv.value));
             break;
         }
+        default:
+            // Future simdjson element kinds (e.g. BIGINT): not produced by the
+            // canonical corpus; treat as null rather than failing the build.
+            v.type = ctx::JsonValue::Type::Null;
+            break;
     }
     return v;
 }

@@ -40,24 +40,24 @@ void mergeObjects(const JsonValue* b, const JsonValue& o, const JsonValue& t, Ct
     out.obj.clear();
     const size_t pathLen = ctx.path.size();
     // Union of keys: ours order first, then theirs-only keys in theirs order.
-    for (const auto& [key, oval] : o.obj) {
-        const JsonValue* bv = b ? b->find(key) : nullptr;
-        const JsonValue* tv = t.find(key);
+    for (const JsonMember& om : o.obj) {
+        const JsonValue* bv = b ? b->find(om.key) : nullptr;
+        const JsonValue* tv = t.find(om.key);
         ctx.path.push_back('/');
-        ctx.path.append(key);
+        ctx.path.append(om.key);
         JsonValue merged;
-        if (mergeNode(bv, &oval, tv, ctx, merged))
-            out.obj.emplace_back(key, std::move(merged));
+        if (mergeNode(bv, &om.value, tv, ctx, merged))
+            out.obj.emplace_back(om.key, std::move(merged));
         ctx.path.resize(pathLen);
     }
-    for (const auto& [key, tval] : t.obj) {
-        if (o.find(key) != nullptr) continue;  // handled above
-        const JsonValue* bv = b ? b->find(key) : nullptr;
+    for (const JsonMember& tm : t.obj) {
+        if (o.find(tm.key) != nullptr) continue;  // handled above
+        const JsonValue* bv = b ? b->find(tm.key) : nullptr;
         ctx.path.push_back('/');
-        ctx.path.append(key);
+        ctx.path.append(tm.key);
         JsonValue merged;
-        if (mergeNode(bv, nullptr, &tval, ctx, merged))
-            out.obj.emplace_back(key, std::move(merged));
+        if (mergeNode(bv, nullptr, &tm.value, ctx, merged))
+            out.obj.emplace_back(tm.key, std::move(merged));
         ctx.path.resize(pathLen);
     }
 }

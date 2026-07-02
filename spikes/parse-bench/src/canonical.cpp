@@ -141,16 +141,16 @@ void writeValue(const JsonValue& v, int indent, std::string& out) {
             std::vector<uint32_t> idx(v.obj.size());
             std::iota(idx.begin(), idx.end(), 0u);
             std::sort(idx.begin(), idx.end(), [&](uint32_t a, uint32_t b) {
-                return v.obj[a].first < v.obj[b].first;
+                return v.obj[a].key < v.obj[b].key;
             });
             out.push_back('{');
             for (size_t i = 0; i < idx.size(); ++i) {
-                const auto& [key, val] = v.obj[idx[i]];
+                const JsonMember& m = v.obj[idx[i]];
                 out.push_back('\n');
                 out.append(static_cast<size_t>(indent + 1) * 2, ' ');
-                writeString(key, out);
+                writeString(m.key, out);
                 out.append(": ");
-                writeValue(val, indent + 1, out);
+                writeValue(m.value, indent + 1, out);
                 if (i + 1 < idx.size()) out.push_back(',');
             }
             out.push_back('\n');
