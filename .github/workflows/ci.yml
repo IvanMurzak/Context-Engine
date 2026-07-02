@@ -143,6 +143,58 @@ jobs:
           path: bench/results/
           if-no-files-found: error
 
+  # spikes/wasm smoke on ALL THREE platforms (L-8/R-LANG-003: per-platform WASM backends are
+  # the point — wasmtime prebuilt C API + WAMR from source both support win/mac/linux).
+  # Uses the stand-alone CONTEXT_BUILD_SPIKE_WASM toggle: no vcpkg toolchain, so the
+  # vcpkg-dependent spikes stay unconfigured and the job stays lean. Honest per-platform
+  # gating: the WAMR-AOT leg needs a wamrc prebuilt, which exists for x86_64 win/linux but NOT
+  # for macos-arm64 — the spike's CMake gates it off there automatically (recorded in
+  # spikes/wasm/FINDINGS.md).
+  spike-wasm:
+    name: spike-wasm (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            generator: Ninja
+            cc: clang
+            cxx: clang++
+          - os: macos-latest
+            generator: Ninja
+            cc: ''
+            cxx: ''
+          - os: windows-latest # default generator (Visual Studio)
+            generator: ''
+            cc: ''
+            cxx: ''
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure environment
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.generator }}" ]; then
+            echo "CMAKE_GENERATOR=${{ matrix.generator }}" >> "$GITHUB_ENV"
+          fi
+          if [ -n "${{ matrix.cc }}" ]; then
+            echo "CC=${{ matrix.cc }}" >> "$GITHUB_ENV"
+            echo "CXX=${{ matrix.cxx }}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Configure (wasm spike only)
+        run: >
+          cmake -B build/spike-wasm -S src
+          -DCMAKE_BUILD_TYPE=Release
+          -DCONTEXT_BUILD_SPIKE_WASM=ON
+
+      - name: Build
+        run: cmake --build build/spike-wasm --config Release --target context-spike-wasm
+
+      - name: Run smoke tests (wasmtime + wamr, + wamr-aot where wamrc exists)
+        run: ctest --test-dir build/spike-wasm -C Release -R context-spike-wasm --output-on-failure
+
   # WebGPU spike (spikes/webgpu): native build on all three desktop platforms + the offscreen
   # render/readback self-check. The spike is standalone-configurable (no vcpkg — it pins its own
   # wgpu-native prebuilt), so this job stays light: no other spike's deps are configured here.

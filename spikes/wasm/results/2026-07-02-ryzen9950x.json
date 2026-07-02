@@ -1,0 +1,806 @@
+{
+  "hardware": {
+    "os": "Windows 10 (10.0.26200)",
+    "machine": "AMD64",
+    "cpu": "AMD Ryzen 9 9950X 16-Core Processor",
+    "ram_gb": 61.4
+  },
+  "binary_footprint_mb": {
+    "context-spike-wasm.exe": 0.696,
+    "module.aot": 0.004,
+    "module.wasm": 0.002,
+    "wasmtime.dll": 20.611
+  },
+  "runtimes": {
+    "wasmtime": {
+      "load": {
+        "runtime": "wasmtime",
+        "mode": "cranelift-jit",
+        "version": "46.0.1",
+        "bench": "load",
+        "module_bytes": 2097,
+        "compile_ms_first": 1.9589,
+        "compile_ms": {
+          "median": 1.7859,
+          "min": 1.4394,
+          "max": 1.9589
+        },
+        "instantiate_ms": {
+          "median": 0.0299,
+          "min": 0.0276,
+          "max": 0.0312
+        }
+      },
+      "calls": {
+        "runtime": "wasmtime",
+        "mode": "cranelift-jit",
+        "version": "46.0.1",
+        "bench": "calls",
+        "module_bytes": 2097,
+        "host_to_wasm_empty": {
+          "n_per_rep": 1048580.0,
+          "ns_per_op": {
+            "median": 102.384,
+            "min": 99.3676,
+            "max": 105.51
+          },
+          "ops_per_sec": {
+            "median": 9767120.0,
+            "min": 9477740.0,
+            "max": 10063600.0
+          }
+        },
+        "host_to_wasm_add_i32": {
+          "n_per_rep": 1048580.0,
+          "ns_per_op": {
+            "median": 144.416,
+            "min": 144.268,
+            "max": 151.112
+          },
+          "ops_per_sec": {
+            "median": 6924440.0,
+            "min": 6617600.0,
+            "max": 6931530.0
+          }
+        },
+        "host_to_wasm_sum3_f64": {
+          "n_per_rep": 1048580.0,
+          "ns_per_op": {
+            "median": 161.681,
+            "min": 159.587,
+            "max": 174.445
+          },
+          "ops_per_sec": {
+            "median": 6185020.0,
+            "min": 5732450.0,
+            "max": 6266170.0
+          }
+        }
+      },
+      "zerocopy": {
+        "runtime": "wasmtime",
+        "mode": "cranelift-jit",
+        "version": "46.0.1",
+        "bench": "zerocopy",
+        "module_bytes": 2097,
+        "host_write_visible_to_guest": true,
+        "guest_write_visible_to_host": true,
+        "memory_base_stable_across_calls": true,
+        "scale_1m_f32": {
+          "elems": 1048580.0,
+          "n_per_rep": 1024,
+          "ns_per_elem": {
+            "median": 0.109068,
+            "min": 0.107904,
+            "max": 0.110251
+          },
+          "gb_per_sec_median": 73.3487
+        },
+        "scale_1m_f32_native_host": {
+          "ns_per_elem": {
+            "median": 0.200683,
+            "min": 0.193584,
+            "max": 0.203614
+          }
+        },
+        "scale_64_f32": {
+          "n_per_rep": 1048580.0,
+          "ns_per_call": {
+            "median": 152.252,
+            "min": 148.168,
+            "max": 158.535
+          }
+        }
+      },
+      "compute": {
+        "runtime": "wasmtime",
+        "mode": "cranelift-jit",
+        "version": "46.0.1",
+        "bench": "compute",
+        "module_bytes": 2097,
+        "checksum": 175162,
+        "native_checksum": 175162,
+        "checksum_matches_native": true,
+        "n_per_rep": 1024,
+        "kernel_runs_per_sec": {
+          "median": 3323.52,
+          "min": 3289.98,
+          "max": 3419.12
+        },
+        "native_kernel_runs_per_sec": {
+          "median": 3283.21,
+          "min": 3271.9,
+          "max": 3342.63
+        }
+      },
+      "trap": {
+        "runtime": "wasmtime",
+        "mode": "cranelift-jit",
+        "version": "46.0.1",
+        "bench": "trap",
+        "module_bytes": 2097,
+        "oob_read_traps": true,
+        "oob_read_message": "    1: wasm trap: out of bounds memory access",
+        "oob_far_read_traps": true,
+        "oob_write_traps": true,
+        "oob_write_message": "    1: wasm trap: out of bounds memory access",
+        "engine_usable_after_trap": true,
+        "instantiated_with_zero_imports": true
+      },
+      "grow": {
+        "runtime": "wasmtime",
+        "mode": "cranelift-jit",
+        "version": "46.0.1",
+        "bench": "grow",
+        "module_bytes": 2097,
+        "bytes_before": 4325380.0,
+        "bytes_after": 21102600.0,
+        "grew": true,
+        "base_moved_after_grow": false,
+        "contents_preserved_after_grow": true
+      },
+      "memory": {
+        "runtime": "wasmtime",
+        "mode": "cranelift-jit",
+        "version": "46.0.1",
+        "bench": "memory",
+        "module_bytes": 2097,
+        "private_bytes_after_init": 13492200.0,
+        "working_set_after_init": 18415600.0,
+        "linear_memory_bytes": 4325380.0
+      }
+    },
+    "wasmtime-winch": {
+      "load": {
+        "runtime": "wasmtime",
+        "mode": "winch",
+        "version": "46.0.1",
+        "bench": "load",
+        "module_bytes": 2097,
+        "compile_ms_first": 1.7897,
+        "compile_ms": {
+          "median": 1.457,
+          "min": 1.2589,
+          "max": 1.7897
+        },
+        "instantiate_ms": {
+          "median": 0.0237,
+          "min": 0.0228,
+          "max": 0.0313
+        }
+      },
+      "calls": {
+        "runtime": "wasmtime",
+        "mode": "winch",
+        "version": "46.0.1",
+        "bench": "calls",
+        "module_bytes": 2097,
+        "host_to_wasm_empty": {
+          "n_per_rep": 1048580.0,
+          "ns_per_op": {
+            "median": 102.542,
+            "min": 100.17,
+            "max": 104.623
+          },
+          "ops_per_sec": {
+            "median": 9752050.0,
+            "min": 9558130.0,
+            "max": 9982990.0
+          }
+        },
+        "host_to_wasm_add_i32": {
+          "n_per_rep": 1048580.0,
+          "ns_per_op": {
+            "median": 150.049,
+            "min": 147.538,
+            "max": 156.039
+          },
+          "ops_per_sec": {
+            "median": 6664470.0,
+            "min": 6408660.0,
+            "max": 6777900.0
+          }
+        },
+        "host_to_wasm_sum3_f64": {
+          "n_per_rep": 1048580.0,
+          "ns_per_op": {
+            "median": 167.661,
+            "min": 164.177,
+            "max": 175.002
+          },
+          "ops_per_sec": {
+            "median": 5964420.0,
+            "min": 5714200.0,
+            "max": 6090990.0
+          }
+        }
+      },
+      "zerocopy": {
+        "runtime": "wasmtime",
+        "mode": "winch",
+        "version": "46.0.1",
+        "bench": "zerocopy",
+        "module_bytes": 2097,
+        "host_write_visible_to_guest": true,
+        "guest_write_visible_to_host": true,
+        "memory_base_stable_across_calls": true,
+        "scale_1m_f32": {
+          "elems": 1048580.0,
+          "n_per_rep": 256,
+          "ns_per_elem": {
+            "median": 0.509014,
+            "min": 0.477727,
+            "max": 0.517576
+          },
+          "gb_per_sec_median": 15.7166
+        },
+        "scale_1m_f32_native_host": {
+          "ns_per_elem": {
+            "median": 0.197576,
+            "min": 0.190188,
+            "max": 0.200104
+          }
+        },
+        "scale_64_f32": {
+          "n_per_rep": 1048580.0,
+          "ns_per_call": {
+            "median": 194.681,
+            "min": 176.796,
+            "max": 215.251
+          }
+        }
+      },
+      "compute": {
+        "runtime": "wasmtime",
+        "mode": "winch",
+        "version": "46.0.1",
+        "bench": "compute",
+        "module_bytes": 2097,
+        "checksum": 175162,
+        "native_checksum": 175162,
+        "checksum_matches_native": true,
+        "n_per_rep": 512,
+        "kernel_runs_per_sec": {
+          "median": 999.899,
+          "min": 984.103,
+          "max": 1039.41
+        },
+        "native_kernel_runs_per_sec": {
+          "median": 3284.16,
+          "min": 3274.14,
+          "max": 3295.11
+        }
+      },
+      "trap": {
+        "runtime": "wasmtime",
+        "mode": "winch",
+        "version": "46.0.1",
+        "bench": "trap",
+        "module_bytes": 2097,
+        "oob_read_traps": true,
+        "oob_read_message": "    1: wasm trap: out of bounds memory access",
+        "oob_far_read_traps": true,
+        "oob_write_traps": true,
+        "oob_write_message": "    1: wasm trap: out of bounds memory access",
+        "engine_usable_after_trap": true,
+        "instantiated_with_zero_imports": true
+      },
+      "grow": {
+        "runtime": "wasmtime",
+        "mode": "winch",
+        "version": "46.0.1",
+        "bench": "grow",
+        "module_bytes": 2097,
+        "bytes_before": 4325380.0,
+        "bytes_after": 21102600.0,
+        "grew": true,
+        "base_moved_after_grow": false,
+        "contents_preserved_after_grow": true
+      },
+      "memory": {
+        "runtime": "wasmtime",
+        "mode": "winch",
+        "version": "46.0.1",
+        "bench": "memory",
+        "module_bytes": 2097,
+        "private_bytes_after_init": 14008300.0,
+        "working_set_after_init": 18894800.0,
+        "linear_memory_bytes": 4325380.0
+      }
+    },
+    "wasmtime-pulley": {
+      "load": {
+        "runtime": "wasmtime",
+        "mode": "pulley-interp",
+        "version": "46.0.1",
+        "bench": "load",
+        "module_bytes": 2097,
+        "compile_ms_first": 2.0936,
+        "compile_ms": {
+          "median": 2.0936,
+          "min": 1.503,
+          "max": 2.1882
+        },
+        "instantiate_ms": {
+          "median": 0.0319,
+          "min": 0.0238,
+          "max": 0.0349
+        }
+      },
+      "calls": {
+        "runtime": "wasmtime",
+        "mode": "pulley-interp",
+        "version": "46.0.1",
+        "bench": "calls",
+        "module_bytes": 2097,
+        "host_to_wasm_empty": {
+          "n_per_rep": 1048580.0,
+          "ns_per_op": {
+            "median": 146.36,
+            "min": 141.438,
+            "max": 151.322
+          },
+          "ops_per_sec": {
+            "median": 6832440.0,
+            "min": 6608440.0,
+            "max": 7070230.0
+          }
+        },
+        "host_to_wasm_add_i32": {
+          "n_per_rep": 524288,
+          "ns_per_op": {
+            "median": 218.087,
+            "min": 214.744,
+            "max": 222.727
+          },
+          "ops_per_sec": {
+            "median": 4585320.0,
+            "min": 4489810.0,
+            "max": 4656710.0
+          }
+        },
+        "host_to_wasm_sum3_f64": {
+          "n_per_rep": 524288,
+          "ns_per_op": {
+            "median": 241.554,
+            "min": 226.145,
+            "max": 245.462
+          },
+          "ops_per_sec": {
+            "median": 4139870.0,
+            "min": 4073950.0,
+            "max": 4421940.0
+          }
+        }
+      },
+      "zerocopy": {
+        "runtime": "wasmtime",
+        "mode": "pulley-interp",
+        "version": "46.0.1",
+        "bench": "zerocopy",
+        "module_bytes": 2097,
+        "host_write_visible_to_guest": true,
+        "guest_write_visible_to_host": true,
+        "memory_base_stable_across_calls": true,
+        "scale_1m_f32": {
+          "elems": 1048580.0,
+          "n_per_rep": 16,
+          "ns_per_elem": {
+            "median": 9.65966,
+            "min": 9.61219,
+            "max": 9.98869
+          },
+          "gb_per_sec_median": 0.828187
+        },
+        "scale_1m_f32_native_host": {
+          "ns_per_elem": {
+            "median": 0.198032,
+            "min": 0.185721,
+            "max": 0.202351
+          }
+        },
+        "scale_64_f32": {
+          "n_per_rep": 131072,
+          "ns_per_call": {
+            "median": 1009.4,
+            "min": 958.136,
+            "max": 1032.15
+          }
+        }
+      },
+      "compute": {
+        "runtime": "wasmtime",
+        "mode": "pulley-interp",
+        "version": "46.0.1",
+        "bench": "compute",
+        "module_bytes": 2097,
+        "checksum": 175162,
+        "native_checksum": 175162,
+        "checksum_matches_native": true,
+        "n_per_rep": 64,
+        "kernel_runs_per_sec": {
+          "median": 132.211,
+          "min": 101.482,
+          "max": 136.526
+        },
+        "native_kernel_runs_per_sec": {
+          "median": 3244.67,
+          "min": 3238.59,
+          "max": 3283.85
+        }
+      },
+      "trap": {
+        "runtime": "wasmtime",
+        "mode": "pulley-interp",
+        "version": "46.0.1",
+        "bench": "trap",
+        "module_bytes": 2097,
+        "oob_read_traps": true,
+        "oob_read_message": "    wasm trap: out of bounds memory access",
+        "oob_far_read_traps": true,
+        "oob_write_traps": true,
+        "oob_write_message": "    wasm trap: out of bounds memory access",
+        "engine_usable_after_trap": true,
+        "instantiated_with_zero_imports": true
+      },
+      "grow": {
+        "runtime": "wasmtime",
+        "mode": "pulley-interp",
+        "version": "46.0.1",
+        "bench": "grow",
+        "module_bytes": 2097,
+        "bytes_before": 4325380.0,
+        "bytes_after": 21102600.0,
+        "grew": true,
+        "base_moved_after_grow": false,
+        "contents_preserved_after_grow": true
+      },
+      "memory": {
+        "runtime": "wasmtime",
+        "mode": "pulley-interp",
+        "version": "46.0.1",
+        "bench": "memory",
+        "module_bytes": 2097,
+        "private_bytes_after_init": 14307300.0,
+        "working_set_after_init": 18133000.0,
+        "linear_memory_bytes": 4325380.0
+      }
+    },
+    "wamr": {
+      "load": {
+        "runtime": "wamr",
+        "mode": "fast-interp",
+        "version": "2.4.5",
+        "bench": "load",
+        "module_bytes": 2097,
+        "compile_ms_first": 0.0371,
+        "compile_ms": {
+          "median": 0.0263,
+          "min": 0.0249,
+          "max": 0.0371
+        },
+        "instantiate_ms": {
+          "median": 0.0285,
+          "min": 0.0262,
+          "max": 0.0347
+        }
+      },
+      "calls": {
+        "runtime": "wamr",
+        "mode": "fast-interp",
+        "version": "2.4.5",
+        "bench": "calls",
+        "module_bytes": 2097,
+        "host_to_wasm_empty": {
+          "n_per_rep": 262144,
+          "ns_per_op": {
+            "median": 467.704,
+            "min": 447.136,
+            "max": 484.319
+          },
+          "ops_per_sec": {
+            "median": 2138100.0,
+            "min": 2064750.0,
+            "max": 2236460.0
+          }
+        },
+        "host_to_wasm_add_i32": {
+          "n_per_rep": 262144,
+          "ns_per_op": {
+            "median": 450.433,
+            "min": 448.638,
+            "max": 477.992
+          },
+          "ops_per_sec": {
+            "median": 2220080.0,
+            "min": 2092090.0,
+            "max": 2228970.0
+          }
+        },
+        "host_to_wasm_sum3_f64": {
+          "n_per_rep": 262144,
+          "ns_per_op": {
+            "median": 472.052,
+            "min": 468.078,
+            "max": 488.575
+          },
+          "ops_per_sec": {
+            "median": 2118410.0,
+            "min": 2046770.0,
+            "max": 2136400.0
+          }
+        }
+      },
+      "zerocopy": {
+        "runtime": "wamr",
+        "mode": "fast-interp",
+        "version": "2.4.5",
+        "bench": "zerocopy",
+        "module_bytes": 2097,
+        "host_write_visible_to_guest": true,
+        "guest_write_visible_to_host": true,
+        "memory_base_stable_across_calls": true,
+        "scale_1m_f32": {
+          "elems": 1048580.0,
+          "n_per_rep": 32,
+          "ns_per_elem": {
+            "median": 5.84543,
+            "min": 5.79521,
+            "max": 6.21024
+          },
+          "gb_per_sec_median": 1.36859
+        },
+        "scale_1m_f32_native_host": {
+          "ns_per_elem": {
+            "median": 0.194165,
+            "min": 0.187338,
+            "max": 0.195452
+          }
+        },
+        "scale_64_f32": {
+          "n_per_rep": 131072,
+          "ns_per_call": {
+            "median": 840.585,
+            "min": 837.566,
+            "max": 874.361
+          }
+        }
+      },
+      "compute": {
+        "runtime": "wamr",
+        "mode": "fast-interp",
+        "version": "2.4.5",
+        "bench": "compute",
+        "module_bytes": 2097,
+        "checksum": 175162,
+        "native_checksum": 175162,
+        "checksum_matches_native": true,
+        "n_per_rep": 128,
+        "kernel_runs_per_sec": {
+          "median": 230.924,
+          "min": 169.961,
+          "max": 237.531
+        },
+        "native_kernel_runs_per_sec": {
+          "median": 3254.54,
+          "min": 3196.5,
+          "max": 3286.6
+        }
+      },
+      "trap": {
+        "runtime": "wamr",
+        "mode": "fast-interp",
+        "version": "2.4.5",
+        "bench": "trap",
+        "module_bytes": 2097,
+        "oob_read_traps": true,
+        "oob_read_message": "trap: Exception: out of bounds memory access",
+        "oob_far_read_traps": true,
+        "oob_write_traps": true,
+        "oob_write_message": "trap: Exception: out of bounds memory access",
+        "engine_usable_after_trap": true,
+        "instantiated_with_zero_imports": true
+      },
+      "grow": {
+        "runtime": "wamr",
+        "mode": "fast-interp",
+        "version": "2.4.5",
+        "bench": "grow",
+        "module_bytes": 2097,
+        "bytes_before": 4325380.0,
+        "bytes_after": 21102600.0,
+        "grew": true,
+        "base_moved_after_grow": false,
+        "contents_preserved_after_grow": true
+      },
+      "memory": {
+        "runtime": "wamr",
+        "mode": "fast-interp",
+        "version": "2.4.5",
+        "bench": "memory",
+        "module_bytes": 2097,
+        "private_bytes_after_init": 6070270.0,
+        "working_set_after_init": 8441860.0,
+        "linear_memory_bytes": 4325380.0
+      }
+    },
+    "wamr-aot": {
+      "load": {
+        "runtime": "wamr",
+        "mode": "aot",
+        "version": "2.4.5",
+        "bench": "load",
+        "module_bytes": 3868,
+        "compile_ms_first": 0.0272,
+        "compile_ms": {
+          "median": 0.0211,
+          "min": 0.0207,
+          "max": 0.0272
+        },
+        "instantiate_ms": {
+          "median": 0.0104,
+          "min": 0.0098,
+          "max": 0.027
+        }
+      },
+      "calls": {
+        "runtime": "wamr",
+        "mode": "aot",
+        "version": "2.4.5",
+        "bench": "calls",
+        "module_bytes": 3868,
+        "host_to_wasm_empty": {
+          "n_per_rep": 262144,
+          "ns_per_op": {
+            "median": 438.538,
+            "min": 437.046,
+            "max": 441.088
+          },
+          "ops_per_sec": {
+            "median": 2280300.0,
+            "min": 2267120.0,
+            "max": 2288090.0
+          }
+        },
+        "host_to_wasm_add_i32": {
+          "n_per_rep": 262144,
+          "ns_per_op": {
+            "median": 462.917,
+            "min": 445.863,
+            "max": 474.222
+          },
+          "ops_per_sec": {
+            "median": 2160210.0,
+            "min": 2108720.0,
+            "max": 2242840.0
+          }
+        },
+        "host_to_wasm_sum3_f64": {
+          "n_per_rep": 262144,
+          "ns_per_op": {
+            "median": 454.282,
+            "min": 452.022,
+            "max": 456.683
+          },
+          "ops_per_sec": {
+            "median": 2201270.0,
+            "min": 2189700.0,
+            "max": 2212280.0
+          }
+        }
+      },
+      "zerocopy": {
+        "runtime": "wamr",
+        "mode": "aot",
+        "version": "2.4.5",
+        "bench": "zerocopy",
+        "module_bytes": 3868,
+        "host_write_visible_to_guest": true,
+        "guest_write_visible_to_host": true,
+        "memory_base_stable_across_calls": true,
+        "scale_1m_f32": {
+          "elems": 1048580.0,
+          "n_per_rep": 1024,
+          "ns_per_elem": {
+            "median": 0.18504,
+            "min": 0.183372,
+            "max": 0.187855
+          },
+          "gb_per_sec_median": 43.2339
+        },
+        "scale_1m_f32_native_host": {
+          "ns_per_elem": {
+            "median": 0.187237,
+            "min": 0.186293,
+            "max": 0.19801
+          }
+        },
+        "scale_64_f32": {
+          "n_per_rep": 262144,
+          "ns_per_call": {
+            "median": 464.309,
+            "min": 459.019,
+            "max": 500.903
+          }
+        }
+      },
+      "compute": {
+        "runtime": "wamr",
+        "mode": "aot",
+        "version": "2.4.5",
+        "bench": "compute",
+        "module_bytes": 3868,
+        "checksum": 175162,
+        "native_checksum": 175162,
+        "checksum_matches_native": true,
+        "n_per_rep": 2048,
+        "kernel_runs_per_sec": {
+          "median": 3574.77,
+          "min": 3387.06,
+          "max": 3602.99
+        },
+        "native_kernel_runs_per_sec": {
+          "median": 3212.45,
+          "min": 3177.4,
+          "max": 3260.75
+        }
+      },
+      "trap": {
+        "runtime": "wamr",
+        "mode": "aot",
+        "version": "2.4.5",
+        "bench": "trap",
+        "module_bytes": 3868,
+        "oob_read_traps": true,
+        "oob_read_message": "trap: Exception: out of bounds memory access",
+        "oob_far_read_traps": true,
+        "oob_write_traps": true,
+        "oob_write_message": "trap: Exception: out of bounds memory access",
+        "engine_usable_after_trap": true,
+        "instantiated_with_zero_imports": true
+      },
+      "grow": {
+        "runtime": "wamr",
+        "mode": "aot",
+        "version": "2.4.5",
+        "bench": "grow",
+        "module_bytes": 3868,
+        "bytes_before": 4325380.0,
+        "bytes_after": 21102600.0,
+        "grew": true,
+        "base_moved_after_grow": false,
+        "contents_preserved_after_grow": true
+      },
+      "memory": {
+        "runtime": "wamr",
+        "mode": "aot",
+        "version": "2.4.5",
+        "bench": "memory",
+        "module_bytes": 3868,
+        "private_bytes_after_init": 6086660.0,
+        "working_set_after_init": 8441860.0,
+        "linear_memory_bytes": 4325380.0
+      }
+    }
+  }
+}
