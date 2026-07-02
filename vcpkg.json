@@ -3,5 +3,14 @@
     "version": "0.0.1",
     "description": "Context Game Engine — AI-first, file-authoritative, headless-complete game engine",
     "builtin-baseline": "b6b57c2520804b639f8e9e6a769697f47432d6af",
-    "dependencies": []
+    "dependencies": [],
+    "features": {
+        "spikes": {
+            "description": "Dependencies for the opt-in M0 measurement spikes (CONTEXT_BUILD_SPIKES=ON)",
+            "dependencies": [
+                "simdjson",
+                "blake3"
+            ]
+        }
+    }
 }
