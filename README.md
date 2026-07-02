@@ -21,35 +21,43 @@ CI rails. **No engine feature code yet.** The normative design (requirements, ar
 roadmap, decision locks L-1…L-59) lives in the owner's design records, not in this repository;
 directory README stubs below name the documents that govern them.
 
+## Building
+
+Requires CMake ≥ 3.25 and a C++20 compiler. **All build files live in `src/`** (the repo root
+stays minimal by design), so the entry point is:
+
+```sh
+cmake -S src --preset dev   # configure from the repo root — note the explicit -S src
+cd src                      # build/test presets resolve CMakePresets.json from the working dir
+cmake --build --preset dev
+ctest --preset dev          # runs the context-hello spike
+```
+
+The `dev` preset uses `$CMAKE_GENERATOR` if set (Ninja recommended), else the platform default.
+Builds land in `src/build/<preset>/` (gitignored). vcpkg is **not** required for this skeleton —
+the manifest (`src/vcpkg.json`) only activates when you pass the vcpkg toolchain file.
+
+A `sanitize` preset (ASan + UBSan, non-MSVC platforms) mirrors the CI sanitizer job:
+
+```sh
+cmake -S src --preset sanitize && cd src && cmake --build --preset sanitize && ctest --preset sanitize
+```
+
 ## Repository layout
 
 | Directory | Contents |
 |---|---|
+| `src/` | Engine source **plus all build/lint files** (`CMakeLists.txt`, `CMakePresets.json`, `vcpkg.json`, `.clang-format`, `.clang-tidy`) — configure with `cmake -S src` |
 | `src/kernel/` | The microkernel — the ~6 stable interfaces everything else plugs into |
 | `src/editor/` | **EditorKernel** — the headless, file-authoritative project language server |
 | `src/runtime/` | **RuntimeKernel** — the runtime the editor embeds and shipped builds use |
 | `src/packages/` | First-party feature packages (every feature is a package) |
 | `spikes/` | M0 de-risking spikes — throwaway proof code, never production code |
+| `bench/` | R-FILE-011 benchmark harness — corpus generator + median-of-5 runner (Python) |
 | `tools/` | Repository/CI tooling (dependency-license gate, SBOM) |
 | `docs/` | Engineering docs that live with the code |
 | `cmake/` | Shared CMake modules |
-
-## Building
-
-Requires CMake ≥ 3.25 and a C++20 compiler. vcpkg is **not** required for this skeleton — the
-manifest (`vcpkg.json`) only activates when you pass the vcpkg toolchain file.
-
-```sh
-cmake --preset dev          # uses $CMAKE_GENERATOR if set (Ninja recommended), else the platform default
-cmake --build --preset dev
-ctest --preset dev          # runs the context-hello spike
-```
-
-A `sanitize` preset (ASan + UBSan, non-MSVC platforms) mirrors the CI sanitizer job:
-
-```sh
-cmake --preset sanitize && cmake --build --preset sanitize && ctest --preset sanitize
-```
+| `.github/` | CI workflows + community files (`CONTRIBUTING.md`, `CLA.md`) |
 
 ## License
 
@@ -64,4 +72,4 @@ threshold (marginal, resets yearly), waived for games developed under an active
 ## Contributing
 
 External contributions are currently blocked until the CLA flow exists — see
-[CONTRIBUTING.md](CONTRIBUTING.md) and [CLA.md](CLA.md).
+[CONTRIBUTING.md](.github/CONTRIBUTING.md) and [CLA.md](.github/CLA.md).

@@ -33,7 +33,7 @@ R-FILE-011 scenario mapping:
   (-) merge throughput   -> merge    (R-FILE-012 `context merge-file`-class)
 
 Usage:
-  python bench/harness.py --subject build/dev/spikes/parse-bench/Release/context-parse-bench \
+  python bench/harness.py --subject src/build/spikes/spikes/parse-bench/Release/context-parse-bench \
       --corpus bench/corpora/corpus-10k --runs 5 --out bench/results/local-10k
 """
 

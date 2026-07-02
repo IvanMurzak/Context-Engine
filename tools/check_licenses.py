@@ -6,7 +6,7 @@ tools/license-allowlist.json under "dependency_licenses") AND that license must 
 "allowed_licenses" list. Anything unknown or unlisted fails the build.
 
 Current reach — stated honestly:
-  * scans direct dependencies declared in vcpkg.json ("dependencies", incl. feature deps);
+  * scans direct dependencies declared in src/vcpkg.json ("dependencies", incl. feature deps);
   * scans direct dependencies in any package.json in the repo (excluding node_modules/);
   * does NOT yet resolve transitive graphs (no lockfiles / vcpkg installs exist yet — the
     transitive scan grows with the first real dependency, per ROADMAP M0);
@@ -79,7 +79,7 @@ def main() -> int:
         return 2
 
     components: list[dict] = []
-    vcpkg_manifest_path = REPO_ROOT / "vcpkg.json"
+    vcpkg_manifest_path = REPO_ROOT / "src" / "vcpkg.json"
     if vcpkg_manifest_path.is_file():
         components.extend(vcpkg_dependencies(load_json(vcpkg_manifest_path)))
     for pkg_path in find_package_jsons(REPO_ROOT):
@@ -124,7 +124,7 @@ def main() -> int:
     }
     SBOM_PATH.write_text(json.dumps(sbom, indent=2) + "\n", encoding="utf-8")
     print(f"[license-gate] scanned {len(components)} declared dependencies "
-          f"(vcpkg.json + package.json files); SBOM written to {SBOM_PATH.name}")
+          f"(src/vcpkg.json + package.json files); SBOM written to {SBOM_PATH.name}")
 
     if violations:
         print(f"[license-gate] FAIL — {len(violations)} violation(s):")

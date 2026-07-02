@@ -1,0 +1,16 @@
+# COPY of src/.clang-tidy — keep in sync (clang tools search upward; src/ configs don't cover this sibling dir).
+# Context Engine clang-tidy — conservative starter set. Grows as real engine code lands.
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  clang-analyzer-*,
+  performance-*,
+  portability-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-using,
+  readability-redundant-smartptr-get
+WarningsAsErrors: ''
+HeaderFilterRegex: '(kernel|editor|runtime|packages)/.*'
+FormatStyle: file

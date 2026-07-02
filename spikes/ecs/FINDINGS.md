@@ -31,9 +31,9 @@ slowest structural-churn flush).
 Reproduce:
 
 ```
-VCPKG_ROOT=<vcpkg> cmake --preset spikes && cmake --build --preset spikes
-build/spikes/spikes/ecs/Release/ecs-spike-{entt,flecs,custom}.exe   # benchmarks
-ctest --preset spikes                                               # zero-copy proof
+VCPKG_ROOT=<vcpkg> cmake -S src --preset spikes && cmake --build src/build/spikes --config Release
+src/build/spikes/spikes/ecs/Release/ecs-spike-{entt,flecs,custom}.exe   # benchmarks
+ctest --test-dir src/build/spikes -C Release                            # zero-copy proof
 ```
 
 ## 2. Workload (identical across implementations — proven)

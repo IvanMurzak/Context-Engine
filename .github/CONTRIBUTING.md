@@ -5,7 +5,7 @@ Thank you for your interest — and please read this before opening a pull reque
 ## External contributions are currently blocked
 
 Honest status: **pull requests from external contributors cannot be merged yet.** Context is
-source-available under a proprietary EULA (see [LICENSE.md](LICENSE.md)), and keeping that
+source-available under a proprietary EULA (see [LICENSE.md](../LICENSE.md)), and keeping that
 license enforceable requires that the project owns the full copyright of every line in the
 repository. That means every external contribution must be covered by a **Contributor License
 Agreement (CLA) with copyright assignment** — a Developer Certificate of Origin (DCO) sign-off
@@ -21,7 +21,8 @@ Once the CLA is in place, contributions will additionally need to pass the stand
 - **Build + test** on Linux, Windows, and macOS (`dev` preset), plus the ASan/UBSan `sanitize`
   job.
 - **Warnings-as-errors** — the baseline is on by default (`CONTEXT_WARNINGS_AS_ERRORS=ON`).
-- **Formatting** — `.clang-format` (LLVM-based, 100 columns) and the `.clang-tidy` starter set.
+- **Formatting** — `src/.clang-format` (LLVM-based, 100 columns) and the `src/.clang-tidy` starter
+  set (copies in `spikes/` and `bench/` cover those sibling trees).
 - **Dependency-license gate** — `tools/check_licenses.py` is deny-by-default: any new
   dependency whose license is unknown or not on `tools/license-allowlist.json` fails CI.
 

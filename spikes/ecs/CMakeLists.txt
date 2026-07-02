@@ -4,9 +4,9 @@
 # the default CI matrix never builds it). Requires the vcpkg toolchain with the `spikes`
 # manifest feature so entt/flecs are installed:
 #
-#   cmake --preset spikes            # needs VCPKG_ROOT in the environment
-#   cmake --build --preset spikes
-#   ctest --preset spikes            # runs the zero-copy proof
+#   cmake -S src --preset spikes                  # from the repo root; needs VCPKG_ROOT in the environment
+#   cmake --build src/build/spikes --config Release
+#   ctest --test-dir src/build/spikes -C Release  # runs the zero-copy proof
 #
 # The three benchmark executables (ecs-spike-entt / -flecs / -custom) are run manually;
 # results and the scoring matrix live in FINDINGS.md.

@@ -48,14 +48,18 @@ jobs:
             echo "CXX=${{ matrix.cxx }}" >> "$GITHUB_ENV"
           fi
 
+      # Build files live in src/ (root stays minimal): configure with -S src; build/test
+      # presets resolve CMakePresets.json from the working directory, so those run in src/.
       - name: Configure
-        run: cmake --preset dev
+        run: cmake -S src --preset dev
 
       - name: Build
         run: cmake --build --preset dev
+        working-directory: src
 
       - name: Run context-hello
         run: ctest --preset dev --verbose
+        working-directory: src
 
   sanitize:
     name: sanitize (ASan+UBSan, ubuntu)
@@ -68,13 +72,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure (sanitize preset)
-        run: cmake --preset sanitize
+        run: cmake -S src --preset sanitize
 
       - name: Build
         run: cmake --build --preset sanitize
+        working-directory: src
 
       - name: Run context-hello under ASan+UBSan
         run: ctest --preset sanitize --verbose
+        working-directory: src
 
   # R-FILE-011 benchmark baseline on a SMALL corpus (10k files). GH-hosted runners are
   # NOT the R-QA-009 perf-isolated runner class — this job is a trend gauge + harness
@@ -94,9 +100,12 @@ jobs:
       - name: Generate seeded 10k corpus
         run: python3 bench/gen_corpus.py --size 10000 --out bench/corpora/corpus-10k --jobs 4
 
+      # -S src (build files live there); -B stays repo-root-relative, and src/CMakeLists.txt
+      # pins spike binary dirs to ${CMAKE_BINARY_DIR}/spikes/<x>, so the subject path below
+      # (build/bench/spikes/parse-bench/...) is unchanged by the src/ move.
       - name: Configure (spikes ON, vcpkg toolchain)
         run: >
-          cmake -B build/bench -S .
+          cmake -B build/bench -S src
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake
           -DVCPKG_MANIFEST_FEATURES=spikes
