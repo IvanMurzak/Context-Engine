@@ -151,3 +151,17 @@ jobs:
           name: sbom
           path: sbom.json
           if-no-files-found: error
+
+  # Fast pytest gate over the repo's Python tooling (R-QA-013 retroactive coverage):
+  # tools/tests (license gate) + bench/tests (seeded corpus generator).
+  python-tests:
+    name: python tests (license gate + corpus generator)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pytest
+        run: python3 -m pip install pytest
+
+      - name: Run Python test suites
+        run: python3 -m pytest tools/tests bench/tests -v
