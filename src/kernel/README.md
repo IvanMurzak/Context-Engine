@@ -1,4 +1,4 @@
-# kernel/
+# src/kernel/
 
 The **microkernel** — the deliberately tiny stable core (~6 interfaces: World/ECS, fixed-timestep
 Scheduler, module registry, event bus, resource handles, platform seam) that everything else —

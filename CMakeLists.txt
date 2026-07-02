@@ -34,6 +34,6 @@ endif()
 
 enable_testing()
 
-# M0: the only buildable target is the hello spike. Engine components (kernel/, editor/,
-# runtime/, packages/) gain targets starting at M1.
+# M0: the only buildable target is the hello spike. Engine components (src/kernel/, src/editor/,
+# src/runtime/, src/packages/) gain targets starting at M1.
 add_subdirectory(spikes/hello)
