@@ -1,0 +1,4 @@
+# TEST-ONLY trust root for tools/tests/test_verify_artifact.py — NOT a production key.
+# The production trust root is tools/trust-root/allowed_signers (empty until first release).
+# Principal 'context-engine-test' is restricted to the 'context-engine-artifact' namespace.
+context-engine-test namespaces="context-engine-artifact" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHKV2ibD9Ce7S+aMzcDiqh9I0NAE5cRb30kSs37gr1Fw context-engine-TEST-ONLY-signer

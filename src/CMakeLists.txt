@@ -101,3 +101,53 @@ endif()
 if(CONTEXT_BUILD_SPIKES OR CONTEXT_BUILD_SPIKE_CEF)
     add_spike(cef-compositing)
 endif()
+
+# ---------------------------------------------------------------------------
+# R-VER-004 — versioned install layout (docs/versioned-install.md).
+#
+# Every engine version installs SIDE-BY-SIDE under <prefix>/versions/<semver>/ and NEVER
+# flat — a first release that installed flat would foreclose side-by-side installs forever,
+# so the LAYOUT is the day-one contract. The resolver/fetcher/launcher machinery lands with
+# the second release; this is the minimal install/package skeleton that stakes out the
+# convention now. R-SEC-009: when the on-demand version fetcher lands, a fetched version is
+# verify-before-use / fail closed via tools/verify_artifact.py before it is ever executed.
+# ---------------------------------------------------------------------------
+set(CONTEXT_INSTALL_SUBDIR "versions/${PROJECT_VERSION}"
+    CACHE STRING "R-VER-004 side-by-side install root: <prefix>/versions/<semver>/")
+
+# Machine-readable version marker: a resolver enumerates installed versions by listing
+# <prefix>/versions/*/ — the day-one hook the future launcher resolves the R-VER-003 pin
+# against.
+set(_context_version_marker "${CMAKE_CURRENT_BINARY_DIR}/context-version.txt")
+file(WRITE "${_context_version_marker}"
+     "name=Context Engine\nversion=${PROJECT_VERSION}\nlayout=R-VER-004\n")
+
+# M0 has one always-on target (context-hello); it stands in as the installed payload so the
+# layout is proven by a real file landing under versions/<semver>/bin/. Engine components
+# (kernel/editor/runtime/packages) join this install set as they gain targets from M1.
+install(TARGETS context-hello
+    RUNTIME DESTINATION "${CONTEXT_INSTALL_SUBDIR}/bin"
+    LIBRARY DESTINATION "${CONTEXT_INSTALL_SUBDIR}/lib"
+    ARCHIVE DESTINATION "${CONTEXT_INSTALL_SUBDIR}/lib")
+install(FILES "${_context_version_marker}" DESTINATION "${CONTEXT_INSTALL_SUBDIR}")
+
+# CPack packaging: the produced archive carries the SAME versions/<semver>/ internal layout
+# (it consumes the install() rules above), so `cpack -G ZIP` and `cmake --install` agree by
+# construction. Kept minimal — a built-in ZIP archive, no external packaging tools.
+set(CPACK_PACKAGE_NAME "context-engine")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}/package")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.md")
+set(CPACK_GENERATOR "ZIP")
+include(CPack)
+
+# CI proof (runs under `ctest --preset dev` on all three OS legs of the CI build matrix):
+# stage a real install into a build-local prefix and assert it landed under
+# versions/<semver>/ and NOT flat. Fails the build on any R-VER-004 layout violation.
+add_test(NAME versioned-install-layout
+    COMMAND "${CMAKE_COMMAND}"
+        -D "CONTEXT_BINARY_DIR=${CMAKE_BINARY_DIR}"
+        -D "CONTEXT_EXPECTED_VERSION=${PROJECT_VERSION}"
+        -D "CONTEXT_INSTALL_SUBDIR=${CONTEXT_INSTALL_SUBDIR}"
+        -D "CONTEXT_BUILD_CONFIG=$<CONFIG>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/versioned-install-check.cmake")
