@@ -40,6 +40,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import math
@@ -165,10 +166,13 @@ def _canon_string(s: str) -> str:
     return "".join(out)
 
 
+# Keys recur constantly (component/field names) while values are unbounded — memoize
+# escaping for keys only.
+_canon_key = functools.lru_cache(maxsize=None)(_canon_string)
+
+
 def canonical_json(value, indent: int = 0) -> str:
     """Canonical serialization: sorted keys, 2-space indent, LF (R-FILE-001/L-32)."""
-    pad = "  " * indent
-    pad_in = "  " * (indent + 1)
     if value is None:
         return "null"
     if value is True:
@@ -182,14 +186,20 @@ def canonical_json(value, indent: int = 0) -> str:
     if isinstance(value, list):
         if not value:
             return "[]"
+        pad = "  " * indent
+        pad_in = "  " * (indent + 1)
         items = ",\n".join(pad_in + canonical_json(v, indent + 1) for v in value)
         return "[\n" + items + "\n" + pad + "]"
     if isinstance(value, dict):
         if not value:
             return "{}"
-        keys = sorted(value.keys(), key=lambda k: k.encode("utf-8"))
+        pad = "  " * indent
+        pad_in = "  " * (indent + 1)
+        # UTF-8 byte order == code-point order for valid strings, so a plain sort
+        # implements the R-FILE-001 "sorted lexicographically by UTF-8 bytes" rule.
+        keys = sorted(value.keys())
         items = ",\n".join(
-            f"{pad_in}{_canon_string(k)}: {canonical_json(value[k], indent + 1)}"
+            f"{pad_in}{_canon_key(k)}: {canonical_json(value[k], indent + 1)}"
             for k in keys)
         return "{\n" + items + "\n" + pad + "}"
     raise TypeError(f"unsupported type: {type(value)!r}")
@@ -221,9 +231,10 @@ NAME_WORDS = [
     "階段", "colonne", "übergang",  # NFC unicode minority share
 ]
 
-# File-mix fractions (of total corpus file count).
-MIX = {"scene": 0.36, "scene_meta": 0.36, "bin_asset": 0.09, "bin_meta": 0.09,
-       "sidecar": 0.10}
+# File-mix fractions (of total corpus file count). Only the fractions plan_counts()
+# reads are listed; scenes + scene metas (36% each, per the module docstring) are the
+# remainder.
+MIX = {"bin_asset": 0.09, "sidecar": 0.10}
 
 
 def plan_counts(total: int) -> dict[str, int]:
@@ -257,7 +268,7 @@ def scene_entity_count(seed: int, i: int, n_scene: int) -> int:
 
     A deterministic handful of "ceiling" scenes sit at the ~1 MB / ~1k-entity soft cap.
     """
-    if n_scene >= 100 and i % (n_scene // min(50, n_scene // 2)) == 0 and i > 0:
+    if n_scene >= 100 and i % (n_scene // 50) == 0 and i > 0:
         return 1000  # ceiling scene
     u = rng_float(seed, "entcount", i)
     v = math.exp(3.0 + 1.1 * _inv_norm(u))  # median ~e^3 ≈ 20, long tail
@@ -321,8 +332,8 @@ def build_component(seed: int, i: int, k: int, ctype: str, n_bin: int, n_ent: in
         }
     if ctype == "ctx:MeshRenderer":
         mesh_idx = rng_int(0, n_bin - 1, *s, "mesh")
-        mats = [make_ref(seed, "bin", rng_int(0, n_bin - 1, *s, "mat", j),
-                         bin_relpath(rng_int(0, n_bin - 1, *s, "mat", j)))
+        mats = [make_ref(seed, "bin", (mat_idx := rng_int(0, n_bin - 1, *s, "mat", j)),
+                         bin_relpath(mat_idx))
                 for j in range(rng_int(1, 3, *s, "nmat"))]
         return {"mesh": make_ref(seed, "bin", mesh_idx, bin_relpath(mesh_idx)),
                 "materials": mats,
@@ -384,7 +395,10 @@ OPTIONAL_COMPONENTS = ["ctx:MeshRenderer", "ctx:RigidBody", "ctx:Collider", "ctx
                        "game:Inventory", "game:AIBehavior"]
 
 
-def build_scene(seed: int, i: int, counts: dict, dense: bool) -> dict:
+def build_scene(seed: int, i: int, counts: dict, dense: bool,
+                sidecar_payload: bytes | None = None) -> dict:
+    """Build scene `i`. For sidecar-owning scenes (i < counts["sidecar"]) the caller may
+    pass the materialized sidecar payload so its bytes are generated only once."""
     n_scene, n_bin, n_sidecar = counts["scene"], counts["bin"], counts["sidecar"]
     n_ent = scene_entity_count(seed, i, n_scene)
     used_versions: dict[str, int] = {"ctx:Transform": COMPONENT_VERSIONS["ctx:Transform"],
@@ -437,7 +451,6 @@ def build_scene(seed: int, i: int, counts: dict, dense: bool) -> dict:
                     "scene": make_ref(seed, "scene", target, scene_relpath(target)),
                     "overrides": overrides}
             instances.append(inst)
-            used_versions["ctx:Transform"] = COMPONENT_VERSIONS["ctx:Transform"]
 
     root_comps: dict[str, object] = {
         "ctx:SceneSettings": {
@@ -447,12 +460,13 @@ def build_scene(seed: int, i: int, counts: dict, dense: bool) -> dict:
             "gravity": {"x": 0, "y": -9.81, "z": 0},
             "timeScale": 1,
         }}
-    if i < counts["sidecar"]:
+    if i < n_sidecar:
         # This scene owns a binary sidecar payload (L-33).
-        rel = sidecar_relpath(i)
+        if sidecar_payload is None:
+            sidecar_payload = sidecar_bytes(seed, i)
         root_comps["ctx:BakedCurves"] = {
-            "$sidecar": os.path.basename(rel),
-            "hash": sidecar_hash(seed, i),
+            "$sidecar": os.path.basename(sidecar_relpath(i)),
+            "hash": sidecar_hash(sidecar_payload),
         }
         used_versions["ctx:BakedCurves"] = COMPONENT_VERSIONS["ctx:BakedCurves"]
 
@@ -495,24 +509,26 @@ def _pseudo_bytes(key: bytes, size: int) -> bytes:
     return bytes(out[:size])
 
 
-def sidecar_hash(seed: int, i: int) -> str:
+def sidecar_hash(payload: bytes) -> str:
     """Raw-byte hash recorded in the owning scene's $sidecar ref (R-FILE-001).
 
     sha256 stands in for the engine's content hash in the M0 corpus.
     """
-    return "sha256:" + hashlib.sha256(sidecar_bytes(seed, i)).hexdigest()
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
 def build_meta(seed: int, kind: str, idx: int, asset_rel: str) -> dict:
     s = (seed, "meta", kind, idx)
-    importer = {
-        "scene": {"name": "ctx.scene", "version": 1},
-        "bin": {"name": ["ctx.mesh", "ctx.texture", "ctx.animation"][idx % 3],
-                "version": 2,
-                "settings": {"compression": ["none", "lz4", "zstd"][rng_int(0, 2, *s, "cmp")],
-                             "quality": fnum(*s, "q", lo=0, hi=1),
-                             "generateMips": rng_u64(*s, "mips") % 2 == 0}},
-    }[kind]
+    if kind == "scene":
+        importer = {"name": "ctx.scene", "version": 1}
+    elif kind == "bin":
+        importer = {"name": ["ctx.mesh", "ctx.texture", "ctx.animation"][idx % 3],
+                    "version": 2,
+                    "settings": {"compression": ["none", "lz4", "zstd"][rng_int(0, 2, *s, "cmp")],
+                                 "quality": fnum(*s, "q", lo=0, hi=1),
+                                 "generateMips": rng_u64(*s, "mips") % 2 == 0}}
+    else:
+        raise ValueError(kind)
     return {
         "$schema": f"{SCHEMA_BASE}/meta.schema.json",
         "version": 1,
@@ -542,15 +558,28 @@ def count_edges(doc: dict) -> int:
     return n
 
 
+def _new_stats() -> dict:
+    """Zeroed per-worker stats accumulator (merged with _merge_stats)."""
+    return {"files": 0, "bytes": 0, "json_bytes": 0, "bin_bytes": 0, "edges": 0,
+            "scenes": 0, "metas": 0, "bins": 0, "sidecars": 0}
+
+
+def _merge_stats(totals: dict, part: dict) -> None:
+    for k, v in part.items():
+        totals[k] = totals.get(k, 0) + v
+
+
 def _gen_range(args_tuple) -> dict:
     """Worker: generate files for scene indices [lo, hi). Returns stats."""
     seed, lo, hi, out, counts, dense = args_tuple
     out = Path(out)
-    stats = {"files": 0, "bytes": 0, "json_bytes": 0, "bin_bytes": 0, "edges": 0,
-             "scenes": 0, "metas": 0, "bins": 0, "sidecars": 0}
+    stats = _new_stats()
     for i in range(lo, hi):
+        # The owned sidecar payload (first n_sidecar scenes) is materialized ONCE; the
+        # scene's embedded hash and the payload file both derive from the same bytes.
+        payload = sidecar_bytes(seed, i) if i < counts["sidecar"] else None
         # Scene + its meta
-        doc = build_scene(seed, i, counts, dense)
+        doc = build_scene(seed, i, counts, dense, sidecar_payload=payload)
         p = out / scene_relpath(i)
         n = write_canonical(p, doc)
         stats["files"] += 1
@@ -559,27 +588,24 @@ def _gen_range(args_tuple) -> dict:
         stats["json_bytes"] += n
         stats["edges"] += count_edges(doc)
         meta = build_meta(seed, "scene", i, scene_relpath(i))
-        n = write_canonical(Path(str(p) + ".meta.json").with_name(p.name + ".meta.json"), meta)
+        n = write_canonical(p.with_name(p.name + ".meta.json"), meta)
         stats["files"] += 1
         stats["metas"] += 1
         stats["bytes"] += n
         stats["json_bytes"] += n
-        # Owned binary sidecar for the first n_sidecar scenes
-        if i < counts["sidecar"]:
-            b = sidecar_bytes(seed, i)
-            (out / sidecar_relpath(i)).write_bytes(b)
+        if payload is not None:
+            (out / sidecar_relpath(i)).write_bytes(payload)
             stats["files"] += 1
             stats["sidecars"] += 1
-            stats["bytes"] += len(b)
-            stats["bin_bytes"] += len(b)
+            stats["bytes"] += len(payload)
+            stats["bin_bytes"] += len(payload)
     return stats
 
 
 def _gen_bin_range(args_tuple) -> dict:
     seed, lo, hi, out = args_tuple
     out = Path(out)
-    stats = {"files": 0, "bytes": 0, "json_bytes": 0, "bin_bytes": 0, "edges": 0,
-             "scenes": 0, "metas": 0, "bins": 0, "sidecars": 0}
+    stats = _new_stats()
     for i in range(lo, hi):
         b = bin_asset_bytes(seed, i)
         p = out / bin_relpath(i)
@@ -636,13 +662,10 @@ def generate(size: int, out: Path | str, seed: int = 20260702,
             futs = [ex.submit(_gen_range if k == "scene" else _gen_bin_range, a)
                     for k, a in tasks]
             for f in futs:
-                for k, v in f.result().items():
-                    totals[k] = totals.get(k, 0) + v
+                _merge_stats(totals, f.result())
     else:
         for k, a in tasks:
-            r = (_gen_range if k == "scene" else _gen_bin_range)(a)
-            for kk, vv in r.items():
-                totals[kk] = totals.get(kk, 0) + vv
+            _merge_stats(totals, (_gen_range if k == "scene" else _gen_bin_range)(a))
     dt = time.perf_counter() - t0
 
     manifest = {

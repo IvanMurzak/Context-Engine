@@ -8,20 +8,12 @@ only by the single integration-style test at the bottom.
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 
-import pytest
+from conftest import load_tool
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-REPO_ROOT = TOOLS_DIR.parent
-
-_spec = importlib.util.spec_from_file_location("check_licenses", TOOLS_DIR / "check_licenses.py")
-check_licenses = importlib.util.module_from_spec(_spec)
-sys.modules["check_licenses"] = check_licenses
-_spec.loader.exec_module(check_licenses)
+check_licenses = load_tool("check_licenses")
 
 
 DEFAULT_ALLOWED = ["MIT", "BSD-3-Clause", "Apache-2.0", "Zlib"]
@@ -250,7 +242,7 @@ def test_malformed_allowlist_is_clean_config_error(tmp_path, monkeypatch, capsys
     repo = make_repo(tmp_path, allowlist_text="{not json!", vcpkg_manifest=vcpkg())
     code, _ = run_gate(repo, monkeypatch)
     assert code == 2
-    assert "ERROR: cannot read" in capsys.readouterr().out
+    assert "ERROR: cannot read" in capsys.readouterr().err
 
 
 def test_missing_allowlist_is_clean_config_error(tmp_path, monkeypatch, capsys):
@@ -258,14 +250,14 @@ def test_missing_allowlist_is_clean_config_error(tmp_path, monkeypatch, capsys):
     (repo / "tools" / "license-allowlist.json").unlink()
     code, _ = run_gate(repo, monkeypatch)
     assert code == 2
-    assert "ERROR: cannot read" in capsys.readouterr().out
+    assert "ERROR: cannot read" in capsys.readouterr().err
 
 
 def test_malformed_vcpkg_manifest_is_clean_config_error(tmp_path, monkeypatch, capsys):
     repo = make_repo(tmp_path, vcpkg_text='{"dependencies": [oops')
     code, _ = run_gate(repo, monkeypatch)
     assert code == 2
-    assert "ERROR: cannot read" in capsys.readouterr().out
+    assert "ERROR: cannot read" in capsys.readouterr().err
 
 
 def test_missing_vcpkg_manifest_is_clean_config_error(tmp_path, monkeypatch, capsys):

@@ -7,20 +7,13 @@ repo's live cmake/toolchain-versions.json to keep the manifest itself honest.
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 
 import pytest
+from conftest import load_tool
 
-TOOLS_DIR = Path(__file__).resolve().parents[1]
-REPO_ROOT = TOOLS_DIR.parent
-
-_spec = importlib.util.spec_from_file_location("check_toolchain", TOOLS_DIR / "check_toolchain.py")
-check_toolchain = importlib.util.module_from_spec(_spec)
-sys.modules["check_toolchain"] = check_toolchain
-_spec.loader.exec_module(check_toolchain)
+check_toolchain = load_tool("check_toolchain")
 
 
 def make_manifest(tmp_path: Path, targets: dict) -> Path:

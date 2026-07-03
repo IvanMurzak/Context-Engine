@@ -21,8 +21,25 @@ runs:
         case "$RUNNER_OS" in
           Linux)
             PLATFORM=linux-x86_64
-            PIN="$(python3 tools/check_toolchain.py --platform "$PLATFORM" --print-pin)"
-            MAJOR="$(python3 tools/check_toolchain.py --platform "$PLATFORM" --print-install-major)"
+            # One manifest read yields pin + install major, and asserts the install.method is
+            # the one this branch implements — the manifest field is load-bearing: pointing it
+            # at an install mechanism this action does not perform must fail loudly.
+            VARS="$(python3 - "$PLATFORM" <<'PYEOF'
+        import json
+        import sys
+
+        platform = sys.argv[1]
+        with open("cmake/toolchain-versions.json", encoding="utf-8") as fh:
+            entry = json.load(fh)["targets"][platform]
+        method = entry.get("install", {}).get("method")
+        if method != "apt.llvm.org (llvm.sh)":
+            sys.exit(f"[toolchain] ERROR: {platform} install.method is {method!r}; this action "
+                     "only implements 'apt.llvm.org (llvm.sh)'")
+        print(f"PIN={entry['pin']}")
+        print(f"MAJOR={entry['install']['major']}")
+        PYEOF
+            )"
+            eval "$VARS"
             python3 tools/check_toolchain.py --platform "$PLATFORM" --describe
             echo "[toolchain] installing clang $PIN (apt.llvm.org, major $MAJOR)"
             wget -q https://apt.llvm.org/llvm.sh -O "$RUNNER_TEMP/llvm.sh"

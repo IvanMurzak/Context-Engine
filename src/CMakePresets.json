@@ -11,6 +11,15 @@
             }
         },
         {
+            "name": "sanitizer-base",
+            "hidden": true,
+            "inherits": "base",
+            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
             "name": "dev",
             "displayName": "Dev (Ninja via $CMAKE_GENERATOR if available, else platform default generator)",
             "inherits": "base",
@@ -21,20 +30,16 @@
         {
             "name": "sanitize",
             "displayName": "Sanitize (ASan + UBSan, non-MSVC)",
-            "inherits": "base",
-            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+            "inherits": "sanitizer-base",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
                 "CONTEXT_SANITIZE": "ON"
             }
         },
         {
             "name": "tsan",
             "displayName": "TSan (ThreadSanitizer, non-MSVC; mutually exclusive with sanitize)",
-            "inherits": "base",
-            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+            "inherits": "sanitizer-base",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
                 "CONTEXT_TSAN": "ON"
             }
         },
@@ -52,6 +57,11 @@
     ],
     "buildPresets": [
         {
+            "name": "sanitizer-base",
+            "hidden": true,
+            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+        },
+        {
             "name": "dev",
             "configurePreset": "dev",
             "configuration": "Release"
@@ -59,12 +69,12 @@
         {
             "name": "sanitize",
             "configurePreset": "sanitize",
-            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+            "inherits": "sanitizer-base"
         },
         {
             "name": "tsan",
             "configurePreset": "tsan",
-            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+            "inherits": "sanitizer-base"
         },
         {
             "name": "spikes",
@@ -74,6 +84,12 @@
     ],
     "testPresets": [
         {
+            "name": "sanitizer-base",
+            "hidden": true,
+            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+            "output": { "outputOnFailure": true }
+        },
+        {
             "name": "dev",
             "configurePreset": "dev",
             "configuration": "Release",
@@ -82,14 +98,12 @@
         {
             "name": "sanitize",
             "configurePreset": "sanitize",
-            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
-            "output": { "outputOnFailure": true }
+            "inherits": "sanitizer-base"
         },
         {
             "name": "tsan",
             "configurePreset": "tsan",
-            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
-            "output": { "outputOnFailure": true }
+            "inherits": "sanitizer-base"
         },
         {
             "name": "spikes",
