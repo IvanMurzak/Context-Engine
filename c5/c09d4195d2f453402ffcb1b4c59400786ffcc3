@@ -1,0 +1,91 @@
+src/editor/filesync/include/context/editor/filesync/file_store.h
+  s_00cb1100a75700::t_e09493013060f3 1-100
+src/editor/filesync/include/context/editor/filesync/sha256.h
+  s_00cb1100a75700::t_2b8d2b272b2760 1-22
+src/editor/filesync/tests/test_watcher.cpp
+  s_00cb1100a75700::t_181c6af2c7eef8 1-69
+src/editor/filesync/tests/test_reconcile_index.cpp
+  s_00cb1100a75700::t_94dd97d5fca2f2 1-73
+src/editor/filesync/tests/test_intent_log.cpp
+  s_00cb1100a75700::t_0d59b43a626896 1-209
+src/editor/filesync/include/context/editor/filesync/reconcile_index.h
+  s_00cb1100a75700::t_fc0ef930499ae2 1-53
+src/editor/filesync/include/context/editor/filesync/hmac.h
+  s_00cb1100a75700::t_c76130c2c63818 1-17
+src/editor/filesync/src/content_hash.cpp
+  s_00cb1100a75700::t_fb8284ada4c1a1 1-22
+src/editor/filesync/src/intent_log.cpp
+  s_00cb1100a75700::t_23afeab7f96aca 1-316
+src/editor/filesync/CMakeLists.txt
+  s_00cb1100a75700::t_5afe340e9aa58e 1-52
+src/editor/filesync/tests/test_sha256.cpp
+  s_00cb1100a75700::t_09bf72f4f8667f 1-37
+src/editor/filesync/src/expected_writes.cpp
+  s_00cb1100a75700::t_08c2dffa5f26a1 1-46
+src/editor/filesync/include/context/editor/filesync/diagnostic.h
+  s_00cb1100a75700::t_742c35ed45f8e5 1-23
+src/editor/filesync/src/watcher.cpp
+  s_00cb1100a75700::t_f6019685d62f36 1-45
+src/editor/filesync/README.md
+  s_00cb1100a75700::t_e2983a43835451 1-54
+src/editor/filesync/include/context/editor/filesync/intent_log.h
+  s_00cb1100a75700::t_c20dd8c4cf8ae1 1-110
+src/editor/filesync/tests/test_atomic_io.cpp
+  s_00cb1100a75700::t_d13a5afde5ec4b 1-79
+src/editor/filesync/tests/test_content_hash.cpp
+  s_00cb1100a75700::t_7ad6d311edf620 1-25
+src/editor/filesync/tests/test_reconciler.cpp
+  s_00cb1100a75700::t_58fd23c841a639 1-195
+src/editor/filesync/include/context/editor/filesync/atomic_io.h
+  s_00cb1100a75700::t_ffcd1315209f04 1-26
+src/editor/filesync/src/path_jail.cpp
+  s_00cb1100a75700::t_a089d78410b177 1-51,53-108
+  s_00cb1100a75700::t_ddfa02c6239166 52
+src/editor/filesync/tests/filesync_test.h
+  s_00cb1100a75700::t_0df420b69b7614 1-27
+src/editor/filesync/src/sha256.cpp
+  s_00cb1100a75700::t_df1360ce18e04a 1-128
+src/editor/filesync/src/reconcile_index.cpp
+  s_00cb1100a75700::t_925051dfabc084 1-84
+src/editor/filesync/include/context/editor/filesync/reconciler.h
+  s_00cb1100a75700::t_5d8a39b7d8557c 9
+  s_00cb1100a75700::t_24825144abc514 1-8,10-106
+src/editor/filesync/tests/test_expected_writes.cpp
+  s_00cb1100a75700::t_8783f7d97e5015 1-62
+src/editor/filesync/src/hmac.cpp
+  s_00cb1100a75700::t_42e6aa96f67ba2 1-45
+src/editor/filesync/include/context/editor/filesync/expected_writes.h
+  s_00cb1100a75700::t_7ff52cb40ad136 1-48
+src/editor/filesync/tests/test_path_jail.cpp
+  s_00cb1100a75700::t_27e5b98041de15 1-33
+src/editor/filesync/src/file_store.cpp
+  s_00cb1100a75700::t_eb9ba4f7e0c13e 1-102
+src/editor/filesync/include/context/editor/filesync/path_jail.h
+  s_00cb1100a75700::t_3ec37d9986adf5 1-24
+src/CMakeLists.txt
+  s_00cb1100a75700::t_0c1202aa9610b5 79-82
+src/editor/filesync/include/context/editor/filesync/content_hash.h
+  s_00cb1100a75700::t_9939f6dfe5f8d3 1-17
+src/editor/filesync/src/reconciler.cpp
+  s_00cb1100a75700::t_27447c91ef9371 1-200
+src/editor/filesync/src/atomic_io.cpp
+  s_00cb1100a75700::t_4fcd3ed2f5a965 1-42
+src/editor/filesync/include/context/editor/filesync/watcher.h
+  s_00cb1100a75700::t_98a3809228fd73 1-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "c5c09d4195d2f453402ffcb1b4c59400786ffcc3",
+  "prompts": {},
+  "sessions": {
+    "s_00cb1100a75700": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c36dbb71-cb5a-4c4d-b9b0-792a43a89435",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
