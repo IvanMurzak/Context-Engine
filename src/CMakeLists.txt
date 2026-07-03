@@ -105,6 +105,13 @@ if(CONTEXT_BUILD_SPIKES OR CONTEXT_BUILD_SPIKE_CEF)
     add_spike(cef-compositing)
 endif()
 
+# M1 public-contract cluster (R-CLI-007/008/009/013): the single registry that generates
+# CLI ≡ RPC ≡ MCP ≡ introspection (src/editor/contract/) plus the `context` CLI (src/cli/) that
+# consumes it and context_kernel. Wired here — deliberately apart from add_subdirectory(kernel)
+# above — so concurrent sibling tasks touching src/editor/ and src/ merge cleanly.
+add_subdirectory(editor/contract)
+add_subdirectory(cli)
+
 # ---------------------------------------------------------------------------
 # R-VER-004 — versioned install layout (docs/versioned-install.md).
 #
