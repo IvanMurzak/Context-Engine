@@ -33,3 +33,21 @@ layout convention it will resolve against must exist from release one. That is t
 
 Any packaging script, installer, CI artifact layout, or archive produced by this repository
 MUST follow this convention from the first release.
+
+## Implementation status (M0 skeleton)
+
+The install/package skeleton that stakes out this layout is wired into `src/CMakeLists.txt`:
+
+- `cmake --install <build> --prefix <root>` stages the payload into
+  `<root>/versions/<semver>/` (`bin/` for executables, plus a `context-version.txt` marker a
+  resolver enumerates by listing `versions/*/`). The `<semver>` is `PROJECT_VERSION`.
+- `cpack -G ZIP` produces an archive carrying the **same** internal
+  `versions/<semver>/` layout (it consumes the same `install()` rules).
+- **CI proof**: the `versioned-install-layout` ctest (`cmake/versioned-install-check.cmake`)
+  stages a real install and asserts it landed under `versions/<semver>/` and **not flat**,
+  failing the build on any violation. It runs under `ctest --preset dev` on all three OS legs
+  of the CI `build` matrix.
+
+The resolver/fetcher/launcher machinery (second release) will resolve the R-VER-003 project
+pin against this layout, and R-SEC-009 requires every fetched version be **verify-before-use /
+fail closed** (`tools/verify_artifact.py`; see `docs/signing.md`) before it is ever executed.

@@ -1,0 +1,17 @@
+# Context Engine — PINNED PRODUCTION trust root (R-SEC-009 / DESIGN-DECISIONS L-58).
+#
+# This is the OpenSSH `allowed_signers` file (see ALLOWED SIGNERS in ssh-keygen(1)) that
+# tools/verify_artifact.py checks every trust-bearing artifact against. It is the pinned,
+# non-TOFU root of trust: an artifact is authentic ONLY if its detached signature was made
+# by a key listed here, under the expected principal and namespace.
+#
+# INTENTIONALLY EMPTY until the first release.
+# R-SEC-009 v1 posture = first-party release signing with ONE pinned publisher key, minted
+# at the first release (owner decides custody then — see docs/signing.md). Because no
+# production key is pinned yet, the default gate REFUSES every artifact — which is the
+# correct fail-closed state while nothing first-party is published. Do NOT add a placeholder
+# or test key here; the TEST-ONLY signer lives in tools/tests/fixtures/allowed_signers and is
+# never trusted in production.
+#
+# At first release, append exactly one line (see docs/signing.md § Minting the release key):
+#   context-engine-release namespaces="context-engine-artifact" ssh-ed25519 AAAA... <comment>
