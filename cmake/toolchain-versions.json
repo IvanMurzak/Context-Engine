@@ -27,8 +27,8 @@
         "macos-arm64": {
             "compiler": "apple-clang",
             "l42_target": "Apple clang via the macOS build agent (L-42 / R-BUILD-007)",
-            "pin": "17.0",
-            "actual": "runner-default Apple clang (macos-latest); the version is RECORDED here, not installed — CI verifies it advisorily, so a runner-image Xcode bump surfaces as a CI warning and a manifest update, never a silent drift",
+            "pin": "21.0",
+            "actual": "runner-default Apple clang (macos-latest); the version is RECORDED here, not installed — CI verifies it advisorily, so a runner-image Xcode bump surfaces as a CI warning and a manifest update, never a silent drift (recorded 21.0 from the 2026-07-02 runner image, PR #9 run)",
             "enforcement": "advisory",
             "notes": "Honest note: Apple clang IS the L-42 target for macOS, but the version is whatever the GH runner image ships (no pinned install step yet). The staged hardening is either pinning the Xcode selection on the runner or moving to a pinned Homebrew LLVM; until then this entry keeps the actual version declared and drift visible."
         },
