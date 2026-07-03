@@ -29,6 +29,16 @@
             }
         },
         {
+            "name": "tsan",
+            "displayName": "TSan (ThreadSanitizer, non-MSVC; mutually exclusive with sanitize)",
+            "inherits": "base",
+            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CONTEXT_TSAN": "ON"
+            }
+        },
+        {
             "name": "spikes",
             "displayName": "Spikes (opt-in M0 spike targets; Release; vcpkg toolchain via $env{VCPKG_ROOT})",
             "inherits": "base",
@@ -52,6 +62,11 @@
             "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" }
         },
         {
+            "name": "tsan",
+            "configurePreset": "tsan",
+            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+        },
+        {
             "name": "spikes",
             "configurePreset": "spikes",
             "configuration": "Release"
@@ -67,6 +82,12 @@
         {
             "name": "sanitize",
             "configurePreset": "sanitize",
+            "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "tsan",
+            "configurePreset": "tsan",
             "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" },
             "output": { "outputOnFailure": true }
         },
