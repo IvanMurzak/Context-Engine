@@ -1,0 +1,238 @@
+{
+  "manifest_version": 1,
+  "requirement": "R-QA-012",
+  "description": "Versioned CI fleet manifest: maps every CI-enforced requirement to the named runner class that enforces it, its build flavor, tier, and red-X policy. A gate whose runner class is not yet provisioned is marked advisory (never silently green). Validated in CI by tools/check_fleet_manifest.py (the 'CI consumes it' tie); the human-readable companion is docs/ci-fleet-manifest.md.",
+  "red_x_policies": ["blocking", "advisory", "quarantine-with-issue"],
+  "tiers": ["per-PR", "nightly"],
+  "runner_classes": {
+    "gh-ubuntu-shared": {
+      "os": "ubuntu-latest",
+      "hardware": "github-hosted (shared)",
+      "gpu": false,
+      "isolation": "shared",
+      "provisioned": true,
+      "notes": "GitHub-hosted Linux. Shared, NOT perf-isolated — cannot host an R-QA-009 perf floor."
+    },
+    "gh-macos-shared": {
+      "os": "macos-latest",
+      "hardware": "github-hosted (shared)",
+      "gpu": false,
+      "isolation": "shared",
+      "provisioned": true,
+      "notes": "GitHub-hosted macOS. Doubles as the interim macOS build agent (R-BUILD-007); a dedicated agent is a follow-up."
+    },
+    "gh-windows-shared": {
+      "os": "windows-latest",
+      "hardware": "github-hosted (shared)",
+      "gpu": false,
+      "isolation": "shared",
+      "provisioned": true,
+      "notes": "GitHub-hosted Windows. The only MSVC /W4 /WX signal (the local dev gate is Ninja+GCC)."
+    },
+    "perf-linux-bare-metal": {
+      "os": "linux-x64",
+      "hardware": "bare-metal perf box",
+      "gpu": false,
+      "isolation": "perf-isolated",
+      "provisioned": false,
+      "notes": "R-QA-009 minimal-v1 perf box (one bare-metal Linux, median-of-5, +/-10% band). NOT yet provisioned -> every gate mapped here is advisory until it is."
+    },
+    "determinism-matrix": {
+      "os": "linux-x64 + win-x64 + macos-arm64",
+      "hardware": "named determinism rows",
+      "gpu": false,
+      "isolation": "shared",
+      "provisioned": false,
+      "notes": "R-QA-005 / L-54 state-hash determinism matrix (min Linux-x64, Win-x64, macOS-ARM64). Lands M6; advisory until provisioned."
+    },
+    "gpu-runner": {
+      "os": "linux-x64",
+      "hardware": "GPU-present runner",
+      "gpu": true,
+      "isolation": "shared",
+      "provisioned": false,
+      "notes": "M4 visual-equivalence gate needs a real GPU. Advisory until provisioned."
+    },
+    "n-daemons-host": {
+      "os": "linux-x64",
+      "hardware": "multi-worktree host",
+      "gpu": false,
+      "isolation": "perf-isolated",
+      "provisioned": false,
+      "notes": "R-FILE-011 N-daemons-on-one-box scenario: validates composed watcher/fd/index-memory/cache budgets. Advisory until provisioned."
+    }
+  },
+  "gates": [
+    {
+      "id": "license-gate",
+      "requirement": "O-7",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "n/a",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "license-gate",
+      "description": "Deny-by-default dependency-license allowlist + SBOM emit (tools/check_licenses.py)."
+    },
+    {
+      "id": "python-tests",
+      "requirement": "R-QA-013",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "n/a",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "python-tests",
+      "description": "pytest over tools/tests + bench/tests (license gate, toolchain gate, corpus generator, perf gate, fleet-manifest validator)."
+    },
+    {
+      "id": "build-ubuntu",
+      "requirement": "R-QA-008",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "dev-preset build + ctest: the kernel, file-sync, and fault-injection-harness suites (M1-exit gate, R-QA-008)."
+    },
+    {
+      "id": "build-macos",
+      "requirement": "R-QA-008",
+      "runner_class": "gh-macos-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "dev-preset build + ctest on macOS (M1-exit gate, R-QA-008)."
+    },
+    {
+      "id": "build-windows",
+      "requirement": "R-QA-008",
+      "runner_class": "gh-windows-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "dev-preset build + ctest on Windows/MSVC (M1-exit gate + the only MSVC /W4 /WX signal)."
+    },
+    {
+      "id": "sanitize-asan-ubsan",
+      "requirement": "L-38",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "sanitizer",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "sanitize",
+      "description": "ASan+UBSan preset build + ctest (ubuntu/clang; non-MSVC-only)."
+    },
+    {
+      "id": "sanitize-tsan",
+      "requirement": "L-38",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "sanitizer",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "sanitize",
+      "description": "ThreadSanitizer preset build + ctest (ubuntu/clang; grows real coverage with M1 threaded kernel code)."
+    },
+    {
+      "id": "bench-baseline-10k",
+      "requirement": "R-FILE-011",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "release",
+      "tier": "per-PR",
+      "red_x_policy": "advisory",
+      "ci_job_id": "bench-baseline",
+      "description": "10k-corpus benchmark proxy + canonical fixpoint smoke + the R-QA-009 perf gate (advisory: a shared runner is NOT perf-isolated, so the numbers do not gate)."
+    },
+    {
+      "id": "spike-wasm-interpreters",
+      "requirement": "R-LANG-003",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "spike",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "spike-wasm",
+      "description": "wasmtime + WAMR interpreter smoke on all 3 OSes (blocking legs)."
+    },
+    {
+      "id": "spike-wasm-wamr-aot",
+      "requirement": "R-LANG-003",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "spike",
+      "tier": "per-PR",
+      "red_x_policy": "quarantine-with-issue",
+      "issue": "IvanMurzak/Context-Engine#24",
+      "ci_job_id": "spike-wasm",
+      "description": "WAMR AOT smoke — intermittent SIGILL flake; quarantined (continue-on-error) with an owned issue, kept running + visible for trend."
+    },
+    {
+      "id": "spike-webgpu-native",
+      "requirement": "R-REND-005",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "spike",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "spike-webgpu",
+      "description": "WebGPU spike native build + offscreen render/readback self-check on all 3 OSes (software adapter; skips cleanly where none)."
+    },
+    {
+      "id": "spike-webgpu-web",
+      "requirement": "R-REND-005",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "spike",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "spike-webgpu-web",
+      "description": "WebGPU spike Emscripten/emdawnwebgpu wasm+JS build (in-browser render is a local step)."
+    },
+    {
+      "id": "fleet-manifest-validation",
+      "requirement": "R-QA-012",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "n/a",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "python-tests",
+      "description": "CI consumes this manifest: tools/check_fleet_manifest.py validates it against the live workflow every run (self-consistency + advisory-until-provisioned rule)."
+    },
+    {
+      "id": "perf-filesync-attach-100k",
+      "requirement": "R-FILE-011",
+      "runner_class": "perf-linux-bare-metal",
+      "build_flavor": "release",
+      "tier": "nightly",
+      "red_x_policy": "advisory",
+      "ci_job_id": null,
+      "description": "Full 100k-file index-warm-attach floor under the R-QA-009 methodology. Advisory until the perf box is provisioned (then blocking, nightly)."
+    },
+    {
+      "id": "determinism-state-hash",
+      "requirement": "R-QA-005",
+      "runner_class": "determinism-matrix",
+      "build_flavor": "deterministic",
+      "tier": "per-PR",
+      "red_x_policy": "advisory",
+      "ci_job_id": null,
+      "description": "L-54 state-hash determinism on the named wedge platforms with hierarchical-hash auto-triage. Lands M6; advisory until provisioned."
+    },
+    {
+      "id": "visual-equivalence",
+      "requirement": "R-REND-005",
+      "runner_class": "gpu-runner",
+      "build_flavor": "release",
+      "tier": "nightly",
+      "red_x_policy": "advisory",
+      "ci_job_id": null,
+      "description": "M4 visual-equivalence gate; needs a GPU runner. Advisory until provisioned."
+    },
+    {
+      "id": "n-daemons-budget",
+      "requirement": "R-FILE-011",
+      "runner_class": "n-daemons-host",
+      "build_flavor": "release",
+      "tier": "nightly",
+      "red_x_policy": "advisory",
+      "ci_job_id": null,
+      "description": "N-daemons-on-one-box composed watcher/fd/index-memory/cache budget scenario. Advisory until provisioned."
+    }
+  ]
+}
