@@ -102,9 +102,12 @@ std::string build_request(std::int64_t id, const std::string& method, Json param
 }
 
 // Send one JSON-RPC request and return its `result` object. On a transport failure, a JSON-RPC error
-// response, or a malformed reply, returns nullopt and sets `error`.
+// response, or a malformed reply, returns nullopt and sets `error`. When the failure is a daemon-side
+// JSON-RPC error response (as opposed to a transport/parse failure) and `rejected_by_daemon` is
+// non-null, sets `*rejected_by_daemon` — letting the handshake call site distinguish a genuine
+// protocol rejection from a mere transport hiccup.
 std::optional<Json> call(TransportClient& client, std::int64_t id, const std::string& method,
-                         Json params, std::string& error)
+                         Json params, std::string& error, bool* rejected_by_daemon = nullptr)
 {
     const std::optional<std::string> raw = client.request(build_request(id, method, std::move(params)));
     if (!raw.has_value())
@@ -128,6 +131,8 @@ std::optional<Json> call(TransportClient& client, std::int64_t id, const std::st
         const std::string msg =
             err.contains("message") ? err.at("message").as_string() : std::string("(no message)");
         error = "daemon rejected '" + method + "': " + msg;
+        if (rejected_by_daemon != nullptr)
+            *rejected_by_daemon = true;
         return std::nullopt;
     }
     if (!response.contains("result"))
@@ -141,21 +146,9 @@ std::optional<Json> call(TransportClient& client, std::int64_t id, const std::st
 
 Envelope run_attach(const std::vector<std::string>& args)
 {
-    const std::optional<std::string> project_flag = flag_value(args, "project");
-    if (!project_flag.has_value())
-        return Envelope::failure("usage.missing_argument", "context attach requires --project <dir>");
-
-    std::error_code ec;
-    const fs::path project = fs::absolute(fs::path(*project_flag), ec);
-    if (ec)
-        return Envelope::failure("internal.error",
-                                 "could not resolve --project '" + *project_flag +
-                                     "' to an absolute path: " + ec.message());
-    const std::string set_path = flag_value(args, "set-path").value_or("proj/a.scene");
-    const std::string set_content = flag_value(args, "set-content").value_or("entity: 1");
+    // Resolve `--out` and its result-file sink FIRST so every failure path — including the earliest
+    // --project validation below — honors --out when requested (parity with run_daemon()'s fail()).
     const std::optional<std::string> out = flag_value(args, "out");
-    const bool do_shutdown = has_flag(args, "shutdown");
-
     auto finish = [&out](Envelope env) -> Envelope
     {
         if (out.has_value())
@@ -166,6 +159,21 @@ Envelope run_attach(const std::vector<std::string>& args)
         }
         return env;
     };
+
+    const std::optional<std::string> project_flag = flag_value(args, "project");
+    if (!project_flag.has_value())
+        return finish(
+            Envelope::failure("usage.missing_argument", "context attach requires --project <dir>"));
+
+    std::error_code ec;
+    const fs::path project = fs::absolute(fs::path(*project_flag), ec);
+    if (ec)
+        return finish(Envelope::failure("internal.error",
+                                        "could not resolve --project '" + *project_flag +
+                                            "' to an absolute path: " + ec.message()));
+    const std::string set_path = flag_value(args, "set-path").value_or("proj/a.scene");
+    const std::string set_content = flag_value(args, "set-content").value_or("entity: 1");
+    const bool do_shutdown = has_flag(args, "shutdown");
 
     // --- discover + connect ---------------------------------------------------------------------
     const std::optional<std::string> endpoint = discover_endpoint(project, 3000);
@@ -192,9 +200,14 @@ Envelope run_attach(const std::vector<std::string>& args)
     // Request write (for `edit`) + session (for the optional `shutdown`); the daemon's launch-time
     // operator ceiling clamps this to least privilege (R-SEC-007).
     attach_params.set("scope", Json(std::string("write,session")));
-    const std::optional<Json> attach_res = call(client, ++id, "attach", std::move(attach_params), err);
+    bool attach_rejected = false;
+    const std::optional<Json> attach_res =
+        call(client, ++id, "attach", std::move(attach_params), err, &attach_rejected);
     if (!attach_res.has_value())
-        return finish(Envelope::failure("handshake.incompatible_protocol", err));
+        // Only a daemon-side rejection of the handshake is a genuine protocol/version mismatch; a
+        // transport hiccup or malformed reply is internal (matching the edit/query call sites below).
+        return finish(Envelope::failure(
+            attach_rejected ? "handshake.incompatible_protocol" : "internal.error", err));
 
     // --- edit a file over the wire (file-rewriter) ----------------------------------------------
     Json edit_params = Json::object();
