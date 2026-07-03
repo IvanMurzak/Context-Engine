@@ -33,6 +33,15 @@ Library target: **`context_filesync`** (links `context_kernel` + `context_warnin
   `MemoryFileStore`), a virtual `Watcher` (`FakeWatcher` can drop/duplicate/reorder events), and the
   kernel `Clock`. The seams are M1 architecture and are **not retrofittable**; the deterministic
   fault-injection harness (a later task) drives them.
+- **Native on-disk `FileStore` (R-FILE-002/004)** — `NativeFileStore` is the real backend behind the
+  `FileStore` seam: `std::filesystem` for read/write/stat/list, a genuine **atomic rename** (POSIX
+  `rename(2)`; Windows `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING` — used directly because MinGW's
+  `std::filesystem::rename` won't replace an existing target), and a real **fsync durability barrier**
+  (`fsync` + best-effort parent-dir fsync on POSIX; `FlushFileBuffers` on Windows). Bytes are read/written
+  in binary so content hashes are byte-exact across platforms. `MemoryFileStore` stays selectable for
+  deterministic, fault-injectable tests; the whole file-authoritative loop runs against real disk when
+  `NativeFileStore` is injected. Native impls never throw `SimulatedCrash` — tests model a real-disk crash
+  with a thin decorator around the native store.
 
 ## Known M1 simplifications (deliberate, documented)
 
@@ -58,4 +67,6 @@ Library target: **`context_filesync`** (links `context_kernel` + `context_warnin
 `ctest --preset dev` runs each `filesync-*` executable (see `CMakeLists.txt`): content hash, SHA-256 /
 HMAC known-answer vectors, atomic-IO torn-write proof, path jail, watcher fault primitives, reconcile
 index round-trip, expected-writes TTL, the reconciler pipeline (dropped-event + same-mtime-edit safety
-nets, self-echo, degraded event), and the intent-log crash-recovery / integrity / jail / CAS paths.
+nets, self-echo, degraded event), the intent-log crash-recovery / integrity / jail / CAS paths, and —
+for the native on-disk store — the `NativeFileStore` real-FS contract (atomic-rename replace, fsync,
+stat/list/remove, binary round-trip, real-disk torn-write proof) plus on-disk intent-log crash recovery.

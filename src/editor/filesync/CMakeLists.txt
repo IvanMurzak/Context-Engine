@@ -11,6 +11,7 @@ add_library(context_filesync STATIC
     src/hmac.cpp
     src/path_jail.cpp
     src/file_store.cpp
+    src/native_file_store.cpp
     src/atomic_io.cpp
     src/watcher.cpp
     src/reconcile_index.cpp
@@ -32,7 +33,8 @@ target_link_libraries(context_filesync PRIVATE context_warnings)
 # The repo has no C++ test framework (adding one would pull a vcpkg dep + a license-allowlist entry);
 # each test is a plain assertion-bearing executable registered with ctest. See tests/filesync_test.h.
 # Coverage spans happy paths, edge cases, AND failure/crash paths (torn writes, dropped watcher
-# events, corrupt/foreign/jail-escaping/moved-on intent-log entries).
+# events, corrupt/foreign/jail-escaping/moved-on intent-log entries, and — for the native on-disk
+# store — real-FS atomic-rename/fsync/stat/list + on-disk crash recovery).
 set(_context_filesync_tests
     test_content_hash
     test_sha256
@@ -42,11 +44,22 @@ set(_context_filesync_tests
     test_reconcile_index
     test_expected_writes
     test_reconciler
-    test_intent_log)
+    test_intent_log
+    test_native_file_store
+    test_native_crash_recovery)
+
+# Self-contained GCC runtime for the ctest executables. The native store + its tests pull std::filesystem
+# (newer libstdc++ symbols); on a MinGW host a stale libstdc++-6.dll elsewhere on PATH can shadow the
+# toolchain's and be loaded first, yielding STATUS_ENTRYPOINT_NOT_FOUND at launch. Static libgcc +
+# libstdc++ make the test binaries self-contained and the local ctest gate deterministic. Gated to GNU
+# so the macOS/Clang and Windows/MSVC CI legs are untouched (mirrors src/editor/bridge, editorkernel, cli).
+set(_context_filesync_static_runtime
+    $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
 
 foreach(_t IN LISTS _context_filesync_tests)
     add_executable(context_filesync_${_t} tests/${_t}.cpp)
     target_link_libraries(context_filesync_${_t} PRIVATE context_filesync context_warnings)
+    target_link_options(context_filesync_${_t} PRIVATE ${_context_filesync_static_runtime})
     target_include_directories(context_filesync_${_t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     add_test(NAME filesync-${_t} COMMAND context_filesync_${_t})
 endforeach()

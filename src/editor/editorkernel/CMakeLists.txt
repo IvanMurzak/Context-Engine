@@ -34,7 +34,8 @@ set(_context_editorkernel_static_runtime
 # test_editor_kernel (attach handshake + CLI-verb edit + raw edit + read-your-writes barrier +
 # scope-denial exit-class 6).
 set(_context_editorkernel_tests
-    test_editor_kernel)
+    test_editor_kernel
+    test_editor_kernel_native)
 
 foreach(_t IN LISTS _context_editorkernel_tests)
     add_executable(context_editorkernel_${_t} tests/${_t}.cpp)
