@@ -99,5 +99,34 @@ int main()
     CHECK(hot.generation() == 1);
     CHECK(hot.node_count() == 1);
 
+    // The visible/queried subgraph is NEVER shed: max_batch_per_pass caps only the NON-visible fill, so
+    // when the visible-pending set ALONE exceeds it, every visible node still derives in one overloaded
+    // pass (R-FILE-013 "never stall a query"). Locks in that intentional trade-off (visible batch is
+    // deliberately unbounded); only the non-visible remainder defers.
+    {
+        DerivationConfig vcfg;
+        vcfg.high_watermark = 4;
+        vcfg.max_batch_per_pass = 3;
+        DerivationGraph vis(vcfg);
+
+        for (int i = 0; i < 6; ++i)
+            vis.set_visible("v" + std::to_string(i), true); // 6 visible > max_batch_per_pass
+        for (int i = 0; i < 6; ++i)
+            vis.apply(change("v" + std::to_string(i)), "vis" + std::to_string(i));
+        vis.apply(change("bg0"), "b0"); // 2 non-visible background writes
+        vis.apply(change("bg1"), "b1");
+        CHECK(vis.backpressure().overloaded == true); // 8 pending > 4
+
+        auto pv = vis.run_pass();
+        CHECK(pv.nodes_derived == 6);                       // ALL visible derived, none shed
+        CHECK(pv.nodes_derived > vcfg.max_batch_per_pass);  // deliberately exceeds the fill cap
+        CHECK(pv.deferred == 2);                            // only the non-visible fill was shed
+        CHECK(vis.node_count() == 6);
+        CHECK(vis.pending_count() == 2);
+        CHECK(vis.generation() == 1);
+        for (int i = 0; i < 6; ++i)
+            CHECK(vis.node("v" + std::to_string(i)).has_value());
+    }
+
     DERIVATION_TEST_MAIN_END();
 }

@@ -49,7 +49,8 @@ struct BackpressureSignal
 struct DerivationConfig
 {
     std::size_t high_watermark = 64;      // overload threshold on the pending dirty set
-    std::size_t max_batch_per_pass = 32;  // cap on nodes derived per pass while overloaded (load-shed)
+    std::size_t max_batch_per_pass = 32;  // cap on the NON-VISIBLE fill per overloaded pass (load-shed);
+                                          // visible/queried nodes always derive — never stall a query
 };
 
 // The result of one coalesced derivation pass.
