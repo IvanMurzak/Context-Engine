@@ -1,0 +1,40 @@
+src/editor/editorkernel/tests/test_kernel_server.cpp
+  s_00cb1100a75700::t_87bd1379f14956 180-248
+src/editor/bridge/src/dispatcher.cpp
+  s_00cb1100a75700::t_12724e6621f29c 107-110
+src/editor/editorkernel/include/context/editor/editorkernel/kernel_server.h
+  s_00cb1100a75700::t_aa56f3a6faf77e 50-51
+src/editor/editorkernel/src/kernel_server.cpp
+  s_00cb1100a75700::t_b54545d958ec86 118-125
+src/editor/bridge/src/daemon.cpp
+  s_00cb1100a75700::t_c3af1f96e4004f 28-30,33
+  s_00cb1100a75700::t_e5fbd7a8b17f13 58-60
+src/cli/src/daemon_command.cpp
+  s_00cb1100a75700::t_d1eeaa6a73719c 223-224,227
+  s_00cb1100a75700::t_e9f4b8b4fcf072 196-200
+  s_00cb1100a75700::t_58582a48d9341f 209-211,213
+  s_00cb1100a75700::t_0ba764b8bb3e23 143-146,151-158
+src/editor/bridge/include/context/editor/bridge/transport.h
+  s_00cb1100a75700::t_4b820b8c2631f5 104-108
+src/editor/bridge/include/context/editor/bridge/dispatcher.h
+  s_00cb1100a75700::t_db26fd27d272ea 93
+  s_00cb1100a75700::t_97ba9cb3bb1e68 59-65
+src/cli/src/attach_command.cpp
+  s_00cb1100a75700::t_b28b723d0cba9b 150-153
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5dd10bbe4830ed076532a6aeea1429137272c94d",
+  "prompts": {},
+  "sessions": {
+    "s_00cb1100a75700": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c36dbb71-cb5a-4c4d-b9b0-792a43a89435",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
