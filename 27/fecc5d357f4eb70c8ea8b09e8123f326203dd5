@@ -1,0 +1,24 @@
+src/testing/include/context/testing/fault_scenarios.h
+  s_00cb1100a75700::t_7422d6d2ddc7cc 69
+src/testing/tests/test_slow_client.cpp
+  s_00cb1100a75700::t_004a1e806ab584 19-21,30-31,37-39
+  s_00cb1100a75700::t_248fa35cf4a252 40
+src/testing/src/fault_scenarios.cpp
+  s_00cb1100a75700::t_9607a02e06085a 276,280-283
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "27fecc5d357f4eb70c8ea8b09e8123f326203dd5",
+  "prompts": {},
+  "sessions": {
+    "s_00cb1100a75700": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c36dbb71-cb5a-4c4d-b9b0-792a43a89435",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
