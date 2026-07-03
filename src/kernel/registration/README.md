@@ -27,6 +27,20 @@ pillar before real packages proliferate.
    semantics** (an archive member is pulled only to resolve a referenced symbol); LTO + section GC
    are the uniform shipped-build pipeline layered on top.
 
+## Sanitizer builds: the proof measures the SHIPPED (non-instrumented) build
+
+Zero-footprint is a property of the shipped, optimized build — so the proof's own translation units
+(the `alpha`/`beta` fixtures + the two probes) are compiled with `-fno-sanitize=all` (via
+`context_dce_flags`, non-MSVC only). AddressSanitizer deliberately **defeats** dead-code elimination
+of globals: under `-fsanitize=address` every global is red-zoned and emitted with a
+`__asan_register_globals` call from a module constructor, which anchors it so LTO + `--gc-sections`
+can no longer strip it. Without this carve-out, the `sanitize` preset (whose directory-wide
+`-fsanitize=address,undefined` is inherited here) kept the unreferenced `alpha` alive in its probe
+binary and failed `kernel-dce-footprint`. Only **compile** options are cancelled — the inherited
+`-fsanitize=...` **link** options remain, so the sanitizer runtime is still linked for the
+instrumented `context_kernel` the probes link against. (The TSan leg was unaffected: ThreadSanitizer
+instruments memory accesses, it does not register/red-zone globals.)
+
 ## The measured proof
 
 Two probe executables are built that differ **only** in the generated registration TU each links:

@@ -32,6 +32,27 @@ else()
     else()
         target_link_options(context_dce_flags INTERFACE -Wl,--gc-sections)
     endif()
+
+    # Make the zero-footprint proof PRESET-INVARIANT: cancel sanitizer instrumentation on the proof's
+    # OWN translation units (this INTERFACE flows to the demo-package libs + both probe exes below).
+    # Why this is required, not a hack: R-KERNEL-003's "unreferenced package leaves zero footprint" is
+    # a property of the SHIPPED (optimized, non-instrumented) build. AddressSanitizer deliberately
+    # DEFEATS dead-code elimination of globals — under `-fsanitize=address` every global is red-zoned
+    # and emitted with a `__asan_register_globals` call from a module constructor, which anchors it so
+    # LTO + `--gc-sections` can no longer strip it. So under the `sanitize` preset (whose directory-wide
+    # `add_compile_options(-fsanitize=address,undefined)` in src/CMakeLists.txt is inherited here) the
+    # unreferenced package `alpha` survived into its probe binary and the footprint ctest failed. (The
+    # TSan leg passes: ThreadSanitizer instruments memory ACCESSES, it does not register/red-zone
+    # globals, so it does not anchor them.) Compiling the throwaway proof fixtures WITHOUT the
+    # sanitizer restores the real shipped-build DCE semantics the proof is meant to measure — target-
+    # level options are appended AFTER the inherited directory-level `-fsanitize=...`, and the last
+    # `-f(no-)sanitize` on the command line wins, so this cleanly cancels instrumentation for exactly
+    # these targets. We intentionally touch only COMPILE options: the inherited `-fsanitize=...` LINK
+    # options stay, so the ASan/UBSan runtime is still linked for the (instrumented) context_kernel the
+    # probes link against — mixing an instrumented lib with non-instrumented objects is supported.
+    # `-fno-sanitize=all` is inert under the non-sanitized `dev` build, so it is safe to apply here for
+    # every non-MSVC toolchain (MSVC never sees it — the sanitizer options are non-MSVC-only anyway).
+    target_compile_options(context_dce_flags INTERFACE -fno-sanitize=all)
 endif()
 
 # Uniform LTO where supported (portable check — falls back cleanly on toolchains that cannot archive
