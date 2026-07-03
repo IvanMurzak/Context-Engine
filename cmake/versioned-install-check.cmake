@@ -33,19 +33,27 @@ if(NOT EXISTS "${_marker}")
     message(FATAL_ERROR "R-VER-004 violation: version marker missing at '${_marker}'")
 endif()
 file(READ "${_marker}" _marker_text)
-if(NOT _marker_text MATCHES "version=${CONTEXT_EXPECTED_VERSION}")
+# Literal substring match (string(FIND), not MATCHES): the semver's dots are regex
+# metacharacters, so a regex match would spuriously accept e.g. version=0X0X1.
+string(FIND "${_marker_text}" "version=${CONTEXT_EXPECTED_VERSION}" _marker_pos)
+if(_marker_pos EQUAL -1)
     message(FATAL_ERROR
         "R-VER-004 violation: version marker does not record version=${CONTEXT_EXPECTED_VERSION}:\n${_marker_text}")
 endif()
 
-# 3. FAIL CLOSED on a FLAT install: nothing may install directly into <prefix>/bin —
-#    everything belongs under versions/<semver>/.
-file(GLOB _flat_bin "${_prefix}/bin/*")
-if(_flat_bin)
-    message(FATAL_ERROR
-        "R-VER-004 violation: flat install detected at '${_prefix}/bin' (${_flat_bin}); "
-        "installs MUST stage under versions/<semver>/")
-endif()
+# 3. FAIL CLOSED on a FLAT install: the ONLY entry allowed directly under <prefix> is the
+#    top-level versions/ tree — anything else (a flat bin/, lib/, include/, …) means a
+#    payload escaped versions/<semver>/. Enumerate all top-level entries, not just bin/, so
+#    a future library/header install cannot slip past a bin-only guard.
+file(GLOB _top_level "${_prefix}/*")
+foreach(_entry IN LISTS _top_level)
+    get_filename_component(_name "${_entry}" NAME)
+    if(NOT _name STREQUAL "versions")
+        message(FATAL_ERROR
+            "R-VER-004 violation: flat install detected at '${_entry}'; "
+            "installs MUST stage under versions/<semver>/")
+    endif()
+endforeach()
 
 # 4. The payload binary must be present under versions/<semver>/bin/ (name is
 #    platform-dependent: context-hello[.exe]).

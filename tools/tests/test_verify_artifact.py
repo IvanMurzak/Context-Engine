@@ -129,7 +129,8 @@ def test_corrupted_signature_is_refused(tmp_path):
     good = SAMPLE_SIG.read_text(encoding="utf-8")
     # Flip a chunk of the armored base64 body while keeping the PEM envelope intact.
     lines = good.splitlines()
-    lines[1] = ("A" * len(lines[1])) if len(lines) > 2 else lines[1]
+    assert len(lines) > 2, f"signature fixture too short to tamper meaningfully: {len(lines)} lines"
+    lines[1] = "A" * len(lines[1])
     bad_sig = tmp_path / "bad.sig"
     bad_sig.write_text("\n".join(lines) + "\n", encoding="utf-8")
     result = verify_artifact.verify_artifact(

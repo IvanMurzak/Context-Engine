@@ -134,25 +134,26 @@ def verify_artifact(
     if not signature.is_file():
         return VerifyResult(REFUSED, f"signature not found: {signature} (unsigned ⇒ refused)")
 
-    try:
-        data = artifact.read_bytes()
-    except OSError as exc:
-        return VerifyResult(CONFIG_ERROR, f"cannot read artifact {artifact}: {exc}")
-
     # ssh-keygen -Y verify reads the signed data from stdin and checks it against the
     # detached signature file, the pinned allowed_signers trust root, the expected signer
     # principal, and the namespace. Non-zero exit == verification failed == refuse.
-    proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
-        [
-            keygen, "-Y", "verify",
-            "-f", str(trust_root),
-            "-I", identity,
-            "-n", namespace,
-            "-s", str(signature),
-        ],
-        input=data,
-        capture_output=True,
-    )
+    # The artifact is STREAMED as the child's stdin (not buffered into a Python bytes), so a
+    # large protected artifact does not double peak memory; a read error still fails closed.
+    try:
+        with artifact.open("rb") as data:
+            proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                [
+                    keygen, "-Y", "verify",
+                    "-f", str(trust_root),
+                    "-I", identity,
+                    "-n", namespace,
+                    "-s", str(signature),
+                ],
+                stdin=data,
+                capture_output=True,
+            )
+    except OSError as exc:
+        return VerifyResult(CONFIG_ERROR, f"cannot read artifact {artifact}: {exc}")
     if proc.returncode == 0:
         return VerifyResult(OK, _decode(proc.stdout).strip() or "signature OK")
 
