@@ -70,6 +70,12 @@ OK = 0
 REFUSED = 1
 CONFIG_ERROR = 2
 
+# Upper bound (seconds) on the ssh-keygen verify subprocess. A wedged verifier — or a
+# pathological artifact stream — must fail closed PROMPTLY rather than stall the gate (and
+# anything driving it, e.g. a CI/release step) indefinitely. 60s is far above any real
+# verify time, so it never trips on a legitimate artifact.
+SSH_KEYGEN_TIMEOUT_SECONDS = 60
+
 
 @dataclass(frozen=True)
 class VerifyResult:
@@ -134,13 +140,23 @@ def verify_artifact(
     if not signature.is_file():
         return VerifyResult(REFUSED, f"signature not found: {signature} (unsigned ⇒ refused)")
 
-    # ssh-keygen -Y verify reads the signed data from stdin and checks it against the
-    # detached signature file, the pinned allowed_signers trust root, the expected signer
-    # principal, and the namespace. Non-zero exit == verification failed == refuse.
-    # The artifact is STREAMED as the child's stdin (not buffered into a Python bytes), so a
-    # large protected artifact does not double peak memory; a read error still fails closed.
+    # Opening the artifact for streaming is the only artifact-READ step that can raise here;
+    # keep its handler narrow so a subprocess-launch failure below is not misattributed to an
+    # artifact-read error. The artifact is STREAMED as the child's stdin (not buffered into a
+    # Python bytes), so a large protected artifact does not double peak memory; a read error
+    # still fails closed.
     try:
-        with artifact.open("rb") as data:
+        data = artifact.open("rb")
+    except OSError as exc:
+        return VerifyResult(CONFIG_ERROR, f"cannot read artifact {artifact}: {exc}")
+
+    # ssh-keygen -Y verify reads the signed data from stdin and checks it against the detached
+    # signature file, the pinned allowed_signers trust root, the expected signer principal, and
+    # the namespace. Non-zero exit == verification failed == refuse. A wedged verifier is
+    # bounded by SSH_KEYGEN_TIMEOUT_SECONDS and a spawn failure fails closed on its own path —
+    # both distinct from (and no longer misreported as) the artifact-read failure above.
+    try:
+        with data:
             proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
                 [
                     keygen, "-Y", "verify",
@@ -151,9 +167,16 @@ def verify_artifact(
                 ],
                 stdin=data,
                 capture_output=True,
+                timeout=SSH_KEYGEN_TIMEOUT_SECONDS,
             )
+    except subprocess.TimeoutExpired:
+        return VerifyResult(
+            CONFIG_ERROR,
+            f"ssh-keygen did not complete within {SSH_KEYGEN_TIMEOUT_SECONDS}s — "
+            "cannot verify (fail closed).",
+        )
     except OSError as exc:
-        return VerifyResult(CONFIG_ERROR, f"cannot read artifact {artifact}: {exc}")
+        return VerifyResult(CONFIG_ERROR, f"cannot invoke ssh-keygen: {exc}")
     if proc.returncode == 0:
         return VerifyResult(OK, _decode(proc.stdout).strip() or "signature OK")
 

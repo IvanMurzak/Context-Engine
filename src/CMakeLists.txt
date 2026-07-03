@@ -112,8 +112,15 @@ endif()
 # convention now. R-SEC-009: when the on-demand version fetcher lands, a fetched version is
 # verify-before-use / fail closed via tools/verify_artifact.py before it is ever executed.
 # ---------------------------------------------------------------------------
-set(CONTEXT_INSTALL_SUBDIR "versions/${PROJECT_VERSION}"
-    CACHE STRING "R-VER-004 side-by-side install root: <prefix>/versions/<semver>/")
+# R-VER-004 side-by-side install root: <prefix>/versions/<semver>/. A PLAIN (non-cache)
+# variable so it is recomputed from PROJECT_VERSION on EVERY configure. A
+# `set(... CACHE STRING ...)` without FORCE is a no-op once the cache entry exists, so
+# re-configuring an existing build dir after a version bump would strand this at the OLD
+# version while context-version.txt / CPACK_PACKAGE_VERSION (rewritten below from
+# PROJECT_VERSION every configure) track the new one — the versioned dir name and its own
+# marker would then disagree, the exact invariant cmake/versioned-install-check.cmake guards.
+# The layout is a fixed day-one contract, so it is intentionally NOT overridable via -D.
+set(CONTEXT_INSTALL_SUBDIR "versions/${PROJECT_VERSION}")
 
 # Machine-readable version marker: a resolver enumerates installed versions by listing
 # <prefix>/versions/*/ — the day-one hook the future launcher resolves the R-VER-003 pin

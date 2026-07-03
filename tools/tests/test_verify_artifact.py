@@ -205,6 +205,19 @@ def test_missing_ssh_keygen_fails_closed(monkeypatch):
     assert "ssh-keygen" in result.detail.lower()
 
 
+def test_verify_times_out_fails_closed(monkeypatch):
+    """A wedged ssh-keygen (TimeoutExpired) must fail closed as CONFIG_ERROR, never pass."""
+    def _hang(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="ssh-keygen", timeout=kwargs.get("timeout", 0))
+    monkeypatch.setattr(verify_artifact.subprocess, "run", _hang)
+    result = verify_artifact.verify_artifact(
+        SAMPLE_ARTIFACT, SAMPLE_SIG, trust_root=COMMITTED_TRUST_ROOT,
+        identity=TEST_IDENTITY, namespace=NAMESPACE)
+    assert not result.ok
+    assert result.code == verify_artifact.CONFIG_ERROR
+    assert "did not complete" in result.detail.lower()
+
+
 def test_cli_refused_returns_one_and_writes_stderr(tmp_path, capsys):
     tampered = tmp_path / "sample-artifact.bin"
     tampered.write_bytes(SAMPLE_ARTIFACT.read_bytes() + b"x")
