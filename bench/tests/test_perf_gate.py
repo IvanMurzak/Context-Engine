@@ -138,6 +138,12 @@ def test_main_archive_appends_timeseries(tmp_path):
     entry = json.loads(rows[0].read_text().strip())
     assert entry["median"] == pytest.approx(1.0)
     assert entry["scenario"] == "attach"
+    # Archive row matches the documented schema (docs/perf-gate-methodology.md): dispersion
+    # (spread_pct) is archived per methodology rules 2 & 4 so a rising-variance trend is
+    # distinguishable from a rising-median one.
+    assert entry["spread_pct"] == pytest.approx(0.0)
+    assert set(entry) == {"timestamp_utc", "scenario", "metric", "median", "spread_pct",
+                          "runner_class"}
 
 
 def test_main_bad_result_is_config_error(tmp_path):

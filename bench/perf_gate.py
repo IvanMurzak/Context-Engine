@@ -150,6 +150,7 @@ def main(argv: list[str] | None = None) -> int:
         "scenario": args.scenario,
         "metric": metric,
         "median": current,
+        "spread_pct": result["scenarios"][args.scenario][metric].get("spread_pct"),
         "runner_class": args.runner_class,
     }
     if args.archive:

@@ -80,7 +80,7 @@ to make the floor blocking.
   median for a scenario/metric on a named runner class. Refreshed with `--record` from a trusted
   perf-box run (never from a shared-runner number).
 - **Time-series archive** — `--archive <dir>` appends one JSONL row per measurement
-  (`{timestamp, scenario, metric, median, spread_pct, runner_class}`), so drift is visible over time.
+  (`{timestamp_utc, scenario, metric, median, spread_pct, runner_class}`), so drift is visible over time.
   Archive contents are generated artifacts (`bench/results/` is gitignored + uploaded as a CI
   artifact); the committed deliverable is the **baseline**, not the raw series.
 
