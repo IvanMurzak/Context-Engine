@@ -16,6 +16,9 @@ static const std::uint64_t kRegressionSeeds[] = {0, 2, 13, 64, 2048, 0xBADF00Du}
 
 int main()
 {
+    bool saw_gapped = false; // at least one seed evicted the missed events -> fresh-snapshot recovery
+    bool saw_replay = false; // at least one seed kept them in the ring     -> replay-since recovery
+
     for (std::uint64_t seed = 0; seed < 512; ++seed)
     {
         const SlowClientScenarioResult r = run_slow_client_scenario(seed);
@@ -24,10 +27,16 @@ int main()
         CHECK(r.recovery_defined); // replay-since or a fresh snapshot reaches the latest seq
         CHECK(r.converged());
         CHECK(r.published > r.capacity); // the flood really overflowed the bounded queue
+        saw_gapped = saw_gapped || r.recovery_gapped;
+        saw_replay = saw_replay || !r.recovery_gapped;
     }
 
     for (const std::uint64_t seed : kRegressionSeeds)
         CHECK(run_slow_client_scenario(seed).converged());
+
+    // The sweep must actually drive BOTH recovery paths (else the test proves nothing).
+    CHECK(saw_gapped);
+    CHECK(saw_replay);
 
     TESTING_TEST_MAIN_END();
 }

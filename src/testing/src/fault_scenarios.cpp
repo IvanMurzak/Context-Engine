@@ -273,10 +273,14 @@ SlowClientScenarioResult run_slow_client_scenario(std::uint64_t seed)
     sub.reset_gap();
     bool gapped = false;
     const std::vector<br::Event> missed = stream.replay_since(sub.last_delivered_seq(), gapped);
+    r.recovery_gapped = gapped;
     if (gapped)
     {
         const ct::Json snap = stream.snapshot();
-        r.recovery_defined = snap.at("lastSeq").as_int() == static_cast<std::int64_t>(stream.last_seq());
+        // Assert the fresh snapshot reaches the latest published seq against the harness's OWN
+        // publish count `n` — NOT stream.last_seq(), which snapshot() reads from the same last_seq_
+        // field, making that comparison a tautology that would catch no regression.
+        r.recovery_defined = snap.at("lastSeq").as_int() == static_cast<std::int64_t>(n);
     }
     else
     {

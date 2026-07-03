@@ -66,6 +66,7 @@ struct SlowClientScenarioResult
     bool never_blocked = false;    // seqs stayed strictly monotonic 1..N — the stream never stalled
     bool gap_flagged = false;      // overflow raised the gap marker
     bool recovery_defined = false; // replay-since (non-gapped) OR fresh snapshot reaches last seq
+    bool recovery_gapped = false;  // true => recovery took the fresh-snapshot path; false => replay-since
     [[nodiscard]] bool converged() const
     {
         return never_blocked && gap_flagged && recovery_defined;
