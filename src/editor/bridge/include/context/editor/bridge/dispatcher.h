@@ -16,6 +16,7 @@
 #include "context/editor/contract/json.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -35,11 +36,35 @@ struct Session
     ScopeSet scopes;                       // granted scopes (read/query baseline by default)
 };
 
+// The seam that lets a COMPOSING layer (the EditorKernel, which sits ABOVE the bridge and therefore
+// cannot be depended on from here without a cycle) supply the real backing for a resolved method —
+// so a cross-process client's `edit`/`query`/… actually mutate/read the derived world instead of
+// returning contract.unimplemented. The dispatcher runs the R-SEC-007 scope check FIRST, then offers
+// each method to the backend (on an attached session only); the backend returns nullopt for any
+// method it does not serve, letting the dispatcher fall back to its default registry routing.
+class MethodBackend
+{
+public:
+    virtual ~MethodBackend() = default;
+    [[nodiscard]] virtual std::optional<contract::Envelope>
+    invoke(const std::string& method, const contract::Json& params, const Session& session) const = 0;
+};
+
 class Dispatcher
 {
 public:
     // `stream` (optional, non-owning): when set, a successful attach emits a `clients` event.
-    explicit Dispatcher(EventStream* stream = nullptr) : stream_(stream) {}
+    // `backend` (optional, non-owning): the real backing for resolved verbs (see MethodBackend); when
+    // null the reserved verbs return contract.unimplemented exactly as before.
+    // `ceiling`: the launch-time operator scope ceiling (R-SEC-007). It is the SINGLE clamp point —
+    // attach() intersects EVERY attaching client's requested scopes against it, so the in-process
+    // (Daemon::attach_client) and cross-process wire (handle → attach) paths honor `--launch-scopes`
+    // identically. Default: all scopes (no restriction).
+    explicit Dispatcher(EventStream* stream = nullptr, const MethodBackend* backend = nullptr,
+                        ScopeSet ceiling = ScopeSet::all())
+        : stream_(stream), backend_(backend), ceiling_(ceiling)
+    {
+    }
 
     using AttachResult = std::variant<Session, contract::Envelope>;
 
@@ -64,6 +89,8 @@ public:
 
 private:
     EventStream* stream_;
+    const MethodBackend* backend_;
+    ScopeSet ceiling_;
 };
 
 } // namespace context::editor::bridge

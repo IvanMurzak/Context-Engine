@@ -46,6 +46,11 @@ public:
     // instance), `booted` on success, `error` otherwise.
     StartOutcome start(bool write_capable = true, ScopeSet launch_scopes = ScopeSet::all());
 
+    // Wire the composing layer's real method backing (see MethodBackend) BEFORE start() — the
+    // dispatcher is constructed in start() and captures it. Non-owning; the caller keeps it alive
+    // for the daemon's serving lifetime. Null (the default) keeps the reserved verbs unimplemented.
+    void set_method_backend(const MethodBackend* backend) noexcept { backend_ = backend; }
+
     // Release the lock and tear down the stream/dispatcher. Idempotent.
     void stop();
 
@@ -68,6 +73,7 @@ private:
     bool running_ = false;
     ScopeSet launch_scopes_;
     std::string error_;
+    const MethodBackend* backend_ = nullptr;
     std::optional<EventStream> events_;
     std::optional<Dispatcher> dispatcher_;
 };

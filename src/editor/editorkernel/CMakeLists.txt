@@ -5,7 +5,8 @@
 # the merged components via their public headers; it does not re-implement them.
 
 add_library(context_editorkernel STATIC
-    src/editor_kernel.cpp)
+    src/editor_kernel.cpp
+    src/kernel_server.cpp)
 
 target_include_directories(context_editorkernel PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -35,7 +36,8 @@ set(_context_editorkernel_static_runtime
 # scope-denial exit-class 6).
 set(_context_editorkernel_tests
     test_editor_kernel
-    test_editor_kernel_native)
+    test_editor_kernel_native
+    test_kernel_server)
 
 foreach(_t IN LISTS _context_editorkernel_tests)
     add_executable(context_editorkernel_${_t} tests/${_t}.cpp)

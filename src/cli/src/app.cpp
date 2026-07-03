@@ -2,6 +2,8 @@
 
 #include "context/cli/app.h"
 
+#include "context/cli/attach_command.h"
+#include "context/cli/daemon_command.h"
 #include "context/cli/editor_driver.h"
 #include "context/cli/scaffold.h"
 #include "context/editor/contract/json.h"
@@ -118,6 +120,13 @@ Envelope run(const std::vector<std::string>& args)
     if (args[0] == "editor")
         return run_editor(std::vector<std::string>(args.begin() + 1, args.end()));
 
+    // `attach` is the cross-process counterpart of `editor smoke`: it connects to a running daemon
+    // over the IPC wire and drives it as a SEPARATE process (attach_command.h). Also operational —
+    // outside the contract registry. (`daemon`, the long-running server, is intercepted in main_cli
+    // because it manages its own process lifetime rather than returning a one-shot envelope.)
+    if (args[0] == "attach")
+        return run_attach(std::vector<std::string>(args.begin() + 1, args.end()));
+
     // --- resolve the verb selector (1 token global, or 2 tokens noun-scoped) --------------------
     const auto [ns0, head0] = split_ns(args[0]);
     const VerbSpec* verb = nullptr;
@@ -194,6 +203,12 @@ int main_cli(int argc, char** argv)
     std::vector<std::string> args;
     for (int i = 1; i < argc; ++i)
         args.emplace_back(argv[i]);
+
+    // `daemon` is the long-running server process: it manages its own stdout + exit code (a clean
+    // shutdown is 0, the R-BRIDGE-001 attach signal is a distinct code), so it is intercepted here
+    // rather than through run()'s one-shot envelope-print path.
+    if (!args.empty() && args[0] == "daemon")
+        return run_daemon(std::vector<std::string>(args.begin() + 1, args.end()));
 
     const Envelope env = run(args);
     const std::string out = env.dump(2);

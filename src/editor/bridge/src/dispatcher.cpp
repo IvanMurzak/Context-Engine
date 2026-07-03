@@ -104,7 +104,10 @@ Dispatcher::AttachResult Dispatcher::attach(const ClientHandshake& client, Scope
     session.attached = true;
     session.protocol_major = agreed.protocol_major;
     session.capabilities = agreed.capabilities;
-    session.scopes = requested;
+    // R-SEC-007 least privilege: clamp the requested scopes to the launch-time operator ceiling. This
+    // is the SINGLE clamp point for BOTH the in-process (Daemon::attach_client) and the cross-process
+    // wire (handle → attach) paths, so a wire client cannot escalate past `--launch-scopes`.
+    session.scopes = ceiling_.intersect(requested);
 
     if (stream_ != nullptr)
     {
@@ -123,8 +126,6 @@ Dispatcher::AttachResult Dispatcher::attach(const ClientHandshake& client, Scope
 Envelope Dispatcher::dispatch(const std::string& method, const Json& params,
                               const Session& session) const
 {
-    (void)params; // v1 bridge backing consumes params only for `describe` (none) — reserved surface.
-
     // R-SEC-007: the token scope is checked on EVERY method, BEFORE the verb resolves. An
     // under-scoped token cannot even learn whether the verb is implemented.
     if (!authorize(method, session.scopes))
@@ -132,6 +133,15 @@ Envelope Dispatcher::dispatch(const std::string& method, const Json& params,
         return Envelope::failure(kScopeDeniedCode,
                                  "The attach token's scope does not permit '" + method +
                                      "' (R-SEC-007).");
+    }
+
+    // Offer the method to the composing backend FIRST (post scope-check): it serves the real
+    // operational verbs (edit/query/… over the daemon's composed EditorKernel). nullopt => the
+    // backend does not serve this method, so fall through to the default registry routing below.
+    if (backend_ != nullptr)
+    {
+        if (std::optional<Envelope> served = backend_->invoke(method, params, session))
+            return std::move(*served);
     }
 
     // Dispatch OVER the single registry (do NOT re-declare verbs). Resolve the method-id to a verb.

@@ -29,6 +29,11 @@ int main()
     CHECK(required_scope_for("package.add") == Scope::build_install);
     CHECK(required_scope_for("build") == Scope::build_install);
     CHECK(required_scope_for("session.play") == Scope::session_control);
+    // The daemon's operational cross-process verbs (issue #34): `edit` is a file write, `shutdown` is
+    // a session-control action, and `query` is a plain read (baseline).
+    CHECK(required_scope_for("edit") == Scope::file_write);
+    CHECK(required_scope_for("shutdown") == Scope::session_control);
+    CHECK(required_scope_for("query") == Scope::read_query);
     CHECK(required_scope_for("totally.unknown") == Scope::read_query); // unknowns are read/query
 
     // --- authorize(): a read/query token -------------------------------------------------------
@@ -38,7 +43,10 @@ int main()
         CHECK(!authorize("package.add", read));   // install rejected (FAILURE PATH — the R-SEC-007 gate)
         CHECK(!authorize("build", read));         // build rejected
         CHECK(!authorize("set", read));           // file-write rejected
+        CHECK(!authorize("edit", read));          // operational file-write rejected (issue #34)
         CHECK(!authorize("session.play", read));  // session-control rejected
+        CHECK(!authorize("shutdown", read));      // operational session-control rejected
+        CHECK(authorize("query", read));          // operational read is baseline-allowed
     }
 
     // --- authorize(): a fully-privileged token --------------------------------------------------

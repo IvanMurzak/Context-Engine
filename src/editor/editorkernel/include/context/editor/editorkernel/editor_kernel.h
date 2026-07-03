@@ -90,6 +90,14 @@ public:
     EditorKernel(const EditorKernel&) = delete;
     EditorKernel& operator=(const EditorKernel&) = delete;
 
+    // Wire the daemon's real method backing (see bridge::MethodBackend) BEFORE start(), so a
+    // cross-process client's operational verbs (edit/query/…) are served over the composed kernel
+    // instead of returning contract.unimplemented. Non-owning; the backend must outlive serving.
+    void set_method_backend(const bridge::MethodBackend* backend) noexcept
+    {
+        daemon_.set_method_backend(backend);
+    }
+
     // Boot the daemon: the atomic single-instance try-lock (R-BRIDGE-001) then a warm attach of the
     // persisted reconcile index. `booted` = this instance owns the Project; `attach` = an instance is
     // already live (do NOT run a second); `error` = an OS/filesystem error. `launch_scopes` is the

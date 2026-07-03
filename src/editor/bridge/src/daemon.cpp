@@ -25,9 +25,12 @@ StartOutcome Daemon::start(bool write_capable, ScopeSet launch_scopes)
     }
 
     // Lock held — bring up a fresh incarnation's event stream + the scope-enforcing dispatcher.
+    // The dispatcher captures the composing layer's method backend (set before start()) AND the
+    // launch-time scope ceiling, so a cross-process client's real verbs are served over the same one
+    // JSON-RPC surface and clamped to least privilege on the wire exactly as in-process (R-SEC-007).
     launch_scopes_ = launch_scopes;
     events_.emplace();
-    dispatcher_.emplace(&*events_);
+    dispatcher_.emplace(&*events_, backend_, launch_scopes);
     running_ = true;
 
     // Announce the session on the client-facing stream.
@@ -52,8 +55,9 @@ void Daemon::stop()
 Dispatcher::AttachResult Daemon::attach_client(const contract::ClientHandshake& client,
                                                ScopeSet requested) const
 {
-    // Clamp the requested scopes to the operator's launch-time ceiling (least privilege).
-    return dispatcher_->attach(client, launch_scopes_.intersect(requested));
+    // The dispatcher holds the launch-time scope ceiling and clamps to least privilege (R-SEC-007)
+    // for BOTH this in-process path and the cross-process wire path, so the clamp lives in ONE place.
+    return dispatcher_->attach(client, requested);
 }
 
 } // namespace context::editor::bridge
