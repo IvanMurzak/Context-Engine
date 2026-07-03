@@ -1,0 +1,74 @@
+src/kernel/CMakeLists.txt
+  s_00cb1100a75700::t_a6a366fc8d14ba 1-36
+src/kernel/include/context/kernel/component.h
+  s_00cb1100a75700::t_fd363b974fa47f 1-6,8-59
+  s_00cb1100a75700::t_b507961cf01235 7
+src/kernel/src/event_bus.cpp
+  s_00cb1100a75700::t_1d8c727b1a6a89 1-79
+src/kernel/src/platform.cpp
+  s_00cb1100a75700::t_ae64bc5e0708df 1-42
+src/kernel/src/kernel.cpp
+  s_00cb1100a75700::t_880bc4b3af827f 1-17
+src/kernel/tests/test_world.cpp
+  s_00cb1100a75700::t_8eb302d27ee5f4 1-168
+src/kernel/tests/test_module_registry.cpp
+  s_00cb1100a75700::t_6775259adbbfb4 1-83
+src/kernel/tests/test_event_bus.cpp
+  s_00cb1100a75700::t_d422aa2a916903 1-112
+src/kernel/tests/test_platform.cpp
+  s_00cb1100a75700::t_ba97d843e7e7c7 1-80
+src/kernel/src/module.cpp
+  s_00cb1100a75700::t_39bf88dbff1a8a 1-56
+src/CMakeLists.txt
+  s_00cb1100a75700::t_0f6f7b12acccbd 137-139
+  s_00cb1100a75700::t_31268058e1b4ec 72,75-77
+  s_00cb1100a75700::t_d2b268e240c3b7 78
+src/kernel/include/context/kernel/module.h
+  s_00cb1100a75700::t_d776cd784398a8 1-80
+docs/sim-render-timing-contract.md
+  s_00cb1100a75700::t_daca2126f3b766 1-79
+src/kernel/include/context/kernel/kernel.h
+  s_00cb1100a75700::t_432f777fc0e727 1-112
+src/kernel/src/world.cpp
+  s_00cb1100a75700::t_eeffc9751594fd 1-390
+src/kernel/include/context/kernel/platform.h
+  s_00cb1100a75700::t_2dc1186ef65729 1-109
+src/kernel/include/context/kernel/scheduler.h
+  s_00cb1100a75700::t_85a65c9e146ffa 1-71
+src/kernel/tests/kernel_test.h
+  s_00cb1100a75700::t_cbf391c8953ba0 1-29
+src/kernel/src/scheduler.cpp
+  s_00cb1100a75700::t_462bb06f5cf56c 1-61
+src/kernel/tests/test_resource.cpp
+  s_00cb1100a75700::t_7516e824449c58 1-81
+src/kernel/tests/test_scheduler.cpp
+  s_00cb1100a75700::t_34855e3085f133 1-123
+src/kernel/include/context/kernel/world.h
+  s_00cb1100a75700::t_e404319fd43735 1-119
+src/kernel/include/context/kernel/event_bus.h
+  s_00cb1100a75700::t_6fefbbbf8f2a9d 1-89
+src/kernel/include/context/kernel/entity.h
+  s_00cb1100a75700::t_d39c9c53b4958a 1-42
+src/kernel/tests/test_kernel.cpp
+  s_00cb1100a75700::t_d26d3d061fcd45 1-123
+src/kernel/README.md
+  s_00cb1100a75700::t_2568d0d0254938 3-44
+src/kernel/include/context/kernel/resource.h
+  s_00cb1100a75700::t_a8b503b0a7ae89 1-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "ce319966b472a33621ec58391508384c682f874f",
+  "prompts": {},
+  "sessions": {
+    "s_00cb1100a75700": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c36dbb71-cb5a-4c4d-b9b0-792a43a89435",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
