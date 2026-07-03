@@ -1,0 +1,51 @@
+tools/tests/test_verify_artifact.py
+  s_4dcafa08bfb269::t_053eaabac47102 1-235
+tools/tests/fixtures/sample-artifact.bin
+  s_4dcafa08bfb269::t_628dade3031b39 1
+cmake/versioned-install-check.cmake
+  s_4dcafa08bfb269::t_6a69f0087249dc 1-59
+tools/README.md
+  s_4dcafa08bfb269::t_50812ef0793f7e 15-28
+docs/versioned-install.md
+  s_4dcafa08bfb269::t_cdd5fe49493eef 36-53
+docs/signing.md
+  s_4dcafa08bfb269::t_b30064e3c3fd9f 1-149
+tools/tests/fixtures/allowed_signers
+  s_4dcafa08bfb269::t_628dade3031b39 1-4
+tools/tests/fixtures/sample-artifact.bin.sig
+  s_4dcafa08bfb269::t_628dade3031b39 1-6
+tools/tests/fixtures/test-signer.pub
+  s_4dcafa08bfb269::t_628dade3031b39 1
+.gitattributes
+  s_4dcafa08bfb269::t_e9e3b4003b643f 9-15
+tools/verify_artifact.py
+  s_4dcafa08bfb269::t_1f1ac717af9fe6 1-201
+tools/trust-root/allowed_signers
+  s_4dcafa08bfb269::t_608d284aeaea97 1-17
+src/CMakeLists.txt
+  s_c0d9692844dbf4::t_26ffe0aa7d518f 104-153
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "f640ab180e398daeb9c0a641ebeed1b250d53d08",
+  "prompts": {},
+  "sessions": {
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_c0d9692844dbf4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-afb0acc22709bbffc",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
