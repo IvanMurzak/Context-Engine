@@ -135,7 +135,15 @@ bool NativeFileStore::write(std::string_view path, std::string_view data)
     if (!data.empty())
         out.write(data.data(), static_cast<std::streamsize>(data.size()));
     out.flush();
-    return static_cast<bool>(out);
+    if (!out)
+    {
+        // A real I/O failure mid-write (e.g. ENOSPC): don't leave a partially-written file behind.
+        // Every write() target is an atomic .tmp, so a stray residue would outlive the failed op.
+        out.close();
+        fs::remove(target, ec);
+        return false;
+    }
+    return true;
 }
 
 bool NativeFileStore::rename(std::string_view from, std::string_view to)
@@ -161,8 +169,12 @@ bool NativeFileStore::rename(std::string_view from, std::string_view to)
 
 bool NativeFileStore::remove(std::string_view path)
 {
+    const fs::path target = resolve(path);
     std::error_code ec;
-    return fs::remove(resolve(path), ec); // true iff a file existed and was removed.
+    // File-only, matching MemoryFileStore: never remove a directory (mirrors exists()/read()/stat()).
+    if (!fs::is_regular_file(target, ec))
+        return false;
+    return fs::remove(target, ec); // true iff the file was removed.
 }
 
 void NativeFileStore::fsync(std::string_view path)
@@ -173,8 +185,11 @@ void NativeFileStore::fsync(std::string_view path)
         return; // nothing durable to flush (e.g. a temp already renamed away). Best-effort, never throws.
 
 #ifdef _WIN32
-    HANDLE h = CreateFileW(target.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    // FlushFileBuffers requires the handle to hold GENERIC_WRITE access — a GENERIC_READ-only handle
+    // fails with ERROR_ACCESS_DENIED, silently turning the durability barrier into a no-op. Open R+W.
+    HANDLE h = CreateFileW(target.c_str(), GENERIC_READ | GENERIC_WRITE,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+                           FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE)
         return;
     FlushFileBuffers(h);
