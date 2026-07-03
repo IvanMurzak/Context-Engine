@@ -116,6 +116,13 @@ endif()
 add_subdirectory(editor/contract)
 add_subdirectory(cli)
 
+# The EditorKernel bridge (M1): daemon-per-worktree + single-instance lock (R-BRIDGE-001) + JSON-RPC
+# 2.0 RPC dispatcher with R-SEC-007 scope enforcement + the client-facing R-BRIDGE-008 event stream.
+# Dispatches OVER the contract registry (src/editor/contract/) and forwards context_kernel's log
+# topic. Wired here — apart from add_subdirectory(kernel) above — so concurrent sibling tasks touching
+# src/kernel/ and src/ merge cleanly.
+add_subdirectory(editor/bridge)
+
 # ---------------------------------------------------------------------------
 # R-VER-004 — versioned install layout (docs/versioned-install.md).
 #
