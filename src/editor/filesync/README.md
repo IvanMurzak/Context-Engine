@@ -45,6 +45,13 @@ Library target: **`context_filesync`** (links `context_kernel` + `context_warnin
 - **`NullWatcher`** is the portable default (always degraded → correctness from the crawl). A real
   inotify / ReadDirectoryChangesW / FSEvents watcher is a later platform-specific drop-in behind the
   same seam; because hashes are authoritative, correctness never depends on it.
+- **Crashed-write temp residue is not garbage-collected.** A crash between `atomic_write`'s temp write
+  and its rename (or during `IntentLog::begin`'s own atomic write) can leave a `.tmp.<unique>` file
+  behind. Such residue is correctly *ignored* by reconciliation (`is_atomic_temp_name` /
+  `is_control_path`), so it never corrupts state — but nothing sweeps it, so a repeatedly-crashing
+  daemon accumulates orphaned temp files. A production impl reaps residue that has no matching pending
+  intent entry during the recovery crawl; deferred because a correct sweep must not race an in-flight
+  rename.
 
 ## Tests
 

@@ -4,7 +4,9 @@
 //   * a DROPPED watcher event is still reconciled by the crawl (the safety net);
 //   * a same-mtime+size in-place edit is missed by the gated crawl but caught by the full re-hash;
 //   * the daemon's own write is self-echo-suppressed;
-//   * a degraded watcher emits a visible watcher.degraded log event (never a silent fall-back).
+//   * a degraded watcher emits a visible watcher.degraded log event (never a silent fall-back);
+//   * a touch (mtime bump, unchanged content) refreshes the index's cheap gate so a later gated
+//     crawl short-circuits instead of re-reading + re-hashing the file on every pass.
 
 #include "context/editor/filesync/content_hash.h"
 #include "context/editor/filesync/file_store.h"
@@ -189,6 +191,38 @@ int main()
         auto changes = rec2.crawl(/*gated=*/true);
         CHECK(has_change(changes, "proj/b.txt", ChangeType::removed));
         CHECK(!rec2.index().get("proj/b.txt").has_value());
+    }
+
+    // --- 7. touch (mtime bump, content unchanged) refreshes the index's cheap gate ---------------
+    // A bare `touch` bumps mtime without changing bytes. rehash reports no change (the hash is the
+    // truth) but MUST refresh the index's stat, or the mtime+size gate is permanently defeated for
+    // that file (every gated crawl re-reads + re-hashes it forever — the exact cost the index avoids).
+    {
+        MemoryFileStore fs;
+        FakeWatcher watcher;
+        context::kernel::ManualClock clock;
+        context::kernel::InlineTaskRunner tasks;
+        Reconciler rec(fs, watcher, clock, tasks, "proj", "proj/.editor/index");
+
+        fs.write("proj/e.txt", "E0");
+        watcher.emit("proj/e.txt", ChangeKind::created);
+        (void)rec.reconcile_hints();
+        const std::uint64_t mtime0 = rec.index().get("proj/e.txt")->mtime_nanos;
+
+        // Touch: bump mtime, identical bytes.
+        const std::uint64_t bumped = mtime0 + 4242;
+        fs.set_mtime("proj/e.txt", bumped);
+        watcher.emit("proj/e.txt", ChangeKind::modified);
+
+        // Unchanged content -> no reconcile change reported...
+        CHECK(rec.reconcile_hints().empty());
+        // ...but the index's cheap-gate stat was refreshed to the new mtime (the fix).
+        CHECK(rec.index().get("proj/e.txt")->mtime_nanos == bumped);
+        CHECK(rec.index().get("proj/e.txt")->content_hash == content_hash("E0"));
+
+        // Consequence: a subsequent gated crawl short-circuits (mtime+size match) — no re-read.
+        CHECK(rec.crawl(/*gated=*/true).empty());
+        CHECK(rec.index().get("proj/e.txt")->content_hash == content_hash("E0"));
     }
 
     FILESYNC_TEST_MAIN_END();

@@ -97,7 +97,14 @@ std::optional<ReconcileChange> Reconciler::rehash(std::string_view path, std::ui
 
     const std::optional<IndexEntry> prev = index_.get(key);
     if (prev && prev->content_hash == hash)
-        return std::nullopt; // content unchanged — hash is the truth, hint was spurious/duplicate.
+    {
+        // Content unchanged — the hash is the truth, the hint/mtime bump was spurious. Refresh the
+        // index's cheap-gate stat (mtime+size) so a later gated crawl short-circuits instead of
+        // re-reading + re-hashing this file forever (a bare `touch` bumps mtime without changing bytes).
+        if (const std::optional<FileStat> st = fs_.stat(key))
+            index_.put(key, IndexEntry{st->size, st->mtime_nanos, hash});
+        return std::nullopt;
+    }
 
     const std::optional<FileStat> st = fs_.stat(key);
     index_.put(key, IndexEntry{st ? st->size : static_cast<std::uint64_t>(current->size()),

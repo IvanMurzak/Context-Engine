@@ -147,6 +147,11 @@ std::string ensure_hmac_key(FileStore& fs, std::string_view editor_dir)
     if (const std::optional<std::string> existing = fs.read(key_path))
         return *existing;
 
+    // std::random_device is the entropy source. On most platforms it is a real OS CSPRNG; on a few
+    // (older MinGW libstdc++) it is deterministic, making the key predictable and weakening the
+    // integrity check. Acceptable for M1: the HMAC's job is corruption / foreign-log detection, NOT
+    // defending against a same-user attacker who can already read `.editor/hmac.key`. A hardened build
+    // should mix in a high-resolution clock / OS CSPRNG on platforms with a weak random_device.
     std::random_device rd;
     std::uniform_int_distribution<int> dist(0, 255);
     std::string key;
