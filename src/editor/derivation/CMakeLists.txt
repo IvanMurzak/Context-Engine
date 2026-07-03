@@ -1,0 +1,43 @@
+# src/editor/derivation/ — the M1 incremental derivation graph (L-19/L-22, R-FILE-013, R-CLI-006):
+# file changes (from the file-sync layer's ReconcileChange) → a minimal canonical-parse node → the
+# derived context::kernel::World, with content-hash memoized dirty-subgraph recompute, a monotonic
+# derived-world generation counter, derivation-side backpressure (coalesced batched passes + a
+# queue-depth / bounded-lag signal + load-shed to the visible/queried subgraph), and the
+# read-your-writes query barrier. The canonical parse is a deliberate M1 placeholder (whitespace
+# normalization) behind a stable seam; the real canonical-JSON serializer + schema model is M2.
+
+add_library(context_derivation STATIC
+    src/canonical_parse.cpp
+    src/derivation_graph.cpp)
+
+target_include_directories(context_derivation PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+# Consumes the merged M1 deps read-only via their public headers: context_filesync for the
+# ReconcileChange input type, context_kernel for the derived World + the internal EventBus the
+# generation / backpressure events are published on. PUBLIC because the derivation graph's public
+# headers expose those types, so consumers need their include paths. (context_filesync already links
+# context_kernel PUBLIC; context_kernel is named explicitly here because this target uses World and
+# EventBus directly.)
+target_link_libraries(context_derivation PUBLIC context_filesync context_kernel)
+
+# Every Context target links the warnings-as-errors baseline (conventions.md).
+target_link_libraries(context_derivation PRIVATE context_warnings)
+
+# --- tests (R-QA-013: behavior ships WITH its tests in the same PR) -----------------------------
+# The repo has no C++ test framework (adding one would pull a vcpkg dep + a license-allowlist entry);
+# each test is a plain assertion-bearing executable registered with ctest. See tests/derivation_test.h.
+# Coverage spans the happy path (change -> derived World + generation), edge cases (memoization,
+# coalescing, idempotent removal, empty pass), and failure paths (barrier timeout, load-shed deferral).
+set(_context_derivation_tests
+    test_canonical_parse
+    test_derivation_graph
+    test_incremental
+    test_backpressure
+    test_query_barrier)
+
+foreach(_t IN LISTS _context_derivation_tests)
+    add_executable(context_derivation_${_t} tests/${_t}.cpp)
+    target_link_libraries(context_derivation_${_t} PRIVATE context_derivation context_warnings)
+    target_include_directories(context_derivation_${_t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    add_test(NAME derivation-${_t} COMMAND context_derivation_${_t})
+endforeach()
