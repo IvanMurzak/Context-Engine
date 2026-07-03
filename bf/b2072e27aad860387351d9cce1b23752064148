@@ -1,0 +1,22 @@
+src/editor/editorkernel/include/context/editor/editorkernel/kernel_server.h
+  s_00cb1100a75700::t_b8359c4ee05373 54-55
+src/cli/src/daemon_command.cpp
+  s_00cb1100a75700::t_dbce5efeec6430 196-197
+  s_00cb1100a75700::t_4580932f1ae85e 140-144,146,149-153,158-159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bfb2072e27aad860387351d9cce1b23752064148",
+  "prompts": {},
+  "sessions": {
+    "s_00cb1100a75700": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c36dbb71-cb5a-4c4d-b9b0-792a43a89435",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
