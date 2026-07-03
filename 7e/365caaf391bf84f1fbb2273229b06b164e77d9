@@ -1,0 +1,32 @@
+src/cli/src/editor_driver.cpp
+  s_00cb1100a75700::t_0e7a01f25dc739 67-69
+  s_00cb1100a75700::t_2de439bbaa825c 83-96
+  s_00cb1100a75700::t_d4afa9a36d2857 168
+src/editor/editorkernel/tests/test_editor_kernel.cpp
+  s_00cb1100a75700::t_988d034b0fe475 44
+  s_00cb1100a75700::t_a91331edfe2ce0 187-222,226-264
+  s_00cb1100a75700::t_7d23e7bfa7b343 15
+  s_00cb1100a75700::t_41c17abe9b3d90 265
+src/editor/editorkernel/src/editor_kernel.cpp
+  s_00cb1100a75700::t_f382b2102ff7d2 11
+  s_00cb1100a75700::t_49e7d4f9addedd 26-30
+  s_00cb1100a75700::t_9cd5305048deca 177-182,185
+src/cli/tests/test_editor_driver.cpp
+  s_00cb1100a75700::t_ce28f6836868e5 30-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "7e365caaf391bf84f1fbb2273229b06b164e77d9",
+  "prompts": {},
+  "sessions": {
+    "s_00cb1100a75700": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c36dbb71-cb5a-4c4d-b9b0-792a43a89435",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
