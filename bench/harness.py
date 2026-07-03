@@ -110,7 +110,7 @@ def main() -> int:
                     help="thread count for parallel scenarios (0 = subject default)")
     ap.add_argument("--single-thread-attach", action="store_true",
                     help="additionally measure attach with --threads 1")
-    ap.add_argument("--scenarios", default="attach,edit,bulk,import,merge",
+    ap.add_argument("--scenarios", default=",".join(SCENARIOS),
                     help="comma-separated scenario subset")
     ap.add_argument("--count", type=int, default=2000,
                     help="file count for bulk / merge scenarios")
