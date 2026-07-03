@@ -98,7 +98,19 @@ bool is_inside_jail(std::string_view root, std::string_view path)
     if (path_norm == root_norm)
         return true;
     if (root_norm.empty())
-        return !path_norm.empty() && path_norm.rfind("..", 0) != 0;
+    {
+        // Root normalizes to empty (root was "" or "." — the jail is the current directory). A path is
+        // inside iff it is a relative path that does not ascend past the root. An ANCHORED path (a POSIX
+        // "/..." or a Windows "X:/...", detected the same way take_anchor() does) can never sit under a
+        // relative root, so it escapes; a ".."-leading path escapes too.
+        if (path_norm.empty())
+            return false;
+        const bool anchored =
+            path_norm[0] == '/' || (path_norm.size() >= 2 && path_norm[1] == ':');
+        if (anchored)
+            return false;
+        return path_norm.rfind("..", 0) != 0;
+    }
 
     // Beneath the root iff it starts with "<root>/".
     const std::string prefix = root_norm + "/";

@@ -264,14 +264,16 @@ std::vector<Diagnostic> WriteQueue::recover()
 {
     std::vector<Diagnostic> diagnostics;
 
-    for (const std::string& op_id : log_.pending())
+    for (const std::string& op_name : log_.pending())
     {
         std::string error;
-        const std::optional<IntentEntry> entry = log_.load(op_id, error);
+        const std::optional<IntentEntry> entry = log_.load(op_name, error);
         if (!entry)
         {
-            // Integrity / foreign-log / parse failure: name the op, do not touch state.
-            diagnostics.push_back(Diagnostic{"filesync.intent.integrity", op_id, error, {}});
+            // Integrity / foreign-log / parse failure: no verified entry, so the on-disk basename is
+            // the only id we can name. (For a loaded entry below, we name entry->op_id — the caller's
+            // ORIGINAL id, which may differ from the sanitized on-disk basename.)
+            diagnostics.push_back(Diagnostic{"filesync.intent.integrity", op_name, error, {}});
             continue;
         }
 
@@ -284,7 +286,7 @@ std::vector<Diagnostic> WriteQueue::recover()
             if (!is_inside_jail(root_, write.path))
             {
                 fully_resumed = false;
-                diagnostics.push_back(Diagnostic{"filesync.intent.jail", op_id,
+                diagnostics.push_back(Diagnostic{"filesync.intent.jail", entry->op_id,
                                                  "planned write escapes the project root: " +
                                                      write.path,
                                                  {write.path}});
@@ -299,7 +301,9 @@ std::vector<Diagnostic> WriteQueue::recover()
 
             if (current_hash == write.expected_prev_hash)
             {
-                const std::string unique = op_id + ".r" + std::to_string(i);
+                // The unique tag becomes part of a temp filename, so use the slash-free on-disk
+                // basename (not entry->op_id, which may contain a path separator).
+                const std::string unique = op_name + ".r" + std::to_string(i);
                 if (!atomic_write(fs_, write.path, write.data, unique))
                     fully_resumed = false;
                 continue;
@@ -307,14 +311,14 @@ std::vector<Diagnostic> WriteQueue::recover()
 
             // The file moved on since planning: refuse to clobber it (L-25 — no rollback either).
             fully_resumed = false;
-            diagnostics.push_back(Diagnostic{"filesync.intent.cas", op_id,
+            diagnostics.push_back(Diagnostic{"filesync.intent.cas", entry->op_id,
                                              "content changed since crash; not clobbering " +
                                                  write.path,
                                              {write.path}});
         }
 
         if (fully_resumed)
-            log_.clear(op_id);
+            log_.clear(op_name);
     }
 
     return diagnostics;

@@ -205,5 +205,32 @@ int main()
         CHECK(fs.exists("proj/.editor/hmac.key"));
     }
 
+    // --- H. op-id with a path separator: the recovery diagnostic names the ORIGINAL op id --------
+    // The intent file lives under a SANITIZED basename ('/' -> '_'), but the diagnostic must still
+    // name the id the caller tracks ("grp/op-slash"), not the sanitized on-disk form ("grp_op-slash").
+    {
+        MemoryFileStore fs;
+        context::kernel::ManualClock clock;
+        IntentLog log(fs, "proj/.editor", kKey);
+        WriteQueue queue(fs, "proj", log, clock);
+
+        IntentEntry entry;
+        entry.op_id = "grp/op-slash";
+        entry.incarnation_id = "incarnation-1";
+        entry.writes = {plan("proj/../evil.txt", "", "E")}; // jail-escaping -> jail diagnostic
+        CHECK(log.begin(entry));
+
+        auto diags = queue.recover();
+        CHECK(has_code(diags, "filesync.intent.jail"));
+        bool named_original = false;
+        for (const Diagnostic& diagnostic : diags)
+        {
+            if (diagnostic.code == "filesync.intent.jail" && diagnostic.op_id == "grp/op-slash")
+                named_original = true;
+        }
+        CHECK(named_original); // original op id, not the sanitized "grp_op-slash" basename
+        CHECK(!fs.exists("evil.txt"));
+    }
+
     FILESYNC_TEST_MAIN_END();
 }

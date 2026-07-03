@@ -29,5 +29,14 @@ int main()
     CHECK(!is_inside_jail("proj", "project2/a.txt"));     // sibling with shared prefix
     CHECK(!is_inside_jail("proj", "proj/../proj-evil"));  // prefix-adjacent escape
 
+    // --- empty / "." root (the jail IS the current directory) -----------------------------------
+    // A root of "" or "." normalizes to empty. A relative path stays inside; an ANCHORED path must
+    // still be refused (an absolute path can never live under a relative root — R-SEC-008).
+    CHECK(is_inside_jail(".", "a.txt"));                 // relative path is inside a cwd-root
+    CHECK(is_inside_jail("", "sub/deep/a.txt"));         // "" normalizes to the same cwd-root
+    CHECK(!is_inside_jail(".", "/etc/passwd"));          // POSIX-absolute escape refused
+    CHECK(!is_inside_jail(".", "C:/Windows/system32"));  // Windows-absolute escape refused
+    CHECK(!is_inside_jail(".", "../evil.txt"));          // relative ascend refused
+
     FILESYNC_TEST_MAIN_END();
 }

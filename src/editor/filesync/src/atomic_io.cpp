@@ -21,8 +21,9 @@ std::string atomic_temp_path(std::string_view path, std::string_view unique)
 
 bool is_atomic_temp_name(std::string_view name)
 {
-    // Exact ".tmp" suffix (the unique-less form) or the ".tmp.<unique>" residue form — matching the
-    // two shapes atomic_temp_path() can produce, and only those.
+    // Exact ".tmp" suffix (the unique-less form) or the ".tmp.<unique>" infix — the two shapes
+    // atomic_temp_path() produces. Purely lexical, so it may conservatively over-match an authored file
+    // literally shaped like "<name>.tmp" / "<name>.tmp.<x>" (the safe bias — see the header).
     if (name.size() >= 4 && name.substr(name.size() - 4) == ".tmp")
         return true;
     return name.find(".tmp.") != std::string_view::npos;
