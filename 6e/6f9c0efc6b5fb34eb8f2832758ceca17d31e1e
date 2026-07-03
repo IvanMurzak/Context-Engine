@@ -1,0 +1,60 @@
+src/CMakeLists.txt
+  s_00cb1100a75700::t_78c65111ea2602 126-131
+docs/ci-fleet-manifest.json
+  s_00cb1100a75700::t_ee1c28e2a829c3 1-238
+bench/perf_gate.py
+  s_00cb1100a75700::t_a1b67768493d22 1-198
+docs/ci-fleet-manifest.md
+  s_00cb1100a75700::t_a3283c77f4f651 1-97
+src/testing/tests/test_seeded_rng.cpp
+  s_00cb1100a75700::t_59524ae6b65936 1-75
+src/testing/src/fault_scenarios.cpp
+  s_00cb1100a75700::t_4539a405ca27c4 1-294
+src/testing/tests/test_seed_replay.cpp
+  s_00cb1100a75700::t_87cdcc9066082c 1-53
+tools/tests/test_check_fleet_manifest.py
+  s_00cb1100a75700::t_8642d30aed22af 1-119
+src/testing/CMakeLists.txt
+  s_00cb1100a75700::t_b7345cf2f6b013 1-47
+src/testing/tests/test_crash_recovery.cpp
+  s_00cb1100a75700::t_982f6e40c2d96f 1-38
+src/testing/tests/test_watcher_faults.cpp
+  s_00cb1100a75700::t_da4b05ccb9a8e9 1-41
+src/testing/tests/testing_test.h
+  s_00cb1100a75700::t_440d218a763487 1-28
+docs/test-vector-corpus.md
+  s_00cb1100a75700::t_30601ff13f4593 1-77
+src/testing/include/context/testing/fault_scenarios.h
+  s_00cb1100a75700::t_90c2444cda49d0 1-77
+src/testing/include/context/testing/seeded_rng.h
+  s_00cb1100a75700::t_288abd09a4512d 1-62
+docs/perf-gate-methodology.md
+  s_00cb1100a75700::t_5a739772706ecb 1-98
+bench/tests/test_perf_gate.py
+  s_00cb1100a75700::t_d464128b6d5354 1-151
+tools/check_fleet_manifest.py
+  s_00cb1100a75700::t_430bee9409ec9d 1-133
+src/testing/tests/test_slow_client.cpp
+  s_00cb1100a75700::t_b5a26fd39ae90c 1-33
+.github/workflows/ci.yml
+  s_00cb1100a75700::t_3e36eb499be773 67-72
+  s_00cb1100a75700::t_a4299b1eaf4273 221-235
+bench/baselines/README.md
+  s_00cb1100a75700::t_422d842e2cd3ed 1-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "6e6f9c0efc6b5fb34eb8f2832758ceca17d31e1e",
+  "prompts": {},
+  "sessions": {
+    "s_00cb1100a75700": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c36dbb71-cb5a-4c4d-b9b0-792a43a89435",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
