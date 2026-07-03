@@ -2,6 +2,7 @@
 
 #include "context/cli/app.h"
 
+#include "context/cli/editor_driver.h"
 #include "context/cli/scaffold.h"
 #include "context/editor/contract/json.h"
 #include "context/editor/contract/registry.h"
@@ -110,6 +111,12 @@ Envelope run(const std::vector<std::string>& args)
     if (args.empty())
         return Envelope::failure("usage.invalid",
                                  "no verb supplied — try 'context describe --json'");
+
+    // `editor` is a CLI-local operational command family (a headless in-process driver over the
+    // composed EditorKernel), NOT a contract registry verb — so it is intercepted before registry
+    // resolution. See editor_driver.h for why it is deliberately outside the CLI ≡ RPC ≡ MCP surface.
+    if (args[0] == "editor")
+        return run_editor(std::vector<std::string>(args.begin() + 1, args.end()));
 
     // --- resolve the verb selector (1 token global, or 2 tokens noun-scoped) --------------------
     const auto [ns0, head0] = split_ns(args[0]);

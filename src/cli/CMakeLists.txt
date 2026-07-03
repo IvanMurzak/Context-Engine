@@ -7,16 +7,19 @@
 # The CLI logic as a library so the ctest executables can link it without pulling in main().
 add_library(context_cli STATIC
     src/app.cpp
+    src/editor_driver.cpp
     src/scaffold.cpp)
 
 target_include_directories(context_cli PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-# context_contract is PUBLIC (its headers appear in the CLI's public headers); context_kernel is
-# PRIVATE (only scaffold.cpp's runnable-template proof touches it). Every target links the
-# warnings-as-errors baseline (conventions.md).
+# context_contract is PUBLIC (its headers appear in the CLI's public headers); context_kernel and
+# context_editorkernel are PRIVATE (only scaffold.cpp's runnable-template proof touches context_kernel;
+# only editor_driver.cpp's `context editor smoke` in-process driver touches context_editorkernel — the
+# editor_driver.h public header exposes only contract types). Every target links the warnings-as-errors
+# baseline (conventions.md).
 target_link_libraries(context_cli
     PUBLIC context_contract
-    PRIVATE context_kernel context_warnings)
+    PRIVATE context_kernel context_editorkernel context_warnings)
 
 # Self-contained GCC runtime for the CLI executables. context_cli uses std::filesystem (the
 # `context new` scaffolder), whose libstdc++ symbols live in a NEWER libstdc++-6.dll; on a MinGW
@@ -39,6 +42,7 @@ target_link_options(context PRIVATE ${_context_cli_static_runtime})
 # tests/cli_test.h is the tiny CHECK() harness.
 set(_context_cli_tests
     test_cli
+    test_editor_driver
     test_scaffold)
 
 foreach(_t IN LISTS _context_cli_tests)

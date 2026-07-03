@@ -116,11 +116,10 @@ if(CONTEXT_BUILD_SPIKES OR CONTEXT_BUILD_SPIKE_CEF)
 endif()
 
 # M1 public-contract cluster (R-CLI-007/008/009/013): the single registry that generates
-# CLI ≡ RPC ≡ MCP ≡ introspection (src/editor/contract/) plus the `context` CLI (src/cli/) that
-# consumes it and context_kernel. Wired here — deliberately apart from add_subdirectory(kernel)
-# above — so concurrent sibling tasks touching src/editor/ and src/ merge cleanly.
+# CLI ≡ RPC ≡ MCP ≡ introspection (src/editor/contract/). Wired here — deliberately apart from
+# add_subdirectory(kernel) above — so concurrent sibling tasks touching src/editor/ and src/ merge
+# cleanly.
 add_subdirectory(editor/contract)
-add_subdirectory(cli)
 
 # The EditorKernel bridge (M1): daemon-per-worktree + single-instance lock (R-BRIDGE-001) + JSON-RPC
 # 2.0 RPC dispatcher with R-SEC-007 scope enforcement + the client-facing R-BRIDGE-008 event stream.
@@ -128,6 +127,16 @@ add_subdirectory(cli)
 # topic. Wired here — apart from add_subdirectory(kernel) above — so concurrent sibling tasks touching
 # src/kernel/ and src/ merge cleanly.
 add_subdirectory(editor/bridge)
+
+# The EditorKernel composition (M1): wires filesync + derivation + kernel World + bridge into ONE
+# runnable headless attach path (src/editor/editorkernel/). Added AFTER its five composed deps
+# (filesync, derivation, kernel, contract, bridge) so their targets exist for its PUBLIC link.
+add_subdirectory(editor/editorkernel)
+
+# The `context` CLI (M1, src/cli/) — consumes the contract registry (CLI ≡ RPC ≡ MCP surface) and
+# context_kernel, plus context_editorkernel for the `context editor smoke` in-process driver. Added
+# AFTER contract + editorkernel so its link deps exist.
+add_subdirectory(cli)
 
 # M1 test-system foundations (R-QA-010): the deterministic fault-injection harness (src/testing/) —
 # a reusable context_testing support lib + scenario tests driving the injectable kernel + file-sync +

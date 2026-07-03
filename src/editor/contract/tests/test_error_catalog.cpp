@@ -5,6 +5,7 @@
 #include "context/editor/contract/error_catalog.h"
 #include "contract_test.h"
 
+#include <algorithm>
 #include <set>
 #include <string>
 #include <vector>
@@ -64,6 +65,30 @@ int main()
         CHECK(find_code("no.such.code") == nullptr);
         CHECK(exit_code_for("path.jail_violation") == 6);
         CHECK(exit_code_for("no.such.code") == 1); // unknown => generic-error exit
+    }
+
+    // --- R-SEC-007: the scope-denial codes map to the permission class (exit 6) ------------------
+    // Promoted from bridge-local strings into the catalog so a scope-denied RPC returns exit-class 6
+    // instead of the generic error (1). Both are on the frozen baseline (additive-only holds above).
+    {
+        const ErrorCode* denied = find_code("scope.denied");
+        CHECK(denied != nullptr);
+        CHECK(denied->exit_code == 6);       // permission class
+        CHECK(denied->retriable == false);   // a bare retry cannot grant scope
+        CHECK(denied->origin == "R-SEC-007");
+
+        const ErrorCode* insufficient = find_code("scope.insufficient");
+        CHECK(insufficient != nullptr);
+        CHECK(insufficient->exit_code == 6);
+
+        CHECK(exit_code_for("scope.denied") == 6);
+        CHECK(exit_code_for("scope.insufficient") == 6);
+
+        // Both were promoted onto the frozen v0 baseline (so removing/renaming them later trips the
+        // additive-only check just like every other shipped code).
+        const std::vector<std::string>& base = baseline_v0_codes();
+        CHECK(std::find(base.begin(), base.end(), "scope.denied") != base.end());
+        CHECK(std::find(base.begin(), base.end(), "scope.insufficient") != base.end());
     }
 
     CONTRACT_TEST_MAIN_END();

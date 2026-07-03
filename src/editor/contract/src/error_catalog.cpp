@@ -71,6 +71,19 @@ const std::vector<ErrorCode>& catalog()
          false, kExitUnimplemented, "R-CLI-009"},
         {"internal.error", "An unexpected internal error occurred.", false, kExitInternal,
          "R-CLI-008"},
+        // --- scope / authorization (R-SEC-007) -------------------------------------------------
+        // The RPC dispatcher enforces attach-token scopes on EVERY method (adapter-level tool
+        // filtering is bypassable via direct RPC). A denied method returns one of these permission-
+        // class codes so a CLI/RPC caller branches on exit-class 6 instead of the generic error.
+        // `bridge::kScopeDeniedCode` is exactly "scope.denied"; promoting it here (with a frozen
+        // baseline entry below) is what gives a scope-denied RPC its permission-class exit code.
+        {"scope.denied",
+         "The attach token's scope does not permit this method (least privilege, R-SEC-007).", false,
+         kExitPermission, "R-SEC-007"},
+        {"scope.insufficient",
+         "The attach token holds a lower scope than this method requires; re-attach with the needed "
+         "scope.",
+         false, kExitPermission, "R-SEC-007"},
     };
     return the_catalog;
 }
@@ -112,6 +125,8 @@ const std::vector<std::string>& baseline_v0_codes()
         "schema.newer_than_package",
         "contract.unimplemented",
         "internal.error",
+        "scope.denied",
+        "scope.insufficient",
     };
     return baseline;
 }
