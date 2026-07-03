@@ -99,6 +99,9 @@ int main()
         const Envelope install = d.dispatcher().dispatch("package.add", Json::object(), s);
         CHECK(!install.ok());
         CHECK(install.error()->code == kScopeDeniedCode);
+        // R-SEC-007: the bridge points kScopeDeniedCode at the promoted catalog entry, so the
+        // scope-denied envelope now classes as the permission exit (6), not the generic error (1).
+        CHECK(install.exit_code() == 6);
 
         d.stop();
         std::error_code ec;

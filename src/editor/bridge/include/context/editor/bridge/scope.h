@@ -69,11 +69,12 @@ private:
 // the dispatcher calls on every method (R-SEC-007).
 [[nodiscard]] bool authorize(const std::string& rpc_method, const ScopeSet& granted);
 
-// The diagnostic code the dispatcher emits when a token's scope does not permit a method. NOTE: the
-// versioned error-code catalog (src/editor/contract/error_catalog.h) is owned by the contract
-// cluster and is additive-only; promoting this bridge-local code into that catalog (so it gains a
-// permission-class exit code + a frozen-baseline entry) is a contract-owning follow-up. Kept a
-// stable, grep-able string here so the wire `error.code` is meaningful today (R-CLI-008 shape).
+// The diagnostic code the dispatcher emits when a token's scope does not permit a method. This is
+// PROMOTED into the versioned error-code catalog (src/editor/contract/error_catalog.{h,cpp}): the
+// contract cluster carries `scope.denied` (and its sibling `scope.insufficient`) on the frozen v0
+// baseline with permission-class exit code 6 (R-SEC-007), so a scope-denied envelope's exit_code()
+// classes as permission (6) rather than the generic error (1). The string is kept here — grep-stable
+// and identical to the catalog code — so the bridge references the one catalog entry by value.
 inline constexpr const char* kScopeDeniedCode = "scope.denied";
 
 } // namespace context::editor::bridge
