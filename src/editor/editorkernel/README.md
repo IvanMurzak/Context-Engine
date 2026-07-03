@@ -35,12 +35,15 @@ Two write paths reach the derived World:
 
 - The daemon's single-instance lock lives on the **real** filesystem (`project_root`), while the
   reconcile pipeline operates over the **injectable** `FileStore` seam (`filesync_root`). With the
-  portable in-memory `FileStore` the two roots are distinct; when the native `FileStore` lands they
-  coincide on one on-disk directory.
+  portable in-memory `FileStore` the two roots are distinct; with the native `FileStore`
+  (`filesync::NativeFileStore`, rooted at `project_root`) they **coincide on one on-disk directory** —
+  the whole loop then runs against real files.
 - The composition forwards the **derived-world generation** onto the client event stream as
-  `derivation.settled{generation}`. Cross-process transport, a native `FileStore`, and an OS watcher
-  are follow-ups (the merged components ship `MemoryFileStore` / `NullWatcher` seams at M1).
+  `derivation.settled{generation}`. Cross-process transport and an OS watcher are follow-ups (the
+  merged components ship a `NullWatcher` seam at M1; correctness comes from the re-hash crawl).
 
-Tests: `tests/test_editor_kernel.cpp` — the composed-loop integration smoke (boot + attach handshake,
-CLI-verb edit with the read-your-writes barrier, raw edit, single-instance attach signal, and the
-R-SEC-007 scope-denial exit-class-6 path).
+Tests: `tests/test_editor_kernel.cpp` — the composed-loop integration smoke over `MemoryFileStore`
+(boot + attach handshake, CLI-verb edit with the read-your-writes barrier, raw edit, single-instance
+attach signal, and the R-SEC-007 scope-denial exit-class-6 path). `tests/test_editor_kernel_native.cpp`
+— the same composition over **`NativeFileStore`**, proving the derived World is built from ACTUAL files
+on disk (CLI-verb edit lands on real disk; a raw out-of-band on-disk edit reaches the World via the crawl).
