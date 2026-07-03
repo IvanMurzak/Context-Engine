@@ -76,6 +76,10 @@ add_spike(hello)
 # stable interfaces; src/editor/, src/runtime/, src/packages/ gain their targets in later M1 tasks.
 add_subdirectory(kernel)
 
+# M1: the EditorKernel file-sync layer (src/editor/filesync/) — atomic IO + watch-hash-reconcile +
+# crash-recovery intent log (R-FILE-002/004, R-QA-010), built on the kernel platform seams.
+add_subdirectory(editor/filesync)
+
 # M0 de-risking spikes are OPT-IN (CONTEXT_BUILD_SPIKES=ON): the default CI matrix stays
 # untouched. spikes/ecs takes its dependencies from the vcpkg manifest's `spikes` feature;
 # spikes/js-engine acquires its pinned backends itself (FetchContent + NuGet — see its README);
