@@ -1,0 +1,52 @@
+{
+    "_comment": [
+        "L-42 per-target pinned toolchain manifest (DESIGN-DECISIONS.md L-42; ROADMAP.md M0).",
+        "This file is the DECLARED, versioned toolchain artifact: per build target it states the",
+        "L-42 end-state ('l42_target'), what CI actually uses today ('actual'), and — where one",
+        "exists — an exact major.minor version pin ('pin'). tools/check_toolchain.py is the",
+        "machine half; the .github/actions/pinned-toolchain composite action applies it in CI.",
+        "Enforcement levels: 'strict' = version mismatch fails CI; 'advisory' = mismatch emits a",
+        "CI warning annotation but does not fail (drift is visible, not breaking); 'documented' =",
+        "no live probe yet, the entry records reality so drift/adoption is tracked here on paper.",
+        "Bump 'manifest_version' on schema changes, not on pin changes."
+    ],
+    "manifest_version": 1,
+    "targets": {
+        "linux-x86_64": {
+            "compiler": "clang",
+            "l42_target": "mainline clang, exact major.minor pinned",
+            "pin": "20.1",
+            "actual": "clang 20.1 from apt.llvm.org, installed and STRICTLY verified by CI (this entry is at target)",
+            "enforcement": "strict",
+            "install": {
+                "method": "apt.llvm.org (llvm.sh)",
+                "major": 20
+            },
+            "notes": "llvm.sh installs the latest 20.x from apt.llvm.org; the whole LLVM 20 series is 20.1.x, so the major.minor pin is stable across point releases. If upstream ever ships 20.2 the strict gate fails loudly — that is the drift alarm working, not a bug."
+        },
+        "macos-arm64": {
+            "compiler": "apple-clang",
+            "l42_target": "Apple clang via the macOS build agent (L-42 / R-BUILD-007)",
+            "pin": "21.0",
+            "actual": "runner-default Apple clang (macos-latest); the version is RECORDED here, not installed — CI verifies it advisorily, so a runner-image Xcode bump surfaces as a CI warning and a manifest update, never a silent drift (recorded 21.0 from the 2026-07-02 runner image, PR #9 run)",
+            "enforcement": "advisory",
+            "notes": "Honest note: Apple clang IS the L-42 target for macOS, but the version is whatever the GH runner image ships (no pinned install step yet). The staged hardening is either pinning the Xcode selection on the runner or moving to a pinned Homebrew LLVM; until then this entry keeps the actual version declared and drift visible."
+        },
+        "windows-x86_64": {
+            "compiler": "msvc",
+            "l42_target": "clang-cl + MSVC STL / Windows SDK, exact version pinned",
+            "pin": null,
+            "actual": "runner-default MSVC (VS 2022 toolset, cl 19.4x) via the Visual Studio generator — NOT the L-42 target",
+            "enforcement": "documented",
+            "notes": "clang-cl adoption is a STAGED FOLLOW-UP, deliberately not forced in the same pass that introduced this manifest (compiler swaps on Windows deserve their own change + soak). Until then the Windows jobs stay on recorded MSVC with no live probe; this entry is the visible IOU."
+        },
+        "web-emscripten": {
+            "compiler": "emscripten-clang",
+            "l42_target": "Emscripten's bundled LLVM, emsdk version pinned",
+            "pin": null,
+            "actual": "emsdk 'latest' installed at CI time (spike-webgpu-web job) — the bundled LLVM version floats with emsdk",
+            "enforcement": "documented",
+            "notes": "Pinning emsdk (and thereby its LLVM) is a staged follow-up that lands together with the first non-spike web build target; today only the WebGPU spike's web leg uses emscripten."
+        }
+    }
+}

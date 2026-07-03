@@ -3,9 +3,18 @@
 # GH-hosted runners ONLY for now: migrating the Windows leg to the org's self-hosted Windows
 # runner is a deliberate later follow-up, not part of the M0 bootstrap.
 #
-# Toolchain note: these jobs use the runner-default toolchains (Clang on Linux, Apple Clang on
-# macOS, MSVC on Windows). The L-42 per-target pinned Clang toolchain manifest is an M0
-# follow-up and will replace the defaults here.
+# Toolchain (L-42): per-target pins live in cmake/toolchain-versions.json — the versioned,
+# DECLARED target-vs-actual toolchain manifest. The pinned-toolchain composite action
+# (.github/actions/pinned-toolchain, backed by tools/check_toolchain.py) applies it in every
+# build job: ubuntu installs + strictly verifies the pinned clang from apt.llvm.org and exports
+# CC/CXX; macOS advisory-verifies the recorded Apple clang (the manifest's honest temporary
+# reality); Windows stays on documented MSVC — clang-cl adoption is a staged follow-up recorded
+# in the manifest.
+#
+# Compiler caching: sccache with the GitHub-Actions cache backend on the ubuntu/macos legs
+# (CMAKE_{C,CXX}_COMPILER_LAUNCHER=sccache; stats printed at job end). The Windows/MSVC legs
+# skip it deliberately: the Visual Studio generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER,
+# and sccache+MSVC is not worth fighting until the clang-cl follow-up lands.
 
 name: CI
 
@@ -13,6 +22,9 @@ on:
   push:
     branches: [main]
   pull_request:
+
+env:
+  SCCACHE_GHA_ENABLED: "true"
 
 jobs:
   build:
@@ -23,19 +35,20 @@ jobs:
         include:
           - os: ubuntu-latest
             generator: Ninja
-            cc: clang
-            cxx: clang++
           - os: macos-latest
             generator: Ninja
-            cc: ''
-            cxx: ''
           - os: windows-latest # default generator (Visual Studio) — no MSVC env setup needed
             generator: ''
-            cc: ''
-            cxx: ''
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Set up sccache (GHA cache backend)
+        if: runner.os != 'Windows'
+        uses: mozilla-actions/sccache-action@v0.0.10
 
       - name: Configure environment
         shell: bash
@@ -43,9 +56,9 @@ jobs:
           if [ -n "${{ matrix.generator }}" ]; then
             echo "CMAKE_GENERATOR=${{ matrix.generator }}" >> "$GITHUB_ENV"
           fi
-          if [ -n "${{ matrix.cc }}" ]; then
-            echo "CC=${{ matrix.cc }}" >> "$GITHUB_ENV"
-            echo "CXX=${{ matrix.cxx }}" >> "$GITHUB_ENV"
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+            echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
           fi
 
       # Build files live in src/ (root stays minimal): configure with -S src; build/test
@@ -61,15 +74,26 @@ jobs:
         run: ctest --preset dev --verbose
         working-directory: src
 
+      - name: sccache stats
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ${SCCACHE_PATH} --show-stats
+
   sanitize:
     name: sanitize (ASan+UBSan, ubuntu)
     runs-on: ubuntu-latest
     env:
       CMAKE_GENERATOR: Ninja
-      CC: clang
-      CXX: clang++
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Set up sccache (GHA cache backend)
+        uses: mozilla-actions/sccache-action@v0.0.10
 
       - name: Configure (sanitize preset)
         run: cmake -S src --preset sanitize
@@ -82,6 +106,44 @@ jobs:
         run: ctest --preset sanitize --verbose
         working-directory: src
 
+      - name: sccache stats
+        run: ${SCCACHE_PATH} --show-stats
+
+  # L-38 locks TSan-gated CI from day one, but TSan cannot combine with ASan/UBSan in one
+  # binary — hence a job separate from `sanitize`. M0 has no threaded engine code yet (spikes
+  # are exempt from the sanitizer gate), so today this builds+runs context-hello under TSan to
+  # keep the preset proven and the job wired; it grows real coverage with M1's threaded kernel
+  # code (the L-38 auto-parallel scheduler).
+  tsan:
+    name: sanitize (TSan, ubuntu)
+    runs-on: ubuntu-latest
+    env:
+      CMAKE_GENERATOR: Ninja
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Set up sccache (GHA cache backend)
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Configure (tsan preset)
+        run: cmake -S src --preset tsan
+
+      - name: Build
+        run: cmake --build --preset tsan
+        working-directory: src
+
+      - name: Run context-hello under TSan
+        run: ctest --preset tsan --verbose
+        working-directory: src
+
+      - name: sccache stats
+        run: ${SCCACHE_PATH} --show-stats
+
   # R-FILE-011 benchmark baseline on a SMALL corpus (10k files). GH-hosted runners are
   # NOT the R-QA-009 perf-isolated runner class — this job is a trend gauge + harness
   # smoke (results archived as artifacts), not a gating floor. The full 100k corpus run
@@ -92,10 +154,16 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CMAKE_GENERATOR: Ninja
-      CC: clang
-      CXX: clang++
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Set up sccache (GHA cache backend)
+        uses: mozilla-actions/sccache-action@v0.0.10
 
       - name: Generate seeded 10k corpus
         run: python3 bench/gen_corpus.py --size 10000 --out bench/corpora/corpus-10k --jobs 4
@@ -135,9 +203,12 @@ jobs:
           --runs 5 --single-thread-attach --count 2000
           --out bench/results/ci-ubuntu-10k --label ci-ubuntu-10k
 
+      - name: sccache stats
+        run: ${SCCACHE_PATH} --show-stats
+
       - name: Upload bench results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-results
           path: bench/results/
@@ -158,19 +229,20 @@ jobs:
         include:
           - os: ubuntu-latest
             generator: Ninja
-            cc: clang
-            cxx: clang++
           - os: macos-latest
             generator: Ninja
-            cc: ''
-            cxx: ''
           - os: windows-latest # default generator (Visual Studio)
             generator: ''
-            cc: ''
-            cxx: ''
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Set up sccache (GHA cache backend)
+        if: runner.os != 'Windows'
+        uses: mozilla-actions/sccache-action@v0.0.10
 
       - name: Configure environment
         shell: bash
@@ -178,9 +250,9 @@ jobs:
           if [ -n "${{ matrix.generator }}" ]; then
             echo "CMAKE_GENERATOR=${{ matrix.generator }}" >> "$GITHUB_ENV"
           fi
-          if [ -n "${{ matrix.cc }}" ]; then
-            echo "CC=${{ matrix.cc }}" >> "$GITHUB_ENV"
-            echo "CXX=${{ matrix.cxx }}" >> "$GITHUB_ENV"
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+            echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
           fi
 
       - name: Configure (wasm spike only)
@@ -195,6 +267,11 @@ jobs:
       - name: Run smoke tests (wasmtime + wamr, + wamr-aot where wamrc exists)
         run: ctest --test-dir build/spike-wasm -C Release -R context-spike-wasm --output-on-failure
 
+      - name: sccache stats
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ${SCCACHE_PATH} --show-stats
+
   # WebGPU spike (spikes/webgpu): native build on all three desktop platforms + the offscreen
   # render/readback self-check. The spike is standalone-configurable (no vcpkg — it pins its own
   # wgpu-native prebuilt), so this job stays light: no other spike's deps are configured here.
@@ -208,19 +285,20 @@ jobs:
         include:
           - os: ubuntu-latest
             generator: Ninja
-            cc: clang
-            cxx: clang++
           - os: macos-latest
             generator: Ninja
-            cc: ''
-            cxx: ''
           - os: windows-latest # default generator (Visual Studio)
             generator: ''
-            cc: ''
-            cxx: ''
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Set up sccache (GHA cache backend)
+        if: runner.os != 'Windows'
+        uses: mozilla-actions/sccache-action@v0.0.10
 
       - name: Configure environment
         shell: bash
@@ -228,9 +306,9 @@ jobs:
           if [ -n "${{ matrix.generator }}" ]; then
             echo "CMAKE_GENERATOR=${{ matrix.generator }}" >> "$GITHUB_ENV"
           fi
-          if [ -n "${{ matrix.cc }}" ]; then
-            echo "CC=${{ matrix.cc }}" >> "$GITHUB_ENV"
-            echo "CXX=${{ matrix.cxx }}" >> "$GITHUB_ENV"
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+            echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
           fi
 
       # lavapipe (Mesa's software Vulkan rasterizer) gives the ubuntu leg a real adapter, so the
@@ -262,14 +340,22 @@ jobs:
           -DCONTEXT_SPIKE_JSENGINE_V8=OFF
           && cmake --build build/spikes-integrated --target context-spike-webgpu
 
+      - name: sccache stats
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ${SCCACHE_PATH} --show-stats
+
   # WebGPU spike, web leg: Emscripten + the emdawnwebgpu port binding the BROWSER's WebGPU (the
   # locked web path — NOT a Dawn cross-compile). Proves the same spike source compiles to
   # wasm+JS; the in-browser render run is a local/manual step (see spikes/webgpu/README.md).
+  # Toolchain note: this leg compiles with emsdk's bundled LLVM — recorded as 'documented'
+  # (unpinned, floats with emsdk 'latest') in cmake/toolchain-versions.json; pinning emsdk is a
+  # staged follow-up that lands with the first non-spike web build target.
   spike-webgpu-web:
     name: spike webgpu (web, emscripten)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install emsdk (latest)
         run: |
@@ -284,7 +370,7 @@ jobs:
           cmake --build build/spike-webgpu-web
 
       - name: Upload wasm artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: spike-webgpu-web
           path: |
@@ -297,26 +383,27 @@ jobs:
     name: dependency-license gate (deny-by-default)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run license gate
         run: python3 tools/check_licenses.py
 
       - name: Upload SBOM
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sbom
           path: sbom.json
           if-no-files-found: error
 
   # Fast pytest gate over the repo's Python tooling (R-QA-013 retroactive coverage):
-  # tools/tests (license gate) + bench/tests (seeded corpus generator).
+  # tools/tests (license gate + toolchain-manifest gate) + bench/tests (seeded corpus
+  # generator).
   python-tests:
-    name: python tests (license gate + corpus generator)
+    name: python tests (license gate + toolchain gate + corpus generator)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install pytest
         run: python3 -m pip install pytest
