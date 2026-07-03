@@ -21,6 +21,8 @@ import json
 import sys
 from pathlib import Path
 
+from _ci_common import load_json_or_exit
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ALLOWLIST_PATH = REPO_ROOT / "tools" / "license-allowlist.json"
 SBOM_PATH = REPO_ROOT / "sbom.json"
@@ -29,12 +31,7 @@ SKIP_DIRS = {"node_modules", "build", "out", "vcpkg_installed", ".git"}
 
 
 def load_json(path: Path) -> dict:
-    try:
-        with path.open(encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"[license-gate] ERROR: cannot read {path}: {exc}")
-        sys.exit(2)
+    return load_json_or_exit(path, tag="license-gate")
 
 
 def vcpkg_dependencies(manifest: dict) -> list[dict]:
@@ -73,7 +70,7 @@ def find_package_jsons(root: Path) -> list[Path]:
 def main() -> int:
     allowlist = load_json(ALLOWLIST_PATH)
     allowed = set(allowlist.get("allowed_licenses", []))
-    known = dict(allowlist.get("dependency_licenses", {}))
+    known = allowlist.get("dependency_licenses", {})
     if not allowed:
         print("[license-gate] ERROR: allowlist has no allowed_licenses — refusing to pass.")
         return 2
@@ -86,7 +83,8 @@ def main() -> int:
         print(f"[license-gate] ERROR: vcpkg manifest not found at {vcpkg_manifest_path} — "
               "refusing to pass with nothing to scan.")
         return 2
-    components.extend(vcpkg_dependencies(load_json(vcpkg_manifest_path)))
+    vcpkg_manifest = load_json(vcpkg_manifest_path)
+    components.extend(vcpkg_dependencies(vcpkg_manifest))
     for pkg_path in find_package_jsons(REPO_ROOT):
         components.extend(npm_dependencies(load_json(pkg_path), pkg_path.relative_to(REPO_ROOT)))
 
@@ -104,7 +102,6 @@ def main() -> int:
                 f"is not on the allowlist")
 
     # Minimal CycloneDX-shaped SBOM (grows into a full CycloneDX document with real deps).
-    project = load_json(vcpkg_manifest_path)
     sbom = {
         "bomFormat": "CycloneDX",
         "specVersion": "1.5",
@@ -112,8 +109,8 @@ def main() -> int:
         "metadata": {
             "component": {
                 "type": "application",
-                "name": project.get("name", "context-engine"),
-                "version": project.get("version", "0.0.0"),
+                "name": vcpkg_manifest.get("name", "context-engine"),
+                "version": vcpkg_manifest.get("version", "0.0.0"),
             }
         },
         "components": [

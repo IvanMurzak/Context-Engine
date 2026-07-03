@@ -25,10 +25,11 @@ Exit codes: 0 = OK; 1 = strict verification failure; 2 = configuration/usage err
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from pathlib import Path
+
+from _ci_common import load_json_or_exit
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MANIFEST = REPO_ROOT / "cmake" / "toolchain-versions.json"
@@ -48,11 +49,7 @@ def fail_config(message: str) -> "NoReturn":  # noqa: F821 - py3.9-friendly anno
 
 
 def load_manifest(path: Path) -> dict:
-    try:
-        with path.open(encoding="utf-8") as fh:
-            manifest = json.load(fh)
-    except (OSError, json.JSONDecodeError) as exc:
-        fail_config(f"cannot read manifest {path}: {exc}")
+    manifest = load_json_or_exit(path, tag="toolchain")
     if "targets" not in manifest or not isinstance(manifest["targets"], dict):
         fail_config(f"manifest {path} has no 'targets' table")
     return manifest
