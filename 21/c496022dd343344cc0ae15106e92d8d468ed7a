@@ -1,0 +1,36 @@
+src/editor/filesync/tests/test_intent_log.cpp
+  s_00cb1100a75700::t_766f2c764ed82c 141
+  s_00cb1100a75700::t_607459d85e2022 133
+  s_00cb1100a75700::t_30b6ed04340941 90,191
+  s_00cb1100a75700::t_e29c0078c67b5b 50,68,108,152,172
+src/editor/filesync/tests/test_sha256.cpp
+  s_00cb1100a75700::t_462e747be8c59b 32-37
+src/editor/filesync/include/context/editor/filesync/intent_log.h
+  s_00cb1100a75700::t_cf8ada77582fd5 57
+src/editor/filesync/src/atomic_io.cpp
+  s_00cb1100a75700::t_b8506a013f618e 22-30
+src/editor/filesync/src/reconciler.cpp
+  s_00cb1100a75700::t_844d1f59657259 41
+src/editor/filesync/src/intent_log.cpp
+  s_00cb1100a75700::t_8dc9d71fb5bc25 190
+  s_00cb1100a75700::t_9a78f0ff87d1b1 135-138
+  s_00cb1100a75700::t_d0970f734af556 161-162
+src/editor/filesync/include/context/editor/filesync/atomic_io.h
+  s_00cb1100a75700::t_ebfb58a3c8a364 17-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "21c496022dd343344cc0ae15106e92d8d468ed7a",
+  "prompts": {},
+  "sessions": {
+    "s_00cb1100a75700": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c36dbb71-cb5a-4c4d-b9b0-792a43a89435",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
