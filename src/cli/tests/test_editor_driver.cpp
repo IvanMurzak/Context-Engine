@@ -8,6 +8,8 @@
 
 #include "cli_test.h"
 
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -46,6 +48,32 @@ int main()
         const Envelope unknown = context::cli::run({"editor", "bogus"});
         CHECK(!unknown.ok());
         CHECK(unknown.error()->code == "usage.unknown_verb");
+    }
+
+    // --- regression: a caller-supplied `--project <dir>` must SURVIVE the smoke run -----------------
+    // The RAII cleanup only owns the auto-generated temp dir; a real project passed via --project (its
+    // daemon lock lives at <dir>/.editor/lock) must be left intact. Guards against a catastrophic
+    // `fs::remove_all(<caller dir>)` data-loss regression in run_smoke's ProjectCleanup.
+    {
+        namespace fs = std::filesystem;
+        const fs::path project =
+            fs::temp_directory_path() /
+            ("context-editor-smoke-keep-" +
+             std::to_string(fs::file_time_type::clock::now().time_since_epoch().count()));
+        std::error_code ec;
+        fs::remove_all(project, ec);
+        fs::create_directories(project, ec);
+        const fs::path sentinel = project / "keep.txt";
+        {
+            std::ofstream out(sentinel);
+            out << "precious";
+        }
+
+        const Envelope env = context::cli::run({"editor", "smoke", "--project", project.string()});
+        CHECK(env.ok()); // the smoke actually ran against the caller-supplied directory
+        CHECK(fs::exists(sentinel)); // ...and left it (and its contents) untouched
+
+        fs::remove_all(project, ec); // test-owned cleanup
     }
 
     CLI_TEST_MAIN_END();

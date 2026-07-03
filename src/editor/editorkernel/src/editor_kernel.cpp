@@ -110,8 +110,9 @@ void EditorKernel::ingest_change(const filesync::ReconcileChange& change)
 {
     if (change.type == filesync::ChangeType::removed)
     {
-        graph_.apply(filesync::ReconcileChange{change.path, filesync::ChangeType::removed, 0},
-                     std::string_view{});
+        // A removal carries no content: content_hash is 0 by the ReconcileChange contract and the
+        // derivation graph ignores it for removals, so forward the change as-is.
+        graph_.apply(change, std::string_view{});
         return;
     }
     // Content hash is authoritative (R-FILE-002): read the path's CURRENT bytes and derive from them.

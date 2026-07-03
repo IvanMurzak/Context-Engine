@@ -76,23 +76,31 @@ Json edit_summary(const std::string& path, std::uint64_t canonical_hash, bool re
 // same public API a future cross-process CLI attaches through).
 Envelope run_smoke(const std::vector<std::string>& args)
 {
+    // Only an auto-generated temp dir is ours to delete on exit. A caller-supplied `--project <dir>`
+    // names a REAL directory (its daemon lock lives at `<dir>/.editor/lock`) that we must never remove
+    // — wiping a live project would be catastrophic data loss.
+    const bool owns_project = !flag_value(args, "project").has_value();
     const fs::path project = resolve_project_dir(args);
     std::error_code ec;
     fs::create_directories(project, ec);
 
-    // Remove the temp lock directory on EVERY exit path, not just the happy tail: a boot / attach /
-    // edit failure below returns early, and without this guard each failed `context editor smoke`
-    // invocation would leak a `context-editor-smoke-*` directory under the system temp folder.
-    // Declared before the kernel so it is destroyed AFTER the daemon releases its lock.
+    // Remove the AUTO-CREATED temp lock directory on EVERY exit path, not just the happy tail: a boot /
+    // attach / edit failure below returns early, and without this guard each failed `context editor
+    // smoke` invocation would leak a `context-editor-smoke-*` directory under the system temp folder. A
+    // caller-supplied `--project` dir is left untouched (owns=false). Declared before the kernel so it
+    // is destroyed AFTER the daemon releases its lock.
     struct ProjectCleanup
     {
         fs::path dir;
+        bool owns;
         ~ProjectCleanup()
         {
+            if (!owns)
+                return;
             std::error_code cleanup_ec;
             fs::remove_all(dir, cleanup_ec);
         }
-    } project_cleanup{project};
+    } project_cleanup{project, owns_project};
 
     MemoryFileStore store;
     NullWatcher watcher;
