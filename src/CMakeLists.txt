@@ -69,9 +69,12 @@ function(add_spike name)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/${name} ${CMAKE_BINARY_DIR}/spikes/${name})
 endfunction()
 
-# M0: the only always-on target is the hello spike. Engine components (src/kernel/, src/editor/,
-# src/runtime/, src/packages/) gain targets starting at M1.
+# M0: the only always-on target is the hello spike.
 add_spike(hello)
+
+# M1: the microkernel core — the first real engine component (src/kernel/). R-KERNEL-001's ~6
+# stable interfaces; src/editor/, src/runtime/, src/packages/ gain their targets in later M1 tasks.
+add_subdirectory(kernel)
 
 # M0 de-risking spikes are OPT-IN (CONTEXT_BUILD_SPIKES=ON): the default CI matrix stays
 # untouched. spikes/ecs takes its dependencies from the vcpkg manifest's `spikes` feature;
@@ -131,8 +134,9 @@ file(WRITE "${_context_version_marker}"
 
 # M0 has one always-on target (context-hello); it stands in as the installed payload so the
 # layout is proven by a real file landing under versions/<semver>/bin/. Engine components
-# (kernel/editor/runtime/packages) join this install set as they gain targets from M1.
-install(TARGETS context-hello
+# (kernel/editor/runtime/packages) join this install set as they gain targets from M1 — the
+# microkernel library (context_kernel) is the first to do so.
+install(TARGETS context-hello context_kernel
     RUNTIME DESTINATION "${CONTEXT_INSTALL_SUBDIR}/bin"
     LIBRARY DESTINATION "${CONTEXT_INSTALL_SUBDIR}/lib"
     ARCHIVE DESTINATION "${CONTEXT_INSTALL_SUBDIR}/lib")
