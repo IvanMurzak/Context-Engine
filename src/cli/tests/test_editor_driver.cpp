@@ -56,10 +56,15 @@ int main()
     // `fs::remove_all(<caller dir>)` data-loss regression in run_smoke's ProjectCleanup.
     {
         namespace fs = std::filesystem;
+        // Cast the file-clock rep to a concrete integer before to_string: on macOS libc++
+        // fs::file_time_type::clock::rep does not uniquely match a std::to_string overload
+        // (ambiguous call), while libstdc++/MSVC accept it. long long is portable + ample
+        // for a unique temp-dir suffix.
         const fs::path project =
             fs::temp_directory_path() /
             ("context-editor-smoke-keep-" +
-             std::to_string(fs::file_time_type::clock::now().time_since_epoch().count()));
+             std::to_string(static_cast<long long>(
+                 fs::file_time_type::clock::now().time_since_epoch().count())));
         std::error_code ec;
         fs::remove_all(project, ec);
         fs::create_directories(project, ec);
