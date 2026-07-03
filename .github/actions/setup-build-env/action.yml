@@ -1,0 +1,27 @@
+# Shared per-job build environment for the CI build legs (sibling of pinned-toolchain).
+#   non-Windows — sets up sccache with the GitHub-Actions cache backend and exports the
+#                 shared CMake configure environment: CMAKE_GENERATOR=Ninja plus
+#                 CMAKE_{C,CXX}_COMPILER_LAUNCHER=sccache.
+#   Windows     — deliberately a no-op: the legs use the default Visual Studio generator
+#                 (no MSVC env setup needed), which ignores CMAKE_<LANG>_COMPILER_LAUNCHER;
+#                 sccache+MSVC is not worth fighting until the clang-cl follow-up lands.
+# The per-job "sccache stats" step stays inline in ci.yml — composite actions have no
+# post-steps. Requires the repo to be checked out first.
+
+name: Build environment (sccache + CMake env)
+description: Set up sccache (GHA cache backend) and export the shared CMake configure environment (non-Windows only)
+
+runs:
+  using: composite
+  steps:
+    - name: Set up sccache (GHA cache backend)
+      if: runner.os != 'Windows'
+      uses: mozilla-actions/sccache-action@v0.0.10
+
+    - name: Configure environment
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        echo "CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
+        echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+        echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
