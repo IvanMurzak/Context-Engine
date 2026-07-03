@@ -16,7 +16,7 @@ the first release.
 | Verify-before-use gate | `tools/verify_artifact.py` | ✅ implemented + tested |
 | Pinned **production** trust root | `tools/trust-root/allowed_signers` | ✅ committed, **intentionally empty until first release** |
 | TEST-ONLY trust root + fixtures | `tools/tests/fixtures/` | ✅ committed (public key + sample signature only — **no private key**) |
-| Fail-closed test coverage (R-QA-013) | `tools/tests/test_verify_artifact.py` | ✅ 15 tests: good sig passes; bad / missing / tampered / untrusted-key / wrong-namespace / wrong-identity / missing-trust-root / absent-ssh-keygen all fail closed |
+| Fail-closed test coverage (R-QA-013) | `tools/tests/test_verify_artifact.py` | ✅ 16 tests: good sig passes; bad / missing / tampered / untrusted-key / wrong-namespace / wrong-identity / missing-trust-root / absent-ssh-keygen / verifier-timeout all fail closed |
 
 The **production signing key is NOT minted yet** (see § Minting). Because no production
 key is pinned, the default gate refuses every artifact — the correct fail-closed state
