@@ -34,3 +34,8 @@ foreach(_t IN LISTS _context_kernel_tests)
     target_include_directories(context_kernel_${_t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     add_test(NAME kernel-${_t} COMMAND context_kernel_${_t})
 endforeach()
+
+# --- R-KERNEL-003 generated-registration DCE proof (registration/) -----------------------------
+# The build-time generated registration TU + uniform LTO + linker GC, with a measured
+# referenced-vs-unreferenced footprint delta proving an unreferenced package leaves zero footprint.
+add_subdirectory(registration)
