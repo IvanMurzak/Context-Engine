@@ -51,8 +51,8 @@ public:
     // Blocking — runs on the calling thread.
     int serve(bridge::TransportServer& server);
 
-    // Ask the serve loop to stop (thread-safe). Also invoked by the `shutdown` verb.
-    void request_stop() noexcept { stop_.store(true); }
+    // Read whether the serve loop has been asked to stop (the `shutdown` verb flips `stop_` directly
+    // from the const invoke() path, since it is mutable).
     [[nodiscard]] bool stop_requested() const noexcept { return stop_.load(); }
 
 private:

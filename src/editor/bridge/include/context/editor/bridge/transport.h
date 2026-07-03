@@ -137,9 +137,6 @@ public:
     // a peer disconnect before a response arrived.
     [[nodiscard]] std::optional<std::string> request(std::string_view request_json);
 
-    // Send one framed notification (no response expected). false on a transport failure.
-    [[nodiscard]] bool notify(std::string_view request_json);
-
     void close() noexcept;
 
     [[nodiscard]] bool connected() const noexcept { return conn_.valid(); }

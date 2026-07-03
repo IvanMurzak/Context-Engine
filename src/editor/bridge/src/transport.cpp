@@ -562,14 +562,4 @@ std::optional<std::string> TransportClient::request(std::string_view request_jso
     return response;
 }
 
-bool TransportClient::notify(std::string_view request_json)
-{
-    if (!conn_.write_frame(request_json))
-    {
-        error_ = conn_.error().empty() ? "write failed" : conn_.error();
-        return false;
-    }
-    return true;
-}
-
 } // namespace context::editor::bridge

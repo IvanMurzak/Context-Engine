@@ -137,25 +137,26 @@ bool write_instance_file(const fs::path& project, const std::string& endpoint,
 int run_daemon(const std::vector<std::string>& args)
 {
     const std::optional<std::string> out = flag_value(args, "out");
-    const std::optional<std::string> project_flag = flag_value(args, "project");
-    if (!project_flag.has_value())
+
+    // Emit an error envelope (stdout + the optional --out result file) and return its exit code —
+    // funnels the early exits that need no transport/kernel teardown (the two that do keep their
+    // explicit cleanup below).
+    const auto fail = [&out](const std::string& code, const std::string& message) -> int
     {
-        const Envelope env = Envelope::failure("usage.missing_argument",
-                                               "context daemon requires --project <dir>");
+        const Envelope env = Envelope::failure(code, message);
         emit(env, out);
         return env.exit_code();
-    }
+    };
+
+    const std::optional<std::string> project_flag = flag_value(args, "project");
+    if (!project_flag.has_value())
+        return fail("usage.missing_argument", "context daemon requires --project <dir>");
 
     std::error_code ec;
     const fs::path project = fs::absolute(fs::path(*project_flag), ec);
     if (ec)
-    {
-        const Envelope env = Envelope::failure(
-            "internal.error", "could not resolve --project '" + *project_flag +
-                                  "' to an absolute path: " + ec.message());
-        emit(env, out);
-        return env.exit_code();
-    }
+        return fail("internal.error", "could not resolve --project '" + *project_flag +
+                                          "' to an absolute path: " + ec.message());
     fs::create_directories(project, ec);
 
     const ScopeSet launch_scopes = flag_value(args, "launch-scopes").has_value()
@@ -192,13 +193,8 @@ int run_daemon(const std::vector<std::string>& args)
         return kDaemonAttachSignalExit;
     }
     if (outcome == StartOutcome::error)
-    {
-        const Envelope env = Envelope::failure("internal.error",
-                                               "the EditorKernel daemon failed to boot: " +
-                                                   kernel.daemon().error_message());
-        emit(env, out);
-        return env.exit_code();
-    }
+        return fail("internal.error",
+                    "the EditorKernel daemon failed to boot: " + kernel.daemon().error_message());
 
     // Booted — this process owns the Project. Bind the loopback transport, publish the discovery hint,
     // and serve until shutdown.
