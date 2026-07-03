@@ -132,6 +132,10 @@ std::string op_basename(const std::string& op_id)
     safe.reserve(op_id.size());
     for (char ch : op_id)
         safe.push_back((ch == '/' || ch == '\\') ? '_' : ch);
+    // A basename that lexically resolves to "." or ".." would escape the intent/ subtree
+    // (op_path() would yield "<editor>/intent/.." == "<editor>"); neutralize the traversal segment.
+    if (safe == "." || safe == "..")
+        safe.insert(safe.begin(), '_');
     return safe;
 }
 
@@ -154,10 +158,8 @@ std::string ensure_hmac_key(FileStore& fs, std::string_view editor_dir)
     return key;
 }
 
-IntentLog::IntentLog(FileStore& fs, std::string editor_dir, std::string hmac_key,
-                     std::string incarnation_id)
-    : fs_(fs), dir_(std::move(editor_dir) + "/intent"), hmac_key_(std::move(hmac_key)),
-      incarnation_id_(std::move(incarnation_id))
+IntentLog::IntentLog(FileStore& fs, std::string editor_dir, std::string hmac_key)
+    : fs_(fs), dir_(std::move(editor_dir) + "/intent"), hmac_key_(std::move(hmac_key))
 {
 }
 
@@ -185,7 +187,7 @@ std::vector<std::string> IntentLog::pending() const
     const std::string prefix = dir_ + "/";
     for (const std::string& path : fs_.list(dir_))
     {
-        if (path.find(".tmp") != std::string::npos)
+        if (is_atomic_temp_name(path))
             continue; // ignore staging residue
         if (path.rfind(prefix, 0) == 0)
             ops.push_back(path.substr(prefix.size()));

@@ -14,6 +14,12 @@ class FileStore;
 // tests can reason about the residue a crash leaves behind.
 [[nodiscard]] std::string atomic_temp_path(std::string_view path, std::string_view unique);
 
+// True when `name` is atomic-write staging residue produced by atomic_temp_path — i.e. it ends in the
+// ".tmp" marker or carries the ".tmp.<unique>" infix. A precise marker check, NOT a bare ".tmp"
+// substring: a legitimately-authored file such as "deploy.tmpl.yaml" must never be mistaken for
+// staging residue and skipped by reconciliation / recovery.
+[[nodiscard]] bool is_atomic_temp_name(std::string_view name);
+
 // Atomically write `data` to `path`: stage into a sibling temp file, fsync it, then rename it over
 // `path`, then fsync `path`. A concurrent reader of `path` observes either the complete OLD content
 // or the complete NEW content — never a torn/partial write. Returns true on durable success. If the

@@ -29,9 +29,12 @@ int main()
     // A different key over the same message yields a different MAC (foreign-log-replay basis).
     CHECK(hmac_sha256_hex("keyA", "message") != hmac_sha256_hex("keyB", "message"));
 
-    // A key longer than the 64-byte block is hashed down first — just assert it is stable/non-empty.
-    const std::string long_key(200, 'k');
-    CHECK(hmac_sha256_hex(long_key, "x").size() == 64);
+    // RFC 4231 HMAC-SHA256 Test Case 6: a key LONGER than the 64-byte block is hashed down first
+    // (RFC 2104 key reduction). A published known-answer vector pins that branch, rather than only
+    // asserting the output length.
+    const std::string long_key(131, static_cast<char>(0xaa));
+    CHECK(hmac_sha256_hex(long_key, "Test Using Larger Than Block-Size Key - Hash Key First") ==
+          "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54");
 
     FILESYNC_TEST_MAIN_END();
 }

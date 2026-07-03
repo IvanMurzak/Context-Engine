@@ -38,7 +38,7 @@ bool Reconciler::is_control_path(std::string_view path) const
         {
             if (segment == ".editor")
                 return true;
-            if (segment.find(".tmp") != std::string::npos)
+            if (is_atomic_temp_name(segment))
                 return true;
             segment.clear();
         }

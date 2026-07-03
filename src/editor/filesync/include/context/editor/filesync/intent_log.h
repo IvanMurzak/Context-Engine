@@ -54,8 +54,7 @@ struct IntentEntry
 class IntentLog
 {
 public:
-    IntentLog(FileStore& fs, std::string editor_dir, std::string hmac_key,
-              std::string incarnation_id);
+    IntentLog(FileStore& fs, std::string editor_dir, std::string hmac_key);
 
     // fsync-before: durably write the intent entry BEFORE the caller performs any of its writes.
     bool begin(const IntentEntry& entry);
@@ -76,7 +75,6 @@ private:
     FileStore& fs_;
     std::string dir_; // <editor_dir>/intent
     std::string hmac_key_;
-    std::string incarnation_id_;
 };
 
 // Serializes multi-file verbs through the intent log so a crash never loses a half-applied op.

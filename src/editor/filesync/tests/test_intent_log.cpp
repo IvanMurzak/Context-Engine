@@ -47,7 +47,7 @@ int main()
         fs.write("proj/a.txt", "A0");
         fs.write("proj/b.txt", "B0");
 
-        IntentLog log(fs, "proj/.editor", kKey, "incarnation-1");
+        IntentLog log(fs, "proj/.editor", kKey);
         WriteQueue queue(fs, "proj", log, clock);
 
         const std::vector<PlannedWrite> writes = {plan("proj/a.txt", "A0", "A1"),
@@ -65,7 +65,7 @@ int main()
         fs.write("proj/a.txt", "A0");
         fs.write("proj/b.txt", "B0");
 
-        IntentLog log(fs, "proj/.editor", kKey, "incarnation-1");
+        IntentLog log(fs, "proj/.editor", kKey);
         WriteQueue queue(fs, "proj", log, clock);
         const std::vector<PlannedWrite> writes = {plan("proj/a.txt", "A0", "A1"),
                                                   plan("proj/b.txt", "B0", "B1")};
@@ -87,7 +87,7 @@ int main()
 
         // Restart: a fresh incarnation recovers. a.txt is already applied (idempotent skip); b.txt is
         // resumed to completion. Nothing is lost.
-        IntentLog log2(fs, "proj/.editor", kKey, "incarnation-2");
+        IntentLog log2(fs, "proj/.editor", kKey);
         WriteQueue queue2(fs, "proj", log2, clock);
         auto diags = queue2.recover();
         CHECK(diags.empty());
@@ -105,7 +105,7 @@ int main()
     {
         MemoryFileStore fs;
         context::kernel::ManualClock clock;
-        IntentLog log(fs, "proj/.editor", kKey, "incarnation-1");
+        IntentLog log(fs, "proj/.editor", kKey);
         WriteQueue queue(fs, "proj", log, clock);
 
         IntentEntry entry;
@@ -130,7 +130,7 @@ int main()
         MemoryFileStore fs;
         context::kernel::ManualClock clock;
 
-        IntentLog writer(fs, "proj/.editor", kKey, "incarnation-1");
+        IntentLog writer(fs, "proj/.editor", kKey);
         IntentEntry entry;
         entry.op_id = "op-foreign";
         entry.incarnation_id = "incarnation-1";
@@ -138,7 +138,7 @@ int main()
         CHECK(writer.begin(entry));
 
         // A daemon holding a DIFFERENT project key cannot resume this foreign entry.
-        IntentLog reader(fs, "proj/.editor", "a-completely-different-project-key", "incarnation-2");
+        IntentLog reader(fs, "proj/.editor", "a-completely-different-project-key");
         WriteQueue queue(fs, "proj", reader, clock);
         auto diags = queue.recover();
         CHECK(has_code(diags, "filesync.intent.integrity"));
@@ -149,7 +149,7 @@ int main()
     {
         MemoryFileStore fs;
         context::kernel::ManualClock clock;
-        IntentLog log(fs, "proj/.editor", kKey, "incarnation-1");
+        IntentLog log(fs, "proj/.editor", kKey);
         WriteQueue queue(fs, "proj", log, clock);
 
         IntentEntry entry;
@@ -169,7 +169,7 @@ int main()
         context::kernel::ManualClock clock;
         fs.write("proj/a.txt", "A0");
 
-        IntentLog log(fs, "proj/.editor", kKey, "incarnation-1");
+        IntentLog log(fs, "proj/.editor", kKey);
         WriteQueue queue(fs, "proj", log, clock);
         const std::vector<PlannedWrite> writes = {plan("proj/a.txt", "A0", "A1")};
 
@@ -188,7 +188,7 @@ int main()
         // Something else rewrote a.txt to a THIRD state before recovery ran.
         fs.write("proj/a.txt", "A-external");
 
-        IntentLog log2(fs, "proj/.editor", kKey, "incarnation-2");
+        IntentLog log2(fs, "proj/.editor", kKey);
         WriteQueue queue2(fs, "proj", log2, clock);
         auto diags = queue2.recover();
         CHECK(has_code(diags, "filesync.intent.cas"));
