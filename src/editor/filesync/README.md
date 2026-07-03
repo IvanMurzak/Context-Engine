@@ -49,8 +49,10 @@ Library target: **`context_filesync`** (links `context_kernel` + `context_warnin
   impl would stage payloads in the temp files (write-temp-then-rename) to avoid doubling write volume;
   the recover-vs-diagnose contract is unchanged.
 - **Path jail is logical** (lexical normalization + prefix check) over the injectable seam. The fully
-  TOCTOU-safe variant (`O_NOFOLLOW` / `openat` relative to a jail-root fd, re-`realpath` after open) is
-  the native `FileStore` impl's responsibility.
+  TOCTOU-safe variant (`O_NOFOLLOW` / `openat` relative to a jail-root fd, re-`realpath` after open) is a
+  documented hardening follow-up, still deferred: the now-landed `NativeFileStore` does **not** implement
+  it (see `native_file_store.h`), so its jail stays the logical `normalize` + `is_inside_jail` applied by
+  the reconciler / `WriteQueue` that call the store.
 - **`NullWatcher`** is the portable default (always degraded → correctness from the crawl). A real
   inotify / ReadDirectoryChangesW / FSEvents watcher is a later platform-specific drop-in behind the
   same seam; because hashes are authoritative, correctness never depends on it.

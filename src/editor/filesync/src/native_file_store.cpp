@@ -201,8 +201,9 @@ void NativeFileStore::fsync(std::string_view path)
         (void)::fsync(fd);
         (void)::close(fd);
     }
-    // Best-effort parent-directory fsync so the create/rename directory entry is itself durable
-    // (POSIX). macOS F_FULLFSYNC would be a stronger barrier — a documented hardening follow-up.
+    // Best-effort fsync of the file's IMMEDIATE parent directory so its create/rename directory entry is
+    // durable (POSIX). Only that one level is flushed — freshly-created ANCESTOR directories above it are
+    // not — and macOS F_FULLFSYNC would be a stronger barrier; both are documented hardening follow-ups.
     if (target.has_parent_path())
     {
         const int dfd = ::open(target.parent_path().c_str(), O_RDONLY);
