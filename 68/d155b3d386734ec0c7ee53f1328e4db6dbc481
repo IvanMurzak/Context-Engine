@@ -1,0 +1,35 @@
+src/kernel/registration/packages/alpha.cpp
+  s_00cb1100a75700::t_c794a69e1e978b 1-31
+src/kernel/registration/dce_footprint_check.cmake
+  s_00cb1100a75700::t_6ffda1f7de1df5 1-58
+src/kernel/registration/README.md
+  s_00cb1100a75700::t_aa6c29e5a1bda7 1-61
+src/kernel/registration/generate_registration.cmake
+  s_00cb1100a75700::t_32e8f1fc890d71 1-45
+src/kernel/registration/packages/beta.cpp
+  s_00cb1100a75700::t_a5959082b4e8f1 1-31
+src/kernel/registration/probe_main.cpp
+  s_00cb1100a75700::t_10c23ecd96ac62 1-42
+src/kernel/CMakeLists.txt
+  s_00cb1100a75700::t_b8c4825a3f6594 37-41
+src/kernel/registration/include/context/kernel/registration/registrar.h
+  s_00cb1100a75700::t_866e2dc90ee0ff 1-19
+src/kernel/registration/CMakeLists.txt
+  s_00cb1100a75700::t_f05326c2abcbf6 1-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "68d155b3d386734ec0c7ee53f1328e4db6dbc481",
+  "prompts": {},
+  "sessions": {
+    "s_00cb1100a75700": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c36dbb71-cb5a-4c4d-b9b0-792a43a89435",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
