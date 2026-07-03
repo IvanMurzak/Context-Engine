@@ -1,0 +1,83 @@
+src/editor/editorkernel/CMakeLists.txt
+  s_00cb1100a75700::t_4dc7024ca81661 8-9
+  s_00cb1100a75700::t_e894543e58779a 39-40
+src/cli/src/daemon_command.cpp
+  s_00cb1100a75700::t_c333524dd16d49 18
+  s_00cb1100a75700::t_07765bfde7ee2c 1-17,19-71,87-207,212-240
+  s_00cb1100a75700::t_7ddc4d56f7638f 208-211
+  s_00cb1100a75700::t_a7da6b1c300116 72-86
+src/editor/editorkernel/tests/test_kernel_server.cpp
+  s_00cb1100a75700::t_4b3f2e9d53841a 25
+  s_00cb1100a75700::t_42d736be64a16b 94-96
+  s_00cb1100a75700::t_39773922f26c4e 1-24,26-93,97-181
+src/editor/bridge/tests/test_scope.cpp
+  s_00cb1100a75700::t_c59e5e5f4ab6f5 32-36
+  s_00cb1100a75700::t_a76207f4162b69 46,48-49
+src/editor/bridge/src/transport.cpp
+  s_00cb1100a75700::t_5da14d52e5a86c 1-575
+src/editor/bridge/include/context/editor/bridge/dispatcher.h
+  s_00cb1100a75700::t_8ca2494ebcc3a3 87
+  s_00cb1100a75700::t_c0cf6150146fd4 19,39-52,57-62
+src/cli/src/app.cpp
+  s_00cb1100a75700::t_bb20d08d0f4f64 207-212
+  s_00cb1100a75700::t_f65d3dce085e13 5-6
+  s_00cb1100a75700::t_e35fa66b9bf3ca 123-129
+src/cli/src/attach_command.cpp
+  s_00cb1100a75700::t_053c2553098ddf 188-190
+  s_00cb1100a75700::t_358e8ec55f6256 1-187,191-253
+src/CMakeLists.txt
+  s_00cb1100a75700::t_8d2984510fde02 42-47
+src/cli/tests/process_util.h
+  s_00cb1100a75700::t_021d56cb701272 1-182
+src/cli/tests/test_attach_e2e.cpp
+  s_00cb1100a75700::t_8dbc39230900de 1-185
+src/editor/bridge/src/scope.cpp
+  s_00cb1100a75700::t_e6b7978dc08516 122-125,127-128,130,132
+src/editor/editorkernel/include/context/editor/editorkernel/kernel_server.h
+  s_00cb1100a75700::t_297772bf3b498e 1-58,61-63
+  s_00cb1100a75700::t_f6c630b36ca0ac 59-60
+src/editor/bridge/include/context/editor/bridge/daemon.h
+  s_00cb1100a75700::t_fbdf102fab817b 76
+  s_00cb1100a75700::t_c76768578e0e6c 49-53
+src/editor/editorkernel/src/kernel_server.cpp
+  s_00cb1100a75700::t_9e652991fecb33 1-102,104-143
+  s_00cb1100a75700::t_a48ae4d1fb58c1 103
+src/cli/include/context/cli/daemon_command.h
+  s_00cb1100a75700::t_abb5a73d195df7 1-30
+src/editor/bridge/tests/test_transport.cpp
+  s_00cb1100a75700::t_e6b2c695c3de71 12
+  s_00cb1100a75700::t_e2bca845f9d058 1-11,13-93
+src/cli/CMakeLists.txt
+  s_00cb1100a75700::t_01420ad3cc6613 57-72
+  s_00cb1100a75700::t_5682ae80d62001 10-11
+src/cli/include/context/cli/attach_command.h
+  s_00cb1100a75700::t_aa7a0957cad876 1-27
+src/editor/bridge/include/context/editor/bridge/transport.h
+  s_00cb1100a75700::t_29adab1bccd4b8 1-150
+src/editor/bridge/src/dispatcher.cpp
+  s_00cb1100a75700::t_ebb859f15264a4 135-141
+  s_00cb1100a75700::t_a234670a13b843 142-143
+src/editor/bridge/src/daemon.cpp
+  s_00cb1100a75700::t_c4c9b60fad756f 28-29,32
+src/editor/editorkernel/include/context/editor/editorkernel/editor_kernel.h
+  s_00cb1100a75700::t_7de04a40ffa5dd 93-100
+src/editor/bridge/CMakeLists.txt
+  s_00cb1100a75700::t_0651f5531e93b2 12-13,18-21,23
+  s_00cb1100a75700::t_97bd034573ecea 43-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6e09e7f66b442330298d3cfcbee378223e783f91",
+  "prompts": {},
+  "sessions": {
+    "s_00cb1100a75700": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c36dbb71-cb5a-4c4d-b9b0-792a43a89435",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
