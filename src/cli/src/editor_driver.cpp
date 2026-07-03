@@ -134,9 +134,9 @@ Envelope run_smoke(const std::vector<std::string>& args)
     }
     const Session& session = std::get<Session>(attached);
 
-    // CLI-verb edit through filesync atomic-IO, then a read-your-writes barrier query.
-    const ScopeSet writer = ScopeSet::parse("write");
-    EditOutcome first = kernel.edit_file("proj/a.scene", "entity: 1", writer);
+    // CLI-verb edit through filesync atomic-IO with the attached session's negotiated scopes, then a
+    // read-your-writes barrier query.
+    EditOutcome first = kernel.edit_file("proj/a.scene", "entity: 1", session.scopes);
     if (!first.ok)
     {
         kernel.stop();
