@@ -163,8 +163,13 @@ struct World::Impl
 {
     std::vector<EntityRecord> records;
     std::vector<std::uint32_t> free_list;
-    std::map<std::vector<ComponentId>, std::unique_ptr<Archetype>> archetypes;
+    // Destruction-order invariant: `ops` MUST be declared before `archetypes`.
+    // Every Column stores a `const ComponentOps*` into this map (get_or_create_archetype),
+    // and ~Archetype's column teardown dereferences those pointers to destroy components.
+    // Members die in reverse declaration order, so `archetypes` (and its Columns) must be
+    // destroyed BEFORE `ops`; swapping these two reintroduces the ~Impl heap-use-after-free.
     std::unordered_map<ComponentId, ComponentOps> ops;
+    std::map<std::vector<ComponentId>, std::unique_ptr<Archetype>> archetypes;
     std::size_t alive = 0;
 
     Archetype* get_or_create_archetype(const std::vector<ComponentId>& types)
