@@ -106,7 +106,6 @@ def verify_artifact(
     trust_root: Path = DEFAULT_TRUST_ROOT,
     identity: str = DEFAULT_IDENTITY,
     namespace: str = DEFAULT_NAMESPACE,
-    ssh_keygen: str | None = None,
 ) -> VerifyResult:
     """Verify `artifact` against a detached `signature` and a pinned `trust_root`.
 
@@ -114,7 +113,7 @@ def verify_artifact(
     missing/tampered/untrusted signature, a namespace/identity mismatch, or an absent
     ssh-keygen all return a non-OK result. Nothing is ever "verified with a warning".
     """
-    keygen = ssh_keygen if ssh_keygen is not None else find_ssh_keygen()
+    keygen = find_ssh_keygen()
     if not keygen:
         return VerifyResult(
             CONFIG_ERROR,
