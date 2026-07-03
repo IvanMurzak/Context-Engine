@@ -80,6 +80,12 @@ add_subdirectory(kernel)
 # crash-recovery intent log (R-FILE-002/004, R-QA-010), built on the kernel platform seams.
 add_subdirectory(editor/filesync)
 
+# M1: the EditorKernel incremental derivation graph (src/editor/derivation/) — file changes ->
+# canonical parse -> derived World (L-19/L-22), with derivation-side backpressure (R-FILE-013) and the
+# read-your-writes generation barrier (R-CLI-006), built on the file-sync layer (its input) + kernel.
+# Wired immediately after filesync (its dependency) so concurrent sibling edits to this file merge cleanly.
+add_subdirectory(editor/derivation)
+
 # M0 de-risking spikes are OPT-IN (CONTEXT_BUILD_SPIKES=ON): the default CI matrix stays
 # untouched. spikes/ecs takes its dependencies from the vcpkg manifest's `spikes` feature;
 # spikes/js-engine acquires its pinned backends itself (FetchContent + NuGet — see its README);
