@@ -1,0 +1,57 @@
+tools/license-allowlist.json
+  s_4dcafa08bfb269::t_61528dd6065d25 13-16
+CMakeLists.txt
+  s_4dcafa08bfb269::t_95bf46669561c5 21
+  s_6950a46aeaff4f::t_17775454f34d12 38-39,42-43,45
+vcpkg.json
+  s_4dcafa08bfb269::t_b777c1bd314b40 11-14
+  s_4dcafa08bfb269::t_d2870d892f3f24 9
+CMakePresets.json
+  s_4dcafa08bfb269::t_74e92e1bfac034 30-40,53-57,72-77
+spikes/ecs/CMakeLists.txt
+  s_4dcafa08bfb269::t_eff570df91aa40 1-44
+spikes/ecs/FINDINGS.md
+  s_4dcafa08bfb269::t_8f5c41f43c03e3 1-158
+spikes/ecs/common/bench.h
+  s_4dcafa08bfb269::t_feffb1a1fb8b6e 1-55
+spikes/ecs/common/grid.h
+  s_4dcafa08bfb269::t_c6c05b083434f0 1-80
+spikes/ecs/common/harness.h
+  s_4dcafa08bfb269::t_837fc1981fbd1e 1-173
+spikes/ecs/common/workload.h
+  s_4dcafa08bfb269::t_7fc1ce986e4e2a 1-139
+spikes/ecs/custom/main.cpp
+  s_4dcafa08bfb269::t_9f806de47d4dc6 1-295
+spikes/ecs/custom/mini_ecs.h
+  s_4dcafa08bfb269::t_b36d6667781093 1-342
+spikes/ecs/entt/main.cpp
+  s_4dcafa08bfb269::t_d0d302ceb066d1 1-199
+spikes/ecs/flecs/main.cpp
+  s_4dcafa08bfb269::t_8666535ffdf6ff 1-266
+spikes/ecs/zerocopy/main.cpp
+  s_4dcafa08bfb269::t_329d52e54f60a6 1-191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "f2fd9bd402e06b9e798b55cf1aa652da2419a3c2",
+  "prompts": {},
+  "sessions": {
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_6950a46aeaff4f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a3b54f541dfb57416",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

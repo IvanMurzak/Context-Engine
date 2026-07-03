@@ -1,0 +1,47 @@
+docs/versioned-install.md
+  s_4dcafa08bfb269::t_1598ece7ca67bf 1-35
+runtime/README.md
+  s_4dcafa08bfb269::t_c2e74a8309d19b 1-7
+tools/README.md
+  s_4dcafa08bfb269::t_3df352c50f050d 1-8
+README.md
+  s_4dcafa08bfb269::t_5e35293fa862b8 1-67
+LICENSE.md
+  s_4dcafa08bfb269::t_21aaec59f63418 1-27
+.gitignore
+  s_4dcafa08bfb269::t_465da93179571a 1-24
+spikes/README.md
+  s_4dcafa08bfb269::t_982b2414ce7cf9 1-8
+editor/README.md
+  s_4dcafa08bfb269::t_1e82bb8b55d6bb 1-7
+docs/README.md
+  s_4dcafa08bfb269::t_c9ae9f0cfbd6b9 1-7
+kernel/README.md
+  s_4dcafa08bfb269::t_bef4b28f5cf991 1-7
+packages/README.md
+  s_4dcafa08bfb269::t_776b3b31ea422b 1-7
+CLA.md
+  s_4dcafa08bfb269::t_4fee4caa0a6dd2 1-17
+cmake/README.md
+  s_4dcafa08bfb269::t_823c81747bb175 1-7
+.gitattributes
+  s_4dcafa08bfb269::t_9ca56451c462b7 1-21
+CONTRIBUTING.md
+  s_4dcafa08bfb269::t_6bf4aa5f5c86d5 1-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "790282747b3715fa06bee5975708c0f255058d3a",
+  "prompts": {},
+  "sessions": {
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

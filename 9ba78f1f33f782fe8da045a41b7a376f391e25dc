@@ -1,0 +1,55 @@
+tools/license-allowlist.json
+  s_4dcafa08bfb269::t_3711417dd9216c 2
+  s_4dcafa08bfb269::t_2a002a0dce5131 15
+src/CMakeLists.txt
+  s_4dcafa08bfb269::t_b4c326cf4e50dc 66
+  s_4dcafa08bfb269::t_a7dc64dcbf9aa3 28,67-75
+.github/CONTRIBUTING.md
+  s_4dcafa08bfb269::t_d47d00350cdc80 29-43
+.github/workflows/ci.yml
+  s_4dcafa08bfb269::t_9fafc18e7eb23d 106-113,214-227
+.gitignore
+  s_4dcafa08bfb269::t_07c85f644fbfcc 30-33
+bench/gen_corpus.py
+  s_4dcafa08bfb269::t_04bed1411195aa 600-602,604-608,610-616,625,627,629,631,634-635,650-652,668-689
+bench/tests/test_gen_corpus.py
+  s_4dcafa08bfb269::t_6c15ced478fa7f 1-328
+spikes/README.md
+  s_4dcafa08bfb269::t_8afa107fdd737b 22-31
+spikes/cef-compositing/CMakeLists.txt
+  s_4dcafa08bfb269::t_6008691ed8abb4 1-102
+spikes/cef-compositing/FINDINGS.md
+  s_4dcafa08bfb269::t_c1d52781ab4b07 1-167
+spikes/cef-compositing/README.md
+  s_4dcafa08bfb269::t_9d7a06f48b5963 1-52
+spikes/cef-compositing/assets/ui.html
+  s_4dcafa08bfb269::t_b7a859278feee7 1-63
+spikes/cef-compositing/src/main.cpp
+  s_4dcafa08bfb269::t_aa5e3b2d444f25 1-694
+spikes/cef-compositing/src/renderer_d3d11.cpp
+  s_4dcafa08bfb269::t_a851c4b788e546 1-430
+spikes/cef-compositing/src/renderer_d3d11.hpp
+  s_4dcafa08bfb269::t_2f67a7c90cb162 1-105
+spikes/parse-bench/CMakeLists.txt
+  s_4dcafa08bfb269::t_cc0976db4adafc 21-42
+tools/check_licenses.py
+  s_4dcafa08bfb269::t_f045a4a4840707 83-89,107
+tools/tests/test_check_licenses.py
+  s_4dcafa08bfb269::t_bf55e352f0fe79 1-304
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "9ba78f1f33f782fe8da045a41b7a376f391e25dc",
+  "prompts": {},
+  "sessions": {
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

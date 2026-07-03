@@ -1,0 +1,22 @@
+tools/check_licenses.py
+  s_4dcafa08bfb269::t_6b172228b4d82c 83-89
+  s_4dcafa08bfb269::t_5fc5931684bebb 107
+tools/tests/test_check_licenses.py
+  s_4dcafa08bfb269::t_621160ea84db7c 1-304
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "c5d63845e27ed2a96e1e7e1ea45548398b5c4ee1",
+  "prompts": {},
+  "sessions": {
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

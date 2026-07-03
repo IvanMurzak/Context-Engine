@@ -1,0 +1,22 @@
+bench/gen_corpus.py
+  s_4dcafa08bfb269::t_fb0a812685c8b2 687
+  s_4dcafa08bfb269::t_2aa327e72745c7 600-602,604-608,610-616,625,627,629,631,634-635,650-652,668-686,688-689
+bench/tests/test_gen_corpus.py
+  s_4dcafa08bfb269::t_e7342b05e2212a 1-328
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "0f4fcb66a8b6adb35028b1cc12d98232e2aa81d4",
+  "prompts": {},
+  "sessions": {
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

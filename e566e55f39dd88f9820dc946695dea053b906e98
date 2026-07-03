@@ -1,0 +1,59 @@
+spikes/.clang-format
+  s_4dcafa08bfb269::t_e7fd44874483f7 1
+  s_4dcafa08bfb269::t_f48a1d68f501bb 2-16
+.github/workflows/ci.yml
+  s_4dcafa08bfb269::t_35c5fc79b30660 103-105,108
+  s_4dcafa08bfb269::t_c6c40155ffc51f 75,79,83
+  s_4dcafa08bfb269::t_8e82b4046ebd26 51-52,54,58,62
+spikes/js-engine/README.md
+  s_4dcafa08bfb269::t_8666c6b8daa016 26-28,38
+.github/CONTRIBUTING.md
+  s_4dcafa08bfb269::t_a2c414611596eb 8,24-25
+bench/.clang-tidy
+  s_4dcafa08bfb269::t_76044b73f6ba13 1
+  s_4dcafa08bfb269::t_595620042f9ae3 2-16
+bench/harness.py
+  s_4dcafa08bfb269::t_48130154035c2d 36
+bench/.clang-format
+  s_4dcafa08bfb269::t_0d835efb0aab8d 1
+  s_4dcafa08bfb269::t_f48a1d68f501bb 2-16
+tools/README.md
+  s_4dcafa08bfb269::t_4fe47724282be7 4
+src/CMakeLists.txt
+  s_4dcafa08bfb269::t_4f5b56732dd93a 3-7,9
+  s_4dcafa08bfb269::t_38cdfe80c2b325 45-48,54-56
+  s_4dcafa08bfb269::t_374232dd7800bf 28-29
+README.md
+  s_4dcafa08bfb269::t_5048e704cd0ca3 75
+  s_4dcafa08bfb269::t_541ad91261a3d5 26-27,30-31,36-39,43,46-60
+  s_4dcafa08bfb269::t_d1c2432877d053 61
+spikes/ecs/FINDINGS.md
+  s_4dcafa08bfb269::t_94c5f29ee58cad 34-36
+spikes/.clang-tidy
+  s_4dcafa08bfb269::t_595620042f9ae3 2-16
+  s_4dcafa08bfb269::t_7ca7e73bcce17c 1
+spikes/ecs/CMakeLists.txt
+  s_4dcafa08bfb269::t_ea9312e5901262 7-9
+tools/check_licenses.py
+  s_4dcafa08bfb269::t_e559f8d8323908 127
+  s_4dcafa08bfb269::t_b597a8915b578d 9
+  s_4dcafa08bfb269::t_e5319a2ee4a8e7 82
+bench/README.md
+  s_4dcafa08bfb269::t_7bf9b51078abfe 71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "e566e55f39dd88f9820dc946695dea053b906e98",
+  "prompts": {},
+  "sessions": {
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

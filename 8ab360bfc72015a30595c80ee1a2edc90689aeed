@@ -1,0 +1,23 @@
+tools/check_licenses.py
+  s_4dcafa08bfb269::t_2797cd4563ffc5 1-140
+tools/license-allowlist.json
+  s_4dcafa08bfb269::t_ceee11088e064a 1-13
+.github/workflows/ci.yml
+  s_4dcafa08bfb269::t_5653a773a7a985 1-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "8ab360bfc72015a30595c80ee1a2edc90689aeed",
+  "prompts": {},
+  "sessions": {
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

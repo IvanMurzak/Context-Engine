@@ -1,0 +1,58 @@
+spikes/wasm/guest/build_module.py
+  s_4dcafa08bfb269::t_450f97193ec903 1-9,11-69
+  s_4dcafa08bfb269::t_18bfe0397fed97 10
+spikes/wasm/src/engine_wasmtime.cpp
+  s_4dcafa08bfb269::t_09546431598d84 1-193
+spikes/wasm/run_bench.py
+  s_4dcafa08bfb269::t_f6e2d2b200e898 1-111
+spikes/wasm/README.md
+  s_4dcafa08bfb269::t_274c79b88cd973 1-51
+spikes/README.md
+  s_4dcafa08bfb269::t_a4a6916201c33b 10-21
+spikes/wasm/src/bench_main.cpp
+  s_4dcafa08bfb269::t_55255525c113b4 1-189,199-415,420-421,423-425,428-491,511-520,522-523,526-531,533-665
+  s_4dcafa08bfb269::t_65a9d09e499d4c 492-493,495-508
+  s_4dcafa08bfb269::t_6a711947508c13 190-198
+  s_4dcafa08bfb269::t_02eb3ff5c17cd3 416-419,422,426-427
+  s_4dcafa08bfb269::t_d995bfd9b7f6a9 494,509-510
+  s_4dcafa08bfb269::t_4f1bf7b0ab0bab 521,524-525,532
+src/CMakeLists.txt
+  s_4dcafa08bfb269::t_d148be7c086558 27
+  s_4dcafa08bfb269::t_29aa6658a7bd96 59-64
+tools/license-allowlist.json
+  s_4dcafa08bfb269::t_8349f0a17ffe3e 2,8,19-21
+spikes/wasm/CMakeLists.txt
+  s_4dcafa08bfb269::t_22a8637b9e97d5 276
+  s_4dcafa08bfb269::t_88ff1e1e085fc3 240-263
+  s_4dcafa08bfb269::t_3579438f2eae0f 1-143,151-239,264-275,277-280
+  s_4dcafa08bfb269::t_4582adf01c8911 144-150
+.github/workflows/ci.yml
+  s_4dcafa08bfb269::t_2edcb244b34b2f 138-189
+spikes/wasm/guest/module.cpp
+  s_4dcafa08bfb269::t_5ecac1c02f54f3 1-129
+spikes/wasm/include/ctx/wasm_engine.hpp
+  s_4dcafa08bfb269::t_0547f9bc3ca02d 1-85
+spikes/wasm/src/engine_wamr.cpp
+  s_4dcafa08bfb269::t_a91de41cf9d1fa 1-59,61-173
+  s_4dcafa08bfb269::t_1baa6b4944f613 60
+spikes/wasm/FINDINGS.md
+  s_4dcafa08bfb269::t_b5d80d93f2b290 1-255
+spikes/wasm/results/2026-07-02-ryzen9950x.json
+  s_4dcafa08bfb269::t_7d4f652d3ccbf4 1-806
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "40d0b886c208339ddbf1747f64427b4c3af840d9",
+  "prompts": {},
+  "sessions": {
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

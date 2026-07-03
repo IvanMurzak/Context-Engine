@@ -1,0 +1,25 @@
+src/CMakeLists.txt
+  s_4dcafa08bfb269::t_06f5f6ce9c4c0f 102
+  s_4dcafa08bfb269::t_09e0a5e7729b09 82-85
+  s_4dcafa08bfb269::t_f1308bd5e5f7df 65-71,74
+  s_4dcafa08bfb269::t_7f291c2ec9539c 92
+  s_4dcafa08bfb269::t_ce2d6e9bc18944 46-52
+src/CMakePresets.json
+  s_4dcafa08bfb269::t_8c4888853d8fa2 13-21,33,41,59-63,72,77,86-91,101,106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "0871ff17b9f1c5b175b5f7091dbd8d82501e3898",
+  "prompts": {},
+  "sessions": {
+    "s_4dcafa08bfb269": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cbbb1d21-628a-4cc9-8559-7c2d1267382f",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
