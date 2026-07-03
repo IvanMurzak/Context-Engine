@@ -47,7 +47,8 @@ public:
 
     // Accept + serve clients over `server` until a `shutdown` message (or stop()) breaks the loop.
     // Each connection gets a fresh Session; every framed request goes through the composed kernel's
-    // dispatcher. Returns 0 on a clean stop. Blocking — runs on the calling thread.
+    // dispatcher. Returns 0 on a clean stop, non-zero if the listener fails (server.error() set).
+    // Blocking — runs on the calling thread.
     int serve(bridge::TransportServer& server);
 
     // Ask the serve loop to stop (thread-safe). Also invoked by the `shutdown` verb.

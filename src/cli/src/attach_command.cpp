@@ -147,6 +147,10 @@ Envelope run_attach(const std::vector<std::string>& args)
 
     std::error_code ec;
     const fs::path project = fs::absolute(fs::path(*project_flag), ec);
+    if (ec)
+        return Envelope::failure("internal.error",
+                                 "could not resolve --project '" + *project_flag +
+                                     "' to an absolute path: " + ec.message());
     const std::string set_path = flag_value(args, "set-path").value_or("proj/a.scene");
     const std::string set_content = flag_value(args, "set-content").value_or("entity: 1");
     const std::optional<std::string> out = flag_value(args, "out");

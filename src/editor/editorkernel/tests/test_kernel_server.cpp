@@ -177,5 +177,74 @@ int main()
     std::error_code ec;
     fs::remove_all(project, ec);
 
+    // ---- ceiling clamp: a daemon launched with a restricted --launch-scopes clamps a wire client
+    //      that requests MORE (R-SEC-007 least privilege over the wire). Regression guard: without the
+    //      dispatcher-level ceiling the wire attach path (handle -> attach) would grant the requested
+    //      scope verbatim, letting any local process escalate past the operator's launch ceiling.
+    {
+        const fs::path project2 = make_temp_project();
+        MemoryFileStore store2;
+        NullWatcher watcher2;
+        context::kernel::ManualClock clock2;
+        context::kernel::InlineTaskRunner tasks2;
+
+        EditorKernelConfig cfg2;
+        cfg2.project_root = project2;
+        cfg2.filesync_root = "proj";
+        cfg2.index_path = "proj/.editor/reconcile-index";
+
+        EditorKernel kernel2(store2, watcher2, clock2, tasks2, cfg2);
+        KernelServer server2(kernel2);
+        // Launch ceiling = session-control only (NO file-write): `context daemon --launch-scopes session`.
+        CHECK(kernel2.start(ScopeSet::parse("session")) == StartOutcome::booted);
+
+        TransportServer transport2(endpoint_for(
+            "ctx-kernelserver-ceiling-" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())));
+        CHECK(transport2.listen());
+
+        std::thread srv2([&server2, &transport2]() { server2.serve(transport2); });
+
+        {
+            TransportClient esc(transport2.endpoint());
+            CHECK(esc.connect(3000));
+
+            // The client ASKS for write,session — the ceiling must clamp file-write away.
+            const std::optional<std::string> a =
+                esc.request(rpc(1, "attach", attach_params("write,session")));
+            CHECK(a.has_value());
+            const Json attached = Json::parse(*a);
+            CHECK(attached.contains("result"));
+            const Json& granted = attached.at("result").at("scopes");
+            bool granted_file_write = false;
+            for (std::size_t i = 0; i < granted.size(); ++i)
+                if (granted.at(i).as_string() == "file-write")
+                    granted_file_write = true;
+            CHECK(!granted_file_write); // clamped away by the launch ceiling
+
+            // And the clamp is enforced end-to-end: edit is denied though the client requested write.
+            Json ep = Json::object();
+            ep.set("path", Json(std::string("proj/a.scene")));
+            ep.set("content", Json(std::string("entity: 2")));
+            const std::optional<std::string> denied = esc.request(rpc(2, "edit", std::move(ep)));
+            CHECK(denied.has_value());
+            const Json resp = Json::parse(*denied);
+            CHECK(resp.contains("error"));
+            CHECK(resp.at("error").at("data").at("code").as_string() == "scope.denied");
+
+            // session-control SURVIVES the clamp, so shutdown is accepted and the serve loop stops.
+            const std::optional<std::string> s = esc.request(rpc(3, "shutdown", Json::object()));
+            CHECK(s.has_value());
+            const Json stop_resp = Json::parse(*s);
+            CHECK(stop_resp.at("result").at("data").at("stopping").as_bool());
+            esc.close();
+        }
+
+        srv2.join();
+        kernel2.stop();
+        std::error_code ec2;
+        fs::remove_all(project2, ec2);
+    }
+
     EDITORKERNEL_TEST_MAIN_END();
 }

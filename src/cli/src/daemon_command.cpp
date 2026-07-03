@@ -140,14 +140,22 @@ int run_daemon(const std::vector<std::string>& args)
     const std::optional<std::string> project_flag = flag_value(args, "project");
     if (!project_flag.has_value())
     {
-        emit(Envelope::failure("usage.missing_argument",
-                               "context daemon requires --project <dir>"),
-             out);
-        return Envelope::failure("usage.missing_argument", "").exit_code();
+        const Envelope env = Envelope::failure("usage.missing_argument",
+                                               "context daemon requires --project <dir>");
+        emit(env, out);
+        return env.exit_code();
     }
 
     std::error_code ec;
     const fs::path project = fs::absolute(fs::path(*project_flag), ec);
+    if (ec)
+    {
+        const Envelope env = Envelope::failure(
+            "internal.error", "could not resolve --project '" + *project_flag +
+                                  "' to an absolute path: " + ec.message());
+        emit(env, out);
+        return env.exit_code();
+    }
     fs::create_directories(project, ec);
 
     const ScopeSet launch_scopes = flag_value(args, "launch-scopes").has_value()
@@ -185,11 +193,11 @@ int run_daemon(const std::vector<std::string>& args)
     }
     if (outcome == StartOutcome::error)
     {
-        emit(Envelope::failure("internal.error",
-                               "the EditorKernel daemon failed to boot: " +
-                                   kernel.daemon().error_message()),
-             out);
-        return Envelope::failure("internal.error", "").exit_code();
+        const Envelope env = Envelope::failure("internal.error",
+                                               "the EditorKernel daemon failed to boot: " +
+                                                   kernel.daemon().error_message());
+        emit(env, out);
+        return env.exit_code();
     }
 
     // Booted — this process owns the Project. Bind the loopback transport, publish the discovery hint,
@@ -198,11 +206,11 @@ int run_daemon(const std::vector<std::string>& args)
     TransportServer transport(endpoint);
     if (!transport.listen())
     {
-        emit(Envelope::failure("internal.error",
-                               "could not bind the IPC endpoint: " + transport.error()),
-             out);
+        const Envelope env = Envelope::failure("internal.error",
+                                               "could not bind the IPC endpoint: " + transport.error());
+        emit(env, out);
         kernel.stop();
-        return Envelope::failure("internal.error", "").exit_code();
+        return env.exit_code();
     }
 
     // A per-instance token derived from the canonical key + endpoint + pid (carried per R-BRIDGE-007;
@@ -212,10 +220,11 @@ int run_daemon(const std::vector<std::string>& args)
     std::string write_err;
     if (!write_instance_file(project, endpoint, token, write_err))
     {
-        emit(Envelope::failure("internal.error", write_err), out);
+        const Envelope env = Envelope::failure("internal.error", write_err);
+        emit(env, out);
         transport.stop();
         kernel.stop();
-        return Envelope::failure("internal.error", "").exit_code();
+        return env.exit_code();
     }
 
     // The appearance of instance.json is the "ready" signal a launcher/test waits on; also announce it.

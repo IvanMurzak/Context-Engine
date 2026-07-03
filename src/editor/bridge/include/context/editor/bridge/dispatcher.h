@@ -56,8 +56,13 @@ public:
     // `stream` (optional, non-owning): when set, a successful attach emits a `clients` event.
     // `backend` (optional, non-owning): the real backing for resolved verbs (see MethodBackend); when
     // null the reserved verbs return contract.unimplemented exactly as before.
-    explicit Dispatcher(EventStream* stream = nullptr, const MethodBackend* backend = nullptr)
-        : stream_(stream), backend_(backend)
+    // `ceiling`: the launch-time operator scope ceiling (R-SEC-007). It is the SINGLE clamp point —
+    // attach() intersects EVERY attaching client's requested scopes against it, so the in-process
+    // (Daemon::attach_client) and cross-process wire (handle → attach) paths honor `--launch-scopes`
+    // identically. Default: all scopes (no restriction).
+    explicit Dispatcher(EventStream* stream = nullptr, const MethodBackend* backend = nullptr,
+                        ScopeSet ceiling = ScopeSet::all())
+        : stream_(stream), backend_(backend), ceiling_(ceiling)
     {
     }
 
@@ -85,6 +90,7 @@ public:
 private:
     EventStream* stream_;
     const MethodBackend* backend_;
+    ScopeSet ceiling_;
 };
 
 } // namespace context::editor::bridge

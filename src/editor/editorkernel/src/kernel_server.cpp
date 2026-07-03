@@ -115,7 +115,14 @@ int KernelServer::serve(bridge::TransportServer& server)
     {
         std::optional<bridge::TransportConnection> conn = server.accept();
         if (!conn.has_value())
-            break; // stopped or listener closed
+        {
+            // A null accept() is EITHER a clean stop()/shutdown OR a genuine listener error — only the
+            // latter sets server.error(). Surface an error as a non-zero exit instead of letting a
+            // transient IPC failure masquerade as a graceful daemon shutdown.
+            if (!server.error().empty())
+                return 1;
+            break; // clean stop / listener closed
+        }
 
         // One fresh session per connection: the dispatcher establishes it on the attach handshake and
         // reads its scopes on every subsequent method (R-SEC-007).

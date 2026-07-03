@@ -101,7 +101,11 @@ public:
     [[nodiscard]] std::optional<TransportConnection> accept();
 
     // Stop listening + release the endpoint (unlink the POSIX socket file). Idempotent. A subsequent
-    // accept() returns nullopt.
+    // accept() returns nullopt. CAUTION: in the M1 serial model stop() runs on the SAME thread that
+    // runs accept() (after it returns). Calling stop() from another thread WHILE accept() is blocked
+    // closes the listener fd/HANDLE out from under a blocked syscall — undefined behavior on both
+    // platforms; a future concurrent graceful-shutdown must use CancelSynchronousIo/CancelIoEx
+    // (Windows) or a self-pipe/eventfd wakeup (POSIX) instead of relying on this.
     void stop() noexcept;
 
     [[nodiscard]] const std::string& endpoint() const noexcept { return endpoint_; }

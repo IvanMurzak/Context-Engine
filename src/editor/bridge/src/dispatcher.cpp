@@ -104,7 +104,10 @@ Dispatcher::AttachResult Dispatcher::attach(const ClientHandshake& client, Scope
     session.attached = true;
     session.protocol_major = agreed.protocol_major;
     session.capabilities = agreed.capabilities;
-    session.scopes = requested;
+    // R-SEC-007 least privilege: clamp the requested scopes to the launch-time operator ceiling. This
+    // is the SINGLE clamp point for BOTH the in-process (Daemon::attach_client) and the cross-process
+    // wire (handle → attach) paths, so a wire client cannot escalate past `--launch-scopes`.
+    session.scopes = ceiling_.intersect(requested);
 
     if (stream_ != nullptr)
     {
