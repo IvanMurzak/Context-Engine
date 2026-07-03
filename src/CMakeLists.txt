@@ -43,34 +43,35 @@ if(CONTEXT_SANITIZE AND CONTEXT_TSAN)
     message(FATAL_ERROR "CONTEXT_SANITIZE and CONTEXT_TSAN are mutually exclusive: ThreadSanitizer cannot be combined with ASan/UBSan in one binary (use the separate `sanitize` and `tsan` presets).")
 endif()
 
+# ASan exists on MSVC but UBSan does not, and MSVC has no ThreadSanitizer; both sanitizer
+# presets are scoped to non-MSVC toolchains (design lock L-38: sanitizer/TSan CI runs on
+# Linux/Clang).
+if(MSVC AND (CONTEXT_SANITIZE OR CONTEXT_TSAN))
+    message(FATAL_ERROR "CONTEXT_SANITIZE and CONTEXT_TSAN are only supported with non-MSVC toolchains (Clang/GCC).")
+endif()
+
 if(CONTEXT_SANITIZE)
-    if(MSVC)
-        # ASan exists on MSVC but UBSan does not; the sanitize preset is scoped to non-MSVC
-        # toolchains (design lock L-38 sanitizer CI runs on Linux/Clang).
-        message(FATAL_ERROR "CONTEXT_SANITIZE is only supported with non-MSVC toolchains (Clang/GCC).")
-    endif()
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
     add_link_options(-fsanitize=address,undefined)
 endif()
 
 if(CONTEXT_TSAN)
-    if(MSVC)
-        # MSVC has no ThreadSanitizer; the tsan preset is scoped to non-MSVC toolchains
-        # (design lock L-38: TSan-gated CI runs on Linux/Clang).
-        message(FATAL_ERROR "CONTEXT_TSAN is only supported with non-MSVC toolchains (Clang/GCC).")
-    endif()
     add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
     add_link_options(-fsanitize=thread)
 endif()
 
 enable_testing()
 
+# spikes/ lives OUTSIDE the source dir (sibling of src/), so every spike is added with an
+# explicit binary dir; the ${CMAKE_BINARY_DIR}/spikes/<name> layout keeps output paths
+# identical to the pre-move tree (the CI bench job depends on <binaryDir>/spikes/parse-bench/...).
+function(add_spike name)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/${name} ${CMAKE_BINARY_DIR}/spikes/${name})
+endfunction()
+
 # M0: the only always-on target is the hello spike. Engine components (src/kernel/, src/editor/,
 # src/runtime/, src/packages/) gain targets starting at M1.
-# spikes/ lives OUTSIDE the source dir (sibling of src/), so every add_subdirectory names an
-# explicit binary dir; the ${CMAKE_BINARY_DIR}/spikes/<x> layout keeps output paths identical
-# to the pre-move tree (the CI bench job depends on build/bench/spikes/parse-bench/...).
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/hello ${CMAKE_BINARY_DIR}/spikes/hello)
+add_spike(hello)
 
 # M0 de-risking spikes are OPT-IN (CONTEXT_BUILD_SPIKES=ON): the default CI matrix stays
 # untouched. spikes/ecs takes its dependencies from the vcpkg manifest's `spikes` feature;
@@ -78,17 +79,17 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/hello ${CMAKE_BINARY_DIR}
 # spikes/webgpu downloads the pinned wgpu-native prebuilt itself (no vcpkg port exists) and is
 # also standalone-configurable for its Emscripten web leg — see its CMakeLists.txt.
 if(CONTEXT_BUILD_SPIKES)
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/ecs ${CMAKE_BINARY_DIR}/spikes/ecs)
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/parse-bench ${CMAKE_BINARY_DIR}/spikes/parse-bench)
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/js-engine ${CMAKE_BINARY_DIR}/spikes/js-engine)
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/webgpu ${CMAKE_BINARY_DIR}/spikes/webgpu)
+    add_spike(ecs)
+    add_spike(parse-bench)
+    add_spike(js-engine)
+    add_spike(webgpu)
 endif()
 
 # spikes/wasm acquires its own pinned runtimes (wasmtime prebuilt C API + WAMR from source) and
 # needs no vcpkg toolchain, so it also has a stand-alone toggle the spikes CI job uses.
 # (The C language WAMR needs is enabled at the top of this file, before any add_subdirectory.)
 if(CONTEXT_BUILD_SPIKES OR CONTEXT_BUILD_SPIKE_WASM)
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/wasm ${CMAKE_BINARY_DIR}/spikes/wasm)
+    add_spike(wasm)
 endif()
 
 # spikes/cef-compositing (L-41) is DOUBLY gated: CEF's binary distribution is a ~162 MB
@@ -98,5 +99,5 @@ endif()
 # CONTEXT_BUILD_SPIKE_CEF=ON alone (the local Windows run) the spike builds WITHOUT dragging
 # in the vcpkg-dependent spikes above.
 if(CONTEXT_BUILD_SPIKES OR CONTEXT_BUILD_SPIKE_CEF)
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../spikes/cef-compositing ${CMAKE_BINARY_DIR}/spikes/cef-compositing)
+    add_spike(cef-compositing)
 endif()
