@@ -1,0 +1,45 @@
+# Applies the L-42 pinned-toolchain manifest (cmake/toolchain-versions.json) to a CI job.
+#   Linux   — installs the pinned clang from apt.llvm.org, STRICTLY verifies it against the
+#             manifest pin, and exports CC/CXX so every subsequent step compiles with it.
+#   macOS   — advisory-verifies the runner's Apple clang against the recorded version
+#             (drift = a ::warning:: annotation + a manifest update, never a red build).
+#   Windows — prints the documented reality (runner MSVC; clang-cl adoption is a staged
+#             follow-up recorded in the manifest). No live probe yet.
+# The manifest + tools/check_toolchain.py are the single source of truth; this action is
+# only the applicator. Requires the repo to be checked out first.
+
+name: Pinned toolchain (L-42 manifest)
+description: Install/verify the per-target pinned toolchain declared in cmake/toolchain-versions.json
+
+runs:
+  using: composite
+  steps:
+    - name: Apply toolchain manifest
+      shell: bash
+      run: |
+        set -euo pipefail
+        case "$RUNNER_OS" in
+          Linux)
+            PLATFORM=linux-x86_64
+            PIN="$(python3 tools/check_toolchain.py --platform "$PLATFORM" --print-pin)"
+            MAJOR="$(python3 tools/check_toolchain.py --platform "$PLATFORM" --print-install-major)"
+            python3 tools/check_toolchain.py --platform "$PLATFORM" --describe
+            echo "[toolchain] installing clang $PIN (apt.llvm.org, major $MAJOR)"
+            wget -q https://apt.llvm.org/llvm.sh -O "$RUNNER_TEMP/llvm.sh"
+            chmod +x "$RUNNER_TEMP/llvm.sh"
+            sudo "$RUNNER_TEMP/llvm.sh" "$MAJOR"
+            "clang-$MAJOR" --version
+            "clang-$MAJOR" --version | python3 tools/check_toolchain.py --platform "$PLATFORM" --verify
+            echo "CC=clang-$MAJOR" >> "$GITHUB_ENV"
+            echo "CXX=clang++-$MAJOR" >> "$GITHUB_ENV"
+            ;;
+          macOS)
+            PLATFORM=macos-arm64
+            python3 tools/check_toolchain.py --platform "$PLATFORM" --describe
+            clang --version
+            clang --version | python3 tools/check_toolchain.py --platform "$PLATFORM" --verify
+            ;;
+          Windows)
+            python tools/check_toolchain.py --platform windows-x86_64 --describe
+            ;;
+        esac
