@@ -1,0 +1,24 @@
+src/cli/src/editor_driver.cpp
+  s_00cb1100a75700::t_30e02a2fe1285b 79-82,87-91,95,98-99,103
+src/editor/editorkernel/src/editor_kernel.cpp
+  s_00cb1100a75700::t_a5fdcdd8d89c26 113-115
+src/cli/tests/test_editor_driver.cpp
+  s_00cb1100a75700::t_f7028a0ed526f1 11-12
+  s_00cb1100a75700::t_53ebb32667f8cc 53-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "5ba918250c503274c30ec7fe126c8d645dc74ecd",
+  "prompts": {},
+  "sessions": {
+    "s_00cb1100a75700": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c36dbb71-cb5a-4c4d-b9b0-792a43a89435",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
