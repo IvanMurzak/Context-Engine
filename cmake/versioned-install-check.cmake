@@ -45,10 +45,13 @@ endif()
 #    top-level versions/ tree — anything else (a flat bin/, lib/, include/, …) means a
 #    payload escaped versions/<semver>/. Enumerate all top-level entries, not just bin/, so
 #    a future library/header install cannot slip past a bin-only guard.
+# Derive the required top-level segment from the SAME subdir install() used (drift-proof:
+# a rename of the layout root changes exactly one place, src/CMakeLists.txt).
+string(REGEX REPLACE "/.*" "" _versions_root "${CONTEXT_INSTALL_SUBDIR}")
 file(GLOB _top_level "${_prefix}/*")
 foreach(_entry IN LISTS _top_level)
     get_filename_component(_name "${_entry}" NAME)
-    if(NOT _name STREQUAL "versions")
+    if(NOT _name STREQUAL "${_versions_root}")
         message(FATAL_ERROR
             "R-VER-004 violation: flat install detected at '${_entry}'; "
             "installs MUST stage under versions/<semver>/")
