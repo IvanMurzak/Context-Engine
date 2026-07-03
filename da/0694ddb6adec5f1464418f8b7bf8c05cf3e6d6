@@ -1,0 +1,45 @@
+src/CMakeLists.txt
+  s_00cb1100a75700::t_f6303af572dbdb 83-88
+src/editor/derivation/include/context/editor/derivation/canonical_parse.h
+  s_00cb1100a75700::t_c10a3fc14e4bcd 1-38
+src/editor/derivation/tests/test_canonical_parse.cpp
+  s_00cb1100a75700::t_64e4d373a69a7a 1-52
+src/editor/derivation/src/canonical_parse.cpp
+  s_00cb1100a75700::t_1bbfc35d944b20 1-62
+src/editor/derivation/include/context/editor/derivation/derivation_graph.h
+  s_00cb1100a75700::t_8a5f036c5a214a 1-175
+src/editor/derivation/include/context/editor/derivation/query_barrier.h
+  s_00cb1100a75700::t_5437b9d406eafe 1-75
+src/editor/derivation/tests/test_incremental.cpp
+  s_00cb1100a75700::t_ae659096c0d0d1 1-82
+src/editor/derivation/tests/derivation_test.h
+  s_00cb1100a75700::t_146d1454cebb17 1-28
+src/editor/derivation/src/derivation_graph.cpp
+  s_00cb1100a75700::t_bdebb04f1efc0f 1-202
+src/editor/derivation/tests/test_derivation_graph.cpp
+  s_00cb1100a75700::t_942ba8775200cb 1-90
+src/editor/derivation/tests/test_backpressure.cpp
+  s_00cb1100a75700::t_8d9ef708ea4b9c 1-103
+src/editor/derivation/tests/test_query_barrier.cpp
+  s_00cb1100a75700::t_209231712811c7 1-109
+src/editor/derivation/CMakeLists.txt
+  s_00cb1100a75700::t_7c025d74cd46bf 1-43
+src/editor/derivation/README.md
+  s_00cb1100a75700::t_991d5be7546189 1-57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "da0694ddb6adec5f1464418f8b7bf8c05cf3e6d6",
+  "prompts": {},
+  "sessions": {
+    "s_00cb1100a75700": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c36dbb71-cb5a-4c4d-b9b0-792a43a89435",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
