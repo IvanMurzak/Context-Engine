@@ -64,6 +64,12 @@ jobs:
       - name: Run Python test suites
         run: python3 -m pytest tools/tests bench/tests -v
 
+      # R-QA-012: CI CONSUMES the fleet manifest — validate it against this live workflow every run
+      # (self-consistency + the advisory-until-provisioned rule + ci_job_id sync). See
+      # docs/ci-fleet-manifest.md.
+      - name: Validate CI fleet manifest (R-QA-012)
+        run: python3 tools/check_fleet_manifest.py --manifest docs/ci-fleet-manifest.json --ci-workflow .github/workflows/ci.yml
+
   build:
     name: build (${{ matrix.os }})
     needs: [license-gate, python-tests]
@@ -211,6 +217,21 @@ jobs:
           --corpus bench/corpora/corpus-10k
           --runs 5 --single-thread-attach --count 2000
           --out bench/results/ci-ubuntu-10k --label ci-ubuntu-10k
+
+      # R-QA-009 perf gate wired to the 10k benchmark. ADVISORY (continue-on-error): a shared
+      # GitHub runner is NOT the perf-isolated `perf-linux-bare-metal` runner class the manifest
+      # names, so its numbers cannot gate (docs/perf-gate-methodology.md rule 1 + the R-QA-012
+      # advisory-until-provisioned contract). It records the measurement to the time-series archive
+      # and, once a baseline exists, reports drift — it never red-Xs the rollup here.
+      - name: Perf gate (R-QA-009, advisory until the perf box is provisioned)
+        continue-on-error: true
+        run: >
+          python3 bench/perf_gate.py
+          --result bench/results/ci-ubuntu-10k.json
+          --scenario attach
+          --baseline bench/baselines/attach-ci-ubuntu-10k.json
+          --archive bench/results/archive
+          --runner-class gh-ubuntu-shared
 
       - name: sccache stats
         if: runner.os != 'Windows'

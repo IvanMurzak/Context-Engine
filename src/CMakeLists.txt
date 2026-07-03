@@ -129,6 +129,12 @@ add_subdirectory(cli)
 # src/kernel/ and src/ merge cleanly.
 add_subdirectory(editor/bridge)
 
+# M1 test-system foundations (R-QA-010): the deterministic fault-injection harness (src/testing/) —
+# a reusable context_testing support lib + scenario tests driving the injectable kernel + file-sync +
+# bridge seams under a seeded fault schedule. Wired here — apart from add_subdirectory(kernel) above —
+# so concurrent sibling tasks touching src/editor/ and src/ merge cleanly.
+add_subdirectory(testing)
+
 # ---------------------------------------------------------------------------
 # R-VER-004 — versioned install layout (docs/versioned-install.md).
 #
