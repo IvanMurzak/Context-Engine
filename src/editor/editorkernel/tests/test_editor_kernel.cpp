@@ -12,6 +12,7 @@
 
 #include "context/editor/editorkernel/editor_kernel.h"
 
+#include "context/editor/bridge/event_stream.h"
 #include "context/editor/contract/handshake.h"
 #include "context/editor/derivation/canonical_parse.h"
 #include "context/editor/filesync/file_store.h"
@@ -40,6 +41,7 @@ using context::editor::bridge::Scope;
 using context::editor::bridge::ScopeSet;
 using context::editor::bridge::Session;
 using context::editor::bridge::StartOutcome;
+using context::editor::bridge::Subscriber;
 
 namespace
 {
@@ -182,8 +184,84 @@ int main()
         CHECK(!store.exists("escape.scene"));
     }
 
+    // --- await_hash / await_generation bounded-block THEN publish the settle fact (R-CLI-006 +
+    // --- R-BRIDGE-008): the explicit barrier primitives, distinct from query_after_hash (which does
+    // --- not settle). Subscribe to the client `derivation` stream to observe the quiescence event. --
+    {
+        Subscriber sub({"derivation"});
+        kernel.events().add_subscriber(&sub);
+
+        // A fresh CLI-verb edit leaves a pending derivation; await_hash blocks until the derived world
+        // reflects the write's canonical hash, then settles.
+        EditOutcome edit = kernel.edit_file("proj/c.scene", "entity: 3", writer);
+        CHECK(edit.ok);
+        const auto hashed = kernel.await_hash(edit.ticket.canonical_hash);
+        CHECK(hashed.ok());
+        auto node = kernel.query("proj/c.scene");
+        CHECK(node.has_value());
+        CHECK(node->canonical_hash == edit.ticket.canonical_hash);
+
+        // await_hash's settle() published derivation.settled carrying the derived-world generation.
+        const std::uint64_t settled_gen = kernel.generation();
+        bool saw_settled = false;
+        for (const auto& e : sub.drain())
+            if (e.topic == "derivation" &&
+                e.payload.at("event").as_string() == "derivation.settled" &&
+                static_cast<std::uint64_t>(e.payload.at("generation").as_int()) == settled_gen)
+                saw_settled = true;
+        CHECK(saw_settled);
+
+        // A foreign-generation barrier on an already-reached generation resolves immediately (0 passes)
+        // and re-settles. wait_for_generation is otherwise unexercised.
+        const auto reached = kernel.await_generation(kernel.generation());
+        CHECK(reached.ok());
+        CHECK(reached.passes == 0);
+
+        kernel.events().remove_subscriber(&sub);
+    }
+
     kernel.stop();
     CHECK(!kernel.running());
+
+    // --- a read-your-writes query must NEVER stall behind a derivation backlog (R-FILE-013): under
+    // --- load-shed, query_after_hash marks the queried path visible so it derives first. Without that
+    // --- the target — sorted last behind a backlog — is deferred past the barrier bound and times out.
+    {
+        const fs::path loadshed_project = make_temp_project("loadshed");
+        MemoryFileStore ls_store;
+        NullWatcher ls_watcher;
+        context::kernel::ManualClock ls_clock;
+        context::kernel::InlineTaskRunner ls_tasks;
+
+        EditorKernelConfig ls_cfg = config_for(loadshed_project);
+        ls_cfg.derivation.high_watermark = 2;     // overload once >2 writes are pending
+        ls_cfg.derivation.max_batch_per_pass = 1; // …and derive only ONE non-visible node per pass
+        ls_cfg.barrier_max_passes = 3;            // a bound too small to reach a late-sorted backlog entry
+
+        EditorKernel ls_kernel(ls_store, ls_watcher, ls_clock, ls_tasks, ls_cfg);
+        CHECK(ls_kernel.start(ScopeSet::all()) == StartOutcome::booted);
+
+        // Enqueue a backlog of distinct writes without running a pass; the target sorts LAST.
+        EditOutcome target;
+        for (int i = 0; i < 8; ++i)
+        {
+            const std::string path = "proj/f" + std::to_string(i) + ".scene";
+            EditOutcome e = ls_kernel.edit_file(path, "entity: " + std::to_string(100 + i), writer);
+            CHECK(e.ok);
+            if (i == 7)
+                target = e; // proj/f7.scene sorts after proj/f0..f6 in the pending map
+        }
+        CHECK(ls_kernel.generation() == 0); // nothing derived yet — the whole backlog is pending
+
+        // Resolves within the tight bound ONLY because the query prioritizes its own path.
+        auto observed = ls_kernel.query_after_hash("proj/f7.scene", target.ticket.canonical_hash);
+        CHECK(observed.has_value());
+        CHECK(observed->canonical_hash == target.ticket.canonical_hash);
+
+        ls_kernel.stop();
+        std::error_code ls_ec;
+        fs::remove_all(loadshed_project, ls_ec);
+    }
 
     // Best-effort cleanup of the real lock directory.
     std::error_code ec;

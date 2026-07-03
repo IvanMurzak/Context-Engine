@@ -64,7 +64,9 @@ Json edit_summary(const std::string& path, std::uint64_t canonical_hash, bool re
 {
     Json out = Json::object();
     out.set("path", Json(path));
-    out.set("canonicalHash", Json(canonical_hash));
+    // Decimal STRING, not a number: Json's number type is double-backed and a full-range 64-bit
+    // canonical hash (> 2^53) would lose precision (R-CLI-006 replay key must round-trip losslessly).
+    out.set("canonicalHash", Json(std::to_string(canonical_hash)));
     out.set("reflected", Json(reflected));
     return out;
 }
@@ -77,6 +79,20 @@ Envelope run_smoke(const std::vector<std::string>& args)
     const fs::path project = resolve_project_dir(args);
     std::error_code ec;
     fs::create_directories(project, ec);
+
+    // Remove the temp lock directory on EVERY exit path, not just the happy tail: a boot / attach /
+    // edit failure below returns early, and without this guard each failed `context editor smoke`
+    // invocation would leak a `context-editor-smoke-*` directory under the system temp folder.
+    // Declared before the kernel so it is destroyed AFTER the daemon releases its lock.
+    struct ProjectCleanup
+    {
+        fs::path dir;
+        ~ProjectCleanup()
+        {
+            std::error_code cleanup_ec;
+            fs::remove_all(dir, cleanup_ec);
+        }
+    } project_cleanup{project};
 
     MemoryFileStore store;
     NullWatcher watcher;
@@ -149,8 +165,7 @@ Envelope run_smoke(const std::vector<std::string>& args)
         env.add_warning("the derived world did not reflect an edit within the read barrier bound");
 
     kernel.stop();
-    fs::remove_all(project, ec); // best-effort cleanup of the temp lock directory
-    return env;
+    return env; // project_cleanup removes the temp lock directory as it goes out of scope
 }
 } // namespace
 

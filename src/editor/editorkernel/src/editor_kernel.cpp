@@ -8,6 +8,7 @@
 #include "context/editor/filesync/file_store.h"
 #include "context/editor/filesync/path_jail.h"
 
+#include <string>
 #include <utility>
 
 namespace context::editor::editorkernel
@@ -22,7 +23,11 @@ Envelope EditOutcome::envelope() const
     {
         Json data = Json::object();
         data.set("path", Json(ticket.path));
-        data.set("canonicalHash", Json(ticket.canonical_hash));
+        // Serialize the 64-bit content hash as a decimal STRING: Json's number type is double-backed,
+        // so a full-range canonical hash (routinely > 2^53) would lose precision — and this is exactly
+        // the own-write replay key a caller feeds back as `--after-hash` (R-CLI-006), which must
+        // round-trip losslessly.
+        data.set("canonicalHash", Json(std::to_string(ticket.canonical_hash)));
         data.set("removal", Json(ticket.removal));
         // generationAfter is the derived-world generation the write will be incorporated into
         // (R-CLI-006 own-write barrier target).
@@ -169,8 +174,15 @@ std::uint64_t EditorKernel::settle()
 std::optional<derivation::DerivedSource>
 EditorKernel::query_after_hash(std::string_view path, std::uint64_t canonical_hash)
 {
+    // Prioritize the queried path in the derivation load-shed: under sustained write load
+    // (R-FILE-013) a non-visible node can be repeatedly deferred while the barrier burns through its
+    // pass budget, stalling the read. DerivationGraph derives visible/queried nodes first — never
+    // stall a query — so mark this path visible for the duration of the read. Scoped (unmarked below)
+    // so a one-off read does not permanently exempt the path from load-shedding.
+    graph_.set_visible(path, true);
     const derivation::BarrierResult result =
         derivation::wait_for_hash(graph_, canonical_hash, config_.barrier_max_passes);
+    graph_.set_visible(path, false);
     if (!result.ok())
         return std::nullopt;
     return graph_.node(path);

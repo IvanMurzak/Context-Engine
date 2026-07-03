@@ -27,8 +27,11 @@ int main()
         CHECK(data.at("cliVerbEdit").at("reflected").as_bool());
         CHECK(data.at("rawEdit").at("reflected").as_bool());
         // The CLI-verb edit and the raw edit derive to DIFFERENT canonical hashes on the same source.
-        CHECK(data.at("cliVerbEdit").at("canonicalHash").as_int() !=
-              data.at("rawEdit").at("canonicalHash").as_int());
+        // canonicalHash is a decimal STRING (a full-range 64-bit hash does not fit a JSON number
+        // losslessly — see editor_driver.cpp), so compare the string forms.
+        CHECK(!data.at("cliVerbEdit").at("canonicalHash").as_string().empty());
+        CHECK(data.at("cliVerbEdit").at("canonicalHash").as_string() !=
+              data.at("rawEdit").at("canonicalHash").as_string());
         CHECK(data.at("worldEntities").as_int() == 1); // one source entity, updated in place
         CHECK(data.at("generation").as_int() >= 1);
         CHECK(env.warnings().empty()); // both edits landed within the read-barrier bound
