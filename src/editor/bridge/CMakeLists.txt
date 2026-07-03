@@ -9,15 +9,18 @@ add_library(context_bridge STATIC
     src/lock.cpp
     src/event_stream.cpp
     src/dispatcher.cpp
-    src/daemon.cpp)
+    src/daemon.cpp
+    src/transport.cpp)
 
 target_include_directories(context_bridge PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # context_contract + context_kernel are PUBLIC: their headers appear in the bridge's public headers
-# (dispatcher/daemon expose contract types; event_stream forwards kernel::LogEvent). Every Context
-# target links the warnings-as-errors baseline (conventions.md).
+# (dispatcher/daemon expose contract types; event_stream forwards kernel::LogEvent). Threads::Threads
+# is PUBLIC because the IPC transport uses <thread> (backoff sleep) and downstream tests spawn a
+# server thread (-pthread on Linux; a no-op on Windows). Every Context target links the
+# warnings-as-errors baseline (conventions.md).
 target_link_libraries(context_bridge
-    PUBLIC context_contract context_kernel
+    PUBLIC context_contract context_kernel Threads::Threads
     PRIVATE context_warnings)
 
 # Self-contained GCC runtime for the bridge ctest executables. The lock + daemon use std::filesystem
@@ -37,7 +40,8 @@ set(_context_bridge_tests
     test_lock
     test_event_stream
     test_dispatcher
-    test_daemon)
+    test_daemon
+    test_transport)
 
 foreach(_t IN LISTS _context_bridge_tests)
     add_executable(context_bridge_${_t} tests/${_t}.cpp)

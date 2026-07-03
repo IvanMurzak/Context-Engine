@@ -39,6 +39,12 @@ endif()
 # Warnings-as-errors baseline: the `context_warnings` interface target (../cmake/ContextWarnings.cmake).
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextWarnings.cmake)
 
+# Threads: the bridge IPC transport uses <thread> (backoff sleep) and the cross-process tests spawn a
+# server thread; on Linux/GCC that requires -pthread. Threads::Threads is a no-op on the Windows/MSVC
+# and MinGW legs (native threads), so the toolchain matrix is untouched.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
 if(CONTEXT_SANITIZE AND CONTEXT_TSAN)
     message(FATAL_ERROR "CONTEXT_SANITIZE and CONTEXT_TSAN are mutually exclusive: ThreadSanitizer cannot be combined with ASan/UBSan in one binary (use the separate `sanitize` and `tsan` presets).")
 endif()

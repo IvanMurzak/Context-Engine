@@ -25,9 +25,11 @@ StartOutcome Daemon::start(bool write_capable, ScopeSet launch_scopes)
     }
 
     // Lock held — bring up a fresh incarnation's event stream + the scope-enforcing dispatcher.
+    // The dispatcher captures the composing layer's method backend (set before start()), so a
+    // cross-process client's real verbs are served over the same one JSON-RPC surface.
     launch_scopes_ = launch_scopes;
     events_.emplace();
-    dispatcher_.emplace(&*events_);
+    dispatcher_.emplace(&*events_, backend_);
     running_ = true;
 
     // Announce the session on the client-facing stream.

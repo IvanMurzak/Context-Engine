@@ -119,14 +119,17 @@ Scope required_scope_for(const std::string& rpc_method)
     // Install/build family — "file-write is effectively code execution" (R-SEC-007).
     if (rpc_method == "package.add" || rpc_method == "build")
         return Scope::build_install;
-    // File-rewriter family (R-ARCH-002 authored-file writes).
-    if (rpc_method == "set" || rpc_method == "new")
+    // File-rewriter family (R-ARCH-002 authored-file writes). `edit` is the daemon's operational
+    // cross-process file-write method (the composed-loop backing behind the bridge), so it is gated
+    // as a write exactly like the reserved `set` verb.
+    if (rpc_method == "set" || rpc_method == "new" || rpc_method == "edit")
         return Scope::file_write;
-    // Session lifecycle family (reserved verb-ids; gated now so activation is non-breaking).
+    // Session lifecycle family (reserved verb-ids; gated now so activation is non-breaking). The
+    // daemon's operational `shutdown` control method is a session-lifecycle action.
     if (rpc_method == "session.play" || rpc_method == "session.pause" ||
-        rpc_method == "session.step")
+        rpc_method == "session.step" || rpc_method == "shutdown")
         return Scope::session_control;
-    // describe + everything else is a read/query read.
+    // describe, the operational `query` read, and everything else is a read/query read.
     return Scope::read_query;
 }
 

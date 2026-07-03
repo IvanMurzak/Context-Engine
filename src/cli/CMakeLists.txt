@@ -7,6 +7,8 @@
 # The CLI logic as a library so the ctest executables can link it without pulling in main().
 add_library(context_cli STATIC
     src/app.cpp
+    src/attach_command.cpp
+    src/daemon_command.cpp
     src/editor_driver.cpp
     src/scaffold.cpp)
 
@@ -52,3 +54,19 @@ foreach(_t IN LISTS _context_cli_tests)
     target_include_directories(context_cli_${_t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     add_test(NAME cli-${_t} COMMAND context_cli_${_t})
 endforeach()
+
+# --- cross-process e2e (R-QA-013 / issue #34): spawn a REAL `context daemon` process + a SEPARATE
+# `context attach` process; the attach process drives the daemon over the wire and a 2nd `context
+# daemon` proves the R-BRIDGE-001 attach signal. The test needs the built `context` binary's path,
+# threaded in as a compile-time define ($<TARGET_FILE:context> resolves per-config), and must be built
+# AFTER `context`. It links context_cli only for the tiny CHECK() harness + std process helpers.
+add_executable(context_cli_test_attach_e2e tests/test_attach_e2e.cpp)
+target_link_libraries(context_cli_test_attach_e2e PRIVATE context_cli context_warnings)
+target_link_options(context_cli_test_attach_e2e PRIVATE ${_context_cli_static_runtime})
+target_include_directories(context_cli_test_attach_e2e PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+target_compile_definitions(context_cli_test_attach_e2e
+    PRIVATE CONTEXT_BINARY="$<TARGET_FILE:context>")
+add_dependencies(context_cli_test_attach_e2e context)
+add_test(NAME cli-test_attach_e2e COMMAND context_cli_test_attach_e2e)
+# The daemon child can block if something goes wrong; cap the cross-process test so CI never hangs.
+set_tests_properties(cli-test_attach_e2e PROPERTIES TIMEOUT 60)
