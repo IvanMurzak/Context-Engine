@@ -80,7 +80,9 @@ function(_context_dce_add_probe variant packages expected)
     target_link_libraries(context_dce_probe_${variant}
         PRIVATE context_kernel context_dce_pkg_alpha context_dce_pkg_beta
                 context_warnings context_dce_flags)
-    target_include_directories(context_dce_probe_${variant} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    # The registration/include dir is inherited transitively from the linked
+    # context_dce_pkg_{alpha,beta} static libs (they PUBLIC-export it above), so the
+    # probe needs no explicit target_include_directories of its own.
     target_compile_definitions(context_dce_probe_${variant}
         PRIVATE CONTEXT_DCE_EXPECTED_MODULES=${expected})
     if(_context_dce_ipo)
