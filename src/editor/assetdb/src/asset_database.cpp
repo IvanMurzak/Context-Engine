@@ -516,6 +516,14 @@ MoveResult AssetDatabase::move_asset(filesync::FileStore& fs, std::string_view f
     {
         const bool same_identity = from_meta_parsed.has_value() && to_meta_parsed.has_value() &&
                                    from_meta_parsed->guid == to_meta_parsed->guid;
+        // KNOWN AMBIGUITY (accepted): bytes alone cannot tell our window-B residue (destination
+        // file landed, crash before its sidecar) from a coincidentally byte-identical, meta-less
+        // file that legitimately occupies the destination — pre-meta files carry no identity to
+        // compare. In that edge the documented occupied-destination refusal does not fire; the
+        // move completes (source removed, fresh identity minted at `to`). Accepted: the bytes at
+        // `to` are unchanged either way and neither endpoint holds a GUID yet, so no content or
+        // identity is destroyed — only the refusal diagnostic is missed. Distinguishing the two
+        // would need a persisted move-intent record; the window closes once assets are meta-adopted.
         const bool same_bytes_pre_meta =
             !to_meta_bytes.has_value() && fs.read(from_s) == fs.read(to_s);
         if (!same_identity && !same_bytes_pre_meta)
