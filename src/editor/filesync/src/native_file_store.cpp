@@ -186,6 +186,20 @@ struct UniqueFd
     }
     UniqueFd(const UniqueFd&) = delete;
     UniqueFd& operator=(const UniqueFd&) = delete;
+    // Move-only (copies stay deleted): the user-declared destructor suppresses the implicit move
+    // ctor, and open_verified_dir() returns a named UniqueFd by value.
+    UniqueFd(UniqueFd&& other) noexcept : fd(other.fd) { other.fd = -1; }
+    UniqueFd& operator=(UniqueFd&& other) noexcept
+    {
+        if (this != &other)
+        {
+            if (fd >= 0)
+                ::close(fd);
+            fd = other.fd;
+            other.fd = -1;
+        }
+        return *this;
+    }
     [[nodiscard]] bool valid() const noexcept { return fd >= 0; }
 };
 
