@@ -1,0 +1,43 @@
+src/cli/tests/test_fetch_e2e.cpp
+  s_e3239cf02087b8::t_6b416d38151cec 187-190,193-194
+src/cli/src/fetch_command.cpp
+  s_e3239cf02087b8::t_cb530188b590c0 146-151,172-178
+  s_e3239cf02087b8::t_88847686278f68 10
+src/cli/src/daemon_command.cpp
+  s_e3239cf02087b8::t_a7e4f5369909fc 163-168,171
+  s_e3239cf02087b8::t_ca46cd6ec1bf1e 20
+  s_e3239cf02087b8::t_a0a455a0844c46 181-184
+src/cli/include/context/cli/wire_client.h
+  s_e3239cf02087b8::t_040ed3e0d81850 16,29-33
+  s_e3239cf02087b8::t_6218a80af6fe71 34
+src/editor/filesync/src/native_file_store.cpp
+  s_e3239cf02087b8::t_a74767cdb70aeb 220-248,253-259
+  s_e3239cf02087b8::t_3ab3e6405503cd 390-398
+  s_e3239cf02087b8::t_af4e517e09c163 491-496,498
+  s_e3239cf02087b8::t_be0f44b2a6bc22 249-252
+src/cli/src/wire_client.cpp
+  s_e3239cf02087b8::t_c552f1f273514a 47-63
+  s_e3239cf02087b8::t_52817ff751c368 8
+src/cli/tests/test_cli.cpp
+  s_e3239cf02087b8::t_68a279729a01b4 165-179
+  s_e3239cf02087b8::t_98cb72410e9dd1 6
+src/editor/filesync/tests/test_native_file_store.cpp
+  s_e3239cf02087b8::t_5ac9269057d13f 224-229
+  s_e3239cf02087b8::t_477f39a1a0dd61 278-282
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1fb61847443d175a403fdce64209e2653818fc8f",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
