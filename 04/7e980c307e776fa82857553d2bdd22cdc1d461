@@ -1,0 +1,34 @@
+src/editor/compose/include/context/editor/compose/flatten.h
+  s_e3239cf02087b8::t_648f30e8de4d50 112-116
+src/editor/derivation/tests/test_compose_node.cpp
+  s_e3239cf02087b8::t_b69adc2c477c78 195-217
+  s_e3239cf02087b8::t_89bd21ed10f68a 90-106
+src/editor/derivation/src/derivation_graph.cpp
+  s_e3239cf02087b8::t_abe391e69e0e6e 224-226,234,240-254
+  s_e3239cf02087b8::t_18a5cf92af9034 266-268,270-271,273-280
+  s_e3239cf02087b8::t_4a74d2da66eb47 151
+  s_e3239cf02087b8::t_1766f07e17a278 255-257
+src/editor/derivation/include/context/editor/derivation/derivation_graph.h
+  s_e3239cf02087b8::t_81fa7ab4c06cbb 238
+  s_e3239cf02087b8::t_0b3f8430ad3ca5 258-261
+src/editor/compose/src/flatten.cpp
+  s_e3239cf02087b8::t_5b57f0c10e02c6 430-436
+  s_e3239cf02087b8::t_abae1b00b82ea3 7
+  s_e3239cf02087b8::t_94ad40cacd5aa1 246
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "047e980c307e776fa82857553d2bdd22cdc1d461",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
