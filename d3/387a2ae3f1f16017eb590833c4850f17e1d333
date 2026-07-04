@@ -1,0 +1,25 @@
+bench/tests/test_budget_table.py
+  s_e3239cf02087b8::t_eca438c4177778 103-115
+src/cli/src/bench_command.cpp
+  s_e3239cf02087b8::t_7430348a6c995f 194
+bench/harness.py
+  s_e3239cf02087b8::t_68e53c825c9e9c 363-366
+bench/budget_table.py
+  s_e3239cf02087b8::t_22ac10763c24cd 130-133,135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d3387a2ae3f1f16017eb590833c4850f17e1d333",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
