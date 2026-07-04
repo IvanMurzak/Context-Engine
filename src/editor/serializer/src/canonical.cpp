@@ -296,6 +296,7 @@ CanonicalizeResult canonicalize(std::string_view source)
             result.is_json = true;
             result.bytes = std::move(bytes);
             result.canonical_hash = canonical_hash_of(result.bytes);
+            result.root = std::move(parsed.root); // reused by layered consumers (schema validation)
             return result;
         }
         // Unreachable from a real parse (the grammar cannot produce NaN/Infinity); fall through

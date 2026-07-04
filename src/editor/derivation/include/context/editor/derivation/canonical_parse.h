@@ -32,8 +32,12 @@ struct CanonicalForm
     // Machine-readable findings from the parse (R-FILE-003 shape). For JSON these are the
     // NON-FATAL encoding heals (encoding.bom / encoding.crlf — fixed in `bytes` already); for
     // non-JSON they carry the parse failure a JSON-expecting caller may surface. The graph itself
-    // ignores them in M2 wave 1 (the per-node diagnostics topic is the schema-model task).
+    // still ignores THESE (they heal on the next tool save); per-kind SCHEMA findings are the
+    // validate node's ValidationReport, surfaced via DerivationGraph::validation() (M2 wave 2).
     std::vector<serializer::Diagnostic> diagnostics;
+    // The parsed document tree (meaningful iff is_json) — carried so the M2 validate node runs
+    // per-kind schema validation on THIS parse instead of re-parsing (one parse per file).
+    serializer::JsonValue root;
 };
 
 // Parse + canonicalize `source_bytes`. Deterministic and total (never throws); empty input yields

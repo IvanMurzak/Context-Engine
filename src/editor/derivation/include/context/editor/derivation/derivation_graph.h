@@ -6,6 +6,7 @@
 
 #include "context/editor/derivation/canonical_parse.h"
 #include "context/editor/filesync/reconciler.h"
+#include "context/editor/schema/validator.h"
 #include "context/kernel/world.h"
 
 #include <cstddef>
@@ -61,6 +62,20 @@ struct DerivePassResult
     std::size_t nodes_skipped = 0;  // dirty nodes memoized away (canonical form unchanged, L-22)
     std::size_t nodes_removed = 0;  // nodes whose source was removed this pass
     std::size_t deferred = 0;       // nodes load-shed to a later pass (still pending after this one)
+    std::size_t nodes_invalid = 0;  // nodes whose payload FAILED schema validation this pass —
+                                    // their last-good derived state was retained (R-FILE-003)
+};
+
+// A node's schema-validation state, surfaced by DerivationGraph::validation() (the M2 validate
+// node's R-FILE-003 output). `stable` mirrors the L-31 diagnostic `stability` field: false
+// (provisional) while a re-derivation of the SAME path is still queued — a settling pass may clear
+// the finding, so an agent should not act on it yet; true (stable) once the path has no pending
+// work. `generation` is the derived-world generation the report was produced at.
+struct NodeValidation
+{
+    schema::ValidationReport report;
+    std::uint64_t generation = 0;
+    bool stable = true;
 };
 
 // The receipt an ingest returns — the R-CLI-006 own-write barrier key, carrying BOTH hashes of the
@@ -105,13 +120,22 @@ struct BackpressureEvent
 class DerivationGraph
 {
 public:
+    // `schemas` wires the M2 validate node: when non-null, every JSON ingest is validated against
+    // the registered kind schemas (schema::engine_schemas() in the real EditorKernel composition)
+    // and a failing payload RETAINS its last-good derived state (R-FILE-003). nullptr disables
+    // validation (the M1 behavior — direct graph consumers and micro-benches are unchanged).
+    // `ref_resolver` is the x-ctx-ref meta-lookup seam (R-DATA-006); nullptr until the asset
+    // database lands, which limits typed-reference checks to shape only.
     explicit DerivationGraph(DerivationConfig config = {},
-                             context::kernel::EventBus* bus = nullptr);
+                             context::kernel::EventBus* bus = nullptr,
+                             const schema::SchemaSet* schemas = nullptr,
+                             const schema::RefTargetResolver* ref_resolver = nullptr);
 
     // Ingest one reconciled change + its authored bytes. Parses to canonical form NOW so the returned
     // ticket carries the canonical hash (R-CLI-006), then coalesces into the pending dirty set — a later
     // write to the same path before the next pass replaces the earlier one (one batched pass per burst,
     // never one pass per event: R-FILE-013). A `removed` change enqueues a node removal (bytes ignored).
+    // With a schema set wired, the ingest also runs the validate node on the SAME parse (R-DATA-006).
     WriteTicket apply(const context::editor::filesync::ReconcileChange& change,
                       std::string_view source_bytes);
 
@@ -143,6 +167,13 @@ public:
     [[nodiscard]] std::uint64_t derivations() const noexcept { return derivations_; }
     [[nodiscard]] std::optional<DerivedSource> node(std::string_view path) const;
 
+    // The validate node's R-FILE-003 output for `path`: the last schema-validation report a pass
+    // produced (pointer + line/column diagnostics), its generation, and its L-31 stability.
+    // nullopt when the path never passed through a validating pass (no schema set wired, non-JSON
+    // content, or the path is unknown). A failing report means the node's derived value is its
+    // LAST-GOOD state (or that the source never derived).
+    [[nodiscard]] std::optional<NodeValidation> validation(std::string_view path) const;
+
 private:
     struct Node
     {
@@ -151,12 +182,17 @@ private:
         std::uint64_t generation = 0;
         bool visible = false;
         bool alive = false; // an entity exists in the derived World for this source
+        schema::ValidationReport report; // validate-node output (meaningful iff has_report)
+        std::uint64_t report_generation = 0;
+        bool has_report = false;
     };
 
     struct Pending
     {
         CanonicalForm form;
         bool removal = false;
+        schema::ValidationReport report; // computed at ingest, on the SAME parse (iff validated)
+        bool validated = false;
     };
 
     void derive_one(const std::string& path, const Pending& pending, std::uint64_t target_gen,
@@ -168,6 +204,9 @@ private:
 
     DerivationConfig config_;
     context::kernel::EventBus* bus_;
+    const schema::SchemaSet* schemas_;              // validate node's kind set (nullptr = off)
+    const schema::RefTargetResolver* ref_resolver_; // x-ctx-ref meta-lookup seam (nullptr until
+                                                    // the asset database lands)
     context::kernel::World world_;
     std::map<std::string, Node> nodes_;
     std::map<std::string, Pending> pending_;

@@ -4,11 +4,13 @@
 #include "context/cli/scaffold.h"
 
 #include "context/editor/contract/json.h"
+#include "context/editor/schema/kind_schema.h"
 #include "context/editor/serializer/canonical.h"
 #include "context/kernel/kernel.h"
 #include "context/kernel/scheduler.h"
 #include "context/kernel/world.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -51,12 +53,16 @@ std::string project_basename(const std::string& directory)
     return name;
 }
 
-// The default template's two files, as JSON DOM (so they are guaranteed well-formed).
+// The default template's two files, as JSON DOM (so they are guaranteed well-formed). Both carry
+// the L-32 header ("$schema" + "version") binding them to the registered engine kinds
+// (schema::engine_schemas()), so the derivation validate node checks them from their first byte —
+// the M1 "schemaVersion" placeholder migrated onto the R-DATA-006 mechanism.
 Json default_project_json(const std::string& name)
 {
     Json j = Json::object();
+    j.set("$schema", Json(std::string(editor::schema::kProjectKindId)));
+    j.set("version", Json(std::int64_t{1}));
     j.set("engine", Json("context"));
-    j.set("schemaVersion", Json(0));
     j.set("name", Json(name));
     j.set("scene", Json("scenes/main.scene.json"));
     return j;
@@ -65,7 +71,9 @@ Json default_project_json(const std::string& name)
 Json default_scene_json()
 {
     Json camera = Json::object();
-    camera.set("fov", Json(60.0));
+    // The units law (R-DATA-006): authored data is SI + RADIANS everywhere — this is a 60-degree
+    // vertical FoV expressed in radians (the scene schema declares fov as x-ctx-units "rad").
+    camera.set("fov", Json(1.0471975511965976));
     camera.set("near", Json(0.1));
     camera.set("far", Json(1000.0));
 
@@ -88,7 +96,12 @@ Json default_scene_json()
     entities.push_back(std::move(entity));
 
     Json scene = Json::object();
+    scene.set("$schema", Json(std::string(editor::schema::kSceneKindId)));
+    scene.set("version", Json(std::int64_t{1}));
     scene.set("kind", Json("scene"));
+    scene.set("notes",
+              Json("Scaffolded by `context new` — human/AI annotations live in schema-blessed "
+                   "notes fields (L-32 bans JSON comments)."));
     scene.set("entities", std::move(entities));
     return scene;
 }

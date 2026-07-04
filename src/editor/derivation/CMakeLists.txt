@@ -5,7 +5,8 @@
 # queue-depth / bounded-lag signal + load-shed to the visible/queried subgraph), and the
 # read-your-writes query barrier. The canonical-parse node delegates to the REAL canonical-JSON
 # serializer (src/editor/serializer/, M2 issue #42) behind the same stable seam the M1 placeholder
-# occupied; the schema model layers on top in later M2 tasks.
+# occupied; the M2 wave-2 validate node (src/editor/schema/, R-DATA-006, issue #47) schema-checks
+# bound payloads on the same parse, retaining last-good derived state on failure (R-FILE-003).
 
 add_library(context_derivation STATIC
     src/canonical_parse.cpp
@@ -19,8 +20,11 @@ target_include_directories(context_derivation PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 # headers expose those types, so consumers need their include paths. (context_filesync already links
 # context_kernel PUBLIC; context_kernel is named explicitly here because this target uses World and
 # EventBus directly.) context_serializer is PUBLIC too: canonical_parse.h exposes the serializer's
-# Diagnostic type in CanonicalForm, so consumers need its include path.
-target_link_libraries(context_derivation PUBLIC context_filesync context_kernel context_serializer)
+# Diagnostic type in CanonicalForm, so consumers need its include path. context_schema (M2 wave 2)
+# powers the validate node: derivation_graph.h exposes SchemaSet/ValidationReport in its ctor and
+# NodeValidation surface, so it is PUBLIC as well.
+target_link_libraries(context_derivation
+    PUBLIC context_filesync context_kernel context_serializer context_schema)
 
 # Every Context target links the warnings-as-errors baseline (conventions.md).
 target_link_libraries(context_derivation PRIVATE context_warnings)
@@ -35,7 +39,8 @@ set(_context_derivation_tests
     test_derivation_graph
     test_incremental
     test_backpressure
-    test_query_barrier)
+    test_query_barrier
+    test_validate_node)
 
 foreach(_t IN LISTS _context_derivation_tests)
     add_executable(context_derivation_${_t} tests/${_t}.cpp)

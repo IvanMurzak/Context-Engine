@@ -7,7 +7,10 @@
 #include "context/cli/scaffold.h"
 #include "context/editor/contract/envelope.h"
 #include "context/editor/contract/json.h"
+#include "context/editor/schema/kind_schema.h"
+#include "context/editor/schema/validator.h"
 #include "context/editor/serializer/canonical.h"
+#include "context/editor/serializer/json_parse.h"
 #include "cli_test.h"
 
 #include <filesystem>
@@ -69,6 +72,52 @@ int main()
             // Tool saves canonicalize the whole file they write (R-FILE-001): the scaffolded
             // bytes must already BE the canonical form (a canonicalization fixpoint).
             CHECK(context::editor::serializer::canonicalize(scene_text).bytes == scene_text);
+
+            // M2 wave 2 (R-DATA-006/#47): the template carries the L-32 header binding it to the
+            // registered scene kind, exposes the schema-blessed notes affordance, and VALIDATES
+            // clean against the engine schema set — the validate node checks it on every attach.
+            CHECK(scene.at("$schema").as_string() == "ctx:scene");
+            CHECK(scene.at("version").as_int() == 1);
+            CHECK(!scene.at("notes").as_string().empty());
+            // The units law: the template's camera fov is radians (60 degrees ~ 1.047), never 60.
+            const double fov = scene.at("entities")
+                                   .at(0)
+                                   .at("components")
+                                   .at("camera")
+                                   .at("fov")
+                                   .as_number();
+            CHECK(fov > 1.0 && fov < 1.1);
+            {
+                namespace schema = context::editor::schema;
+                namespace serializer = context::editor::serializer;
+                auto parsed = serializer::parse_json(scene_text);
+                CHECK(parsed.ok);
+                const schema::ValidationReport report = schema::validate_document(
+                    parsed.root, scene_text, schema::engine_schemas());
+                CHECK(report.schema_bound);
+                CHECK(report.ok);
+                CHECK(report.diagnostics.empty());
+            }
+        }
+
+        // project.json is likewise schema-bound (ctx:project@1) and validates clean.
+        {
+            std::ifstream project_in(dir / "project.json", std::ios::binary);
+            std::string project_text((std::istreambuf_iterator<char>(project_in)),
+                                     std::istreambuf_iterator<char>());
+            const Json project = Json::parse(project_text);
+            CHECK(project.at("$schema").as_string() == "ctx:project");
+            CHECK(project.at("version").as_int() == 1);
+            CHECK(project.at("engine").as_string() == "context");
+            namespace schema = context::editor::schema;
+            namespace serializer = context::editor::serializer;
+            auto parsed = serializer::parse_json(project_text);
+            CHECK(parsed.ok);
+            const schema::ValidationReport report =
+                schema::validate_document(parsed.root, project_text, schema::engine_schemas());
+            CHECK(report.schema_bound);
+            CHECK(report.ok);
+            CHECK(report.diagnostics.empty());
         }
 
         // The template ships .gitattributes pinning authored JSON to LF (R-FILE-001).

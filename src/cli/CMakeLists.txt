@@ -59,9 +59,11 @@ foreach(_t IN LISTS _context_cli_tests)
 endforeach()
 
 # test_scaffold additionally asserts the scaffolded files are canonicalization fixpoints
-# (R-FILE-001 tool-save rule), so it links the serializer directly (PRIVATE in context_cli, so the
-# include path does not propagate through it).
-target_link_libraries(context_cli_test_scaffold PRIVATE context_serializer)
+# (R-FILE-001 tool-save rule) AND that both templates validate clean against the registered engine
+# kind schemas (R-DATA-006/#47 — the templates carry the L-32 `$schema` header from their first
+# byte), so it links the serializer + schema modules directly (PRIVATE in context_cli, so their
+# include paths do not propagate through it).
+target_link_libraries(context_cli_test_scaffold PRIVATE context_serializer context_schema)
 
 # --- cross-process e2e (R-QA-013 / issue #34): spawn a REAL `context daemon` process + a SEPARATE
 # `context attach` process; the attach process drives the daemon over the wire and a 2nd `context

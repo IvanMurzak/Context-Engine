@@ -7,6 +7,7 @@
 #include "context/editor/filesync/content_hash.h"
 #include "context/editor/filesync/file_store.h"
 #include "context/editor/filesync/path_jail.h"
+#include "context/editor/schema/kind_schema.h"
 
 #include <string>
 #include <unordered_set>
@@ -78,7 +79,10 @@ EditorKernel::EditorKernel(filesync::FileStore& fs, filesync::Watcher& watcher,
                            EditorKernelConfig config, kernel::EventBus* bus)
     : fs_(fs), clock_(clock), config_(std::move(config)), daemon_(config_.project_root),
       reconciler_(fs, watcher, clock, tasks, config_.filesync_root, config_.index_path, bus),
-      graph_(config_.derivation, bus)
+      // The real attach path runs the M2 validate node against the ENGINE kind set (R-DATA-006):
+      // schema-bound payloads validate on ingest, failing ones retain last-good derived state
+      // (R-FILE-003). The x-ctx-ref resolver seam stays null until the asset database lands.
+      graph_(config_.derivation, bus, &schema::engine_schemas())
 {
 }
 
