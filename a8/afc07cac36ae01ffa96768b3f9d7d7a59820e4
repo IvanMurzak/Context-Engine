@@ -1,0 +1,168 @@
+src/editor/editorkernel/src/editor_kernel.cpp
+  s_e3239cf02087b8::t_2247ba51d439d6 10
+  s_e3239cf02087b8::t_ecb0f993fd4028 77-94,99-100
+  s_e3239cf02087b8::t_8c0e15e587bcf4 302,305-322
+  s_118ec45132cbd3::t_db55481b4f8912 108
+src/editor/editorkernel/include/context/editor/editorkernel/kernel_server.h
+  s_e3239cf02087b8::t_0c37fe44674aa0 48
+  s_e3239cf02087b8::t_f3766890a85239 10-11,23-28,32-36,42,47,49
+  s_e3239cf02087b8::t_69a51793997e5f 98-104,106
+  s_e3239cf02087b8::t_094dbdd42c11e5 96-97
+  s_e3239cf02087b8::t_fb0dfb4fce6c20 107
+  s_45843e7226396d::t_bdd489ace7116e 72-74,77-90
+src/editor/contract/CMakeLists.txt
+  s_e3239cf02087b8::t_7cfa689f06761e 12-13
+  s_e3239cf02087b8::t_cea9e5f53b7d80 29-30
+src/editor/bridge/include/context/editor/bridge/resource_store.h
+  s_e3239cf02087b8::t_c7d811f649ef81 1-90
+src/cli/src/fetch_command.cpp
+  s_e3239cf02087b8::t_45ed2c2657ebdb 1-192
+src/editor/contract/tests/test_registry_parity.cpp
+  s_e3239cf02087b8::t_9639338a003f1c 156-202,204-254
+  s_e3239cf02087b8::t_78ca1ede02ebd3 203
+src/cli/tests/test_fetch_e2e.cpp
+  s_e3239cf02087b8::t_b336dfd98777c5 1-74,89-145,158-169,185-196,204-235
+  s_e3239cf02087b8::t_f08ec6b76a4f05 75-88
+  s_e3239cf02087b8::t_f4c223fc6d87eb 170-184
+  s_e3239cf02087b8::t_7535cee22f66e5 146-157
+  s_e3239cf02087b8::t_5aaf6c2dcd7a77 197-203
+src/editor/editorkernel/src/kernel_server.cpp
+  s_e3239cf02087b8::t_eef292b7621e22 354-357
+  s_e3239cf02087b8::t_418aad8fa015b8 173-177,180
+  s_e3239cf02087b8::t_bfdd0024a4fbf7 7,12
+  s_e3239cf02087b8::t_747351ce12e69f 210-254,267-327
+  s_e3239cf02087b8::t_eff3ea899feb16 44-51
+  s_e3239cf02087b8::t_9dbc849a149a2b 52-53,328-329
+src/editor/filesync/include/context/editor/filesync/native_file_store.h
+  s_e3239cf02087b8::t_094ab2ec7f6389 27-34,36-46
+  s_e3239cf02087b8::t_e5334f14cec256 70-76,78
+src/editor/contract/tests/test_resource_handle.cpp
+  s_e3239cf02087b8::t_ff6ed43208c1f5 48-50
+  s_e3239cf02087b8::t_eb01b4f4691a3d 1-47,51-92
+src/editor/filesync/src/native_file_store.cpp
+  s_e3239cf02087b8::t_7114bce046ed01 1-31,38,41,43,53-54,58-60,68-72,78,85-89,93-103,106-221,234-249,252-263,353-370,373-424,426-428,432,436,448-450,458-464,467-474,477-478,483-484,487,503-514,521-538,542-552
+  s_e3239cf02087b8::t_6be12dd954be33 371-372
+  s_e3239cf02087b8::t_fee23540de9ce7 451-457,465-466,475-476,479-482,485-486,488-501
+  s_e3239cf02087b8::t_caedb00c1f8429 539-540
+  s_e3239cf02087b8::t_9362f5f7adf617 73-77,79-84,90-92,104-105
+  s_e3239cf02087b8::t_763a4424fe545c 250-251
+src/cli/src/app.cpp
+  s_e3239cf02087b8::t_7f384770e7b2b0 9
+  s_e3239cf02087b8::t_94be7fd8da3eee 106-138
+  s_e3239cf02087b8::t_c9e73a1a8da1be 175-189
+src/cli/CMakeLists.txt
+  s_e3239cf02087b8::t_e9a200c419ea5e 14-16
+  s_e3239cf02087b8::t_c5bca3f9adf8ed 84-97
+  s_e3239cf02087b8::t_ee5766c0bb85ab 20-26,28
+src/editor/contract/src/registry.cpp
+  s_e3239cf02087b8::t_af0599716c6bfe 34-37,53-61,71-72,75-81,85-86,98-99
+  s_e3239cf02087b8::t_52573f504edc27 369-370,375
+  s_e3239cf02087b8::t_3cbd3b96884b3e 294-295,299
+  s_e3239cf02087b8::t_a64bb865d2cbb3 200-205
+  s_e3239cf02087b8::t_608ffa6ab5e5db 341
+  s_e3239cf02087b8::t_7fe7becd601b59 7
+  s_e3239cf02087b8::t_747e18e0dd1e98 185-199,206-259
+  s_e3239cf02087b8::t_11f21a5f4ca21e 414-417
+  s_e3239cf02087b8::t_909c21f7eee27c 317
+src/editor/contract/include/context/editor/contract/resource_handle.h
+  s_e3239cf02087b8::t_07bd4e4b2448dd 1-56
+src/cli/src/attach_command.cpp
+  s_e3239cf02087b8::t_b23e1ad09f56dc 1-2,6
+src/editor/filesync/tests/native_test_support.h
+  s_e3239cf02087b8::t_9c08dd6fae5a21 13
+  s_e3239cf02087b8::t_cac5f4efdd9ce0 98-133
+src/editor/filesync/include/context/editor/filesync/reconciler.h
+  s_e3239cf02087b8::t_9af523f5de980f 50-53
+src/editor/filesync/tests/test_native_file_store.cpp
+  s_e3239cf02087b8::t_a106184272fc4f 12,15
+  s_e3239cf02087b8::t_665247457d562f 196-273
+src/editor/bridge/CMakeLists.txt
+  s_e3239cf02087b8::t_77c2a9afb8e7ca 13-14
+  s_e3239cf02087b8::t_2ade0d101e358c 45-46
+src/cli/tests/test_cli.cpp
+  s_e3239cf02087b8::t_a7628ec0c876ff 126-163
+src/cli/src/wire_client.cpp
+  s_e3239cf02087b8::t_1f171acc38acc5 1-134
+src/editor/bridge/tests/test_resource_store.cpp
+  s_e3239cf02087b8::t_b211d4361366b4 1-156
+src/editor/bridge/src/resource_store.cpp
+  s_e3239cf02087b8::t_3a7e29dc41080d 1-145
+src/cli/include/context/cli/wire_client.h
+  s_e3239cf02087b8::t_8d22e1ca85ce49 1-46
+src/editor/filesync/tests/test_native_crash_recovery.cpp
+  s_e3239cf02087b8::t_eef453c9650b78 20-21
+  s_e3239cf02087b8::t_73f78548b8d263 161-229
+src/editor/bridge/include/context/editor/bridge/transport.h
+  s_e3239cf02087b8::t_2825d2c0bc90c9 30-32
+src/editor/editorkernel/tests/test_kernel_server.cpp
+  s_e3239cf02087b8::t_e4d446d8049c3c 10-13
+  s_e3239cf02087b8::t_df517b7f395058 255-397
+  s_e3239cf02087b8::t_a66d6782f86523 17,19,24
+  s_45843e7226396d::t_9f8474086a72ba 94,200
+src/editor/filesync/src/intent_log.cpp
+  s_e3239cf02087b8::t_fa512579e6aa2b 308-313,315-320
+src/editor/editorkernel/tests/test_editor_kernel.cpp
+  s_e3239cf02087b8::t_f77847e779ceda 41-43
+  s_e3239cf02087b8::t_ebb4695350ffb7 353-406
+  s_45843e7226396d::t_cb29fd11810995 69
+src/cli/include/context/cli/fetch_command.h
+  s_e3239cf02087b8::t_4e39d34290efa7 1-31
+src/editor/contract/src/error_catalog.cpp
+  s_e3239cf02087b8::t_53fd025de20c8f 87-99
+src/cli/src/daemon_command.cpp
+  s_e3239cf02087b8::t_1fe1d7b7059b2d 186-204
+  s_e3239cf02087b8::t_96a723624ae001 166-185,210-215,224-225
+  s_e3239cf02087b8::t_817ad00e51eec9 229-230
+src/editor/editorkernel/include/context/editor/editorkernel/editor_kernel.h
+  s_e3239cf02087b8::t_6ea0877915971b 197-203
+  s_e3239cf02087b8::t_7e136f957be2ff 71-86
+  s_e3239cf02087b8::t_0b595bff03441f 237
+  s_e3239cf02087b8::t_8775ff7f755b16 257-261
+  s_118ec45132cbd3::t_318c1a542ff7b5 68
+src/editor/contract/include/context/editor/contract/registry.h
+  s_e3239cf02087b8::t_d517317398c8a2 60-72
+src/editor/contract/src/resource_handle.cpp
+  s_e3239cf02087b8::t_6e1716721c2cb6 1-132
+src/cli/src/bench_command.cpp
+  s_e3239cf02087b8::t_a08e2c565c26e1 249
+src/cli/src/editor_driver.cpp
+  s_e3239cf02087b8::t_1fecba20210c9e 113
+src/editor/editorkernel/tests/test_editor_kernel_native.cpp
+  s_e3239cf02087b8::t_fdade2cbef63ba 63,124
+src/editor/filesync/tests/test_native_watcher.cpp
+  s_e3239cf02087b8::t_64f629e0f6d0fd 140,196,239,326,351
+src/tests/integration/test_exit1_files_as_truth.cpp
+  s_e3239cf02087b8::t_92050c11681817 61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a8afc07cac36ae01ffa96768b3f9d7d7a59820e4",
+  "prompts": {},
+  "sessions": {
+    "s_118ec45132cbd3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aefc583499befa846",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_45843e7226396d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ae7ce3889e70fbc05",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
