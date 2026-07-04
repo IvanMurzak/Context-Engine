@@ -48,6 +48,11 @@ Every gate carries exactly one written red-X policy:
 | `build-ubuntu` | R-QA-008 | gh-ubuntu-shared | per-PR | blocking | `build` |
 | `build-macos` | R-QA-008 | gh-macos-shared | per-PR | blocking | `build` |
 | `build-windows` | R-QA-008 | gh-windows-shared | per-PR | blocking | `build` |
+| `m1-exit-files-as-truth` | L-19 | gh-ubuntu-shared | per-PR | blocking | `build` |
+| `m1-exit-live-attach` | R-CLI-010 | gh-ubuntu-shared | per-PR | blocking | `build` |
+| `m1-exit-crash-recovery` | R-FILE-004 | gh-ubuntu-shared | per-PR | blocking | `build` |
+| `m1-exit-contract-parity` | R-CLI-009 | gh-ubuntu-shared | per-PR | blocking | `build` |
+| `m1-exit-scope-enforcement` | R-SEC-007 | gh-ubuntu-shared | per-PR | blocking | `build` |
 | `sanitize-asan-ubsan` | L-38 | gh-ubuntu-shared | per-PR | blocking | `sanitize` |
 | `sanitize-tsan` | L-38 | gh-ubuntu-shared | per-PR | blocking | `sanitize` |
 | `bench-baseline-10k` | R-FILE-011 | gh-ubuntu-shared | per-PR | **advisory** | `bench-baseline` |
@@ -63,7 +68,10 @@ Every gate carries exactly one written red-X policy:
 
 ⏳ = advisory **until its runner class is provisioned**. The R-QA-008 M1-exit suites (kernel,
 file-sync, and the R-QA-010 fault-injection harness) ride the `build` gate — their ctest
-registrations run on every `build (<os>)` leg.
+registrations run on every `build (<os>)` leg. The five `m1-exit-*` gates are the ROADMAP §1
+M1 Exit criteria themselves (issue #36): the `m1-exit-<n>-*` ctest family under
+`src/tests/integration/`, run by the dedicated "M1 exit gate (5 criteria, blocking)" step of the
+`build` job on all three OS legs (the runner class shown is the representative leg).
 
 ## How CI consumes it (the R-QA-012 tie)
 

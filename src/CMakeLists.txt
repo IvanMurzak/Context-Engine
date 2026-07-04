@@ -207,3 +207,12 @@ add_test(NAME versioned-install-layout
         -D "CONTEXT_INSTALL_SUBDIR=${CONTEXT_INSTALL_SUBDIR}"
         -D "CONTEXT_BUILD_CONFIG=$<CONFIG>"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/versioned-install-check.cmake")
+
+# ---------------------------------------------------------------------------
+# The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36): five integration tests, one per exit
+# criterion, registered as the `m1-exit-*` ctest family and CI-gated per the §6 tiering (blocking
+# per-PR on the 3-OS build matrix — see the dedicated ci.yml step). Added LAST: the gate composes
+# every M1 component above — kernel, filesync, derivation, contract, bridge, editorkernel, cli,
+# testing — and spawns the real `context` binary, so all of their targets must already exist.
+# ---------------------------------------------------------------------------
+add_subdirectory(tests/integration)

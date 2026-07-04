@@ -263,6 +263,44 @@ int main()
         fs::remove_all(loadshed_project, ls_ec);
     }
 
+    // --- read-your-writes is per-PATH, not per-hash (M1 exit-gate regression): when ANOTHER file
+    // --- already carries the identical canonical content, the world-global hash barrier resolves
+    // --- instantly — query_after_hash must still drain the queried path's own pending ingest, so
+    // --- the second write's read never observes the pre-write state of ITS OWN node.
+    {
+        const fs::path dup_project = make_temp_project("dup-content");
+        MemoryFileStore dup_store;
+        NullWatcher dup_watcher;
+        context::kernel::ManualClock dup_clock;
+        context::kernel::InlineTaskRunner dup_tasks;
+
+        EditorKernel dup_kernel(dup_store, dup_watcher, dup_clock, dup_tasks,
+                                config_for(dup_project));
+        CHECK(dup_kernel.start(ScopeSet::all()) == StartOutcome::booted);
+
+        // File 1 derives content C; its canonical hash is now reflected by a live node.
+        const EditOutcome first = dup_kernel.edit_file("proj/one.scene", "entity: same", writer);
+        CHECK(first.ok);
+        auto first_node = dup_kernel.query_after_hash("proj/one.scene", first.ticket.canonical_hash);
+        CHECK(first_node.has_value());
+
+        // File 2 writes the IDENTICAL content: the hash barrier alone would resolve on file 1's
+        // node before file 2's ingest ever derived. The per-path drain must still produce file 2.
+        const EditOutcome second = dup_kernel.edit_file("proj/two.scene", "entity: same", writer);
+        CHECK(second.ok);
+        CHECK(second.ticket.canonical_hash == first.ticket.canonical_hash); // same canonical form
+        auto second_node =
+            dup_kernel.query_after_hash("proj/two.scene", second.ticket.canonical_hash);
+        CHECK(second_node.has_value());
+        CHECK(second_node.has_value() &&
+              second_node->canonical_hash == second.ticket.canonical_hash);
+        CHECK(dup_kernel.world().alive_count() == 2); // both files live in the derived World
+
+        dup_kernel.stop();
+        std::error_code dup_ec;
+        fs::remove_all(dup_project, dup_ec);
+    }
+
     // Best-effort cleanup of the real lock directory.
     std::error_code ec;
     fs::remove_all(project, ec);

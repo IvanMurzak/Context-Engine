@@ -61,7 +61,8 @@ private:
 
 // The scope a given RPC method-id (the registry's rpc_method) requires. Unknown / read-only methods
 // map to read_query. The install/build family (package.add, build) requires build_install; the
-// file-writer family (set, new) requires file_write. Session verbs require session_control.
+// file-writer family (set, new, edit, edit-batch) requires file_write. Session verbs (and the
+// daemon's operational shutdown) require session_control.
 [[nodiscard]] Scope required_scope_for(const std::string& rpc_method);
 
 // Does `granted` satisfy the requirement for `rpc_method`? read/query-required methods are always

@@ -114,6 +114,56 @@
       "description": "dev-preset build + ctest on Windows/MSVC (M1-exit gate + the only MSVC /W4 /WX signal)."
     },
     {
+      "id": "m1-exit-files-as-truth",
+      "requirement": "L-19",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M1 exit criterion 1 (issue #36): mutate a scene file via a CLI verb AND a raw text edit -> identical derived World headless, byte-identical derived state (ctest m1-exit-1-files-as-truth; runs on all three build-matrix legs via the 'M1 exit gate' step)."
+    },
+    {
+      "id": "m1-exit-live-attach",
+      "requirement": "R-CLI-010",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M1 exit criterion 2 (issue #36): a second CLI process attaches live to the running daemon over the real IPC wire via the capability-negotiation handshake (protocolMajor=0, hard-fail-on-mismatch) (ctest m1-exit-2-live-attach; all three build-matrix legs)."
+    },
+    {
+      "id": "m1-exit-crash-recovery",
+      "requirement": "R-FILE-004",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M1 exit criterion 3 (issue #36): real kill -9 of the real daemon process mid-multi-file-write, nothing lost — intent-log resume (HMAC-checked, re-jailed, re-CAS'd) + fresh snapshot on the new incarnationId (ctest m1-exit-3-crash-recovery; all three build-matrix legs)."
+    },
+    {
+      "id": "m1-exit-contract-parity",
+      "requirement": "R-CLI-009",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M1 exit criterion 4 (issue #36): CLI ≡ RPC ≡ MCP ≡ introspection parity generated from the one registry — proven end-to-end over the real wire — plus the additive-only error-code catalog (R-CLI-008) (ctest m1-exit-4-contract-parity; all three build-matrix legs)."
+    },
+    {
+      "id": "m1-exit-scope-enforcement",
+      "requirement": "R-SEC-007",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M1 exit criterion 5 (issue #36): a read/query-scoped token cannot install a package or trigger a build via DIRECT RPC — dispatcher-level denial mapping to catalog scope.denied, exit-class 6, verified over the real IPC transport (ctest m1-exit-5-scope-enforcement; all three build-matrix legs)."
+    },
+    {
       "id": "sanitize-asan-ubsan",
       "requirement": "L-38",
       "runner_class": "gh-ubuntu-shared",

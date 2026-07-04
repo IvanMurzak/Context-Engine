@@ -41,17 +41,50 @@ Envelope EditOutcome::envelope() const
 EditorKernel::EditorKernel(filesync::FileStore& fs, filesync::Watcher& watcher,
                            kernel::Clock& clock, kernel::TaskRunner& tasks,
                            EditorKernelConfig config, kernel::EventBus* bus)
-    : fs_(fs), config_(std::move(config)), daemon_(config_.project_root),
+    : fs_(fs), clock_(clock), config_(std::move(config)), daemon_(config_.project_root),
       reconciler_(fs, watcher, clock, tasks, config_.filesync_root, config_.index_path, bus),
       graph_(config_.derivation, bus)
 {
 }
 
+std::string EditorKernel::editor_dir() const
+{
+    // The `.editor/` control dir under the FileStore seam — the same convention the reconcile index
+    // follows (config default ".editor/reconcile-index" for root ".").
+    return config_.filesync_root == "." ? std::string(".editor")
+                                        : config_.filesync_root + "/.editor";
+}
+
 bridge::StartOutcome EditorKernel::start(bridge::ScopeSet launch_scopes)
 {
     const bridge::StartOutcome outcome = daemon_.start(/*write_capable=*/true, launch_scopes);
-    if (outcome == bridge::StartOutcome::booted)
-        reconciler_.attach(); // warm-attach the persisted index (no cold re-hash when it is valid)
+    if (outcome != bridge::StartOutcome::booted)
+        return outcome;
+
+    // R-FILE-004 crash recovery — runs AFTER the lock is won (owning the Project) and BEFORE any
+    // client is served: resume-or-diagnose every intent-log entry a previous incarnation left
+    // mid-flight. Each entry is HMAC-integrity-checked and each planned write re-jailed + re-CAS'd
+    // before a byte is re-applied; an op that cannot be fully + safely resumed is left on disk and
+    // surfaced as a machine-readable diagnostic naming it (R-FILE-003), never a forced state.
+    const std::string dir = editor_dir();
+    intent_log_.emplace(fs_, dir, filesync::ensure_hmac_key(fs_, dir));
+    write_queue_.emplace(fs_, config_.filesync_root, *intent_log_, clock_);
+    recovery_diagnostics_ = write_queue_->recover();
+    for (const filesync::Diagnostic& d : recovery_diagnostics_)
+    {
+        Json payload = Json::object();
+        payload.set("event", Json(std::string("recovery.diagnostic")));
+        payload.set("code", Json(d.code));
+        payload.set("opId", Json(d.op_id));
+        payload.set("message", Json(d.message));
+        Json remaining = Json::array();
+        for (const std::string& p : d.remaining_writes)
+            remaining.push_back(Json(p));
+        payload.set("remainingWrites", std::move(remaining));
+        daemon_.events().publish("diagnostics", std::move(payload));
+    }
+
+    reconciler_.attach(); // warm-attach the persisted index (no cold re-hash when it is valid)
     return outcome;
 }
 
@@ -102,6 +135,74 @@ EditOutcome EditorKernel::edit_file(std::string_view path, std::string_view data
     const filesync::ReconcileChange change{key, filesync::ChangeType::modified,
                                            filesync::content_hash(data)};
     out.ticket = graph_.apply(change, data);
+    out.ok = true;
+    return out;
+}
+
+EditBatchOutcome EditorKernel::edit_files(const std::vector<BatchEdit>& edits,
+                                          const bridge::ScopeSet& caller_scopes)
+{
+    EditBatchOutcome out;
+
+    // R-SEC-007: a multi-file write is a write — same file_write gate as edit_file, enforced here
+    // in addition to the dispatcher so no composing layer can bypass it.
+    if (!caller_scopes.has(bridge::Scope::file_write))
+    {
+        out.error_code = bridge::kScopeDeniedCode;
+        return out;
+    }
+    if (!running() || !write_queue_.has_value())
+    {
+        out.error_code = "internal.error";
+        out.error_detail = "the intent-logged write path is only available on a booted daemon";
+        return out;
+    }
+
+    // Plan the whole batch up front: jail-check every path (R-SEC-008) and record the planning-time
+    // CAS hash of each target (R-FILE-004 — a resume never clobbers a file that moved on).
+    std::vector<filesync::PlannedWrite> writes;
+    writes.reserve(edits.size());
+    for (const BatchEdit& e : edits)
+    {
+        const std::string key = filesync::normalize_path(e.path);
+        if (!filesync::is_inside_jail(config_.filesync_root, key))
+        {
+            out.error_code = "path.jail_violation";
+            out.error_detail = e.path;
+            return out;
+        }
+        const std::optional<std::string> current = fs_.read(key);
+        filesync::PlannedWrite w;
+        w.path = key;
+        w.expected_prev_hash = filesync::content_hash(current ? *current : std::string());
+        w.target_hash = filesync::content_hash(e.data);
+        w.data = e.data;
+        writes.push_back(std::move(w));
+    }
+
+    // One op id per batch, unique across incarnations (the crashed incarnation's pending entry must
+    // never be overwritten by the next incarnation's first batch).
+    out.op_id = "batch-" + daemon_.events().incarnation_id() + "-" + std::to_string(++next_batch_op_);
+
+    // fsync the intent entry BEFORE the first write; apply per-file-atomically in order; clear AFTER
+    // the last durable rename (R-FILE-004). A crash anywhere in between leaves the entry for the
+    // next incarnation's start() recovery pass.
+    if (!write_queue_->execute(out.op_id, writes))
+    {
+        out.error_code = "internal.error";
+        out.error_detail = "the intent-logged batch did not complete durably (op " + out.op_id + ")";
+        return out;
+    }
+
+    // Ingest each write into the derivation graph (the WriteQueue path does not register reconciler
+    // self-echo; a later crawl re-hash of these paths memoizes to a no-op, so no double-derive).
+    out.tickets.reserve(writes.size());
+    for (const filesync::PlannedWrite& w : writes)
+    {
+        const filesync::ReconcileChange change{w.path, filesync::ChangeType::modified,
+                                               w.target_hash};
+        out.tickets.push_back(graph_.apply(change, w.data));
+    }
     out.ok = true;
     return out;
 }
@@ -183,10 +284,29 @@ EditorKernel::query_after_hash(std::string_view path, std::uint64_t canonical_ha
     graph_.set_visible(path, true);
     const derivation::BarrierResult result =
         derivation::wait_for_hash(graph_, canonical_hash, config_.barrier_max_passes);
+
+    // The hash barrier is world-global (reflects_hash answers "does ANY alive node carry this
+    // canonical hash"), so when ANOTHER file already holds the identical canonical content the
+    // barrier resolves instantly — possibly BEFORE this path's own pending ingest has derived
+    // (surfaced by the M1 exit gate: two clients writing the same bytes to two paths). Read-your-
+    // writes is per-PATH: drain remaining passes (same bounded budget) until THIS path's node
+    // reflects the hash it just wrote, so an own-write read never observes the pre-write node.
+    for (std::uint64_t budget = config_.barrier_max_passes; budget > 0; --budget)
+    {
+        const std::optional<derivation::DerivedSource> node = graph_.node(path);
+        if ((node.has_value() && node->canonical_hash == canonical_hash) ||
+            graph_.pending_count() == 0)
+            break;
+        graph_.run_pass();
+    }
     graph_.set_visible(path, false);
+
+    const std::optional<derivation::DerivedSource> node = graph_.node(path);
+    if (node.has_value() && node->canonical_hash == canonical_hash)
+        return node; // the path itself reflects the write — the strongest read-your-writes answer
     if (!result.ok())
         return std::nullopt;
-    return graph_.node(path);
+    return node;
 }
 
 } // namespace context::editor::editorkernel

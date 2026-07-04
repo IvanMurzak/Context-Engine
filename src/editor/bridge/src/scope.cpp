@@ -121,8 +121,11 @@ Scope required_scope_for(const std::string& rpc_method)
         return Scope::build_install;
     // File-rewriter family (R-ARCH-002 authored-file writes). `edit` is the daemon's operational
     // cross-process file-write method (the composed-loop backing behind the bridge), so it is gated
-    // as a write exactly like the reserved `set` verb.
-    if (rpc_method == "set" || rpc_method == "new" || rpc_method == "edit")
+    // as a write exactly like the reserved `set` verb; `edit-batch` is its multi-file sibling
+    // (the R-FILE-004 intent-logged batch) and MUST sit in the same family — an unknown method
+    // defaults to read_query, which would let a read-only token write files.
+    if (rpc_method == "set" || rpc_method == "new" || rpc_method == "edit" ||
+        rpc_method == "edit-batch")
         return Scope::file_write;
     // Session lifecycle family (reserved verb-ids; gated now so activation is non-breaking). The
     // daemon's operational `shutdown` control method is a session-lifecycle action.

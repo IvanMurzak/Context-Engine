@@ -12,8 +12,10 @@
 //
 // Everything is built on the injectable platform seams (FileStore / Watcher / Clock / TaskRunner),
 // so the whole loop runs deterministically headless (R-HEAD-001 / R-QA-010) with no GPU, display, or
-// real wall-clock. Two write paths reach the derived World: edit_file() is the daemon-initiated
-// "CLI-verb" write (through filesync atomic-IO, scope-checked), and ingest_external() folds in a raw
+// real wall-clock. Three write paths reach the derived World: edit_file() is the daemon-initiated
+// "CLI-verb" write (through filesync atomic-IO, scope-checked); edit_files() is its MULTI-file
+// sibling, serialized through the R-FILE-004 crash-recovery intent log (fsync-before / clear-after,
+// resumed-or-diagnosed by start() on the next incarnation); and ingest_external() folds in a raw
 // out-of-band edit the reconcile crawl detected (content hash is authoritative, R-FILE-002).
 
 #pragma once
@@ -22,6 +24,8 @@
 #include "context/editor/contract/envelope.h"
 #include "context/editor/derivation/derivation_graph.h"
 #include "context/editor/derivation/query_barrier.h"
+#include "context/editor/filesync/diagnostic.h"
+#include "context/editor/filesync/intent_log.h"
 #include "context/editor/filesync/reconciler.h"
 
 #include <cstdint>
@@ -78,6 +82,23 @@ struct EditOutcome
     [[nodiscard]] contract::Envelope envelope() const;
 };
 
+// One file inside a multi-file ("batch") write.
+struct BatchEdit
+{
+    std::string path;
+    std::string data;
+};
+
+// The result of a MULTI-file write through the kernel's intent-logged path (R-FILE-004).
+struct EditBatchOutcome
+{
+    bool ok = false;
+    std::string op_id;                            // the intent-log op id this batch ran under
+    std::vector<derivation::WriteTicket> tickets; // one per edit, in order; valid iff ok
+    std::string error_code;   // catalog code when !ok (scope.denied / path.jail_violation / …)
+    std::string error_detail; // e.g. the offending path for a jail violation
+};
+
 class EditorKernel
 {
 public:
@@ -98,14 +119,25 @@ public:
         daemon_.set_method_backend(backend);
     }
 
-    // Boot the daemon: the atomic single-instance try-lock (R-BRIDGE-001) then a warm attach of the
-    // persisted reconcile index. `booted` = this instance owns the Project; `attach` = an instance is
-    // already live (do NOT run a second); `error` = an OS/filesystem error. `launch_scopes` is the
-    // operator's scope ceiling clamped onto every attaching client (R-SEC-007, default: all).
+    // Boot the daemon: the atomic single-instance try-lock (R-BRIDGE-001), then the R-FILE-004
+    // crash-recovery pass (resume-or-diagnose any intent-log entries a previous incarnation left
+    // mid-flight — each entry HMAC-integrity-checked, re-jailed, and re-CAS'd before any byte is
+    // re-applied), then a warm attach of the persisted reconcile index. `booted` = this instance owns
+    // the Project; `attach` = an instance is already live (do NOT run a second); `error` = an
+    // OS/filesystem error. `launch_scopes` is the operator's scope ceiling clamped onto every
+    // attaching client (R-SEC-007, default: all).
     [[nodiscard]] bridge::StartOutcome
     start(bridge::ScopeSet launch_scopes = bridge::ScopeSet::all());
     void stop();
     [[nodiscard]] bool running() const noexcept { return daemon_.running(); }
+
+    // The machine-readable diagnostics the boot-time recovery pass produced (R-FILE-004 /
+    // R-FILE-003): empty == clean recovery (no pending op, or every pending op fully resumed). Each
+    // is also published on the client `diagnostics` event topic at boot, naming the incomplete op.
+    [[nodiscard]] const std::vector<filesync::Diagnostic>& recovery_diagnostics() const noexcept
+    {
+        return recovery_diagnostics_;
+    }
 
     // Attach a client over the capability-negotiation handshake, clamped to the launch ceiling. The
     // result is a negotiated Session or the R-CLI-008 hard-fail envelope (handshake mismatch).
@@ -120,6 +152,16 @@ public:
     // (await_hash / settle).
     [[nodiscard]] EditOutcome edit_file(std::string_view path, std::string_view data,
                                         const bridge::ScopeSet& caller_scopes);
+
+    // Daemon-initiated MULTI-file write (R-FILE-004): scope-check (file_write) -> jail-check every
+    // path up front -> serialize the whole batch through the crash-recovery intent log (fsync the
+    // planned writes BEFORE the first byte, per-file-atomic apply in the given dependency-safe
+    // order, clear AFTER the last durable rename) -> ingest each write into the derivation graph.
+    // A kill -9 mid-batch leaves the fsync'd intent entry on disk; the next incarnation's start()
+    // resumes it to completion (or diagnoses, never clobbering a moved-on file). Valid only while
+    // running() (the intent log comes up with the daemon).
+    [[nodiscard]] EditBatchOutcome edit_files(const std::vector<BatchEdit>& edits,
+                                              const bridge::ScopeSet& caller_scopes);
 
     // Fold EXTERNAL (out-of-band) edits into the derived index. Drains the reconciler (watcher hints
     // + the full re-hash crawl safety net), reads each changed path's current bytes, and ingests them
@@ -161,12 +203,22 @@ public:
 
 private:
     void ingest_change(const filesync::ReconcileChange& change);
+    [[nodiscard]] std::string editor_dir() const;
 
     filesync::FileStore& fs_;
+    kernel::Clock& clock_;
     EditorKernelConfig config_;
     bridge::Daemon daemon_;
     filesync::Reconciler reconciler_;
     derivation::DerivationGraph graph_;
+
+    // The R-FILE-004 intent-logged multi-file write path. Brought up in start() AFTER the
+    // single-instance lock is won (the lock stays the atomic FIRST action of a write-capable
+    // instantiation, R-ARCH-005 — the HMAC key file must not be touched before owning the Project).
+    std::optional<filesync::IntentLog> intent_log_;
+    std::optional<filesync::WriteQueue> write_queue_;
+    std::vector<filesync::Diagnostic> recovery_diagnostics_;
+    std::uint64_t next_batch_op_ = 0;
 };
 
 } // namespace context::editor::editorkernel
