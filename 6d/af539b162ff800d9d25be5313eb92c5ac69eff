@@ -1,0 +1,21 @@
+src/cli/src/editor_driver.cpp
+  s_e3239cf02087b8::t_3af454281a085a 5
+src/cli/src/daemon_command.cpp
+  s_e3239cf02087b8::t_ac37fa8ac04e83 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6daf539b162ff800d9d25be5313eb92c5ac69eff",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
