@@ -21,7 +21,9 @@ Reconciler::Reconciler(FileStore& fs, Watcher& watcher, context::kernel::Clock& 
                        context::kernel::TaskRunner& tasks, std::string root, std::string index_path,
                        context::kernel::EventBus* bus, ReconcilerConfig config)
     : fs_(fs), watcher_(watcher), clock_(clock), tasks_(tasks), bus_(bus), root_(std::move(root)),
-      index_path_(std::move(index_path)), expected_(config.expected_write_ttl_nanos)
+      index_path_(std::move(index_path)),
+      crawl_fallback_note_(std::move(config.crawl_fallback_note)),
+      expected_(config.expected_write_ttl_nanos)
 {
 }
 
@@ -62,9 +64,11 @@ void Reconciler::announce_degraded_if_needed()
     degraded_announced_ = true;
     if (bus_ != nullptr)
     {
+        // R-FILE-002: the degraded diagnostic names the affected subtree AND the fallback cadence —
+        // a silent fall-back to crawl latency is forbidden.
         bus_->log(context::kernel::LogLevel::warn,
                   "watcher.degraded: OS watch registration failed/truncated for subtree '" + root_ +
-                      "'; change-detection fell back to the background re-hash crawl");
+                      "'; change-detection falls back to " + crawl_fallback_note_);
     }
 }
 

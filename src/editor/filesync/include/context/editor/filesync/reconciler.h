@@ -44,6 +44,12 @@ struct ReconcilerConfig
     // Self-echo suppression window (~one debounce cycle). Short by design: it must never outlive a
     // genuine later external edit of the same path (R-FILE-002).
     std::uint64_t expected_write_ttl_nanos = 500000000ULL; // 500 ms
+
+    // Names the crawl fallback + its cadence inside the `watcher.degraded` diagnostic — R-FILE-002
+    // requires the diagnostic to name the affected subtree AND the fallback cadence. The default is
+    // accurate for every current composition (EditorKernel::ingest_external runs the full crawl on
+    // every reconcile pass); a consumer with a timer-driven crawl sets its own wording.
+    std::string crawl_fallback_note = "the full re-hash crawl (runs with every reconcile pass)";
 };
 
 // The watch-hash-reconcile pipeline. Watcher events are HINTS only: they point at paths to re-hash,
@@ -98,6 +104,7 @@ private:
     context::kernel::EventBus* bus_;
     std::string root_;
     std::string index_path_;
+    std::string crawl_fallback_note_;
     ReconcileIndex index_;
     ExpectedWrites expected_;
     bool degraded_announced_ = false;

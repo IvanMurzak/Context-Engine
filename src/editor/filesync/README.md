@@ -33,6 +33,18 @@ Library target: **`context_filesync`** (links `context_kernel` + `context_warnin
   `MemoryFileStore`), a virtual `Watcher` (`FakeWatcher` can drop/duplicate/reorder events), and the
   kernel `Clock`. The seams are M1 architecture and are **not retrofittable**; the deterministic
   fault-injection harness (a later task) drives them.
+- **Native OS watcher backends (R-FILE-002)** — `NativeWatcher` is the real hint source behind the
+  `Watcher` seam: **ReadDirectoryChangesW** (Windows, native recursive subtree), **inotify** (Linux,
+  per-directory watches recursively maintained as directories appear, with a scan that closes the
+  watch-add race), and **FSEvents** (macOS, file-level events on a private dispatch queue). The
+  correctness model is unchanged — every delivered path is a hint the reconciler re-hashes
+  *unconditionally*, and the crawl stays the dropped-event safety net, so hint loss costs latency,
+  never correctness. `degraded()` **latches** on any loss-of-coverage signal (registration failure,
+  kernel queue overflow / RDCW buffer overflow / FSEvents coalescing drops, backend death, or the
+  userspace pending-cap tripping) and the reconciler then emits the visible `watcher.degraded`
+  diagnostic naming the subtree and the crawl fall-back cadence — silent degradation is forbidden.
+  `context daemon` composes `NativeWatcher` over its authored root; `NullWatcher` remains for
+  in-memory compositions and scan-bound measurement rigs.
 - **Native on-disk `FileStore` (R-FILE-002/004)** — `NativeFileStore` is the real backend behind the
   `FileStore` seam: `std::filesystem` for read/write/stat/list, a genuine **atomic rename** (POSIX
   `rename(2)`; Windows `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING` — used directly because MinGW's
@@ -53,9 +65,13 @@ Library target: **`context_filesync`** (links `context_kernel` + `context_warnin
   documented hardening follow-up, still deferred: the now-landed `NativeFileStore` does **not** implement
   it (see `native_file_store.h`), so its jail stays the logical `normalize` + `is_inside_jail` applied by
   the reconciler / `WriteQueue` that call the store.
-- **`NullWatcher`** is the portable default (always degraded → correctness from the crawl). A real
-  inotify / ReadDirectoryChangesW / FSEvents watcher is a later platform-specific drop-in behind the
-  same seam; because hashes are authoritative, correctness never depends on it.
+- **Watcher hints are best-effort by design.** The native backends (`NativeWatcher`) deliver hints
+  for the overwhelmingly common cases, but some OS shapes intentionally lean on the crawl instead:
+  a directory moved into the tree may produce no per-file events for its contents (covered by a
+  one-shot scan on the new directory plus the crawl), and a storm that overflows the kernel or
+  userspace queues drops hints and latches `degraded()`. Hashes are authoritative, so all of these
+  are latency costs, never correctness bugs. `NullWatcher` (always degraded, zero hints) remains the
+  in-memory/measurement composition.
 - **Crashed-write temp residue is not garbage-collected.** A crash between `atomic_write`'s temp write
   and its rename (or during `IntentLog::begin`'s own atomic write) can leave a `.tmp.<unique>` file
   behind. Such residue is correctly *ignored* by reconciliation (`is_atomic_temp_name` /
@@ -72,3 +88,8 @@ index round-trip, expected-writes TTL, the reconciler pipeline (dropped-event + 
 nets, self-echo, degraded event), the intent-log crash-recovery / integrity / jail / CAS paths, and —
 for the native on-disk store — the `NativeFileStore` real-FS contract (atomic-rename replace, fsync,
 stat/list/remove, binary round-trip, real-disk torn-write proof) plus on-disk intent-log crash recovery.
+The `filesync-test_native_watcher` suite exercises the CURRENT platform's real backend on real FS
+events: create/modify/remove/new-directory smoke, hint-driven reconciler convergence, self-echo
+suppression under real watcher timing, a branch-switch storm converged by the crawl safety net, and
+the degraded-registration diagnostic (every hint wait is bounded; convergence asserts on the
+crawl-converged end state so OS timing can never flake it).

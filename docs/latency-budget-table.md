@@ -12,7 +12,7 @@ DerivationGraph + bridge daemon, issue #38).
 
 | stage | what it is (M1 reality) | where it is measured |
 |---|---|---|
-| watch | change *detection*: enumerate + mtime/size stat gate of the reconcile crawl (no native OS watcher exists yet — `NullWatcher` is always degraded, so detection is scan-bound by design, R-FILE-002's safety-net crawl) | `bench attach` stage `watch_seconds` (TimingFileStore: `list()` + `stat()` share of the crawl) |
+| watch | change *detection*: enumerate + mtime/size stat gate of the reconcile crawl. The native OS watcher backends exist (`NativeWatcher` — RDCW/inotify/FSEvents, issue #41; `context daemon` composes them), but the bench rig composes `NullWatcher` ON PURPOSE so this stage stays scan-bound and comparable across runs (R-FILE-002's safety-net crawl); the bench subject adopts hint-driven detection when the daemon's hint-consuming reconcile cadence lands, re-baselining per R-QA-009 | `bench attach` stage `watch_seconds` (TimingFileStore: `list()` + `stat()` share of the crawl) |
 | hash | raw-byte read + content digest of changed files + index bookkeeping | `bench attach` stage `hash_seconds` |
 | parse | parse + canonicalize + canonical-content hash (M1: the placeholder whitespace-normalizing canonicalizer + FNV-1a — the M2 canonical-JSON serializer replaces the node body behind the same seam, and the numbers re-baseline per R-QA-009) | `bench attach` stage `parse_seconds` (`DerivationGraph::apply`) |
 | validate | schema validation — **lands with the M2 schema model** (async-streamed per R-FILE-011(b)) | pending-M2 row (budget reserved) |
@@ -46,9 +46,14 @@ Companion budgets carried in the same table:
   files/second against the rolling baseline.
 - **Incremental edit ≤ 100 ms** (R-FILE-011(b)) — single authored-file change → updated
   derived state. Scale-independent; always compared. M1 honesty: the external-change
-  leg's detection is crawl-bound until the native watcher lands (the `edit` scenario
-  reports `detect_ms` separately, and the CLI-verb write path `edit_cli_verb_ms` shows
-  the pipeline-minus-detection latency).
+  leg's detection in the BENCH stays crawl-bound (the `edit` scenario reports
+  `detect_ms` separately, and the CLI-verb write path `edit_cli_verb_ms` shows the
+  pipeline-minus-detection latency). The native watcher backends landed with issue #41
+  and make detection O(changed files) instead of O(tree size) — measured at the
+  reconciler seam (`filesync-test_native_watcher`, informational print) at ~5 ms
+  incl. OS delivery vs ~465 ms `detect_ms` @10k on the same host — but the bench's
+  `detect_ms` only moves when the daemon's hint-consuming reconcile cadence lands
+  (the follow-up that re-baselines this row per R-QA-009).
 - **Session-query p99 ≤ 5 ms local** (R-BRIDGE-008) — measured at the daemon's bounded
   service point: the full JSON-RPC dispatch (parse → R-SEC-007 scope check →
   KernelServer backend → derived-world read → envelope serialize) against an attached
