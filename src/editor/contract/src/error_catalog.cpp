@@ -131,11 +131,13 @@ const std::vector<ErrorCode>& catalog()
         {"asset.move_source_missing", "The move/rename source asset does not exist.", false,
          kExitNotFound, "R-FILE-004"},
         {"asset.move_destination_exists",
-         "The move/rename destination is occupied by a different asset; move never overwrites.",
+         "The move/rename destination is occupied by a different asset (or an orphaned sidecar "
+         "holding one's identity); move never overwrites.",
          false, kExitConflict, "R-FILE-004"},
         {"asset.move_invalid",
-         "The move/rename request is malformed (a sidecar path, or an empty path).", false,
-         kExitUsage, "R-FILE-004"},
+         "The move/rename request is malformed (a sidecar, temp-residue, or dot-tree path, or an "
+         "empty path).",
+         false, kExitUsage, "R-FILE-004"},
     };
     return the_catalog;
 }

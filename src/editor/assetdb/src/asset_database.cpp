@@ -7,7 +7,6 @@
 #include "context/editor/serializer/canonical.h"
 #include "context/editor/serializer/json_parse.h"
 
-#include <algorithm>
 #include <map>
 #include <utility>
 
@@ -80,6 +79,15 @@ struct MetaOnDisk
     {
         if (!is_meta_path(path))
             continue;
+        std::string asset_path = asset_path_for(path);
+        // Sidecars OUTSIDE the asset domain — under a dot-segment tree (`.editor/`, `.git/`),
+        // beside atomic-write residue, or a sidecar-of-a-sidecar — are not asset metas: scan must
+        // never index them (a hand-made `x.json.meta.json.meta.json` must not turn a sidecar into
+        // an asset) and heal_moves must never pair their identity onto a genuine asset
+        // (find_newcomers applies the same filter on the newcomer side). Out of domain means out
+        // of diagnostics too: they are engine/tool territory, not scan findings.
+        if (!is_asset_candidate(asset_path))
+            continue;
         const std::optional<std::string> bytes = fs.read(path);
         if (!bytes.has_value())
             continue; // raced away between list and read; the next pass sees the truth
@@ -96,7 +104,7 @@ struct MetaOnDisk
         }
         MetaOnDisk entry;
         entry.meta_path = path;
-        entry.asset_path = asset_path_for(path);
+        entry.asset_path = std::move(asset_path);
         entry.meta = *meta;
         entry.asset_exists = fs.exists(entry.asset_path);
         out.push_back(std::move(entry));
@@ -374,12 +382,17 @@ MoveResult AssetDatabase::move_asset(filesync::FileStore& fs, std::string_view f
     const std::string from_meta = meta_path_for(from);
     const std::string to_meta = meta_path_for(to);
 
-    if (is_meta_path(from) || is_meta_path(to) || from.empty() || to.empty())
+    // is_asset_candidate refuses sidecar paths, atomic-temp shapes, and dot-segment trees in one
+    // check — endpoints outside the asset domain would produce a pair the index can never see
+    // (silent identity loss) or collide with atomic-write residue cleanup. Empty stays explicit
+    // (the candidate walk vacuously accepts "").
+    if (from.empty() || to.empty() || !is_asset_candidate(from) || !is_asset_candidate(to))
     {
         result.diagnostics.push_back(make_diag(
             "asset.move_invalid",
-            "move/rename operates on ASSET paths; sidecars travel with their asset", from_s,
-            to_s));
+            "move/rename operates on ASSET paths (not sidecars, dot-tree internals, or temp "
+            "residue); sidecars travel with their asset",
+            from_s, to_s));
         return result;
     }
     if (from == to)
@@ -403,8 +416,9 @@ MoveResult AssetDatabase::move_asset(filesync::FileStore& fs, std::string_view f
     if (from_meta_bytes.has_value())
         from_meta_parsed = parse_meta(*from_meta_bytes, problems);
     std::optional<AssetMeta> to_meta_parsed;
-    if (const std::optional<std::string> bytes = fs.read(to_meta); bytes.has_value())
-        to_meta_parsed = parse_meta(*bytes, problems);
+    const std::optional<std::string> to_meta_bytes = fs.read(to_meta);
+    if (to_meta_bytes.has_value())
+        to_meta_parsed = parse_meta(*to_meta_bytes, problems);
 
     // --- convergence / resume detection (R-FILE-004: idempotent + re-runnable under partial
     // apply — every crash window of the write order below re-enters through one of these arms).
@@ -429,7 +443,21 @@ MoveResult AssetDatabase::move_asset(filesync::FileStore& fs, std::string_view f
                     from_s, to_s, from_meta_parsed->guid));
                 return result;
             }
-            if (!to_meta_parsed.has_value())
+            if (to_meta_bytes.has_value() && !to_meta_parsed.has_value())
+            {
+                // A malformed-but-PRESENT destination sidecar gets the same honesty as the
+                // malformed SOURCE below: its bytes may hold identity/import settings recoverable
+                // by hand or from git, and our own write order never leaves a torn sidecar
+                // (atomic_write is all-or-nothing) — this is foreign state, never our residue.
+                // Refuse rather than overwrite (R-FILE-003: no unasked destructive fixes).
+                result.diagnostics.push_back(make_diag(
+                    "asset.meta_invalid",
+                    "the destination's meta sidecar is malformed; repair it (or remove it) "
+                    "before re-running the move",
+                    to_meta, to_s));
+                return result;
+            }
+            if (!to_meta_bytes.has_value())
                 filesync::atomic_write(fs, to_meta, *from_meta_bytes, "assetdb-move");
             fs.remove(from_meta);
         }
@@ -459,12 +487,37 @@ MoveResult AssetDatabase::move_asset(filesync::FileStore& fs, std::string_view f
             from_meta, from_s));
         return result;
     }
+    if (to_meta_bytes.has_value() && !to_meta_parsed.has_value())
+    {
+        // The malformed-DESTINATION twin of the refusal above: the resume arms below must never
+        // treat unparseable destination-sidecar bytes as "no sidecar" and clobber them — the
+        // same-bytes resume window is defined by a MISSING destination sidecar (our atomic writes
+        // never leave a torn one, so a malformed one is foreign state).
+        result.diagnostics.push_back(make_diag(
+            "asset.meta_invalid",
+            "the destination's meta sidecar is malformed; repair it (or remove it) before moving",
+            to_meta, to_s));
+        return result;
+    }
+    if (!to_exists && to_meta_parsed.has_value())
+    {
+        // An orphaned sidecar squats at the destination (its asset file is gone). No write order
+        // of ours produces this state — the destination FILE lands first and is never removed —
+        // so it is foreign residue holding some asset's identity. Refuse rather than overwrite;
+        // `context validate --fix` cleans deliberate deletes.
+        result.diagnostics.push_back(make_diag(
+            "asset.move_destination_exists",
+            "an orphaned meta sidecar occupies the destination; `context validate --fix` cleans "
+            "deliberate deletes",
+            to_s, from_s, to_meta_parsed->guid));
+        return result;
+    }
     if (to_exists)
     {
         const bool same_identity = from_meta_parsed.has_value() && to_meta_parsed.has_value() &&
                                    from_meta_parsed->guid == to_meta_parsed->guid;
         const bool same_bytes_pre_meta =
-            !to_meta_parsed.has_value() && fs.read(from_s) == fs.read(to_s);
+            !to_meta_bytes.has_value() && fs.read(from_s) == fs.read(to_s);
         if (!same_identity && !same_bytes_pre_meta)
         {
             // CAS-honesty: a DIFFERENT asset occupies the destination — refuse, never overwrite.

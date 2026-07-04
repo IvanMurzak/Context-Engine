@@ -178,6 +178,24 @@ int main()
             }
     }
 
+    // --- scan ignores sidecars OUTSIDE the asset domain (dot-trees, sidecar-of-a-sidecar) ---------
+    {
+        filesync::MemoryFileStore fs;
+        put_asset(fs, "proj/real.json", "{}\n", kGuidScene, "ctx:scene");
+        put_asset(fs, "proj/.editor/cache/level.json", "{}\n", kGuidMesh, ""); // dot-tree pair
+        // A hand-made sidecar-of-a-sidecar must not turn the real sidecar into an indexed asset.
+        fs.write("proj/real.json.meta.json.meta.json",
+                 "{\"guid\": \"00000000000000000000000000000ccc\"}\n");
+        SequenceGuidGenerator guids;
+        AssetDatabase db(guids);
+        const ScanResult scan = db.scan(fs, "proj");
+        CHECK(scan.assets_indexed == 1); // only the real asset
+        CHECK(scan.diagnostics.empty()); // out-of-domain sidecars are not diagnosed either
+        CHECK(db.find_by_guid(kGuidMesh) == nullptr);                  // dot-tree pair not indexed
+        CHECK(db.find_by_path("proj/real.json.meta.json") == nullptr); // a sidecar is never an asset
+        CHECK(db.find_by_guid(kGuidTexture) == nullptr);
+    }
+
     // --- scan: orphaned meta (asset gone) — diagnosed, never indexed, never auto-removed ----------
     {
         filesync::MemoryFileStore fs;

@@ -179,6 +179,55 @@ int main()
         CHECK(!fs.exists("proj/elsewhere.json"));
         CHECK(*fs.read("proj/broken.json") == "B2\n");
         CHECK(*fs.read("proj/broken.json.meta.json") == "not json"); // the bytes survive
+
+        // The malformed-DESTINATION twin: a byte-identical destination with an unparseable
+        // sidecar must NOT be mistaken for our own window-B residue (that window is defined by
+        // a MISSING destination sidecar) — refused, the unparseable bytes survive.
+        fs.write("proj/lookalike.json", "A\n"); // byte-identical to a.json
+        fs.write("proj/lookalike.json.meta.json", "corrupt dest");
+        const MoveResult dest_broken = db.move_asset(fs, "proj/a.json", "proj/lookalike.json");
+        CHECK(!dest_broken.ok);
+        CHECK(has_diag(dest_broken.diagnostics, "asset.meta_invalid"));
+        CHECK(*fs.read("proj/lookalike.json.meta.json") == "corrupt dest"); // bytes survive
+        CHECK(fs.exists("proj/a.json"));
+        CHECK(guid_at(fs, "proj/a.json") == kGuidA); // source untouched
+
+        // An orphaned sidecar squatting at the destination (asset file gone) holds some asset's
+        // identity — never overwritten by the write order, refused instead.
+        AssetMeta squatter;
+        squatter.guid = "00000000000000000000000000000ddd";
+        fs.write("proj/free.json.meta.json", serialize_meta(squatter)); // no proj/free.json
+        const MoveResult squat = db.move_asset(fs, "proj/a.json", "proj/free.json");
+        CHECK(!squat.ok);
+        CHECK(has_diag(squat.diagnostics, "asset.move_destination_exists"));
+        CHECK(guid_at(fs, "proj/free.json") == "00000000000000000000000000000ddd"); // survives
+        CHECK(fs.exists("proj/a.json"));
+
+        // Non-candidate endpoints are refused: dot-tree internals and temp-residue shapes are
+        // outside the asset domain (the index could never see the resulting pair).
+        const MoveResult into_dot = db.move_asset(fs, "proj/a.json", "proj/.editor/a.json");
+        CHECK(!into_dot.ok);
+        CHECK(has_diag(into_dot.diagnostics, "asset.move_invalid"));
+        const MoveResult onto_tmp = db.move_asset(fs, "proj/a.json", "proj/a2.json.tmp");
+        CHECK(!onto_tmp.ok);
+        CHECK(has_diag(onto_tmp.diagnostics, "asset.move_invalid"));
+        CHECK(fs.exists("proj/a.json")); // and nothing moved
+    }
+
+    // --- converged state with a MALFORMED destination sidecar: residue-clearing must not clobber --
+    {
+        filesync::MemoryFileStore fs;
+        fs.write("proj/a/l.json.meta.json", kRichMeta); // source sidecar left behind (file gone)
+        fs.write("proj/b/l.json", "{}\n");              // destination file present
+        fs.write("proj/b/l.json.meta.json", "corrupt"); // malformed destination sidecar
+        SequenceGuidGenerator guids;
+        AssetDatabase db(guids);
+        db.scan(fs, "proj");
+        const MoveResult conv = db.move_asset(fs, "proj/a/l.json", "proj/b/l.json");
+        CHECK(!conv.ok);
+        CHECK(has_diag(conv.diagnostics, "asset.meta_invalid"));
+        CHECK(*fs.read("proj/b/l.json.meta.json") == "corrupt"); // bytes survive
+        CHECK(fs.exists("proj/a/l.json.meta.json"));             // source residue untouched
     }
 
     // ================== crash windows around the meta-first order (R-QA-010) =====================
@@ -402,6 +451,26 @@ int main()
         CHECK(fs.exists("proj/a/x.json.meta.json")); // both orphans untouched
         CHECK(fs.exists("proj/b/x.json.meta.json"));
         CHECK(!fs.exists("proj/c/x.json.meta.json"));
+    }
+
+    // --- an orphaned DOT-TREE sidecar never pairs onto a genuine newcomer (out of domain) ----------
+    {
+        filesync::MemoryFileStore fs;
+        AssetMeta internal;
+        internal.guid = std::string(kGuidA);
+        fs.write("proj/.editor/cache/level.json.meta.json", serialize_meta(internal)); // orphan
+        fs.write("proj/scenes/level.json", "{}\n"); // genuine newcomer, same basename
+        SequenceGuidGenerator guids;
+        AssetDatabase db(guids);
+        db.scan(fs, "proj");
+        const HealResult healed = db.heal_moves(fs, "proj");
+        CHECK(healed.actions.empty());     // no identity injection from engine-internal residue
+        CHECK(healed.diagnostics.empty()); // out of domain means out of diagnostics too
+        CHECK(fs.exists("proj/.editor/cache/level.json.meta.json")); // untouched
+        CHECK(!fs.exists("proj/scenes/level.json.meta.json"));
+        const HealResult created = db.ensure_metas(fs, "proj");
+        CHECK(has_action(created.actions, "meta-created", "proj/scenes/level.json"));
+        CHECK(guid_at(fs, "proj/scenes/level.json") != kGuidA); // fresh identity, not injected
     }
 
     // --- pure delete: orphan reported, sidecar NOT auto-removed (enumerated write surface) ---------

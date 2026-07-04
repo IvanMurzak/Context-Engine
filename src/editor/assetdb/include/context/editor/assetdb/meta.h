@@ -2,8 +2,6 @@
 
 #pragma once
 
-#include "context/editor/serializer/json_tree.h"
-
 #include <cstdint>
 #include <optional>
 #include <string>

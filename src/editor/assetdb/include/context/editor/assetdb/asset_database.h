@@ -97,9 +97,11 @@ public:
     // --- passes ----------------------------------------------------------------------------------
 
     // (Re)build the index from the store: reads ONLY *.meta.json files (payloads stay on disk).
-    // Indexes LIVE pairs (meta + asset both present); surfaces asset.meta_orphaned,
-    // asset.meta_invalid, and asset.guid_duplicate (deterministic: the lexicographically-first
-    // live path keeps a duplicated GUID). Never writes.
+    // Indexes LIVE pairs (meta + asset both present) whose asset path is a candidate — sidecars
+    // outside the asset domain (dot-segment trees, temp residue, a sidecar-of-a-sidecar) are
+    // ignored entirely, diagnostics included. Surfaces asset.meta_orphaned, asset.meta_invalid,
+    // and asset.guid_duplicate (deterministic: the lexicographically-first live path keeps a
+    // duplicated GUID). Never writes.
     ScanResult scan(const filesync::FileStore& fs, std::string_view root);
 
     // GUID move-healing (the second R-FILE-003 enumerated write): heal raw filesystem moves the
@@ -123,10 +125,11 @@ public:
     // (GUID identity survives any observed mid-state), then source file, then source meta — and
     // idempotent + re-runnable under partial apply: re-running after ANY crash window converges to
     // the same result. Referencing files are NEVER rewritten (path hints heal lazily on tool save,
-    // L-34). A destination occupied by a DIFFERENT asset refuses with
-    // asset.move_destination_exists rather than overwriting; a malformed-but-present source
-    // sidecar refuses with asset.meta_invalid rather than re-keying the asset and discarding the
-    // unparseable bytes.
+    // L-34). A destination occupied by a DIFFERENT asset — or by an orphaned sidecar holding some
+    // asset's identity — refuses with asset.move_destination_exists rather than overwriting; a
+    // malformed-but-present sidecar on EITHER side refuses with asset.meta_invalid rather than
+    // re-keying the asset or discarding the unparseable bytes. Both endpoints must be asset
+    // candidates (not sidecar/temp/dot-tree paths — asset.move_invalid).
     MoveResult move_asset(filesync::FileStore& fs, std::string_view from, std::string_view to);
 
 private:
