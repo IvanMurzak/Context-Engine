@@ -69,7 +69,7 @@ struct SidecarDecodeResult
 resolve_sidecar_path(std::string_view root, std::string_view owner_path, std::string_view relpath);
 
 // One machine-readable sidecar finding (R-FILE-003 shape, code from the R-CLI-008 catalog:
-// sidecar.* / path.jail_violation / file.parse_error / usage.invalid).
+// sidecar.* / path.jail_violation / file.not_found / file.parse_error / usage.invalid).
 struct SidecarDiagnostic
 {
     std::string code;
