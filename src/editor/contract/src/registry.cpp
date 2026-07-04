@@ -174,6 +174,23 @@ Registry::Registry()
          {"value", "json", true, "The JSON value to set."}},
         /*flags=*/{}, /*implemented=*/false));
 
+    // The L-37 explicit bulk migration path (M2 wave 3, R-DATA-004): rewrite otherwise-untouched
+    // files to current schema versions — the ONLY migration that writes disk besides tool saves
+    // (parse-time migration is in-memory). Canonicalizes + stamps every file it rewrites; files
+    // with blocking findings (newer-than stamps, chain gaps, failed steps) are reported and left
+    // untouched. Honors the core --dry-run and --project flags.
+    verbs_.push_back(make_verb(
+        "", "", "migrate",
+        "Bulk-migrate authored JSON files to the current registered schema versions (L-37): "
+        "canonicalize + migrate stamped-older component payloads + stamp current versions, "
+        "rewriting files in place. The explicit disk-writing migration path; parse-time "
+        "migration never touches disk.",
+        /*params=*/
+        {{"path", "path", false,
+          "File or directory to migrate (recursive over *.json); defaults to the --project "
+          "root."}},
+        /*flags=*/{}, /*implemented=*/true));
+
     // A noun-scoped, package-facing verb: fixes `context <noun> <verb>` grammar AND reserves the
     // R-CLI-007 namespace-collision path (inert until a second package source exists).
     verbs_.push_back(make_verb(

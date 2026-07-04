@@ -2,8 +2,10 @@
 
 #include "context/editor/derivation/derivation_graph.h"
 
+#include "context/editor/migrate/migrate_document.h"
 #include "context/kernel/event_bus.h"
 
+#include <iterator>
 #include <utility>
 #include <vector>
 
@@ -13,10 +15,36 @@ namespace context::editor::derivation
 using context::editor::filesync::ChangeType;
 using context::editor::filesync::ReconcileChange;
 
+namespace
+{
+// Fold parse-time migration findings into the node's R-FILE-003 validation report. Positions are
+// located in the SOURCE bytes where the pointer still resolves (header stamps, override entries);
+// a pointer only meaningful in the migrated in-memory view locates at 0/0 — migration findings
+// describe the migrated view, an accepted precision trade the validate node's same-bytes contract
+// does not cover.
+void fold_migration_findings(const std::vector<migrate::MigrationDiagnostic>& findings,
+                             std::string_view source_bytes, schema::ValidationReport& report)
+{
+    for (const migrate::MigrationDiagnostic& d : findings)
+    {
+        schema::ValidationDiagnostic out;
+        out.code = d.code;
+        out.message = d.message;
+        out.pointer = d.pointer;
+        (void)schema::locate_pointer(source_bytes, d.pointer, out.line, out.column);
+        report.diagnostics.push_back(std::move(out));
+        if (d.blocking)
+            report.ok = false;
+    }
+}
+} // namespace
+
 DerivationGraph::DerivationGraph(DerivationConfig config, context::kernel::EventBus* bus,
                                  const schema::SchemaSet* schemas,
-                                 const schema::RefTargetResolver* ref_resolver)
-    : config_(config), bus_(bus), schemas_(schemas), ref_resolver_(ref_resolver)
+                                 const schema::RefTargetResolver* ref_resolver,
+                                 const migrate::MigrationSet* migrations)
+    : config_(config), bus_(bus), schemas_(schemas), ref_resolver_(ref_resolver),
+      migrations_(migrations), set_hash_(config.registered_set_hash)
 {
     signal_.high_watermark = config_.high_watermark;
 }
@@ -41,13 +69,50 @@ WriteTicket DerivationGraph::apply(const ReconcileChange& change, std::string_vi
         // The raw-byte half of the R-FILE-001 two-hash split, carried from the filesync change
         // (the reconcile pipeline's own content hash of the bytes on disk).
         ticket.raw_hash = change.content_hash;
-        // The M2 validate node (R-DATA-006): schema-validate JSON payloads on the SAME parse the
-        // canonical node produced. Positions are located in the SOURCE bytes, so diagnostics
-        // point at what the author actually wrote (R-FILE-003 pointer + line/column).
-        if (schemas_ != nullptr && pending.form.is_json)
+        // The L-37 parse-time migration node (M2 wave 3): migrate stamped-older component payloads
+        // IN MEMORY on the SAME parse — disk truth never mutates; the ticket's canonical hash stays
+        // the AUTHORED identity (own-write barrier + memo key on what is actually on disk). The
+        // validate node then sees CURRENT-version payloads. A BLOCKING migration finding
+        // (newer-than / gap / failed / over-budget / id mutation) becomes a failing validation
+        // report — skipping schema validation of the old-shape payload — so derive_one retains the
+        // node's last-good derived state (R-FILE-003), exactly the L-37 downgrade semantics.
+        bool migration_blocked = false;
+        if (migrations_ != nullptr && pending.form.is_json)
         {
-            pending.report = schema::validate_document(pending.form.root, source_bytes, *schemas_,
-                                                       ref_resolver_);
+            const migrate::DocumentMigrationResult migrated =
+                migrate::migrate_document(pending.form.root, *migrations_);
+            if (!migrated.ok)
+            {
+                migration_blocked = true;
+                pending.report = schema::ValidationReport{};
+                fold_migration_findings(migrated.diagnostics, source_bytes, pending.report);
+                pending.report.ok = false;
+                pending.validated = true;
+            }
+            else if (!migrated.diagnostics.empty() && schemas_ != nullptr)
+            {
+                // Non-blocking findings (orphan overrides) ride the validation report below.
+                // Deliberate asymmetry with the blocking branch above: with NO schema set wired
+                // there is no validate node to carry advisories, so they are dropped — only
+                // BLOCKING findings force a report (last-good retention needs the verdict).
+                pending.report = schema::ValidationReport{};
+                fold_migration_findings(migrated.diagnostics, source_bytes, pending.report);
+            }
+        }
+        // The M2 validate node (R-DATA-006): schema-validate JSON payloads on the SAME parse the
+        // canonical node produced (post-migration, so kind schemas judge current-version
+        // payloads). Positions are located in the SOURCE bytes, so diagnostics point at what the
+        // author actually wrote (R-FILE-003 pointer + line/column).
+        if (!migration_blocked && schemas_ != nullptr && pending.form.is_json)
+        {
+            schema::ValidationReport validation = schema::validate_document(
+                pending.form.root, source_bytes, *schemas_, ref_resolver_);
+            // Prepend the migration findings gathered above (if any) onto the validate verdict.
+            validation.diagnostics.insert(
+                validation.diagnostics.begin(),
+                std::make_move_iterator(pending.report.diagnostics.begin()),
+                std::make_move_iterator(pending.report.diagnostics.end()));
+            pending.report = std::move(validation);
             pending.validated = true;
         }
     }
@@ -167,7 +232,11 @@ void DerivationGraph::derive_one(const std::string& path, const Pending& pending
 
     // Content-hash memoization: an unchanged canonical form means the downstream derivation is skipped
     // — this is what makes incremental re-derive recompute ONLY genuinely affected nodes (L-22).
-    if (node.alive && node.canonical_hash == pending.form.canonical_hash)
+    // The registered-set hash is the second key component (R-FILE-005): a node derived under a
+    // DIFFERENT schema + migration set is stale even for identical content — a pass-0 change
+    // (package upgrade) re-keys the dependent pass-1 subgraph instead of serving old derivations.
+    if (node.alive && node.canonical_hash == pending.form.canonical_hash &&
+        node.set_hash == set_hash_)
     {
         ++result.nodes_skipped;
         return;
@@ -184,6 +253,7 @@ void DerivationGraph::derive_one(const std::string& path, const Pending& pending
     }
 
     node.canonical_hash = pending.form.canonical_hash;
+    node.set_hash = set_hash_;
     node.generation = target_gen;
     world_.add(node.entity, DerivedSource{pending.form.canonical_hash, target_gen});
     reflect(node.canonical_hash);
