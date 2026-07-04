@@ -102,7 +102,7 @@ JsonValue random_value(Rng& rng, int depth)
         return v;
     case 3:
         v.type = JsonValue::Type::unsigned_integer;
-        v.uint_value = rng.next() | (1ULL << 63); // force the u64-only domain half the time
+        v.uint_value = rng.next() | (1ULL << 63); // top bit forced: always in the u64-only domain
         return v;
     case 4:
         v.type = JsonValue::Type::number;

@@ -27,6 +27,7 @@
 #include "context/editor/filesync/diagnostic.h"
 #include "context/editor/filesync/intent_log.h"
 #include "context/editor/filesync/reconciler.h"
+#include "context/editor/serializer/json_tree.h"
 
 #include <cstdint>
 #include <filesystem>
