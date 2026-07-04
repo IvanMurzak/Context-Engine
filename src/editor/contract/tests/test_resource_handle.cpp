@@ -52,6 +52,14 @@ int main()
     CHECK(!ResourceHandle::parse("context-res://v0/i/1?bytes=").has_value());  // empty byte count
     CHECK(!ResourceHandle::parse("context-res://v0/i/1?bytes=12x").has_value()); // trailing junk
     CHECK(!ResourceHandle::parse("context-res://v0/i/1").has_value());         // missing query
+    // Numeric overflow is REJECTED, never silently wrapped (2^64 is 20 digits — it would wrap to
+    // 0 under unchecked accumulation); the u64 max itself still parses.
+    CHECK(!ResourceHandle::parse("context-res://v0/i/1?bytes=18446744073709551616").has_value());
+    {
+        const auto max_ok = ResourceHandle::parse("context-res://v0/i/1?bytes=18446744073709551615");
+        CHECK(max_ok.has_value());
+        CHECK(max_ok.has_value() && max_ok->size_bytes == 18446744073709551615ULL);
+    }
 
     // --- the largeResult JSON shape (with and without the same-FS hint) --------------------------
     {

@@ -26,7 +26,8 @@ using editor::contract::ResourceHandle;
 
 namespace
 {
-// Parse "--range <offset>:<length>" (both non-negative decimal). nullopt on malformed input.
+// Parse the optional range positional "<offset>:<length>" (both non-negative decimal). nullopt on
+// malformed input.
 std::optional<std::pair<std::uint64_t, std::uint64_t>> parse_range(const std::string& text)
 {
     const std::size_t colon = text.find(':');
@@ -102,7 +103,7 @@ Envelope run_fetch(const std::string& handle_uri, const std::map<std::string, st
         range = parse_range(range_it->second);
         if (!range.has_value())
             return finish(Envelope::failure(
-                "usage.invalid", "--range expects <offset>:<length>, got '" + range_it->second + "'"));
+                "usage.invalid", "range expects <offset>:<length>, got '" + range_it->second + "'"));
     }
 
     // --- discover + connect + attach (read/query baseline suffices for resource.read) ------------
@@ -130,13 +131,18 @@ Envelope run_fetch(const std::string& handle_uri, const std::map<std::string, st
             attach_rejected ? "handshake.incompatible_protocol" : "internal.error", err));
 
     // --- single-range mode: one resource.read, the raw read result is the answer -----------------
+    // Error classing (both modes, same as the attach call above): a DAEMON-side rejection of
+    // resource.read is an unknown/expired handle (not-found exit class); a transport or parse
+    // failure says nothing about the handle — that is internal.error (exit-table honesty).
     if (range.has_value())
     {
+        bool rejected = false;
         const std::optional<Json> res =
             call(client, ++id, "resource.read", range_params(handle_uri, range->first, range->second),
-                 err);
+                 err, &rejected);
         if (!res.has_value())
-            return finish(Envelope::failure("resource.unknown_handle", err));
+            return finish(Envelope::failure(
+                rejected ? "resource.unknown_handle" : "internal.error", err));
         Json data = res->contains("data") ? res->at("data") : Json::object();
         return finish(Envelope::success(std::move(data)));
     }
@@ -152,10 +158,12 @@ Envelope run_fetch(const std::string& handle_uri, const std::map<std::string, st
     std::uint64_t offset = 0;
     for (;;)
     {
+        bool rejected = false; // fresh per call: call() sets it on rejection, never clears it
         const std::optional<Json> res =
-            call(client, ++id, "resource.read", range_params(handle_uri, offset, 0), err);
+            call(client, ++id, "resource.read", range_params(handle_uri, offset, 0), err, &rejected);
         if (!res.has_value())
-            return finish(Envelope::failure("resource.unknown_handle", err));
+            return finish(Envelope::failure(
+                rejected ? "resource.unknown_handle" : "internal.error", err));
         const Json& data = res->at("data");
         const std::optional<std::string> bytes =
             editor::bridge::hex_decode(data.at("chunkHex").as_string());

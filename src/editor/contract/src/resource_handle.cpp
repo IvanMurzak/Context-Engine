@@ -2,6 +2,7 @@
 
 #include "context/editor/contract/resource_handle.h"
 
+#include <limits>
 #include <string>
 
 namespace context::editor::contract
@@ -29,7 +30,9 @@ bool valid_instance_id(std::string_view id)
     return true;
 }
 
-// Parse a non-empty all-digits decimal. nullopt on empty / non-digit / overflow-ish length.
+// Parse a non-empty all-digits decimal. nullopt on empty / non-digit / overflow: a 20-digit value
+// >= 2^64 is REJECTED, never silently wrapped — parse() promises STRICT handling of untrusted
+// input (and the overflow-checked cli::parse_u64 sets the same bar).
 std::optional<std::uint64_t> parse_u64(std::string_view text)
 {
     if (text.empty() || text.size() > 20)
@@ -39,7 +42,10 @@ std::optional<std::uint64_t> parse_u64(std::string_view text)
     {
         if (ch < '0' || ch > '9')
             return std::nullopt;
-        value = value * 10u + static_cast<std::uint64_t>(ch - '0');
+        const auto digit = static_cast<std::uint64_t>(ch - '0');
+        if (value > (std::numeric_limits<std::uint64_t>::max() - digit) / 10u)
+            return std::nullopt; // would overflow
+        value = value * 10u + digit;
     }
     return value;
 }
