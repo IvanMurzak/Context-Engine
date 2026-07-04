@@ -1,0 +1,87 @@
+bench/tests/test_harness.py
+  s_e3239cf02087b8::t_355077b13fb61c 1-174
+bench/tests/test_budget_table.py
+  s_e3239cf02087b8::t_0b418e85667901 1-180
+bench/README.md
+  s_e3239cf02087b8::t_669cc20c9a2fc0 3-4,8-20,23-33
+  s_e3239cf02087b8::t_04df4c29e1b756 89-107,116,120-121,123,126-127,129,131-150
+src/cli/src/bench_command.cpp
+  s_e3239cf02087b8::t_8c223ffc3d8644 147-148,151-154
+  s_e3239cf02087b8::t_fac175f1497f8d 692-693
+  s_e3239cf02087b8::t_ddcb9fed91c226 757
+  s_e3239cf02087b8::t_1441ca1ab7ad4b 1-146,149-150,155-354,374-533,537-623,625-691,694-739,741-756,758-941
+  s_e3239cf02087b8::t_e467ad4aacfc5c 355-373
+  s_e3239cf02087b8::t_0c7e6e61598557 534-536
+  s_e3239cf02087b8::t_323458515b67db 624
+  s_e3239cf02087b8::t_6179e164c4ba57 740
+docs/latency-budget-table.md
+  s_e3239cf02087b8::t_cba4642fd2bb36 1-105
+tools/check_fleet_manifest.py
+  s_e3239cf02087b8::t_a4f84dd0067a7d 15-16
+  s_4e029918257beb::t_500a59510d0a54 104-106,113-121
+bench/harness.py
+  s_e3239cf02087b8::t_ec3b8c61dfaa63 6-9,17-20,26-27,30-36,39-40,43-53,56-58,69,74-75,77,92-107,111,113-124,163-297,301-302,311-312,316-328,339,361-362,367-374,379-381,397-400
+  s_e3239cf02087b8::t_d983348787f51b 337
+  s_e3239cf02087b8::t_7378aaa7ada871 80-91
+  s_e3239cf02087b8::t_87bec10535f6cf 363-365
+  s_e3239cf02087b8::t_6dfd41fa28d463 366
+docs/ci-fleet-manifest.md
+  s_e3239cf02087b8::t_e12ab2b0be78d6 59,65-69,72,81-90
+  s_e3239cf02087b8::t_6c9041fb071eb6 98-99,102-105
+  s_e3239cf02087b8::t_7f7363fa53255f 91
+src/cli/tests/test_attach_e2e.cpp
+  s_e3239cf02087b8::t_c531ed31457476 126-128,130
+  s_e3239cf02087b8::t_eae7759711e3c0 85-97,100-101
+docs/ci-fleet-manifest.json
+  s_e3239cf02087b8::t_3c2068cc98d010 194-203
+  s_e3239cf02087b8::t_3d6a2fdc3583cf 84
+  s_e3239cf02087b8::t_9f5f86cda3a643 204
+  s_e3239cf02087b8::t_d103bcddbd302f 261,264-305
+  s_e3239cf02087b8::t_8142fc60a84609 331,334-335
+src/cli/include/context/cli/bench_command.h
+  s_e3239cf02087b8::t_1ebe1c91a50d35 1-33
+.github/workflows/ci.yml
+  s_e3239cf02087b8::t_721f7930dfdda1 263-336
+  s_e3239cf02087b8::t_908c5248addade 67-69,71-74
+bench/budget_table.py
+  s_e3239cf02087b8::t_276b2e295239ec 1-284
+tools/tests/test_check_fleet_manifest.py
+  s_e3239cf02087b8::t_72272211dab294 22
+  s_e3239cf02087b8::t_60a3e01bee5a0b 110-112,114-115,119-128,130-131,133-139
+src/cli/CMakeLists.txt
+  s_e3239cf02087b8::t_7c8eaa8267c4ed 11
+  s_e3239cf02087b8::t_fa1a4c9bbd33b3 47
+.github/workflows/bench-nightly.yml
+  s_e3239cf02087b8::t_a35e8e7111da82 1-123
+src/cli/src/attach_command.cpp
+  s_e3239cf02087b8::t_73cf0b83da45f2 213-228
+  s_e3239cf02087b8::t_246a4958662b35 177
+  s_e3239cf02087b8::t_f5f89c820aa1d0 272-273,277
+src/cli/src/app.cpp
+  s_e3239cf02087b8::t_c0ae0a42c54a30 214-225
+  s_e3239cf02087b8::t_5bd2a9fcca880a 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "784fd078e198929da39062c866441e020780bc00",
+  "prompts": {},
+  "sessions": {
+    "s_4e029918257beb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a691da2a4a00b7a36",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
