@@ -1,0 +1,122 @@
+src/editor/compose/tests/test_scene_model.cpp
+  s_e3239cf02087b8::t_08f98c8366a255 1-164
+src/editor/compose/tests/test_json_pointer.cpp
+  s_e3239cf02087b8::t_8c06180585c7f2 1-126
+src/editor/compose/include/context/editor/compose/json_pointer.h
+  s_e3239cf02087b8::t_bc3201cd98eff1 1-41
+src/editor/compose/tests/compose_test.h
+  s_e3239cf02087b8::t_7fdb098e114191 1-27
+src/editor/editorkernel/CMakeLists.txt
+  s_e3239cf02087b8::t_b7dc5d1d7d375f 18-21,24
+src/editor/compose/CMakeLists.txt
+  s_e3239cf02087b8::t_e3d8e341d9ea47 1-61
+src/editor/compose/src/json_pointer.cpp
+  s_e3239cf02087b8::t_b87157a052142c 1-193
+src/editor/compose/include/context/editor/compose/stable_id.h
+  s_e3239cf02087b8::t_aaa6e177775404 1-36
+src/editor/compose/tests/test_corpus.cpp
+  s_e3239cf02087b8::t_a69c15a6d168cd 1-171
+src/editor/compose/tests/test_flatten.cpp
+  s_e3239cf02087b8::t_50bb6d446dfc54 8
+  s_e3239cf02087b8::t_beb8396915df86 1-7,9-277
+src/editor/compose/tests/test_stable_id.cpp
+  s_e3239cf02087b8::t_2f37447bb211ae 1-49
+src/editor/compose/src/stable_id.cpp
+  s_e3239cf02087b8::t_a94efc75efdc90 1-53
+src/editor/compose/include/context/editor/compose/scene_model.h
+  s_e3239cf02087b8::t_dd294adaf34165 1-115
+src/editor/compose/include/context/editor/compose/flatten.h
+  s_e3239cf02087b8::t_cbc274c1e930ec 1-104,108-128
+  s_e3239cf02087b8::t_13b30fb21f5920 105-107
+src/editor/derivation/README.md
+  s_e3239cf02087b8::t_e23e43b82c3476 73-77
+  s_a5320a84ad9dc7::t_3c03978d6789b8 48-58
+src/editor/compose/src/scene_model.cpp
+  s_e3239cf02087b8::t_012eaf49109132 1-281
+src/editor/derivation/CMakeLists.txt
+  s_e3239cf02087b8::t_e2db00e69c7031 9-11
+  s_e3239cf02087b8::t_69b25c0f0f506d 27-29,31,47-48
+src/editor/compose/src/flatten.cpp
+  s_e3239cf02087b8::t_91caaabc976bee 39-514,545,551
+  s_e3239cf02087b8::t_07bfc193388034 36-38
+  s_e3239cf02087b8::t_9ccb77e382ff1f 515-517,542-544
+  s_e3239cf02087b8::t_71594e26fced85 546-550
+  s_e3239cf02087b8::t_195e071bcacf0a 552-554
+  s_a790a02dd596d7::t_ef7e613d1f0929 1-35,518-541,555-577
+src/editor/derivation/include/context/editor/derivation/derivation_graph.h
+  s_e3239cf02087b8::t_f31cd1decbaabb 226-233,235-238,253-256
+  s_e3239cf02087b8::t_9e08290bca6cc4 71-72
+  s_e3239cf02087b8::t_96c8c7b64fc16e 7-8,18
+  s_e3239cf02087b8::t_a64ab13c04e166 87-99
+  s_a5320a84ad9dc7::t_52196727651bdb 58,196-204
+src/editor/compose/tests/test_flatten_diagnostics.cpp
+  s_e3239cf02087b8::t_1074b69bae4698 208-227,232,234
+  s_e3239cf02087b8::t_93e6a6160b8cd4 1-207,228-231,233,235-256
+src/editor/derivation/tests/test_compose_node.cpp
+  s_e3239cf02087b8::t_f701bf399d83b6 1-245
+src/CMakeLists.txt
+  s_e3239cf02087b8::t_c84145ba7a4327 225-233
+src/editor/compose/README.md
+  s_e3239cf02087b8::t_e138de4f4fea42 1-91
+src/editor/schema/src/kind_schema.cpp
+  s_e3239cf02087b8::t_9bb95d5353c6d2 200-241,244,250
+src/editor/derivation/src/derivation_graph.cpp
+  s_e3239cf02087b8::t_b49372b3ac1c38 107,110,114-117
+  s_e3239cf02087b8::t_c872a617f5cb43 128-129,147-153,217,224,226,250,262,270-271,273,276,287,290
+  s_e3239cf02087b8::t_e81727b1036e9d 233,237,297,300,354-368
+  s_e3239cf02087b8::t_5e17b0fbe2780c 118,206-216,218-223,225,227-232,234-236,238-249,251-261,263-269,272,274-275,277-286,288-289,291-296,298-299,301-322
+src/editor/compose/tests/corpus/deep-nesting-exceeds-cap.json
+  s_e3239cf02087b8::t_6c0008f38cd222 1-105
+src/editor/compose/tests/corpus/deep-nesting-within-cap.json
+  s_e3239cf02087b8::t_9ebbe4a4f88907 1-112
+src/editor/compose/tests/corpus/dense-fan-in.json
+  s_e3239cf02087b8::t_2f86d300ed981c 1-67
+src/editor/compose/tests/corpus/diamond-budget.json
+  s_e3239cf02087b8::t_ebeae382110538 1-85
+src/editor/compose/tests/corpus/direct-cycle.json
+  s_e3239cf02087b8::t_bc1b6448e197b1 1-34
+src/editor/compose/tests/corpus/duplicate-and-missing-ids.json
+  s_e3239cf02087b8::t_c4af100ca73892 1-58
+src/editor/compose/tests/corpus/indirect-cycle.json
+  s_e3239cf02087b8::t_08d3bf54d0ee91 1-55
+src/editor/compose/tests/corpus/orphan-overrides.json
+  s_e3239cf02087b8::t_cbe257e15fd007 1-84
+src/editor/compose/tests/corpus/precedence-chain.json
+  s_e3239cf02087b8::t_6c46b7c0dcb85c 1-105
+src/editor/compose/tests/corpus/root-inert-vs-composable.json
+  s_e3239cf02087b8::t_89114305188200 1-60
+src/editor/compose/tests/corpus/structural-add-remove.json
+  s_e3239cf02087b8::t_8c6e3b93a337f4 1-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "03e30d96589f21b50120ec27c7e45f9c756d5b3f",
+  "prompts": {},
+  "sessions": {
+    "s_a5320a84ad9dc7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b5723d03-208f-40b2-85df-2638ec4ba23d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_a790a02dd596d7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a6219c8d9061a0db6",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
