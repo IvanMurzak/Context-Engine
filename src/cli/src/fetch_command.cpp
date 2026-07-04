@@ -7,6 +7,7 @@
 #include "context/editor/bridge/transport.h"
 #include "context/editor/contract/resource_handle.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -142,7 +143,12 @@ Envelope run_fetch(const std::string& handle_uri, const std::map<std::string, st
 
     // --- full fetch: chunk loop, hex-decode, byte-exact reassembly -------------------------------
     std::string payload;
-    payload.reserve(static_cast<std::size_t>(handle->size_bytes));
+    // sizeBytes comes from the CLIENT-parsed URI (untrusted input): clamp the up-front reservation
+    // to one chunk — growth past that is amortized — so a doctored ?bytes= cannot throw
+    // length_error/bad_alloc out of the documented no-throw contract. The daemon-declared totals
+    // then bound the loop below.
+    payload.reserve(static_cast<std::size_t>(
+        std::min(handle->size_bytes, editor::bridge::kResourceReadMaxChunkBytes)));
     std::uint64_t offset = 0;
     for (;;)
     {
@@ -163,6 +169,13 @@ Envelope run_fetch(const std::string& handle_uri, const std::map<std::string, st
         if (bytes->empty())
             return finish(Envelope::failure("internal.error",
                                             "daemon returned an empty non-eof chunk (no progress)"));
+        // Bound reassembly by the handle's declared size: a stream that exceeds it without eof can
+        // only be a doctored handle or a misbehaving daemon — fail instead of growing unbounded
+        // (the post-loop equality check could otherwise only fire after arbitrary allocation).
+        if (payload.size() > handle->size_bytes)
+            return finish(Envelope::failure(
+                "internal.error", "daemon streamed past the handle's declared sizeBytes (" +
+                                      std::to_string(handle->size_bytes) + ") without eof"));
     }
 
     if (payload.size() != handle->size_bytes)

@@ -217,6 +217,46 @@ bool write_all_fd(int fd, std::string_view data)
 
 #endif
 
+// Pre-gate for ON-DEMAND parent-directory creation (write()/rename() create missing parents):
+// create_directories traverses the LEXICAL path, so behind a pre-existing root-escaping link it
+// would leave empty-DIRECTORY residue outside the jail even though the content itself is refused by
+// the fd/handle verification below. Verify the deepest EXISTING ancestor of `parent` through the
+// SAME opened-fd/handle probe every other check uses (links followed, then the OPENED object's
+// resolved location compared against the jail root) before any missing tail is created. The
+// per-operation fd/handle verification stays the authoritative TOCTOU gate — there is no
+// handle-relative mkdir (Win32), so the race window left here is litter-only (empty directories),
+// never content.
+bool parent_chain_inside_jail(const fs::path& parent, const fs::path& real_base)
+{
+    fs::path probe = parent;
+    std::error_code ec;
+    while (!fs::exists(probe, ec))
+    {
+        const fs::path up = probe.parent_path();
+        if (up.empty() || up == probe)
+            return false; // nothing existing to verify against -> fail closed
+        probe = up;
+    }
+#ifdef _WIN32
+    UniqueHandle h(CreateFileW(probe.c_str(), FILE_READ_ATTRIBUTES,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                               OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr));
+    if (!h.valid())
+        return false;
+    const std::optional<FinalPath> real = final_path_of(h.h);
+    return real.has_value() && inside_folded_base(real->folded, real_base.wstring());
+#else
+    // O_NONBLOCK: the deepest existing ancestor is normally a directory (ignored for those), but a
+    // pathological FIFO at that position must not hang the gate. Not O_DIRECTORY — a FILE ancestor
+    // still verifies (create_directories then fails on it, surfacing below like any mkdir failure).
+    UniqueFd fd(::open(probe.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK));
+    if (!fd.valid())
+        return false;
+    const std::optional<std::string> real = final_path_of_fd(fd.fd);
+    return real.has_value() && inside_resolved_base(*real, real_base.string());
+#endif
+}
+
 } // namespace
 
 NativeFileStore::NativeFileStore(fs::path base) : base_(std::move(base)) {}
@@ -347,8 +387,15 @@ bool NativeFileStore::write(std::string_view path, std::string_view data)
 {
     const fs::path target = resolve(path);
     std::error_code ec;
-    if (target.has_parent_path())
-        fs::create_directories(target.parent_path(), ec); // idempotent; a real failure surfaces below.
+    // Create missing parents only behind the pre-gate (see parent_chain_inside_jail): an existing
+    // parent needs no mkdir (and the target open below verifies it), so the gate runs only when a
+    // directory would actually be created.
+    if (target.has_parent_path() && !fs::exists(target.parent_path(), ec))
+    {
+        if (!parent_chain_inside_jail(target.parent_path(), real_base()))
+            return false;
+        fs::create_directories(target.parent_path(), ec); // a real failure surfaces below.
+    }
 
 #ifdef _WIN32
     const std::wstring base = real_base().wstring();
@@ -441,8 +488,14 @@ bool NativeFileStore::rename(std::string_view from, std::string_view to)
     const fs::path src = resolve(from);
     const fs::path dst = resolve(to);
     std::error_code ec;
-    if (dst.has_parent_path())
+    // Same mkdir pre-gate as write(): never create missing destination parents through a
+    // root-escaping link (see parent_chain_inside_jail).
+    if (dst.has_parent_path() && !fs::exists(dst.parent_path(), ec))
+    {
+        if (!parent_chain_inside_jail(dst.parent_path(), real_base()))
+            return false;
         fs::create_directories(dst.parent_path(), ec);
+    }
 
 #ifdef _WIN32
     const std::wstring base = real_base().wstring();

@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <thread>
 
@@ -41,6 +42,23 @@ std::optional<std::string> flag_value(const std::vector<std::string>& args, cons
             return args[i].substr(eq.size());
     }
     return std::nullopt;
+}
+
+std::optional<std::uint64_t> parse_u64(std::string_view text)
+{
+    if (text.empty())
+        return std::nullopt;
+    std::uint64_t value = 0;
+    for (const char ch : text)
+    {
+        if (ch < '0' || ch > '9')
+            return std::nullopt;
+        const auto digit = static_cast<std::uint64_t>(ch - '0');
+        if (value > (std::numeric_limits<std::uint64_t>::max() - digit) / 10u)
+            return std::nullopt; // would overflow
+        value = value * 10u + digit;
+    }
+    return value;
 }
 
 bool has_flag(const std::vector<std::string>& args, const std::string& name)

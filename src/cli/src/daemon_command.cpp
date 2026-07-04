@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -159,15 +160,15 @@ int run_daemon(const std::vector<std::string>& args)
     if (const std::optional<std::string> raw = flag_value(args, "crawl-interval-ms");
         raw.has_value())
     {
-        try
-        {
-            crawl_interval_ms = static_cast<std::uint64_t>(std::stoull(*raw));
-        }
-        catch (const std::exception&)
-        {
+        // Strict parse (parse_u64, not stoull): "-1" / trailing junk must be a usage error, not a
+        // silent wrap that turns the crawl safety net off. Bounded so the ms->nanos conversion
+        // below cannot overflow either.
+        const std::optional<std::uint64_t> parsed = parse_u64(*raw);
+        if (!parsed.has_value() ||
+            *parsed > std::numeric_limits<std::uint64_t>::max() / 1000000ULL)
             return fail("usage.invalid",
                         "--crawl-interval-ms expects a non-negative integer, got '" + *raw + "'");
-        }
+        crawl_interval_ms = *parsed;
     }
 
     // R-CLI-017 spool threshold override (operational/test knob): a response above this many bytes
@@ -177,16 +178,13 @@ int run_daemon(const std::vector<std::string>& args)
     if (const std::optional<std::string> raw = flag_value(args, "large-result-threshold");
         raw.has_value())
     {
-        try
-        {
-            large_result_threshold = static_cast<std::uint64_t>(std::stoull(*raw));
-        }
-        catch (const std::exception&)
-        {
+        // Strict parse (see --crawl-interval-ms): "-1" wrapping to ~2^64 would silently disable
+        // the R-CLI-017 spool and push oversized results into the transport frame cap.
+        large_result_threshold = parse_u64(*raw);
+        if (!large_result_threshold.has_value())
             return fail("usage.invalid",
                         "--large-result-threshold expects a non-negative byte count, got '" + *raw +
                             "'");
-        }
     }
 
     // Compose the real-disk EditorKernel. filesync_root is a subdir ("proj") so the `.editor/` control

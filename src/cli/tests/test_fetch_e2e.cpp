@@ -184,11 +184,14 @@ int main()
         }
     }
 
-    // --- failure path: a bogus (well-formed but unknown) handle → resource.unknown_handle --------
+    // --- failure path: a bogus (well-formed but unknown) handle → resource.unknown_handle. The
+    // --- doctored ?bytes= is deliberately HUGE: the client must clamp its up-front reservation
+    // --- (untrusted input) and fail with a clean envelope, never abort — a crash here would leave
+    // --- an empty/garbage --out file and a non-envelope exit.
     {
         ctest_proc::Process fetch = ctest_proc::spawn(
-            bin, {"fetch", "context-res://v0/no-such-instance/0?bytes=1", "--project",
-                  project.string(), "--out", bogus_out.string()});
+            bin, {"fetch", "context-res://v0/no-such-instance/0?bytes=18446744073709551615",
+                  "--project", project.string(), "--out", bogus_out.string()});
         CHECK(ctest_proc::valid(fetch));
         int code = -1;
         CHECK(ctest_proc::wait_for(fetch, 20000, code));

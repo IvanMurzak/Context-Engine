@@ -221,6 +221,12 @@ int main()
             CHECK(!store.write("inside/esc/evil.txt", "escaped"));
             CHECK(!fs::exists(outside / "evil.txt"));
 
+            // (a2) write THROUGH the escaping link with a MISSING tail dir: refused BEFORE the
+            // on-demand create_directories runs (the parent-chain pre-gate), so not even empty
+            // directory residue lands outside the jail.
+            CHECK(!store.write("inside/esc/newdir/evil.txt", "escaped"));
+            CHECK(!fs::exists(outside / "newdir"));
+
             // (b) rename THROUGH the escaping link: refused, the source survives intact.
             CHECK(store.write("stage.tmp", "payload"));
             CHECK(!store.rename("stage.tmp", "inside/esc/stolen.txt"));
@@ -268,6 +274,11 @@ int main()
             CHECK(store.write("alias/ok.txt", "fine"));
             CHECK(fs::exists(base / "real" / "ok.txt"));
             CHECK(slurp(base / "real" / "ok.txt") == "fine");
+        }
+        else
+        {
+            std::fprintf(stderr, "note: no directory link available on this host; skipping the "
+                                 "internal-link positive control\n");
         }
     }
 

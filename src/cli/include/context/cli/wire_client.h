@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace context::cli
@@ -24,6 +25,12 @@ namespace context::cli
 
 // Presence of a bare `--name` flag.
 [[nodiscard]] bool has_flag(const std::vector<std::string>& args, const std::string& name);
+
+// Strict non-negative decimal parse for operational flag VALUES: all digits, overflow-checked.
+// nullopt on anything else. Deliberately NOT std::stoull, which accepts a leading '-' (silently
+// wrapping "-1" to a huge value) and ignores trailing junk ("600abc" -> 600) — an operational knob
+// that misparses silently can turn a safety net off with no error.
+[[nodiscard]] std::optional<std::uint64_t> parse_u64(std::string_view text);
 
 // Discover the daemon's endpoint from `<project>/.editor/instance.json`, retrying for the boot race
 // (the daemon may still be publishing the file). nullopt if none appears within `timeout_ms`.

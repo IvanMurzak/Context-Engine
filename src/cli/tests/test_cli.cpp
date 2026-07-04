@@ -3,6 +3,7 @@
 // R-CLI-008 envelope (R-CLI-007/008/009; happy + failure paths, R-QA-013).
 
 #include "context/cli/app.h"
+#include "context/cli/wire_client.h"
 #include "context/editor/contract/json.h"
 #include "cli_test.h"
 
@@ -159,6 +160,21 @@ int main()
         // `build` is scope-reserved AND operational — same one-shot rejection.
         const Envelope build = run({"build"});
         CHECK(err_code(build) == "contract.operational_only");
+    }
+
+    // --- wire_client parse_u64: strict operational-flag value parsing. Deliberately NOT stoull,
+    // --- which wraps "-1" to ~2^64 (silently turning e.g. the --crawl-interval-ms safety net off)
+    // --- and ignores trailing junk ("600abc" -> 600).
+    {
+        using context::cli::parse_u64;
+        CHECK(parse_u64("0").has_value() && *parse_u64("0") == 0);
+        CHECK(parse_u64("30000").has_value() && *parse_u64("30000") == 30000);
+        CHECK(!parse_u64("").has_value());
+        CHECK(!parse_u64("-1").has_value());
+        CHECK(!parse_u64("600abc").has_value());
+        CHECK(!parse_u64(" 5").has_value());
+        CHECK(parse_u64("18446744073709551615").has_value()); // 2^64-1 fits
+        CHECK(!parse_u64("18446744073709551616").has_value()); // 2^64 overflows
     }
 
     CLI_TEST_MAIN_END();
