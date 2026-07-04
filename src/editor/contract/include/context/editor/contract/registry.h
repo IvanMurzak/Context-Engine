@@ -58,6 +58,19 @@ struct VerbSpec
     bool implemented = false;    // false => the surface is reserved; invoking returns
                                  //          contract.unimplemented (R-CLI-009 grammar reservation)
 
+    // Contract stability class (R-CLI-009 honesty; introspected via describe):
+    //   "stable"      — the versioned contract surface (default; frozen to promotion at M3).
+    //   "operational" — the daemon-driver surface (edit / query / snapshot / …) served by a LIVE
+    //                   daemon's method backend over RPC. Registered so `context describe` reflects
+    //                   the REAL served surface, but explicitly UNSTABLE: promoted into the stable
+    //                   contract (or dropped) at the M3 freeze, without a deprecation cycle.
+    std::string stability = "stable";
+
+    // Optional registry-owned alternate GLOBAL CLI spelling (e.g. `context fetch` for resource/read,
+    // the R-CLI-017 name). Lives IN the registry so the alias is introspectable and the CLI resolver
+    // generates it from the one source of truth — never hand-maintained parity (R-CLI-009).
+    std::string cli_alias;
+
     // The canonical CLI invocation form, e.g. "context describe" or "context [<ns>:]package add".
     [[nodiscard]] std::string cli_command() const;
     // The registry key: ns + noun + verb, unique across the surface.

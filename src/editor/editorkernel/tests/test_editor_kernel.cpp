@@ -38,6 +38,9 @@ using context::editor::editorkernel::EditBatchOutcome;
 using context::editor::editorkernel::EditorKernel;
 using context::editor::editorkernel::EditorKernelConfig;
 using context::editor::editorkernel::EditOutcome;
+using context::editor::editorkernel::CrawlMode;
+using context::editor::filesync::ChangeKind;
+using context::editor::filesync::FakeWatcher;
 using context::editor::filesync::MemoryFileStore;
 using context::editor::filesync::NullWatcher;
 using context::editor::bridge::Scope;
@@ -63,7 +66,7 @@ EditorKernelConfig config_for(const fs::path& project)
     EditorKernelConfig cfg;
     cfg.project_root = project;                     // real FS: the daemon single-instance lock
     cfg.filesync_root = "proj";                     // logical FileStore root (path jail)
-    cfg.index_path = "proj/.editor/reconcile-index"; // under the injectable FileStore seam
+    cfg.index_path = "proj/.editor/index"; // under the injectable FileStore seam
     return cfg;
 }
 } // namespace
@@ -345,6 +348,60 @@ int main()
         db_kernel.stop();
         std::error_code db_ec;
         fs::remove_all(dupbatch_project, db_ec);
+    }
+
+    // --- R-FILE-002 crawl-cadence policy: with a live watcher, the full re-hash crawl is a
+    // --- LOW-FREQUENCY safety net, not the ingest cadence — hints drain on EVERY pass, the crawl
+    // --- runs when due (or on demand via CrawlMode::force), and convergence stays guaranteed.
+    // --- (Every earlier section runs with the default interval 0 == crawl-every-pass, which keeps
+    // --- the NullWatcher-composition regression covered.)
+    {
+        const fs::path cadence_project = make_temp_project("crawl-cadence");
+        MemoryFileStore cw_store;
+        FakeWatcher cw_watcher; // a live (non-degraded) watcher: hints carry routine detection
+        context::kernel::ManualClock cw_clock;
+        context::kernel::InlineTaskRunner cw_tasks;
+
+        EditorKernelConfig cw_cfg = config_for(cadence_project);
+        cw_cfg.min_crawl_interval_nanos = 1000000000ULL; // policy: at most one crawl per 1 s
+        EditorKernel cw_kernel(cw_store, cw_watcher, cw_clock, cw_tasks, cw_cfg);
+        CHECK(cw_kernel.start(ScopeSet::all()) == StartOutcome::booted);
+
+        // The FIRST pass always crawls: an unhinted out-of-band write is detected immediately.
+        CHECK(cw_store.write("proj/first.scene", "entity: 1"));
+        const auto first = cw_kernel.ingest_external();
+        CHECK(first.size() == 1);
+        CHECK(!first.empty() && first[0].path == "proj/first.scene");
+
+        // Within the interval an UNHINTED out-of-band write stays unseen — the crawl did NOT run
+        // with the pass (this is exactly the decoupling from the kernel ingest cadence)...
+        CHECK(cw_store.write("proj/unhinted.scene", "entity: 2"));
+        CHECK(cw_kernel.ingest_external().empty());
+
+        // ...while a HINTED write IS seen on the very next pass (watcher-speed detection).
+        CHECK(cw_store.write("proj/hinted.scene", "entity: 3"));
+        cw_watcher.emit("proj/hinted.scene", ChangeKind::modified);
+        const auto hinted = cw_kernel.ingest_external();
+        CHECK(hinted.size() == 1);
+        CHECK(!hinted.empty() && hinted[0].path == "proj/hinted.scene");
+
+        // Once the interval elapses the policy crawl runs and converges on the unhinted write —
+        // eventual convergence even when EVERY watcher event for a path was lost (R-FILE-002).
+        cw_clock.advance(1000000000ULL);
+        const auto converged = cw_kernel.ingest_external();
+        CHECK(converged.size() == 1);
+        CHECK(!converged.empty() && converged[0].path == "proj/unhinted.scene");
+
+        // CrawlMode::force bypasses the cadence — the crawl-on-demand path bulk ops / the
+        // `reconcile` verb use (the cadence clock just reset, so a policy pass would skip).
+        CHECK(cw_store.write("proj/bulk.scene", "entity: 4"));
+        const auto forced = cw_kernel.ingest_external(CrawlMode::force);
+        CHECK(forced.size() == 1);
+        CHECK(!forced.empty() && forced[0].path == "proj/bulk.scene");
+
+        cw_kernel.stop();
+        std::error_code cw_ec;
+        fs::remove_all(cadence_project, cw_ec);
     }
 
     // Best-effort cleanup of the real lock directory.

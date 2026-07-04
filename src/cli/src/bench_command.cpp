@@ -246,7 +246,7 @@ private:
 // ---------------------------------------------------------------------------------------------
 
 constexpr const char* kFilesyncRoot = "project";                            // gen_corpus layout
-constexpr const char* kIndexPath = "project/.editor/reconcile-index";       // control-path-skipped
+constexpr const char* kIndexPath = "project/.editor/index";       // control-path-skipped
 // Bulk-sized derivation config for whole-corpus scenarios: drain everything in each pass (the
 // overloaded load-shed path re-scans pending per pass, so a 100k flood under the tiny library
 // defaults would measure the shed policy's overhead, not attach throughput — `sustained` measures

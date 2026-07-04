@@ -4,6 +4,7 @@
 
 #include "context/editor/contract/error_catalog.h"
 #include "context/editor/contract/handshake.h"
+#include "context/editor/contract/resource_handle.h"
 #include "context/editor/schema/kind_schema.h"
 
 #include <utility>
@@ -31,8 +32,10 @@ std::string VerbSpec::key() const
 
 namespace
 {
-// The R-CLI-007 core-flag set: honored by EVERY verb. --idempotency-key and --after-generation
-// stay reserved-but-accepted in v1 (their behavior activates with the replay store / barrier).
+// The R-CLI-007 core-flag set: honored by EVERY verb. --idempotency-key, --after-generation and
+// --atomic-plan stay reserved-but-accepted in v1 (their behavior activates with the replay store /
+// the batch backend); --after-hash is LIVE — the own-write barrier mechanism it names
+// (EditorKernel::query_after_hash) exists and is tested.
 std::vector<FlagSpec> make_core_flags()
 {
     return {
@@ -48,6 +51,15 @@ std::vector<FlagSpec> make_core_flags()
         {"idempotency-key", "string",
          "Client-supplied replay key (R-CLI-016); reserved and accepted, replay store lands later.",
          true},
+        {"after-hash", "hash",
+         "Own-write read barrier: block until the target path's derived node reflects the "
+         "canonical hash the write returned (R-CLI-006).",
+         false},
+        {"atomic-plan", "bool",
+         "Plan-level all-or-nothing batch: CAS every target against its planning-time hash and "
+         "refuse the whole batch if any target moved (R-CLI-011); reserved — the batch backend "
+         "activates the behavior later.",
+         true},
     };
 }
 
@@ -57,14 +69,22 @@ std::string rpc_method_for(const std::string& noun, const std::string& verb)
     return noun.empty() ? verb : noun + "." + verb;
 }
 
-// Derive the MCP tool name: "context_[<noun>_]<verb>".
+// Derive the MCP tool name: "context_[<noun>_]<verb>", folding '-' to '_' so a hyphenated verb
+// (e.g. "edit-batch") yields a conventional snake_case tool name ("context_edit_batch").
 std::string mcp_tool_for(const std::string& noun, const std::string& verb)
 {
-    return noun.empty() ? "context_" + verb : "context_" + noun + "_" + verb;
+    std::string tool = noun.empty() ? "context_" + verb : "context_" + noun + "_" + verb;
+    for (char& ch : tool)
+    {
+        if (ch == '-')
+            ch = '_';
+    }
+    return tool;
 }
 
 VerbSpec make_verb(std::string ns, std::string noun, std::string verb, std::string summary,
-                   std::vector<ParamSpec> params, std::vector<FlagSpec> flags, bool implemented)
+                   std::vector<ParamSpec> params, std::vector<FlagSpec> flags, bool implemented,
+                   std::string stability = "stable", std::string cli_alias = std::string())
 {
     VerbSpec spec;
     spec.rpc_method = rpc_method_for(noun, verb);
@@ -76,6 +96,8 @@ VerbSpec make_verb(std::string ns, std::string noun, std::string verb, std::stri
     spec.params = std::move(params);
     spec.flags = std::move(flags);
     spec.implemented = implemented;
+    spec.stability = std::move(stability);
+    spec.cli_alias = std::move(cli_alias);
     return spec;
 }
 
@@ -161,6 +183,81 @@ Registry::Registry()
         /*params=*/{{"name", "string", true, "Package name/source to add."}},
         /*flags=*/{}, /*implemented=*/false));
 
+    // The R-CLI-017 large-result fetch verb. The opaque-URI handle FORMAT and this
+    // `resource.read { handle, range }` verb are contract from day one (the wire shape cannot be
+    // retrofitted); v1 implements same-filesystem fetch only — the URI resolves against the local
+    // daemon (bridge::ResourceStore). `context fetch` is the registry-owned CLI alias R-CLI-017
+    // names for it.
+    verbs_.push_back(make_verb(
+        "", "resource", "read",
+        "Read (a byte range of) an oversized result payload by its transport-portable opaque "
+        "resource handle (R-CLI-017). Served by a live daemon; v1 resolves same-filesystem only.",
+        /*params=*/
+        {{"handle", "string", true,
+          "The opaque resource URI (context-res://...) a largeResult envelope returned."},
+         {"range", "json", false,
+          "Optional byte range {offsetBytes, lengthBytes}; omitted reads from 0 up to the "
+          "daemon's chunk cap."}},
+        /*flags=*/
+        {{"out", "path",
+          "Also write the result envelope to this file (the operational sink `context attach` / "
+          "`context daemon` offer).",
+          false}},
+        /*implemented=*/true, /*stability=*/"stable", /*cli_alias=*/"fetch"));
+
+    // --- the OPERATIONAL daemon-driver surface (R-CLI-009 honesty) ------------------------------
+    // These RPC methods are genuinely served by a live daemon's method backend (KernelServer) — the
+    // cross-process analogue of `context editor smoke`. They are registered here so
+    // `context describe` reflects the REAL served surface, but marked stability="operational":
+    // explicitly UNSTABLE, promoted into the stable contract (or dropped) at the M3 freeze. They are
+    // NOT one-shot CLI verbs (the CLI rejects them with contract.operational_only).
+    verbs_.push_back(make_verb(
+        "", "", "edit",
+        "Daemon-initiated single-file write through filesync atomic-IO with the read-your-writes "
+        "barrier (R-FILE-004 / R-CLI-006). Requires the file_write scope.",
+        /*params=*/
+        {{"path", "path", true, "Project-relative file to write."},
+         {"content", "string", true, "The full content to write (tool saves canonicalize JSON)."}},
+        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "", "edit-batch",
+        "Daemon-initiated MULTI-file write serialized through the R-FILE-004 crash-recovery intent "
+        "log. Requires the file_write scope.",
+        /*params=*/
+        {{"files", "json", true, "Non-empty array of {path, content} objects."}},
+        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "", "query",
+        "Read the derived node for a path (canonical hash + generation) plus world stats. NOT the "
+        "R-CLI-012 query language — a single-path operational read.",
+        /*params=*/{{"path", "string", true, "Project-relative path to look up."}},
+        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "", "snapshot",
+        "The R-BRIDGE-008 current-state snapshot (incarnationId, generation, lastSeq, world stats) "
+        "plus the boot-time R-FILE-004 recovery diagnostics.",
+        /*params=*/{}, /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "", "reconcile",
+        "Fold external (out-of-band) edits into the derived world: drain watcher hints and force "
+        "the full re-hash crawl (R-FILE-002), then settle.",
+        /*params=*/{}, /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "", "build",
+        "Trigger a build. Scope-mapped (build_install, R-SEC-007) and registered for honesty; the "
+        "backing is not served yet.",
+        /*params=*/{}, /*flags=*/{}, /*implemented=*/false, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "", "shutdown",
+        "Ask the daemon's serve loop to stop after replying. Requires the session_control scope.",
+        /*params=*/{}, /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
     // The R-BRIDGE-008 core event topics, described statically (R-CLI-013/014). Live
     // package-registered topics join this set at runtime as the package ecosystem lands.
     topics_ = {
@@ -222,9 +319,12 @@ Json Registry::cli_surface() const
     {
         Json entry = Json::object();
         entry.set("command", Json(v.cli_command()));
+        if (!v.cli_alias.empty())
+            entry.set("alias", Json("context " + v.cli_alias));
         entry.set("ns", Json(v.ns));
         entry.set("noun", Json(v.noun));
         entry.set("verb", Json(v.verb));
+        entry.set("stability", Json(v.stability));
         entry.set("params", param_names(v));
         entry.set("flags", flag_names(v, core_flags_));
         out.push_back(std::move(entry));
@@ -242,6 +342,7 @@ Json Registry::rpc_surface() const
         entry.set("ns", Json(v.ns));
         entry.set("noun", Json(v.noun));
         entry.set("verb", Json(v.verb));
+        entry.set("stability", Json(v.stability));
         entry.set("params", param_names(v));
         entry.set("flags", flag_names(v, core_flags_));
         out.push_back(std::move(entry));
@@ -265,6 +366,7 @@ Json Registry::mcp_surface() const
         entry.set("ns", Json(v.ns));
         entry.set("noun", Json(v.noun));
         entry.set("verb", Json(v.verb));
+        entry.set("stability", Json(v.stability));
         entry.set("params", param_names(v));
         entry.set("flags", flag_names(v, core_flags_));
         entry.set("inputSchema", std::move(input_schema));
@@ -292,10 +394,13 @@ Json Registry::describe() const
         entry.set("noun", Json(v.noun));
         entry.set("verb", Json(v.verb));
         entry.set("command", Json(v.cli_command()));
+        if (!v.cli_alias.empty())
+            entry.set("cliAlias", Json("context " + v.cli_alias));
         entry.set("summary", Json(v.summary));
         entry.set("rpcMethod", Json(v.rpc_method));
         entry.set("mcpTool", Json(v.mcp_tool));
         entry.set("implemented", Json(v.implemented));
+        entry.set("stability", Json(v.stability));
         Json params = Json::array();
         for (const ParamSpec& p : v.params)
             params.push_back(param_to_json(p));
@@ -333,6 +438,10 @@ Json Registry::describe() const
         errors.push_back(std::move(entry));
     }
     contract.set("errorCatalog", std::move(errors));
+
+    // The R-CLI-017 large-result mechanism: URI scheme, fetch verb naming, chunk encoding, and the
+    // handle / read-result field shapes (the numeric spool threshold is daemon policy, not shape).
+    contract.set("largeResult", large_result_descriptor());
 
     // The registered file kinds (R-CLI-005 / R-DATA-006): one entry per kind — id, schema
     // version, the derived per-field x-ctx-* index (units/storage/ref/union metadata), and the

@@ -10,6 +10,7 @@
 #include "context/editor/filesync/path_jail.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -93,5 +94,41 @@ private:
     context::editor::filesync::FileStore& inner_;
     std::optional<std::string> crash_dst_;
 };
+
+// Create a DIRECTORY link at `link` pointing at `target` (an existing real directory), for the
+// R-SEC-008 symlink-escape fault cases. POSIX: a plain directory symlink (always available).
+// Windows: try a directory symlink first (works under Developer Mode / an elevated CI runner), then
+// fall back to an NTFS JUNCTION via `cmd /c mklink /J` (junctions need no privilege — and are a
+// reparse point the TOCTOU-safe jail must treat exactly like a symlink). Returns false when no link
+// could be created — the caller SKIPS the dependent fault case (the attack precondition cannot be
+// staged on this host) rather than failing.
+inline bool make_dir_link(const std::filesystem::path& link, const std::filesystem::path& target)
+{
+    std::error_code ec;
+    std::filesystem::create_directory_symlink(target, link, ec);
+    if (!ec && std::filesystem::is_symlink(link))
+        return true;
+#if defined(_WIN32)
+    std::filesystem::path l = link;
+    std::filesystem::path t = target;
+    const std::string cmd = "cmd /c mklink /J \"" + l.make_preferred().string() + "\" \"" +
+                            t.make_preferred().string() + "\" > NUL 2>&1";
+    (void)std::system(cmd.c_str());
+    std::error_code jec;
+    return std::filesystem::exists(link, jec); // the junction resolves to the existing target
+#else
+    return false;
+#endif
+}
+
+// Create a FILE symlink at `link` -> `target`. May be unavailable on Windows without Developer
+// Mode / elevation (and junctions are directory-only, so there is no fallback); the caller skips
+// the dependent fault case when this returns false.
+inline bool make_file_link(const std::filesystem::path& link, const std::filesystem::path& target)
+{
+    std::error_code ec;
+    std::filesystem::create_symlink(target, link, ec);
+    return !ec && std::filesystem::is_symlink(link);
+}
 
 } // namespace nfstest

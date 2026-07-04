@@ -17,6 +17,8 @@
 #include "filesync_test.h"
 #include "native_test_support.h"
 
+#include <cstdio>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -154,6 +156,75 @@ int main()
         CHECK(k1.size() == 32);
         CHECK(k1 == k2); // second call reads the persisted key back from disk, does not regenerate
         CHECK(fs.exists("proj/.editor/hmac.key"));
+    }
+
+    // --- E. symlink RACE between crash and resume (R-SEC-008 TOCTOU / R-FILE-004 jail-on-resume):
+    // --- while an op is pending, the target's parent dir is swapped for a ROOT-ESCAPING link and a
+    // --- decoy matching the planning-time content is staged outside (luring the CAS). The resumed
+    // --- write must be REFUSED by the native store's TOCTOU-safe jail, REPORTED as a diagnostic
+    // --- (never silently dropped), and land NOTHING outside the project root. This extends the
+    // --- R-QA-010 fault matrix with the symlink-race class, staged via the same crash-injecting
+    // --- decorator (real-FS reparse faults cannot be modelled over MemoryFileStore).
+    {
+        namespace stdfs = std::filesystem;
+        TempDir tmp("crash-symlink-race");
+        const stdfs::path base = tmp.path() / "base";
+        const stdfs::path outside = tmp.path() / "outside";
+        std::error_code ec;
+        stdfs::create_directories(base, ec);
+        stdfs::create_directories(outside, ec);
+
+        NativeFileStore native(base);
+        context::kernel::ManualClock clock;
+        native.write("proj/sub/a.txt", "A0");
+
+        CrashInjectingFileStore crash_fs(native);
+        IntentLog log(crash_fs, "proj/.editor", kKey);
+        WriteQueue queue(crash_fs, "proj", log, clock);
+        const std::vector<PlannedWrite> writes = {plan("proj/sub/a.txt", "A0", "A1")};
+
+        crash_fs.crash_on_rename_to("proj/sub/a.txt");
+        bool crashed = false;
+        try
+        {
+            queue.execute("op-race", writes);
+        }
+        catch (const SimulatedCrash&)
+        {
+            crashed = true;
+        }
+        CHECK(crashed);
+        CHECK(!log.pending().empty());
+
+        // THE RACE: swap the pending target's parent for a link escaping the project base, and
+        // stage a decoy with the planning-time content so the resume's CAS check is lured into
+        // actually attempting the write (a vanished file would stop at a CAS diagnostic instead).
+        stdfs::remove_all(base / "proj" / "sub", ec);
+        NativeFileStore outside_store(outside); // decoy staging only — a separate root
+        CHECK(outside_store.write("a.txt", "A0"));
+        if (nfstest::make_dir_link(base / "proj" / "sub", outside))
+        {
+            IntentLog log2(native, "proj/.editor", kKey);
+            WriteQueue queue2(native, "proj", log2, clock);
+            const std::vector<Diagnostic> diags = queue2.recover();
+
+            // Refused AND reported (R-FILE-004: an op that cannot be safely resumed is named).
+            CHECK(has_code(diags, "filesync.intent.resume"));
+            CHECK(!log2.pending().empty()); // left on disk, honestly incomplete
+
+            // NOTHING landed outside the project root: the decoy is byte-identical, no temp
+            // residue, no A1 — the redirected resume never wrote a byte out there.
+            CHECK(*outside_store.read("a.txt") == "A0");
+            std::size_t outside_entries = 0;
+            for (stdfs::directory_iterator it(outside, ec), end; it != end; it.increment(ec))
+                ++outside_entries;
+            CHECK(outside_entries == 1); // exactly the decoy
+        }
+        else
+        {
+            std::fprintf(stderr, "note: no directory link available on this host; skipping the "
+                                 "symlink-race resume fault case\n");
+        }
     }
 
     FILESYNC_TEST_MAIN_END();

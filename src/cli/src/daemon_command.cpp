@@ -2,6 +2,7 @@
 
 #include "context/cli/daemon_command.h"
 
+#include "context/cli/wire_client.h" // shared flag_value (single-sourced with attach/fetch)
 #include "context/editor/bridge/transport.h"
 #include "context/editor/contract/envelope.h"
 #include "context/editor/contract/handshake.h"
@@ -16,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -46,20 +48,6 @@ using editor::filesync::NativeWatcher;
 
 namespace
 {
-std::optional<std::string> flag_value(const std::vector<std::string>& args, const std::string& name)
-{
-    const std::string prefix = "--" + name;
-    for (std::size_t i = 0; i < args.size(); ++i)
-    {
-        if (args[i] == prefix && i + 1 < args.size())
-            return args[i + 1];
-        const std::string eq = prefix + "=";
-        if (args[i].rfind(eq, 0) == 0)
-            return args[i].substr(eq.size());
-    }
-    return std::nullopt;
-}
-
 long current_pid()
 {
 #if defined(_WIN32)
@@ -163,16 +151,53 @@ int run_daemon(const std::vector<std::string>& args)
                                        ? ScopeSet::parse(*flag_value(args, "launch-scopes"))
                                        : ScopeSet::all();
 
+    // R-FILE-002 crawl cadence: this composition runs a REAL OS watcher, so the full re-hash crawl
+    // is the LOW-FREQUENCY dropped-event safety net — not the ingest cadence (default: at most once
+    // per 30 s). The `reconcile` verb still FORCES a crawl on demand (bulk ops, e.g. a git branch
+    // switch). `--crawl-interval-ms 0` restores crawl-every-pass (sensible on watch-hostile mounts,
+    // where the watcher is degraded anyway).
+    std::uint64_t crawl_interval_ms = 30000;
+    if (const std::optional<std::string> raw = flag_value(args, "crawl-interval-ms");
+        raw.has_value())
+    {
+        // Strict parse (parse_u64, not stoull): "-1" / trailing junk must be a usage error, not a
+        // silent wrap that turns the crawl safety net off. Bounded so the ms->nanos conversion
+        // below cannot overflow either.
+        const std::optional<std::uint64_t> parsed = parse_u64(*raw);
+        if (!parsed.has_value() ||
+            *parsed > std::numeric_limits<std::uint64_t>::max() / 1000000ULL)
+            return fail("usage.invalid",
+                        "--crawl-interval-ms expects a non-negative integer, got '" + *raw + "'");
+        crawl_interval_ms = *parsed;
+    }
+
+    // R-CLI-017 spool threshold override (operational/test knob): a response above this many bytes
+    // returns a largeResult handle instead of inline data. Default: bridge::kLargeResultThresholdBytes.
+    // The e2e tests lower it to drive the oversized path with a routine-sized response.
+    std::optional<std::uint64_t> large_result_threshold;
+    if (const std::optional<std::string> raw = flag_value(args, "large-result-threshold");
+        raw.has_value())
+    {
+        // Strict parse (see --crawl-interval-ms): "-1" wrapping to ~2^64 would silently disable
+        // the R-CLI-017 spool and push oversized results into the transport frame cap.
+        large_result_threshold = parse_u64(*raw);
+        if (!large_result_threshold.has_value())
+            return fail("usage.invalid",
+                        "--large-result-threshold expects a non-negative byte count, got '" + *raw +
+                            "'");
+    }
+
     // Compose the real-disk EditorKernel. filesync_root is a subdir ("proj") so the `.editor/` control
     // dir (lock, instance file, reconcile index) stays OUTSIDE the reconcile crawl root — the proven
     // native composition (test_editor_kernel_native.cpp).
     NativeFileStore store(project);
     // The REAL OS watcher (RDCW / inotify / FSEvents) over the authored subtree — hints only, hashes
-    // stay the truth (R-FILE-002): `reconcile` still runs the full-crawl safety net every pass. The
-    // watched dir must exist before registration (a missing root = degraded, by contract), and its
-    // logical prefix must equal filesync_root so hints key into the same reconcile index. If
-    // registration fails (fd/watch limits, network FS), the kernel emits the visible
-    // `watcher.degraded` diagnostic and detection leans on the crawl — never silently.
+    // stay the truth (R-FILE-002): hints drive routine detection, the cadenced crawl guarantees
+    // eventual convergence, and `reconcile` forces a full crawl on demand. The watched dir must
+    // exist before registration (a missing root = degraded, by contract), and its logical prefix
+    // must equal filesync_root so hints key into the same reconcile index. If registration fails
+    // (fd/watch limits, network FS), the kernel emits the visible `watcher.degraded` diagnostic and
+    // detection leans on the crawl — never silently.
     fs::create_directories(project / "proj", ec);
     NativeWatcher watcher(project / "proj", "proj");
     context::kernel::SteadyClock clock;
@@ -181,10 +206,13 @@ int run_daemon(const std::vector<std::string>& args)
     EditorKernelConfig cfg;
     cfg.project_root = project;
     cfg.filesync_root = "proj";
-    cfg.index_path = "proj/.editor/reconcile-index";
+    cfg.index_path = "proj/.editor/index";
+    cfg.min_crawl_interval_nanos = crawl_interval_ms * 1000000ULL;
 
     EditorKernel kernel(store, watcher, clock, tasks, cfg);
     KernelServer server(kernel); // registers itself as the method backend BEFORE start()
+    if (large_result_threshold.has_value())
+        server.set_large_result_threshold(*large_result_threshold);
 
     const StartOutcome outcome = kernel.start(launch_scopes);
 

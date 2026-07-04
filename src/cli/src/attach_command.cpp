@@ -1,18 +1,17 @@
-// `context attach` implementation (see attach_command.h).
+// `context attach` implementation (see attach_command.h). The wire plumbing (flag parsing, endpoint
+// discovery, one-shot JSON-RPC calls) lives in wire_client.h — shared with `context fetch`.
 
 #include "context/cli/attach_command.h"
 
+#include "context/cli/wire_client.h"
 #include "context/editor/bridge/transport.h"
 #include "context/editor/contract/json.h"
 
-#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <optional>
-#include <sstream>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace context::cli
@@ -22,127 +21,6 @@ namespace fs = std::filesystem;
 using editor::contract::Envelope;
 using editor::contract::Json;
 using editor::bridge::TransportClient;
-
-namespace
-{
-std::optional<std::string> flag_value(const std::vector<std::string>& args, const std::string& name)
-{
-    const std::string prefix = "--" + name;
-    for (std::size_t i = 0; i < args.size(); ++i)
-    {
-        if (args[i] == prefix && i + 1 < args.size())
-            return args[i + 1];
-        const std::string eq = prefix + "=";
-        if (args[i].rfind(eq, 0) == 0)
-            return args[i].substr(eq.size());
-    }
-    return std::nullopt;
-}
-
-bool has_flag(const std::vector<std::string>& args, const std::string& name)
-{
-    const std::string f = "--" + name;
-    for (const std::string& a : args)
-        if (a == f)
-            return true;
-    return false;
-}
-
-std::string read_file(const fs::path& path)
-{
-    std::ifstream f(path, std::ios::binary);
-    if (!f)
-        return std::string();
-    std::ostringstream ss;
-    ss << f.rdbuf();
-    return ss.str();
-}
-
-// Discover the daemon's endpoint from `<project>/.editor/instance.json`, retrying for the boot race
-// (the daemon may still be publishing the file). nullopt if none appears within `timeout_ms`.
-std::optional<std::string> discover_endpoint(const fs::path& project, int timeout_ms)
-{
-    const fs::path instance = project / ".editor" / "instance.json";
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-    for (;;)
-    {
-        std::error_code ec;
-        if (fs::exists(instance, ec))
-        {
-            const std::string text = read_file(instance);
-            if (!text.empty())
-            {
-                try
-                {
-                    const Json doc = Json::parse(text);
-                    if (doc.contains("endpoint") && doc.at("endpoint").is_string() &&
-                        !doc.at("endpoint").as_string().empty())
-                        return doc.at("endpoint").as_string();
-                }
-                catch (const std::exception&)
-                {
-                    // A torn read while the daemon writes the file — retry until it is complete.
-                }
-            }
-        }
-        if (std::chrono::steady_clock::now() >= deadline)
-            return std::nullopt;
-        std::this_thread::sleep_for(std::chrono::milliseconds(25));
-    }
-}
-
-std::string build_request(std::int64_t id, const std::string& method, Json params)
-{
-    Json req = Json::object();
-    req.set("jsonrpc", Json(std::string("2.0")));
-    req.set("id", Json(id));
-    req.set("method", Json(method));
-    req.set("params", std::move(params));
-    return req.dump(0);
-}
-
-// Send one JSON-RPC request and return its `result` object. On a transport failure, a JSON-RPC error
-// response, or a malformed reply, returns nullopt and sets `error`. When the failure is a daemon-side
-// JSON-RPC error response (as opposed to a transport/parse failure) and `rejected_by_daemon` is
-// non-null, sets `*rejected_by_daemon` — letting the handshake call site distinguish a genuine
-// protocol rejection from a mere transport hiccup.
-std::optional<Json> call(TransportClient& client, std::int64_t id, const std::string& method,
-                         Json params, std::string& error, bool* rejected_by_daemon = nullptr)
-{
-    const std::optional<std::string> raw = client.request(build_request(id, method, std::move(params)));
-    if (!raw.has_value())
-    {
-        error = "transport error on '" + method + "': " + client.error();
-        return std::nullopt;
-    }
-    Json response;
-    try
-    {
-        response = Json::parse(*raw);
-    }
-    catch (const std::exception& e)
-    {
-        error = "malformed response to '" + method + "': " + e.what();
-        return std::nullopt;
-    }
-    if (response.contains("error"))
-    {
-        const Json& err = response.at("error");
-        const std::string msg =
-            err.contains("message") ? err.at("message").as_string() : std::string("(no message)");
-        error = "daemon rejected '" + method + "': " + msg;
-        if (rejected_by_daemon != nullptr)
-            *rejected_by_daemon = true;
-        return std::nullopt;
-    }
-    if (!response.contains("result"))
-    {
-        error = "response to '" + method + "' carried neither result nor error";
-        return std::nullopt;
-    }
-    return response.at("result");
-}
-} // namespace
 
 Envelope run_attach(const std::vector<std::string>& args)
 {

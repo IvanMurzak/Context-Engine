@@ -84,6 +84,19 @@ const std::vector<ErrorCode>& catalog()
          "The attach token holds a lower scope than this method requires; re-attach with the needed "
          "scope.",
          false, kExitPermission, "R-SEC-007"},
+        // --- appended post-baseline (additive-only: new codes go at the END) --------------------
+        // The operational daemon-driver verbs (edit / query / …) are registered in the contract
+        // (R-CLI-009 honesty) but served only by a LIVE daemon over RPC — invoking one as a one-shot
+        // CLI verb is a usage error, not a reserved surface.
+        {"contract.operational_only",
+         "This verb is operational: it is served by a live daemon over RPC (attach to a running "
+         "'context daemon'), not as a one-shot CLI verb.",
+         false, kExitUsage, "R-CLI-009"},
+        // R-CLI-017 large-result handles: a resource.read naming a handle this daemon instance does
+        // not hold (expired, foreign instance, or malformed URI).
+        {"resource.unknown_handle",
+         "The resource handle is unknown to this daemon instance (expired, foreign, or malformed).",
+         false, kExitNotFound, "R-CLI-017"},
     };
     return the_catalog;
 }

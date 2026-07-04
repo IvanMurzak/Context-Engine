@@ -7,15 +7,21 @@
 //   * `query` reads the derived node back, byte-consistent with the edit's canonical hash;
 //   * a READ-ONLY session is refused `edit` with scope.denied (R-SEC-007) over the wire;
 //   * `describe` routes to the registry through the same dispatcher;
-//   * `shutdown` breaks the serve loop cleanly (the thread joins without a kill).
+//   * `shutdown` breaks the serve loop cleanly (the thread joins without a kill);
+//   * the R-CLI-017 large-result path END-TO-END: an oversized response is spooled + replaced by a
+//     `largeResult` handle envelope, and resource.read range-fetches reassemble the EXACT original
+//     result over the same channel (plus the unknown/malformed-handle failure paths).
 
 #include "context/editor/editorkernel/kernel_server.h"
 
+#include "context/editor/contract/envelope.h"
 #include "context/editor/contract/json.h"
+#include "context/editor/contract/registry.h"
 #include "context/editor/derivation/canonical_parse.h"
 #include "context/editor/editorkernel/editor_kernel.h"
 #include "context/editor/filesync/file_store.h"
 #include "context/editor/filesync/watcher.h"
+#include "context/editor/bridge/resource_store.h"
 #include "context/editor/bridge/transport.h"
 #include "context/kernel/platform.h"
 
@@ -85,7 +91,7 @@ int main()
     EditorKernelConfig cfg;
     cfg.project_root = project;
     cfg.filesync_root = "proj";
-    cfg.index_path = "proj/.editor/reconcile-index";
+    cfg.index_path = "proj/.editor/index";
 
     EditorKernel kernel(store, watcher, clock, tasks, cfg);
     KernelServer server(kernel); // registers the method backend BEFORE start()
@@ -191,7 +197,7 @@ int main()
         EditorKernelConfig cfg2;
         cfg2.project_root = project2;
         cfg2.filesync_root = "proj";
-        cfg2.index_path = "proj/.editor/reconcile-index";
+        cfg2.index_path = "proj/.editor/index";
 
         EditorKernel kernel2(store2, watcher2, clock2, tasks2, cfg2);
         KernelServer server2(kernel2);
@@ -244,6 +250,149 @@ int main()
         kernel2.stop();
         std::error_code ec2;
         fs::remove_all(project2, ec2);
+    }
+
+    // ---- R-CLI-017 large-result round-trip over the wire: an oversized response returns a handle
+    //      (never an oversized frame), and resource.read RANGE fetches reassemble the EXACT original
+    //      result envelope. The spool threshold is lowered via the operational knob so `describe`
+    //      (a few KB) exercises the oversized path deterministically.
+    {
+        const fs::path project3 = make_temp_project();
+        MemoryFileStore store3;
+        NullWatcher watcher3;
+        context::kernel::ManualClock clock3;
+        context::kernel::InlineTaskRunner tasks3;
+
+        EditorKernelConfig cfg3;
+        cfg3.project_root = project3;
+        cfg3.filesync_root = "proj";
+        cfg3.index_path = "proj/.editor/index";
+
+        EditorKernel kernel3(store3, watcher3, clock3, tasks3, cfg3);
+        KernelServer server3(kernel3);
+        server3.set_large_result_threshold(512); // force the spool on a routine describe
+        CHECK(kernel3.start(ScopeSet::all()) == StartOutcome::booted);
+
+        TransportServer transport3(endpoint_for(
+            "ctx-kernelserver-largeresult-" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())));
+        CHECK(transport3.listen());
+
+        std::thread srv3([&server3, &transport3]() { server3.serve(transport3); });
+
+        {
+            TransportClient lr(transport3.endpoint());
+            CHECK(lr.connect(3000));
+            CHECK(lr.request(rpc(1, "attach", attach_params("session"))).has_value());
+
+            // What the daemon WOULD have returned inline (the in-process registry projection).
+            const std::string expected_result =
+                context::editor::contract::Envelope::success(
+                    context::editor::contract::Registry::instance().describe())
+                    .to_json()
+                    .dump(0);
+            CHECK(expected_result.size() > 512); // precondition: describe exceeds the threshold
+
+            // The oversized response came back as a SMALL largeResult envelope, not inline data.
+            const std::optional<std::string> d = lr.request(rpc(2, "describe", Json::object()));
+            CHECK(d.has_value());
+            const Json resp = Json::parse(*d);
+            const Json& result = resp.at("result");
+            CHECK(result.at("ok").as_bool());
+            CHECK(!result.at("data").contains("contract")); // NOT inline
+            const Json& lr_obj = result.at("data").at("largeResult");
+            const std::string uri = lr_obj.at("handle").as_string();
+            CHECK(!uri.empty());
+            const std::uint64_t total =
+                static_cast<std::uint64_t>(lr_obj.at("sizeBytes").as_int());
+            CHECK(total == expected_result.size());
+            CHECK(lr_obj.contains("localPath")); // the same-FS hint (spool file on real disk)
+
+            // RANGE fetch loop: deliberately small chunks, not a divisor of the total.
+            std::string reassembled;
+            std::uint64_t offset = 0;
+            int id = 10;
+            for (;;)
+            {
+                Json range = Json::object();
+                range.set("offsetBytes", Json(offset));
+                range.set("lengthBytes", Json(static_cast<std::uint64_t>(777)));
+                Json rp = Json::object();
+                rp.set("handle", Json(uri));
+                rp.set("range", std::move(range));
+                const std::optional<std::string> chunk_resp =
+                    lr.request(rpc(++id, "resource.read", std::move(rp)));
+                CHECK(chunk_resp.has_value());
+                if (!chunk_resp.has_value())
+                    break;
+                const Json chunk = Json::parse(*chunk_resp);
+                const Json& cdata = chunk.at("result").at("data");
+                CHECK(static_cast<std::uint64_t>(cdata.at("totalBytes").as_int()) == total);
+                const auto bytes = context::editor::bridge::hex_decode(
+                    cdata.at("chunkHex").as_string());
+                CHECK(bytes.has_value());
+                if (!bytes.has_value())
+                    break;
+                CHECK(static_cast<std::uint64_t>(cdata.at("offsetBytes").as_int()) == offset);
+                reassembled += *bytes;
+                offset += bytes->size();
+                if (cdata.at("eof").as_bool())
+                    break;
+            }
+            // Byte-exact reassembly of the ORIGINAL result envelope (the R-QA-013 round-trip).
+            CHECK(reassembled == expected_result);
+            const Json fetched = Json::parse(reassembled);
+            CHECK(fetched.at("ok").as_bool());
+            CHECK(fetched.at("data").at("contract").contains("protocol"));
+
+            // Failure paths over the wire: unknown + malformed handles.
+            {
+                Json rp = Json::object();
+                rp.set("handle", Json(std::string("context-res://v0/other-instance/0?bytes=1")));
+                const std::optional<std::string> unknown =
+                    lr.request(rpc(++id, "resource.read", std::move(rp)));
+                CHECK(unknown.has_value());
+                const Json u = Json::parse(*unknown);
+                CHECK(u.contains("error"));
+                CHECK(u.at("error").at("data").at("code").as_string() ==
+                      "resource.unknown_handle");
+
+                Json rp2 = Json::object();
+                rp2.set("handle", Json(std::string("not-a-resource-uri")));
+                const std::optional<std::string> malformed =
+                    lr.request(rpc(++id, "resource.read", std::move(rp2)));
+                CHECK(malformed.has_value());
+                const Json m = Json::parse(*malformed);
+                CHECK(m.contains("error"));
+                CHECK(m.at("error").at("data").at("code").as_string() ==
+                      "resource.unknown_handle");
+            }
+
+            // A resource.read chunk reply is NEVER re-spooled even though it exceeds the tiny
+            // threshold (the anti-recursion guard): fetching with no range returns the whole
+            // payload in one over-threshold chunk, still inline.
+            {
+                Json rp = Json::object();
+                rp.set("handle", Json(uri));
+                const std::optional<std::string> whole =
+                    lr.request(rpc(++id, "resource.read", std::move(rp)));
+                CHECK(whole.has_value());
+                const Json w = Json::parse(*whole);
+                const Json& wdata = w.at("result").at("data");
+                CHECK(wdata.contains("chunkHex")); // inline chunk, not a nested largeResult
+                CHECK(wdata.at("eof").as_bool());
+            }
+
+            const std::optional<std::string> s =
+                lr.request(rpc(++id, "shutdown", Json::object()));
+            CHECK(s.has_value());
+            lr.close();
+        }
+
+        srv3.join();
+        kernel3.stop();
+        std::error_code ec3;
+        fs::remove_all(project3, ec3);
     }
 
     EDITORKERNEL_TEST_MAIN_END();

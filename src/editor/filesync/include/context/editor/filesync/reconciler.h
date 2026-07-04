@@ -47,8 +47,10 @@ struct ReconcilerConfig
 
     // Names the crawl fallback + its cadence inside the `watcher.degraded` diagnostic — R-FILE-002
     // requires the diagnostic to name the affected subtree AND the fallback cadence. The default is
-    // accurate for every current composition (EditorKernel::ingest_external runs the full crawl on
-    // every reconcile pass); a consumer with a timer-driven crawl sets its own wording.
+    // accurate for a crawl-every-pass composition (EditorKernelConfig.min_crawl_interval_nanos == 0,
+    // the no-real-watcher default); EditorKernel sets a cadence-accurate wording when its
+    // low-frequency crawl policy is active (interval > 0), and any other timer-driven consumer sets
+    // its own.
     std::string crawl_fallback_note = "the full re-hash crawl (runs with every reconcile pass)";
 };
 

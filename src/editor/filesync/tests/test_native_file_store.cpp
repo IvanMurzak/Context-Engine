@@ -9,8 +9,10 @@
 #include "filesync_test.h"
 #include "native_test_support.h"
 
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -189,6 +191,95 @@ int main()
         }
         CHECK(crashed);
         CHECK(!native.exists("proj/new.scene")); // never became visible
+    }
+
+    // --- R-SEC-008 TOCTOU-safe jail: ROOT-ESCAPING links are refused on every write-side op, while
+    // --- INTERNAL (non-escaping) links keep working. The victim/decoy lives OUTSIDE the store base
+    // --- (a sibling dir in the same TempDir), so an escape would be observable on real disk.
+    {
+        TempDir tmp("jail");
+        const fs::path base = tmp.path() / "base";
+        const fs::path outside = tmp.path() / "outside";
+        std::error_code ec;
+        fs::create_directories(base / "inside", ec);
+        fs::create_directories(outside, ec);
+        NativeFileStore store(base);
+
+        const auto slurp = [](const fs::path& p)
+        {
+            std::ifstream in(p, std::ios::binary);
+            std::ostringstream ss;
+            ss << in.rdbuf();
+            return ss.str();
+        };
+
+        // (a)-(d): a directory link inside the jail pointing OUTSIDE it (a junction on Windows —
+        // no privilege needed — or a directory symlink elsewhere).
+        if (nfstest::make_dir_link(base / "inside" / "esc", outside))
+        {
+            // (a) write THROUGH the escaping link: refused, nothing lands outside.
+            CHECK(!store.write("inside/esc/evil.txt", "escaped"));
+            CHECK(!fs::exists(outside / "evil.txt"));
+
+            // (a2) write THROUGH the escaping link with a MISSING tail dir: refused BEFORE the
+            // on-demand create_directories runs (the parent-chain pre-gate), so not even empty
+            // directory residue lands outside the jail.
+            CHECK(!store.write("inside/esc/newdir/evil.txt", "escaped"));
+            CHECK(!fs::exists(outside / "newdir"));
+
+            // (b) rename THROUGH the escaping link: refused, the source survives intact.
+            CHECK(store.write("stage.tmp", "payload"));
+            CHECK(!store.rename("stage.tmp", "inside/esc/stolen.txt"));
+            CHECK(!fs::exists(outside / "stolen.txt"));
+            CHECK(store.exists("stage.tmp"));
+
+            // (c) remove THROUGH the escaping link: refused, the outside victim survives.
+            {
+                std::ofstream victim(outside / "victim.txt", std::ios::binary);
+                victim << "keep";
+            }
+            CHECK(!store.remove("inside/esc/victim.txt"));
+            CHECK(fs::exists(outside / "victim.txt"));
+            CHECK(slurp(outside / "victim.txt") == "keep");
+        }
+        else
+        {
+            std::fprintf(stderr,
+                         "note: no directory link available on this host; skipping the dir-link "
+                         "escape fault cases\n");
+        }
+
+        // (d) a file-symlink LEAF pointing outside: refused (O_NOFOLLOW / OPEN_REPARSE_POINT), the
+        // link's target is never clobbered. (Needs file-symlink privilege; skipped when absent.)
+        {
+            std::ofstream target(outside / "target.txt", std::ios::binary);
+            target << "orig";
+        }
+        if (nfstest::make_file_link(base / "leaf.txt", outside / "target.txt"))
+        {
+            CHECK(!store.write("leaf.txt", "clobbered"));
+            CHECK(slurp(outside / "target.txt") == "orig");
+        }
+        else
+        {
+            std::fprintf(stderr, "note: no file symlink available on this host; skipping the "
+                                 "leaf-symlink fault case\n");
+        }
+
+        // (e) positive control: an INTERNAL link that resolves INSIDE the jail is allowed
+        // (R-SEC-008 outlaws root-ESCAPING links, not links) — the write lands at the real location.
+        fs::create_directories(base / "real", ec);
+        if (nfstest::make_dir_link(base / "alias", base / "real"))
+        {
+            CHECK(store.write("alias/ok.txt", "fine"));
+            CHECK(fs::exists(base / "real" / "ok.txt"));
+            CHECK(slurp(base / "real" / "ok.txt") == "fine");
+        }
+        else
+        {
+            std::fprintf(stderr, "note: no directory link available on this host; skipping the "
+                                 "internal-link positive control\n");
+        }
     }
 
     FILESYNC_TEST_MAIN_END();

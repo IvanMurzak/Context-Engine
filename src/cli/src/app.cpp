@@ -6,6 +6,7 @@
 #include "context/cli/bench_command.h"
 #include "context/cli/daemon_command.h"
 #include "context/cli/editor_driver.h"
+#include "context/cli/fetch_command.h"
 #include "context/cli/scaffold.h"
 #include "context/editor/contract/json.h"
 #include "context/editor/contract/registry.h"
@@ -102,6 +103,39 @@ Envelope dispatch(const VerbSpec& verb, const std::vector<std::string>& position
         return scaffold_project(directory, tmpl);
     }
 
+    // `context resource read <handle> [<offset>:<length>]` (alias: `context fetch ...`) — the
+    // R-CLI-017 large-result fetch. Drives a RUNNING daemon over the wire via the shared client
+    // plumbing; --project (core flag) names the project whose daemon minted the handle.
+    if (verb.noun == "resource" && verb.verb == "read")
+    {
+        const std::string handle = bound.count("handle") ? bound.at("handle") : "";
+        if (dry_run)
+        {
+            Json plan = Json::object();
+            plan.set("verb", Json(verb.cli_command()));
+            plan.set("handle", Json(handle));
+            plan.set("wouldApply", Json(false));
+            plan.set("note", Json(std::string(
+                                 "dry-run: would fetch the handle from the --project daemon over "
+                                 "resource.read (R-CLI-017).")));
+            return Envelope::success(std::move(plan));
+        }
+        std::map<std::string, std::string> merged = flags;
+        if (bound.count("range"))
+            merged["range"] = bound.at("range");
+        return run_fetch(handle, merged);
+    }
+
+    // The operational daemon-driver verbs (edit / edit-batch / query / snapshot / reconcile /
+    // build / shutdown) are REGISTERED for describe-honesty (R-CLI-009, stability="operational")
+    // but are served over RPC by a LIVE daemon — not as one-shot CLI verbs.
+    if (verb.stability == "operational")
+        return Envelope::failure(
+            "contract.operational_only",
+            "'" + verb.cli_command() +
+                "' is an operational daemon verb served over RPC by a live daemon (start one with "
+                "'context daemon', drive it with 'context attach') — not a one-shot CLI verb.");
+
     // Every other registered verb is a reserved surface at M1.
     return reserved_surface(verb, dry_run, positionals);
 }
@@ -138,7 +172,21 @@ Envelope run(const std::vector<std::string>& args)
         verb = global;
         cursor = 1;
     }
-    else if (args.size() >= 2)
+    if (verb == nullptr && ns0.empty())
+    {
+        // Registry-owned GLOBAL aliases (e.g. `context fetch` for resource/read, the R-CLI-017
+        // naming): generated from the one registry, never a hand-maintained table (R-CLI-009).
+        for (const VerbSpec& v : reg.verbs())
+        {
+            if (!v.cli_alias.empty() && v.ns.empty() && v.cli_alias == head0)
+            {
+                verb = &v;
+                cursor = 1;
+                break;
+            }
+        }
+    }
+    if (verb == nullptr && args.size() >= 2)
     {
         if (const VerbSpec* scoped = reg.find_verb(ns0, head0, args[1]); scoped != nullptr)
         {

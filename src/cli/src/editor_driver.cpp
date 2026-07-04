@@ -2,6 +2,7 @@
 
 #include "context/cli/editor_driver.h"
 
+#include "context/cli/wire_client.h" // shared flag_value (single-sourced with attach/fetch)
 #include "context/editor/contract/handshake.h"
 #include "context/editor/contract/json.h"
 #include "context/editor/editorkernel/editor_kernel.h"
@@ -36,21 +37,6 @@ using editor::bridge::StartOutcome;
 
 namespace
 {
-// Minimal flag lookup: returns the value of `--name <value>` or `--name=<value>`, or nullopt.
-std::optional<std::string> flag_value(const std::vector<std::string>& args, const std::string& name)
-{
-    const std::string prefix = "--" + name;
-    for (std::size_t i = 0; i < args.size(); ++i)
-    {
-        if (args[i] == prefix && i + 1 < args.size())
-            return args[i + 1];
-        const std::string eq = prefix + "=";
-        if (args[i].rfind(eq, 0) == 0)
-            return args[i].substr(eq.size());
-    }
-    return std::nullopt;
-}
-
 // Resolve the daemon-lock project directory: `--project <dir>` when given, else a fresh temp dir.
 fs::path resolve_project_dir(const std::vector<std::string>& args)
 {
@@ -110,7 +96,7 @@ Envelope run_smoke(const std::vector<std::string>& args)
     EditorKernelConfig cfg;
     cfg.project_root = project;
     cfg.filesync_root = "proj";
-    cfg.index_path = "proj/.editor/reconcile-index";
+    cfg.index_path = "proj/.editor/index";
 
     EditorKernel kernel(store, watcher, clock, tasks, cfg);
 

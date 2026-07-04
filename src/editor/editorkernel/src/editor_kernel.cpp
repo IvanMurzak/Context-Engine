@@ -8,6 +8,7 @@
 #include "context/editor/filesync/file_store.h"
 #include "context/editor/filesync/path_jail.h"
 #include "context/editor/schema/kind_schema.h"
+#include "context/kernel/platform.h" // Clock is only forward-declared in the header
 
 #include <string>
 #include <unordered_set>
@@ -74,11 +75,30 @@ Envelope EditOutcome::envelope() const
     return Envelope::failure(error_code);
 }
 
+namespace
+{
+// The R-FILE-002 watcher.degraded diagnostic must NAME the effective crawl fallback cadence, so the
+// reconciler's note reflects this composition's actual policy (see EditorKernelConfig).
+filesync::ReconcilerConfig reconciler_config_for(const EditorKernelConfig& cfg)
+{
+    filesync::ReconcilerConfig rc;
+    if (cfg.min_crawl_interval_nanos > 0)
+    {
+        rc.crawl_fallback_note =
+            "the full re-hash crawl (low-frequency safety net: at most once per " +
+            std::to_string(cfg.min_crawl_interval_nanos / 1000000ULL) +
+            " ms; on-demand via the reconcile verb)";
+    }
+    return rc; // interval 0: the default note ("runs with every reconcile pass") stays accurate
+}
+} // namespace
+
 EditorKernel::EditorKernel(filesync::FileStore& fs, filesync::Watcher& watcher,
                            kernel::Clock& clock, kernel::TaskRunner& tasks,
                            EditorKernelConfig config, kernel::EventBus* bus)
     : fs_(fs), clock_(clock), config_(std::move(config)), daemon_(config_.project_root),
-      reconciler_(fs, watcher, clock, tasks, config_.filesync_root, config_.index_path, bus),
+      reconciler_(fs, watcher, clock, tasks, config_.filesync_root, config_.index_path, bus,
+                  reconciler_config_for(config_)),
       // The real attach path runs the M2 validate node against the ENGINE kind set (R-DATA-006):
       // schema-bound payloads validate on ingest, failing ones retain last-good derived state
       // (R-FILE-003). The x-ctx-ref resolver seam stays null until the asset database lands.
@@ -89,7 +109,7 @@ EditorKernel::EditorKernel(filesync::FileStore& fs, filesync::Watcher& watcher,
 std::string EditorKernel::editor_dir() const
 {
     // The `.editor/` control dir under the FileStore seam — the same convention the reconcile index
-    // follows (config default ".editor/reconcile-index" for root ".").
+    // follows (config default ".editor/index" for root ".").
     return config_.filesync_root == "." ? std::string(".editor")
                                         : config_.filesync_root + "/.editor";
 }
@@ -283,14 +303,27 @@ void EditorKernel::ingest_change(const filesync::ReconcileChange& change)
     graph_.apply(change, bytes ? std::string_view(*bytes) : std::string_view{});
 }
 
-std::vector<filesync::ReconcileChange> EditorKernel::ingest_external()
+std::vector<filesync::ReconcileChange> EditorKernel::ingest_external(CrawlMode mode)
 {
     std::vector<filesync::ReconcileChange> changes = reconciler_.reconcile_hints();
-    // The full re-hash crawl is the dropped-event safety net: it converges even when every watcher
-    // hint was lost (the portable NullWatcher is always degraded). Already-current paths yield no
-    // change, so a path caught by both a hint and the crawl is not double-reported.
-    std::vector<filesync::ReconcileChange> crawled = reconciler_.crawl(/*gated=*/false);
-    changes.insert(changes.end(), crawled.begin(), crawled.end());
+
+    // The full re-hash crawl is the dropped-event SAFETY NET (R-FILE-002), not the ingest cadence:
+    // it converges even when every watcher hint was lost (the portable NullWatcher is always
+    // degraded). With real OS watchers live, hints carry routine detection and the crawl runs
+    // LOW-FREQUENCY by policy (config.min_crawl_interval_nanos); CrawlMode::force is the on-demand
+    // bulk-op path (the `reconcile` verb, e.g. after a git branch switch) and ignores the cadence.
+    // Already-current paths yield no change, so a path caught by both a hint and the crawl is not
+    // double-reported.
+    const std::uint64_t now = clock_.now_nanos();
+    const bool due = !crawled_once_ || config_.min_crawl_interval_nanos == 0 ||
+                     now - last_crawl_nanos_ >= config_.min_crawl_interval_nanos;
+    if (mode == CrawlMode::force || due)
+    {
+        std::vector<filesync::ReconcileChange> crawled = reconciler_.crawl(/*gated=*/false);
+        changes.insert(changes.end(), crawled.begin(), crawled.end());
+        crawled_once_ = true;
+        last_crawl_nanos_ = now;
+    }
 
     for (const filesync::ReconcileChange& change : changes)
         ingest_change(change);

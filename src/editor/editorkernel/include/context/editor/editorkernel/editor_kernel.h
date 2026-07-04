@@ -65,9 +65,25 @@ struct EditorKernelConfig
 {
     std::filesystem::path project_root = "."; // daemon single-instance lock identity (real FS)
     std::string filesync_root = ".";          // logical FileStore root the path jail is measured from
-    std::string index_path = ".editor/reconcile-index"; // reconcile index (under the FileStore seam)
+    std::string index_path = ".editor/index"; // reconcile index (under the FileStore seam)
     derivation::DerivationConfig derivation{};          // coalescing / load-shed tuning
     std::uint64_t barrier_max_passes = 256;             // read-your-writes bound (R-CLI-006)
+
+    // R-FILE-002 crawl-cadence policy: the full re-hash crawl is the dropped-event SAFETY NET, not
+    // the ingest cadence. 0 (default) = crawl on EVERY ingest_external() pass — correct for
+    // compositions with no real watcher (NullWatcher is always degraded, so the crawl IS change
+    // detection). N > 0 = with real OS watchers live, the full crawl runs at most once per N
+    // nanoseconds of injected-Clock time; between crawls ingest_external() drains watcher hints
+    // only. Bulk ops (the `reconcile` verb, e.g. after a git branch switch) bypass the cadence via
+    // CrawlMode::force — crawl-on-demand is always available. The very first pass always crawls.
+    std::uint64_t min_crawl_interval_nanos = 0;
+};
+
+// How ingest_external() treats the full re-hash crawl (R-FILE-002).
+enum class CrawlMode
+{
+    policy, // honor min_crawl_interval_nanos (the routine ingest cadence)
+    force,  // run the full crawl regardless — the on-demand path for bulk ops / `reconcile`
 };
 
 // The result of a file write through the kernel's daemon-initiated ("CLI-verb") path.
@@ -178,12 +194,13 @@ public:
     [[nodiscard]] EditBatchOutcome edit_files(const std::vector<BatchEdit>& edits,
                                               const bridge::ScopeSet& caller_scopes);
 
-    // Fold EXTERNAL (out-of-band) edits into the derived index. Drains the reconciler (watcher hints
-    // + the full re-hash crawl safety net), reads each changed path's current bytes, and ingests them
-    // into the derivation graph. This is how a raw edit that bypassed edit_file() reaches the World
-    // (content hash is authoritative over watchers, R-FILE-002). Returns the reconciled changes
-    // ingested. Like edit_file, the World updates only when a pass runs.
-    std::vector<filesync::ReconcileChange> ingest_external();
+    // Fold EXTERNAL (out-of-band) edits into the derived index. ALWAYS drains watcher hints; runs
+    // the full re-hash crawl per the R-FILE-002 cadence policy (config.min_crawl_interval_nanos —
+    // see EditorKernelConfig) or unconditionally under CrawlMode::force (the on-demand bulk-op
+    // path). Reads each changed path's current bytes and ingests them into the derivation graph.
+    // This is how a raw edit that bypassed edit_file() reaches the World (content hash is
+    // authoritative over watchers). Like edit_file, the World updates only when a pass runs.
+    std::vector<filesync::ReconcileChange> ingest_external(CrawlMode mode = CrawlMode::policy);
 
     // Bounded-block until the derived world reflects `canonical_hash` (own-write barrier) or
     // `generation` (a foreign generation stamp), running derivation passes between checks up to
@@ -217,6 +234,7 @@ public:
     [[nodiscard]] derivation::DerivationGraph& graph() noexcept { return graph_; }
     [[nodiscard]] filesync::Reconciler& reconciler() noexcept { return reconciler_; }
     [[nodiscard]] const bridge::Daemon& daemon() const noexcept { return daemon_; }
+    [[nodiscard]] const EditorKernelConfig& config() const noexcept { return config_; }
 
 private:
     void ingest_change(const filesync::ReconcileChange& change);
@@ -236,6 +254,11 @@ private:
     std::optional<filesync::WriteQueue> write_queue_;
     std::vector<filesync::Diagnostic> recovery_diagnostics_;
     std::uint64_t next_batch_op_ = 0;
+
+    // R-FILE-002 crawl-cadence state: when the last full crawl ran (injected-Clock time). The first
+    // ingest_external() always crawls (crawled_once_ starts false).
+    bool crawled_once_ = false;
+    std::uint64_t last_crawl_nanos_ = 0;
 };
 
 } // namespace context::editor::editorkernel

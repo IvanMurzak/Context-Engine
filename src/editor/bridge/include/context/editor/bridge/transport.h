@@ -27,8 +27,9 @@ namespace context::editor::bridge
 {
 
 // The largest single frame the transport will read/write. A hostile or corrupt length prefix cannot
-// force an unbounded allocation; a legitimate oversized response uses the R-CLI-017 resource-handle
-// path instead (out of M1 scope).
+// force an unbounded allocation; a legitimate oversized response never fights this cap — the serve
+// layer spools it and returns an R-CLI-017 resource handle instead (resource_store.h +
+// KernelServer::finalize_response), fetched in bounded resource.read chunks.
 inline constexpr std::uint32_t kMaxFrameBytes = 64u * 1024u * 1024u;
 
 // Derive the stable loopback endpoint string for a Project, keyed by its canonical path. POSIX:
