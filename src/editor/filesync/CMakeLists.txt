@@ -14,6 +14,7 @@ add_library(context_filesync STATIC
     src/native_file_store.cpp
     src/atomic_io.cpp
     src/watcher.cpp
+    src/native_watcher.cpp
     src/reconcile_index.cpp
     src/expected_writes.cpp
     src/reconciler.cpp
@@ -23,8 +24,16 @@ target_include_directories(context_filesync PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/i
 
 # Consumes the microkernel read-only (Clock / TaskRunner / EventBus platform seams). PUBLIC because
 # the reconciler's public header forward-declares those kernel types, so consumers need the kernel's
-# include path.
-target_link_libraries(context_filesync PUBLIC context_kernel)
+# include path. Threads::Threads is PUBLIC because the native watcher backends collect OS events on
+# a private std::thread inside this STATIC library — every executable that links context_filesync
+# needs -pthread at final link on Linux/GCC (a no-op on Windows/MSVC; found at top level).
+target_link_libraries(context_filesync PUBLIC context_kernel Threads::Threads)
+
+# FSEvents (the macOS native watcher backend) lives in the CoreServices framework. PUBLIC for the
+# same static-library reason: the flag must reach the final link of every consuming executable.
+if(APPLE)
+    target_link_libraries(context_filesync PUBLIC "-framework CoreServices")
+endif()
 
 # Every Context target links the warnings-as-errors baseline (conventions.md).
 target_link_libraries(context_filesync PRIVATE context_warnings)
@@ -41,6 +50,7 @@ set(_context_filesync_tests
     test_atomic_io
     test_path_jail
     test_watcher
+    test_native_watcher
     test_reconcile_index
     test_expected_writes
     test_reconciler

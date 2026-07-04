@@ -9,7 +9,7 @@
 #include "context/editor/editorkernel/editor_kernel.h"
 #include "context/editor/editorkernel/kernel_server.h"
 #include "context/editor/filesync/native_file_store.h"
-#include "context/editor/filesync/watcher.h"
+#include "context/editor/filesync/native_watcher.h"
 #include "context/kernel/platform.h"
 
 #include <cstdio>
@@ -42,7 +42,7 @@ using editor::editorkernel::EditorKernel;
 using editor::editorkernel::EditorKernelConfig;
 using editor::editorkernel::KernelServer;
 using editor::filesync::NativeFileStore;
-using editor::filesync::NullWatcher;
+using editor::filesync::NativeWatcher;
 
 namespace
 {
@@ -167,7 +167,14 @@ int run_daemon(const std::vector<std::string>& args)
     // dir (lock, instance file, reconcile index) stays OUTSIDE the reconcile crawl root — the proven
     // native composition (test_editor_kernel_native.cpp).
     NativeFileStore store(project);
-    NullWatcher watcher;
+    // The REAL OS watcher (RDCW / inotify / FSEvents) over the authored subtree — hints only, hashes
+    // stay the truth (R-FILE-002): `reconcile` still runs the full-crawl safety net every pass. The
+    // watched dir must exist before registration (a missing root = degraded, by contract), and its
+    // logical prefix must equal filesync_root so hints key into the same reconcile index. If
+    // registration fails (fd/watch limits, network FS), the kernel emits the visible
+    // `watcher.degraded` diagnostic and detection leans on the crawl — never silently.
+    fs::create_directories(project / "proj", ec);
+    NativeWatcher watcher(project / "proj", "proj");
     context::kernel::SteadyClock clock;
     context::kernel::InlineTaskRunner tasks;
 

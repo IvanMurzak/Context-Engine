@@ -12,8 +12,11 @@
 //     settle), mirroring EditorKernel::ingest_external()'s exact sequence stage by stage.
 //
 // M1 honesty notes (documented in docs/latency-budget-table.md):
-//   * "watch" is the reconcile crawl's detection share — the native OS watcher does not exist yet
-//     (NullWatcher), so detection is scan-bound by design at M1 (R-FILE-002's safety-net crawl).
+//   * "watch" is the reconcile crawl's detection share — this rig composes NullWatcher ON PURPOSE
+//     so detection stays scan-bound and comparable across runs (R-FILE-002's safety-net crawl).
+//     The real OS watcher backends exist behind the same seam (native_watcher.h; `context daemon`
+//     composes them) — the bench subject adopts hint-driven detection when the daemon's
+//     hint-consuming reconcile cadence lands, re-baselining per R-QA-009.
 //   * "parse" is the M1 placeholder canonicalization (whitespace-normalize + FNV-1a; the M2
 //     canonical-JSON serializer replaces the node body behind the same seam).
 //   * validate / compose / (template) fan-out stages land with the M2 schema/composition model; the
@@ -567,8 +570,11 @@ int bench_edit(const std::vector<std::string>& args, const fs::path& corpus, std
     const bool cli_reflected = rig.kernel.graph().reflects_hash(edit.ticket.canonical_hash);
 
     // Leg B — an EXTERNAL raw edit: mutate on disk behind the kernel's back, then measure the whole
-    // detect (gated crawl) -> read -> parse -> derive incremental path. With no native watcher at
-    // M1, detection is the mtime/size-gated scan — the honest current bound of the 100 ms target.
+    // detect (gated crawl) -> read -> parse -> derive incremental path. This rig composes
+    // NullWatcher ON PURPOSE, so detection is the mtime/size-gated scan — the honest bound of the
+    // 100 ms target until the daemon's hint-consuming reconcile cadence lands (the real OS backends
+    // exist behind the seam — native_watcher.h — and the hint-driven detect path is measured at the
+    // reconciler seam by filesync-test_native_watcher).
     const std::string& ext_path = scenes[(seed + 1) % scenes.size()];
     const std::optional<std::string> ext_bytes = rig.store.read(ext_path);
     std::optional<std::string> ext_mutated =

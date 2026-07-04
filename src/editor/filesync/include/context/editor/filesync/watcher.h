@@ -35,10 +35,11 @@ public:
     [[nodiscard]] virtual bool degraded() const = 0;
 };
 
-// Portable default: registers no OS watch and is always degraded, so correctness comes ENTIRELY from
-// the reconcile crawl. A real inotify / ReadDirectoryChangesW / FSEvents impl is a later,
-// platform-specific drop-in behind this same seam; because hashes are authoritative, correctness
-// never depends on the watcher being present or accurate.
+// Portable no-op: registers no OS watch and is always degraded, so correctness comes ENTIRELY from
+// the reconcile crawl. The REAL inotify / ReadDirectoryChangesW / FSEvents backends live behind this
+// same seam in native_watcher.h (NativeWatcher); NullWatcher stays the right choice for in-memory
+// (MemoryFileStore) compositions and for scan-bound measurement rigs. Because hashes are
+// authoritative, correctness never depends on the watcher being present or accurate.
 class NullWatcher final : public Watcher
 {
 public:
