@@ -6,7 +6,9 @@
 # read-your-writes query barrier. The canonical-parse node delegates to the REAL canonical-JSON
 # serializer (src/editor/serializer/, M2 issue #42) behind the same stable seam the M1 placeholder
 # occupied; the M2 wave-2 validate node (src/editor/schema/, R-DATA-006, issue #47) schema-checks
-# bound payloads on the same parse, retaining last-good derived state on failure (R-FILE-003).
+# bound payloads on the same parse, retaining last-good derived state on failure (R-FILE-003); the
+# M2 wave-3 compose node (src/editor/compose/, L-35, issue #51) flattens scene composition over the
+# graph's first cross-file dependency edges, re-flattening dependents when a template changes.
 
 add_library(context_derivation STATIC
     src/canonical_parse.cpp
@@ -22,9 +24,11 @@ target_include_directories(context_derivation PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 # EventBus directly.) context_serializer is PUBLIC too: canonical_parse.h exposes the serializer's
 # Diagnostic type in CanonicalForm, so consumers need its include path. context_schema (M2 wave 2)
 # powers the validate node: derivation_graph.h exposes SchemaSet/ValidationReport in its ctor and
-# NodeValidation surface, so it is PUBLIC as well.
+# NodeValidation surface, so it is PUBLIC as well. context_compose (M2 wave 3) powers the compose
+# node: derivation_graph.h exposes ComposeLimits/SceneDoc/ComposedScene in DerivationConfig and
+# the ComposedView surface, so it is PUBLIC too.
 target_link_libraries(context_derivation
-    PUBLIC context_filesync context_kernel context_serializer context_schema)
+    PUBLIC context_filesync context_kernel context_serializer context_schema context_compose)
 
 # Every Context target links the warnings-as-errors baseline (conventions.md).
 target_link_libraries(context_derivation PRIVATE context_warnings)
@@ -40,7 +44,8 @@ set(_context_derivation_tests
     test_incremental
     test_backpressure
     test_query_barrier
-    test_validate_node)
+    test_validate_node
+    test_compose_node)
 
 foreach(_t IN LISTS _context_derivation_tests)
     add_executable(context_derivation_${_t} tests/${_t}.cpp)

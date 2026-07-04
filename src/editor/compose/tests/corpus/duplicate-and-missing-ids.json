@@ -1,0 +1,58 @@
+{
+  "notes": "R-QA-011: the id-keyed collection invariant (L-33/R-FILE-012) - a duplicate intra-file id is blocking (first claim wins), an id-less entity is excluded with an advisory. Intra-file findings surface ONCE per file even when the file is instanced twice.",
+  "root": "host.scene.json",
+  "scenes": {
+    "dup.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [
+        {
+          "id": "cccccccccccccc01",
+          "name": "First",
+          "components": {}
+        },
+        {
+          "id": "cccccccccccccc01",
+          "name": "Dup",
+          "components": {}
+        },
+        {
+          "name": "NoId",
+          "components": {}
+        }
+      ]
+    },
+    "host.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "instances": [
+        {
+          "id": "1111111111111101",
+          "scene": "dup.scene.json"
+        },
+        {
+          "id": "1111111111111102",
+          "scene": "dup.scene.json"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "ok": false,
+    "idPaths": [
+      [
+        "1111111111111101",
+        "cccccccccccccc01"
+      ],
+      [
+        "1111111111111102",
+        "cccccccccccccc01"
+      ]
+    ],
+    "diagnostics": [
+      "compose.duplicate_id",
+      "compose.missing_id"
+    ]
+  }
+}

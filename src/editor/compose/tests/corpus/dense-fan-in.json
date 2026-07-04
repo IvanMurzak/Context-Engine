@@ -1,0 +1,67 @@
+{
+  "notes": "R-QA-011: one leaf instanced 4x in one flatten crosses a fan-in threshold of 3 - advisory once (R-FILE-011(e)).",
+  "root": "hub.scene.json",
+  "limits": {
+    "fanInThreshold": 3
+  },
+  "scenes": {
+    "leaf.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [
+        {
+          "id": "eeeeeeeeeeeeee01",
+          "name": "L",
+          "components": {}
+        }
+      ]
+    },
+    "hub.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "instances": [
+        {
+          "id": "1111111111111101",
+          "scene": "leaf.scene.json"
+        },
+        {
+          "id": "1111111111111102",
+          "scene": "leaf.scene.json"
+        },
+        {
+          "id": "1111111111111103",
+          "scene": "leaf.scene.json"
+        },
+        {
+          "id": "1111111111111104",
+          "scene": "leaf.scene.json"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "ok": true,
+    "idPaths": [
+      [
+        "1111111111111101",
+        "eeeeeeeeeeeeee01"
+      ],
+      [
+        "1111111111111102",
+        "eeeeeeeeeeeeee01"
+      ],
+      [
+        "1111111111111103",
+        "eeeeeeeeeeeeee01"
+      ],
+      [
+        "1111111111111104",
+        "eeeeeeeeeeeeee01"
+      ]
+    ],
+    "diagnostics": [
+      "compose.fan_in"
+    ]
+  }
+}

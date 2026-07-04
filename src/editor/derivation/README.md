@@ -45,9 +45,17 @@ canonical parse node's real body, and `context_warnings`). Namespace:
   (JSON-pointer + line/column into the source bytes) surface through `validation()` with L-31
   stability. A nullptr schema set preserves the exact M1 behavior; richer per-kind derived
   components (compose/instantiate) still land in later M2 tasks.
-- **The derived World is a flat file→entity map.** Composition / instantiation across scenes
-  (parse → validate → **compose → instantiate**, the rest of the L-22 pipeline) lands with the M2 data
-  model; here each source derives to one node with no cross-node dependency edges yet.
+- ~~No compose node~~ **PARTIALLY RESOLVED (M2 wave 3, #51 — the READ path)**: valid scene
+  documents retain a composition view (`src/editor/compose/`, L-35) and every pass re-flattens the
+  scenes it touched **plus their transitive dependents** over the graph's first cross-file
+  dependency edges (instance edges — editing a template updates every instancing scene's composed
+  view). `composed()` surfaces the flattened entities (id-path identity, innermost-out override
+  precedence, R-CLI-006 provenance chains) + diagnostics, with closure-aware L-31 stability; a
+  validation-FAILING scene ingest retains its last-good composed view like its derived node
+  (R-FILE-003). Fan-out re-flatten is synchronous within the pass (the async-streamed fan-out of
+  R-FILE-011(b) lands with the daemon threading model); the **instantiate** node (composed output →
+  per-kind derived World components) and the composed WRITE path are still later M2 tasks — the
+  derived World itself remains a flat file→entity map.
 - **The "bounded-block" is modeled as a bounded number of passes**, not real threads/sleeps — matching
   how a daemon drains its queue while a query waits, and keeping the whole layer deterministic (no
   concurrency in M1; the daemon's threading model is a later task).
@@ -62,5 +70,8 @@ canonical parse node's real body, and `context_warnings`). Namespace:
 seam (real-canonicalizer formatting-insensitivity, non-JSON passthrough, fixpoint, determinism,
 encoding heals), the end-to-end change→World+generation flow
 (create / removal / empty-pass), incremental re-derive + memoization + coalescing, backpressure
-(coalescing, the queue-depth signal, load-shed to the visible subgraph, event publication), and the
-read-your-writes barrier (own-write hash, foreign generation, explicit timeout, load-shed robustness).
+(coalescing, the queue-depth signal, load-shed to the visible subgraph, event publication), the
+read-your-writes barrier (own-write hash, foreign generation, explicit timeout, load-shed
+robustness), and the compose node (`test_compose_node`: ingest→flatten, template-edit fan-out to
+dependents, memoized no-op edits leaving composed output untouched, removal → missing-scene
+diagnostics on dependents, last-good retention under a failing ingest, closure-aware stability).

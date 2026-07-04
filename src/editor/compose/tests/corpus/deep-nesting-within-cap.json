@@ -1,0 +1,112 @@
+{
+  "notes": "R-QA-011 composition corpus: a 6-deep instance chain composes fully under an 8-deep cap.",
+  "root": "n0.scene.json",
+  "limits": {
+    "maxDepth": 8
+  },
+  "scenes": {
+    "n0.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "instances": [
+        {
+          "id": "1111111111111101",
+          "scene": "n1.scene.json"
+        }
+      ]
+    },
+    "n1.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "instances": [
+        {
+          "id": "1111111111111102",
+          "scene": "n2.scene.json"
+        }
+      ]
+    },
+    "n2.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [
+        {
+          "id": "eeeeeeeeeeeeee02",
+          "name": "MidEnt",
+          "components": {}
+        }
+      ],
+      "instances": [
+        {
+          "id": "1111111111111103",
+          "scene": "n3.scene.json"
+        }
+      ]
+    },
+    "n3.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "instances": [
+        {
+          "id": "1111111111111104",
+          "scene": "n4.scene.json"
+        }
+      ]
+    },
+    "n4.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "instances": [
+        {
+          "id": "1111111111111105",
+          "scene": "n5.scene.json"
+        }
+      ]
+    },
+    "n5.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "instances": [
+        {
+          "id": "1111111111111106",
+          "scene": "n6.scene.json"
+        }
+      ]
+    },
+    "n6.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [
+        {
+          "id": "eeeeeeeeeeeeee06",
+          "name": "Leaf",
+          "components": {}
+        }
+      ]
+    }
+  },
+  "expect": {
+    "ok": true,
+    "idPaths": [
+      [
+        "1111111111111101",
+        "1111111111111102",
+        "eeeeeeeeeeeeee02"
+      ],
+      [
+        "1111111111111101",
+        "1111111111111102",
+        "1111111111111103",
+        "1111111111111104",
+        "1111111111111105",
+        "1111111111111106",
+        "eeeeeeeeeeeeee06"
+      ]
+    ],
+    "diagnostics": []
+  }
+}
