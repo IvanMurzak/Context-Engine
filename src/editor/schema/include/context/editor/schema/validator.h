@@ -30,7 +30,9 @@ public:
 
 // One machine-readable validation finding (the R-FILE-003 shape): a stable dotted code, a
 // human/AI-readable message, the JSON pointer of the offending value, and its 1-based line/column
-// in the SOURCE bytes (0/0 when the pointer could not be located, e.g. header-level findings).
+// in the SOURCE bytes. Header-level findings carry an empty pointer, which locates the document's
+// first byte (line 1, column 1); 0/0 remains only for a pointer that fails to resolve against the
+// bytes (possible only when a caller violates validate_document's same-bytes contract).
 struct ValidationDiagnostic
 {
     std::string code;

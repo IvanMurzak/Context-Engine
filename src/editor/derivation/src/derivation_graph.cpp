@@ -155,6 +155,15 @@ void DerivationGraph::derive_one(const std::string& path, const Pending& pending
             return;
         }
     }
+    else if (schemas_ != nullptr)
+    {
+        // Schemas are wired but THIS pass's bytes are not JSON (a deliberate non-JSON kind, or a
+        // broken/truncated write) — no validation ran, so a PRIOR schema verdict no longer
+        // describes the current content. Clear it so validation() returns nullopt (the header's
+        // non-JSON-content contract) instead of a stale report, mirroring the removal branch.
+        node.report = schema::ValidationReport{};
+        node.has_report = false;
+    }
 
     // Content-hash memoization: an unchanged canonical form means the downstream derivation is skipped
     // — this is what makes incremental re-derive recompute ONLY genuinely affected nodes (L-22).

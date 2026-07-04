@@ -170,6 +170,24 @@ int main()
         CHECK(!graph.validation("r.scene.json").has_value());
     }
 
+    // --- a non-JSON rewrite clears validation state (no stale verdict for the new bytes) ---------
+    {
+        DerivationGraph graph({}, nullptr, &schema::engine_schemas());
+        graph.apply(change("t.scene.json", ChangeType::created), kValidScene);
+        graph.run_pass();
+        CHECK(graph.validation("t.scene.json")->report.ok);
+
+        // A truncated/mid-edit write that no longer parses as JSON: no validation ran this pass,
+        // so the prior ok=true verdict no longer describes the content — validation() returns
+        // nullopt (the non-JSON-content contract) while the bytes still derive normally (the M1
+        // behavior for non-JSON content).
+        graph.apply(change("t.scene.json", ChangeType::modified), "{\"$schema\": \"ctx:scene\",");
+        auto pass = graph.run_pass();
+        CHECK(pass.nodes_invalid == 0);
+        CHECK(pass.nodes_derived == 1);
+        CHECK(!graph.validation("t.scene.json").has_value());
+    }
+
     // --- the M1 default (no schema set) is byte-for-byte unchanged -------------------------------
     {
         DerivationGraph graph; // no schemas wired — validation off
