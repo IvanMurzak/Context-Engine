@@ -1,0 +1,21 @@
+src/editor/editorkernel/include/context/editor/editorkernel/editor_kernel.h
+  s_e3239cf02087b8::t_de7d7288002ba1 30
+src/editor/serializer/tests/test_property.cpp
+  s_e3239cf02087b8::t_451a075207b486 105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "795630a103e2a5d00c9cb018b16ea6c343948b1c",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
