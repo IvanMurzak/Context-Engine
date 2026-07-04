@@ -1,0 +1,36 @@
+src/editor/assetdb/include/context/editor/assetdb/asset_database.h
+  s_e3239cf02087b8::t_2d1cb9f1539c6f 133
+  s_e3239cf02087b8::t_014cd19b30f488 127-129
+src/editor/assetdb/tests/test_move_heal.cpp
+  s_e3239cf02087b8::t_c18d6ca8de8a7d 170-181
+src/editor/assetdb/src/meta.cpp
+  s_e3239cf02087b8::t_220c74b17f833b 8
+  s_e3239cf02087b8::t_359b6043343a77 36-40
+src/editor/assetdb/src/asset_database.cpp
+  s_e3239cf02087b8::t_32f1a32faaf2b5 496
+  s_e3239cf02087b8::t_8ae89ecb563d24 143-151
+  s_e3239cf02087b8::t_9c5394b4dc988b 8
+  s_e3239cf02087b8::t_a129c659b97d5f 448-461
+  s_e3239cf02087b8::t_ace4beb4e0a572 42-45
+  s_e3239cf02087b8::t_c48ec21c7c022f 359
+src/editor/assetdb/include/context/editor/assetdb/meta.h
+  s_e3239cf02087b8::t_c88e28493e9a8f 41-43
+src/editor/contract/src/error_catalog.cpp
+  s_e3239cf02087b8::t_1e73dbcd938cce 112-114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7a24a32c66acfe63ee28198495d65f2a32fd37e0",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
