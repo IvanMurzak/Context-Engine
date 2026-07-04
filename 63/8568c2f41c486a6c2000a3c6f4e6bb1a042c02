@@ -1,0 +1,68 @@
+src/editor/editorkernel/include/context/editor/editorkernel/kernel_server.h
+  s_e3239cf02087b8::t_683b9969690764 15-17,19-23
+src/editor/editorkernel/src/kernel_server.cpp
+  s_e3239cf02087b8::t_c131f04c9223d2 79-180
+src/tests/integration/test_exit1_files_as_truth.cpp
+  s_e3239cf02087b8::t_901223ea6588b9 1-253
+docs/ci-fleet-manifest.md
+  s_e3239cf02087b8::t_213f6f51fc8c66 51-55
+  s_e3239cf02087b8::t_541d75cc8b0281 71-74
+src/editor/bridge/include/context/editor/bridge/scope.h
+  s_e3239cf02087b8::t_74940d6e89eb0b 64-65
+src/editor/bridge/src/scope.cpp
+  s_e3239cf02087b8::t_6c3254788d311f 124-128
+src/tests/integration/test_exit4_contract_parity.cpp
+  s_e3239cf02087b8::t_feec1097e8d7e0 1-95,100-187
+  s_e3239cf02087b8::t_ca6bf592b7c30d 96-99
+src/tests/integration/test_exit3_crash_recovery_kill9.cpp
+  s_e3239cf02087b8::t_092f884190e43a 284
+  s_e3239cf02087b8::t_dc025f85cf7c83 1-73,79-85,91-93,104-147,152-154,156,158-160,162-172,176-283,285-334
+  s_e3239cf02087b8::t_b93c11201861fb 151,155,157,161,173-175
+  s_e3239cf02087b8::t_5b97d2d91625c5 148-150
+  s_e3239cf02087b8::t_0ed78b4da334e6 74-78,86-90,94-103
+src/editor/editorkernel/tests/test_editor_kernel.cpp
+  s_e3239cf02087b8::t_77e93f65be864a 266-303
+src/tests/integration/test_exit2_second_client_attach.cpp
+  s_e3239cf02087b8::t_f4bfc3a16a991e 1-177
+src/editor/editorkernel/src/editor_kernel.cpp
+  s_e3239cf02087b8::t_5458f63f34cbaf 44,50-57,61-87
+  s_e3239cf02087b8::t_2bf77217787f64 142-209
+  s_e3239cf02087b8::t_12ffeebc01c9ca 287-301,303-306,309
+src/tests/integration/CMakeLists.txt
+  s_e3239cf02087b8::t_edd832b5090531 1-71
+src/tests/integration/integration_test.h
+  s_e3239cf02087b8::t_e6057e7c655552 1-19,21-239
+  s_e3239cf02087b8::t_b6d5cc59eef030 20
+src/editor/editorkernel/include/context/editor/editorkernel/editor_kernel.h
+  s_e3239cf02087b8::t_796f59af4ca6bd 206,209,214-221
+  s_e3239cf02087b8::t_1b8622b3189891 122-128,134-140
+  s_e3239cf02087b8::t_9f6cfa4ed6f79f 156-165
+  s_e3239cf02087b8::t_9f7a27dacccf31 27-28
+  s_e3239cf02087b8::t_5cc4e1e16b85b2 15-18
+  s_e3239cf02087b8::t_3c5883e9aac8b4 85-101
+  s_e3239cf02087b8::t_585618cda25ba2 141
+docs/ci-fleet-manifest.json
+  s_e3239cf02087b8::t_d337b4276b9a9e 116-165
+src/CMakeLists.txt
+  s_e3239cf02087b8::t_01a043c9fdd4af 210-218
+src/tests/integration/test_exit5_scope_enforcement.cpp
+  s_e3239cf02087b8::t_5ad85c827b23ff 1-238
+.github/workflows/ci.yml
+  s_e3239cf02087b8::t_bdd0aa2366d074 99-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "638568c2f41c486a6c2000a3c6f4e6bb1a042c02",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
