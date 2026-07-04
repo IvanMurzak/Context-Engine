@@ -4,6 +4,7 @@
 
 #include "context/editor/compose/json_pointer.h"
 #include "context/editor/compose/stable_id.h"
+#include "context/editor/schema/json_access.h"
 #include "context/editor/serializer/canonical.h"
 
 #include <algorithm>
@@ -242,10 +243,7 @@ void expand(FlattenState& s, const std::string& scene_path, const SceneDoc& doc,
     for (const NarrowedOverride& add : pending_adds)
     {
         s.consumed.insert(add.entry);
-        const JsonValue* id = nullptr;
-        for (const JsonMember& m : add.entry->value.members)
-            if (m.key == "id")
-                id = &m.value;
+        const JsonValue* id = schema::find_member(add.entry->value, "id");
         if (id == nullptr || id->type != JsonValue::Type::string || !is_stable_id(id->string_value))
         {
             diagnose(s, "compose.missing_id",
@@ -429,8 +427,13 @@ std::vector<ProvenanceEntry> provenance_for(const ComposedEntity& entity, std::s
 
 std::uint64_t identity_hash_of(std::string_view root_path, const std::vector<std::string>& id_path)
 {
-    std::string joined;
-    joined.reserve(root_path.size() + id_path.size() * 17);
+    // Length-prefixing the root path keeps the encoding injective even when the path itself
+    // contains the 0x1F separator (a legal filename byte): decoding reads the length, takes that
+    // many bytes as the path, and splits the rest on 0x1F — id-path segments (stable ids / $root)
+    // never contain it. Without the prefix, ("A\x1fB", ["C"]) and ("A", ["B", "C"]) would collide.
+    std::string joined = std::to_string(root_path.size());
+    joined.reserve(joined.size() + root_path.size() + id_path.size() * 17 + 1);
+    joined.push_back('\x1f');
     joined.append(root_path);
     for (const std::string& seg : id_path)
     {

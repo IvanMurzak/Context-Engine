@@ -148,6 +148,7 @@ void DerivationGraph::derive_one(const std::string& path, const Pending& pending
         // (compose.missing_scene).
         if (scene_docs_.erase(path) > 0)
         {
+            unlink_instance_deps(path);
             instance_deps_.erase(path);
             compose_seeds.insert(path);
         }
@@ -220,6 +221,9 @@ void DerivationGraph::derive_one(const std::string& path, const Pending& pending
             for (const compose::SceneInstance& inst : doc->instances)
                 deps.push_back(inst.scene);
             scene_docs_[path] = std::move(*doc);
+            unlink_instance_deps(path);
+            for (const std::string& dep : deps)
+                instance_dependents_[dep].insert(path);
             instance_deps_[path] = std::move(deps);
             compose_seeds.insert(path);
             return;
@@ -227,8 +231,27 @@ void DerivationGraph::derive_one(const std::string& path, const Pending& pending
     }
     if (scene_docs_.erase(path) > 0)
     {
+        unlink_instance_deps(path);
         instance_deps_.erase(path);
         compose_seeds.insert(path);
+    }
+}
+
+void DerivationGraph::unlink_instance_deps(const std::string& path)
+{
+    // Drop `path`'s reverse edges (template -> dependent) so instance_dependents_ stays the exact
+    // inverse of instance_deps_ before the caller erases or replaces the forward entry.
+    auto it = instance_deps_.find(path);
+    if (it == instance_deps_.end())
+        return;
+    for (const std::string& dep : it->second)
+    {
+        auto rev = instance_dependents_.find(dep);
+        if (rev == instance_dependents_.end())
+            continue;
+        rev->second.erase(path);
+        if (rev->second.empty())
+            instance_dependents_.erase(rev);
     }
 }
 
@@ -240,26 +263,21 @@ void DerivationGraph::recompose(const std::set<std::string>& seeds, std::uint64_
 
     // Close the seed set over reverse instance edges: any scene whose transitive template set
     // intersects the seeds re-flattens (the L-35 fan-out; editing a template updates every
-    // non-overriding instance).
+    // non-overriding instance). BFS over the instance_dependents_ reverse index, so the cost
+    // tracks the affected fan-out — not the total number of scenes ever derived (L-22 discipline,
+    // R-FILE-011 scale envelope). Cycles terminate: a scene enqueues at most once.
     std::set<std::string> dirty = seeds;
-    bool grew = true;
-    while (grew)
+    std::vector<std::string> queue(seeds.begin(), seeds.end());
+    while (!queue.empty())
     {
-        grew = false;
-        for (const auto& [scene, deps] : instance_deps_)
-        {
-            if (dirty.count(scene) != 0)
-                continue;
-            for (const std::string& dep : deps)
-            {
-                if (dirty.count(dep) != 0)
-                {
-                    dirty.insert(scene);
-                    grew = true;
-                    break;
-                }
-            }
-        }
+        const std::string scene = std::move(queue.back());
+        queue.pop_back();
+        auto rev = instance_dependents_.find(scene);
+        if (rev == instance_dependents_.end())
+            continue;
+        for (const std::string& dependent : rev->second)
+            if (dirty.insert(dependent).second)
+                queue.push_back(dependent);
     }
 
     // The resolver over the graph's retained last-good scene views.

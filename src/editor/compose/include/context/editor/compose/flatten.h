@@ -109,9 +109,11 @@ public:
                                                           std::string_view pointer);
 
 // The deterministic composed identity hash (L-37): FNV-1a 64 over the id-path prefixed with the
-// root scene path ([rootScene, instanceId, …, entityId]), segments joined with a 0x1F separator
-// (which no stable id, path, or the $root token contains) so distinct paths never collide by
-// concatenation. Stable across re-derivation, engine upgrade, and process restarts.
+// root scene path ([rootScene, instanceId, …, entityId]), segments joined with a 0x1F separator.
+// The root path is length-prefixed, so the encoding stays injective even for a path containing
+// the separator byte (id-path segments — stable ids or the $root token — never contain it), and
+// distinct paths never collide by concatenation. Stable across re-derivation, engine upgrade, and
+// process restarts.
 [[nodiscard]] std::uint64_t identity_hash_of(std::string_view root_path,
                                              const std::vector<std::string>& id_path);
 

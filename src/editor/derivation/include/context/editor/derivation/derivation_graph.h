@@ -235,6 +235,7 @@ private:
                     DerivePassResult& result, std::set<std::string>& compose_seeds);
     void recompose(const std::set<std::string>& seeds, std::uint64_t target_gen,
                    DerivePassResult& result);
+    void unlink_instance_deps(const std::string& path);
     [[nodiscard]] bool scene_closure_pending(const std::string& path) const;
     void reflect(std::uint64_t canonical_hash);
     void unreflect(std::uint64_t canonical_hash);
@@ -254,6 +255,10 @@ private:
     std::map<std::string, compose::SceneDoc> scene_docs_;   // last-good scene views (flatten input)
     std::map<std::string, ComposedRecord> composed_;        // flattened outputs per scene
     std::map<std::string, std::vector<std::string>> instance_deps_; // scene -> direct templates
+    // Reverse of instance_deps_ (template -> dependent scenes), kept in lockstep by
+    // unlink_instance_deps() + the ingest relink, so recompose()'s fan-out closure BFSes only the
+    // affected subgraph instead of rescanning every scene ever derived (L-22 discipline).
+    std::map<std::string, std::set<std::string>> instance_dependents_;
     BackpressureSignal signal_;
     std::uint64_t generation_ = 0;
     std::uint64_t parse_invocations_ = 0;

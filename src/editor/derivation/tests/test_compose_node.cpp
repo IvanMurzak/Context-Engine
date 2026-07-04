@@ -87,6 +87,23 @@ const char* kRoot = R"({
   ]
 })";
 
+// With kGrand these form a 3-level chain (grand -> mid -> child), pinning MULTI-hop fan-out:
+// a leaf edit must propagate recomposition across every intermediate level, so the reverse-edge
+// closure cannot stop after one hop.
+const char* kMid = R"({
+  "$schema": "ctx:scene",
+  "version": 1,
+  "entities": [],
+  "instances": [{"id": "bbbbbbbbbbbbbbb1", "scene": "child.scene.json"}]
+})";
+
+const char* kGrand = R"({
+  "$schema": "ctx:scene",
+  "version": 1,
+  "entities": [],
+  "instances": [{"id": "ddddddddddddddd1", "scene": "mid.scene.json"}]
+})";
+
 [[nodiscard]] std::int64_t position_x(const compose::ComposedEntity& entity)
 {
     const serializer::JsonValue* x =
@@ -173,6 +190,29 @@ int main()
         std::optional<ComposedView> after = graph.composed("root.scene.json");
         CHECK(after.has_value());
         CHECK(after->generation == composed_gen);
+    }
+
+    // --- multi-hop fan-out: a leaf edit recomposes the whole 3-level chain (grand -> mid -> child)
+    {
+        DerivationGraph graph({}, nullptr, &schema::engine_schemas());
+        graph.apply(change("child.scene.json", ChangeType::created), kChild);
+        graph.apply(change("mid.scene.json", ChangeType::created), kMid);
+        graph.apply(change("grand.scene.json", ChangeType::created), kGrand);
+        (void)graph.run_pass();
+
+        graph.apply(change("child.scene.json", ChangeType::modified), kChildMoved);
+        DerivePassResult pass = graph.run_pass();
+        CHECK(pass.nodes_derived == 1);
+        CHECK(pass.scenes_composed == 3); // the leaf edit crossed BOTH hops, not just one
+
+        std::optional<ComposedView> grand = graph.composed("grand.scene.json");
+        CHECK(grand.has_value());
+        CHECK(grand->scene->ok);
+        CHECK(grand->scene->entities.size() == 2);
+        CHECK(position_x(grand->scene->entities[1]) == 9); // the template edit reached the top
+        CHECK(grand->scene->entities[1].id_path ==
+              (std::vector<std::string>{"ddddddddddddddd1", "bbbbbbbbbbbbbbb1",
+                                        "ccccccccccccccc2"}));
     }
 
     // --- last-good retention: a validation-failing child ingest leaves composition untouched ------
