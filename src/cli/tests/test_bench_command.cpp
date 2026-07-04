@@ -171,6 +171,14 @@ int main()
         CHECK(static_cast<int>(num(doc, "world_entities")) >= total_files);
     }
 
+    // --- negative numeric flags fall back to their defaults ----------------------------------
+    // std::stoull would ACCEPT "-40" and value-wrap to ~2^64 (a giant reservation / near-endless
+    // loop); flag_u64 rejects non-digit tokens so the scenario runs with the flag's default.
+    {
+        const Json doc = run_json({"query", "--corpus", corpus_str, "--samples", "-40"}, 0);
+        CHECK(static_cast<int>(num(doc, "samples")) == 2000); // the --samples default, not 2^64-40
+    }
+
     // --- sustained: R-FILE-013 backpressure under deliberate overload ------------------------
     {
         const Json doc = run_json({"sustained", "--corpus", corpus_str, "--writes", "64",

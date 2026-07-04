@@ -94,9 +94,14 @@ std::uint64_t flag_u64(const std::vector<std::string>& args, const std::string& 
     const std::optional<std::string> v = flag_value(args, name);
     if (!v.has_value())
         return fallback;
+    // Digits only: std::stoull ACCEPTS a leading '-' and value-wraps (2^64 - n), which would turn
+    // e.g. `--samples -5` into a ~1.8e19-element reservation instead of the graceful fallback every
+    // other malformed value gets. Non-digit tokens fall back exactly like the catch below.
+    if (v->empty() || v->find_first_not_of("0123456789") != std::string::npos)
+        return fallback;
     try
     {
-        return static_cast<std::uint64_t>(std::stoull(*v));
+        return static_cast<std::uint64_t>(std::stoull(*v)); // still throws on > 2^64 digit strings
     }
     catch (const std::exception&)
     {
