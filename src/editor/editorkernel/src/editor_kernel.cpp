@@ -7,7 +7,9 @@
 #include "context/editor/filesync/content_hash.h"
 #include "context/editor/filesync/file_store.h"
 #include "context/editor/filesync/path_jail.h"
+#include "context/editor/migrate/migrate_document.h"
 #include "context/editor/schema/kind_schema.h"
+#include "context/editor/serializer/canonical.h"
 #include "context/kernel/platform.h" // Clock is only forward-declared in the header
 
 #include <string>
@@ -91,6 +93,74 @@ filesync::ReconcilerConfig reconciler_config_for(const EditorKernelConfig& cfg)
     }
     return rc; // interval 0: the default note ("runs with every reconcile pass") stays accurate
 }
+
+// The composition's migration set: the config's injected set, or the engine-shipped one (L-37).
+const migrate::MigrationSet& migrations_for(const EditorKernelConfig& cfg)
+{
+    return cfg.migrations != nullptr ? *cfg.migrations : migrate::MigrationSet::engine_set();
+}
+
+// The R-FILE-005 pass-0 "registered schema + migration set" hash pass-1 derivation keys on:
+// fold every registered kind schema's identity (id, version, canonical document bytes) with the
+// migration set's own hash. Deterministic; any schema or migration change re-keys pass-1
+// (R-FILE-010: a package upgrade yields new cache keys, never stale derived state). An explicit
+// non-zero config value overrides the computation.
+derivation::DerivationConfig derivation_config_for(const EditorKernelConfig& cfg)
+{
+    derivation::DerivationConfig dc = cfg.derivation;
+    if (dc.registered_set_hash == 0)
+    {
+        std::uint64_t folded = migrations_for(cfg).set_hash();
+        for (const schema::KindSchema& kind : schema::engine_schemas().all())
+        {
+            std::uint64_t h = migrate::hash_combine(0, std::string_view("kind"));
+            h = migrate::hash_combine(h, kind.id);
+            h = migrate::hash_combine(h, static_cast<std::uint64_t>(kind.version));
+            h = migrate::hash_combine(h, kind.canonical_doc);
+            folded ^= h;
+        }
+        dc.registered_set_hash = folded;
+    }
+    return dc;
+}
+
+// The L-37 tool-save law: a tool save canonicalizes the WHOLE file it writes AND stamps current
+// schema versions — which entails migrating stamped-older payloads first (the file the tool was
+// writing anyway becomes current on disk as part of that same save; this and the explicit
+// `context migrate` bulk verb are the ONLY disk-writing migrations). On a BLOCKING finding the
+// save proceeds UNMIGRATED — disk is the author's truth and a save is never refused for carrying
+// data this engine version cannot lift; the derivation ingest surfaces the findings and retains
+// last-good derived state (R-FILE-003). Returns the findings for the caller's envelope.
+std::vector<serializer::Diagnostic> migrate_and_stamp_for_save(derivation::CanonicalForm& form,
+                                                               const migrate::MigrationSet& set)
+{
+    std::vector<serializer::Diagnostic> findings;
+    if (!form.is_json)
+        return findings;
+    migrate::MigrateOptions options;
+    options.stamp_registered_sites = true;
+    const migrate::DocumentMigrationResult result =
+        migrate::migrate_document(form.root, set, options);
+    findings.reserve(result.diagnostics.size());
+    for (const migrate::MigrationDiagnostic& d : result.diagnostics)
+    {
+        serializer::Diagnostic finding;
+        finding.code = d.code;
+        finding.message =
+            d.pointer.empty() ? d.message : d.message + " (at " + d.pointer + ")";
+        findings.push_back(std::move(finding));
+    }
+    if (result.ok && result.changed)
+    {
+        std::string bytes;
+        if (serializer::serialize_canonical(form.root, bytes))
+        {
+            form.bytes = std::move(bytes);
+            form.canonical_hash = serializer::canonical_hash_of(form.bytes);
+        }
+    }
+    return findings;
+}
 } // namespace
 
 EditorKernel::EditorKernel(filesync::FileStore& fs, filesync::Watcher& watcher,
@@ -102,7 +172,11 @@ EditorKernel::EditorKernel(filesync::FileStore& fs, filesync::Watcher& watcher,
       // The real attach path runs the M2 validate node against the ENGINE kind set (R-DATA-006):
       // schema-bound payloads validate on ingest, failing ones retain last-good derived state
       // (R-FILE-003). The x-ctx-ref resolver seam stays null until the asset database lands.
-      graph_(config_.derivation, bus, &schema::engine_schemas())
+      // The L-37 parse-time migration node runs against the composition's migration set, and the
+      // derivation config carries the computed R-FILE-005 pass-0 registered-set hash (see
+      // derivation_config_for) so pass-1 memoization is keyed on (content, registered set).
+      graph_(derivation_config_for(config_), bus, &schema::engine_schemas(), nullptr,
+             &migrations_for(config_))
 {
 }
 
@@ -180,6 +254,13 @@ EditOutcome EditorKernel::edit_file(std::string_view path, std::string_view data
     // verbatim (no canonicalization pass). Encoding heals surface on the envelope (R-FILE-003).
     derivation::CanonicalForm form = derivation::canonical_parse(data);
 
+    // ...and stamp current schema versions (L-37): stamped-older payloads migrate, registered
+    // unstamped sites gain their stamps, and the canonical bytes/hash are recomputed. Blocking
+    // findings leave the content unmigrated (the ingest below retains last-good) but ride the
+    // envelope's diagnostics.
+    std::vector<serializer::Diagnostic> migration_findings =
+        migrate_and_stamp_for_save(form, migrations_for(config_));
+
     // Write THROUGH filesync atomic-IO (temp+fsync+rename, R-FILE-004). apply_write registers the
     // write as self-echo, so the reconcile crawl will NOT re-surface our own write as external.
     if (!reconciler_.apply_write(key, form.bytes))
@@ -196,11 +277,17 @@ EditOutcome EditorKernel::edit_file(std::string_view path, std::string_view data
     const filesync::ReconcileChange change{key, filesync::ChangeType::modified,
                                            filesync::content_hash(form.bytes)};
     out.ticket = graph_.apply(change, form.bytes);
-    // Only JSON content carries envelope findings (the encoding heals). A non-JSON payload's
-    // parse-failure diagnostic is NOT a finding — sidecars/TS text are legal non-JSON kinds, and
-    // whether a path SHOULD be JSON is the schema model's knowledge (a later M2 task).
+    // Only JSON content carries envelope findings (the encoding heals + the L-37 migration
+    // findings from stamping this save). A non-JSON payload's parse-failure diagnostic is NOT a
+    // finding — sidecars/TS text are legal non-JSON kinds, and whether a path SHOULD be JSON is
+    // the schema model's knowledge (a later M2 task).
     if (form.is_json)
+    {
         out.encoding_diagnostics = std::move(form.diagnostics);
+        out.encoding_diagnostics.insert(out.encoding_diagnostics.end(),
+                                        std::make_move_iterator(migration_findings.begin()),
+                                        std::make_move_iterator(migration_findings.end()));
+    }
     out.ok = true;
     return out;
 }
@@ -251,8 +338,12 @@ EditBatchOutcome EditorKernel::edit_files(const std::vector<BatchEdit>& edits,
         }
         // Tool saves canonicalize the whole file they write (R-FILE-001) — the batch path plans,
         // intent-logs, CAS-es, and writes the CANONICAL bytes, so a crash-recovery resume re-lands
-        // the identical canonical content. Non-JSON payloads pass through verbatim.
+        // the identical canonical content. Non-JSON payloads pass through verbatim. The batch
+        // stamps current schema versions too (L-37, same rule as edit_file); its per-entry
+        // migration findings re-surface through the derivation ingest's validation() — the batch
+        // outcome type carries no per-entry diagnostics channel.
         derivation::CanonicalForm form = derivation::canonical_parse(e.data);
+        (void)migrate_and_stamp_for_save(form, migrations_for(config_));
         const std::optional<std::string> current = fs_.read(key);
         filesync::PlannedWrite w;
         w.path = key;

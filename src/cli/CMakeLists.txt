@@ -12,6 +12,7 @@ add_library(context_cli STATIC
     src/daemon_command.cpp
     src/editor_driver.cpp
     src/fetch_command.cpp
+    src/migrate_command.cpp
     src/scaffold.cpp
     src/wire_client.cpp)
 
@@ -28,6 +29,11 @@ target_include_directories(context_cli PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/includ
 target_link_libraries(context_cli
     PUBLIC context_contract context_bridge
     PRIVATE context_kernel context_editorkernel context_schema context_serializer context_warnings)
+
+# `context migrate` (M2 wave 3, src/editor/migrate/): PUBLIC — migrate_command.h names
+# migrate::MigrationSet in its test-seam signature, and the ctest executable that injects its own
+# set reaches the module's include path through this target.
+target_link_libraries(context_cli PUBLIC context_migrate)
 
 # Self-contained GCC runtime for the CLI executables. context_cli uses std::filesystem (the
 # `context new` scaffolder), whose libstdc++ symbols live in a NEWER libstdc++-6.dll; on a MinGW
@@ -52,6 +58,7 @@ set(_context_cli_tests
     test_bench_command
     test_cli
     test_editor_driver
+    test_migrate_command
     test_scaffold)
 
 foreach(_t IN LISTS _context_cli_tests)

@@ -7,6 +7,7 @@
 #include "context/cli/daemon_command.h"
 #include "context/cli/editor_driver.h"
 #include "context/cli/fetch_command.h"
+#include "context/cli/migrate_command.h"
 #include "context/cli/scaffold.h"
 #include "context/editor/contract/json.h"
 #include "context/editor/contract/registry.h"
@@ -124,6 +125,16 @@ Envelope dispatch(const VerbSpec& verb, const std::vector<std::string>& position
         if (bound.count("range"))
             merged["range"] = bound.at("range");
         return run_fetch(handle, merged);
+    }
+
+    // `context migrate [path]` — the L-37 explicit bulk migration path (M2 wave 3): canonicalize +
+    // migrate stamped-older payloads + stamp current versions, rewriting files in place. The only
+    // disk-writing migration besides tool saves. --dry-run (core flag) is honored INSIDE the
+    // command: a full real scan + per-file report, with the writes suppressed.
+    if (verb.noun.empty() && verb.verb == "migrate")
+    {
+        const std::string target = bound.count("path") ? bound.at("path") : "";
+        return run_migrate(target, flags);
     }
 
     // The operational daemon-driver verbs (edit / edit-batch / query / snapshot / reconcile /
