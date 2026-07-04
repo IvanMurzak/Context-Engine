@@ -91,8 +91,10 @@ int main()
         CHECK(decoded.version == sidecar_format_version);
         CHECK(decoded.payload == payload);
 
-        // An empty payload is a valid sidecar (header only).
-        const SidecarDecodeResult empty = decode_sidecar(encode_sidecar(""));
+        // An empty payload is a valid sidecar (header only). The input is named because the
+        // result's `payload` view is only valid while the decoded bytes live (sidecar.h).
+        const std::string header_only = encode_sidecar("");
+        const SidecarDecodeResult empty = decode_sidecar(header_only);
         CHECK(empty.ok);
         CHECK(empty.payload.empty());
     }
