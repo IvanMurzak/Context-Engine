@@ -300,6 +300,7 @@ void collect_fields(const JsonValue& node, const std::string& data_pointer, Json
         for (const JsonMember& property : properties->members)
         {
             const std::string child_pointer = data_pointer + "/" + property.key;
+            const JsonValue* union_spec = find_member(property.value, kKeyUnion);
             JsonValue entry;
             set_member(entry, "pointer", make_string(child_pointer));
             if (property.key == kNotesField)
@@ -316,8 +317,7 @@ void collect_fields(const JsonValue& node, const std::string& data_pointer, Json
                 set_member(entry, "storage", make_string(storage->string_value));
             if (const JsonValue* ref = find_member(property.value, kKeyRef); ref != nullptr)
                 set_member(entry, "ref", make_string(ref->string_value));
-            if (const JsonValue* union_spec = find_member(property.value, kKeyUnion);
-                union_spec != nullptr)
+            if (union_spec != nullptr)
             {
                 JsonValue tags;
                 tags.type = JsonValue::Type::array;
@@ -331,8 +331,7 @@ void collect_fields(const JsonValue& node, const std::string& data_pointer, Json
             fields.elements.push_back(std::move(entry));
 
             collect_fields(property.value, child_pointer, fields);
-            if (const JsonValue* union_spec = find_member(property.value, kKeyUnion);
-                union_spec != nullptr)
+            if (union_spec != nullptr)
                 for (const JsonMember& variant : union_spec->members)
                     collect_fields(variant.value, child_pointer + "/(" + variant.key + ")",
                                    fields);

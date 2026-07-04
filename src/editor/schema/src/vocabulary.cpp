@@ -235,8 +235,7 @@ bool is_union_tag(std::string_view tag) noexcept
     const std::size_t colon = tag.find(':');
     if (colon == std::string_view::npos)
         return false;
-    return is_tag_segment(tag.substr(0, colon)) && is_tag_segment(tag.substr(colon + 1)) &&
-           tag.find(':', colon + 1) == std::string_view::npos;
+    return is_tag_segment(tag.substr(0, colon)) && is_tag_segment(tag.substr(colon + 1));
 }
 
 bool is_color_space(std::string_view space) noexcept
