@@ -96,8 +96,19 @@ jobs:
         run: cmake --build --preset dev
         working-directory: src
 
-      - name: Run context-hello
-        run: ctest --preset dev --verbose
+      # Every registered suite EXCEPT the M1 exit gate — that family runs in its own named step
+      # below so the milestone gate is legible per OS leg (same tests, each runs exactly once).
+      - name: Run test suites (ctest)
+        run: ctest --preset dev --verbose -E "^m1-exit-"
+        working-directory: src
+
+      # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36) — the five exit criteria as a BLOCKING
+      # per-PR check on every OS leg (§6 tiering): files-as-truth equivalence (L-19), second-CLI
+      # live attach (R-CLI-010), real kill-9 crash recovery (R-FILE-004), CLI ≡ RPC ≡ MCP ≡
+      # introspection parity + additive-only error catalog (R-CLI-008/009), and dispatcher scope
+      # enforcement (R-SEC-007). Registered in docs/ci-fleet-manifest.json as the m1-exit-* gates.
+      - name: M1 exit gate (5 criteria, blocking)
+        run: ctest --preset dev --output-on-failure -R "^m1-exit-"
         working-directory: src
 
       - name: sccache stats

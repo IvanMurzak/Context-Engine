@@ -76,6 +76,98 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
         return env;
     }
 
+    // `edit-batch` — the daemon-initiated MULTI-file write, serialized through the R-FILE-004
+    // crash-recovery intent log (the dispatcher already enforced file_write via the scope table;
+    // edit_files re-checks it defensively). The reply reports each file's canonical hash plus
+    // whether the derived world reflects the whole batch after a settle.
+    if (method == "edit-batch")
+    {
+        if (!params.contains("files") || !params.at("files").is_array() ||
+            params.at("files").size() == 0)
+            return Envelope::failure("usage.missing_argument",
+                                     "edit-batch requires a non-empty 'files' array of "
+                                     "{path, content} objects");
+
+        std::vector<BatchEdit> edits;
+        edits.reserve(params.at("files").size());
+        for (std::size_t i = 0; i < params.at("files").size(); ++i)
+        {
+            const Json& f = params.at("files").at(i);
+            const std::optional<std::string> path = string_param(f, "path");
+            const std::optional<std::string> content = string_param(f, "content");
+            if (!path.has_value() || !content.has_value())
+                return Envelope::failure("usage.missing_argument",
+                                         "edit-batch files[" + std::to_string(i) +
+                                             "] needs string 'path' and 'content'");
+            edits.push_back(BatchEdit{*path, *content});
+        }
+
+        EditBatchOutcome out = kernel_.edit_files(edits, session.scopes);
+        if (!out.ok)
+        {
+            Envelope fail = Envelope::failure(out.error_code);
+            if (!out.error_detail.empty())
+                fail.add_warning(out.error_detail);
+            return fail;
+        }
+
+        kernel_.settle(); // drain the batch into the derived world (R-BRIDGE-008 quiescence)
+
+        Json files = Json::array();
+        bool all_reflected = true;
+        for (const derivation::WriteTicket& t : out.tickets)
+        {
+            const std::optional<derivation::DerivedSource> node = kernel_.query(t.path);
+            const bool reflected = node.has_value() && node->canonical_hash == t.canonical_hash;
+            all_reflected = all_reflected && reflected;
+            Json entry = Json::object();
+            entry.set("path", Json(t.path));
+            entry.set("canonicalHash", hash_string(t.canonical_hash));
+            entry.set("reflected", Json(reflected));
+            files.push_back(std::move(entry));
+        }
+
+        Json data = Json::object();
+        data.set("opId", Json(out.op_id));
+        data.set("files", std::move(files));
+        data.set("allReflected", Json(all_reflected));
+        data.set("worldEntities", Json(static_cast<std::uint64_t>(kernel_.world().alive_count())));
+        data.set("generation", Json(kernel_.generation()));
+        return Envelope::success(std::move(data), kernel_.generation());
+    }
+
+    // `snapshot` — the R-BRIDGE-008 current-state snapshot a newly-attached or RECONNECTING client
+    // reads before deltas: the incarnation epoch id (a restart forces a fresh snapshot rather than
+    // trusting a stale "since seq N" cursor), the derived-world generation, the last seq — plus the
+    // boot-time R-FILE-004 recovery diagnostics so a reconnecting client learns about any op the
+    // previous incarnation left incomplete. Read-only (read/query baseline).
+    if (method == "snapshot")
+    {
+        Json data = kernel_.events().snapshot();
+        data.set("worldEntities", Json(static_cast<std::uint64_t>(kernel_.world().alive_count())));
+        data.set("worldGeneration", Json(kernel_.generation()));
+        Json recovery = Json::array();
+        for (const auto& d : kernel_.recovery_diagnostics())
+            recovery.push_back(diagnostic_json(d));
+        data.set("recoveryDiagnostics", std::move(recovery));
+        return Envelope::success(std::move(data), kernel_.generation());
+    }
+
+    // `reconcile` — fold EXTERNAL (out-of-band) edits into the derived world: drain watcher hints +
+    // the full re-hash crawl (content hash authoritative over watchers, R-FILE-002), then settle.
+    // Read-only w.r.t. authored state (it makes the daemon notice on-disk truth; it writes nothing),
+    // so it sits on the read/query baseline.
+    if (method == "reconcile")
+    {
+        const std::size_t changes = kernel_.ingest_external().size();
+        const std::uint64_t generation = kernel_.settle();
+        Json data = Json::object();
+        data.set("changes", Json(static_cast<std::uint64_t>(changes)));
+        data.set("generation", Json(generation));
+        data.set("worldEntities", Json(static_cast<std::uint64_t>(kernel_.world().alive_count())));
+        return Envelope::success(std::move(data), generation);
+    }
+
     // `query` — read the derived node for a path + world stats. Read-only (read/query baseline).
     if (method == "query")
     {

@@ -12,7 +12,16 @@
 //   * attach   — the capability handshake (served by the dispatcher itself).
 //   * edit      {path, content}  -> daemon-initiated file write (filesync atomic-IO) + read-your-writes
 //                                   barrier; requires the file_write scope (R-SEC-007).
+//   * edit-batch {files:[{path, content}…]} -> MULTI-file write serialized through the R-FILE-004
+//                                   crash-recovery intent log; requires file_write (R-SEC-007 — the
+//                                   method is in the dispatcher's file-write family, scope.cpp).
 //   * query     {path}           -> the derived node (canonical hash + generation) + world stats; read.
+//   * snapshot                   -> the R-BRIDGE-008 current-state snapshot (incarnationId, generation,
+//                                   lastSeq, worldEntities, worldGeneration) + the boot recovery
+//                                   diagnostics; read.
+//   * reconcile                  -> fold external (out-of-band) edits into the derived world via the
+//                                   watch-hash-reconcile crawl (R-FILE-002), then settle; read (it
+//                                   mutates no authored state — it makes the daemon notice truth).
 //   * shutdown                   -> ask the serve loop to stop; requires session_control.
 //   * describe / anything else   -> the dispatcher's default registry routing.
 //

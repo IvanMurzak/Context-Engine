@@ -27,11 +27,14 @@
 #include <string>
 #include <system_error>
 #include <variant>
+#include <vector>
 
 namespace fs = std::filesystem;
 using context::editor::contract::ClientHandshake;
 using context::editor::contract::Envelope;
 using context::editor::derivation::canonical_parse;
+using context::editor::editorkernel::BatchEdit;
+using context::editor::editorkernel::EditBatchOutcome;
 using context::editor::editorkernel::EditorKernel;
 using context::editor::editorkernel::EditorKernelConfig;
 using context::editor::editorkernel::EditOutcome;
@@ -261,6 +264,87 @@ int main()
         ls_kernel.stop();
         std::error_code ls_ec;
         fs::remove_all(loadshed_project, ls_ec);
+    }
+
+    // --- read-your-writes is per-PATH, not per-hash (M1 exit-gate regression): when ANOTHER file
+    // --- already carries the identical canonical content, the world-global hash barrier resolves
+    // --- instantly — query_after_hash must still drain the queried path's own pending ingest, so
+    // --- the second write's read never observes the pre-write state of ITS OWN node.
+    {
+        const fs::path dup_project = make_temp_project("dup-content");
+        MemoryFileStore dup_store;
+        NullWatcher dup_watcher;
+        context::kernel::ManualClock dup_clock;
+        context::kernel::InlineTaskRunner dup_tasks;
+
+        EditorKernel dup_kernel(dup_store, dup_watcher, dup_clock, dup_tasks,
+                                config_for(dup_project));
+        CHECK(dup_kernel.start(ScopeSet::all()) == StartOutcome::booted);
+
+        // File 1 derives content C; its canonical hash is now reflected by a live node.
+        const EditOutcome first = dup_kernel.edit_file("proj/one.scene", "entity: same", writer);
+        CHECK(first.ok);
+        auto first_node = dup_kernel.query_after_hash("proj/one.scene", first.ticket.canonical_hash);
+        CHECK(first_node.has_value());
+
+        // File 2 writes the IDENTICAL content: the hash barrier alone would resolve on file 1's
+        // node before file 2's ingest ever derived. The per-path drain must still produce file 2.
+        const EditOutcome second = dup_kernel.edit_file("proj/two.scene", "entity: same", writer);
+        CHECK(second.ok);
+        CHECK(second.ticket.canonical_hash == first.ticket.canonical_hash); // same canonical form
+        auto second_node =
+            dup_kernel.query_after_hash("proj/two.scene", second.ticket.canonical_hash);
+        CHECK(second_node.has_value());
+        CHECK(second_node.has_value() &&
+              second_node->canonical_hash == second.ticket.canonical_hash);
+        CHECK(dup_kernel.world().alive_count() == 2); // both files live in the derived World
+
+        dup_kernel.stop();
+        std::error_code dup_ec;
+        fs::remove_all(dup_project, dup_ec);
+    }
+
+    // --- edit_files refuses a batch naming the same path twice (R-FILE-004 resume correctness):
+    // --- every intent entry's planning-time CAS hash is measured against the PRE-batch file, so a
+    // --- twice-applied path would make a mid-batch crash recovery re-CAS the second entry against
+    // --- the FIRST apply's bytes — misreporting a moved-on file instead of resuming the batch.
+    {
+        const fs::path dupbatch_project = make_temp_project("dup-batch");
+        MemoryFileStore db_store;
+        NullWatcher db_watcher;
+        context::kernel::ManualClock db_clock;
+        context::kernel::InlineTaskRunner db_tasks;
+
+        EditorKernel db_kernel(db_store, db_watcher, db_clock, db_tasks,
+                               config_for(dupbatch_project));
+        CHECK(db_kernel.start(ScopeSet::all()) == StartOutcome::booted);
+
+        const std::vector<BatchEdit> dup_batch = {
+            {"proj/x.scene", "entity: first"},
+            {"proj/y.scene", "entity: other"},
+            {"proj/x.scene", "entity: second"}, // the same path again — refused at planning
+        };
+        const EditBatchOutcome refused = db_kernel.edit_files(dup_batch, writer);
+        CHECK(!refused.ok);
+        CHECK(refused.error_code == "usage.invalid");
+        CHECK(refused.error_detail.find("proj/x.scene") != std::string::npos);
+        // Planning-stage refusal: NOTHING was written — no partial batch, no intent entry.
+        CHECK(!db_store.exists("proj/x.scene"));
+        CHECK(!db_store.exists("proj/y.scene"));
+
+        // The same content batch WITHOUT the duplicate goes through (the guard is not over-broad).
+        const std::vector<BatchEdit> clean_batch = {
+            {"proj/x.scene", "entity: second"},
+            {"proj/y.scene", "entity: other"},
+        };
+        const EditBatchOutcome accepted = db_kernel.edit_files(clean_batch, writer);
+        CHECK(accepted.ok);
+        CHECK(*db_store.read("proj/x.scene") == "entity: second");
+        CHECK(*db_store.read("proj/y.scene") == "entity: other");
+
+        db_kernel.stop();
+        std::error_code db_ec;
+        fs::remove_all(dupbatch_project, db_ec);
     }
 
     // Best-effort cleanup of the real lock directory.
