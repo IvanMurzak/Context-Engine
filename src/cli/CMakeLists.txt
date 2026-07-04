@@ -8,6 +8,7 @@
 add_library(context_cli STATIC
     src/app.cpp
     src/attach_command.cpp
+    src/bench_command.cpp
     src/daemon_command.cpp
     src/editor_driver.cpp
     src/scaffold.cpp)
@@ -43,6 +44,7 @@ target_link_options(context PRIVATE ${_context_cli_static_runtime})
 # Plain assertion-bearing executables registered with ctest (the sibling src/kernel/ pattern);
 # tests/cli_test.h is the tiny CHECK() harness.
 set(_context_cli_tests
+    test_bench_command
     test_cli
     test_editor_driver
     test_scaffold)

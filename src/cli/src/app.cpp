@@ -3,6 +3,7 @@
 #include "context/cli/app.h"
 
 #include "context/cli/attach_command.h"
+#include "context/cli/bench_command.h"
 #include "context/cli/daemon_command.h"
 #include "context/cli/editor_driver.h"
 #include "context/cli/scaffold.h"
@@ -209,6 +210,18 @@ int main_cli(int argc, char** argv)
     // rather than through run()'s one-shot envelope-print path.
     if (!args.empty() && args[0] == "daemon")
         return run_daemon(std::vector<std::string>(args.begin() + 1, args.end()));
+
+    // `bench` is the R-FILE-011 benchmark subject: its stdout is the bench/harness.py subject
+    // contract (one plain JSON object per invocation), NOT the R-CLI-008 envelope — so it too
+    // bypasses run()'s envelope-print path (see bench_command.h).
+    if (!args.empty() && args[0] == "bench")
+    {
+        std::string out_json;
+        const int rc = run_bench(std::vector<std::string>(args.begin() + 1, args.end()), out_json);
+        std::fwrite(out_json.data(), 1, out_json.size(), stdout);
+        std::fputc('\n', stdout);
+        return rc;
+    }
 
     const Envelope env = run(args);
     const std::string out = env.dump(2);

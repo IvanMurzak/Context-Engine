@@ -12,7 +12,8 @@ Checks:
   4. Advisory-until-provisioned: a gate whose runner class has provisioned=false MUST be advisory
      (R-QA-012 — never blocking, never silently green).
   5. Every quarantine-with-issue gate NAMES an issue.
-  6. (with --ci-workflow) every gate with a non-null ci_job_id maps to a REAL job in the workflow.
+  6. (with --ci-workflow, repeatable) every gate with a non-null ci_job_id maps to a REAL job in
+     one of the given workflows (per-PR gates live in ci.yml; nightly gates in bench-nightly.yml).
 
 Exit code 0 = manifest valid; 1 = violation(s); 2 = configuration error.
 """
@@ -100,20 +101,24 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--manifest", default="docs/ci-fleet-manifest.json",
                     help="path to the CI fleet manifest JSON")
-    ap.add_argument("--ci-workflow", default=None,
-                    help="optional: cross-check ci_job_id values against this workflow YAML")
+    ap.add_argument("--ci-workflow", action="append", default=None,
+                    help="optional, repeatable: cross-check ci_job_id values against these "
+                         "workflow YAMLs (a job id must exist in at least one)")
     args = ap.parse_args(argv)
 
     manifest = load_json_or_exit(Path(args.manifest), tag="fleet-manifest")
 
     workflow_text: str | None = None
     if args.ci_workflow:
-        try:
-            workflow_text = Path(args.ci_workflow).read_text(encoding="utf-8")
-        except OSError as exc:
-            print(f"[fleet-manifest] ERROR: cannot read workflow {args.ci_workflow}: {exc}",
-                  file=sys.stderr)
-            return 2
+        texts = []
+        for wf in args.ci_workflow:
+            try:
+                texts.append(Path(wf).read_text(encoding="utf-8"))
+            except OSError as exc:
+                print(f"[fleet-manifest] ERROR: cannot read workflow {wf}: {exc}",
+                      file=sys.stderr)
+                return 2
+        workflow_text = "\n".join(texts)
 
     errors = validate(manifest, workflow_text)
     if errors:

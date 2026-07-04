@@ -174,6 +174,7 @@ Envelope run_attach(const std::vector<std::string>& args)
     const std::string set_path = flag_value(args, "set-path").value_or("proj/a.scene");
     const std::string set_content = flag_value(args, "set-content").value_or("entity: 1");
     const bool do_shutdown = has_flag(args, "shutdown");
+    const bool do_reconcile = has_flag(args, "reconcile");
 
     // --- discover + connect ---------------------------------------------------------------------
     const std::optional<std::string> endpoint = discover_endpoint(project, 3000);
@@ -208,6 +209,22 @@ Envelope run_attach(const std::vector<std::string>& args)
         // transport hiccup or malformed reply is internal (matching the edit/query call sites below).
         return finish(Envelope::failure(
             attach_rejected ? "handshake.incompatible_protocol" : "internal.error", err));
+
+    // --- optional: fold on-disk truth into the derived world over the wire (R-FILE-002) ----------
+    // `--reconcile` drives the daemon's `reconcile` verb before the edit/query pair, so a project
+    // whose authored files landed out-of-band (e.g. a generated benchmark corpus — the R-FILE-011
+    // N-daemons scenario) is ingested through the REAL crawl + derivation path over the wire.
+    bool reconcile_ok = true;
+    Json reconcile_data;
+    if (do_reconcile)
+    {
+        const std::optional<Json> rec_res = call(client, ++id, "reconcile", Json::object(), err);
+        if (!rec_res.has_value())
+            return finish(Envelope::failure("internal.error", err));
+        reconcile_ok = rec_res->contains("ok") && rec_res->at("ok").as_bool();
+        if (rec_res->contains("data"))
+            reconcile_data = rec_res->at("data");
+    }
 
     // --- edit a file over the wire (file-rewriter) ----------------------------------------------
     Json edit_params = Json::object();
@@ -252,10 +269,12 @@ Envelope run_attach(const std::vector<std::string>& args)
     data.set("edit", edit_data);
     data.set("query", query_data);
     data.set("hashesMatch", Json(hashes_match));
+    if (do_reconcile)
+        data.set("reconcile", reconcile_data);
     if (do_shutdown)
         data.set("shutdownAck", Json(shutdown_ack));
 
-    const bool all_ok = edit_ok && reflected && query_ok && present && hashes_match;
+    const bool all_ok = edit_ok && reflected && query_ok && present && hashes_match && reconcile_ok;
     Envelope env = Envelope::success(std::move(data));
     if (!all_ok)
     {
