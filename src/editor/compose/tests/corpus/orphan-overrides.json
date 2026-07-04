@@ -1,0 +1,84 @@
+{
+  "notes": "R-QA-011: the four orphan-override classes (L-37: unmappable paths are excluded from flatten, advisory) - unknown instance id, unknown entity id, structurally inapplicable pointer (array growth), a field override stopping at an instance id.",
+  "root": "root.scene.json",
+  "scenes": {
+    "child.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [
+        {
+          "id": "cccccccccccccc01",
+          "name": "E",
+          "components": {
+            "transform": {
+              "position": [
+                0,
+                0,
+                0
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "root.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "instances": [
+        {
+          "id": "1111111111111101",
+          "scene": "child.scene.json"
+        }
+      ],
+      "overrides": [
+        {
+          "path": [
+            "ffffffffffffffff",
+            "cccccccccccccc01"
+          ],
+          "pointer": "/name",
+          "value": "X"
+        },
+        {
+          "path": [
+            "1111111111111101",
+            "eeeeeeeeeeeeee99"
+          ],
+          "pointer": "/name",
+          "value": "X"
+        },
+        {
+          "path": [
+            "1111111111111101",
+            "cccccccccccccc01"
+          ],
+          "pointer": "/components/transform/position/9",
+          "value": 1
+        },
+        {
+          "path": [
+            "1111111111111101"
+          ],
+          "pointer": "/name",
+          "value": "X"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "ok": true,
+    "idPaths": [
+      [
+        "1111111111111101",
+        "cccccccccccccc01"
+      ]
+    ],
+    "diagnostics": [
+      "compose.orphan_override",
+      "compose.orphan_override",
+      "compose.orphan_override",
+      "compose.orphan_override"
+    ]
+  }
+}

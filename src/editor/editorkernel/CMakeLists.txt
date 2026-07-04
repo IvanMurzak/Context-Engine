@@ -15,10 +15,13 @@ target_include_directories(context_editorkernel PUBLIC ${CMAKE_CURRENT_SOURCE_DI
 # Reconciler/ReconcileChange, contract Envelope, kernel World), so a consumer needs their include
 # paths. context_derivation already links context_filesync + context_kernel, and context_bridge links
 # context_contract + context_kernel, so several are transitively available; they are named explicitly
-# because this target uses each directly. Every Context target links the warnings-as-errors baseline.
+# because this target uses each directly. context_schema is PRIVATE: editor_kernel.cpp names
+# schema::engine_schemas() directly (previously reached only transitively via context_derivation)
+# while the public header exposes no schema type. Every Context target links the warnings-as-errors
+# baseline.
 target_link_libraries(context_editorkernel
     PUBLIC context_bridge context_derivation context_filesync context_contract context_kernel
-    PRIVATE context_warnings)
+    PRIVATE context_schema context_warnings)
 
 # The L-37 migration set + tool-save stamping (M2 wave 3, src/editor/migrate/): PUBLIC — the
 # config header exposes migrate::MigrationSet (as an opaque seam pointer; only forward-declared),

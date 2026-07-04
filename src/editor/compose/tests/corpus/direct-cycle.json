@@ -1,0 +1,34 @@
+{
+  "notes": "R-QA-011: a scene instancing itself is the minimum instancing cycle - blocking, first visit still composes.",
+  "root": "a.scene.json",
+  "scenes": {
+    "a.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [
+        {
+          "id": "eeeeeeeeeeeeee01",
+          "name": "InA",
+          "components": {}
+        }
+      ],
+      "instances": [
+        {
+          "id": "1111111111111101",
+          "scene": "a.scene.json"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "ok": false,
+    "idPaths": [
+      [
+        "eeeeeeeeeeeeee01"
+      ]
+    ],
+    "diagnostics": [
+      "compose.cycle"
+    ]
+  }
+}

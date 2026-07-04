@@ -1,0 +1,55 @@
+{
+  "notes": "R-QA-011: a -> b -> a. Both first visits compose; the back-edge is the blocking cycle diagnostic.",
+  "root": "a.scene.json",
+  "scenes": {
+    "a.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [
+        {
+          "id": "eeeeeeeeeeeeee01",
+          "name": "InA",
+          "components": {}
+        }
+      ],
+      "instances": [
+        {
+          "id": "1111111111111101",
+          "scene": "b.scene.json"
+        }
+      ]
+    },
+    "b.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [
+        {
+          "id": "eeeeeeeeeeeeee02",
+          "name": "InB",
+          "components": {}
+        }
+      ],
+      "instances": [
+        {
+          "id": "1111111111111102",
+          "scene": "a.scene.json"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "ok": false,
+    "idPaths": [
+      [
+        "eeeeeeeeeeeeee01"
+      ],
+      [
+        "1111111111111101",
+        "eeeeeeeeeeeeee02"
+      ]
+    ],
+    "diagnostics": [
+      "compose.cycle"
+    ]
+  }
+}
