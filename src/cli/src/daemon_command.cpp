@@ -2,6 +2,7 @@
 
 #include "context/cli/daemon_command.h"
 
+#include "context/cli/wire_client.h" // shared flag_value (single-sourced with attach/fetch)
 #include "context/editor/bridge/transport.h"
 #include "context/editor/contract/envelope.h"
 #include "context/editor/contract/handshake.h"
@@ -46,20 +47,6 @@ using editor::filesync::NativeWatcher;
 
 namespace
 {
-std::optional<std::string> flag_value(const std::vector<std::string>& args, const std::string& name)
-{
-    const std::string prefix = "--" + name;
-    for (std::size_t i = 0; i < args.size(); ++i)
-    {
-        if (args[i] == prefix && i + 1 < args.size())
-            return args[i + 1];
-        const std::string eq = prefix + "=";
-        if (args[i].rfind(eq, 0) == 0)
-            return args[i].substr(eq.size());
-    }
-    return std::nullopt;
-}
-
 long current_pid()
 {
 #if defined(_WIN32)
