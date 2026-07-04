@@ -3,6 +3,9 @@
 > External contributions are NOT yet accepted: the CLA acceptance flow does not exist.
 > This skeleton records the required shape — a CLA **with copyright assignment** (or an
 > exclusive unrestricted grant); DCO alone is insufficient. See CONTRIBUTING.md.
+> Interim status (2026-07-02): no external contributor CLA is accepted and no external PR is
+> merged until the planned assignee legal entity exists — copyright assignment to an
+> individual is non-durable.
 
 ## PART II — Contributor License Agreement (CLA) — SKELETON
 
@@ -49,7 +52,8 @@ and distribute the Engine incorporating the Contribution.
 
 Options to evaluate: (a) a CLA-bot that blocks PR merge until a one-time click-through signature
 is recorded per GitHub account; (b) a `CONTRIBUTING.md`-referenced signature stored in-repo; (c) a
-first-run CLI prompt for `context contribute`. **Not yet decided — flagged in Notes for counsel
-and left as a follow-up engineering task.**
+first-run CLI prompt for `context contribute`. **Not yet decided — flagged for counsel review
+and left as a follow-up engineering task; gated regardless behind the assignee-entity formation
+(see the interim status note above).**
 
 ---

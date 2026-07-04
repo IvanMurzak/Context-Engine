@@ -64,8 +64,10 @@ cmake -S src --preset sanitize && cd src && cmake --build --preset sanitize && c
 Context is **source-available under the Context Engine EULA** (draft — see
 [LICENSE.md](LICENSE.md)). The engine is **free under $200,000/year of gross revenue per
 product**; above that annual threshold a **2% royalty** applies to the revenue above the
-threshold (marginal, resets yearly), waived for games developed under an active
-[ai-game.dev](https://ai-game.dev) subscription.
+threshold (marginal, resets yearly). The royalty base is **gross receipts** — storefront and
+platform fees are not deducted — and the royalty is **unconditional**: no subscription to any
+product or service affects it, and the license has no connection to any AI service
+(LICENSE.md §6).
 
 **Not open source** — you may build games with it; you may not build engines from it.
 
