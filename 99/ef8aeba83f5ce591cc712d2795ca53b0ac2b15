@@ -1,0 +1,39 @@
+src/editor/editorkernel/include/context/editor/editorkernel/editor_kernel.h
+  s_e3239cf02087b8::t_3342aa83a8f90c 102-106
+  s_e3239cf02087b8::t_59576def823c5a 162-167
+  s_e3239cf02087b8::t_f75fa85da5b6f0 201-204
+src/tests/integration/CMakeLists.txt
+  s_e3239cf02087b8::t_d0d677131237a9 64-66,73
+src/editor/editorkernel/src/editor_kernel.cpp
+  s_e3239cf02087b8::t_a06260c317abc5 172-173,183-190
+  s_e3239cf02087b8::t_86e3dbb629e57f 326-330,333-334
+  s_e3239cf02087b8::t_eb59e73e8c331a 89
+  s_e3239cf02087b8::t_54df2c298fb8e7 21-33
+  s_e3239cf02087b8::t_69581d0175c72e 304-308
+  s_e3239cf02087b8::t_306841157f0c75 12
+  s_e3239cf02087b8::t_80dae41d5bb5d9 191-192
+src/editor/editorkernel/src/kernel_server.cpp
+  s_e3239cf02087b8::t_90fa4160f5a482 151
+src/editor/editorkernel/include/context/editor/editorkernel/kernel_server.h
+  s_e3239cf02087b8::t_4b9724d5771a4f 20-21
+src/editor/editorkernel/tests/test_editor_kernel.cpp
+  s_e3239cf02087b8::t_045bf3a8d6a405 307-349
+  s_e3239cf02087b8::t_3f5665dca92cb1 30
+  s_e3239cf02087b8::t_ae8dffb7690dfe 36-37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "99ef8aeba83f5ce591cc712d2795ca53b0ac2b15",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
