@@ -1,0 +1,60 @@
+{
+  "notes": "R-QA-011: the scene-root entity is inert by default when instanced as a sub-scene; composable: true opts it into the parent flatten, addressable as $root (L-35).",
+  "root": "host.scene.json",
+  "scenes": {
+    "inert.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "root": {
+        "components": {
+          "physics": {
+            "gravity": [
+              0,
+              -9.81,
+              0
+            ]
+          }
+        }
+      }
+    },
+    "optin.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "root": {
+        "composable": true,
+        "components": {
+          "weather": {
+            "rain": true
+          }
+        }
+      }
+    },
+    "host.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "instances": [
+        {
+          "id": "1111111111111101",
+          "scene": "inert.scene.json"
+        },
+        {
+          "id": "1111111111111102",
+          "scene": "optin.scene.json"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "ok": true,
+    "idPaths": [
+      [
+        "1111111111111102",
+        "$root"
+      ]
+    ],
+    "diagnostics": []
+  }
+}

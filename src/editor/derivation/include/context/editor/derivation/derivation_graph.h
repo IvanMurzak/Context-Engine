@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "context/editor/compose/flatten.h"
+#include "context/editor/compose/scene_model.h"
 #include "context/editor/derivation/canonical_parse.h"
 #include "context/editor/filesync/reconciler.h"
 #include "context/editor/schema/validator.h"
@@ -13,6 +15,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -57,6 +60,7 @@ struct DerivationConfig
     std::size_t high_watermark = 64;      // overload threshold on the pending dirty set
     std::size_t max_batch_per_pass = 32;  // cap on the NON-VISIBLE fill per overloaded pass (load-shed);
                                           // visible/queried nodes always derive — never stall a query
+    compose::ComposeLimits compose_limits{}; // the M2 compose node's R-FILE-011(e) invariants
     // The content hash of the R-FILE-005 pass-0 "registered schema + migration set" (the derived
     // stratum): folded into every node's memoization identity, so pass-1 derived values are keyed
     // on (canonical content, registered set) — a package upgrade that changes a schema/migration
@@ -75,6 +79,8 @@ struct DerivePassResult
     std::size_t deferred = 0;       // nodes load-shed to a later pass (still pending after this one)
     std::size_t nodes_invalid = 0;  // nodes whose payload FAILED schema validation this pass —
                                     // their last-good derived state was retained (R-FILE-003)
+    std::size_t scenes_composed = 0; // scenes (re)flattened by the compose node this pass —
+                                     // changed scenes plus their transitive dependents (fan-out)
 };
 
 // A node's schema-validation state, surfaced by DerivationGraph::validation() (the M2 validate
@@ -85,6 +91,19 @@ struct DerivePassResult
 struct NodeValidation
 {
     schema::ValidationReport report;
+    std::uint64_t generation = 0;
+    bool stable = true;
+};
+
+// The compose node's flattened view of one scene (L-35: composition flattens in the derivation
+// graph at zero runtime cost), surfaced by DerivationGraph::composed(). `scene` points at
+// graph-owned storage valid until the next run_pass(). `generation` is the derived-world
+// generation the flatten was produced at; `stable` mirrors the L-31 semantics — false while
+// pending work anywhere in the scene's transitive template closure could still change the
+// composed output (composition introduces the graph's first cross-file dependency edges).
+struct ComposedView
+{
+    const compose::ComposedScene* scene = nullptr;
     std::uint64_t generation = 0;
     bool stable = true;
 };
@@ -204,6 +223,15 @@ public:
     // that the source never derived).
     [[nodiscard]] std::optional<NodeValidation> validation(std::string_view path) const;
 
+    // The compose node's flattened output for scene `path` (L-35 read path): its composed
+    // entities (id-path identity, overrides applied, provenance chains) + diagnostics. Every
+    // scene document that derives gets a composed view — the degenerate flatten of an
+    // instance-free scene is its own entities. nullopt when the path never derived as a scene.
+    // A scene whose LATEST ingest failed validation retains its last-good composed view
+    // (R-FILE-003), exactly like its derived node. The returned pointer is invalidated by the
+    // next run_pass().
+    [[nodiscard]] std::optional<ComposedView> composed(std::string_view path) const;
+
 private:
     struct Node
     {
@@ -227,8 +255,20 @@ private:
         bool validated = false;
     };
 
+    // The compose node's per-scene record: the retained composition view of the LAST-GOOD ingest
+    // (the flatten input) and the flattened output with the generation it was produced at.
+    struct ComposedRecord
+    {
+        compose::ComposedScene scene;
+        std::uint64_t generation = 0;
+    };
+
     void derive_one(const std::string& path, const Pending& pending, std::uint64_t target_gen,
-                    DerivePassResult& result);
+                    DerivePassResult& result, std::set<std::string>& compose_seeds);
+    void recompose(const std::set<std::string>& seeds, std::uint64_t target_gen,
+                   DerivePassResult& result);
+    void unlink_instance_deps(const std::string& path);
+    [[nodiscard]] bool scene_closure_pending(const std::string& path) const;
     void reflect(std::uint64_t canonical_hash);
     void unreflect(std::uint64_t canonical_hash);
     void refresh_signal();
@@ -245,6 +285,14 @@ private:
     std::map<std::string, Node> nodes_;
     std::map<std::string, Pending> pending_;
     std::map<std::uint64_t, std::size_t> reflected_hashes_; // canonical hash -> live node count
+    // --- the compose node (M2 wave 3, L-35) — the graph's first cross-file dependency edges ----
+    std::map<std::string, compose::SceneDoc> scene_docs_;   // last-good scene views (flatten input)
+    std::map<std::string, ComposedRecord> composed_;        // flattened outputs per scene
+    std::map<std::string, std::vector<std::string>> instance_deps_; // scene -> direct templates
+    // Reverse of instance_deps_ (template -> dependent scenes), kept in lockstep by
+    // unlink_instance_deps() + the ingest relink, so recompose()'s fan-out closure BFSes only the
+    // affected subgraph instead of rescanning every scene ever derived (L-22 discipline).
+    std::map<std::string, std::set<std::string>> instance_dependents_;
     BackpressureSignal signal_;
     std::uint64_t generation_ = 0;
     std::uint64_t parse_invocations_ = 0;

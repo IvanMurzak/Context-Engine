@@ -240,6 +240,15 @@ add_test(NAME versioned-install-layout
 # resolves at generate time regardless of add_subdirectory order).
 add_subdirectory(editor/assetdb)
 
+# M2 wave 3: the scene-composition READ path (src/editor/compose/, L-35/R-DATA-002, issue #51) —
+# id-path overrides with innermost-out precedence, stable intra-file ids (L-33), the scene-root
+# entity, the R-FILE-011(e) depth-cap/fan-in/cycle diagnostics, deterministic composed identity
+# (L-37), and the R-CLI-006 provenance chains. The derivation graph's compose node links this
+# target. Wired here — deliberately apart from the serializer/derivation and schema blocks above —
+# so concurrent sibling tasks touching src/editor/ and this file merge cleanly (consumers name the
+# `context_compose` target, which CMake resolves at generate time regardless of order).
+add_subdirectory(editor/compose)
+
 # ---------------------------------------------------------------------------
 # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36): five integration tests, one per exit
 # criterion, registered as the `m1-exit-*` ctest family and CI-gated per the §6 tiering (blocking

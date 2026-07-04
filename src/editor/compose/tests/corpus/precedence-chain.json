@@ -1,0 +1,105 @@
+{
+  "notes": "R-QA-011: the three-level precedence chain - root overrides mid overrides child; innermost-out, the outermost instancing scene wins (L-35). Values and chains are pinned by the unit tests; this case pins the composed set.",
+  "root": "root.scene.json",
+  "scenes": {
+    "child.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [
+        {
+          "id": "cccccccccccccc01",
+          "name": "Light",
+          "components": {
+            "transform": {
+              "position": [
+                0,
+                0,
+                0
+              ]
+            }
+          }
+        },
+        {
+          "id": "cccccccccccccc02",
+          "name": "Prop",
+          "components": {
+            "transform": {
+              "position": [
+                7,
+                7,
+                7
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "mid.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "instances": [
+        {
+          "id": "2222222222222201",
+          "scene": "child.scene.json"
+        }
+      ],
+      "overrides": [
+        {
+          "path": [
+            "2222222222222201",
+            "cccccccccccccc01"
+          ],
+          "pointer": "/components/transform/position",
+          "value": [
+            1,
+            1,
+            1
+          ]
+        }
+      ]
+    },
+    "root.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "instances": [
+        {
+          "id": "1111111111111101",
+          "scene": "mid.scene.json"
+        }
+      ],
+      "overrides": [
+        {
+          "path": [
+            "1111111111111101",
+            "2222222222222201",
+            "cccccccccccccc01"
+          ],
+          "pointer": "/components/transform/position",
+          "value": [
+            2,
+            2,
+            2
+          ]
+        }
+      ]
+    }
+  },
+  "expect": {
+    "ok": true,
+    "idPaths": [
+      [
+        "1111111111111101",
+        "2222222222222201",
+        "cccccccccccccc01"
+      ],
+      [
+        "1111111111111101",
+        "2222222222222201",
+        "cccccccccccccc02"
+      ]
+    ],
+    "diagnostics": []
+  }
+}

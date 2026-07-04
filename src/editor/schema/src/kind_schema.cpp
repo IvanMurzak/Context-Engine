@@ -197,14 +197,57 @@ constexpr std::string_view kSceneSchemaJson = R"({
   "properties": {
     "kind": {"type": "string", "enum": ["scene"], "description": "The M1 placeholder kind marker; the $schema header is authoritative."},
     "notes": {"description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."},
+    "instances": {
+      "type": "array",
+      "description": "Scene composition (L-35): each entry instances another scene under a stable intra-file id; per-instance state lives in `overrides`.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "scene"],
+        "properties": {
+          "id": {"type": "string", "description": "Stable intra-file id of this instance — the first segment of override id-paths addressing into its subtree (L-33/L-35)."},
+          "scene": {"type": "string", "description": "Project-root-relative path of the instanced scene (becomes a typed x-ctx-ref when the asset database lands, L-34/L-36)."},
+          "notes": {"description": "Schema-blessed annotations."}
+        }
+      }
+    },
+    "overrides": {
+      "type": "array",
+      "description": "Id-path-addressed override entries ([instanceId, ..., entityId] — L-35), innermost-out precedence (the OUTERMOST instancing scene wins). Exactly one kind per entry: `pointer`+`value` (per-field), `add` (structural add), or `remove: true` (structural remove) — enforced by the composition model.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path"],
+        "properties": {
+          "path": {"type": "array", "items": {"type": "string"}, "description": "The id-path, from an instance id of THIS scene inward ($root addresses a composable sub-scene root)."},
+          "pointer": {"type": "string", "description": "JSON pointer into the addressed entity (field override; paired with `value`). /id, /$schema and /version are immutable under composition (L-37)."},
+          "value": {"description": "The overriding value — any JSON (paired with `pointer`)."},
+          "add": {"type": "object", "description": "Structural override: an entity object (with its own stable id) composed under the instance subtree `path` addresses."},
+          "remove": {"type": "boolean", "description": "Structural override: remove the entity (or whole instance subtree) `path` addresses."},
+          "notes": {"description": "Schema-blessed annotations."}
+        }
+      }
+    },
+    "root": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The scene-root entity (L-35): scene-level state as singleton components. Inert by default when this scene is instanced as a sub-scene; `composable: true` opts it into the parent flatten. Bakes are derived artifacts, never authored.",
+      "properties": {
+        "id": {"type": "string", "description": "Optional stable intra-file id; when absent the root is addressable in override paths as `$root`."},
+        "composable": {"type": "boolean", "description": "Opt-in: compose this root's components when the scene is instanced as a sub-scene (default false = inert)."},
+        "components": {"type": "object", "description": "Singleton scene-level components."},
+        "notes": {"description": "Schema-blessed annotations."}
+      }
+    },
     "entities": {
       "type": "array",
-      "description": "The scene's entities (id-keyed stable collections land with the full M2 schema).",
+      "description": "The scene's entities — an id-keyed stable collection: an array of objects each carrying a stable intra-file `id` (L-33; the map-keyed form is forbidden, R-FILE-001).",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["name", "components"],
         "properties": {
+          "id": {"type": "string", "description": "Stable intra-file id: collision-resistant random lowercase hex, >= 64-bit, file-scoped, never sequential (L-33). Required for composition — an id-less entity cannot carry composed identity."},
           "name": {"type": "string"},
           "notes": {"description": "Schema-blessed annotations at the entity level."},
           "components": {

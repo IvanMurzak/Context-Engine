@@ -1,0 +1,74 @@
+{
+  "notes": "R-QA-011: explicit structural overrides (L-35) - remove one template entity, add one entity under the instance subtree, and override the added entity from the same scene.",
+  "root": "root.scene.json",
+  "scenes": {
+    "child.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [
+        {
+          "id": "cccccccccccccc01",
+          "name": "Gone",
+          "components": {}
+        },
+        {
+          "id": "cccccccccccccc02",
+          "name": "Kept",
+          "components": {}
+        }
+      ]
+    },
+    "root.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "instances": [
+        {
+          "id": "1111111111111101",
+          "scene": "child.scene.json"
+        }
+      ],
+      "overrides": [
+        {
+          "path": [
+            "1111111111111101",
+            "cccccccccccccc01"
+          ],
+          "remove": true
+        },
+        {
+          "path": [
+            "1111111111111101"
+          ],
+          "add": {
+            "id": "dddddddddddddd01",
+            "name": "Extra",
+            "components": {}
+          }
+        },
+        {
+          "path": [
+            "1111111111111101",
+            "dddddddddddddd01"
+          ],
+          "pointer": "/name",
+          "value": "Renamed"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "ok": true,
+    "idPaths": [
+      [
+        "1111111111111101",
+        "cccccccccccccc02"
+      ],
+      [
+        "1111111111111101",
+        "dddddddddddddd01"
+      ]
+    ],
+    "diagnostics": []
+  }
+}

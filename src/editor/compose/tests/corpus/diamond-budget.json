@@ -1,0 +1,85 @@
+{
+  "notes": "R-QA-011: a diamond fan-out (root -> mid1/mid2 -> the same leaf) against a composed-entity budget of 3 - expansion stops deterministically with compose.too_many_entities (R-FILE-011(e) bounded composition).",
+  "root": "root.scene.json",
+  "limits": {
+    "maxEntities": 3
+  },
+  "scenes": {
+    "leaf.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [
+        {
+          "id": "eeeeeeeeeeeeee01",
+          "name": "A",
+          "components": {}
+        },
+        {
+          "id": "eeeeeeeeeeeeee02",
+          "name": "B",
+          "components": {}
+        }
+      ]
+    },
+    "mid1.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "instances": [
+        {
+          "id": "2222222222222201",
+          "scene": "leaf.scene.json"
+        }
+      ]
+    },
+    "mid2.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "instances": [
+        {
+          "id": "2222222222222201",
+          "scene": "leaf.scene.json"
+        }
+      ]
+    },
+    "root.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "instances": [
+        {
+          "id": "1111111111111101",
+          "scene": "mid1.scene.json"
+        },
+        {
+          "id": "1111111111111102",
+          "scene": "mid2.scene.json"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "ok": false,
+    "idPaths": [
+      [
+        "1111111111111101",
+        "2222222222222201",
+        "eeeeeeeeeeeeee01"
+      ],
+      [
+        "1111111111111101",
+        "2222222222222201",
+        "eeeeeeeeeeeeee02"
+      ],
+      [
+        "1111111111111102",
+        "2222222222222201",
+        "eeeeeeeeeeeeee01"
+      ]
+    ],
+    "diagnostics": [
+      "compose.too_many_entities"
+    ]
+  }
+}
