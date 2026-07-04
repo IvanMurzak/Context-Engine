@@ -3,6 +3,7 @@
 #include "context/editor/filesync/atomic_io.h"
 
 #include "context/editor/filesync/file_store.h"
+#include "context/editor/filesync/path_jail.h"
 
 namespace context::editor::filesync
 {
@@ -27,6 +28,31 @@ bool is_atomic_temp_name(std::string_view name)
     if (name.size() >= 4 && name.substr(name.size() - 4) == ".tmp")
         return true;
     return name.find(".tmp.") != std::string_view::npos;
+}
+
+bool is_control_path(std::string_view path)
+{
+    const std::string norm = normalize_path(path);
+
+    // Anything under a ".editor/" control directory, or a staging temp file, is engine-internal and
+    // never authored content (shared by the reconcile pipeline and the sidecar orphan sweep).
+    std::string segment;
+    for (std::size_t i = 0; i <= norm.size(); ++i)
+    {
+        if (i == norm.size() || norm[i] == '/')
+        {
+            if (segment == ".editor")
+                return true;
+            if (is_atomic_temp_name(segment))
+                return true;
+            segment.clear();
+        }
+        else
+        {
+            segment.push_back(norm[i]);
+        }
+    }
+    return false;
 }
 
 bool atomic_write(FileStore& fs, std::string_view path, std::string_view data,

@@ -48,6 +48,7 @@ std::string serialize_body(const IntentEntry& entry)
         put_u64(out, write.expected_prev_hash);
         put_u64(out, write.target_hash);
         put_field(out, write.data);
+        put_u64(out, write.kind == WriteKind::remove ? 1 : 0);
     }
     return out.str();
 }
@@ -117,9 +118,12 @@ std::optional<IntentEntry> parse_body(const std::string& body)
     for (std::uint64_t i = 0; i < count; ++i)
     {
         PlannedWrite write;
+        std::uint64_t kind = 0;
         if (!cursor.read_field(write.path) || !cursor.read_u64(write.expected_prev_hash) ||
-            !cursor.read_u64(write.target_hash) || !cursor.read_field(write.data))
+            !cursor.read_u64(write.target_hash) || !cursor.read_field(write.data) ||
+            !cursor.read_u64(kind) || kind > 1)
             return std::nullopt;
+        write.kind = kind == 1 ? WriteKind::remove : WriteKind::write;
         entry.writes.push_back(std::move(write));
     }
     return entry;
@@ -251,6 +255,14 @@ bool WriteQueue::execute(std::string_view op_id, const std::vector<PlannedWrite>
         const PlannedWrite& write = writes[i];
         if (!is_inside_jail(root_, write.path))
             return false; // front-door writes are jailed; leave the entry for recover() to report.
+        if (write.kind == WriteKind::remove)
+        {
+            // Idempotent: an already-absent file IS the target state. remove() routes through the
+            // FileStore seam, so the native store's TOCTOU-safe jail (R-SEC-008) covers it too.
+            if (fs_.exists(write.path) && !fs_.remove(write.path))
+                return false;
+            continue;
+        }
         const std::string unique = std::string{op_id} + "." + std::to_string(i);
         if (!atomic_write(fs_, write.path, write.data, unique))
             return false;
@@ -294,6 +306,34 @@ std::vector<Diagnostic> WriteQueue::recover()
             }
 
             const std::optional<std::string> current = fs_.read(write.path);
+
+            if (write.kind == WriteKind::remove)
+            {
+                if (!current)
+                    continue; // already applied — the file is absent (idempotent replay).
+                if (content_hash(*current) == write.expected_prev_hash)
+                {
+                    // Safe to (re)apply the removal — same jail + seam as a fresh remove.
+                    if (!fs_.remove(write.path))
+                    {
+                        fully_resumed = false;
+                        diagnostics.push_back(Diagnostic{"filesync.intent.resume", entry->op_id,
+                                                         "resume removal did not complete "
+                                                         "(jail-refused or I/O failure): " +
+                                                             write.path,
+                                                         {write.path}});
+                    }
+                    continue;
+                }
+                // The file moved on since planning: do NOT delete it (L-25 — no rollback either).
+                fully_resumed = false;
+                diagnostics.push_back(Diagnostic{"filesync.intent.cas", entry->op_id,
+                                                 "content changed since crash; not removing " +
+                                                     write.path,
+                                                 {write.path}});
+                continue;
+            }
+
             const std::uint64_t current_hash = content_hash(current ? *current : std::string{});
 
             if (current_hash == write.target_hash)

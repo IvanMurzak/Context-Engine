@@ -79,6 +79,9 @@ public:
     void crash_on_rename_to(std::string path);
     // Arm a one-shot crash on the next write to `path`.
     void crash_on_write(std::string path);
+    // Arm a one-shot crash on the next remove of `path` — BEFORE anything is deleted. Models a crash
+    // inside a multi-file move's removal tail (R-QA-010: crash points between every durable step).
+    void crash_on_remove(std::string path);
     // Pin an existing file's synthetic mtime (models same-second edits).
     void set_mtime(std::string_view path, std::uint64_t mtime_nanos);
 
@@ -95,6 +98,7 @@ private:
     std::uint64_t next_mtime_ = 1;
     std::optional<std::string> crash_rename_dest_;
     std::optional<std::string> crash_write_path_;
+    std::optional<std::string> crash_remove_path_;
 };
 
 } // namespace context::editor::filesync

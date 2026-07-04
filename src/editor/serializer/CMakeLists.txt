@@ -9,7 +9,8 @@
 add_library(context_serializer STATIC
     src/canonical.cpp
     src/json_parse.cpp
-    src/nfc.cpp)
+    src/nfc.cpp
+    src/sidecar_ref.cpp)
 
 target_include_directories(context_serializer PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -34,7 +35,8 @@ set(_context_serializer_tests
     test_canonical_write
     test_vectors
     test_property
-    test_nfc_bench)
+    test_nfc_bench
+    test_sidecar_ref)
 
 foreach(_t IN LISTS _context_serializer_tests)
     add_executable(context_serializer_${_t} tests/${_t}.cpp)
