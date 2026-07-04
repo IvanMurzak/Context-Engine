@@ -1,0 +1,85 @@
+src/editor/filesync/README.md
+  s_e3239cf02087b8::t_e531c60d58b422 109-114
+  s_e3239cf02087b8::t_c11a3437a5f81e 36-56
+  s_e3239cf02087b8::t_6b920a27d8aebe 9-10
+src/editor/filesync/include/context/editor/filesync/intent_log.h
+  s_e3239cf02087b8::t_f11b1d88b9f968 23-32,37-38,41-42,49
+  s_e3239cf02087b8::t_aef1b9331ed6c1 105-106,110-113
+src/editor/serializer/CMakeLists.txt
+  s_e3239cf02087b8::t_0f4d8e1e67239d 12-13
+  s_e3239cf02087b8::t_fd3417cb6ac3a6 38-39
+src/editor/filesync/CMakeLists.txt
+  s_e3239cf02087b8::t_acd702a9d4fe55 21-22,31-35
+  s_e3239cf02087b8::t_6cf15717bf697f 64-65
+src/editor/filesync/src/reconciler.cpp
+  s_e3239cf02087b8::t_434bc9d191d884 182,191-238
+  s_e3239cf02087b8::t_7b023301da273a 30-31
+  s_e3239cf02087b8::t_26858a8065ad2e 134
+  s_595741b60ca1d6::t_a457395421bbea 239
+src/editor/filesync/include/context/editor/filesync/file_store.h
+  s_e3239cf02087b8::t_910462cf1027e9 82-84
+  s_e3239cf02087b8::t_caf0e259aeeee1 101
+src/editor/filesync/src/intent_log.cpp
+  s_e3239cf02087b8::t_6d9b6c27764bef 51
+  s_e3239cf02087b8::t_db34e7fdd1087f 309-336
+  s_e3239cf02087b8::t_c431bccfc43dca 258-265
+  s_e3239cf02087b8::t_cec131bf5f9148 121,123-124,126
+src/editor/filesync/include/context/editor/filesync/atomic_io.h
+  s_e3239cf02087b8::t_071849eecebe72 26-30
+src/editor/filesync/src/atomic_io.cpp
+  s_e3239cf02087b8::t_1bd1edbd85f8ac 33-57
+  s_e3239cf02087b8::t_5c26c7e4af879e 6
+src/editor/serializer/include/context/editor/serializer/sidecar_ref.h
+  s_e3239cf02087b8::t_49964b5b51da86 1-50
+src/editor/contract/src/error_catalog.cpp
+  s_e3239cf02087b8::t_99f5f71eca3f3d 100-121
+src/editor/serializer/tests/test_sidecar_ref.cpp
+  s_e3239cf02087b8::t_ad385e330cd2a3 1-145
+src/editor/filesync/include/context/editor/filesync/reconciler.h
+  s_e3239cf02087b8::t_4b353df8990c0a 117-119
+  s_e3239cf02087b8::t_b4f66d5077a410 43-45
+  s_e3239cf02087b8::t_8b1daf770daa0e 7
+  s_e3239cf02087b8::t_3ec53994b2a791 131
+  s_e3239cf02087b8::t_c5a82a405baaa8 101-111
+  s_e3239cf02087b8::t_0d9e099c8a0085 41-42
+src/editor/serializer/src/sidecar_ref.cpp
+  s_e3239cf02087b8::t_bc113fdef0bea4 1-131,134-146
+  s_e3239cf02087b8::t_9d2867491d6598 132-133
+src/editor/filesync/tests/test_sidecar.cpp
+  s_e3239cf02087b8::t_233293468c56e4 1-67,76-109,113-128,131-386,388-693
+  s_e3239cf02087b8::t_11c47974fa4472 129-130
+  s_e3239cf02087b8::t_864663e8332690 387
+  s_e3239cf02087b8::t_ecbcd1503c8384 68-75
+  s_e3239cf02087b8::t_3b1433d4d50f03 110-112
+src/editor/filesync/include/context/editor/filesync/sidecar.h
+  s_e3239cf02087b8::t_9df1f3f21c040f 1-192
+src/editor/filesync/src/sidecar.cpp
+  s_e3239cf02087b8::t_36339c1edfa11b 1-576
+src/editor/filesync/src/file_store.cpp
+  s_e3239cf02087b8::t_55414a584f2e56 82-88,101-103
+  s_e3239cf02087b8::t_8d8da3542608ea 104-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "99feaba624fae4826fbc2e17c10ad189745bd24d",
+  "prompts": {},
+  "sessions": {
+    "s_595741b60ca1d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d07a825a-bbd0-4c62-89c9-32aaf87d478b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
