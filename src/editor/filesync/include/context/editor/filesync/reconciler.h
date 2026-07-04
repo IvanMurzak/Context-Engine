@@ -4,6 +4,7 @@
 
 #include "context/editor/filesync/expected_writes.h"
 #include "context/editor/filesync/reconcile_index.h"
+#include "context/editor/filesync/sidecar.h"
 
 #include <cstdint>
 #include <optional>
@@ -37,6 +38,11 @@ struct ReconcileChange
     std::string path;
     ChangeType type = ChangeType::modified;
     std::uint64_t content_hash = 0; // 0 for a removal
+    // Non-empty when this change is SYNTHETIC: `path` is an owner document whose bytes did not
+    // change, dirtied because the named sidecar changed (L-33 sidecar-aware reconcile — the owner's
+    // derived output depends on the sidecar's bytes even though its own bytes are stable). The
+    // NSDMI keeps pre-existing 3-member aggregate initializations warning-clean (-Wextra).
+    std::string via_sidecar{};
 };
 
 struct ReconcilerConfig
@@ -92,12 +98,25 @@ public:
     bool save_index();
     [[nodiscard]] const ReconcileIndex& index() const noexcept { return index_; }
 
+    // --- sidecar-aware reconcile (L-33) ---------------------------------------------------------
+    // The layer that PARSES owner documents (the derivation graph's parse node — filesync itself
+    // never parses on the reconcile hot path) registers each owner's resolved sidecar paths here
+    // (from filesync::scan_sidecar_refs). Once registered, any reconciled change to a sidecar path
+    // ALSO emits a synthetic `modified` change for its owner(s) — `via_sidecar` names the trigger —
+    // so the owner's derived output is re-derived even though its own bytes are stable. An owner
+    // whose removal is reconciled drops its registrations automatically.
+    void set_sidecar_refs(std::string_view owner, std::vector<std::string> sidecar_paths);
+    void clear_sidecar_refs(std::string_view owner);
+    [[nodiscard]] const SidecarIndex& sidecar_index() const noexcept { return sidecars_; }
+
 private:
     // Re-read + re-hash `path`, reconcile against the index, and return the external change (if any).
     // Applies self-echo suppression. A removal is reported when the file is gone but indexed.
     std::optional<ReconcileChange> rehash(std::string_view path, std::uint64_t now_nanos);
-    [[nodiscard]] bool is_control_path(std::string_view path) const;
     void announce_degraded_if_needed();
+    // Post-process one pass's changes: drop registrations of removed owners, then append the
+    // synthetic owner change for every changed sidecar (skipping owners already in the list).
+    void expand_sidecar_owners(std::vector<ReconcileChange>& changes);
 
     FileStore& fs_;
     Watcher& watcher_;
@@ -109,6 +128,7 @@ private:
     std::string crawl_fallback_note_;
     ReconcileIndex index_;
     ExpectedWrites expected_;
+    SidecarIndex sidecars_;
     bool degraded_announced_ = false;
 };
 

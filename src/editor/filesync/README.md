@@ -6,8 +6,8 @@ operations. It is `EditorKernel`'s real atomic-IO + watcher implementation, buil
 platform seams (`context::kernel::Clock` / `TaskRunner` / `EventBus`, consumed read-only) — exactly as
 `src/kernel/include/context/kernel/platform.h` anticipates.
 
-Library target: **`context_filesync`** (links `context_kernel` + `context_warnings`). Namespace:
-`context::editor::filesync`.
+Library target: **`context_filesync`** (links `context_kernel` + `context_serializer` +
+`context_warnings`). Namespace: `context::editor::filesync`.
 
 ## What it implements
 
@@ -33,6 +33,27 @@ Library target: **`context_filesync`** (links `context_kernel` + `context_warnin
   `MemoryFileStore`), a virtual `Watcher` (`FakeWatcher` can drop/duplicate/reorder events), and the
   kernel `Clock`. The seams are M1 architecture and are **not retrofittable**; the deterministic
   fault-injection harness (a later task) drives them.
+- **Binary-sidecar authoring rules (L-33, M2 wave 3)** — `sidecar.h`. Heavy numeric payloads live in
+  versioned binary sidecars beside their authored JSON owner, never inline base64. The pieces: a
+  **12-byte header codec** (8-byte magic + little-endian format version; the magic starts with `C`
+  and embeds a NUL, so a sidecar can NEVER parse as JSON — `serializer::canonicalize()` therefore
+  passes it through raw and the **canonical hash EQUALS the raw-byte hash by construction**, the
+  R-FILE-001 sidecar rule); the authored reference shape `{"$sidecar": "<relpath>", "hash":
+  "<decimal raw-byte hash>"}` (read out of the parsed tree by `serializer/sidecar_ref.h` — the
+  serializer integration — with owner-relative resolution + the **R-SEC-008 jail** on every sidecar
+  path here); **verification diagnostics** (`sidecar.dangling_ref` / `sidecar.hash_mismatch` /
+  header codes) and an **orphan sweep** (`sidecar.orphaned`), all R-CLI-008 catalog codes; a
+  bidirectional **`SidecarIndex`** feeding the reconciler's **sidecar-aware reconcile** — a
+  changed/removed sidecar emits a synthetic `via_sidecar` change dirtying its registered owner(s);
+  registration comes from the parse layer via `Reconciler::set_sidecar_refs`, since filesync never
+  parses on the reconcile hot path — and the two **intent-logged plans**:
+  `plan_sidecar_family_write` (sidecar-FIRST order — every sidecar durable before the referencing
+  JSON write; refuses to author a dangling or lying ref) and `plan_owner_move` (**owned
+  satellites**: a move/rename carries each referenced sidecar at its owner-relative relpath,
+  dest-writes-then-src-removes so no observable mid-state has a referencing JSON without its
+  sidecar — enabled by the `PlannedWrite` `remove` kind, CAS-guarded like writes on resume).
+  Sidecars are **NEVER content-merged** — a sidecar conflict is whole-file ours/theirs
+  (R-FILE-012(d)); `is_sidecar_bytes` is the classifier that merge layer will consume.
 - **Native OS watcher backends (R-FILE-002)** — `NativeWatcher` is the real hint source behind the
   `Watcher` seam: **ReadDirectoryChangesW** (Windows, native recursive subtree), **inotify** (Linux,
   per-directory watches recursively maintained as directories appear, with a scan that closes the
@@ -85,9 +106,12 @@ Library target: **`context_filesync`** (links `context_kernel` + `context_warnin
 `ctest --preset dev` runs each `filesync-*` executable (see `CMakeLists.txt`): content hash, SHA-256 /
 HMAC known-answer vectors, atomic-IO torn-write proof, path jail, watcher fault primitives, reconcile
 index round-trip, expected-writes TTL, the reconciler pipeline (dropped-event + same-mtime-edit safety
-nets, self-echo, degraded event), the intent-log crash-recovery / integrity / jail / CAS paths, and —
-for the native on-disk store — the `NativeFileStore` real-FS contract (atomic-rename replace, fsync,
-stat/list/remove, binary round-trip, real-disk torn-write proof) plus on-disk intent-log crash recovery.
+nets, self-echo, degraded event), the intent-log crash-recovery / integrity / jail / CAS paths, the
+binary-sidecar rules (header versioning, raw≡canonical hash, ref resolution + jail, dangling / orphan /
+hash-mismatch diagnostics, sidecar-first + owned-satellite plans with crash windows between every
+durable step, sidecar-aware reconcile), and — for the native on-disk store — the `NativeFileStore`
+real-FS contract (atomic-rename replace, fsync, stat/list/remove, binary round-trip, real-disk
+torn-write proof) plus on-disk intent-log crash recovery.
 The `filesync-test_native_watcher` suite exercises the CURRENT platform's real backend on real FS
 events: create/modify/remove/new-directory smoke, hint-driven reconciler convergence, self-echo
 suppression under real watcher timing, a branch-switch storm converged by the crawl safety net, and
