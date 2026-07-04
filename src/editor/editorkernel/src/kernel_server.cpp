@@ -148,17 +148,7 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
         data.set("worldGeneration", Json(kernel_.generation()));
         Json recovery = Json::array();
         for (const auto& d : kernel_.recovery_diagnostics())
-        {
-            Json entry = Json::object();
-            entry.set("code", Json(d.code));
-            entry.set("opId", Json(d.op_id));
-            entry.set("message", Json(d.message));
-            Json remaining = Json::array();
-            for (const std::string& p : d.remaining_writes)
-                remaining.push_back(Json(p));
-            entry.set("remainingWrites", std::move(remaining));
-            recovery.push_back(std::move(entry));
-        }
+            recovery.push_back(diagnostic_json(d));
         data.set("recoveryDiagnostics", std::move(recovery));
         return Envelope::success(std::move(data), kernel_.generation());
     }

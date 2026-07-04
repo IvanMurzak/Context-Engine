@@ -27,11 +27,14 @@
 #include <string>
 #include <system_error>
 #include <variant>
+#include <vector>
 
 namespace fs = std::filesystem;
 using context::editor::contract::ClientHandshake;
 using context::editor::contract::Envelope;
 using context::editor::derivation::canonical_parse;
+using context::editor::editorkernel::BatchEdit;
+using context::editor::editorkernel::EditBatchOutcome;
 using context::editor::editorkernel::EditorKernel;
 using context::editor::editorkernel::EditorKernelConfig;
 using context::editor::editorkernel::EditOutcome;
@@ -299,6 +302,49 @@ int main()
         dup_kernel.stop();
         std::error_code dup_ec;
         fs::remove_all(dup_project, dup_ec);
+    }
+
+    // --- edit_files refuses a batch naming the same path twice (R-FILE-004 resume correctness):
+    // --- every intent entry's planning-time CAS hash is measured against the PRE-batch file, so a
+    // --- twice-applied path would make a mid-batch crash recovery re-CAS the second entry against
+    // --- the FIRST apply's bytes — misreporting a moved-on file instead of resuming the batch.
+    {
+        const fs::path dupbatch_project = make_temp_project("dup-batch");
+        MemoryFileStore db_store;
+        NullWatcher db_watcher;
+        context::kernel::ManualClock db_clock;
+        context::kernel::InlineTaskRunner db_tasks;
+
+        EditorKernel db_kernel(db_store, db_watcher, db_clock, db_tasks,
+                               config_for(dupbatch_project));
+        CHECK(db_kernel.start(ScopeSet::all()) == StartOutcome::booted);
+
+        const std::vector<BatchEdit> dup_batch = {
+            {"proj/x.scene", "entity: first"},
+            {"proj/y.scene", "entity: other"},
+            {"proj/x.scene", "entity: second"}, // the same path again — refused at planning
+        };
+        const EditBatchOutcome refused = db_kernel.edit_files(dup_batch, writer);
+        CHECK(!refused.ok);
+        CHECK(refused.error_code == "usage.invalid");
+        CHECK(refused.error_detail.find("proj/x.scene") != std::string::npos);
+        // Planning-stage refusal: NOTHING was written — no partial batch, no intent entry.
+        CHECK(!db_store.exists("proj/x.scene"));
+        CHECK(!db_store.exists("proj/y.scene"));
+
+        // The same content batch WITHOUT the duplicate goes through (the guard is not over-broad).
+        const std::vector<BatchEdit> clean_batch = {
+            {"proj/x.scene", "entity: second"},
+            {"proj/y.scene", "entity: other"},
+        };
+        const EditBatchOutcome accepted = db_kernel.edit_files(clean_batch, writer);
+        CHECK(accepted.ok);
+        CHECK(*db_store.read("proj/x.scene") == "entity: second");
+        CHECK(*db_store.read("proj/y.scene") == "entity: other");
+
+        db_kernel.stop();
+        std::error_code db_ec;
+        fs::remove_all(dupbatch_project, db_ec);
     }
 
     // Best-effort cleanup of the real lock directory.

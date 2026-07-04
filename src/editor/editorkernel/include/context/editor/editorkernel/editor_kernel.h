@@ -99,6 +99,11 @@ struct EditBatchOutcome
     std::string error_detail; // e.g. the offending path for a jail violation
 };
 
+// The uniform machine-readable JSON shape of ONE R-FILE-004/R-FILE-003 recovery diagnostic —
+// {code, opId, message, remainingWrites} — shared by the boot-time `diagnostics` event topic and
+// the `snapshot` verb's recoveryDiagnostics array (KernelServer), so the two surfaces never drift.
+[[nodiscard]] contract::Json diagnostic_json(const filesync::Diagnostic& diagnostic);
+
 class EditorKernel
 {
 public:
@@ -154,9 +159,12 @@ public:
                                         const bridge::ScopeSet& caller_scopes);
 
     // Daemon-initiated MULTI-file write (R-FILE-004): scope-check (file_write) -> jail-check every
-    // path up front -> serialize the whole batch through the crash-recovery intent log (fsync the
-    // planned writes BEFORE the first byte, per-file-atomic apply in the given dependency-safe
-    // order, clear AFTER the last durable rename) -> ingest each write into the derivation graph.
+    // path up front (a batch naming the same path twice is refused with usage.invalid — each entry's
+    // planning-time CAS hash is measured against the PRE-batch file, so a duplicate would poison
+    // crash recovery's re-CAS) -> serialize the whole batch through the crash-recovery intent log
+    // (fsync the planned writes BEFORE the first byte, per-file-atomic apply in the given
+    // dependency-safe order, clear AFTER the last durable rename) -> ingest each write into the
+    // derivation graph.
     // A kill -9 mid-batch leaves the fsync'd intent entry on disk; the next incarnation's start()
     // resumes it to completion (or diagnoses, never clobbering a moved-on file). Valid only while
     // running() (the intent log comes up with the daemon).
@@ -190,8 +198,10 @@ public:
     {
         return graph_.node(path);
     }
-    // Read-your-writes query (R-CLI-006): bounded-block until the world reflects `canonical_hash`,
-    // then read the node. nullopt on barrier timeout OR an absent node.
+    // Read-your-writes query (R-CLI-006): bounded-block until THIS path's node carries
+    // `canonical_hash`, then return it. nullopt whenever the bounded drain expires without the path
+    // reflecting that hash (barrier timeout, absent node, or a superseded write) — never a stale
+    // non-matching node with success semantics.
     [[nodiscard]] std::optional<derivation::DerivedSource>
     query_after_hash(std::string_view path, std::uint64_t canonical_hash);
 

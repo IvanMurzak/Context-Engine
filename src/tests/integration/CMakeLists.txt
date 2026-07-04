@@ -61,11 +61,13 @@ foreach(_i RANGE ${_m1_exit_last})
 endforeach()
 
 # Cross-process tests spawn daemon children that could block if something regresses; cap every
-# criterion so CI never hangs. The kill-9 gate gets extra headroom for its bounded race retries.
+# criterion so CI never hangs. The kill-9 gate gets extra headroom: its worst case is 5 race
+# retries x (daemon boot 15s + mid-op poll 20s + kill reap 15s) + the recovery scenario — ~300s
+# on a slow leg, so 600 keeps a 2x margin without letting a real hang eat the job budget.
 set_tests_properties(
     m1-exit-1-files-as-truth
     m1-exit-2-live-attach
     m1-exit-4-contract-parity
     m1-exit-5-scope-enforcement
     PROPERTIES TIMEOUT 120)
-set_tests_properties(m1-exit-3-crash-recovery PROPERTIES TIMEOUT 300)
+set_tests_properties(m1-exit-3-crash-recovery PROPERTIES TIMEOUT 600)

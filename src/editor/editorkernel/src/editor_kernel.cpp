@@ -9,6 +9,7 @@
 #include "context/editor/filesync/path_jail.h"
 
 #include <string>
+#include <unordered_set>
 #include <utility>
 
 namespace context::editor::editorkernel
@@ -16,6 +17,19 @@ namespace context::editor::editorkernel
 
 using contract::Envelope;
 using contract::Json;
+
+Json diagnostic_json(const filesync::Diagnostic& diagnostic)
+{
+    Json entry = Json::object();
+    entry.set("code", Json(diagnostic.code));
+    entry.set("opId", Json(diagnostic.op_id));
+    entry.set("message", Json(diagnostic.message));
+    Json remaining = Json::array();
+    for (const std::string& p : diagnostic.remaining_writes)
+        remaining.push_back(Json(p));
+    entry.set("remainingWrites", std::move(remaining));
+    return entry;
+}
 
 Envelope EditOutcome::envelope() const
 {
@@ -72,15 +86,8 @@ bridge::StartOutcome EditorKernel::start(bridge::ScopeSet launch_scopes)
     recovery_diagnostics_ = write_queue_->recover();
     for (const filesync::Diagnostic& d : recovery_diagnostics_)
     {
-        Json payload = Json::object();
+        Json payload = diagnostic_json(d);
         payload.set("event", Json(std::string("recovery.diagnostic")));
-        payload.set("code", Json(d.code));
-        payload.set("opId", Json(d.op_id));
-        payload.set("message", Json(d.message));
-        Json remaining = Json::array();
-        for (const std::string& p : d.remaining_writes)
-            remaining.push_back(Json(p));
-        payload.set("remainingWrites", std::move(remaining));
         daemon_.events().publish("diagnostics", std::move(payload));
     }
 
@@ -162,6 +169,8 @@ EditBatchOutcome EditorKernel::edit_files(const std::vector<BatchEdit>& edits,
     // CAS hash of each target (R-FILE-004 — a resume never clobbers a file that moved on).
     std::vector<filesync::PlannedWrite> writes;
     writes.reserve(edits.size());
+    std::unordered_set<std::string> planned_paths;
+    planned_paths.reserve(edits.size());
     for (const BatchEdit& e : edits)
     {
         const std::string key = filesync::normalize_path(e.path);
@@ -169,6 +178,16 @@ EditBatchOutcome EditorKernel::edit_files(const std::vector<BatchEdit>& edits,
         {
             out.error_code = "path.jail_violation";
             out.error_detail = e.path;
+            return out;
+        }
+        // One entry per path: every planning-time CAS hash is computed against the PRE-batch file,
+        // so a path applied twice would leave the second entry's recovery re-CAS staring at the
+        // FIRST apply's bytes after a mid-batch crash — misreported as a moved-on file instead of
+        // resumed to the batch's intended final content (R-FILE-004). Refuse up front.
+        if (!planned_paths.insert(key).second)
+        {
+            out.error_code = "usage.invalid";
+            out.error_detail = "duplicate path in batch: " + e.path;
             return out;
         }
         const std::optional<std::string> current = fs_.read(key);
@@ -282,8 +301,11 @@ EditorKernel::query_after_hash(std::string_view path, std::uint64_t canonical_ha
     // stall a query — so mark this path visible for the duration of the read. Scoped (unmarked below)
     // so a one-off read does not permanently exempt the path from load-shedding.
     graph_.set_visible(path, true);
-    const derivation::BarrierResult result =
-        derivation::wait_for_hash(graph_, canonical_hash, config_.barrier_max_passes);
+    // The world-global hash barrier is the fast path: it pumps bounded passes until the write is
+    // incorporated SOMEWHERE (R-CLI-006). Its verdict is deliberately discarded — resolving on
+    // ANOTHER node's identical content says nothing about THIS path (see below); the per-path
+    // check after the drain is authoritative either way.
+    (void)derivation::wait_for_hash(graph_, canonical_hash, config_.barrier_max_passes);
 
     // The hash barrier is world-global (reflects_hash answers "does ANY alive node carry this
     // canonical hash"), so when ANOTHER file already holds the identical canonical content the
@@ -301,12 +323,15 @@ EditorKernel::query_after_hash(std::string_view path, std::uint64_t canonical_ha
     }
     graph_.set_visible(path, false);
 
+    // Read-your-writes is strict: only a node CARRYING the hash is a success. A non-matching (or
+    // absent) node after the bounded drain means THIS path never derived the write within the
+    // budget (or the write was superseded) — returning it would hand the caller a possibly
+    // PRE-write state with success semantics, the exact staleness class this query exists to
+    // prevent. Callers distinguish "not reflected" from a node read via plain query().
     const std::optional<derivation::DerivedSource> node = graph_.node(path);
     if (node.has_value() && node->canonical_hash == canonical_hash)
-        return node; // the path itself reflects the write — the strongest read-your-writes answer
-    if (!result.ok())
-        return std::nullopt;
-    return node;
+        return node;
+    return std::nullopt;
 }
 
 } // namespace context::editor::editorkernel

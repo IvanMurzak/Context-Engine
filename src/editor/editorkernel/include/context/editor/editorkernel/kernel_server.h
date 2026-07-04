@@ -17,7 +17,8 @@
 //                                   method is in the dispatcher's file-write family, scope.cpp).
 //   * query     {path}           -> the derived node (canonical hash + generation) + world stats; read.
 //   * snapshot                   -> the R-BRIDGE-008 current-state snapshot (incarnationId, generation,
-//                                   lastSeq) + the boot recovery diagnostics; read.
+//                                   lastSeq, worldEntities, worldGeneration) + the boot recovery
+//                                   diagnostics; read.
 //   * reconcile                  -> fold external (out-of-band) edits into the derived world via the
 //                                   watch-hash-reconcile crawl (R-FILE-002), then settle; read (it
 //                                   mutates no authored state — it makes the daemon notice truth).
