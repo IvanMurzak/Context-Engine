@@ -179,7 +179,6 @@ public:
     };
 
     [[nodiscard]] const Counters& counters() const noexcept { return counters_; }
-    void set_progress_total(std::uint64_t total) noexcept { progress_total_ = total; }
 
     [[nodiscard]] bool exists(std::string_view path) const override { return inner_.exists(path); }
 
@@ -192,7 +191,7 @@ public:
         if (out.has_value())
             counters_.read_bytes += out->size();
         if (progress_every_ != 0 && counters_.reads % progress_every_ == 0)
-            emit_progress(progress_stage_, counters_.reads, progress_total_);
+            emit_progress(progress_stage_, counters_.reads, 0); // total unknown mid-scan
         return out;
     }
 
@@ -232,7 +231,6 @@ private:
     mutable Counters counters_;
     std::uint64_t progress_every_ = 0;
     const char* progress_stage_ = "scan";
-    std::uint64_t progress_total_ = 0;
 };
 
 // ---------------------------------------------------------------------------------------------

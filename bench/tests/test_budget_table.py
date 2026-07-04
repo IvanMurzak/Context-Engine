@@ -100,6 +100,19 @@ def test_envelope_scale_within():
     assert targets["warm-attach-total"]["status"] == "within"
 
 
+def test_envelope_scale_without_warm_reports_not_measured_not_over():
+    """A 100k run missing the warm-attach scenario must not fabricate stage breaches:
+    the warm budget was never measured, so stage rows report not-measured (with the
+    fresh number still carried), and nothing lands in over_budget."""
+    result = harness_result(files=100_000)
+    del result["scenarios"]["attach_warm"]
+    table = budget_table.build_table(result, NAMES)
+    stages = {r["stage"]: r for r in table["stages"]}
+    assert stages["watch"]["status"] == "not-measured"
+    assert stages["watch"]["measured_seconds_fresh"] == 0.9
+    assert table["over_budget"] == []
+
+
 def test_scale_independent_breach_detected_at_proxy_scale():
     table = budget_table.build_table(harness_result(edit_ms=250.0, query_p99=9.0), NAMES)
     targets = {t["id"]: t for t in table["targets"]}

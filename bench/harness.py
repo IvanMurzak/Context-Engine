@@ -360,9 +360,10 @@ def main() -> int:
         print(f"[harness] scenario {name} x{args.runs} ...", file=sys.stderr)
 
         if scenario == "daemons":
-            # The context binary: an explicit --daemon-binary, else the subject's first token
-            # (the real subject is "<binary> bench"). Tokens split like --subject.
-            binary = (args.daemon_binary or subject[0]).split()
+            # The context binary: an explicit --daemon-binary (tokens split like --subject), else
+            # the subject's first token — already a single resolved token, NOT re-split (a
+            # resolved absolute path may contain spaces).
+            binary = args.daemon_binary.split() if args.daemon_binary else [subject[0]]
             binary[0] = resolve_exe(binary[0])
             entry = run_daemons_scenario(binary, args.runs, args.daemons,
                                          args.daemon_corpus_size, args.seed)

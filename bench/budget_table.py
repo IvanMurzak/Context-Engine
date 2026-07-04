@@ -127,9 +127,12 @@ def build_table(result: dict, scenario_names: dict[str, str]) -> dict:
             status = "not-measured"
         elif not at_envelope:
             status = "proxy-scale"
+        elif measured_warm is None:
+            # Fresh-only run at envelope scale: the warm-attach budget was never measured —
+            # report the fresh number, never fabricate an "over" against a missing measurement.
+            status = "not-measured"
         else:
-            status = "within" if measured_warm is not None and measured_warm <= budget \
-                else "over"
+            status = "within" if measured_warm <= budget else "over"
         stage_rows.append({
             "stage": stage,
             "budget_seconds_warm_100k": budget,
