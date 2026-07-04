@@ -160,5 +160,25 @@ int main()
             CHECK(!d.blocking);
     }
 
+    // --- malformed instance entries: excluded, advisory-diagnosed ---------------------------------
+    {
+        const char* kScene = R"({
+          "$schema": "ctx:scene",
+          "entities": [],
+          "instances": [
+            {"id": "bbbbbbbbbbbbbbb1"},
+            {"id": "bbbbbbbbbbbbbbb2", "scene": 42},
+            {"id": "bbbbbbbbbbbbbbb3", "scene": ""},
+            {"id": "bbbbbbbbbbbbbbb4", "scene": "ok.scene.json"}
+          ]
+        })";
+        std::optional<SceneDoc> doc = build_scene_doc("inst.scene.json", parse(kScene));
+        CHECK(doc.has_value());
+        CHECK(doc->instances.size() == 1 && doc->instances[0].id == "bbbbbbbbbbbbbbb4");
+        CHECK(count_code(*doc, "compose.override_malformed") == 3); // no / non-string / empty `scene`
+        for (const ComposeDiagnostic& d : doc->diagnostics)
+            CHECK(!d.blocking);
+    }
+
     COMPOSE_TEST_MAIN_END();
 }

@@ -231,14 +231,18 @@ void expand(FlattenState& s, const std::string& scene_path, const SceneDoc& doc,
 
     // --- structural adds targeting THIS subtree ---------------------------------------------------
     // An added entity behaves like an entity defined here, except its baseline (and chain tail)
-    // is the override entry itself. Its id joins this scene's id space for this expansion.
+    // is the override entry itself. Its id joins this scene's id space for this expansion (the id
+    // set is built only when an add targets this subtree — the common expansion has none).
     std::set<std::string> local_ids;
-    for (const AuthoredEntity& e : doc.entities)
-        local_ids.insert(e.id);
-    for (const SceneInstance& inst : doc.instances)
-        local_ids.insert(inst.id);
-    if (doc.root.present && !doc.root.id.empty())
-        local_ids.insert(doc.root.id);
+    if (!pending_adds.empty())
+    {
+        for (const AuthoredEntity& e : doc.entities)
+            local_ids.insert(e.id);
+        for (const SceneInstance& inst : doc.instances)
+            local_ids.insert(inst.id);
+        if (doc.root.present && !doc.root.id.empty())
+            local_ids.insert(doc.root.id);
+    }
 
     for (const NarrowedOverride& add : pending_adds)
     {
