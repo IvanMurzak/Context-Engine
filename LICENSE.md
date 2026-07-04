@@ -1,25 +1,34 @@
 # Context Game Engine — End User License Agreement
 
-> ## ⚠️ DRAFT v0.1 — NOT YET COUNSEL-REVIEWED — effective placeholder until reviewed
+> ## ⚠️ DRAFT v0.2 — NOT YET COUNSEL-REVIEWED — effective placeholder until reviewed
 >
-> This document is an AI-drafted working draft prepared to satisfy the M0 gate ("a
-> counsel-reviewed LICENSE exists in the repo before the first public push" —
-> `DESIGN-DECISIONS.md` L-57, `ROADMAP.md` §1 M0). **It is not legal advice, has not been
-> reviewed by a licensed attorney, and must not be treated as final.** It is written to be
-> internally consistent with the owner-ruled business terms recorded in `DESIGN-DECISIONS.md`
-> (L-57) and `README.md` ("v1 at a glance" → Business model row), so that counsel has a concrete,
-> complete starting point rather than a blank page. See **"Notes for counsel"** at the end for the
-> specific points that need professional review before this ships as the repo's real `LICENSE`.
+> This document is an AI-drafted working draft published so the repository carries a concrete,
+> complete license from day one. **It is not legal advice, has not been reviewed by a licensed
+> attorney, and must not be treated as final.** It is written to be internally consistent with
+> the project's owner-ruled business terms (design decision L-57, as amended by owner rulings
+> dated 2026-07-03). Professional counsel review is a standing gate before this draft banner is
+> removed.
 >
-> **Licensor (placeholder — flagged below):** Ivan Murzak (sole owner) [entity TBD — counsel]
+> **v0.2 (2026-07-03)** folds in the business department's legal review (round 1) and two owner
+> rulings dated 2026-07-03: **(1)** the royalty base is **gross receipts** — storefront/platform
+> fees are **not** deducted; and **(2)** this EULA is **fully decoupled from ai-game.dev** — the
+> former subscription-based royalty waiver is **removed**, and no subscription to any product or
+> service affects this license in any way (§6). See the Version history at the end.
+>
+> **Licensor:** Ivan Murzak, an individual (the Engine's sole owner). Licensor intends to form a
+> legal entity and to republish this EULA under that entity with a future Engine Version — see
+> §10 (Version-Locked Terms) and §15(7) (Licensor succession); such a republication changes the
+> identity of the Licensor, never the terms locked to earlier Engine Versions.
 > **Effective Date:** [DATE OF FIRST PUBLIC PUSH — TBD]
-> **Engine repository:** [GITHUB ORG/REPO URL — TBD; naming still open per L-57/README "Open items"]
+> **Engine repository:** https://github.com/IvanMurzak/Context-Engine
 > **Scope note:** This EULA governs **only** the Context Game Engine source repository
 > (EditorKernel, RuntimeKernel, the CLI, schemas, sample content, and associated tooling and
 > documentation published in that repository — collectively, the **"Engine"**). It does **not**
 > apply to the company's separate MCP plugin repositories (Unity-MCP, Godot-MCP, Unreal-MCP and
-> their extensions), which remain licensed independently under the Apache License 2.0, nor to the
-> ai-game.dev SaaS platform, which is governed by its own Terms of Service.
+> their extensions), which remain licensed independently under the Apache License 2.0, nor to
+> any separate product or service of Licensor, each of which is governed by its own terms.
+> **This EULA has no connection to any subscription or AI service** — using the Engine never
+> requires one, and holding one never changes these terms (§6).
 
 ---
 
@@ -34,45 +43,88 @@
 - **"Engine Version"** — a numbered/tagged release of the Engine (see §10, Version-Locked Terms).
 - **"You" / "Licensee"** — the individual or legal entity exercising rights under this EULA.
 - **"Product"** — a discrete game or interactive application You develop using the Engine,
-  identified by its own distinct name, title, or SKU as released or distributed to end users. A
-  sequel, spin-off, or unrelated title is a separate Product; a patch, DLC, expansion, or season
-  content released under the same title as an existing Product is **not** a separate Product for
-  royalty purposes (its revenue is added to that Product's Gross Revenue).
+  identified by its own distinct name, title, or SKU as released or distributed to end users.
+  For royalty purposes:
+  - a sequel, spin-off, or unrelated title is a **separate** Product;
+  - a patch, update, DLC, expansion, season content, or in-Product subscription offering
+    released under the same title is part of the **same** Product (its revenue is added to that
+    Product's Gross Revenue);
+  - ports, platform-specific versions, regional editions, and content-tier editions (e.g.,
+    standard/deluxe) of the same title are the **same** Product, aggregated across all
+    platforms and regions;
+  - a free demo, prologue, or trial of a title is part of that title's Product;
+  - an early-access or beta release and its subsequent full release under the same title are
+    the **same** Product; and
+  - a remake or remaster sold to end users as a new purchase is a **separate** Product.
 - **"Gross Revenue"** — for a given Product in a given Measurement Year, the sum of all revenue
-  actually received by You (or Your affiliates) that is directly attributable to that Product,
-  including sale/purchase price, in-app purchases, microtransactions, downloadable content,
-  season passes or subscriptions sold within the Product, and advertising or sponsorship revenue
-  earned within the Product — **less**: (a) amounts actually refunded or charged back to end
-  users; (b) sales tax, VAT, or similar transaction taxes collected on behalf of a taxing
-  authority; and (c) standard distribution/platform fees actually charged by a third-party
-  storefront or platform (e.g., a console, mobile, or PC storefront's standard revenue share) on
-  that revenue. Gross Revenue does **not** include revenue from goods or services not built with
-  the Engine (e.g., unrelated merchandise), revenue of a Product not built with the Engine even if
-  co-distributed, or investment/grant funding not tied to end-user transactions. *(⚠️ See Notes
-  for counsel — the netting choices in this definition are a business/legal judgment call, not a
-  settled default.)*
+  attributable to that Product worldwide, measured on a **gross-receipts basis**:
+  - for revenue arising from end-user transactions: the amounts paid by or on behalf of end
+    users for the Product (the end-user transaction price), **before and without deduction of**
+    any storefront, platform, or distribution fee, commission, or revenue share (e.g., a
+    console, mobile, or PC storefront's cut), payment-processing fees, or any other cost or
+    expense of any kind, whether or not such amounts are withheld by an intermediary before
+    remittance to You; and
+  - for Product revenue not arising from individual end-user transactions (e.g., a fixed
+    platform, catalog, or subscription-service fee paid for including or distributing the
+    Product, a porting or exclusivity fee for the Product, or advertising or sponsorship
+    revenue earned within the Product): the amounts payable to You (or Your affiliates) under
+    the relevant arrangement.
+
+  Gross Revenue includes, without limitation, sale/purchase price, in-app purchases,
+  microtransactions, downloadable content, and season passes or subscriptions sold within the
+  Product. Gross Revenue **excludes only**: (a) amounts actually refunded or charged back to
+  end users; and (b) sales tax, VAT, or similar transaction taxes collected on behalf of a
+  taxing authority — amounts never retained by You, not cost deductions. Gross Revenue does not
+  include revenue from goods or services not built with the Engine (e.g., unrelated
+  merchandise), revenue of a separate product not built with the Engine even if co-distributed,
+  or investment or grant funding not tied to end-user transactions. *(⚠️ currency-conversion
+  methodology and first-partial-year proration are open counsel/finance items.)*
+  - **Bundles.** If a Product is sold together with other products or services for a single
+    combined price, the portion of the bundle price attributable to the Product is determined
+    by a commercially reasonable, consistently applied allocation — by default, pro-rata by the
+    bundled items' individual standalone list prices at the time of sale — and only that
+    portion is Gross Revenue of that Product. Where several bundled items are Products built
+    with the Engine, each Product's Royalty Threshold and royalty are computed on its own
+    allocated share.
 - **"Measurement Year"** — each successive 12-month period beginning January 1 and ending
   December 31, measured per Product, aggregating Gross Revenue across all platforms, regions, and
   currencies in which that Product is distributed. *(⚠️ proration for a Product's first partial
-  year is undecided — see Notes for counsel.)*
+  year is undecided — flagged for counsel.)*
 - **"Royalty Threshold"** — USD $200,000 of Gross Revenue for a given Product in a given
   Measurement Year. The threshold applies **per Product, per Measurement Year**, and resets at
   the start of each new Measurement Year — it does not accumulate across years or across
   different Products.
-- **"Qualifying Subscription"** — an active, paid subscription to the ai-game.dev platform (Pro
-  tier or higher; not the Free tier) held by You or Your development team and associated with the
-  Product's development, as further described in §6.
-- **"Competing Engine Product"** — a general-purpose game engine, game-engine middleware, or
-  game-development authoring/runtime platform that You offer or make available (commercially or
-  otherwise) to any third party outside Your own affiliated development team, and that is created,
-  in whole or in material part, using the Engine's source code, architecture, or non-public
-  technical materials. For the avoidance of doubt, this definition restricts *use of the Engine's
-  source* to build such a product — it does not restrict any individual's personal skills,
-  general engine-development knowledge, or independent work on an unrelated engine project that
-  does not use or derive from the Engine's source. *(⚠️ flagged for enforceability review — see
-  Notes for counsel.)*
+- **"Competing Engine Product"** — any product or service **made available to any third party**
+  outside You and Your affiliated development team (commercially or free of charge, in any form
+  — including distributed software, an SDK or other development tool, middleware, or a hosted
+  or managed service) that:
+  - (a) **is, embeds, or exposes the Engine or a modified version of it** for any purpose other
+    than running a shipped Product — including offering the Engine (or any substantial part of
+    it) to third parties as a game engine, authoring tool, development or simulation platform,
+    middleware, or as a hosted or managed service whose value derives, in whole or in material
+    part, from the Engine's functionality; or
+  - (b) **is derived from, incorporates, or was created using the Engine's source code** (or a
+    modification of it) and provides third parties with the same or substantially similar
+    functionality as the Engine or a substantial component of it (e.g., its editor kernel,
+    runtime, build pipeline, or asset/derivation system).
+
+  For the avoidance of doubt, **none of the following is a Competing Engine Product**:
+  - a shipped Product (a game or interactive application under the §2 grant), including its
+    embedded Engine runtime components;
+  - a plugin, package, extension, editor tool, or asset pack **for** the Engine that requires a
+    licensed copy of the Engine to function and does not itself provide the Engine's
+    functionality apart from the Engine;
+  - paid tutorials, training, support, consulting, or contract development for Engine users;
+  - internal tooling used solely by You and Your affiliated development team and not made
+    available to third parties; and
+  - an independently developed engine, tool, or middleware that does not use, incorporate, or
+    derive from the Engine's source code. This definition restricts what You do with the
+    Engine's **source code and derivatives of it** — it does not restrict any individual's
+    personal skills or general engine-development knowledge. *(⚠️ flagged for enforceability
+    review by counsel.)*
 - **"Contribution"** — any source code, documentation, or other material You submit to Licensor
-  for inclusion in the Engine (see §9 and the CLA in Part II).
+  for inclusion in the Engine (see §9 and the CLA skeleton in
+  [`.github/CLA.md`](.github/CLA.md)).
 
 ### 2. License Grant
 
@@ -88,10 +140,20 @@ Subject to Your compliance with this EULA, Licensor grants You a worldwide, roya
 4. **Distribute Your Product** built with the Engine to end users worldwide, by any distribution
    method.
 
-This grant does not require a subscription to ai-game.dev, does not require any AI usage, and
-does not require registration, activation, or any network call to Licensor's servers (§7
-reporting is self-directed; see §8 of `DESIGN-DECISIONS.md` L-57's "contractual-only
-enforcement" principle).
+This grant does not require a subscription to any product or service (Licensor's or anyone
+else's), does not require any AI usage, and does not require registration, activation, or any
+network call to Licensor's servers — royalty reporting under §7 is entirely self-directed and
+contractual (§7(4)).
+
+**Acceptance.** This EULA operates as a condition on the copyright license to the Engine. You
+accept it by exercising any right granted in this §2 — for example, cloning or downloading the
+Engine's source for development use, building it, modifying it, embedding it in a Product, or
+distributing a Product built with it. If You do not agree to this EULA, do not exercise those
+rights: no other permission is granted, and use of the Engine outside this EULA's terms
+infringes Licensor's copyright rather than merely breaching a contract. Merely viewing the
+public repository, reading its code or documentation, or performing acts the hosting platform's
+own terms independently allow (e.g., viewing and forking within GitHub under GitHub's Terms of
+Service) does not constitute acceptance and imposes none of this EULA's obligations.
 
 ### 3. Restrictions
 
@@ -100,8 +162,9 @@ You may **not**, without Licensor's prior separate written agreement:
 1. **Redistribute the Engine itself**, in source or compiled form, standalone or as a
    development tool/SDK, to any third party — the only permitted redistribution of Engine
    runtime components is embedded inside a shipped Product per §2(3);
-2. **Use the Engine's source, architecture, or non-public technical materials to create,
-   contribute to, market, or distribute a Competing Engine Product** (as defined in §1);
+2. **Use the Engine, its source code, or any modification or derivative of it to create,
+   operate, market, or distribute a Competing Engine Product** (as defined in §1), including
+   offering the Engine's functionality to third parties as a hosted or managed service;
 3. **Sublicense** the Engine source code or grant any third party rights in it beyond what this
    EULA grants You;
 4. **Remove, obscure, or alter** any copyright, license, or attribution notice included in the
@@ -111,10 +174,11 @@ You may **not**, without Licensor's prior separate written agreement:
    "Context Game Engine" / "Context Engine" marks beyond truthfully stating a Product was "made
    with Context Game Engine."
 
-For clarity, §3(2) restricts use of the Engine's *source* to build a competing product — it does
-**not** restrict You from selling adjacent, Engine-compatible goods or services (asset packs,
-plugins distributed as separate packages, paid tutorials, paid support, consulting), which remain
-permitted and are not "commercial exploitation of the Engine itself."
+For clarity, §3(2) restricts use of the Engine's *source code and derivatives of it* to build a
+competing product — it does **not** restrict You from selling adjacent, Engine-compatible goods
+or services (asset packs, plugins distributed as separate packages that require the Engine, paid
+tutorials, paid support, consulting), which remain permitted and are not "commercial
+exploitation of the Engine itself."
 
 ### 4. Reservation of Rights; Ownership
 
@@ -122,7 +186,7 @@ Licensor retains all right, title, and interest in and to the Engine, including 
 property rights, subject only to the license expressly granted in §2. No rights are granted by
 implication, estoppel, or otherwise. You retain all right, title, and interest in Your Product
 and in any original code You write, subject to Licensor's rights in the Engine code embedded or
-incorporated within it, and subject to the CLA (Part II) for any Contribution You submit back to
+incorporated within it, and subject to the CLA (see §9) for any Contribution You submit back to
 the Engine itself.
 
 ### 5. Royalty
@@ -131,38 +195,41 @@ the Engine itself.
    the Royalty Threshold, You owe Licensor a royalty equal to **2% of the portion of Gross
    Revenue that exceeds the Royalty Threshold** (a marginal royalty — the first $200,000 of Gross
    Revenue for that Product in that Measurement Year is royalty-free).
-2. *Worked example (illustrative only, not a warranty of tax or accounting treatment):* if a
-   Product's Gross Revenue in a Measurement Year is $350,000, the royalty due is
-   2% × ($350,000 − $200,000) = 2% × $150,000 = **$3,000**.
-3. Below the Royalty Threshold, use of the Engine is entirely free — no subscription, no
-   registration, and no AI usage of any kind is required, consistent with `README.md`'s "free
-   under $200k/year" commitment and `REQUIREMENTS.md` R-HUX-009.
+2. *Worked examples (illustrative only, not a warranty of tax or accounting treatment):*
+   - A Product's Gross Revenue in a Measurement Year is $350,000. The royalty due is
+     2% × ($350,000 − $200,000) = 2% × $150,000 = **$3,000**.
+   - End users paid a storefront $350,000 for the Product in the Measurement Year; the
+     storefront withheld its 30% revenue share ($105,000) and remitted $245,000 to You. Gross
+     Revenue is still **$350,000** — the storefront's share is not deducted (§1, "Gross
+     Revenue") — and the royalty due is the same **$3,000**.
+   - A Product's Gross Revenue in a Measurement Year is $180,000. That is below the Royalty
+     Threshold: **no royalty is due** for that Product for that year and no statement is
+     required (§7).
+3. Below the Royalty Threshold, use of the Engine is entirely free — the full Engine, with no
+   subscription of any kind, no registration, and no AI usage required.
 4. Royalty is calculated and owed **per Product**; revenue from one Product is never aggregated
    with another Product to reach the threshold.
 5. Payment is due in USD within 45 days after the end of the Measurement Year in which the
    threshold was exceeded, together with the royalty statement described in §7. *(⚠️ currency
    conversion methodology for non-USD revenue is unspecified — flagged for counsel/finance.)*
 
-### 6. Royalty Waiver — ai-game.dev Subscription
+### 6. The Royalty Is Unconditional — No Subscription or Service Nexus
 
-The royalty in §5 is **waived** for a Product's Measurement Year if, as of the date the royalty
-statement for that Measurement Year is due under §7, You hold a **Qualifying Subscription**
-associated with that Product's development team. Holding a Qualifying Subscription does not
-require that the Product's AI usage occur on ai-game.dev, or that any particular volume of usage
-occurred — the waiver's nexus is **subscription status**, not proof of AI-assisted development.
-*(⚠️ This is a deliberately simple, literal nexus test per the owner's instruction; it is also the
-single highest-risk definitional gap in this draft — see Notes for counsel. A more precise test
-— e.g., subscription must be active for the entire Measurement Year, or must be held by every
-team member, or must be a specific tier — is a business decision Licensor has not yet made
-final.)*
+The royalty in §5 is a fixed term of this EULA. It is **not waived, reduced, deferred, or
+otherwise affected** by any subscription to, purchase of, or usage of any product or service of
+Licensor or of any third party — including any AI or cloud service. This EULA and the Engine
+are **fully independent of any such service**: no subscription is ever required to use the
+Engine (§2), holding one never changes the royalty, and Your choice of AI tooling — any
+provider's, Your own, or none at all — is irrelevant to this EULA. Any change to the royalty's
+amount, threshold, or conditions can be made only prospectively, for a future Engine Version,
+per §10.
 
 ### 7. Reporting, Records, and Audit
 
 1. **Self-reporting.** You must monitor Your own Product revenue. If a Product's Gross Revenue in
-   a Measurement Year exceeds the Royalty Threshold and no Qualifying Subscription waiver applies
-   under §6, You must, within 45 days after that Measurement Year ends, submit to Licensor a
-   royalty statement showing Gross Revenue, the deductions applied, and the royalty calculation,
-   together with payment.
+   a Measurement Year exceeds the Royalty Threshold, You must, within 45 days after that
+   Measurement Year ends, submit to Licensor a royalty statement showing Gross Revenue, the
+   exclusions applied, and the royalty calculation, together with payment.
 2. **Records.** You must keep records sufficient to verify Gross Revenue for each Product for at
    least three years after the end of the relevant Measurement Year.
 3. **Audit.** Licensor (or an independent accountant engaged by Licensor under confidentiality)
@@ -171,10 +238,10 @@ final.)*
    verify Gross Revenue and royalty calculations. If an audit reveals an underpayment of more
    than 5% for the audited period, You bear the reasonable cost of that audit in addition to the
    shortfall and any royalty otherwise owed.
-4. **No telemetry.** Consistent with L-57's contractual-only enforcement principle, the Engine
-   itself (EditorKernel, RuntimeKernel, or a shipped Product build) contains no license-server
-   calls, no subscription checks, no phone-home, and no revenue telemetry. Reporting is entirely
-   self-directed and contractual.
+4. **No telemetry.** Consistent with the Engine's contractual-only enforcement principle, the
+   Engine itself (EditorKernel, RuntimeKernel, or a shipped Product build) contains no
+   license-server calls, no subscription or entitlement checks, no phone-home, and no revenue
+   telemetry. Reporting is entirely self-directed and contractual.
 
 ### 8. Attribution and Notices
 
@@ -186,13 +253,18 @@ that is a business, not legal, decision and is left open here.)*
 
 ### 9. Contributions
 
-If You submit a Contribution to the Engine, it is accepted and incorporated **only** under the
-Contributor License Agreement (CLA) in Part II of this document. A Contribution submitted without
-a signed/accepted CLA on file will not be merged. A Developer Certificate of Origin (DCO)
-sign-off alone is **not** sufficient (L-57) — the CLA requires copyright assignment or an
-exclusive, unrestricted grant, because Licensor's full, unencumbered ownership of the Engine's
-copyright is what keeps this EULA (including future relicensing and the royalty terms)
-enforceable now that the source is public.
+1. **External contributions are not yet accepted.** Until Licensor announces that a Contributor
+   License Agreement (CLA) signing flow is in place (see
+   [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md)), pull requests from external
+   contributors will be closed without merging, and no rights in a submission made anyway are
+   granted to or acquired by Licensor. Issues, bug reports, and design discussion are welcome.
+2. **When contributions open**, a Contribution will be accepted and incorporated **only** under
+   a CLA providing **copyright assignment** to Licensor (or, where assignment is not legally
+   available in the Contributor's jurisdiction, an exclusive, irrevocable, unrestricted,
+   sublicensable license), per the CLA skeleton in [`.github/CLA.md`](.github/CLA.md). A
+   Developer Certificate of Origin (DCO) sign-off alone is **not** sufficient. Licensor's full,
+   unencumbered ownership of the Engine's copyright is what keeps this EULA — including the
+   royalty terms and any future relicensing — enforceable now that the source is public.
 
 ### 10. Version-Locked Terms
 
@@ -201,8 +273,10 @@ Engine Version and any Product built with it, even if Licensor later publishes a
 for a subsequent Engine Version. Licensor may change these terms for future Engine Versions;
 such changes are never retroactive to a Product built solely on an earlier, unchanged Engine
 Version. If You upgrade a Product to a newer Engine Version, the EULA published with the Engine
-Version You then adopt governs Your use going forward. *(⚠️ the precise mechanics for a Product
-that upgrades mid-Measurement-Year are not fully specified — see Notes for counsel.)*
+Version You then adopt governs Your use going forward. A future Engine Version's EULA may also
+be published by a successor Licensor under §15(7); such a succession changes the identity of the
+Licensor, never the terms locked to earlier Engine Versions. *(⚠️ the precise mechanics for a
+Product that upgrades mid-Measurement-Year are not fully specified — flagged for counsel.)*
 
 ### 11. Term and Termination
 
@@ -225,7 +299,7 @@ THE ENGINE IS PROVIDED **"AS IS,"** WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMP
 WITHOUT LIMITATION THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
 AND NON-INFRINGEMENT. LICENSOR HAS NO OBLIGATION TO PROVIDE SUPPORT, MAINTENANCE, UPDATES, OR
 BUG FIXES. *(⚠️ some jurisdictions do not allow the exclusion of certain implied warranties for
-consumer transactions — a savings clause may be needed; see Notes for counsel.)*
+consumer transactions — a savings clause may be needed; flagged for counsel.)*
 
 ### 13. Limitation of Liability
 
@@ -239,12 +313,11 @@ THE PRODUCT GIVING RISE TO THE CLAIM IN THE 12 MONTHS BEFORE THE CLAIM AROSE.
 ### 14. Governing Law and Disputes
 
 This EULA is governed by the laws of **[JURISDICTION — counsel to determine]**, without regard to
-conflict-of-laws principles. *(⚠️ Placeholder pending counsel — the ai-game.dev SaaS Terms of
-Service currently use Washington State law per `project-context.md`; whether the Engine EULA
-should match, for consistency and cost, or use a different jurisdiction, is a decision for
-counsel together with the Licensor-entity question below.)* Any dispute not resolved informally
-within 30 days may be brought exclusively in the courts of [VENUE — counsel to determine], and
-each party consents to that venue's jurisdiction.
+conflict-of-laws principles. *(⚠️ Placeholder pending counsel — Washington State is the expected
+choice, consistent with the Licensor's location; the final call belongs to counsel together with
+the entity-formation decision.)* Any dispute not resolved informally within 30 days may be
+brought exclusively in the courts of [VENUE — counsel to determine], and each party consents to
+that venue's jurisdiction.
 
 ### 15. General
 
@@ -261,5 +334,26 @@ each party consents to that venue's jurisdiction.
 5. **No partnership.** Nothing in this EULA creates an employment, agency, partnership, or joint
    venture relationship between You and Licensor.
 6. **Notices.** Notices to Licensor must be sent to [LEGAL CONTACT EMAIL/ADDRESS — TBD].
+7. **Licensor succession.** Licensor may assign this EULA, and/or transfer the Engine and its
+   copyrights, without Your consent, to a legal entity that assumes Licensor's rights and
+   obligations under it (including in connection with entity formation, corporate
+   reorganization, or a sale of the Engine business); upon that assignment the successor becomes
+   the "Licensor" under this EULA. Licensor will identify the successor in the EULA published
+   with a subsequent Engine Version (§10); the succession does not change the terms that govern
+   any earlier Engine Version.
 
 ---
+
+## Version history
+
+- **v0.2 (2026-07-03)** — Owner rulings encoded: royalty base is **gross receipts** (no
+  storefront/platform-fee netting); the **subscription royalty waiver is REMOVED** and the EULA
+  fully decoupled from ai-game.dev (former §6 replaced by an unconditionality clause — no
+  subscription or service nexus). Licensor-succession mechanics added (§15(7), §10) for the
+  planned entity cutover; the contributions section aligned with the interim
+  external-contribution freeze and pointed at the in-repo CLA skeleton. Polish: "Competing
+  Engine Product" tightened (operative restriction narrowed to source code and derivatives; a
+  hosted/managed-service vector; an explicit safe-harbor list); Product
+  edition/demo/early-access/remaster rules and a bundle-allocation rule; an express acceptance
+  clause (§2); storefront-cut and below-threshold worked examples (§5).
+- **v0.1 (2026-07-02)** — initial AI-drafted working draft from the owner-ruled business terms.
