@@ -222,6 +222,15 @@ add_test(NAME versioned-install-layout
         -D "CONTEXT_BUILD_CONFIG=$<CONFIG>"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/versioned-install-check.cmake")
 
+# M2 wave 3: the asset database (src/editor/assetdb/, issue #53) — GUID + sidecar <asset>.meta.json
+# identity (L-36/R-ASSET-002), dual-form + entity references with the real x-ctx-ref meta lookup
+# behind the schema module's RefTargetResolver seam (L-34/R-DATA-006), meta-first move/rename +
+# raw-move GUID healing (R-FILE-003/004), and the bounded lazy GUID index (R-FILE-011(e)). Wired
+# here — deliberately apart from the src/editor/ cluster above — so the concurrent M2 sibling tasks
+# inserting into this file merge cleanly (consumers name the `context_assetdb` target, which CMake
+# resolves at generate time regardless of add_subdirectory order).
+add_subdirectory(editor/assetdb)
+
 # ---------------------------------------------------------------------------
 # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36): five integration tests, one per exit
 # criterion, registered as the `m1-exit-*` ctest family and CI-gated per the §6 tiering (blocking

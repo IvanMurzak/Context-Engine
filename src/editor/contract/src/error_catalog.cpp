@@ -97,6 +97,44 @@ const std::vector<ErrorCode>& catalog()
         {"resource.unknown_handle",
          "The resource handle is unknown to this daemon instance (expired, foreign, or malformed).",
          false, kExitNotFound, "R-CLI-017"},
+        // --- asset database (M2 wave 3, issue #53: L-36/L-34, R-ASSET-002) ----------------------
+        // The stable-identity diagnostics: duplicate/orphaned/malformed sidecars, dangling and
+        // healable references, healing-ambiguity refusal, and the move/rename verb failures.
+        {"asset.guid_duplicate",
+         "Two live assets claim the same GUID (raw copy?); the lexicographically-first path keeps "
+         "it — re-key the duplicate via `context validate --fix`.",
+         false, kExitValidation, "R-ASSET-002"},
+        {"asset.meta_orphaned",
+         "A meta sidecar's asset file is missing (raw move or delete); healing pairs unique moves, "
+         "`context validate --fix` cleans deliberate deletes.",
+         false, kExitValidation, "R-ASSET-002"},
+        {"asset.meta_invalid",
+         "A meta sidecar is malformed (not canonical JSON, or no valid \"guid\").", false,
+         kExitValidation, "R-ASSET-002"},
+        {"asset.heal_ambiguous",
+         "Raw-move healing found no UNIQUE orphan/newcomer pairing; nothing was written — re-run "
+         "the move via `context asset move` or resolve by hand.",
+         false, kExitValidation, "R-ASSET-002"},
+        {"asset.ref_dangling",
+         "A reference resolves to no indexed asset (unknown $ref GUID, or a path that names "
+         "nothing).",
+         false, kExitValidation, "R-ASSET-002"},
+        {"asset.ref_path_only",
+         "A path-only reference (accepted, L-34); `context validate --fix` or the next tool save "
+         "resolves the authoritative $ref GUID.",
+         false, kExitValidation, "R-ASSET-002"},
+        {"asset.ref_hint_stale",
+         "A dual-form reference's path hint no longer matches the asset's location; healed on tool "
+         "save (L-34).",
+         false, kExitValidation, "R-ASSET-002"},
+        {"asset.move_source_missing", "The move/rename source asset does not exist.", false,
+         kExitNotFound, "R-FILE-004"},
+        {"asset.move_destination_exists",
+         "The move/rename destination is occupied by a different asset; move never overwrites.",
+         false, kExitConflict, "R-FILE-004"},
+        {"asset.move_invalid",
+         "The move/rename request is malformed (a sidecar path, or an empty path).", false,
+         kExitUsage, "R-FILE-004"},
     };
     return the_catalog;
 }
