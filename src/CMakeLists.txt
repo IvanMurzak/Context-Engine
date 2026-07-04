@@ -211,6 +211,15 @@ set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.md")
 set(CPACK_GENERATOR "ZIP")
 include(CPack)
 
+# M2 wave 3: per-component-payload schema versioning + parse-time migration (src/editor/migrate/,
+# L-37 / R-DATA-004, issue #52) — the registered migration set (the R-FILE-005 pass-0 stratum's
+# migration half, whose set hash keys pass-1 derivation cache entries), the in-memory
+# migrate_document engine, and the R-QA-011 fixture corpus. Wired here — deliberately far from the
+# editor add_subdirectory cluster above — so concurrent sibling tasks inserting into this file
+# merge cleanly (its consumers name the `context_migrate` target, which CMake resolves at generate
+# time regardless of add_subdirectory order).
+add_subdirectory(editor/migrate)
+
 # CI proof (runs under `ctest --preset dev` on all three OS legs of the CI build matrix):
 # stage a real install into a build-local prefix and assert it landed under
 # versions/<semver>/ and NOT flat. Fails the build on any R-VER-004 layout violation.

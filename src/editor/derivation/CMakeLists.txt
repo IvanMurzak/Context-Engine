@@ -26,6 +26,12 @@ target_include_directories(context_derivation PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 target_link_libraries(context_derivation
     PUBLIC context_filesync context_kernel context_serializer context_schema)
 
+# The L-37 parse-time migration node (M2 wave 3, src/editor/migrate/): PRIVATE — the public header
+# only forward-declares migrate::MigrationSet (an opaque seam pointer); the .cpp calls
+# migrate_document on ingest. CMake resolves the target at generate time regardless of
+# add_subdirectory order.
+target_link_libraries(context_derivation PRIVATE context_migrate)
+
 # Every Context target links the warnings-as-errors baseline (conventions.md).
 target_link_libraries(context_derivation PRIVATE context_warnings)
 
@@ -40,7 +46,8 @@ set(_context_derivation_tests
     test_incremental
     test_backpressure
     test_query_barrier
-    test_validate_node)
+    test_validate_node
+    test_migrate_node)
 
 foreach(_t IN LISTS _context_derivation_tests)
     add_executable(context_derivation_${_t} tests/${_t}.cpp)
@@ -48,3 +55,7 @@ foreach(_t IN LISTS _context_derivation_tests)
     target_include_directories(context_derivation_${_t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     add_test(NAME derivation-${_t} COMMAND context_derivation_${_t})
 endforeach()
+
+# test_migrate_node registers its own migration steps, so it needs the migrate module's headers
+# directly (context_derivation links it PRIVATE — the seam is an opaque pointer in the public API).
+target_link_libraries(context_derivation_test_migrate_node PRIVATE context_migrate)
