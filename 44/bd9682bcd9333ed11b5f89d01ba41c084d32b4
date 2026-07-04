@@ -1,0 +1,23 @@
+src/editor/schema/include/context/editor/schema/validator.h
+  s_e3239cf02087b8::t_d66599413f9118 33-35
+src/editor/derivation/tests/test_validate_node.cpp
+  s_e3239cf02087b8::t_088108d4450633 173-190
+src/editor/derivation/src/derivation_graph.cpp
+  s_e3239cf02087b8::t_a007802847109a 158-166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "44bd9682bcd9333ed11b5f89d01ba41c084d32b4",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
