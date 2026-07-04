@@ -1,0 +1,32 @@
+spikes/wasm/FINDINGS.md
+  s_e3239cf02087b8::t_16382aee3908ad 256-272
+spikes/wasm/CMakeLists.txt
+  s_e3239cf02087b8::t_2d5ebb91a214e8 151-165
+  s_e3239cf02087b8::t_8a9d048a05ec76 270-284,287,290
+  s_e3239cf02087b8::t_099c7939c08532 17-19
+  s_e3239cf02087b8::t_b6eb3e83bcb72a 318-331
+spikes/wasm/aot_pin_guard.cmake
+  s_e3239cf02087b8::t_c90c8c04bfbd61 1-57
+spikes/wasm/README.md
+  s_e3239cf02087b8::t_dd84310e2c1ae6 50-54
+docs/ci-fleet-manifest.json
+  s_e3239cf02087b8::t_87bb998f82ace1 222,224
+.github/workflows/ci.yml
+  s_e3239cf02087b8::t_6dc1876aae6052 370-382
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3cb794457807dbf4c70ca646214582ae5afc7367",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
