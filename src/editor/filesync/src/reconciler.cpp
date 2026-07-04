@@ -27,30 +27,8 @@ Reconciler::Reconciler(FileStore& fs, Watcher& watcher, context::kernel::Clock& 
 {
 }
 
-bool Reconciler::is_control_path(std::string_view path) const
-{
-    const std::string norm = normalize_path(path);
-
-    // Anything under a ".editor/" control directory, or a staging temp file, is engine-internal and
-    // never an authored file the reconcile pipeline should track.
-    std::string segment;
-    for (std::size_t i = 0; i <= norm.size(); ++i)
-    {
-        if (i == norm.size() || norm[i] == '/')
-        {
-            if (segment == ".editor")
-                return true;
-            if (is_atomic_temp_name(segment))
-                return true;
-            segment.clear();
-        }
-        else
-        {
-            segment.push_back(norm[i]);
-        }
-    }
-    return false;
-}
+// Control-path classification lives in atomic_io.h (is_control_path) — shared with the sidecar
+// orphan sweep so the two never drift.
 
 void Reconciler::announce_degraded_if_needed()
 {
@@ -153,6 +131,7 @@ std::vector<ReconcileChange> Reconciler::reconcile_hints()
         if (std::optional<ReconcileChange> change = rehash(event.path, now))
             changes.push_back(std::move(*change));
     }
+    expand_sidecar_owners(changes);
     return changes;
 }
 
@@ -200,12 +179,62 @@ std::vector<ReconcileChange> Reconciler::crawl(bool gated)
                 changes.push_back(ReconcileChange{path, ChangeType::removed, 0});
             }
         });
+    expand_sidecar_owners(changes);
     return changes;
 }
 
 bool Reconciler::save_index()
 {
     return index_.save(fs_, index_path_);
+}
+
+void Reconciler::set_sidecar_refs(std::string_view owner, std::vector<std::string> sidecar_paths)
+{
+    sidecars_.set_owner_refs(owner, std::move(sidecar_paths));
+}
+
+void Reconciler::clear_sidecar_refs(std::string_view owner)
+{
+    sidecars_.remove_owner(owner);
+}
+
+void Reconciler::expand_sidecar_owners(std::vector<ReconcileChange>& changes)
+{
+    if (sidecars_.owner_count() == 0 || changes.empty())
+        return;
+
+    std::set<std::string> present;
+    for (const ReconcileChange& change : changes)
+        present.insert(change.path);
+
+    // Index-based over the DIRECT changes only (appends must not re-expand; push_back may
+    // reallocate, so copy the fields we need before appending).
+    const std::size_t direct_count = changes.size();
+    for (std::size_t i = 0; i < direct_count; ++i)
+    {
+        const std::string path = changes[i].path;
+        const ChangeType type = changes[i].type;
+
+        // A reconciled owner removal drops its registrations — a gone owner dirties nothing.
+        if (type == ChangeType::removed && sidecars_.has_owner(path))
+            sidecars_.remove_owner(path);
+
+        // A changed (or removed) sidecar dirties every registered owner whose bytes did not also
+        // change this pass (an owner that changed directly is already in the list). L-33: the
+        // owner's derived output embeds the sidecar bytes, so it must re-derive; a removal makes
+        // the owner's ref dangling, which the re-derive then diagnoses (R-FILE-003).
+        for (const std::string& owner : sidecars_.owners_of(path))
+        {
+            if (present.count(owner) != 0)
+                continue;
+            const std::optional<IndexEntry> entry = index_.get(owner);
+            if (!entry)
+                continue; // the owner is not tracked (never scanned or already gone) — nothing to dirty
+            present.insert(owner);
+            changes.push_back(
+                ReconcileChange{owner, ChangeType::modified, entry->content_hash, path});
+        }
+    }
 }
 
 } // namespace context::editor::filesync

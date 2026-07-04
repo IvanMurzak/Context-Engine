@@ -20,20 +20,33 @@ namespace context::editor::filesync
 
 class FileStore;
 
+// What one planned step does. `remove` exists for the multi-file MOVE verbs (L-33 owned satellites:
+// a move is dest writes + src removals inside ONE intent-logged op, so a crash mid-move resumes to
+// the moved state instead of silently forking the file). Recovery semantics per kind are documented
+// on WriteQueue::recover.
+enum class WriteKind : std::uint8_t
+{
+    write = 0,
+    remove = 1,
+};
+
 // One planned file write inside a multi-file operation.
 //   expected_prev_hash — content-hash of the file read at PLANNING time (the CAS guard: on resume, if
 //                         the file no longer holds this, it moved on and must NOT be clobbered).
 //   target_hash        — content-hash of the bytes we intend to write (used to detect "already
-//                         applied" for idempotent resume).
+//                         applied" for idempotent resume). Unused (0) for kind == remove, where
+//                         "already applied" means the file is ABSENT.
 //   data               — the payload. Kept in the log so a resume can always complete (M1
 //                         simplification; a production impl would stage payloads in the temp files to
-//                         avoid doubling write volume). See the component README.
+//                         avoid doubling write volume). See the component README. Empty for removes.
+//   kind               — write (atomic temp+rename) or remove (delete; CAS-guarded like a write).
 struct PlannedWrite
 {
     std::string path;
     std::uint64_t expected_prev_hash = 0;
     std::uint64_t target_hash = 0;
     std::string data;
+    WriteKind kind = WriteKind::write;
 };
 
 // A bounded crash-recovery intent-log entry: (opId, incarnationId, planned writes + target hashes).
@@ -89,11 +102,15 @@ public:
     // (that is how a test models a crash mid-op) — the entry then stays on disk for recover().
     bool execute(std::string_view op_id, const std::vector<PlannedWrite>& writes);
 
-    // Recovery pass on restart: for each pending op, verify integrity, then for each planned write
-    // re-JAIL (R-SEC-008) + re-CAS against the planning-time hash:
+    // Recovery pass on restart: for each pending op, verify integrity, then for each planned step
+    // re-JAIL (R-SEC-008) + re-CAS against the planning-time hash. For kind == write:
     //   current == target_hash        -> already applied, skip (idempotent replay)
     //   current == expected_prev_hash -> safe to (re)apply the write
     //   otherwise                     -> the file moved on: do NOT clobber; emit a CAS diagnostic
+    // For kind == remove:
+    //   file absent                   -> already applied, skip (idempotent replay)
+    //   current == expected_prev_hash -> safe to (re)apply the removal
+    //   otherwise                     -> the file moved on: do NOT delete; emit a CAS diagnostic
     // A fully-resumed op is cleared; an op that could not be fully + safely resumed is left on disk
     // and reported via a Diagnostic naming it. Returns the diagnostics (empty == clean recovery).
     std::vector<Diagnostic> recover();

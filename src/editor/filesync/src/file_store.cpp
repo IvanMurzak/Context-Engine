@@ -79,7 +79,13 @@ bool MemoryFileStore::rename(std::string_view from, std::string_view to)
 
 bool MemoryFileStore::remove(std::string_view path)
 {
-    return files_.erase(normalize_path(path)) != 0;
+    const std::string key = normalize_path(path);
+    if (crash_remove_path_ && *crash_remove_path_ == key)
+    {
+        crash_remove_path_.reset();
+        throw SimulatedCrash("remove " + key);
+    }
+    return files_.erase(key) != 0;
 }
 
 void MemoryFileStore::crash_on_rename_to(std::string path)
@@ -90,6 +96,11 @@ void MemoryFileStore::crash_on_rename_to(std::string path)
 void MemoryFileStore::crash_on_write(std::string path)
 {
     crash_write_path_ = normalize_path(path);
+}
+
+void MemoryFileStore::crash_on_remove(std::string path)
+{
+    crash_remove_path_ = normalize_path(path);
 }
 
 void MemoryFileStore::set_mtime(std::string_view path, std::uint64_t mtime_nanos)

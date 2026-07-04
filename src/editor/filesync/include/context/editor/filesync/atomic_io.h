@@ -23,6 +23,11 @@ class FileStore;
 // would need temp-registry / filesystem state, which is out of this lexical seam's scope.
 [[nodiscard]] bool is_atomic_temp_name(std::string_view name);
 
+// True when `path` is engine-internal rather than authored content: any path with a ".editor"
+// control-directory segment, or with a segment shaped like atomic-write staging residue. The
+// reconcile pipeline and the sidecar orphan sweep both skip these — shared so they can never drift.
+[[nodiscard]] bool is_control_path(std::string_view path);
+
 // Atomically write `data` to `path`: stage into a sibling temp file, fsync it, then rename it over
 // `path`, then fsync `path`. A concurrent reader of `path` observes either the complete OLD content
 // or the complete NEW content — never a torn/partial write. Returns true on durable success. If the

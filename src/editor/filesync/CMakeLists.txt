@@ -18,7 +18,8 @@ add_library(context_filesync STATIC
     src/reconcile_index.cpp
     src/expected_writes.cpp
     src/reconciler.cpp
-    src/intent_log.cpp)
+    src/intent_log.cpp
+    src/sidecar.cpp)
 
 target_include_directories(context_filesync PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -27,7 +28,11 @@ target_include_directories(context_filesync PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/i
 # include path. Threads::Threads is PUBLIC because the native watcher backends collect OS events on
 # a private std::thread inside this STATIC library — every executable that links context_filesync
 # needs -pthread at final link on Linux/GCC (a no-op on Windows/MSVC; found at top level).
-target_link_libraries(context_filesync PUBLIC context_kernel Threads::Threads)
+# context_serializer is PUBLIC because sidecar.h (the L-33 binary-sidecar module) exposes
+# serializer::SidecarRef in its API — the sanctioned serializer integration: the $sidecar reference
+# SHAPE is read by the serializer's tree utilities, while resolution, the R-SEC-008 jail, and
+# on-disk verification stay in this layer. context_serializer is a leaf (stdlib-only), so no cycle.
+target_link_libraries(context_filesync PUBLIC context_kernel context_serializer Threads::Threads)
 
 # FSEvents (the macOS native watcher backend) lives in the CoreServices framework. PUBLIC for the
 # same static-library reason: the flag must reach the final link of every consuming executable.
@@ -56,7 +61,8 @@ set(_context_filesync_tests
     test_reconciler
     test_intent_log
     test_native_file_store
-    test_native_crash_recovery)
+    test_native_crash_recovery
+    test_sidecar)
 
 # Self-contained GCC runtime for the ctest executables. The native store + its tests pull std::filesystem
 # (newer libstdc++ symbols); on a MinGW host a stale libstdc++-6.dll elsewhere on PATH can shadow the

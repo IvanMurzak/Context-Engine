@@ -120,6 +120,28 @@ const std::vector<ErrorCode>& catalog()
          "An override path has no destination after migration; the entry is preserved but "
          "excluded from flatten (L-37 orphan override).",
          false, kExitValidation, "R-DATA-004"},
+        // L-33 binary sidecars (M2 wave 3): the versioned-header codec, the {"$sidecar", "hash"}
+        // reference shape, and the ownership diagnostics (R-FILE-001 raw==canonical hash rule;
+        // R-FILE-003 dangling/orphan surface). Emitted by src/editor/filesync/sidecar.h.
+        {"sidecar.bad_magic", "The file does not begin with the sidecar magic.", false,
+         kExitValidation, "R-FILE-001"},
+        {"sidecar.truncated", "The sidecar file is shorter than its fixed header.", false,
+         kExitValidation, "R-FILE-001"},
+        {"sidecar.unsupported_version",
+         "The sidecar header carries a format version this engine cannot read; last-good state "
+         "retained.",
+         false, kExitValidation, "R-FILE-001"},
+        {"sidecar.ref_malformed",
+         "A $sidecar reference is not the canonical {\"$sidecar\": \"<relpath>\", \"hash\": "
+         "\"<decimal>\"} shape.",
+         false, kExitValidation, "R-FILE-003"},
+        {"sidecar.dangling_ref", "A $sidecar reference names a sidecar file that does not exist.",
+         false, kExitValidation, "R-FILE-003"},
+        {"sidecar.orphaned", "A sidecar file exists with no referencing owner.", false,
+         kExitValidation, "R-FILE-003"},
+        {"sidecar.hash_mismatch",
+         "The sidecar's whole-file raw bytes do not hash to the referencing \"hash\" value.", false,
+         kExitValidation, "R-FILE-001"},
     };
     return the_catalog;
 }
