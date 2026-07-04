@@ -1,0 +1,196 @@
+src/editor/serializer/tests/test_property.cpp
+  s_e3239cf02087b8::t_5852156f4bd3d7 1-224
+src/editor/derivation/src/canonical_parse.cpp
+  s_e3239cf02087b8::t_40fdd4c0e65aa4 1,5,7,9,14,19,21-24
+src/editor/serializer/tests/test_vectors.cpp
+  s_e3239cf02087b8::t_c01631e3ad9c6a 1-133
+src/cli/src/scaffold.cpp
+  s_e3239cf02087b8::t_55c6fe47c4301d 227-228,230-239,245-247,251-252
+  s_e3239cf02087b8::t_807c93191e0c39 7
+  s_e3239cf02087b8::t_290ccf7a1e6145 125,265
+src/editor/serializer/src/json_parse.cpp
+  s_e3239cf02087b8::t_7c682750eddc32 7,9-10
+  s_e3239cf02087b8::t_0531c67d6a71b5 501-509,511-516
+  s_e3239cf02087b8::t_874382f81bc0b0 1-6,8,11-500,510,517-540
+src/editor/serializer/tests/test_nfc.cpp
+  s_e3239cf02087b8::t_16e08e96f808f0 93-96
+  s_e3239cf02087b8::t_cd71232864bbe8 1-92,97-110
+src/editor/serializer/tests/serializer_test.h
+  s_e3239cf02087b8::t_f58a476eed6436 1-28
+src/editor/serializer/tests/test_ecma_number.cpp
+  s_e3239cf02087b8::t_6b832617d69ed6 84
+  s_e3239cf02087b8::t_e0924a2ffb505b 1-9,11-83,85-97
+  s_e3239cf02087b8::t_943b082fae78bc 10
+src/editor/serializer/include/context/editor/serializer/nfc.h
+  s_e3239cf02087b8::t_98de0d95e0cf0b 1-28,30-32
+  s_e3239cf02087b8::t_59ae751f68885b 29
+src/editor/derivation/src/derivation_graph.cpp
+  s_e3239cf02087b8::t_2d25c01cdf5908 39-41
+src/editor/derivation/tests/test_incremental.cpp
+  s_e3239cf02087b8::t_3d33f8ffd312e7 52-53,56-60,63-68
+src/editor/editorkernel/include/context/editor/editorkernel/editor_kernel.h
+  s_e3239cf02087b8::t_552f7996405081 76-78,80-82,85-87
+src/editor/serializer/CMakeLists.txt
+  s_e3239cf02087b8::t_b3ef162fc3b513 1-53
+src/editor/derivation/CMakeLists.txt
+  s_e3239cf02087b8::t_82bddfd34c3a8e 21-23
+  s_e3239cf02087b8::t_ef86c1528ef5e8 2,6-8
+src/editor/serializer/tests/vectors/.gitattributes
+  s_e3239cf02087b8::t_cd6f18e65e06c6 1-4
+src/editor/serializer/tests/test_json_parse.cpp
+  s_e3239cf02087b8::t_3366a2a6ca20c0 1-167
+  s_e3239cf02087b8::t_ba597aefa4bba9 168-176
+src/editor/serializer/README.md
+  s_e3239cf02087b8::t_fc1de7bf74f12b 1-68
+src/editor/editorkernel/src/kernel_server.cpp
+  s_e3239cf02087b8::t_519699316ad94c 68-70
+  s_039dc43db6be65::t_85a954f18bdfdf 128
+src/cli/CMakeLists.txt
+  s_e3239cf02087b8::t_5e5ff3031b58b1 61-65
+  s_e3239cf02087b8::t_0a691d8c0d9266 18-22,26
+src/cli/tests/test_cli.cpp
+  s_e3239cf02087b8::t_095fa7500061c7 121-123
+src/editor/serializer/src/nfc.cpp
+  s_e3239cf02087b8::t_77f1ffefedf36b 1-140,142-266,268-282
+  s_e3239cf02087b8::t_44b1e89b27ef6d 141
+  s_e3239cf02087b8::t_ffe5dbf185bf24 267
+src/editor/serializer/include/context/editor/serializer/canonical.h
+  s_e3239cf02087b8::t_cde7710bc07a76 1-79
+src/editor/serializer/tests/test_canonical_write.cpp
+  s_e3239cf02087b8::t_93b64367d7866e 1-196
+tools/gen_nfc_tables.py
+  s_e3239cf02087b8::t_2214a5636dce7b 1-226
+src/editor/serializer/include/context/editor/serializer/json_parse.h
+  s_e3239cf02087b8::t_b1c7386dae1988 1-53
+src/editor/serializer/tests/vectors/README.md
+  s_e3239cf02087b8::t_1428d4a9ded6fb 1-58
+src/editor/serializer/src/canonical.cpp
+  s_e3239cf02087b8::t_63227ca4ebd7f2 1-234,248-249,252-257,259-374
+  s_e3239cf02087b8::t_0c61d163db0718 235-247,250-251,258
+src/editor/derivation/tests/test_canonical_parse.cpp
+  s_e3239cf02087b8::t_f151b7391c5213 1-3,9-10,16,18-22,25-27,29-32,35,40-50,53-66,69,74-90,93-94
+src/editor/serializer/tests/test_nfc_bench.cpp
+  s_e3239cf02087b8::t_188235504ad120 1-116
+src/editor/editorkernel/src/editor_kernel.cpp
+  s_e3239cf02087b8::t_4de0b6f162b571 40-48,51-66
+  s_e3239cf02087b8::t_dfc8c0057a9dce 175-179
+  s_e3239cf02087b8::t_3149c528e1e64d 153-158,161,168-171,173-174
+  s_e3239cf02087b8::t_17f01c5162ecc2 228-231,236-237
+src/editor/derivation/include/context/editor/derivation/canonical_parse.h
+  s_e3239cf02087b8::t_23bfd9e0b2cdbf 1,5-6,10,15-20,22-26,29-36,39-40,43-46
+src/cli/tests/test_scaffold.cpp
+  s_e3239cf02087b8::t_9bd02fa903c781 10
+  s_e3239cf02087b8::t_e1d8ccdc09cc11 68-80
+src/editor/serializer/include/context/editor/serializer/json_tree.h
+  s_e3239cf02087b8::t_232a24d8331277 1-65
+tools/tests/test_gen_nfc_tables.py
+  s_e3239cf02087b8::t_0456334cd23189 1-84
+src/tests/integration/test_exit1_files_as_truth.cpp
+  s_e3239cf02087b8::t_4055e72525e82e 10-11
+  s_e3239cf02087b8::t_fe5c86f14bd079 189-191,194
+  s_e3239cf02087b8::t_a85c8305d1e33c 17-18
+  s_e3239cf02087b8::t_2e88937bcbade1 109,117-121
+  s_e3239cf02087b8::t_afe16bc3c89d92 136-137,140,147-148,151,157-159,163
+  s_e3239cf02087b8::t_8c0723e3c3064f 204-206
+  s_e3239cf02087b8::t_078c3a3ffedae9 237-238
+docs/latency-budget-table.md
+  s_e3239cf02087b8::t_b186cc907f09c3 17
+src/CMakeLists.txt
+  s_e3239cf02087b8::t_a16b3e0c194b1b 85-89
+src/editor/derivation/README.md
+  s_e3239cf02087b8::t_3349ecdf906d5b 6-8,11-12,38-42,57-58
+src/editor/derivation/include/context/editor/derivation/derivation_graph.h
+  s_e3239cf02087b8::t_ce50f46aeff78d 66-70,74
+src/editor/serializer/src/nfc_tables.inc
+  s_e3239cf02087b8::t_b4bfeb9d250c39 1-1208
+src/editor/serializer/tests/vectors/array-order-preserved.expected.json
+  s_e3239cf02087b8::t_277319a9fdb039 1-26
+src/editor/serializer/tests/vectors/array-order-preserved.input.json
+  s_e3239cf02087b8::t_6009f59e2f2276 1-2
+src/editor/serializer/tests/vectors/bom-crlf.diags
+  s_e3239cf02087b8::t_5c63ab13b90583 1-2
+src/editor/serializer/tests/vectors/bom-crlf.expected.json
+  s_e3239cf02087b8::t_c680fc49ef5f26 1-7
+src/editor/serializer/tests/vectors/bom-crlf.input.json
+  s_e3239cf02087b8::t_1bef5dca9d522b 1-4
+src/editor/serializer/tests/vectors/escapes.expected.json
+  s_e3239cf02087b8::t_9a8af164da1eb6 1-9
+src/editor/serializer/tests/vectors/escapes.input.json
+  s_e3239cf02087b8::t_1e1df730ff9ed2 1
+src/editor/serializer/tests/vectors/floats-boundaries.expected.json
+  s_e3239cf02087b8::t_2312a4f541e8e9 1-17
+src/editor/serializer/tests/vectors/floats-boundaries.input.json
+  s_e3239cf02087b8::t_535b4121c06ee8 1-2
+src/editor/serializer/tests/vectors/floats-extremes.expected.json
+  s_e3239cf02087b8::t_bd8dc4e41e9396 1-9
+src/editor/serializer/tests/vectors/floats-extremes.input.json
+  s_e3239cf02087b8::t_39446b649fa16a 1-2
+src/editor/serializer/tests/vectors/formatting-noise.expected.json
+  s_e3239cf02087b8::t_203313cac6cec1 1-18
+src/editor/serializer/tests/vectors/formatting-noise.input.json
+  s_e3239cf02087b8::t_92caa7c4d556aa 1-7
+src/editor/serializer/tests/vectors/headers-scene.expected.json
+  s_e3239cf02087b8::t_5a5d23ae1817b9 1-44
+src/editor/serializer/tests/vectors/headers-scene.input.json
+  s_e3239cf02087b8::t_6aa6f0833d5ec6 1-13
+src/editor/serializer/tests/vectors/ints-beyond-u64.expected.json
+  s_e3239cf02087b8::t_c636ef9f6dbc0c 1-5
+src/editor/serializer/tests/vectors/ints-beyond-u64.input.json
+  s_e3239cf02087b8::t_8bbdce5ff1b435 1
+src/editor/serializer/tests/vectors/ints-lossless.expected.json
+  s_e3239cf02087b8::t_98242fb0012c75 1-10
+src/editor/serializer/tests/vectors/ints-lossless.input.json
+  s_e3239cf02087b8::t_ef097b3d0d51d5 1-2
+src/editor/serializer/tests/vectors/key-order-ascii.expected.json
+  s_e3239cf02087b8::t_975d943cf90152 1-11
+src/editor/serializer/tests/vectors/key-order-ascii.input.json
+  s_e3239cf02087b8::t_68f44305fec408 1-2
+src/editor/serializer/tests/vectors/key-order-unicode.expected.json
+  s_e3239cf02087b8::t_525d750a9b03d2 1-7
+src/editor/serializer/tests/vectors/key-order-unicode.input.json
+  s_e3239cf02087b8::t_7a82d60bf7e4c7 1
+src/editor/serializer/tests/vectors/minus-zero.expected.json
+  s_e3239cf02087b8::t_cf5cf6cbc8691b 1-8
+src/editor/serializer/tests/vectors/minus-zero.input.json
+  s_e3239cf02087b8::t_f727845e503ee8 1
+src/editor/serializer/tests/vectors/nfc-exclusions.expected.json
+  s_e3239cf02087b8::t_cc8d1cad23ed67 1-5
+src/editor/serializer/tests/vectors/nfc-exclusions.input.json
+  s_e3239cf02087b8::t_d5f5875060efe5 1-2
+src/editor/serializer/tests/vectors/nfc-hangul.expected.json
+  s_e3239cf02087b8::t_58a16167d6e4b9 1-4
+src/editor/serializer/tests/vectors/nfc-hangul.input.json
+  s_e3239cf02087b8::t_bc483fdab6cba0 1-2
+src/editor/serializer/tests/vectors/nfc-latin.expected.json
+  s_e3239cf02087b8::t_30b3c8a59c4b4c 1-5
+src/editor/serializer/tests/vectors/nfc-latin.input.json
+  s_e3239cf02087b8::t_8bbfc7aac7ea48 1-2
+src/editor/serializer/tests/vectors/nfc-reorder.expected.json
+  s_e3239cf02087b8::t_b20430adefdd23 1-5
+src/editor/serializer/tests/vectors/nfc-reorder.input.json
+  s_e3239cf02087b8::t_fc543eb97ce76e 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d12aba2d428b3df097d9b10e964c88c2b29bd8d6",
+  "prompts": {},
+  "sessions": {
+    "s_039dc43db6be65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a61bee5152ee63b71",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
