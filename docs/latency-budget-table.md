@@ -14,7 +14,7 @@ DerivationGraph + bridge daemon, issue #38).
 |---|---|---|
 | watch | change *detection*: enumerate + mtime/size stat gate of the reconcile crawl. The native OS watcher backends exist (`NativeWatcher` — RDCW/inotify/FSEvents, issue #41; `context daemon` composes them), but the bench rig composes `NullWatcher` ON PURPOSE so this stage stays scan-bound and comparable across runs (R-FILE-002's safety-net crawl); the bench subject adopts hint-driven detection when the daemon's hint-consuming reconcile cadence lands, re-baselining per R-QA-009 | `bench attach` stage `watch_seconds` (TimingFileStore: `list()` + `stat()` share of the crawl) |
 | hash | raw-byte read + content digest of changed files + index bookkeeping | `bench attach` stage `hash_seconds` |
-| parse | parse + canonicalize + canonical-content hash (M1: the placeholder whitespace-normalizing canonicalizer + FNV-1a — the M2 canonical-JSON serializer replaces the node body behind the same seam, and the numbers re-baseline per R-QA-009) | `bench attach` stage `parse_seconds` (`DerivationGraph::apply`) |
+| parse | parse + canonicalize + canonical-content hash (since M2 wave 1 (#42): the REAL canonical-JSON serializer — R-FILE-001 key sort/number formatting/NFC with the ASCII fast path — + FNV-1a behind the same seam; numbers re-baseline per R-QA-009) | `bench attach` stage `parse_seconds` (`DerivationGraph::apply`) |
 | validate | schema validation — **lands with the M2 schema model** (async-streamed per R-FILE-011(b)) | pending-M2 row (budget reserved) |
 | compose | scene composition / template expansion — **lands M2** | pending-M2 row (budget reserved) |
 | instantiate | derivation pass → derived-World update | `bench attach` stage `instantiate_seconds` (`run_pass` drain) |

@@ -82,6 +82,11 @@ add_spike(hello)
 # stable interfaces; src/editor/, src/runtime/, src/packages/ gain their targets in later M1 tasks.
 add_subdirectory(kernel)
 
+# M2: the REAL canonical-JSON serializer (src/editor/serializer/, issue #42) — R-FILE-001/L-32:
+# strict JSON parse -> NFC-normalized canonical bytes + the canonical-content hash. Dependency-free
+# (stdlib only); wired BEFORE editor/derivation, whose canonical-parse node delegates to it.
+add_subdirectory(editor/serializer)
+
 # M1: the EditorKernel file-sync layer (src/editor/filesync/) — atomic IO + watch-hash-reconcile +
 # crash-recovery intent log (R-FILE-002/004, R-QA-010), built on the kernel platform seams.
 add_subdirectory(editor/filesync)

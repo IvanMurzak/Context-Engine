@@ -65,6 +65,9 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
 
         Json data = Json::object();
         data.set("path", Json(*path));
+        // The R-FILE-001 two-hash split, labelled: rawHash = on-disk byte identity (CAS
+        // `--if-match`); canonicalHash = canonical-content identity (the R-CLI-006 barrier key).
+        data.set("rawHash", hash_string(out.ticket.raw_hash));
         data.set("canonicalHash", hash_string(out.ticket.canonical_hash));
         data.set("reflected", Json(reflected));
         data.set("worldEntities", Json(static_cast<std::uint64_t>(kernel_.world().alive_count())));
@@ -122,6 +125,7 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
             all_reflected = all_reflected && reflected;
             Json entry = Json::object();
             entry.set("path", Json(t.path));
+            entry.set("rawHash", hash_string(t.raw_hash)); // R-FILE-001 split (see `edit` above)
             entry.set("canonicalHash", hash_string(t.canonical_hash));
             entry.set("reflected", Json(reflected));
             files.push_back(std::move(entry));

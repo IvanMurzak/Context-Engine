@@ -1,0 +1,9 @@
+[
+  "A",
+  "😀",
+  "a/b",
+  "line\nbreak\ttab",
+  "\u0001\u001f",
+  "quote\"backslash\\",
+  " del is raw"
+]

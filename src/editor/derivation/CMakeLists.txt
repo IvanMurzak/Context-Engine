@@ -1,10 +1,11 @@
 # src/editor/derivation/ — the M1 incremental derivation graph (L-19/L-22, R-FILE-013, R-CLI-006):
-# file changes (from the file-sync layer's ReconcileChange) → a minimal canonical-parse node → the
+# file changes (from the file-sync layer's ReconcileChange) → the canonical-parse node → the
 # derived context::kernel::World, with content-hash memoized dirty-subgraph recompute, a monotonic
 # derived-world generation counter, derivation-side backpressure (coalesced batched passes + a
 # queue-depth / bounded-lag signal + load-shed to the visible/queried subgraph), and the
-# read-your-writes query barrier. The canonical parse is a deliberate M1 placeholder (whitespace
-# normalization) behind a stable seam; the real canonical-JSON serializer + schema model is M2.
+# read-your-writes query barrier. The canonical-parse node delegates to the REAL canonical-JSON
+# serializer (src/editor/serializer/, M2 issue #42) behind the same stable seam the M1 placeholder
+# occupied; the schema model layers on top in later M2 tasks.
 
 add_library(context_derivation STATIC
     src/canonical_parse.cpp
@@ -17,8 +18,9 @@ target_include_directories(context_derivation PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 # generation / backpressure events are published on. PUBLIC because the derivation graph's public
 # headers expose those types, so consumers need their include paths. (context_filesync already links
 # context_kernel PUBLIC; context_kernel is named explicitly here because this target uses World and
-# EventBus directly.)
-target_link_libraries(context_derivation PUBLIC context_filesync context_kernel)
+# EventBus directly.) context_serializer is PUBLIC too: canonical_parse.h exposes the serializer's
+# Diagnostic type in CanonicalForm, so consumers need its include path.
+target_link_libraries(context_derivation PUBLIC context_filesync context_kernel context_serializer)
 
 # Every Context target links the warnings-as-errors baseline (conventions.md).
 target_link_libraries(context_derivation PRIVATE context_warnings)

@@ -118,7 +118,9 @@ int main()
         const Envelope e = run({"new", "some-dir", "--dry-run"});
         CHECK(e.ok());
         CHECK(e.data().at("directory").as_string() == "some-dir");
-        CHECK(e.data().at("files").size() == 2);
+        // .gitattributes (the R-FILE-001 LF pin) + project.json + scenes/main.scene.json.
+        CHECK(e.data().at("files").size() == 3);
+        CHECK(e.data().at("files").at(0).as_string() == ".gitattributes");
     }
 
     CLI_TEST_MAIN_END();

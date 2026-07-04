@@ -4,6 +4,7 @@
 #include "context/cli/scaffold.h"
 
 #include "context/editor/contract/json.h"
+#include "context/editor/serializer/canonical.h"
 #include "context/kernel/kernel.h"
 #include "context/kernel/scheduler.h"
 #include "context/kernel/world.h"
@@ -121,6 +122,7 @@ bool is_known_template(const std::string& name)
 Json scaffold_plan(const std::string& directory, const std::string& template_name)
 {
     Json files = Json::array();
+    files.push_back(Json(".gitattributes"));
     files.push_back(Json("project.json"));
     files.push_back(Json("scenes/main.scene.json"));
     Json plan = Json::object();
@@ -222,19 +224,32 @@ Envelope scaffold_project(const std::string& directory, const std::string& templ
         return Envelope::failure("internal.error",
                                  "could not create project directories: " + ec.message());
 
+    // Tool saves canonicalize the whole file they write (R-FILE-001) — and `context new` IS a
+    // tool save, so the template files land in THE canonical form from their very first byte.
     const std::string name = project_basename(directory);
-    const std::string project_body = default_project_json(name).dump(2);
-    const std::string scene_body = default_scene_json().dump(2);
+    const std::string project_body =
+        editor::serializer::canonicalize(default_project_json(name).dump(2)).bytes;
+    const std::string scene_body =
+        editor::serializer::canonicalize(default_scene_json().dump(2)).bytes;
+    // The template ships a .gitattributes pinning authored JSON to LF/text (R-FILE-001): the
+    // canonical form is byte-exact, so checkout EOL rewriting must never touch authored files.
+    const std::string gitattributes_body =
+        "# Authored Context files are canonical JSON: UTF-8, LF-only (R-FILE-001).\n"
+        "* text=auto\n"
+        "*.json text eol=lf\n";
 
     {
         std::ofstream project_out(root / "project.json", std::ios::binary | std::ios::trunc);
         std::ofstream scene_out(root / "scenes" / "main.scene.json",
                                 std::ios::binary | std::ios::trunc);
-        if (!project_out || !scene_out)
+        std::ofstream attributes_out(root / ".gitattributes",
+                                     std::ios::binary | std::ios::trunc);
+        if (!project_out || !scene_out || !attributes_out)
             return Envelope::failure("internal.error", "could not open template files for writing");
         project_out << project_body;
         scene_out << scene_body;
-        if (!project_out || !scene_out)
+        attributes_out << gitattributes_body;
+        if (!project_out || !scene_out || !attributes_out)
             return Envelope::failure("internal.error", "template files failed to write cleanly");
     }
 
@@ -247,6 +262,7 @@ Envelope scaffold_project(const std::string& directory, const std::string& templ
     data.set("directory", Json(directory));
     data.set("template", Json(template_name));
     Json files = Json::array();
+    files.push_back(Json(".gitattributes"));
     files.push_back(Json("project.json"));
     files.push_back(Json("scenes/main.scene.json"));
     data.set("files", std::move(files));

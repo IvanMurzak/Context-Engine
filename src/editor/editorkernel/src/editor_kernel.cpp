@@ -37,12 +37,33 @@ Envelope EditOutcome::envelope() const
     {
         Json data = Json::object();
         data.set("path", Json(ticket.path));
-        // Serialize the 64-bit content hash as a decimal STRING: Json's number type is double-backed,
-        // so a full-range canonical hash (routinely > 2^53) would lose precision — and this is exactly
-        // the own-write replay key a caller feeds back as `--after-hash` (R-CLI-006), which must
-        // round-trip losslessly.
+        // The R-FILE-001 two-hash split, both labelled, both as decimal STRINGS (Json's number
+        // type is double-backed, so a full-range 64-bit hash — routinely > 2^53 — would lose
+        // precision, and these are exactly the keys a caller feeds back):
+        //   rawHash       — raw-byte identity of the bytes ON DISK after this tool save: the
+        //                   watch/reconcile change-detector's identity and the CAS `--if-match` key.
+        //   canonicalHash — canonical-content identity: derivation/cache keys and the own-write
+        //                   replay key fed back as `--after-hash` (R-CLI-006).
+        // For non-JSON content (binary sidecars) the two are EQUAL by construction.
+        data.set("rawHash", Json(std::to_string(ticket.raw_hash)));
         data.set("canonicalHash", Json(std::to_string(ticket.canonical_hash)));
         data.set("removal", Json(ticket.removal));
+        // Machine-readable encoding heals from canonicalizing this save (R-FILE-003: e.g.
+        // encoding.bom / encoding.crlf — already fixed in the bytes written to disk).
+        if (!encoding_diagnostics.empty())
+        {
+            Json diags = Json::array();
+            for (const serializer::Diagnostic& d : encoding_diagnostics)
+            {
+                Json entry = Json::object();
+                entry.set("code", Json(d.code));
+                entry.set("message", Json(d.message));
+                entry.set("line", Json(static_cast<std::uint64_t>(d.line)));
+                entry.set("column", Json(static_cast<std::uint64_t>(d.column)));
+                diags.push_back(std::move(entry));
+            }
+            data.set("diagnostics", std::move(diags));
+        }
         // generationAfter is the derived-world generation the write will be incorporated into
         // (R-CLI-006 own-write barrier target).
         return Envelope::success(std::move(data), ticket.generation_after);
@@ -129,19 +150,33 @@ EditOutcome EditorKernel::edit_file(std::string_view path, std::string_view data
         return out;
     }
 
+    // Tool saves canonicalize the WHOLE file they write (R-FILE-001): JSON content lands on disk
+    // in THE canonical form — which is also how external non-canonical formatting normalizes on
+    // the first tool save. Non-JSON content (binary sidecars, the L-32 carve-outs) writes
+    // verbatim (no canonicalization pass). Encoding heals surface on the envelope (R-FILE-003).
+    derivation::CanonicalForm form = derivation::canonical_parse(data);
+
     // Write THROUGH filesync atomic-IO (temp+fsync+rename, R-FILE-004). apply_write registers the
     // write as self-echo, so the reconcile crawl will NOT re-surface our own write as external.
-    if (!reconciler_.apply_write(key, data))
+    if (!reconciler_.apply_write(key, form.bytes))
     {
         out.error_code = "internal.error";
         return out;
     }
 
     // Ingest our own write directly into the derivation graph (it will not come back through the
-    // reconciler). The ticket carries the canonical hash the own-write read barrier keys on (R-CLI-006).
+    // reconciler). The ticket carries BOTH hashes of the R-FILE-001 split: the raw-byte hash of
+    // the bytes just written, and the canonical hash the own-write read barrier keys on
+    // (R-CLI-006). The graph's parse node re-canonicalizes the already-canonical bytes — a
+    // deliberate fixpoint no-op that keeps the seam single-sourced.
     const filesync::ReconcileChange change{key, filesync::ChangeType::modified,
-                                           filesync::content_hash(data)};
-    out.ticket = graph_.apply(change, data);
+                                           filesync::content_hash(form.bytes)};
+    out.ticket = graph_.apply(change, form.bytes);
+    // Only JSON content carries envelope findings (the encoding heals). A non-JSON payload's
+    // parse-failure diagnostic is NOT a finding — sidecars/TS text are legal non-JSON kinds, and
+    // whether a path SHOULD be JSON is the schema model's knowledge (a later M2 task).
+    if (form.is_json)
+        out.encoding_diagnostics = std::move(form.diagnostics);
     out.ok = true;
     return out;
 }
@@ -190,12 +225,16 @@ EditBatchOutcome EditorKernel::edit_files(const std::vector<BatchEdit>& edits,
             out.error_detail = "duplicate path in batch: " + e.path;
             return out;
         }
+        // Tool saves canonicalize the whole file they write (R-FILE-001) — the batch path plans,
+        // intent-logs, CAS-es, and writes the CANONICAL bytes, so a crash-recovery resume re-lands
+        // the identical canonical content. Non-JSON payloads pass through verbatim.
+        derivation::CanonicalForm form = derivation::canonical_parse(e.data);
         const std::optional<std::string> current = fs_.read(key);
         filesync::PlannedWrite w;
         w.path = key;
         w.expected_prev_hash = filesync::content_hash(current ? *current : std::string());
-        w.target_hash = filesync::content_hash(e.data);
-        w.data = e.data;
+        w.target_hash = filesync::content_hash(form.bytes);
+        w.data = std::move(form.bytes);
         writes.push_back(std::move(w));
     }
 

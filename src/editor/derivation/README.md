@@ -3,12 +3,13 @@
 The LSP-style pipeline that turns **file changes** (from the merged `src/editor/filesync/` layer) into
 the **derived `context::kernel::World`** — EditorKernel as a restartable incremental derivation engine
 over project files (**L-19**, **L-22**). The RuntimeKernel never parses authored files; it consumes this
-graph's output (**L-24**). This is the M1 **skeleton**: the graph mechanics are the deliverable; the
-canonical parse node is a deliberate placeholder (the real canonical-JSON serializer + schema model is
-M2), swappable behind a stable seam without touching the graph.
+graph's output (**L-24**). The graph mechanics were the M1 deliverable; the
+canonical parse node now delegates to the REAL canonical-JSON serializer (`src/editor/serializer/`,
+M2 issue #42) behind the same stable seam the M1 placeholder occupied — the graph never changed.
 
 Library target: **`context_derivation`** (links `context_filesync` for the `ReconcileChange` input type,
-`context_kernel` for the derived `World` + the internal `EventBus`, and `context_warnings`). Namespace:
+`context_kernel` for the derived `World` + the internal `EventBus`, `context_serializer` for the
+canonical parse node's real body, and `context_warnings`). Namespace:
 `context::editor::derivation`.
 
 ## What it implements
@@ -34,9 +35,11 @@ Library target: **`context_derivation`** (links `context_filesync` for the `Reco
 
 ## Known M1 simplifications (deliberate, documented)
 
-- **The canonical parse is a whitespace-normalizing placeholder** (`canonical_parse.h`), NOT the M2
-  canonical-JSON serializer. It is enough to make the canonical hash distinct from filesync's raw-byte
-  hash (**R-FILE-001**) and thus to exercise memoization; M2 replaces its body behind the same seam.
+- ~~The canonical parse is a whitespace-normalizing placeholder~~ **RESOLVED (M2 wave 1, #42)**: the
+  parse node delegates to the real canonical-JSON serializer (`src/editor/serializer/` — R-FILE-001
+  key order / number formatting / NFC, the two-hash split, and the committed test-vector corpus).
+  Non-JSON content passes through raw (raw ≡ canonical — the binary-sidecar rule); the per-kind
+  schema model still lands in later M2 tasks.
 - **The derived World is a flat file→entity map.** Composition / instantiation across scenes
   (parse → validate → **compose → instantiate**, the rest of the L-22 pipeline) lands with the M2 data
   model; here each source derives to one node with no cross-node dependency edges yet.
@@ -51,7 +54,8 @@ Library target: **`context_derivation`** (links `context_filesync` for the `Reco
 ## Tests
 
 `ctest --preset dev` runs each `derivation-*` executable (see `CMakeLists.txt`): the canonical-parse
-placeholder (whitespace-insensitivity, determinism, edges), the end-to-end change→World+generation flow
+seam (real-canonicalizer formatting-insensitivity, non-JSON passthrough, fixpoint, determinism,
+encoding heals), the end-to-end change→World+generation flow
 (create / removal / empty-pass), incremental re-derive + memoization + coalescing, backpressure
 (coalescing, the queue-depth signal, load-shed to the visible subgraph, event publication), and the
 read-your-writes barrier (own-write hash, foreign generation, explicit timeout, load-shed robustness).

@@ -36,6 +36,9 @@ WriteTicket DerivationGraph::apply(const ReconcileChange& change, std::string_vi
         pending.form = canonical_parse(source_bytes);
         ++parse_invocations_;
         ticket.canonical_hash = pending.form.canonical_hash;
+        // The raw-byte half of the R-FILE-001 two-hash split, carried from the filesync change
+        // (the reconcile pipeline's own content hash of the bytes on disk).
+        ticket.raw_hash = change.content_hash;
     }
 
     // Coalesce: the latest write to a path before the next pass wins (one batched pass per burst).
