@@ -1,0 +1,21 @@
+src/cli/src/bench_command.cpp
+  s_e3239cf02087b8::t_5f580c42da8966 97-101,104
+src/cli/tests/test_bench_command.cpp
+  s_e3239cf02087b8::t_d29a176cae6fae 174-181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d9d627462c2c232171f6fe7a9a41007ff56f4854",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
