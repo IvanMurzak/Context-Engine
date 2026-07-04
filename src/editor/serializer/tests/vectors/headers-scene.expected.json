@@ -1,0 +1,44 @@
+{
+  "$schema": "ctx://scene/1",
+  "componentVersions": {
+    "core:camera": 1,
+    "core:transform": 2,
+    "render:mesh": 3
+  },
+  "entities": [
+    {
+      "components": {
+        "camera": {
+          "far": 1000,
+          "fov": 60,
+          "near": 0.1
+        },
+        "transform": {
+          "position": [
+            0,
+            1,
+            -5
+          ]
+        }
+      },
+      "id": "e-9f2c41d7a3b8e650"
+    },
+    {
+      "components": {
+        "mesh": {
+          "heights": {
+            "$sidecar": "terrain.heights.bin",
+            "hash": "0f2a4b9c"
+          },
+          "source": {
+            "$ref": "a3f8c2d1-9b4e-4f60-8123-5c7d9e0f2a4b",
+            "path": "meshes/rock.mesh.json"
+          }
+        }
+      },
+      "id": "e-1a2b3c4d5e6f7081"
+    }
+  ],
+  "kind": "scene",
+  "version": 1
+}

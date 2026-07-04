@@ -7,14 +7,15 @@
 //          path (edit_file), the other exclusively through raw std::ofstream writes + the
 //          watch-hash-reconcile crawl (R-FILE-002). The serialized derived state of both worlds is
 //          compared BYTE-FOR-BYTE. Includes the canonical-form edge (L-22): raw bytes that differ
-//          only in insignificant whitespace derive to the identical canonical state.
+//          only in insignificant formatting — whitespace AND key order, erased by the REAL
+//          canonical-JSON serializer (M2, R-FILE-001) — derive to the identical canonical state.
 //   Part B (cross-process, REAL daemon over the REAL IPC wire, #35): a real `context attach`
 //          process performs the CLI-verb mutation; the test performs the raw text edit directly on
 //          disk; the daemon folds it in via `reconcile`; both derived nodes are read back over the
 //          wire and must carry the identical canonical hash.
 //
-// R-QA-013: happy path + edge cases (whitespace canonicalization, same-file two-path convergence,
-// removal) + failure path (divergent content must NOT be identical — the control).
+// R-QA-013: happy path + edge cases (whitespace + key-order canonicalization, same-file two-path
+// convergence, removal) + failure path (divergent content must NOT be identical — the control).
 
 #include "context/editor/bridge/scope.h"
 #include "context/editor/contract/json.h"
@@ -105,7 +106,7 @@ int main()
         CHECK(b.kernel.start() == editor::bridge::StartOutcome::booted);
 
         const std::string scene = "proj/a.scene";
-        const std::string content = "entity: 1";
+        const std::string content = "{\"entity\": 1, \"kind\": \"scene\"}";
 
         // Kernel A: the CLI-verb path (scope-checked daemon-initiated write through filesync).
         const EditOutcome ea = a.kernel.edit_file(scene, content, editor::bridge::ScopeSet::all());
@@ -113,9 +114,11 @@ int main()
         CHECK(a.kernel.await_hash(ea.ticket.canonical_hash).ok());
 
         // Kernel B: the raw text edit — a plain out-of-band ofstream write, folded in by the
-        // reconcile crawl (content hash authoritative, R-FILE-002). Raw bytes differ ONLY in
-        // insignificant whitespace, so the canonical form (L-22) must be identical.
-        CHECK(itest::write_file_raw(pb / "proj" / "a.scene", "  entity:   1  \n"));
+        // reconcile crawl (content hash authoritative, R-FILE-002). Raw bytes differ in
+        // whitespace AND key order — insignificant formatting the REAL canonical-JSON serializer
+        // (M2, R-FILE-001) erases — so the canonical form (L-22) must be identical.
+        CHECK(itest::write_file_raw(pb / "proj" / "a.scene",
+                                    "  { \"kind\" : \"scene\",\n    \"entity\" :   1 }  \n"));
         CHECK(!b.kernel.ingest_external().empty());
         b.kernel.settle();
 
@@ -130,34 +133,34 @@ int main()
         CHECK(b.kernel.world().alive_count() == 1);
 
         // Failure-path control: DIVERGENT content must NOT be identical.
-        const EditOutcome ea2 =
-            a.kernel.edit_file("proj/b.scene", "entity: 2", editor::bridge::ScopeSet::all());
+        const EditOutcome ea2 = a.kernel.edit_file("proj/b.scene", "{\"entity\": 2}",
+                                                   editor::bridge::ScopeSet::all());
         CHECK(ea2.ok);
         CHECK(a.kernel.await_hash(ea2.ticket.canonical_hash).ok());
-        CHECK(itest::write_file_raw(pb / "proj" / "b.scene", "entity: 3"));
+        CHECK(itest::write_file_raw(pb / "proj" / "b.scene", "{\"entity\": 3}"));
         CHECK(!b.kernel.ingest_external().empty());
         b.kernel.settle();
         CHECK(derived_state(a.kernel, {"proj/b.scene"}) != derived_state(b.kernel, {"proj/b.scene"}));
 
         // Edge: SAME file, both paths in sequence — the raw edit overrides the CLI verb (files are
         // the truth), then the CLI verb overrides back; the derived node tracks each.
-        const EditOutcome ex =
-            a.kernel.edit_file("proj/x.scene", "entity: 10", editor::bridge::ScopeSet::all());
+        const EditOutcome ex = a.kernel.edit_file("proj/x.scene", "{\"entity\": 10}",
+                                                  editor::bridge::ScopeSet::all());
         CHECK(ex.ok);
         CHECK(a.kernel.await_hash(ex.ticket.canonical_hash).ok());
-        CHECK(itest::write_file_raw(pa / "proj" / "x.scene", "entity: 11"));
+        CHECK(itest::write_file_raw(pa / "proj" / "x.scene", "{\"entity\": 11}"));
         CHECK(!a.kernel.ingest_external().empty());
         a.kernel.settle();
         const auto raw_won = a.kernel.query("proj/x.scene");
         CHECK(raw_won.has_value());
         CHECK(raw_won->canonical_hash ==
-              editor::derivation::canonical_parse("entity: 11").canonical_hash);
-        const EditOutcome ex2 =
-            a.kernel.edit_file("proj/x.scene", "entity: 12", editor::bridge::ScopeSet::all());
+              editor::derivation::canonical_parse("{\"entity\": 11}").canonical_hash);
+        const EditOutcome ex2 = a.kernel.edit_file("proj/x.scene", "{\"entity\": 12}",
+                                                   editor::bridge::ScopeSet::all());
         CHECK(ex2.ok);
         CHECK(a.kernel.await_hash(ex2.ticket.canonical_hash).ok());
         CHECK(a.kernel.query("proj/x.scene")->canonical_hash ==
-              editor::derivation::canonical_parse("entity: 12").canonical_hash);
+              editor::derivation::canonical_parse("{\"entity\": 12}").canonical_hash);
 
         // Edge: a raw REMOVAL converges too (the file is gone => the derived node is gone).
         std::error_code ec;
@@ -183,10 +186,12 @@ int main()
         CHECK(ctest_proc::valid(daemon));
         CHECK(itest::wait_for_instance(project, 15000));
 
-        // CLI-verb mutation by a REAL separate CLI process over the wire.
+        // CLI-verb mutation by a REAL separate CLI process over the wire. The content is a bare
+        // JSON array (no quotes/spaces) because the test-side spawn does no embedded-quote
+        // escaping — the canonical-form equivalence below is what matters, not the payload shape.
         ctest_proc::Process attach = ctest_proc::spawn(
             bin, {"attach", "--project", project.string(), "--set-path", "proj/cli.scene",
-                  "--set-content", "entity: 9"});
+                  "--set-content", "[9]"});
         CHECK(ctest_proc::valid(attach));
         int attach_code = -1;
         const bool attach_done = ctest_proc::wait_for(attach, 25000, attach_code);
@@ -196,8 +201,9 @@ int main()
         CHECK(attach_done);
         CHECK(attach_code == 0);
 
-        // Raw text edit, bypassing the engine entirely — whitespace-variant of the same content.
-        CHECK(itest::write_file_raw(project / "proj" / "raw.scene", "  entity:   9 \n"));
+        // Raw text edit, bypassing the engine entirely — a formatting-variant of the same content
+        // (whitespace noise the real canonicalizer erases, R-FILE-001).
+        CHECK(itest::write_file_raw(project / "proj" / "raw.scene", "  [ 9 ]  \n"));
 
         // Read both derived nodes back over the wire; the daemon folds the raw edit in via the
         // reconcile crawl. Identical canonical hash == identical derived World state for the pair.
@@ -228,8 +234,8 @@ int main()
             CHECK(!ch.empty());
             CHECK(ch == rh); // byte-identical derived state through both mutation paths
             // and it is the canonical form both raw byte streams reduce to (L-22):
-            CHECK(ch == std::to_string(
-                            editor::derivation::canonical_parse("entity: 9").canonical_hash));
+            CHECK(ch ==
+                  std::to_string(editor::derivation::canonical_parse("[9]").canonical_hash));
         }
 
         const auto stopped = rpc.call("shutdown", Json::object());

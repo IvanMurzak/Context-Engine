@@ -7,6 +7,7 @@
 #include "context/cli/scaffold.h"
 #include "context/editor/contract/envelope.h"
 #include "context/editor/contract/json.h"
+#include "context/editor/serializer/canonical.h"
 #include "cli_test.h"
 
 #include <filesystem>
@@ -64,6 +65,19 @@ int main()
             const Json scene = Json::parse(scene_text);
             CHECK(scene.at("kind").as_string() == "scene");
             CHECK(scene.at("entities").size() >= 1);
+
+            // Tool saves canonicalize the whole file they write (R-FILE-001): the scaffolded
+            // bytes must already BE the canonical form (a canonicalization fixpoint).
+            CHECK(context::editor::serializer::canonicalize(scene_text).bytes == scene_text);
+        }
+
+        // The template ships .gitattributes pinning authored JSON to LF (R-FILE-001).
+        CHECK(std::filesystem::exists(dir / ".gitattributes"));
+        {
+            std::ifstream attrs_in(dir / ".gitattributes", std::ios::binary);
+            std::string attrs_text((std::istreambuf_iterator<char>(attrs_in)),
+                                   std::istreambuf_iterator<char>());
+            CHECK(attrs_text.find("*.json text eol=lf") != std::string::npos);
         }
 
         remove_quiet(dir);

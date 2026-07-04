@@ -63,10 +63,15 @@ struct DerivePassResult
     std::size_t deferred = 0;       // nodes load-shed to a later pass (still pending after this one)
 };
 
-// The receipt an ingest returns — the R-CLI-006 own-write barrier key.
+// The receipt an ingest returns — the R-CLI-006 own-write barrier key, carrying BOTH hashes of the
+// R-FILE-001 two-hash split: `raw_hash` (the raw-byte identity of the ingested bytes — the
+// watch/reconcile change-detector's and CAS `--if-match`'s key) and `canonical_hash` (the
+// canonical-content identity — the derivation/cache key and the own-write barrier). For non-JSON
+// content the two coincide by construction (no canonicalization pass — the binary-sidecar rule).
 struct WriteTicket
 {
     std::string path;
+    std::uint64_t raw_hash = 0;         // raw-byte hash of the ingested bytes (0 for a removal)
     std::uint64_t canonical_hash = 0;   // barrier on THIS for own writes (`--after-hash`)
     std::uint64_t generation_after = 0; // best-effort target generation (`--after-generation`); under
                                         // load-shed the real generation may be later, so own writes

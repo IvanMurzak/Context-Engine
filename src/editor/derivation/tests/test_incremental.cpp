@@ -49,17 +49,23 @@ int main()
     CHECK(graph.node("c")->generation == 1); // untouched
     CHECK(graph.generation() == 2);
 
-    // Memoization via canonicalization: rewriting a with whitespace-only noise yields the SAME canonical
+    // Memoization via canonicalization: rewriting a with formatting-only noise (whitespace + key
+    // order — the file is JSON, so the REAL canonicalizer erases both) yields the SAME canonical
     // form, so the node is dirty-then-skipped — no downstream re-derive, entity generation frozen.
     const auto derivations_after_b = graph.derivations();
-    graph.apply(change("a"), "   AAA   "); // canonicalizes back to "AAA"
-    auto r2 = graph.run_pass();            // generation 3
+    graph.apply(change("j"), "{\"k\": 1, \"m\": 2}");
+    graph.run_pass(); // generation 3: j derived once
+    const auto derivations_after_j = graph.derivations();
+    graph.apply(change("j"), "  {\n  \"m\" : 2,\t\"k\" : 1 }  "); // same canonical form
+    auto r2 = graph.run_pass();                                   // generation 4
     CHECK(r2.nodes_skipped == 1);
     CHECK(r2.nodes_derived == 0);
-    CHECK(graph.derivations() == derivations_after_b); // no derivation work happened
-    CHECK(graph.node("a")->generation == 1);           // memoized: value never changed
-    CHECK(graph.node("a")->canonical_hash == canonical_hash_of("AAA"));
-    CHECK(graph.generation() == 3); // global generation still advances (the batch was incorporated)
+    CHECK(graph.derivations() == derivations_after_j); // no derivation work happened
+    CHECK(graph.node("j")->generation == 3);           // memoized: value never changed
+    CHECK(graph.node("j")->canonical_hash ==
+          context::editor::derivation::canonical_parse("{\"k\": 1, \"m\": 2}").canonical_hash);
+    CHECK(graph.derivations() == derivations_after_b + 1); // exactly the one j derivation
+    CHECK(graph.generation() == 4); // global generation still advances (the batch was incorporated)
 
     // Memoization via byte-identical rewrite (the common "save with no edit" case).
     graph.apply(change("c"), "CCC");

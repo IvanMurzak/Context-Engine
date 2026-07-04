@@ -15,14 +15,15 @@ add_library(context_cli STATIC
 
 target_include_directories(context_cli PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-# context_contract is PUBLIC (its headers appear in the CLI's public headers); context_kernel and
-# context_editorkernel are PRIVATE (only scaffold.cpp's runnable-template proof touches context_kernel;
-# only editor_driver.cpp's `context editor smoke` in-process driver touches context_editorkernel — the
-# editor_driver.h public header exposes only contract types). Every target links the warnings-as-errors
+# context_contract is PUBLIC (its headers appear in the CLI's public headers); context_kernel,
+# context_editorkernel, and context_serializer are PRIVATE (only scaffold.cpp's runnable-template
+# proof touches context_kernel; only editor_driver.cpp's `context editor smoke` in-process driver
+# touches context_editorkernel; only scaffold.cpp's canonical tool-save touches context_serializer —
+# the public headers expose only contract types). Every target links the warnings-as-errors
 # baseline (conventions.md).
 target_link_libraries(context_cli
     PUBLIC context_contract
-    PRIVATE context_kernel context_editorkernel context_warnings)
+    PRIVATE context_kernel context_editorkernel context_serializer context_warnings)
 
 # Self-contained GCC runtime for the CLI executables. context_cli uses std::filesystem (the
 # `context new` scaffolder), whose libstdc++ symbols live in a NEWER libstdc++-6.dll; on a MinGW
@@ -56,6 +57,11 @@ foreach(_t IN LISTS _context_cli_tests)
     target_include_directories(context_cli_${_t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     add_test(NAME cli-${_t} COMMAND context_cli_${_t})
 endforeach()
+
+# test_scaffold additionally asserts the scaffolded files are canonicalization fixpoints
+# (R-FILE-001 tool-save rule), so it links the serializer directly (PRIVATE in context_cli, so the
+# include path does not propagate through it).
+target_link_libraries(context_cli_test_scaffold PRIVATE context_serializer)
 
 # --- cross-process e2e (R-QA-013 / issue #34): spawn a REAL `context daemon` process + a SEPARATE
 # `context attach` process; the attach process drives the daemon over the wire and a 2nd `context

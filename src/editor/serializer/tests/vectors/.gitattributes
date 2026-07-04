@@ -1,0 +1,4 @@
+# The vectors are BYTE-EXACT fixtures (R-QA-011): the expected files' bytes ARE the contract
+# (LF endings, BOM bytes, raw UTF-8 sequences), and bom-crlf.input.json deliberately CONTAINS
+# CRLF + a BOM. Any EOL normalization on checkout would corrupt them — pin the whole tree.
+* -text

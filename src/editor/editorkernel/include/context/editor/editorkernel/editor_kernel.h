@@ -73,12 +73,18 @@ struct EditorKernelConfig
 struct EditOutcome
 {
     bool ok = false;
-    derivation::WriteTicket ticket{}; // valid iff ok; its canonical_hash is the own-write barrier key
+    derivation::WriteTicket ticket{}; // valid iff ok; carries BOTH R-FILE-001 hashes — raw_hash
+                                      // (on-disk bytes; CAS `--if-match`) and canonical_hash (the
+                                      // own-write barrier / derivation key)
     std::string error_code;           // catalog code when !ok (scope.denied / path.jail_violation / …)
+    // Machine-readable encoding heals from canonicalizing this save (R-FILE-003 shape); populated
+    // only for JSON content (e.g. encoding.bom / encoding.crlf — already fixed on disk).
+    std::vector<serializer::Diagnostic> encoding_diagnostics;
 
     // The uniform R-CLI-008 result envelope a CLI/RPC caller returns. Success carries the derived
-    // generation the write targets + the node's canonical hash; failure carries the catalog code so
-    // Envelope::exit_code() classes it (e.g. scope.denied -> permission exit 6, R-SEC-007).
+    // generation the write targets + the two-hash split (`rawHash` + `canonicalHash`, labelled) +
+    // any encoding diagnostics; failure carries the catalog code so Envelope::exit_code() classes
+    // it (e.g. scope.denied -> permission exit 6, R-SEC-007).
     [[nodiscard]] contract::Envelope envelope() const;
 };
 
