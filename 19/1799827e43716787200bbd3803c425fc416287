@@ -1,0 +1,34 @@
+src/editor/assetdb/tests/test_asset_database.cpp
+  s_e3239cf02087b8::t_1b1a87829795ea 181-198
+src/editor/assetdb/include/context/editor/assetdb/asset_database.h
+  s_e3239cf02087b8::t_4b7e4dfa82ccb7 100-104
+  s_e3239cf02087b8::t_b96cc46ee5e2f7 128-132
+src/editor/assetdb/tests/test_move_heal.cpp
+  s_e3239cf02087b8::t_51e87ba020ba44 182-230
+  s_e3239cf02087b8::t_b5f5a94b038af7 456-475
+src/editor/contract/src/error_catalog.cpp
+  s_e3239cf02087b8::t_045089db4573e8 134-135,138-140
+src/editor/assetdb/src/asset_database.cpp
+  s_e3239cf02087b8::t_b539d275199de2 419-421
+  s_e3239cf02087b8::t_b05d1611a6ee61 107
+  s_e3239cf02087b8::t_8fef86b272d5b6 385-389,393-395
+  s_e3239cf02087b8::t_d0eca684900119 446-460
+  s_e3239cf02087b8::t_4674acf37d5867 490-514,520
+  s_e3239cf02087b8::t_0d0260c952beab 82-90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "191799827e43716787200bbd3803c425fc416287",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
