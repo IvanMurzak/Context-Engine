@@ -153,5 +153,104 @@ int main()
         CHECK(pkg->mcp_tool == "context_package_add");
     }
 
+    // --- core flags: --after-hash is LIVE, --atomic-plan is grammar-reserved (R-CLI-011) --------
+    {
+        const FlagSpec* after_hash = nullptr;
+        const FlagSpec* atomic_plan = nullptr;
+        const FlagSpec* idem = nullptr;
+        for (const FlagSpec& f : reg.core_flags())
+        {
+            if (f.name == "after-hash")
+                after_hash = &f;
+            if (f.name == "atomic-plan")
+                atomic_plan = &f;
+            if (f.name == "idempotency-key")
+                idem = &f;
+        }
+        CHECK(after_hash != nullptr);
+        CHECK(!after_hash->reserved); // the own-write barrier mechanism exists + is tested
+        CHECK(after_hash->value_type == "hash");
+        CHECK(atomic_plan != nullptr);
+        CHECK(atomic_plan->reserved); // accepted-but-inert: parity with --idempotency-key
+        CHECK(idem != nullptr && idem->reserved);
+        // Core flags project onto EVERY verb's flag list on every surface (checked structurally
+        // above via flag_names) — spot-check one verb's cli entry carries the new names.
+        const std::vector<std::string> flags0 = name_list(cli.at(0).at("flags"));
+        bool saw_after_hash = false;
+        bool saw_atomic_plan = false;
+        for (const std::string& name : flags0)
+        {
+            saw_after_hash = saw_after_hash || name == "after-hash";
+            saw_atomic_plan = saw_atomic_plan || name == "atomic-plan";
+        }
+        CHECK(saw_after_hash);
+        CHECK(saw_atomic_plan);
+    }
+
+    // --- R-CLI-017: resource.read is registered, stable, implemented, with the fetch alias ------
+    {
+        const VerbSpec* rr = reg.find_verb("", "resource", "read");
+        CHECK(rr != nullptr);
+        CHECK(rr->rpc_method == "resource.read");
+        CHECK(rr->mcp_tool == "context_resource_read");
+        CHECK(rr->cli_command() == "context resource read");
+        CHECK(rr->cli_alias == "fetch");
+        CHECK(rr->implemented);
+        CHECK(rr->stability == "stable");
+        CHECK(rr->params.size() == 2); // handle (required) + range (optional)
+        CHECK(rr->params[0].name == "handle" && rr->params[0].required);
+        CHECK(rr->params[1].name == "range" && !rr->params[1].required);
+        CHECK(rr->flags.size() == 1 && rr->flags[0].name == "out"); // the operational result sink
+    }
+
+    // --- R-CLI-009 honesty: the operational daemon-driver surface is registered -----------------
+    {
+        const struct
+        {
+            const char* verb;
+            bool implemented;
+        } operational[] = {{"edit", true},      {"edit-batch", true}, {"query", true},
+                           {"snapshot", true},  {"reconcile", true},  {"build", false},
+                           {"shutdown", true}};
+        for (const auto& op : operational)
+        {
+            const VerbSpec* v = reg.find_verb("", "", op.verb);
+            CHECK(v != nullptr);
+            if (v == nullptr)
+                continue;
+            CHECK(v->stability == "operational");
+            CHECK(v->implemented == op.implemented);
+            CHECK(v->rpc_method == op.verb); // global verbs: method-id == verb name (stable ids)
+        }
+        // Hyphenated verbs fold to snake_case MCP tool names.
+        const VerbSpec* batch = reg.find_verb("", "", "edit-batch");
+        CHECK(batch != nullptr && batch->mcp_tool == "context_edit_batch");
+        // The original M1 quartet stays "stable" (the default) — additive, nothing re-classed.
+        const VerbSpec* describe_verb = reg.find_verb("", "", "describe");
+        CHECK(describe_verb != nullptr && describe_verb->stability == "stable");
+    }
+
+    // --- describe carries stability + cliAlias + the largeResult section (R-CLI-013/017) --------
+    {
+        const Json& c = describe.at("contract");
+        bool saw_fetch_alias = false;
+        for (std::size_t i = 0; i < c.at("verbs").size(); ++i)
+        {
+            const Json& v = c.at("verbs").at(i);
+            CHECK(!v.at("stability").as_string().empty());
+            if (v.contains("cliAlias") && v.at("cliAlias").as_string() == "context fetch")
+                saw_fetch_alias = true;
+        }
+        CHECK(saw_fetch_alias);
+
+        const Json& lr = c.at("largeResult");
+        CHECK(lr.is_object());
+        CHECK(lr.at("uriScheme").as_string() == "context-res");
+        CHECK(lr.at("rpcMethod").as_string() == "resource.read");
+        CHECK(lr.at("cliCommand").as_string() == "context fetch");
+        CHECK(lr.at("handleShape").is_object());
+        CHECK(lr.at("readResultShape").is_object());
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

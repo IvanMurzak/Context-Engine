@@ -4,10 +4,12 @@
 
 #include "context/editor/contract/envelope.h"
 #include "context/editor/contract/json.h"
+#include "context/editor/contract/resource_handle.h"
 #include "context/editor/derivation/derivation_graph.h"
 
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace context::editor::editorkernel
 {
@@ -37,6 +39,16 @@ KernelServer::KernelServer(EditorKernel& kernel) : kernel_(kernel)
     // Register as the dispatcher's method backend. MUST precede kernel.start() (the dispatcher is
     // constructed at boot and captures the backend then).
     kernel_.set_method_backend(this);
+}
+
+bridge::ResourceStore& KernelServer::resources() const
+{
+    // Lazy: the incarnation id lives on the daemon's EventStream, which exists only after
+    // kernel.start() — and every caller of this accessor runs on a started daemon (see header).
+    if (!resources_.has_value())
+        resources_.emplace(kernel_.config().project_root / ".editor" / "resources",
+                           kernel_.events().incarnation_id());
+    return *resources_;
 }
 
 std::optional<Envelope> KernelServer::invoke(const std::string& method, const Json& params,
@@ -158,12 +170,14 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
     }
 
     // `reconcile` — fold EXTERNAL (out-of-band) edits into the derived world: drain watcher hints +
-    // the full re-hash crawl (content hash authoritative over watchers, R-FILE-002), then settle.
-    // Read-only w.r.t. authored state (it makes the daemon notice on-disk truth; it writes nothing),
-    // so it sits on the read/query baseline.
+    // FORCE the full re-hash crawl (content hash authoritative over watchers, R-FILE-002), then
+    // settle. This is the crawl-on-demand path for bulk ops (e.g. after a git branch switch), so it
+    // bypasses the low-frequency crawl cadence deliberately. Read-only w.r.t. authored state (it
+    // makes the daemon notice on-disk truth; it writes nothing), so it sits on the read/query
+    // baseline.
     if (method == "reconcile")
     {
-        const std::size_t changes = kernel_.ingest_external().size();
+        const std::size_t changes = kernel_.ingest_external(CrawlMode::force).size();
         const std::uint64_t generation = kernel_.settle();
         Json data = Json::object();
         data.set("changes", Json(static_cast<std::uint64_t>(changes)));
@@ -193,6 +207,51 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
         return Envelope::success(std::move(data), kernel_.generation());
     }
 
+    // `resource.read` — the R-CLI-017 large-result fetch (CLI: `context fetch`): read a bounded,
+    // hex-encoded chunk of a spooled oversized result by its opaque handle. v1 resolves against
+    // THIS live daemon only (same-filesystem scope); a foreign / stale / malformed handle is
+    // resource.unknown_handle. Read-only (read/query baseline).
+    if (method == "resource.read")
+    {
+        const std::optional<std::string> uri = string_param(params, "handle");
+        if (!uri.has_value())
+            return Envelope::failure("usage.missing_argument",
+                                     "resource.read requires a string 'handle' param");
+        const std::optional<contract::ResourceHandle> handle =
+            contract::ResourceHandle::parse(*uri);
+        if (!handle.has_value())
+            return Envelope::failure("resource.unknown_handle",
+                                     "malformed resource URI: " + *uri);
+
+        std::uint64_t offset = 0;
+        std::uint64_t length = 0; // 0 = up to the chunk cap
+        if (params.contains("range") && params.at("range").is_object())
+        {
+            const Json& range = params.at("range");
+            if (range.contains("offsetBytes"))
+                offset = static_cast<std::uint64_t>(range.at("offsetBytes").as_int());
+            if (range.contains("lengthBytes"))
+                length = static_cast<std::uint64_t>(range.at("lengthBytes").as_int());
+        }
+
+        const std::optional<bridge::ResourceStore::ReadResult> chunk =
+            resources().read(*handle, offset, length);
+        if (!chunk.has_value())
+            return Envelope::failure("resource.unknown_handle",
+                                     "no such resource on this daemon instance (expired, foreign, "
+                                     "or out-of-range read): " +
+                                         *uri);
+
+        Json data = Json::object();
+        data.set("handle", Json(*uri));
+        data.set("offsetBytes", Json(chunk->offset));
+        data.set("lengthBytes", Json(static_cast<std::uint64_t>(chunk->bytes.size())));
+        data.set("totalBytes", Json(chunk->total));
+        data.set("eof", Json(chunk->eof));
+        data.set("chunkHex", Json(bridge::hex_encode(chunk->bytes)));
+        return Envelope::success(std::move(data));
+    }
+
     // `shutdown` — ask the serve loop to stop after replying (session_control scope, enforced above).
     if (method == "shutdown")
     {
@@ -203,6 +262,69 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
     }
 
     return std::nullopt; // not an operational verb — let the dispatcher route it (describe / reserved)
+}
+
+std::string KernelServer::finalize_response(std::string response) const
+{
+    // The R-CLI-017 oversized-response gate. Anything at or under the threshold travels inline.
+    if (response.size() <= large_result_threshold_)
+        return response;
+
+    // Only a well-formed SUCCESS result spools: error responses stay inline (they are small by
+    // construction), and a malformed/unexpected shape passes through untouched (defensive — the
+    // transport frame cap remains the hard backstop).
+    Json doc;
+    try
+    {
+        doc = Json::parse(response);
+    }
+    catch (const std::exception&)
+    {
+        return response;
+    }
+    if (!doc.is_object() || !doc.contains("result") || !doc.at("result").is_object())
+        return response;
+    const Json& result = doc.at("result");
+    if (!result.contains("ok") || !result.at("ok").as_bool())
+        return response;
+
+    // Never spool a reply that IS the large-result mechanism (a resource.read chunk or an already-
+    // spooled largeResult) — that would recurse the fetch.
+    if (result.contains("data") && result.at("data").is_object() &&
+        (result.at("data").contains("chunkHex") || result.at("data").contains("largeResult")))
+        return response;
+
+    // Spool the WHOLE original result envelope: the fetched payload re-parses as exactly what the
+    // daemon would have returned inline (ok/data/generationAfter/warnings).
+    const std::string payload = result.dump(0);
+    const std::optional<contract::ResourceHandle> handle = resources().put(payload);
+    if (!handle.has_value())
+        return response; // spool failed: degrade to inline (the frame cap still bounds it)
+
+    Json data = Json::object();
+    data.set("largeResult", handle->to_json(resources().local_path_hint(*handle)));
+
+    Json replacement = Json::object();
+    replacement.set("ok", Json(true));
+    replacement.set("data", std::move(data));
+    if (result.contains("generationAfter"))
+        replacement.set("generationAfter", result.at("generationAfter"));
+    Json warnings = Json::array();
+    if (result.contains("warnings") && result.at("warnings").is_array())
+    {
+        for (std::size_t i = 0; i < result.at("warnings").size(); ++i)
+            warnings.push_back(result.at("warnings").at(i));
+    }
+    warnings.push_back(Json(std::string(
+        "result exceeded the inline threshold; fetch it via resource.read (context fetch)")));
+    replacement.set("warnings", std::move(warnings));
+
+    Json out = Json::object();
+    out.set("jsonrpc", Json(std::string("2.0")));
+    if (doc.contains("id"))
+        out.set("id", doc.at("id"));
+    out.set("result", std::move(replacement));
+    return out.dump(0);
 }
 
 int KernelServer::serve(bridge::TransportServer& server)
@@ -229,7 +351,10 @@ int KernelServer::serve(bridge::TransportServer& server)
             if (!request.has_value())
                 break; // client disconnected (or a framing error)
 
-            const std::string response = kernel_.daemon().dispatcher().handle(*request, session);
+            // Dispatch, then apply the R-CLI-017 oversized-response gate (spool + largeResult
+            // replacement) so no legitimate result ever has to fight the transport frame cap.
+            const std::string response =
+                finalize_response(kernel_.daemon().dispatcher().handle(*request, session));
             if (!response.empty() && !conn->write_frame(response))
                 break; // peer gone
 

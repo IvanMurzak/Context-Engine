@@ -11,18 +11,21 @@ add_library(context_cli STATIC
     src/bench_command.cpp
     src/daemon_command.cpp
     src/editor_driver.cpp
-    src/scaffold.cpp)
+    src/fetch_command.cpp
+    src/scaffold.cpp
+    src/wire_client.cpp)
 
 target_include_directories(context_cli PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-# context_contract is PUBLIC (its headers appear in the CLI's public headers); context_kernel,
-# context_editorkernel, and context_serializer are PRIVATE (only scaffold.cpp's runnable-template
-# proof touches context_kernel; only editor_driver.cpp's `context editor smoke` in-process driver
-# touches context_editorkernel; only scaffold.cpp's canonical tool-save touches context_serializer —
-# the public headers expose only contract types). Every target links the warnings-as-errors
-# baseline (conventions.md).
+# context_contract and context_bridge are PUBLIC (their headers appear in the CLI's public
+# headers — contract types everywhere; wire_client.h exposes bridge::TransportClient for the
+# operational wire commands); context_kernel, context_editorkernel, and context_serializer are
+# PRIVATE (only scaffold.cpp's runnable-template proof touches context_kernel; only
+# editor_driver.cpp's `context editor smoke` in-process driver touches context_editorkernel; only
+# scaffold.cpp's canonical tool-save touches context_serializer). Every target links the
+# warnings-as-errors baseline (conventions.md).
 target_link_libraries(context_cli
-    PUBLIC context_contract
+    PUBLIC context_contract context_bridge
     PRIVATE context_kernel context_editorkernel context_serializer context_warnings)
 
 # Self-contained GCC runtime for the CLI executables. context_cli uses std::filesystem (the
@@ -78,3 +81,17 @@ add_dependencies(context_cli_test_attach_e2e context)
 add_test(NAME cli-test_attach_e2e COMMAND context_cli_test_attach_e2e)
 # The daemon child can block if something goes wrong; cap the cross-process test so CI never hangs.
 set_tests_properties(cli-test_attach_e2e PROPERTIES TIMEOUT 60)
+
+# --- cross-process R-CLI-017 e2e: a REAL daemon with a lowered --large-result-threshold serves an
+# oversized `describe` as a largeResult HANDLE; a separate `context fetch` process retrieves +
+# reassembles it over resource.read (full + range + unknown-handle failure). Same harness shape as
+# the attach e2e (CONTEXT_BINARY define, built after `context`, reaped daemon, capped runtime).
+add_executable(context_cli_test_fetch_e2e tests/test_fetch_e2e.cpp)
+target_link_libraries(context_cli_test_fetch_e2e PRIVATE context_cli context_warnings)
+target_link_options(context_cli_test_fetch_e2e PRIVATE ${_context_cli_static_runtime})
+target_include_directories(context_cli_test_fetch_e2e PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+target_compile_definitions(context_cli_test_fetch_e2e
+    PRIVATE CONTEXT_BINARY="$<TARGET_FILE:context>")
+add_dependencies(context_cli_test_fetch_e2e context)
+add_test(NAME cli-test_fetch_e2e COMMAND context_cli_test_fetch_e2e)
+set_tests_properties(cli-test_fetch_e2e PROPERTIES TIMEOUT 60)

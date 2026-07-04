@@ -305,7 +305,19 @@ std::vector<Diagnostic> WriteQueue::recover()
                 // basename (not entry->op_id, which may contain a path separator).
                 const std::string unique = op_name + ".r" + std::to_string(i);
                 if (!atomic_write(fs_, write.path, write.data, unique))
+                {
+                    // The store refused or failed the re-apply — e.g. the native store's TOCTOU-safe
+                    // jail (R-SEC-008) rejected a resume whose target now resolves outside the
+                    // project root (a symlink swapped in since the crash), or a real I/O error.
+                    // R-FILE-004: an op that cannot be fully + safely resumed is REPORTED, never
+                    // silently dropped; the entry stays pending.
                     fully_resumed = false;
+                    diagnostics.push_back(Diagnostic{"filesync.intent.resume", entry->op_id,
+                                                     "resume write did not complete durably "
+                                                     "(jail-refused or I/O failure): " +
+                                                         write.path,
+                                                     {write.path}});
+                }
                 continue;
             }
 

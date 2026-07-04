@@ -60,7 +60,7 @@ int main()
     EditorKernelConfig cfg;
     cfg.project_root = project;                      // daemon single-instance lock (real FS)
     cfg.filesync_root = "proj";                      // logical FileStore root under the native base
-    cfg.index_path = "proj/.editor/reconcile-index"; // reconcile index (real file on disk)
+    cfg.index_path = "proj/.editor/index"; // reconcile index (real file on disk)
 
     EditorKernel kernel(store, watcher, clock, tasks, cfg);
     const ScopeSet writer = ScopeSet::parse("write");
@@ -121,7 +121,7 @@ int main()
 
     // --- the reconcile index persisted to a real file under .editor/ ------------------------------
     CHECK(kernel.reconciler().save_index());
-    CHECK(store.exists("proj/.editor/reconcile-index"));
+    CHECK(store.exists("proj/.editor/index"));
 
     kernel.stop();
     CHECK(!kernel.running());

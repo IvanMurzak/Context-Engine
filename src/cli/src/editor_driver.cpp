@@ -110,7 +110,7 @@ Envelope run_smoke(const std::vector<std::string>& args)
     EditorKernelConfig cfg;
     cfg.project_root = project;
     cfg.filesync_root = "proj";
-    cfg.index_path = "proj/.editor/reconcile-index";
+    cfg.index_path = "proj/.editor/index";
 
     EditorKernel kernel(store, watcher, clock, tasks, cfg);
 

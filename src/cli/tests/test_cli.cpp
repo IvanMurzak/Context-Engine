@@ -123,5 +123,43 @@ int main()
         CHECK(e.data().at("files").at(0).as_string() == ".gitattributes");
     }
 
+    // --- the R-CLI-017 fetch verb: registry-owned alias + canonical form resolve identically -----
+    {
+        // Both spellings resolve to the SAME registered verb (dry-run: no daemon needed).
+        const Envelope alias = run({"fetch", "context-res://v0/i/1?bytes=9", "--dry-run"});
+        CHECK(alias.ok());
+        CHECK(alias.data().at("verb").as_string() == "context resource read");
+        const Envelope canonical =
+            run({"resource", "read", "context-res://v0/i/1?bytes=9", "--dry-run"});
+        CHECK(canonical.ok());
+        CHECK(canonical.data().at("verb").as_string() == "context resource read");
+
+        // Required-arg enforcement holds through the alias too.
+        const Envelope missing = run({"fetch"});
+        CHECK(err_code(missing) == "usage.missing_argument");
+
+        // Without --project there is no daemon to resolve against (a REAL fetch is the e2e's job).
+        const Envelope no_project = run({"fetch", "context-res://v0/i/1?bytes=9"});
+        CHECK(err_code(no_project) == "usage.missing_argument");
+
+        // A non-URI handle fails fast with the R-CLI-017 catalog code (not-found exit class 3).
+        const Envelope bogus = run({"fetch", "not-a-uri", "--project", "/nowhere"});
+        CHECK(err_code(bogus) == "resource.unknown_handle");
+        CHECK(bogus.exit_code() == 3);
+    }
+
+    // --- operational daemon-driver verbs are registered (describe-honesty) but NOT one-shot CLI
+    // --- verbs: invoking one names the wire door instead of pretending "reserved" (R-CLI-009) -----
+    {
+        const Envelope edit = run({"edit", "proj/a.scene", "entity: 1"});
+        CHECK(err_code(edit) == "contract.operational_only");
+        CHECK(edit.exit_code() == 2); // usage class
+        const Envelope snap = run({"snapshot"});
+        CHECK(err_code(snap) == "contract.operational_only");
+        // `build` is scope-reserved AND operational — same one-shot rejection.
+        const Envelope build = run({"build"});
+        CHECK(err_code(build) == "contract.operational_only");
+    }
+
     CLI_TEST_MAIN_END();
 }

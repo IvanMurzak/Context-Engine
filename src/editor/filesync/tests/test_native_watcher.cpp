@@ -137,7 +137,7 @@ int main()
         NativeWatcher watcher(tmp.path() / "proj", "proj");
         context::kernel::SteadyClock clock;
         context::kernel::InlineTaskRunner tasks;
-        Reconciler rec(store, watcher, clock, tasks, "proj", "proj/.editor/reconcile-index");
+        Reconciler rec(store, watcher, clock, tasks, "proj", "proj/.editor/index");
         CHECK(!watcher.degraded());
 
         // Three external creates converge through hints alone (paths re-hashed UNCONDITIONALLY on
@@ -193,7 +193,7 @@ int main()
         NativeWatcher watcher(tmp.path() / "proj", "proj");
         context::kernel::SteadyClock clock;
         context::kernel::InlineTaskRunner tasks;
-        Reconciler rec(store, watcher, clock, tasks, "proj", "proj/.editor/reconcile-index");
+        Reconciler rec(store, watcher, clock, tasks, "proj", "proj/.editor/index");
 
         // The daemon's own write: the OS watcher WILL see it (temp file + rename + target), but it
         // must never surface as an external change — suppressed by the expected-writes TTL while
@@ -236,7 +236,7 @@ int main()
         NativeWatcher watcher(tmp.path() / "proj", "proj");
         context::kernel::SteadyClock clock;
         context::kernel::InlineTaskRunner tasks;
-        Reconciler rec(store, watcher, clock, tasks, "proj", "proj/.editor/reconcile-index");
+        Reconciler rec(store, watcher, clock, tasks, "proj", "proj/.editor/index");
         (void)rec.crawl(/*gated=*/false); // prime the index with the pre-existing tree
         (void)watcher.poll();             // and discard any hints the priming itself produced
 
@@ -323,7 +323,7 @@ int main()
         std::vector<std::string> logs;
         bus.subscribe<context::kernel::LogEvent>(
             [&](const context::kernel::LogEvent& event) { logs.push_back(event.message); });
-        Reconciler rec(store, file_root, clock, tasks, "proj", "proj/.editor/reconcile-index",
+        Reconciler rec(store, file_root, clock, tasks, "proj", "proj/.editor/index",
                        &bus);
         (void)rec.reconcile_hints();
         (void)rec.reconcile_hints();
@@ -348,7 +348,7 @@ int main()
         NativeWatcher watcher(tmp.path() / "proj", "proj");
         context::kernel::SteadyClock clock;
         context::kernel::InlineTaskRunner tasks;
-        Reconciler rec(store, watcher, clock, tasks, "proj", "proj/.editor/reconcile-index");
+        Reconciler rec(store, watcher, clock, tasks, "proj", "proj/.editor/index");
         (void)rec.crawl(/*gated=*/false);
         (void)watcher.poll();
 

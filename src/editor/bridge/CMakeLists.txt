@@ -10,7 +10,8 @@ add_library(context_bridge STATIC
     src/event_stream.cpp
     src/dispatcher.cpp
     src/daemon.cpp
-    src/transport.cpp)
+    src/transport.cpp
+    src/resource_store.cpp)
 
 target_include_directories(context_bridge PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -41,7 +42,8 @@ set(_context_bridge_tests
     test_event_stream
     test_dispatcher
     test_daemon
-    test_transport)
+    test_transport
+    test_resource_store)
 
 foreach(_t IN LISTS _context_bridge_tests)
     add_executable(context_bridge_${_t} tests/${_t}.cpp)

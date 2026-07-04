@@ -58,7 +58,7 @@ struct NativeKernel
         EditorKernelConfig cfg;
         cfg.project_root = project;
         cfg.filesync_root = "proj";
-        cfg.index_path = "proj/.editor/reconcile-index";
+        cfg.index_path = "proj/.editor/index";
         return cfg;
     }
 
