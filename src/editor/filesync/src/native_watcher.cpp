@@ -124,8 +124,10 @@ struct NativeWatcher::Impl
     void enqueue_real(const fs::path& real, ChangeKind kind)
     {
         const std::string rel = real.lexically_relative(real_root).generic_string();
-        if (rel.empty() || rel == "." || rel.rfind("..", 0) == 0)
-            return; // outside (or exactly) the watch root — never surface an escaping path.
+        if (rel.empty() || rel == "." || rel == ".." || rel.rfind("../", 0) == 0)
+            return; // outside (or exactly) the watch root — never surface an escaping path. The
+                    // separator-anchored test keeps a legal NAME that merely starts with ".."
+                    // (e.g. "..foo") hintable — only real parent traversal is rejected.
         enqueue_relative(rel, kind);
     }
 
@@ -243,7 +245,27 @@ bool NativeWatcher::Impl::start()
     }
     // The first ReadDirectoryChangesW is issued BEFORE the thread spawns, so changes made
     // immediately after construction are already being captured (no startup race).
-    thread = std::thread([this] { run(); });
+    try
+    {
+        thread = std::thread([this] { run(); });
+    }
+    catch (const std::system_error&)
+    {
+        // Thread-resource exhaustion is an ENVIRONMENTAL failure — the ctor contract promises not
+        // to throw for those. Quiesce the armed read FIRST (the kernel would otherwise complete it
+        // into this Impl's buffer/OVERLAPPED after teardown), then release and come up degraded.
+        mark_degraded();
+        CancelIoEx(dir_handle, &overlapped);
+        DWORD bytes = 0;
+        GetOverlappedResult(dir_handle, &overlapped, &bytes, TRUE);
+        CloseHandle(io_event);
+        CloseHandle(stop_event);
+        CloseHandle(dir_handle);
+        io_event = nullptr;
+        stop_event = nullptr;
+        dir_handle = INVALID_HANDLE_VALUE;
+        return false;
+    }
     return true;
 }
 
@@ -446,7 +468,23 @@ bool NativeWatcher::Impl::start()
             add_watch(it->path());
     }
 
-    thread = std::thread([this] { run(); });
+    try
+    {
+        thread = std::thread([this] { run(); });
+    }
+    catch (const std::system_error&)
+    {
+        // Thread-resource exhaustion is an ENVIRONMENTAL failure — the ctor contract promises not
+        // to throw for those; release the fds (dropping every registered watch) and come up
+        // degraded instead.
+        mark_degraded();
+        ::close(wake_fd);
+        ::close(inotify_fd);
+        wake_fd = -1;
+        inotify_fd = -1;
+        wd_to_dir.clear();
+        return false;
+    }
     return true;
 }
 
@@ -611,6 +649,12 @@ bool NativeWatcher::Impl::start()
     const void* path_values[1] = {cf_path};
     CFArrayRef cf_paths =
         CFArrayCreate(kCFAllocatorDefault, path_values, 1, &kCFTypeArrayCallBacks);
+    if (cf_paths == nullptr)
+    {
+        mark_degraded(); // allocation refused — registration failed (same contract as cf_path).
+        CFRelease(cf_path);
+        return false;
+    }
     FSEventStreamContext context{};
     context.info = this;
     // 50 ms coalescing latency: the reconciler's own poll cadence is the real debounce; NoDefer
@@ -619,8 +663,7 @@ bool NativeWatcher::Impl::start()
                                  cf_paths, kFSEventStreamEventIdSinceNow, 0.05,
                                  kFSEventStreamCreateFlagFileEvents |
                                      kFSEventStreamCreateFlagNoDefer);
-    if (cf_paths != nullptr)
-        CFRelease(cf_paths);
+    CFRelease(cf_paths);
     CFRelease(cf_path);
     if (stream == nullptr)
     {

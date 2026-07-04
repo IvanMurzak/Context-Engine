@@ -50,8 +50,9 @@ Companion budgets carried in the same table:
   `detect_ms` separately, and the CLI-verb write path `edit_cli_verb_ms` shows the
   pipeline-minus-detection latency). The native watcher backends landed with issue #41
   and make detection O(changed files) instead of O(tree size) — measured at the
-  reconciler seam (`filesync-test_native_watcher`, informational print) at ~5 ms
-  incl. OS delivery vs ~465 ms `detect_ms` @10k on the same host — but the bench's
+  reconciler seam (`filesync-test_native_watcher`, informational print) at ~5 ms @2k
+  incl. OS delivery vs ~465 ms `detect_ms` @10k on the same host (the hint path is
+  O(changed), so its figure does not grow with the corpus) — but the bench's
   `detect_ms` only moves when the daemon's hint-consuming reconcile cadence lands
   (the follow-up that re-baselines this row per R-QA-009).
 - **Session-query p99 ≤ 5 ms local** (R-BRIDGE-008) — measured at the daemon's bounded
