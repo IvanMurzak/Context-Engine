@@ -1,0 +1,19 @@
+src/editor/filesync/tests/test_sidecar.cpp
+  s_e3239cf02087b8::t_a4678e1a7c9651 94-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4a2ad310b4d264410d56ef61b0122a0a5c43ce3b",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
