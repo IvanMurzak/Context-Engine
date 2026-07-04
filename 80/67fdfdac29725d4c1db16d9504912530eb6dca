@@ -1,0 +1,92 @@
+src/editor/derivation/CMakeLists.txt
+  s_e3239cf02087b8::t_8fe89230877946 54
+  s_595741b60ca1d6::t_41724600b11e69 33-38,55,63-66
+src/CMakeLists.txt
+  s_e3239cf02087b8::t_fe80be9d18f94a 214-222
+src/cli/CMakeLists.txt
+  s_e3239cf02087b8::t_5dfa401ec4a9a2 15,33-37,61
+src/cli/include/context/cli/migrate_command.h
+  s_e3239cf02087b8::t_a77416d90b954f 1-36
+src/cli/src/app.cpp
+  s_e3239cf02087b8::t_08af81a4b3f5b3 10,130-139
+src/cli/src/migrate_command.cpp
+  s_e3239cf02087b8::t_07190c64498f2c 1-243
+src/cli/tests/test_migrate_command.cpp
+  s_e3239cf02087b8::t_2b47530e8e8b73 1-209
+src/editor/contract/src/error_catalog.cpp
+  s_e3239cf02087b8::t_44ca6a0905849d 100-122
+src/editor/contract/src/registry.cpp
+  s_e3239cf02087b8::t_659aa85071d6aa 177-193
+src/editor/derivation/include/context/editor/derivation/derivation_graph.h
+  s_595741b60ca1d6::t_4ceafd82fc52dc 28-32,64-69,159-164,168-169,193-200,218-223,240-241,282-283
+src/editor/derivation/src/derivation_graph.cpp
+  s_e3239cf02087b8::t_ab0b57ac372720 5,8,18-41,44-47,72-101,103-106,108-115,250-254,271
+src/editor/derivation/tests/test_migrate_node.cpp
+  s_e3239cf02087b8::t_3260a0cc2f27d1 1-225
+src/editor/editorkernel/CMakeLists.txt
+  s_e3239cf02087b8::t_ee3262cc237e38 26-30
+src/editor/editorkernel/include/context/editor/editorkernel/editor_kernel.h
+  s_e3239cf02087b8::t_960f531611d08d 53-57,85-97
+src/editor/editorkernel/src/editor_kernel.cpp
+  s_e3239cf02087b8::t_d700fb58707d2c 10,12,96-163,175-179,257-263,280-283,285,287-290,341-344,346
+src/editor/migrate/CMakeLists.txt
+  s_e3239cf02087b8::t_4ffcece7cb2099 1-54
+src/editor/migrate/README.md
+  s_e3239cf02087b8::t_961fd11d11b102 1-41
+src/editor/migrate/fixtures/README.md
+  s_e3239cf02087b8::t_3e2928596125d7 1-30
+src/editor/migrate/fixtures/test-sprite/v1-to-v2/golden.json
+  s_e3239cf02087b8::t_ce9af83d34c27c 1-19
+src/editor/migrate/fixtures/test-sprite/v1-to-v2/input.json
+  s_e3239cf02087b8::t_09b35907e68fb6 1-19
+src/editor/migrate/fixtures/test-sprite/v1-to-v3/golden.json
+  s_e3239cf02087b8::t_dc66e7fe00b747 1-52
+src/editor/migrate/fixtures/test-sprite/v1-to-v3/input.json
+  s_e3239cf02087b8::t_9d7eabefff5696 1-44
+src/editor/migrate/fixtures/test-sprite/v2-to-v3/golden.json
+  s_e3239cf02087b8::t_426b3f40b67105 1-23
+src/editor/migrate/fixtures/test-sprite/v2-to-v3/input.json
+  s_e3239cf02087b8::t_2b67aaa6360e54 1-19
+src/editor/migrate/include/context/editor/migrate/migrate_document.h
+  s_e3239cf02087b8::t_8c6c1d2c190edf 1-123
+src/editor/migrate/include/context/editor/migrate/migration_set.h
+  s_e3239cf02087b8::t_563f3808be0381 1-134
+src/editor/migrate/src/migrate_document.cpp
+  s_e3239cf02087b8::t_c8bd35ab5cec5f 1-571
+src/editor/migrate/src/migration_set.cpp
+  s_e3239cf02087b8::t_4fd3a7749087d4 1-164
+src/editor/migrate/tests/migrate_test.h
+  s_e3239cf02087b8::t_560cbe8d5f6245 1-163
+src/editor/migrate/tests/test_fixtures.cpp
+  s_e3239cf02087b8::t_6b440808b0c836 1-164
+src/editor/migrate/tests/test_migrate_document.cpp
+  s_e3239cf02087b8::t_1b9000196918f2 1-603
+src/editor/migrate/tests/test_migration_set.cpp
+  s_e3239cf02087b8::t_2348b3b20ae388 1-181
+src/editor/migrate/tests/test_path_transform.cpp
+  s_e3239cf02087b8::t_cc82be4022d46f 1-221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8067fdfdac29725d4c1db16d9504912530eb6dca",
+  "prompts": {},
+  "sessions": {
+    "s_595741b60ca1d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d07a825a-bbd0-4c62-89c9-32aaf87d478b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
