@@ -1,0 +1,66 @@
+src/editor/assetdb/tests/test_meta.cpp
+  s_e3239cf02087b8::t_fc3faf4f89a6d3 1-96
+src/editor/assetdb/include/context/editor/assetdb/meta.h
+  s_e3239cf02087b8::t_ff24d297b9d7df 1-52
+src/editor/assetdb/src/ref_heal.cpp
+  s_e3239cf02087b8::t_3fa2aed380fdb1 1-268
+src/editor/contract/src/registry.cpp
+  s_e3239cf02087b8::t_c19b6cbc03c064 208-230
+src/editor/assetdb/tests/test_move_heal.cpp
+  s_e3239cf02087b8::t_f2a5dc4b2056b7 1-431
+src/editor/assetdb/src/guid.cpp
+  s_e3239cf02087b8::t_eaee5821590b16 1-61
+src/editor/assetdb/tests/test_ref_heal.cpp
+  s_e3239cf02087b8::t_e6b75b582bf900 1-242
+src/editor/assetdb/include/context/editor/assetdb/ref_heal.h
+  s_e3239cf02087b8::t_ab661eba87c759 1-73
+src/editor/assetdb/src/asset_database.cpp
+  s_e3239cf02087b8::t_5fd00440a9ed19 255-256
+  s_e3239cf02087b8::t_62f8e2fd920052 1-254,257-504
+src/editor/assetdb/tests/test_guid.cpp
+  s_e3239cf02087b8::t_93f8e7798afc63 1-56
+src/editor/assetdb/tests/test_asset_database.cpp
+  s_e3239cf02087b8::t_e2f49bb2c54186 101,103-105,107-109,114-116,121,128,130,134,142-145,151,154,161-162,165,167,170-171,176,187,190,192,194,200-201,204,206,212-216,220-221,224-228,231,235,238,242,244,249,256-257,260
+  s_e3239cf02087b8::t_f6c84816fb7d2b 1-100,102,106,110-113,117-120,122-127,129,131-133,135-141,146-150,152-153,155-160,163-164,166,168-169,172-175,177-186,188-189,191,193,195-199,202-203,205,207-211,217-219,222-223,229-230,232-234,236-237,239-241,243,245-248,250-255,258-259,261-313
+src/editor/assetdb/README.md
+  s_e3239cf02087b8::t_58024ad5afb1e6 1-56
+src/editor/assetdb/include/context/editor/assetdb/guid.h
+  s_e3239cf02087b8::t_03fde3310d1bfa 1-55
+src/editor/assetdb/src/meta.cpp
+  s_e3239cf02087b8::t_5ef5cc9c2a31bf 5
+  s_e3239cf02087b8::t_9e68d55d14f6e0 1-4,6-116
+src/editor/contract/src/error_catalog.cpp
+  s_e3239cf02087b8::t_9edfef0b13a3da 100-137
+src/editor/assetdb/include/context/editor/assetdb/asset_database.h
+  s_e3239cf02087b8::t_a9f55e19e59ffb 1-143
+src/CMakeLists.txt
+  s_a5320a84ad9dc7::t_70acd787ed406c 225-233
+src/editor/assetdb/CMakeLists.txt
+  s_e3239cf02087b8::t_c6980c0b5ea045 1-49
+src/editor/assetdb/tests/assetdb_test.h
+  s_a5320a84ad9dc7::t_b7d711d8c78c40 1-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7ec8f75f4576050c4bc06df2ef1b61fd63d709c4",
+  "prompts": {},
+  "sessions": {
+    "s_a5320a84ad9dc7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b5723d03-208f-40b2-85df-2638ec4ba23d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
