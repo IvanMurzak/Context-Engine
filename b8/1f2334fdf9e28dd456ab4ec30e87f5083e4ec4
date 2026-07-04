@@ -1,0 +1,23 @@
+src/editor/schema/src/vocabulary.cpp
+  s_e3239cf02087b8::t_54b43af3d0f484 238
+src/editor/schema/src/kind_schema.cpp
+  s_e3239cf02087b8::t_022da6e50f934c 334
+  s_e3239cf02087b8::t_8836d3c6c395bc 320
+  s_e3239cf02087b8::t_0fc0f1ba0f68bb 303
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b81f2334fdf9e28dd456ab4ec30e87f5083e4ec4",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
