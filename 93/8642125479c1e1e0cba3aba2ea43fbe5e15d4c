@@ -1,0 +1,88 @@
+src/cli/CMakeLists.txt
+  s_e3239cf02087b8::t_276f38153d723d 22-26
+  s_7348e961048659::t_171c859aa148fe 30,66-70
+src/CMakeLists.txt
+  s_e3239cf02087b8::t_48938f1282f466 129-137
+src/cli/src/scaffold.cpp
+  s_e3239cf02087b8::t_562821b91a20ff 7,13,56-59,63-64,74-76,99-100,102-104
+src/cli/tests/test_scaffold.cpp
+  s_e3239cf02087b8::t_13cccecd07f808 10-11,13,75-120
+src/editor/contract/CMakeLists.txt
+  s_e3239cf02087b8::t_120d495eb88d18 18-21
+src/editor/contract/include/context/editor/contract/registry.h
+  s_e3239cf02087b8::t_117ccd6ac82f67 15,87-98,109-120,138-140,144
+src/editor/contract/tests/test_registry_parity.cpp
+  s_e3239cf02087b8::t_84a84e51fce505 118-146
+src/editor/derivation/CMakeLists.txt
+  s_e3239cf02087b8::t_9f47a66ae689d3 8-9,23-27,42-43
+src/editor/derivation/README.md
+  s_e3239cf02087b8::t_4618596213eb70 41-47
+src/editor/derivation/include/context/editor/derivation/canonical_parse.h
+  s_e3239cf02087b8::t_3313970bd8e101 35-36,38-40
+src/editor/derivation/include/context/editor/derivation/derivation_graph.h
+  s_e3239cf02087b8::t_b5ed3aeb4fb766 9,65-78,123-128,130-132,138,170-176,185-187,194-195,207-209
+src/editor/derivation/src/canonical_parse.cpp
+  s_e3239cf02087b8::t_b2f25f6cd2a946 25
+src/editor/derivation/src/derivation_graph.cpp
+  s_e3239cf02087b8::t_86b67a8c3497af 16-19,44-52,137-139,143-167,208-222
+src/editor/derivation/tests/test_validate_node.cpp
+  s_e3239cf02087b8::t_73aa51c01c8345 1-203
+src/editor/schema/CMakeLists.txt
+  s_e3239cf02087b8::t_d52383ba873228 1-41
+src/editor/schema/README.md
+  s_e3239cf02087b8::t_ef9cf15ffb1f25 1-75
+src/editor/schema/include/context/editor/schema/json_access.h
+  s_e3239cf02087b8::t_ceed80ca84d44f 1-58
+src/editor/schema/include/context/editor/schema/kind_schema.h
+  s_e3239cf02087b8::t_4614333e3b25ed 1-86
+src/editor/schema/include/context/editor/schema/validator.h
+  s_e3239cf02087b8::t_585a41f5968c41 1-80
+src/editor/schema/include/context/editor/schema/vocabulary.h
+  s_e3239cf02087b8::t_6e1091b0b84d11 1-114
+src/editor/schema/src/kind_schema.cpp
+  s_e3239cf02087b8::t_f765aee2aa3fbf 1-435
+src/editor/schema/src/validator.cpp
+  s_e3239cf02087b8::t_bcaafb64b2a9e4 1-704
+src/editor/schema/src/vocabulary.cpp
+  s_e3239cf02087b8::t_f5172c68268581 1-257
+src/editor/schema/tests/schema_test.h
+  s_e3239cf02087b8::t_6b8ba57c7b6fed 1-27
+src/editor/schema/tests/test_kind_schema.cpp
+  s_e3239cf02087b8::t_a73b91336c9573 1-181
+src/editor/schema/tests/test_validator.cpp
+  s_e3239cf02087b8::t_3a6fcc5f5c3dd8 1-408
+src/editor/schema/tests/test_vocabulary.cpp
+  s_e3239cf02087b8::t_7ea09dead9d379 1-165
+src/editor/serializer/include/context/editor/serializer/canonical.h
+  s_e3239cf02087b8::t_a7e9dc2331db80 53-56,66-68
+src/editor/serializer/src/canonical.cpp
+  s_e3239cf02087b8::t_e5abb2a6c781a2 299
+src/editor/contract/src/registry.cpp
+  s_7348e961048659::t_6866430defbd7e 8,271-297,446-455
+src/editor/editorkernel/src/editor_kernel.cpp
+  s_7348e961048659::t_40df85098c7ffc 10,102-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "938642125479c1e1e0cba3aba2ea43fbe5e15d4c",
+  "prompts": {},
+  "sessions": {
+    "s_7348e961048659": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-af57a9eb9f5d151cf",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
