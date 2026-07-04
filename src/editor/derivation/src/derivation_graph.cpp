@@ -92,6 +92,9 @@ WriteTicket DerivationGraph::apply(const ReconcileChange& change, std::string_vi
             else if (!migrated.diagnostics.empty() && schemas_ != nullptr)
             {
                 // Non-blocking findings (orphan overrides) ride the validation report below.
+                // Deliberate asymmetry with the blocking branch above: with NO schema set wired
+                // there is no validate node to carry advisories, so they are dropped — only
+                // BLOCKING findings force a report (last-good retention needs the verdict).
                 pending.report = schema::ValidationReport{};
                 fold_migration_findings(migrated.diagnostics, source_bytes, pending.report);
             }

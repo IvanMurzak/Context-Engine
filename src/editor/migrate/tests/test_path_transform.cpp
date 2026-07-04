@@ -180,6 +180,32 @@ void test_overrides_inside_migrated_payloads_are_opaque()
     CHECK(bytes.find("\"path\": \"components/test:sprite/tint\"") != std::string::npos);
 }
 
+void test_overrides_inside_current_version_payloads_are_opaque()
+{
+    // Payload opacity holds for EVERY stamped/registered type, not just the migrated ones: an
+    // "overrides"-shaped member inside a CURRENT-version payload (no plan for it this pass) is
+    // that payload's private data — the rewriter must not reach in and rewrite its paths.
+    MigrationSet set;
+    std::string problem;
+    register_reference_steps(set); // test:sprite current 3, migrated below
+    CHECK(set.register_component("test:panel", 1, problem));
+
+    JsonValue doc = parse(R"({
+      "componentVersions": {"test:panel": 1, "test:sprite": 1},
+      "c": {"test:sprite": {"tint": "red"}},
+      "ui": {"test:panel": {"overrides": [{"path": "components/test:sprite/tint", "value": 1}]}}
+    })");
+    const DocumentMigrationResult r = migrate_document(doc, set);
+    CHECK(r.ok);
+    CHECK(r.changed);
+    const std::string bytes = canon(doc);
+    // The real sprite payload migrated...
+    CHECK(bytes.find("\"color\": \"red\"") != std::string::npos);
+    // ...but the panel-payload-internal pseudo-override path survived verbatim.
+    CHECK(bytes.find("\"path\": \"components/test:sprite/tint\"") != std::string::npos);
+    CHECK(count_code(r, "migration.orphan_override") == 0);
+}
+
 } // namespace
 
 int main()
@@ -190,5 +216,6 @@ int main()
     test_non_matching_shapes_are_untouched();
     test_whole_payload_path_and_last_segment_rule();
     test_overrides_inside_migrated_payloads_are_opaque();
+    test_overrides_inside_current_version_payloads_are_opaque();
     MIGRATE_TEST_MAIN_END();
 }

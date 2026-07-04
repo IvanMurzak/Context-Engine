@@ -235,6 +235,74 @@ void test_malformed_component_versions_is_a_noop_for_migration()
     CHECK(canon(bad_entry) == bad_before);
 }
 
+void test_cross_type_payload_interiors_are_opaque()
+{
+    // Payload interiors are opaque to site discovery for EVERY type, not just the payload's own:
+    // a "test:a"-keyed object INSIDE test:b's payload is b-payload-internal data (a namespaced key
+    // collision), never a test:a site — migrating it would corrupt another payload's private data.
+    MigrationSet set;
+    std::string problem;
+    bool ok = set.register_component("test:a", 2, problem);
+    ok = set.register_component("test:b", 2, problem) && ok;
+    MigrationStep a_step;
+    a_step.component_type = "test:a";
+    a_step.from_version = 1;
+    a_step.transform = [](JsonValue& p) {
+        for (auto& m : p.members)
+            if (m.key == "x")
+                m.key = "y";
+        return true;
+    };
+    ok = set.register_step(std::move(a_step), problem) && ok;
+    MigrationStep b_step;
+    b_step.component_type = "test:b";
+    b_step.from_version = 1;
+    b_step.transform = [](JsonValue& p) {
+        for (auto& m : p.members)
+            if (m.key == "m")
+                m.key = "n";
+        return true;
+    };
+    ok = set.register_step(std::move(b_step), problem) && ok;
+    CHECK(ok);
+
+    JsonValue doc = parse(R"({
+      "componentVersions": {"test:a": 1, "test:b": 1},
+      "c": {"test:a": {"x": 2}, "test:b": {"m": 1, "test:a": {"x": 1}}}
+    })");
+    const DocumentMigrationResult r = migrate_document(doc, set);
+    CHECK(r.ok);
+    CHECK(r.changed);
+    const std::string bytes = canon(doc);
+    CHECK(bytes.find("\"y\": 2") != std::string::npos);  // the real test:a site migrated
+    CHECK(bytes.find("\"n\": 1") != std::string::npos);  // the real test:b site migrated
+    CHECK(bytes.find("\"x\": 1") != std::string::npos);  // b-payload-internal "test:a": untouched
+    CHECK(bytes.find("\"x\": 2") == std::string::npos);
+}
+
+void test_unstamped_scan_respects_payload_opacity()
+{
+    // The stamp_registered_sites scan must not descend into a stamped payload and header-stamp a
+    // registered type whose only "site" is that payload's internal data.
+    MigrationSet set;
+    std::string problem;
+    register_reference_steps(set); // test:sprite current 3
+    CHECK(set.register_component("test:widget", 1, problem));
+
+    JsonValue doc = parse(R"({
+      "componentVersions": {"test:sprite": 3},
+      "c": {"test:sprite": {"color": "red", "test:widget": {"w": 1}}}
+    })");
+    const std::string before = canon(doc);
+    MigrateOptions options;
+    options.stamp_registered_sites = true;
+    const DocumentMigrationResult r = migrate_document(doc, set, options);
+    CHECK(r.ok);
+    CHECK(!r.changed); // nothing to migrate, nothing to stamp: the widget object is sprite-internal
+    CHECK(canon(doc) == before);
+    CHECK(canon(doc).find("\"test:widget\": 1") == std::string::npos);
+}
+
 // --- the execution contract ------------------------------------------------------------------
 
 void test_sandboxed_tier_is_refused_in_process()
@@ -523,6 +591,8 @@ int main()
     test_stamp_registered_sites_tool_save_rule();
     test_component_versions_header_is_not_a_payload_site();
     test_malformed_component_versions_is_a_noop_for_migration();
+    test_cross_type_payload_interiors_are_opaque();
+    test_unstamped_scan_respects_payload_opacity();
     test_sandboxed_tier_is_refused_in_process();
     test_failing_step_rolls_back_whole_document();
     test_budget_exceeded();

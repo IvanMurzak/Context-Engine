@@ -89,10 +89,28 @@ struct PayloadSite
     JsonValue* payload = nullptr;
 };
 
+// The ONE payload-opacity rule every document traversal below shares (site discovery, the
+// unstamped-site scan, override rewriting): an object member keyed by a header-stamped OR
+// registered "<ns>:<type>" id IS a payload site, and payload interiors are opaque — no traversal
+// descends into one (payload-internal data that happens to use a namespaced key, an "overrides"-
+// shaped member, etc. is the payload's private business).
+bool is_payload_boundary(std::string_view key, const MigrationSet& set,
+                         const std::vector<std::string>& stamped)
+{
+    if (key.find(':') == std::string_view::npos)
+        return false;
+    if (set.current_version(key) > 0)
+        return true;
+    return std::find(stamped.begin(), stamped.end(), key) != stamped.end();
+}
+
 // Recursively discover payload sites for `type`: any object member whose key equals the type id
-// and whose value is an object. The root "componentVersions" header member is exempt, and a
-// matched payload subtree is not re-scanned (payloads are opaque to site discovery).
+// and whose value is an object. The root "componentVersions" header member is exempt, and
+// EVERY payload subtree — this type's or another stamped/registered type's — is opaque
+// (is_payload_boundary): a nested namespaced key inside some other payload is that payload's
+// private data, never a site of this scan.
 void find_sites(JsonValue& value, const std::string& pointer, std::string_view type, bool is_root,
+                const MigrationSet& set, const std::vector<std::string>& stamped,
                 std::vector<PayloadSite>& out)
 {
     if (value.type == JsonValue::Type::object)
@@ -102,24 +120,30 @@ void find_sites(JsonValue& value, const std::string& pointer, std::string_view t
             if (is_root && m.key == "componentVersions")
                 continue;
             const std::string child = pointer + "/" + escape_segment(m.key);
-            if (m.key == type && m.value.type == JsonValue::Type::object)
+            if (m.value.type == JsonValue::Type::object)
             {
-                out.push_back({child, &m.value});
-                continue; // opaque: no nested sites inside a payload
+                if (m.key == type)
+                {
+                    out.push_back({child, &m.value});
+                    continue; // opaque: no nested sites inside a payload
+                }
+                if (is_payload_boundary(m.key, set, stamped))
+                    continue; // another type's payload: equally opaque to this scan
             }
-            find_sites(m.value, child, type, /*is_root=*/false, out);
+            find_sites(m.value, child, type, /*is_root=*/false, set, stamped, out);
         }
     }
     else if (value.type == JsonValue::Type::array)
     {
         for (std::size_t i = 0; i < value.elements.size(); ++i)
             find_sites(value.elements[i], pointer + "/" + std::to_string(i), type,
-                       /*is_root=*/false, out);
+                       /*is_root=*/false, set, stamped, out);
     }
 }
 
 // Discover registered-type payload sites with NO componentVersions stamp (the
-// stamp_registered_sites tool-save rule). Same traversal contract as find_sites.
+// stamp_registered_sites tool-save rule). Same traversal contract as find_sites: every
+// stamped/registered payload subtree is opaque, whether or not it contributes to `out`.
 void find_unstamped_types(const JsonValue& value, bool is_root, const MigrationSet& set,
                           const std::vector<std::string>& stamped, std::vector<std::string>& out)
 {
@@ -129,13 +153,13 @@ void find_unstamped_types(const JsonValue& value, bool is_root, const MigrationS
         {
             if (is_root && m.key == "componentVersions")
                 continue;
-            if (m.value.type == JsonValue::Type::object && m.key.find(':') != std::string::npos &&
-                set.current_version(m.key) > 0 &&
-                std::find(stamped.begin(), stamped.end(), m.key) == stamped.end() &&
-                std::find(out.begin(), out.end(), m.key) == out.end())
+            if (m.value.type == JsonValue::Type::object && is_payload_boundary(m.key, set, stamped))
             {
-                out.push_back(m.key);
-                continue;
+                if (set.current_version(m.key) > 0 &&
+                    std::find(stamped.begin(), stamped.end(), m.key) == stamped.end() &&
+                    std::find(out.begin(), out.end(), m.key) == out.end())
+                    out.push_back(m.key);
+                continue; // a payload site is opaque even when already stamped/collected
             }
             find_unstamped_types(m.value, /*is_root=*/false, set, stamped, out);
         }
@@ -238,19 +262,20 @@ bool apply_step(const MigrationStep& step, JsonValue& payload, const std::string
 
 // Rewrite the override "path" strings of every override site through the migrated types' chained
 // path maps. An override site is any object member named "overrides" holding an array of objects
-// with a string "path". Payload sites are opaque (not scanned); the root componentVersions header
-// is exempt. Unmappable paths yield NON-blocking migration.orphan_override findings; the entry is
-// preserved verbatim (parse-time migration never destroys authored data — flatten excludes the
-// orphan by consulting the same rule, L-37).
+// with a string "path". Payload sites are opaque (not scanned — the shared is_payload_boundary
+// rule); the root componentVersions header is exempt. Unmappable paths yield NON-blocking
+// migration.orphan_override findings; the entry is preserved verbatim (parse-time migration never
+// destroys authored data — flatten excludes the orphan by consulting the same rule, L-37).
 void rewrite_overrides(JsonValue& value, const std::string& pointer, bool is_root,
-                       const std::vector<TypePlan>& plans, bool& changed,
+                       const std::vector<TypePlan>& plans, const MigrationSet& set,
+                       const std::vector<std::string>& stamped, bool& changed,
                        std::vector<MigrationDiagnostic>& diagnostics)
 {
     if (value.type == JsonValue::Type::array)
     {
         for (std::size_t i = 0; i < value.elements.size(); ++i)
             rewrite_overrides(value.elements[i], pointer + "/" + std::to_string(i),
-                              /*is_root=*/false, plans, changed, diagnostics);
+                              /*is_root=*/false, plans, set, stamped, changed, diagnostics);
         return;
     }
     if (value.type != JsonValue::Type::object)
@@ -260,10 +285,9 @@ void rewrite_overrides(JsonValue& value, const std::string& pointer, bool is_roo
     {
         if (is_root && m.key == "componentVersions")
             continue;
-        // Opaque payload sites: a member keyed by a migrated type is a payload, not override data.
-        if (m.value.type == JsonValue::Type::object &&
-            std::any_of(plans.begin(), plans.end(),
-                        [&m](const TypePlan& p) { return p.type == m.key; }))
+        // Opaque payload sites: a member keyed by a stamped/registered type is a payload, not
+        // override data (an "overrides"-shaped member INSIDE one is the payload's private data).
+        if (m.value.type == JsonValue::Type::object && is_payload_boundary(m.key, set, stamped))
             continue;
 
         const std::string child = pointer + "/" + escape_segment(m.key);
@@ -330,7 +354,8 @@ void rewrite_overrides(JsonValue& value, const std::string& pointer, bool is_roo
             }
             continue;
         }
-        rewrite_overrides(m.value, child, /*is_root=*/false, plans, changed, diagnostics);
+        rewrite_overrides(m.value, child, /*is_root=*/false, plans, set, stamped, changed,
+                          diagnostics);
     }
 }
 
@@ -460,7 +485,7 @@ DocumentMigrationResult migrate_document(JsonValue& root, const MigrationSet& se
     for (const TypePlan& plan : plans)
     {
         std::vector<PayloadSite> sites;
-        find_sites(root, "", plan.type, /*is_root=*/true, sites);
+        find_sites(root, "", plan.type, /*is_root=*/true, set, stamped, sites);
         for (const PayloadSite& site : sites)
         {
             // Pre-check: the payload must be canonically serializable BEFORE the chain, so every
@@ -496,7 +521,8 @@ DocumentMigrationResult migrate_document(JsonValue& root, const MigrationSet& se
     {
         // Override/reference path transforms through the same chains (L-37: migrations transform
         // paths as well as payloads). Non-blocking orphan findings may be appended here.
-        rewrite_overrides(root, "", /*is_root=*/true, plans, result.changed, result.diagnostics);
+        rewrite_overrides(root, "", /*is_root=*/true, plans, set, stamped, result.changed,
+                          result.diagnostics);
     }
 
     if (!result.ok)

@@ -78,8 +78,11 @@ struct DocumentMigrationResult
 // A payload SITE is any object member whose key equals a stamped (or, under
 // stamp_registered_sites, registered) component type and whose value is an object — the
 // document-shape-agnostic rule that works for any kind carrying namespaced component payloads.
-// The root `componentVersions` header object itself is exempt from site scanning, and a matched
-// payload subtree is not re-scanned for nested sites.
+// The root `componentVersions` header object itself is exempt from site scanning, and payload
+// subtrees are OPAQUE to every document traversal (site discovery, the unstamped-site scan,
+// override rewriting): no traversal descends into ANY stamped/registered type's payload, so
+// payload-internal data that happens to use a namespaced key or an "overrides"-shaped member is
+// never misread as document structure.
 //
 // Around every step invocation the engine enforces the L-37 execution contract:
 //   - tier gating: package_sandboxed steps are REFUSED in-process (migration.runner_unavailable)

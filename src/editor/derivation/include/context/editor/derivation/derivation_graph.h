@@ -196,8 +196,12 @@ public:
     // The validate node's R-FILE-003 output for `path`: the last schema-validation report a pass
     // produced (pointer + line/column diagnostics), its generation, and its L-31 stability.
     // nullopt when the path never passed through a validating pass (no schema set wired, non-JSON
-    // content, or the path is unknown). A failing report means the node's derived value is its
-    // LAST-GOOD state (or that the source never derived).
+    // content, or the path is unknown) — with one addition since the L-37 migration node: a
+    // BLOCKING parse-time migration finding produces a (failing) report even when NO schema set
+    // is wired, because last-good retention needs the verdict channel; non-blocking migration
+    // findings (orphan overrides) surface only when a schema set is wired (they ride the validate
+    // node's report). A failing report means the node's derived value is its LAST-GOOD state (or
+    // that the source never derived).
     [[nodiscard]] std::optional<NodeValidation> validation(std::string_view path) const;
 
 private:
