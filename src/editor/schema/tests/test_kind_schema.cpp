@@ -154,5 +154,28 @@ int main()
         CHECK(entry.find("\"type\": \"notes\"") != std::string::npos);
     }
 
+    // Typed-reference and tagged-union metadata are projected per field too (the registry's
+    // `describe` fileKinds surface carries ref targets + declared union tags, R-DATA-006).
+    {
+        std::vector<std::string> problems;
+        auto schema = compile_kind_schema(
+            minimal_schema("\"mesh\": {\"x-ctx-ref\": \"ctx:mesh\"},"
+                           " \"collider\": {\"x-ctx-union\": {"
+                           "\"shape:circle\": {\"type\": \"object\","
+                           " \"properties\": {\"radius\": {\"type\": \"number\","
+                           " \"x-ctx-units\": \"m\"}}},"
+                           " \"shape:box\": {\"type\": \"object\"}}}"),
+            problems);
+        CHECK(problems.empty());
+        CHECK(schema.has_value());
+        const std::string entry = introspection_json(*schema);
+        CHECK(entry.find("\"ref\": \"ctx:mesh\"") != std::string::npos);
+        CHECK(entry.find("\"unionTags\"") != std::string::npos);
+        CHECK(entry.find("\"shape:circle\"") != std::string::npos);
+        CHECK(entry.find("\"shape:box\"") != std::string::npos);
+        // Union variant fields are indexed under the "(<tag>)" data-pointer convention.
+        CHECK(entry.find("\"pointer\": \"/collider/(shape:circle)/radius\"") != std::string::npos);
+    }
+
     SCHEMA_TEST_MAIN_END();
 }

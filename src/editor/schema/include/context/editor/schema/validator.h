@@ -42,7 +42,9 @@ struct ValidationDiagnostic
 
 // The outcome of validating one authored document against the registered kind schemas.
 //
-//   schema_bound == false — the document declares no `$schema` (validation does not apply), or
+//   schema_bound == false — the document declares no `$schema` (validation does not apply — but a
+//                           PRESENT-but-malformed `$schema` is an attempted binding and surfaces
+//                           its blocking "header.*" findings rather than silently skipping), or
 //                           declares an UNREGISTERED kind/version (non-blocking informational
 //                           diagnostics "schema.unknown_kind" / "schema.version_unregistered" —
 //                           kinds register incrementally, so unknown ids must not block derive).

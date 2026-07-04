@@ -6,6 +6,7 @@
 #include "context/editor/schema/vocabulary.h"
 #include "context/editor/serializer/canonical.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -625,7 +626,26 @@ ValidationReport validate_document(const JsonValue& root, std::string_view sourc
     const serializer::DocumentHeader header =
         serializer::read_document_header(root, header_diagnostics);
     if (!header.has_schema)
-        return report; // no `$schema` — the document is not schema-bound (validation skips)
+    {
+        // No usable `$schema` — the document is not schema-bound (validation skips). One case
+        // still surfaces: a PRESENT-but-malformed `$schema` (wrong JSON type) is an attempted
+        // binding with an authored header defect, not an opt-out — silently deriving the file
+        // unvalidated would drop the defect with zero signal. A document with NO `$schema`
+        // member never claims the L-32 header law, so its `version`/`componentVersions` shape
+        // findings stay dropped (foreign JSON must not be blocked by a law it never opted into).
+        const bool attempted_binding =
+            std::any_of(header_diagnostics.begin(), header_diagnostics.end(),
+                        [](const serializer::Diagnostic& d) {
+                            return d.code == "header.schema_not_string";
+                        });
+        if (attempted_binding)
+        {
+            Walker walker(source_bytes, resolver, report);
+            for (const serializer::Diagnostic& d : header_diagnostics)
+                walker.diag(d.code, "", d.message);
+        }
+        return report;
+    }
 
     report.schema_id = header.schema;
     Walker walker(source_bytes, resolver, report);

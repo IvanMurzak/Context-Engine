@@ -16,14 +16,15 @@ add_library(context_cli STATIC
 target_include_directories(context_cli PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # context_contract is PUBLIC (its headers appear in the CLI's public headers); context_kernel,
-# context_editorkernel, and context_serializer are PRIVATE (only scaffold.cpp's runnable-template
-# proof touches context_kernel; only editor_driver.cpp's `context editor smoke` in-process driver
-# touches context_editorkernel; only scaffold.cpp's canonical tool-save touches context_serializer —
-# the public headers expose only contract types). Every target links the warnings-as-errors
-# baseline (conventions.md).
+# context_editorkernel, context_schema, and context_serializer are PRIVATE (only scaffold.cpp's
+# runnable-template proof touches context_kernel; only editor_driver.cpp's `context editor smoke`
+# in-process driver touches context_editorkernel; only scaffold.cpp touches context_schema — the
+# L-32 `$schema` template headers — and context_serializer — the canonical tool-save; the public
+# headers expose only contract types). Every target links the warnings-as-errors baseline
+# (conventions.md).
 target_link_libraries(context_cli
     PUBLIC context_contract
-    PRIVATE context_kernel context_editorkernel context_serializer context_warnings)
+    PRIVATE context_kernel context_editorkernel context_schema context_serializer context_warnings)
 
 # Self-contained GCC runtime for the CLI executables. context_cli uses std::filesystem (the
 # `context new` scaffolder), whose libstdc++ symbols live in a NEWER libstdc++-6.dll; on a MinGW

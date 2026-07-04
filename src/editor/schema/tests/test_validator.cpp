@@ -114,6 +114,29 @@ int main()
         CHECK(r.diagnostics.empty());
     }
     {
+        // No $schema member at all — the document never claims the L-32 header law, so a
+        // header-SHAPED member of the wrong type is plain payload, not a finding.
+        auto r = validate("{\"version\": \"not-an-int\"}", set);
+        CHECK(!r.schema_bound);
+        CHECK(r.ok);
+        CHECK(r.diagnostics.empty());
+    }
+    {
+        // $schema PRESENT but malformed (wrong JSON type) — an attempted binding: the header
+        // defect surfaces BLOCKING instead of silently deriving the file unvalidated.
+        auto r = validate("{\"$schema\": 42, \"version\": 1}", set);
+        CHECK(!r.schema_bound);
+        CHECK(!r.ok);
+        CHECK(has_code(r, "header.schema_not_string"));
+    }
+    {
+        // ... and the attempted binding surfaces the OTHER header-shape findings with it.
+        auto r = validate("{\"$schema\": 42, \"version\": \"not-an-int\"}", set);
+        CHECK(!r.ok);
+        CHECK(has_code(r, "header.schema_not_string"));
+        CHECK(has_code(r, "header.version_not_integer"));
+    }
+    {
         // Unknown kind — informational, NON-blocking (kinds register incrementally).
         auto r = validate("{\"$schema\": \"https://example.com/other.json\", \"version\": 1}", set);
         CHECK(!r.schema_bound);
