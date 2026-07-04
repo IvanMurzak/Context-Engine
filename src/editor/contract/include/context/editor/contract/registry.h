@@ -12,6 +12,7 @@
 
 #include "context/editor/contract/json.h"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -83,6 +84,18 @@ struct TopicSpec
     std::string description;
 };
 
+// One registered authored file kind (R-CLI-005 / R-DATA-006): the kind id, its schema version,
+// and the published introspection entry (the versioned JSON Schema + the derived per-field
+// x-ctx-* index, including x-ctx-units — the units-law introspection surface). `entry` is parsed
+// from the schema module's canonical projection, so `describe` enumerates the SAME documents the
+// derivation validate node enforces — one source of truth, never a hand-maintained copy.
+struct FileKindSpec
+{
+    std::string id;
+    std::int64_t version = 0;
+    Json entry;
+};
+
 class Registry
 {
 public:
@@ -92,6 +105,18 @@ public:
     [[nodiscard]] const std::vector<VerbSpec>& verbs() const noexcept { return verbs_; }
     [[nodiscard]] const std::vector<FlagSpec>& core_flags() const noexcept { return core_flags_; }
     [[nodiscard]] const std::vector<TopicSpec>& topics() const noexcept { return topics_; }
+
+    // The registered file kinds (R-CLI-005): each authored kind's versioned schema publication.
+    // Engine kinds register at construction through the same register_file_kind() mechanism
+    // package-contributed kinds will use when the package system lands — `describe` enumerates
+    // whatever is registered, never a hardcoded list.
+    [[nodiscard]] const std::vector<FileKindSpec>& file_kinds() const noexcept
+    {
+        return file_kinds_;
+    }
+
+    // Look a file kind up by its id ("ctx:scene"). nullptr when absent.
+    [[nodiscard]] const FileKindSpec* find_file_kind(const std::string& id) const;
 
     // Look a verb up by its (ns, noun, verb) triple. nullptr when absent.
     [[nodiscard]] const VerbSpec* find_verb(const std::string& ns, const std::string& noun,
@@ -110,9 +135,13 @@ public:
 
 private:
     Registry();
+    // The R-CLI-005 registration mechanism: engine kinds call this from the constructor; live
+    // package add/remove re-registration arrives with the package system.
+    void register_file_kind(FileKindSpec spec);
     std::vector<FlagSpec> core_flags_;
     std::vector<VerbSpec> verbs_;
     std::vector<TopicSpec> topics_;
+    std::vector<FileKindSpec> file_kinds_;
 };
 
 } // namespace context::editor::contract

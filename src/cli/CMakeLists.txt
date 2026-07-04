@@ -19,14 +19,15 @@ target_include_directories(context_cli PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/includ
 
 # context_contract and context_bridge are PUBLIC (their headers appear in the CLI's public
 # headers — contract types everywhere; wire_client.h exposes bridge::TransportClient for the
-# operational wire commands); context_kernel, context_editorkernel, and context_serializer are
-# PRIVATE (only scaffold.cpp's runnable-template proof touches context_kernel; only
-# editor_driver.cpp's `context editor smoke` in-process driver touches context_editorkernel; only
-# scaffold.cpp's canonical tool-save touches context_serializer). Every target links the
+# operational wire commands); context_kernel, context_editorkernel, context_schema, and
+# context_serializer are PRIVATE (only scaffold.cpp's runnable-template proof touches
+# context_kernel; only editor_driver.cpp's `context editor smoke` in-process driver touches
+# context_editorkernel; only scaffold.cpp touches context_schema — the L-32 `$schema` template
+# headers — and context_serializer — the canonical tool-save). Every target links the
 # warnings-as-errors baseline (conventions.md).
 target_link_libraries(context_cli
     PUBLIC context_contract context_bridge
-    PRIVATE context_kernel context_editorkernel context_serializer context_warnings)
+    PRIVATE context_kernel context_editorkernel context_schema context_serializer context_warnings)
 
 # Self-contained GCC runtime for the CLI executables. context_cli uses std::filesystem (the
 # `context new` scaffolder), whose libstdc++ symbols live in a NEWER libstdc++-6.dll; on a MinGW
@@ -62,9 +63,11 @@ foreach(_t IN LISTS _context_cli_tests)
 endforeach()
 
 # test_scaffold additionally asserts the scaffolded files are canonicalization fixpoints
-# (R-FILE-001 tool-save rule), so it links the serializer directly (PRIVATE in context_cli, so the
-# include path does not propagate through it).
-target_link_libraries(context_cli_test_scaffold PRIVATE context_serializer)
+# (R-FILE-001 tool-save rule) AND that both templates validate clean against the registered engine
+# kind schemas (R-DATA-006/#47 — the templates carry the L-32 `$schema` header from their first
+# byte), so it links the serializer + schema modules directly (PRIVATE in context_cli, so their
+# include paths do not propagate through it).
+target_link_libraries(context_cli_test_scaffold PRIVATE context_serializer context_schema)
 
 # --- cross-process e2e (R-QA-013 / issue #34): spawn a REAL `context daemon` process + a SEPARATE
 # `context attach` process; the attach process drives the daemon over the wire and a 2nd `context

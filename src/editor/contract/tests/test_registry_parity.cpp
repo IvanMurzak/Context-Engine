@@ -115,8 +115,35 @@ int main()
         CHECK(c.at("eventTopics").size() >= 1);
         CHECK(c.at("errorCatalog").is_array());
         CHECK(c.at("errorCatalog").size() >= 1);
-        CHECK(c.at("fileKinds").is_array());      // reserved, empty at M1
-        CHECK(c.at("componentTypes").is_array()); // reserved, empty at M1
+        // The file-kind schema section (R-CLI-005 / R-DATA-006, M2 wave 2): one entry per
+        // registered kind — enumerated LIVE from the registry's registration set.
+        const Json& kinds = c.at("fileKinds");
+        CHECK(kinds.is_array());
+        CHECK(kinds.size() == reg.file_kinds().size());
+        CHECK(kinds.size() >= 2); // the engine kinds: ctx:scene + ctx:project
+        bool saw_scene = false;
+        for (std::size_t i = 0; i < kinds.size(); ++i)
+        {
+            const Json& k = kinds.at(i);
+            CHECK(!k.at("id").as_string().empty());
+            CHECK(k.at("version").as_int() >= 1);        // versioned publication
+            CHECK(k.at("schema").is_object());           // the full published JSON Schema
+            CHECK(k.at("fields").is_array());            // the derived per-field x-ctx-* index
+            saw_scene = saw_scene || k.at("id").as_string() == "ctx:scene";
+        }
+        CHECK(saw_scene); // the M1 scene placeholder, migrated onto the mechanism
+        // The units-law metadata reaches `describe` (R-DATA-006: x-ctx-units surfaced through
+        // schema introspection so agents render/reason about units without guessing).
+        const FileKindSpec* scene = reg.find_file_kind("ctx:scene");
+        CHECK(scene != nullptr);
+        CHECK(reg.find_file_kind("ctx:nope") == nullptr);
+        bool saw_rad_units = false;
+        const Json& scene_fields = scene->entry.at("fields");
+        for (std::size_t i = 0; i < scene_fields.size(); ++i)
+            saw_rad_units =
+                saw_rad_units || scene_fields.at(i).at("units").as_string() == "rad";
+        CHECK(saw_rad_units); // camera fov declares radians (never degrees)
+        CHECK(c.at("componentTypes").is_array()); // reserved until R-LANG-010 lands
 
         // Each verb entry carries the full contract shape.
         for (std::size_t i = 0; i < c.at("verbs").size(); ++i)
