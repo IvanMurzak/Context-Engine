@@ -14,7 +14,9 @@
 #     recipe (pinned FetchContent tarball; ~1 min build).
 #   * wamrc 2.4.5 (prebuilt, hash-pinned) — the WAMR AOT compiler; precompiles the guest
 #     module to module.aot at build time where a prebuilt exists (x86_64 win/linux/macos-intel;
-#     macOS arm64 has NO prebuilt → the AOT leg is honestly gated off there).
+#     macOS arm64 has NO prebuilt → the AOT leg is honestly gated off there). Codegen is
+#     PINNED to the x86-64-v2 baseline (see _ctx_wamrc_flags below + aot_pin_guard.cmake) —
+#     host-CPU default codegen was the Context-Engine#24 CI SIGILL flake.
 #
 # The guest module (guest/module.wasm, ~2 KB) is COMMITTED — freestanding wasm32, zero imports;
 # rebuilding it needs a wasm32-capable clang (guest/build_module.py records the pinned
@@ -146,6 +148,21 @@ if(CONTEXT_SPIKE_WASM_WAMR)
     set(WAMR_BUILD_MULTI_MODULE 0)
     set(WAMR_BUILD_LIB_PTHREAD 0)
     set(WAMR_BUILD_SIMD 0)         # guest built without -msimd128; fast-interp has no SIMD
+
+    # Windows-AOT determinism hardening (Context-Engine#24 / L-62 sub-note / R-SEC-009): with
+    # AOT on Windows, WAMR's iwasm_aot.cmake git-fetches zydis (SHA-pinned upstream) and
+    # zycore (UNPINNED — floats on the repo's default branch) at configure time for its
+    # hw-bounds-check trap handler. Pre-declare zycore pinned to the exact commit that zydis
+    # e14a0789 records as its dependencies/zycore submodule, so CI compiles the
+    # upstream-tested pair instead of whatever zycore's default branch holds that day. The
+    # FIRST FetchContent_Declare for a name wins — WAMR's later unpinned declare is a no-op.
+    # (FINDINGS.md "Deviations" #3; a shipped WAMR port still owes vendoring per L-62.)
+    if(WIN32)
+        FetchContent_Declare(zycore
+            GIT_REPOSITORY https://github.com/zyantific/zycore-c.git
+            GIT_TAG dd2211a023c2e6d383709fcb401a92943cb5e6b1)
+    endif()
+
     include(${WAMR_ROOT_DIR}/build-scripts/runtime_lib.cmake)
 
     # FINDING (recorded in FINDINGS.md): WAMR unconditionally compiles its implementation of
@@ -250,12 +267,27 @@ if(CONTEXT_SPIKE_WASM_AOT AND CONTEXT_SPIKE_WASM_WAMR)
                     RESULT_VARIABLE _wamrc_rc OUTPUT_QUIET ERROR_QUIET)
     if(_wamrc_rc EQUAL 0)
         set(_ctx_aot_wired ON)
+        # Deterministic codegen pin — the Context-Engine#24 root cause. Without --target/--cpu,
+        # wamrc compiles for the BUILD host: cpu = LLVMGetHostCPUName() (a family/model-derived
+        # name) with an EMPTY explicit feature string (aot_llvm.c), so LLVM derives the feature
+        # set from the CPU MODEL's defaults — not from live CPUID. On the CPU-heterogeneous
+        # GitHub runner fleet some VMs mask ISA their model name implies (e.g. AVX-512 on
+        # Ice-Lake-class Xeons), and WAMR's AOT loader validates arch/endian/bitwidth but NEVER
+        # the ISA feature level (aot_loader.c check_machine_info) — so an overshooting image
+        # loads cleanly and dies with SIGILL mid-run, intermittently (per-VM lottery), on the
+        # very machine that compiled it. Pinning target+cpu makes codegen host-independent:
+        # x86-64-v2 (SSE4.2/POPCNT-level baseline) executes on every x86_64 runner in the fleet
+        # (Intel Nehalem+ / all AMD EPYC). Keep these flags in lockstep with
+        # aot_pin_guard.cmake, which re-derives and byte-verifies the image (R-QA-013 guard).
+        # NOTE (perf): FINDINGS.md §1/§4 AOT numbers predate this pin (host-CPU codegen on the
+        # Ryzen box); the smoke gate is correctness-only, so the pin does not affect them.
+        set(_ctx_wamrc_flags --opt-level=3 --target=x86_64 --cpu=x86-64-v2)
         add_custom_command(
             OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/module.aot"
-            COMMAND "${_wamrc}" --opt-level=3 -o "${CMAKE_CURRENT_BINARY_DIR}/module.aot"
+            COMMAND "${_wamrc}" ${_ctx_wamrc_flags} -o "${CMAKE_CURRENT_BINARY_DIR}/module.aot"
                     "${CMAKE_CURRENT_SOURCE_DIR}/guest/module.wasm"
             DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/guest/module.wasm"
-            COMMENT "wasm spike: wamrc AOT-precompiling guest module.wasm -> module.aot")
+            COMMENT "wasm spike: wamrc AOT-precompiling guest module.wasm -> module.aot (pinned x86-64-v2)")
         add_custom_target(context-spike-wasm-aot ALL
             DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/module.aot")
         add_custom_command(TARGET context-spike-wasm POST_BUILD
@@ -283,5 +315,19 @@ if(CONTEXT_SPIKE_WASM_WAMR)
     if(_ctx_aot_wired)
         add_test(NAME context-spike-wasm-wamr-aot-smoke
                  COMMAND context-spike-wasm --runtime=wamr-aot --bench=smoke)
+        # R-QA-013 regression guard for the #24 fix: aot_pin_guard.cmake re-compiles the guest
+        # with its OWN hardcoded copy of the pinned flags (intentional redundancy with
+        # _ctx_wamrc_flags above) and byte-compares the result against the image the build rule
+        # produced. If the build rule's pin ever drifts (flag dropped/renamed → host-dependent
+        # codegen again), the two images differ on any host whose CPU defaults are not exactly
+        # the pinned baseline — so the regression fails HERE, deterministically, instead of
+        # resurfacing as an intermittent SIGILL on the CI fleet.
+        add_test(NAME context-spike-wasm-aot-pin-guard
+                 COMMAND ${CMAKE_COMMAND}
+                     "-DWAMRC=${_wamrc}"
+                     "-DMODULE_WASM=${CMAKE_CURRENT_SOURCE_DIR}/guest/module.wasm"
+                     "-DMODULE_AOT=${CMAKE_CURRENT_BINARY_DIR}/module.aot"
+                     "-DREFERENCE_AOT=${CMAKE_CURRENT_BINARY_DIR}/module.pin-ref.aot"
+                     -P "${CMAKE_CURRENT_SOURCE_DIR}/aot_pin_guard.cmake")
     endif()
 endif()

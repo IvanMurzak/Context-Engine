@@ -47,5 +47,10 @@ Platform gates, stated honestly:
   which exists for x86_64 windows/linux/macos-intel but **not macos-arm64** — CMake gates
   `CONTEXT_SPIKE_WASM_AOT` off there (override with `-DCONTEXT_SPIKE_WASM_AOT=ON
   -DCONTEXT_SPIKE_WAMRC=<path>` if you have a wamrc).
+- AOT codegen is **pinned to the x86-64-v2 baseline** (`--target=x86_64 --cpu=x86-64-v2`) so the
+  image is host-independent — wamrc's host-CPU default was the Context-Engine#24 intermittent
+  CI SIGILL. The `context-spike-wasm-aot-pin-guard` ctest byte-verifies the pin
+  (`aot_pin_guard.cmake`); FINDINGS.md §8.9 records the root cause. Perf numbers in FINDINGS
+  predate the pin (host codegen).
 - WAMR LLVM-JIT / Fast-JIT modes are not built (both pull heavyweight toolchains); the JIT
   story is wasmtime's, the no-JIT story is WAMR fast-interp + AOT. See FINDINGS.md.
