@@ -5,6 +5,7 @@
 #include "context/editor/assetdb/guid.h"
 #include "context/editor/schema/json_access.h"
 #include "context/editor/serializer/canonical.h"
+#include "context/editor/serializer/json_parse.h"
 
 namespace context::editor::assetdb
 {
@@ -32,8 +33,11 @@ std::string asset_path_for(std::string_view meta_path)
 
 std::optional<AssetMeta> parse_meta(std::string_view bytes, std::vector<std::string>& problems)
 {
-    const serializer::CanonicalizeResult parsed = serializer::canonicalize(bytes);
-    if (!parsed.is_json)
+    // parse_json, not canonicalize: only the tree is needed, and parse_meta runs per sidecar on
+    // every scan (the R-FILE-011 100k-file hot path) — canonicalize would re-serialize + hash for
+    // nothing. Tolerance is the point: hand-edited / newer-engine sidecars need not be canonical.
+    const serializer::ParseResult parsed = serializer::parse_json(bytes);
+    if (!parsed.ok)
     {
         problems.emplace_back("meta sidecar is not well-formed JSON");
         return std::nullopt;

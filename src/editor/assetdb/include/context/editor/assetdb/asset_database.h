@@ -124,10 +124,13 @@ public:
     // idempotent + re-runnable under partial apply: re-running after ANY crash window converges to
     // the same result. Referencing files are NEVER rewritten (path hints heal lazily on tool save,
     // L-34). A destination occupied by a DIFFERENT asset refuses with
-    // asset.move_destination_exists rather than overwriting.
+    // asset.move_destination_exists rather than overwriting; a malformed-but-present source
+    // sidecar refuses with asset.meta_invalid rather than re-keying the asset and discarding the
+    // unparseable bytes.
     MoveResult move_asset(filesync::FileStore& fs, std::string_view from, std::string_view to);
 
 private:
+    [[nodiscard]] std::string mint_unique_guid();
     void index_record(AssetRecord record);
     void drop_path(std::string_view asset_path);
 

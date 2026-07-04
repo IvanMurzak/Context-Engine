@@ -167,6 +167,18 @@ int main()
         const MoveResult noop = db.move_asset(fs, "proj/a.json", "proj/a.json");
         CHECK(noop.ok);
         CHECK(noop.guid == kGuidA);
+
+        // A malformed-but-present source sidecar is NEVER re-keyed or discarded: the move refuses
+        // with asset.meta_invalid and leaves both files untouched (repair — by hand or from git —
+        // is the user's call, R-FILE-003).
+        fs.write("proj/broken.json", "B2\n");
+        fs.write("proj/broken.json.meta.json", "not json");
+        const MoveResult broken = db.move_asset(fs, "proj/broken.json", "proj/elsewhere.json");
+        CHECK(!broken.ok);
+        CHECK(has_diag(broken.diagnostics, "asset.meta_invalid"));
+        CHECK(!fs.exists("proj/elsewhere.json"));
+        CHECK(*fs.read("proj/broken.json") == "B2\n");
+        CHECK(*fs.read("proj/broken.json.meta.json") == "not json"); // the bytes survive
     }
 
     // ================== crash windows around the meta-first order (R-QA-010) =====================

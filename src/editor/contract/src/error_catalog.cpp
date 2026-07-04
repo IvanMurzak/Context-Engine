@@ -109,8 +109,9 @@ const std::vector<ErrorCode>& catalog()
          "`context validate --fix` cleans deliberate deletes.",
          false, kExitValidation, "R-ASSET-002"},
         {"asset.meta_invalid",
-         "A meta sidecar is malformed (not canonical JSON, or no valid \"guid\").", false,
-         kExitValidation, "R-ASSET-002"},
+         "A meta sidecar is malformed (not well-formed JSON, root not an object, or no valid "
+         "\"guid\"); non-canonical formatting alone is tolerated.",
+         false, kExitValidation, "R-ASSET-002"},
         {"asset.heal_ambiguous",
          "Raw-move healing found no UNIQUE orphan/newcomer pairing; nothing was written — re-run "
          "the move via `context asset move` or resolve by hand.",

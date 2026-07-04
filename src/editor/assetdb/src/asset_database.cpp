@@ -5,6 +5,7 @@
 #include "context/editor/filesync/atomic_io.h"
 #include "context/editor/filesync/file_store.h"
 #include "context/editor/serializer/canonical.h"
+#include "context/editor/serializer/json_parse.h"
 
 #include <algorithm>
 #include <map>
@@ -38,8 +39,10 @@ namespace
     const std::optional<std::string> bytes = fs.read(asset_path);
     if (!bytes.has_value())
         return "";
-    const serializer::CanonicalizeResult parsed = serializer::canonicalize(*bytes);
-    if (!parsed.is_json)
+    // parse_json, not canonicalize: only the header is read — re-serializing + hashing the whole
+    // document would be dead work on this one transient read.
+    const serializer::ParseResult parsed = serializer::parse_json(*bytes);
+    if (!parsed.ok)
         return "";
     std::vector<serializer::Diagnostic> diags;
     const serializer::DocumentHeader header = serializer::read_document_header(parsed.root, diags);
@@ -135,6 +138,15 @@ bool is_asset_candidate(std::string_view path)
         start = slash + 1;
     }
     return true;
+}
+
+std::string AssetDatabase::mint_unique_guid()
+{
+    std::string guid;
+    do
+        guid = guids_->next();
+    while (find_by_guid(guid) != nullptr); // never alias an indexed identity
+    return guid;
 }
 
 std::optional<std::string> AssetDatabase::kind_of(std::string_view guid) const
@@ -344,9 +356,7 @@ HealResult AssetDatabase::ensure_metas(filesync::FileStore& fs, std::string_view
     {
         AssetMeta meta;
         meta.kind = sniff_kind(fs, path);
-        do
-            meta.guid = guids_->next();
-        while (find_by_guid(meta.guid) != nullptr); // never alias an indexed identity
+        meta.guid = mint_unique_guid();
         const std::string meta_path = meta_path_for(path);
         filesync::atomic_write(fs, meta_path, serialize_meta(meta), "assetdb-create");
         result.actions.push_back({"meta-created", path, meta_path, meta.guid});
@@ -435,6 +445,20 @@ MoveResult AssetDatabase::move_asset(filesync::FileStore& fs, std::string_view f
         result.ok = true;
         return result;
     }
+    if (from_meta_bytes.has_value() && !from_meta_parsed.has_value())
+    {
+        // A malformed-but-PRESENT source sidecar is not a meta-less source: minting fresh identity
+        // would silently re-key the asset (references to the old GUID dangle) and the write order
+        // below would then discard the unparseable bytes — identity + import settings that may be
+        // recoverable by hand or from git. Refuse instead (R-FILE-003: no unasked destructive
+        // fixes); scan() reports the same asset.meta_invalid and the repair is the user's call.
+        result.diagnostics.push_back(make_diag(
+            "asset.meta_invalid",
+            "the source asset's meta sidecar is malformed; repair it (or remove it to mint fresh "
+            "identity) before moving",
+            from_meta, from_s));
+        return result;
+    }
     if (to_exists)
     {
         const bool same_identity = from_meta_parsed.has_value() && to_meta_parsed.has_value() &&
@@ -469,9 +493,7 @@ MoveResult AssetDatabase::move_asset(filesync::FileStore& fs, std::string_view f
     {
         AssetMeta fresh;
         fresh.kind = sniff_kind(fs, from_s);
-        do
-            fresh.guid = guids_->next();
-        while (find_by_guid(fresh.guid) != nullptr);
+        fresh.guid = mint_unique_guid();
         guid = fresh.guid;
         kind = fresh.kind;
         meta_bytes = serialize_meta(fresh);

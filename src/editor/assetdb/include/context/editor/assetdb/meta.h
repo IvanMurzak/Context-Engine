@@ -38,8 +38,9 @@ struct AssetMeta
 };
 
 // Parse sidecar bytes. Hard failures (not JSON, root not an object, `guid` missing or malformed)
-// return nullopt; softer shape oddities (missing header fields, wrong-typed `kind`) parse with a
-// note appended to `problems` so scan can surface them without dropping identity.
+// return nullopt; softer shape oddities (a missing or foreign `$schema` header, a wrong-typed
+// `kind`) parse with a note appended to `problems` so scan can surface them without dropping
+// identity.
 [[nodiscard]] std::optional<AssetMeta> parse_meta(std::string_view bytes,
                                                   std::vector<std::string>& problems);
 
