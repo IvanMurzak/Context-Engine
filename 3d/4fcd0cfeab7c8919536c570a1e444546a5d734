@@ -1,0 +1,24 @@
+docs/latency-budget-table.md
+  s_e3239cf02087b8::t_b8994ac5fcf822 53-55
+src/editor/filesync/src/native_watcher.cpp
+  s_e3239cf02087b8::t_9ba3614ee31c08 248-268
+  s_e3239cf02087b8::t_98e76dd9a38c6e 652-657,666
+  s_e3239cf02087b8::t_765ebbfe04d3ca 471-487
+  s_e3239cf02087b8::t_462ad318606ac0 127-130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3d4fcd0cfeab7c8919536c570a1e444546a5d734",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
