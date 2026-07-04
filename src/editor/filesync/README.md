@@ -48,10 +48,12 @@ Library target: **`context_filesync`** (links `context_kernel` + `context_serial
   registration comes from the parse layer via `Reconciler::set_sidecar_refs`, since filesync never
   parses on the reconcile hot path — and the two **intent-logged plans**:
   `plan_sidecar_family_write` (sidecar-FIRST order — every sidecar durable before the referencing
-  JSON write; refuses to author a dangling or lying ref) and `plan_owner_move` (**owned
-  satellites**: a move/rename carries each referenced sidecar at its owner-relative relpath,
-  dest-writes-then-src-removes so no observable mid-state has a referencing JSON without its
-  sidecar — enabled by the `PlannedWrite` `remove` kind, CAS-guarded like writes on resume).
+  JSON write; refuses to author a dangling ref, a lying ref, or staged bytes without a readable
+  sidecar header) and `plan_owner_move` (**owned satellites**: a move/rename carries each
+  referenced sidecar at its owner-relative relpath, dest-writes-then-src-removes so no observable
+  mid-state has a referencing JSON without its sidecar — enabled by the `PlannedWrite` `remove`
+  kind, CAS-guarded like writes on resume; a satellite the supplied `SidecarIndex` knows another
+  owner still references is COPIED, not moved, so a sibling's valid ref never goes dangling).
   Sidecars are **NEVER content-merged** — a sidecar conflict is whole-file ours/theirs
   (R-FILE-012(d)); `is_sidecar_bytes` is the classifier that merge layer will consume.
 - **Native OS watcher backends (R-FILE-002)** — `NativeWatcher` is the real hint source behind the

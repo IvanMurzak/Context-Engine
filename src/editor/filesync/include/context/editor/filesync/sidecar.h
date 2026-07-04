@@ -11,7 +11,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 namespace context::editor::filesync
@@ -165,6 +164,9 @@ struct StagedSidecar
 //   - a staged path escapes the jail (path.jail_violation);
 //   - `owner_bytes` does not parse as JSON (file.parse_error — an owner carrying $sidecar refs is
 //     authored JSON by definition);
+//   - a staged sidecar's bytes do not decode as a readable sidecar (its decode_sidecar code — the
+//     daemon never authors a "sidecar" it cannot itself read; headerless bytes would also evade
+//     the is_sidecar_bytes merge classifier, defeating whole-file ours/theirs);
 //   - a staged sidecar is not referenced by `owner_bytes`, or is referenced with a hash that does
 //     not match the staged bytes (sidecar.hash_mismatch);
 //   - a ref resolves to a path that is neither staged nor already on disk (sidecar.dangling_ref) —
@@ -186,7 +188,13 @@ struct StagedSidecar
 // sidecar exists with DIFFERENT bytes; a DANGLING ref is skipped with its diagnostic (the move
 // neither fixes nor worsens a pre-existing inconsistency). An unparseable owner moves alone,
 // flagged file.parse_error (advisory — refs unknowable). A same-path move is a no-op plan.
+// When `shared_index` is supplied (derived, best-effort — e.g. Reconciler::sidecar_index()), a
+// satellite that ANOTHER registered owner still references is COPIED rather than moved: the dest
+// gets its copy and the src stays put for the sibling, so the daemon's own move never turns a
+// sibling's valid ref dangling (the same neither-fixes-nor-worsens posture). Without an index the
+// planner has no ownership knowledge and relocates every carried satellite.
 [[nodiscard]] SidecarPlan plan_owner_move(const FileStore& fs, std::string_view root,
-                                          std::string_view owner_src, std::string_view owner_dest);
+                                          std::string_view owner_src, std::string_view owner_dest,
+                                          const SidecarIndex* shared_index = nullptr);
 
 } // namespace context::editor::filesync

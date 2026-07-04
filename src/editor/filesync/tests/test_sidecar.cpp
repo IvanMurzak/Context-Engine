@@ -332,6 +332,22 @@ int main()
         CHECK(!not_json.ok);
         CHECK(has_diag(not_json.diagnostics, "file.parse_error"));
 
+        // Staged bytes that are not a readable sidecar REFUSE with the decode code: the daemon
+        // never authors a "sidecar" it cannot itself read (headerless bytes would also evade the
+        // is_sidecar_bytes merge classifier). Coherent hashes cannot save either family.
+        const std::string headerless = "raw bytes without the magic";
+        const SidecarPlan no_header = plan_sidecar_family_write(
+            fs, "proj", "proj/level.json", owner_json("s1.bin", headerless),
+            {{"proj/s1.bin", headerless}});
+        CHECK(!no_header.ok);
+        CHECK(has_diag(no_header.diagnostics, "sidecar.bad_magic"));
+
+        const std::string future = encode_sidecar("P", sidecar_format_version + 1);
+        const SidecarPlan future_version = plan_sidecar_family_write(
+            fs, "proj", "proj/level.json", owner_json("s1.bin", future), {{"proj/s1.bin", future}});
+        CHECK(!future_version.ok);
+        CHECK(has_diag(future_version.diagnostics, "sidecar.unsupported_version"));
+
         // A ref satisfied by an already-durable on-disk sidecar needs no staging.
         fs.write("proj/s1.bin", s1);
         const SidecarPlan on_disk =
@@ -555,6 +571,57 @@ int main()
         CHECK(opaque.ok);
         CHECK(has_diag(opaque.diagnostics, "file.parse_error"));
         CHECK(opaque.steps.size() == 2);
+    }
+    {
+        // SHARED satellite: when the (derived, best-effort) index knows ANOTHER owner still
+        // references a satellite, the move COPIES it — the dest gets its copy, the src stays put
+        // for the sibling — so the daemon's own move never turns a sibling's valid ref dangling.
+        MemoryFileStore fs;
+        const std::string tiles = encode_sidecar("SHARED-TILES");
+        const std::string scene_a = owner_json("tiles.bin", tiles);
+        const std::string scene_b = owner_json("tiles.bin", tiles);
+        fs.write("proj/a/x.json", scene_a);
+        fs.write("proj/a/y.json", scene_b);
+        fs.write("proj/a/tiles.bin", tiles);
+
+        SidecarIndex index;
+        index.set_owner_refs("proj/a/x.json", {"proj/a/tiles.bin"});
+        index.set_owner_refs("proj/a/y.json", {"proj/a/tiles.bin"});
+
+        const SidecarPlan plan =
+            plan_owner_move(fs, "proj", "proj/a/x.json", "proj/b/x.json", &index);
+        CHECK(plan.ok);
+        CHECK(plan.diagnostics.empty());
+        CHECK(plan.steps.size() == 3); // dest satellite COPY + dest owner + src owner remove —
+        CHECK(plan.steps[0].path == "proj/b/tiles.bin"); // and NO src satellite remove
+        CHECK(plan.steps[0].kind == WriteKind::write);
+        CHECK(plan.steps[1].path == "proj/b/x.json");
+        CHECK(plan.steps[2].path == "proj/a/x.json");
+        CHECK(plan.steps[2].kind == WriteKind::remove);
+
+        context::kernel::ManualClock clock;
+        IntentLog log(fs, "proj/.editor", kKey);
+        WriteQueue queue(fs, "proj", log, clock);
+        CHECK(queue.execute("op-shared-move", plan.steps));
+
+        // BOTH owners verify clean: the mover against its dest copy, the sibling against the
+        // still-present src satellite.
+        CHECK(*fs.read("proj/a/tiles.bin") == tiles);
+        const SidecarScan moved = scan_sidecar_refs("proj", "proj/b/x.json", scene_a);
+        CHECK(verify_sidecar_refs(fs, "proj/b/x.json", moved.refs).empty());
+        const SidecarScan sibling = scan_sidecar_refs("proj", "proj/a/y.json", scene_b);
+        CHECK(verify_sidecar_refs(fs, "proj/a/y.json", sibling.refs).empty());
+
+        // Once the mover is re-registered at its destination, the sibling is the SOLE registered
+        // owner of the src satellite — a later move of the sibling carries it normally.
+        index.set_owner_refs("proj/b/x.json", {"proj/b/tiles.bin"});
+        index.remove_owner("proj/a/x.json");
+        const SidecarPlan solo =
+            plan_owner_move(fs, "proj", "proj/a/y.json", "proj/c/y.json", &index);
+        CHECK(solo.ok);
+        CHECK(solo.steps.size() == 4); // dest satellite + dest owner + src owner + src satellite
+        CHECK(solo.steps[3].path == "proj/a/tiles.bin");
+        CHECK(solo.steps[3].kind == WriteKind::remove);
     }
     {
         // Crash in the REMOVAL tail (after every dest write): both copies exist mid-crash — the

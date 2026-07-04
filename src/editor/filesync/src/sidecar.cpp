@@ -361,7 +361,7 @@ SidecarPlan plan_sidecar_family_write(const FileStore& fs, std::string_view root
         }
     }
 
-    // Staged sidecars: jailed, referenced, and byte-coherent with the declared hash.
+    // Staged sidecars: jailed, header-valid, referenced, and byte-coherent with the declared hash.
     std::set<std::string> staged_paths;
     for (const StagedSidecar& staged : sidecars)
     {
@@ -370,6 +370,18 @@ SidecarPlan plan_sidecar_family_write(const FileStore& fs, std::string_view root
         {
             plan.diagnostics.push_back(SidecarDiagnostic{
                 "path.jail_violation", owner, path, "staged sidecar escapes the project root"});
+            return plan;
+        }
+        // The bytes must decode as a sidecar THIS engine can read (StagedSidecar's contract is
+        // encode_sidecar output): the daemon never durably authors a "sidecar" it cannot itself
+        // read — headerless bytes would also evade the is_sidecar_bytes merge classifier,
+        // defeating the L-33 whole-file ours/theirs rule for that file.
+        const SidecarDecodeResult decoded = decode_sidecar(staged.bytes);
+        if (!decoded.ok)
+        {
+            plan.diagnostics.push_back(SidecarDiagnostic{
+                decoded.error_code, owner, path,
+                "staged sidecar bytes do not carry a readable sidecar header"});
             return plan;
         }
         const auto it = declared.find(path);
@@ -446,7 +458,7 @@ SidecarPlan plan_sidecar_family_write(const FileStore& fs, std::string_view root
 }
 
 SidecarPlan plan_owner_move(const FileStore& fs, std::string_view root, std::string_view owner_src,
-                            std::string_view owner_dest)
+                            std::string_view owner_dest, const SidecarIndex* shared_index)
 {
     SidecarPlan plan;
     const std::string src = normalize_path(owner_src);
@@ -543,13 +555,31 @@ SidecarPlan plan_owner_move(const FileStore& fs, std::string_view root, std::str
                     "a different sidecar already exists at the destination; refusing to clobber"});
                 return plan;
             }
-            // Identical bytes already at the destination — nothing to write, still remove the src.
+            // Identical bytes already at the destination — nothing to write; src removal below.
         }
         else
         {
             sidecar_writes.push_back(make_write(*dest_resolved, empty_hash(), *bytes));
         }
-        sidecar_removes.push_back(make_remove(sidecar_src, src_hash));
+
+        // A satellite that ANOTHER registered owner still references is COPIED, not moved:
+        // removing the src would turn the sibling's valid ref dangling — the daemon's own move
+        // must not CREATE an inconsistency (neither-fixes-nor-worsens). Best-effort: the index is
+        // derived state (never truth), so an owner it does not know about is unprotectable here.
+        bool referenced_elsewhere = false;
+        if (shared_index != nullptr)
+        {
+            for (const std::string& other : shared_index->owners_of(sidecar_src))
+            {
+                if (other != src)
+                {
+                    referenced_elsewhere = true;
+                    break;
+                }
+            }
+        }
+        if (!referenced_elsewhere)
+            sidecar_removes.push_back(make_remove(sidecar_src, src_hash));
     }
 
     // R-FILE-004 dependency-safe order: dest sidecars -> dest owner -> remove src owner -> remove
