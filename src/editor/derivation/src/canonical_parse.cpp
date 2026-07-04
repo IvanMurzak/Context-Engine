@@ -22,6 +22,7 @@ CanonicalForm canonical_parse(std::string_view source_bytes)
     form.canonical_hash = result.canonical_hash;
     form.is_json = result.is_json;
     form.diagnostics = std::move(result.diagnostics);
+    form.root = std::move(result.root);
     return form;
 }
 

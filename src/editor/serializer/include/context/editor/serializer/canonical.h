@@ -50,6 +50,10 @@ struct CanonicalizeResult
     std::string bytes;                   // canonical file bytes (JSON) or the raw input (non-JSON)
     std::uint64_t canonical_hash = 0;    // canonical_hash_of(bytes)
     std::vector<Diagnostic> diagnostics; // non-fatal encoding findings (JSON) or the parse failure
+    // The parsed document tree (meaningful iff is_json). Surfaced so layered consumers — the M2
+    // schema validator in the derivation validate node — reuse THIS parse instead of re-parsing
+    // the bytes (the attach pipeline parses each file exactly once, R-FILE-011).
+    JsonValue root;
 };
 
 // Parse + canonicalize `source`. Deterministic and total (never throws). JSON input yields the
@@ -59,9 +63,9 @@ struct CanonicalizeResult
 [[nodiscard]] CanonicalizeResult canonicalize(std::string_view source);
 
 // The authored-file header block (L-32): "$schema" + "version" + the per-component-payload
-// "componentVersions" map ({"<ns>:<type>": <schemaVersion>}). M2 wave 1 reads and shape-checks
-// the header; per-kind schema VALIDATION (and required-header strictness per file kind) is the
-// M2 schema-model task layered on top.
+// "componentVersions" map ({"<ns>:<type>": <schemaVersion>}). This reads and shape-checks the
+// header; per-kind schema VALIDATION binds on it in src/editor/schema/ (M2 wave 2, R-DATA-006 —
+// the derivation validate node).
 struct DocumentHeader
 {
     bool has_schema = false;

@@ -14,7 +14,10 @@ add_library(context_contract STATIC
 target_include_directories(context_contract PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # Every Context target links the warnings-as-errors baseline (conventions.md).
-target_link_libraries(context_contract PRIVATE context_warnings)
+# context_schema (M2 wave 2) is PRIVATE: only registry.cpp consumes it — the registry projects the
+# registered kind schemas into the `describe` fileKinds section (R-CLI-005/R-DATA-006); no schema
+# type appears in the contract's public headers.
+target_link_libraries(context_contract PRIVATE context_warnings context_schema)
 
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) -----------------------------
 # The repo carries no C++ test framework (adding one would pull a vcpkg dep + a license-allowlist

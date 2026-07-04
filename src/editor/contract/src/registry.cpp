@@ -4,6 +4,7 @@
 
 #include "context/editor/contract/error_catalog.h"
 #include "context/editor/contract/handshake.h"
+#include "context/editor/schema/kind_schema.h"
 
 #include <utility>
 
@@ -170,6 +171,33 @@ Registry::Registry()
         {"clients", "Client attach/detach on the daemon."},
         {"log", "Structured log entries (severity, source, tick, session)."},
     };
+
+    // The engine file kinds (R-CLI-005 / R-DATA-006, M2 wave 2): each registered kind's versioned
+    // schema publication, projected from the SAME schema module the derivation validate node
+    // enforces — the registry stays the one enumeration surface without becoming a second source
+    // of truth. Package-contributed kinds join through the same register_file_kind() mechanism.
+    for (const schema::KindSchema& kind : schema::engine_schemas().all())
+        register_file_kind(
+            {kind.id, kind.version, Json::parse(schema::introspection_json(kind))});
+}
+
+void Registry::register_file_kind(FileKindSpec spec)
+{
+    for (FileKindSpec& existing : file_kinds_)
+        if (existing.id == spec.id && existing.version == spec.version)
+        {
+            existing = std::move(spec);
+            return;
+        }
+    file_kinds_.push_back(std::move(spec));
+}
+
+const FileKindSpec* Registry::find_file_kind(const std::string& id) const
+{
+    for (const FileKindSpec& kind : file_kinds_)
+        if (kind.id == id)
+            return &kind;
+    return nullptr;
 }
 
 const Registry& Registry::instance()
@@ -306,9 +334,16 @@ Json Registry::describe() const
     }
     contract.set("errorCatalog", std::move(errors));
 
-    // Reserved sections: file kinds + component types populate as packages register (R-CLI-005);
-    // empty at M1 with no registered kinds, but the section shape is contract from day one.
-    contract.set("fileKinds", Json::array());
+    // The registered file kinds (R-CLI-005 / R-DATA-006): one entry per kind — id, schema
+    // version, the derived per-field x-ctx-* index (units/storage/ref/union metadata), and the
+    // full published JSON Schema. Enumerated LIVE from the registration set, so `describe` and
+    // the derivation validate node can never disagree on what a kind's schema is.
+    Json kinds = Json::array();
+    for (const FileKindSpec& kind : file_kinds_)
+        kinds.push_back(kind.entry);
+    contract.set("fileKinds", std::move(kinds));
+    // Reserved section: component types populate as the declarative component compiler lands
+    // (R-LANG-010); the section shape is contract from day one.
     contract.set("componentTypes", Json::array());
 
     Json out = Json::object();

@@ -13,8 +13,10 @@ namespace context::editor::derivation
 using context::editor::filesync::ChangeType;
 using context::editor::filesync::ReconcileChange;
 
-DerivationGraph::DerivationGraph(DerivationConfig config, context::kernel::EventBus* bus)
-    : config_(config), bus_(bus)
+DerivationGraph::DerivationGraph(DerivationConfig config, context::kernel::EventBus* bus,
+                                 const schema::SchemaSet* schemas,
+                                 const schema::RefTargetResolver* ref_resolver)
+    : config_(config), bus_(bus), schemas_(schemas), ref_resolver_(ref_resolver)
 {
     signal_.high_watermark = config_.high_watermark;
 }
@@ -39,6 +41,15 @@ WriteTicket DerivationGraph::apply(const ReconcileChange& change, std::string_vi
         // The raw-byte half of the R-FILE-001 two-hash split, carried from the filesync change
         // (the reconcile pipeline's own content hash of the bytes on disk).
         ticket.raw_hash = change.content_hash;
+        // The M2 validate node (R-DATA-006): schema-validate JSON payloads on the SAME parse the
+        // canonical node produced. Positions are located in the SOURCE bytes, so diagnostics
+        // point at what the author actually wrote (R-FILE-003 pointer + line/column).
+        if (schemas_ != nullptr && pending.form.is_json)
+        {
+            pending.report = schema::validate_document(pending.form.root, source_bytes, *schemas_,
+                                                       ref_resolver_);
+            pending.validated = true;
+        }
     }
 
     // Coalesce: the latest write to a path before the next pass wins (one batched pass per burst).
@@ -123,8 +134,35 @@ void DerivationGraph::derive_one(const std::string& path, const Pending& pending
             ++derivations_;
             ++result.nodes_removed;
         }
-        // Removing a source with no derived node is a no-op (idempotent).
+        // Removing a source clears its validation state with it (idempotent for unknown sources).
+        node.report = schema::ValidationReport{};
+        node.has_report = false;
         return;
+    }
+
+    // The validate node's verdict (R-FILE-003): record the report FIRST — diagnostics are derived
+    // data an agent reads — and on a FAILED validation retain the node's last-good derived state
+    // (an alive node keeps its value + generation; a new source does not derive until it is
+    // valid). The self-correction loop: a later valid ingest derives normally below.
+    if (pending.validated)
+    {
+        node.report = pending.report;
+        node.report_generation = target_gen;
+        node.has_report = true;
+        if (!pending.report.ok)
+        {
+            ++result.nodes_invalid;
+            return;
+        }
+    }
+    else if (schemas_ != nullptr)
+    {
+        // Schemas are wired but THIS pass's bytes are not JSON (a deliberate non-JSON kind, or a
+        // broken/truncated write) — no validation ran, so a PRIOR schema verdict no longer
+        // describes the current content. Clear it so validation() returns nullopt (the header's
+        // non-JSON-content contract) instead of a stale report, mirroring the removal branch.
+        node.report = schema::ValidationReport{};
+        node.has_report = false;
     }
 
     // Content-hash memoization: an unchanged canonical form means the downstream derivation is skipped
@@ -165,6 +203,21 @@ std::optional<DerivedSource> DerivationGraph::node(std::string_view path) const
     if (it == nodes_.end() || !it->second.alive)
         return std::nullopt;
     return DerivedSource{it->second.canonical_hash, it->second.generation};
+}
+
+std::optional<NodeValidation> DerivationGraph::validation(std::string_view path) const
+{
+    auto it = nodes_.find(std::string(path));
+    if (it == nodes_.end() || !it->second.has_report)
+        return std::nullopt;
+    NodeValidation out;
+    out.report = it->second.report;
+    out.generation = it->second.report_generation;
+    // L-31 stability: a report is provisional while a re-derivation of the SAME path is still
+    // queued (a settling pass may replace it); the M1-shape graph has no cross-file dependencies,
+    // so other paths' pending work cannot invalidate this node's finding.
+    out.stable = pending_.find(std::string(path)) == pending_.end();
+    return out;
 }
 
 void DerivationGraph::reflect(std::uint64_t canonical_hash)

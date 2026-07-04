@@ -38,8 +38,13 @@ canonical parse node's real body, and `context_warnings`). Namespace:
 - ~~The canonical parse is a whitespace-normalizing placeholder~~ **RESOLVED (M2 wave 1, #42)**: the
   parse node delegates to the real canonical-JSON serializer (`src/editor/serializer/` — R-FILE-001
   key order / number formatting / NFC, the two-hash split, and the committed test-vector corpus).
-  Non-JSON content passes through raw (raw ≡ canonical — the binary-sidecar rule); the per-kind
-  schema model still lands in later M2 tasks.
+  Non-JSON content passes through raw (raw ≡ canonical — the binary-sidecar rule).
+- ~~No validate node~~ **RESOLVED (M2 wave 2, #47)**: schema-bound JSON validates on ingest against
+  the registered kind schemas (`src/editor/schema/`, R-DATA-006) — on the SAME parse the canonical
+  node produced. A FAILING payload retains its last-good derived state (R-FILE-003); diagnostics
+  (JSON-pointer + line/column into the source bytes) surface through `validation()` with L-31
+  stability. A nullptr schema set preserves the exact M1 behavior; richer per-kind derived
+  components (compose/instantiate) still land in later M2 tasks.
 - **The derived World is a flat file→entity map.** Composition / instantiation across scenes
   (parse → validate → **compose → instantiate**, the rest of the L-22 pipeline) lands with the M2 data
   model; here each source derives to one node with no cross-node dependency edges yet.

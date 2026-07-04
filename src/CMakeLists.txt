@@ -126,6 +126,15 @@ if(CONTEXT_BUILD_SPIKES OR CONTEXT_BUILD_SPIKE_CEF)
     add_spike(cef-compositing)
 endif()
 
+# M2 wave 2: the engine schema vocabulary + units law + per-kind versioned schemas (R-DATA-006,
+# src/editor/schema/, issue #47) — x-ctx-type/x-ctx-storage/x-ctx-ref, the ONE tagged-union
+# convention, SI+radians x-ctx-units, the compiled engine kind schemas (scene, project), and the
+# document validator the derivation validate node runs. Wired here — deliberately apart from the
+# serializer/derivation block above — so concurrent sibling tasks touching src/editor/ and this
+# file merge cleanly (its consumers name the `context_schema` target, which CMake resolves at
+# generate time regardless of add_subdirectory order).
+add_subdirectory(editor/schema)
+
 # M1 public-contract cluster (R-CLI-007/008/009/013): the single registry that generates
 # CLI ≡ RPC ≡ MCP ≡ introspection (src/editor/contract/). Wired here — deliberately apart from
 # add_subdirectory(kernel) above — so concurrent sibling tasks touching src/editor/ and src/ merge
