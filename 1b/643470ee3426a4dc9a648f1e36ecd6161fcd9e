@@ -1,0 +1,49 @@
+LICENSE.md
+  s_e3239cf02087b8::t_927b1ff5075029 151-156
+  s_e3239cf02087b8::t_eee8f4f804f216 430-436
+  s_e3239cf02087b8::t_e840a616fe1aa1 230-237
+  s_e3239cf02087b8::t_0ff0ccfff9ffdb 298-302
+  s_e3239cf02087b8::t_59fc333ee40ac2 437-443
+  s_e3239cf02087b8::t_0b8a0e49b9b55b 48-51
+  s_e3239cf02087b8::t_831dcc67bfff99 356-361,408
+  s_e3239cf02087b8::t_9bfcc9f0bf2b3c 45-47
+  s_e3239cf02087b8::t_ec596e7ce16817 198-203
+  s_e3239cf02087b8::t_50582905a13980 65-67
+  s_e3239cf02087b8::t_ecca222318b454 145-146
+  s_e3239cf02087b8::t_5899899f2a812e 94-96,100-107
+  s_e3239cf02087b8::t_67194895ddc109 280-283
+  s_e3239cf02087b8::t_ca9e9590be249f 130-134
+  s_e3239cf02087b8::t_7a64e6f7b196b5 188-196
+  s_e3239cf02087b8::t_4ae19a42e47a83 142-144
+  s_e3239cf02087b8::t_373bb394f80c33 197
+  s_e3239cf02087b8::t_e02c1deceb895e 406-407
+  s_e3239cf02087b8::t_fdf463121456c2 409-411
+  s_9020007f6f39c0::t_ac5076198f3b1e 141,164,412-424
+.github/CLA.md
+  s_e3239cf02087b8::t_e2e0df81ddf285 55-57
+  s_e3239cf02087b8::t_a4ab4ad7d38c07 6-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1b643470ee3426a4dc9a648f1e36ecd6161fcd9e",
+  "prompts": {},
+  "sessions": {
+    "s_9020007f6f39c0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a12fd0e6dda4f89f6",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
