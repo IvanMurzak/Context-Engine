@@ -1,0 +1,97 @@
+src/CMakeLists.txt
+  s_595741b60ca1d6::t_60b02ba457c736 243-251
+src/editor/compose/CMakeLists.txt
+  s_e3239cf02087b8::t_f05bd1bce4d758 1-61
+src/editor/compose/README.md
+  s_e3239cf02087b8::t_f6dae7e1026840 1-91
+src/editor/compose/include/context/editor/compose/flatten.h
+  s_e3239cf02087b8::t_5bd18e0c799eef 1-130
+src/editor/compose/include/context/editor/compose/json_pointer.h
+  s_e3239cf02087b8::t_c7769de23698d2 1-41
+src/editor/compose/include/context/editor/compose/scene_model.h
+  s_e3239cf02087b8::t_c8b855211e4c4e 1-115
+src/editor/compose/include/context/editor/compose/stable_id.h
+  s_e3239cf02087b8::t_2a037d4e465182 1-36
+src/editor/compose/src/flatten.cpp
+  s_e3239cf02087b8::t_f7ac58338204b1 1-584
+src/editor/compose/src/json_pointer.cpp
+  s_e3239cf02087b8::t_83fc7ef1def281 1-193
+src/editor/compose/src/scene_model.cpp
+  s_e3239cf02087b8::t_cf03a8e95a2f42 1-281
+src/editor/compose/src/stable_id.cpp
+  s_e3239cf02087b8::t_14e01aff2a214c 1-53
+src/editor/compose/tests/compose_test.h
+  s_e3239cf02087b8::t_2ae98a927327f8 1-27
+src/editor/compose/tests/corpus/deep-nesting-exceeds-cap.json
+  s_e3239cf02087b8::t_6c036f1d63b0a2 1-105
+src/editor/compose/tests/corpus/deep-nesting-within-cap.json
+  s_e3239cf02087b8::t_a25d508db1363c 1-112
+src/editor/compose/tests/corpus/dense-fan-in.json
+  s_e3239cf02087b8::t_c2459301aed869 1-67
+src/editor/compose/tests/corpus/diamond-budget.json
+  s_e3239cf02087b8::t_afd56d31b29919 1-85
+src/editor/compose/tests/corpus/direct-cycle.json
+  s_e3239cf02087b8::t_04a37e8a07fc66 1-34
+src/editor/compose/tests/corpus/duplicate-and-missing-ids.json
+  s_e3239cf02087b8::t_3a8a648a30ac90 1-58
+src/editor/compose/tests/corpus/indirect-cycle.json
+  s_e3239cf02087b8::t_560ace593a205f 1-55
+src/editor/compose/tests/corpus/orphan-overrides.json
+  s_e3239cf02087b8::t_76a8888344c9a5 1-84
+src/editor/compose/tests/corpus/precedence-chain.json
+  s_e3239cf02087b8::t_5e099c568a800c 1-105
+src/editor/compose/tests/corpus/root-inert-vs-composable.json
+  s_e3239cf02087b8::t_6f1df82ff242f3 1-60
+src/editor/compose/tests/corpus/structural-add-remove.json
+  s_e3239cf02087b8::t_0edcda6242625f 1-74
+src/editor/compose/tests/test_corpus.cpp
+  s_e3239cf02087b8::t_da72c456fe45cc 1-171
+src/editor/compose/tests/test_flatten.cpp
+  s_e3239cf02087b8::t_c99a2fe0fd0949 1-277
+src/editor/compose/tests/test_flatten_diagnostics.cpp
+  s_e3239cf02087b8::t_3c0e397cec0817 1-256
+src/editor/compose/tests/test_json_pointer.cpp
+  s_e3239cf02087b8::t_58badd78c627e5 1-126
+src/editor/compose/tests/test_scene_model.cpp
+  s_e3239cf02087b8::t_621b6842f2a7e4 1-184
+src/editor/compose/tests/test_stable_id.cpp
+  s_e3239cf02087b8::t_46c418e2030df3 1-49
+src/editor/derivation/CMakeLists.txt
+  s_e3239cf02087b8::t_b8c0b119f2cec5 9-11,27-29,31,54
+src/editor/derivation/README.md
+  s_e3239cf02087b8::t_286ff9f3f45ea4 48-58,73-77
+src/editor/derivation/include/context/editor/derivation/derivation_graph.h
+  s_e3239cf02087b8::t_062a5db2dc0900 7-8,18,63,82-83,98-110,226-234,258-265,267-271,288-295
+src/editor/derivation/src/derivation_graph.cpp
+  s_e3239cf02087b8::t_414db6eb2b31e9 172,175,179-183,193-194,212-219,277-410,442-456
+src/editor/derivation/tests/test_compose_node.cpp
+  s_e3239cf02087b8::t_4dff3827bf4275 1-285
+src/editor/editorkernel/CMakeLists.txt
+  s_e3239cf02087b8::t_a72e1bb4591257 18-21,24
+src/editor/schema/src/kind_schema.cpp
+  s_e3239cf02087b8::t_eeb47dc0a13ccf 200-241,244,250
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ba6ff2a12038536a9e81b1c0bd2b31cce8a4bdfa",
+  "prompts": {},
+  "sessions": {
+    "s_595741b60ca1d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d07a825a-bbd0-4c62-89c9-32aaf87d478b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
