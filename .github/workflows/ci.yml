@@ -64,11 +64,14 @@ jobs:
       - name: Run Python test suites
         run: python3 -m pytest tools/tests bench/tests -v
 
-      # R-QA-012: CI CONSUMES the fleet manifest — validate it against this live workflow every run
-      # (self-consistency + the advisory-until-provisioned rule + ci_job_id sync). See
-      # docs/ci-fleet-manifest.md.
+      # R-QA-012: CI CONSUMES the fleet manifest — validate it against the live workflows every run
+      # (self-consistency + the advisory-until-provisioned rule + ci_job_id sync across BOTH the
+      # per-PR rollup and the nightly benchmark workflow). See docs/ci-fleet-manifest.md.
       - name: Validate CI fleet manifest (R-QA-012)
-        run: python3 tools/check_fleet_manifest.py --manifest docs/ci-fleet-manifest.json --ci-workflow .github/workflows/ci.yml
+        run: >
+          python3 tools/check_fleet_manifest.py --manifest docs/ci-fleet-manifest.json
+          --ci-workflow .github/workflows/ci.yml
+          --ci-workflow .github/workflows/bench-nightly.yml
 
   build:
     name: build (${{ matrix.os }})
@@ -254,6 +257,80 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: bench-results
+          path: bench/results/
+          if-no-files-found: error
+
+  # R-FILE-011 per-PR proxy on the REAL attach pipeline (issue #38; §6 tiering: the 10k-file
+  # variant is the blocking per-PR stand-in for the 100k gate until M3). The JOB is BLOCKING — the
+  # real filesync-reconcile-index + derivation-graph + daemon-boot loop must run green end to end
+  # on the 10k corpus, and the R-FILE-011 per-stage budget-table extraction must succeed — while
+  # the perf NUMBERS stay advisory (a shared GitHub runner is NOT the R-QA-009 perf-isolated
+  # `perf-linux-bare-metal` class; the manifest's advisory-until-provisioned contract applies).
+  # The FULL 100k benchmark + the query/sustained/daemons/dense scenarios run NIGHTLY in
+  # .github/workflows/bench-nightly.yml (advisory/trend). Distinct from bench-baseline below,
+  # which keeps the M0 parse-bench FILE-FORMAT baseline + canonical-fixpoint smoke.
+  bench-attach-10k:
+    name: bench attach proxy (10k, real pipeline, ubuntu)
+    needs: [license-gate, python-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      - name: Configure (dev preset)
+        run: cmake -S src --preset dev
+
+      - name: Build the context CLI
+        run: cmake --build --preset dev --target context
+        working-directory: src
+
+      - name: Generate seeded 10k corpus
+        run: python3 bench/gen_corpus.py --size 10000 --out bench/corpora/corpus-10k --jobs 4
+
+      # attach (fresh, parse+canonicalize+hash-bounded w/ progress) -> attach_warm (index-warm,
+      # mtime/size-gated) -> edit (R-FILE-011(b), both write paths) -> bulk (R-FILE-011(c)).
+      # Ordering is load-bearing: the fresh attach persists the reconcile index warm attach needs.
+      - name: Run harness on the real subject (median-of-5, R-QA-009 discipline)
+        run: >
+          python3 bench/harness.py
+          --subject "./src/build/dev/cli/context bench"
+          --corpus bench/corpora/corpus-10k
+          --runs 5 --scenarios attach,attach_warm,edit,bulk
+          --out bench/results/ci-real-10k --label ci-real-10k
+
+      - name: Extract the per-stage latency budget table (R-FILE-011 M1 exit criterion)
+        run: >
+          python3 bench/budget_table.py
+          --result bench/results/ci-real-10k.json
+          --out bench/results/budget-table-10k
+
+      # Advisory numbers gate (same contract as the bench-baseline job's): archives the
+      # measurement + reports drift once a baseline exists; never red-Xs the rollup here.
+      - name: Perf gate (R-QA-009, advisory until the perf box is provisioned)
+        continue-on-error: true
+        run: >
+          python3 bench/perf_gate.py
+          --result bench/results/ci-real-10k.json
+          --scenario attach
+          --baseline bench/baselines/attach-real-ci-ubuntu-10k.json
+          --archive bench/results/archive
+          --runner-class gh-ubuntu-shared
+
+      - name: sccache stats
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ${SCCACHE_PATH} --show-stats
+
+      - name: Upload bench results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-attach-results
           path: bench/results/
           if-no-files-found: error
 

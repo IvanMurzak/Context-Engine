@@ -1,17 +1,36 @@
 # bench/ — R-FILE-011 scale benchmark: seeded corpus generator + harness
 
-The durable scale instrument behind **R-FILE-011** (100k-file envelope) and **R-QA-009**
-(performance-gate methodology). Two pieces:
+The durable scale instrument behind **R-FILE-011** (100k-file envelope), **R-FILE-010/013**,
+**R-BRIDGE-008**, and **R-QA-009** (performance-gate methodology). Pieces:
 
 - **`gen_corpus.py`** — deterministic, seeded generator emitting synthetic Context
   projects in the LOCKED authored format (L-32…L-36).
-- **`harness.py`** — scenario timing scaffold with a **pluggable subject**: for M0 the
-  subject is the `spikes/parse-bench` baseline binary; from M1 the real EditorKernel CLI
-  slots into the same contract.
+- **`harness.py`** — scenario timing scaffold with a **pluggable subject**: the M0
+  baseline subject was the `spikes/parse-bench` binary (file-format-bound costs only);
+  since M1 (issue #38) the REAL EditorKernel CLI is the primary subject —
+  `--subject "<context-binary> bench"` drives the real filesync reconcile index +
+  derivation graph + daemon boot/attach loop. The harness also orchestrates the
+  `daemons` scenario itself (N REAL `context daemon` processes + N
+  `context attach --reconcile` clients over the real IPC wire).
+- **`budget_table.py`** — extracts the **R-FILE-011 per-stage latency budget table**
+  (watch → hash → parse → validate → compose → instantiate → fan-out; an M1 exit
+  criterion) from a harness result. Normative allocation + methodology:
+  `docs/latency-budget-table.md`.
+- **`perf_gate.py`** — the R-QA-009 rolling-baseline ± band gate (advisory until the
+  perf box is provisioned).
 
 Corpora and results are **generated, never committed** (`bench/corpora/`,
-`bench/results/` are gitignored). CI archives results as workflow artifacts
-(`bench-baseline` job in `.github/workflows/ci.yml`).
+`bench/results/` are gitignored). CI archives results as workflow artifacts: the
+`bench-baseline` (M0 file-format baseline) and `bench-attach-10k` (REAL-pipeline per-PR
+proxy, blocking job / advisory numbers) jobs in `.github/workflows/ci.yml`, and the
+nightly 100k + scenario sweep in `.github/workflows/bench-nightly.yml` (advisory trend
+— see `docs/ci-fleet-manifest.json` for the runner-class honesty contract).
+
+> **Corpus mutation caveat**: the `edit` / `bulk` / `sustained` scenarios MUTATE corpus
+> files in place (seeded value tweaks; `sustained` cleans its synthetic files up after
+> itself). Scenario ordering matters — run `attach` (fresh) first (it persists the
+> reconcile index `attach_warm` and the edit/bulk primes rely on) — and regenerate the
+> corpus when you need pristine canonical-form bytes (e.g. for `canon-check`).
 
 ## Generating corpora
 
@@ -67,35 +86,65 @@ newline. The spike's `canon-check` mode asserts the **re-canonicalization fixpoi
 ## Running the harness
 
 ```bash
-# build the M0 subject (opt-in spike target; needs the vcpkg toolchain):
+# The REAL M1 subject (the routine dev preset — no vcpkg needed):
+cmake -S src --preset dev && cmake --build --preset dev --target context   # from src/
+
+python bench/harness.py \
+    --subject "src/build/dev/cli/context bench" \
+    --corpus bench/corpora/corpus-10k \
+    --runs 5 --scenarios attach,attach_warm,edit,bulk,query,sustained \
+    --out bench/results/local-10k --label local-10k
+
+# The daemons scenario (N real daemons + attach clients on one box; generates its own
+# per-daemon corpora — --corpus is still required but only the other scenarios read it):
+python bench/harness.py \
+    --subject "src/build/dev/cli/context bench" \
+    --corpus bench/corpora/corpus-10k \
+    --runs 3 --scenarios daemons --daemons 4 --daemon-corpus-size 1000 \
+    --out bench/results/local-daemons --label local-daemons
+
+# The M0 file-format baseline subject still slots in unchanged (opt-in spike target;
+# needs the vcpkg toolchain) for the default M0 scenario set:
 cmake -B build/bench -S src -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
     -DVCPKG_MANIFEST_FEATURES=spikes -DCONTEXT_BUILD_SPIKES=ON
 cmake --build build/bench --target context-parse-bench
-
 python bench/harness.py \
     --subject build/bench/spikes/parse-bench/context-parse-bench \
     --corpus bench/corpora/corpus-10k \
     --runs 5 --single-thread-attach \
-    --out bench/results/local-10k --label local-10k
+    --out bench/results/local-10k-m0 --label local-10k-m0
 ```
 
 Median of N ≥ 5 runs with dispersion recorded, per R-QA-009. Output: `<out>.json`
-(full raw runs + aggregates) and `<out>.md` (summary table).
+(full raw runs + aggregates) and `<out>.md` (summary table). Feed `<out>.json` to
+`budget_table.py` for the per-stage budget table.
 
-## Subject CLI contract (pluggable — M1's EditorKernel slots in here)
+## Subject CLI contract (pluggable)
 
 Every scenario invocation prints one JSON object on stdout; unimplemented scenarios
-print `{"unsupported": true}`.
+print `{"unsupported": true}`. The default `--scenarios` set stays the M0 five
+(parse-bench back-compat); the M1 additions are opt-in.
 
-| scenario | R-FILE-011 | subject invocation |
+| scenario | requirement | subject invocation |
 |---|---|---|
-| fresh attach (parse+canonicalize+hash bound) | (a) | `<subject> attach --corpus DIR --threads N` |
-| single-edit latency | (b) | `<subject> edit --corpus DIR --seed S` |
-| bulk change (branch-switch class) | (c) | `<subject> bulk --corpus DIR --count K --seed S` |
-| cold import | (d) | `<subject> import --corpus DIR` *(unsupported until importers exist)* |
-| 3-way structural merge (R-FILE-012) | — | `<subject> merge --corpus DIR --count K --threads N` |
+| fresh attach (parse+canonicalize+hash bound, progress events) | R-FILE-011(a) | `<subject> attach --corpus DIR --threads N` |
+| index-warm attach (mtime/size-gated scan) | R-FILE-011(a) | `<subject> attach --corpus DIR --mode warm --threads N` *(real subject; needs the index a fresh attach persisted)* |
+| single-edit latency (both write paths) | R-FILE-011(b) | `<subject> edit --corpus DIR --seed S` |
+| bulk change (branch-switch class) | R-FILE-011(c) | `<subject> bulk --corpus DIR --count K --seed S` |
+| cold import | R-FILE-011(d) | `<subject> import --corpus DIR` *(unsupported until the M2 importers)* |
+| 3-way structural merge (R-FILE-012) | — | `<subject> merge --corpus DIR --count K --threads N` *(M0 parse-bench only until `context merge-file` lands, M2)* |
+| session-query p99 at the daemon service point | R-BRIDGE-008 | `<subject> query --corpus DIR --samples N --seed S` |
+| sustained-write dirty-set latency + backpressure | R-FILE-013 | `<subject> sustained --corpus DIR --writes W --sample-every M` |
+| N daemons on one box (harness-orchestrated) | R-FILE-011 / R-FILE-010 | `--scenarios daemons --daemons N --daemon-corpus-size K` *(spawns real `daemon` + `attach --reconcile --shutdown` processes)* |
 
-The M0 baseline measures the *file-format-bound* costs only (no derivation graph, no
-index, no watcher). Index-warm attach (the ≤ 5 s target proper) becomes measurable at
-M1 when the persisted reconcile index exists.
+**M1 honesty notes** (full detail in `docs/latency-budget-table.md`): the real subject's
+"watch" stage is the reconcile crawl (no native OS watcher yet); "parse" is the M1
+placeholder canonicalizer (the M2 canonical-JSON serializer replaces the node body
+behind the same seam and the numbers re-baseline); validate/compose stages land M2 and
+are explicit `pending-M2` budget rows; the crawl is serial today, so `threads_effective`
+honestly reports `1` against the "fully parallel scan" target; and at M1 an index-warm
+attach verifies convergence via the gated scan — the cache-hot derived-world
+materialization half of R-FILE-011(a) activates with the R-FILE-010 shared cache (M2).
+The M0 parse-bench baseline measured the *file-format-bound* costs only (no derivation
+graph, no index, no daemon); the real subject measures the composed pipeline.

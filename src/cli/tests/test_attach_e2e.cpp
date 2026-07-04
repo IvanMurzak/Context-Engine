@@ -82,11 +82,23 @@ int main()
         CHECK(ctest_proc::valid(daemon));
         CHECK(wait_for_instance(project, 15000));
 
-        // A SEPARATE process attaches over the wire, edits + queries, writes its envelope to a file,
-        // and asks the daemon to shut down. Reading the file AFTER the child exits is race-free.
+        // Seed an OUT-OF-BAND authored file the daemon has never been told about — the attach
+        // client's `--reconcile` must fold it in over the wire (R-FILE-002; the path the R-FILE-011
+        // N-daemons benchmark scenario drives against generated corpora).
+        {
+            std::error_code seed_ec;
+            fs::create_directories(project / "proj", seed_ec);
+            std::ofstream seeded(project / "proj" / "seeded.scene", std::ios::binary);
+            seeded << "seeded: 1";
+        }
+
+        // A SEPARATE process attaches over the wire, reconciles the seeded file, edits + queries,
+        // writes its envelope to a file, and asks the daemon to shut down. Reading the file AFTER
+        // the child exits is race-free.
         const fs::path result = project / "attach-result.json";
         ctest_proc::Process attach = ctest_proc::spawn(
-            bin, {"attach", "--project", project.string(), "--out", result.string(), "--shutdown"});
+            bin, {"attach", "--project", project.string(), "--out", result.string(), "--reconcile",
+                  "--shutdown"});
         CHECK(ctest_proc::valid(attach));
 
         int attach_code = -1;
@@ -111,8 +123,11 @@ int main()
             const Json& data = env.at("data");
             CHECK(data.at("attached").as_bool());
             CHECK(data.at("hashesMatch").as_bool());
+            // --reconcile folded the seeded out-of-band file in over the wire BEFORE the edit.
+            CHECK(data.at("reconcile").at("changes").as_int() == 1);
+            CHECK(data.at("reconcile").at("worldEntities").as_int() == 1);
             CHECK(data.at("edit").at("reflected").as_bool());
-            CHECK(data.at("edit").at("worldEntities").as_int() == 1);
+            CHECK(data.at("edit").at("worldEntities").as_int() == 2); // seeded + the edit's a.scene
             CHECK(data.at("query").at("present").as_bool());
             CHECK(data.at("shutdownAck").as_bool());
         }

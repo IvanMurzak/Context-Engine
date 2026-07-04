@@ -1,0 +1,123 @@
+# Context Engine nightly benchmark — the §6 NIGHTLY/TREND tier of the R-FILE-011 scale envelope
+# (issue #38): the FULL 100k-file benchmark on the real attach pipeline, the dense-reference
+# synthetic (R-FILE-011(e): edges O(refs) > O(files)), the session-query p99 budget
+# (R-BRIDGE-008), the sustained-write backpressure / dirty-set-latency measurement (R-FILE-013),
+# and the N-daemons-on-one-box scenario (R-FILE-011 composed budgets; the R-FILE-010
+# multi-worktree scenario home — its shared-cache contention measurement activates at M2).
+#
+# Runner-class honesty (R-QA-009 / R-QA-012): ubuntu-latest is SHARED, not the perf-isolated
+# `perf-linux-bare-metal` class docs/ci-fleet-manifest.json names for the 100k floor — so this
+# whole workflow is ADVISORY/TREND: results are archived as artifacts + the perf-gate time series,
+# drift stays visible, and nothing here red-Xs a merge. When the perf box is provisioned the
+# manifest rows flip to blocking and this workflow moves onto that runner class.
+#
+# Registered in docs/ci-fleet-manifest.json (job id `bench-100k-nightly`), which the per-PR
+# python-tests job validates against BOTH workflows (tools/check_fleet_manifest.py).
+
+name: bench-nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # nightly, off-peak UTC
+  workflow_dispatch:
+
+jobs:
+  bench-100k-nightly:
+    name: bench nightly (100k real pipeline, ubuntu, advisory trend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      - name: Configure (dev preset)
+        run: cmake -S src --preset dev
+
+      - name: Build the context CLI
+        run: cmake --build --preset dev --target context
+        working-directory: src
+
+      - name: Generate seeded 100k corpus (R-FILE-011 envelope scale)
+        run: python3 bench/gen_corpus.py --size 100000 --out bench/corpora/corpus-100k --jobs 4
+
+      - name: Generate seeded 10k dense-reference corpus (R-FILE-011(e))
+        run: >
+          python3 bench/gen_corpus.py --size 10000 --variant dense
+          --out bench/corpora/corpus-10k-dense --jobs 4
+
+      # The full scenario sweep on the real subject at envelope scale. Ordering is load-bearing
+      # (the fresh attach persists the reconcile index the warm attach + edit/bulk primes use).
+      - name: Run harness — 100k real pipeline (median-of-5, R-QA-009 discipline)
+        run: >
+          python3 bench/harness.py
+          --subject "./src/build/dev/cli/context bench"
+          --corpus bench/corpora/corpus-100k
+          --runs 5 --scenarios attach,attach_warm,edit,bulk,query,sustained,daemons
+          --daemons 4 --daemon-corpus-size 1000
+          --out bench/results/nightly-100k --label nightly-100k
+
+      # Dense-reference synthetic: the edge-heavy case (many more ref edges than files) at proxy
+      # size — the property under test is edges >> files, not absolute file count.
+      - name: Run harness — dense-reference synthetic (R-FILE-011(e))
+        run: >
+          python3 bench/harness.py
+          --subject "./src/build/dev/cli/context bench"
+          --corpus bench/corpora/corpus-10k-dense
+          --runs 5 --scenarios attach
+          --out bench/results/nightly-10k-dense --label nightly-10k-dense
+
+      - name: Extract the per-stage latency budget table (R-FILE-011 M1 exit criterion)
+        run: >
+          python3 bench/budget_table.py
+          --result bench/results/nightly-100k.json
+          --out bench/results/budget-table-100k
+
+      # Advisory perf gates: archive the trend series per scenario; report drift once baselines
+      # exist. Nothing gates on a shared runner (R-QA-009 rule 1).
+      - name: Perf gate — warm attach (advisory)
+        continue-on-error: true
+        run: >
+          python3 bench/perf_gate.py
+          --result bench/results/nightly-100k.json
+          --scenario attach_warm
+          --baseline bench/baselines/attach-warm-nightly-100k.json
+          --archive bench/results/archive
+          --runner-class gh-ubuntu-shared
+
+      - name: Perf gate — session-query p99 (advisory)
+        continue-on-error: true
+        run: >
+          python3 bench/perf_gate.py
+          --result bench/results/nightly-100k.json
+          --scenario query --metric p99_ms
+          --baseline bench/baselines/query-p99-nightly-100k.json
+          --archive bench/results/archive
+          --runner-class gh-ubuntu-shared
+
+      - name: Perf gate — sustained dirty-set latency (advisory)
+        continue-on-error: true
+        run: >
+          python3 bench/perf_gate.py
+          --result bench/results/nightly-100k.json
+          --scenario sustained --metric dirty_latency_max_ms
+          --baseline bench/baselines/sustained-dirty-max-nightly-100k.json
+          --archive bench/results/archive
+          --runner-class gh-ubuntu-shared
+
+      - name: sccache stats
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ${SCCACHE_PATH} --show-stats
+
+      - name: Upload nightly bench results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-nightly-results
+          path: bench/results/
+          if-no-files-found: error

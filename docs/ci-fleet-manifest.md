@@ -56,15 +56,20 @@ Every gate carries exactly one written red-X policy:
 | `sanitize-asan-ubsan` | L-38 | gh-ubuntu-shared | per-PR | blocking | `sanitize` |
 | `sanitize-tsan` | L-38 | gh-ubuntu-shared | per-PR | blocking | `sanitize` |
 | `bench-baseline-10k` | R-FILE-011 | gh-ubuntu-shared | per-PR | **advisory** | `bench-baseline` |
+| `bench-attach-10k` | R-FILE-011 | gh-ubuntu-shared | per-PR | blocking | `bench-attach-10k` |
 | `spike-wasm-interpreters` | R-LANG-003 | gh-ubuntu-shared | per-PR | blocking | `spike-wasm` |
 | `spike-wasm-wamr-aot` | R-LANG-003 | gh-ubuntu-shared | per-PR | **quarantine** (#24) | `spike-wasm` |
 | `spike-webgpu-native` | R-REND-005 | gh-ubuntu-shared | per-PR | blocking | `spike-webgpu` |
 | `spike-webgpu-web` | R-REND-005 | gh-ubuntu-shared | per-PR | blocking | `spike-webgpu-web` |
 | `fleet-manifest-validation` | R-QA-012 | gh-ubuntu-shared | per-PR | blocking | `python-tests` |
-| `perf-filesync-attach-100k` | R-FILE-011 | perf-linux-bare-metal | nightly | **advisory** ⏳ | — |
+| `perf-filesync-attach-100k` | R-FILE-011 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
+| `bench-query-p99` | R-BRIDGE-008 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
+| `bench-sustained-backpressure` | R-FILE-013 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
+| `bench-dense-reference` | R-FILE-011 | gh-ubuntu-shared | nightly | **advisory** | `bench-100k-nightly` |
+| `bench-multiworktree-contention` | R-FILE-010 | n-daemons-host | nightly | **advisory** ⏳ | `bench-100k-nightly` |
 | `determinism-state-hash` | R-QA-005 | determinism-matrix | per-PR | **advisory** ⏳ | — |
 | `visual-equivalence` | R-REND-005 | gpu-runner | nightly | **advisory** ⏳ | — |
-| `n-daemons-budget` | R-FILE-011 | n-daemons-host | nightly | **advisory** ⏳ | — |
+| `n-daemons-budget` | R-FILE-011 | n-daemons-host | nightly | **advisory** ⏳ | `bench-100k-nightly` |
 
 ⏳ = advisory **until its runner class is provisioned**. The R-QA-008 M1-exit suites (kernel,
 file-sync, and the R-QA-010 fault-injection harness) ride the `build` gate — their ctest
@@ -73,17 +78,31 @@ M1 Exit criteria themselves (issue #36): the `m1-exit-<n>-*` ctest family under
 `src/tests/integration/`, run by the dedicated "M1 exit gate (5 criteria, blocking)" step of the
 `build` job on all three OS legs (the runner class shown is the representative leg).
 
+**The two-tier R-FILE-011 benchmark (issue #38, ROADMAP §6 tiering):** `bench-attach-10k` is the
+**per-PR blocking 10k proxy** on the REAL attach pipeline (filesync reconcile index + derivation
+graph + daemon boot via the `context bench` subject) — the JOB blocks (the real path must run
+green + the per-stage budget-table extraction must succeed), while the perf NUMBERS stay advisory
+(in-job perf gate is `continue-on-error`) because a shared runner cannot satisfy R-QA-009 rule 1.
+The nightly `bench-100k-nightly` job (`.github/workflows/bench-nightly.yml`) runs the FULL 100k
+benchmark + the dense-reference, session-query-p99, sustained-backpressure, and N-daemons
+scenarios as an **advisory trend** on `gh-ubuntu-shared`; the nightly gates' `runner_class`
+columns name the class that will make each a real floor once provisioned (never silently green).
+The normative budget allocation lives in [`latency-budget-table.md`](latency-budget-table.md).
+
 ## How CI consumes it (the R-QA-012 tie)
 
 `tools/check_fleet_manifest.py` runs in the `python-tests` job on every PR:
 
 ```bash
 python3 tools/check_fleet_manifest.py --manifest docs/ci-fleet-manifest.json \
-    --ci-workflow .github/workflows/ci.yml
+    --ci-workflow .github/workflows/ci.yml \
+    --ci-workflow .github/workflows/bench-nightly.yml
 ```
 
-It fails the build (exit 1) when the manifest drifts out of self-consistency, and exit 2 on a config
-error. It enforces:
+(`--ci-workflow` is repeatable: per-PR gates live in `ci.yml`, the nightly benchmark gates in
+`bench-nightly.yml`; a `ci_job_id` must exist in at least one given workflow.) It fails the build
+(exit 1) when the manifest drifts out of self-consistency, and exit 2 on a config error. It
+enforces:
 
 1. Every gate references a **declared runner class**.
 2. Every `red_x_policy` is one of the three taxonomy values; every `tier` is `per-PR` or `nightly`.

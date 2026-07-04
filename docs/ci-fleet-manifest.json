@@ -81,7 +81,7 @@
       "tier": "per-PR",
       "red_x_policy": "blocking",
       "ci_job_id": "python-tests",
-      "description": "pytest over tools/tests + bench/tests (license gate, toolchain gate, corpus generator, perf gate, fleet-manifest validator)."
+      "description": "pytest over tools/tests + bench/tests (license gate, toolchain gate, corpus generator, perf gate, bench harness + daemons orchestration, budget-table extractor, fleet-manifest validator)."
     },
     {
       "id": "build-ubuntu",
@@ -191,7 +191,17 @@
       "tier": "per-PR",
       "red_x_policy": "advisory",
       "ci_job_id": "bench-baseline",
-      "description": "10k-corpus benchmark proxy + canonical fixpoint smoke + the R-QA-009 perf gate (advisory: a shared runner is NOT perf-isolated, so the numbers do not gate)."
+      "description": "M0 parse-bench FILE-FORMAT baseline on the 10k corpus + canonical fixpoint smoke + the R-QA-009 perf gate (advisory: a shared runner is NOT perf-isolated, so the numbers do not gate). The real-pipeline per-PR proxy is bench-attach-10k."
+    },
+    {
+      "id": "bench-attach-10k",
+      "requirement": "R-FILE-011",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "bench-attach-10k",
+      "description": "The ROADMAP-§6-tiering per-PR 10k proxy (issue #38) on the REAL attach pipeline (filesync reconcile index + derivation graph + daemon boot; `context bench` subject): fresh + index-warm attach, single-edit, bulk scenarios + the R-FILE-011 per-stage budget-table extraction. The JOB is blocking (the real path must run green end to end); the perf NUMBERS stay advisory until perf-linux-bare-metal is provisioned (the in-job perf gate is continue-on-error)."
     },
     {
       "id": "spike-wasm-interpreters",
@@ -248,11 +258,51 @@
       "id": "perf-filesync-attach-100k",
       "requirement": "R-FILE-011",
       "runner_class": "perf-linux-bare-metal",
-      "build_flavor": "release",
+      "build_flavor": "dev",
       "tier": "nightly",
       "red_x_policy": "advisory",
-      "ci_job_id": null,
-      "description": "Full 100k-file index-warm-attach floor under the R-QA-009 methodology. Advisory until the perf box is provisioned (then blocking, nightly)."
+      "ci_job_id": "bench-100k-nightly",
+      "description": "Full 100k-file fresh + index-warm attach floor under the R-QA-009 methodology. Runs nightly as an ADVISORY TREND on gh-ubuntu-shared (bench-nightly.yml) until this perf-isolated runner class is provisioned — the runner_class names the class that makes it a real floor (then blocking, nightly)."
+    },
+    {
+      "id": "bench-query-p99",
+      "requirement": "R-BRIDGE-008",
+      "runner_class": "perf-linux-bare-metal",
+      "build_flavor": "dev",
+      "tier": "nightly",
+      "red_x_policy": "advisory",
+      "ci_job_id": "bench-100k-nightly",
+      "description": "Session-query latency budget (p99 <= 5 ms local) measured at the daemon's bounded service point (full JSON-RPC dispatch, socket excluded) against a 100k-file derived world. Advisory trend on the shared runner until the perf box is provisioned."
+    },
+    {
+      "id": "bench-sustained-backpressure",
+      "requirement": "R-FILE-013",
+      "runner_class": "perf-linux-bare-metal",
+      "build_flavor": "dev",
+      "tier": "nightly",
+      "red_x_policy": "advisory",
+      "ci_job_id": "bench-100k-nightly",
+      "description": "Sustained-write-load dirty-set latency + backpressure policy measurement (the DOCUMENTED maximum dirty-set latency of docs/latency-budget-table.md, under the library-default coalescing config). Advisory trend until the perf box is provisioned."
+    },
+    {
+      "id": "bench-dense-reference",
+      "requirement": "R-FILE-011",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "nightly",
+      "red_x_policy": "advisory",
+      "ci_job_id": "bench-100k-nightly",
+      "description": "Dense-reference synthetic (R-FILE-011(e): ref edges O(refs) > O(files)) attach on the real pipeline — the edge-heavy case exercised nightly at proxy size (the property under test is edges >> files, not absolute count)."
+    },
+    {
+      "id": "bench-multiworktree-contention",
+      "requirement": "R-FILE-010",
+      "runner_class": "n-daemons-host",
+      "build_flavor": "dev",
+      "tier": "nightly",
+      "red_x_policy": "advisory",
+      "ci_job_id": "bench-100k-nightly",
+      "description": "Multi-worktree scenario home (the harness `daemons` scenario: N real daemons + N attach clients on one box). The R-FILE-010 SHARED-CACHE contention measurement activates when the M2 derivation cache lands; advisory until the runner class is provisioned."
     },
     {
       "id": "determinism-state-hash",
@@ -278,11 +328,11 @@
       "id": "n-daemons-budget",
       "requirement": "R-FILE-011",
       "runner_class": "n-daemons-host",
-      "build_flavor": "release",
+      "build_flavor": "dev",
       "tier": "nightly",
       "red_x_policy": "advisory",
-      "ci_job_id": null,
-      "description": "N-daemons-on-one-box composed watcher/fd/index-memory/cache budget scenario. Advisory until provisioned."
+      "ci_job_id": "bench-100k-nightly",
+      "description": "N-daemons-on-one-box composed watcher/fd/index-memory/cache budget scenario (the harness `daemons` scenario: N real `context daemon` processes + N `context attach --reconcile` clients over the real wire). Runs nightly as concurrent boot/attach/reconcile trend on gh-ubuntu-shared; the composed watch-handle/fd budgets gain fidelity when the native watcher lands and this runner class is provisioned. Advisory until then."
     }
   ]
 }
