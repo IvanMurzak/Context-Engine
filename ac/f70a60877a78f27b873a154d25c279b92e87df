@@ -1,0 +1,28 @@
+src/cli/CMakeLists.txt
+  s_e3239cf02087b8::t_f82e3f8c027801 19-24,27
+src/editor/schema/src/validator.cpp
+  s_e3239cf02087b8::t_33cb8c52b9295f 629-648
+  s_e3239cf02087b8::t_823d794e1999a7 9
+src/editor/schema/tests/test_validator.cpp
+  s_e3239cf02087b8::t_ad2a51dcb3fad8 116-138
+src/editor/schema/include/context/editor/schema/validator.h
+  s_e3239cf02087b8::t_333dea62df0e04 45-47
+src/editor/schema/tests/test_kind_schema.cpp
+  s_e3239cf02087b8::t_70f650539ae788 157-179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "acf70a60877a78f27b873a154d25c279b92e87df",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
