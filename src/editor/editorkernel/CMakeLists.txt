@@ -23,6 +23,11 @@ target_link_libraries(context_editorkernel
     PUBLIC context_bridge context_derivation context_filesync context_contract context_kernel
     PRIVATE context_schema context_warnings)
 
+# The L-37 migration set + tool-save stamping (M2 wave 3, src/editor/migrate/): PUBLIC — the
+# config header exposes migrate::MigrationSet (as an opaque seam pointer; only forward-declared),
+# and the .cpp calls migrate_document/hash_combine on the save paths.
+target_link_libraries(context_editorkernel PUBLIC context_migrate)
+
 # Self-contained GCC runtime for the editorkernel ctest executables. The composition pulls the bridge
 # daemon's single-instance lock (std::filesystem) and thus newer libstdc++ symbols; on a MinGW host a
 # stale libstdc++-6.dll elsewhere on PATH can shadow the toolchain's and be loaded first, yielding

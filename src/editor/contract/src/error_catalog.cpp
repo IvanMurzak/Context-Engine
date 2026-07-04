@@ -97,6 +97,29 @@ const std::vector<ErrorCode>& catalog()
         {"resource.unknown_handle",
          "The resource handle is unknown to this daemon instance (expired, foreign, or malformed).",
          false, kExitNotFound, "R-CLI-017"},
+        // The L-37 / R-DATA-004 migration family (M2 wave 3, issue #52): parse-time per-payload
+        // migration findings. All deterministic (retriable=false); orphan overrides are the one
+        // NON-blocking member (the entry is preserved and excluded from flatten).
+        {"migration.step_missing",
+         "No registered migration step covers a version in the payload's chain (a gap).", false,
+         kExitValidation, "R-DATA-004"},
+        {"migration.step_failed", "A migration step reported failure; the document rolled back.",
+         false, kExitValidation, "R-DATA-004"},
+        {"migration.budget_exceeded",
+         "A payload exceeded the per-invocation migration budget (L-37); the document rolled back.",
+         false, kExitValidation, "R-DATA-004"},
+        {"migration.id_mutated",
+         "A migration step altered, moved, added, or removed an id/guid — identity is immutable "
+         "(L-37); the document rolled back.",
+         false, kExitValidation, "R-DATA-004"},
+        {"migration.runner_unavailable",
+         "Package-shipped migrations execute only in the sandboxed WASM tier; the VM component is "
+         "not stood up yet (L-37 contract; execution deliberately stubbed).",
+         false, kExitUnimplemented, "R-DATA-004"},
+        {"migration.orphan_override",
+         "An override path has no destination after migration; the entry is preserved but "
+         "excluded from flatten (L-37 orphan override).",
+         false, kExitValidation, "R-DATA-004"},
     };
     return the_catalog;
 }

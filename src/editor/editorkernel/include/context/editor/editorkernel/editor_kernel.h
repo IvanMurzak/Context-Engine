@@ -50,6 +50,11 @@ class FileStore;
 class Watcher;
 } // namespace context::editor::filesync
 
+namespace context::editor::migrate
+{
+class MigrationSet;
+}
+
 namespace context::editor::editorkernel
 {
 
@@ -77,6 +82,19 @@ struct EditorKernelConfig
     // only. Bulk ops (the `reconcile` verb, e.g. after a git branch switch) bypass the cadence via
     // CrawlMode::force — crawl-on-demand is always available. The very first pass always crawls.
     std::uint64_t min_crawl_interval_nanos = 0;
+
+    // The L-37 migration set this composition runs under (M2 wave 3). nullptr (the default)
+    // resolves to migrate::MigrationSet::engine_set() — the engine-shipped set; tests inject their
+    // own. Wired into (a) the derivation graph's parse-time migration node, (b) the tool-save
+    // canonicalize+stamp path (edit_file / edit_files), and (c) the R-FILE-005 pass-0
+    // registered-set hash (with the engine kind schemas) that keys pass-1 derivation. In the
+    // R-FILE-005 cold-start order this registration point sits where "VM → registration (pass 0)"
+    // boots — the sandboxed-tier VM component itself is contract-stubbed in v1 (see
+    // src/editor/migrate/README.md).
+    const migrate::MigrationSet* migrations = nullptr;
+    // (`derivation.registered_set_hash` — the R-FILE-005 pass-0 hash — is COMPUTED at construction
+    // from the engine kind schemas + the resolved migration set when left 0; a non-zero value in
+    // the embedded DerivationConfig is honored as an explicit override.)
 };
 
 // How ingest_external() treats the full re-hash crawl (R-FILE-002).

@@ -1,0 +1,44 @@
+{
+  "$schema": "test:doc",
+  "componentVersions": {
+    "test:sprite": 1
+  },
+  "entities": [
+    {
+      "components": {
+        "test:sprite": {
+          "id": "spr-1",
+          "size": 4,
+          "tint": "red"
+        }
+      },
+      "name": "a"
+    },
+    {
+      "components": {
+        "test:sprite": {
+          "id": "spr-2",
+          "size": 2,
+          "tint": "blue"
+        }
+      },
+      "name": "b"
+    }
+  ],
+  "instances": [
+    {
+      "overrides": [
+        {
+          "path": "components/test:sprite/tint",
+          "value": "green"
+        },
+        {
+          "path": "components/test:sprite/size",
+          "value": 8
+        }
+      ],
+      "source": "lib/tpl.doc.json"
+    }
+  ],
+  "version": 1
+}
