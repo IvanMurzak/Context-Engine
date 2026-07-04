@@ -22,6 +22,11 @@ namespace context::kernel
 class EventBus;
 }
 
+namespace context::editor::migrate
+{
+class MigrationSet;
+}
+
 namespace context::editor::derivation
 {
 
@@ -52,6 +57,12 @@ struct DerivationConfig
     std::size_t high_watermark = 64;      // overload threshold on the pending dirty set
     std::size_t max_batch_per_pass = 32;  // cap on the NON-VISIBLE fill per overloaded pass (load-shed);
                                           // visible/queried nodes always derive — never stall a query
+    // The content hash of the R-FILE-005 pass-0 "registered schema + migration set" (the derived
+    // stratum): folded into every node's memoization identity, so pass-1 derived values are keyed
+    // on (canonical content, registered set) — a package upgrade that changes a schema/migration
+    // yields NEW keys instead of serving values derived under the old set (R-FILE-010). 0 (the
+    // default) keys purely on content — the M1 behavior, unchanged for direct graph consumers.
+    std::uint64_t registered_set_hash = 0;
 };
 
 // The result of one coalesced derivation pass.
@@ -126,10 +137,17 @@ public:
     // validation (the M1 behavior — direct graph consumers and micro-benches are unchanged).
     // `ref_resolver` is the x-ctx-ref meta-lookup seam (R-DATA-006); nullptr until the asset
     // database lands, which limits typed-reference checks to shape only.
+    // `migrations` wires the L-37 parse-time migration node (M2 wave 3): when non-null, every JSON
+    // ingest first migrates stamped-older component payloads IN MEMORY (per-payload selection over
+    // the componentVersions header) before validation, so the validate node and every downstream
+    // consumer see current-version payloads while disk truth stays untouched. A BLOCKING migration
+    // finding (newer-than stamps, chain gaps, failed/over-budget steps, id mutation) retains the
+    // node's last-good derived state, exactly like a failed validation. nullptr disables the node.
     explicit DerivationGraph(DerivationConfig config = {},
                              context::kernel::EventBus* bus = nullptr,
                              const schema::SchemaSet* schemas = nullptr,
-                             const schema::RefTargetResolver* ref_resolver = nullptr);
+                             const schema::RefTargetResolver* ref_resolver = nullptr,
+                             const migrate::MigrationSet* migrations = nullptr);
 
     // Ingest one reconciled change + its authored bytes. Parses to canonical form NOW so the returned
     // ticket carries the canonical hash (R-CLI-006), then coalesces into the pending dirty set — a later
@@ -152,6 +170,14 @@ public:
     [[nodiscard]] const context::kernel::World& world() const noexcept { return world_; }
     [[nodiscard]] std::uint64_t generation() const noexcept { return generation_; }
     [[nodiscard]] const BackpressureSignal& backpressure() const noexcept { return signal_; }
+
+    // The R-FILE-005 pass-0 re-derivation hook: a definition-file change re-derives the registered
+    // schema + migration set, whose new hash re-keys the dependent pass-1 subgraphs — nodes derived
+    // under the OLD hash stop memoizing and re-derive on their next touch. (The full pass-0
+    // scheduler that parses manifest/definition kinds and calls this lands with the package
+    // system; the KEY mechanism is contract now so cache identity is right from the start.)
+    void set_registered_set_hash(std::uint64_t hash) noexcept { set_hash_ = hash; }
+    [[nodiscard]] std::uint64_t registered_set_hash() const noexcept { return set_hash_; }
 
     // Read-your-writes predicates the QueryBarrier drives. has_generation: the derived world has
     // reached generation g (`--after-generation`). reflects_hash: some alive derived node currently
@@ -179,6 +205,8 @@ private:
     {
         context::kernel::Entity entity{};
         std::uint64_t canonical_hash = 0;
+        std::uint64_t set_hash = 0; // the registered-set hash this node's value derived under
+                                    // (the R-FILE-005 pass-1 cache-key component)
         std::uint64_t generation = 0;
         bool visible = false;
         bool alive = false; // an entity exists in the derived World for this source
@@ -207,6 +235,8 @@ private:
     const schema::SchemaSet* schemas_;              // validate node's kind set (nullptr = off)
     const schema::RefTargetResolver* ref_resolver_; // x-ctx-ref meta-lookup seam (nullptr until
                                                     // the asset database lands)
+    const migrate::MigrationSet* migrations_;       // L-37 parse-time migration node (nullptr = off)
+    std::uint64_t set_hash_ = 0;                    // current registered-set hash (pass-0 output)
     context::kernel::World world_;
     std::map<std::string, Node> nodes_;
     std::map<std::string, Pending> pending_;

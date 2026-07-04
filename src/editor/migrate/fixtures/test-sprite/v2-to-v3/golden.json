@@ -1,0 +1,23 @@
+{
+  "$schema": "test:doc",
+  "componentVersions": {
+    "test:sprite": 3
+  },
+  "entities": [
+    {
+      "components": {
+        "test:sprite": {
+          "color": "blue",
+          "extent": {
+            "h": 2,
+            "w": 2
+          },
+          "id": "spr-2",
+          "opacity": 1
+        }
+      },
+      "name": "b"
+    }
+  ],
+  "version": 1
+}
