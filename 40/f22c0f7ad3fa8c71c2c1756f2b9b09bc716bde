@@ -1,0 +1,53 @@
+src/editor/contract/src/error_catalog.cpp
+  s_e3239cf02087b8::t_7b1c1b97c2ac75 123-144
+src/editor/filesync/CMakeLists.txt
+  s_e3239cf02087b8::t_f38d0924e5b750 21-22,31-35,64-65
+src/editor/filesync/README.md
+  s_e3239cf02087b8::t_8f1dc5ef48269f 9-10,36-58,111-116
+src/editor/filesync/include/context/editor/filesync/atomic_io.h
+  s_e3239cf02087b8::t_6f232b9733bdcf 26-30
+src/editor/filesync/include/context/editor/filesync/file_store.h
+  s_e3239cf02087b8::t_db13dd80469b9f 82-84,101
+src/editor/filesync/include/context/editor/filesync/intent_log.h
+  s_e3239cf02087b8::t_0fc8d0895b3029 23-32,37-38,41-42,49,105-106,110-113
+src/editor/filesync/include/context/editor/filesync/reconciler.h
+  s_e3239cf02087b8::t_403c2cfbd36774 7,41-45,101-111,117-119,131
+src/editor/filesync/include/context/editor/filesync/sidecar.h
+  s_e3239cf02087b8::t_cf270d523d1812 1-200
+src/editor/filesync/src/atomic_io.cpp
+  s_e3239cf02087b8::t_5214f35cf9485e 6,33-57
+src/editor/filesync/src/file_store.cpp
+  s_e3239cf02087b8::t_34b70aa880b7bb 82-88,101-105
+src/editor/filesync/src/intent_log.cpp
+  s_e3239cf02087b8::t_8d7de4df85ee95 51,121,123-124,126,258-265,309-336
+src/editor/filesync/src/reconciler.cpp
+  s_e3239cf02087b8::t_48cb820bda6673 30-31,134,182,191-239
+src/editor/filesync/src/sidecar.cpp
+  s_e3239cf02087b8::t_b76169ab7504ad 1-606
+src/editor/filesync/tests/test_sidecar.cpp
+  s_e3239cf02087b8::t_cf9285eeb72f49 1-762
+src/editor/serializer/CMakeLists.txt
+  s_e3239cf02087b8::t_2a1af2982eeec3 12-13,38-39
+src/editor/serializer/include/context/editor/serializer/sidecar_ref.h
+  s_e3239cf02087b8::t_6a8cabda419773 1-50
+src/editor/serializer/src/sidecar_ref.cpp
+  s_e3239cf02087b8::t_388f6c8175af67 1-146
+src/editor/serializer/tests/test_sidecar_ref.cpp
+  s_e3239cf02087b8::t_30b3bde0084ea7 1-145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "40f22c0f7ad3fa8c71c2c1756f2b9b09bc716bde",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
