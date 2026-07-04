@@ -367,26 +367,19 @@ jobs:
       - name: Build
         run: cmake --build build/spike-wasm --config Release --target context-spike-wasm
 
-      # The wasmtime + WAMR *interpreter* smoke legs stay BLOCKING — a real regression here must
-      # red-X the rollup. The WAMR *AOT* smoke leg is quarantined in the next step (see below), so
-      # it is excluded here (-E) and run separately as non-blocking.
-      - name: Run smoke tests (wasmtime + wamr interpreters — blocking)
-        run: ctest --test-dir build/spike-wasm -C Release -R context-spike-wasm -E context-spike-wasm-wamr-aot-smoke --output-on-failure
-
-      # QUARANTINE — tracker: IvanMurzak/Context-Engine#24
-      # (https://github.com/IvanMurzak/Context-Engine/issues/24).
-      # The WAMR AOT smoke (context-spike-wasm-wamr-aot-smoke) intermittently fails with an
-      # ILLEGAL-instruction (SIGILL) flake — observed even on `main`, independent of the diff.
-      # Per the design's CI red-X policy (engine ROADMAP.md §6: quarantine-with-issue, NEVER
-      # silently retried to green) this leg is kept RUNNING + visible for trend / root-cause but
-      # made non-blocking (continue-on-error), so a SIGILL flake no longer red-Xs the required
-      # rollup. The wasmtime + WAMR interpreter legs above stay blocking; the WASM interpreter
-      # tier is unaffected. On macos-arm64 the AOT leg is unregistered (no wamrc prebuilt), so
-      # --no-tests=ignore makes this a clean no-op there. Do NOT delete this leg or touch
-      # branch-protection to mask the flake; un-quarantine only when #24 is resolved.
-      - name: Run WAMR AOT smoke (quarantined, non-blocking — Context-Engine#24)
-        continue-on-error: true
-        run: ctest --test-dir build/spike-wasm -C Release -R context-spike-wasm-wamr-aot-smoke --no-tests=ignore --output-on-failure
+      # ALL smoke legs are BLOCKING again (wasmtime + WAMR interpreter + WAMR AOT where wamrc
+      # exists, plus the AOT target-pin regression guard). The WAMR AOT leg was quarantined
+      # 2026-07-03→04 (tracker Context-Engine#24, intermittent SIGILL); ROOT CAUSE: wamrc's
+      # default host-CPU codegen (LLVMGetHostCPUName() + empty explicit features ⇒ LLVM
+      # model-default ISA) can overshoot what a hypervisor-masked VM in the CPU-heterogeneous
+      # runner fleet actually executes, and WAMR's AOT loader never validates the ISA feature
+      # level — the image loads and SIGILLs mid-run. FIXED by pinning the AOT codegen target to
+      # the x86-64-v2 baseline in spikes/wasm/CMakeLists.txt; the
+      # context-spike-wasm-aot-pin-guard ctest byte-verifies the pin so a drift fails
+      # deterministically instead of flaking. On macos-arm64 the AOT tests are unregistered
+      # (no wamrc prebuilt); the interpreter legs still run there.
+      - name: Run smoke tests (wasmtime + wamr interp + wamr-aot — all blocking)
+        run: ctest --test-dir build/spike-wasm -C Release -R context-spike-wasm --output-on-failure
 
       - name: sccache stats
         if: runner.os != 'Windows'

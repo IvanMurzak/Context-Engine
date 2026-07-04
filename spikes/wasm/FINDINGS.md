@@ -253,3 +253,20 @@ only.**
 8. WAMR's LLVM-JIT and Fast-JIT modes were not built (LLVM/asmjit toolchain weight); the JIT
    column is wasmtime's. If a single-runtime-everywhere strategy is ever wanted, WAMR's JIT
    would need its own measurement.
+9. **CI SIGILL flake root-caused + fixed (2026-07-04, Context-Engine#24):** the WAMR-AOT smoke
+   intermittently died with an ILLEGAL instruction on the GitHub runners (observed on ubuntu
+   AND windows, red on `main`, diff-independent). Root cause: the original `wamrc
+   --opt-level=3` invocation left codegen at wamrc's default = the BUILD host's CPU
+   (`LLVMGetHostCPUName()` + an EMPTY explicit feature string in `aot_llvm.c`, so LLVM derives
+   features from the CPU *model's* defaults, not live CPUID). On the CPU-heterogeneous Actions
+   fleet some VMs mask ISA their model name implies (e.g. AVX-512 on Ice-Lake-class Xeons),
+   and WAMR's AOT loader validates arch/endian/bitwidth but never the ISA feature level
+   (`aot_loader.c check_machine_info`) — so the overshooting image loads cleanly and SIGILLs
+   mid-run on the very machine that compiled it, intermittently (per-VM lottery). Fix:
+   `--target=x86_64 --cpu=x86-64-v2` pinned at the wamrc call (fleet-safe deterministic
+   baseline), byte-verified by the `context-spike-wasm-aot-pin-guard` ctest (R-QA-013), and
+   zycore pinned to the commit zydis e14a0789 expects (hardens deviation #3 for the spike's
+   own Windows-AOT build; a shipped port still owes vendoring per L-62). **Perf caveat:** the
+   §1/§4 AOT numbers above were measured with host-CPU codegen on the Ryzen box and predate
+   the pin; a local re-bench through the pinned build would measure x86-64-v2 codegen instead
+   (the smoke gate is correctness-only, so CI is unaffected).

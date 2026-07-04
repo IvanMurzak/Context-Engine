@@ -219,10 +219,9 @@
       "runner_class": "gh-ubuntu-shared",
       "build_flavor": "spike",
       "tier": "per-PR",
-      "red_x_policy": "quarantine-with-issue",
-      "issue": "IvanMurzak/Context-Engine#24",
+      "red_x_policy": "blocking",
       "ci_job_id": "spike-wasm",
-      "description": "WAMR AOT smoke — intermittent SIGILL flake; quarantined (continue-on-error) with an owned issue, kept running + visible for trend."
+      "description": "WAMR AOT smoke + target-pin guard (blocking; un-quarantined 2026-07-04 — #24 SIGILL root-caused to host-CPU wamrc codegen, fixed by the x86-64-v2 pin in spikes/wasm/CMakeLists.txt)."
     },
     {
       "id": "spike-webgpu-native",
