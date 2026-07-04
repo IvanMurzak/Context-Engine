@@ -1,0 +1,107 @@
+src/editor/contract/src/registry.cpp
+  s_e3239cf02087b8::t_77b6281e843a06 174-200
+  s_e3239cf02087b8::t_bf13686ebb3f3c 7
+  s_e3239cf02087b8::t_dc009f8a6dbe00 337-346
+src/editor/contract/tests/test_registry_parity.cpp
+  s_e3239cf02087b8::t_0edb4869b69c94 118-146
+src/editor/schema/include/context/editor/schema/validator.h
+  s_e3239cf02087b8::t_961218394d3d9d 1-76
+src/editor/schema/src/validator.cpp
+  s_e3239cf02087b8::t_f9156c26ee5064 1-684
+src/editor/schema/README.md
+  s_e3239cf02087b8::t_8a22625091228c 1-75
+src/editor/derivation/include/context/editor/derivation/derivation_graph.h
+  s_e3239cf02087b8::t_9ade7c632ba7ae 9
+  s_e3239cf02087b8::t_d6cc35519b5885 123-128,130-132,138
+  s_e3239cf02087b8::t_3a8edeacaa6966 170-176,185-187,194-195
+  s_e3239cf02087b8::t_97bfa7a96624cd 65-78
+  s_e3239cf02087b8::t_45aae6eba26222 207-209
+src/editor/derivation/src/derivation_graph.cpp
+  s_e3239cf02087b8::t_c144b36a265e3f 137-139,143-156
+  s_e3239cf02087b8::t_2798cedc58ce64 199-213
+  s_e3239cf02087b8::t_f361681f0984f1 16-19,44-52
+  s_e3239cf02087b8::t_13ae3619ee85db 157-158
+src/editor/contract/include/context/editor/contract/registry.h
+  s_e3239cf02087b8::t_be8a5a535e24e8 15
+  s_e3239cf02087b8::t_95da782bcf89af 125-127,131
+  s_e3239cf02087b8::t_7329c1dbbc484d 74-85
+  s_e3239cf02087b8::t_3ab62c954f50fc 96-107
+src/editor/schema/tests/test_validator.cpp
+  s_e3239cf02087b8::t_357ad0fbbb7053 376
+  s_e3239cf02087b8::t_4618255c89b887 321,332
+  s_e3239cf02087b8::t_740f846f06dabc 1-320,322-331,333-375,377-385
+src/editor/derivation/tests/test_validate_node.cpp
+  s_e3239cf02087b8::t_15b44fbbea4cdf 1-13,15-185
+  s_e3239cf02087b8::t_209b1c0d262672 14
+src/CMakeLists.txt
+  s_e3239cf02087b8::t_fdd63965b82575 129-137
+src/editor/schema/include/context/editor/schema/kind_schema.h
+  s_e3239cf02087b8::t_be3d3cca1c4407 1-86
+src/editor/schema/src/vocabulary.cpp
+  s_e3239cf02087b8::t_0d7c69c5cc12ea 1-4,7-258
+  s_e3239cf02087b8::t_b6cbe214737fa8 5-6
+src/editor/schema/tests/test_kind_schema.cpp
+  s_e3239cf02087b8::t_a014e183a53c9d 1-5,7-158
+  s_e3239cf02087b8::t_1e186fce30a6be 6
+src/editor/derivation/src/canonical_parse.cpp
+  s_e3239cf02087b8::t_a2b8d029c32c8d 25
+src/cli/src/scaffold.cpp
+  s_e3239cf02087b8::t_1b6ae89ad89612 13
+  s_e3239cf02087b8::t_d792e855aa0a7d 56-59,63-64,74-76
+  s_e3239cf02087b8::t_1860db90238ee1 99-100,102-104
+  s_e3239cf02087b8::t_9f2ae13e57c422 7
+src/editor/schema/tests/schema_test.h
+  s_e3239cf02087b8::t_c79598e5b37c32 1-27
+src/cli/tests/test_scaffold.cpp
+  s_e3239cf02087b8::t_78f1f47fbb52d4 10-11,13
+  s_e3239cf02087b8::t_131cf585a89547 75-120
+src/editor/serializer/src/canonical.cpp
+  s_e3239cf02087b8::t_5cee5dd69add6c 299
+src/editor/derivation/include/context/editor/derivation/canonical_parse.h
+  s_e3239cf02087b8::t_c48b40429c2707 35-36
+  s_e3239cf02087b8::t_df934d13e6ce0c 38-40
+src/editor/serializer/include/context/editor/serializer/canonical.h
+  s_e3239cf02087b8::t_59495ace5439a4 53-56
+  s_e3239cf02087b8::t_923f5f9f0e8a38 66-68
+src/editor/schema/CMakeLists.txt
+  s_e3239cf02087b8::t_03bff42a83345f 1-41
+src/editor/derivation/CMakeLists.txt
+  s_e3239cf02087b8::t_5fd701e722e064 8-9
+  s_e3239cf02087b8::t_01cb7601ffed59 23-27
+  s_e3239cf02087b8::t_3f269cbfa82370 42-43
+src/editor/derivation/README.md
+  s_e3239cf02087b8::t_8e89246d29aa6c 41-47
+src/cli/CMakeLists.txt
+  s_e3239cf02087b8::t_e7b5405e219b6b 62-66
+src/editor/schema/src/kind_schema.cpp
+  s_e3239cf02087b8::t_48147f80c5ca04 12,15,17
+  s_e3239cf02087b8::t_b44d25adcd45f4 1-11,13-14,16,18-436
+src/editor/contract/CMakeLists.txt
+  s_e3239cf02087b8::t_6a1a01759b5598 17-20
+src/editor/editorkernel/src/editor_kernel.cpp
+  s_e3239cf02087b8::t_23c3b69c798ee0 10
+  s_e3239cf02087b8::t_cb2f763a7048c9 82-85
+src/editor/schema/include/context/editor/schema/vocabulary.h
+  s_e3239cf02087b8::t_dc83ed20a87e01 1-114
+src/editor/schema/tests/test_vocabulary.cpp
+  s_e3239cf02087b8::t_3d3edeb93d2305 1-9,11-165
+  s_e3239cf02087b8::t_7dd723679f989e 10
+src/editor/schema/include/context/editor/schema/json_access.h
+  s_e3239cf02087b8::t_527bedce4106b7 1-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "31a412e5b33e5f52376e426eb2dcbf3da8d8b566",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
