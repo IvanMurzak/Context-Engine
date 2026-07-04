@@ -27,6 +27,9 @@ void ecma_number(double v, std::string& out);
 // raw NFC UTF-8), ECMAScript number formatting, and EXACTLY ONE trailing newline — the emitted
 // bytes ARE the canonical file bytes. Strings that are not definitively NFC are normalized on the
 // way out, so the writer's output is NFC even for programmatically built trees.
+// Precondition: every string in the tree (keys and values) is VALID UTF-8 — parse_json guarantees
+// it for parsed trees; a programmatically built tree must ensure it itself, because the NFC
+// machinery decodes multi-byte sequences unchecked (see nfc.h's precondition).
 // Returns false (leaving `out` untouched) when the tree contains a non-finite double — the ONE
 // unrepresentable input (R-FILE-001 bans NaN/Infinity).
 [[nodiscard]] bool serialize_canonical(const JsonValue& root, std::string& out);
