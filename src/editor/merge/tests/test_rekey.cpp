@@ -14,9 +14,8 @@ using mergetest::parse;
 namespace
 {
 
-// Stable-id-form (16 lowercase hex) ids so find_duplicate_ids recognizes them as identities.
+// Stable-id-form (16 lowercase hex) id so find_duplicate_ids recognizes it as an identity.
 constexpr const char* kIdA = "aaaa0000aaaa0001";
-constexpr const char* kIdB = "bbbb0000bbbb0002";
 
 void test_find_duplicate_ids()
 {
