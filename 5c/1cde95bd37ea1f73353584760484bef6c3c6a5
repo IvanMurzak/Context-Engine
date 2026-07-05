@@ -1,0 +1,36 @@
+docs/chunk-pack-format.md
+  s_e3239cf02087b8::t_94703c6c7f7c0f 104-111
+src/runtime/save/tests/test_save_document.cpp
+  s_e3239cf02087b8::t_56809f7985f7c6 135-148
+src/runtime/save/src/save_migration.cpp
+  s_e3239cf02087b8::t_3100e64f75352b 8
+  s_e3239cf02087b8::t_db601e857e3840 118,120
+  s_e3239cf02087b8::t_3cbf92c62c7d45 147-148
+  s_e3239cf02087b8::t_a3da55357bd9be 103,105
+  s_e3239cf02087b8::t_18ab27f66e2101 31-50
+  s_e3239cf02087b8::t_5af5612b081e85 80-81
+  s_e3239cf02087b8::t_81d044090e36e3 129,131,134-138
+  s_e3239cf02087b8::t_510bc3c9341e3a 139
+src/runtime/save/tests/test_save_migration.cpp
+  s_e3239cf02087b8::t_aba044adafe79b 222-248
+src/editor/compose/tests/test_content_unit.cpp
+  s_e3239cf02087b8::t_eb33f6b1724ce2 95-112
+src/runtime/save/src/save_document.cpp
+  s_e3239cf02087b8::t_e97a4e63603705 243-254
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5c1cde95bd37ea1f73353584760484bef6c3c6a5",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
