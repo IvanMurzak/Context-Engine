@@ -178,20 +178,26 @@ StepResult Session::step(std::uint64_t ticks)
 
         HashTree tree;
         tree.tick = tick;
+        StateHash last; // full hierarchical hash after the most recent system ran
         for (const System& sys : systems_)
         {
             SystemContext ctx{world_, rng_, tick, inputs, *registry_};
             sys.run(ctx);
             if (trace_enabled_)
-                tree.per_system.push_back(SystemHash{sys.name, hash_world(world_, *registry_).root});
+            {
+                last = hash_world(world_, *registry_);
+                tree.per_system.push_back(SystemHash{sys.name, last.root});
+            }
         }
         ++sim_tick_;
 
         if (trace_enabled_)
         {
-            StateHash end = hash_world(world_, *registry_);
-            tree.root = end.root;
-            tree.per_archetype = std::move(end.archetypes);
+            // The world is unchanged between the final system and here (++sim_tick_ is not part of
+            // the world hash), so the last per-system hash IS the tick's end-state hash — reuse it
+            // instead of a redundant 4th hash_world() walk. test_session pins root == per_system.back().
+            tree.root = last.root;
+            tree.per_archetype = std::move(last.archetypes);
             trace_.push_back(std::move(tree));
         }
     }

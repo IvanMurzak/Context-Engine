@@ -385,11 +385,11 @@ Registry::Registry()
 
     verbs_.push_back(make_verb(
         "", "session", "hash",
-        "Query the session's canonical hierarchical state hash (R-QA-005): the per-tick root plus "
-        "the per-archetype sub-hashes; with --trace, the recorded per-tick hash tree.",
+        "Query the session's canonical hierarchical state hash (R-QA-005): the root plus the "
+        "per-archetype sub-hashes of the current persisted state. (The per-tick hash TRACE is a "
+        "property of a run, not a persisted snapshot — obtain it from `session step --trace`.)",
         /*params=*/{{"state", "path", true, "The session-state file."}},
-        /*flags=*/{{"trace", "bool", "Also emit the recorded per-tick hash trace.", false}},
-        /*implemented=*/true));
+        /*flags=*/{}, /*implemented=*/true));
 
     verbs_.push_back(make_verb(
         "", "session", "record",

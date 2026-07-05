@@ -333,7 +333,7 @@ const std::vector<ErrorCode>& catalog()
         {"replay.divergence",
          "A deterministic replay diverged from its expected per-tick hash trace; the first divergent "
          "tick is reported.",
-         false, kExitInternal, "R-QA-005"},
+         false, kExitValidation, "R-QA-005"},
     };
     return the_catalog;
 }

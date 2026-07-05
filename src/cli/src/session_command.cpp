@@ -10,12 +10,14 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <ios>
 #include <iterator>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace context::cli
@@ -35,13 +37,31 @@ std::optional<std::string> read_file(const std::string& path)
     return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
+// Durable write: stage into a sibling temp file, then rename it over `path` (R-FILE-004 semantics) so
+// a concurrent/crashing reader sees either the whole OLD or whole NEW file, never a torn write. This
+// hand-rolls the stage-then-rename (rather than filesync::atomic_write) because the CLI writes
+// user-supplied paths that are not rooted in any FileStore jail.
 bool write_file(const std::string& path, const std::string& content)
 {
-    std::ofstream out(path, std::ios::binary);
-    if (!out)
+    namespace fs = std::filesystem;
+    const fs::path target(path);
+    const fs::path tmp(path + ".tmp");
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (!out)
+            return false;
+        out.write(content.data(), static_cast<std::streamsize>(content.size()));
+        if (!out.good())
+            return false;
+    } // flush + close before the rename
+    std::error_code ec;
+    fs::rename(tmp, target, ec);
+    if (ec)
+    {
+        fs::remove(tmp, ec); // best-effort: don't leave staging residue on a failed rename
         return false;
-    out.write(content.data(), static_cast<std::streamsize>(content.size()));
-    return out.good();
+    }
+    return true;
 }
 
 // A 64-bit value as a 0x-prefixed 16-digit hex string — the envelope hash representation (the
@@ -55,6 +75,12 @@ std::string to_hex(std::uint64_t v)
 
 std::optional<std::uint64_t> parse_u64(const std::string& s)
 {
+    // std::stoull mirrors strtoull, which accepts a leading '-' and returns the 2^64 wraparound
+    // rather than failing — so "-1" would parse as 18446744073709551615. Reject a leading sign so an
+    // unsigned flag (--seed / --ticks / --at) honors its documented "unsigned integer" contract.
+    const std::size_t first = s.find_first_not_of(" \t");
+    if (first != std::string::npos && s[first] == '-')
+        return std::nullopt;
     try
     {
         std::size_t pos = 0;
@@ -283,7 +309,7 @@ Envelope session_inject(const std::string& state, const std::map<std::string, st
     return save_session(state, s, std::move(data));
 }
 
-Envelope session_hash(const std::string& state, const std::map<std::string, std::string>& flags)
+Envelope session_hash(const std::string& state, const std::map<std::string, std::string>& /*flags*/)
 {
     Loaded loaded = load_session(state);
     if (!loaded.session.has_value())
@@ -293,8 +319,6 @@ Envelope session_hash(const std::string& state, const std::map<std::string, std:
     Json data = Json::object();
     data.set("simTick", Json(static_cast<std::uint64_t>(s.sim_tick())));
     data.set("stateHash", state_hash_json(s.state_hash()));
-    if (flag(flags, "trace"))
-        data.set("trace", trace_json(s.trace()));
     return Envelope::success(std::move(data));
 }
 

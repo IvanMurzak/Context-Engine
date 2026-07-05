@@ -2,6 +2,7 @@
 
 #include "context/runtime/session/replay.h"
 
+#include "context/editor/filesync/path_jail.h"
 #include "context/editor/serializer/canonical.h"
 #include "context/editor/serializer/json_parse.h"
 #include "context/runtime/session/json_build.h"
@@ -60,7 +61,7 @@ ReplayArtifact record_replay(const SessionConfig& config, const InputStream& str
         for (const ActionActivation& a : t.actions)
             session.inject_action_at(t.tick, a);
     }
-    session.set_trace(true);
+    session.set_trace(deterministic);
     session.step(ticks);
 
     ReplayArtifact artifact;
@@ -118,6 +119,12 @@ std::string replay_dump(const ReplayArtifact& artifact)
 
 namespace
 {
+// Upper bound on a replay artifact's tickCount. A ctx:replay artifact is untrusted, shareable input;
+// this turns a maliciously huge tickCount (e.g. a 20-byte file with tickCount 2^64-1) from an
+// effectively-infinite step loop + unbounded trace growth into a clean replay.artifact_invalid.
+// 10M ticks is ~46 hours of 60Hz sim — orders of magnitude above any real determinism replay.
+constexpr std::uint64_t kMaxReplayTicks = 10'000'000ULL;
+
 ReplayParseResult artifact_invalid(std::string message)
 {
     ReplayParseResult r;
@@ -138,6 +145,9 @@ ReplayParseResult replay_from_json(const serializer::JsonValue& doc)
     ReplayArtifact artifact;
     artifact.seed = jb::as_uint(jb::member(doc, "seed"));
     artifact.tick_count = jb::as_uint(jb::member(doc, "tickCount"));
+    if (artifact.tick_count > kMaxReplayTicks)
+        return artifact_invalid("replay artifact tickCount exceeds the maximum supported (" +
+                                std::to_string(kMaxReplayTicks) + ")");
     artifact.scenario = jb::as_str(jb::member(doc, "scenario"), "demo");
     artifact.engine_version = jb::as_str(jb::member(doc, "engineVersion"));
     artifact.protocol_major = jb::as_int(jb::member(doc, "protocolMajor"));
@@ -177,8 +187,19 @@ std::vector<std::string> verify_manifest(const ReplayArtifact& artifact,
     std::vector<std::string> drifted;
     for (const ContentManifestEntry& entry : artifact.content_manifest)
     {
+        // A ctx:replay artifact is untrusted, shareable input: a manifest entry that escapes the
+        // project root (e.g. "../../etc/passwd") must never be opened as a content-hash oracle. Jail
+        // the joined path with the same R-SEC-008 check the filesync write path uses, BEFORE read_file
+        // hands it to the OS (which would resolve the ".." itself). An escaping entry is reported as
+        // drift, exactly like a missing one.
+        const std::string full = join_path(project_root, entry.path);
+        if (!::context::editor::filesync::is_inside_jail(project_root, full))
+        {
+            drifted.push_back(entry.path);
+            continue;
+        }
         bool ok = false;
-        const std::string bytes = read_file(join_path(project_root, entry.path), ok);
+        const std::string bytes = read_file(full, ok);
         if (!ok)
         {
             drifted.push_back(entry.path); // missing input == drift
@@ -218,7 +239,7 @@ ReplayResult run_replay(const ReplayArtifact& artifact, std::string_view project
         for (const ActionActivation& a : t.actions)
             session.inject_action_at(t.tick, a);
     }
-    session.set_trace(true);
+    session.set_trace(artifact.deterministic);
     const StepResult stepped = session.step(artifact.tick_count);
     result.sim_tick = stepped.sim_tick;
     result.final_root = stepped.state_hash.root;

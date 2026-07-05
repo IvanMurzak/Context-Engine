@@ -22,6 +22,11 @@ target_include_directories(context_session PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/in
 # JsonValue tree (session-state + replay docs are canonical engine files, R-FILE-001).
 target_link_libraries(context_session PUBLIC context_kernel context_serializer)
 
+# PRIVATE context_filesync: replay.cpp jails artifact-supplied manifest paths against the project
+# root (R-SEC-008 is_inside_jail) before reading them — a ctx:replay artifact is untrusted, shareable
+# input. Only the .cpp uses it (no filesync type appears in a public session header).
+target_link_libraries(context_session PRIVATE context_filesync)
+
 # Every Context target links the warnings-as-errors baseline (conventions.md).
 target_link_libraries(context_session PRIVATE context_warnings)
 
