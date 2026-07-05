@@ -7,6 +7,11 @@
 // unprivileged-subprocess + per-OS sandbox-primitive lockdown (seccomp-bpf Linux-first) is the
 // staged rollout (sandbox.h::os_sandbox_support); the daemon swaps this in-process runner for the
 // subprocess one without any importer change, since importers are already pure (importer.h).
+//
+// OPEN (issue #72): the "input-bytes-only" framing here and sandbox.cpp's jail-wide read_permitted
+// (R-SEC-008) coincide only because a v1 importer reads nothing but its source bytes. When the
+// subprocess syscall read-filter lands, whether the ENFORCED read set is the jail-wide structural
+// jail or is narrowed to input-bytes-only is an OWNER ruling — pre-decided by neither surface.
 
 #pragma once
 

@@ -24,6 +24,14 @@ bool read_permitted(const SandboxPolicy& policy, std::string_view path)
 {
     // R-SEC-008: reads are confined to the jail root (the project/cache root). The ONE jail
     // primitive, shared with the file-write path (filesync).
+    //
+    // OPEN — OWNER RULING NEEDED when the seccomp-bpf sandbox lands (issue #72): this predicate
+    // grants the BROAD R-SEC-008 *structural* jail (reads anywhere under jail_root), whereas
+    // isolated_runner.h frames the v1 effective guarantee as "input-bytes-only". The two COINCIDE
+    // today (a v1 importer is a pure function of source_bytes and reads nothing of its own), so
+    // nothing is observably narrowed or widened either way. When the subprocess syscall read-filter
+    // lands it makes the choice enforceable, and the owner must rule which is the real read set —
+    // jail-wide vs input-bytes-only. Do NOT pre-decide it here by narrowing/widening this check.
     if (policy.jail_root.empty())
         return false;
     return filesync::is_inside_jail(policy.jail_root, path);

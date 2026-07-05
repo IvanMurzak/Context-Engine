@@ -162,6 +162,50 @@ void test_whole_payload_path_and_last_segment_rule()
           std::string::npos);
 }
 
+void test_last_segment_rule_spans_multiple_migrated_types()
+{
+    // An override path naming TWO DIFFERENT migrated types must split at the LAST type segment (the
+    // deepest payload boundary), regardless of the types' registration/plan order. Pre-fix the
+    // rewriter matched the FIRST plan (in componentVersions order) whose type appeared anywhere, so
+    // a path whose LAST type segment belonged to a later-ordered type was split at the wrong (outer)
+    // type and its real tail never migrated. (Regression for the M2 polish audit, issue #70.)
+    MigrationSet set;
+    register_reference_steps(set); // test:sprite v1->v3
+    std::string problem;
+    CHECK(set.register_component("test:layout", 2, problem));
+    MigrationStep layout_v1;
+    layout_v1.component_type = "test:layout";
+    layout_v1.from_version = 1;
+    layout_v1.revision = 1;
+    layout_v1.transform = [](JsonValue&) { return true; };
+    layout_v1.map_path = [](std::string_view p) -> std::optional<std::string> {
+        if (p == "/w")
+            return std::string("/z");
+        return std::string(p);
+    };
+    CHECK(set.register_step(std::move(layout_v1), problem));
+
+    // componentVersions authored order => plans order [test:sprite, test:layout]; the path's LAST
+    // type segment is the later-ordered test:layout, NOT the first-in-order test:sprite.
+    JsonValue doc = parse(R"({
+      "componentVersions": {"test:sprite": 1, "test:layout": 1},
+      "instances": [
+        {"overrides": [
+          {"path": "root/test:sprite/mid/test:layout/w", "value": 1}
+        ], "source": "x"}
+      ]
+    })");
+    const DocumentMigrationResult r = migrate_document(doc, set);
+    CHECK(r.ok);
+    const std::string bytes = canon(doc);
+    // Split at the LAST type segment (test:layout): "/w" -> "/z" through test:layout's chain; the
+    // "root/test:sprite/mid/" prefix (test:sprite here is an inner authored segment, not the
+    // boundary) is preserved verbatim.
+    CHECK(bytes.find("\"path\": \"root/test:sprite/mid/test:layout/z\"") != std::string::npos);
+    CHECK(bytes.find("test:layout/w") == std::string::npos);
+    CHECK(count_code(r, "migration.orphan_override") == 0);
+}
+
 void test_overrides_inside_migrated_payloads_are_opaque()
 {
     // A payload's OWN "overrides"-shaped member is payload data, not an override site.
@@ -215,6 +259,7 @@ int main()
     test_orphan_override_is_preserved_and_flagged();
     test_non_matching_shapes_are_untouched();
     test_whole_payload_path_and_last_segment_rule();
+    test_last_segment_rule_spans_multiple_migrated_types();
     test_overrides_inside_migrated_payloads_are_opaque();
     test_overrides_inside_current_version_payloads_are_opaque();
     MIGRATE_TEST_MAIN_END();

@@ -2,6 +2,8 @@
 
 #include "context/editor/kinds/string_table.h"
 
+#include "json_access.h" // shared member() / array_member() / string_member() over the serializer tree
+
 #include <algorithm>
 #include <functional>
 #include <string>
@@ -9,33 +11,10 @@
 namespace context::editor::kinds
 {
 
-using serializer::JsonMember;
 using serializer::JsonValue;
 
 namespace
 {
-
-const JsonValue* member(const JsonValue& object, std::string_view key)
-{
-    if (object.type != JsonValue::Type::object)
-        return nullptr;
-    for (const JsonMember& m : object.members)
-        if (m.key == key)
-            return &m.value;
-    return nullptr;
-}
-
-const JsonValue* array_member(const JsonValue& object, std::string_view key)
-{
-    const JsonValue* v = member(object, key);
-    return (v != nullptr && v->type == JsonValue::Type::array) ? v : nullptr;
-}
-
-const JsonValue* string_member(const JsonValue& object, std::string_view key)
-{
-    const JsonValue* v = member(object, key);
-    return (v != nullptr && v->type == JsonValue::Type::string) ? v : nullptr;
-}
 
 // The base-language subtag of a BCP-47 tag, lowercased ("pt-BR" -> "pt", "EN" -> "en").
 std::string base_language(std::string_view locale)

@@ -7,7 +7,8 @@
 #include "context/editor/migrate/migration_set.h"
 #include "context/editor/serializer/canonical.h"
 
-#include <algorithm>
+#include "json_walk.h"
+
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -63,40 +64,6 @@ bool write_file_atomically(const fs::path& path, const std::string& bytes)
     return true;
 }
 
-// Collect the candidate files: the target itself when it is a regular file, else every *.json
-// under it (recursive), skipping dot-directories (.editor control state, .git, …). Sorted so the
-// report (and any failure) is deterministic.
-std::vector<fs::path> collect_candidates(const fs::path& target)
-{
-    std::vector<fs::path> files;
-    if (fs::is_regular_file(target))
-    {
-        files.push_back(target);
-        return files;
-    }
-    std::error_code ec;
-    fs::recursive_directory_iterator it(target, fs::directory_options::skip_permission_denied, ec);
-    const fs::recursive_directory_iterator end;
-    while (!ec && it != end)
-    {
-        const fs::directory_entry& entry = *it;
-        const std::string name = entry.path().filename().string();
-        if (entry.is_directory(ec))
-        {
-            if (!name.empty() && name[0] == '.')
-                it.disable_recursion_pending(); // never descend into dot-dirs (.editor, .git)
-        }
-        else if (entry.is_regular_file(ec) && name.size() > 5 &&
-                 name.compare(name.size() - 5, 5, ".json") == 0)
-        {
-            files.push_back(entry.path());
-        }
-        it.increment(ec);
-    }
-    std::sort(files.begin(), files.end());
-    return files;
-}
-
 Json diagnostics_json(const std::vector<migrate::MigrationDiagnostic>& diagnostics)
 {
     Json out = Json::array();
@@ -128,7 +95,7 @@ Envelope run_migrate_with(const std::string& target,
         return Envelope::failure("file.not_found",
                                  "migrate target does not exist: " + target_path.string());
 
-    const std::vector<fs::path> candidates = collect_candidates(target_path);
+    const std::vector<fs::path> candidates = collect_json_candidates(target_path);
 
     Json entries = Json::array();
     std::uint64_t migrated = 0;
