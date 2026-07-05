@@ -6,23 +6,14 @@
 #include "context/editor/serializer/canonical.h"
 #include "context/editor/serializer/json_tree.h"
 
+#include "detail/json_detail.h"
+
 namespace context::editor::import
 {
 namespace
 {
+using detail::member; // the shared object-member lookup (detail/json_detail.h)
 using serializer::JsonValue;
-
-// The object member named `key`, or nullptr. Object members are authored-order; a canonical parse
-// has at most one per key (duplicate-key is a parse diagnostic upstream), so first match is total.
-const JsonValue* member(const JsonValue& obj, std::string_view key)
-{
-    if (obj.type != JsonValue::Type::object)
-        return nullptr;
-    for (const serializer::JsonMember& m : obj.members)
-        if (m.key == key)
-            return &m.value;
-    return nullptr;
-}
 
 // Read a boolean member with a default (a missing or wrong-typed member keeps `fallback`).
 bool bool_member(const JsonValue& obj, std::string_view key, bool fallback)

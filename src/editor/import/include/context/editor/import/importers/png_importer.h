@@ -28,7 +28,6 @@ struct PngInfo
     std::uint8_t channels = 0;   // derived from color_type (palette = 1 index channel)
     bool has_alpha = false;
     bool srgb = false;           // an sRGB chunk was present (authoritative colorspace intent)
-    std::uint64_t idat_bytes = 0; // total IDAT payload length (structure, not decoded pixels)
 };
 
 // Parse + CRC-verify a PNG. Returns true and fills `info` on a well-formed stream; false with a

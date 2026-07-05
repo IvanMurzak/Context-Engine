@@ -106,7 +106,7 @@ bool parse_gltf(std::string_view bytes, GltfInfo& info, std::vector<ImportDiagno
     if (info.version != "2.0")
     {
         fail(diagnostics, "import.unsupported_format",
-             "glTF version " + info.version + " unsupported (v1 supports 2.0)");
+             "glTF version " + detail::ascii_or_hex(info.version) + " unsupported (v1 supports 2.0)");
         return false;
     }
 

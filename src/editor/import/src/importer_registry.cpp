@@ -6,6 +6,7 @@
 #include "context/editor/import/importers/png_importer.h"
 #include "context/editor/import/importers/wav_importer.h"
 
+#include <cassert>
 #include <string>
 
 namespace context::editor::import
@@ -99,10 +100,16 @@ ImporterRegistry default_importer_registry()
 {
     ImporterRegistry registry;
     // Fixed registration order (deterministic tooling iteration). Extensions are disjoint, so none of
-    // these collide; a package-supplied importer that later claims a taken extension is refused.
-    registry.register_importer(std::make_unique<PngImporter>());
-    registry.register_importer(std::make_unique<WavImporter>());
-    registry.register_importer(std::make_unique<GltfImporter>());
+    // these collide; a package-supplied importer that later claims a taken extension is refused. The
+    // [[nodiscard]] results are asserted rather than silently dropped, so a future colliding addition
+    // to this fixed first-party set fails loudly in a debug/CI build instead of vanishing an importer.
+    const RegisterResult png = registry.register_importer(std::make_unique<PngImporter>());
+    const RegisterResult wav = registry.register_importer(std::make_unique<WavImporter>());
+    const RegisterResult gltf = registry.register_importer(std::make_unique<GltfImporter>());
+    assert(png.ok && wav.ok && gltf.ok && "first-party importer extensions must be disjoint");
+    (void)png;
+    (void)wav;
+    (void)gltf;
     return registry;
 }
 

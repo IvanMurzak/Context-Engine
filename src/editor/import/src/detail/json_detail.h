@@ -102,4 +102,41 @@ inline void append(JsonValue& arr, JsonValue value)
     return fallback;
 }
 
+// --- diagnostics hygiene ------------------------------------------------------------------------
+
+// Render `raw` for a human diagnostic message: returned verbatim when every byte is printable ASCII
+// (0x20-0x7E), else a deterministic hex form ("0xAB 0xCD ..."). Importer diagnostics splice bytes
+// taken straight from an untrusted source (a PNG chunk type, a glTF version string), so a fuzzed or
+// malicious asset could otherwise inject terminal control/escape sequences into a log; hex-encoding
+// the non-printable case neutralizes that while staying byte-deterministic (R-ASSET-001: a bad
+// source must fail identically twice, so this must be a pure function of `raw`).
+[[nodiscard]] inline std::string ascii_or_hex(std::string_view raw)
+{
+    const auto is_printable = [](unsigned char b) { return b >= 0x20 && b <= 0x7E; };
+    bool all_printable = true;
+    for (const char ch : raw)
+        if (!is_printable(static_cast<unsigned char>(ch)))
+        {
+            all_printable = false;
+            break;
+        }
+    if (all_printable)
+        return std::string(raw);
+
+    static constexpr char kHex[] = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(raw.size() * 5);
+    for (const char ch : raw)
+    {
+        const auto b = static_cast<unsigned char>(ch);
+        if (!out.empty())
+            out.push_back(' ');
+        out.push_back('0');
+        out.push_back('x');
+        out.push_back(kHex[b >> 4]);
+        out.push_back(kHex[b & 0x0FU]);
+    }
+    return out;
+}
+
 } // namespace context::editor::import::detail

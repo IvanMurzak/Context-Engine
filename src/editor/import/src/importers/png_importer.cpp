@@ -86,7 +86,8 @@ bool parse_png(std::string_view bytes, PngInfo& info, std::vector<ImportDiagnost
         const std::uint32_t crc_calc = crc32(bytes.substr(pos + 4, static_cast<std::size_t>(len) + 4));
         if (crc_calc != crc_stored)
         {
-            fail(diagnostics, "import.decode_failed", "PNG chunk CRC mismatch (" + std::string(type) + ")");
+            fail(diagnostics, "import.decode_failed",
+                 "PNG chunk CRC mismatch (" + detail::ascii_or_hex(type) + ")");
             return false;
         }
 
@@ -147,7 +148,6 @@ bool parse_png(std::string_view bytes, PngInfo& info, std::vector<ImportDiagnost
                 fail(diagnostics, "import.source_malformed", "IDAT before IHDR");
                 return false;
             }
-            info.idat_bytes += len;
         }
         else if (type == "sRGB")
         {

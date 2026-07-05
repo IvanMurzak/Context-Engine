@@ -20,12 +20,16 @@ namespace context::editor::import
 {
 
 // The capability envelope an importer run is confined to (R-SEC-006). Everything outside it is
-// denied by construction: the importer sees `input_path`'s bytes (read) and may write ONLY under
-// its own `output_key` beneath `jail_root`; network is never allowed in v1.
+// denied by construction: the importer converts `input_path`'s bytes and may write ONLY under its
+// own `output_key` beneath `jail_root`; network is never allowed in v1. Read scope: in v1 the
+// importer is a PURE function of the source bytes (importer.h) — it performs no reads of its own, so
+// "input-bytes-only" is the effective guarantee; `read_permitted` enforces the broader R-SEC-008
+// *structural* jail (reads anywhere under `jail_root`) that the future unprivileged-subprocess
+// runner's syscall read-filter operates within. Writes stay narrowed to `output_key` (write_permitted).
 struct SandboxPolicy
 {
     std::string jail_root;  // the project/cache root the importer is jailed under (R-SEC-008)
-    std::string input_path; // the single readable source path (the input bytes it converts)
+    std::string input_path; // the source the importer converts (its bytes arrive via ImportInput)
     std::string output_key; // the importer's own cache-output key — its only writable target
     bool allow_network = false; // ALWAYS false in v1 (no ambient network — R-SEC-010)
 };

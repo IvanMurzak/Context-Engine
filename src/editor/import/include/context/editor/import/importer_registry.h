@@ -27,8 +27,10 @@ class ImporterRegistry
 {
 public:
     // Register `importer`, claiming each of its extensions. Fails (registering nothing) if ANY of its
-    // extensions is already claimed — atomic, so a collision leaves the registry unchanged.
-    RegisterResult register_importer(std::unique_ptr<Importer> importer);
+    // extensions is already claimed — atomic, so a collision leaves the registry unchanged. The
+    // collision result MUST be surfaced (a dropped collision is an authoring error, R-CLI-007), so
+    // ignoring it is a defect — hence [[nodiscard]] (matches every other query on this class).
+    [[nodiscard]] RegisterResult register_importer(std::unique_ptr<Importer> importer);
 
     // The importer for a source path (routed by lowercased extension), or nullptr when none claims
     // it. `.gltf`/`.glb` both route to the glTF importer via its extension list.
