@@ -1,0 +1,52 @@
+src/editor/merge/src/resolve.cpp
+  s_e3239cf02087b8::t_fd66aacaaaa265 23-24,26
+  s_e3239cf02087b8::t_569cfe48e47b3a 102
+  s_e3239cf02087b8::t_e66ea339bf0411 143-144,149-158
+  s_e3239cf02087b8::t_7c2bf055d79c54 159
+src/cli/src/merge_command.cpp
+  s_e3239cf02087b8::t_57255d64b73a44 226,231-232,238,246-247,257
+  s_e3239cf02087b8::t_96c359e80d870a 277,282-283,289,293-294,310
+  s_e3239cf02087b8::t_db9db32b30f50d 323
+  s_e3239cf02087b8::t_2ab28fce0991ac 456
+  s_e3239cf02087b8::t_d7b619de9b6fa9 493,501
+  s_e3239cf02087b8::t_7f3a247ed2467a 204
+  s_e3239cf02087b8::t_80c78df2bfe039 157-191
+  s_e3239cf02087b8::t_df95d9adf3b5cc 394,397-399,407-418,420-421,423-435,444
+src/editor/merge/tests/test_corpus.cpp
+  s_e3239cf02087b8::t_9c99ae9b025fb4 74-76,84,90
+  s_e3239cf02087b8::t_036c3710207a67 163
+  s_e3239cf02087b8::t_25d718fc69ba72 186,188-196
+src/editor/merge/include/context/editor/merge/resolve.h
+  s_e3239cf02087b8::t_274ba2ec101459 9
+  s_e3239cf02087b8::t_c592f4f242737b 21-27
+src/cli/tests/test_merge_command.cpp
+  s_e3239cf02087b8::t_de416b32749252 222-224
+  s_e3239cf02087b8::t_bfd7f2ab57e885 198-221,225-277
+  s_e3239cf02087b8::t_fd39eeb638e61e 297-300
+src/editor/merge/src/three_way_merge.cpp
+  s_e3239cf02087b8::t_d7cdae0f4651a3 517,525-529
+  s_e3239cf02087b8::t_4478ebd4a53903 10-11
+  s_e3239cf02087b8::t_cda209ea9a9bc6 263-264,279-296,299-300
+  s_e3239cf02087b8::t_2c65505eac802e 496-503
+  s_e3239cf02087b8::t_c33afed1a034b6 309-318,320,326,328,332,337,341
+  s_e3239cf02087b8::t_6ee94e2e243bb2 530
+src/editor/merge/tests/test_three_way_merge.cpp
+  s_e3239cf02087b8::t_893f7035405cef 347-348
+  s_e3239cf02087b8::t_dfaa362914f591 286-323
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f7800f7c1bdce59817603a51136a3bc30f65a8ef",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
