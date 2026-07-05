@@ -126,6 +126,35 @@ struct TemplateLocation
     const JsonValue* entity_value = nullptr;  // the authored entity value (from the SceneDoc)
 };
 
+// Descend one instance hop: find the instance named `seg` in `doc`, then move `current`/`doc` to the
+// scene it instances. Returns false (with `reason` set) when `seg` is not an instance of the current
+// scene, or when the instanced scene does not resolve. Shared by locate_template's interior segments
+// and resolve_instance_scene's --at-instance prefix walk so the two identical hops cannot drift.
+[[nodiscard]] bool descend_instance(const std::string& seg, const WriteResolver& resolver,
+                                    std::string& current, const SceneDoc*& doc, std::string& reason)
+{
+    const SceneInstance* inst = nullptr;
+    for (const SceneInstance& s : doc->instances)
+        if (s.id == seg)
+        {
+            inst = &s;
+            break;
+        }
+    if (inst == nullptr)
+    {
+        reason = "instance id `" + seg + "` is not an instance of scene `" + current + "`";
+        return false;
+    }
+    current = inst->scene;
+    doc = resolver.resolve(current);
+    if (doc == nullptr)
+    {
+        reason = "instanced scene `" + current + "` does not resolve to a known scene";
+        return false;
+    }
+    return true;
+}
+
 [[nodiscard]] TemplateLocation locate_template(const std::string& scene,
                                                const std::vector<std::string>& id_path,
                                                const WriteResolver& resolver)
@@ -177,25 +206,8 @@ struct TemplateLocation
         }
 
         // An interior segment: descend through the instance with this id.
-        const SceneInstance* inst = nullptr;
-        for (const SceneInstance& s : doc->instances)
-            if (s.id == seg)
-            {
-                inst = &s;
-                break;
-            }
-        if (inst == nullptr)
-        {
-            loc.reason = "instance id `" + seg + "` is not an instance of scene `" + current + "`";
+        if (!descend_instance(seg, resolver, current, doc, loc.reason))
             return loc;
-        }
-        current = inst->scene;
-        doc = resolver.resolve(current);
-        if (doc == nullptr)
-        {
-            loc.reason = "instanced scene `" + current + "` does not resolve to a known scene";
-            return loc;
-        }
     }
     loc.reason = "the id-path did not resolve to an entity"; // unreachable (loop returns)
     return loc;
@@ -216,27 +228,8 @@ struct TemplateLocation
         return false;
     }
     for (const std::string& seg : prefix)
-    {
-        const SceneInstance* inst = nullptr;
-        for (const SceneInstance& s : doc->instances)
-            if (s.id == seg)
-            {
-                inst = &s;
-                break;
-            }
-        if (inst == nullptr)
-        {
-            reason = "instance id `" + seg + "` is not an instance of scene `" + current + "`";
+        if (!descend_instance(seg, resolver, current, doc, reason))
             return false;
-        }
-        current = inst->scene;
-        doc = resolver.resolve(current);
-        if (doc == nullptr)
-        {
-            reason = "instanced scene `" + current + "` does not resolve to a known scene";
-            return false;
-        }
-    }
     out_scene = current;
     return true;
 }
@@ -264,10 +257,17 @@ struct TemplateLocation
 }
 
 // Collect every scene path reachable from `root` (root + transitively instanced scenes), deduped so
-// an instancing cycle terminates. Order is deterministic (DFS in authored instance order).
-void collect_scenes(const std::string& scene, const WriteResolver& resolver,
-                    std::set<std::string>& visited, std::vector<std::string>& order)
+// an instancing cycle terminates. Order is deterministic (DFS in authored instance order). Bounded by
+// `max_depth` in lockstep with flatten's `depth + 1 > max_depth` gate: a scene nested deeper than the
+// composition cap never composes (flatten suppresses that subtree), so hygiene stops there too — such
+// an override is a de-facto orphan, outside the diverged/redundant remit — and the walk cannot
+// overflow the stack on a pathologically deep chain (R-FILE-011 scale envelope).
+void collect_scenes(const std::string& scene, const WriteResolver& resolver, std::size_t depth,
+                    std::size_t max_depth, std::set<std::string>& visited,
+                    std::vector<std::string>& order)
 {
+    if (depth > max_depth)
+        return;
     if (!visited.insert(scene).second)
         return;
     const SceneDoc* doc = resolver.resolve(scene);
@@ -275,7 +275,7 @@ void collect_scenes(const std::string& scene, const WriteResolver& resolver,
         return;
     order.push_back(scene);
     for (const SceneInstance& inst : doc->instances)
-        collect_scenes(inst.scene, resolver, visited, order);
+        collect_scenes(inst.scene, resolver, depth + 1, max_depth, visited, order);
 }
 
 // True iff a pointer's FIRST token names an identity field immutable under composition (L-37):
@@ -451,12 +451,11 @@ std::vector<OverrideFinding> override_hygiene(std::string_view root_scene,
                                               const WriteResolver& resolver, HygieneKind kind,
                                               const ComposeLimits& limits)
 {
-    (void)limits; // reserved: hygiene walks the scene graph directly (cycle-terminated by `visited`)
     std::vector<OverrideFinding> findings;
 
     std::set<std::string> visited;
     std::vector<std::string> scenes;
-    collect_scenes(std::string(root_scene), resolver, visited, scenes);
+    collect_scenes(std::string(root_scene), resolver, 0, limits.max_depth, visited, scenes);
 
     for (const std::string& scene : scenes)
     {

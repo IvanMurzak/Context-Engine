@@ -1,8 +1,9 @@
 // `context set` (composed write) + `context query --overrides` (advisory hygiene) end-to-end through
 // the CLI verb grammar over real temp scene files (issue #58). Coverage: the default-outermost
-// override write + the resulting file, --edit-template, the labelled hashes, the --if-match CAS
-// round-trip (pass then conflict), --dry-run write suppression, the immutable-pointer + missing-arg
-// failures, and the `query --overrides redundant|diverged` reads. Happy + failure paths (R-QA-013).
+// override write + the resulting file, --edit-template, --at-instance (a mid-level override) and its
+// mutual exclusion with --edit-template, the labelled hashes, the --if-match CAS round-trip (pass
+// then conflict), --dry-run write suppression, the immutable-pointer + missing-arg failures, and the
+// `query --overrides redundant|diverged` reads. Happy + failure paths (R-QA-013).
 
 #include "context/cli/app.h"
 #include "context/cli/set_command.h"
@@ -124,6 +125,45 @@ int main()
         // root.scene.json was NOT touched (no override entry).
         const Json root = Json::parse(read_file(dir / "root.scene.json"));
         CHECK(!root.contains("overrides"));
+    }
+
+    // --- --at-instance <prefix>: the override lands in the mid-level scene (mid.scene.json) --------
+    {
+        const fs::path dir = unique_temp_dir("atinstance");
+        seed_project(dir);
+        // Prefix aaa1 names the scene instanced as A (mid.scene.json); the remaining suffix
+        // [bbb1, ccc1] addresses the entity from there, so the override entry lands mid-level.
+        const Envelope env = run({"set", "root.scene.json", "[3, 3, 3]", "--pointer", kPointer,
+                                  "--id-path", kFullId, "--at-instance", "aaaaaaaaaaaaaaa1",
+                                  "--project", dir.string()});
+        CHECK(env.ok());
+        CHECK(env.data().at("file").as_string() == "mid.scene.json");
+        CHECK(env.data().at("target").as_string() == "at-instance");
+        CHECK(env.data().at("pointer").as_string() == "/overrides/0/value");
+        CHECK(env.data().at("applied").as_bool());
+
+        // The override lands in mid.scene.json, addressed by the SUFFIX [bbb1, ccc1] (not the full id).
+        const Json mid = Json::parse(read_file(dir / "mid.scene.json"));
+        CHECK(mid.at("overrides").size() == 1);
+        const Json& entry = mid.at("overrides").at(std::size_t{0});
+        CHECK(entry.at("pointer").as_string() == kPointer);
+        CHECK(entry.at("path").size() == 2);
+        CHECK(entry.at("path").at(std::size_t{0}).as_string() == "bbbbbbbbbbbbbbb1");
+        CHECK(entry.at("path").at(std::size_t{1}).as_string() == "ccccccccccccccc1");
+        // The outermost (root) scene was NOT touched — the override landed at the mid level.
+        const Json root = Json::parse(read_file(dir / "root.scene.json"));
+        CHECK(!root.contains("overrides"));
+    }
+
+    // --- failure: --edit-template and --at-instance are mutually exclusive ------------------------
+    {
+        const fs::path dir = unique_temp_dir("mutex");
+        seed_project(dir);
+        const Envelope env = run({"set", "root.scene.json", "[3, 3, 3]", "--pointer", kPointer,
+                                  "--id-path", kFullId, "--edit-template", "--at-instance",
+                                  "aaaaaaaaaaaaaaa1", "--project", dir.string()});
+        CHECK(!env.ok());
+        CHECK(env.error().has_value() && env.error()->code == "usage.invalid");
     }
 
     // --- --if-match CAS round-trip: matching hash applies, a stale hash conflicts -----------------
