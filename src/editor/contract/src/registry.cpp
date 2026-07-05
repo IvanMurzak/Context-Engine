@@ -222,6 +222,29 @@ Registry::Registry()
           false}},
         /*implemented=*/true, /*stability=*/"stable", /*cli_alias=*/"fetch"));
 
+    // M2 wave 3 (issue #53): the asset-database verbs (L-36 / R-ASSET-002). The engine operation
+    // (meta-first dependency-safe order, idempotent under partial apply — R-FILE-004) ships in
+    // src/editor/assetdb/; the grammar is contract now and the CLI/daemon serving wire lands with
+    // the M2 integration task (the `set` pattern). Referencing files are never rewritten by these
+    // verbs — path hints heal lazily on tool save (L-34).
+    verbs_.push_back(make_verb(
+        "", "asset", "move",
+        "Move an asset (its <asset>.meta.json sidecar travels with it) to a new path, preserving "
+        "its GUID identity (L-36). Never overwrites an occupied destination.",
+        /*params=*/
+        {{"from", "path", true, "Project-relative source asset path."},
+         {"to", "path", true, "Project-relative destination asset path."}},
+        /*flags=*/{}, /*implemented=*/false));
+
+    verbs_.push_back(make_verb(
+        "", "asset", "rename",
+        "Rename an asset in place, keeping its <asset>.meta.json sidecar and GUID in sync (L-36) "
+        "— the same meta-first engine operation as `asset move` (R-FILE-004).",
+        /*params=*/
+        {{"from", "path", true, "Project-relative asset path."},
+         {"to", "path", true, "The new project-relative asset path."}},
+        /*flags=*/{}, /*implemented=*/false));
+
     // --- the OPERATIONAL daemon-driver surface (R-CLI-009 honesty) ------------------------------
     // These RPC methods are genuinely served by a live daemon's method backend (KernelServer) — the
     // cross-process analogue of `context editor smoke`. They are registered here so

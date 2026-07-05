@@ -231,6 +231,15 @@ add_test(NAME versioned-install-layout
         -D "CONTEXT_BUILD_CONFIG=$<CONFIG>"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/versioned-install-check.cmake")
 
+# M2 wave 3: the asset database (src/editor/assetdb/, issue #53) — GUID + sidecar <asset>.meta.json
+# identity (L-36/R-ASSET-002), dual-form + entity references with the real x-ctx-ref meta lookup
+# behind the schema module's RefTargetResolver seam (L-34/R-DATA-006), meta-first move/rename +
+# raw-move GUID healing (R-FILE-003/004), and the bounded lazy GUID index (R-FILE-011(e)). Wired
+# here — deliberately apart from the src/editor/ cluster above — so the concurrent M2 sibling tasks
+# inserting into this file merge cleanly (consumers name the `context_assetdb` target, which CMake
+# resolves at generate time regardless of add_subdirectory order).
+add_subdirectory(editor/assetdb)
+
 # M2 wave 3: the scene-composition READ path (src/editor/compose/, L-35/R-DATA-002, issue #51) —
 # id-path overrides with innermost-out precedence, stable intra-file ids (L-33), the scene-root
 # entity, the R-FILE-011(e) depth-cap/fan-in/cycle diagnostics, deterministic composed identity
