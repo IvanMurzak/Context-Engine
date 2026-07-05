@@ -1,0 +1,23 @@
+src/cli/src/session_command.cpp
+  s_e3239cf02087b8::t_a7ed107553ba7d 240-244
+  s_e3239cf02087b8::t_fdc9456fca9e35 81-82,89
+  s_e3239cf02087b8::t_aa29f6e4f29e6d 102-104,108
+src/cli/tests/test_session_command.cpp
+  s_e3239cf02087b8::t_2d93e23c7912bc 125-159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "acfe57e010042d8db574c24f335b779565f61b7b",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
