@@ -48,7 +48,10 @@ and the autonomy envelope safe.
 
 - `import-test_determinism` — the **R-ASSET-001 CI double-run byte-compare gate**: imports each
   fixture + every routable corpus seed twice and asserts byte-equality (and proves it has teeth by
-  catching a deliberately-flaky importer).
+  catching a deliberately-flaky importer). The `import.non_deterministic` catalog code is already
+  reserved for a future runtime consumer that surfaces a gate failure as a protocol error — v1
+  asserts byte-equality directly in this test, so nothing emits the code yet (mirroring the
+  `import.cache_corrupt` reservation for the on-disk cache STORE follow-up).
 - `import-test_fuzz_corpus` — the **R-QA-011 / R-SEC-006 corpus replay**: every committed seed
   (valid + minimized malformed) under `tests/corpora/` is replayed through the jailed runner,
   asserting no crash, a graceful result, determinism, and the isolation audit. This is corpus
