@@ -2,34 +2,18 @@
 
 #include "context/editor/kinds/tilemap.h"
 
+#include "json_access.h" // shared member() / array_member() over the serializer tree
+
 #include <limits>
 #include <string>
 
 namespace context::editor::kinds
 {
 
-using serializer::JsonMember;
 using serializer::JsonValue;
 
 namespace
 {
-
-const JsonValue* member(const JsonValue& object, std::string_view key)
-{
-    if (object.type != JsonValue::Type::object)
-        return nullptr;
-    for (const JsonMember& m : object.members)
-        if (m.key == key)
-            return &m.value;
-    return nullptr;
-}
-
-// The array value at object[key], or nullptr when absent / not an array.
-const JsonValue* array_member(const JsonValue& object, std::string_view key)
-{
-    const JsonValue* v = member(object, key);
-    return (v != nullptr && v->type == JsonValue::Type::array) ? v : nullptr;
-}
 
 // A lossless integer read of a JSON number (integer / in-range unsigned). False otherwise.
 bool as_ll(const JsonValue& v, long long& out)

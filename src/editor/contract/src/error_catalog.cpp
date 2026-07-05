@@ -147,6 +147,7 @@ const std::vector<ErrorCode>& catalog()
          "A migration step altered, moved, added, or removed an id/guid — identity is immutable "
          "(L-37); the document rolled back.",
          false, kExitValidation, "R-DATA-004"},
+        // The sandboxed WASM runner that lifts this stub is the tracked follow-up (issue #71).
         {"migration.runner_unavailable",
          "Package-shipped migrations execute only in the sandboxed WASM tier; the VM component is "
          "not stood up yet (L-37 contract; execution deliberately stubbed).",

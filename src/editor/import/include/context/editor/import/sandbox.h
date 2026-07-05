@@ -25,7 +25,9 @@ namespace context::editor::import
 // importer is a PURE function of the source bytes (importer.h) — it performs no reads of its own, so
 // "input-bytes-only" is the effective guarantee; `read_permitted` enforces the broader R-SEC-008
 // *structural* jail (reads anywhere under `jail_root`) that the future unprivileged-subprocess
-// runner's syscall read-filter operates within. Writes stay narrowed to `output_key` (write_permitted).
+// runner's syscall read-filter operates within. Whether that syscall filter is ultimately jail-wide
+// or narrowed to input-bytes-only is an OPEN owner ruling deferred to when the sandbox lands (issue
+// #72) — the two are indistinguishable in v1. Writes stay narrowed to `output_key` (write_permitted).
 struct SandboxPolicy
 {
     std::string jail_root;  // the project/cache root the importer is jailed under (R-SEC-008)

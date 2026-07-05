@@ -86,7 +86,8 @@ struct DocumentMigrationResult
 //
 // Around every step invocation the engine enforces the L-37 execution contract:
 //   - tier gating: package_sandboxed steps are REFUSED in-process (migration.runner_unavailable)
-//     until the sandboxed WASM runner lands — the contract is registered, execution is stubbed;
+//     until the sandboxed WASM runner lands (tracked follow-up: issue #71) — the contract is
+//     registered, execution is stubbed;
 //   - budget: input/output payloads over budget.max_nodes are refused (migration.budget_exceeded);
 //   - id immutability: the exact multiset of ("id"/"guid" member pointer, canonical value) inside
 //     the payload must survive the step unchanged — no mutation, move, addition, or removal

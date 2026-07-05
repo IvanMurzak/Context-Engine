@@ -12,7 +12,8 @@
 #include "context/editor/serializer/json_parse.h"
 #include "context/editor/serializer/json_tree.h"
 
-#include <algorithm>
+#include "json_walk.h"
+
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -519,34 +520,9 @@ Envelope run_validate(const std::map<std::string, std::string>& params,
     if (!fs::exists(target_path, ec) || ec)
         return Envelope::failure("file.not_found", "validate target does not exist: " + target);
 
-    // Candidate files: the target file, or every *.json under it (skip dot-dirs) — the migrate rule.
-    std::vector<fs::path> files;
-    if (fs::is_regular_file(target_path))
-    {
-        files.push_back(target_path);
-    }
-    else
-    {
-        fs::recursive_directory_iterator it(target_path, fs::directory_options::skip_permission_denied, ec);
-        const fs::recursive_directory_iterator end;
-        while (!ec && it != end)
-        {
-            const fs::directory_entry& entry = *it;
-            const std::string name = entry.path().filename().string();
-            if (entry.is_directory(ec))
-            {
-                if (!name.empty() && name[0] == '.')
-                    it.disable_recursion_pending();
-            }
-            else if (entry.is_regular_file(ec) && name.size() > 5 &&
-                     name.compare(name.size() - 5, 5, ".json") == 0)
-            {
-                files.push_back(entry.path());
-            }
-            it.increment(ec);
-        }
-        std::sort(files.begin(), files.end());
-    }
+    // Candidate files: the target file, or every *.json under it (skip dot-dirs) — the ONE shared
+    // migrate/validate rule (json_walk.h), so the two verbs' file selection cannot drift.
+    const std::vector<fs::path> files = collect_json_candidates(target_path);
 
     Json diagnostics = Json::array();
     std::uint64_t scanned = 0;

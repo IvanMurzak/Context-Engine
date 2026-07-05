@@ -179,6 +179,7 @@ bool apply_step(const MigrationStep& step, JsonValue& payload, const std::string
     // Tier gating: package-shipped migrations run ONLY in the sandboxed WASM tier (L-37). The VM
     // component is not stood up in v1, so the tier boundary REFUSES in-process execution — the
     // contract is registered; execution is deliberately stubbed, never silently run unsandboxed.
+    // The sandboxed WASM runner is the tracked follow-up (issue #71).
     if (step.tier != MigrationTier::engine_native)
     {
         diagnostics.push_back(
@@ -301,55 +302,78 @@ void rewrite_overrides(JsonValue& value, const std::string& pointer, bool is_roo
                     continue;
                 const std::string entry_pointer = child + "/" + std::to_string(i) + "/path";
 
-                // Split the authored path on '/'; the LAST segment equal to a migrated type splits
-                // it into "<prefix>/<type>/<payload-relative-pointer>".
+                // Split the authored path at its DEEPEST payload-boundary segment — identified by
+                // the SAME is_payload_boundary predicate the rest of this file uses (registered-
+                // current OR stamped), NOT by plan membership. The tail after that boundary feeds
+                // through the boundary type's chain (L-37). Selecting by segment POSITION (not
+                // plans-iteration order) makes a path naming two DIFFERENT migrated types split at
+                // the DEEPEST one — the last-segment rule the single-type case already follows.
+                // (A prior implementation matched the first plan in iteration order whose type
+                // appeared anywhere, mis-splitting at the wrong — outer — type; and a plans-only
+                // boundary scan would let an outer migrating type capture a tail owned by a deeper
+                // already-current payload — issue #70, global-predicate-vs-per-path.)
                 const std::string& authored = path->string_value;
-                for (const TypePlan& plan : plans)
+                const TypePlan* selected = nullptr;
+                std::size_t type_at = std::string::npos;
+                std::size_t last_boundary_at = std::string::npos;
                 {
                     std::size_t seg_start = 0;
-                    std::size_t type_at = std::string::npos;
                     for (std::size_t pos = 0; pos <= authored.size(); ++pos)
                     {
                         if (pos == authored.size() || authored[pos] == '/')
                         {
-                            if (authored.compare(seg_start, pos - seg_start, plan.type) == 0)
-                                type_at = seg_start;
+                            const std::string_view segment(authored.data() + seg_start,
+                                                           pos - seg_start);
+                            // The deepest boundary uses the file-wide payload predicate, so a path
+                            // whose deepest type segment is an already-current (non-migrating) type
+                            // is recognized as addressing THAT payload.
+                            if (is_payload_boundary(segment, set, stamped))
+                                last_boundary_at = seg_start;
+                            for (const TypePlan& plan : plans)
+                                if (segment == plan.type)
+                                {
+                                    selected = &plan;    // a later segment overwrites — LAST wins
+                                    type_at = seg_start;
+                                    break; // types are unique — at most one plan matches a segment
+                                }
                             seg_start = pos + 1;
                         }
                     }
-                    if (type_at == std::string::npos)
-                        continue;
+                }
+                if (selected == nullptr)
+                    continue; // no migrated-type segment in this path — nothing to rewrite
+                if (last_boundary_at != type_at)
+                    continue; // deepest boundary is a non-migrating (current) type: the override
+                              // addresses its unchanged payload — leave it verbatim (mirrors the
+                              // file-wide is_payload_boundary opacity rule; issue #70)
 
-                    const std::size_t tail_at = type_at + plan.type.size();
-                    // The payload-relative pointer: "/a/b" for ".../<type>/a/b", "" for a path
-                    // that addresses the whole payload.
-                    const std::string tail(authored, std::min(tail_at, authored.size()));
-                    std::optional<std::string> mapped = tail;
-                    for (const MigrationStep* step : plan.chain)
-                    {
-                        if (step->map_path && mapped.has_value())
-                            mapped = step->map_path(*mapped);
-                        if (!mapped.has_value())
-                            break;
-                    }
+                const std::size_t tail_at = type_at + selected->type.size();
+                // The payload-relative pointer: "/a/b" for ".../<type>/a/b", "" for a path
+                // that addresses the whole payload.
+                const std::string tail(authored, std::min(tail_at, authored.size()));
+                std::optional<std::string> mapped = tail;
+                for (const MigrationStep* step : selected->chain)
+                {
+                    if (step->map_path && mapped.has_value())
+                        mapped = step->map_path(*mapped);
                     if (!mapped.has_value())
-                    {
-                        diagnostics.push_back(
-                            {"migration.orphan_override",
-                             "override path \"" + authored + "\" has no destination after the \"" +
-                                 plan.type + "\" v" + std::to_string(plan.from) + "->v" +
-                                 std::to_string(plan.to) +
-                                 " migration; the entry is preserved but excluded from flatten "
-                                 "(L-37 orphan override)",
-                             entry_pointer, /*blocking=*/false});
-                    }
-                    else if (*mapped != tail)
-                    {
-                        path->string_value =
-                            authored.substr(0, type_at) + plan.type + *mapped;
-                        changed = true;
-                    }
-                    break; // one type match per entry (the last-segment rule bound to this plan)
+                        break;
+                }
+                if (!mapped.has_value())
+                {
+                    diagnostics.push_back(
+                        {"migration.orphan_override",
+                         "override path \"" + authored + "\" has no destination after the \"" +
+                             selected->type + "\" v" + std::to_string(selected->from) + "->v" +
+                             std::to_string(selected->to) +
+                             " migration; the entry is preserved but excluded from flatten "
+                             "(L-37 orphan override)",
+                         entry_pointer, /*blocking=*/false});
+                }
+                else if (*mapped != tail)
+                {
+                    path->string_value = authored.substr(0, type_at) + selected->type + *mapped;
+                    changed = true;
                 }
             }
             continue;
