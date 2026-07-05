@@ -62,7 +62,10 @@ int main()
     k = base; k.importer_version = 2; CHECK(k.digest() != d);
     k = base; k.platform_profile = "web"; CHECK(k.digest() != d);
     k = base; k.importer_build_hash ^= 1U; CHECK(k.digest() != d);
-    k = base; k.cpu_isa = "arm64"; CHECK(k.digest() != d);
+    // cpu_isa is auto-filled from the host (current_cpu_isa()), so mutate RELATIVE to the base value:
+    // a hard-coded literal is a no-op on a host whose ISA already equals it (e.g. "arm64" on the
+    // Apple-Silicon macOS CI runner), leaving the digest unchanged and this assert falsely failing.
+    k = base; k.cpu_isa = base.cpu_isa + "_probe"; CHECK(k.digest() != d);
     k = base; k.artifact_kind = ArtifactKind::mesh; CHECK(k.digest() != d);
     k = base; k.artifact_name = "texture.hi"; CHECK(k.digest() != d);
     k = base; k.derived_format_version = 2; CHECK(k.digest() != d);
