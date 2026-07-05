@@ -74,6 +74,15 @@ hooks staked out now** with the heavy work tracked, never silent stubs:
 3. **Importer build hash.** v1 derives it from the framework epoch + the toolchain stamp (re-keys on
    a toolchain change — the cross-machine determinism scope R-FILE-010 defers). A real per-importer
    compiled-object hash lands with the native build pipeline.
+4. **On-disk cache STORE + corrupt-entry self-heal.** The exhaustive R-FILE-010 cache KEY (with its
+   sensitivity-matrix test) is complete, but v1 does not yet persist a write-once/self-verifying cache
+   STORE — a call re-derives rather than reading a stored artifact back. The store's write-once +
+   self-verify + re-derive-on-mismatch behavior, and its corrupt-entry runtime rejection test, are the
+   follow-up; the `import.cache_corrupt` catalog code is already reserved for it.
+5. **Async progress events.** Imports are synchronous in v1 — there is no async consumer yet (no CLI
+   import verb / daemon progress channel this milestone), so `import()` returns a whole `ImportResult`
+   rather than streaming. Progress-event emission (and its R-QA-013 test) is deferred until that
+   consumer lands; the importer contract stays pure, so it slots in with no importer change.
 
 ## Layering
 

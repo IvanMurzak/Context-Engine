@@ -129,5 +129,48 @@ int main()
         CHECK(has_code(diags, "import.decode_failed"));
     }
 
+    // GLB binary-container failure paths — the offset-arithmetic branches. No committed .glb fixture
+    // is malformed (valid.glb is well-formed), so cover each branch here with in-memory containers.
+    {
+        GltfInfo info;
+        std::vector<ImportDiagnostic> diags;
+
+        // Unsupported container version (!= 2).
+        std::string bad_ver = "glTF";
+        importtest::put_u32le(bad_ver, 1); // version 1
+        importtest::put_u32le(bad_ver, 0); // pad to >= 12 bytes so the GLB branch is entered
+        CHECK(!parse_gltf(bad_ver, info, diags));
+        CHECK(has_code(diags, "import.unsupported_format"));
+
+        // Truncated GLB header: valid version but fewer than the 20 header bytes.
+        diags.clear();
+        std::string short_hdr = "glTF";
+        importtest::put_u32le(short_hdr, 2); // version 2
+        importtest::put_u32le(short_hdr, 0); // 12 bytes total (< 20)
+        CHECK(!parse_gltf(short_hdr, info, diags));
+        CHECK(has_code(diags, "import.source_malformed"));
+
+        // First chunk type is not "JSON".
+        diags.clear();
+        std::string bad_chunk = "glTF";
+        importtest::put_u32le(bad_chunk, 2); // version
+        importtest::put_u32le(bad_chunk, 0); // total length (unread)
+        importtest::put_u32le(bad_chunk, 0); // chunk length
+        bad_chunk += "BIN "; // chunk type != "JSON"
+        CHECK(!parse_gltf(bad_chunk, info, diags));
+        CHECK(has_code(diags, "import.source_malformed"));
+
+        // Declared JSON-chunk length overruns the buffer.
+        diags.clear();
+        std::string over = "glTF";
+        importtest::put_u32le(over, 2);   // version
+        importtest::put_u32le(over, 0);   // total length (unread)
+        importtest::put_u32le(over, 999); // chunk length far exceeds the payload actually present
+        over += "JSON";
+        over += "{}"; // only 2 bytes follow the 20-byte header
+        CHECK(!parse_gltf(over, info, diags));
+        CHECK(has_code(diags, "import.source_malformed"));
+    }
+
     IMPORT_TEST_MAIN_END();
 }

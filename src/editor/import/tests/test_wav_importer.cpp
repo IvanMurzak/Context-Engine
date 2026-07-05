@@ -108,6 +108,19 @@ int main()
         diags.clear();
         CHECK(!parse_wav("RIFF", info, diags));
         CHECK(has_code(diags, "import.source_malformed"));
+
+        // A chunk whose declared size overruns the remaining bytes -> "truncated WAV chunk" (the
+        // mid-stream bounds branch; the committed truncated.wav trips the 12-byte header check, and
+        // no_data.wav trips "no data chunk", so neither exercises this branch).
+        diags.clear();
+        std::string over_chunk;
+        over_chunk += "RIFF";
+        importtest::put_u32le(over_chunk, 0); // RIFF size (unread by the parser)
+        over_chunk += "WAVE";
+        over_chunk += "data";
+        importtest::put_u32le(over_chunk, 999); // declares 999 bytes, but none follow
+        CHECK(!parse_wav(over_chunk, info, diags));
+        CHECK(has_code(diags, "import.source_malformed"));
     }
 
     IMPORT_TEST_MAIN_END();

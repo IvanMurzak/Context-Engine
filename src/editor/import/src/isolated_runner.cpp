@@ -14,7 +14,9 @@ IsolatedImport run_isolated(const Importer& importer, const ImportInput& input,
     const OsSandboxSupport os = os_sandbox_support();
     out.audit.input_path = policy.input_path;
     out.audit.output_key = policy.output_key;
-    out.audit.network_allowed = policy.allow_network;
+    // v1 never grants network (R-SEC-010): a request is refused below, so the audit honestly records
+    // that no network was allowed rather than echoing the (about-to-be-denied) request.
+    out.audit.network_allowed = false;
     out.audit.os_primitive_enforced = os.enforced;
     out.audit.os_primitive = os.primitive;
 

@@ -26,15 +26,8 @@ using detail::jstr;
 using detail::juint;
 using detail::member;
 using detail::put;
+using detail::read_u32le;
 using serializer::JsonValue;
-
-std::uint32_t read_u32le(std::string_view b, std::size_t at) noexcept
-{
-    return static_cast<std::uint32_t>(static_cast<std::uint8_t>(b[at])) |
-           (static_cast<std::uint32_t>(static_cast<std::uint8_t>(b[at + 1])) << 8) |
-           (static_cast<std::uint32_t>(static_cast<std::uint8_t>(b[at + 2])) << 16) |
-           (static_cast<std::uint32_t>(static_cast<std::uint8_t>(b[at + 3])) << 24);
-}
 
 void fail(std::vector<ImportDiagnostic>& diagnostics, std::string code, std::string message)
 {

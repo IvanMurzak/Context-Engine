@@ -7,6 +7,7 @@
 
 #include "context/editor/serializer/json_tree.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -137,6 +138,25 @@ inline void append(JsonValue& arr, JsonValue value)
         out.push_back(kHex[b & 0x0FU]);
     }
     return out;
+}
+
+// --- byte readers (little-endian scalar fields in a binary container: GLB header, WAV chunks) ----
+
+// A little-endian u32/u16 at byte offset `at`. Callers bounds-check `at` against the buffer before
+// calling (the importers validate every offset up-front). Shared so the glTF/GLB + WAV parsers do
+// not each re-hand-roll the same shift/mask.
+[[nodiscard]] inline std::uint32_t read_u32le(std::string_view b, std::size_t at) noexcept
+{
+    return static_cast<std::uint32_t>(static_cast<std::uint8_t>(b[at])) |
+           (static_cast<std::uint32_t>(static_cast<std::uint8_t>(b[at + 1])) << 8) |
+           (static_cast<std::uint32_t>(static_cast<std::uint8_t>(b[at + 2])) << 16) |
+           (static_cast<std::uint32_t>(static_cast<std::uint8_t>(b[at + 3])) << 24);
+}
+
+[[nodiscard]] inline std::uint16_t read_u16le(std::string_view b, std::size_t at) noexcept
+{
+    return static_cast<std::uint16_t>(static_cast<std::uint8_t>(b[at]) |
+                                      (static_cast<std::uint8_t>(b[at + 1]) << 8));
 }
 
 } // namespace context::editor::import::detail

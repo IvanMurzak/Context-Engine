@@ -22,7 +22,8 @@ const std::vector<PlatformProfile>& platform_profiles()
 const PlatformProfile& host_platform_profile()
 {
     // The desktop this build runs on — the default for an editor-side import. Compile-time selected;
-    // the fallback (no known macro) is the first desktop profile so the reference is always valid.
+    // the fallback (no known macro) is a desktop profile in the table, and the find + front() guard
+    // below keeps the returned reference valid regardless.
 #if defined(_WIN32)
     const char* host_id = "windows";
 #elif defined(__APPLE__)

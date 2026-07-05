@@ -18,20 +18,8 @@ using detail::jobject;
 using detail::jstr;
 using detail::juint;
 using detail::put;
-
-std::uint32_t read_u32le(std::string_view b, std::size_t at) noexcept
-{
-    return static_cast<std::uint32_t>(static_cast<std::uint8_t>(b[at])) |
-           (static_cast<std::uint32_t>(static_cast<std::uint8_t>(b[at + 1])) << 8) |
-           (static_cast<std::uint32_t>(static_cast<std::uint8_t>(b[at + 2])) << 16) |
-           (static_cast<std::uint32_t>(static_cast<std::uint8_t>(b[at + 3])) << 24);
-}
-
-std::uint16_t read_u16le(std::string_view b, std::size_t at) noexcept
-{
-    return static_cast<std::uint16_t>(static_cast<std::uint8_t>(b[at]) |
-                                      (static_cast<std::uint8_t>(b[at + 1]) << 8));
-}
+using detail::read_u16le;
+using detail::read_u32le;
 
 void fail(std::vector<ImportDiagnostic>& diagnostics, std::string code, std::string message)
 {
