@@ -283,6 +283,44 @@ void test_newer_stamped_whole_file()
     CHECK(c != nullptr && c->klass == ConflictClass::newer_stamped);
 }
 
+void test_duplicate_id_array_falls_back_to_field_conflict()
+{
+    // A side carrying a DUPLICATE intra-file id is not safely id-mergeable (the dup-id remedy is
+    // `context re-key`). Merging must NOT silently drop/unify an element via per-id matching: the
+    // array falls back to an opaque whole-array field conflict (ours preserved), never a false-clean.
+    const JsonValue base = parse(R"({"items": [{"id": "e1", "v": 1}]})");
+    // ours edits e1; theirs carries a DUPLICATE id "e2" (a raw-copy residue). Pre-fix, the per-id
+    // merge dropped the second "e2" and reported clean; now it must surface a field conflict.
+    MergeResult r = merge_documents(base,
+        parse(R"({"items": [{"id": "e1", "v": 2}]})"),
+        parse(R"({"items": [{"id": "e1", "v": 1}, {"id": "e2", "v": 5}, {"id": "e2", "v": 6}]})"));
+    CHECK(!r.clean);
+    const Conflict* c = conflict_at(r, "/items");
+    CHECK(c != nullptr && c->klass == ConflictClass::field);
+    CHECK(c->theirs.has_value()); // the whole theirs array is recorded — nothing silently dropped
+    check_marker_free(r);
+}
+
+void test_whole_file_omits_base_when_no_ancestor()
+{
+    // A whole-file conflict with NO real ancestor (the caller seeds base as {}) must OMIT base from
+    // the conflict per the R-CLI-008 "absent side is omitted" contract — never report base: {}.
+    MergeResult nobase = merge_documents(parse("{}"),
+        parse(R"({"guid": "aaaa000000000000", "importer": "png"})"),
+        parse(R"({"guid": "bbbb000000000000", "importer": "png"})"));
+    CHECK(!nobase.clean && nobase.whole_file);
+    const Conflict* c = conflict_at(nobase, "");
+    CHECK(c != nullptr && c->klass == ConflictClass::meta_guid);
+    CHECK(!c->base.has_value()); // absent ancestor omitted, not {}
+    CHECK(c->ours.has_value() && c->theirs.has_value());
+    // A whole-file conflict WITH a real ancestor still carries base (regression guard).
+    MergeResult withbase = merge_documents(parse(R"({"guid": "0000000000000000"})"),
+        parse(R"({"guid": "aaaa000000000000", "importer": "png"})"),
+        parse(R"({"guid": "bbbb000000000000", "importer": "png"})"));
+    const Conflict* c2 = conflict_at(withbase, "");
+    CHECK(c2 != nullptr && c2->base.has_value());
+}
+
 } // namespace
 
 int main()
@@ -306,5 +344,7 @@ int main()
     test_meta_guid_whole_file();
     test_meta_guid_one_sided_automerges();
     test_newer_stamped_whole_file();
+    test_duplicate_id_array_falls_back_to_field_conflict();
+    test_whole_file_omits_base_when_no_ancestor();
     MERGE_TEST_MAIN_END();
 }

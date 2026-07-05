@@ -6,6 +6,7 @@
 
 #include "context/editor/serializer/json_tree.h"
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -17,6 +18,13 @@ struct ApplyResult
 {
     bool ok = false;
     std::string error;
+    // When the resolution REMOVED an array element (a delete that shrank an array), the parent
+    // array's RFC 6901 pointer and the removed index — so the caller can reindex sibling conflict
+    // entries that now address a slot one too high. False for a set, a whole-document replace, or an
+    // object-member removal (none of which shift sibling array indices).
+    bool removed_array_element = false;
+    std::string removed_array_pointer;
+    std::size_t removed_index = 0;
 };
 
 // Apply one conflict resolution at an RFC 6901 `pointer` in the merged document:

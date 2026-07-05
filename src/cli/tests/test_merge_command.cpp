@@ -195,6 +195,86 @@ void test_validate()
     CHECK(bad.data().at("diagnostics").at(0).at("code").as_string() == "merge.duplicate_id");
 }
 
+void test_merge_file_dry_run_writes_nothing()
+{
+    // --dry-run is a core flag ("honored by EVERY verb"): COMPUTE + report the conflict, write NOTHING
+    // (no merged output, no sidecar) — mirroring `context migrate --dry-run`.
+    write(p("db.json"), R"({"hp": 10})");
+    write(p("do.json"), R"({"hp": 11})");
+    write(p("dt.json"), R"({"hp": 12})");
+    const std::string out = p("dm.json").string();
+    const Envelope e = run({"merge-file", p("db.json").string(), p("do.json").string(),
+                            p("dt.json").string(), "--output", out, "--dry-run"});
+    CHECK(e.ok());
+    CHECK(e.data().at("dryRun").as_bool() == true);
+    CHECK(e.data().at("clean").as_bool() == false);      // the conflict was still computed + reported
+    CHECK(e.data().at("conflicts").size() == 1);
+    CHECK(!fs::exists(out));                              // ...but nothing was written to disk
+    CHECK(!fs::exists(out + ".ctxconflicts.json"));
+}
+
+void test_resolve_conflict_dry_run_writes_nothing()
+{
+    write(p("rcb.json"), R"({"hp": 10})");
+    write(p("rco.json"), R"({"hp": 11})");
+    write(p("rct.json"), R"({"hp": 12})");
+    const std::string out = p("rcm.json").string();
+    const Envelope setup = run({"merge-file", p("rcb.json").string(), p("rco.json").string(),
+                                p("rct.json").string(), "--output", out});
+    CHECK(setup.ok() && setup.data().at("clean").as_bool() == false);
+    const std::string merged_before = read(out);
+    const std::string sidecar_before = read(out + ".ctxconflicts.json");
+    const Envelope e = run({"resolve-conflict", out, "--path", "/hp", "--take", "theirs", "--dry-run"});
+    CHECK(e.ok());
+    CHECK(e.data().at("dryRun").as_bool() == true);
+    CHECK(e.data().at("remainingConflicts").as_int() == 0);      // computed
+    CHECK(read(out) == merged_before);                           // file untouched
+    CHECK(read(out + ".ctxconflicts.json") == sidecar_before);   // sidecar untouched
+}
+
+void test_rekey_dry_run_writes_nothing()
+{
+    write(p("drk.json"), R"({"entities": [{"id": "aaaa0000aaaa0001"}, {"id": "aaaa0000aaaa0001"}]})");
+    const std::string before = read(p("drk.json"));
+    const Envelope e = run({"re-key", p("drk.json").string(), "--id", "aaaa0000aaaa0001", "--dry-run"});
+    CHECK(e.ok());
+    CHECK(e.data().at("dryRun").as_bool() == true);
+    CHECK(e.data().at("newId").as_string().size() == 16); // the fresh id was still minted (reported)
+    CHECK(read(p("drk.json")) == before);                 // ...but the file is untouched
+}
+
+void test_resolve_conflict_reindexes_after_array_shrink()
+{
+    // Two delete_modify conflicts in ONE id-keyed array. Resolving the first by taking the deleting
+    // side shrinks the array, shifting the second element down. The surviving sidecar entry must be
+    // reindexed (/items/1 -> /items/0) so a second resolve still targets the intended element — not a
+    // silently mis-targeted neighbour (the pre-fix corruption).
+    write(p("xb.json"),
+          R"({"items": [{"id": "e1", "v": 1}, {"id": "e2", "v": 2}, {"id": "e3", "v": 3}]})");
+    write(p("xo.json"),
+          R"({"items": [{"id": "e1", "v": 11}, {"id": "e2", "v": 22}, {"id": "e3", "v": 3}]})");
+    write(p("xt.json"), R"({"items": [{"id": "e3", "v": 3}]})"); // theirs deleted e1 and e2
+    const std::string out = p("xm.json").string();
+    const Envelope m = run({"merge-file", p("xb.json").string(), p("xo.json").string(),
+                            p("xt.json").string(), "--output", out});
+    CHECK(m.ok());
+    CHECK(m.data().at("conflicts").size() == 2);
+
+    // Resolve the first conflict by taking theirs (a delete) — removes element 0, shrinking the array.
+    const Envelope r1 = run({"resolve-conflict", out, "--path", "/items/0", "--take", "theirs"});
+    CHECK(r1.ok());
+    CHECK(r1.data().at("remainingConflicts").as_int() == 1);
+
+    // The survivor was reindexed to /items/0; a second take-theirs deletes e2, leaving ONLY e3.
+    const Envelope r2 = run({"resolve-conflict", out, "--path", "/items/0", "--take", "theirs"});
+    CHECK(r2.ok());
+    CHECK(r2.data().at("remainingConflicts").as_int() == 0);
+    const Json merged = read_json(out);
+    CHECK(merged.at("items").size() == 1);
+    CHECK(merged.at("items").at(0).at("id").as_string() == "e3"); // e3 survived; e1,e2 deleted
+    CHECK(!fs::exists(out + ".ctxconflicts.json"));
+}
+
 } // namespace
 
 int main()
@@ -214,6 +294,10 @@ int main()
     test_rekey();
     test_rekey_at_pathological_index_no_crash();
     test_validate();
+    test_merge_file_dry_run_writes_nothing();
+    test_resolve_conflict_dry_run_writes_nothing();
+    test_rekey_dry_run_writes_nothing();
+    test_resolve_conflict_reindexes_after_array_shrink();
 
     fs::remove_all(g_dir, ec);
     CLI_TEST_MAIN_END();

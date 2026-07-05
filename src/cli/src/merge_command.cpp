@@ -154,6 +154,41 @@ std::string merge_binary(const std::string& base, const std::string& ours, const
     return ours;
 }
 
+// A canonical RFC 6901 array-index token: plain digits, no leading zero beyond "0", length-capped so
+// a pathological digit-run never reaches std::stoull (which would throw). Mirrors the merge module's
+// internal detail::parse_array_index — duplicated here rather than reaching across into that module's
+// PRIVATE src/pointer_format.h from the CLI layer.
+bool parse_index_token(const std::string& token, std::size_t& out)
+{
+    if (token.empty() || token.size() > 10 ||
+        token.find_first_not_of("0123456789") != std::string::npos ||
+        (token.size() > 1 && token[0] == '0'))
+        return false;
+    out = static_cast<std::size_t>(std::stoull(token));
+    return true;
+}
+
+// After a resolution DELETED the array element at `removed_parent`[`removed_index`], a surviving
+// conflict entry addressing a LATER element of the SAME array carries a now-stale index (the erase
+// shifted every later element down one). Return `path` with that index decremented so a subsequent
+// `resolve-conflict --path` still targets the intended element — never a silently mis-targeted
+// neighbour. A path into a different container, or an object key that merely shares the prefix, is
+// returned unchanged (RFC 6901 array indices are plain digits, so a non-index token is left alone).
+std::string reindex_after_array_removal(const std::string& path, const std::string& removed_parent,
+                                        std::size_t removed_index)
+{
+    const std::string prefix = removed_parent + "/";
+    if (path.size() < prefix.size() || path.compare(0, prefix.size(), prefix) != 0)
+        return path; // a different container (or the container pointer itself)
+    const std::string rest = path.substr(prefix.size());
+    const std::size_t slash = rest.find('/');
+    std::size_t index = 0;
+    if (!parse_index_token(rest.substr(0, slash), index) || index <= removed_index)
+        return path; // an object key, or an earlier/equal element — unaffected by the shift
+    const std::string tail = slash == std::string::npos ? std::string() : rest.substr(slash);
+    return prefix + std::to_string(index - 1) + tail;
+}
+
 } // namespace
 
 Envelope run_merge_file(const std::map<std::string, std::string>& params,
@@ -166,6 +201,7 @@ Envelope run_merge_file(const std::map<std::string, std::string>& params,
     const std::string ours_path = param("ours");
     const std::string theirs_path = param("theirs");
     const bool driver = flags.find("driver") != flags.end();
+    const bool dry_run = flags.find("dry-run") != flags.end(); // core flag: report without writing
     const std::string output = !flag("output").empty() ? flag("output") : ours_path;
     const std::string pathname = !param("pathname").empty() ? param("pathname") : output;
     const fs::path sidecar = pathname + ".ctxconflicts.json";
@@ -187,17 +223,19 @@ Envelope run_merge_file(const std::map<std::string, std::string>& params,
     {
         bool conflicted = false;
         const std::string merged = merge_binary(base_text, ours_text, theirs_text, base_present, conflicted);
-        if (!write_file_atomically(output, merged))
+        if (!dry_run && !write_file_atomically(output, merged))
             return Envelope::failure("internal.error", "could not write merged output: " + output);
 
         if (!conflicted)
         {
-            remove_sidecar(sidecar);
+            if (!dry_run)
+                remove_sidecar(sidecar);
             Json data = Json::object();
             data.set("merged", Json(output));
             data.set("clean", Json(true));
             data.set("wholeFile", Json(false));
             data.set("conflicts", Json::array());
+            data.set("dryRun", Json(dry_run));
             return Envelope::success(std::move(data));
         }
 
@@ -205,7 +243,8 @@ Envelope run_merge_file(const std::map<std::string, std::string>& params,
         c.path = "";
         c.klass = merge::ConflictClass::binary_sidecar; // binary bytes are not embedded as JSON
         std::vector<merge::Conflict> conflicts{c};
-        write_sidecar(sidecar, pathname, conflicts);
+        if (!dry_run)
+            write_sidecar(sidecar, pathname, conflicts);
         if (driver)
             return Envelope::failure(merge::catalog_code(c.klass),
                                      "binary sidecar differs on both sides — resolve whole-file "
@@ -215,6 +254,7 @@ Envelope run_merge_file(const std::map<std::string, std::string>& params,
         data.set("clean", Json(false));
         data.set("wholeFile", Json(true));
         data.set("conflicts", conflicts_to_json(conflicts));
+        data.set("dryRun", Json(dry_run));
         return Envelope::success(std::move(data));
     }
 
@@ -234,21 +274,24 @@ Envelope run_merge_file(const std::map<std::string, std::string>& params,
     std::string merged_bytes;
     if (!serializer::serialize_canonical(result.merged, merged_bytes))
         return Envelope::failure("internal.error", "the merged tree did not serialize");
-    if (!write_file_atomically(output, merged_bytes))
+    if (!dry_run && !write_file_atomically(output, merged_bytes))
         return Envelope::failure("internal.error", "could not write merged output: " + output);
 
     if (result.clean)
     {
-        remove_sidecar(sidecar);
+        if (!dry_run)
+            remove_sidecar(sidecar);
         Json data = Json::object();
         data.set("merged", Json(output));
         data.set("clean", Json(true));
         data.set("wholeFile", Json(false));
         data.set("conflicts", Json::array());
+        data.set("dryRun", Json(dry_run));
         return Envelope::success(std::move(data));
     }
 
-    write_sidecar(sidecar, pathname, result.conflicts);
+    if (!dry_run)
+        write_sidecar(sidecar, pathname, result.conflicts);
 
     if (driver)
     {
@@ -264,6 +307,7 @@ Envelope run_merge_file(const std::map<std::string, std::string>& params,
     data.set("wholeFile", Json(result.whole_file));
     data.set("conflicts", conflicts_to_json(result.conflicts));
     data.set("sidecar", Json(sidecar.string()));
+    data.set("dryRun", Json(dry_run));
     return Envelope::success(std::move(data));
 }
 
@@ -276,6 +320,7 @@ Envelope run_resolve_conflict(const std::map<std::string, std::string>& params,
     const std::string path = flag("path");
     const std::string take = flag("take");
     const bool has_value = flags.find("value") != flags.end();
+    const bool dry_run = flags.find("dry-run") != flags.end(); // core flag: report without writing
 
     if (file.empty())
         return Envelope::failure("usage.missing_argument", "a target <file> is required");
@@ -346,31 +391,48 @@ Envelope run_resolve_conflict(const std::map<std::string, std::string>& params,
     std::string out_bytes;
     if (!serializer::serialize_canonical(root, out_bytes))
         return Envelope::failure("internal.error", "the resolved tree did not serialize");
-    if (!write_file_atomically(file, out_bytes))
+    if (!dry_run && !write_file_atomically(file, out_bytes))
         return Envelope::failure("internal.error", "could not write " + file);
 
-    // Drop the resolved entry from the sidecar; delete the sidecar when it empties.
+    // Drop the resolved entry from the sidecar; reindex any survivor addressing a LATER element of an
+    // array this resolution shrank (else its recorded index now points one slot too high); delete the
+    // sidecar when it empties.
     std::uint64_t remaining = 0;
     if (have_sidecar)
     {
         Json kept = Json::array();
         const Json& conflicts = sidecar_doc.at("conflicts");
         for (std::size_t i = 0; i < conflicts.size(); ++i)
-            if (conflicts.at(i).at("path").as_string() != path)
-                kept.push_back(conflicts.at(i));
-        remaining = kept.size();
-        if (remaining == 0)
         {
-            remove_sidecar(sidecar);
+            if (conflicts.at(i).at("path").as_string() == path)
+                continue; // the just-resolved entry
+            Json entry = conflicts.at(i);
+            if (applied.removed_array_element)
+            {
+                const std::string entry_path = entry.at("path").as_string();
+                const std::string reindexed = reindex_after_array_removal(
+                    entry_path, applied.removed_array_pointer, applied.removed_index);
+                if (reindexed != entry_path)
+                    entry.set("path", Json(reindexed));
+            }
+            kept.push_back(std::move(entry));
         }
-        else
+        remaining = kept.size();
+        if (!dry_run)
         {
-            Json doc = Json::object();
-            doc.set("path", sidecar_doc.contains("path") ? sidecar_doc.at("path") : Json(file));
-            doc.set("conflicts", std::move(kept));
-            std::ofstream o(sidecar, std::ios::binary | std::ios::trunc);
-            if (o)
-                o << doc.dump(2) << "\n";
+            if (remaining == 0)
+            {
+                remove_sidecar(sidecar);
+            }
+            else
+            {
+                Json doc = Json::object();
+                doc.set("path", sidecar_doc.contains("path") ? sidecar_doc.at("path") : Json(file));
+                doc.set("conflicts", std::move(kept));
+                std::ofstream o(sidecar, std::ios::binary | std::ios::trunc);
+                if (o)
+                    o << doc.dump(2) << "\n";
+            }
         }
     }
 
@@ -379,6 +441,7 @@ Envelope run_resolve_conflict(const std::map<std::string, std::string>& params,
     data.set("path", Json(path));
     data.set("resolution", Json(has_value ? std::string("value") : take));
     data.set("remainingConflicts", Json(remaining));
+    data.set("dryRun", Json(dry_run));
     return Envelope::success(std::move(data));
 }
 
@@ -390,6 +453,7 @@ Envelope run_rekey(const std::map<std::string, std::string>& params,
     const std::string file = params.count("file") ? params.at("file") : std::string();
     const std::string at = flag("at");
     const std::string id = flag("id");
+    const bool dry_run = flags.find("dry-run") != flags.end(); // core flag: report without writing
     if (file.empty())
         return Envelope::failure("usage.missing_argument", "a target <file> is required");
     if (at.empty() && id.empty())
@@ -426,7 +490,7 @@ Envelope run_rekey(const std::map<std::string, std::string>& params,
     std::string out_bytes;
     if (!serializer::serialize_canonical(root, out_bytes))
         return Envelope::failure("internal.error", "the re-keyed tree did not serialize");
-    if (!write_file_atomically(file, out_bytes))
+    if (!dry_run && !write_file_atomically(file, out_bytes))
         return Envelope::failure("internal.error", "could not write " + file);
 
     Json data = Json::object();
@@ -434,6 +498,7 @@ Envelope run_rekey(const std::map<std::string, std::string>& params,
     data.set("oldId", Json(r.old_id));
     data.set("newId", Json(r.new_id));
     data.set("referencesRewritten", Json(r.references_rewritten));
+    data.set("dryRun", Json(dry_run));
     return Envelope::success(std::move(data));
 }
 

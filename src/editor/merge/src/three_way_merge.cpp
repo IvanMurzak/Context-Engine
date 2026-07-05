@@ -7,6 +7,8 @@
 #include "pointer_format.h"
 
 #include <algorithm>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace context::editor::merge
@@ -258,6 +260,8 @@ struct IdDecision
     bool include = true; // false => the element is removed from the merged array
 };
 
+// Order-bearing index: the array's (id, element) pairs in array order. ours/theirs iterate this to
+// drive the merged array's order; is_id_keyed_array guarantees each side's ids are unique.
 std::vector<std::pair<std::string, const JsonValue*>> id_index(const JsonValue& array)
 {
     std::vector<std::pair<std::string, const JsonValue*>> out;
@@ -272,13 +276,28 @@ std::vector<std::pair<std::string, const JsonValue*>> id_index(const JsonValue& 
     return out;
 }
 
-const JsonValue* lookup(const std::vector<std::pair<std::string, const JsonValue*>>& index,
+// id -> element hash index for O(1) lookup — keeps a large id-keyed array's merge linear, not
+// quadratic. First occurrence wins, mirroring the historical linear scan; only `base` can carry a
+// duplicate id (a pre-existing ancestor), since is_id_keyed_array rejects a duplicate-carrying side.
+std::unordered_map<std::string, const JsonValue*> id_map(const JsonValue& array)
+{
+    std::unordered_map<std::string, const JsonValue*> out;
+    if (array.type != JsonValue::Type::array)
+        return out;
+    for (const JsonValue& el : array.elements)
+    {
+        std::string id = id_of(el);
+        if (!id.empty())
+            out.emplace(std::move(id), &el); // emplace keeps the FIRST occurrence
+    }
+    return out;
+}
+
+const JsonValue* lookup(const std::unordered_map<std::string, const JsonValue*>& index,
                         const std::string& id)
 {
-    for (const auto& [key, value] : index)
-        if (key == id)
-            return value;
-    return nullptr;
+    const auto it = index.find(id);
+    return it != index.end() ? it->second : nullptr;
 }
 
 // Merge two-or-three id-keyed arrays by id identity (L-33). Order policy (v1, documented): ours's
@@ -287,35 +306,39 @@ const JsonValue* lookup(const std::vector<std::pair<std::string, const JsonValue
 JsonValue merge_id_array(const JsonValue& base, const JsonValue& ours, const JsonValue& theirs,
                          const std::string& path, std::vector<Conflict>& conflicts)
 {
-    const auto base_ix = id_index(base);
-    const auto ours_ix = id_index(ours);
-    const auto theirs_ix = id_index(theirs);
+    const auto ours_ix = id_index(ours);     // order-bearing: drives the merged array order
+    const auto theirs_ix = id_index(theirs); // order-bearing: theirs-only adds append in this order
+    const auto base_map = id_map(base);      // lookup-only
+    std::unordered_map<std::string, const JsonValue*> theirs_map;
+    theirs_map.reserve(theirs_ix.size());
+    for (const auto& [id, el] : theirs_ix)
+        theirs_map.emplace(id, el);
 
-    // Pass 1: decide membership + order.
+    // Pass 1: decide membership + order. O(1) lookups + a planned-id set keep a large id-keyed array
+    // (thousands of entities) linear rather than quadratic.
     std::vector<IdDecision> plan;
-    auto has = [](const std::vector<IdDecision>& p, const std::string& id) {
-        return std::any_of(p.begin(), p.end(), [&](const IdDecision& d) { return d.id == id; });
-    };
+    std::unordered_set<std::string> planned;
 
     for (const auto& [id, ours_el] : ours_ix)
     {
         IdDecision d;
         d.id = id;
-        d.base = lookup(base_ix, id);
+        d.base = lookup(base_map, id);
         d.ours = ours_el;
-        d.theirs = lookup(theirs_ix, id);
+        d.theirs = lookup(theirs_map, id);
         // ours present; keep unless theirs removed a base element ours did not touch.
         if (d.theirs == nullptr && d.base != nullptr && json_equal(*d.base, *d.ours))
             d.include = false; // theirs removed it, ours untouched => removal wins
+        planned.insert(id);
         plan.push_back(std::move(d));
     }
     for (const auto& [id, theirs_el] : theirs_ix)
     {
-        if (has(plan, id))
+        if (planned.count(id) != 0)
             continue; // already planned from ours
         IdDecision d;
         d.id = id;
-        d.base = lookup(base_ix, id);
+        d.base = lookup(base_map, id);
         d.ours = nullptr;
         d.theirs = theirs_el;
         if (d.base != nullptr && json_equal(*d.base, *d.theirs))
@@ -470,7 +493,14 @@ MergeResult whole_file(ConflictClass klass, const JsonValue& base, const JsonVal
     Conflict c;
     c.path = "";
     c.klass = klass;
-    if (base.type != JsonValue::Type::null_value)
+    // Omit `base` when there is no real ancestor (R-CLI-008: an absent side is omitted, never {}).
+    // merge_command seeds an absent ancestor as an EMPTY object for the add/add structural path;
+    // a real whole-file-class ancestor (a .meta GUID doc, a schema-stamped payload) is never an
+    // empty object, so treating {} as absent here keeps the conflict envelope exact — and, because
+    // this only affects whole-file emission, it leaves that structural add/add sentinel untouched.
+    const bool base_absent = base.type == JsonValue::Type::null_value ||
+                             (base.type == JsonValue::Type::object && base.members.empty());
+    if (!base_absent)
         c.base = base;
     c.ours = ours;
     c.theirs = theirs;
@@ -484,12 +514,19 @@ bool is_id_keyed_array(const JsonValue& array) noexcept
 {
     if (array.type != JsonValue::Type::array || array.elements.empty())
         return false;
+    std::unordered_set<std::string> seen;
     for (const JsonValue& el : array.elements)
     {
         if (el.type != JsonValue::Type::object)
             return false;
         const JsonValue* id = member(el, "id");
         if (id == nullptr || id->type != JsonValue::Type::string || id->string_value.empty())
+            return false;
+        // A DUPLICATE intra-file id makes id-identity merging unsafe: merge_id_array's per-id match
+        // assumes uniqueness per side and would silently drop/misplace a colliding element (the very
+        // corruption `context re-key` exists to remedy). Treat such an array as opaque so merge_value
+        // surfaces a whole-array field conflict (ours preserved) instead of silently unifying it.
+        if (!seen.insert(id->string_value).second)
             return false;
     }
     return true;

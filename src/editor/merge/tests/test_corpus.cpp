@@ -71,7 +71,9 @@ SchemaFloor read_floor(const JsonValue& expected)
     return floor;
 }
 
-void run_case(const fs::path& dir)
+// Returns true when the case actually RAN a merge; false when the dir was skipped (no base.json —
+// the binary_sidecar case). The caller counts executed cases so a silently-skipped JSON case fails.
+bool run_case(const fs::path& dir)
 {
     const std::string name = dir.filename().string();
 
@@ -79,13 +81,13 @@ void run_case(const fs::path& dir)
     // Non-JSON (binary_sidecar) cases carry base.bin and are exercised by the CLI merge test, not
     // here — the structural engine only sees parsed JSON. Skip a dir without base.json.
     if (!read_file(dir / "base.json", base_text))
-        return;
+        return false;
     if (!read_file(dir / "ours.json", ours_text) || !read_file(dir / "theirs.json", theirs_text) ||
         !read_file(dir / "expected.json", expected_text))
     {
         std::fprintf(stderr, "corpus case '%s' is missing an input\n", name.c_str());
         ++mergetest::g_failures;
-        return;
+        return false;
     }
 
     const JsonValue expected = parse(expected_text);
@@ -158,6 +160,7 @@ void run_case(const fs::path& dir)
             ++mergetest::g_failures;
         }
     }
+    return true;
 }
 
 } // namespace
@@ -180,8 +183,17 @@ int main()
     // The corpus must be non-trivial (guards against an empty/renamed fixture dir silently passing).
     CHECK(cases.size() >= 5);
 
+    std::size_t executed = 0;
     for (const fs::path& dir : cases)
-        run_case(dir);
+        if (run_case(dir))
+            ++executed;
+
+    // Every JSON conflict-class case must actually RUN a merge. Counting discovered directories is
+    // not enough: a case whose base.json is missing/mis-named skips like the (intentional) binary
+    // case and would pass unseen. Assert the executed count against the 7 committed JSON classes
+    // (the lone binary-sidecar dir is exercised by the CLI test); bump this floor when a new JSON
+    // conflict class + fixture lands.
+    CHECK(executed >= 7);
 
     MERGE_TEST_MAIN_END();
 }

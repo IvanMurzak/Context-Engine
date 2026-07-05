@@ -20,8 +20,10 @@ namespace
 // Remove the member/element an RFC 6901 pointer addresses. Resolves the PARENT, then erases the last
 // token from it. Fails when the pointer is malformed, the parent does not resolve, or the leaf is
 // absent.
-bool remove_at_pointer(JsonValue& root, std::string_view pointer, std::string& error)
+bool remove_at_pointer(JsonValue& root, std::string_view pointer, std::string& error,
+                       bool& removed_array_element)
 {
+    removed_array_element = false;
     std::vector<std::string> tokens;
     if (!compose::parse_json_pointer(pointer, tokens) || tokens.empty())
     {
@@ -97,6 +99,7 @@ bool remove_at_pointer(JsonValue& root, std::string_view pointer, std::string& e
             return false;
         }
         parent->elements.erase(parent->elements.begin() + static_cast<std::ptrdiff_t>(index));
+        removed_array_element = true;
         return true;
     }
     error = "the --path parent is a scalar";
@@ -137,10 +140,22 @@ ApplyResult apply_resolution(JsonValue& root, std::string_view pointer,
     else
     {
         std::string error;
-        if (!remove_at_pointer(root, pointer, error))
+        bool removed_array_element = false;
+        if (!remove_at_pointer(root, pointer, error, removed_array_element))
         {
             result.error = error;
             return result;
+        }
+        if (removed_array_element)
+        {
+            // The removal shrank an array: report the parent-array pointer + removed index so the
+            // caller reindexes sibling conflict paths. RFC 6901: the removed index is the token after
+            // the last '/'; the parent-array pointer is everything before it ("" for a root array).
+            const std::string p(pointer);
+            const std::size_t slash = p.rfind('/');
+            result.removed_array_element = true;
+            result.removed_array_pointer = p.substr(0, slash);
+            detail::parse_array_index(p.substr(slash + 1), result.removed_index);
         }
     }
     result.ok = true;
