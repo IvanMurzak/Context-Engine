@@ -158,11 +158,13 @@ SaveParseResult parse_save(std::string_view bytes)
     SaveParseResult result;
 
     serializer::ParseResult parsed = serializer::parse_json(bytes);
+    // Carry the parser's findings through in BOTH directions: the fatal json.* finding on failure,
+    // or the non-fatal encoding.bom/encoding.crlf findings the parser still reports on a SUCCESSFUL
+    // parse (json_parse.h). The SaveParseResult contract exposes the json.* family, so dropping them
+    // on the ok path would silently hide a BOM/CRLF a hand-edited save carried.
+    result.diagnostics = std::move(parsed.diagnostics);
     if (!parsed.ok)
-    {
-        result.diagnostics = std::move(parsed.diagnostics); // the fatal json.* finding
         return result;
-    }
 
     const JsonValue& root = parsed.root;
     if (root.type != JsonValue::Type::object)
@@ -188,6 +190,13 @@ SaveParseResult parse_save(std::string_view bytes)
         return result;
     }
     result.save.format_version = as_integer(*format_version);
+    if (result.save.format_version < 1)
+    {
+        push_diag(result.diagnostics, "save.malformed",
+                  "\"saveFormatVersion\" is " + std::to_string(result.save.format_version) +
+                      " but save envelope versions start at 1");
+        return result;
+    }
     if (result.save.format_version > kSaveFormatVersion)
     {
         push_diag(result.diagnostics, "save.format_unsupported",
@@ -269,6 +278,19 @@ SaveParseResult parse_save(std::string_view bytes)
             push_diag(result.diagnostics, "save.malformed",
                       "an entity is missing an object \"components\" map");
             return result;
+        }
+        // Every component payload must itself be an object. The migration runner and the editor's
+        // parse-time payload discovery (migrate::find_sites) both treat ONLY object values as real
+        // payload sites, so a scalar/array payload would silently no-op through migration and still
+        // be re-stamped to the current version — surface it as malformed here (never best-effort).
+        for (const JsonMember& component : components->members)
+        {
+            if (component.value.type != JsonValue::Type::object)
+            {
+                push_diag(result.diagnostics, "save.malformed",
+                          "component \"" + component.key + "\" is not an object payload");
+                return result;
+            }
         }
         entity.components = *components;
         result.save.entities.push_back(std::move(entity));

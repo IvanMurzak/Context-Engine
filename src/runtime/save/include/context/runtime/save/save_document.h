@@ -85,8 +85,10 @@ struct SaveParseResult
 // Parse a save from its canonical-JSON bytes. Deterministic and total (never throws). ok == false
 // with a diagnostic when: the bytes are not strict JSON; the root is not a save envelope (missing
 // or mis-typed "$save"/"saveFormatVersion"/"entities"); the envelope version is newer than this
-// build supports (save.format_unsupported); an entity carries a non-16-hex identity or a
-// non-object component map (save.malformed).
+// build supports (save.format_unsupported); the envelope version is below 1, an entity carries a
+// non-16-hex identity, or a component map / an individual component payload is not an object
+// (save.malformed). On a SUCCESSFUL parse the diagnostics may still carry the parser's non-fatal
+// encoding.bom / encoding.crlf findings (json_parse.h) — they are propagated, not dropped.
 [[nodiscard]] SaveParseResult parse_save(std::string_view bytes);
 
 } // namespace context::runtime::save

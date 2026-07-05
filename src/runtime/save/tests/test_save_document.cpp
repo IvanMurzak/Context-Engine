@@ -120,6 +120,40 @@ int main()
             parse_save(R"({"$save": "ctx:save", "saveFormatVersion": 99, "entities": []})");
         CHECK(!newer.ok);
         CHECK(!newer.diagnostics.empty() && newer.diagnostics.back().code == "save.format_unsupported");
+
+        // The envelope version also has a FLOOR: 0 or a negative version is malformed (versions
+        // start at 1), never silently accepted as "supported".
+        const SaveParseResult zero_ver =
+            parse_save(R"({"$save": "ctx:save", "saveFormatVersion": 0, "entities": []})");
+        CHECK(!zero_ver.ok);
+        CHECK(!zero_ver.diagnostics.empty() && zero_ver.diagnostics.back().code == "save.malformed");
+        const SaveParseResult neg_ver =
+            parse_save(R"({"$save": "ctx:save", "saveFormatVersion": -3, "entities": []})");
+        CHECK(!neg_ver.ok);
+        CHECK(!neg_ver.diagnostics.empty() && neg_ver.diagnostics.back().code == "save.malformed");
+
+        // A non-object component PAYLOAD (not just the outer components map) is malformed: a scalar
+        // payload would otherwise silently no-op through the migration runner and get re-stamped.
+        const SaveParseResult scalar_payload = parse_save(
+            R"({"$save": "ctx:save", "saveFormatVersion": 1, "entities": [{"identity": "0123456789abcdef", "components": {"ctx:transform": 42}}]})");
+        CHECK(!scalar_payload.ok);
+        CHECK(!scalar_payload.diagnostics.empty() &&
+              scalar_payload.diagnostics.back().code == "save.malformed");
+    }
+
+    // --- a SUCCESSFUL parse still surfaces the parser's non-fatal encoding findings ---------------
+    {
+        // A leading UTF-8 BOM parses fine (the parser strips it) but must not be silently swallowed:
+        // parse_json reports a non-fatal encoding.bom and parse_save propagates it on the ok path
+        // (the json.* family the SaveParseResult contract documents).
+        const SaveParseResult bom = parse_save(
+            "\xEF\xBB\xBF" R"({"$save": "ctx:save", "saveFormatVersion": 1, "entities": []})");
+        CHECK(bom.ok);
+        bool saw_bom = false;
+        for (const auto& d : bom.diagnostics)
+            if (d.code == "encoding.bom")
+                saw_bom = true;
+        CHECK(saw_bom);
     }
 
     SAVE_TEST_MAIN_END();
