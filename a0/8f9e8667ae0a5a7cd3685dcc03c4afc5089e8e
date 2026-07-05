@@ -1,0 +1,25 @@
+src/runtime/save/src/save_document.cpp
+  s_e3239cf02087b8::t_80abdb0c8502c1 161-165
+  s_e3239cf02087b8::t_bd612507dffbfa 193-199
+  s_e3239cf02087b8::t_034b7e494d8c94 282-294
+src/runtime/save/include/context/runtime/save/save_document.h
+  s_e3239cf02087b8::t_ab6c281bee055b 88-91
+src/runtime/save/tests/test_save_document.cpp
+  s_e3239cf02087b8::t_db73fa32df3eb9 123-156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a08f9e8667ae0a5a7cd3685dcc03c4afc5089e8e",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
