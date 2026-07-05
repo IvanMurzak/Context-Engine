@@ -12,6 +12,7 @@ add_library(context_cli STATIC
     src/daemon_command.cpp
     src/editor_driver.cpp
     src/fetch_command.cpp
+    src/merge_command.cpp
     src/migrate_command.cpp
     src/scaffold.cpp
     src/wire_client.cpp)
@@ -34,6 +35,10 @@ target_link_libraries(context_cli
 # migrate::MigrationSet in its test-seam signature, and the ctest executable that injects its own
 # set reaches the module's include path through this target.
 target_link_libraries(context_cli PUBLIC context_migrate)
+
+# The M2 wave 4 merge family (src/editor/merge/, issue #59): PRIVATE — merge_command.h exposes only
+# the contract Envelope, so no merge type appears in the CLI's public headers.
+target_link_libraries(context_cli PRIVATE context_merge)
 
 # Self-contained GCC runtime for the CLI executables. context_cli uses std::filesystem (the
 # `context new` scaffolder), whose libstdc++ symbols live in a NEWER libstdc++-6.dll; on a MinGW
@@ -58,6 +63,7 @@ set(_context_cli_tests
     test_bench_command
     test_cli
     test_editor_driver
+    test_merge_command
     test_migrate_command
     test_scaffold)
 

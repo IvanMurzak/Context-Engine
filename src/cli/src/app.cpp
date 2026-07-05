@@ -7,6 +7,7 @@
 #include "context/cli/daemon_command.h"
 #include "context/cli/editor_driver.h"
 #include "context/cli/fetch_command.h"
+#include "context/cli/merge_command.h"
 #include "context/cli/migrate_command.h"
 #include "context/cli/scaffold.h"
 #include "context/editor/contract/json.h"
@@ -103,6 +104,19 @@ Envelope dispatch(const VerbSpec& verb, const std::vector<std::string>& position
             return Envelope::success(scaffold_plan(directory, tmpl));
         return scaffold_project(directory, tmpl);
     }
+
+    // The M2 wave 4 structural-merge family (issue #59, R-FILE-012): merge-file / resolve-conflict /
+    // re-key / validate. Placed immediately after the `new` verb region (distinct from the sibling
+    // editing near `describe`) so concurrent M2 tasks inserting dispatch branches merge cleanly. Each
+    // is backed by src/cli/merge_command.cpp over the src/editor/merge/ engine.
+    if (verb.noun.empty() && verb.verb == "merge-file")
+        return run_merge_file(bound, flags);
+    if (verb.noun.empty() && verb.verb == "resolve-conflict")
+        return run_resolve_conflict(bound, flags);
+    if (verb.noun.empty() && verb.verb == "re-key")
+        return run_rekey(bound, flags);
+    if (verb.noun.empty() && verb.verb == "validate")
+        return run_validate(bound, flags);
 
     // `context resource read <handle> [<offset>:<length>]` (alias: `context fetch ...`) — the
     // R-CLI-017 large-result fetch. Drives a RUNNING daemon over the wire via the shared client

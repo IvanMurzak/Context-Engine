@@ -116,6 +116,31 @@ bool read_file(const std::filesystem::path& path, std::string& out)
     out = ss.str();
     return true;
 }
+
+// Auto-install the R-FILE-012 structural merge driver DEFINITION into the project's git config, when
+// a repo already exists. L-27: the ENGINE never invokes git — this is a client-side PLAIN-FILE write
+// of the `[merge "context"]` stanza git will later invoke (no shell-out, no libgit). Idempotent;
+// returns true when the driver is installed (or already present), false when there is no
+// .git/config to install into yet (the `.gitattributes` mapping still ships, so the driver activates
+// the moment the user `git init`s and re-runs, or adds the stanza by hand).
+bool install_merge_driver(const std::filesystem::path& root)
+{
+    namespace fs = std::filesystem;
+    const fs::path config = root / ".git" / "config";
+    std::error_code ec;
+    if (!fs::exists(config, ec) || ec)
+        return false;
+    std::string existing;
+    if (read_file(config, existing) && existing.find("[merge \"context\"]") != std::string::npos)
+        return true; // already installed — idempotent re-run
+    std::ofstream out(config, std::ios::binary | std::ios::app);
+    if (!out)
+        return false;
+    out << "\n[merge \"context\"]\n"
+        << "\tname = Context structural JSON merge (R-FILE-012)\n"
+        << "\tdriver = context merge-file --driver %O %A %B %P\n";
+    return static_cast<bool>(out);
+}
 } // namespace
 
 const std::vector<std::string>& template_names()
@@ -245,11 +270,17 @@ Envelope scaffold_project(const std::string& directory, const std::string& templ
     const std::string scene_body =
         editor::serializer::canonicalize(default_scene_json().dump(2)).bytes;
     // The template ships a .gitattributes pinning authored JSON to LF/text (R-FILE-001): the
-    // canonical form is byte-exact, so checkout EOL rewriting must never touch authored files.
+    // canonical form is byte-exact, so checkout EOL rewriting must never touch authored files. It
+    // ALSO maps authored JSON to the `context` merge driver (R-FILE-012): parallel-worktree merges
+    // are structural by default. The driver DEFINITION is installed into .git/config below (L-27:
+    // the engine never invokes git; git invokes the driver).
     const std::string gitattributes_body =
         "# Authored Context files are canonical JSON: UTF-8, LF-only (R-FILE-001).\n"
         "* text=auto\n"
-        "*.json text eol=lf\n";
+        "*.json text eol=lf\n"
+        "# Structural three-way merge for authored JSON (R-FILE-012): git invokes `context\n"
+        "# merge-file` as the `context` merge driver (defined in .git/config by `context new`).\n"
+        "*.json merge=context\n";
 
     {
         std::ofstream project_out(root / "project.json", std::ios::binary | std::ios::trunc);
@@ -265,6 +296,11 @@ Envelope scaffold_project(const std::string& directory, const std::string& templ
         if (!project_out || !scene_out || !attributes_out)
             return Envelope::failure("internal.error", "template files failed to write cleanly");
     }
+
+    // Auto-install the R-FILE-012 structural merge driver definition (L-27: a plain-file write of the
+    // git-config stanza, NOT a git invocation). The .gitattributes mapping already shipped above; this
+    // wires the driver git will invoke when the project is a repo.
+    const bool merge_driver_installed = install_merge_driver(root);
 
     // Prove the scaffold is runnable before reporting success (R-QA-006).
     Envelope runnable = verify_runnable(directory);
@@ -282,7 +318,13 @@ Envelope scaffold_project(const std::string& directory, const std::string& templ
     data.set("runnable", runnable.data().at("runnable"));
     data.set("entities", runnable.data().at("entities"));
     data.set("cameras", runnable.data().at("cameras"));
-    return Envelope::success(std::move(data), runnable.generation_after());
+    data.set("mergeDriverInstalled", Json(merge_driver_installed));
+    Envelope out = Envelope::success(std::move(data), runnable.generation_after());
+    if (!merge_driver_installed)
+        out.add_warning("the R-FILE-012 git merge driver was not installed: no .git/config found. "
+                        "Run `git init` then re-run `context new`, or add the [merge \"context\"] "
+                        "stanza by hand (the .gitattributes mapping is already in place).");
+    return out;
 }
 
 } // namespace context::cli

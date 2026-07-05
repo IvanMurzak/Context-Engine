@@ -1,0 +1,1 @@
+{"clean": false, "conflicts": [{"path": "/entities/0/hp", "class": "field"}, {"path": "/entities/1", "class": "id_add_add"}], "merged": {"entities": [{"id": "e1", "hp": 2}, {"id": "e2", "hp": 5}]}}
