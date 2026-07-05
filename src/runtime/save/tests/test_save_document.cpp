@@ -132,6 +132,20 @@ int main()
         CHECK(!neg_ver.ok);
         CHECK(!neg_ver.diagnostics.empty() && neg_ver.diagnostics.back().code == "save.malformed");
 
+        // A per-component schemaVersion in the header ALSO floors at 1: a 0/negative component stamp
+        // is malformed (it would otherwise be silently re-stamped to the current version with no live
+        // payload to trip migrate_payload's floor check).
+        const SaveParseResult zero_comp_ver = parse_save(
+            R"({"$save": "ctx:save", "saveFormatVersion": 1, "componentVersions": {"ctx:transform": 0}, "entities": []})");
+        CHECK(!zero_comp_ver.ok);
+        CHECK(!zero_comp_ver.diagnostics.empty() &&
+              zero_comp_ver.diagnostics.back().code == "save.malformed");
+        const SaveParseResult neg_comp_ver = parse_save(
+            R"({"$save": "ctx:save", "saveFormatVersion": 1, "componentVersions": {"ctx:transform": -2}, "entities": []})");
+        CHECK(!neg_comp_ver.ok);
+        CHECK(!neg_comp_ver.diagnostics.empty() &&
+              neg_comp_ver.diagnostics.back().code == "save.malformed");
+
         // A non-object component PAYLOAD (not just the outer components map) is malformed: a scalar
         // payload would otherwise silently no-op through the migration runner and get re-stamped.
         const SaveParseResult scalar_payload = parse_save(

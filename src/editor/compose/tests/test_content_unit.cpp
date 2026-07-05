@@ -92,6 +92,24 @@ int main()
         CHECK(units.units[0].unit_id == format_stable_id(units.units[0].identity_hash));
     }
 
+    // --- an instance whose scene fails to resolve contributes NO unit (§2 boundary rule) ---------
+    {
+        MapResolver missing_r;
+        // The root has its own entity (a non-empty root unit) plus ONE instance pointing at a scene
+        // the resolver does not know. flatten suppresses the unresolvable instance best-effort, so it
+        // composes no entities and the partition emits no unit for it (only non-empty units emit).
+        missing_r.add("root.scene.json", R"({
+          "$schema": "ctx:scene", "version": 1,
+          "entities": [{"id": "eeeeeeeeeeeeeee1", "name": "RootEnt", "components": {}}],
+          "instances": [{"id": "fffffffffffffff1", "scene": "missing.scene.json"}]})");
+        ComposedScene missing_scene = flatten("root.scene.json", missing_r);
+        ContentUnitSet missing_units = partition_content_units(missing_scene, missing_r);
+        // Only the root unit is emitted; the failed-to-resolve instance produced no unit.
+        CHECK(missing_units.units.size() == 1);
+        CHECK(missing_units.units[0].is_root);
+        CHECK(unit_with_segment(missing_units, "fffffffffffffff1") == nullptr);
+    }
+
     // --- root unit + two top-level instance units ----------------------------------------------
     MapResolver r;
     r.add("child.scene.json", R"({

@@ -219,5 +219,32 @@ int main()
         CHECK(*save.saved_version("test:sprite") == 1);
     }
 
+    // --- ALL blocking selection findings are gathered, not just the first ------------------------
+    {
+        // Two independent type-level problems: phys:body is unknown (not in the compiled set) and
+        // test:sprite@4 is newer-than (current 3). The runner scans every componentVersions entry
+        // before the all-or-nothing rollback (mirrors migrate_document's selection pass), so BOTH
+        // surface in one attempt rather than one-per-attempt.
+        SaveDocument save;
+        save.component_versions = {{"phys:body", 1}, {"test:sprite", 4}};
+        SaveEntity entity;
+        entity.components =
+            migratetest::parse(R"({"phys:body": {"mass": 1}, "test:sprite": {"id": "spr-1"}})");
+        save.entities = {std::move(entity)};
+
+        const SaveMigrationResult result = migrate_save(save, set);
+        CHECK(!result.ok);
+        bool saw_unknown = false;
+        bool saw_newer = false;
+        for (const migrate::MigrationDiagnostic& d : result.diagnostics)
+        {
+            if (d.code == "save.unknown_component")
+                saw_unknown = true;
+            if (d.code == "schema.newer_than_package")
+                saw_newer = true;
+        }
+        CHECK(saw_unknown && saw_newer); // both selection findings gathered, not just the first
+    }
+
     MIGRATE_TEST_MAIN_END();
 }

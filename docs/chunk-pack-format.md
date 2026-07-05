@@ -101,10 +101,14 @@ re-derivation (R-DATA-005).
 | `rootScene` | string | the flattened root scene the pack was built from | **frozen** |
 | `unitCount` | u64 | number of directory entries | **frozen** |
 
-The **manifest** the M2 emission produces (`content_units_json`) is exactly the §3.1 directory
-(the frozen columns) plus the pack header's `rootScene`/`unitCount`; the reserved columns are added
-by the M8 packer. That manifest is the artifact the M8 implementation reads to lay out chunks, and
-it is what the M2 tests pin, so a future change to the boundary rule is a reviewed diff on a golden.
+The **manifest** the M2 emission produces (`content_units_json`) carries, per unit, the §3.1
+directory's frozen columns (`unitId`/`parentUnit`/`isRoot`/`sourceScene`/`entityCount`) plus an
+`identities` array — the composed identities of the unit's entities (the §3.2 chunk-body contract,
+inlined in the M2 manifest because M2 emits no separate chunk bodies) — all wrapped by the pack
+header's `rootScene`/`unitCount`; the reserved directory columns are added by the M8 packer, which
+also moves `identities` into the chunk body proper. That manifest is the artifact the M8
+implementation reads to lay out chunks, and it is what the M2 tests pin, so a future change to the
+boundary rule is a reviewed diff on a golden.
 
 ## 4. Independent load / unload / patch
 

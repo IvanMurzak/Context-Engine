@@ -240,7 +240,18 @@ SaveParseResult parse_save(std::string_view bytes)
                           "componentVersions[\"" + m.key + "\"] is not an integer");
                 return result;
             }
-            result.save.component_versions.emplace_back(m.key, as_integer(m.value));
+            const std::int64_t version = as_integer(m.value);
+            // Mirror the saveFormatVersion floor: a per-component schemaVersion also starts at 1. A
+            // 0/negative stamp with no live payload of that type would otherwise never reach
+            // migrate_payload's floor check and get silently re-stamped to the current version.
+            if (version < 1)
+            {
+                push_diag(result.diagnostics, "save.malformed",
+                          "componentVersions[\"" + m.key + "\"] is " + std::to_string(version) +
+                              " but component schema versions start at 1");
+                return result;
+            }
+            result.save.component_versions.emplace_back(m.key, version);
         }
     }
 

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace context::runtime::save
@@ -25,6 +26,26 @@ namespace
         if (m.key == key)
             return &m.value;
     return nullptr;
+}
+
+// JSON-pointer segment escaping (RFC 6901): "~" -> "~0", "/" -> "~1". A component type/key is
+// file-controlled (a save is loadable and hand-editable), so a segment carrying '/' or '~' must be
+// escaped to keep a diagnostic pointer a valid RFC 6901 reference — mirrors the sibling
+// migrate_document.cpp's escape_segment.
+[[nodiscard]] std::string escape_pointer_segment(std::string_view segment)
+{
+    std::string out;
+    out.reserve(segment.size());
+    for (const char c : segment)
+    {
+        if (c == '~')
+            out += "~0";
+        else if (c == '/')
+            out += "~1";
+        else
+            out += c;
+    }
+    return out;
 }
 
 void push_diag(std::vector<MigrationDiagnostic>& diagnostics, std::string code, std::string message,
@@ -56,7 +77,8 @@ SaveMigrationResult migrate_save(SaveDocument& save, const migrate::MigrationSet
                 push_diag(result.diagnostics, "save.malformed",
                           "entity component \"" + comp.key +
                               "\" is not stamped in the save header componentVersions",
-                          "/entities/" + std::to_string(i) + "/components/" + comp.key);
+                          "/entities/" + std::to_string(i) + "/components/" +
+                              escape_pointer_segment(comp.key));
                 result.ok = false;
             }
         }
@@ -78,9 +100,9 @@ SaveMigrationResult migrate_save(SaveDocument& save, const migrate::MigrationSet
                       "the save carries component \"" + type +
                           "\" which this build's compiled component set does not include "
                           "(R-DATA-005)",
-                      "/componentVersions/" + type);
+                      "/componentVersions/" + escape_pointer_segment(type));
             result.ok = false;
-            break;
+            continue;
         }
         if (saved_version > current)
         {
@@ -93,9 +115,9 @@ SaveMigrationResult migrate_save(SaveDocument& save, const migrate::MigrationSet
                       "\"" + type + "\" is stamped version " + std::to_string(saved_version) +
                           " but this build's schema is version " + std::to_string(current) +
                           "; the save was written by a newer build",
-                      "/componentVersions/" + type);
+                      "/componentVersions/" + escape_pointer_segment(type));
             result.ok = false;
-            break;
+            continue;
         }
         if (saved_version < current && (current - saved_version) > options.back_compat_scope)
         {
@@ -104,10 +126,16 @@ SaveMigrationResult migrate_save(SaveDocument& save, const migrate::MigrationSet
                           " but this build is version " + std::to_string(current) +
                           ", beyond the declared " + std::to_string(options.back_compat_scope) +
                           "-version save back-compat scope (R-DATA-005)",
-                      "/componentVersions/" + type);
+                      "/componentVersions/" + escape_pointer_segment(type));
             result.ok = false;
-            break;
+            continue;
         }
+
+        // A blocking selection finding on an earlier type already refuses the whole save; keep
+        // scanning to surface EVERY type-level finding (as the sibling migrate_document's selection
+        // pass does), but migrate no payloads — the save rolls back regardless.
+        if (!result.ok)
+            continue;
 
         // saved_version == current (a no-op) or older-within-scope: migrate every entity's payload
         // of this type through the SHARED per-payload primitive (the editor's parse-time mechanism).
@@ -116,7 +144,8 @@ SaveMigrationResult migrate_save(SaveDocument& save, const migrate::MigrationSet
             JsonValue* payload = find_member(save.entities[i].components, type);
             if (payload == nullptr)
                 continue;
-            const std::string pointer = "/entities/" + std::to_string(i) + "/components/" + type;
+            const std::string pointer =
+                "/entities/" + std::to_string(i) + "/components/" + escape_pointer_segment(type);
             if (!migrate::migrate_payload(set, type, saved_version, *payload, options.budget, pointer,
                                           result.diagnostics))
             {
