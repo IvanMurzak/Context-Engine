@@ -1,0 +1,66 @@
+src/editor/kinds/include/context/editor/kinds/tilemap.h
+  s_e3239cf02087b8::t_d4b5e379bfe786 1-47
+src/editor/schema/src/validator.cpp
+  s_e3239cf02087b8::t_cc034d6066da99 8
+  s_e3239cf02087b8::t_c04446d5d4f212 397-407
+src/editor/kinds/src/tilemap.cpp
+  s_e3239cf02087b8::t_c08b72993ff9f7 1-155
+src/editor/kinds/include/context/editor/kinds/diagnostic.h
+  s_e3239cf02087b8::t_2a75775ad63f26 1-35
+src/editor/kinds/CMakeLists.txt
+  s_e3239cf02087b8::t_01cdd65694d22d 1-53
+src/CMakeLists.txt
+  s_e3239cf02087b8::t_ab3420a3472afe 243-251
+src/editor/schema/tests/test_kind_schema.cpp
+  s_e3239cf02087b8::t_44e5859fcf75c7 58-59
+  s_e3239cf02087b8::t_2c5c7d8947cb38 75-81
+  s_e3239cf02087b8::t_4b031fd0bdf2c5 137,140-141,144-145,148-163
+src/editor/schema/include/context/editor/schema/vocabulary.h
+  s_e3239cf02087b8::t_4f70e8c1aa571b 22
+  s_e3239cf02087b8::t_bc8e5d253a50b1 105-120
+src/editor/schema/src/vocabulary.cpp
+  s_e3239cf02087b8::t_1733abbb946e45 241-248
+src/editor/kinds/README.md
+  s_e3239cf02087b8::t_c419e1e8730e16 1-53
+src/editor/schema/tests/test_validator.cpp
+  s_e3239cf02087b8::t_3fa3aac8217115 73
+  s_e3239cf02087b8::t_8451e0cdb3c1eb 178
+  s_e3239cf02087b8::t_bbd801f54c5cf8 308-336
+src/editor/kinds/tests/test_string_table.cpp
+  s_e3239cf02087b8::t_c89f25c14176a5 1-321
+src/editor/schema/src/kind_schema.cpp
+  s_e3239cf02087b8::t_ee416dd524a042 41
+  s_e3239cf02087b8::t_96a98f9d28bfcf 524-526
+  s_e3239cf02087b8::t_a36b4153a7a700 139-148,150-151
+  s_e3239cf02087b8::t_22ec26a7778903 613-614
+  s_e3239cf02087b8::t_a96dac273767e7 316-467
+src/editor/kinds/include/context/editor/kinds/string_table.h
+  s_e3239cf02087b8::t_0111b39b4d328a 1-87
+src/editor/kinds/tests/kinds_test.h
+  s_e3239cf02087b8::t_8dce6d4a1b8555 1-27
+src/editor/contract/src/error_catalog.cpp
+  s_e3239cf02087b8::t_50426d686898b5 145-172
+src/editor/kinds/tests/test_tilemap.cpp
+  s_e3239cf02087b8::t_64897147819156 1-248
+src/editor/schema/include/context/editor/schema/kind_schema.h
+  s_e3239cf02087b8::t_1773e4be2792b7 21-26
+src/editor/kinds/src/string_table.cpp
+  s_e3239cf02087b8::t_081b4e00d94b77 100-104
+  s_e3239cf02087b8::t_9597a2e4b988da 1-99,105-345
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "eeea73357b7e0f99c1e8443bc1ded8168d44c281",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
