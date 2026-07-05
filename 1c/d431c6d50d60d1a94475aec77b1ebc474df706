@@ -1,0 +1,149 @@
+src/editor/merge/src/three_way_merge.cpp
+  s_e3239cf02087b8::t_e1bd3c55b02dfb 1-6,9-137,140-345,347,354-440,444-447,456-532
+  s_e3239cf02087b8::t_b9c2372d7e88fa 7-8
+  s_e3239cf02087b8::t_19706111cda157 138-139
+  s_e3239cf02087b8::t_3458e282001f0a 346,348-353
+  s_e3239cf02087b8::t_959a02ea116ae6 441-443,448-455
+src/editor/merge/include/context/editor/merge/resolve.h
+  s_e3239cf02087b8::t_4a77210efb7bb4 1-32
+src/editor/merge/src/rekey.cpp
+  s_e3239cf02087b8::t_c34d5b23ccd261 1-238
+src/editor/merge/tests/corpus/.gitattributes
+  s_e3239cf02087b8::t_99ee0767c235bf 1-4
+src/editor/merge/CMakeLists.txt
+  s_e3239cf02087b8::t_bae0f9638f5857 11-12
+  s_e3239cf02087b8::t_cc950d1e63e8bf 1-10,13-69
+src/editor/merge/README.md
+  s_e3239cf02087b8::t_e7811a14571e76 1-52
+src/editor/merge/tests/merge_test.h
+  s_e3239cf02087b8::t_27248a7881992f 1-67
+src/CMakeLists.txt
+  s_e3239cf02087b8::t_70a00628cc4dbd 214-222
+src/editor/merge/include/context/editor/merge/conflict.h
+  s_e3239cf02087b8::t_90cb2be4d5e64f 1-61
+src/cli/src/merge_command.cpp
+  s_e3239cf02087b8::t_51e4ae8b6eb3c5 1-510
+src/editor/contract/src/error_catalog.cpp
+  s_e3239cf02087b8::t_520333bf5d7037 83-117
+src/cli/src/app.cpp
+  s_e3239cf02087b8::t_df161cee20fdd0 10
+  s_e3239cf02087b8::t_a19c79c00b3f00 108-120
+src/cli/CMakeLists.txt
+  s_e3239cf02087b8::t_528109b1b08356 39-42
+  s_e3239cf02087b8::t_d8350cba3e4097 15
+  s_e3239cf02087b8::t_f032d237389c3b 66
+src/editor/merge/src/resolve.cpp
+  s_e3239cf02087b8::t_c222ee40bbbfd6 1-134
+src/editor/merge/src/pointer_format.h
+  s_e3239cf02087b8::t_257c96a0ea9f51 1-36
+src/editor/merge/tests/test_corpus.cpp
+  s_e3239cf02087b8::t_2f8b546e659686 1-187
+src/editor/merge/tests/test_rekey.cpp
+  s_e3239cf02087b8::t_634e005081f27e 1-9,11-107
+  s_e3239cf02087b8::t_351853886b5a3b 10
+src/editor/contract/src/registry.cpp
+  s_e3239cf02087b8::t_7a6e6980fb83ec 248-300
+src/editor/merge/include/context/editor/merge/three_way_merge.h
+  s_e3239cf02087b8::t_b7c1a0f0807c43 1-19,26-27,30-68
+  s_e3239cf02087b8::t_23763223cafbf2 20-25,28-29
+src/editor/merge/include/context/editor/merge/rekey.h
+  s_e3239cf02087b8::t_322ccc78aefe42 1-50
+src/editor/merge/tests/test_three_way_merge.cpp
+  s_e3239cf02087b8::t_d6df11c258c189 89-90
+  s_e3239cf02087b8::t_b47a616f8d0d8e 1-7,9-88,91-290
+  s_e3239cf02087b8::t_41fdab866756c0 8
+src/cli/src/scaffold.cpp
+  s_e3239cf02087b8::t_46fc7011758826 119-143
+  s_e3239cf02087b8::t_1841ed76e5d238 273-276,280-283
+  s_e3239cf02087b8::t_669d750d1b8d4a 300-304,321-327
+src/cli/tests/test_merge_command.cpp
+  s_e3239cf02087b8::t_91b68b02994f97 1-179
+src/editor/merge/tests/test_git_driver.cpp
+  s_e3239cf02087b8::t_45647ce7548e6f 98-102
+  s_e3239cf02087b8::t_26a266ddce0543 59-64,66
+  s_e3239cf02087b8::t_5f9157497708db 143
+  s_e3239cf02087b8::t_a7e9ae05825930 1-24,31-58,65,67-97,103-106,110,113-117,119-142,144-145,147-149,151-152,154-156,158-193
+  s_e3239cf02087b8::t_9e0521e7fd5cbe 150
+  s_e3239cf02087b8::t_6a14b3bef864c3 153
+  s_e3239cf02087b8::t_e90d7f36f426a8 146
+  s_e3239cf02087b8::t_d2c005c5caa803 25-30
+  s_e3239cf02087b8::t_f8c49246cc5249 157
+  s_e3239cf02087b8::t_f51ad1dc474adb 118
+  s_e3239cf02087b8::t_39e3cf993ca4d3 107-109,111-112
+src/cli/include/context/cli/merge_command.h
+  s_e3239cf02087b8::t_176832e7564ca6 1-43
+src/editor/merge/tests/corpus/binary-sidecar/expected.txt
+  s_e3239cf02087b8::t_e8f5ec8b1d5a9b 1
+src/editor/merge/tests/corpus/delete-modify/base.json
+  s_e3239cf02087b8::t_5f58ecd8dbe4cf 1
+src/editor/merge/tests/corpus/delete-modify/expected.json
+  s_e3239cf02087b8::t_840de9cc2c7429 1
+src/editor/merge/tests/corpus/delete-modify/ours.json
+  s_e3239cf02087b8::t_58a88d30bb5b36 1
+src/editor/merge/tests/corpus/delete-modify/theirs.json
+  s_e3239cf02087b8::t_47d0a2c34a6e1c 1
+src/editor/merge/tests/corpus/disjoint-fields/base.json
+  s_e3239cf02087b8::t_71f016c54c4b62 1
+src/editor/merge/tests/corpus/disjoint-fields/expected.json
+  s_e3239cf02087b8::t_3fe3fa2fd8b12b 1
+src/editor/merge/tests/corpus/disjoint-fields/ours.json
+  s_e3239cf02087b8::t_71cb8504871920 1
+src/editor/merge/tests/corpus/disjoint-fields/theirs.json
+  s_e3239cf02087b8::t_4ff1b8c18a616b 1
+src/editor/merge/tests/corpus/field-conflict/base.json
+  s_e3239cf02087b8::t_bed7f27caf7624 1
+src/editor/merge/tests/corpus/field-conflict/expected.json
+  s_e3239cf02087b8::t_38a25a58d16a5a 1
+src/editor/merge/tests/corpus/field-conflict/ours.json
+  s_e3239cf02087b8::t_c33e7f47b5cdb2 1
+src/editor/merge/tests/corpus/field-conflict/theirs.json
+  s_e3239cf02087b8::t_42e0eaf449a9b6 1
+src/editor/merge/tests/corpus/id-add-add/base.json
+  s_e3239cf02087b8::t_1f7c2baff34069 1
+src/editor/merge/tests/corpus/id-add-add/expected.json
+  s_e3239cf02087b8::t_1709e4db83d6b2 1
+src/editor/merge/tests/corpus/id-add-add/ours.json
+  s_e3239cf02087b8::t_b6f56acd0eef1d 1
+src/editor/merge/tests/corpus/id-add-add/theirs.json
+  s_e3239cf02087b8::t_a6461ab4ba58fd 1
+src/editor/merge/tests/corpus/id-reorder/base.json
+  s_e3239cf02087b8::t_5809c73657b31d 1
+src/editor/merge/tests/corpus/id-reorder/expected.json
+  s_e3239cf02087b8::t_e61cf601678b3e 1
+src/editor/merge/tests/corpus/id-reorder/ours.json
+  s_e3239cf02087b8::t_60ca33308d6a60 1
+src/editor/merge/tests/corpus/id-reorder/theirs.json
+  s_e3239cf02087b8::t_b3e6304528e38c 1
+src/editor/merge/tests/corpus/meta-guid/base.json
+  s_e3239cf02087b8::t_2043a9e462f57a 1
+src/editor/merge/tests/corpus/meta-guid/expected.json
+  s_e3239cf02087b8::t_bc863884e19e86 1
+src/editor/merge/tests/corpus/meta-guid/ours.json
+  s_e3239cf02087b8::t_dd4a2250b12a0f 1
+src/editor/merge/tests/corpus/meta-guid/theirs.json
+  s_e3239cf02087b8::t_6e575f5817db74 1
+src/editor/merge/tests/corpus/newer-stamped/base.json
+  s_e3239cf02087b8::t_971fa9889eea86 1
+src/editor/merge/tests/corpus/newer-stamped/expected.json
+  s_e3239cf02087b8::t_75b666a4e1f2f8 1
+src/editor/merge/tests/corpus/newer-stamped/ours.json
+  s_e3239cf02087b8::t_df22532c8fc32b 1
+src/editor/merge/tests/corpus/newer-stamped/theirs.json
+  s_e3239cf02087b8::t_50c42ff62a1a62 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1cd431c6d50d60d1a94475aec77b1ebc474df706",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
