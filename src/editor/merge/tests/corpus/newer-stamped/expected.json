@@ -1,0 +1,1 @@
+{"clean": false, "wholeFile": true, "floor": {"kind_versions": {"ctx:scene": 1}}, "conflicts": [{"path": "", "class": "newer_stamped"}], "merged": {"$schema": "ctx:scene", "version": 1, "entities": [{"id": "e1"}]}}

@@ -268,6 +268,59 @@ Registry::Registry()
          {"to", "path", true, "The new project-relative asset path."}},
         /*flags=*/{}, /*implemented=*/false));
 
+    // M2 wave 4 (issue #59): the structural three-way merge family (R-FILE-012 / L-26/L-33/L-37) —
+    // the convergence primitive for worktree-per-agent parallelism. Registered here at the END of the
+    // stable verbs block (this anchor, not the operational block below) so concurrent M2 siblings
+    // inserting verbs merge cleanly. Backed by src/editor/merge/ + src/cli/merge_command.cpp.
+    verbs_.push_back(make_verb(
+        "", "", "merge-file",
+        "Schema-aware structural three-way merge over authored JSON (R-FILE-012): field-path "
+        "granular, id-based merge identity (L-33), machine-readable conflict envelope — never "
+        "last-writer-wins, never text conflict markers. `--driver` is git's merge-driver entry.",
+        /*params=*/
+        {{"base", "path", true, "The common-ancestor file (git's %O)."},
+         {"ours", "path", true, "The current-branch file (git's %A; also the default output)."},
+         {"theirs", "path", true, "The incoming-branch file (git's %B)."},
+         {"pathname", "path", false,
+          "The real repository path (git's %P); names the conflict sidecar. Defaults to --output."}},
+        /*flags=*/
+        {{"output", "path", "Where to write the merged result; defaults to the ours/%A path.", false},
+         {"driver", "bool",
+          "git merge-driver mode: write the result to the ours/%A path and exit non-zero on "
+          "unresolved conflicts (L-27: git invokes the driver, never the reverse).",
+          false}},
+        /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "", "resolve-conflict",
+        "Apply one resolution to a merged file per conflict entry (R-FILE-012): take a whole side "
+        "or write an explicit value, looping until the conflict sidecar empties.",
+        /*params=*/{{"file", "path", true, "The merged file to resolve in place."}},
+        /*flags=*/
+        {{"path", "string", "The RFC 6901 field-path of the conflict entry to resolve.", false},
+         {"take", "string", "Take one whole side of the conflict: 'ours' or 'theirs'.", false},
+         {"value", "json", "Write an explicit JSON value at --path (instead of --take).", false}},
+        /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "", "re-key",
+        "Mint a fresh stable id for a duplicated intra-file entity and rewrite its unambiguous "
+        "in-file references (R-FILE-012(c) convergence remedy for a duplicate-id).",
+        /*params=*/{{"file", "path", true, "The file to re-key in place."}},
+        /*flags=*/
+        {{"at", "string", "RFC 6901 pointer to the object to re-key.", false},
+         {"id", "string", "Re-key the last holder of this duplicated intra-file id.", false}},
+        /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "", "validate",
+        "The post-merge convergence gate (R-FILE-012): report the duplicate-intra-file-id "
+        "diagnostic (merge.duplicate_id) across a file or the project tree.",
+        /*params=*/
+        {{"path", "path", false,
+          "File or directory to validate (recursive over *.json); defaults to the --project root."}},
+        /*flags=*/{}, /*implemented=*/true));
+
     // --- the OPERATIONAL daemon-driver surface (R-CLI-009 honesty) ------------------------------
     // These RPC methods are genuinely served by a live daemon's method backend (KernelServer) — the
     // cross-process analogue of `context editor smoke`. They are registered here so

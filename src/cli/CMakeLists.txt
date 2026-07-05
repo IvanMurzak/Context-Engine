@@ -12,6 +12,7 @@ add_library(context_cli STATIC
     src/daemon_command.cpp
     src/editor_driver.cpp
     src/fetch_command.cpp
+    src/merge_command.cpp
     src/migrate_command.cpp
     src/scaffold.cpp
     src/set_command.cpp
@@ -41,6 +42,10 @@ target_link_libraries(context_cli PRIVATE context_compose context_filesync)
 # set reaches the module's include path through this target.
 target_link_libraries(context_cli PUBLIC context_migrate)
 
+# The M2 wave 4 merge family (src/editor/merge/, issue #59): PRIVATE — merge_command.h exposes only
+# the contract Envelope, so no merge type appears in the CLI's public headers.
+target_link_libraries(context_cli PRIVATE context_merge)
+
 # Self-contained GCC runtime for the CLI executables. context_cli uses std::filesystem (the
 # `context new` scaffolder), whose libstdc++ symbols live in a NEWER libstdc++-6.dll; on a MinGW
 # host a stale libstdc++-6.dll elsewhere on PATH can shadow the toolchain's and be loaded first,
@@ -64,6 +69,7 @@ set(_context_cli_tests
     test_bench_command
     test_cli
     test_editor_driver
+    test_merge_command
     test_migrate_command
     test_scaffold
     test_set_command)
@@ -82,6 +88,12 @@ endforeach()
 # byte), so it links the serializer + schema modules directly (PRIVATE in context_cli, so their
 # include paths do not propagate through it).
 target_link_libraries(context_cli_test_scaffold PRIVATE context_serializer context_schema)
+
+# test_merge_command consumes the R-QA-011 binary-sidecar corpus fixtures (the non-JSON conflict
+# class the engine-level corpus test cannot exercise — binary whole-file merge lives in the CLI
+# layer), so the committed base.bin/ours.bin/theirs.bin are the source of truth, not inline literals.
+target_compile_definitions(context_cli_test_merge_command
+    PRIVATE CONTEXT_MERGE_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../editor/merge/tests/corpus")
 
 # --- cross-process e2e (R-QA-013 / issue #34): spawn a REAL `context daemon` process + a SEPARATE
 # `context attach` process; the attach process drives the daemon over the wire and a 2nd `context
