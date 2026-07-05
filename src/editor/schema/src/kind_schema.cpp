@@ -38,7 +38,7 @@ constexpr std::array<std::string_view, 12> kSchemaKeywords = {
 {
     return std::find(kSchemaKeywords.begin(), kSchemaKeywords.end(), key) !=
                kSchemaKeywords.end() ||
-           key == kKeyRef || key == kKeyUnion;
+           key == kKeyRef || key == kKeyUnion || key == kKeySidecar;
 }
 
 void add_problem(std::vector<std::string>& problems, const std::string& pointer,
@@ -136,10 +136,19 @@ void check_schema_node(const JsonValue& node, const std::string& pointer, bool i
             }
     }
 
-    // A field is a ref, a union, or a semantic value — never two at once.
-    if ((semantic != nullptr) + (ref != nullptr) + (union_spec != nullptr) > 1)
+    const JsonValue* sidecar = find_member(node, kKeySidecar);
+    if (sidecar != nullptr && (sidecar->type != JsonValue::Type::string ||
+                               !is_sidecar_content_type(sidecar->string_value)))
+        add_problem(problems, pointer + "/" + std::string(kKeySidecar),
+                    "x-ctx-sidecar names the sidecar's logical content-type as one lowercase "
+                    "identifier ([a-z][a-z0-9_-]*)");
+
+    // A field is a ref, a union, a semantic value, or a binary-sidecar ref — never two at once.
+    if ((semantic != nullptr) + (ref != nullptr) + (union_spec != nullptr) + (sidecar != nullptr) >
+        1)
         add_problem(problems, pointer,
-                    "x-ctx-type, x-ctx-ref, and x-ctx-union are mutually exclusive on one field");
+                    "x-ctx-type, x-ctx-ref, x-ctx-union, and x-ctx-sidecar are mutually exclusive "
+                    "on one field");
 
     const JsonValue* properties = find_member(node, "properties");
     if (properties != nullptr)
@@ -305,6 +314,158 @@ constexpr std::string_view kProjectSchemaJson = R"({
   }
 })";
 
+// The tilemap content kind (R-2D-003, M2 wave 4): the 2D backbone. Layers of chunked cell regions
+// whose heavy per-cell tile-id grids live in binary SIDECARS (L-33 — the x-ctx-sidecar day-one
+// consumer), painted from atlas tile-sets referenced by x-ctx-ref. Id-keyed child collections are
+// arrays of objects carrying a stable `id` member (L-33 / R-FILE-001 — never map-keyed). CLI/file
+// authoring works from M2; the painting GUI trails at M8.5 (L-55). Chunk cell-grid semantics
+// (the ~1 MB split-nudge, id-uniqueness) live in src/editor/kinds/tilemap.h.
+constexpr std::string_view kTilemapSchemaJson = R"({
+  "$id": "ctx:tilemap",
+  "version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tileSize", "tileSets", "layers"],
+  "description": "A 2D tilemap (R-2D-003, L-32/L-33): back-to-front layers of chunked cell regions whose heavy per-cell tile-id grids live in binary sidecars, painted from atlas tile-sets.",
+  "properties": {
+    "notes": {"description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."},
+    "tileSize": {"type": "array", "items": {"type": "number"}, "x-ctx-units": "m", "x-ctx-storage": "f32x2", "description": "World size of one cell, meters (SI units law): [width, height]."},
+    "grid": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional overall grid extent, in CELLS (dimensionless counts).",
+      "properties": {
+        "notes": {"description": "Schema-blessed annotations."},
+        "width": {"type": "integer", "x-ctx-units": "1", "x-ctx-storage": "u32", "description": "Grid width in cells."},
+        "height": {"type": "integer", "x-ctx-units": "1", "x-ctx-storage": "u32", "description": "Grid height in cells."}
+      }
+    },
+    "tileSets": {
+      "type": "array",
+      "description": "The atlases tiles are painted from — an id-keyed stable collection (L-33 / R-FILE-001: array of objects, never a map).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "atlas", "firstTileId"],
+        "properties": {
+          "notes": {"description": "Schema-blessed annotations."},
+          "id": {"type": "string", "description": "Stable intra-file id: collision-resistant random lowercase hex, >= 64-bit, file-scoped, never sequential (L-33)."},
+          "name": {"type": "string", "description": "Human-readable tile-set name."},
+          "atlas": {"x-ctx-ref": "ctx:atlas", "description": "Typed reference to the atlas asset (L-34 dual form); target-kind enforced through the asset-db meta lookup once an atlas kind lands (L-36 / R-DATA-006)."},
+          "firstTileId": {"type": "integer", "x-ctx-units": "1", "x-ctx-storage": "u32", "description": "Global tile-id of this set's first tile; per-set id ranges never overlap (Tiled-style offset)."},
+          "tileCount": {"type": "integer", "x-ctx-units": "1", "x-ctx-storage": "u32", "description": "Tiles in the atlas; the set spans global ids [firstTileId, firstTileId + tileCount)."}
+        }
+      }
+    },
+    "layers": {
+      "type": "array",
+      "description": "Draw layers, back-to-front — an id-keyed stable collection (L-33 / R-FILE-001). Each layer's cells are chunked; each chunk's packed tile-id grid lives in a binary sidecar.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "chunks"],
+        "properties": {
+          "notes": {"description": "Schema-blessed annotations."},
+          "id": {"type": "string", "description": "Stable intra-file id (L-33)."},
+          "name": {"type": "string"},
+          "opacity": {"type": "number", "x-ctx-units": "1", "x-ctx-storage": "f32", "description": "Layer opacity in [0, 1] (dimensionless)."},
+          "visible": {"type": "boolean", "description": "Whether the layer is drawn (default true)."},
+          "chunks": {
+            "type": "array",
+            "description": "Cell-grid regions. The heavy per-cell tile-id data lives OUT of the JSON in a binary sidecar (L-33), sized under the ~1 MB split-nudge ceiling.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["region", "cells"],
+              "properties": {
+                "notes": {"description": "Schema-blessed annotations."},
+                "region": {"type": "array", "items": {"type": "integer"}, "x-ctx-units": "1", "x-ctx-storage": "i32x4", "description": "Chunk bounds in CELL coordinates: [x, y, width, height] (dimensionless)."},
+                "cells": {"x-ctx-sidecar": "tilemap-cells", "description": "Binary sidecar of the packed per-cell tile ids (width*height u32 values), sized under the split-nudge ceiling (L-33)."}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+})";
+
+// The string-table content kind (R-I18N-001, M2 wave 4): locale variants, fallback chains, and
+// ICU/CLDR plural rules. Downstream systems (UI, dialogue) bind string KEYS from day one. Locales,
+// keys, and per-locale values are all id-keyed stable collections (arrays keyed by `locale` / `key`
+// / `locale` — L-33 / R-FILE-001, never maps); the CLDR plural form set uses the FIXED category
+// vocabulary (zero/one/two/few/many/other) as declared properties. A value is EXACTLY ONE of `text`
+// or `plural` — the dialect has no oneOf, so that single-choice rule (and fallback-cycle / plural
+// completeness / id-uniqueness) is enforced by the semantic validator in src/editor/kinds/string_table.h.
+constexpr std::string_view kStringTableSchemaJson = R"({
+  "$id": "ctx:string-table",
+  "version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sourceLocale", "locales", "keys"],
+  "description": "A localization string table (R-I18N-001, L-32): locale variants, fallback chains, and ICU/CLDR plural rules. Downstream systems bind string KEYS from day one.",
+  "properties": {
+    "notes": {"description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."},
+    "sourceLocale": {"type": "string", "description": "BCP-47 tag of the authoritative source locale (the implicit final fallback for every key)."},
+    "locales": {
+      "type": "array",
+      "description": "Declared locales + their fallback chains — an id-keyed stable collection (L-33 / R-FILE-001: array keyed by `locale`, never a map).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["locale"],
+        "properties": {
+          "notes": {"description": "Schema-blessed annotations."},
+          "locale": {"type": "string", "description": "BCP-47 locale tag (e.g. \"en\", \"pt-BR\") — the stable key."},
+          "name": {"type": "string", "description": "Human-readable locale name."},
+          "fallback": {"type": "array", "items": {"type": "string"}, "description": "Ordered fallback chain: locale tags tried, in order, when a key has no value for this locale."}
+        }
+      }
+    },
+    "keys": {
+      "type": "array",
+      "description": "The string entries — an id-keyed stable collection (L-33 / R-FILE-001: array keyed by `key`). Downstream systems bind these keys.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "values"],
+        "properties": {
+          "notes": {"description": "Schema-blessed annotations."},
+          "key": {"type": "string", "description": "The stable string key downstream systems bind (the message id)."},
+          "values": {
+            "type": "array",
+            "description": "Per-locale translations — an id-keyed stable collection keyed by `locale`. A value is EXACTLY ONE of `text` (simple) or `plural` (CLDR categories).",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["locale"],
+              "properties": {
+                "notes": {"description": "Schema-blessed annotations."},
+                "locale": {"type": "string", "description": "The locale this translation targets."},
+                "text": {"type": "string", "description": "The simple (non-plural) translation."},
+                "plural": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "CLDR plural forms; `other` is the required catch-all. The engine selects a category by locale + count (R-I18N-001 ICU-style rules).",
+                  "properties": {
+                    "notes": {"description": "Schema-blessed annotations."},
+                    "zero": {"type": "string"},
+                    "one": {"type": "string"},
+                    "two": {"type": "string"},
+                    "few": {"type": "string"},
+                    "many": {"type": "string"},
+                    "other": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+})";
+
 [[nodiscard]] KindSchema compile_engine_schema(std::string_view schema_json)
 {
     std::vector<std::string> problems;
@@ -361,6 +522,9 @@ void collect_fields(const JsonValue& node, const std::string& data_pointer, Json
                 set_member(entry, "storage", make_string(storage->string_value));
             if (const JsonValue* ref = find_member(property.value, kKeyRef); ref != nullptr)
                 set_member(entry, "ref", make_string(ref->string_value));
+            if (const JsonValue* sidecar = find_member(property.value, kKeySidecar);
+                sidecar != nullptr)
+                set_member(entry, "sidecar", make_string(sidecar->string_value));
             if (union_spec != nullptr)
             {
                 JsonValue tags;
@@ -447,6 +611,8 @@ const SchemaSet& engine_schemas()
         SchemaSet s;
         s.add(compile_engine_schema(kSceneSchemaJson));
         s.add(compile_engine_schema(kProjectSchemaJson));
+        s.add(compile_engine_schema(kTilemapSchemaJson));
+        s.add(compile_engine_schema(kStringTableSchemaJson));
         return s;
     }();
     return set;
