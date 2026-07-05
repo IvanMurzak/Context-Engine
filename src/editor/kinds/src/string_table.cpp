@@ -2,6 +2,7 @@
 
 #include "context/editor/kinds/string_table.h"
 
+#include <algorithm>
 #include <functional>
 #include <string>
 
@@ -67,10 +68,7 @@ const JsonValue* fallback_of(const JsonValue& doc, std::string_view tag)
 
 bool contains(const std::vector<std::string>& v, const std::string& s)
 {
-    for (const std::string& e : v)
-        if (e == s)
-            return true;
-    return false;
+    return std::find(v.begin(), v.end(), s) != v.end();
 }
 
 } // namespace

@@ -161,6 +161,13 @@ int main()
             kinds::analyze_tilemap(parse(tilemap_one_chunk(0, 0, 0, 16)));
         CHECK(kinds::has_code(d, "tilemap.region_invalid"));
         CHECK(d.front().pointer == "/layers/0/chunks/0/region");
+
+        // A NEGATIVE extent is a distinct invalid class from zero — it must also raise region_invalid
+        // through the full analyze_tilemap path (not only the tilemap_chunk_bytes(16, -1) unit check).
+        std::vector<kinds::KindDiagnostic> neg =
+            kinds::analyze_tilemap(parse(tilemap_one_chunk(0, 0, -1, 16)));
+        CHECK(kinds::has_code(neg, "tilemap.region_invalid"));
+        CHECK(neg.front().pointer == "/layers/0/chunks/0/region");
     }
 
     // --- analyze_tilemap: stable-id uniqueness (L-33) -------------------------------------------

@@ -24,7 +24,8 @@ live **out of the JSON** in binary sidecars (L-33, the `x-ctx-sidecar` day-one c
   payload exceeds `kTilemapSplitCeilingBytes`. Uses the sidecar's **measured** on-disk size when the
   caller supplies it, else estimates from `region area × 4 bytes/cell`.
 - **`tilemap.region_invalid`** — a non-positive chunk region extent.
-- **`tilemap.id_duplicate`** — a repeated stable `id` across tile-sets or layers (L-33 ids are unique).
+- **`tilemap.id_duplicate`** — a repeated stable `id` within the tile-sets collection, or within the
+  layers collection (L-33 ids are unique per collection, not across the two).
 
 ## String-table (`ctx:string-table`, R-I18N-001)
 
