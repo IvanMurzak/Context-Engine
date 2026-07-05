@@ -39,7 +39,7 @@ Every gate carries exactly one written red-X policy:
 - **quarantine-with-issue** — a known-flaky gate, auto-quarantined WITH an owned issue, kept running +
   visible for trend, **never silently retried to green**.
 
-## Gates (M1 snapshot)
+## Gates (M1 + M2 snapshot)
 
 | Gate | Requirement | Runner class | Tier | Red-X policy | CI job |
 |---|---|---|---|---|---|
@@ -82,7 +82,11 @@ file-sync, and the R-QA-010 fault-injection harness) ride the `build` gate — t
 registrations run on every `build (<os>)` leg. The five `m1-exit-*` gates are the ROADMAP §1
 M1 Exit criteria themselves (issue #36): the `m1-exit-<n>-*` ctest family under
 `src/tests/integration/`, run by the dedicated "M1 exit gate (5 criteria, blocking)" step of the
-`build` job on all three OS legs (the runner class shown is the representative leg).
+`build` job on all three OS legs (the runner class shown is the representative leg). The six
+`m2-exit-*` gates are the ROADMAP §1 M2 Exit criteria (issue #68): the `m2-exit-*` ctest family
+under `src/tests/integration/`, run by the dedicated "M2 exit gate (5 criteria + seam audit,
+blocking)" step of the `build` job on all three OS legs (representative leg shown) — the
+milestone-closing mirror of the M1 gate.
 
 **The two-tier R-FILE-011 benchmark (issue #38, ROADMAP §6 tiering):** `bench-attach-10k` is the
 **per-PR blocking 10k proxy** on the REAL attach pipeline (filesync reconcile index + derivation

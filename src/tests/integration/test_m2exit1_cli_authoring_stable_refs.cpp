@@ -149,52 +149,60 @@ int main()
         const compose::ComposedEntity* prop = find_entity(c1scene, {kInstA, kInstB, kEntC2});
         CHECK(light != nullptr);
         CHECK(prop != nullptr);
+        // CHECK() logs and continues (m2_exit_test.h); guard the dependent block so a find_entity
+        // miss reports a clean CHECK failure and still runs cleanup, instead of segfaulting (mirrors
+        // the guard pattern in test_m2exit4).
+        if (light != nullptr && prop != nullptr)
+        {
+            // The CLI-authored override survived the save/reload: the composed value is [2,2,2].
+            const serializer::JsonValue* pos =
+                compose::resolve_json_pointer(light->value, "/components/transform/position/0");
+            CHECK(pos != nullptr && pos->int_value == 2);
 
-        // The CLI-authored override survived the save/reload: the composed value is [2,2,2].
-        const serializer::JsonValue* pos =
-            compose::resolve_json_pointer(light->value, "/components/transform/position/0");
-        CHECK(pos != nullptr && pos->int_value == 2);
+            // The `$entity` ref (L-34) survived the round-trip verbatim, and its target is a real
+            // composed entity (the reference resolves).
+            const serializer::JsonValue* ref =
+                compose::resolve_json_pointer(light->value, "/components/link/target/$entity");
+            CHECK(ref != nullptr);
+            CHECK(ref->string_value == kEntC2);
 
-        // The `$entity` ref (L-34) survived the round-trip verbatim, and its target is a real
-        // composed entity (the reference resolves).
-        const serializer::JsonValue* ref =
-            compose::resolve_json_pointer(light->value, "/components/link/target/$entity");
-        CHECK(ref != nullptr);
-        CHECK(ref->string_value == kEntC2);
+            const std::uint64_t light_guid = light->identity_hash;
+            const std::uint64_t prop_guid = prop->identity_hash;
+            const std::string light_guid_str = compose::format_stable_id(light_guid);
 
-        const std::uint64_t light_guid = light->identity_hash;
-        const std::uint64_t prop_guid = prop->identity_hash;
-        const std::string light_guid_str = compose::format_stable_id(light_guid);
+            // Restart — a SECOND independent resolver re-derives the same files (a rebooted daemon).
+            m2exit::FileSceneResolver r2;
+            CHECK(r2.load(project) == 3);
+            compose::ComposedScene c2scene = compose::flatten("root.scene.json", r2);
+            CHECK(c2scene.entities.size() == c1scene.entities.size());
 
-        // Restart — a SECOND independent resolver re-derives the same files (a rebooted daemon).
-        m2exit::FileSceneResolver r2;
-        CHECK(r2.load(project) == 3);
-        compose::ComposedScene c2scene = compose::flatten("root.scene.json", r2);
-        CHECK(c2scene.entities.size() == c1scene.entities.size());
+            const compose::ComposedEntity* light2 = find_entity(c2scene, {kInstA, kInstB, kEntC1});
+            const compose::ComposedEntity* prop2 = find_entity(c2scene, {kInstA, kInstB, kEntC2});
+            CHECK(light2 != nullptr && prop2 != nullptr);
+            if (light2 != nullptr && prop2 != nullptr)
+            {
+                // The GUIDs (composed identity, L-37) are byte-identical across the restart.
+                CHECK(light2->identity_hash == light_guid);
+                CHECK(prop2->identity_hash == prop_guid);
+                CHECK(compose::format_stable_id(light2->identity_hash) == light_guid_str);
 
-        const compose::ComposedEntity* light2 = find_entity(c2scene, {kInstA, kInstB, kEntC1});
-        const compose::ComposedEntity* prop2 = find_entity(c2scene, {kInstA, kInstB, kEntC2});
-        CHECK(light2 != nullptr && prop2 != nullptr);
+                // The `$entity` ref is byte-identical across the restart.
+                const serializer::JsonValue* ref2 =
+                    compose::resolve_json_pointer(light2->value, "/components/link/target/$entity");
+                CHECK(ref2 != nullptr && ref2->string_value == kEntC2);
 
-        // The GUIDs (composed identity, L-37) are byte-identical across the restart.
-        CHECK(light2->identity_hash == light_guid);
-        CHECK(prop2->identity_hash == prop_guid);
-        CHECK(compose::format_stable_id(light2->identity_hash) == light_guid_str);
+                // The override, too, is stable across the restart.
+                const serializer::JsonValue* pos2 =
+                    compose::resolve_json_pointer(light2->value, "/components/transform/position/0");
+                CHECK(pos2 != nullptr && pos2->int_value == 2);
+            }
 
-        // The `$entity` ref is byte-identical across the restart.
-        const serializer::JsonValue* ref2 =
-            compose::resolve_json_pointer(light2->value, "/components/link/target/$entity");
-        CHECK(ref2 != nullptr && ref2->string_value == kEntC2);
-
-        // The override, too, is stable across the restart.
-        const serializer::JsonValue* pos2 =
-            compose::resolve_json_pointer(light2->value, "/components/transform/position/0");
-        CHECK(pos2 != nullptr && pos2->int_value == 2);
-
-        // Identity is bound to the ROOT scene (L-37): the same id-path under a different root scene
-        // is a DIFFERENT GUID — the failure-path control that proves the hash is not path-only.
-        CHECK(compose::identity_hash_of("root.scene.json", light->id_path) == light_guid);
-        CHECK(compose::identity_hash_of("other.scene.json", light->id_path) != light_guid);
+            // Identity is bound to the ROOT scene (L-37): the same id-path under a different root
+            // scene is a DIFFERENT GUID — the failure-path control that proves the hash is not
+            // path-only.
+            CHECK(compose::identity_hash_of("root.scene.json", light->id_path) == light_guid);
+            CHECK(compose::identity_hash_of("other.scene.json", light->id_path) != light_guid);
+        }
 
         m2exit::remove_quiet(project);
     }
