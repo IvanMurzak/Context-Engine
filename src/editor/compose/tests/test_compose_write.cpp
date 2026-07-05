@@ -297,6 +297,63 @@ int main()
         CHECK(at(plan.document, "/root/components/sky/color")->string_value == "red");
     }
 
+    // --- a NESTED scene-root override is REFUSED when that root is INERT (not `composable`) --------
+    // The read side (flatten) leaves an instanced sub-scene's root out of the composition unless it
+    // opts in, so writing such an override would land a silently-orphaned entry with no composed
+    // effect — plan_write must refuse it (R-CLI-006: never report a landed write that cannot compose).
+    {
+        MapWriteResolver r;
+        r.add("gadget.scene.json", R"({
+          "$schema": "ctx:scene", "version": 1, "entities": [],
+          "root": {"components": {"physics": {"gravity": [0, -9, 0]}}}})");
+        r.add("host.scene.json", R"({
+          "$schema": "ctx:scene", "version": 1, "entities": [],
+          "instances": [{"id": "aaaaaaaaaaaaaaa1", "scene": "gadget.scene.json"}]})");
+        WriteRequest req;
+        req.root_scene = "host.scene.json";
+        req.id_path = {kInstA, std::string("$root")}; // nested root, 2-segment -> override branch
+        req.pointer = "/components/physics/gravity";
+        req.value = parse("[1, 2, 3]");
+        req.target = WriteTarget::outermost;
+
+        WritePlan plan = plan_write(req, r);
+        CHECK(!plan.ok);
+        CHECK(plan.error_code == "compose.write_target_not_found");
+    }
+
+    // --- a NESTED scene-root override SUCCEEDS + composes when that root opts in (`composable`) -----
+    {
+        MapWriteResolver r;
+        r.add("gadget.scene.json", R"({
+          "$schema": "ctx:scene", "version": 1, "entities": [],
+          "root": {"composable": true, "components": {"physics": {"gravity": [0, -9, 0]}}}})");
+        r.add("host.scene.json", R"({
+          "$schema": "ctx:scene", "version": 1, "entities": [],
+          "instances": [{"id": "aaaaaaaaaaaaaaa1", "scene": "gadget.scene.json"}]})");
+        WriteRequest req;
+        req.root_scene = "host.scene.json";
+        req.id_path = {kInstA, std::string("$root")};
+        req.pointer = "/components/physics/gravity";
+        req.value = parse("[1, 2, 3]");
+        req.target = WriteTarget::outermost;
+
+        WritePlan plan = plan_write(req, r);
+        CHECK(plan.ok);
+        CHECK(plan.file == "host.scene.json");
+        CHECK(plan.pointer == "/overrides/0/value");
+
+        // Read-your-writes: apply the plan + re-flatten -> the composed gadget root gravity moved.
+        r.set_tree("host.scene.json", plan.document);
+        ComposedScene flat = flatten("host.scene.json", r);
+        CHECK(flat.ok);
+        const ComposedEntity* groot = nullptr;
+        for (const ComposedEntity& e : flat.entities)
+            if (e.id_path == std::vector<std::string>{kInstA, std::string("$root")})
+                groot = &e;
+        CHECK(groot != nullptr);
+        CHECK(is_vec3(at(groot->value, "/components/physics/gravity"), 1, 2, 3));
+    }
+
     // --- idempotent update: a second set on the SAME path+pointer reuses the entry ---------------
     {
         MapWriteResolver r;

@@ -278,6 +278,14 @@ void collect_scenes(const std::string& scene, const WriteResolver& resolver,
         collect_scenes(inst.scene, resolver, visited, order);
 }
 
+// True iff a pointer's FIRST token names an identity field immutable under composition (L-37):
+// `id`, `$schema`, `version`. Factored out so plan_write can reuse an already-parsed token list
+// instead of re-parsing the same pointer string a second time.
+[[nodiscard]] bool is_immutable_first_token(std::string_view token) noexcept
+{
+    return token == "id" || token == "$schema" || token == "version";
+}
+
 } // namespace
 
 bool is_immutable_pointer(std::string_view pointer) noexcept
@@ -285,7 +293,7 @@ bool is_immutable_pointer(std::string_view pointer) noexcept
     std::vector<std::string> tokens;
     if (!parse_json_pointer(pointer, tokens) || tokens.empty())
         return false;
-    return tokens.front() == "id" || tokens.front() == "$schema" || tokens.front() == "version";
+    return is_immutable_first_token(tokens.front());
 }
 
 WritePlan plan_write(const WriteRequest& request, const WriteResolver& resolver)
@@ -298,7 +306,7 @@ WritePlan plan_write(const WriteRequest& request, const WriteResolver& resolver)
     if (!parse_json_pointer(request.pointer, pointer_tokens))
         return fail("usage.invalid",
                     "the field pointer `" + request.pointer + "` is not a valid JSON pointer");
-    if (is_immutable_pointer(request.pointer))
+    if (!pointer_tokens.empty() && is_immutable_first_token(pointer_tokens.front()))
         return fail("compose.immutable_pointer",
                     "`/" + pointer_tokens.front() +
                         "` is immutable under composition (L-37: stable ids and the schema header "
@@ -369,6 +377,23 @@ WritePlan plan_write(const WriteRequest& request, const WriteResolver& resolver)
         plan.target = request.target;
         plan.base_recorded = false;
         return plan;
+    }
+
+    // A nested scene-root override composes only when that root opts in (`composable`): the read side
+    // (flatten) leaves an instanced sub-scene's root inert by default, so an override onto an inert
+    // nested root would land a silently-orphaned entry with NO composed effect. Refuse it — the write
+    // path must never report a landed write that cannot compose (R-CLI-006 provenance). This mirrors
+    // flatten's `depth == 0 || root.composable` gate; the addressing scene's OWN root (a single-
+    // segment id-path) never reaches here — it took the in-place template-edit branch above.
+    if (tmpl.entity_pointer == "/root")
+    {
+        const SceneDoc* target_doc = resolver.resolve(tmpl.file);
+        if (target_doc != nullptr && !target_doc->root.composable)
+            return fail("compose.write_target_not_found",
+                        "the target scene-root `" + tmpl.file +
+                            "` is inert (not `composable`) — an instanced sub-scene's root does not "
+                            "compose into its parent, so this override would never apply; set "
+                            "`composable: true` on that scene's root, or use --edit-template");
     }
 
     // Otherwise an override entry in the addressing scene (outermost or --at-instance). The addressed
@@ -446,6 +471,15 @@ std::vector<OverrideFinding> override_hygiene(std::string_view root_scene,
             const TemplateLocation tmpl = locate_template(scene, e.path, resolver);
             if (!tmpl.found)
                 continue; // an orphan override is the flatten's compose.orphan_override, not hygiene
+            // An override onto a NESTED scene-root that is inert (not `composable`) never composes
+            // (flatten drops such a root), so it is a de-facto orphan — outside hygiene's
+            // diverged/redundant remit, exactly like the !found orphan above.
+            if (tmpl.entity_pointer == "/root" && e.path.size() > 1)
+            {
+                const SceneDoc* target_doc = resolver.resolve(tmpl.file);
+                if (target_doc != nullptr && !target_doc->root.composable)
+                    continue;
+            }
             const JsonValue* template_value =
                 resolve_json_pointer(*tmpl.entity_value, e.field_pointer);
             if (template_value == nullptr)

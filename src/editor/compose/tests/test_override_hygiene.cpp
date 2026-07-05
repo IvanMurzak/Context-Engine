@@ -142,5 +142,32 @@ int main()
         CHECK(hygiene_with(entry.c_str(), HygieneKind::diverged).empty());
     }
 
+    // --- an override onto a NESTED scene-root that is INERT (not `composable`) is a de-facto orphan:
+    // --- flatten leaves such a root out of the composition, so hygiene must not evaluate it as a
+    // --- live target (same treatment as the !found orphan above). A `composable:true` root IS live.
+    {
+        const auto hygiene_root = [](bool composable, HygieneKind kind) {
+            MapWriteResolver r;
+            const std::string gadget =
+                std::string(R"({"$schema": "ctx:scene", "version": 1, "entities": [], "root": {)") +
+                (composable ? R"("composable": true, )" : "") +
+                R"("components": {"physics": {"gravity": [0, -9, 0]}}}})";
+            r.add("gadget.scene.json", gadget.c_str());
+            r.add("host.scene.json", R"({
+              "$schema": "ctx:scene", "version": 1, "entities": [],
+              "instances": [{"id": "aaaaaaaaaaaaaaa1", "scene": "gadget.scene.json"}],
+              "overrides": [
+                {"path": ["aaaaaaaaaaaaaaa1", "$root"], "pointer": "/components/physics/gravity",
+                 "value": [1, 1, 1], "base": [7, 7, 7]}
+              ]})");
+            return override_hygiene("host.scene.json", r, kind);
+        };
+        // inert nested root -> de-facto orphan -> reported by NEITHER kind (like the !found orphan).
+        CHECK(hygiene_root(false, HygieneKind::redundant).empty());
+        CHECK(hygiene_root(false, HygieneKind::diverged).empty());
+        // composable nested root -> a live target: base [7,7,7] != template [0,-9,0] -> diverged.
+        CHECK(hygiene_root(true, HygieneKind::diverged).size() == 1);
+    }
+
     COMPOSE_TEST_MAIN_END();
 }
