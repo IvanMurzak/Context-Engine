@@ -392,4 +392,25 @@ void World::for_each(const ComponentId* ids, std::size_t count,
     }
 }
 
+const void* World::ArchetypeView::component(std::size_t col, std::size_t row) const noexcept
+{
+    const auto* arch = static_cast<const Archetype*>(archetype_);
+    return arch->columns[col].elem(row);
+}
+
+void World::for_each_archetype(const std::function<void(const ArchetypeView&)>& fn) const
+{
+    for (const auto& kv : impl_->archetypes)
+    {
+        Archetype* arch = kv.second.get();
+        if (arch->entities.empty())
+            continue;
+        ArchetypeView view;
+        view.types_ = &arch->types;
+        view.entities_ = &arch->entities;
+        view.archetype_ = arch;
+        fn(view);
+    }
+}
+
 } // namespace context::kernel

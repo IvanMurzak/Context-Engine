@@ -42,8 +42,8 @@
       "hardware": "named determinism rows",
       "gpu": false,
       "isolation": "shared",
-      "provisioned": false,
-      "notes": "R-QA-005 / L-54 state-hash determinism matrix (min Linux-x64, Win-x64, macOS-ARM64). Lands M6; advisory until provisioned."
+      "provisioned": true,
+      "notes": "R-QA-005 / L-54 state-hash determinism matrix (min Linux-x64, Win-x64, macOS-ARM64). Realized on the GitHub-hosted shared trio: ubuntu-latest=Linux-x64, windows-latest=Win-x64, macos-latest=macOS-ARM64 (macos-latest is Apple Silicon). The determinism gate runs as a blocking named step in the 3-OS build job; the integer-only sim state + fixed-endian hashing make the golden hash portable, so a per-platform divergence turns that leg red. Provisioned M3 entry (issue #74)."
     },
     "gpu-runner": {
       "os": "linux-x64",
@@ -367,11 +367,11 @@
       "id": "determinism-state-hash",
       "requirement": "R-QA-005",
       "runner_class": "determinism-matrix",
-      "build_flavor": "deterministic",
+      "build_flavor": "dev",
       "tier": "per-PR",
-      "red_x_policy": "advisory",
-      "ci_job_id": null,
-      "description": "L-54 state-hash determinism on the named wedge platforms with hierarchical-hash auto-triage. Lands M6; advisory until provisioned."
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "R-QA-005 / L-54 headless-session state-hash determinism (issue #74): a fixed seed + fixed injected input stream, stepped a fixed tick count, asserted against a cross-platform GOLDEN hierarchical state-hash (root + per-system + per-archetype + trace). Runs as the blocking 'Determinism gate' named step of the build job on ALL THREE build-matrix legs — ubuntu-latest (Linux-x64), windows-latest (Win-x64), macos-latest (macOS-ARM64) — so any per-platform divergence turns that leg red (ctest determinism-state-hash). The bisect/triage `context determinism diff` auto-triage is the reserved follow-up split."
     },
     {
       "id": "visual-equivalence",

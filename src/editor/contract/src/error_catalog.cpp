@@ -309,6 +309,31 @@ const std::vector<ErrorCode>& catalog()
          "The save envelope's format version is newer than this build reads; last-good retained, "
          "never a best-effort parse (R-DATA-005).",
          false, kExitValidation, "R-DATA-005"},
+        // --- M3 entry: headless session control + replay (issue #74, R-QA-005 / L-54) -----------
+        // The deterministic headless harness diagnostics: session-state (de)serialization, synthetic
+        // input injection, and the versioned replay artifact (manifest-verified before run; a
+        // deterministic divergence localized to the first divergent tick). Additive-only
+        // (protocolMajor stays 0): NEW rows appended at the END, no existing row reordered/renamed.
+        {"session.state_invalid",
+         "The session-state document is malformed, an unsupported version, or names ids that are "
+         "not restorable.",
+         false, kExitValidation, "R-QA-005"},
+        {"session.state_not_found", "The named session-state file does not exist.", false,
+         kExitNotFound, "R-QA-005"},
+        {"session.input_invalid",
+         "A synthetic input event / action activation injection was malformed (unknown kind or a "
+         "missing field).",
+         false, kExitUsage, "R-QA-005"},
+        {"replay.artifact_invalid", "The replay artifact is malformed or an unsupported version.",
+         false, kExitValidation, "R-QA-005"},
+        {"replay.manifest_drift",
+         "The project inputs drifted from the replay artifact's content manifest; reported as drift "
+         "BEFORE running, never a silent divergence.",
+         false, kExitConflict, "R-QA-005"},
+        {"replay.divergence",
+         "A deterministic replay diverged from its expected per-tick hash trace; the first divergent "
+         "tick is reported.",
+         false, kExitInternal, "R-QA-005"},
     };
     return the_catalog;
 }

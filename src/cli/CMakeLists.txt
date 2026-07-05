@@ -14,7 +14,9 @@ add_library(context_cli STATIC
     src/fetch_command.cpp
     src/merge_command.cpp
     src/migrate_command.cpp
+    src/replay_command.cpp
     src/scaffold.cpp
+    src/session_command.cpp
     src/set_command.cpp
     src/wire_client.cpp)
 
@@ -46,6 +48,11 @@ target_link_libraries(context_cli PUBLIC context_migrate)
 # the contract Envelope, so no merge type appears in the CLI's public headers.
 target_link_libraries(context_cli PRIVATE context_merge)
 
+# M3 entry (issue #74): the headless session + replay engine (src/runtime/session/). PRIVATE —
+# session_command.h / replay_command.h expose only the contract Envelope, so no session type appears
+# in the CLI's public headers; only session_command.cpp / replay_command.cpp touch context_session.
+target_link_libraries(context_cli PRIVATE context_session)
+
 # Self-contained GCC runtime for the CLI executables. context_cli uses std::filesystem (the
 # `context new` scaffolder), whose libstdc++ symbols live in a NEWER libstdc++-6.dll; on a MinGW
 # host a stale libstdc++-6.dll elsewhere on PATH can shadow the toolchain's and be loaded first,
@@ -72,6 +79,7 @@ set(_context_cli_tests
     test_merge_command
     test_migrate_command
     test_scaffold
+    test_session_command
     test_set_command)
 
 foreach(_t IN LISTS _context_cli_tests)

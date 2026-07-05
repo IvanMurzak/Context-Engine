@@ -96,6 +96,35 @@ public:
         each_impl<Cs...>(std::forward<F>(fn), ids, std::index_sequence_for<Cs...>{});
     }
 
+    // --- introspection (generic state hashing / serialization, R-QA-005) ----------------------
+
+    // A read-only view of one archetype's live storage, handed to for_each_archetype's visitor.
+    // `types()` is the archetype's sorted component-id set; `entities()[row]` occupies storage
+    // `row` in every column; `component(col, row)` is a raw pointer to the component of type
+    // `types()[col]` for the entity at `row`. Pointers are valid only for the visitor call.
+    class ArchetypeView
+    {
+    public:
+        [[nodiscard]] const std::vector<ComponentId>& types() const noexcept { return *types_; }
+        [[nodiscard]] const std::vector<Entity>& entities() const noexcept { return *entities_; }
+        // Raw pointer to the (col, row) component; col indexes types(), row indexes entities().
+        [[nodiscard]] const void* component(std::size_t col, std::size_t row) const noexcept;
+
+    private:
+        friend class World;
+        const std::vector<ComponentId>* types_ = nullptr;
+        const std::vector<Entity>* entities_ = nullptr;
+        const void* archetype_ = nullptr; // opaque Archetype* (defined in world.cpp)
+    };
+
+    // Visit every archetype that currently holds at least one entity, in the World's canonical
+    // component-id-sorted order (the archetype map key order). The visitor receives a read-only
+    // ArchetypeView and MUST NOT structurally mutate the World. This is the generic walk state
+    // hashing + serialization use when the concrete component types are not known at compile time
+    // (R-QA-005 hierarchical state hash). Component identity is by ComponentId here; a higher layer
+    // that needs stable cross-process names maps ids to registered names itself.
+    void for_each_archetype(const std::function<void(const ArchetypeView&)>& fn) const;
+
 private:
     template <class... Cs, class F, std::size_t... Is>
     void each_impl(F&& fn, const ComponentId* ids, std::index_sequence<Is...>)

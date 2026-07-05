@@ -24,6 +24,11 @@ inline constexpr std::string_view kProjectKindId = "ctx:project";
 // plural evaluation) live in src/editor/kinds/; the schema publication lives here (engine_schemas()).
 inline constexpr std::string_view kTilemapKindId = "ctx:tilemap";
 inline constexpr std::string_view kStringTableKindId = "ctx:string-table";
+// The M3-entry versioned replay artifact (R-QA-005 / L-54): a recorded headless run (seed + input
+// stream + tick count + engine/protocol versions + content-hash manifest + expected per-tick hash
+// trace). RuntimeKernel's own serialization (R-FILE-009), published as a versioned kind so
+// `context describe` introspects it like the authored kinds (R-CLI-005).
+inline constexpr std::string_view kReplayKindId = "ctx:replay";
 
 // One compiled per-kind versioned schema. `doc` is the schema DOCUMENT (the dialect below);
 // `canonical_doc` is its canonical-JSON serialization — the published form (R-DATA-006: published,
