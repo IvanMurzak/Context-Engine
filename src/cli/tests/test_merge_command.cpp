@@ -79,6 +79,29 @@ void test_merge_conflict_envelope()
     CHECK(fs::exists(out + ".ctxconflicts.json"));
 }
 
+void test_merge_conflict_no_ancestor_omits_base()
+{
+    // Both sides created this file with NO common ancestor and INCOMPATIBLE root shapes (two plain,
+    // non-id-keyed arrays), so the top-level field conflict has no `base`. It must be OMITTED — an
+    // absent ancestor is never emitted as {} (the R-CLI-008 "absent side is omitted" contract). This
+    // guards the general field-conflict path against the same base-leak the whole-file path already fixes.
+    write(p("nb.json"), "");                 // empty => no ancestor (add/add)
+    write(p("no.json"), R"([1, 2])");
+    write(p("nt.json"), R"([3, 4])");
+    const std::string out = p("nm.json").string();
+    const Envelope e = run({"merge-file", p("nb.json").string(), p("no.json").string(),
+                            p("nt.json").string(), "--output", out});
+    CHECK(e.ok());
+    CHECK(e.data().at("clean").as_bool() == false);
+    const Json& conflicts = e.data().at("conflicts");
+    CHECK(conflicts.size() == 1);
+    CHECK(conflicts.at(0).at("path").as_string() == "");
+    CHECK(conflicts.at(0).at("class").as_string() == "field");
+    CHECK(!conflicts.at(0).contains("base")); // absent ancestor is OMITTED, never {}
+    CHECK(conflicts.at(0).contains("ours"));
+    CHECK(conflicts.at(0).contains("theirs"));
+}
+
 void test_merge_driver_mode_exit()
 {
     write(p("b3.json"), R"({"hp": 10})");
@@ -130,6 +153,19 @@ void test_resolve_conflict_value()
     CHECK(read_json(p("r.json")).at("a").as_int() == 42);
 }
 
+void test_resolve_conflict_take_and_value_mutually_exclusive()
+{
+    // --take and --value are two different resolution sources; supplying BOTH is ambiguous input and
+    // must fail loudly (usage.invalid) rather than silently prefer one and drop the other unnoticed.
+    // Validation precedes any read/write, so the target file is left untouched.
+    write(p("me.json"), R"({"a": 1})");
+    const Envelope e = run({"resolve-conflict", p("me.json").string(), "--path", "/a",
+                            "--take", "ours", "--value", "42"});
+    CHECK(!e.ok());
+    CHECK(e.error()->code == "usage.invalid");
+    CHECK(read_json(p("me.json")).at("a").as_int() == 1); // rejected before any write
+}
+
 void test_resolve_conflict_whole_file_take_theirs()
 {
     // A meta_guid whole-file conflict (both sides re-guid) defaults the merged file to OURS; the
@@ -177,6 +213,17 @@ void test_rekey_at_pathological_index_no_crash()
                             "--at", "/entities/999999999999999999999999"});
     CHECK(!e.ok());
     CHECK(e.error()->code == "merge.rekey_target_invalid");
+}
+
+void test_rekey_at_and_id_mutually_exclusive()
+{
+    // --at (a pointer) and --id (a duplicated id) are two different targeting modes; supplying BOTH
+    // must fail loudly rather than silently prefer --at and ignore --id.
+    write(p("mek.json"), R"({"entities": [{"id": "aaaa0000aaaa0001"}]})");
+    const Envelope e = run({"re-key", p("mek.json").string(),
+                            "--at", "/entities/0", "--id", "aaaa0000aaaa0001"});
+    CHECK(!e.ok());
+    CHECK(e.error()->code == "usage.invalid");
 }
 
 void test_validate()
@@ -286,13 +333,16 @@ int main()
 
     test_merge_clean_disjoint();
     test_merge_conflict_envelope();
+    test_merge_conflict_no_ancestor_omits_base();
     test_merge_driver_mode_exit();
     test_merge_binary_sidecar();
     test_resolve_conflict_take_theirs();
     test_resolve_conflict_value();
+    test_resolve_conflict_take_and_value_mutually_exclusive();
     test_resolve_conflict_whole_file_take_theirs();
     test_rekey();
     test_rekey_at_pathological_index_no_crash();
+    test_rekey_at_and_id_mutually_exclusive();
     test_validate();
     test_merge_file_dry_run_writes_nothing();
     test_resolve_conflict_dry_run_writes_nothing();

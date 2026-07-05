@@ -137,6 +137,17 @@ std::string id_of(const JsonValue& v)
     return std::string();
 }
 
+// An absent common ancestor. merge_command seeds a missing ancestor (an add/add on both sides) as an
+// EMPTY object because the structural add/add path needs base.type==object; a genuine JSON null is
+// likewise "no value". Treating both as absent keeps the R-CLI-008 conflict envelope exact — an absent
+// `base` is OMITTED, never emitted as {} (a real whole-file/field ancestor is never an empty object).
+// Shared by whole_file() and merge_value()'s field-conflict emitter so both omit an absent base identically.
+bool base_is_absent_ancestor(const JsonValue& base) noexcept
+{
+    return base.type == JsonValue::Type::null_value ||
+           (base.type == JsonValue::Type::object && base.members.empty());
+}
+
 using detail::append_index;
 using detail::append_token;
 
@@ -449,7 +460,11 @@ JsonValue merge_value(const JsonValue& base, const JsonValue& ours, const JsonVa
     Conflict c;
     c.path = path;
     c.klass = ConflictClass::field;
-    c.base = base;
+    // Omit `base` for a no-ancestor divergence (e.g. both sides created this file with incompatible
+    // root shapes, so merge_command seeded the absent ancestor as the empty-object sentinel): an absent
+    // side is omitted from the envelope, never emitted as {} (mirrors whole_file()).
+    if (!base_is_absent_ancestor(base))
+        c.base = base;
     c.ours = ours;
     c.theirs = theirs;
     conflicts.push_back(std::move(c));
@@ -494,13 +509,10 @@ MergeResult whole_file(ConflictClass klass, const JsonValue& base, const JsonVal
     c.path = "";
     c.klass = klass;
     // Omit `base` when there is no real ancestor (R-CLI-008: an absent side is omitted, never {}).
-    // merge_command seeds an absent ancestor as an EMPTY object for the add/add structural path;
-    // a real whole-file-class ancestor (a .meta GUID doc, a schema-stamped payload) is never an
-    // empty object, so treating {} as absent here keeps the conflict envelope exact — and, because
-    // this only affects whole-file emission, it leaves that structural add/add sentinel untouched.
-    const bool base_absent = base.type == JsonValue::Type::null_value ||
-                             (base.type == JsonValue::Type::object && base.members.empty());
-    if (!base_absent)
+    // A real whole-file-class ancestor (a .meta GUID doc, a schema-stamped payload) is never an empty
+    // object, so treating the add/add empty-object sentinel as absent keeps the conflict envelope
+    // exact; because this only affects emission, that structural add/add sentinel is left untouched.
+    if (!base_is_absent_ancestor(base))
         c.base = base;
     c.ours = ours;
     c.theirs = theirs;

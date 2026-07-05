@@ -329,6 +329,9 @@ Envelope run_resolve_conflict(const std::map<std::string, std::string>& params,
                                  "--path is required (pass --path \"\" for a whole-file conflict)");
     if (take.empty() && !has_value)
         return Envelope::failure("usage.missing_argument", "one of --take ours|theirs or --value is required");
+    if (!take.empty() && has_value)
+        return Envelope::failure("usage.invalid",
+                                 "--take and --value are mutually exclusive; pass exactly one");
     if (!take.empty() && take != "ours" && take != "theirs")
         return Envelope::failure("usage.invalid", "--take must be 'ours' or 'theirs'");
 
@@ -458,6 +461,9 @@ Envelope run_rekey(const std::map<std::string, std::string>& params,
         return Envelope::failure("usage.missing_argument", "a target <file> is required");
     if (at.empty() && id.empty())
         return Envelope::failure("usage.missing_argument", "one of --at <pointer> or --id <id> is required");
+    if (!at.empty() && !id.empty())
+        return Envelope::failure("usage.invalid",
+                                 "--at and --id are mutually exclusive; pass exactly one");
 
     std::string text;
     if (!read_file(file, text))
