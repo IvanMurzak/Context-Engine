@@ -1,0 +1,120 @@
+src/runtime/session/README.md
+  s_e3239cf02087b8::t_2e99b054f67f3f 1-47
+src/runtime/session/include/context/runtime/session/input.h
+  s_e3239cf02087b8::t_5eaaf51efbf95b 20-23
+  s_e3239cf02087b8::t_a8e246d6f5df22 1-19,24-75
+src/kernel/tests/test_world.cpp
+  s_e3239cf02087b8::t_f6723b8bd52f2e 167-219
+docs/ci-fleet-manifest.json
+  s_e3239cf02087b8::t_58a27a473e1d18 45-46
+  s_e3239cf02087b8::t_ba916e230fac56 370,372-374
+src/cli/include/context/cli/session_command.h
+  s_e3239cf02087b8::t_4d6d25f1329b04 1-27
+src/runtime/session/include/context/runtime/session/session_state.h
+  s_e3239cf02087b8::t_160856f8ba8a90 28-29
+  s_e3239cf02087b8::t_1fe5fa4d458961 1-27,30-49
+.github/workflows/ci.yml
+  s_e3239cf02087b8::t_cee5a487acf81b 102-104,106
+  s_e3239cf02087b8::t_c92eb084d4d166 128-137
+src/runtime/session/include/context/runtime/session/json_build.h
+  s_e3239cf02087b8::t_606909282c0e11 20-21
+  s_e3239cf02087b8::t_e47570a8444564 1-19,22-139
+src/runtime/session/include/context/runtime/session/hash.h
+  s_e3239cf02087b8::t_b160652d2e1d32 1-74
+src/CMakeLists.txt
+  s_e3239cf02087b8::t_ec7f5ec8d0b697 289-299
+src/runtime/session/tests/test_replay.cpp
+  s_e3239cf02087b8::t_a1cbf359cf56af 81-82
+  s_e3239cf02087b8::t_2158295a384aab 1-80,83-141
+src/cli/include/context/cli/replay_command.h
+  s_e3239cf02087b8::t_94fae1caae1a3a 1-23
+src/runtime/session/tests/test_state_hash.cpp
+  s_e3239cf02087b8::t_7d86a84883ef01 11
+  s_e3239cf02087b8::t_41d6daf2d51584 1-10,12-114
+src/editor/schema/src/kind_schema.cpp
+  s_e3239cf02087b8::t_c3b017b3d713c1 469-548
+  s_e3239cf02087b8::t_8a5f99b830134c 696
+src/runtime/session/src/state_hash.cpp
+  s_e3239cf02087b8::t_c32361d66e613e 1-170
+src/runtime/session/CMakeLists.txt
+  s_e3239cf02087b8::t_5c145876bbaa76 1-27,32-67
+  s_e3239cf02087b8::t_6f91363647b7d1 28-31
+src/editor/schema/include/context/editor/schema/kind_schema.h
+  s_e3239cf02087b8::t_cb0fc3e3bd7618 27-31
+src/runtime/session/tests/test_session_state.cpp
+  s_e3239cf02087b8::t_a7b36a400d7d8e 1-80
+src/kernel/src/world.cpp
+  s_e3239cf02087b8::t_d77932c326f9d7 395-415
+src/runtime/session/tests/determinism_gate.cpp
+  s_e3239cf02087b8::t_cbee43b6c96980 1-29,32-89
+  s_e3239cf02087b8::t_27d68e2104f602 30-31
+src/runtime/session/src/replay.cpp
+  s_e3239cf02087b8::t_9c7563f05ddab7 114-115
+  s_e3239cf02087b8::t_1fc55fca6657d1 1-113,116-258
+src/runtime/session/include/context/runtime/session/rng.h
+  s_e3239cf02087b8::t_b119706be15e69 1-46
+src/runtime/session/src/sim_component.cpp
+  s_e3239cf02087b8::t_67a1ffee961729 1-97
+src/runtime/session/src/input.cpp
+  s_e3239cf02087b8::t_fb77dd56c70f66 1-121
+src/runtime/session/include/context/runtime/session/state_hash.h
+  s_e3239cf02087b8::t_c6946b6ffa153d 1-27,30-78
+  s_e3239cf02087b8::t_e2dca26062e623 28-29
+src/runtime/session/tests/test_sim_component.cpp
+  s_e3239cf02087b8::t_1eb150f7dc6495 8
+  s_e3239cf02087b8::t_75546c2784479a 1-7,9-87
+src/cli/src/session_command.cpp
+  s_e3239cf02087b8::t_609a432d6e1044 1-378
+src/cli/src/app.cpp
+  s_e3239cf02087b8::t_aba7bdf04de617 12,14
+  s_e3239cf02087b8::t_3710e6d2d5e404 135-141
+src/runtime/session/tests/session_test.h
+  s_e3239cf02087b8::t_2c5fbe2af0af85 1-28
+src/runtime/session/include/context/runtime/session/sim_component.h
+  s_e3239cf02087b8::t_e6c77dc89d4117 1-136
+src/kernel/include/context/kernel/world.h
+  s_e3239cf02087b8::t_47b959c9483d80 99-127
+src/runtime/session/src/session.cpp
+  s_e3239cf02087b8::t_608e21c09e9968 1-121,133-150,153-216
+  s_e3239cf02087b8::t_47b443c8e9d61f 151-152
+  s_e3239cf02087b8::t_3417838e3c50c6 122-132
+src/runtime/session/include/context/runtime/session/session.h
+  s_e3239cf02087b8::t_e980854bdbf71f 129-130
+  s_e3239cf02087b8::t_562b5cb342d283 75-78
+  s_e3239cf02087b8::t_279e5b39916428 1-74,79-128,131-146
+src/cli/src/replay_command.cpp
+  s_e3239cf02087b8::t_c89d1fb9e3c67b 1-13,15-97
+  s_e3239cf02087b8::t_73acd58a0caa53 14
+src/editor/contract/src/registry.cpp
+  s_e3239cf02087b8::t_9adf9d64c07aea 324-427
+src/editor/contract/src/error_catalog.cpp
+  s_e3239cf02087b8::t_9b733e41c5b3e9 312-336
+src/runtime/session/src/session_state.cpp
+  s_e3239cf02087b8::t_8ffc4061e5721c 1-94,97-189
+  s_e3239cf02087b8::t_74d498dffff65b 95-96
+src/runtime/session/tests/test_session.cpp
+  s_e3239cf02087b8::t_b22b5c92a8a45f 1-126
+src/cli/CMakeLists.txt
+  s_e3239cf02087b8::t_05f525620da37e 82
+  s_e3239cf02087b8::t_925c10ec7e83d0 17,19
+  s_e3239cf02087b8::t_3fe518ca13d360 51-55
+src/runtime/session/include/context/runtime/session/replay.h
+  s_e3239cf02087b8::t_6a0559bc9ad398 30-31
+  s_e3239cf02087b8::t_cf76947e08e589 1-29,32-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "601a483ba92feb8afd2d7cf885f8252ccc5fde1b",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
