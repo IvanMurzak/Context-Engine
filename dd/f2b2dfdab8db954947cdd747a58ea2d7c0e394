@@ -1,0 +1,116 @@
+src/editor/import/tests/test_wav_importer.cpp
+  s_e3239cf02087b8::t_62d6909dde6e2c 1-13,15-114
+  s_e3239cf02087b8::t_eec47c5b847f3b 14
+src/editor/import/src/isolated_runner.cpp
+  s_e3239cf02087b8::t_ba7746a30a154f 1-112
+src/editor/import/include/context/editor/import/sandbox.h
+  s_e3239cf02087b8::t_9653a4c09381f9 1-61
+src/editor/import/include/context/editor/import/importers/png_importer.h
+  s_e3239cf02087b8::t_c3145653fa33f8 1-51
+src/editor/import/src/platform_profile.cpp
+  s_e3239cf02087b8::t_56fe60198fe721 1-81
+src/CMakeLists.txt
+  s_e3239cf02087b8::t_2f6f42338191b5 234-242
+src/editor/import/src/cache_key.cpp
+  s_e3239cf02087b8::t_b2e36f86d8efad 53-57
+  s_e3239cf02087b8::t_02d71d1adbe6ad 1-4,6-52,58-105,107-133,151
+  s_e3239cf02087b8::t_e72b6ddc74ac27 134-150
+  s_e3239cf02087b8::t_fb942ef0fb804c 5
+  s_e3239cf02087b8::t_4a37874573af18 106
+src/editor/import/include/context/editor/import/artifact_kind.h
+  s_e3239cf02087b8::t_2c6ea0856de557 1-39
+src/editor/import/README.md
+  s_e3239cf02087b8::t_91c457b60d28b0 1-83
+src/editor/import/CMakeLists.txt
+  s_e3239cf02087b8::t_392e1d13913aa8 1-72
+src/editor/import/tests/test_cache_key.cpp
+  s_e3239cf02087b8::t_eaa8c39fbaed21 1-83
+src/editor/import/tests/test_import_settings.cpp
+  s_e3239cf02087b8::t_9fc5643cf39f58 1-59
+src/editor/import/include/context/editor/import/platform_profile.h
+  s_e3239cf02087b8::t_73d9d2817d96c5 1-59
+src/editor/import/tests/test_fuzz_corpus.cpp
+  s_e3239cf02087b8::t_8c71a52a119877 1-104
+src/editor/import/tests/test_platform_profile.cpp
+  s_e3239cf02087b8::t_ae7738e988fc2b 1-56
+src/editor/import/tests/test_registry.cpp
+  s_e3239cf02087b8::t_c216b274263102 1-62
+src/editor/import/include/context/editor/import/import_settings.h
+  s_e3239cf02087b8::t_ee32e72580887f 1-26,30-36,38-41
+  s_e3239cf02087b8::t_395010dc520ca5 27-29
+  s_e3239cf02087b8::t_efd23d475f8b4d 37
+src/editor/import/include/context/editor/import/importer.h
+  s_e3239cf02087b8::t_23439eec217ac7 1-93
+src/editor/import/tests/descriptor_read.h
+  s_e3239cf02087b8::t_f763948c61fc43 1-50
+src/editor/import/src/sandbox.cpp
+  s_e3239cf02087b8::t_9758f954eea617 1-70
+src/editor/import/tests/test_png_importer.cpp
+  s_e3239cf02087b8::t_94cb58cb2f339e 1-13,15-132
+  s_e3239cf02087b8::t_7add98ac492d42 14
+src/editor/import/include/context/editor/import/importer_registry.h
+  s_e3239cf02087b8::t_7e6cc71c2fae0e 1-54
+src/editor/import/tests/test_gltf_importer.cpp
+  s_e3239cf02087b8::t_38563068990565 1-133
+src/editor/import/src/importers/png_importer.cpp
+  s_e3239cf02087b8::t_93d3a5edc76332 1-233
+src/editor/contract/src/error_catalog.cpp
+  s_e3239cf02087b8::t_4f586e4210ffab 186-212
+src/editor/import/src/importer_registry.cpp
+  s_e3239cf02087b8::t_1d06e27e184b26 1-109
+src/editor/import/src/importers/gltf_importer.cpp
+  s_e3239cf02087b8::t_c67404a1f7c9c4 1-254
+src/editor/import/tests/corpora/generate_corpus.py
+  s_e3239cf02087b8::t_67140902c140d0 1-99
+src/editor/import/include/context/editor/import/cache_key.h
+  s_e3239cf02087b8::t_9493380a62c792 68,71-90
+  s_e3239cf02087b8::t_4e3e5579951e5e 52-54
+  s_e3239cf02087b8::t_98bf890748b290 21-25
+  s_e3239cf02087b8::t_75b78235108311 12
+  s_e3239cf02087b8::t_6572c2c0bc6966 1-11,13-20,26-51,55-67,69-70,91-92
+src/editor/import/src/import_settings.cpp
+  s_e3239cf02087b8::t_44f01976994b4c 1-107
+src/editor/import/include/context/editor/import/importers/gltf_importer.h
+  s_e3239cf02087b8::t_48d9ff6cea831c 1-67
+src/editor/import/tests/import_test.h
+  s_e3239cf02087b8::t_a917818ad8fc30 1-175
+src/editor/import/include/context/editor/import/importers/wav_importer.h
+  s_e3239cf02087b8::t_123d6d7c5d0444 1-48
+src/editor/import/tests/test_sandbox.cpp
+  s_e3239cf02087b8::t_9dc87627a7a1e1 40
+  s_e3239cf02087b8::t_d689399b7d9de9 1-39,41-70
+src/editor/import/src/detail/json_detail.h
+  s_e3239cf02087b8::t_c852d876e4566f 1-105
+src/editor/import/include/context/editor/import/isolated_runner.h
+  s_e3239cf02087b8::t_cfec34bfe8201d 1-57
+src/editor/import/src/importers/wav_importer.cpp
+  s_e3239cf02087b8::t_912947ad4683a7 1-178
+src/editor/import/tests/test_determinism.cpp
+  s_e3239cf02087b8::t_6cc0674901c223 1-142
+src/editor/import/tests/corpora/gltf/malformed.gltf
+  s_e3239cf02087b8::t_88643d0705d0e4 1
+src/editor/import/tests/corpora/gltf/unsupported_version.gltf
+  s_e3239cf02087b8::t_0f34c717c301eb 1
+src/editor/import/tests/corpora/gltf/valid_tri.gltf
+  s_e3239cf02087b8::t_aba3da5ab3cbff 1
+src/editor/import/tests/corpora/gltf/valid_uv2.gltf
+  s_e3239cf02087b8::t_8d3501b4353ec3 1
+src/editor/import/tests/corpora/wav/truncated.wav
+  s_e3239cf02087b8::t_aeaefe2b1a9718 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ddf2b2dfdab8db954947cdd747a58ea2d7c0e394",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
