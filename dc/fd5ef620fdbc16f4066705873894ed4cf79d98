@@ -1,0 +1,26 @@
+src/editor/compose/src/compose_write.cpp
+  s_e3239cf02087b8::t_b2b36e283b3ce8 231
+  s_e3239cf02087b8::t_fce3c0a701d72e 458
+  s_e3239cf02087b8::t_fda171f67ff466 260-267,269-270,278
+  s_e3239cf02087b8::t_f5c1e075e3f915 129-157
+  s_e3239cf02087b8::t_a27fd0624db1fa 209
+src/cli/tests/test_set_command.cpp
+  s_e3239cf02087b8::t_583892a4b92074 3-6
+  s_e3239cf02087b8::t_0a85e3f5724767 130-168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dcfd5ef620fdbc16f4066705873894ed4cf79d98",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
