@@ -99,10 +99,10 @@ jobs:
         run: cmake --build --preset dev
         working-directory: src
 
-      # Every registered suite EXCEPT the M1 exit gate — that family runs in its own named step
-      # below so the milestone gate is legible per OS leg (same tests, each runs exactly once).
+      # Every registered suite EXCEPT the M1 + M2 exit gates — those families run in their own named
+      # steps below so each milestone gate is legible per OS leg (same tests, each runs exactly once).
       - name: Run test suites (ctest)
-        run: ctest --preset dev --verbose -E "^m1-exit-"
+        run: ctest --preset dev --verbose -E "^m1-exit-|^m2-exit-"
         working-directory: src
 
       # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36) — the five exit criteria as a BLOCKING
@@ -112,6 +112,16 @@ jobs:
       # enforcement (R-SEC-007). Registered in docs/ci-fleet-manifest.json as the m1-exit-* gates.
       - name: M1 exit gate (5 criteria, blocking)
         run: ctest --preset dev --output-on-failure -R "^m1-exit-"
+        working-directory: src
+
+      # The M2 EXIT GATE (ROADMAP §1 M2 Exit / issue #68) — the milestone-closing mirror of the M1
+      # gate: five exit scenarios + the data-model seam checklist as a BLOCKING per-PR check on every
+      # OS leg. Author-from-CLI + stable refs (L-19/34/37), schema migration round-trip (L-37), flatten
+      # to GUID-addressable independently-loadable content units (R-ASSET-005), composed write +
+      # provenance (R-CLI-006), per-payload migration vs the R-QA-011 fixtures, and the executable
+      # data-model seam audit. Registered in docs/ci-fleet-manifest.json as the m2-exit-* gates.
+      - name: M2 exit gate (5 criteria + seam audit, blocking)
+        run: ctest --preset dev --output-on-failure -R "^m2-exit-"
         working-directory: src
 
       - name: sccache stats

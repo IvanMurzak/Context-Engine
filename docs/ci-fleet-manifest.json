@@ -164,6 +164,66 @@
       "description": "M1 exit criterion 5 (issue #36): a read/query-scoped token cannot install a package or trigger a build via DIRECT RPC — dispatcher-level denial mapping to catalog scope.denied, exit-class 6, verified over the real IPC transport (ctest m1-exit-5-scope-enforcement; all three build-matrix legs)."
     },
     {
+      "id": "m2-exit-cli-authoring",
+      "requirement": "L-37",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M2 exit criterion 1 (issue #68): author a scene from the CLI, save/reload with stable references — a GUID (composed identity, L-37) and an $entity ref (L-34) survive a restart (re-derivation from files, L-19); m2-exit-1 also spawns the real `context` binary (ctest m2-exit-1-cli-authoring; runs on all three build-matrix legs via the 'M2 exit gate' step)."
+    },
+    {
+      "id": "m2-exit-schema-migration",
+      "requirement": "L-37",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M2 exit criterion 2 (issue #68): migrate a schema — a real component-payload version bump round-trips through both the parse-time (in-memory) and bulk `context migrate` (on-disk re-stamp + idempotence) paths, and a newer-than-current stamp is blocked (ctest m2-exit-2-schema-migration; all three build-matrix legs)."
+    },
+    {
+      "id": "m2-exit-flatten-content-units",
+      "requirement": "R-ASSET-005",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M2 exit criterion 3 (issue #68): flatten a composed scene into GUID-addressable content units (unit id = composed identity of the boundary root) that load/unload INDEPENDENTLY with sibling isolation — the co-designed chunk boundaries (ctest m2-exit-3-flatten-content-units; all three build-matrix legs)."
+    },
+    {
+      "id": "m2-exit-composed-write-provenance",
+      "requirement": "R-CLI-006",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M2 exit criterion 4 (issue #68): a composed-entity write lands in the correct file/level (default-outermost / --at-instance / --edit-template) and reports its winning-value-first provenance chain (ctest m2-exit-4-composed-write-provenance; all three build-matrix legs)."
+    },
+    {
+      "id": "m2-exit-per-payload-migration",
+      "requirement": "R-QA-011",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M2 exit criterion 5 (issue #68): a per-payload migration round-trips against the committed R-QA-011 fixture corpus (input->golden byte-exact + idempotence) through both document migration and the shared migrate_payload primitive the save-migration runner reuses (ctest m2-exit-5-per-payload-migration; all three build-matrix legs)."
+    },
+    {
+      "id": "m2-exit-seam-checklist",
+      "requirement": "R-DATA-006",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M2 exit criterion 6 (issue #68): the M2 data-model seam set as an executable audit — one assertion per seam (id-path overrides + innermost-out, composed write path, componentVersions selection, package-migration contract + set hash, override-path migration + orphans, $entity refs, composed identity, dup-id + re-key, schema vocabulary + units law, sidecar rules, scene-root singleton, save-migration groundwork, meta platforms reservation, override-hygiene) so a dropped seam turns the gate red (ctest m2-exit-6-seam-checklist; all three build-matrix legs)."
+    },
+    {
       "id": "sanitize-asan-ubsan",
       "requirement": "L-38",
       "runner_class": "gh-ubuntu-shared",
