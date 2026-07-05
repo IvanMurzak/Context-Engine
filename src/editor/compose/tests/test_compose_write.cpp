@@ -226,6 +226,39 @@ int main()
         CHECK(is_vec3(at(c1->value, "/components/transform/position"), 3, 3, 3));
     }
 
+    // --- --at-instance reaching all-but-the-last segment: the suffix is a single segment, so the
+    // --- addressed entity is native to the addressing (child) scene and the write edits it in place
+    {
+        MapWriteResolver r;
+        seed(r);
+        WriteRequest req;
+        req.root_scene = "root.scene.json";
+        req.id_path = {kInstA, kInstB, kEntC1};
+        req.pointer = "/components/transform/position";
+        req.value = parse("[4, 4, 4]");
+        req.target = WriteTarget::at_instance;
+        req.at_instance = {kInstA, kInstB}; // addressing scene = child.scene.json; suffix = [C1]
+
+        WritePlan plan = plan_write(req, r);
+        CHECK(plan.ok);
+        // addressing_path.size() == 1 -> an in-place template edit of the child scene, NOT an override.
+        CHECK(plan.file == "child.scene.json");
+        CHECK(plan.pointer == "/entities/0/components/transform/position");
+        CHECK(!plan.base_recorded);
+        CHECK(at(plan.document, "/overrides") == nullptr); // no override array created
+        CHECK(is_vec3(at(plan.document, "/entities/0/components/transform/position"), 4, 4, 4));
+
+        // Read-your-writes: applying it moves the template value for every instance of child.
+        r.set_tree("child.scene.json", plan.document);
+        ComposedScene flat = flatten("root.scene.json", r);
+        const ComposedEntity* c1 = nullptr;
+        for (const ComposedEntity& e : flat.entities)
+            if (e.id_path == std::vector<std::string>{kInstA, kInstB, kEntC1})
+                c1 = &e;
+        CHECK(c1 != nullptr);
+        CHECK(is_vec3(at(c1->value, "/components/transform/position"), 4, 4, 4));
+    }
+
     // --- a root-native entity (single-segment id-path): edits the root scene in place ------------
     {
         MapWriteResolver r;

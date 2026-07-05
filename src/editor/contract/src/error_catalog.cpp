@@ -46,15 +46,6 @@ const std::vector<ErrorCode>& catalog()
         // --- concurrency / CAS (R-CLI-006) ----------------------------------------------------
         {"cas.mismatch", "The --if-match hash did not match the file's current bytes.", true,
          kExitConflict, "R-CLI-006"},
-        // --- composed write path (R-CLI-006 / L-35, M2 issue #58) ------------------------------
-        {"compose.write_target_not_found",
-         "The composed-write target does not resolve — the id-path names no composed entity, or an "
-         "--at-instance prefix names no instancing scene.",
-         false, kExitNotFound, "R-CLI-006"},
-        {"compose.immutable_pointer",
-         "The field pointer addresses an identity field (/id, /$schema, /version) that is immutable "
-         "under composition (L-37).",
-         false, kExitValidation, "R-CLI-006"},
         // --- security / path jail (R-SEC-008) -------------------------------------------------
         {"path.jail_violation", "The path escapes the project root and was refused.", false,
          kExitPermission, "R-SEC-008"},
@@ -192,6 +183,15 @@ const std::vector<ErrorCode>& catalog()
          "The move/rename request is malformed (a sidecar, temp-residue, or dot-tree path, or an "
          "empty path).",
          false, kExitUsage, "R-FILE-004"},
+        // --- composed write path (R-CLI-006 / L-35, M2 issue #58) ------------------------------
+        {"compose.write_target_not_found",
+         "The composed-write target does not resolve — the id-path names no composed entity, or an "
+         "--at-instance prefix names no instancing scene.",
+         false, kExitNotFound, "R-CLI-006"},
+        {"compose.immutable_pointer",
+         "The field pointer addresses an identity field (/id, /$schema, /version) that is immutable "
+         "under composition (L-37).",
+         false, kExitValidation, "R-CLI-006"},
     };
     return the_catalog;
 }

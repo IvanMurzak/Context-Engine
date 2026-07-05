@@ -2,6 +2,7 @@
 
 #include "context/cli/set_command.h"
 
+#include "context/cli/wire_client.h"
 #include "context/editor/compose/compose_write.h"
 #include "context/editor/compose/scene_model.h"
 #include "context/editor/contract/json.h"
@@ -14,7 +15,6 @@
 
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -32,17 +32,6 @@ namespace fs = std::filesystem;
 
 namespace
 {
-
-bool read_file(const fs::path& path, std::string& out)
-{
-    std::ifstream in(path, std::ios::binary);
-    if (!in)
-        return false;
-    std::ostringstream buffer;
-    buffer << in.rdbuf();
-    out = buffer.str();
-    return true;
-}
 
 // Split a slash-separated id-path token ("a/b/c") into its segments. Rejects empty segments (a
 // leading/trailing/doubled '/'), so a malformed id-path is a clean usage error rather than an
@@ -64,21 +53,6 @@ bool read_file(const fs::path& path, std::string& out)
     return !out.empty() && text.back() != '/';
 }
 
-[[nodiscard]] bool parse_u64(const std::string& text, std::uint64_t& out)
-{
-    if (text.empty())
-        return false;
-    std::uint64_t value = 0;
-    for (const char c : text)
-    {
-        if (c < '0' || c > '9')
-            return false;
-        value = value * 10 + static_cast<std::uint64_t>(c - '0');
-    }
-    out = value;
-    return true;
-}
-
 [[nodiscard]] std::optional<std::string> flag(const std::map<std::string, std::string>& flags,
                                               const std::string& name)
 {
@@ -96,7 +70,7 @@ bool read_file(const fs::path& path, std::string& out)
 class ProjectResolver final : public compose::WriteResolver
 {
 public:
-    explicit ProjectResolver(fs::path root) : root_(std::move(root)) {}
+    explicit ProjectResolver(fs::path root) : store_(std::move(root)) {}
 
     [[nodiscard]] const compose::SceneDoc* resolve(std::string_view path) const override
     {
@@ -127,10 +101,9 @@ private:
         // resolves to nothing (the write path then reports write_target_not_found / file.not_found).
         if (filesync::is_inside_jail(".", path))
         {
-            std::string bytes;
-            if (read_file(root_ / filesync::normalize_path(path), bytes))
+            if (const std::optional<std::string> bytes = store_.read(path))
             {
-                serializer::CanonicalizeResult canonical = serializer::canonicalize(bytes);
+                serializer::CanonicalizeResult canonical = serializer::canonicalize(*bytes);
                 if (canonical.is_json)
                 {
                     if (std::optional<compose::SceneDoc> doc =
@@ -148,7 +121,7 @@ private:
         return inserted->second;
     }
 
-    fs::path root_;
+    filesync::NativeFileStore store_;
     mutable std::map<std::string, Entry, std::less<>> cache_;
 };
 
@@ -257,26 +230,25 @@ Envelope run_set(const std::vector<std::string>& positionals,
     const std::uint64_t canonical_hash = serializer::canonical_hash_of(new_bytes);
 
     const bool dry_run = flags.find("dry-run") != flags.end();
-    const fs::path target_abs = fs::path(project) / filesync::normalize_path(plan.file);
+    filesync::NativeFileStore store(project);
 
     // --if-match CAS: guard the target file's CURRENT raw bytes (R-FILE-004 / R-CLI-006 — the raw-byte
     // hash guards the exact bytes on disk).
     if (const std::optional<std::string> if_match = flag(flags, "if-match"))
     {
-        std::uint64_t expected = 0;
-        if (!parse_u64(*if_match, expected))
+        const std::optional<std::uint64_t> expected = parse_u64(*if_match);
+        if (!expected)
             return Envelope::failure("usage.invalid",
                                      "--if-match takes a decimal raw-byte content hash; got `" +
                                          *if_match + "`");
-        std::string current;
-        const bool present = read_file(target_abs, current);
-        const std::uint64_t actual = filesync::content_hash(current);
-        if (!present || actual != expected)
+        const std::optional<std::string> current = store.read(plan.file);
+        const std::uint64_t actual = current ? filesync::content_hash(*current) : 0;
+        if (!current || actual != *expected)
             return Envelope::failure(
                 "cas.mismatch",
-                "the --if-match raw-byte hash (" + std::to_string(expected) +
+                "the --if-match raw-byte hash (" + std::to_string(*expected) +
                     ") does not match the target file's current bytes (" +
-                    (present ? std::to_string(actual) : std::string("<file absent>")) +
+                    (current ? std::to_string(actual) : std::string("<file absent>")) +
                     ") — re-read and retry");
     }
 
@@ -299,7 +271,6 @@ Envelope run_set(const std::vector<std::string>& positionals,
         return Envelope::success(std::move(data));
     }
 
-    filesync::NativeFileStore store(project);
     if (!filesync::atomic_write(store, plan.file, new_bytes))
         return Envelope::failure("internal.error",
                                  "the atomic write to `" + plan.file +
