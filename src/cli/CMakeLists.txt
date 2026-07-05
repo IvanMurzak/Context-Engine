@@ -14,6 +14,7 @@ add_library(context_cli STATIC
     src/fetch_command.cpp
     src/migrate_command.cpp
     src/scaffold.cpp
+    src/set_command.cpp
     src/wire_client.cpp)
 
 target_include_directories(context_cli PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -29,6 +30,11 @@ target_include_directories(context_cli PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/includ
 target_link_libraries(context_cli
     PUBLIC context_contract context_bridge
     PRIVATE context_kernel context_editorkernel context_schema context_serializer context_warnings)
+
+# `context set` / `context query --overrides` (M2 composed write path, src/editor/compose/ +
+# src/editor/filesync/): PRIVATE — set_command.cpp is the only consumer, driving compose's IO-free
+# plan_write()/override_hygiene() and filesync's R-FILE-004 atomic_write + content_hash.
+target_link_libraries(context_cli PRIVATE context_compose context_filesync)
 
 # `context migrate` (M2 wave 3, src/editor/migrate/): PUBLIC — migrate_command.h names
 # migrate::MigrationSet in its test-seam signature, and the ctest executable that injects its own
@@ -59,7 +65,8 @@ set(_context_cli_tests
     test_cli
     test_editor_driver
     test_migrate_command
-    test_scaffold)
+    test_scaffold
+    test_set_command)
 
 foreach(_t IN LISTS _context_cli_tests)
     add_executable(context_cli_${_t} tests/${_t}.cpp)

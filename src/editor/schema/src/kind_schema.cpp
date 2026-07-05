@@ -222,6 +222,7 @@ constexpr std::string_view kSceneSchemaJson = R"({
           "path": {"type": "array", "items": {"type": "string"}, "description": "The id-path, from an instance id of THIS scene inward ($root addresses a composable sub-scene root)."},
           "pointer": {"type": "string", "description": "JSON pointer into the addressed entity (field override; paired with `value`). /id, /$schema and /version are immutable under composition (L-37)."},
           "value": {"description": "The overriding value — any JSON (paired with `pointer`)."},
+          "base": {"description": "Optional divergence snapshot `context set` records with a field override (R-CLI-006 / L-35): the template value at write time. `context query --overrides diverged` flags an override whose `base` no longer matches the current template value (advisory; never auto-pruned)."},
           "add": {"type": "object", "description": "Structural override: an entity object (with its own stable id) composed under the instance subtree `path` addresses."},
           "remove": {"type": "boolean", "description": "Structural override: remove the entity (or whole instance subtree) `path` addresses."},
           "notes": {"description": "Schema-blessed annotations."}

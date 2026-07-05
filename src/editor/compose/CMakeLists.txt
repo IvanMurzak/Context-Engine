@@ -8,6 +8,7 @@
 # (`--edit-template` / `--at-instance`) is a separate follow-up task.
 
 add_library(context_compose STATIC
+    src/compose_write.cpp
     src/flatten.cpp
     src/json_pointer.cpp
     src/scene_model.cpp
@@ -41,6 +42,8 @@ set(_context_compose_tests
     test_scene_model
     test_flatten
     test_flatten_diagnostics
+    test_compose_write
+    test_override_hygiene
     test_corpus)
 
 foreach(_t IN LISTS _context_compose_tests)
