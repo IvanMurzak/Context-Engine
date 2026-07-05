@@ -94,6 +94,11 @@ int main()
         CHECK(!bad_seed.ok());
         CHECK(err_code(bad_seed) == "session.input_invalid");
 
+        const Envelope bad_scenario =
+            run_session("new", {{"state", state}}, {{"scenario", "bogus"}});
+        CHECK(!bad_scenario.ok());
+        CHECK(err_code(bad_scenario) == "session.input_invalid");
+
         const Envelope no_input = run_session("inject", {{"state", state}}, {});
         CHECK(!no_input.ok());
         CHECK(err_code(no_input) == "session.input_invalid");

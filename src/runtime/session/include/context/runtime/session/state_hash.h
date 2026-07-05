@@ -66,12 +66,6 @@ using HashTrace = std::vector<HashTree>;
 [[nodiscard]] StateHash hash_world(const kernel::World& world,
                                    const SimComponentRegistry& registry);
 
-// Canonical JSON projections (for `session hash`, trace output, and the replay artifact's expected
-// trace). state_hash_to_json emits {"root", "archetypes":[{"signature","hash","entityCount"}...]}.
-[[nodiscard]] serializer::JsonValue state_hash_to_json(const StateHash& hash);
-[[nodiscard]] serializer::JsonValue hash_tree_to_json(const HashTree& tree);
-[[nodiscard]] serializer::JsonValue hash_trace_to_json(const HashTrace& trace);
-
 // The compact per-tick root list an artifact stores as its expected trace (index i == tick i).
 [[nodiscard]] std::vector<std::uint64_t> trace_roots(const HashTrace& trace);
 

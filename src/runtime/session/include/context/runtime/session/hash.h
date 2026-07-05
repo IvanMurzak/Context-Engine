@@ -9,7 +9,6 @@
 #pragma once
 
 #include <cstdint>
-#include <initializer_list>
 #include <string_view>
 
 namespace context::runtime::session
@@ -50,25 +49,5 @@ public:
 private:
     std::uint64_t state_ = kOffsetBasis;
 };
-
-// Compose an ordered list of sub-hashes into one parent hash (the hierarchical combine). Order is
-// significant — the caller sorts its children into a canonical order before combining.
-[[nodiscard]] inline std::uint64_t combine_hashes(std::initializer_list<std::uint64_t> subs) noexcept
-{
-    Fnv1a h;
-    for (std::uint64_t s : subs)
-        h.update_u64(s);
-    return h.digest();
-}
-
-// FNV-1a over a byte string, one-shot (matches serializer::canonical_hash_of on the same bytes —
-// both are the same 64-bit FNV-1a; provided here so the session layer stays serializer-independent
-// for pure byte hashing).
-[[nodiscard]] inline std::uint64_t hash_bytes(std::string_view bytes) noexcept
-{
-    Fnv1a h;
-    h.update_bytes(bytes);
-    return h.digest();
-}
 
 } // namespace context::runtime::session

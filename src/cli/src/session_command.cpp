@@ -198,7 +198,15 @@ Envelope session_new(const std::string& state, const std::map<std::string, std::
         config.seed = *parsed;
     }
     if (const std::string* scenario = flag(flags, "scenario"))
+    {
+        // Only the built-in `demo` scenario exists today; reject an unknown name loudly rather than
+        // silently constructing an empty world (setup_scenario populates entities for "demo" only).
+        if (*scenario != "demo")
+            return Envelope::failure(
+                "session.input_invalid",
+                "--scenario '" + *scenario + "' is not a known scenario (expected 'demo')");
         config.scenario = *scenario;
+    }
 
     session::Session s(config);
     Json data = Json::object();

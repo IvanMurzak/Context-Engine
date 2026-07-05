@@ -3,7 +3,6 @@
 #include "context/runtime/session/state_hash.h"
 
 #include "context/runtime/session/hash.h"
-#include "context/runtime/session/json_build.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -104,58 +103,6 @@ StateHash hash_world(const kernel::World& world, const SimComponentRegistry& reg
     }
     result.root = root.digest();
     return result;
-}
-
-namespace
-{
-serializer::JsonValue archetypes_to_json(const std::vector<ArchetypeHash>& archetypes)
-{
-    serializer::JsonValue arr = jb::array();
-    for (const ArchetypeHash& a : archetypes)
-    {
-        serializer::JsonValue entry = jb::object();
-        jb::set(entry, "signature", jb::str(a.signature));
-        jb::set(entry, "hash", jb::uinteger(a.hash));
-        jb::set(entry, "entityCount", jb::uinteger(a.entity_count));
-        jb::push(arr, std::move(entry));
-    }
-    return arr;
-}
-} // namespace
-
-serializer::JsonValue state_hash_to_json(const StateHash& hash)
-{
-    serializer::JsonValue out = jb::object();
-    jb::set(out, "root", jb::uinteger(hash.root));
-    jb::set(out, "archetypes", archetypes_to_json(hash.archetypes));
-    return out;
-}
-
-serializer::JsonValue hash_tree_to_json(const HashTree& tree)
-{
-    serializer::JsonValue out = jb::object();
-    jb::set(out, "tick", jb::uinteger(tree.tick));
-    jb::set(out, "root", jb::uinteger(tree.root));
-
-    serializer::JsonValue systems = jb::array();
-    for (const SystemHash& s : tree.per_system)
-    {
-        serializer::JsonValue entry = jb::object();
-        jb::set(entry, "system", jb::str(s.system));
-        jb::set(entry, "hash", jb::uinteger(s.hash));
-        jb::push(systems, std::move(entry));
-    }
-    jb::set(out, "perSystem", std::move(systems));
-    jb::set(out, "perArchetype", archetypes_to_json(tree.per_archetype));
-    return out;
-}
-
-serializer::JsonValue hash_trace_to_json(const HashTrace& trace)
-{
-    serializer::JsonValue arr = jb::array();
-    for (const HashTree& tree : trace)
-        jb::push(arr, hash_tree_to_json(tree));
-    return arr;
 }
 
 std::vector<std::uint64_t> trace_roots(const HashTrace& trace)

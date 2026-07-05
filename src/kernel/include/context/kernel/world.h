@@ -16,6 +16,7 @@
 #include <functional>
 #include <memory>
 #include <utility>
+#include <vector>
 
 namespace context::kernel
 {
