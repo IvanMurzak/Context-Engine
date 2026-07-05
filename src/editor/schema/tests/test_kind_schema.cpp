@@ -55,6 +55,8 @@ int main()
         " \"properties\": {\"radius\": {\"type\": \"number\", \"x-ctx-units\": \"m\"}}},"
         " \"shape:box\": {\"type\": \"object\"}}}")));
     CHECK(compiles(minimal_schema("\"mesh\": {\"x-ctx-ref\": \"ctx:mesh\"}")));
+    // A binary-sidecar field names its logical content-type (x-ctx-sidecar, L-33 day-one consumer).
+    CHECK(compiles(minimal_schema("\"cells\": {\"x-ctx-sidecar\": \"tilemap-cells\"}")));
 
     // --- failure paths: the LAW rejects lawless declarations --------------------------------------
     // The units law: a non-SI unit CANNOT be declared (this is the whole point of R-DATA-006).
@@ -70,6 +72,13 @@ int main()
     // ref/union/semantic are mutually exclusive on one field.
     CHECK(!compiles(minimal_schema(
         "\"x\": {\"x-ctx-ref\": \"ctx:mesh\", \"x-ctx-type\": \"quaternion\"}")));
+    // x-ctx-sidecar names one lowercase content-type id; empty / non-string / ad-hoc casing rejected.
+    CHECK(!compiles(minimal_schema("\"cells\": {\"x-ctx-sidecar\": \"\"}")));
+    CHECK(!compiles(minimal_schema("\"cells\": {\"x-ctx-sidecar\": \"Tilemap Cells\"}")));
+    CHECK(!compiles(minimal_schema("\"cells\": {\"x-ctx-sidecar\": true}")));
+    // x-ctx-sidecar is mutually exclusive with the other field-shape annotations.
+    CHECK(!compiles(minimal_schema(
+        "\"x\": {\"x-ctx-sidecar\": \"blob\", \"x-ctx-ref\": \"ctx:mesh\"}")));
     // Unknown schema keyword (the dialect is pinned).
     CHECK(!compiles(minimal_schema("\"x\": {\"minimum\": 3}")));
     // Root must expose the blessed notes field (L-32).
@@ -125,13 +134,33 @@ int main()
     // --- the engine kinds ------------------------------------------------------------------------
     {
         const SchemaSet& engine = engine_schemas();
-        CHECK(engine.all().size() >= 2);
+        CHECK(engine.all().size() >= 4); // scene + project + the M2 wave-4 content kinds
         const KindSchema* scene = engine.latest(kSceneKindId);
         const KindSchema* project = engine.latest(kProjectKindId);
+        const KindSchema* tilemap = engine.latest(kTilemapKindId);
+        const KindSchema* strings = engine.latest(kStringTableKindId);
         CHECK(scene != nullptr);
         CHECK(project != nullptr);
+        CHECK(tilemap != nullptr); // ctx:tilemap (R-2D-003)
+        CHECK(strings != nullptr); // ctx:string-table (R-I18N-001)
         CHECK(scene->version == 1);
         CHECK(project->version == 1);
+        CHECK(tilemap->version == 1);
+        CHECK(strings->version == 1);
+    }
+
+    // --- introspection surfaces x-ctx-sidecar (the tilemap chunk cells) --------------------------
+    {
+        const KindSchema* tilemap = engine_schemas().latest(kTilemapKindId);
+        CHECK(tilemap != nullptr);
+        const std::string entry = introspection_json(*tilemap);
+        CHECK(entry == context::editor::serializer::canonicalize(entry).bytes);
+        // The binary-sidecar content-type reaches `describe` so agents know a chunk's cells live in
+        // a sidecar without opening it (R-CLI-005).
+        CHECK(entry.find("\"sidecar\": \"tilemap-cells\"") != std::string::npos);
+        CHECK(entry.find("\"pointer\": \"/layers/[]/chunks/[]/cells\"") != std::string::npos);
+        // The SI units law is surfaced on tileSize (meters).
+        CHECK(entry.find("\"units\": \"m\"") != std::string::npos);
     }
 
     // --- introspection projection ----------------------------------------------------------------

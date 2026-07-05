@@ -238,6 +238,14 @@ bool is_union_tag(std::string_view tag) noexcept
     return is_tag_segment(tag.substr(0, colon)) && is_tag_segment(tag.substr(colon + 1));
 }
 
+bool is_sidecar_content_type(std::string_view content_type) noexcept
+{
+    // A sidecar content-type names the binary payload's logical kind for introspection — one
+    // canonical lowercase identifier per meaning (the tag-segment grammar the union convention uses),
+    // so tools/agents key off a stable id rather than free text.
+    return is_tag_segment(content_type);
+}
+
 bool is_color_space(std::string_view space) noexcept
 {
     return std::find(kColorSpaces.begin(), kColorSpaces.end(), space) != kColorSpaces.end();

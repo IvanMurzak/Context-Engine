@@ -210,6 +210,39 @@ const std::vector<ErrorCode>& catalog()
          "A shared-cache entry failed its content-hash self-verification on read (corruption); the "
          "entry is rejected and the artifact re-derived (R-FILE-010).",
          true, kExitValidation, "R-FILE-010"},
+        // --- content kinds (M2 wave 4, issue #61: R-2D-003 tilemap + R-I18N-001 string-table) ----
+        // The CONTENT-rule diagnostics the schema dialect cannot express (src/editor/kinds/): the
+        // L-33 tilemap split-nudge + region/id checks and the string-table fallback/plural checks.
+        // NOTE: tilemap.chunk_oversize is ADVISORY (the L-33 split-nudge) — a consumer must NOT treat
+        // its kExitValidation class as a hard validation failure; the payload is still valid.
+        {"tilemap.chunk_oversize",
+         "A tilemap chunk's packed cell payload exceeds the ~1 MB split-nudge ceiling; split the "
+         "region (L-33 advisory).",
+         false, kExitValidation, "R-2D-003"},
+        {"tilemap.region_invalid", "A tilemap chunk region has a non-positive width or height.",
+         false, kExitValidation, "R-2D-003"},
+        {"tilemap.id_duplicate",
+         "Two tilemap tile-sets or two layers share a stable id (L-33 ids are unique within a "
+         "collection).",
+         false, kExitValidation, "R-2D-003"},
+        {"stringtable.locale_duplicate", "Two string-table locales declare the same tag.", false,
+         kExitValidation, "R-I18N-001"},
+        {"stringtable.key_duplicate", "Two string-table entries declare the same key.", false,
+         kExitValidation, "R-I18N-001"},
+        {"stringtable.fallback_unknown",
+         "A locale's fallback names a locale not declared in the table's `locales`.", false,
+         kExitValidation, "R-I18N-001"},
+        {"stringtable.fallback_cycle", "A locale's fallback chain contains a cycle.", false,
+         kExitValidation, "R-I18N-001"},
+        {"stringtable.value_invalid",
+         "A string-table translation is not EXACTLY ONE of `text` or `plural`.", false,
+         kExitValidation, "R-I18N-001"},
+        {"stringtable.plural_incomplete",
+         "A plural set omits the required CLDR `other` category.", false, kExitValidation,
+         "R-I18N-001"},
+        {"stringtable.value_locale_duplicate",
+         "Two translations for one string-table key declare the same locale.", false,
+         kExitValidation, "R-I18N-001"},
     };
     return the_catalog;
 }

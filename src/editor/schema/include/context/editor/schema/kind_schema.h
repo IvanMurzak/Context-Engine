@@ -18,6 +18,12 @@ namespace context::editor::schema
 // "version" header field selects the registered schema version (L-32 header block).
 inline constexpr std::string_view kSceneKindId = "ctx:scene";
 inline constexpr std::string_view kProjectKindId = "ctx:project";
+// The first content kinds (M2 wave 4, R-2D-003 / R-I18N-001): the tilemap (2D backbone — canonical
+// JSON per L-32/L-33 with heavy cell data in binary sidecars) and the string table (locale variants
+// + fallback chains + ICU-style plural rules). Kind SEMANTICS (split-nudge, fallback resolution,
+// plural evaluation) live in src/editor/kinds/; the schema publication lives here (engine_schemas()).
+inline constexpr std::string_view kTilemapKindId = "ctx:tilemap";
+inline constexpr std::string_view kStringTableKindId = "ctx:string-table";
 
 // One compiled per-kind versioned schema. `doc` is the schema DOCUMENT (the dialect below);
 // `canonical_doc` is its canonical-JSON serialization — the published form (R-DATA-006: published,
