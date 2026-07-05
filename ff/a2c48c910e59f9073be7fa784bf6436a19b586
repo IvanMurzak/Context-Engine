@@ -1,0 +1,43 @@
+src/editor/merge/src/resolve.cpp
+  s_e3239cf02087b8::t_b22c2227fb4991 7-8
+  s_e3239cf02087b8::t_34087b889e4cc3 88-89
+  s_e3239cf02087b8::t_c1db622c315336 54-55
+  s_e3239cf02087b8::t_36ce60171acb4e 112-127
+src/editor/merge/src/pointer_format.h
+  s_e3239cf02087b8::t_4e91d2c5d6730b 36-50
+src/editor/merge/src/three_way_merge.cpp
+  s_e3239cf02087b8::t_11947d144d7d39 517-529
+  s_e3239cf02087b8::t_fe165c61523327 331-332
+src/cli/src/merge_command.cpp
+  s_e3239cf02087b8::t_cf55dbae19ac0f 16
+  s_e3239cf02087b8::t_166900e4c45882 303-311
+  s_e3239cf02087b8::t_bc22c92c844971 282-284
+src/cli/tests/test_merge_command.cpp
+  s_e3239cf02087b8::t_689548f89b97be 171-181
+  s_e3239cf02087b8::t_ddf81c90c21e3f 213,215
+  s_e3239cf02087b8::t_eea70b99bb1d7d 133-156
+  s_e3239cf02087b8::t_c8757d576ebd9f 99-102,104-105,109-111
+src/editor/merge/tests/test_three_way_merge.cpp
+  s_e3239cf02087b8::t_fecb4afa7d4c0f 253-271
+  s_e3239cf02087b8::t_1e7e9f46a6f27b 307
+src/editor/merge/src/rekey.cpp
+  s_e3239cf02087b8::t_6a173a275683ab 129-131
+src/cli/CMakeLists.txt
+  s_e3239cf02087b8::t_055a40cac82c68 85-90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ffa2c48c910e59f9073be7fa784bf6436a19b586",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
