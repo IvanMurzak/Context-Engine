@@ -5,6 +5,7 @@
 #include "context/editor/schema/json_access.h"
 #include "context/editor/schema/vocabulary.h"
 #include "context/editor/serializer/canonical.h"
+#include "context/editor/serializer/sidecar_ref.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -393,6 +394,17 @@ public:
     void walk(const JsonValue& value, const JsonValue& node, const std::string& pointer,
               bool is_root, bool allow_tag = false)
     {
+        if (find_member(node, kKeySidecar) != nullptr)
+        {
+            // A binary-sidecar field holds the pinned reference object {"$sidecar", "hash"} (L-33);
+            // the file-sync layer owns resolution + on-disk hash verification, the schema layer the
+            // authored SHAPE. The ref object is a LEAF — never descended into.
+            if (!serializer::is_sidecar_ref(value))
+                diag("sidecar.ref_malformed", pointer,
+                     "a binary-sidecar field is {\"$sidecar\": \"<relpath>\", \"hash\": "
+                     "\"<decimal>\"} (L-33)");
+            return;
+        }
         if (const JsonValue* ref = find_member(node, kKeyRef); ref != nullptr)
         {
             check_ref(value, ref->string_value, pointer);
