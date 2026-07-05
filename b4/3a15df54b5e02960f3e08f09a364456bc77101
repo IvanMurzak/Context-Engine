@@ -1,0 +1,22 @@
+src/editor/migrate/src/migrate_document.cpp
+  s_e3239cf02087b8::t_2efa429c83e301 305-310,312-314,318,325-331,333,345-348
+src/editor/migrate/tests/test_path_transform.cpp
+  s_e3239cf02087b8::t_c46314fb97b2a0 209-254
+  s_e3239cf02087b8::t_47b7d5bc8238d8 309
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b43a15df54b5e02960f3e08f09a364456bc77101",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
