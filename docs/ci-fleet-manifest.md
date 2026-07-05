@@ -53,6 +53,12 @@ Every gate carries exactly one written red-X policy:
 | `m1-exit-crash-recovery` | R-FILE-004 | gh-ubuntu-shared | per-PR | blocking | `build` |
 | `m1-exit-contract-parity` | R-CLI-009 | gh-ubuntu-shared | per-PR | blocking | `build` |
 | `m1-exit-scope-enforcement` | R-SEC-007 | gh-ubuntu-shared | per-PR | blocking | `build` |
+| `m2-exit-cli-authoring` | L-37 | gh-ubuntu-shared | per-PR | blocking | `build` |
+| `m2-exit-schema-migration` | L-37 | gh-ubuntu-shared | per-PR | blocking | `build` |
+| `m2-exit-flatten-content-units` | R-ASSET-005 | gh-ubuntu-shared | per-PR | blocking | `build` |
+| `m2-exit-composed-write-provenance` | R-CLI-006 | gh-ubuntu-shared | per-PR | blocking | `build` |
+| `m2-exit-per-payload-migration` | R-QA-011 | gh-ubuntu-shared | per-PR | blocking | `build` |
+| `m2-exit-seam-checklist` | R-DATA-006 | gh-ubuntu-shared | per-PR | blocking | `build` |
 | `sanitize-asan-ubsan` | L-38 | gh-ubuntu-shared | per-PR | blocking | `sanitize` |
 | `sanitize-tsan` | L-38 | gh-ubuntu-shared | per-PR | blocking | `sanitize` |
 | `bench-baseline-10k` | R-FILE-011 | gh-ubuntu-shared | per-PR | **advisory** | `bench-baseline` |
