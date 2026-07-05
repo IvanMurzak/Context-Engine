@@ -75,9 +75,13 @@ maps a failed composed read onto the existing catalog when the query surface con
 - **Fan-out is synchronous inside the derivation pass** (the graph re-flattens dependents in the
   pass that derived the template) — the async-streamed fan-out of R-FILE-011(b) lands with the
   daemon's threading model, like the rest of the graph's determinism story.
-- **Flatten boundaries = future content-unit boundaries**: the flatten output is the layer the
-  R-ASSET-005 chunked pack format co-designs against (ROADMAP M2); the pack format itself is a
-  later M2 task.
+- **Flatten boundaries = content-unit boundaries** (`content_unit.h`, R-ASSET-005 / L-35): the
+  flatten output is partitioned into GUID-addressable, independently loadable/unloadable content
+  units — the root scene's own content is the root unit, each top-level instance subtree is its own
+  unit, keyed by the composed identity of its boundary root. This is co-designed with the chunked
+  pack format the M8 packer freezes against (`docs/chunk-pack-format.md`); the on-disk chunk encoding
+  and the async streaming loader themselves are M8 (this module emits the boundaries and proves they
+  load/unload independently over the derivation-output seam).
 - **Component-level validation of composed output** (validating an overridden component against
   its kind schema post-compose) is the instantiate node's concern, not the flatten's.
 

@@ -287,6 +287,27 @@ const std::vector<ErrorCode>& catalog()
         {"stringtable.value_locale_duplicate",
          "Two translations for one string-table key declare the same locale.", false,
          kExitValidation, "R-I18N-001"},
+        // --- player save-game groundwork (M2 issue #66: R-DATA-005 / L-37) ----------------------
+        // RuntimeKernel's save-migration runner diagnostics (src/runtime/save/). Deterministic
+        // (retriable=false); the L-37 downgrade + per-payload migration findings a save shares with
+        // parse-time migration reuse the existing schema.newer_than_* / migration.* codes above.
+        // Additive-only (protocolMajor stays 0): NEW rows, no existing row reordered/renamed.
+        {"save.malformed",
+         "The save document shape is invalid (not a save envelope, a bad composed identity, or a "
+         "component payload the save header does not stamp).",
+         false, kExitValidation, "R-DATA-005"},
+        {"save.unknown_component",
+         "The save carries a component this build's compiled component set does not include; a save "
+         "migration runner embeds migrations for exactly the compiled set (R-DATA-005).",
+         false, kExitValidation, "R-DATA-005"},
+        {"save.back_compat_exceeded",
+         "A saved component payload is stamped more schema versions behind than the declared save "
+         "back-compat scope (N versions) covers; refused, never best-effort read (R-DATA-005).",
+         false, kExitValidation, "R-DATA-005"},
+        {"save.format_unsupported",
+         "The save envelope's format version is newer than this build reads; last-good retained, "
+         "never a best-effort parse (R-DATA-005).",
+         false, kExitValidation, "R-DATA-005"},
     };
     return the_catalog;
 }

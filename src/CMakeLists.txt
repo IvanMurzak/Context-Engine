@@ -276,6 +276,16 @@ add_subdirectory(editor/kinds)
 # `context_compose` target, which CMake resolves at generate time regardless of order).
 add_subdirectory(editor/compose)
 
+# M2 wave 4: player save-game groundwork (src/runtime/save/, R-DATA-005 / L-37, issue #66) — the
+# FIRST src/runtime/ (RuntimeKernel) target. RuntimeKernel's OWN serialization (R-FILE-009 — never
+# authored files): a per-component schemaVersion save header + composed-identity-addressed entity
+# records (L-37) + a minimal save-migration runner that REUSES the editor's per-payload migration
+# mechanism (context_migrate::migrate_payload) so a shipped build loads older saves through exactly
+# the parse-time mechanism. OWN stanza inserted here — deliberately apart from the editor cluster
+# above and before the M1 exit-gate block — so it never collides at the file tail (consumers name
+# the `context_save` target, resolved at generate time regardless of add_subdirectory order).
+add_subdirectory(runtime/save)
+
 # ---------------------------------------------------------------------------
 # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36): five integration tests, one per exit
 # criterion, registered as the `m1-exit-*` ctest family and CI-gated per the §6 tiering (blocking

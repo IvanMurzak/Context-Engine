@@ -91,5 +91,20 @@ int main()
         CHECK(std::find(base.begin(), base.end(), "scope.insufficient") != base.end());
     }
 
+    // --- R-DATA-005 save-groundwork codes (M2 issue #66) map to the validation class -------------
+    // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
+    // holds because baseline is a subset of the live catalog).
+    {
+        for (const char* code : {"save.malformed", "save.unknown_component",
+                                 "save.back_compat_exceeded", "save.format_unsupported"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 5);      // validation class
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-DATA-005");
+        }
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

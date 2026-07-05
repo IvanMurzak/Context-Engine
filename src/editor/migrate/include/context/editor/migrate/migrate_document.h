@@ -116,6 +116,32 @@ struct DocumentMigrationResult
                                                                 std::int64_t from_version,
                                                                 std::string_view pointer);
 
+// Migrate ONE component payload of `component_type` from `from_version` up to the registered
+// current version, IN PLACE, under the full L-37 execution contract (tier gating, per-invocation
+// budget, purity, id immutability — the same enforcement document migration applies at every
+// payload site). This is the shared per-payload migration PRIMITIVE: the RuntimeKernel
+// save-migration runner (R-DATA-005) reuses it so a shipped build loads older player saves through
+// EXACTLY the mechanism the editor uses at parse time, rather than duplicating the contract.
+//
+// `site_pointer` locates the payload for diagnostics (the caller's document shape — a save entity's
+// component pointer, a scene payload site). Behavior:
+//   - component unregistered (current == 0)  — no-op, returns true (unknown types are the caller's
+//                                              policy: packages/builds register incrementally).
+//   - from_version == current                — no-op, returns true.
+//   - from_version >  current                — the L-37 downgrade rule: schema.newer_than_engine
+//                                              ("ctx:" namespace) / schema.newer_than_package,
+//                                              blocking, returns false (never a best-effort parse).
+//   - from_version <  current (>= 1)         — apply the step chain; a gap is migration.step_missing,
+//                                              a step violation is the apply_step finding
+//                                              (step_failed / budget_exceeded / id_mutated /
+//                                              runner_unavailable). On ANY blocking finding the
+//                                              payload is ROLLED BACK to its pre-call bytes.
+// Returns true iff the payload is at the current version afterward.
+[[nodiscard]] bool migrate_payload(const MigrationSet& set, std::string_view component_type,
+                                   std::int64_t from_version, serializer::JsonValue& payload,
+                                   const MigrationBudget& budget, std::string_view site_pointer,
+                                   std::vector<MigrationDiagnostic>& diagnostics);
+
 // Count the JSON nodes of a payload subtree (the budget metric: every value + every object member
 // counts one). Exposed for tests pinning the budget rule.
 [[nodiscard]] std::uint64_t node_count(const serializer::JsonValue& value) noexcept;
