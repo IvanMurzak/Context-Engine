@@ -86,11 +86,21 @@ SaveMigrationResult migrate_save(SaveDocument& save, const migrate::MigrationSet
     if (!result.ok)
         return result; // nothing applied yet
 
-    // All-or-nothing per save: snapshot the entities so any blocking finding rolls the WHOLE save
-    // back (last-good — never a partial load). The header is edited only on the success path.
-    const std::vector<SaveEntity> entities_snapshot = save.entities;
-
-    std::vector<std::string> migrated_types;
+    // --- selection (per componentVersions entry, authored order — deterministic) ----------------
+    // Classify EVERY stamped type BEFORE touching a single payload, exactly as the sibling
+    // migrate_document's selection pass does (migrate_document.cpp): gather every type-level finding
+    // (unknown / newer-than / back-compat) across ALL types, THEN — if any is blocking — refuse the
+    // whole save up front. Separating selection from application this way guarantees an
+    // application-time failure on an earlier type can never suppress a LATER type's selection
+    // diagnostic (which an interleaved single loop would drop when it broke on the earlier failure).
+    // Nothing is mutated in this pass.
+    struct EligibleType
+    {
+        std::string type;
+        std::int64_t saved_version;
+        std::int64_t current;
+    };
+    std::vector<EligibleType> to_migrate;
     for (const auto& [type, saved_version] : save.component_versions)
     {
         const std::int64_t current = set.current_version(type);
@@ -130,24 +140,32 @@ SaveMigrationResult migrate_save(SaveDocument& save, const migrate::MigrationSet
             result.ok = false;
             continue;
         }
+        // saved_version == current (a no-op) or older-within-scope: eligible for payload migration.
+        to_migrate.push_back({type, saved_version, current});
+    }
+    if (!result.ok)
+        return result; // every selection finding gathered; nothing was applied — no rollback needed
 
-        // A blocking selection finding on an earlier type already refuses the whole save; keep
-        // scanning to surface EVERY type-level finding (as the sibling migrate_document's selection
-        // pass does), but migrate no payloads — the save rolls back regardless.
-        if (!result.ok)
-            continue;
+    // --- application (all-or-nothing per save: snapshot, apply, roll back on a blocking finding) --
+    // Snapshot the entities so any application failure rolls the WHOLE save back (last-good — never a
+    // partial load). The header is edited only on the success path. Selection is fully known now, so
+    // breaking on the first application failure is safe.
+    const std::vector<SaveEntity> entities_snapshot = save.entities;
 
-        // saved_version == current (a no-op) or older-within-scope: migrate every entity's payload
-        // of this type through the SHARED per-payload primitive (the editor's parse-time mechanism).
+    std::vector<std::string> migrated_types;
+    for (const EligibleType& eligible : to_migrate)
+    {
+        // Migrate every entity's payload of this type through the SHARED per-payload primitive (the
+        // editor's parse-time mechanism).
         for (std::size_t i = 0; i < save.entities.size(); ++i)
         {
-            JsonValue* payload = find_member(save.entities[i].components, type);
+            JsonValue* payload = find_member(save.entities[i].components, eligible.type);
             if (payload == nullptr)
                 continue;
-            const std::string pointer =
-                "/entities/" + std::to_string(i) + "/components/" + escape_pointer_segment(type);
-            if (!migrate::migrate_payload(set, type, saved_version, *payload, options.budget, pointer,
-                                          result.diagnostics))
+            const std::string pointer = "/entities/" + std::to_string(i) + "/components/" +
+                                        escape_pointer_segment(eligible.type);
+            if (!migrate::migrate_payload(set, eligible.type, eligible.saved_version, *payload,
+                                          options.budget, pointer, result.diagnostics))
             {
                 result.ok = false;
                 break;
@@ -155,8 +173,8 @@ SaveMigrationResult migrate_save(SaveDocument& save, const migrate::MigrationSet
         }
         if (!result.ok)
             break;
-        if (saved_version < current)
-            migrated_types.push_back(type);
+        if (eligible.saved_version < eligible.current)
+            migrated_types.push_back(eligible.type);
     }
 
     if (!result.ok)

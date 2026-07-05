@@ -246,5 +246,48 @@ int main()
         CHECK(saw_unknown && saw_newer); // both selection findings gathered, not just the first
     }
 
+    // --- an earlier type's APPLICATION failure must NOT suppress a later type's SELECTION finding --
+    {
+        // test:sprite (iterated FIRST) has a migration-chain GAP, so its payload would fail at
+        // APPLICATION time (migration.step_missing); phys:body (iterated LATER) is unknown — a
+        // SELECTION finding. Because the runner classifies EVERY type before applying any payload
+        // (selection-before-application, mirroring migrate_document), phys:body's selection diagnostic
+        // is gathered rather than being hidden behind test:sprite's application failure. And since a
+        // blocking selection finding refuses the save up front, NO payload is migrated — so the
+        // chain-gap application finding is not reached and nothing is mutated.
+        migrate::MigrationSet gapped;
+        std::string problem;
+        CHECK(gapped.register_component("test:sprite", 3, problem));
+        migrate::MigrationStep v1;
+        v1.component_type = "test:sprite";
+        v1.from_version = 1;
+        v1.revision = 1;
+        v1.transform = migratetest::sprite_v1_to_v2;
+        CHECK(gapped.register_step(std::move(v1), problem)); // only v1->v2; v2->v3 is a GAP
+
+        SaveDocument save;
+        save.component_versions = {{"test:sprite", 1}, {"phys:body", 1}};
+        SaveEntity entity;
+        entity.components = migratetest::parse(
+            R"({"phys:body": {"mass": 1}, "test:sprite": {"id": "spr-1", "size": 4, "tint": "red"}})");
+        save.entities = {std::move(entity)};
+        const std::string before = migratetest::canon(save.entities[0].components);
+
+        const SaveMigrationResult result = migrate_save(save, gapped);
+        CHECK(!result.ok);
+        bool saw_unknown = false;
+        bool saw_step_missing = false;
+        for (const migrate::MigrationDiagnostic& d : result.diagnostics)
+        {
+            if (d.code == "save.unknown_component")
+                saw_unknown = true;
+            if (d.code == "migration.step_missing")
+                saw_step_missing = true;
+        }
+        CHECK(saw_unknown);       // the later type's selection finding is NOT suppressed
+        CHECK(!saw_step_missing); // selection-before-application: no payload migrated once selection blocks
+        CHECK(migratetest::canon(save.entities[0].components) == before); // untouched (no partial apply)
+    }
+
     MIGRATE_TEST_MAIN_END();
 }
