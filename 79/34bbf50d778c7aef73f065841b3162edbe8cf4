@@ -1,0 +1,61 @@
+src/runtime/save/tests/test_save_migration.cpp
+  s_e3239cf02087b8::t_3fce136fe6cb26 1-223
+src/runtime/save/README.md
+  s_e3239cf02087b8::t_a8bdd4f1c25890 1-65
+src/editor/compose/README.md
+  s_e3239cf02087b8::t_fcd2d6186f8087 78-84
+src/runtime/README.md
+  s_e3239cf02087b8::t_e869190d4ffdfb 5-22
+src/runtime/save/src/save_document.cpp
+  s_e3239cf02087b8::t_52fec955a80a7f 1-281
+src/editor/contract/tests/test_error_catalog.cpp
+  s_e3239cf02087b8::t_9b6a6dd2194f78 94-108
+src/editor/migrate/src/migrate_document.cpp
+  s_e3239cf02087b8::t_b81022a538a3ac 396-467
+src/editor/compose/src/content_unit.cpp
+  s_e3239cf02087b8::t_f12a1ff3ff1b28 1-241
+src/runtime/save/include/context/runtime/save/save_document.h
+  s_e3239cf02087b8::t_1f2ed3743cce04 1-92
+src/CMakeLists.txt
+  s_e3239cf02087b8::t_8e7a7b22730728 279-288
+src/editor/compose/tests/test_content_unit.cpp
+  s_e3239cf02087b8::t_d2efe306d3a4cd 64-65
+  s_e3239cf02087b8::t_5e7d68ac6b86ee 1-63,66-209
+src/editor/migrate/include/context/editor/migrate/migrate_document.h
+  s_e3239cf02087b8::t_bd1512466f2085 119-144
+src/runtime/save/include/context/runtime/save/save_migration.h
+  s_e3239cf02087b8::t_43c80bfc399972 1-55
+src/editor/compose/CMakeLists.txt
+  s_e3239cf02087b8::t_64865d691aac80 12
+  s_e3239cf02087b8::t_ac9923a3a86492 46
+docs/chunk-pack-format.md
+  s_e3239cf02087b8::t_51e1da73382914 1-143
+src/editor/contract/src/error_catalog.cpp
+  s_e3239cf02087b8::t_6653e4058356d8 290-310
+src/runtime/save/CMakeLists.txt
+  s_e3239cf02087b8::t_521bd09fac6230 1-45
+src/runtime/save/tests/save_test.h
+  s_e3239cf02087b8::t_22c6957109f7cf 1-27
+src/runtime/save/tests/test_save_document.cpp
+  s_e3239cf02087b8::t_23075c5e552a15 1-126
+src/runtime/save/src/save_migration.cpp
+  s_e3239cf02087b8::t_539b9b8783242e 1-153
+src/editor/compose/include/context/editor/compose/content_unit.h
+  s_e3239cf02087b8::t_72aac29098eb85 1-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7934bbf50d778c7aef73f065841b3162edbe8cf4",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
