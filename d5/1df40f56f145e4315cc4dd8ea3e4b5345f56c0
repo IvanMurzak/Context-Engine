@@ -1,0 +1,24 @@
+src/tests/integration/test_m2exit1_cli_authoring_stable_refs.cpp
+  s_e3239cf02087b8::t_96ee26cce53aea 152-205
+docs/ci-fleet-manifest.md
+  s_e3239cf02087b8::t_8638955b3d54d4 85-89
+  s_e3239cf02087b8::t_7b0bfcfe5d431a 42
+src/tests/integration/test_m2exit3_flatten_content_units.cpp
+  s_e3239cf02087b8::t_667d5f4b441576 85-88,90-155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d51df40f56f145e4315cc4dd8ea3e4b5345f56c0",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
