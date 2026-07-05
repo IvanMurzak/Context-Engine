@@ -1,0 +1,29 @@
+src/editor/kinds/tests/test_tilemap.cpp
+  s_e3239cf02087b8::t_62c8fa3863f500 153
+  s_e3239cf02087b8::t_8f2694255eec62 163,170-181
+src/editor/kinds/src/tilemap.cpp
+  s_e3239cf02087b8::t_facee953dbd11a 130-132,135-149
+  s_e3239cf02087b8::t_d40e814eaacdf1 53-61
+src/editor/kinds/tests/test_string_table.cpp
+  s_e3239cf02087b8::t_d4991fe62bdb40 299-308
+src/editor/kinds/src/string_table.cpp
+  s_e3239cf02087b8::t_2a98a502377ac4 323,329-340
+src/editor/contract/src/error_catalog.cpp
+  s_e3239cf02087b8::t_9bdfa4e7428b71 216-218
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "48ea6dcac80f14e06e5be861fef1407b091b4cc4",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
