@@ -328,15 +328,10 @@ JsonValue merge_id_array(const JsonValue& base, const JsonValue& ours, const Jso
     out.type = JsonValue::Type::array;
     for (const IdDecision& d : plan)
     {
+        // include==false is only ever set for a confirmed-clean removal (one side removed an element
+        // the other left byte-identical to base), so it contributes nothing to the merged array.
         if (!d.include)
-        {
-            // A removal that is really a delete/modify conflict (the other side changed it).
-            if (d.ours != nullptr || d.theirs != nullptr)
-            {
-                // handled below only when a real conflict; a clean removal adds nothing.
-            }
             continue;
-        }
 
         const std::size_t index = out.elements.size();
         const std::string child = append_index(path, index);
@@ -519,7 +514,19 @@ MergeResult merge_documents(const JsonValue& base, const JsonValue& ours, const 
         const JsonValue* tg = member(theirs, "guid");
         if (og != nullptr && tg != nullptr && og->type == JsonValue::Type::string &&
             tg->type == JsonValue::Type::string && og->string_value != tg->string_value)
-            return whole_file(ConflictClass::meta_guid, base, ours, theirs);
+        {
+            // Fire ONLY when BOTH sides minted a guid different from base (a genuine both-sides mint).
+            // A one-sided guid edit (base == ours, or base == theirs) is not a conflict — it
+            // auto-merges to the changed side like any other field; forcing it whole-file would
+            // spuriously conflict a clean, one-sided re-guid.
+            const JsonValue* bg = member(base, "guid");
+            const bool base_has_guid = bg != nullptr && bg->type == JsonValue::Type::string;
+            const bool both_diverged =
+                !base_has_guid || (bg->string_value != og->string_value &&
+                                   bg->string_value != tg->string_value);
+            if (both_diverged)
+                return whole_file(ConflictClass::meta_guid, base, ours, theirs);
+        }
     }
 
     MergeResult result;

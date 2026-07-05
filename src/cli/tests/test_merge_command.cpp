@@ -96,15 +96,19 @@ void test_merge_driver_mode_exit()
 
 void test_merge_binary_sidecar()
 {
-    write(p("b4.bin"), "RAWBYTES-base");
-    write(p("o4.bin"), "RAWBYTES-ours-differ");
-    write(p("t4.bin"), "RAWBYTES-theirs-vary");
+    // R-QA-011: exercise the COMMITTED binary-sidecar corpus fixtures (the source of truth), not
+    // inline literals — a corrupted/edited .bin must fail here. The engine-level corpus test skips
+    // non-JSON cases (binary whole-file merge lives in the CLI layer), so this is the fixtures' gate.
+    const fs::path corpus = fs::path(CONTEXT_MERGE_CORPUS_DIR) / "binary-sidecar";
     const std::string out = p("m4.bin").string();
-    const Envelope e = run({"merge-file", p("b4.bin").string(), p("o4.bin").string(),
-                            p("t4.bin").string(), "--output", out});
+    const Envelope e = run({"merge-file", (corpus / "base.bin").string(), (corpus / "ours.bin").string(),
+                            (corpus / "theirs.bin").string(), "--output", out});
     CHECK(e.ok());
     CHECK(e.data().at("clean").as_bool() == false);
     CHECK(e.data().at("conflicts").at(0).at("class").as_string() == "binary_sidecar");
+    // whole-file default is OURS: the merged bytes are byte-identical to the committed ours.bin.
+    CHECK(read(out) == read(corpus / "ours.bin"));
+    CHECK(read(out) != read(corpus / "theirs.bin"));
 }
 
 void test_resolve_conflict_take_theirs()
@@ -126,6 +130,30 @@ void test_resolve_conflict_value()
     CHECK(read_json(p("r.json")).at("a").as_int() == 42);
 }
 
+void test_resolve_conflict_whole_file_take_theirs()
+{
+    // A meta_guid whole-file conflict (both sides re-guid) defaults the merged file to OURS; the
+    // whole-document sentinel path "" must be resolvable to theirs via `resolve-conflict --path ""`.
+    write(p("wb.json"), R"({"guid": "0000000000000000", "importer": "png"})");
+    write(p("wo.json"), R"({"guid": "aaaa000000000000", "importer": "png"})");
+    write(p("wt.json"), R"({"guid": "bbbb000000000000", "importer": "png"})");
+    const std::string out = p("wm.json").string();
+    const Envelope m = run({"merge-file", p("wb.json").string(), p("wo.json").string(),
+                            p("wt.json").string(), "--output", out});
+    CHECK(m.ok());
+    CHECK(m.data().at("clean").as_bool() == false);
+    CHECK(m.data().at("wholeFile").as_bool() == true);
+    CHECK(m.data().at("conflicts").at(0).at("path").as_string() == "");
+    CHECK(m.data().at("conflicts").at(0).at("class").as_string() == "meta_guid");
+    CHECK(read_json(out).at("guid").as_string() == "aaaa000000000000"); // merged defaults to ours
+
+    const Envelope r = run({"resolve-conflict", out, "--path", "", "--take", "theirs"});
+    CHECK(r.ok());
+    CHECK(read_json(out).at("guid").as_string() == "bbbb000000000000"); // whole document -> theirs
+    CHECK(r.data().at("remainingConflicts").as_int() == 0);
+    CHECK(!fs::exists(out + ".ctxconflicts.json"));
+}
+
 void test_rekey()
 {
     write(p("dup.json"),
@@ -138,6 +166,17 @@ void test_rekey()
     const Envelope v = run({"validate", p("dup.json").string()});
     CHECK(v.ok());
     CHECK(v.data().at("valid").as_bool() == true);
+}
+
+void test_rekey_at_pathological_index_no_crash()
+{
+    // A pathological over-long array index must yield a clean failure envelope, never an uncaught
+    // std::out_of_range from std::stoull (the pointer index parse caps the token length).
+    write(p("bigidx.json"), R"({"entities": [{"id": "aaaa0000aaaa0001"}]})");
+    const Envelope e = run({"re-key", p("bigidx.json").string(),
+                            "--at", "/entities/999999999999999999999999"});
+    CHECK(!e.ok());
+    CHECK(e.error()->code == "merge.rekey_target_invalid");
 }
 
 void test_validate()
@@ -171,7 +210,9 @@ int main()
     test_merge_binary_sidecar();
     test_resolve_conflict_take_theirs();
     test_resolve_conflict_value();
+    test_resolve_conflict_whole_file_take_theirs();
     test_rekey();
+    test_rekey_at_pathological_index_no_crash();
     test_validate();
 
     fs::remove_all(g_dir, ec);

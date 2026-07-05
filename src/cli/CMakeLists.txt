@@ -82,6 +82,12 @@ endforeach()
 # include paths do not propagate through it).
 target_link_libraries(context_cli_test_scaffold PRIVATE context_serializer context_schema)
 
+# test_merge_command consumes the R-QA-011 binary-sidecar corpus fixtures (the non-JSON conflict
+# class the engine-level corpus test cannot exercise — binary whole-file merge lives in the CLI
+# layer), so the committed base.bin/ours.bin/theirs.bin are the source of truth, not inline literals.
+target_compile_definitions(context_cli_test_merge_command
+    PRIVATE CONTEXT_MERGE_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../editor/merge/tests/corpus")
+
 # --- cross-process e2e (R-QA-013 / issue #34): spawn a REAL `context daemon` process + a SEPARATE
 # `context attach` process; the attach process drives the daemon over the wire and a 2nd `context
 # daemon` proves the R-BRIDGE-001 attach signal. The test needs the built `context` binary's path,

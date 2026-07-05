@@ -13,6 +13,7 @@
 #include "context/editor/serializer/json_tree.h"
 
 #include <algorithm>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -126,7 +127,6 @@ void write_sidecar(const fs::path& sidecar, const std::string& pathname,
     Json doc = Json::object();
     doc.set("path", Json(pathname));
     doc.set("conflicts", conflicts_to_json(conflicts));
-    std::error_code ec;
     std::ofstream out(sidecar, std::ios::binary | std::ios::trunc);
     if (out)
         out << doc.dump(2) << "\n";
@@ -279,8 +279,9 @@ Envelope run_resolve_conflict(const std::map<std::string, std::string>& params,
 
     if (file.empty())
         return Envelope::failure("usage.missing_argument", "a target <file> is required");
-    if (path.empty())
-        return Envelope::failure("usage.missing_argument", "--path is required");
+    if (flags.find("path") == flags.end())
+        return Envelope::failure("usage.missing_argument",
+                                 "--path is required (pass --path \"\" for a whole-file conflict)");
     if (take.empty() && !has_value)
         return Envelope::failure("usage.missing_argument", "one of --take ours|theirs or --value is required");
     if (!take.empty() && take != "ours" && take != "theirs")
@@ -299,7 +300,15 @@ Envelope run_resolve_conflict(const std::map<std::string, std::string>& params,
     bool have_sidecar = false;
     if (std::string sc; read_file(sidecar, sc))
     {
-        sidecar_doc = Json::parse(sc);
+        try
+        {
+            sidecar_doc = Json::parse(sc);
+        }
+        catch (const std::exception&)
+        {
+            return Envelope::failure("file.parse_error",
+                                     "the conflict sidecar is not well-formed JSON: " + sidecar.string());
+        }
         have_sidecar = true;
     }
 

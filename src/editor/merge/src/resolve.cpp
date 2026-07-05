@@ -4,6 +4,8 @@
 
 #include "context/editor/compose/json_pointer.h"
 
+#include "pointer_format.h"
+
 #include <string>
 #include <vector>
 
@@ -49,13 +51,12 @@ bool remove_at_pointer(JsonValue& root, std::string_view pointer, std::string& e
         }
         else if (parent->type == JsonValue::Type::array)
         {
-            if (token.empty() || token.find_first_not_of("0123456789") != std::string::npos ||
-                (token.size() > 1 && token[0] == '0'))
+            std::size_t index = 0;
+            if (!detail::parse_array_index(token, index))
             {
                 error = "the --path has a non-index token against an array";
                 return false;
             }
-            const std::size_t index = std::stoull(token);
             if (index >= parent->elements.size())
             {
                 error = "the --path array index is out of range";
@@ -84,13 +85,12 @@ bool remove_at_pointer(JsonValue& root, std::string_view pointer, std::string& e
     }
     if (parent->type == JsonValue::Type::array)
     {
-        if (leaf.empty() || leaf.find_first_not_of("0123456789") != std::string::npos ||
-            (leaf.size() > 1 && leaf[0] == '0'))
+        std::size_t index = 0;
+        if (!detail::parse_array_index(leaf, index))
         {
             error = "the --path leaf is not a canonical array index";
             return false;
         }
-        const std::size_t index = std::stoull(leaf);
         if (index >= parent->elements.size())
         {
             error = "the --path array index is out of range";
@@ -109,6 +109,22 @@ ApplyResult apply_resolution(JsonValue& root, std::string_view pointer,
                              const std::optional<JsonValue>& value)
 {
     ApplyResult result;
+    // "" addresses the WHOLE document — the whole-file conflict classes (meta_guid / newer_stamped)
+    // surface path "". compose's pointer resolver deliberately rejects the empty pointer (a per-field
+    // override may never replace a whole entity), so the whole-document case is handled here: replace
+    // the entire tree with the chosen side. A delete of the whole document is meaningless.
+    if (pointer.empty())
+    {
+        if (!value.has_value())
+        {
+            result.error = "the whole-document --path \"\" resolves with --take ours|theirs or "
+                           "--value, not a delete";
+            return result;
+        }
+        root = *value;
+        result.ok = true;
+        return result;
+    }
     if (value.has_value())
     {
         if (!compose::set_json_pointer(root, pointer, *value))

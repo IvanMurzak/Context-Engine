@@ -250,6 +250,25 @@ void test_meta_guid_whole_file()
     CHECK(c != nullptr && c->klass == ConflictClass::meta_guid);
 }
 
+void test_meta_guid_one_sided_automerges()
+{
+    // A ONE-sided guid change is NOT a whole-file conflict — it auto-merges to the changed side like
+    // any other field. Only a BOTH-sides divergent mint (test_meta_guid_whole_file) is whole-file.
+    const JsonValue base = parse(R"({"guid": "0000000000000000", "importer": "png"})");
+    // only theirs re-guids (ours == base)
+    MergeResult theirs = merge_documents(base, base,
+                                         parse(R"({"guid": "bbbb000000000000", "importer": "png"})"));
+    CHECK(theirs.clean);
+    CHECK(!theirs.whole_file);
+    check_merged(theirs, R"({"guid": "bbbb000000000000", "importer": "png"})");
+    // only ours re-guids (theirs == base)
+    MergeResult ours = merge_documents(base,
+                                       parse(R"({"guid": "aaaa000000000000", "importer": "png"})"), base);
+    CHECK(ours.clean);
+    CHECK(!ours.whole_file);
+    check_merged(ours, R"({"guid": "aaaa000000000000", "importer": "png"})");
+}
+
 void test_newer_stamped_whole_file()
 {
     MergeOptions opts;
@@ -285,6 +304,7 @@ int main()
     test_non_id_array_is_opaque();
     test_non_id_array_one_sided_clean();
     test_meta_guid_whole_file();
+    test_meta_guid_one_sided_automerges();
     test_newer_stamped_whole_file();
     MERGE_TEST_MAIN_END();
 }

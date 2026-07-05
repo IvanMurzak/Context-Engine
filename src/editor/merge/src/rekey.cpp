@@ -126,12 +126,9 @@ JsonValue* resolve_mut(JsonValue& root, const std::vector<std::string>& tokens)
         }
         else if (cur->type == JsonValue::Type::array)
         {
-            // canonical base-10 index (no leading zeros except "0"; no sign)
-            if (token.empty() ||
-                (token.size() > 1 && token[0] == '0') ||
-                token.find_first_not_of("0123456789") != std::string::npos)
-                return nullptr;
-            const std::size_t index = std::stoull(token);
+            std::size_t index = 0;
+            if (!detail::parse_array_index(token, index))
+                return nullptr; // non-index token, or an over-long index that cannot resolve
             if (index >= cur->elements.size())
                 return nullptr;
             cur = &cur->elements[index];
