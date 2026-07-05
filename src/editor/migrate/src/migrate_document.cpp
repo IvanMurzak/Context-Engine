@@ -393,6 +393,78 @@ std::optional<std::string> transform_payload_path(const MigrationSet& set,
     return mapped;
 }
 
+bool migrate_payload(const MigrationSet& set, std::string_view component_type,
+                     std::int64_t from_version, JsonValue& payload, const MigrationBudget& budget,
+                     std::string_view site_pointer, std::vector<MigrationDiagnostic>& diagnostics)
+{
+    const std::int64_t current = set.current_version(component_type);
+    if (current == 0)
+        return true; // unregistered: not ours to migrate (the caller decides unknown-type policy)
+    if (from_version == current)
+        return true; // already current
+
+    const std::string type(component_type);
+    const std::string pointer(site_pointer);
+
+    if (from_version > current)
+    {
+        // The L-37 downgrade rule (R-PKG-005): a payload stamped NEWER than the installed schema is
+        // never best-effort migrated — blocking, last-good retained.
+        const bool engine_kind = type.rfind("ctx:", 0) == 0;
+        diagnostics.push_back(
+            {engine_kind ? "schema.newer_than_engine" : "schema.newer_than_package",
+             "\"" + type + "\" payload is stamped version " + std::to_string(from_version) +
+                 " but the installed schema is version " + std::to_string(current) + "; upgrade the " +
+                 (engine_kind ? "engine" : "package") + " that provides it",
+             pointer, /*blocking=*/true});
+        return false;
+    }
+    if (from_version < 1)
+    {
+        diagnostics.push_back({"migration.step_missing",
+                               "\"" + type + "\" payload carries an invalid from-version " +
+                                   std::to_string(from_version) + " (versions start at 1)",
+                               pointer, /*blocking=*/true});
+        return false;
+    }
+
+    // Pre-check canonical serializability so every apply_step id-snapshot / output serialize is
+    // total (mirrors the per-site pre-check in migrate_document).
+    std::string pre_check;
+    if (!serializer::serialize_canonical(payload, pre_check))
+    {
+        diagnostics.push_back({"migration.step_failed",
+                               "\"" + type +
+                                   "\" payload is not canonically serializable (non-finite "
+                                   "number) — cannot migrate",
+                               pointer, /*blocking=*/true});
+        return false;
+    }
+
+    // All-or-nothing per payload: snapshot, apply the chain, roll back on any blocking finding.
+    const JsonValue snapshot = payload;
+    for (std::int64_t v = from_version; v < current; ++v)
+    {
+        const MigrationStep* step = set.find_step(component_type, v);
+        if (step == nullptr)
+        {
+            diagnostics.push_back({"migration.step_missing",
+                                   "no registered migration step takes \"" + type +
+                                       "\" from version " + std::to_string(v) + " toward " +
+                                       std::to_string(current) + " (a gap in the chain)",
+                                   pointer, /*blocking=*/true});
+            payload = snapshot;
+            return false;
+        }
+        if (!apply_step(*step, payload, pointer, budget, diagnostics))
+        {
+            payload = snapshot;
+            return false;
+        }
+    }
+    return true;
+}
+
 DocumentMigrationResult migrate_document(JsonValue& root, const MigrationSet& set,
                                          const MigrateOptions& options)
 {
