@@ -1,0 +1,1 @@
+{"asset":{"version":"2.0"},"materials":[{"name":"m0"}],"accessors":[{"count":3},{"count":3},{"count":3},{"count":3},{"count":3}],"meshes":[{"name":"Tri","primitives":[{"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2},"indices":4,"material":0}]}]}

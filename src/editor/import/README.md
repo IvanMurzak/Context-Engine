@@ -1,0 +1,83 @@
+# src/editor/import — the importer framework
+
+The M2 asset importer framework (issue #60): **R-ASSET-001** (import pipeline), **R-SEC-006/008/010**
+(importer isolation), **R-FILE-010** (hybrid derivation cache key), **R-REND-006** (baked-lighting
+UV2 hook), **R-QA-011/013** (test corpora + feature-coupled tests).
+
+Package-based importers convert source assets (glTF / PNG / WAV first) into **canonical engine-format
+descriptors**. Every import is a **pure, run-deterministic** function of its input, runs **headless**
+in EditorKernel, and is **isolated** — the design that makes the shared derivation cache (L-28) sound
+and the autonomy envelope safe.
+
+## What lives here
+
+- **The importer contract** (`importer.h`) — `Importer` is stateless + `const`: `import()` is a PURE
+  function of `(source bytes, resolved settings, target platform)` — fixed seeds, no threads, no
+  clock, no environment, no filesystem — so two runs byte-match and it never throws (a bad source is
+  `ok=false` + diagnostics). Artifacts (`DerivedArtifact`) carry a kind + a stable name + the derived
+  bytes + their per-kind derived-format version.
+- **Three importers** (`importers/`) — each parses the REAL container structure (no third-party
+  decode library; deny-by-default deps) into a canonical descriptor:
+  - **PNG** (`png_importer.h`) — full chunk walk, **CRC-32 verified**, IHDR geometry + colorspace →
+    a texture descriptor. (Texel DEFLATE-decode/encode is the transcode follow-up.)
+  - **WAV** (`wav_importer.h`) — RIFF/WAVE `fmt`/`data` parse → an audio descriptor **plus the raw
+    PCM payload** artifact. WAV `data` IS raw PCM, so this is a COMPLETE import for the desktop
+    `pcm16` target (no deferred decode).
+  - **glTF** (`gltf_importer.h`) — GLB container unwrap + glTF-2.0 JSON parse (via the engine's own
+    canonical JSON parser) → a mesh descriptor. **Reserves a UV2 (lightmap) channel** whether or not
+    the source authored `TEXCOORD_1` (R-REND-006 hook — cheap now, brutal to retrofit).
+- **The registry** (`importer_registry.h`) — routes a source path to the importer that claims its
+  extension; **collisions are refused, never last-writer-wins**. Package importers join the same
+  registry (same contract, same isolation) when the package system lands.
+- **The cache key** (`cache_key.h`) — `ImportCacheKey` enumerates **every** input that affects an
+  artifact's bytes (R-FILE-010): source bytes + import settings + importer id/version + platform
+  profile + **importer build hash** + **CPU ISA** + per-artifact-kind derived-format version + the
+  registered schema/migration set hash. `make_cache_key()` fills the build-hash/ISA automatically.
+  It EXTENDS the engine's existing FNV-1a content-hash machinery — no new hash family, no restructure
+  of the derivation graph's memoization.
+- **Isolation** (`sandbox.h`, `isolated_runner.h`) — the **v1 slice** of R-SEC-006: the shared
+  TOCTOU-safe path jail (R-SEC-008, reused from filesync), a **scrubbed environment** (R-SEC-010, C
+  locale only — no ambient secret/token), **no ambient network**, and **input-bytes-only + own
+  cache-output key**. `run_isolated()` enforces the policy; `check_deterministic()` is the
+  double-run byte-compare gate.
+- **The per-platform transcode SKELETON** (`platform_profile.h`) — the v1 platform set + the
+  data-driven `(kind × platform) → format` table. The platform profile is a cache-key component, so
+  per-platform variants coexist as separate entries (platform switches instant after first import).
+
+## The determinism gate + fuzz corpus
+
+- `import-test_determinism` — the **R-ASSET-001 CI double-run byte-compare gate**: imports each
+  fixture + every routable corpus seed twice and asserts byte-equality (and proves it has teeth by
+  catching a deliberately-flaky importer).
+- `import-test_fuzz_corpus` — the **R-QA-011 / R-SEC-006 corpus replay**: every committed seed
+  (valid + minimized malformed) under `tests/corpora/` is replayed through the jailed runner,
+  asserting no crash, a graceful result, determinism, and the isolation audit. This is corpus
+  regression, **never open-ended fuzz time per PR**. Regenerate the corpus with
+  `python tests/corpora/generate_corpus.py` (deterministic).
+
+## Explicitly deferred (tracked follow-ups — NOT silently assumed)
+
+The owner bar is "very well polished, not just drafted" — the deferrals below are **format/contract
+hooks staked out now** with the heavy work tracked, never silent stubs:
+
+1. **Byte-level transcode.** The descriptors + the transcode TABLE are complete; the encoders behind
+   each row (texture BC7/ASTC, mesh meshopt quantization, audio compression) are the transcode
+   milestone. `transcode_target_for()` already keys per platform so an encoder drops in without a
+   cache-key change.
+2. **Per-OS subprocess sandbox lockdown.** v1 ships the portable isolation slice (jail + scrubbed
+   env + no-network + input-bytes-only) enforced by the in-process reference runner. The
+   **unprivileged-subprocess + sandbox-primitive** lockdown (**seccomp-bpf Linux-first**, then
+   Windows AppContainer / macOS sandbox-exec) is the next isolation milestone —
+   `os_sandbox_support()` reports the intended primitive and honestly reports `enforced=false` until
+   it lands. Importers are already pure, so the daemon swaps the in-process runner for the subprocess
+   one with **no importer change**.
+3. **Importer build hash.** v1 derives it from the framework epoch + the toolchain stamp (re-keys on
+   a toolchain change — the cross-machine determinism scope R-FILE-010 defers). A real per-importer
+   compiled-object hash lands with the native build pipeline.
+
+## Layering
+
+Depends only on `context_serializer` (canonical JSON parse/emit + the content-hash family) and
+`context_filesync` (raw-byte content hash + the shared R-SEC-008 path jail), both PRIVATE — no public
+`import` header exposes their types. Emits diagnostics through the shared error catalog
+(`contract/error_catalog.cpp`, the `import.*` cluster). No third-party dependency (deny-by-default).
