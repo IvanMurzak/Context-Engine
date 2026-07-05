@@ -70,6 +70,7 @@ const SchemaSet& test_set()
                 "position": {"type": "array", "items": {"type": "number"},
                              "x-ctx-units": "m", "x-ctx-storage": "f32x3"},
                 "mesh": {"x-ctx-ref": "ctx:mesh"},
+                "blob": {"x-ctx-sidecar": "opaque"},
                 "collider": {"x-ctx-union": {
                     "shape:circle": {"type": "object",
                                      "properties": {"radius": {"type": "number",
@@ -174,6 +175,7 @@ int main()
             "flags": ["kinematic"],
             "position": [1, 2, 3],
             "mesh": {"$ref": "guid-mesh", "path": "meshes/ball.mesh.json"},
+            "blob": {"$sidecar": "blobs/ball.bin", "hash": "1234567890"},
             "collider": {"type": "shape:circle", "radius": 0.5}
         })",
                           set);
@@ -301,6 +303,35 @@ int main()
                                 " \"mesh\": {\"$ref\": \"guid-unknown\"}}",
                                 set, &resolver);
         CHECK(unknown.ok);
+    }
+
+    // --- binary-sidecar fields (x-ctx-sidecar; L-33 day-one consumer) ----------------------------
+    {
+        // A well-formed reference object validates (shape checked; hash is a canonical decimal).
+        auto ok = validate("{\"$schema\": \"test:thing\", \"version\": 1, \"name\": \"x\","
+                           " \"blob\": {\"$sidecar\": \"blobs/a.bin\", \"hash\": \"42\"}}",
+                           set);
+        CHECK(ok.ok);
+        CHECK(ok.diagnostics.empty());
+    }
+    {
+        // Not the pinned {$sidecar, hash} shape → sidecar.ref_malformed (the same catalog code the
+        // file-sync layer emits), located at the field pointer.
+        auto r = validate("{\"$schema\": \"test:thing\", \"version\": 1, \"name\": \"x\","
+                          " \"blob\": \"blobs/a.bin\"}",
+                          set);
+        CHECK(!r.ok);
+        const ValidationDiagnostic* d = find_code(r, "sidecar.ref_malformed");
+        CHECK(d != nullptr);
+        CHECK(d->pointer == "/blob");
+    }
+    {
+        // A non-canonical hash string (leading zero) is not a well-formed sidecar ref.
+        auto r = validate("{\"$schema\": \"test:thing\", \"version\": 1, \"name\": \"x\","
+                          " \"blob\": {\"$sidecar\": \"blobs/a.bin\", \"hash\": \"007\"}}",
+                          set);
+        CHECK(!r.ok);
+        CHECK(has_code(r, "sidecar.ref_malformed"));
     }
 
     // --- the pinned tagged-union convention -------------------------------------------------------

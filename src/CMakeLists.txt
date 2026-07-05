@@ -240,6 +240,15 @@ add_test(NAME versioned-install-layout
 # resolves at generate time regardless of add_subdirectory order).
 add_subdirectory(editor/assetdb)
 
+# M2 wave 4: the first content asset KINDS' semantics (src/editor/kinds/, R-2D-003 tilemap +
+# R-I18N-001 string-table, issue #61) — the L-33 split-nudge over tilemap chunk cell payloads +
+# stable-id/region checks, and the string-table CLDR plural rules + fallback-chain resolution +
+# semantic validation. The per-kind SCHEMAS live in editor/schema/ (engine_schemas()); this is the
+# behaviour on top. Wired here — deliberately apart from the editor/schema block above — so concurrent
+# sibling tasks touching src/editor/ and this file merge cleanly (consumers name the `context_kinds`
+# target, which CMake resolves at generate time regardless of add_subdirectory order).
+add_subdirectory(editor/kinds)
+
 # M2 wave 3: the scene-composition READ path (src/editor/compose/, L-35/R-DATA-002, issue #51) —
 # id-path overrides with innermost-out precedence, stable intra-file ids (L-33), the scene-root
 # entity, the R-FILE-011(e) depth-cap/fan-in/cycle diagnostics, deterministic composed identity

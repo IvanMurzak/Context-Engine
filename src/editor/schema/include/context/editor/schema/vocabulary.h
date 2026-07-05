@@ -19,6 +19,7 @@ inline constexpr std::string_view kKeyStorage = "x-ctx-storage";
 inline constexpr std::string_view kKeyRef = "x-ctx-ref";
 inline constexpr std::string_view kKeyUnits = "x-ctx-units";
 inline constexpr std::string_view kKeyUnion = "x-ctx-union";
+inline constexpr std::string_view kKeySidecar = "x-ctx-sidecar";
 
 // The schema-blessed human/AI annotation field (L-32 bans JSON comments): ACCEPTED on every object
 // level of every authored kind, as a string or an array of strings.
@@ -100,6 +101,22 @@ struct SemanticIssue
 inline constexpr std::string_view kRefGuidField = "$ref";
 inline constexpr std::string_view kRefPathField = "path";
 inline constexpr std::string_view kRefEntityField = "$entity";
+
+// --- binary-sidecar fields (`x-ctx-sidecar`) -----------------------------------------------------
+//
+// A field carrying `x-ctx-sidecar` holds a versioned binary-sidecar REFERENCE — the L-33 escape
+// hatch for heavy numeric payloads (tilemap cell grids, mesh buffers, …) that would bloat the
+// authored JSON past the ~1 MB split-nudge ceiling if inlined as base64. The authored value is the
+// pinned reference object {"$sidecar": "<relpath>", "hash": "<decimal>"} (serializer/sidecar_ref.h);
+// the annotation's STRING value names the sidecar's logical content-type (e.g. "tilemap-cells"), so
+// schema introspection (R-CLI-005) tells agents/tools what a sidecar carries without opening it —
+// the symmetric analogue of x-ctx-ref naming a reference's target kind. This makes the binary-sidecar
+// mechanism (PR #54) a first-class, introspectable schema vocabulary citizen: the validator checks
+// the reference SHAPE (serializer::is_sidecar_ref) and the file-sync layer owns resolution +
+// on-disk hash verification (filesync/sidecar.h). x-ctx-sidecar is mutually exclusive with
+// x-ctx-type / x-ctx-ref / x-ctx-union (a field is exactly one of a semantic value, a typed ref, a
+// tagged union, or a sidecar ref).
+[[nodiscard]] bool is_sidecar_content_type(std::string_view content_type) noexcept;
 
 // --- color spaces ---------------------------------------------------------------------------------
 
