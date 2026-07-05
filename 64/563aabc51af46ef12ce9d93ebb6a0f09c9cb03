@@ -1,0 +1,55 @@
+src/CMakeLists.txt
+  s_e3239cf02087b8::t_29ba8b854cc4b7 243-251
+src/editor/contract/src/error_catalog.cpp
+  s_e3239cf02087b8::t_2635e7057a52af 195-227
+src/editor/kinds/CMakeLists.txt
+  s_e3239cf02087b8::t_cebaf97136d576 1-53
+src/editor/kinds/README.md
+  s_e3239cf02087b8::t_51df51ef4bd919 1-55
+src/editor/kinds/include/context/editor/kinds/diagnostic.h
+  s_e3239cf02087b8::t_e5abb6f92ce8b9 1-35
+src/editor/kinds/include/context/editor/kinds/string_table.h
+  s_e3239cf02087b8::t_4caf3f96f1fbe0 1-87
+src/editor/kinds/include/context/editor/kinds/tilemap.h
+  s_e3239cf02087b8::t_bf4ffdd04467f8 1-47
+src/editor/kinds/src/string_table.cpp
+  s_e3239cf02087b8::t_c57f17402b6f5b 1-356
+src/editor/kinds/src/tilemap.cpp
+  s_e3239cf02087b8::t_1b8a54c0dc51d9 1-177
+src/editor/kinds/tests/kinds_test.h
+  s_e3239cf02087b8::t_3faba4c62cd024 1-27
+src/editor/kinds/tests/test_string_table.cpp
+  s_e3239cf02087b8::t_bdf1f9822a160f 1-337
+src/editor/kinds/tests/test_tilemap.cpp
+  s_e3239cf02087b8::t_e15c9ae6618a09 1-266
+src/editor/schema/include/context/editor/schema/kind_schema.h
+  s_e3239cf02087b8::t_c8638e0c75caac 21-26
+src/editor/schema/include/context/editor/schema/vocabulary.h
+  s_e3239cf02087b8::t_68f86d4b02e4e0 22,105-120
+src/editor/schema/src/kind_schema.cpp
+  s_e3239cf02087b8::t_f6c16e1ba64801 41,139-148,150-151,317-468,525-527,614-615
+src/editor/schema/src/validator.cpp
+  s_e3239cf02087b8::t_adae8f0f7c6796 8,397-407
+src/editor/schema/src/vocabulary.cpp
+  s_e3239cf02087b8::t_a9165b84719e99 241-248
+src/editor/schema/tests/test_kind_schema.cpp
+  s_e3239cf02087b8::t_a4eb429b1e76a7 58-59,75-81,137,140-141,144-145,148-163
+src/editor/schema/tests/test_validator.cpp
+  s_e3239cf02087b8::t_93e571e8d59fd2 73,178,308-336
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "64563aabc51af46ef12ce9d93ebb6a0f09c9cb03",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
