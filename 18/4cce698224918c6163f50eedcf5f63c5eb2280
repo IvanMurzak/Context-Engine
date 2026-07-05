@@ -1,0 +1,44 @@
+docs/ci-fleet-manifest.json
+  s_e3239cf02087b8::t_a6e50d504f02c4 166-225
+docs/ci-fleet-manifest.md
+  s_e3239cf02087b8::t_c669545ab609f0 56-61
+src/tests/integration/test_m2exit1_cli_authoring_stable_refs.cpp
+  s_e3239cf02087b8::t_d343744d0f5798 97,113-119
+  s_e3239cf02087b8::t_bdf85be8a37a8e 1-21,23-96,98-112,120-203
+  s_e3239cf02087b8::t_76b7573c6cfd0a 22
+src/tests/integration/test_m2exit5_per_payload_migration.cpp
+  s_e3239cf02087b8::t_696992d3a7fe8a 1-200
+.github/workflows/ci.yml
+  s_e3239cf02087b8::t_bc6cec8b47418f 102-103,105,117-124
+  s_e3239cf02087b8::t_c39a6ce96d5cfc 125-126
+src/tests/integration/test_m2exit6_seam_checklist.cpp
+  s_e3239cf02087b8::t_47825fce3b694f 1-419
+src/tests/integration/test_m2exit4_composed_write_provenance.cpp
+  s_e3239cf02087b8::t_04f7fd2dbf9106 1-185
+src/tests/integration/m2_exit_test.h
+  s_e3239cf02087b8::t_285c1c641ab02f 1-157,189
+  s_e3239cf02087b8::t_4424615e430831 158-188
+src/tests/integration/test_m2exit2_schema_migration.cpp
+  s_e3239cf02087b8::t_9b219621329056 1-176
+src/tests/integration/CMakeLists.txt
+  s_e3239cf02087b8::t_0040a8fb2a0135 1-10
+  s_e3239cf02087b8::t_6a6feaac2a9b2c 84-157
+src/tests/integration/test_m2exit3_flatten_content_units.cpp
+  s_e3239cf02087b8::t_73ae4521ca9b9f 1-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "184cce698224918c6163f50eedcf5f63c5eb2280",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
