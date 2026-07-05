@@ -165,14 +165,37 @@ Registry::Registry()
           "Template name; defaults to the runnable default template."}},
         /*flags=*/{}, /*implemented=*/true));
 
+    // The composed WRITE path (M2, R-CLI-006 / L-35): `context set` writes a value onto a composed
+    // entity — an override entry in the OUTERMOST (root) instancing scene by default, the defining
+    // template with `--edit-template`, or a mid-level instancing scene with `--at-instance`. The
+    // write is a canonical file rewrite through filesync's R-FILE-004 atomic write path (the core
+    // `--if-match` flag is the raw-byte CAS guard); the envelope reports the file + JSON-pointer
+    // actually written and both labelled resulting hashes. Addressing uses the L-35 id-path form.
     verbs_.push_back(make_verb(
         "", "", "set",
-        "Set a value in an authored file (file-rewriter). The atomic write routes through filesync "
-        "when integrated; the verb surface + envelope are contract now.",
+        "Write a value onto a composed entity (R-CLI-006 / L-35): an override entry in the "
+        "outermost instancing scene by default, the defining template (--edit-template), or a "
+        "mid-level instancing scene (--at-instance). A canonical file rewrite through the R-FILE-004 "
+        "atomic write path; the envelope reports the file + JSON-pointer written + both labelled "
+        "resulting hashes.",
         /*params=*/
-        {{"path", "path", true, "File (and JSON-pointer) to write."},
-         {"value", "json", true, "The JSON value to set."}},
-        /*flags=*/{}, /*implemented=*/false));
+        {{"path", "path", true, "The root scene file to compose + write against (project-relative)."},
+         {"value", "json", true, "The JSON value to set at the addressed field."}},
+        /*flags=*/
+        {{"pointer", "string", "RFC 6901 JSON pointer of the field to write inside the entity.",
+          false},
+         {"id-path", "string",
+          "The L-35 id-path to the composed entity, slash-separated ([instanceId, ..., entityId]).",
+          false},
+         {"edit-template", "bool",
+          "Retarget the write to the entity's DEFINING template file (edit it in place) instead of "
+          "writing an override in the outermost scene.",
+          false},
+         {"at-instance", "string",
+          "Retarget the override to the mid-level instancing scene named by this id-path prefix "
+          "(a strict prefix of --id-path).",
+          false}},
+        /*implemented=*/true));
 
     // The L-37 explicit bulk migration path (M2 wave 3, R-DATA-004): rewrite otherwise-untouched
     // files to current schema versions — the ONLY migration that writes disk besides tool saves
@@ -271,9 +294,17 @@ Registry::Registry()
     verbs_.push_back(make_verb(
         "", "", "query",
         "Read the derived node for a path (canonical hash + generation) plus world stats. NOT the "
-        "R-CLI-012 query language — a single-path operational read.",
+        "R-CLI-012 query language — a single-path operational read. `--overrides <mode> <scene>` is "
+        "the one-shot advisory override-hygiene read (R-CLI-006), served over the project scenes.",
         /*params=*/{{"path", "string", true, "Project-relative path to look up."}},
-        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+        /*flags=*/
+        {{"overrides", "string",
+          "Advisory override-hygiene read (R-CLI-006, never auto-pruned): `diverged` lists "
+          "overrides whose recorded base no longer matches the current template value; `redundant` "
+          "lists overrides equal to the template value. Served one-shot over the project's scenes "
+          "(the plain `query` is daemon-served).",
+          false}},
+        /*implemented=*/true, /*stability=*/"operational"));
 
     verbs_.push_back(make_verb(
         "", "", "snapshot",
