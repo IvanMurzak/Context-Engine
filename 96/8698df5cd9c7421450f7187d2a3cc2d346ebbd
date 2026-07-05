@@ -1,0 +1,23 @@
+src/editor/kinds/tests/test_tilemap.cpp
+  s_e3239cf02087b8::t_d868c89caec01d 255-256
+src/editor/kinds/README.md
+  s_e3239cf02087b8::t_bb2e38e79c4bc5 26-27
+src/editor/kinds/tests/test_string_table.cpp
+  s_e3239cf02087b8::t_81f1f36f27c433 170-175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "968698df5cd9c7421450f7187d2a3cc2d346ebbd",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
