@@ -1,0 +1,4 @@
+# The three-way merge corpus is a BYTE-EXACT versioned deliverable (R-QA-011): the binary-sidecar
+# fixtures carry raw non-JSON bytes and the JSON fixtures are canonical LF. Any EOL normalization on
+# checkout would corrupt the binaries — pin the whole tree (mirrors serializer/tests/vectors).
+* -text

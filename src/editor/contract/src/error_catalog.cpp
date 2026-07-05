@@ -80,6 +80,41 @@ const std::vector<ErrorCode>& catalog()
         {"scope.denied",
          "The attach token's scope does not permit this method (least privilege, R-SEC-007).", false,
          kExitPermission, "R-SEC-007"},
+        // --- structural three-way merge (M2 wave 4, issue #59: R-FILE-012 / L-26/L-33/L-37) --------
+        // The conflict-class codes `context merge-file` emits; inserted at THIS anchor (not the
+        // catalog tail) so concurrent M2 sibling appends do not collide. Additive-only: these are NEW
+        // rows, no existing row is reordered/renamed (protocolMajor stays 0). Deterministic (never a
+        // bare-retry win): resolve via `context resolve-conflict` / `context re-key`.
+        {"merge.conflict",
+         "A structural three-way merge left an unresolved field conflict; see the conflict envelope.",
+         false, kExitConflict, "R-FILE-012"},
+        {"merge.id_conflict",
+         "The same intra-file id was added on both sides relative to base — a structural conflict, "
+         "never silently unified (L-33).",
+         false, kExitConflict, "R-FILE-012"},
+        {"merge.binary_sidecar",
+         "A binary sidecar differs on both sides; binaries are never content-merged — resolve "
+         "whole-file ours/theirs (L-33).",
+         false, kExitConflict, "R-FILE-012"},
+        {"merge.meta_guid",
+         "Both sides minted a different GUID for the same asset meta; GUID identity is never "
+         "field-blended — resolve whole-asset ours/theirs (L-36).",
+         false, kExitConflict, "R-FILE-012"},
+        {"merge.newer_stamped",
+         "A merge input carries payloads stamped newer than the installed schemas; a whole-file "
+         "conflict class, never a parse error (L-37).",
+         false, kExitConflict, "R-FILE-012"},
+        {"merge.duplicate_id",
+         "Two objects in one file share an intra-file id (an id add/add or a raw copy); re-key one "
+         "via `context re-key`. The post-merge convergence gate.",
+         false, kExitValidation, "R-FILE-012"},
+        {"merge.no_conflict_at_path",
+         "`context resolve-conflict` named a --path with no open conflict in the merge sidecar.",
+         false, kExitNotFound, "R-FILE-012"},
+        {"merge.rekey_target_invalid",
+         "The re-key target does not resolve to an object carrying a stable intra-file id (or the "
+         "requested id is invalid).",
+         false, kExitUsage, "R-FILE-012"},
         {"scope.insufficient",
          "The attach token holds a lower scope than this method requires; re-attach with the needed "
          "scope.",
@@ -210,6 +245,15 @@ const std::vector<ErrorCode>& catalog()
          "A shared-cache entry failed its content-hash self-verification on read (corruption); the "
          "entry is rejected and the artifact re-derived (R-FILE-010).",
          true, kExitValidation, "R-FILE-010"},
+        // --- composed write path (R-CLI-006 / L-35, M2 issue #58) ------------------------------
+        {"compose.write_target_not_found",
+         "The composed-write target does not resolve — the id-path names no composed entity, or an "
+         "--at-instance prefix names no instancing scene.",
+         false, kExitNotFound, "R-CLI-006"},
+        {"compose.immutable_pointer",
+         "The field pointer addresses an identity field (/id, /$schema, /version) that is immutable "
+         "under composition (L-37).",
+         false, kExitValidation, "R-CLI-006"},
         // --- content kinds (M2 wave 4, issue #61: R-2D-003 tilemap + R-I18N-001 string-table) ----
         // The CONTENT-rule diagnostics the schema dialect cannot express (src/editor/kinds/): the
         // L-33 tilemap split-nudge + region/id checks and the string-table fallback/plural checks.

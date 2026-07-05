@@ -211,6 +211,15 @@ set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.md")
 set(CPACK_GENERATOR "ZIP")
 include(CPack)
 
+# M2 wave 4: schema-aware structural three-way merge (src/editor/merge/, R-FILE-012 / L-26/L-50/L-33,
+# issue #59) — the convergence primitive for worktree-per-agent parallelism: a field-path-granular,
+# id-identity 3-way merge over authored JSON plus the git merge driver (`context new` writes the
+# .gitattributes mapping; L-27 keeps git OUT of the engine — the driver is invoked BY git). Wired
+# here as its OWN stanza, deliberately apart from the editor cluster above and immediately before
+# editor/migrate, so concurrent M2 sibling tasks inserting into this file merge cleanly (consumers
+# name the `context_merge` target, which CMake resolves at generate time regardless of order).
+add_subdirectory(editor/merge)
+
 # M2 wave 3: per-component-payload schema versioning + parse-time migration (src/editor/migrate/,
 # L-37 / R-DATA-004, issue #52) — the registered migration set (the R-FILE-005 pass-0 stratum's
 # migration half, whose set hash keys pass-1 derivation cache entries), the in-memory

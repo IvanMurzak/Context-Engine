@@ -91,19 +91,27 @@ int main()
         CHECK(err_code(e) == "usage.missing_argument");
     }
 
-    // --- reserved file-rewriter verb: unimplemented without --dry-run, plan WITH it -------------
+    // --- reserved verb: unimplemented without --dry-run, plan WITH it ----------------------------
+    // (`asset move` is a still-reserved stable verb; `set` graduated to the composed write path.)
     {
-        const Envelope e = run({"set", "scenes/main.scene.json", "42"});
+        const Envelope e = run({"asset", "move", "a.png", "b.png"});
         CHECK(err_code(e) == "contract.unimplemented");
         CHECK(e.exit_code() == 8);
     }
     {
-        const Envelope e = run({"set", "scenes/main.scene.json", "42", "--dry-run"});
+        const Envelope e = run({"asset", "move", "a.png", "b.png", "--dry-run"});
         CHECK(e.ok());
         CHECK(e.data().at("wouldApply").as_bool() == false);
         CHECK(e.data().at("args").size() == 2);
     }
-    // --- set missing its required path arg ------------------------------------------------------
+    // --- `set` is now the IMPLEMENTED composed write path (R-CLI-006): it validates its flags
+    // --- rather than reporting a reserved surface. Full write coverage lives in test_set_command. -
+    {
+        const Envelope e = run({"set", "scenes/main.scene.json", "42"}); // no --pointer / --id-path
+        CHECK(!e.ok());
+        CHECK(err_code(e) == "usage.missing_argument");
+    }
+    // --- set missing its required positional args ------------------------------------------------
     {
         const Envelope e = run({"set"});
         CHECK(err_code(e) == "usage.missing_argument");

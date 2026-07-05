@@ -165,14 +165,37 @@ Registry::Registry()
           "Template name; defaults to the runnable default template."}},
         /*flags=*/{}, /*implemented=*/true));
 
+    // The composed WRITE path (M2, R-CLI-006 / L-35): `context set` writes a value onto a composed
+    // entity — an override entry in the OUTERMOST (root) instancing scene by default, the defining
+    // template with `--edit-template`, or a mid-level instancing scene with `--at-instance`. The
+    // write is a canonical file rewrite through filesync's R-FILE-004 atomic write path (the core
+    // `--if-match` flag is the raw-byte CAS guard); the envelope reports the file + JSON-pointer
+    // actually written and both labelled resulting hashes. Addressing uses the L-35 id-path form.
     verbs_.push_back(make_verb(
         "", "", "set",
-        "Set a value in an authored file (file-rewriter). The atomic write routes through filesync "
-        "when integrated; the verb surface + envelope are contract now.",
+        "Write a value onto a composed entity (R-CLI-006 / L-35): an override entry in the "
+        "outermost instancing scene by default, the defining template (--edit-template), or a "
+        "mid-level instancing scene (--at-instance). A canonical file rewrite through the R-FILE-004 "
+        "atomic write path; the envelope reports the file + JSON-pointer written + both labelled "
+        "resulting hashes.",
         /*params=*/
-        {{"path", "path", true, "File (and JSON-pointer) to write."},
-         {"value", "json", true, "The JSON value to set."}},
-        /*flags=*/{}, /*implemented=*/false));
+        {{"path", "path", true, "The root scene file to compose + write against (project-relative)."},
+         {"value", "json", true, "The JSON value to set at the addressed field."}},
+        /*flags=*/
+        {{"pointer", "string", "RFC 6901 JSON pointer of the field to write inside the entity.",
+          false},
+         {"id-path", "string",
+          "The L-35 id-path to the composed entity, slash-separated ([instanceId, ..., entityId]).",
+          false},
+         {"edit-template", "bool",
+          "Retarget the write to the entity's DEFINING template file (edit it in place) instead of "
+          "writing an override in the outermost scene.",
+          false},
+         {"at-instance", "string",
+          "Retarget the override to the mid-level instancing scene named by this id-path prefix "
+          "(a strict prefix of --id-path).",
+          false}},
+        /*implemented=*/true));
 
     // The L-37 explicit bulk migration path (M2 wave 3, R-DATA-004): rewrite otherwise-untouched
     // files to current schema versions — the ONLY migration that writes disk besides tool saves
@@ -245,6 +268,59 @@ Registry::Registry()
          {"to", "path", true, "The new project-relative asset path."}},
         /*flags=*/{}, /*implemented=*/false));
 
+    // M2 wave 4 (issue #59): the structural three-way merge family (R-FILE-012 / L-26/L-33/L-37) —
+    // the convergence primitive for worktree-per-agent parallelism. Registered here at the END of the
+    // stable verbs block (this anchor, not the operational block below) so concurrent M2 siblings
+    // inserting verbs merge cleanly. Backed by src/editor/merge/ + src/cli/merge_command.cpp.
+    verbs_.push_back(make_verb(
+        "", "", "merge-file",
+        "Schema-aware structural three-way merge over authored JSON (R-FILE-012): field-path "
+        "granular, id-based merge identity (L-33), machine-readable conflict envelope — never "
+        "last-writer-wins, never text conflict markers. `--driver` is git's merge-driver entry.",
+        /*params=*/
+        {{"base", "path", true, "The common-ancestor file (git's %O)."},
+         {"ours", "path", true, "The current-branch file (git's %A; also the default output)."},
+         {"theirs", "path", true, "The incoming-branch file (git's %B)."},
+         {"pathname", "path", false,
+          "The real repository path (git's %P); names the conflict sidecar. Defaults to --output."}},
+        /*flags=*/
+        {{"output", "path", "Where to write the merged result; defaults to the ours/%A path.", false},
+         {"driver", "bool",
+          "git merge-driver mode: write the result to the ours/%A path and exit non-zero on "
+          "unresolved conflicts (L-27: git invokes the driver, never the reverse).",
+          false}},
+        /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "", "resolve-conflict",
+        "Apply one resolution to a merged file per conflict entry (R-FILE-012): take a whole side "
+        "or write an explicit value, looping until the conflict sidecar empties.",
+        /*params=*/{{"file", "path", true, "The merged file to resolve in place."}},
+        /*flags=*/
+        {{"path", "string", "The RFC 6901 field-path of the conflict entry to resolve.", false},
+         {"take", "string", "Take one whole side of the conflict: 'ours' or 'theirs'.", false},
+         {"value", "json", "Write an explicit JSON value at --path (instead of --take).", false}},
+        /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "", "re-key",
+        "Mint a fresh stable id for a duplicated intra-file entity and rewrite its unambiguous "
+        "in-file references (R-FILE-012(c) convergence remedy for a duplicate-id).",
+        /*params=*/{{"file", "path", true, "The file to re-key in place."}},
+        /*flags=*/
+        {{"at", "string", "RFC 6901 pointer to the object to re-key.", false},
+         {"id", "string", "Re-key the last holder of this duplicated intra-file id.", false}},
+        /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "", "validate",
+        "The post-merge convergence gate (R-FILE-012): report the duplicate-intra-file-id "
+        "diagnostic (merge.duplicate_id) across a file or the project tree.",
+        /*params=*/
+        {{"path", "path", false,
+          "File or directory to validate (recursive over *.json); defaults to the --project root."}},
+        /*flags=*/{}, /*implemented=*/true));
+
     // --- the OPERATIONAL daemon-driver surface (R-CLI-009 honesty) ------------------------------
     // These RPC methods are genuinely served by a live daemon's method backend (KernelServer) — the
     // cross-process analogue of `context editor smoke`. They are registered here so
@@ -271,9 +347,17 @@ Registry::Registry()
     verbs_.push_back(make_verb(
         "", "", "query",
         "Read the derived node for a path (canonical hash + generation) plus world stats. NOT the "
-        "R-CLI-012 query language — a single-path operational read.",
+        "R-CLI-012 query language — a single-path operational read. `--overrides <mode> <scene>` is "
+        "the one-shot advisory override-hygiene read (R-CLI-006), served over the project scenes.",
         /*params=*/{{"path", "string", true, "Project-relative path to look up."}},
-        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+        /*flags=*/
+        {{"overrides", "string",
+          "Advisory override-hygiene read (R-CLI-006, never auto-pruned): `diverged` lists "
+          "overrides whose recorded base no longer matches the current template value; `redundant` "
+          "lists overrides equal to the template value. Served one-shot over the project's scenes "
+          "(the plain `query` is daemon-served).",
+          false}},
+        /*implemented=*/true, /*stability=*/"operational"));
 
     verbs_.push_back(make_verb(
         "", "", "snapshot",

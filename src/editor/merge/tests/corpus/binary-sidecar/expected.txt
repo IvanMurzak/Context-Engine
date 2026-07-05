@@ -1,0 +1,1 @@
+class=binary_sidecar (whole-file ours/theirs; binaries are NEVER content-merged, L-33). Exercised by cli test_merge_command (context merge-file over non-JSON inputs).
