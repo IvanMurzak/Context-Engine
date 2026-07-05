@@ -240,6 +240,15 @@ add_test(NAME versioned-install-layout
         -D "CONTEXT_BUILD_CONFIG=$<CONFIG>"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/versioned-install-check.cmake")
 
+# M2 wave 4: the importer framework (src/editor/import/, issue #60) — package-based glTF/PNG/WAV
+# importers -> canonical engine descriptors, run-deterministic (R-ASSET-001 double-run byte-compare
+# gate) + isolated (the R-SEC-006 v1 slice: shared R-SEC-008 path jail + scrubbed env R-SEC-010 + no
+# ambient network) + the exhaustive R-FILE-010 cache key + a per-platform transcode skeleton; mesh
+# import reserves UV2 (R-REND-006). OWN stanza inserted immediately before assetdb — merge hygiene:
+# concurrent M2 wave-4 siblings insert their own stanzas elsewhere, so this never collides at the
+# file tail (consumers name `context_import`, resolved at generate time regardless of order).
+add_subdirectory(editor/import)
+
 # M2 wave 3: the asset database (src/editor/assetdb/, issue #53) — GUID + sidecar <asset>.meta.json
 # identity (L-36/R-ASSET-002), dual-form + entity references with the real x-ctx-ref meta lookup
 # behind the schema module's RefTargetResolver seam (L-34/R-DATA-006), meta-first move/rename +

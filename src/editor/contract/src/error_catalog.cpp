@@ -218,6 +218,33 @@ const std::vector<ErrorCode>& catalog()
          "The move/rename request is malformed (a sidecar, temp-residue, or dot-tree path, or an "
          "empty path).",
          false, kExitUsage, "R-FILE-004"},
+        // --- asset import (M2 wave 4, issue #60: R-ASSET-001, R-SEC-006/008/010, R-FILE-010) ------
+        // The importer-framework diagnostics: source decode failures, the isolation jail escape, the
+        // run-determinism gate failure, and cache self-verification. Additive-only (protocolMajor 0).
+        {"import.source_malformed",
+         "The source asset is not the format its extension claims, or its container is truncated / "
+         "structurally invalid; nothing was imported.",
+         false, kExitValidation, "R-ASSET-001"},
+        {"import.decode_failed",
+         "The source asset's container parsed but its contents could not be decoded (e.g. a chunk "
+         "CRC mismatch or an unreadable payload).",
+         false, kExitValidation, "R-ASSET-001"},
+        {"import.unsupported_format",
+         "The source asset uses a format variant this importer does not support in v1 (e.g. a "
+         "non-PCM WAV or a non-2.0 glTF); it is refused, never silently mis-imported.",
+         false, kExitValidation, "R-ASSET-001"},
+        {"import.jail_escape",
+         "An importer run attempted to read or write outside its TOCTOU-safe path jail, or requested "
+         "the denied network capability; the run was refused (R-SEC-006/008/010).",
+         false, kExitPermission, "R-SEC-008"},
+        {"import.non_deterministic",
+         "An importer produced different bytes across the CI double-run byte-compare; the shared "
+         "cache is only sound for run-deterministic importers, so this fails the gate.",
+         false, kExitInternal, "R-ASSET-001"},
+        {"import.cache_corrupt",
+         "A shared-cache entry failed its content-hash self-verification on read (corruption); the "
+         "entry is rejected and the artifact re-derived (R-FILE-010).",
+         true, kExitValidation, "R-FILE-010"},
         // --- composed write path (R-CLI-006 / L-35, M2 issue #58) ------------------------------
         {"compose.write_target_not_found",
          "The composed-write target does not resolve — the id-path names no composed entity, or an "
