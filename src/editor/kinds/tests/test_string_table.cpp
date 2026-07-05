@@ -167,6 +167,12 @@ int main()
         // Unknown locale → English-like default.
         CHECK(cat("xx", 1) == PluralCategory::one);
         CHECK(cat("xx", 3) == PluralCategory::other);
+        // A negative count is treated as its magnitude (the string_table.h contract; the magnitude is
+        // taken in the UNSIGNED domain so even LLONG_MIN is UBSan-clean — the CI sanitize leg pins it).
+        CHECK(cat("en", -1) == PluralCategory::one);   // |-1| == 1 → English-like `one`
+        CHECK(cat("ru", -22) == PluralCategory::few);  // |-22| == 22 → East-Slavic `few`
+        CHECK(cat("en", -2) == cat("en", 2));          // magnitude-equivalence (both `other`)
+        CHECK(cat("ru", -5) == cat("ru", 5));          // magnitude-equivalence (both `many`)
         // The category ids round-trip.
         CHECK(kinds::plural_category_id(PluralCategory::few) == "few");
         CHECK(kinds::plural_category_id(PluralCategory::other) == "other");

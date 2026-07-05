@@ -252,8 +252,8 @@ int main()
         std::vector<serializer::SidecarRef> refs =
             serializer::collect_sidecar_refs(tree, refs_diag);
         CHECK(refs.size() == 1);
-        CHECK(refs.front().relpath == "layers/l1/0.bin");
-        CHECK(refs.front().hash == raw);
+        CHECK(!refs.empty() && refs.front().relpath == "layers/l1/0.bin");
+        CHECK(!refs.empty() && refs.front().hash == raw);
         CHECK(refs_diag.empty());
 
         // The measured payload is far under the ceiling → no nudge.
