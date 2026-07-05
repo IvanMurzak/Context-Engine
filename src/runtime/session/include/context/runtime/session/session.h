@@ -1,0 +1,146 @@
+// The headless simulation session (R-QA-005, R-SIM-002, R-CLI-008/009).
+//
+// A Session is the deterministic headless simulation the M3 automated-QA surface drives: it owns a
+// kernel World, a fixed tick rate (the R-SIM-002 fixed-timestep contract — stepping is by tick
+// COUNT here, decoupled from wall time), a seeded PRNG, the monotonic simTick counter, an ordered
+// list of NAMED systems run once per tick, the recorded input stream, and (in trace mode) the
+// per-tick hierarchical hash tree.
+//
+// Determinism law: everything the systems touch is integer (fixed-point) state, and the only
+// entropy source is the seeded Rng — so a Session is bit-reproducible from (seed + input stream)
+// alone, on every platform in the determinism matrix. Stepping across a serialize/reload boundary
+// (the one-shot CLI `session step` path) is bit-identical to stepping straight through, because the
+// full runtime state (World + rng state + simTick + input log) round-trips (session_state.h).
+
+#pragma once
+
+#include "context/kernel/world.h"
+#include "context/runtime/session/input.h"
+#include "context/runtime/session/rng.h"
+#include "context/runtime/session/sim_component.h"
+#include "context/runtime/session/state_hash.h"
+
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <vector>
+
+namespace context::runtime::session
+{
+
+// The result of stepping: the monotonic simTick AFTER the step + the hierarchical state hash. Every
+// step-result carries simTick (R-CLI-008/016) so a client that lost the ack reads the counter and
+// steps only the missing delta.
+struct StepResult
+{
+    std::uint64_t sim_tick = 0;
+    StateHash state_hash;
+};
+
+struct SessionConfig
+{
+    std::uint64_t seed = 0;
+    std::uint64_t tick_hz = 60; // the fixed-timestep rate (R-SIM-002); stepping is by count
+    std::string scenario = "demo";
+};
+
+// One named simulation system: run once per tick, in registration order.
+struct SystemContext;
+struct System
+{
+    std::string name;
+    std::function<void(SystemContext&)> run;
+};
+
+// What a system sees for the tick it is computing.
+struct SystemContext
+{
+    kernel::World& world;
+    Rng& rng;
+    std::uint64_t sim_tick;
+    const TickInputs* inputs; // inputs scheduled for this tick, or nullptr
+    const SimComponentRegistry& components;
+};
+
+class Session
+{
+public:
+    // Construct a session for `config`. When `run_setup` is true (the default) the scenario builds
+    // the initial world (consuming seeded entropy); when false the world is left empty for a caller
+    // that will restore it from a serialized state (session_state::load) — the systems are wired
+    // either way.
+    explicit Session(SessionConfig config, bool run_setup = true);
+
+    // --- seed (R-CLI-009 set/query) -----------------------------------------------------------
+    // Set the seed and REBUILD the initial world from it (the scenario setup is re-run, so the
+    // seeded opening state actually reflects the new seed). Intended before stepping — it resets the
+    // simTick counter to 0 and discards any accumulated state; a fresh `session new` + `session seed`
+    // is the normal path.
+    void set_seed(std::uint64_t seed);
+    [[nodiscard]] std::uint64_t seed() const noexcept { return seed_; }
+
+    [[nodiscard]] std::uint64_t sim_tick() const noexcept { return sim_tick_; }
+    [[nodiscard]] std::uint64_t tick_hz() const noexcept { return tick_hz_; }
+    [[nodiscard]] const std::string& scenario() const noexcept { return scenario_; }
+
+    // --- injection (R-CLI-009 synthetic input + action activation) ----------------------------
+    // Schedule at the current simTick (the next tick to run), or at an explicit tick.
+    void inject_event(InputEvent event);
+    void inject_event_at(std::uint64_t tick, InputEvent event);
+    void inject_action(ActionActivation action);
+    void inject_action_at(std::uint64_t tick, ActionActivation action);
+
+    // --- stepping (R-CLI-009 step-N; R-SIM-002 fixed ticks) -----------------------------------
+    // Advance exactly `ticks` fixed ticks, running every system each tick. Returns the simTick after
+    // + the resulting hierarchical hash. In trace mode, records a per-tick HashTree.
+    StepResult step(std::uint64_t ticks);
+
+    // --- state hash (R-CLI-009 query) ---------------------------------------------------------
+    [[nodiscard]] StateHash state_hash() const;
+
+    // --- trace mode ---------------------------------------------------------------------------
+    void set_trace(bool on) noexcept { trace_enabled_ = on; }
+    [[nodiscard]] bool trace_enabled() const noexcept { return trace_enabled_; }
+    [[nodiscard]] const HashTrace& trace() const noexcept { return trace_; }
+    void clear_trace() noexcept { trace_.clear(); }
+
+    // The recorded input stream (== the replay stream).
+    [[nodiscard]] const InputStream& input_log() const noexcept { return input_log_; }
+
+    // --- direct access (tests + serialization) ------------------------------------------------
+    [[nodiscard]] kernel::World& world() noexcept { return world_; }
+    [[nodiscard]] const kernel::World& world() const noexcept { return world_; }
+    [[nodiscard]] Rng& rng() noexcept { return rng_; }
+    [[nodiscard]] const SimComponentRegistry& components() const noexcept { return *registry_; }
+    [[nodiscard]] const std::vector<std::string>& system_names() const noexcept
+    {
+        return system_names_;
+    }
+
+    // --- restore hooks (session_state::load) --------------------------------------------------
+    // Restore the runtime counters after the caller has rebuilt the World from a serialized state.
+    // `input_log` becomes both the record and the replay schedule.
+    void restore_runtime(std::uint64_t seed, std::uint64_t rng_state, std::uint64_t sim_tick,
+                         InputStream input_log);
+    [[nodiscard]] std::uint64_t rng_state() const noexcept { return rng_.state(); }
+
+private:
+    void build_systems();
+    // (Re)build the initial world for the current scenario + seed (fresh world, rng reset, tick 0).
+    void setup_scenario();
+
+    kernel::World world_;
+    const SimComponentRegistry* registry_;
+    std::uint64_t seed_;
+    Rng rng_;
+    std::uint64_t sim_tick_ = 0;
+    std::uint64_t tick_hz_;
+    std::string scenario_;
+    std::vector<System> systems_;
+    std::vector<std::string> system_names_;
+    InputStream input_log_;
+    bool trace_enabled_ = false;
+    HashTrace trace_;
+};
+
+} // namespace context::runtime::session

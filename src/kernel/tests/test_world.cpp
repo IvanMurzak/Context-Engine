@@ -164,5 +164,58 @@ int main()
         CHECK(w.get<Position>(keep)->x == 3.0f);
     }
 
+    // --- for_each_archetype: the generic introspection walk (state hashing / serialization) ----
+    {
+        World w;
+        // Archetype {Position}: 3 entities; archetype {Position,Velocity}: 2 entities. A bare
+        // entity (empty archetype) is created then given a component, so no empty archetype holds
+        // it at walk time.
+        for (int i = 0; i < 3; ++i)
+        {
+            const Entity e = w.create();
+            w.add<Position>(e, Position{static_cast<float>(i), 0.0f, 0.0f});
+        }
+        for (int i = 0; i < 2; ++i)
+        {
+            const Entity e = w.create();
+            w.add<Position>(e, Position{100.0f, 0.0f, 0.0f});
+            w.add<Velocity>(e, Velocity{7.0f, 8.0f});
+        }
+
+        std::size_t archetypes_seen = 0;
+        std::size_t entities_seen = 0;
+        bool saw_velocity_column = false;
+        w.for_each_archetype(
+            [&](const World::ArchetypeView& view)
+            {
+                ++archetypes_seen;
+                entities_seen += view.entities().size();
+                // Every visited archetype is non-empty and has as many columns as component types.
+                CHECK(!view.entities().empty());
+                CHECK(!view.types().empty());
+                // Locate the Velocity column (if any) and read a component through the raw view.
+                for (std::size_t col = 0; col < view.types().size(); ++col)
+                {
+                    if (view.types()[col] == component_id<Velocity>())
+                    {
+                        saw_velocity_column = true;
+                        const auto* v =
+                            static_cast<const Velocity*>(view.component(col, 0));
+                        CHECK(v->dx == 7.0f);
+                        CHECK(v->dy == 8.0f);
+                    }
+                }
+            });
+        CHECK(archetypes_seen == 2); // {Position} and {Position,Velocity}
+        CHECK(entities_seen == 5);
+        CHECK(saw_velocity_column);
+
+        // An empty World visits nothing.
+        World empty;
+        std::size_t empty_seen = 0;
+        empty.for_each_archetype([&](const World::ArchetypeView&) { ++empty_seen; });
+        CHECK(empty_seen == 0);
+    }
+
     KERNEL_TEST_MAIN_END();
 }

@@ -286,6 +286,17 @@ add_subdirectory(editor/compose)
 # the `context_save` target, resolved at generate time regardless of add_subdirectory order).
 add_subdirectory(runtime/save)
 
+# M3 entry: the headless simulation session + versioned replay artifact + hierarchical determinism
+# hashing (src/runtime/session/, R-QA-005 / L-54, issue #74) — the deterministic headless harness the
+# whole M3 automated-QA / determinism story builds on: fixed-tick session control (step-N / seed /
+# synthetic input + action injection / record + replay / state-hash query), the monotonic simTick
+# counter, the hierarchical canonical state hash (root + per-system + per-archetype + trace), and the
+# versioned schema'd replay-artifact kind. OWN stanza — apart from the editor cluster + the exit-gate
+# block below — so it never collides at the file tail (consumers name the `context_session` target,
+# resolved at generate time regardless of add_subdirectory order). Registers the `determinism-*`
+# ctest family the blocking CI determinism gate runs across the 3-OS matrix.
+add_subdirectory(runtime/session)
+
 # ---------------------------------------------------------------------------
 # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36): five integration tests, one per exit
 # criterion, registered as the `m1-exit-*` ctest family and CI-gated per the §6 tiering (blocking

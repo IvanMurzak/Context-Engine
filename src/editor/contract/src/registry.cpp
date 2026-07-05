@@ -321,6 +321,110 @@ Registry::Registry()
           "File or directory to validate (recursive over *.json); defaults to the --project root."}},
         /*flags=*/{}, /*implemented=*/true));
 
+    // --- M3 entry: headless session control + versioned replay (issue #74, R-QA-005 / L-54) ------
+    // The deterministic headless harness surface (R-CLI-009 the ONE registry): session control
+    // (new / step / seed / inject / hash / record) over a session-state file, plus the global
+    // `replay` verb. New verbs enter the ONE registry so the CLI ≡ RPC ≡ MCP ≡ introspection parity
+    // + additive-catalog gates stay green (protocolMajor stays 0 — additive-only). The determinism
+    // auto-triage grammar (`determinism diff`) is RESERVED here (implemented=false): the grammar is
+    // contract from day one, its bisect/triage backing lands in the follow-up split (the issue's
+    // HALT-to-split candidate). Inserted at THIS anchor (end of the stable block, before the
+    // operational surface) so a future sibling insertion merges cleanly.
+    verbs_.push_back(make_verb(
+        "", "session", "new",
+        "Create a headless simulation session-state file (R-QA-005): a fresh deterministic session "
+        "for the given --seed + --scenario. The state file persists the session between the one-shot "
+        "session verbs (step / seed / inject / hash / record).",
+        /*params=*/{{"state", "path", true, "Path to the session-state file to create."}},
+        /*flags=*/
+        {{"seed", "string", "The deterministic PRNG seed (unsigned integer); defaults to 0.", false},
+         {"scenario", "string", "The headless scenario to run; defaults to the built-in `demo`.",
+          false}},
+        /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "session", "step",
+        "Advance a session exactly N fixed ticks (--ticks; R-SIM-002 fixed timestep). The result "
+        "envelope carries the monotonic simTick (R-CLI-016 — a lost ack reads the counter and steps "
+        "only the missing delta) and the resulting hierarchical state hash.",
+        /*params=*/{{"state", "path", true, "The session-state file to advance in place."}},
+        /*flags=*/
+        {{"ticks", "string", "The number of fixed ticks to advance (unsigned integer); defaults to 1.",
+          false},
+         {"trace", "bool", "Record the per-tick hierarchical hash tree (trace mode).", false}},
+        /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "session", "seed",
+        "Query the session seed, or set it with --set (rebuilding the seeded initial world; valid "
+        "before stepping). R-QA-005 seed set/query.",
+        /*params=*/{{"state", "path", true, "The session-state file."}},
+        /*flags=*/
+        {{"set", "string",
+          "Set the seed to this unsigned integer and rebuild the initial world.", false}},
+        /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "session", "inject",
+        "Inject a synthetic input event (--event <device> --code <code>) or a mapped action "
+        "activation (--action <name>) into the session at --at (default: the current simTick). "
+        "Gameplay + UI actions share the started/performed/canceled phases (R-QA-005 injection).",
+        /*params=*/{{"state", "path", true, "The session-state file to inject into."}},
+        /*flags=*/
+        {{"action", "string",
+          "Inject a mapped action activation with this name (e.g. move_x, ui_submit).", false},
+         {"event", "string", "Inject a raw input event with this device (paired with --code).",
+          false},
+         {"code", "string", "The code on the --event device (e.g. W).", false},
+         {"phase", "string", "The action phase: started | performed | canceled (default performed).",
+          false},
+         {"value", "string", "The integer value of the event/action (default 1).", false},
+         {"at", "string", "The sim tick to schedule the injection at (default: the current simTick).",
+          false}},
+        /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "session", "hash",
+        "Query the session's canonical hierarchical state hash (R-QA-005): the root plus the "
+        "per-archetype sub-hashes of the current persisted state. (The per-tick hash TRACE is a "
+        "property of a run, not a persisted snapshot — obtain it from `session step --trace`.)",
+        /*params=*/{{"state", "path", true, "The session-state file."}},
+        /*flags=*/{}, /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "session", "record",
+        "Record a versioned replay artifact from the session's seed + recorded input stream (the "
+        "ctx:replay kind, R-QA-005): input stream + seed + tick count + engine/protocol versions + "
+        "an optional content-hash manifest of project inputs + the expected per-tick hash trace.",
+        /*params=*/{{"state", "path", true, "The session-state file to record from."}},
+        /*flags=*/
+        {{"out", "path", "Write the replay artifact to this path (default: inline in the envelope).",
+          false},
+         {"manifest", "string",
+          "Comma-separated project-relative input paths to content-hash into the manifest.", false},
+         {"non-deterministic", "bool", "Mark the artifact best-effort (no expected trace recorded).",
+          false}},
+        /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "", "replay",
+        "Replay a versioned replay artifact (R-QA-005): verify its content manifest against the "
+        "project BEFORE running (drift is reported, never a silent divergence), re-run the input "
+        "stream, and report the first-divergence tick. A non-deterministic artifact is best-effort.",
+        /*params=*/{{"artifact", "path", true, "The replay artifact file to run."}},
+        /*flags=*/{}, /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "determinism", "diff",
+        "Triage a determinism divergence between two runs/artifacts (R-QA-005): replay-bisect to the "
+        "first divergent tick, diff the first divergent system, and report (tick, system, entity, "
+        "componentField). RESERVED — the hierarchical-hash trace it consumes ships now; the "
+        "auto-triage backing lands in the follow-up split.",
+        /*params=*/
+        {{"left", "path", true, "The baseline run/artifact."},
+         {"right", "path", true, "The divergent run/artifact to triage against the baseline."}},
+        /*flags=*/{}, /*implemented=*/false));
+
     // --- the OPERATIONAL daemon-driver surface (R-CLI-009 honesty) ------------------------------
     // These RPC methods are genuinely served by a live daemon's method backend (KernelServer) — the
     // cross-process analogue of `context editor smoke`. They are registered here so

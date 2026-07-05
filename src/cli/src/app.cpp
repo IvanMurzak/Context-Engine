@@ -9,7 +9,9 @@
 #include "context/cli/fetch_command.h"
 #include "context/cli/merge_command.h"
 #include "context/cli/migrate_command.h"
+#include "context/cli/replay_command.h"
 #include "context/cli/scaffold.h"
+#include "context/cli/session_command.h"
 #include "context/cli/set_command.h"
 #include "context/editor/contract/json.h"
 #include "context/editor/contract/registry.h"
@@ -129,6 +131,13 @@ Envelope dispatch(const VerbSpec& verb, const std::vector<std::string>& position
         return run_rekey(bound, flags);
     if (verb.noun.empty() && verb.verb == "validate")
         return run_validate(bound, flags);
+
+    // M3 entry (issue #74): headless session control (`context session <verb> <state>`) + the global
+    // `context replay <artifact>` runner. Backed by src/runtime/session/ over the ONE registry.
+    if (verb.noun == "session")
+        return run_session(verb.verb, bound, flags);
+    if (verb.noun.empty() && verb.verb == "replay")
+        return run_replay(bound, flags);
 
     // `context resource read <handle> [<offset>:<length>]` (alias: `context fetch ...`) — the
     // R-CLI-017 large-result fetch. Drives a RUNNING daemon over the wire via the shared client

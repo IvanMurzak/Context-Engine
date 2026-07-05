@@ -466,6 +466,86 @@ constexpr std::string_view kStringTableSchemaJson = R"({
   }
 })";
 
+// The replay artifact content kind (R-QA-005 / L-54, M3 entry): RuntimeKernel's own serialization of
+// a recorded headless run (R-FILE-009 — never an authored project file), published as a versioned
+// kind so `context describe` introspects its schema like the authored kinds (R-CLI-005). The $schema
+// + version header block (L-32) is read separately; the fields below are the artifact body.
+constexpr std::string_view kReplaySchemaJson = R"({
+  "$id": "ctx:replay",
+  "version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["seed", "tickCount", "deterministic", "inputStream"],
+  "description": "A versioned, recorded headless run (R-QA-005, L-54): seed + input stream + tick count + engine/protocol versions + a content-hash manifest of the project inputs + (deterministic mode) the expected per-tick root-hash trace. Replay verifies the manifest before running (drift is reported, never silent divergence) and reports the first-divergence tick; non-deterministic replay is labeled best-effort.",
+  "properties": {
+    "notes": {"description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."},
+    "seed": {"type": "integer", "description": "The deterministic PRNG seed the run started from (splitmix64)."},
+    "tickCount": {"type": "integer", "description": "The number of fixed ticks the run advanced (R-SIM-002)."},
+    "scenario": {"type": "string", "description": "The named headless scenario the session ran (the built-in default is `demo`)."},
+    "engineVersion": {"type": "string", "description": "The engine version that recorded the artifact (semver)."},
+    "protocolMajor": {"type": "integer", "description": "The contract protocol major the artifact was recorded under (stays 0 until the M3 freeze, R-CLI-004)."},
+    "deterministic": {"type": "boolean", "description": "Whether the run is deterministically reproducible; a non-deterministic artifact carries no expected trace and replays best-effort."},
+    "contentManifest": {
+      "type": "array",
+      "description": "The project inputs the run ran against + their canonical content hashes at record time. Replay verifies these BEFORE running so a replay against drifted content is reported as drift, never a silent divergence.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "hash"],
+        "properties": {
+          "path": {"type": "string", "description": "Project-root-relative path of the input file."},
+          "hash": {"type": "integer", "description": "The serializer canonical-content hash (R-FILE-001) of the file's bytes at record time."}
+        }
+      }
+    },
+    "inputStream": {
+      "type": "array",
+      "description": "The recorded per-tick input: synthetic input events + mapped action activations, timestamped to the tick they applied at. Replay feeds these back at the same ticks (R-QA-005 record/replay).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tick"],
+        "properties": {
+          "tick": {"type": "integer", "description": "The sim tick this input applied at."},
+          "events": {
+            "type": "array",
+            "description": "Raw synthetic input events (the low-level layer).",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["device", "code", "value"],
+              "properties": {
+                "device": {"type": "string", "description": "The input device (e.g. `key`, `mouse`)."},
+                "code": {"type": "string", "description": "The code on the device (e.g. `W`)."},
+                "value": {"type": "integer", "description": "The integer value of the event."}
+              }
+            }
+          },
+          "actions": {
+            "type": "array",
+            "description": "Mapped action activations (the gameplay/UI layer).",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["action", "phase", "value"],
+              "properties": {
+                "action": {"type": "string", "description": "The mapped action name (e.g. `move_x`, `ui_submit`)."},
+                "phase": {"type": "string", "enum": ["started", "performed", "canceled"], "description": "The action lifecycle phase."},
+                "value": {"type": "integer", "description": "The integer value of the activation."}
+              }
+            }
+          }
+        }
+      }
+    },
+    "expectedHashTrace": {
+      "type": "array",
+      "description": "The expected per-tick canonical root-hash trace (index i == tick i), present only in deterministic mode. Replay compares each tick's actual root against this and reports the first divergent tick.",
+      "items": {"type": "integer"}
+    }
+  }
+})";
+
 [[nodiscard]] KindSchema compile_engine_schema(std::string_view schema_json)
 {
     std::vector<std::string> problems;
@@ -613,6 +693,7 @@ const SchemaSet& engine_schemas()
         s.add(compile_engine_schema(kProjectSchemaJson));
         s.add(compile_engine_schema(kTilemapSchemaJson));
         s.add(compile_engine_schema(kStringTableSchemaJson));
+        s.add(compile_engine_schema(kReplaySchemaJson));
         return s;
     }();
     return set;
