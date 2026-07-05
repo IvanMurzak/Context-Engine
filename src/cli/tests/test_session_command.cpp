@@ -122,6 +122,41 @@ int main()
         CHECK(e.ok());
     }
 
+    // --- numeric flags parse as decimal, never silent octal/hex (the "unsigned integer" contract) -
+    {
+        // A leading zero stays decimal ("012" == 12, not octal 8).
+        const Envelope dec = run_session("new", {{"state", state}}, {{"seed", "012"}});
+        CHECK(dec.ok());
+        CHECK(dec.data().at("seed").as_string() == "12");
+
+        // A "0x"-prefixed value is rejected, not silently read as hex.
+        const Envelope hex = run_session("new", {{"state", state}}, {{"seed", "0x1f"}});
+        CHECK(!hex.ok());
+        CHECK(err_code(hex) == "session.input_invalid");
+    }
+
+    // --- --trace=false is a real off-switch for the persisted trace toggle ---------------------
+    {
+        const std::string tstate = (dir / "trace.session.json").string();
+        CHECK(run_session("new", {{"state", tstate}}, {{"seed", "1"}}).ok());
+
+        const Envelope on =
+            run_session("step", {{"state", tstate}}, {{"ticks", "1"}, {"trace", "true"}});
+        CHECK(on.ok());
+        CHECK(on.data().contains("trace"));
+
+        // Absent --trace, the persisted trace mode stays on...
+        const Envelope still_on = run_session("step", {{"state", tstate}}, {{"ticks", "1"}});
+        CHECK(still_on.ok());
+        CHECK(still_on.data().contains("trace"));
+
+        // ...and --trace=false turns it back off.
+        const Envelope off =
+            run_session("step", {{"state", tstate}}, {{"ticks", "1"}, {"trace", "false"}});
+        CHECK(off.ok());
+        CHECK(!off.data().contains("trace"));
+    }
+
     fs::remove_all(dir);
     CLI_TEST_MAIN_END();
 }

@@ -78,13 +78,15 @@ std::optional<std::uint64_t> parse_u64(const std::string& s)
     // std::stoull mirrors strtoull, which accepts a leading '-' and returns the 2^64 wraparound
     // rather than failing — so "-1" would parse as 18446744073709551615. Reject a leading sign so an
     // unsigned flag (--seed / --ticks / --at) honors its documented "unsigned integer" contract.
+    // Parse in base 10 (not std::stoull's default base 0) so a leading-zero value stays decimal
+    // ("010" == 10, never octal 8) and a "0x"-prefixed value is rejected, not silently read as hex.
     const std::size_t first = s.find_first_not_of(" \t");
     if (first != std::string::npos && s[first] == '-')
         return std::nullopt;
     try
     {
         std::size_t pos = 0;
-        const unsigned long long v = std::stoull(s, &pos, 0);
+        const unsigned long long v = std::stoull(s, &pos, 10);
         if (pos != s.size())
             return std::nullopt;
         return static_cast<std::uint64_t>(v);
@@ -97,10 +99,13 @@ std::optional<std::uint64_t> parse_u64(const std::string& s)
 
 std::optional<std::int64_t> parse_i64(const std::string& s)
 {
+    // Base 10 (not std::stoll's default base 0): "--value 010" is decimal 10, never octal 8, and a
+    // "0x"-prefixed value is rejected rather than silently read as hex. A leading '-' is allowed —
+    // this backs the signed --value flag.
     try
     {
         std::size_t pos = 0;
-        const long long v = std::stoll(s, &pos, 0);
+        const long long v = std::stoll(s, &pos, 10);
         if (pos != s.size())
             return std::nullopt;
         return static_cast<std::int64_t>(v);
@@ -232,8 +237,11 @@ Envelope session_step(const std::string& state, const std::map<std::string, std:
             return Envelope::failure("session.input_invalid", "--ticks is not an unsigned integer");
         ticks = *parsed;
     }
-    if (flag(flags, "trace"))
-        s.set_trace(true);
+    // --trace / --trace=true enables trace mode; --trace=false turns it back off (traceEnabled
+    // persists in the session-state file, so a presence-only check would be a one-way door). Absent:
+    // the persisted trace mode is left unchanged.
+    if (const std::string* trace_flag = flag(flags, "trace"))
+        s.set_trace(*trace_flag != "false");
 
     const session::StepResult result = s.step(ticks);
     Json data = Json::object();
