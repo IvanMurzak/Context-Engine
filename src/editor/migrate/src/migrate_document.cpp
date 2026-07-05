@@ -302,24 +302,35 @@ void rewrite_overrides(JsonValue& value, const std::string& pointer, bool is_roo
                     continue;
                 const std::string entry_pointer = child + "/" + std::to_string(i) + "/path";
 
-                // Split the authored path on '/': the LAST segment equal to ANY migrated type splits
-                // it into "<prefix>/<type>/<payload-relative-pointer>", and the tail is fed through
-                // THAT type's chain (L-37). Selecting by segment POSITION — not plans-iteration
-                // order — is what makes a path that names two DIFFERENT migrated types split at the
-                // DEEPEST one, exactly the last-segment rule the single-type case already follows.
+                // Split the authored path at its DEEPEST payload-boundary segment — identified by
+                // the SAME is_payload_boundary predicate the rest of this file uses (registered-
+                // current OR stamped), NOT by plan membership. The tail after that boundary feeds
+                // through the boundary type's chain (L-37). Selecting by segment POSITION (not
+                // plans-iteration order) makes a path naming two DIFFERENT migrated types split at
+                // the DEEPEST one — the last-segment rule the single-type case already follows.
                 // (A prior implementation matched the first plan in iteration order whose type
-                // appeared anywhere, silently mis-splitting such a path at the wrong — outer — type.)
+                // appeared anywhere, mis-splitting at the wrong — outer — type; and a plans-only
+                // boundary scan would let an outer migrating type capture a tail owned by a deeper
+                // already-current payload — issue #70, global-predicate-vs-per-path.)
                 const std::string& authored = path->string_value;
                 const TypePlan* selected = nullptr;
                 std::size_t type_at = std::string::npos;
+                std::size_t last_boundary_at = std::string::npos;
                 {
                     std::size_t seg_start = 0;
                     for (std::size_t pos = 0; pos <= authored.size(); ++pos)
                     {
                         if (pos == authored.size() || authored[pos] == '/')
                         {
+                            const std::string_view segment(authored.data() + seg_start,
+                                                           pos - seg_start);
+                            // The deepest boundary uses the file-wide payload predicate, so a path
+                            // whose deepest type segment is an already-current (non-migrating) type
+                            // is recognized as addressing THAT payload.
+                            if (is_payload_boundary(segment, set, stamped))
+                                last_boundary_at = seg_start;
                             for (const TypePlan& plan : plans)
-                                if (authored.compare(seg_start, pos - seg_start, plan.type) == 0)
+                                if (segment == plan.type)
                                 {
                                     selected = &plan;    // a later segment overwrites — LAST wins
                                     type_at = seg_start;
@@ -331,6 +342,10 @@ void rewrite_overrides(JsonValue& value, const std::string& pointer, bool is_roo
                 }
                 if (selected == nullptr)
                     continue; // no migrated-type segment in this path — nothing to rewrite
+                if (last_boundary_at != type_at)
+                    continue; // deepest boundary is a non-migrating (current) type: the override
+                              // addresses its unchanged payload — leave it verbatim (mirrors the
+                              // file-wide is_payload_boundary opacity rule; issue #70)
 
                 const std::size_t tail_at = type_at + selected->type.size();
                 // The payload-relative pointer: "/a/b" for ".../<type>/a/b", "" for a path

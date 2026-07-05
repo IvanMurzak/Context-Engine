@@ -206,6 +206,52 @@ void test_last_segment_rule_spans_multiple_migrated_types()
     CHECK(count_code(r, "migration.orphan_override") == 0);
 }
 
+void test_deepest_boundary_current_type_leaves_override_untouched()
+{
+    // The deepest payload-boundary segment governs the split — and "boundary" is the file-wide
+    // is_payload_boundary set (registered-current OR stamped), NOT just the actively-migrating
+    // plans. An override path whose DEEPEST type segment names an already-current (non-migrating)
+    // type addresses THAT payload, which is not changing, so it must be left verbatim — even when an
+    // OUTER segment names a migrating type whose (structural) map_path would otherwise capture and
+    // rewrite the compound tail. Pre-fix the scan treated only plan types as boundaries, so it fell
+    // back to the outer migrating type and mangled the reference. (Regression, issue #70 —
+    // global-predicate-vs-per-path.)
+    MigrationSet set;
+    std::string problem;
+    // An outer type that IS migrating this pass, with a STRUCTURAL map_path (prefixes any pointer) —
+    // the kind that would rewrite a compound tail it should never have been handed.
+    CHECK(set.register_component("test:outer", 2, problem));
+    MigrationStep outer_v1;
+    outer_v1.component_type = "test:outer";
+    outer_v1.from_version = 1;
+    outer_v1.revision = 1;
+    outer_v1.transform = [](JsonValue&) { return true; };
+    outer_v1.map_path = [](std::string_view p) -> std::optional<std::string> {
+        return "/v2" + std::string(p); // structural: always transforms the tail it is handed
+    };
+    CHECK(set.register_step(std::move(outer_v1), problem));
+    // A deeper type registered + stamped at its CURRENT version — a payload boundary, but NOT in
+    // this pass's migration plans.
+    CHECK(set.register_component("test:panel", 1, problem));
+
+    JsonValue doc = parse(R"({
+      "componentVersions": {"test:outer": 1, "test:panel": 1},
+      "instances": [
+        {"overrides": [
+          {"path": "a/test:outer/b/test:panel/x", "value": 1}
+        ], "source": "x"}
+      ]
+    })");
+    const DocumentMigrationResult r = migrate_document(doc, set);
+    CHECK(r.ok);
+    const std::string bytes = canon(doc);
+    // The override addresses test:panel's (unchanged) payload: the path survives VERBATIM, and the
+    // outer test:outer chain never captured the "/b/test:panel/x" tail (no "/v2" mangling).
+    CHECK(bytes.find("\"path\": \"a/test:outer/b/test:panel/x\"") != std::string::npos);
+    CHECK(bytes.find("/v2") == std::string::npos);
+    CHECK(count_code(r, "migration.orphan_override") == 0);
+}
+
 void test_overrides_inside_migrated_payloads_are_opaque()
 {
     // A payload's OWN "overrides"-shaped member is payload data, not an override site.
@@ -260,6 +306,7 @@ int main()
     test_non_matching_shapes_are_untouched();
     test_whole_payload_path_and_last_segment_rule();
     test_last_segment_rule_spans_multiple_migrated_types();
+    test_deepest_boundary_current_type_leaves_override_untouched();
     test_overrides_inside_migrated_payloads_are_opaque();
     test_overrides_inside_current_version_payloads_are_opaque();
     MIGRATE_TEST_MAIN_END();
