@@ -50,6 +50,15 @@ bool as_ll(const JsonValue& v, long long& out)
     }
 }
 
+// True when `v` is a JSON numeric literal (integer or unsigned). The schema's region items are
+// `{"type": "integer"}` with no range bound, and carrier_matches admits an unsigned above INT64_MAX
+// for it — so a numeric literal that overflows as_ll is a real magnitude defect, not the non-numeric
+// shape error the schema's items check already owns.
+bool is_json_number(const JsonValue& v) noexcept
+{
+    return v.type == JsonValue::Type::integer || v.type == JsonValue::Type::unsigned_integer;
+}
+
 std::string ptr_index(std::string_view base, std::size_t i)
 {
     return std::string(base) + "/" + std::to_string(i);
@@ -118,13 +127,26 @@ std::vector<KindDiagnostic> analyze_tilemap(const JsonValue& doc,
             const std::string chunk_ptr = ptr_index(layer_ptr + "/chunks", ci);
             const JsonValue& chunk = chunks->elements[ci];
             const JsonValue* region = member(chunk, "region");
+            if (region == nullptr || region->type != JsonValue::Type::array ||
+                region->elements.size() != 4)
+                continue; // wrong arity / not an array — the schema's i32x4 items check owns it
             long long w = 0;
             long long h = 0;
-            const bool region_ok = region != nullptr && region->type == JsonValue::Type::array &&
-                                   region->elements.size() == 4 &&
-                                   as_ll(region->elements[2], w) && as_ll(region->elements[3], h);
-            if (!region_ok)
-                continue; // the schema's i32x4 arity check owns malformed regions
+            const bool w_ok = as_ll(region->elements[2], w);
+            const bool h_ok = as_ll(region->elements[3], h);
+            if (!w_ok || !h_ok)
+            {
+                // A width/height that IS a schema-accepted integer (region items carry no range
+                // bound, and carrier_matches passes an unsigned above INT64_MAX) but overflows
+                // long long is a genuine region defect — not the non-numeric shape error the schema
+                // owns — so raise region_invalid rather than silently skipping the chunk (which
+                // would also swallow the chunk_oversize check meant for pathological sizes).
+                if ((!w_ok && is_json_number(region->elements[2])) ||
+                    (!h_ok && is_json_number(region->elements[3])))
+                    out.push_back({"tilemap.region_invalid", chunk_ptr + "/region",
+                                   "chunk region width and height must be a representable integer"});
+                continue;
+            }
             if (w <= 0 || h <= 0)
             {
                 out.push_back({"tilemap.region_invalid", chunk_ptr + "/region",

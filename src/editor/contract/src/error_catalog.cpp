@@ -213,6 +213,9 @@ const std::vector<ErrorCode>& catalog()
         {"stringtable.plural_incomplete",
          "A plural set omits the required CLDR `other` category.", false, kExitValidation,
          "R-I18N-001"},
+        {"stringtable.value_locale_duplicate",
+         "Two translations for one string-table key declare the same locale.", false,
+         kExitValidation, "R-I18N-001"},
     };
     return the_catalog;
 }

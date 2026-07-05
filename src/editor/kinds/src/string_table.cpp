@@ -320,11 +320,24 @@ std::vector<KindDiagnostic> validate_string_table(const JsonValue& doc)
             const JsonValue* values = array_member(entry, "values");
             if (values == nullptr)
                 continue;
+            std::vector<std::string> seen_value_locales;
             for (std::size_t j = 0; j < values->elements.size(); ++j)
             {
                 const JsonValue& v = values->elements[j];
                 const std::string vptr =
                     "/keys/" + std::to_string(i) + "/values/" + std::to_string(j);
+                // `values` is an id-keyed collection keyed by `locale` (see the kind schema); a
+                // repeated tag makes resolve_string silently take the first, so flag it — mirroring
+                // the locale_duplicate / key_duplicate checks on the sibling collections above.
+                if (const JsonValue* vl = string_member(v, "locale"); vl != nullptr)
+                {
+                    if (contains(seen_value_locales, vl->string_value))
+                        out.push_back({"stringtable.value_locale_duplicate", vptr + "/locale",
+                                       "duplicate locale \"" + vl->string_value +
+                                           "\" for this key"});
+                    else
+                        seen_value_locales.push_back(vl->string_value);
+                }
                 const JsonValue* text = member(v, "text");
                 const JsonValue* plural = member(v, "plural");
                 if ((text != nullptr) == (plural != nullptr)) // neither, or both

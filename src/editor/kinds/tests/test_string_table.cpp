@@ -296,6 +296,16 @@ int main()
               {"key": "k", "values": [{"locale": "en", "plural": {"one": "x"}}]}]})"));
         CHECK(kinds::has_code(d, "stringtable.plural_incomplete"));
     }
+    {
+        // Two translations for one key declaring the same locale. `values` is an id-keyed collection
+        // keyed by `locale`, so a repeat (which resolve_string would silently resolve to the first)
+        // is flagged — mirroring the sibling locale/key duplicate checks.
+        std::vector<kinds::KindDiagnostic> d = kinds::validate_string_table(parse(R"({
+            "$schema": "ctx:string-table", "version": 1, "sourceLocale": "en",
+            "locales": [{"locale": "en"}], "keys": [
+              {"key": "k", "values": [{"locale": "en", "text": "x"}, {"locale": "en", "text": "y"}]}]})"));
+        CHECK(kinds::has_code(d, "stringtable.value_locale_duplicate"));
+    }
 
     // --- canonical round-trip (R-FILE-001 fixpoint) ---------------------------------------------
     {

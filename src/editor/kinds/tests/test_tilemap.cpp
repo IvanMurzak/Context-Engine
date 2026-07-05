@@ -150,7 +150,7 @@ int main()
         std::vector<kinds::KindDiagnostic> over =
             kinds::analyze_tilemap(parse(tilemap_one_chunk(0, 0, 512, 513)));
         CHECK(kinds::has_code(over, "tilemap.chunk_oversize"));
-        CHECK(over.front().pointer == "/layers/0/chunks/0");
+        CHECK(!over.empty() && over.front().pointer == "/layers/0/chunks/0");
         // A small chunk is fine.
         CHECK(kinds::analyze_tilemap(parse(tilemap_one_chunk(0, 0, 32, 32))).empty());
     }
@@ -160,14 +160,25 @@ int main()
         std::vector<kinds::KindDiagnostic> d =
             kinds::analyze_tilemap(parse(tilemap_one_chunk(0, 0, 0, 16)));
         CHECK(kinds::has_code(d, "tilemap.region_invalid"));
-        CHECK(d.front().pointer == "/layers/0/chunks/0/region");
+        CHECK(!d.empty() && d.front().pointer == "/layers/0/chunks/0/region");
 
         // A NEGATIVE extent is a distinct invalid class from zero — it must also raise region_invalid
         // through the full analyze_tilemap path (not only the tilemap_chunk_bytes(16, -1) unit check).
         std::vector<kinds::KindDiagnostic> neg =
             kinds::analyze_tilemap(parse(tilemap_one_chunk(0, 0, -1, 16)));
         CHECK(kinds::has_code(neg, "tilemap.region_invalid"));
-        CHECK(neg.front().pointer == "/layers/0/chunks/0/region");
+        CHECK(!neg.empty() && neg.front().pointer == "/layers/0/chunks/0/region");
+
+        // A width that is a schema-valid integer literal but overflows long long (an unsigned above
+        // INT64_MAX — the region items carry no range bound, and carrier_matches admits it) must
+        // raise region_invalid, not be silently skipped (which would also swallow chunk_oversize).
+        // 9223372036854775808 == 2^63 parses as an unsigned_integer just past LLONG_MAX.
+        std::vector<kinds::KindDiagnostic> huge = kinds::analyze_tilemap(parse(R"({
+            "$schema": "ctx:tilemap", "version": 1, "tileSize": [1,1], "tileSets": [],
+            "layers": [{"id": "l1", "name": "b", "chunks": [
+              {"region": [0, 0, 9223372036854775808, 16], "cells": {"$sidecar": "c.bin", "hash": "1"}}]}]})"));
+        CHECK(kinds::has_code(huge, "tilemap.region_invalid"));
+        CHECK(!huge.empty() && huge.front().pointer == "/layers/0/chunks/0/region");
     }
 
     // --- analyze_tilemap: stable-id uniqueness (L-33) -------------------------------------------
