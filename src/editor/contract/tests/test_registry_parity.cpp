@@ -277,6 +277,21 @@ int main()
         CHECK(lr.at("cliCommand").as_string() == "context fetch");
         CHECK(lr.at("handleShape").is_object());
         CHECK(lr.at("readResultShape").is_object());
+
+        // The R-CLI-012 query-language section is published in describe (M3 contract completion):
+        // the EBNF grammar, the enumerated operator set, the total-ordering rule, the R-BRIDGE-008
+        // unified cursor, and the string semantics. (The exhaustive vectors live in
+        // test_query_language; here we only lock its PRESENCE + shape in the whole-contract doc.)
+        const Json& ql = c.at("queryLanguage");
+        CHECK(ql.is_object());
+        CHECK(ql.at("requirement").as_string() == "R-CLI-012");
+        CHECK(!ql.at("ebnf").as_string().empty());
+        CHECK(ql.at("operators").is_array());
+        CHECK(ql.at("operators").size() >= 5); // >= the five requirement classes
+        CHECK(ql.at("ordering").at("defaultKey").as_string() == "@id");
+        CHECK(ql.at("cursor").at("uriScheme").as_string() == "context-cur");
+        CHECK(ql.at("stringSemantics").at("normalization").as_string() == "NFC");
+        CHECK(ql.at("surfaces").size() == 3);
     }
 
     CONTRACT_TEST_MAIN_END();

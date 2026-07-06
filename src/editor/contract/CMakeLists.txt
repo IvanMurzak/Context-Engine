@@ -10,7 +10,8 @@ add_library(context_contract STATIC
     src/envelope.cpp
     src/handshake.cpp
     src/registry.cpp
-    src/resource_handle.cpp)
+    src/resource_handle.cpp
+    src/query_language.cpp)
 
 target_include_directories(context_contract PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -30,7 +31,8 @@ set(_context_contract_tests
     test_envelope
     test_handshake
     test_registry_parity
-    test_resource_handle)
+    test_resource_handle
+    test_query_language)
 
 foreach(_t IN LISTS _context_contract_tests)
     add_executable(context_contract_${_t} tests/${_t}.cpp)
