@@ -67,6 +67,24 @@ target_include_directories(context_ts PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 # Every Context target links the warnings-as-errors baseline (conventions.md).
 target_link_libraries(context_ts PRIVATE context_warnings)
 
+# Sanitize preset (ASan+UBSan, Linux/clang CI leg) carve-out. ts-test_ts_in_v8 links the
+# UNINSTRUMENTED rusty_v8 prebuilt (via context_js), which bundles Chromium's OWN libc++/libc++abi
+# (use_custom_libcxx, the `__Cr` ABI). Its RTTI in the same binary confuses UBSan's `vptr` sub-check
+# into flagging esbuild_toolchain.cpp's std::ostringstream / std::ifstream member calls as
+# "member call on ... not of type std::basic_ostream" — even though the object IS a valid libstdc++
+# std::__cxx11 stream (the UBSan note itself reports `vptr for std::__cxx11::basic_ostringstream`,
+# and the test's functional assertions pass). It is a FALSE POSITIVE of mixing an instrumented
+# embedder with an uninstrumented prebuilt, NOT a defect in Context code (which stays libstdc++,
+# never libc++ — see runtime/js/tsan-suppressions.txt). Drop ONLY the vptr sub-check for THIS TU
+# under the sanitize preset (ASan + every other UBSan check stay ON); this also removes the
+# demangler-driven LSan symbolizer allocations those vptr diagnostics produced (see the
+# lsan-suppressions.txt note below). Scoped to CONTEXT_SANITIZE so the dev/CI release builds are
+# byte-identical, and gated non-MSVC because -fno-sanitize=vptr is a Clang/GCC UBSan flag (MSVC has
+# no vptr sanitizer, and CONTEXT_SANITIZE already FATAL_ERRORs under MSVC).
+if(CONTEXT_SANITIZE AND NOT MSVC)
+    target_compile_options(context_ts PRIVATE -fno-sanitize=vptr)
+endif()
+
 # The driver + its tests use std::filesystem for temp-file plumbing. On the Strawberry-GCC
 # Windows host a STALE PATH libstdc++-6.dll can shadow the std::filesystem symbols at ctest launch
 # (Exit code 0xc0000139 / STATUS_ENTRYPOINT_NOT_FOUND), so static-link the GCC runtime — gated to
@@ -121,4 +139,20 @@ if(_ctx_js_v8 AND CONTEXT_TSAN)
     set_tests_properties(ts-test_ts_in_v8 PROPERTIES
         ENVIRONMENT
         "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../js/tsan-suppressions.txt")
+endif()
+
+# Sanitize preset only (mutually exclusive with the tsan block above — the two presets never
+# co-configure, so their ENVIRONMENT sets never clash): the in-V8 test links the uninstrumented
+# rusty_v8 prebuilt, so ASan's LSan leak-check attributes the SANITIZER's OWN symbolizer/demangler
+# scratch buffers (libc++abi ItaniumDemangle via __cxa_demangle, walked while symbolizing
+# uninstrumented V8 frames whose stack terminates in `0xaaaaaaaa... (<unknown module>)`) as leaks —
+# never Context (`namespace context::`) code. The -fno-sanitize=vptr carve-out on context_ts above
+# removes the vptr diagnostics that drove most of that demangling; this narrow suppressions file is
+# a safety net matching ONLY the sanitizer's symbolizer frames (so it can never mask a real
+# context:: leak), guarded by CONTEXT_SANITIZE + _ctx_js_v8 so the normal dev build + the non-V8
+# toolchains are untouched.
+if(_ctx_js_v8 AND CONTEXT_SANITIZE)
+    set_tests_properties(ts-test_ts_in_v8 PROPERTIES
+        ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan-suppressions.txt")
 endif()

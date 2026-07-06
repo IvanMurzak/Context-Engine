@@ -1,0 +1,34 @@
+# LeakSanitizer suppressions for the in-V8 TypeScript integration test (issue #83 / PR #84).
+#
+# WHY THIS FILE EXISTS
+# ts-test_ts_in_v8 links the SHA-pinned rusty_v8 prebuilt (via context_js). That archive is
+# denoland/rusty_v8's DEFAULT `release` static lib — it is NOT sanitizer-instrumented — and it
+# bundles Chromium's own libc++/libc++abi (use_custom_libcxx, the `__Cr` ABI). When the `sanitize`
+# preset (ASan+UBSan, ubuntu/clang) runs this test, UBSan's `vptr` check trips a FALSE-POSITIVE
+# diagnostic against that uninstrumented libc++abi RTTI (the std::__cxx11 stream objects in
+# esbuild_toolchain.cpp are valid libstdc++ streams — see the CMakeLists.txt carve-out). Printing
+# and SYMBOLIZING those diagnostics drives LLVM's demangler (libc++abi ItaniumDemangle via
+# __cxa_demangle -> DemangleCXXABI -> Symbolizer::PlatformDemangle). The demangler's OWN scratch
+# allocations are then reported by LSan as "leaks" whose allocation stack terminates in an
+# uninstrumented V8 frame (`#N 0xaaaaaaaa00000018  (<unknown module>)`) — the fingerprint of LSan
+# being unable to unwind past the uninstrumented prebuilt. These bytes are allocated INSIDE the
+# sanitizer's symbolizer/demangler, NEVER in Context-Engine (`namespace context::`) code.
+#
+# The PRIMARY fix is in CMakeLists.txt: `-fno-sanitize=vptr` on context_ts removes the false-positive
+# vptr diagnostics whose demangling produced these buffers. This file is a NARROW safety net that
+# matches ONLY the sanitizer's own symbolizer/demangler frames, so it can never mask a real leak in
+# Context code (which, if one existed, would carry a `context::` frame this file does not match — and
+# would be FIXED, not suppressed). Wired into ONLY the ts-test_ts_in_v8 ctest, ONLY under the
+# `sanitize` preset, via LSAN_OPTIONS=suppressions=<abs path> (src/runtime/ts/CMakeLists.txt, guarded
+# by CONTEXT_SANITIZE + _ctx_js_v8). This is the ASan/UBSan analogue of the runtime/js TSan
+# suppressions file for the same uninstrumented-rusty_v8 boundary.
+#
+# Format: one rule per line, `leak:<substring-pattern>` (substring match on a demangled frame in the
+# allocation stack). Ref:
+# https://github.com/google/sanitizers/wiki/AddressSanitizerLeakSanitizer#suppressions
+#
+# LLVM/compiler-rt's symbolizer demangle path (sanitizer-internal — provably never Context code):
+leak:__sanitizer::Symbolizer::PlatformDemangle
+leak:DemangleCXXABI
+leak:__cxa_demangle
+leak:itanium_demangle::
