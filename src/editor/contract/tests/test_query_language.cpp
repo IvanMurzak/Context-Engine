@@ -224,6 +224,21 @@ int main()
         CHECK(!parse_order("a asc,").ok);
         CHECK(!parse_order(",a").ok);
 
+        // strict key grammar (mirrors the predicate field-path production, per the published EBNF
+        // order-term = ( field | "@id" )): a malformed key FAILS with query.syntax_error + a byte
+        // offset rather than being silently accepted and sorting rows last.
+        for (const char* bad : {"a..b desc", "a[ asc", "a[]", "a[x]", ".a", "@foo asc", "@ asc",
+                                "@identity", "a. desc"})
+        {
+            OrderParse p = parse_order(bad);
+            CHECK(!p.ok);
+            CHECK(p.error_code == "query.syntax_error");
+        }
+        // valid dotted / indexed / @id keys still parse
+        CHECK(parse_order("transform.position.x asc").ok);
+        CHECK(parse_order("items[0].id desc").ok);
+        CHECK(parse_order("@id").ok);
+
         // build rows with a DELIBERATELY non-unique sort field (all hp==5) so only the @id
         // tiebreaker makes the order total.
         std::vector<Json> rows;

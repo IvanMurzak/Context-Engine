@@ -6,10 +6,11 @@ three query surfaces — the **derived world**, **live-sim state**, and **schema
 an agent reuses one grammar everywhere; there is deliberately **not** a per-surface dialect.
 
 This document is the human-facing companion to the machine description emitted by
-`context describe --json` under `contract.queryLanguage`. Both are generated from the ONE module
-`src/editor/contract/query_language.{h,cpp}`, and the conformance test
-(`src/editor/contract/tests/test_query_language.cpp`) locks the published grammar to the parser the
-engine actually runs.
+`context describe --json` under `contract.queryLanguage`. That machine description is emitted
+directly from the ONE module `src/editor/contract/query_language.{h,cpp}`; this document is
+hand-maintained alongside it. The conformance test
+(`src/editor/contract/tests/test_query_language.cpp`) locks the emitted grammar to the parser the
+engine actually runs, so both track the same source of truth.
 
 > **Stability.** The contract is UNSTABLE while `protocolMajor == 0` (it may change without a
 > deprecation cycle until the M3 freeze). Everything below is additive-only until then. This module

@@ -823,26 +823,68 @@ OrderParse parse_order(std::string_view input)
     skip_ws();
     while (i < n)
     {
-        // key = "@id" | field-path
+        // key = "@id" | field-path. Parse it STRICTLY, mirroring the predicate parser's
+        // read_field_path() production, so a malformed order key fails with a byte offset instead of
+        // being silently accepted and then sorting every row LAST (the documented invariant: "a
+        // malformed query is never a best-effort partial parse").
         std::string key;
+        const std::size_t key_start = i;
         if (input[i] == '@')
         {
-            key.push_back('@');
+            // The reserved "@id" total-order token is the ONLY valid '@'-prefixed key.
             ++i;
-            while (i < n && is_ident_char(static_cast<unsigned char>(input[i])))
+            std::size_t j = i;
+            while (j < n && is_ident_char(static_cast<unsigned char>(input[j])))
+                ++j;
+            if (input.substr(i, j - i) != "id")
             {
-                key.push_back(input[i]);
-                ++i;
+                out.error_code = "query.syntax_error";
+                out.message = "the only '@'-prefixed order key is the reserved '@id'";
+                out.error_offset = key_start;
+                return out;
             }
+            key = "@id";
+            i = j;
         }
-        else
+        else if (is_ident_start(static_cast<unsigned char>(input[i])))
         {
-            while (i < n)
+            // field = ident , { ("." , ident) | ("[" , index , "]") }
+            while (i < n && is_ident_char(static_cast<unsigned char>(input[i])))
+                key.push_back(input[i++]);
+            for (;;)
             {
-                const char c = input[i];
-                if (is_ident_char(static_cast<unsigned char>(c)) || c == '.' || c == '[' || c == ']')
+                if (i < n && input[i] == '.')
                 {
-                    key.push_back(c);
+                    key.push_back('.');
+                    ++i;
+                    if (i >= n || !is_ident_start(static_cast<unsigned char>(input[i])))
+                    {
+                        out.error_code = "query.syntax_error";
+                        out.message = "expected a field segment after '.'";
+                        out.error_offset = i;
+                        return out;
+                    }
+                    while (i < n && is_ident_char(static_cast<unsigned char>(input[i])))
+                        key.push_back(input[i++]);
+                }
+                else if (i < n && input[i] == '[')
+                {
+                    key.push_back('[');
+                    ++i;
+                    bool any = false;
+                    while (i < n && input[i] >= '0' && input[i] <= '9')
+                    {
+                        key.push_back(input[i++]);
+                        any = true;
+                    }
+                    if (!any || i >= n || input[i] != ']')
+                    {
+                        out.error_code = "query.syntax_error";
+                        out.message = "expected '[<index>]' in an order-by key";
+                        out.error_offset = i;
+                        return out;
+                    }
+                    key.push_back(']');
                     ++i;
                 }
                 else
@@ -1008,7 +1050,10 @@ int compare_scalar(const Json& a, const Json& b)
         const std::string nb = normalize_nfc(b.as_string()).value_or(b.as_string());
         return na.compare(nb) < 0 ? -1 : (na.compare(nb) > 0 ? 1 : 0);
     }
-    return 0; // null == null; composite ranks already separated above
+    // null == null; two composites of the SAME type (array/array or object/object) collapse to
+    // "equal" here — their contents are not compared. This never breaks the mandatory TOTAL order:
+    // compare_rows always appends the "@id" tiebreaker, so distinct rows still disambiguate.
+    return 0;
 }
 } // namespace
 
