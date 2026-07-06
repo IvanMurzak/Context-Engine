@@ -1,0 +1,24 @@
+src/editor/contract/src/query_language.cpp
+  s_681c0f86b30b64::t_e9277c383f7d60 1053-1056
+  s_681c0f86b30b64::t_6a921f7ea66fad 826-829,831,834,836-839,841-844,846-847,849,851-854,856,858-887
+docs/query-language.md
+  s_681c0f86b30b64::t_ac75aa8c2060e1 9-13
+src/editor/contract/tests/test_query_language.cpp
+  s_681c0f86b30b64::t_b0f0fb012faa4a 227-241
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6f8a6aa4b87f568b550f970119e0ccd19735595a",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
