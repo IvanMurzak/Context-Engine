@@ -6,6 +6,8 @@
 #include "context/editor/contract/handshake.h"
 #include "context/editor/contract/query_language.h"
 #include "context/editor/contract/resource_handle.h"
+#include "context/editor/component/component_registry.h"
+#include "context/editor/component/component_type.h"
 #include "context/editor/schema/kind_schema.h"
 
 #include <utility>
@@ -686,9 +688,18 @@ Json Registry::describe() const
     for (const FileKindSpec& kind : file_kinds_)
         kinds.push_back(kind.entry);
     contract.set("fileKinds", std::move(kinds));
-    // Reserved section: component types populate as the declarative component compiler lands
-    // (R-LANG-010); the section shape is contract from day one.
-    contract.set("componentTypes", Json::array());
+
+    // The registered declarative component types (R-LANG-010): each type's published, versioned
+    // schema + the derived per-field storage-layout index (name/offset/size/x-ctx-storage) +
+    // layout hash, projected LIVE from the SAME component module the World registers layouts from —
+    // so `describe` and the storage layout can never drift. Enumerated the same way as fileKinds
+    // above (engine set is empty in v1: declarative component types are project/package-defined —
+    // they join through the same registry as the package ecosystem lands).
+    Json component_types = Json::array();
+    for (const component::RegisteredComponentType& type : component::engine_component_types().all())
+        component_types.push_back(
+            Json::parse(component::component_type_introspection_json(type.schema)));
+    contract.set("componentTypes", std::move(component_types));
 
     Json out = Json::object();
     out.set("contract", std::move(contract));

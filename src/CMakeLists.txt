@@ -135,6 +135,15 @@ endif()
 # generate time regardless of add_subdirectory order).
 add_subdirectory(editor/schema)
 
+# M3 task 2b-ii: declarative component-type authoring (src/editor/component/, R-LANG-010, issue #86)
+# — schema-first component definitions compiled into a runtime storage layout + published schema and
+# registered into the kernel World's data-driven archetype storage (L-60, no native rebuild). Depends
+# on context_schema (x-ctx-* law), context_serializer (parse + publish), context_kernel (raw World).
+# Wired here — deliberately apart from the serializer/schema block above — so concurrent sibling tasks
+# touching src/editor/ and this file merge cleanly (its consumers name the `context_component` target,
+# which CMake resolves at generate time regardless of add_subdirectory order).
+add_subdirectory(editor/component)
+
 # M1 public-contract cluster (R-CLI-007/008/009/013): the single registry that generates
 # CLI ≡ RPC ≡ MCP ≡ introspection (src/editor/contract/). Wired here — deliberately apart from
 # add_subdirectory(kernel) above — so concurrent sibling tasks touching src/editor/ and src/ merge

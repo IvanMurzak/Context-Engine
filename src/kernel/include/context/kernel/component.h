@@ -56,4 +56,15 @@ template <class T>
     return ops;
 }
 
+// Type-erased ops for a trivially-relocatable POD component of `size` bytes / `align` alignment:
+// relocation is a plain memcpy and there is no destructor, expressed as NULL move_construct / destroy
+// hooks (the World reads a null move_construct as "memcpy `size` bytes" and a null destroy as "no
+// destructor"). This is what lets the World store a component type defined at RUNTIME — derived from
+// a declarative schema (R-LANG-010) — with no per-type C++ function pointer: a runtime component
+// record is just a fixed-size byte blob. `size` must be >= 1 (a zero-size column has no storage).
+[[nodiscard]] inline ComponentOps pod_ops(std::size_t size, std::size_t align) noexcept
+{
+    return ComponentOps{size, align, nullptr, nullptr};
+}
+
 } // namespace context::kernel
