@@ -64,4 +64,10 @@ runs:
     - name: Apply toolchain manifest (Windows)
       if: runner.os == 'Windows'
       shell: pwsh
-      run: python tools/check_toolchain.py --platform windows-x86_64 --describe
+      # Informational only (Windows = documented reality, no live install/verify). Use the `py`
+      # launcher (`python`/`python3` are not on a self-hosted LocalSystem service's PATH), and never
+      # block the build on Python availability.
+      run: |
+        if (Get-Command py -ErrorAction SilentlyContinue) { py tools/check_toolchain.py --platform windows-x86_64 --describe }
+        else { Write-Host "::notice::Python launcher unavailable on this runner; skipping the informational Windows toolchain describe." }
+        exit 0
