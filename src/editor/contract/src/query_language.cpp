@@ -252,6 +252,67 @@ bool is_ident_char(unsigned char c)
     return std::isalnum(c) != 0 || c == '_' || c == '-';
 }
 
+// Shared field-path production: field = ident , { ("." , ident) | ("[" , index , "]") }.
+// The predicate parser (Parser::read_field_path) and the order-by parser (parse_order) parse this
+// EXACT production; routing both through one walk keeps them provably in parity — a grammar change
+// (a new field-path character, a new index form) lands in one place instead of two hand-mirrored
+// copies that can silently drift. Advances `i` over `src`, appending the accepted path to `out`.
+// Returns false and sets err_code/err_msg/err_offset on a malformed segment ('.' with no following
+// ident, or a bad "[<index>]"); the caller surfaces those however it reports errors. An input whose
+// first byte is not an ident-start is NOT an error here (out stays empty, i unmoved) — the caller
+// reports the empty key in its own words.
+bool read_field_path_at(std::string_view src, std::size_t& i, std::string& out,
+                        std::string& err_code, std::string& err_msg, std::size_t& err_offset)
+{
+    const std::size_t n = src.size();
+    if (i >= n || !is_ident_start(static_cast<unsigned char>(src[i])))
+        return true;
+    while (i < n && is_ident_char(static_cast<unsigned char>(src[i])))
+        out.push_back(src[i++]);
+    for (;;)
+    {
+        if (i < n && src[i] == '.')
+        {
+            out.push_back('.');
+            ++i;
+            if (i >= n || !is_ident_start(static_cast<unsigned char>(src[i])))
+            {
+                err_code = "query.syntax_error";
+                err_msg = "expected a field segment after '.'";
+                err_offset = i;
+                return false;
+            }
+            while (i < n && is_ident_char(static_cast<unsigned char>(src[i])))
+                out.push_back(src[i++]);
+        }
+        else if (i < n && src[i] == '[')
+        {
+            out.push_back('[');
+            ++i;
+            bool any = false;
+            while (i < n && src[i] >= '0' && src[i] <= '9')
+            {
+                out.push_back(src[i++]);
+                any = true;
+            }
+            if (!any || i >= n || src[i] != ']')
+            {
+                err_code = "query.syntax_error";
+                err_msg = "expected '[<index>]'";
+                err_offset = i;
+                return false;
+            }
+            out.push_back(']');
+            ++i;
+        }
+        else
+        {
+            break;
+        }
+    }
+    return true;
+}
+
 // The recursive-descent parser. Byte-offset cursor over the input; on the FIRST error it records the
 // code+message+offset and every production short-circuits (fail() is sticky).
 class Parser
@@ -663,53 +724,18 @@ private:
         }
     }
 
-    // field = ident , { ("." , ident) | ("[" , index , "]") }
+    // field = ident , { ("." , ident) | ("[" , index , "]") } — see read_field_path_at() (shared
+    // with parse_order so the two field-path walks can never drift). skip_ws() first, then delegate;
+    // a malformed segment routes the helper's error through this parser's sticky fail().
     std::string read_field_path()
     {
         skip_ws();
         std::string out;
-        if (at_end() || !is_ident_start(static_cast<unsigned char>(src_[pos_])))
-            return out;
-        out += read_ident_run();
-        while (!at_end())
-        {
-            const char c = src_[pos_];
-            if (c == '.')
-            {
-                out.push_back('.');
-                ++pos_;
-                const std::string seg = read_ident_run();
-                if (seg.empty())
-                {
-                    fail("query.syntax_error", "expected a field segment after '.'");
-                    return out;
-                }
-                out += seg;
-            }
-            else if (c == '[')
-            {
-                out.push_back('[');
-                ++pos_;
-                bool any = false;
-                while (!at_end() && std::isdigit(static_cast<unsigned char>(src_[pos_])) != 0)
-                {
-                    out.push_back(src_[pos_]);
-                    ++pos_;
-                    any = true;
-                }
-                if (!any || at_end() || src_[pos_] != ']')
-                {
-                    fail("query.syntax_error", "expected '[<index>]'");
-                    return out;
-                }
-                out.push_back(']');
-                ++pos_;
-            }
-            else
-            {
-                break;
-            }
-        }
+        std::string err_code;
+        std::string err_msg;
+        std::size_t err_offset = 0;
+        if (!read_field_path_at(src_, pos_, out, err_code, err_msg, err_offset))
+            fail(std::move(err_code), std::move(err_msg));
         return out;
     }
 
@@ -823,10 +849,10 @@ OrderParse parse_order(std::string_view input)
     skip_ws();
     while (i < n)
     {
-        // key = "@id" | field-path. Parse it STRICTLY, mirroring the predicate parser's
-        // read_field_path() production, so a malformed order key fails with a byte offset instead of
-        // being silently accepted and then sorting every row LAST (the documented invariant: "a
-        // malformed query is never a best-effort partial parse").
+        // key = "@id" | field-path. Parse it STRICTLY, through the SAME read_field_path_at()
+        // production the predicate parser uses, so a malformed order key fails with a byte offset
+        // instead of being silently accepted and then sorting every row LAST (the documented
+        // invariant: "a malformed query is never a best-effort partial parse").
         std::string key;
         const std::size_t key_start = i;
         if (input[i] == '@')
@@ -848,49 +874,17 @@ OrderParse parse_order(std::string_view input)
         }
         else if (is_ident_start(static_cast<unsigned char>(input[i])))
         {
-            // field = ident , { ("." , ident) | ("[" , index , "]") }
-            while (i < n && is_ident_char(static_cast<unsigned char>(input[i])))
-                key.push_back(input[i++]);
-            for (;;)
+            // field = ident , { ("." , ident) | ("[" , index , "]") } — the SAME production the
+            // predicate parser walks; route through read_field_path_at() so the two never drift.
+            std::string err_code;
+            std::string err_msg;
+            std::size_t err_offset = 0;
+            if (!read_field_path_at(input, i, key, err_code, err_msg, err_offset))
             {
-                if (i < n && input[i] == '.')
-                {
-                    key.push_back('.');
-                    ++i;
-                    if (i >= n || !is_ident_start(static_cast<unsigned char>(input[i])))
-                    {
-                        out.error_code = "query.syntax_error";
-                        out.message = "expected a field segment after '.'";
-                        out.error_offset = i;
-                        return out;
-                    }
-                    while (i < n && is_ident_char(static_cast<unsigned char>(input[i])))
-                        key.push_back(input[i++]);
-                }
-                else if (i < n && input[i] == '[')
-                {
-                    key.push_back('[');
-                    ++i;
-                    bool any = false;
-                    while (i < n && input[i] >= '0' && input[i] <= '9')
-                    {
-                        key.push_back(input[i++]);
-                        any = true;
-                    }
-                    if (!any || i >= n || input[i] != ']')
-                    {
-                        out.error_code = "query.syntax_error";
-                        out.message = "expected '[<index>]' in an order-by key";
-                        out.error_offset = i;
-                        return out;
-                    }
-                    key.push_back(']');
-                    ++i;
-                }
-                else
-                {
-                    break;
-                }
+                out.error_code = std::move(err_code);
+                out.message = std::move(err_msg);
+                out.error_offset = err_offset;
+                return out;
             }
         }
         if (key.empty())
