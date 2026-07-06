@@ -91,7 +91,10 @@ if(_ctx_js_v8)
         target_link_libraries(context_v8_prebuilt INTERFACE Threads::Threads ${CMAKE_DL_LIBS})
     endif()
 
-    add_library(context_js STATIC src/v8_engine.cpp)
+    # v8_rust_stubs.cpp satisfies the archive's Rust-provided extern-"C" references (the
+    # rusty_v8 prebuilt is built to be consumed from Rust). Bounded, deterministic, and
+    # unreachable at runtime in this minimal host — see that file's header. V8-backend only.
+    add_library(context_js STATIC src/v8_engine.cpp src/v8_rust_stubs.cpp)
     target_link_libraries(context_js PRIVATE context_v8_prebuilt)
     target_compile_definitions(context_js PRIVATE CONTEXT_JS_HAS_V8)
     if(MSVC)
