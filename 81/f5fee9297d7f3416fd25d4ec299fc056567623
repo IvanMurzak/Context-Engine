@@ -1,0 +1,61 @@
+src/kernel/tests/test_world_raw.cpp
+  s_681c0f86b30b64::t_df29099906a34f 1-134
+src/editor/contract/src/registry.cpp
+  s_681c0f86b30b64::t_4dba574ad687d3 9-10
+  s_681c0f86b30b64::t_6254898ff0afeb 691-702
+src/kernel/CMakeLists.txt
+  s_681c0f86b30b64::t_59da4faae34e14 24
+src/editor/component/src/component_registry.cpp
+  s_681c0f86b30b64::t_e6c54336a895b2 1-397
+src/kernel/src/world.cpp
+  s_681c0f86b30b64::t_1121d667708739 136
+  s_681c0f86b30b64::t_5500d22a8fc5b6 29-46
+  s_681c0f86b30b64::t_e5fe5c6ea76a01 305-306
+  s_681c0f86b30b64::t_db4657c189b011 383-405
+  s_681c0f86b30b64::t_2dd3152d2dea09 8
+  s_681c0f86b30b64::t_f4b7b1f4e3ce67 91,99,102-103,108
+  s_681c0f86b30b64::t_d4f09110baacb3 122-123
+src/kernel/include/context/kernel/world.h
+  s_681c0f86b30b64::t_2caaaef220766c 86-110
+src/editor/component/src/component_type.cpp
+  s_681c0f86b30b64::t_5712d8c38f21fa 1-398
+src/editor/component/include/context/editor/component/component_type.h
+  s_681c0f86b30b64::t_b0bbfbb11929b0 1-136
+src/editor/component/CMakeLists.txt
+  s_681c0f86b30b64::t_84dfee5200e6cf 1-42
+src/editor/component/tests/test_component_registry.cpp
+  s_681c0f86b30b64::t_8d67121589e78a 1-187
+src/editor/component/README.md
+  s_681c0f86b30b64::t_0062538b72460a 1-48
+src/CMakeLists.txt
+  s_681c0f86b30b64::t_0c0b075789a1c9 138-146
+src/editor/contract/CMakeLists.txt
+  s_681c0f86b30b64::t_92c9bfbd3f2776 21-24
+src/editor/component/tests/test_component_type.cpp
+  s_681c0f86b30b64::t_9e6a9892b607b7 1-178
+src/kernel/include/context/kernel/component.h
+  s_681c0f86b30b64::t_9765ff52736409 59-69
+src/editor/component/tests/component_test.h
+  s_681c0f86b30b64::t_cdcc2014fcad22 1-27
+src/editor/component/include/context/editor/component/component_registry.h
+  s_681c0f86b30b64::t_36bb289bbe3aa0 67-69
+  s_681c0f86b30b64::t_b1a279d52690b2 49-52,58
+  s_681c0f86b30b64::t_44d15203207627 1-23,25-48,53-57,59-66,70-100
+  s_681c0f86b30b64::t_8fe2949ef83c37 24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "81f5fee9297d7f3416fd25d4ec299fc056567623",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
