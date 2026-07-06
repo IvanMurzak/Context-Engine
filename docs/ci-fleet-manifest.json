@@ -101,7 +101,7 @@
       "tier": "per-PR",
       "red_x_policy": "blocking",
       "ci_job_id": "build",
-      "description": "dev-preset build + ctest on macOS (M1-exit gate, R-QA-008)."
+      "description": "dev-preset build + ctest on macOS (M1-exit gate, R-QA-008). Cost cut 2026-07-05: the `build` job's macOS leg is now PR-OPTIONAL (matrix conditional on github.event_name) — it does NOT run on pull_request events (macOS is billed 10x on GitHub-hosted runners), only on push to main. Still blocking once it runs; tier stays 'per-PR' because this gate's home is ci.yml (the per-PR workflow), not because every PR exercises it."
     },
     {
       "id": "build-windows",
@@ -371,7 +371,7 @@
       "tier": "per-PR",
       "red_x_policy": "blocking",
       "ci_job_id": "build",
-      "description": "R-QA-005 / L-54 headless-session state-hash determinism (issue #74): a fixed seed + fixed injected input stream, stepped a fixed tick count, asserted against a cross-platform GOLDEN hierarchical state-hash (root + per-system + per-archetype + trace). Runs as the blocking 'Determinism gate' named step of the build job on ALL THREE build-matrix legs — ubuntu-latest (Linux-x64), windows-latest (Win-x64), macos-latest (macOS-ARM64) — so any per-platform divergence turns that leg red (ctest determinism-state-hash). The bisect/triage `context determinism diff` auto-triage is the reserved follow-up split."
+      "description": "R-QA-005 / L-54 headless-session state-hash determinism (issue #74): a fixed seed + fixed injected input stream, stepped a fixed tick count, asserted against a cross-platform GOLDEN hierarchical state-hash (root + per-system + per-archetype + trace). Runs as the blocking 'Determinism gate' named step of the build job on ALL THREE build-matrix legs — ubuntu-latest (Linux-x64), windows-latest (Win-x64), macos-latest (macOS-ARM64) — so any per-platform divergence turns that leg red (ctest determinism-state-hash). Cost cut 2026-07-05: the macOS leg is now PR-OPTIONAL, so on pull_request events this gate only cross-checks Linux-x64 + Win-x64; the macOS-ARM64 row (and the full 3-way cross-platform check) resumes on every push to main. The bisect/triage `context determinism diff` auto-triage is the reserved follow-up split."
     },
     {
       "id": "visual-equivalence",
