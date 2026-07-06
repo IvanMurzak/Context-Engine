@@ -21,7 +21,8 @@
 # --- resolve the host triple + whether this toolchain can link the rusty_v8 prebuilt --------
 set(_ctx_js_v8 OFF)
 set(_ctx_js_triple "")
-if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8
+   AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64|X86_64")
     set(_ctx_js_v8 ON)
     set(_ctx_js_triple "x86_64-pc-windows-msvc")
 elseif(APPLE AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
