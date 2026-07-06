@@ -34,6 +34,14 @@ extern "C"
     // tracing controller). thread_pool_size 0 = default to hardware concurrency.
     v8::Platform* v8__Platform__NewDefaultPlatform(int thread_pool_size, bool idle_task_support);
 
+    // binding.cc:3289 — v8::platform::NewSingleThreadedDefaultPlatform(idle?, ...).release()
+    // Same process-owned raw v8::Platform*, but with ZERO background worker threads: it uses a
+    // single-threaded foreground task runner and never constructs the multi-threaded
+    // DefaultWorkerThreadsTaskRunner pool. The trivial-eval task-2a host needs no background
+    // compilation/GC worker threads, and booting single-threaded avoids TSan flagging benign
+    // internal races inside V8's own uninstrumented (non-TSan-built) worker-thread pool.
+    v8::Platform* v8__Platform__NewSingleThreadedDefaultPlatform(bool idle_task_support);
+
     // binding.cc:1046 — v8::ArrayBuffer::NewBackingStore(isolate, byte_length).release()
     // Returns a raw, caller-owned v8::BackingStore* allocated INSIDE the V8 sandbox address
     // space (the shape-B requirement). Free with v8__BackingStore__DELETE.

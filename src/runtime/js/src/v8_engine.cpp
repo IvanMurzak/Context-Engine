@@ -44,7 +44,13 @@ void bootstrapV8Once()
     std::call_once(g_v8_once, [] {
         // Platform boot is STL-crossing in the real API (std::unique_ptr<Platform> +
         // std::unique_ptr<TracingController>), so it goes through the extern-"C" shim.
-        g_platform = v8__Platform__NewDefaultPlatform(0, /*idle_task_support=*/false);
+        // Boot a SINGLE-THREADED platform: this trivial-eval in-process host (task 2a) needs no
+        // background compilation/GC worker threads, and the single-threaded platform never
+        // constructs V8's DefaultWorkerThreadsTaskRunner pool. Spawning that pool is what TSan
+        // flags as a data race (benign emplace_back across V8-owned worker threads), because the
+        // rusty_v8 prebuilt is NOT TSan-instrumented; skipping the pool removes the race at its
+        // source rather than suppressing it. Background scheduling (task 3) is a later concern.
+        g_platform = v8__Platform__NewSingleThreadedDefaultPlatform(/*idle_task_support=*/false);
         v8::V8::InitializePlatform(g_platform);
         v8::V8::Initialize();
         // rusty_v8 builds V8 with v8_use_external_startup_data=false, so the snapshot + ICU
