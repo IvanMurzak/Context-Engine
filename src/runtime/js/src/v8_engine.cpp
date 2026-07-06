@@ -59,6 +59,12 @@ struct HostEntry
     void* user = nullptr;
 };
 
+// V8 149's External API requires an ExternalPointerTypeTag on both New() and Value(): objects
+// of different C++ types should use different tag values, and the New/Value tags MUST match.
+// This host wraps exactly ONE C++ type (HostEntry*), so the documented default tag suffices —
+// naming it keeps the two call sites in lockstep.
+constexpr v8::ExternalPointerTypeTag kHostEntryTag = v8::kExternalPointerTypeTagDefault;
+
 class V8Engine final : public JsEngine
 {
 public:
@@ -210,7 +216,8 @@ public:
         v8::Context::Scope contextScope(context);
 
         hostEntries_.push_back(std::make_unique<HostEntry>(HostEntry{fn, user}));
-        v8::Local<v8::External> data = v8::External::New(isolate_, hostEntries_.back().get());
+        v8::Local<v8::External> data =
+            v8::External::New(isolate_, hostEntries_.back().get(), kHostEntryTag);
         v8::Local<v8::Function> jsfn;
         if (!v8::Function::New(context, &V8Engine::trampoline, data).ToLocal(&jsfn))
         {
@@ -272,7 +279,8 @@ private:
 
     static void trampoline(const v8::FunctionCallbackInfo<v8::Value>& info)
     {
-        auto* entry = static_cast<HostEntry*>(info.Data().As<v8::External>()->Value());
+        auto* entry =
+            static_cast<HostEntry*>(info.Data().As<v8::External>()->Value(kHostEntryTag));
         double args[kMaxArgs];
         // task-2a doubles-only boundary: JS->host silently clamps to the first kMaxArgs
         // (callFunction on the host->JS side rejects instead). Extra args are intentionally
