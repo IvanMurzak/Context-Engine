@@ -1,0 +1,40 @@
+src/editor/contract/src/query_language.cpp
+  s_681c0f86b30b64::t_123bc32dbb972f 1-8,10-640,654-857,865-1254
+  s_681c0f86b30b64::t_1339398217bc9e 9
+  s_681c0f86b30b64::t_cef084c5a9ab90 858-864
+  s_681c0f86b30b64::t_4934773006f308 641-653
+src/editor/contract/include/context/editor/contract/query_language.h
+  s_681c0f86b30b64::t_b7a99dd8db3828 1-210
+src/editor/contract/tests/test_registry_parity.cpp
+  s_681c0f86b30b64::t_2b09509764b534 280-294
+docs/query-language.md
+  s_681c0f86b30b64::t_245dfa3a68e4c9 1-115
+src/editor/contract/src/registry.cpp
+  s_681c0f86b30b64::t_808f2e01b81e6a 675-680
+  s_681c0f86b30b64::t_f33866788fb573 7
+src/editor/contract/src/error_catalog.cpp
+  s_681c0f86b30b64::t_03836a4667d8a7 337-357
+src/editor/contract/tests/test_query_language.cpp
+  s_681c0f86b30b64::t_2af32acd50cbb8 144
+  s_681c0f86b30b64::t_2dc9753c0d35cf 1-5,7-143,145-408
+  s_681c0f86b30b64::t_60b8e3b71bcb98 6
+src/editor/contract/CMakeLists.txt
+  s_681c0f86b30b64::t_cbb75a2f5d8319 13-14
+  s_681c0f86b30b64::t_eb3cd76c6301b8 34-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "584410cc291ee43c441efc814b354db29a294341",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
