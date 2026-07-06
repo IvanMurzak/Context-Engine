@@ -94,6 +94,19 @@ jobs:
         shell: pwsh
         run: git config --global --add safe.directory '*'
 
+      - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
+        if: runner.os == 'Windows' && runner.environment == 'self-hosted'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $out = cmd /c "`"$vs\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 -no_logo && set"
+          foreach ($name in 'PATH','INCLUDE','LIB','LIBPATH') {
+            $line = ($out | Where-Object { $_ -like "$name=*" } | Select-Object -First 1)
+            if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+          }
+          "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
 
@@ -388,6 +401,19 @@ jobs:
         shell: pwsh
         run: git config --global --add safe.directory '*'
 
+      - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
+        if: runner.os == 'Windows' && runner.environment == 'self-hosted'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $out = cmd /c "`"$vs\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 -no_logo && set"
+          foreach ($name in 'PATH','INCLUDE','LIB','LIBPATH') {
+            $line = ($out | Where-Object { $_ -like "$name=*" } | Select-Object -First 1)
+            if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+          }
+          "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
 
@@ -444,6 +470,19 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: git config --global --add safe.directory '*'
+
+      - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
+        if: runner.os == 'Windows' && runner.environment == 'self-hosted'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $out = cmd /c "`"$vs\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 -no_logo && set"
+          foreach ($name in 'PATH','INCLUDE','LIB','LIBPATH') {
+            $line = ($out | Where-Object { $_ -like "$name=*" } | Select-Object -First 1)
+            if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+          }
+          "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
