@@ -355,6 +355,25 @@ const std::vector<ErrorCode>& catalog()
          "The query named a surface other than the derived world, live-sim state, or schema "
          "introspection — the one language spans exactly those three.",
          false, kExitUsage, "R-CLI-012"},
+        // --- M3 TypeScript toolchain (task 2b-i, issue #83: R-LANG-002/004) ----------------------
+        // The build-tier diagnostics the esbuild toolchain (src/runtime/ts/) emits when authored
+        // TypeScript fails to become a runnable JS module: a transpile/syntax failure and a bundle
+        // (unresolved-import) failure. Deterministic (retriable=false) — a bare retry of malformed
+        // source cannot succeed. The toolchain owns the code STRINGS as ts::kTs*Code constants and
+        // this catalog registers them (the same promote-a-local-string pattern as bridge's
+        // scope.denied), so src/runtime/ts does not link the editor/contract layer. Additive-only
+        // (protocolMajor stays 0): NEW rows at the END, no existing row reordered/renamed.
+        // DEFERRED (task 2b-i follow-up, NOT registered here until its emitter lands): a
+        // tsc-class SEMANTIC typecheck (--noEmit) would add a `ts.type_error` validation-class code
+        // — the author->typecheck->fix loop. See src/runtime/ts/README.md § Deferred seams.
+        {"ts.transpile_failed",
+         "TypeScript could not be transpiled to JavaScript (a syntax or transform error); see the "
+         "diagnostic text.",
+         false, kExitValidation, "R-LANG-002"},
+        {"ts.bundle_failed",
+         "The TypeScript entrypoint could not be bundled (an unresolved import or transform "
+         "error); see the diagnostic text.",
+         false, kExitValidation, "R-LANG-002"},
     };
     return the_catalog;
 }

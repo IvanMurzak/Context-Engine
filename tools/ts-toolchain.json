@@ -1,0 +1,28 @@
+{
+    "$comment": "Pinned, SHA-verified esbuild prebuilt channel for the M3 TypeScript toolchain (src/runtime/ts/, issue #83 / L-61 / R-LANG-002/004). SINGLE source of truth for the pins — parsed by tools/fetch_esbuild.py (download + verify-before-use + extract the standalone binary). src/runtime/ts/CMakeLists.txt forwards this file's PATH to fetch_esbuild.py (it does NOT parse the pins itself, so they are never duplicated) and resolves the extracted binary name (esbuild / esbuild.exe) by the platform naming convention. Channel = esbuild's OWN per-platform npm packages (@esbuild/<platform>), the canonical publisher artifacts — the SAME SHA-pinned third-party build-tool precedent as tools/v8-prebuilt.json / wgpu-native / CEF codified in docs/signing.md: third-party build tools are authenticated by their OWN publisher via TLS + SHA-pin + verify-before-use, and are explicitly OUT of scope for the engine R-SEC-009 first-party trust root (do NOT route these through tools/verify_artifact.py). esbuild is a standalone native Go binary (a build-TIME transpiler/bundler; NOT linked into the shipped engine — unlike rusty_v8), so unlike the V8 prebuilt it builds/runs on EVERY toolchain including the local Ninja+Strawberry-GCC Windows dev gate (it is invoked as a subprocess, never linked). VERSION-COHERENCE (every per-platform package carries the SAME esbuild_version) is the critical correctness invariant — fetch_esbuild.py asserts it at runtime (fail-closed) and tools/tests/test_fetch_esbuild.py asserts it statically. A tsc-class SEMANTIC typecheck (--noEmit, ts.type_error surfacing) + derivation-node compile caching (R-FILE-010) are the tracked follow-up (see src/runtime/ts/README.md § Deferred seams); esbuild deliberately does NOT typecheck, it transpiles+bundles.",
+    "esbuild_version": "0.28.1",
+    "package_url_template": "https://registry.npmjs.org/@esbuild/{platform}/-/{platform}-{esbuild_version}.tgz",
+    "platforms": {
+        "linux-x64": {
+            "package": "@esbuild/linux-x64",
+            "file": "linux-x64-0.28.1.tgz",
+            "sha256": "9ed00ab5330c94386f3273eda99a1fb0e8f37cfd6cb5270e4ad2fe3527da3546",
+            "member": "package/bin/esbuild",
+            "extracted": "esbuild"
+        },
+        "darwin-arm64": {
+            "package": "@esbuild/darwin-arm64",
+            "file": "darwin-arm64-0.28.1.tgz",
+            "sha256": "5d64cc9bc527d598450b5f8d47ff293eb9f3aea38dd9eff67fd55d228c5ccb43",
+            "member": "package/bin/esbuild",
+            "extracted": "esbuild"
+        },
+        "win32-x64": {
+            "package": "@esbuild/win32-x64",
+            "file": "win32-x64-0.28.1.tgz",
+            "sha256": "5c5d62da7572b57ddc1fa3caedc36c1218b5d8d02ce9c7ee70e3339fce4453c4",
+            "member": "package/esbuild.exe",
+            "extracted": "esbuild.exe"
+        }
+    }
+}

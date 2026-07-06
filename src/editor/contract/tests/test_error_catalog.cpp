@@ -106,5 +106,20 @@ int main()
         }
     }
 
+    // --- R-LANG-002 M3 TS-toolchain codes (issue #83) map to the validation class ----------------
+    // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
+    // holds because baseline is a subset of the live catalog). These are the codes src/runtime/ts's
+    // esbuild toolchain emits by string; assert the registry agrees on class + provenance.
+    {
+        for (const char* code : {"ts.transpile_failed", "ts.bundle_failed"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 5);      // validation class
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-LANG-002");
+        }
+    }
+
     CONTRACT_TEST_MAIN_END();
 }
