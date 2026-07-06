@@ -105,7 +105,7 @@ def _obtain(name: str, url: str, source: Path | None, work: Path) -> Path:
         return local
     dest = work / name
     try:
-        with urllib.request.urlopen(url) as resp, dest.open("wb") as out:  # noqa: S310
+        with urllib.request.urlopen(url, timeout=60) as resp, dest.open("wb") as out:  # noqa: S310
             shutil.copyfileobj(resp, out)
     except (urllib.error.URLError, OSError) as exc:
         raise FetchError(f"download of {url} failed: {exc}") from exc
@@ -192,7 +192,6 @@ def fetch(manifest_path: Path, triple: str, dest: Path,
             pass  # corrupt stamp -> re-stage
 
     dest.mkdir(parents=True, exist_ok=True)
-    lib_out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="v8fetch-") as tmp:
         work = Path(tmp)
 
