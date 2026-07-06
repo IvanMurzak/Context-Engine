@@ -1,0 +1,29 @@
+{
+    "$comment": "Pinned, SHA-verified V8 prebuilt channel for the in-process JS host (src/runtime/js/, issue #76 / L-61 / R-LANG-002/008 / R-SEC-009). SINGLE source of truth for the pins — parsed by tools/fetch_v8.py (download + verify-before-use + decompress). src/runtime/js/CMakeLists.txt forwards this file's PATH to fetch_v8.py (it does NOT parse the pins itself, so they are never duplicated) and derives the extracted lib filename (rusty_v8.lib / librusty_v8.a) by the platform naming convention. Channel = denoland/rusty_v8 SHA-pinned third-party prebuilt (the wgpu-native / CEF precedent in docs/signing.md: third-party build libs are authenticated by their OWN publisher via TLS + SHA-pin + verify-before-use, and are explicitly OUT of scope for the engine R-SEC-009 first-party trust root — do NOT route these through tools/verify_artifact.py). rusty_v8 ships no C++ headers, so the coherent V8 C++ headers come from the version-locked v8-<rusty_v8_version>.crate on crates.io (carries v8/include/, incl. v8-inspector.h + cppgc/). VERSION-COHERENCE (rusty_v8_version == the header crate version) is THE critical correctness invariant — fetch_v8.py asserts it at runtime (fail-closed) and tools/tests/test_fetch_v8.py asserts it statically. Migrating to an owned-from-source vcpkg V8 port is a SEPARATE pre-1.0 hardening task (see src/runtime/js/README.md § From-source migration seam).",
+    "rusty_v8_version": "149.4.0",
+    "v8_version": "14.9.207.2",
+    "lib_release_url_template": "https://github.com/denoland/rusty_v8/releases/download/v{rusty_v8_version}/{file}",
+    "libs": {
+        "x86_64-unknown-linux-gnu": {
+            "file": "librusty_v8_release_x86_64-unknown-linux-gnu.a.gz",
+            "sha256": "e4f6c8478b2c19bf237ca05b5c20ec89abe640e73f684cd6bafc68844f5e9c15",
+            "extracted": "librusty_v8.a"
+        },
+        "aarch64-apple-darwin": {
+            "file": "librusty_v8_release_aarch64-apple-darwin.a.gz",
+            "sha256": "70763b92a4236f5cd6be49edd702a58f7d90c85c453302399c2c74f3a8afb668",
+            "extracted": "librusty_v8.a"
+        },
+        "x86_64-pc-windows-msvc": {
+            "file": "rusty_v8_release_x86_64-pc-windows-msvc.lib.gz",
+            "sha256": "c3d0132492f518df79018ef1931726789faf5e42b24e582847e7eb7b2e97e2f7",
+            "extracted": "rusty_v8.lib"
+        }
+    },
+    "headers": {
+        "crate": "v8-149.4.0.crate",
+        "url": "https://static.crates.io/crates/v8/v8-149.4.0.crate",
+        "sha256": "ebfd8d6919bfb4b627ca778a67f85ca45e5fb442d352947ba093798bdf9b07e0",
+        "include_prefix": "v8-149.4.0/v8/include"
+    }
+}

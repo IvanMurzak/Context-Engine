@@ -297,6 +297,18 @@ add_subdirectory(runtime/save)
 # ctest family the blocking CI determinism gate runs across the 3-OS matrix.
 add_subdirectory(runtime/session)
 
+# M3 task 2a: the in-process V8 JavaScript host (src/runtime/js/, issue #76 / L-61 /
+# R-LANG-002/008 / R-SEC-009) — the foundation of the M3 TypeScript scripting tier. A hybrid host
+# over the SHA-pinned rusty_v8 prebuilt channel (real v8:: API for the STL-free majority + rusty_v8
+# extern-"C" shims for the two STL-crossing ops): Isolate+Context + trivial eval + host<->JS both
+# ways, the shape-B VM-allocated (sandbox-interior) backing-store seam (task 3 builds zero-copy
+# views on it), and a stubbed CDP inspector seam (R-OBS-005). V8 is CI-only for its dependency path
+# (MSVC/Clang-ABI prebuilt — the local Strawberry-GCC dev gate builds a stub); the 3-OS CI build
+# legs are the authoritative gate. OWN stanza — apart from the editor cluster + the exit-gate block
+# below — so it never collides at the file tail (consumers name the `context_js` target, resolved at
+# generate time regardless of add_subdirectory order).
+add_subdirectory(runtime/js)
+
 # ---------------------------------------------------------------------------
 # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36): five integration tests, one per exit
 # criterion, registered as the `m1-exit-*` ctest family and CI-gated per the §6 tiering (blocking
