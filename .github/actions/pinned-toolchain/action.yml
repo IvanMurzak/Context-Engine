@@ -14,7 +14,8 @@ description: Install/verify the per-target pinned toolchain declared in cmake/to
 runs:
   using: composite
   steps:
-    - name: Apply toolchain manifest
+    - name: Apply toolchain manifest (Linux/macOS)
+      if: runner.os != 'Windows'
       shell: bash
       run: |
         set -euo pipefail
@@ -56,7 +57,17 @@ runs:
             clang --version
             clang --version | python3 tools/check_toolchain.py --platform "$PLATFORM" --verify
             ;;
-          Windows)
-            python tools/check_toolchain.py --platform windows-x86_64 --describe
-            ;;
         esac
+    # Windows runs in pwsh (NOT bash): on a self-hosted LocalSystem runner `shell: bash` resolves to
+    # WSL, which refuses to run under LocalSystem (WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED). The Windows branch
+    # only needs the manifest describe, which is shell-agnostic.
+    - name: Apply toolchain manifest (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      # Informational only (Windows = documented reality, no live install/verify). Use the `py`
+      # launcher (`python`/`python3` are not on a self-hosted LocalSystem service's PATH), and never
+      # block the build on Python availability.
+      run: |
+        if (Get-Command py -ErrorAction SilentlyContinue) { py tools/check_toolchain.py --platform windows-x86_64 --describe }
+        else { Write-Host "::notice::Python launcher unavailable on this runner; skipping the informational Windows toolchain describe." }
+        exit 0
