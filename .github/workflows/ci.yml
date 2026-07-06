@@ -85,9 +85,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
     steps:
       - uses: actions/checkout@v7
+
+      - name: Git safe.directory (self-hosted LocalSystem)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: git config --global --add safe.directory '*'
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -374,9 +379,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
     steps:
       - uses: actions/checkout@v7
+
+      - name: Git safe.directory (self-hosted LocalSystem)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: git config --global --add safe.directory '*'
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -424,11 +434,16 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
     env:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-bincache
     steps:
       - uses: actions/checkout@v7
+
+      - name: Git safe.directory (self-hosted LocalSystem)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: git config --global --add safe.directory '*'
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
