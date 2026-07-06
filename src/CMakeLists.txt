@@ -309,6 +309,18 @@ add_subdirectory(runtime/session)
 # generate time regardless of add_subdirectory order).
 add_subdirectory(runtime/js)
 
+# M3 task 2b-i: the TypeScript toolchain (src/runtime/ts/, issue #83 / L-61 / R-LANG-002/004) —
+# the build half of the M3 TS scripting tier. Transpiles + bundles authored .ts into a JS module
+# the runtime/js V8 host evaluates, over the SHA-pinned esbuild prebuilt channel
+# (tools/ts-toolchain.json + tools/fetch_esbuild.py; the same third-party-prebuilt precedent as
+# rusty_v8). esbuild is a build-TIME subprocess (never linked), so context_ts builds on EVERY
+# toolchain and its transpile ctest is a LOCAL gate; the in-V8 integration ctest links context_js
+# and is CI-only for its V8 path. OWN stanza — apart from the editor cluster + the exit-gate block
+# below — so it never collides at the file tail (consumers name the `context_ts` target, resolved
+# at generate time regardless of add_subdirectory order). MUST follow add_subdirectory(runtime/js)
+# so context_js exists for the integration test's link.
+add_subdirectory(runtime/ts)
+
 # ---------------------------------------------------------------------------
 # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36): five integration tests, one per exit
 # criterion, registered as the `m1-exit-*` ctest family and CI-gated per the §6 tiering (blocking
