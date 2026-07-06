@@ -4,6 +4,7 @@
 
 #include "context/editor/contract/error_catalog.h"
 #include "context/editor/contract/handshake.h"
+#include "context/editor/contract/query_language.h"
 #include "context/editor/contract/resource_handle.h"
 #include "context/editor/schema/kind_schema.h"
 
@@ -670,6 +671,12 @@ Json Registry::describe() const
     // The R-CLI-017 large-result mechanism: URI scheme, fetch verb naming, chunk encoding, and the
     // handle / read-result field shapes (the numeric spool threshold is daemon policy, not shape).
     contract.set("largeResult", large_result_descriptor());
+
+    // The R-CLI-012 query language (M3 contract completion): the published EBNF grammar, the
+    // enumerated operator set, the mandatory total-ordering rule, the cursor unified with
+    // R-BRIDGE-008, and the defined string semantics — the ONE language spanning the derived world,
+    // live-sim state, and schema introspection. A pure projection of the query_language module.
+    contract.set("queryLanguage", query_language_descriptor());
 
     // The registered file kinds (R-CLI-005 / R-DATA-006): one entry per kind — id, schema
     // version, the derived per-field x-ctx-* index (units/storage/ref/union metadata), and the

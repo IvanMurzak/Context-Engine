@@ -334,6 +334,27 @@ const std::vector<ErrorCode>& catalog()
          "A deterministic replay diverged from its expected per-tick hash trace; the first divergent "
          "tick is reported.",
          false, kExitValidation, "R-QA-005"},
+        // --- query language (M3 contract completion, issue #80: R-CLI-012) ----------------------
+        // The one specified query language's diagnostics: a predicate/order-by parse failure, an
+        // unknown operator/function, a malformed pagination cursor, and an unsupported query surface.
+        // Deterministic (retriable=false) — a bare retry of a malformed query cannot succeed.
+        // Additive-only (protocolMajor stays 0): NEW rows appended at the END, no existing row moved.
+        {"query.syntax_error",
+         "The query expression could not be parsed against the R-CLI-012 grammar; see the byte "
+         "offset in the diagnostic pointer.",
+         false, kExitUsage, "R-CLI-012"},
+        {"query.unknown_operator",
+         "The query used an operator or predicate function not in the enumerated R-CLI-012 operator "
+         "set (equality / range / existence / string-match).",
+         false, kExitUsage, "R-CLI-012"},
+        {"query.invalid_cursor",
+         "The pagination cursor is malformed, from a foreign daemon incarnation, or not the unified "
+         "R-CLI-012 / R-BRIDGE-008 cursor shape; re-issue the query without a cursor.",
+         false, kExitUsage, "R-CLI-012"},
+        {"query.unsupported_surface",
+         "The query named a surface other than the derived world, live-sim state, or schema "
+         "introspection — the one language spans exactly those three.",
+         false, kExitUsage, "R-CLI-012"},
     };
     return the_catalog;
 }
