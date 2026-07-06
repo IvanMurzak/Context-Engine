@@ -177,7 +177,7 @@ def test_real_manifest_is_coherent_and_complete():
     assert REQUIRED_TRIPLES.issubset(manifest["libs"].keys())
     for triple, lib in manifest["libs"].items():
         assert len(lib["sha256"]) == 64, triple
-        assert int(lib["sha256"], 16) >= 0, triple  # hex
+        assert all(c in "0123456789abcdefABCDEF" for c in lib["sha256"]), triple  # hex
         assert lib["file"] and lib["extracted"], triple
     assert len(manifest["headers"]["sha256"]) == 64
     # The URL template must accept the documented substitution keys without KeyError.

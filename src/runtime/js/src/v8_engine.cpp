@@ -274,6 +274,9 @@ private:
     {
         auto* entry = static_cast<HostEntry*>(info.Data().As<v8::External>()->Value());
         double args[kMaxArgs];
+        // task-2a doubles-only boundary: JS->host silently clamps to the first kMaxArgs
+        // (callFunction on the host->JS side rejects instead). Extra args are intentionally
+        // dropped here; a richer arity/type contract is deferred to the task-3 view protocol.
         const int n =
             info.Length() > static_cast<int>(kMaxArgs) ? static_cast<int>(kMaxArgs) : info.Length();
         v8::Local<v8::Context> ctx = info.GetIsolate()->GetCurrentContext();
