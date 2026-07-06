@@ -1,0 +1,25 @@
+src/runtime/js/CMakeLists.txt
+  s_681c0f86b30b64::t_aa4600c4ddeafb 152-165
+src/runtime/js/src/v8_shims.h
+  s_681c0f86b30b64::t_fc292c96edafc5 34-38
+src/runtime/js/tsan-suppressions.txt
+  s_681c0f86b30b64::t_447aec93cac983 1-35
+src/runtime/js/src/v8_engine.cpp
+  s_681c0f86b30b64::t_6b9f31454d4c05 47-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0755e22e41f7f1f1f60b59977669b3fd67197bfd",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
