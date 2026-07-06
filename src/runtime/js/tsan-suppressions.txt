@@ -1,0 +1,35 @@
+# ThreadSanitizer suppressions for the in-process V8 JS host (issue #76 / PR #82).
+#
+# WHY THIS FILE EXISTS
+# The V8 engine comes from the SHA-pinned rusty_v8 prebuilt (tools/v8-prebuilt.json). That
+# archive is denoland/rusty_v8's DEFAULT `release` static lib — it is NOT built with
+# -fsanitize=thread, so V8's own code is UNINSTRUMENTED. When the multi-threaded default
+# platform (v8__Platform__NewDefaultPlatform, see v8_engine.cpp) spins up its
+# DefaultWorkerThreadsTaskRunner pool, TSan reports data races on memory that V8 manages under
+# its OWN mutexes — mutexes whose instrumented accesses TSan cannot see inside the uninstrumented
+# archive. These races are internal to V8's worker-thread pool and never touch Context-Engine
+# code. They are benign reporting artifacts of mixing an instrumented embedder with an
+# uninstrumented prebuilt, NOT real defects in our code.
+#
+# We MUST keep the multi-threaded platform: the single-threaded variant has no background task
+# runner, so Isolate teardown (isolate_->Dispose() -> MemoryPool::PostDelayedReleaseTask) null-
+# deref-SEGVs on every V8 CI leg. So the race is silenced here, ORTHOGONALLY, scoped ONLY to V8's
+# own platform/threading internals. We do NOT globally disable TSan and we do NOT suppress any
+# race in Context-Engine's own code (namespace context::), which stays fully instrumented.
+#
+# Wired into ONLY the js-test_js_engine ctest, and ONLY under the `tsan` preset, via
+# TSAN_OPTIONS=suppressions=<abs path> (src/runtime/js/CMakeLists.txt, guarded by CONTEXT_TSAN).
+#
+# Format: one rule per line, `<type>:<substring-pattern>` (substring match on the demangled
+# frame / module name). Ref: https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions
+#
+# V8's multi-threaded worker pool (the task runner + its worker threads) — the reported racer.
+race:v8::platform::DefaultWorkerThreadsTaskRunner
+race:DefaultWorkerThreadsTaskRunner
+# The whole V8 libplatform threading layer (task runners / worker threads) is uninstrumented.
+race:v8::platform::
+# V8's own thread-primitive wrapper used to start the pool's worker threads.
+race:v8::base::Thread
+# Belt-and-suspenders: match any frame attributed to the rusty_v8 module (harmless no-op under
+# the static-archive link where symbols land in the test executable rather than a DSO).
+called_from_lib:librusty_v8

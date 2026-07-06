@@ -31,16 +31,12 @@ extern "C"
 {
     // binding.cc:3266 — v8::platform::NewDefaultPlatform(thread_pool_size, idle?, ...).release()
     // Returns a process-owned raw v8::Platform* (kDisabled in-process stack dumping, no
-    // tracing controller). thread_pool_size 0 = default to hardware concurrency.
+    // tracing controller). thread_pool_size 0 = default to hardware concurrency. This is the
+    // MULTI-THREADED default platform the host boots (v8_engine.cpp): it owns the background task
+    // runner that Isolate teardown's delayed heap-release task requires. (The single-threaded
+    // variant was tried to silence TSan and instead null-deref-SEGV'd during Isolate::Dispose on
+    // every V8 leg; the TSan race is now handled by a suppressions file, not a platform swap.)
     v8::Platform* v8__Platform__NewDefaultPlatform(int thread_pool_size, bool idle_task_support);
-
-    // binding.cc:3289 — v8::platform::NewSingleThreadedDefaultPlatform(idle?, ...).release()
-    // Same process-owned raw v8::Platform*, but with ZERO background worker threads: it uses a
-    // single-threaded foreground task runner and never constructs the multi-threaded
-    // DefaultWorkerThreadsTaskRunner pool. The trivial-eval task-2a host needs no background
-    // compilation/GC worker threads, and booting single-threaded avoids TSan flagging benign
-    // internal races inside V8's own uninstrumented (non-TSan-built) worker-thread pool.
-    v8::Platform* v8__Platform__NewSingleThreadedDefaultPlatform(bool idle_task_support);
 
     // binding.cc:1046 — v8::ArrayBuffer::NewBackingStore(isolate, byte_length).release()
     // Returns a raw, caller-owned v8::BackingStore* allocated INSIDE the V8 sandbox address

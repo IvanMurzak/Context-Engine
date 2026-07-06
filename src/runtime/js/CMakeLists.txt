@@ -149,3 +149,17 @@ if(_ctx_js_v8)
     target_compile_definitions(context_js_test_js_engine PRIVATE CONTEXT_JS_HAS_V8)
 endif()
 add_test(NAME js-test_js_engine COMMAND context_js_test_js_engine)
+
+# TSan preset only: the V8 engine links the rusty_v8 prebuilt, which is NOT TSan-instrumented
+# (denoland/rusty_v8's default `release` static archive). Its multi-threaded worker pool
+# (DefaultWorkerThreadsTaskRunner) therefore surfaces benign, un-actionable data races inside
+# V8's own uninstrumented threading internals — never in Context-Engine code. We keep the
+# multi-threaded platform on purpose (the single-threaded one null-deref-SEGVs during Isolate
+# teardown), and silence ONLY these V8-internal races via a narrow suppressions file scoped to
+# this one test. Guarded by CONTEXT_TSAN so ASan/UBSan + the normal dev build are untouched, and
+# the path is absolute so it resolves regardless of the ctest working directory. See
+# tsan-suppressions.txt for the full rationale.
+if(_ctx_js_v8 AND CONTEXT_TSAN)
+    set_tests_properties(js-test_js_engine PROPERTIES
+        ENVIRONMENT "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tsan-suppressions.txt")
+endif()
