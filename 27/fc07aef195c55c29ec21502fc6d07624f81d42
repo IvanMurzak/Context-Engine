@@ -1,0 +1,57 @@
+src/runtime/ts/examples/bad_syntax.ts
+  s_681c0f86b30b64::t_80573d57d0753c 1-3
+src/runtime/ts/include/context/runtime/ts/ts_toolchain.h
+  s_681c0f86b30b64::t_28d37a484b7266 21
+  s_681c0f86b30b64::t_d430a291c5a210 1-20,22-96
+tools/tests/test_fetch_esbuild.py
+  s_681c0f86b30b64::t_0fb22aad93a110 1-196
+src/runtime/ts/examples/game.ts
+  s_681c0f86b30b64::t_ad7508f2cc33d6 1-24
+src/runtime/ts/CMakeLists.txt
+  s_681c0f86b30b64::t_d5f8f47debc0c5 1-124
+tools/ts-toolchain.json
+  s_681c0f86b30b64::t_e4da2d09935aae 1-28
+src/runtime/ts/examples/bad_import.ts
+  s_681c0f86b30b64::t_1b4c0ea8bae971 1-6
+src/runtime/ts/examples/util.ts
+  s_681c0f86b30b64::t_66c487188974a5 1-7
+src/runtime/ts/tests/test_ts_toolchain.cpp
+  s_681c0f86b30b64::t_5acc20b3e0f673 51-54
+  s_681c0f86b30b64::t_a9ee7e2dc6d294 1-50,55-187
+src/editor/contract/tests/test_error_catalog.cpp
+  s_681c0f86b30b64::t_07bd117240b1d2 109-123
+tools/fetch_esbuild.py
+  s_681c0f86b30b64::t_edecfc336fba44 1-226
+src/editor/contract/src/error_catalog.cpp
+  s_681c0f86b30b64::t_776018b38d0a30 358-373,376
+  s_681c0f86b30b64::t_ed99fd638792ae 374-375
+src/runtime/ts/src/esbuild_toolchain.cpp
+  s_681c0f86b30b64::t_5aa8dd83af71bd 1-23,31-71,73,79-221
+  s_681c0f86b30b64::t_f18c5222899687 24-30
+  s_681c0f86b30b64::t_55b20d6dd33646 72,74-78
+src/runtime/ts/tests/test_ts_in_v8.cpp
+  s_681c0f86b30b64::t_afb989262586d9 1-159
+src/runtime/ts/README.md
+  s_681c0f86b30b64::t_f407e6944fb460 1-79
+src/CMakeLists.txt
+  s_681c0f86b30b64::t_c240182ad4a23f 312-323
+tools/license-allowlist.json
+  s_681c0f86b30b64::t_5ca66905c40580 2
+  s_681c0f86b30b64::t_c3c3a954ff7bf2 16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "27fc07aef195c55c29ec21502fc6d07624f81d42",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
