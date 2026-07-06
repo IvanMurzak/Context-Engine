@@ -75,18 +75,32 @@ if(_ctx_js_v8)
 
     add_library(context_v8_prebuilt INTERFACE)
     target_include_directories(context_v8_prebuilt SYSTEM INTERFACE "${_ctx_v8_dest}/include")
-    # Embedder defines MUST match how rusty_v8's default `release` prebuilt was built:
-    # v8_enable_sandbox=true (=> pointer compression + external code space + 31-bit SMIs).
-    # Mirrors the triple verified by the js-engine spike (spikes/js-engine).
-    target_compile_definitions(context_v8_prebuilt INTERFACE
-        V8_COMPRESS_POINTERS
-        V8_ENABLE_SANDBOX
-        V8_31BIT_SMIS_ON_64BIT_ARCH)
+    # PINNED-PREBUILT ABI CONTRACT (embedder build config MUST match the prebuilt, or Isolate
+    # creation aborts with "Embedder-vs-V8 build configuration mismatch"). The pinned channel is
+    # rusty_v8's DEFAULT `release` prebuilt: its file is `librusty_v8_release_<triple>.a` /
+    # `rusty_v8_release_<triple>.lib` with NO `_ptrcomp` / `_sandbox` feature suffix
+    # (tools/v8-prebuilt.json). rusty_v8's build.rs appends those suffixes ONLY when the
+    # corresponding Cargo feature is on, and its default feature set is `["use_custom_libcxx"]`
+    # (neither v8_enable_pointer_compression nor v8_enable_sandbox). So the archive is built with
+    # v8_enable_pointer_compression=false AND v8_enable_sandbox=false — verified against
+    # denoland/rusty_v8@v149.4.0 build.rs (prebuilt_features_suffix + the gn-args branch) and by
+    # the Windows CI Isolate-creation check. The embedder must therefore define NONE of
+    # V8_COMPRESS_POINTERS / V8_ENABLE_SANDBOX / V8_31BIT_SMIS_ON_64BIT_ARCH — V8's headers treat
+    # each as absent-=-off, matching the prebuilt. (This is DIFFERENT from the js-engine spike,
+    # which links the MSVC pmed/v8-nuget monolith — a standard sandbox-ENABLED Chromium build —
+    # so the spike's V8_* defines do NOT transfer to this rusty_v8 host.) The from-source
+    # migration seam (README.md) may re-enable these once it owns the gn args.
     # Platform system libs (from rusty_v8 build.rs `print_link_flags`, use_custom_libcxx=true:
     # libc++ is bundled STATICALLY inside the archive — do NOT link a system stdc++/c++).
     target_link_libraries(context_v8_prebuilt INTERFACE "${_ctx_v8_libfile}")
     if(WIN32)
         target_link_libraries(context_v8_prebuilt INTERFACE winmm dbghelp)
+    elseif(APPLE)
+        # V8's timezone/ICU path on Darwin calls into CoreFoundation (CFTimeZoneCopyDefault,
+        # CFStringGet*, CFRelease) and Foundation; without these frameworks the arm64 link fails
+        # with "Undefined symbols: _CFRelease, _CFTimeZoneCopyDefault, …".
+        target_link_libraries(context_v8_prebuilt INTERFACE
+            "-framework CoreFoundation" "-framework Foundation")
     elseif(UNIX AND NOT APPLE)
         target_link_libraries(context_v8_prebuilt INTERFACE Threads::Threads ${CMAKE_DL_LIBS})
     endif()
@@ -94,8 +108,24 @@ if(_ctx_js_v8)
     # v8_rust_stubs.cpp satisfies the archive's Rust-provided extern-"C" references (the
     # rusty_v8 prebuilt is built to be consumed from Rust). Bounded, deterministic, and
     # unreachable at runtime in this minimal host — see that file's header. V8-backend only.
-    add_library(context_js STATIC src/v8_engine.cpp src/v8_rust_stubs.cpp)
-    target_link_libraries(context_js PRIVATE context_v8_prebuilt)
+    #
+    # LINK-ORDER SAFETY (why its own target + WHOLE_ARCHIVE): the stub TU only DEFINES symbols
+    # that librusty_v8.a REFERENCES — it references nothing back. If the stub object sits in the
+    # same archive as v8_engine.cpp (or in any archive that precedes librusty_v8.a on the link
+    # line), a single-pass archive linker (GNU ld / lld on the Linux + sanitize legs) discards it
+    # BEFORE the prebuilt introduces the temporal_rs_*/v8__*/… undefined refs, yielding the exact
+    # "258 undefined reference to temporal_rs_*" failure. Isolating the stubs in their OWN target
+    # and force-loading it (`$<LINK_LIBRARY:WHOLE_ARCHIVE,…>` → --whole-archive / -force_load /
+    # /WHOLEARCHIVE) makes all 288 definitions unconditionally present regardless of link order,
+    # on all 3 linkers. (MSVC linked without this; the fix is order-independent and harmless
+    # there.) Reproduced + verified with a GNU-ld scratch link + the CMake genexp locally.
+    add_library(context_v8_rust_stubs STATIC src/v8_rust_stubs.cpp)
+    target_link_libraries(context_v8_rust_stubs PRIVATE context_warnings)
+
+    add_library(context_js STATIC src/v8_engine.cpp)
+    target_link_libraries(context_js
+        PRIVATE context_v8_prebuilt
+        PUBLIC "$<LINK_LIBRARY:WHOLE_ARCHIVE,context_v8_rust_stubs>")
     target_compile_definitions(context_js PRIVATE CONTEXT_JS_HAS_V8)
     if(MSVC)
         # /external:W0 keeps /W4 /WX for our code while the SYSTEM V8 headers stay quiet;
