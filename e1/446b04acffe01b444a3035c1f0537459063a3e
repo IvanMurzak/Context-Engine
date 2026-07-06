@@ -1,0 +1,25 @@
+.github/workflows/ci.yml
+  s_e3239cf02087b8::t_0976e8b80b92d7 32-37
+  s_e3239cf02087b8::t_3f43a355c832bf 430-431
+  s_e3239cf02087b8::t_1ccf78700236c3 87-90
+  s_e3239cf02087b8::t_d132a1eea59baa 379-380
+docs/ci-fleet-manifest.json
+  s_e3239cf02087b8::t_28a3695517d000 374
+  s_e3239cf02087b8::t_55a75f0f313a22 104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e1446b04acffe01b444a3035c1f0537459063a3e",
+  "prompts": {},
+  "sessions": {
+    "s_e3239cf02087b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83b4675f-ba2b-4933-b50d-dc086f47c446",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
