@@ -84,10 +84,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS is PR-optional (cost cut, 2026-07-05: billed 10x on GitHub-hosted runners) —
-        # pull_request events build ubuntu+windows only; push (main) runs all three, so the
-        # L-54 determinism macOS-ARM64 row still gets exercised post-merge.
-        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest","windows-latest"]') || fromJSON('["ubuntu-latest","macos-latest","windows-latest"]') }}
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -376,8 +373,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS is PR-optional (cost cut, 2026-07-05 — see the build job matrix comment above).
-        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest","windows-latest"]') || fromJSON('["ubuntu-latest","macos-latest","windows-latest"]') }}
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -427,8 +423,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS is PR-optional (cost cut, 2026-07-05 — see the build job matrix comment above).
-        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest","windows-latest"]') || fromJSON('["ubuntu-latest","macos-latest","windows-latest"]') }}
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     env:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-bincache
