@@ -5,6 +5,7 @@
 
 #include "context/editor/serializer/canonical.h"
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -79,6 +80,11 @@ using serializer::JsonValue;
         if (kind == ScalarKind::f32)
         {
             const auto f = static_cast<float>(d);
+            // A finite double outside f32's representable range narrows to +/-inf: reject it rather
+            // than silently store a non-finite value (the integer widths below all range-check, and
+            // serialize_payload treats stored floats as finite).
+            if (std::isinf(f) && !std::isinf(d))
+                return range_fail("f32");
             std::memcpy(dst, &f, sizeof(f));
         }
         else

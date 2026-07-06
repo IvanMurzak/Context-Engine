@@ -125,12 +125,15 @@ compile_component_type(std::string_view schema_json, std::vector<std::string>& p
 // against at module load (mismatch => a machine-readable load error — reserved for the follow-up task).
 [[nodiscard]] std::uint64_t layout_hash_of(const std::vector<ComponentField>& fields) noexcept;
 
-// The published introspection entry for one component type, as a canonical-JSON string:
-//   {"fields": [{"name", "offset", "size", "x-ctx-storage", "x-ctx-units"?, "x-ctx-type"?}...],
+// The published introspection entry for one component type, as a canonical-JSON string (keys are
+// emitted in canonical/sorted order):
+//   {"align", "fields": [{"lanes", "name", "offset", "size", "x-ctx-storage"}...],
 //    "id", "layoutHash", "schema": <doc>, "size", "version"}
-// The `fields` index is DERIVED from the compiled layout (offsets + sizes the schema alone does not
-// show), so the storage layout and the published schema can never drift. The contract registry
-// projects this into its `describe` componentTypes section (R-CLI-005), staying contract-DOM-free.
+// The `fields` index is DERIVED from the compiled layout (offset/size/lanes the schema text alone
+// does not carry), so the storage layout and the published schema can never drift; the full authored
+// definition — including any x-ctx-units / x-ctx-type annotations — rides along under "schema". The
+// contract registry projects this into its `describe` componentTypes section (R-CLI-005), staying
+// contract-DOM-free.
 [[nodiscard]] std::string component_type_introspection_json(const ComponentTypeSchema& type);
 
 } // namespace context::editor::component

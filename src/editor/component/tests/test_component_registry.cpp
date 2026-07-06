@@ -149,6 +149,8 @@ int main()
         p.clear();
         CHECK(!encode_payload(mover, parse(R"({"hp":1.5})"), rec, p)); // non-integer for i32
         p.clear();
+        CHECK(!encode_payload(mover, parse(R"({"pos":[1e300,0.0,0.0]})"), rec, p)); // f32 overflow → inf
+        p.clear();
         CHECK(!encode_payload(mover, parse(R"([])"), rec, p)); // payload not an object
     }
 
