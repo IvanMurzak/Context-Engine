@@ -30,6 +30,15 @@ race:DefaultWorkerThreadsTaskRunner
 race:v8::platform::
 # V8's own thread-primitive wrapper used to start the pool's worker threads.
 race:v8::base::Thread
+# The ACTUAL reported racer on this prebuilt is V8's shared page-memory pool releasing pooled
+# pages on a background worker — v8::internal::MemoryPool::PoolImpl<PooledPage>::ReleaseUpTo
+# (heap/memory-pool.cc) — while the main thread disposes the Isolate in ~V8Engine(). It lives in
+# v8::internal::, NOT v8::platform::, so the platform-scoped rules above never matched it (this is
+# why prior TSan-suppression attempts didn't take). `race:` suppresses a report when EITHER racing
+# stack matches, so matching the V8-internal page-pool teardown allocators here silences the benign
+# teardown race without touching Context-Engine's own instrumented code (namespace context::).
+race:v8::internal::MemoryPool
+race:v8::internal::PagePool
 # Belt-and-suspenders: match any frame attributed to the rusty_v8 module (harmless no-op under
 # the static-archive link where symbols land in the test executable rather than a DSO).
 called_from_lib:librusty_v8
