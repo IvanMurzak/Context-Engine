@@ -83,6 +83,31 @@ public:
         return has_component(e, component_id<T>());
     }
 
+    // --- data-driven (runtime-typed) components (R-LANG-010) ----------------------------------
+    //
+    // The non-template storage API a runtime-registered component type (derived from a declarative
+    // schema, no C++ type) uses: it reaches the SAME archetype/SoA storage that add<T>/get<T> above
+    // reach, addressed by a caller-supplied ComponentId + ComponentOps rather than a compile-time
+    // type. `ops` is typically kernel::pod_ops(size, align) — a trivially-relocatable POD record
+    // (component.h). This is the seam the declarative component compiler builds on, so defining a
+    // new component type requires no native engine rebuild (L-60).
+
+    // Add (or overwrite) component `id` on `e`, copying ops.size bytes from `src` into storage and
+    // returning the stored record (nullptr if `e` is dead). `src == nullptr` adds a zero-initialized
+    // record. For POD ops the copy is a memcpy; for ops with a real move_construct, `src` is consumed
+    // as if moved-from.
+    void* add_raw(Entity e, ComponentId id, const ComponentOps& ops, const void* src);
+
+    // Locate component `id` on `e` (the raw record), or nullptr when absent / `e` is dead.
+    [[nodiscard]] void* get_raw(Entity e, ComponentId id);
+    [[nodiscard]] const void* get_raw(Entity e, ComponentId id) const;
+
+    // Whether `e` currently has component `id`.
+    [[nodiscard]] bool has_raw(Entity e, ComponentId id) const;
+
+    // Remove component `id` from `e`; false if `e` did not have it (or is dead).
+    bool remove_raw(Entity e, ComponentId id);
+
     // --- queries ------------------------------------------------------------------------------
 
     // Invoke fn(Entity, Cs&...) for every live entity whose archetype contains all of Cs. Iteration

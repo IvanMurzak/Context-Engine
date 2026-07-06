@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <map>
 #include <new>
 #include <unordered_map>
@@ -24,6 +25,24 @@ ComponentId next_component_id() noexcept
 
 namespace
 {
+
+// Relocate one component from `src` to raw storage `dst` under `ops`. A null move_construct means a
+// trivially-relocatable POD record (kernel::pod_ops): the relocation is a plain memcpy of ops.size
+// bytes. A concrete move_construct move-constructs the object (leaving `src` in a moved-from state).
+inline void relocate(const ComponentOps& ops, void* dst, void* src) noexcept
+{
+    if (ops.move_construct != nullptr)
+        ops.move_construct(dst, src);
+    else
+        std::memcpy(dst, src, ops.size);
+}
+
+// Destroy one component at `p` under `ops`. A null destroy means the POD record has no destructor.
+inline void destroy_one(const ComponentOps& ops, void* p) noexcept
+{
+    if (ops.destroy != nullptr)
+        ops.destroy(p);
+}
 
 // One SoA column: a contiguous, over-alignment-correct byte buffer of `count` component objects.
 // Move-only; owns its buffer. Element lifetime is managed through the type-erased ComponentOps.
@@ -69,7 +88,7 @@ public:
     void append_move(std::size_t i, void* src)
     {
         ensure_capacity(i + 1);
-        ops_->move_construct(elem(i), src);
+        relocate(*ops_, elem(i), src);
         count_ = i + 1;
     }
 
@@ -77,16 +96,16 @@ public:
     void swap_remove(std::size_t row) noexcept
     {
         const std::size_t last = count_ - 1;
-        ops_->destroy(elem(row));
+        destroy_one(*ops_, elem(row));
         if (row != last)
         {
-            ops_->move_construct(elem(row), elem(last));
-            ops_->destroy(elem(last));
+            relocate(*ops_, elem(row), elem(last));
+            destroy_one(*ops_, elem(last));
         }
         count_ = last;
     }
 
-    void destroy_at(std::size_t i) noexcept { ops_->destroy(elem(i)); }
+    void destroy_at(std::size_t i) noexcept { destroy_one(*ops_, elem(i)); }
 
 private:
     void ensure_capacity(std::size_t n)
@@ -100,8 +119,8 @@ private:
             ::operator new(new_cap * ops_->size, std::align_val_t{ops_->align}));
         for (std::size_t i = 0; i < count_; ++i)
         {
-            ops_->move_construct(nd + i * ops_->size, elem(i));
-            ops_->destroy(elem(i));
+            relocate(*ops_, nd + i * ops_->size, elem(i));
+            destroy_one(*ops_, elem(i));
         }
         if (data_ != nullptr)
             ::operator delete(data_, std::align_val_t{ops_->align});
@@ -114,7 +133,7 @@ private:
         if (data_ != nullptr)
         {
             for (std::size_t i = 0; i < count_; ++i)
-                ops_->destroy(elem(i));
+                destroy_one(*ops_, elem(i));
             ::operator delete(data_, std::align_val_t{ops_->align});
             data_ = nullptr;
         }
@@ -283,8 +302,8 @@ void* World::add_component(Entity e, ComponentId id, const ComponentOps& ops, vo
     {
         Column& col = cur->columns[cur->column_index(id)];
         void* dst = col.elem(rec.row);
-        ops.destroy(dst);
-        ops.move_construct(dst, src_move);
+        destroy_one(ops, dst);
+        relocate(ops, dst, src_move);
         return dst;
     }
 
@@ -360,6 +379,29 @@ bool World::has_component(Entity e, ComponentId id) const
         return false;
     return impl_->records[e.index].archetype->has(id);
 }
+
+// --- data-driven (runtime-typed) components (R-LANG-010) -----------------------------------------
+
+void* World::add_raw(Entity e, ComponentId id, const ComponentOps& ops, const void* src)
+{
+    if (src != nullptr)
+        // The type-erased add_component takes a mutable `src_move`: for POD ops relocate() only
+        // memcpy-reads it, and for a concrete move_construct the caller opted into move semantics
+        // (documented on add_raw). The const_cast is therefore sound for the raw/POD storage path.
+        return add_component(e, id, ops, const_cast<void*>(src));
+
+    // src == nullptr → a zero-initialized record: relocate from a zero buffer of the record size.
+    std::vector<std::byte> zero(ops.size); // value-initialized to all-zero bytes
+    return add_component(e, id, ops, zero.data());
+}
+
+void* World::get_raw(Entity e, ComponentId id) { return locate_component(e, id); }
+
+const void* World::get_raw(Entity e, ComponentId id) const { return locate_component(e, id); }
+
+bool World::has_raw(Entity e, ComponentId id) const { return has_component(e, id); }
+
+bool World::remove_raw(Entity e, ComponentId id) { return remove_component(e, id); }
 
 void World::for_each(const ComponentId* ids, std::size_t count,
                      const std::function<void(Entity, void**)>& fn)

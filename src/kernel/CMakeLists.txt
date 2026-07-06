@@ -21,6 +21,7 @@ target_link_libraries(context_kernel PRIVATE context_warnings)
 # tests/kernel_test.h. Each interface gets its own ctest entry (happy path + edge + failure paths).
 set(_context_kernel_tests
     test_world
+    test_world_raw
     test_scheduler
     test_module_registry
     test_event_bus
