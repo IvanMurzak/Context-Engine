@@ -47,7 +47,10 @@ order-term   = ( field | "@id" ) , [ "asc" | "desc" ] ;
 
 An empty predicate matches everything (the identity). `and` binds tighter than `or`; `not` binds
 tightest; parentheses override precedence. Bare `and` / `or` / `not` are keywords only when not part
-of a longer identifier (so `andy == 1` compares the field `andy`).
+of a longer identifier (so `andy == 1` compares the field `andy`). One asymmetry: `and` / `or` are
+recognized only in infix position, so a field literally named `and` / `or` still parses as the first
+term of a predicate; `not` is recognized in prefix position, so it cannot be used as a bare leading
+field name (`not == 1` reads as the unary operator, not a field).
 
 ## Enumerated operator set
 
@@ -102,6 +105,11 @@ paged/streamed sequence. Treat the token as opaque and feed it back verbatim.
   NFC and passes through; ASCII case-folding backs the `i`-forms. The full Unicode canonical
   decomposition+composition table and non-ASCII case-folding are the tracked follow-up — the
   *semantics* are contract now, so activating the full table later is non-breaking.
+- **Glob `?` matches one byte, not one codepoint (v1 scope).** In `matches` / `imatches`, `*` spans
+  any byte run and `?` matches exactly one byte, so against a multi-byte UTF-8 character `?` matches
+  a single byte of it rather than the whole codepoint. Codepoint-granular globbing rides the same
+  tracked follow-up as full-Unicode NFC — declared here so the byte-granular behavior reads as scoped,
+  not accidental.
 
 ## Composability
 

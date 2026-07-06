@@ -156,6 +156,35 @@ int main()
     }
 
     // ============================================================================================
+    // 2b. adversarial deep-nesting — a crafted untrusted query is depth-bounded, so it fails with a
+    //     catalog code rather than recursing until the parser's call stack overflows (CWE-674).
+    // ============================================================================================
+    {
+        // Thousands of '(' recurse through parse_primary; the depth guard fails the parse cleanly.
+        std::string deep_parens(5000, '(');
+        deep_parens += "a == 1";
+        deep_parens.append(5000, ')');
+        PredicateParse p1 = parse_predicate(deep_parens);
+        CHECK(!p1.ok);
+        CHECK(p1.error_code == "query.syntax_error");
+
+        // Repeated "not " prefixes recurse through parse_not; the same guard bounds them.
+        std::string deep_not;
+        for (int k = 0; k < 5000; ++k)
+            deep_not += "not ";
+        deep_not += "a == 1";
+        PredicateParse p2 = parse_predicate(deep_not);
+        CHECK(!p2.ok);
+        CHECK(p2.error_code == "query.syntax_error");
+
+        // A nesting depth comfortably under the cap still parses — the guard is not over-tight.
+        std::string ok_parens(64, '(');
+        ok_parens += "a == 1";
+        ok_parens.append(64, ')');
+        CHECK(parse_predicate(ok_parens).ok);
+    }
+
+    // ============================================================================================
     // 3. enumerated operator set — tokens + classes are complete and match the descriptor
     // ============================================================================================
     {

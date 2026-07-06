@@ -157,8 +157,11 @@ struct QueryCursor
     std::string after_id;           // keyset position: the last entity id returned (empty for events)
 
     // Serialize as the opaque cursor URI: "context-cur://v0/<incarnation>/<generation>/<seq>?after=<hex>".
-    // Deterministic; parse() round-trips it exactly. after_id is lowercase-hex-encoded so the token
-    // stays in a URI-clean charset for any entity-id bytes (treat the whole string as opaque).
+    // Deterministic. PRECONDITION for the exact parse() round-trip: incarnation_id is a valid
+    // incarnation token (the alphanumeric/.-_ charset parse() accepts) — the identity source that
+    // mints a cursor always satisfies this. to_token() does not re-escape incarnation_id, so an
+    // out-of-charset value would yield a token parse() rejects. after_id is lowercase-hex-encoded so
+    // the token stays in a URI-clean charset for any entity-id bytes (treat the whole string as opaque).
     [[nodiscard]] std::string to_token() const;
 
     // Parse an opaque cursor token. nullopt on anything malformed (wrong scheme/version, a bad

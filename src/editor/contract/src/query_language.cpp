@@ -339,7 +339,12 @@ private:
         skip_ws();
         if (match_keyword("not"))
         {
+            // A repeated "not" prefix recurses one stack frame per token; bound it so a crafted
+            // deeply-nested untrusted query fails cleanly instead of overflowing the call stack.
+            if (!enter_depth())
+                return {};
             Predicate child = parse_not();
+            leave_depth();
             Predicate node;
             node.kind = NodeKind::logical_not;
             node.children.push_back(std::move(child));
@@ -355,7 +360,12 @@ private:
         if (peek() == '(')
         {
             ++pos_;
+            // A "(" recurses back into the disjunction grammar; bound the nesting depth (same
+            // untrusted-input rationale as parse_not) so unbalanced/deep parens cannot blow the stack.
+            if (!enter_depth())
+                return {};
             Predicate inner = parse_or();
+            leave_depth();
             skip_ws();
             if (!consume(')'))
                 fail("query.syntax_error", "expected ')'");
@@ -760,12 +770,34 @@ private:
         err_pos_ = pos_;
     }
 
+    // Bounded-recursion guard. A client query is untrusted (see the header contract), so a crafted
+    // deeply-nested predicate (many '(' or repeated "not") must fail with a code rather than recurse
+    // until the call stack overflows. enter_depth() fails the parse past the cap; callers pair it with
+    // leave_depth() on the success path.
+    bool enter_depth()
+    {
+        if (++depth_ > kMaxDepth)
+        {
+            fail("query.syntax_error", "predicate nesting too deep");
+            return false;
+        }
+        return true;
+    }
+    void leave_depth()
+    {
+        if (depth_ > 0)
+            --depth_;
+    }
+
+    static constexpr std::size_t kMaxDepth = 128;
+
     std::string_view src_;
     std::size_t pos_ = 0;
     bool failed_ = false;
     std::string code_;
     std::string msg_;
     std::size_t err_pos_ = 0;
+    std::size_t depth_ = 0;
 };
 } // namespace
 
@@ -893,7 +925,12 @@ const Json* resolve_path(const Json& row, const std::string& path)
             bool any = false;
             while (i < n && path[i] >= '0' && path[i] <= '9')
             {
-                idx = idx * 10 + static_cast<std::size_t>(path[i] - '0');
+                const auto digit = static_cast<std::size_t>(path[i] - '0');
+                // Guard the accumulation against overflow (mirrors parse_u64's untrusted-input
+                // posture): an absurdly long index wraps std::size_t otherwise. Overflow => no match.
+                if (idx > (std::numeric_limits<std::size_t>::max() - digit) / 10u)
+                    return nullptr;
+                idx = idx * 10u + digit;
                 ++i;
                 any = true;
             }
