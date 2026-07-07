@@ -1,0 +1,43 @@
+src/runtime/js/include/context/runtime/js/js_engine.h
+  s_681c0f86b30b64::t_09fbfc5df11202 117-139
+  s_681c0f86b30b64::t_d05128f2a46adf 44-86
+src/runtime/js/src/v8_engine.cpp
+  s_681c0f86b30b64::t_a1d3aefadd7eed 81-127
+  s_681c0f86b30b64::t_61db9fae532010 27
+  s_681c0f86b30b64::t_c2a2cc66e4734c 10
+  s_681c0f86b30b64::t_84c25bf7e6900f 335-447
+src/runtime/js/CMakeLists.txt
+  s_681c0f86b30b64::t_ad6eccfa6706fa 125
+  s_681c0f86b30b64::t_ccd27ea5701266 136
+src/runtime/js/src/v8_shims.h
+  s_681c0f86b30b64::t_478de0d7a91b61 72-84
+  s_681c0f86b30b64::t_0f9842434bc863 28,31-46
+  s_681c0f86b30b64::t_21f0b246f4c3bf 47
+src/runtime/js/src/view_element.cpp
+  s_681c0f86b30b64::t_e27c1b861d3954 1-33
+src/runtime/js/tests/test_js_engine.cpp
+  s_681c0f86b30b64::t_3ef888560705cd 184-419
+  s_681c0f86b30b64::t_df105cf941f3e6 471
+  s_681c0f86b30b64::t_6d425f15c01cf0 451-456
+  s_681c0f86b30b64::t_6e4686a3c35294 39-54
+  s_681c0f86b30b64::t_0329abfb505256 446
+src/runtime/js/README.md
+  s_681c0f86b30b64::t_307d596b833df9 61-99
+  s_681c0f86b30b64::t_658132b6398517 5-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "26fec8c9f4b321600929a197a8ce7e75fa3a68b5",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
