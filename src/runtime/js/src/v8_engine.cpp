@@ -7,6 +7,7 @@
 
 #include "context/runtime/js/js_host.h"
 
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -23,6 +24,7 @@
 #include <v8-primitive.h>
 #include <v8-script.h>
 #include <v8-template.h>
+#include <v8-typed-array.h>
 
 #include "inspector_seam.h"
 #include "v8_shims.h"
@@ -75,6 +77,53 @@ struct HostEntry
 // This host wraps exactly ONE C++ type (HostEntry*), so the documented default tag suffices —
 // naming it keeps the two call sites in lockstep.
 constexpr v8::ExternalPointerTypeTag kHostEntryTag = v8::kExternalPointerTypeTagDefault;
+
+// Reconstitute a v8::Local from the raw handle-slot pointer a rusty_v8 shim returns (its
+// `local_to_ptr` transmutes a Local — a single pointer to the slot — to a raw pointer; this copies
+// the bits back). Valid only inside the live HandleScope the slot belongs to. Mirrors rusty_v8's
+// own `ptr_to_local`. A bit-copy (not a reinterpret-deref) so it is strict-aliasing-clean and
+// tolerates whatever pointer type v8::Local holds internally.
+template <class T>
+v8::Local<T> ptr_to_local(const T* p)
+{
+    static_assert(sizeof(v8::Local<T>) == sizeof(const T*),
+                  "v8::Local<T> must be a single pointer for the handle-slot bit-copy");
+    v8::Local<T> local;
+    std::memcpy(&local, &p, sizeof(local));
+    return local;
+}
+
+// Create the JS typed array of `element` over [byteOffset, byteOffset + count*width) of `ab`. Each
+// v8::XxxArray::New signature is STL-free, so it links directly (no shim). Returns an empty Local on
+// an unhandled element (never, in practice — the switch is total).
+v8::Local<v8::Value> makeTypedArray(v8::Local<v8::ArrayBuffer> ab, ViewElement element,
+                                    std::size_t byteOffset, std::size_t count)
+{
+    switch (element)
+    {
+    case ViewElement::u8:
+        return v8::Uint8Array::New(ab, byteOffset, count);
+    case ViewElement::i8:
+        return v8::Int8Array::New(ab, byteOffset, count);
+    case ViewElement::u16:
+        return v8::Uint16Array::New(ab, byteOffset, count);
+    case ViewElement::i16:
+        return v8::Int16Array::New(ab, byteOffset, count);
+    case ViewElement::u32:
+        return v8::Uint32Array::New(ab, byteOffset, count);
+    case ViewElement::i32:
+        return v8::Int32Array::New(ab, byteOffset, count);
+    case ViewElement::f32:
+        return v8::Float32Array::New(ab, byteOffset, count);
+    case ViewElement::f64:
+        return v8::Float64Array::New(ab, byteOffset, count);
+    case ViewElement::i64:
+        return v8::BigInt64Array::New(ab, byteOffset, count);
+    case ViewElement::u64:
+        return v8::BigUint64Array::New(ab, byteOffset, count);
+    }
+    return v8::Local<v8::Value>();
+}
 
 class V8Engine final : public JsEngine
 {
@@ -281,6 +330,119 @@ public:
         v8__BackingStore__DELETE(vmBuffers_[h - 1]);
         vmBuffers_[h - 1] = nullptr;
         return true;
+    }
+
+    bool runSystemView(FunctionHandle fn, const ViewBinding* bindings, std::size_t nbindings,
+                       std::string& err) override
+    {
+        if (fn == kInvalidFunction || fn > functions_.size())
+        {
+            err = "bad function handle";
+            return false;
+        }
+        if (nbindings > kMaxSystemViews)
+        {
+            err = "too many system views (> kMaxSystemViews)";
+            return false;
+        }
+
+        v8::Isolate::Scope isolateScope(isolate_);
+        v8::HandleScope handleScope(isolate_);
+        v8::Local<v8::Context> context = context_.Get(isolate_);
+        v8::Context::Scope contextScope(context);
+
+        // Attach: wrap each VmBuffer's STABLE backing store in a fresh per-system ArrayBuffer +
+        // typed view (no copy — the view aliases the exact bytes the host reads/writes). Collect the
+        // ArrayBuffers so they can be detached at exit regardless of how the run ends.
+        v8::Local<v8::ArrayBuffer> attached[kMaxSystemViews];
+        v8::Local<v8::Value> argv[kMaxSystemViews];
+        std::size_t created = 0;
+        bool ok = true;
+        for (std::size_t i = 0; i < nbindings && ok; ++i)
+        {
+            const ViewBinding& b = bindings[i];
+            if (b.buffer == kInvalidVmBuffer || b.buffer > vmBuffers_.size() ||
+                vmBuffers_[b.buffer - 1] == nullptr)
+            {
+                err = "bad VM buffer handle in view binding";
+                ok = false;
+                break;
+            }
+            v8::BackingStore* bs = vmBuffers_[b.buffer - 1];
+            const std::size_t width = view_element_width(b.element);
+            const std::size_t storeBytes = v8__BackingStore__ByteLength(*bs);
+            if (b.byteOffset % width != 0)
+            {
+                err = "view byteOffset is not aligned to the element width";
+                ok = false;
+                break;
+            }
+            if (b.byteOffset > storeBytes || b.count * width > storeBytes - b.byteOffset)
+            {
+                err = "view slice out of range for its VM buffer";
+                ok = false;
+                break;
+            }
+            // Hand the raw store to V8 as a NON-OWNING shared_ptr (null control block): V8 co-owns
+            // the ArrayBuffer's store but never frees it — the host stays sole owner (see v8_shims.h
+            // BackingStoreSharedPtrImage). Detach at exit thus kills the JS view, never the store.
+            BackingStoreSharedPtrImage image;
+            image.ptr = bs;
+            image.cntrl = nullptr;
+            const v8::ArrayBuffer* rawAb =
+                v8__ArrayBuffer__New__with_backing_store(isolate_, &image);
+            if (rawAb == nullptr)
+            {
+                err = "v8__ArrayBuffer__New__with_backing_store returned null";
+                ok = false;
+                break;
+            }
+            v8::Local<v8::ArrayBuffer> ab = ptr_to_local(rawAb);
+            if (!ab->IsDetachable())
+            {
+                err = "per-system ArrayBuffer reports IsDetachable() == false";
+                ok = false;
+                break;
+            }
+            v8::Local<v8::Value> ta = makeTypedArray(ab, b.element, b.byteOffset, b.count);
+            if (ta.IsEmpty())
+            {
+                err = "typed-array view creation failed";
+                ok = false;
+                break;
+            }
+            attached[created] = ab;
+            argv[created] = ta;
+            ++created;
+        }
+
+        // Run the executor exactly once — only if every binding attached cleanly.
+        if (ok)
+        {
+            v8::TryCatch tryCatch(isolate_);
+            v8::Local<v8::Value> r;
+            if (!functions_[fn - 1]
+                     .Get(isolate_)
+                     ->Call(context, v8::Undefined(isolate_), static_cast<int>(created), argv)
+                     .ToLocal(&r))
+            {
+                err = describe(context, tryCatch);
+                ok = false;
+            }
+        }
+
+        // R-LANG-009 end-of-system: DETACH/neuter every view we created — even on an exec throw or a
+        // mid-attach failure, a retained view must never outlive its invocation. Best-effort: a
+        // detach failure is recorded but does not stop neutering the rest.
+        for (std::size_t i = 0; i < created; ++i)
+        {
+            if (!attached[i]->Detach(v8::Local<v8::Value>()).FromMaybe(false) && ok)
+            {
+                err = "ArrayBuffer::Detach returned Nothing/false at system exit";
+                ok = false;
+            }
+        }
+        return ok;
     }
 
     bool inspectorSeamPresent() const override { return inspector_ != nullptr; }

@@ -36,6 +36,22 @@ inline void fail(const char* file, int line, const char* expr)
 
 namespace cjs = context::runtime::js;
 
+// Backend-agnostic: the ViewBinding element-width arithmetic is exercised on EVERY toolchain,
+// including the local Strawberry-GCC stub gate (view_element.cpp is compiled into both builds).
+static void test_view_element_width()
+{
+    CHECK(cjs::view_element_width(cjs::ViewElement::u8) == 1);
+    CHECK(cjs::view_element_width(cjs::ViewElement::i8) == 1);
+    CHECK(cjs::view_element_width(cjs::ViewElement::u16) == 2);
+    CHECK(cjs::view_element_width(cjs::ViewElement::i16) == 2);
+    CHECK(cjs::view_element_width(cjs::ViewElement::u32) == 4);
+    CHECK(cjs::view_element_width(cjs::ViewElement::i32) == 4);
+    CHECK(cjs::view_element_width(cjs::ViewElement::f32) == 4);
+    CHECK(cjs::view_element_width(cjs::ViewElement::f64) == 8);
+    CHECK(cjs::view_element_width(cjs::ViewElement::i64) == 8);
+    CHECK(cjs::view_element_width(cjs::ViewElement::u64) == 8);
+}
+
 #ifdef CONTEXT_JS_HAS_V8
 
 // A JS->host callback: returns the sum of its args plus a host-side bias read through `user`.
@@ -165,6 +181,242 @@ static void test_inspector_seam_present()
     CHECK(engine->inspectorSeamPresent());
 }
 
+// --- R-LANG-009 zero-copy view lifetime & invalidation protocol ---------------------------------
+
+// A zero-copy f32 view over a VmBuffer, mutated by a JS system, read back by the host — proving the
+// JS typed array ALIASES the stable backing store both ways (no copy).
+static void test_view_zero_copy_roundtrip()
+{
+    std::string err;
+    std::unique_ptr<cjs::JsEngine> engine = cjs::createV8Engine(err);
+    CHECK(engine != nullptr);
+    if (!engine)
+    {
+        return;
+    }
+    cjs::VmBuffer buf;
+    CHECK(engine->allocVmBuffer(4 * sizeof(float), buf, err)); // 4 f32 lanes
+    auto* f = static_cast<float*>(buf.data);
+    f[0] = 3.0f;
+    f[1] = 0.0f;
+    f[2] = 0.0f;
+    f[3] = 7.0f;
+
+    // A system reads lane 0, doubles it into lane 1, and stamps lane 2 — all through the view.
+    CHECK(engine->eval("function sys(v){ v[1] = v[0] * 2; v[2] = 42; }", nullptr, err));
+    cjs::FunctionHandle sys = engine->getFunction("sys");
+    CHECK(sys != cjs::kInvalidFunction);
+
+    const cjs::ViewBinding vb{buf.handle, cjs::ViewElement::f32, 0, 4};
+    CHECK(engine->runSystemView(sys, &vb, 1, err));
+
+    // The host reads JS's writes back through the SAME memory — zero-copy.
+    CHECK(f[1] == 6.0f);
+    CHECK(f[2] == 42.0f);
+    CHECK(f[0] == 3.0f); // untouched lane preserved
+    CHECK(f[3] == 7.0f);
+    CHECK(engine->freeVmBuffer(buf.handle, err));
+}
+
+// The view is detached/neutered at system exit: a reference JS retained past the call is dead, a new
+// view over its ArrayBuffer throws, and the host's backing store is intact (detach kills the JS
+// view, never the store).
+static void test_view_detach_neuters_retained()
+{
+    std::string err;
+    std::unique_ptr<cjs::JsEngine> engine = cjs::createV8Engine(err);
+    CHECK(engine != nullptr);
+    if (!engine)
+    {
+        return;
+    }
+    cjs::VmBuffer buf;
+    CHECK(engine->allocVmBuffer(4, buf, err));
+    auto* bytes = static_cast<unsigned char*>(buf.data);
+    bytes[0] = 11;
+
+    // The system stashes the view + its buffer on globalThis and writes a marker, then returns
+    // (retaining a live reference the engine must neuter).
+    CHECK(engine->eval("function leaky(v){ globalThis.__v = v; globalThis.__b = v.buffer; v[3] = 99; }",
+                       nullptr, err));
+    cjs::FunctionHandle leaky = engine->getFunction("leaky");
+    CHECK(leaky != cjs::kInvalidFunction);
+
+    const cjs::ViewBinding vb{buf.handle, cjs::ViewElement::u8, 0, 4};
+    CHECK(engine->runSystemView(leaky, &vb, 1, err));
+
+    // Host sees the write (it landed before detach) and the store is still readable after detach.
+    CHECK(bytes[3] == 99);
+    CHECK(bytes[0] == 11);
+
+    // The retained typed array is neutered: length + byteLength 0, element read undefined.
+    double n = -1.0;
+    CHECK(engine->eval("globalThis.__v.length", &n, err));
+    CHECK(n == 0.0);
+    n = -1.0;
+    CHECK(engine->eval("globalThis.__v.byteLength", &n, err));
+    CHECK(n == 0.0);
+    n = -1.0;
+    CHECK(engine->eval("(globalThis.__v[3] === undefined) ? 1 : 0", &n, err));
+    CHECK(n == 1.0);
+
+    // Constructing a NEW view over the detached buffer throws (buffer is neutered).
+    n = -1.0;
+    CHECK(engine->eval("(function(){ try { new Uint8Array(globalThis.__b); return 0; } "
+                       "catch (e) { return 1; } })()",
+                       &n, err));
+    CHECK(n == 1.0);
+    CHECK(engine->freeVmBuffer(buf.handle, err));
+}
+
+// A (Position, Velocity)-style view-SET: two columns bound in one system invocation, both aliasing
+// their VmBuffers — the R-LANG-012 batched-handout shape.
+static void test_view_multi_binding_set()
+{
+    std::string err;
+    std::unique_ptr<cjs::JsEngine> engine = cjs::createV8Engine(err);
+    CHECK(engine != nullptr);
+    if (!engine)
+    {
+        return;
+    }
+    cjs::VmBuffer pos;
+    cjs::VmBuffer vel;
+    CHECK(engine->allocVmBuffer(4 * sizeof(float), pos, err)); // 2 entities * (x,y)
+    CHECK(engine->allocVmBuffer(4 * sizeof(float), vel, err));
+    auto* p = static_cast<float*>(pos.data);
+    auto* v = static_cast<float*>(vel.data);
+    p[0] = 1.0f;
+    p[1] = 2.0f;
+    p[2] = 3.0f;
+    p[3] = 4.0f;
+    v[0] = 10.0f;
+    v[1] = 20.0f;
+    v[2] = 30.0f;
+    v[3] = 40.0f;
+
+    CHECK(engine->eval("function move(pos, vel){ for (let i = 0; i < pos.length; i++) "
+                       "pos[i] += vel[i]; }",
+                       nullptr, err));
+    cjs::FunctionHandle move = engine->getFunction("move");
+    CHECK(move != cjs::kInvalidFunction);
+
+    const cjs::ViewBinding vbs[2] = {
+        {pos.handle, cjs::ViewElement::f32, 0, 4},
+        {vel.handle, cjs::ViewElement::f32, 0, 4},
+    };
+    CHECK(engine->runSystemView(move, vbs, 2, err));
+
+    CHECK(p[0] == 11.0f);
+    CHECK(p[1] == 22.0f);
+    CHECK(p[2] == 33.0f);
+    CHECK(p[3] == 44.0f);
+    CHECK(engine->freeVmBuffer(pos.handle, err));
+    CHECK(engine->freeVmBuffer(vel.handle, err));
+}
+
+// Bad bindings are rejected (false + err), never a silent wrap.
+static void test_view_bad_bindings()
+{
+    std::string err;
+    std::unique_ptr<cjs::JsEngine> engine = cjs::createV8Engine(err);
+    CHECK(engine != nullptr);
+    if (!engine)
+    {
+        return;
+    }
+    cjs::VmBuffer buf;
+    CHECK(engine->allocVmBuffer(4 * sizeof(float), buf, err));
+    CHECK(engine->eval("function noop(){}", nullptr, err));
+    cjs::FunctionHandle noop = engine->getFunction("noop");
+    CHECK(noop != cjs::kInvalidFunction);
+
+    // Bad VM buffer handle.
+    err.clear();
+    const cjs::ViewBinding badHandle{cjs::kInvalidVmBuffer, cjs::ViewElement::f32, 0, 1};
+    CHECK(!engine->runSystemView(noop, &badHandle, 1, err));
+    CHECK(!err.empty());
+
+    // Misaligned byte offset for an f32 view (2 is not a multiple of 4).
+    err.clear();
+    const cjs::ViewBinding misaligned{buf.handle, cjs::ViewElement::f32, 2, 1};
+    CHECK(!engine->runSystemView(noop, &misaligned, 1, err));
+    CHECK(!err.empty());
+
+    // Slice runs past the end of the store (5 f32 in a 4-f32 buffer).
+    err.clear();
+    const cjs::ViewBinding tooLong{buf.handle, cjs::ViewElement::f32, 0, 5};
+    CHECK(!engine->runSystemView(noop, &tooLong, 1, err));
+    CHECK(!err.empty());
+
+    // Bad function handle.
+    err.clear();
+    const cjs::ViewBinding okvb{buf.handle, cjs::ViewElement::f32, 0, 1};
+    CHECK(!engine->runSystemView(cjs::kInvalidFunction, &okvb, 1, err));
+    CHECK(!err.empty());
+
+    // Too many bindings.
+    err.clear();
+    cjs::ViewBinding many[cjs::kMaxSystemViews + 1];
+    for (auto& b : many)
+    {
+        b = cjs::ViewBinding{buf.handle, cjs::ViewElement::f32, 0, 1};
+    }
+    CHECK(!engine->runSystemView(noop, many, cjs::kMaxSystemViews + 1, err));
+    CHECK(!err.empty());
+
+    CHECK(engine->freeVmBuffer(buf.handle, err));
+}
+
+// A system that THROWS mid-run still gets its views detached at exit (no retained-view leak on the
+// error path) and the call reports the failure.
+static void test_view_detach_on_throw()
+{
+    std::string err;
+    std::unique_ptr<cjs::JsEngine> engine = cjs::createV8Engine(err);
+    CHECK(engine != nullptr);
+    if (!engine)
+    {
+        return;
+    }
+    cjs::VmBuffer buf;
+    CHECK(engine->allocVmBuffer(4, buf, err));
+    CHECK(engine->eval("function boom(v){ globalThis.__t = v; throw new Error('boom'); }", nullptr,
+                       err));
+    cjs::FunctionHandle boom = engine->getFunction("boom");
+    CHECK(boom != cjs::kInvalidFunction);
+
+    err.clear();
+    const cjs::ViewBinding vb{buf.handle, cjs::ViewElement::u8, 0, 4};
+    CHECK(!engine->runSystemView(boom, &vb, 1, err)); // exec threw
+    CHECK(!err.empty());
+
+    // Despite the throw, the stashed view was detached (neutered).
+    double n = -1.0;
+    CHECK(engine->eval("globalThis.__t.byteLength", &n, err));
+    CHECK(n == 0.0);
+    CHECK(engine->freeVmBuffer(buf.handle, err));
+}
+
+// Zero bindings is legal — the executor simply runs with no view arguments.
+static void test_view_no_bindings()
+{
+    std::string err;
+    std::unique_ptr<cjs::JsEngine> engine = cjs::createV8Engine(err);
+    CHECK(engine != nullptr);
+    if (!engine)
+    {
+        return;
+    }
+    CHECK(engine->eval("function tick(){ globalThis.__ticked = 1; }", nullptr, err));
+    cjs::FunctionHandle tick = engine->getFunction("tick");
+    CHECK(tick != cjs::kInvalidFunction);
+    CHECK(engine->runSystemView(tick, nullptr, 0, err));
+    double n = -1.0;
+    CHECK(engine->eval("globalThis.__ticked", &n, err));
+    CHECK(n == 1.0);
+}
+
 static void test_lifecycle_no_leak()
 {
     // Repeated create/dispose across the shared process-global platform — the ASan/LSan
@@ -191,10 +443,17 @@ static void test_lifecycle_no_leak()
 int main()
 {
     CHECK(cjs::v8BackendAvailable());
+    test_view_element_width();
     test_trivial_eval();
     test_host_to_js();
     test_js_to_host();
     test_shape_b_vm_buffer();
+    test_view_zero_copy_roundtrip();
+    test_view_detach_neuters_retained();
+    test_view_multi_binding_set();
+    test_view_bad_bindings();
+    test_view_detach_on_throw();
+    test_view_no_bindings();
     test_inspector_seam_present();
     test_lifecycle_no_leak();
     if (jstest::g_failures == 0)
@@ -209,6 +468,7 @@ int main()
 int main()
 {
     CHECK(!cjs::v8BackendAvailable());
+    test_view_element_width();
     std::string err;
     std::unique_ptr<cjs::JsEngine> engine = cjs::createV8Engine(err);
     CHECK(engine == nullptr);
