@@ -122,7 +122,7 @@ if(_ctx_js_v8)
     add_library(context_v8_rust_stubs STATIC src/v8_rust_stubs.cpp)
     target_link_libraries(context_v8_rust_stubs PRIVATE context_warnings)
 
-    add_library(context_js STATIC src/v8_engine.cpp)
+    add_library(context_js STATIC src/v8_engine.cpp src/view_element.cpp)
     target_link_libraries(context_js
         PRIVATE context_v8_prebuilt
         PUBLIC "$<LINK_LIBRARY:WHOLE_ARCHIVE,context_v8_rust_stubs>")
@@ -133,7 +133,7 @@ if(_ctx_js_v8)
         target_compile_options(context_js PRIVATE /external:W0 /Zc:__cplusplus)
     endif()
 else()
-    add_library(context_js STATIC src/js_host_stub.cpp)
+    add_library(context_js STATIC src/js_host_stub.cpp src/view_element.cpp)
 endif()
 
 target_include_directories(context_js PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

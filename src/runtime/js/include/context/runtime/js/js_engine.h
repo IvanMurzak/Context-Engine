@@ -41,6 +41,49 @@ struct VmBuffer
     std::size_t size = 0;
 };
 
+// --- zero-copy view protocol (R-LANG-009) ------------------------------------------------------
+//
+// The element type of a per-system typed-array view over a VmBuffer slice. Mirrors the JS
+// TypedArray families 1:1; the width drives byte-offset/length validation. This enum is
+// deliberately storage-only (no dependency on the declarative component vocabulary) so the JS
+// host stays layering-clean — the (query, executor) tier maps a component field's x-ctx-storage
+// scalar onto one of these when it binds a view (a follow-up task).
+enum class ViewElement
+{
+    u8,   // Uint8Array
+    i8,   // Int8Array
+    u16,  // Uint16Array
+    i16,  // Int16Array
+    u32,  // Uint32Array
+    i32,  // Int32Array
+    f32,  // Float32Array
+    f64,  // Float64Array
+    i64,  // BigInt64Array
+    u64,  // BigUint64Array
+};
+
+// Byte width of one ViewElement (1/2/4/8). Free function so both the host and its callers agree
+// on the offset/length arithmetic without reaching into the backend.
+[[nodiscard]] std::size_t view_element_width(ViewElement e) noexcept;
+
+// One zero-copy view request handed to a system: expose the slice
+// [byteOffset, byteOffset + count * width(element)) of VmBuffer `buffer` to JS as a typed array of
+// `element`. The view ALIASES the VmBuffer's stable backing store (no copy) and is valid ONLY for
+// the single runSystemView invocation it is passed to. `byteOffset` must be a multiple of the
+// element width (V8 rejects a misaligned typed-array offset).
+struct ViewBinding
+{
+    VmBufferHandle buffer = kInvalidVmBuffer;
+    ViewElement element = ViewElement::u8;
+    std::size_t byteOffset = 0;  // start offset into the VmBuffer, aligned to the element width
+    std::size_t count = 0;       // number of ELEMENTS the view spans (not bytes)
+};
+
+// The most view bindings one system invocation may take (the R-LANG-012 per-archetype view-set is
+// small — a handful of declared component columns). A generous cap that bounds the per-system
+// ArrayBuffer create/detach churn; exceeding it is a caller error, not a silent clamp.
+inline constexpr std::size_t kMaxSystemViews = 16;
+
 class JsEngine
 {
 public:
@@ -70,6 +113,29 @@ public:
     // Freed by freeVmBuffer or automatically at engine teardown.
     virtual bool allocVmBuffer(std::size_t bytes, VmBuffer& out, std::string& err) = 0;
     virtual bool freeVmBuffer(VmBufferHandle h, std::string& err) = 0;
+
+    // --- R-LANG-009 zero-copy view lifetime & invalidation protocol ------------------------
+    //
+    // Run `exec` as ONE system invocation over zero-copy views. For each binding a typed array is
+    // created OVER the VmBuffer's stable backing store (NO copy — the JS view aliases the exact
+    // bytes the host reads/writes through VmBuffer::data) and passed to `exec` as a positional
+    // argument, in binding order. `exec` runs exactly once; then EVERY view's ArrayBuffer is
+    // detached/neutered before this returns — the R-LANG-009 hard-gate. A reference to a view that
+    // JS retained past the call (e.g. stashed on globalThis) is therefore dead afterwards: its
+    // byteLength is 0, element reads yield undefined, and constructing a new view over its
+    // ArrayBuffer throws. The VmBuffer's bytes are UNTOUCHED by detach (the host keeps ownership of
+    // the backing store), so the host reads JS's writes back through VmBuffer::data after the call.
+    //
+    // Detach runs even when `exec` throws (a system that faults still may not leak a live view);
+    // the thrown message is reported in `err` and the call returns false. Returns false + fills
+    // `err` on a bad handle, a misaligned/out-of-range binding, > kMaxSystemViews bindings, or a
+    // wrap/detach failure. `nbindings == 0` is allowed (runs `exec` with no view args).
+    //
+    // Structural changes (add/remove component, entity create/destroy) MUST NOT be applied while a
+    // view is live — memory may move under the alias. Deferring them to an end-of-system command
+    // buffer is the (query, executor) tier's responsibility (a follow-up task), not this seam's.
+    virtual bool runSystemView(FunctionHandle exec, const ViewBinding* bindings,
+                               std::size_t nbindings, std::string& err) = 0;
 
     // --- R-OBS-005 CDP inspector seam ------------------------------------------------------
     // true when v8-inspector.h is wired into this backend (a real, instantiable
