@@ -131,6 +131,34 @@ endif()
 # 0xc0000139); gated to GNU so the MSVC/Clang CI legs are untouched (profile setup.md § filesystem).
 target_link_options(context_schedule_test_in_v8 PRIVATE
     $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
+
+# MSVC + rusty_v8 std::exception_ptr symbol collision (this test target ONLY, when the V8 prebuilt is
+# actually linked). schedule.cpp captures each helper thread's failure into a std::exception_ptr and
+# rethrows the first on the join thread (the fork-join exception-propagation path, R-QA-013). On MSVC
+# that TU emits COMDAT definitions of the std::exception_ptr family (ctor/copy/assign/dtor/operator
+# bool, std::current_exception, std::rethrow_exception). The denoland/rusty_v8 prebuilt bundles its own
+# custom libc++ STATICALLY (use_custom_libcxx=true — see runtime/js/CMakeLists.txt), whose exception.obj
+# provides STRONG (non-COMDAT) definitions of the SAME MSVC-ABI-mangled std:: names, pulled in for V8's
+# internal exception use. COMDAT-vs-strong of the same symbol → MSVC LNK2005 (multiply defined) → fatal
+# LNK1169 when this exe links BOTH context_schedule.lib and rusty_v8.lib (via context_js). The sibling
+# in-V8 keystone context_system_test_in_v8 links rusty_v8 identically WITHOUT this problem precisely
+# because none of its TUs touch std::exception_ptr — so this is the one delta the exception fan-in adds.
+#
+# /FORCE:MULTIPLE keeps the FIRST definition of each duplicated symbol (context_schedule is first on the
+# link line, so the MSVC-STL definitions win and rusty_v8's are dropped) and downgrades LNK2005 to a
+# warning. This is SAFE, not a weakening: on Windows both MSVC-STL and rusty_v8's libc++ implement
+# std::exception_ptr over the SAME underlying MSVC CRT __ExceptionPtr* primitives, so the chosen
+# definitions are ABI-compatible for both sides. Scope is exactly this ONE keystone TEST exe on the
+# MSVC leg — it does NOT touch the context_schedule library, product code, the non-V8 test_schedule
+# (the authoritative parallel-safety subject, links no V8), or any sanitizer leg (ASan/UBSan + TSan run
+# on ubuntu Clang/GCC, excluded by the MSVC generator expression). The scheduler's parallel-safety and
+# exception-propagation correctness remain proven by test_schedule + the sanitizer gates. Guarded by
+# _ctx_js_v8 so the CONTEXT_JS_FORCE_STUB / non-V8 toolchains (incl. the local Strawberry-GCC dev gate)
+# never see it — there the stub context_js links no rusty_v8 and no collision exists.
+if(_ctx_js_v8)
+    target_link_options(context_schedule_test_in_v8 PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/FORCE:MULTIPLE>)
+endif()
 add_test(NAME schedule-test_in_v8 COMMAND context_schedule_test_in_v8)
 
 # TSan preset only: the in-V8 test links the rusty_v8 prebuilt (NOT TSan-instrumented), so reuse
