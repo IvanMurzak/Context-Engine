@@ -1,0 +1,29 @@
+src/editor/pkg/src/tar.cpp
+  s_681c0f86b30b64::t_0aeb719c0735fc 142-148
+src/editor/pkg/tests/test_tar.cpp
+  s_5fa2a0b18ad384::t_a135e2b05ae5ea 90-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cb57148169430820854656a2b883c33d18babfa1",
+  "prompts": {},
+  "sessions": {
+    "s_5fa2a0b18ad384": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a2423664a2690dd05",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
