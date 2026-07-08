@@ -1,0 +1,25 @@
+src/runtime/js/src/v8_rust_stubs.cpp
+  s_e054cff650e8f2::t_999686c34b8d52 18-22
+  s_e054cff650e8f2::t_678b3d0ba500be 69-74
+src/runtime/ts/CMakeLists.txt
+  s_e054cff650e8f2::t_cf6a6c5d50706b 190-200
+src/runtime/js/src/inspector.cpp
+  s_e054cff650e8f2::t_f3949f0bf8fc7a 2-5,7-34,40-41,43,59-70,140-146,148-151,153-159,161,163,165-168,170,173,175-177,179-180,182-184,186,188,190-191,193,195,198-204,206,218-226,242,245-246,252,258-259,305,314-316,324,326,332-440
+  s_e054cff650e8f2::t_b93110a9939825 441
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ec550e79bb778acba6b3b78bc24662187c9c379c",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
