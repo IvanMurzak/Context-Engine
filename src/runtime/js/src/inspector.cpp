@@ -235,6 +235,11 @@ public:
 
         client_ = std::make_unique<ClientImpl>(isolate_, &context_, &pump_);
         inspector_ = v8_inspector::V8Inspector::create(isolate_, client_.get());
+        if (!inspector_)
+        {
+            err = "v8_inspector::V8Inspector::create returned null";
+            return false;
+        }
         channel_ = std::make_unique<ChannelImpl>(&sink_);
 
         const std::string name = "context-engine";
@@ -316,9 +321,15 @@ public:
     {
         // Tear the inspector down inside an Isolate scope and BEFORE the Isolate is disposed (the
         // engine, which owns the Isolate, outlives this session per the attachInspector contract).
+        // Disconnect the session, then pair init()'s contextCreated with a contextDestroyed so the
+        // inspector releases its per-context bookkeeping before the inspector itself is destroyed.
         v8::Isolate::Scope isolateScope(isolate_);
         v8::HandleScope handleScope(isolate_);
         session_.reset();
+        if (inspector_)
+        {
+            inspector_->contextDestroyed(context_.Get(isolate_));
+        }
         inspector_.reset();
         context_.Reset();
     }

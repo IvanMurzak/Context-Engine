@@ -194,7 +194,8 @@ public:
     // Attach a CDP debug session over V8's in-box inspector (see InspectorSession above): the
     // interactive breakpoint/stepping half of R-OBS-005, built out from the task-2a seam. The
     // returned session shares this engine's Isolate + Context and MUST NOT outlive the engine.
-    // Returns nullptr + fills `err` only when the backend has no inspector.
+    // Returns nullptr + fills `err` when the backend has no inspector, or the session could not be
+    // created/connected.
     [[nodiscard]] virtual std::unique_ptr<InspectorSession> attachInspector(std::string& err) = 0;
 };
 
