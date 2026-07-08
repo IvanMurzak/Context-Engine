@@ -1,0 +1,61 @@
+src/runtime/ts/include/context/runtime/ts/stack_trace.h
+  s_681c0f86b30b64::t_fcb07536da8b8c 1-64
+src/runtime/ts/tests/test_ts_in_v8.cpp
+  s_681c0f86b30b64::t_61793df774d202 155-187,190-191
+  s_681c0f86b30b64::t_1a041245fe22f0 16-17,19-20
+  s_681c0f86b30b64::t_cd2d0d8748386f 212-221
+  s_681c0f86b30b64::t_ae06b85cca8607 76-98
+src/runtime/ts/CMakeLists.txt
+  s_681c0f86b30b64::t_635a0ef4fccab0 108-109,116-128
+  s_681c0f86b30b64::t_a6a8a698eeaaf0 65-72
+  s_681c0f86b30b64::t_0579a95813f919 129
+src/editor/contract/tests/test_error_catalog.cpp
+  s_681c0f86b30b64::t_8ff88e07ff9d89 124-134
+src/runtime/ts/src/stack_trace.cpp
+  s_681c0f86b30b64::t_3f24f17a81ca31 1-243
+src/editor/contract/src/error_catalog.cpp
+  s_681c0f86b30b64::t_31ec8b3ae2a61e 377-387
+src/runtime/ts/include/context/runtime/ts/ts_toolchain.h
+  s_681c0f86b30b64::t_4126908ebe1922 64-68,78-80
+  s_681c0f86b30b64::t_54e668b1daee29 54-58
+src/runtime/ts/tests/test_stack_trace.cpp
+  s_681c0f86b30b64::t_c54bdb02952fc3 1-97,100-102,104-147,149-186
+  s_681c0f86b30b64::t_85b97a56ee3f0d 98-99,103
+  s_681c0f86b30b64::t_35141c9c0813b9 148
+src/runtime/ts/README.md
+  s_681c0f86b30b64::t_12f29f0b1c089b 16-17,20-28,30-32
+  s_681c0f86b30b64::t_cc7f70f2ecdea6 91-100
+src/runtime/ts/tests/test_source_map.cpp
+  s_681c0f86b30b64::t_871bbc00f6420e 105-107,114
+  s_681c0f86b30b64::t_c01dac61aae478 1-104,108-113,115-202
+src/runtime/ts/src/esbuild_toolchain.cpp
+  s_681c0f86b30b64::t_70d38fbf5bef40 211
+  s_681c0f86b30b64::t_8bd80eb7752b78 162,172-184,188,191
+src/runtime/ts/tests/test_ts_toolchain.cpp
+  s_681c0f86b30b64::t_85b7e2a2079638 177-258,267-268
+  s_681c0f86b30b64::t_1e248840ab1140 11,14,17
+src/runtime/ts/src/source_map.cpp
+  s_681c0f86b30b64::t_b6566217cc8a44 1-689
+src/runtime/ts/examples/throwing.ts
+  s_681c0f86b30b64::t_308322c427e06d 1-11
+src/runtime/js/src/v8_engine.cpp
+  s_681c0f86b30b64::t_d32db50046565e 483-498
+src/runtime/ts/include/context/runtime/ts/source_map.h
+  s_681c0f86b30b64::t_105c014244dfcc 1-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9e4e30d913cd1a8be0ac0b964ca74391c84ff6a2",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
