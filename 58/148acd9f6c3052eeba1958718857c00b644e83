@@ -1,0 +1,21 @@
+spikes/webgpu/CMakeLists.txt
+  s_681c0f86b30b64::t_448350421dcb55 126-140
+docs/self-hosted-runners.md
+  s_681c0f86b30b64::t_e1feb27186053d 100-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "58148acd9f6c3052eeba1958718857c00b644e83",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
