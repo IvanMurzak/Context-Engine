@@ -1,0 +1,21 @@
+src/editor/system/include/context/editor/system/accessor_codegen.h
+  s_3cfe9b1980b685::t_d1ef4b251623f2 31-39
+src/editor/system/src/accessor_codegen.cpp
+  s_3cfe9b1980b685::t_50925dc91d590c 60-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "443e209b55d9592c7897fbe2c64db8fd905c03b0",
+  "prompts": {},
+  "sessions": {
+    "s_3cfe9b1980b685": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "158480fe-c820-4ee5-a364-8ac3be6fb0f2",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
