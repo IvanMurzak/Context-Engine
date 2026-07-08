@@ -204,6 +204,14 @@ public:
         v8::Isolate::Scope isolateScope(isolate_);
         v8::HandleScope handleScope(isolate_);
         v8::Local<v8::Context> context = context_.Get(isolate_);
+        // Enter the engine's context BEFORE wiring the inspector. V8Inspector::create installs the
+        // isolate's console + debug delegates and materializes the per-context debug state that
+        // contextCreated/connect then register against; on a fresh isolate whose context has never
+        // been entered, that debug state is absent and V8's own V8InspectorImpl constructor
+        // dereferences it (crashing inside v8::debug::SetIsolateId). Every other V8-touching method
+        // in this file (dispatch/run, and V8Engine's eval/getFunction/...) already enters a
+        // Context::Scope; init() must too — it is the R-OBS-005 attach seam's precondition.
+        v8::Context::Scope contextScope(context);
 
         client_ = std::make_unique<ClientImpl>(isolate_, &context_, &pump_);
         inspector_ = v8_inspector::V8Inspector::create(isolate_, client_.get());
@@ -262,10 +270,15 @@ public:
         // inspector releases its per-context bookkeeping before the inspector itself is destroyed.
         v8::Isolate::Scope isolateScope(isolate_);
         v8::HandleScope handleScope(isolate_);
+        v8::Local<v8::Context> context = context_.Get(isolate_);
+        // Mirror init(): enter the context so the session disconnect + contextDestroyed unwind the
+        // same per-context inspector/debug state they were registered against (and ~V8InspectorImpl's
+        // own SetIsolateId runs against a live, entered context).
+        v8::Context::Scope contextScope(context);
         session_.reset();
         if (inspector_)
         {
-            inspector_->contextDestroyed(context_.Get(isolate_));
+            inspector_->contextDestroyed(context);
         }
         inspector_.reset();
         context_.Reset();
