@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstring>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -462,6 +463,114 @@ void test_conflict_serialization()
     CHECK(read_n(world, e, cy.component_id, yoff) == 42); // reader saw the writer's value this tick
 }
 
+void test_helper_thread_exception_propagates()
+{
+    // A system that THROWS must not std::terminate the process when it runs on a HELPER thread: the
+    // scheduler captures the helper's exception and rethrows it to the caller after the fork-join
+    // barrier, so run_tick() surfaces the exception instead of aborting. Four disjoint-write Normal
+    // systems all land in batch 0; worker_count=4 fans them across four chunks, so the throwing system
+    // (id 3, chunk 3) runs on a helper thread — the case that would otherwise crash. Every system in
+    // the batch still runs to completion (all helpers join), proving the barrier held.
+    csch::SystemRegistry reg;
+    std::atomic<int> ran{0};
+    for (ck::ComponentId k = 0; k < 4; ++k)
+    {
+        const bool thrower = (k == 3);
+        reg.add(native("sys" + std::to_string(k),
+                       csch::AccessSet::make({}, {static_cast<ck::ComponentId>(500 + k)}),
+                       csch::CostHint::Normal,
+                       [&ran, thrower]
+                       {
+                           ran.fetch_add(1);
+                           if (thrower)
+                           {
+                               throw std::runtime_error("boom");
+                           }
+                       }));
+    }
+
+    csch::ParallelScheduler sched({/*worker_count*/ 4, 0});
+    bool caught = false;
+    try
+    {
+        sched.run_tick(reg);
+    }
+    catch (const std::runtime_error& e)
+    {
+        caught = true;
+        CHECK(std::string(e.what()) == "boom"); // the ORIGINAL exception object propagated intact
+    }
+    CHECK(caught);                // propagated instead of calling std::terminate
+    CHECK(ran.load() == 4);       // every system in the batch ran — all helpers were joined
+    CHECK(sched.rebuild_count() == 1);
+}
+
+void test_chunk_plan_cached_and_reinvalidated()
+{
+    // The per-batch worker chunk plan is computed ONCE with the DAG and reused every tick (not
+    // re-planned per frame), and is re-planned only when the composition changes. Drive REAL parallel
+    // mutation before and after an add(), asserting both correct World state and exactly one
+    // rebuild per composition (rebuild_count() now also covers the chunk-plan pass).
+    ck::World world;
+    ccomp::ComponentTypeRegistry creg;
+    struct Comp
+    {
+        ck::ComponentId id;
+        std::size_t off;
+    };
+    std::vector<Comp> comps;
+    std::vector<const ccomp::RegisteredComponentType*> types;
+    for (int c = 0; c < 3; ++c)
+    {
+        const ccomp::RegisteredComponentType& t =
+            creg.register_type(u32_comp("demo:ck" + std::to_string(c)));
+        const ccomp::ComponentField* f = t.schema.field("n");
+        CHECK(f != nullptr);
+        comps.push_back(Comp{t.component_id, f != nullptr ? f->offset : 0});
+        types.push_back(&t);
+    }
+    std::vector<ck::Entity> ents;
+    for (int i = 0; i < 32; ++i)
+    {
+        const ck::Entity e = world.create();
+        for (const auto* t : types)
+        {
+            (void)creg.add_default(world, e, *t);
+        }
+        ents.push_back(e);
+    }
+
+    csch::SystemRegistry reg;
+    for (int c = 0; c < 2; ++c) // start with two of the three systems
+    {
+        reg.add(native("incr", csch::AccessSet::make({}, {comps[c].id}), csch::CostHint::Normal,
+                       make_incr(world, ents, comps[c].id, comps[c].off, 1)));
+    }
+
+    csch::ParallelScheduler sched({/*worker_count*/ 4, 0});
+    for (int t = 0; t < 20; ++t)
+    {
+        sched.run_tick(reg);
+    }
+    CHECK(sched.rebuild_count() == 1); // DAG + chunk plan built once across 20 ticks
+
+    // Composition change (add the third system) → schedule + chunk plan re-invalidated exactly once.
+    reg.add(native("incr", csch::AccessSet::make({}, {comps[2].id}), csch::CostHint::Normal,
+                   make_incr(world, ents, comps[2].id, comps[2].off, 1)));
+    for (int t = 0; t < 20; ++t)
+    {
+        sched.run_tick(reg);
+    }
+    CHECK(sched.rebuild_count() == 2);
+
+    for (const ck::Entity e : ents)
+    {
+        CHECK(read_n(world, e, comps[0].id, comps[0].off) == 40); // ticked all 40 times
+        CHECK(read_n(world, e, comps[1].id, comps[1].off) == 40);
+        CHECK(read_n(world, e, comps[2].id, comps[2].off) == 20); // added after the first 20 ticks
+    }
+}
+
 void test_cpp_system_mutates_world()
 {
     // The plain DoD statement: a single C++ (native) system mutates a declared World component,
@@ -496,6 +605,8 @@ int main()
     test_parallel_mutation_over_world();
     test_parallel_matches_sequential_reference();
     test_conflict_serialization();
+    test_helper_thread_exception_propagates();
+    test_chunk_plan_cached_and_reinvalidated();
     test_cpp_system_mutates_world();
     if (scheduletest::g_failures == 0)
     {

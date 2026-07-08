@@ -87,6 +87,11 @@ struct SchedulePolicy
 // The registry of registered systems — the "composition". Mutating it (add / remove) bumps the
 // composition generation, which is what invalidates a cached Schedule. SystemIds are stable across
 // removals.
+//
+// Precondition (not enforced): the registry must NOT be mutated (add / remove) from inside a system's
+// `run` body while a ParallelScheduler::run_tick over it is in flight. A composition change reallocates
+// `systems_` / `active_`, which the worker threads are concurrently reading via `at` / `is_active` — a
+// data race and iterator/reference invalidation. Compose the registry between ticks, never during one.
 class SystemRegistry
 {
 public:
@@ -164,8 +169,12 @@ public:
     const Schedule& schedule(const SystemRegistry& reg);
 
     // Run exactly one tick: the native parallel batches (fork-join, batching policy applied), then the
-    // TS single lane sequentially. Reuses the cached schedule; a tick NEVER rebuilds the DAG (only a
-    // composition change does). A system whose `run` is empty is skipped.
+    // TS single lane sequentially. Reuses the cached schedule AND the cached per-batch chunk plan; a
+    // tick NEVER rebuilds the DAG or re-plans chunks (only a composition change does). A system whose
+    // `run` is empty is skipped. An exception thrown by a system's `run` (on any lane, including a
+    // helper thread) propagates out of run_tick after the batch's fork-join barrier — it never calls
+    // std::terminate. Precondition: no system's `run` mutates `reg`'s composition mid-tick (see
+    // SystemRegistry).
     void run_tick(const SystemRegistry& reg);
 
     // Total number of times the DAG has been (re)built over this scheduler's lifetime. A run of N
@@ -175,10 +184,18 @@ public:
     [[nodiscard]] const SchedulePolicy& policy() const noexcept { return policy_; }
 
 private:
-    void run_native_batch(const SystemRegistry& reg, const std::vector<SystemId>& batch);
+    // Run one native batch from its PRE-PLANNED worker chunks (planned once in schedule(), not per
+    // tick). Fork-join over the chunks; any exception a system throws is captured and rethrown after
+    // every helper joins.
+    void run_native_batch(const SystemRegistry& reg,
+                          const std::vector<std::vector<SystemId>>& chunks);
 
     SchedulePolicy policy_;
     std::optional<Schedule> cached_;
+    // Per native batch → its worker chunk plan, index-aligned with cached_->native_batches(). Computed
+    // alongside the DAG in schedule() (a pure function of batch + composition + policy, invariant until
+    // the next composition change) so run_tick reuses it instead of re-planning every tick.
+    std::vector<std::vector<std::vector<SystemId>>> cached_chunks_;
     std::uint64_t rebuild_count_ = 0;
 };
 
