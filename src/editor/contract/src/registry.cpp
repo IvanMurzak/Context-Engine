@@ -124,6 +124,31 @@ Json flag_to_json(const FlagSpec& f)
     return out;
 }
 
+// One field in an event-payload schema (R-CLI-014): name + JSON-ish type + description. Deliberately
+// the SAME {name,type,description} shape as param/flag introspection so a client reads one field
+// vocabulary across the whole self-description.
+Json schema_field(const std::string& name, const std::string& type, const std::string& description)
+{
+    Json out = Json::object();
+    out.set("name", Json(name));
+    out.set("type", Json(type));
+    out.set("description", Json(description));
+    return out;
+}
+
+// A topic's event-payload schema: { fields: [ {name,type,description}, ... ] } — the topic-specific
+// payload members (the common R-BRIDGE-008 wire envelope seq/incarnationId/generation/topic is
+// described once by describe()'s eventEnvelope section, not repeated per topic).
+Json payload_schema(std::vector<Json> fields)
+{
+    Json arr = Json::array();
+    for (Json& f : fields)
+        arr.push_back(std::move(f));
+    Json out = Json::object();
+    out.set("fields", std::move(arr));
+    return out;
+}
+
 // The flat name list of every input a verb accepts on any surface: params + core flags + verb
 // flags. Shared by all three surface generators so parity is exact.
 Json param_names(const VerbSpec& v)
@@ -472,6 +497,51 @@ Registry::Registry()
         "plus the boot-time R-FILE-004 recovery diagnostics.",
         /*params=*/{}, /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
 
+    // --- R-CLI-015 subscription protocol (subscribe / unsubscribe / ack) -------------------------
+    // The concrete event-stream subscription methods pinned in the versioned contract (R-CLI-004):
+    // subscribe returns a current-state snapshot + a subId (snapshot-then-delta), ack advances the
+    // slowest-acked retention cursor, unsubscribe drops the subscription. Siblings of `snapshot`
+    // above — served by a LIVE daemon's event stream over RPC (stability="operational": you cannot
+    // subscribe on a one-shot CLI invocation, so the CLI rejects them with contract.operational_only,
+    // exactly like snapshot/query). Registered in the ONE registry so `context describe` reflects the
+    // real served surface and CLI ≡ RPC ≡ MCP ≡ introspection parity holds (R-CLI-009). protocolMajor
+    // stays 0 (additive-only). Retention semantics are the normative home of R-CLI-015 (event_stream).
+    verbs_.push_back(make_verb(
+        "", "", "subscribe",
+        "Subscribe to the R-BRIDGE-008 event stream (R-CLI-015): returns a current-state snapshot + a "
+        "subId, then live deltas follow with monotonic seq. `--since-seq` replays retained history for "
+        "a reconnect within the daemon incarnation (a gap forces a fresh snapshot). Optionally "
+        "topic-filtered and path-scoped.",
+        /*params=*/
+        {{"topics", "json", false,
+          "Array of topic names to receive (files/derivation/diagnostics/session/clients/log, or a "
+          "package-namespaced topic); omitted/empty => every topic."},
+         {"pathScope", "path", false,
+          "Restrict path-bearing events to this project-relative subtree (pathless lifecycle events "
+          "still pass)."},
+         {"sinceSeq", "generation", false,
+          "Resume from this last-seen seq (ring catch-up); omitted => snapshot-only, deltas from now."}},
+        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "", "unsubscribe",
+        "Cancel an event-stream subscription by its subId (R-CLI-015); its cursor stops pinning "
+        "ring-buffer retention.",
+        /*params=*/
+        {{"subId", "string", true, "The subscription id returned by `subscribe`."}},
+        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "", "ack",
+        "Acknowledge delivery up to `seq` on a subscription (R-CLI-015): advances the subscription's "
+        "cursor so the daemon may age out ring history the slowest live subscriber has now consumed. "
+        "The daemon never blocks on a slow client — an over-slow subscriber gets a gap-marker + "
+        "re-snapshot instead.",
+        /*params=*/
+        {{"subId", "string", true, "The subscription id returned by `subscribe`."},
+         {"seq", "generation", true, "The highest event seq the client has processed."}},
+        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
     verbs_.push_back(make_verb(
         "", "", "reconcile",
         "Fold external (out-of-band) edits into the derived world: drain watcher hints and force "
@@ -489,16 +559,67 @@ Registry::Registry()
         "Ask the daemon's serve loop to stop after replying. Requires the session_control scope.",
         /*params=*/{}, /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
 
-    // The R-BRIDGE-008 core event topics, described statically (R-CLI-013/014). Live
-    // package-registered topics join this set at runtime as the package ecosystem lands.
-    topics_ = {
-        {"files", "Post-derivation file change facts (never raw filesystem noise)."},
-        {"derivation", "Derived-world updates, each stamped with the input content-hash."},
-        {"diagnostics", "Machine-readable diagnostics through the R-CLI-008 error schema."},
-        {"session", "Session lifecycle + restart-class reload announcements."},
-        {"clients", "Client attach/detach on the daemon."},
-        {"log", "Structured log entries (severity, source, tick, session)."},
-    };
+    // The R-BRIDGE-008 core event topics, each with its event-payload SCHEMA (R-CLI-014 runtime
+    // introspection). Registered through register_topic() — the same seam a package-contributed
+    // NAMESPACED topic (`<ns>:<topic>`) joins through as the package ecosystem lands, so `describe`
+    // enumerates whatever is registered with no second source of truth (parity with register_file_kind
+    // and the component-type registry).
+    register_topic({"files",
+                    "Post-derivation file change facts (never raw filesystem noise).",
+                    payload_schema({
+                        schema_field("path", "path", "The project-relative file the fact is about."),
+                        schema_field("change", "string",
+                                     "The change class: added | modified | removed."),
+                    })});
+    register_topic({"derivation",
+                    "Derived-world updates, each stamped with the input content-hash.",
+                    payload_schema({
+                        schema_field("event", "string",
+                                     "The derivation event, e.g. derivation.settled."),
+                        schema_field("generation", "generation",
+                                     "The derived-world generation this update reflects."),
+                        schema_field("inputHash", "hash",
+                                     "The content-hash of the input file version derived from (the "
+                                     "write-acknowledgement)."),
+                    })});
+    register_topic({"diagnostics",
+                    "Machine-readable diagnostics through the R-CLI-008 error schema.",
+                    payload_schema({
+                        schema_field("code", "string", "The R-CLI-008 catalog error code."),
+                        schema_field("message", "string", "The human-readable diagnostic message."),
+                        schema_field("stability", "string",
+                                     "provisional while the generation churns; promoted to stable "
+                                     "once it settles (R-BRIDGE-008)."),
+                        schema_field("pointer", "string",
+                                     "Optional RFC 6901 JSON-pointer / location the diagnostic is "
+                                     "about."),
+                    })});
+    register_topic({"session",
+                    "Session lifecycle + restart-class reload announcements.",
+                    payload_schema({
+                        schema_field("event", "string",
+                                     "The lifecycle event, e.g. started | reloaded | stopped."),
+                    })});
+    register_topic({"clients",
+                    "Client attach/detach on the daemon.",
+                    payload_schema({
+                        schema_field("event", "string", "attached | detached."),
+                        schema_field("protocolMajor", "generation",
+                                     "The negotiated protocol major (on attach)."),
+                        schema_field("scopes", "json", "The granted scope names (on attach)."),
+                    })});
+    register_topic({"log",
+                    "Structured log entries (severity, source, tick, session).",
+                    payload_schema({
+                        schema_field("level", "string",
+                                     "The severity: trace | debug | info | warn | error."),
+                        schema_field("message", "string", "The log message text."),
+                        schema_field("source", "string",
+                                     "The origin: ts | native | module (R-BRIDGE-008)."),
+                        schema_field("tick", "generation",
+                                     "The sim tick, when the entry is session-scoped."),
+                        schema_field("session", "string", "The session id, when session-scoped."),
+                    })});
 
     // The engine file kinds (R-CLI-005 / R-DATA-006, M2 wave 2): each registered kind's versioned
     // schema publication, projected from the SAME schema module the derivation validate node
@@ -525,6 +646,25 @@ const FileKindSpec* Registry::find_file_kind(const std::string& id) const
     for (const FileKindSpec& kind : file_kinds_)
         if (kind.id == id)
             return &kind;
+    return nullptr;
+}
+
+void Registry::register_topic(TopicSpec spec)
+{
+    for (TopicSpec& existing : topics_)
+        if (existing.name == spec.name)
+        {
+            existing = std::move(spec); // re-registration replaces (a package updating its topic)
+            return;
+        }
+    topics_.push_back(std::move(spec));
+}
+
+const TopicSpec* Registry::find_topic(const std::string& name) const
+{
+    for (const TopicSpec& t : topics_)
+        if (t.name == name)
+            return &t;
     return nullptr;
 }
 
@@ -647,15 +787,60 @@ Json Registry::describe() const
     contract.set("rpcMethods", rpc_surface());
     contract.set("mcpTools", mcp_surface());
 
+    // The event topics + their event-payload SCHEMAS (R-CLI-014 runtime introspection): one entry
+    // per registered topic — name, description, and the payload schema — enumerated LIVE from the
+    // registration set, so a package-contributed namespaced topic appears here automatically.
     Json topics = Json::array();
     for (const TopicSpec& t : topics_)
     {
         Json entry = Json::object();
         entry.set("name", Json(t.name));
         entry.set("description", Json(t.description));
+        entry.set("payloadSchema", t.payload_schema);
         topics.push_back(std::move(entry));
     }
     contract.set("eventTopics", std::move(topics));
+
+    // The common R-BRIDGE-008 event WIRE envelope every topic's payload is wrapped in (described once
+    // here rather than repeated in every topic's payloadSchema): the monotonic seq, the incarnation
+    // epoch id, the derived-world generation stamp, the topic name, and the topic-specific payload.
+    Json envelope = Json::object();
+    Json env_fields = Json::array();
+    env_fields.push_back(schema_field("seq", "generation",
+                                      "The monotonic, totally-ordered event seq within the "
+                                      "incarnation (R-BRIDGE-008)."));
+    env_fields.push_back(schema_field("incarnationId", "string",
+                                      "The daemon incarnation epoch; a restart forces a fresh "
+                                      "snapshot rather than a stale since-seq resume."));
+    env_fields.push_back(schema_field("generation", "generation",
+                                      "The derived-world generation the event reflects."));
+    env_fields.push_back(schema_field("topic", "string", "The event topic name."));
+    env_fields.push_back(schema_field("payload", "json", "The topic-specific payload (see eventTopics)."));
+    envelope.set("fields", std::move(env_fields));
+    contract.set("eventEnvelope", std::move(envelope));
+
+    // The R-CLI-015 subscription protocol, pinned in the versioned contract (R-CLI-004). The concrete
+    // methods live in the verb/rpc surfaces above (subscribe/unsubscribe/ack); this section pins the
+    // protocol's normative SEMANTICS so `describe` self-documents them: snapshot-then-delta, the
+    // slowest-acked ring-retention rule (R-CLI-015 is its single normative home), the never-block gap
+    // marker + re-snapshot, and the cursor unified with R-BRIDGE-008 (no second cursor shape).
+    Json subscription = Json::object();
+    subscription.set("requirement", Json(std::string("R-CLI-015")));
+    Json methods = Json::array();
+    methods.push_back(Json(std::string("subscribe")));
+    methods.push_back(Json(std::string("unsubscribe")));
+    methods.push_back(Json(std::string("ack")));
+    subscription.set("methods", std::move(methods));
+    subscription.set("snapshotThenDelta", Json(true));
+    subscription.set("retention", Json(std::string("slowest-acked-cursor")));
+    subscription.set("gapMarkerOnOverflow", Json(true));
+    subscription.set("neverBlocksOnSlowClient", Json(true));
+    Json cursor = Json::object();
+    cursor.set("unifiedWith", Json(std::string("R-BRIDGE-008")));
+    cursor.set("uriScheme", Json(std::string(kCursorUriScheme)));
+    cursor.set("resumeField", Json(std::string("sinceSeq")));
+    subscription.set("cursor", std::move(cursor));
+    contract.set("subscription", std::move(subscription));
 
     Json errors = Json::array();
     for (const ErrorCode& e : catalog())

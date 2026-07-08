@@ -81,6 +81,78 @@ Json envelope_error_data(const Envelope& env)
     return data;
 }
 
+// R-CLI-015 subscription protocol, served directly against this daemon's live event stream (the same
+// "real backing" pattern `describe` uses over the registry). subscribe returns {subId, snapshot}
+// (snapshot-then-delta) + an optional replayed catch-up; unsubscribe/ack address a subscription by
+// its subId. An unknown subId is subscription.unknown_sub; a missing subId/seq is a usage error.
+Envelope serve_subscription(EventStream& stream, const std::string& method, const Json& params)
+{
+    if (method == "subscribe")
+    {
+        std::vector<std::string> topics;
+        if (params.contains("topics") && params.at("topics").is_array())
+        {
+            const Json& t = params.at("topics");
+            for (std::size_t i = 0; i < t.size(); ++i)
+                if (t.at(i).is_string())
+                    topics.push_back(t.at(i).as_string());
+        }
+        std::string path_scope;
+        if (params.contains("pathScope") && params.at("pathScope").is_string())
+            path_scope = params.at("pathScope").as_string();
+        std::optional<std::uint64_t> since;
+        if (params.contains("sinceSeq") && params.at("sinceSeq").is_number())
+            since = static_cast<std::uint64_t>(params.at("sinceSeq").as_int());
+
+        EventStream::SubscribeResult r =
+            stream.subscribe(std::move(topics), std::move(path_scope), since);
+
+        Json data = Json::object();
+        data.set("subId", Json(r.sub_id));
+        data.set("snapshot", r.snapshot);
+        if (since.has_value())
+        {
+            data.set("gapped", Json(r.gapped)); // true => the sinceSeq predated retention; use snapshot
+            Json catchup = Json::array();
+            for (const Event& e : r.catchup)
+                catchup.push_back(e.to_json());
+            data.set("catchup", std::move(catchup));
+        }
+        return Envelope::success(std::move(data));
+    }
+
+    // unsubscribe + ack both address a subscription by subId.
+    if (!params.contains("subId") || !params.at("subId").is_string() ||
+        params.at("subId").as_string().empty())
+        return Envelope::failure("usage.missing_argument",
+                                 "the '" + method + "' method requires a 'subId'.");
+    const std::string sub_id = params.at("subId").as_string();
+
+    if (method == "unsubscribe")
+    {
+        if (!stream.unsubscribe(sub_id))
+            return Envelope::failure("subscription.unknown_sub",
+                                     "no live subscription '" + sub_id + "' on this daemon.");
+        Json data = Json::object();
+        data.set("subId", Json(sub_id));
+        data.set("removed", Json(true));
+        return Envelope::success(std::move(data));
+    }
+
+    // ack: advance the subscription's retention cursor.
+    if (!params.contains("seq") || !params.at("seq").is_number())
+        return Envelope::failure("usage.missing_argument", "the 'ack' method requires a 'seq'.");
+    const auto seq = static_cast<std::uint64_t>(params.at("seq").as_int());
+    if (!stream.ack(sub_id, seq))
+        return Envelope::failure("subscription.unknown_sub",
+                                 "no live subscription '" + sub_id + "' on this daemon.");
+    Json data = Json::object();
+    data.set("subId", Json(sub_id));
+    data.set("ackedSeq", Json(seq));
+    data.set("slowestAckedSeq", Json(stream.slowest_acked_seq()));
+    return Envelope::success(std::move(data));
+}
+
 // Translate a completed envelope into the JSON-RPC response for request `id`.
 Json envelope_to_response(const Json& id, const Envelope& env)
 {
@@ -143,6 +215,15 @@ Envelope Dispatcher::dispatch(const std::string& method, const Json& params,
         if (std::optional<Envelope> served = backend_->invoke(method, params, session))
             return std::move(*served);
     }
+
+    // R-CLI-015 subscription protocol: subscribe/unsubscribe/ack are served against this daemon's
+    // live event stream (the "real backing" pattern, like `describe`). They are registered
+    // operational verbs, so the R-SEC-007 scope gate above already ran (read/query baseline). A
+    // dispatcher constructed without a stream (pure contract introspection) has no subscriptions, so
+    // these fall through to the reserved-surface handling below.
+    if (stream_ != nullptr &&
+        (method == "subscribe" || method == "unsubscribe" || method == "ack"))
+        return serve_subscription(*stream_, method, params);
 
     // Dispatch OVER the single registry (do NOT re-declare verbs). Resolve the method-id to a verb.
     const Registry& reg = Registry::instance();

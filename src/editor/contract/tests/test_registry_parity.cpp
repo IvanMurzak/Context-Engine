@@ -294,5 +294,76 @@ int main()
         CHECK(ql.at("surfaces").size() == 3);
     }
 
+    // --- R-CLI-015: the subscription protocol verbs are in the ONE registry ---------------------
+    {
+        const struct
+        {
+            const char* verb;
+        } subs[] = {{"subscribe"}, {"unsubscribe"}, {"ack"}};
+        for (const auto& sv : subs)
+        {
+            const VerbSpec* v = reg.find_verb("", "", sv.verb);
+            CHECK(v != nullptr);
+            if (v == nullptr)
+                continue;
+            CHECK(v->implemented);
+            CHECK(v->stability == "operational");   // served by a live daemon's event stream over RPC
+            CHECK(v->rpc_method == sv.verb);         // global verb: method-id == verb name (stable id)
+        }
+        const VerbSpec* subscribe = reg.find_verb("", "", "subscribe");
+        CHECK(subscribe != nullptr && subscribe->params.size() == 3); // topics, pathScope, sinceSeq
+        const VerbSpec* ackv = reg.find_verb("", "", "ack");
+        CHECK(ackv != nullptr && ackv->params.size() == 2);
+        CHECK(ackv != nullptr && ackv->params[0].name == "subId" && ackv->params[0].required);
+        CHECK(ackv != nullptr && ackv->params[1].name == "seq" && ackv->params[1].required);
+    }
+
+    // --- R-CLI-014: every event topic carries a payload schema; find_topic + the register seam ---
+    {
+        const Json& c = describe.at("contract");
+        const Json& topics = c.at("eventTopics");
+        CHECK(topics.is_array());
+        CHECK(topics.size() == reg.topics().size());
+        CHECK(topics.size() >= 6); // files / derivation / diagnostics / session / clients / log
+        bool saw_files = false;
+        for (std::size_t i = 0; i < topics.size(); ++i)
+        {
+            const Json& t = topics.at(i);
+            CHECK(!t.at("name").as_string().empty());
+            CHECK(!t.at("description").as_string().empty());
+            CHECK(t.at("payloadSchema").is_object()); // R-CLI-014 payload-schema introspection
+            CHECK(t.at("payloadSchema").at("fields").is_array());
+            CHECK(t.at("payloadSchema").at("fields").size() >= 1);
+            saw_files = saw_files || t.at("name").as_string() == "files";
+        }
+        CHECK(saw_files);
+
+        // find_topic enumeration parity (mirrors find_file_kind); a package topic would join the same
+        // registration seam and appear automatically.
+        const TopicSpec* files = reg.find_topic("files");
+        CHECK(files != nullptr);
+        CHECK(files->payload_schema.at("fields").size() >= 1);
+        CHECK(reg.find_topic("no:such-topic") == nullptr);
+
+        // The common R-BRIDGE-008 event wire envelope is described once (not repeated per topic).
+        const Json& env = c.at("eventEnvelope");
+        CHECK(env.at("fields").is_array());
+        CHECK(env.at("fields").size() == 5); // seq, incarnationId, generation, topic, payload
+    }
+
+    // --- R-CLI-015: the subscription protocol SEMANTICS are pinned in describe -------------------
+    {
+        const Json& sub = describe.at("contract").at("subscription");
+        CHECK(sub.at("requirement").as_string() == "R-CLI-015");
+        CHECK(sub.at("methods").size() == 3); // subscribe / unsubscribe / ack
+        CHECK(sub.at("snapshotThenDelta").as_bool());
+        CHECK(sub.at("retention").as_string() == "slowest-acked-cursor");
+        CHECK(sub.at("gapMarkerOnOverflow").as_bool());
+        CHECK(sub.at("neverBlocksOnSlowClient").as_bool());
+        // The cursor is unified with R-BRIDGE-008 (no second cursor shape — same scheme as queries).
+        CHECK(sub.at("cursor").at("unifiedWith").as_string() == "R-BRIDGE-008");
+        CHECK(sub.at("cursor").at("uriScheme").as_string() == "context-cur");
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

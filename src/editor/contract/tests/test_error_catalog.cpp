@@ -132,5 +132,16 @@ int main()
         CHECK(entry->origin == "R-OBS-005");
     }
 
+    // --- R-CLI-015 subscription protocol (issue #98) — the unknown-subId failure class -----------
+    // Additive-only new row (NOT on the frozen v0 baseline). unsubscribe/ack of a stale subId map to
+    // the not-found class; a bare retry cannot help (re-subscribe for a fresh subId).
+    {
+        const ErrorCode* entry = find_code("subscription.unknown_sub");
+        CHECK(entry != nullptr);
+        CHECK(entry->exit_code == 3);     // not-found class
+        CHECK(entry->retriable == false); // deterministic
+        CHECK(entry->origin == "R-CLI-015");
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

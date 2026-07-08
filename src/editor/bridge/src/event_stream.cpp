@@ -2,8 +2,10 @@
 
 #include "context/editor/bridge/event_stream.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <string>
 #include <utility>
 
 namespace context::editor::bridge
@@ -61,6 +63,16 @@ std::string generate_incarnation_id()
         out.push_back(hex[(mixed >> shift) & 0xf]);
     return out;
 }
+
+// Is `path` within the `scope` subtree? A prefix match with a component boundary — `scope` itself,
+// or a strict child under `scope/…` — so scope "a/b" matches "a/b" and "a/b/c" but never "a/bc".
+bool path_within_scope(const std::string& path, const std::string& scope)
+{
+    if (path == scope)
+        return true;
+    return path.size() > scope.size() && path.compare(0, scope.size(), scope) == 0 &&
+           path[scope.size()] == '/';
+}
 } // namespace
 
 Json Event::to_json() const
@@ -74,8 +86,9 @@ Json Event::to_json() const
     return out;
 }
 
-Subscriber::Subscriber(std::vector<std::string> topics, std::size_t capacity)
-    : topics_(std::move(topics)), capacity_(capacity == 0 ? 1 : capacity)
+Subscriber::Subscriber(std::vector<std::string> topics, std::size_t capacity, std::string path_scope)
+    : topics_(std::move(topics)), path_scope_(std::move(path_scope)),
+      capacity_(capacity == 0 ? 1 : capacity)
 {
 }
 
@@ -87,6 +100,23 @@ bool Subscriber::wants(const std::string& topic) const
         if (t == topic)
             return true;
     return false;
+}
+
+bool Subscriber::accepts(const Event& e) const
+{
+    if (!wants(e.topic))
+        return false;
+    if (path_scope_.empty())
+        return true;
+    // Path-scoped: a path-bearing event is delivered only when its payload `path` is within the
+    // scope subtree. A pathless event (session/clients/log lifecycle) is not a path-scoped fact and
+    // always passes — narrowing to a subtree must not hide the daemon's own lifecycle stream.
+    if (e.payload.type() != contract::Json::Type::object || !e.payload.contains("path"))
+        return true;
+    const contract::Json& p = e.payload.at("path");
+    if (!p.is_string())
+        return true;
+    return path_within_scope(p.as_string(), path_scope_);
 }
 
 void Subscriber::offer(const Event& e)
@@ -126,11 +156,10 @@ std::uint64_t EventStream::emit(const std::string& topic, Json payload)
     e.payload = std::move(payload);
 
     ring_.push_back(e);
-    while (ring_.size() > ring_capacity_)
-        ring_.pop_front();
+    prune_ring();
 
     for (Subscriber* sub : subscribers_)
-        if (sub != nullptr && sub->wants(topic))
+        if (sub != nullptr && sub->accepts(e))
             sub->offer(e);
 
     return e.seq;
@@ -198,7 +227,13 @@ Json EventStream::snapshot() const
 std::vector<Event> EventStream::replay_since(std::uint64_t since, bool& gapped) const
 {
     gapped = false;
-    if (!ring_.empty() && ring_.front().seq > since + 1)
+    if (ring_.empty())
+        // Slowest-acked retention (R-CLI-015) can drain the ring entirely while last_seq_ > 0 (every
+        // retained event acked by all live subscribers). A stale reconnect (since < last_seq_) then
+        // predates retention just as it does when the ring is non-empty: gap => fresh snapshot. Only
+        // `since == last_seq_` is genuinely caught-up (nothing after `since` existed to evict).
+        gapped = since < last_seq_;
+    else if (ring_.front().seq > since + 1)
         gapped = true; // events after `since` were already evicted — fresh snapshot needed
 
     std::vector<Event> out;
@@ -206,6 +241,105 @@ std::vector<Event> EventStream::replay_since(std::uint64_t since, bool& gapped) 
         if (e.seq > since)
             out.push_back(e);
     return out;
+}
+
+std::uint64_t EventStream::slowest_acked_seq() const
+{
+    // No live subscriptions => floor 0: pure size-cap retention, preserving the reconnect
+    // "since seq N" window for a client that has not (re)subscribed yet.
+    if (subscriptions_.empty())
+        return 0;
+    std::uint64_t floor = subscriptions_.front().acked_seq;
+    for (const Subscription& s : subscriptions_)
+        floor = std::min(floor, s.acked_seq);
+    return floor;
+}
+
+void EventStream::prune_ring()
+{
+    const std::uint64_t floor = slowest_acked_seq();
+    // Evict the oldest event while EITHER the hard capacity is exceeded (bounded memory — an
+    // over-slow subscriber must never grow the ring without bound) OR it has been acked by every
+    // live subscriber (seq <= floor), so no live subscriber still needs it for catch-up.
+    while (!ring_.empty() && (ring_.size() > ring_capacity_ || ring_.front().seq <= floor))
+        ring_.pop_front();
+}
+
+EventStream::SubscribeResult EventStream::subscribe(std::vector<std::string> topics,
+                                                    std::string path_scope,
+                                                    std::optional<std::uint64_t> since_seq,
+                                                    std::size_t capacity)
+{
+    SubscribeResult result;
+    result.sub_id = "sub-" + std::to_string(++sub_counter_);
+
+    // Snapshot-then-delta (R-BRIDGE-008): the client reads this current-state snapshot first; live
+    // deltas then arrive on the subscription's queue (drained via poll()).
+    result.snapshot = snapshot();
+
+    // The initial ack cursor. A fresh subscriber has "seen" state through the snapshot's lastSeq, so
+    // it does not pin ring history at or below it. A reconnect with since_seq resumes from there —
+    // its cursor sits at since_seq until it acks the replayed catch-up forward, so retention keeps
+    // that history pinned for it (bounded by ring_capacity).
+    std::uint64_t acked = last_seq_;
+    if (since_seq.has_value())
+    {
+        result.catchup = replay_since(*since_seq, result.gapped);
+        if (*since_seq < acked)
+            acked = *since_seq;
+    }
+
+    auto owned = std::make_unique<Subscriber>(std::move(topics), capacity, std::move(path_scope));
+    Subscriber* raw = owned.get();
+    subscriptions_.push_back({result.sub_id, std::move(owned), acked});
+    add_subscriber(raw);
+    return result;
+}
+
+bool EventStream::unsubscribe(const std::string& sub_id)
+{
+    for (auto it = subscriptions_.begin(); it != subscriptions_.end(); ++it)
+    {
+        if (it->id == sub_id)
+        {
+            remove_subscriber(it->sub.get());
+            subscriptions_.erase(it);
+            prune_ring(); // dropping the slowest subscriber may raise the retention floor
+            return true;
+        }
+    }
+    return false;
+}
+
+bool EventStream::ack(const std::string& sub_id, std::uint64_t seq)
+{
+    for (Subscription& s : subscriptions_)
+    {
+        if (s.id == sub_id)
+        {
+            if (seq > s.acked_seq) // monotonic: a stale/duplicate ack is a no-op, never a rewind
+                s.acked_seq = seq;
+            prune_ring(); // advancing the slowest cursor ages out newly-acked history
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<Event> EventStream::poll(const std::string& sub_id)
+{
+    for (Subscription& s : subscriptions_)
+        if (s.id == sub_id)
+            return s.sub->drain();
+    return {};
+}
+
+bool EventStream::sub_gapped(const std::string& sub_id) const
+{
+    for (const Subscription& s : subscriptions_)
+        if (s.id == sub_id)
+            return s.sub->gap();
+    return false;
 }
 
 } // namespace context::editor::bridge
