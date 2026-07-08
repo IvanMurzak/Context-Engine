@@ -97,14 +97,20 @@ The Windows legs therefore set up MSVC via **VsDevCmd** and build with **Ninja +
 "Set up MSVC" step in `ci.yml`). This is why the Windows legs skip sccache (the VS generator
 ignores `CMAKE_<LANG>_COMPILER_LAUNCHER`).
 
-### 5. Known secondary flake — webgpu GPU probe under GPU contention
+### 5. webgpu offscreen render self-check uses WARP on Windows — FIXED
 
-The `spike webgpu (windows-latest)` **offscreen render/readback self-check** can fail when
-multiple webgpu jobs hit the machine's single GPU **simultaneously** (surfaced only under the
-artificial 6-run stress test; normal CI runs one pipeline at a time). This is a **GPU-contention**
-issue, unrelated to the `.gitconfig` race. If it becomes a routine problem, options: serialize the
-GPU probe via a workflow `concurrency` group, prefer a software/WARP adapter for the probe, or make
-the self-check retry. Not currently gating normal (single-run) CI.
+The `spike webgpu (windows-latest)` **offscreen render/readback self-check** used to flake (and
+sometimes crash with `0xc0000409`): as a **LocalSystem service in Session 0**, the runner has no
+reliable WDDM/GPU context, so the DEFAULT **hardware** D3D12 adapter is unstable — and it got much
+worse when the three Windows legs hit the one physical GPU concurrently.
+
+**Fix:** on Windows the render self-check now forces the software **fallback adapter (WARP)** —
+`ctest` runs `context-spike-webgpu render --fallback` (see `spikes/webgpu/CMakeLists.txt`). WARP is
+a conformant CPU rasterizer that is always present, runs headless, is deterministic, and never
+contends on the GPU. Linux uses lavapipe and macOS uses Metal via the default adapter (both already
+reliable; macOS is deliberately NOT forced to fallback because Metal has no software-fallback
+adapter and would SKIP). Real hardware-GPU rendering stays covered by the local `window` mode and
+dev machines. This removed the flake under the same 6-run stress test that validated the git fix.
 
 ## Service account: LocalSystem vs a dedicated user
 
