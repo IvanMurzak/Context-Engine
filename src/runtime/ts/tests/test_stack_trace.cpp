@@ -72,6 +72,23 @@ static void test_parse_frames()
     }
 }
 
+static void test_parenthesised_path_uses_outer_paren()
+{
+    // A location whose file path itself contains parentheses (e.g. a Windows folder "me (dev)") must
+    // split at the OUTER '(' that opens the location tail, not the innermost one — otherwise the file
+    // is truncated. Regression for the rfind('(') -> find('(') fix in parseFrameBody.
+    std::vector<cts::StackFrame> frames =
+        cts::parse_v8_stack("    at run (C:\\Users\\me (dev)\\bundle.js:2:3)\n");
+    CHECK(frames.size() == 1);
+    if (frames.size() == 1)
+    {
+        CHECK(frames[0].function == "run");
+        CHECK(frames[0].file == "C:\\Users\\me (dev)\\bundle.js");
+        CHECK(frames[0].line == 2);
+        CHECK(frames[0].column == 3);
+    }
+}
+
 static void test_remap_to_ts()
 {
     std::optional<cts::SourceMap> map = cts::SourceMap::parse(kMap);
@@ -172,6 +189,7 @@ static void test_empty_and_headerless()
 int main()
 {
     test_parse_frames();
+    test_parenthesised_path_uses_outer_paren();
     test_remap_to_ts();
     test_unmappable_frame_passes_through();
     test_render_and_convenience();

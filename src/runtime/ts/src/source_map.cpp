@@ -579,6 +579,13 @@ std::optional<SourceMap> SourceMap::parse(std::string_view json, std::string* er
         {
             return setErr("negative generated column in `mappings`");
         }
+        // Segments on a generated line MUST be genColumn-ascending: resolve()'s binary search and the
+        // documented segments_ invariant depend on it. A cumulative genColumn that moves BACKWARD is a
+        // malformed map — fail closed rather than silently mis-resolving via a broken precondition.
+        if (!current.empty() && genColumn < static_cast<std::int64_t>(current.back().genColumn))
+        {
+            return setErr("non-ascending generated column in `mappings`");
+        }
 
         Segment seg;
         seg.genColumn = static_cast<std::uint32_t>(genColumn);

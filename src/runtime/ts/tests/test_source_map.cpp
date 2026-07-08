@@ -162,6 +162,11 @@ static void test_malformed_inputs()
                .has_value());
     // Truncated JSON.
     CHECK(!cts::SourceMap::parse(R"({"version":3,"sources":["a")").has_value());
+    // Non-ascending generated column on a line: seg "U" = genCol +10 -> 10, then seg "N" = genCol
+    // -6 -> 4 (still >= 0 but BACKWARD). resolve()'s binary search assumes genCol-ascending, so parse
+    // must fail closed on this malformed ordering rather than accept a broken precondition.
+    CHECK(!cts::SourceMap::parse(R"({"version":3,"sources":[],"names":[],"mappings":"U,N"})", &err)
+               .has_value());
 }
 
 static void test_ignores_extra_fields()

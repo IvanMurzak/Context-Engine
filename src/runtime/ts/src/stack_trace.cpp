@@ -93,10 +93,13 @@ bool parseFrameBody(std::string_view body, StackFrame& frame)
         return false;
     }
 
-    // "<function> (<location>)" — the location is the parenthesised tail.
+    // "<function> (<location>)" — the location is the parenthesised tail. Split at the FIRST '(' that
+    // opens that tail (the boundary after the function label), NOT the last: a file path may itself
+    // contain '(' (e.g. a Windows folder "me (dev)"), and rfind would truncate the file to the
+    // innermost parenthesis.
     if (body.back() == ')')
     {
-        const std::size_t open = body.rfind('(');
+        const std::size_t open = body.find('(');
         if (open == std::string_view::npos)
         {
             return false;
