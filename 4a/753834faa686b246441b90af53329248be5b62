@@ -1,0 +1,109 @@
+src/editor/contract/include/context/editor/contract/json.h
+  s_681c0f86b30b64::t_27cc02cc695497 78-82
+src/editor/pkg/include/context/editor/pkg/integrity.h
+  s_681c0f86b30b64::t_0bde1140473e9e 1-37
+src/editor/pkg/include/context/editor/pkg/npm_install.h
+  s_681c0f86b30b64::t_928e24e6010de7 1-115
+src/cli/include/context/cli/install_command.h
+  s_681c0f86b30b64::t_13361de300242b 1-27
+src/cli/src/install_command.cpp
+  s_681c0f86b30b64::t_a07a727ece3240 1-137
+src/editor/contract/tests/test_error_catalog.cpp
+  s_681c0f86b30b64::t_f4bed97e1b9fa9 146-174
+src/runtime/ts/CMakeLists.txt
+  s_681c0f86b30b64::t_1584b0f63c99ef 130-133,138,142
+  s_681c0f86b30b64::t_6f32fbb9cf3f27 134-137,139-141
+src/editor/pkg/include/context/editor/pkg/lockfile.h
+  s_681c0f86b30b64::t_90dd3f47235613 1-60
+src/editor/pkg/include/context/editor/pkg/base64.h
+  s_681c0f86b30b64::t_c1bad58e5dac8e 1-22
+src/editor/contract/src/registry.cpp
+  s_681c0f86b30b64::t_afd2e77ed4d1ed 456-481
+src/cli/src/app.cpp
+  s_681c0f86b30b64::t_4e7d6fc67a97a8 143-149
+  s_681c0f86b30b64::t_a73e0696d21883 10
+src/editor/contract/src/json.cpp
+  s_681c0f86b30b64::t_c6dd33a0314980 54-59
+src/editor/pkg/CMakeLists.txt
+  s_681c0f86b30b64::t_7b9efd9e4309d6 58-61
+  s_681c0f86b30b64::t_5c907b8c3090e3 1-38,43-48,50-57
+  s_681c0f86b30b64::t_7505240490dc27 39-42,49
+src/editor/pkg/tests/pkg_test.h
+  s_681c0f86b30b64::t_68a3dadc0738b8 1-27
+src/editor/pkg/tests/test_integrity.cpp
+  s_681c0f86b30b64::t_123a4ba0b2ebf2 1-97
+src/editor/pkg/include/context/editor/pkg/sha512.h
+  s_681c0f86b30b64::t_05d2b489035acc 1-25
+src/editor/pkg/src/base64.cpp
+  s_681c0f86b30b64::t_d5b5c33951e805 1-133
+src/editor/pkg/src/integrity.cpp
+  s_681c0f86b30b64::t_9da0d6a473d0be 1-104
+src/CMakeLists.txt
+  s_681c0f86b30b64::t_91e5747d4c605b 321-330
+src/editor/pkg/tests/test_lockfile.cpp
+  s_681c0f86b30b64::t_492a852ad7951d 1-147
+src/editor/pkg/src/npm_install.cpp
+  s_681c0f86b30b64::t_071952691fc1d6 1-245
+src/editor/pkg/include/context/editor/pkg/tar.h
+  s_681c0f86b30b64::t_26d3eddc6b8b87 1-38
+src/editor/pkg/tests/test_base64.cpp
+  s_681c0f86b30b64::t_7207fd38caca59 1-41
+src/editor/pkg/src/sha512.cpp
+  s_681c0f86b30b64::t_cffdf7170443a1 1-139
+src/editor/pkg/src/lockfile.cpp
+  s_681c0f86b30b64::t_3c10aa2790fa91 1-259
+src/editor/pkg/src/tar.cpp
+  s_681c0f86b30b64::t_2695a4cc869a73 68,72,81
+  s_681c0f86b30b64::t_ebf58cc3437bf2 1-67,69-71,73-80,82-211
+src/editor/contract/src/error_catalog.cpp
+  s_681c0f86b30b64::t_b9a81d1768cb7b 402-436
+src/editor/pkg/tests/test_sha512.cpp
+  s_681c0f86b30b64::t_b1ef36c59e3c5b 1-38
+src/editor/pkg/tests/test_tar.cpp
+  s_681c0f86b30b64::t_38948c6f29fbb3 70-71,75
+  s_681c0f86b30b64::t_96584e980c84b6 1-69,74,76-83,89-91
+  s_681c0f86b30b64::t_0ec08e497d440e 84-88
+  s_681c0f86b30b64::t_820b3b94d7bf7e 72-73
+src/editor/pkg/README.md
+  s_681c0f86b30b64::t_0f3d004717b914 1-54
+src/cli/CMakeLists.txt
+  s_681c0f86b30b64::t_35e5f3ebe809a8 15
+  s_681c0f86b30b64::t_f8c2c276bf171d 57-61
+  s_681c0f86b30b64::t_8ba32978dd40bf 100-104
+  s_681c0f86b30b64::t_c57a6e2fe7feb9 85
+  s_681c0f86b30b64::t_ade519f2989136 105
+src/editor/contract/tests/test_registry_parity.cpp
+  s_681c0f86b30b64::t_f91230e711e77e 181-196
+src/editor/pkg/include/context/editor/pkg/codes.h
+  s_681c0f86b30b64::t_5b49c0bdecb7e4 1-39
+src/cli/tests/test_pkg_command.cpp
+  s_71eae1e9ad8353::t_dde183b3c7114f 1-160
+src/editor/pkg/tests/test_npm_deps.cpp
+  s_71eae1e9ad8353::t_3dd9729b01ba5b 1-267
+src/runtime/ts/tests/test_pkg_resolve.cpp
+  s_71eae1e9ad8353::t_416bcb3560e504 1-136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4a753834faa686b246441b90af53329248be5b62",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_71eae1e9ad8353": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-abda2a0b153878711",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
