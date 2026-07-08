@@ -207,7 +207,22 @@ InstallOutcome execute_install(const InstallPlan& plan, PackageSource& source,
                 planned.pkg.name + "@" + planned.pkg.version);
     }
 
+    // Extract the whole plan atomically: track every package directory this call creates so a
+    // mid-plan failure (unfetchable / tampered / bad-archive / path-jail) rolls them ALL back,
+    // leaving project_root exactly as it was. Without this, packages 0..k-1 (and the partial dir of
+    // the failing package k) would remain on disk after k fails — a half-populated node_modules that
+    // violates the whole-plan fail-closed contract the native-tier gate above already upholds.
     InstallOutcome out;
+    std::vector<fs::path> extracted;
+    const auto fail_rollback = [&extracted](InstallStatus status, std::string_view code,
+                                            std::string message, std::string offending) {
+        for (auto it = extracted.rbegin(); it != extracted.rend(); ++it)
+        {
+            std::error_code rec;
+            fs::remove_all(*it, rec);
+        }
+        return outcome_fail(status, code, std::move(message), std::move(offending));
+    };
     for (const PlannedPackage& planned : plan.packages)
     {
         if (opts.production && planned.pkg.dev)
@@ -215,14 +230,14 @@ InstallOutcome execute_install(const InstallPlan& plan, PackageSource& source,
         // Only sandbox-tier packages reach here (natives already short-circuited above).
         const std::optional<std::string> bytes = source.fetch(planned.pkg);
         if (!bytes.has_value())
-            return outcome_fail(InstallStatus::FetchFailed, kInstallFetchFailedCode,
-                                "could not fetch artifact for '" + planned.pkg.name + "@" +
-                                    planned.pkg.version + "' from the package source.",
-                                planned.pkg.name + "@" + planned.pkg.version);
+            return fail_rollback(InstallStatus::FetchFailed, kInstallFetchFailedCode,
+                                 "could not fetch artifact for '" + planned.pkg.name + "@" +
+                                     planned.pkg.version + "' from the package source.",
+                                 planned.pkg.name + "@" + planned.pkg.version);
 
         const SriVerification sri = verify_integrity(planned.pkg.integrity, *bytes);
         if (sri.result != SriResult::Ok)
-            return outcome_fail(
+            return fail_rollback(
                 InstallStatus::IntegrityMismatch, kInstallIntegrityMismatchCode,
                 "artifact for '" + planned.pkg.name + "@" + planned.pkg.version +
                     "' failed integrity verification (" +
@@ -236,10 +251,10 @@ InstallOutcome execute_install(const InstallPlan& plan, PackageSource& source,
 
         const std::optional<std::vector<TarEntry>> entries = tar_read(*bytes);
         if (!entries.has_value())
-            return outcome_fail(InstallStatus::IntegrityMismatch, kInstallIntegrityMismatchCode,
-                                "verified artifact for '" + planned.pkg.name + "@" +
-                                    planned.pkg.version + "' is not a valid ustar archive.",
-                                planned.pkg.name + "@" + planned.pkg.version);
+            return fail_rollback(InstallStatus::IntegrityMismatch, kInstallIntegrityMismatchCode,
+                                 "verified artifact for '" + planned.pkg.name + "@" +
+                                     planned.pkg.version + "' is not a valid ustar archive.",
+                                 planned.pkg.name + "@" + planned.pkg.version);
 
         const fs::path dest = fs::path(project_root) / fs::path(planned.pkg.install_path);
         // Defense-in-depth path jail: parse_lockfile already rejects a traversing install_path, but
@@ -249,17 +264,20 @@ InstallOutcome execute_install(const InstallPlan& plan, PackageSource& source,
         const fs::path root_canon = fs::weakly_canonical(fs::path(project_root), jail_ec);
         const fs::path dest_canon = fs::weakly_canonical(dest, jail_ec);
         if (jail_ec || !is_within(root_canon, dest_canon))
-            return outcome_fail(InstallStatus::IntegrityMismatch, kInstallIntegrityMismatchCode,
-                                "refusing to extract '" + planned.pkg.name + "@" +
-                                    planned.pkg.version +
-                                    "' outside the project root (path-jail violation, R-SEC-008).",
-                                planned.pkg.install_path);
+            return fail_rollback(InstallStatus::IntegrityMismatch, kInstallIntegrityMismatchCode,
+                                 "refusing to extract '" + planned.pkg.name + "@" +
+                                     planned.pkg.version +
+                                     "' outside the project root (path-jail violation, R-SEC-008).",
+                                 planned.pkg.install_path);
         std::string err;
+        // Record the dest BEFORE extracting so a partial extraction of THIS package is rolled back
+        // too (extract_into may have created dirs/files before hitting the error).
+        extracted.push_back(dest);
         if (!extract_into(*entries, dest, err))
-            return outcome_fail(InstallStatus::IntegrityMismatch, kInstallIntegrityMismatchCode,
-                                "could not extract '" + planned.pkg.name + "@" +
-                                    planned.pkg.version + "': " + err,
-                                planned.pkg.name + "@" + planned.pkg.version);
+            return fail_rollback(InstallStatus::IntegrityMismatch, kInstallIntegrityMismatchCode,
+                                 "could not extract '" + planned.pkg.name + "@" +
+                                     planned.pkg.version + "': " + err,
+                                 planned.pkg.name + "@" + planned.pkg.version);
 
         out.installed.push_back({planned.pkg.name, planned.pkg.version, planned.pkg.install_path});
     }

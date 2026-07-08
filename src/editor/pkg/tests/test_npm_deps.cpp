@@ -263,5 +263,47 @@ int main()
         fs::remove_all(root, ec);
     }
 
+    // ===== 7. a multi-package plan is ATOMIC: a later failure rolls back an earlier extraction =====
+    {
+        const std::string good_pj = R"({"name":"good-lib","version":"1.0.0","main":"index.js"})";
+        const std::string good_tar = make_package_tar(good_pj, "module.exports = 'good';\n");
+        const std::string bad_pj = R"({"name":"bad-lib","version":"1.0.0","main":"index.js"})";
+        const std::string bad_tar = make_package_tar(bad_pj, "module.exports = 'bad';\n");
+
+        // good-lib's integrity is correct; bad-lib's lock integrity is the SRI of DIFFERENT bytes
+        // (a tamper), so it fails AFTER good-lib has already extracted. good-lib is listed first so
+        // the insertion-ordered `packages` map plans + extracts it before bad-lib.
+        const std::string manifest =
+            R"({"dependencies":{"good-lib":"1.0.0","bad-lib":"1.0.0"}})";
+        const std::string lock = R"({"lockfileVersion":3,"packages":{
+            "":{"name":"app"},
+            "node_modules/good-lib":{"version":"1.0.0","resolved":"https://r/g.tgz","integrity":")" +
+                                 sri512(good_tar) + R"("},
+            "node_modules/bad-lib":{"version":"1.0.0","resolved":"https://r/b.tgz","integrity":")" +
+                                 sri512(bad_tar + "tampered") + R"("}}})";
+
+        MapSource source;
+        source.put("good-lib", "1.0.0", good_tar);
+        source.put("bad-lib", "1.0.0", bad_tar);
+
+        const InstallPlan plan = plan_install(manifest, lock);
+        CHECK(plan.status == PlanStatus::Ok);
+        CHECK(plan.packages.size() == 2);
+        CHECK(plan.packages[0].pkg.name == "good-lib"); // insertion order preserved
+        CHECK(plan.packages[1].pkg.name == "bad-lib");
+
+        const fs::path root = make_temp_dir("atomic");
+        const InstallOutcome out = execute_install(plan, source, root.string(), {});
+        CHECK(out.status == InstallStatus::IntegrityMismatch);
+        CHECK(out.error_code == std::string(kInstallIntegrityMismatchCode));
+        // Fail-closed + ATOMIC: good-lib had already extracted, but the bad-lib failure rolled it
+        // back, so NOTHING from this call is left on disk (no half-populated node_modules).
+        CHECK(!fs::exists(root / "node_modules" / "good-lib"));
+        CHECK(!fs::exists(root / "node_modules" / "bad-lib"));
+
+        std::error_code ec;
+        fs::remove_all(root, ec);
+    }
+
     PKG_TEST_MAIN_END();
 }

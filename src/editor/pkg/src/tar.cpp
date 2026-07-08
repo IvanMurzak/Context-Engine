@@ -175,6 +175,16 @@ std::optional<std::string> tar_write(const std::vector<TarEntry>& entries)
             name = name.substr(split + 1);
         }
 
+        // A ustar size field holds kSizeLen-1 octal digits; reject a body too large to encode rather
+        // than let write_octal silently wrap/truncate it (which would emit a corrupt header whose
+        // stated size no longer matches the payload). Mirrors the long-path rejection above.
+        if (!entry.is_dir)
+        {
+            constexpr std::uint64_t kMaxSize = (std::uint64_t{1} << (3 * (kSizeLen - 1))) - 1;
+            if (entry.data.size() > kMaxSize)
+                return std::nullopt;
+        }
+
         write_field(header.data(), kNameOff, kNameLen, name);
         write_field(header.data(), kPrefixOff, kPrefixLen, prefix);
         write_octal(header.data(), 100, 8, entry.is_dir ? 0755u : 0644u); // mode
