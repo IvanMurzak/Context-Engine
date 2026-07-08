@@ -722,4 +722,113 @@ std::optional<OriginalPosition> SourceMap::resolve(std::uint32_t line, std::uint
     return out;
 }
 
+namespace
+{
+// Does the `sources` entry `candidate` name the source the caller asked for? Exact string match, or
+// `candidate` ends with "/" + `wanted` (a trailing path-segment suffix) so a caller may pass a bare
+// basename ("throwing.ts") for a map whose sources carry a relative prefix ("../throwing.ts"). A
+// bare-suffix without the '/' boundary is rejected so "throwing.ts" does not match "not-throwing.ts".
+bool sourceMatches(std::string_view candidate, std::string_view wanted)
+{
+    if (candidate == wanted)
+    {
+        return true;
+    }
+    if (candidate.size() > wanted.size() &&
+        candidate.substr(candidate.size() - wanted.size()) == wanted &&
+        candidate[candidate.size() - wanted.size() - 1] == '/')
+    {
+        return true;
+    }
+    return false;
+}
+} // namespace
+
+std::optional<GeneratedPosition> SourceMap::resolveGenerated(std::string_view source,
+                                                             std::uint32_t line,
+                                                             std::uint32_t column) const
+{
+    // A generated position (gline, gcolumn) is "earlier" than another when it sorts before it — the
+    // deterministic tie-break among equally-good original candidates.
+    const auto genEarlier = [](std::uint32_t aL, std::uint32_t aC, std::uint32_t bL,
+                               std::uint32_t bC) {
+        return aL != bL ? aL < bL : aC < bC;
+    };
+
+    // Three preference tiers, best first (see the header contract):
+    //   tier 0 — origLine == line AND origColumn >= column, minimise origColumn.
+    //   tier 1 — origLine == line AND origColumn <  column, maximise origColumn.
+    //   tier 2 — origLine >  line, minimise (origLine, origColumn).
+    // A hit in a better tier always beats any hit in a worse tier; within a tier the documented
+    // original-position rule picks, and the earliest generated position breaks ties.
+    bool have0 = false, have1 = false, have2 = false;
+    std::uint32_t best0Col = 0, best0gL = 0, best0gC = 0;
+    std::uint32_t best1Col = 0, best1gL = 0, best1gC = 0;
+    std::uint32_t best2L = 0, best2Col = 0, best2gL = 0, best2gC = 0;
+
+    for (std::uint32_t genLine = 0; genLine < segments_.size(); ++genLine)
+    {
+        for (const Segment& seg : segments_[genLine])
+        {
+            if (!seg.hasSource || seg.sourceIndex >= sources_.size() ||
+                !sourceMatches(sources_[seg.sourceIndex], source))
+            {
+                continue;
+            }
+            const std::uint32_t gC = seg.genColumn;
+            if (seg.origLine == line && seg.origColumn >= column)
+            {
+                if (!have0 || seg.origColumn < best0Col ||
+                    (seg.origColumn == best0Col && genEarlier(genLine, gC, best0gL, best0gC)))
+                {
+                    have0 = true;
+                    best0Col = seg.origColumn;
+                    best0gL = genLine;
+                    best0gC = gC;
+                }
+            }
+            else if (seg.origLine == line) // origColumn < column
+            {
+                if (!have1 || seg.origColumn > best1Col ||
+                    (seg.origColumn == best1Col && genEarlier(genLine, gC, best1gL, best1gC)))
+                {
+                    have1 = true;
+                    best1Col = seg.origColumn;
+                    best1gL = genLine;
+                    best1gC = gC;
+                }
+            }
+            else if (seg.origLine > line)
+            {
+                const bool better = !have2 || seg.origLine < best2L ||
+                                    (seg.origLine == best2L && seg.origColumn < best2Col) ||
+                                    (seg.origLine == best2L && seg.origColumn == best2Col &&
+                                     genEarlier(genLine, gC, best2gL, best2gC));
+                if (better)
+                {
+                    have2 = true;
+                    best2L = seg.origLine;
+                    best2Col = seg.origColumn;
+                    best2gL = genLine;
+                    best2gC = gC;
+                }
+            }
+        }
+    }
+
+    if (have0)
+    {
+        return GeneratedPosition{best0gL, best0gC};
+    }
+    if (have1)
+    {
+        return GeneratedPosition{best1gL, best1gC};
+    }
+    if (have2)
+    {
+        return GeneratedPosition{best2gL, best2gC};
+    }
+    return std::nullopt;
+}
+
 } // namespace context::runtime::ts

@@ -27,6 +27,7 @@
 #include <v8-typed-array.h>
 
 #include "inspector_seam.h"
+#include "inspector_session.h"
 #include "v8_shims.h"
 
 namespace context::runtime::js
@@ -177,37 +178,9 @@ public:
 
     bool eval(std::string_view code, double* numResult, std::string& err) override
     {
-        v8::Isolate::Scope isolateScope(isolate_);
-        v8::HandleScope handleScope(isolate_);
-        v8::Local<v8::Context> context = context_.Get(isolate_);
-        v8::Context::Scope contextScope(context);
-        v8::TryCatch tryCatch(isolate_);
-
-        v8::Local<v8::String> src;
-        if (!v8::String::NewFromUtf8(isolate_, code.data(), v8::NewStringType::kNormal,
-                                     static_cast<int>(code.size()))
-                 .ToLocal(&src))
-        {
-            err = "source string allocation failed";
-            return false;
-        }
-        v8::Local<v8::Script> script;
-        if (!v8::Script::Compile(context, src).ToLocal(&script))
-        {
-            err = describe(context, tryCatch);
-            return false;
-        }
-        v8::Local<v8::Value> result;
-        if (!script->Run(context).ToLocal(&result))
-        {
-            err = describe(context, tryCatch);
-            return false;
-        }
-        if (numResult != nullptr && result->IsNumber())
-        {
-            *numResult = result.As<v8::Number>()->Value();
-        }
-        return true;
+        // Shares the compile+run skeleton with the inspector session's run(); no ScriptOrigin (empty
+        // resourceName) and a numeric result is extracted into numResult when present.
+        return detail::compileAndRun(isolate_, context_, code, {}, numResult, err);
     }
 
     FunctionHandle getFunction(std::string_view globalName) override
@@ -447,6 +420,13 @@ public:
 
     bool inspectorSeamPresent() const override { return inspector_ != nullptr; }
 
+    std::unique_ptr<InspectorSession> attachInspector(std::string& err) override
+    {
+        // The interactive CDP attach (issue #94), built out from the task-2a seam. Shares THIS
+        // engine's Isolate + Context; the returned session must not outlive the engine.
+        return detail::createInspectorSession(isolate_, context_, err);
+    }
+
 private:
     static constexpr std::size_t kMaxArgs = 8;
 
@@ -480,34 +460,10 @@ private:
 
     std::string describe(v8::Local<v8::Context> context, const v8::TryCatch& tryCatch)
     {
-        // Prefer the exception's FULL stack trace (V8's error.stack = "Error: msg\n    at f
-        // (script:line:col)\n..."), so the R-OBS-005 TS-source-map remapper (runtime/ts
-        // stack_trace) sees the raw JS frames and can resolve them to authored .ts positions. The
-        // stack's first line already carries the message, so returning it does not lose the
-        // message. Fall back to the bare message when no stack is attached — a SyntaxError from
-        // Script::Compile, or a thrown non-Error primitive (`throw 42`) carries no `.stack`.
-        v8::Local<v8::Value> stack;
-        if (tryCatch.StackTrace(context).ToLocal(&stack) && !stack.IsEmpty() && stack->IsString())
-        {
-            v8::String::Utf8Value utf8Stack(isolate_, stack);
-            if (*utf8Stack != nullptr)
-            {
-                return *utf8Stack;
-            }
-        }
-
-        v8::Local<v8::Value> ex = tryCatch.Exception();
-        if (ex.IsEmpty())
-        {
-            return "<no exception>";
-        }
-        v8::Local<v8::String> str;
-        if (!ex->ToString(context).ToLocal(&str))
-        {
-            return "<unprintable exception>";
-        }
-        v8::String::Utf8Value utf8(isolate_, str);
-        return *utf8 != nullptr ? *utf8 : "<utf8 conversion failed>";
+        // Prefer the exception's FULL stack trace (so the R-OBS-005 TS-source-map remapper sees the
+        // raw JS frames and can resolve them to authored .ts positions), falling back to the bare
+        // message / stringified non-Error primitive. Shared with the inspector session's run() path.
+        return detail::describeException(isolate_, context, tryCatch);
     }
 
     v8::Isolate::CreateParams createParams_;

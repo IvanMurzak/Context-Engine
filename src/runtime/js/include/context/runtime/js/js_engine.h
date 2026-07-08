@@ -9,6 +9,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -84,6 +86,51 @@ struct ViewBinding
 // ArrayBuffer create/detach churn; exceeding it is a caller error, not a silent clamp.
 inline constexpr std::size_t kMaxSystemViews = 16;
 
+// --- R-OBS-005 interactive CDP debug session (L-61: "config, not building a debugger") ----------
+//
+// A minimal, SYNCHRONOUS Chrome DevTools Protocol (CDP) session over V8's in-box inspector
+// (v8-inspector.h — the same protocol Chrome DevTools / VS Code js-debug speak natively). The
+// embedder drives it with plain CDP JSON: dispatch() feeds one command IN, and every response +
+// notification the inspector produces is delivered to the sink installed via onMessage(). When a
+// breakpoint (or a `debugger;` statement) pauses execution, V8 re-enters the embedder through a
+// NESTED pause loop: the pump installed via onPause() is called repeatedly and dispatches the CDP
+// commands (Debugger.resume / Debugger.stepOver / ...) that eventually resume. The whole loop is
+// single-threaded and deterministic — no socket, no background thread — so a test (or an in-process
+// client) can drive source-mapped breakpoints + stepping over the exact protocol a real
+// DevTools/VS-Code client speaks. Kept STL-only (no V8 type leaks) so this header stays the
+// from-source-migration seam; the implementation is the V8 backend (CI-only for its link).
+//
+// A loopback/websocket transport + a `/json` discovery target (for an OUT-OF-PROCESS DevTools) and a
+// DAP bridge are a documented follow-up — this seam is the in-process CORE that transport wraps.
+class InspectorSession
+{
+public:
+    virtual ~InspectorSession() = default;
+
+    // Install the outbound CDP sink (each message a UTF-8 JSON string: a response or a
+    // notification). Set it BEFORE dispatch()/run() so the scriptParsed + paused notifications are
+    // observed. A later call replaces the sink; a null sink drops messages.
+    virtual void onMessage(std::function<void(std::string_view)> sink) = 0;
+
+    // Install the pause pump: called re-entrantly on each iteration of the nested pause loop V8 runs
+    // while stopped at a breakpoint. It must dispatch() the next CDP command(s); returning true (or
+    // dispatching a resume/step command, which V8 signals internally) exits the loop and resumes
+    // execution. The loop is bounded, so a pump that never resumes cannot hang the process.
+    virtual void onPause(std::function<bool()> pump) = 0;
+
+    // Feed ONE CDP command JSON (e.g. {"id":1,"method":"Debugger.enable"}). Returns false + fills
+    // `err` only when the session rejects the message before handing it to V8 (empty message);
+    // V8 reports a protocol-level error as a normal CDP error RESPONSE through the onMessage sink,
+    // not through this return value. Responses/notifications arrive via the sink.
+    virtual bool dispatch(std::string_view cdpMessage, std::string& err) = 0;
+
+    // Compile + run `code` under the resource name `resourceName` (its CDP script URL, so
+    // Debugger.setBreakpointByUrl can target it and Debugger.scriptParsed reports it). Runs to
+    // completion, driving the onPause pump at any breakpoint hit. Returns false + fills `err` (the
+    // V8 error.stack) on an uncaught throw.
+    virtual bool run(std::string_view code, std::string_view resourceName, std::string& err) = 0;
+};
+
 class JsEngine
 {
 public:
@@ -142,6 +189,14 @@ public:
     // V8InspectorClient stub exists as the future TS source-mapped debugger's home). The
     // debugger itself is NOT built in task 2a.
     virtual bool inspectorSeamPresent() const = 0;
+
+    // --- R-OBS-005 interactive CDP inspector attach ----------------------------------------
+    // Attach a CDP debug session over V8's in-box inspector (see InspectorSession above): the
+    // interactive breakpoint/stepping half of R-OBS-005, built out from the task-2a seam. The
+    // returned session shares this engine's Isolate + Context and MUST NOT outlive the engine.
+    // Returns nullptr + fills `err` when the backend has no inspector, or the session could not be
+    // created/connected.
+    [[nodiscard]] virtual std::unique_ptr<InspectorSession> attachInspector(std::string& err) = 0;
 };
 
 }  // namespace context::runtime::js
