@@ -10,6 +10,7 @@ add_library(context_cli STATIC
     src/attach_command.cpp
     src/bench_command.cpp
     src/daemon_command.cpp
+    src/determinism_command.cpp
     src/editor_driver.cpp
     src/fetch_command.cpp
     src/install_command.cpp
@@ -81,6 +82,7 @@ target_link_options(context PRIVATE ${_context_cli_static_runtime})
 set(_context_cli_tests
     test_bench_command
     test_cli
+    test_determinism_command
     test_editor_driver
     test_pkg_command
     test_merge_command
@@ -96,6 +98,11 @@ foreach(_t IN LISTS _context_cli_tests)
     target_include_directories(context_cli_${_t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     add_test(NAME cli-${_t} COMMAND context_cli_${_t})
 endforeach()
+
+# test_determinism_command (`context determinism diff`) crafts its two replay-artifact fixtures with
+# record_replay/replay_dump from the session runtime, so it links context_session directly (PRIVATE in
+# context_cli, so its include path does not propagate through it — the same pattern as test_pkg_command).
+target_link_libraries(context_cli_test_determinism_command PRIVATE context_session)
 
 # test_pkg_command (the `context install` verb) builds its fixtures (a ustar artifact + its real SRI)
 # with the pkg module's tar_write / sha512, so it links context_editor_pkg directly (PRIVATE in

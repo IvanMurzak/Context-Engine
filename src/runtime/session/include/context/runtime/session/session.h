@@ -104,6 +104,22 @@ public:
     [[nodiscard]] const HashTrace& trace() const noexcept { return trace_; }
     void clear_trace() noexcept { trace_.clear(); }
 
+    // --- per-system observer (determinism triage, R-QA-005) -----------------------------------
+    // An optional read-only hook invoked AFTER each system runs, on every tick (independent of trace
+    // mode). It receives the tick, the system's index + name, and the world exactly as it stands
+    // right after that system ran — the per-system state the `context determinism diff` auto-triage
+    // snapshots to attribute a divergence to a specific (tick, system) and then to an entity +
+    // component field. Purely observational: the World is const, so a well-behaved observer never
+    // mutates simulation state (a mutating one would break determinism).
+    using SystemObserver = std::function<void(std::uint64_t tick, std::size_t system_index,
+                                              const std::string& system, const kernel::World& world)>;
+    void set_system_observer(SystemObserver observer) { system_observer_ = std::move(observer); }
+    void clear_system_observer() noexcept { system_observer_ = nullptr; }
+    [[nodiscard]] bool has_system_observer() const noexcept
+    {
+        return static_cast<bool>(system_observer_);
+    }
+
     // The recorded input stream (== the replay stream).
     [[nodiscard]] const InputStream& input_log() const noexcept { return input_log_; }
 
@@ -141,6 +157,7 @@ private:
     InputStream input_log_;
     bool trace_enabled_ = false;
     HashTrace trace_;
+    SystemObserver system_observer_;
 };
 
 } // namespace context::runtime::session

@@ -5,6 +5,7 @@
 #include "context/cli/attach_command.h"
 #include "context/cli/bench_command.h"
 #include "context/cli/daemon_command.h"
+#include "context/cli/determinism_command.h"
 #include "context/cli/editor_driver.h"
 #include "context/cli/fetch_command.h"
 #include "context/cli/install_command.h"
@@ -139,6 +140,12 @@ Envelope dispatch(const VerbSpec& verb, const std::vector<std::string>& position
         return run_session(verb.verb, bound, flags);
     if (verb.noun.empty() && verb.verb == "replay")
         return run_replay(bound, flags);
+
+    // M3 entry auto-triage (issue #74): `context determinism diff <left> <right>` — replay-bisect
+    // two ctx:replay artifacts to the first divergent (tick, system, entity, componentField). Backed
+    // by src/runtime/session/triage.* over the same hierarchical state hash + replay artifact.
+    if (verb.noun == "determinism" && verb.verb == "diff")
+        return run_determinism_diff(bound, flags);
 
     // M3 task 5 (issue #100): `context install` — the R-SEC-005 engine-driven install. Backed by
     // src/editor/pkg/. --dry-run (core flag) is honored INSIDE the command (validate the plan +

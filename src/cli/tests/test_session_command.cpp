@@ -109,11 +109,13 @@ int main()
         CHECK(err_code(missing_artifact) == "file.not_found");
     }
 
-    // --- the reserved determinism-diff grammar routes to contract.unimplemented ----------------
+    // --- the determinism-diff grammar is now IMPLEMENTED (its own test: test_determinism_command);
+    //     here we only confirm it no longer routes to the reserved contract.unimplemented surface and
+    //     instead reaches the backend (missing artifact files -> file.not_found, not "reserved"). ---
     {
-        const Envelope e = run({"determinism", "diff", "a", "b"});
+        const Envelope e = run({"determinism", "diff", "no-such-a.json", "no-such-b.json"});
         CHECK(!e.ok());
-        CHECK(err_code(e) == "contract.unimplemented");
+        CHECK(err_code(e) == "file.not_found");
     }
 
     // --- the full CLI path: `context replay <artifact>` over run() -----------------------------

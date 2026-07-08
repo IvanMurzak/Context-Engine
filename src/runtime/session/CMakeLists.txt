@@ -13,7 +13,8 @@ add_library(context_session STATIC
     src/state_hash.cpp
     src/session.cpp
     src/session_state.cpp
-    src/replay.cpp)
+    src/replay.cpp
+    src/triage.cpp)
 
 target_include_directories(context_session PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -49,7 +50,8 @@ set(_context_session_tests
     test_state_hash
     test_session
     test_session_state
-    test_replay)
+    test_replay
+    test_triage)
 
 foreach(_t IN LISTS _context_session_tests)
     add_executable(context_session_${_t} tests/${_t}.cpp)
