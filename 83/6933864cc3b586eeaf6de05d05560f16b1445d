@@ -1,0 +1,45 @@
+src/editor/schedule/README.md
+  s_681c0f86b30b64::t_24af291c5e86e8 1-92
+src/editor/schedule/src/schedule.cpp
+  s_681c0f86b30b64::t_7ca9d8fc4d3b94 1-243
+src/editor/system/README.md
+  s_681c0f86b30b64::t_1559a7568aa01b 62-63
+src/editor/schedule/tests/test_schedule.cpp
+  s_681c0f86b30b64::t_da5ebd4e4d6de8 1-505
+src/editor/schedule/tests/test_schedule_in_v8.cpp
+  s_681c0f86b30b64::t_77e4251e93c619 1-167,170-386
+  s_681c0f86b30b64::t_d53631585d450b 168-169
+src/editor/schedule/CMakeLists.txt
+  s_681c0f86b30b64::t_037bd45b156c1d 1-154
+src/editor/schedule/include/context/editor/schedule/schedule.h
+  s_681c0f86b30b64::t_e17add0f4a3e8d 139
+  s_681c0f86b30b64::t_c8c218cc98be1e 1-138,140-189
+src/editor/schedule/src/access.cpp
+  s_681c0f86b30b64::t_0ef4ccef85a565 1-66
+src/CMakeLists.txt
+  s_681c0f86b30b64::t_d3e4d9bf784dc3 346-358
+src/editor/schedule/include/context/editor/schedule/access.h
+  s_681c0f86b30b64::t_1e8d401d70c0c4 1-53
+src/editor/schedule/tests/schedule_test.h
+  s_681c0f86b30b64::t_b4c65f9cc2450d 1-27
+src/editor/schedule/tests/test_access.cpp
+  s_681c0f86b30b64::t_e569b40c77bd11 1-84
+src/editor/schedule/tests/examples/health_system.ts
+  s_681c0f86b30b64::t_a6524bf4913d27 1-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "836933864cc3b586eeaf6de05d05560f16b1445d",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
