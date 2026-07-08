@@ -12,6 +12,7 @@ add_library(context_cli STATIC
     src/daemon_command.cpp
     src/editor_driver.cpp
     src/fetch_command.cpp
+    src/install_command.cpp
     src/merge_command.cpp
     src/migrate_command.cpp
     src/replay_command.cpp
@@ -53,6 +54,11 @@ target_link_libraries(context_cli PRIVATE context_merge)
 # in the CLI's public headers; only session_command.cpp / replay_command.cpp touch context_session.
 target_link_libraries(context_cli PRIVATE context_session)
 
+# M3 task 5 (issue #100): the R-SEC-005 engine-driven install path (src/editor/pkg/). PRIVATE —
+# install_command.h exposes only the contract Envelope, so no pkg type appears in the CLI's public
+# headers; only install_command.cpp touches context_editor_pkg.
+target_link_libraries(context_cli PRIVATE context_editor_pkg)
+
 # Self-contained GCC runtime for the CLI executables. context_cli uses std::filesystem (the
 # `context new` scaffolder), whose libstdc++ symbols live in a NEWER libstdc++-6.dll; on a MinGW
 # host a stale libstdc++-6.dll elsewhere on PATH can shadow the toolchain's and be loaded first,
@@ -76,6 +82,7 @@ set(_context_cli_tests
     test_bench_command
     test_cli
     test_editor_driver
+    test_pkg_command
     test_merge_command
     test_migrate_command
     test_scaffold
@@ -89,6 +96,12 @@ foreach(_t IN LISTS _context_cli_tests)
     target_include_directories(context_cli_${_t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     add_test(NAME cli-${_t} COMMAND context_cli_${_t})
 endforeach()
+
+# test_pkg_command (the `context install` verb) builds its fixtures (a ustar artifact + its real SRI)
+# with the pkg module's tar_write / sha512, so it links context_editor_pkg directly (PRIVATE in
+# context_cli, so its include path does not propagate through it). NB: the target is NOT named
+# *install* — a Windows UAC installer-detection trap (see editor/pkg/CMakeLists.txt).
+target_link_libraries(context_cli_test_pkg_command PRIVATE context_editor_pkg)
 
 # test_scaffold additionally asserts the scaffolded files are canonicalization fixpoints
 # (R-FILE-001 tool-save rule) AND that both templates validate clean against the registered engine

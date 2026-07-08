@@ -7,6 +7,7 @@
 #include "context/cli/daemon_command.h"
 #include "context/cli/editor_driver.h"
 #include "context/cli/fetch_command.h"
+#include "context/cli/install_command.h"
 #include "context/cli/merge_command.h"
 #include "context/cli/migrate_command.h"
 #include "context/cli/replay_command.h"
@@ -138,6 +139,13 @@ Envelope dispatch(const VerbSpec& verb, const std::vector<std::string>& position
         return run_session(verb.verb, bound, flags);
     if (verb.noun.empty() && verb.verb == "replay")
         return run_replay(bound, flags);
+
+    // M3 task 5 (issue #100): `context install` — the R-SEC-005 engine-driven install. Backed by
+    // src/editor/pkg/. --dry-run (core flag) is honored INSIDE the command (validate the plan +
+    // classify tiers, no fetch); the operational-only rejection below is bypassed because this is a
+    // STABLE one-shot verb (like `set`/`migrate`), not a daemon-served surface.
+    if (verb.noun.empty() && verb.verb == "install")
+        return run_install(flags);
 
     // `context resource read <handle> [<offset>:<length>]` (alias: `context fetch ...`) — the
     // R-CLI-017 large-result fetch. Drives a RUNNING daemon over the wire via the shared client

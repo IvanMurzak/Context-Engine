@@ -399,6 +399,41 @@ const std::vector<ErrorCode>& catalog()
          "The subscription id is not a live subscription on this daemon incarnation (never "
          "subscribed, already unsubscribed, or from a prior incarnation); re-subscribe.",
          false, kExitNotFound, "R-CLI-015"},
+        // --- M3 R-SEC-005 engine-driven install (issue #100) ------------------------------------
+        // The install-tier diagnostics the R-SEC-005 install path (src/editor/pkg/) emits by string
+        // (the codes are DEFINED there as context::editor::pkg::kInstall*Code / kConsentRequiredCode —
+        // the same promote-a-local-string pattern as runtime/ts's kTs*Code and bridge's
+        // scope.denied — so src/editor/pkg does not link this contract layer). The pin/integrity/
+        // completeness failures are deterministic validation-class refusals; the scripts-required
+        // native-tier gate + the reserved R-SEC-011 consent code are permission-class. Additive-only
+        // (protocolMajor stays 0): NEW rows appended at the END, no existing row reordered/renamed.
+        {"install.version_unpinned",
+         "An engine-driven install requires an exact pinned version; a dependency spec is a range, "
+         "dist-tag, or url (R-SEC-005). The install is refused, never floated.",
+         false, kExitValidation, "R-SEC-005"},
+        {"install.integrity_mismatch",
+         "A fetched package artifact's bytes did not match its lockfile integrity (SRI) hash, or the "
+         "SRI named no verifiable algorithm; the artifact is refused, never used with a warning "
+         "(verify-before-use, fail-closed — R-SEC-009).",
+         false, kExitValidation, "R-SEC-005"},
+        {"install.lockfile_incomplete",
+         "A dependency is missing from the lockfile, or a lock entry lacks an exact version / "
+         "integrity — the dependency graph is not fully pinned (incl. transitive), so the install is "
+         "refused fail-closed.",
+         false, kExitValidation, "R-SEC-005"},
+        {"install.scripts_required",
+         "The package declares an install lifecycle script, classifying it native-tier; engine-"
+         "driven installs never run lifecycle scripts (--ignore-scripts, all tiers), so it is refused "
+         "pending the L-49 consent gate (see consent_required).",
+         false, kExitPermission, "R-SEC-005"},
+        // The R-SEC-011 machine-readable consent-gate code, reserved from day one (the catalog is
+        // additive-only, so reserving the slot now keeps the v2 async park-and-resume protocol
+        // non-breaking). A bare retry cannot grant consent, so retriable=false (like scope.denied).
+        {"consent_required",
+         "A native-tier / build+install action was requested without the needed grant; it returns "
+         "this machine-readable code (carrying the requested scope + an approval ref) and resumes the "
+         "same idempotency-keyed op once granted out-of-band (R-SEC-011).",
+         false, kExitPermission, "R-SEC-011"},
     };
     return the_catalog;
 }

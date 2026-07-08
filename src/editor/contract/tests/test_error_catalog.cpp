@@ -143,5 +143,34 @@ int main()
         CHECK(entry->origin == "R-CLI-015");
     }
 
+    // --- R-SEC-005 engine-driven install codes (issue #100) --------------------------------------
+    // Additive-only new rows (NOT on the frozen v0 baseline). The pin/integrity/completeness refusals
+    // are deterministic validation-class; the native-tier scripts gate + the reserved R-SEC-011
+    // consent code are permission-class. These strings are the source-of-truth in
+    // src/editor/pkg/codes.h (context::editor::pkg::kInstall*Code / kConsentRequiredCode).
+    {
+        for (const char* code :
+             {"install.version_unpinned", "install.integrity_mismatch", "install.lockfile_incomplete"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 5);     // validation class
+            CHECK(entry->retriable == false); // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-SEC-005");
+        }
+
+        const ErrorCode* scripts = find_code("install.scripts_required");
+        CHECK(scripts != nullptr);
+        CHECK(scripts->exit_code == 6);      // permission class (native-tier consent gate)
+        CHECK(scripts->retriable == false);  // a bare retry cannot grant consent
+        CHECK(scripts->origin == "R-SEC-005");
+
+        const ErrorCode* consent = find_code("consent_required");
+        CHECK(consent != nullptr);
+        CHECK(consent->exit_code == 6);      // permission class
+        CHECK(consent->retriable == false);  // a bare retry cannot grant; resume is out-of-band (v2)
+        CHECK(consent->origin == "R-SEC-011");
+    }
+
     CONTRACT_TEST_MAIN_END();
 }
