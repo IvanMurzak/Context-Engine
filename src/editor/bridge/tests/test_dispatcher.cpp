@@ -190,5 +190,74 @@ int main()
         CHECK(session.attached); // the attach still took effect
     }
 
+    // --- dispatch(): R-CLI-015 subscription protocol served against the live stream --------------
+    {
+        EventStream stream("inc-disp");
+        Dispatcher d(&stream);
+        Session sess;
+        sess.attached = true;
+        sess.scopes = ScopeSet::read_query(); // subscribe/ack/unsubscribe are read-baseline methods
+
+        stream.publish("files", Json::object()); // seq 1
+
+        // subscribe -> {subId, snapshot} (snapshot-then-delta).
+        Json sub_params = Json::object();
+        Json topics = Json::array();
+        topics.push_back(Json(std::string("files")));
+        sub_params.set("topics", std::move(topics));
+        const Envelope sub = d.dispatch("subscribe", sub_params, sess);
+        CHECK(sub.ok());
+        CHECK(!sub.data().at("subId").as_string().empty());
+        CHECK(sub.data().at("snapshot").at("lastSeq").as_int() == 1);
+        const std::string sub_id = sub.data().at("subId").as_string();
+        CHECK(stream.subscription_count() == 1);
+
+        // ack -> advances the cursor; the daemon echoes the slowest-acked retention floor.
+        Json ack_params = Json::object();
+        ack_params.set("subId", Json(sub_id));
+        ack_params.set("seq", Json(1));
+        const Envelope ack = d.dispatch("ack", ack_params, sess);
+        CHECK(ack.ok());
+        CHECK(ack.data().at("slowestAckedSeq").as_int() == 1);
+
+        // FAILURE PATH: ack an unknown subId -> subscription.unknown_sub.
+        Json bad = Json::object();
+        bad.set("subId", Json(std::string("sub-nope")));
+        bad.set("seq", Json(1));
+        const Envelope bad_ack = d.dispatch("ack", bad, sess);
+        CHECK(!bad_ack.ok());
+        CHECK(bad_ack.error()->code == "subscription.unknown_sub");
+
+        // FAILURE PATH: unsubscribe with no subId -> usage.missing_argument.
+        const Envelope no_id = d.dispatch("unsubscribe", Json::object(), sess);
+        CHECK(!no_id.ok());
+        CHECK(no_id.error()->code == "usage.missing_argument");
+
+        // unsubscribe -> removed; the subscription is gone.
+        Json unsub = Json::object();
+        unsub.set("subId", Json(sub_id));
+        const Envelope removed = d.dispatch("unsubscribe", unsub, sess);
+        CHECK(removed.ok());
+        CHECK(removed.data().at("removed").as_bool());
+        CHECK(stream.subscription_count() == 0);
+    }
+
+    // --- handle(): subscribe over the JSON-RPC 2.0 wire -----------------------------------------
+    {
+        EventStream stream("inc-wire");
+        Dispatcher d(&stream);
+        Session session;
+        (void)d.handle(R"({"jsonrpc":"2.0","id":1,"method":"attach","params":{"protocolMajor":0,)"
+                       R"("capabilities":[],"scope":"read"}})",
+                       session);
+        const std::string resp = d.handle(
+            R"({"jsonrpc":"2.0","id":2,"method":"subscribe","params":{"topics":["files"]}})",
+            session);
+        const Json parsed = Json::parse(resp);
+        CHECK(parsed.contains("result"));
+        CHECK(parsed.at("result").at("ok").as_bool());
+        CHECK(!parsed.at("result").at("data").at("subId").as_string().empty());
+    }
+
     BRIDGE_TEST_MAIN_END();
 }

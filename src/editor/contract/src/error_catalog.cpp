@@ -389,6 +389,16 @@ const std::vector<ErrorCode>& catalog()
          "Authored TypeScript threw at runtime; the diagnostic carries a TS-source-mapped stack "
          "trace (authored .ts position, not the transpiled JS position).",
          false, kExitValidation, "R-OBS-005"},
+        // --- M3 subscription protocol (issue #98, R-CLI-015) ------------------------------------
+        // The event-stream subscription methods' one failure class: unsubscribe/ack named a subId
+        // that is not a live subscription on this daemon incarnation (never subscribed, already
+        // unsubscribed, or from a prior incarnation). Deterministic (retriable=false) — re-subscribe
+        // to obtain a fresh subId + snapshot. Additive-only (protocolMajor stays 0): a NEW row at the
+        // END, no existing row reordered/renamed.
+        {"subscription.unknown_sub",
+         "The subscription id is not a live subscription on this daemon incarnation (never "
+         "subscribed, already unsubscribed, or from a prior incarnation); re-subscribe.",
+         false, kExitNotFound, "R-CLI-015"},
     };
     return the_catalog;
 }

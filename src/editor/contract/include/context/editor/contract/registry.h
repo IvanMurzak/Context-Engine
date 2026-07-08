@@ -77,11 +77,16 @@ struct VerbSpec
     [[nodiscard]] std::string key() const;
 };
 
-// An advertised event topic (R-BRIDGE-008 core set; statically described per R-CLI-013/014).
+// An advertised event topic (R-BRIDGE-008 core set; runtime-discoverable per R-CLI-013/014). Each
+// topic carries its event-type PAYLOAD SCHEMA so a client can enumerate not just which topics exist
+// but what every event on a topic carries (R-CLI-014). `name` may be namespaced (`<ns>:<topic>`) for
+// a package-contributed topic (R-CLI-007 namespace rule), which then appears in introspection
+// automatically through the same register_topic() seam the engine topics use.
 struct TopicSpec
 {
     std::string name;
     std::string description;
+    Json payload_schema; // the event-payload schema for this topic (fields + their types)
 };
 
 // One registered authored file kind (R-CLI-005 / R-DATA-006): the kind id, its schema version,
@@ -118,6 +123,10 @@ public:
     // Look a file kind up by its id ("ctx:scene"). nullptr when absent.
     [[nodiscard]] const FileKindSpec* find_file_kind(const std::string& id) const;
 
+    // Look an event topic up by its (possibly namespaced) name ("files", "mypkg:combat"). nullptr
+    // when absent. Enumeration parity with find_file_kind (R-CLI-014).
+    [[nodiscard]] const TopicSpec* find_topic(const std::string& name) const;
+
     // Look a verb up by its (ns, noun, verb) triple. nullptr when absent.
     [[nodiscard]] const VerbSpec* find_verb(const std::string& ns, const std::string& noun,
                                             const std::string& verb) const;
@@ -138,6 +147,11 @@ private:
     // The R-CLI-005 registration mechanism: engine kinds call this from the constructor; live
     // package add/remove re-registration arrives with the package system.
     void register_file_kind(FileKindSpec spec);
+    // The R-CLI-014 event-topic registration seam (parity with register_file_kind): the engine core
+    // topics register from the constructor; package-contributed namespaced topics join at runtime
+    // through the SAME mechanism as the package ecosystem lands, so `describe` enumerates whatever is
+    // registered without a second source of truth. A re-registration of the same name replaces it.
+    void register_topic(TopicSpec spec);
     std::vector<FlagSpec> core_flags_;
     std::vector<VerbSpec> verbs_;
     std::vector<TopicSpec> topics_;
