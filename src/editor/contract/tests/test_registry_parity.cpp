@@ -178,6 +178,22 @@ int main()
         CHECK(pkg->cli_command() == "context package add");
         CHECK(pkg->rpc_method == "package.add");
         CHECK(pkg->mcp_tool == "context_package_add");
+
+        // The R-SEC-005 engine-driven install verb (issue #100): a global, implemented, STABLE verb
+        // whose rpc_method / mcp_tool are projected from the one registry (CLI ≡ RPC ≡ MCP parity).
+        const VerbSpec* install = reg.find_verb("", "", "install");
+        CHECK(install != nullptr);
+        CHECK(install->cli_command() == "context install");
+        CHECK(install->rpc_method == "install");
+        CHECK(install->mcp_tool == "context_install");
+        CHECK(install->implemented);
+        CHECK(install->stability == "stable");
+        // Its verb-specific flags (--source, --production) are declared beyond the core set.
+        bool saw_source = false;
+        for (const FlagSpec& f : install->flags)
+            if (f.name == "source")
+                saw_source = true;
+        CHECK(saw_source);
     }
 
     // --- core flags: --after-hash is LIVE, --atomic-plan is grammar-reserved (R-CLI-011) --------

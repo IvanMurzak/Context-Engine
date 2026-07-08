@@ -127,6 +127,19 @@ target_link_libraries(context_ts_test_stack_trace PRIVATE context_ts context_war
 target_link_options(context_ts_test_stack_trace PRIVATE ${_ctx_ts_gcc_static})
 add_test(NAME ts-test_stack_trace COMMAND context_ts_test_stack_trace)
 
+# 1c) R-SEC-005 end-to-end (issue #100): an engine-INSTALLED pure-JS package resolves + imports in
+# the TS host. Installs a fixture package via context_editor_pkg (the R-SEC-005 install path) then
+# bundles an authored .ts entry importing it through esbuild — proving node module-resolution finds
+# the installed package. A LOCAL gate (esbuild is a subprocess; no V8 link). Links context_editor_pkg
+# (the install path) alongside context_ts; needs the staged esbuild path define. NB: the target is
+# NOT named *install* — a Windows UAC installer-detection trap (see editor/pkg/CMakeLists.txt).
+add_executable(context_ts_test_pkg_resolve tests/test_pkg_resolve.cpp)
+target_link_libraries(context_ts_test_pkg_resolve
+    PRIVATE context_ts context_editor_pkg context_warnings)
+target_compile_definitions(context_ts_test_pkg_resolve PRIVATE ${_ctx_ts_test_defs})
+target_link_options(context_ts_test_pkg_resolve PRIVATE ${_ctx_ts_gcc_static})
+add_test(NAME ts-test_pkg_resolve COMMAND context_ts_test_pkg_resolve)
+
 # 2) Authored TS runs in the V8 host, host<->TS both ways — links context_js. CI-only for its V8
 # path: mirror runtime/js's _ctx_js_v8 gate EXACTLY so the two agree leg-for-leg (real V8 only on
 # Win-x64-MSVC / macOS-ARM64 / Linux-x64; the local Strawberry-GCC Windows dev gate builds the js

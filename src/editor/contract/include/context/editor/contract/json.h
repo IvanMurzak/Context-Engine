@@ -75,6 +75,11 @@ public:
     [[nodiscard]] std::size_t size() const noexcept;
     [[nodiscard]] const Json& at(std::size_t index) const noexcept;
 
+    // Enumerate an object's members in insertion order (empty for a non-object). Lets a consumer
+    // walk a map-shaped object whose KEYS are data — e.g. the R-SEC-005 lockfile's `packages` map,
+    // keyed by install path. A read-only projection of the underlying member vector.
+    [[nodiscard]] const std::vector<std::pair<std::string, Json>>& object_members() const noexcept;
+
     // Mutation. set() upgrades null->object; push_back() upgrades null->array. Re-setting an
     // existing key overwrites in place (preserving its position).
     void set(std::string key, Json value);

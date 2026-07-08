@@ -318,6 +318,16 @@ add_subdirectory(runtime/session)
 # generate time regardless of add_subdirectory order).
 add_subdirectory(runtime/js)
 
+# M3 task 5: the R-SEC-005 engine-driven install path (src/editor/pkg/, issue #100) — the security
+# envelope for the TS scripting tier's npm installs: pinned-version + lockfile-integrity enforcement
+# (incl. transitive), scripts-requiring -> native-tier L-49 consent gate, and extract-without-scripts
+# (--ignore-scripts, structural). Stdlib-only crypto (no license-gate dependency). OWN stanza — apart
+# from the editor cluster + the exit-gate block below — so it never collides at the file tail
+# (consumers name the `context_editor_pkg` target, resolved at generate time regardless of
+# add_subdirectory order). Placed BEFORE runtime/ts so context_editor_pkg exists for the ts tier's
+# install-resolves-in-the-host integration test link.
+add_subdirectory(editor/pkg)
+
 # M3 task 2b-i: the TypeScript toolchain (src/runtime/ts/, issue #83 / L-61 / R-LANG-002/004) —
 # the build half of the M3 TS scripting tier. Transpiles + bundles authored .ts into a JS module
 # the runtime/js V8 host evaluates, over the SHA-pinned esbuild prebuilt channel

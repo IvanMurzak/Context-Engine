@@ -51,6 +51,12 @@ std::size_t Json::size() const noexcept
     return 0;
 }
 
+const std::vector<std::pair<std::string, Json>>& Json::object_members() const noexcept
+{
+    static const std::vector<std::pair<std::string, Json>> empty;
+    return type_ == Type::object ? obj_ : empty;
+}
+
 const Json& Json::at(std::size_t index) const noexcept
 {
     if (type_ == Type::array && index < arr_.size())

@@ -453,6 +453,32 @@ Registry::Registry()
          {"right", "path", true, "The divergent run/artifact to triage against the baseline."}},
         /*flags=*/{}, /*implemented=*/false));
 
+    // --- M3 task 5: the R-SEC-005 engine-driven install verb (issue #100) -----------------------
+    // A global, one-shot STABLE verb (served by the CLI like `set`/`migrate`/`new`, not the daemon):
+    // resolve the project's package.json against its package-lock.json, enforce pinned versions +
+    // lockfile integrity (incl. transitive), fetch + SRI-verify each artifact, and extract WITHOUT
+    // running any lifecycle script (--ignore-scripts, all tiers). A scripts-requiring package is
+    // classified native-tier and trips the L-49 consent gate (fail-closed). Registered in the ONE
+    // registry so the CLI ≡ RPC ≡ MCP ≡ introspection parity holds by construction (R-CLI-009); its
+    // rpc_method `install` + mcp_tool `context_install` are projected automatically. Inserted at the
+    // END of the stable block (before the operational surface) so a future sibling insertion merges
+    // cleanly. Additive-only — protocolMajor stays 0.
+    verbs_.push_back(make_verb(
+        "", "", "install",
+        "Engine-driven package install (R-SEC-005): resolve the project's package.json against its "
+        "package-lock.json, enforce pinned versions + lockfile integrity incl. transitive deps, "
+        "fetch + verify each artifact, and extract WITHOUT running any lifecycle script "
+        "(--ignore-scripts, all trust tiers). A package that requires install scripts is classified "
+        "native-tier and trips the L-49 consent gate (fail-closed).",
+        /*params=*/{},
+        /*flags=*/
+        {{"source", "path",
+          "Offline artifact-cache directory the verified installer fetches package archives from "
+          "(v1 has no live-registry fetcher; the TLS/gzip registry source is a tracked seam).",
+          false},
+         {"production", "bool", "Install only non-dev dependencies (omit devDependencies).", false}},
+        /*implemented=*/true));
+
     // --- the OPERATIONAL daemon-driver surface (R-CLI-009 honesty) ------------------------------
     // These RPC methods are genuinely served by a live daemon's method backend (KernelServer) — the
     // cross-process analogue of `context editor smoke`. They are registered here so
