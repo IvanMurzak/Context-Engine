@@ -8,10 +8,13 @@
 // error classes (ts.transpile_failed / ts.bundle_failed) surfaced through the R-CLI-008 codes.
 // The separate test_ts_in_v8.cpp (CI-only) proves the emitted JS actually runs in the V8 host.
 
+#include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <optional>
 #include <string>
 
+#include "context/runtime/ts/source_map.h"
 #include "context/runtime/ts/ts_toolchain.h"
 
 namespace tstest
@@ -171,6 +174,88 @@ static void test_missing_input_is_a_diagnostic()
     CHECK(r.diagnostics[0].code == std::string(cts::kTsTranspileFailedCode));
 }
 
+// The R-OBS-005 foundation, end-to-end and LOCAL: esbuild emits a Source Map v3, source_map.h
+// parses THAT REAL map (not a hand-crafted one), and a generated position resolves back to an
+// authored .ts source. This proves the whole "TS -> JS + map -> resolve" round trip on the local
+// dev gate; feeding the map a live V8 throw's stack is the CI-only leg (test_ts_in_v8.cpp).
+static void test_sourcemap_emission_round_trips()
+{
+    std::string err;
+    std::unique_ptr<cts::TsToolchain> tc = cts::createEsbuildToolchain(kEsbuild, err);
+    CHECK(tc != nullptr);
+    if (!tc)
+    {
+        return;
+    }
+    cts::TranspileOptions opts;
+    opts.bundle = true;
+    opts.format = cts::ModuleFormat::Iife;
+    opts.sourcemap = true; // <-- the new flag under test
+    cts::TranspileResult r = tc->transpile(example("game.ts"), opts);
+    CHECK(r.ok);
+    CHECK(r.diagnostics.empty());
+    CHECK(!r.js.empty());
+    // esbuild appends the external-map reference comment to the JS.
+    CHECK(contains(r.js, "sourceMappingURL="));
+    // The map is populated (empty for a non-sourcemap transpile — see the guard test below).
+    CHECK(!r.sourceMap.empty());
+    CHECK(contains(r.sourceMap, "\"version\": 3") || contains(r.sourceMap, "\"version\":3"));
+
+    std::optional<cts::SourceMap> map = cts::SourceMap::parse(r.sourceMap, &err);
+    CHECK(map.has_value());
+    if (!map.has_value())
+    {
+        std::fprintf(stderr, "esbuild map parse error: %s\n", err.c_str());
+        return;
+    }
+    // The bundle's sources include the authored .ts (game.ts, and util.ts because --bundle inlined
+    // it). We only assert one authored .ts source is present (paths are relative to the outfile).
+    bool sawTs = false;
+    for (const std::string& s : map->sources())
+    {
+        if (s.size() >= 3 && s.substr(s.size() - 3) == ".ts")
+        {
+            sawTs = true;
+        }
+    }
+    CHECK(sawTs);
+
+    // At least one generated position in the emitted bundle resolves back to an authored .ts
+    // position — the source-mapped-end-to-end proof against a REAL esbuild map. Scan a bounded grid
+    // (the IIFE bundle is small) and stop at the first hit.
+    bool resolvedToTs = false;
+    for (std::uint32_t line = 0; line < 64 && !resolvedToTs; ++line)
+    {
+        for (std::uint32_t col = 0; col < 200 && !resolvedToTs; ++col)
+        {
+            std::optional<cts::OriginalPosition> p = map->resolve(line, col);
+            if (p.has_value() && p->source.size() >= 3 &&
+                p->source.substr(p->source.size() - 3) == ".ts")
+            {
+                resolvedToTs = true;
+            }
+        }
+    }
+    CHECK(resolvedToTs);
+}
+
+// Guard: the default (sourcemap=false) transpile emits NO map (backward-compatible with 2b-i).
+static void test_no_sourcemap_by_default()
+{
+    std::string err;
+    std::unique_ptr<cts::TsToolchain> tc = cts::createEsbuildToolchain(kEsbuild, err);
+    CHECK(tc != nullptr);
+    if (!tc)
+    {
+        return;
+    }
+    cts::TranspileOptions opts; // sourcemap defaults false
+    cts::TranspileResult r = tc->transpile(example("util.ts"), opts);
+    CHECK(r.ok);
+    CHECK(r.sourceMap.empty());
+    CHECK(!contains(r.js, "sourceMappingURL="));
+}
+
 int main()
 {
     test_available_and_version();
@@ -179,6 +264,8 @@ int main()
     test_transpile_error_surfaces_catalog_code();
     test_bundle_error_surfaces_bundle_code();
     test_missing_input_is_a_diagnostic();
+    test_sourcemap_emission_round_trips();
+    test_no_sourcemap_by_default();
     if (tstest::g_failures == 0)
     {
         std::printf("ts toolchain: all checks passed\n");

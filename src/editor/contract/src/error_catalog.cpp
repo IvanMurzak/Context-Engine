@@ -374,6 +374,21 @@ const std::vector<ErrorCode>& catalog()
          "The TypeScript entrypoint could not be bundled (an unresolved import or transform "
          "error); see the diagnostic text.",
          false, kExitValidation, "R-LANG-002"},
+        // The RUN-tier sibling of the two build-tier codes above (task 4b, R-OBS-005): authored
+        // TypeScript threw at runtime in the V8 host. The diagnostic is designed to carry a
+        // TS-source-mapped stack trace (src/runtime/ts/stack_trace.cpp remaps the raw V8 JS stack
+        // through the esbuild-emitted Source Map v3) so the failing authored .ts position — not the
+        // transpiled JS position — is what a caller surfaces in this envelope + headless CLI output.
+        // This PR lands the FOUNDATION: the code is REGISTERED (additive-only, so the stable string
+        // is frozen now) and the remap library + the V8 host's error.stack capture are complete and
+        // tested; the production emit-path that composes THIS envelope from a caught V8 runtime throw
+        // is the deferred follow-up (the same split as the interactive CDP-attach half). Deterministic
+        // w.r.t. a bare retry (retriable=false): the same inputs re-throw. Additive-only (protocolMajor
+        // stays 0): a NEW row at the END. The toolchain owns the STRING as ts::kTsRuntimeErrorCode.
+        {"ts.runtime_error",
+         "Authored TypeScript threw at runtime; the diagnostic carries a TS-source-mapped stack "
+         "trace (authored .ts position, not the transpiled JS position).",
+         false, kExitValidation, "R-OBS-005"},
     };
     return the_catalog;
 }

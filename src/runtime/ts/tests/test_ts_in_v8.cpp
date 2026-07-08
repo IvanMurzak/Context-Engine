@@ -13,7 +13,11 @@
 #include <memory>
 #include <string>
 
+#include <optional>
+
 #include "context/runtime/js/js_host.h"
+#include "context/runtime/ts/source_map.h"
+#include "context/runtime/ts/stack_trace.h"
 #include "context/runtime/ts/ts_toolchain.h"
 
 namespace tsv8
@@ -66,6 +70,29 @@ std::string bundleGame(std::string& err)
         err = r.diagnostics.empty() ? "bundle failed" : r.diagnostics.front().message;
         return {};
     }
+    return r.js;
+}
+
+// Bundle the throwing entrypoint WITH a Source Map v3 — the R-OBS-005 fixture. Returns the JS in
+// the return value and the map JSON via `mapOut`.
+std::string bundleThrowing(std::string& err, std::string& mapOut)
+{
+    std::unique_ptr<cts::TsToolchain> tc = cts::createEsbuildToolchain(kEsbuild, err);
+    if (!tc)
+    {
+        return {};
+    }
+    cts::TranspileOptions opts;
+    opts.bundle = true;
+    opts.format = cts::ModuleFormat::Iife;
+    opts.sourcemap = true;
+    cts::TranspileResult r = tc->transpile(kExamples + "/throwing.ts", opts);
+    if (!r.ok)
+    {
+        err = r.diagnostics.empty() ? "bundle failed" : r.diagnostics.front().message;
+        return {};
+    }
+    mapOut = r.sourceMap;
     return r.js;
 }
 
@@ -125,9 +152,43 @@ int main()
     CHECK(engine->callFunction(update, args0, 1, &out, err));
     CHECK(out == 107.0);
 
+    // 5) R-OBS-005 source-mapped-end-to-end: an authored-TS throw's V8 JS stack remaps back to the
+    //    AUTHORED throwing.ts position (not the transpiled bundle position). This is the headline
+    //    "TS-resolved stack traces in headless output" proof, on a REAL V8 stack + a REAL esbuild
+    //    map (the local gate proves the remap logic on canned inputs; this proves it live).
+    {
+        std::string throwErr;
+        std::string mapJson;
+        const std::string throwingJs = bundleThrowing(throwErr, mapJson);
+        CHECK(!throwingJs.empty());
+        CHECK(!mapJson.empty());
+
+        std::unique_ptr<cjs::JsEngine> throwEngine = cjs::createV8Engine(throwErr);
+        CHECK(throwEngine != nullptr);
+        if (throwEngine != nullptr)
+        {
+            // detonate("kaboom") runs at module load -> the eval throws; err carries the JS stack
+            // (v8_engine.cpp describe() now returns error.stack, with the JS frames).
+            std::string stack;
+            const bool ranOk = throwEngine->eval(throwingJs, nullptr, stack);
+            CHECK(!ranOk);
+            CHECK(!stack.empty());
+
+            std::optional<cts::SourceMap> map = cts::SourceMap::parse(mapJson, &throwErr);
+            CHECK(map.has_value());
+            if (map.has_value())
+            {
+                const std::string tsTrace = cts::resolve_ts_stack(stack, *map, "Error: kaboom");
+                // At least one JS frame resolved back to the authored throwing.ts source.
+                CHECK(tsTrace.find("throwing.ts") != std::string::npos);
+            }
+        }
+    }
+
     if (tsv8::g_failures == 0)
     {
-        std::printf("ts-in-v8: authored TS transpiled + ran in V8; host<->TS both ways OK\n");
+        std::printf("ts-in-v8: authored TS transpiled + ran in V8; host<->TS both ways + "
+                    "TS-source-mapped stack trace OK\n");
     }
     return tsv8::g_failures == 0 ? 0 : 1;
 }
@@ -147,6 +208,16 @@ int main()
     CHECK(!cjs::v8BackendAvailable());
     std::unique_ptr<cjs::JsEngine> engine = cjs::createV8Engine(err);
     CHECK(engine == nullptr);
+
+    // The R-OBS-005 source-map EMISSION half is locally exercisable (esbuild runs here): the
+    // throwing fixture bundles WITH a Source Map v3 that source_map.h parses. The live V8 remap of
+    // an actual throw is the CI-only leg above.
+    std::string mapJson;
+    const std::string throwingJs = bundleThrowing(err, mapJson);
+    CHECK(!throwingJs.empty());
+    CHECK(!mapJson.empty());
+    std::optional<cts::SourceMap> map = cts::SourceMap::parse(mapJson, &err);
+    CHECK(map.has_value());
 
     if (tsv8::g_failures == 0)
     {

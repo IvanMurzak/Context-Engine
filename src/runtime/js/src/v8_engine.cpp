@@ -480,6 +480,22 @@ private:
 
     std::string describe(v8::Local<v8::Context> context, const v8::TryCatch& tryCatch)
     {
+        // Prefer the exception's FULL stack trace (V8's error.stack = "Error: msg\n    at f
+        // (script:line:col)\n..."), so the R-OBS-005 TS-source-map remapper (runtime/ts
+        // stack_trace) sees the raw JS frames and can resolve them to authored .ts positions. The
+        // stack's first line already carries the message, so returning it does not lose the
+        // message. Fall back to the bare message when no stack is attached — a SyntaxError from
+        // Script::Compile, or a thrown non-Error primitive (`throw 42`) carries no `.stack`.
+        v8::Local<v8::Value> stack;
+        if (tryCatch.StackTrace(context).ToLocal(&stack) && !stack.IsEmpty() && stack->IsString())
+        {
+            v8::String::Utf8Value utf8Stack(isolate_, stack);
+            if (*utf8Stack != nullptr)
+            {
+                return *utf8Stack;
+            }
+        }
+
         v8::Local<v8::Value> ex = tryCatch.Exception();
         if (ex.IsEmpty())
         {

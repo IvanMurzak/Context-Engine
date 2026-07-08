@@ -62,7 +62,14 @@ else()
 endif()
 
 # --- the toolchain driver -----------------------------------------------------------------------
-add_library(context_ts STATIC src/esbuild_toolchain.cpp)
+# esbuild_toolchain.cpp = the transpile/bundle + sourcemap-emission driver (subprocess); source_map
+# .cpp + stack_trace.cpp = the STL-only, V8-free R-OBS-005 half (parse a Source Map v3, remap a raw
+# V8 stack to authored .ts positions). All three build on EVERY toolchain (no V8 link), so their
+# ctests are LOCAL gates.
+add_library(context_ts STATIC
+    src/esbuild_toolchain.cpp
+    src/source_map.cpp
+    src/stack_trace.cpp)
 target_include_directories(context_ts PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # Every Context target links the warnings-as-errors baseline (conventions.md).
 target_link_libraries(context_ts PRIVATE context_warnings)
@@ -98,12 +105,27 @@ set(_ctx_ts_test_defs
     "CONTEXT_ESBUILD_PATH=\"${_ctx_esbuild_bin}\""
     "CONTEXT_TS_EXAMPLES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/examples\"")
 
-# 1) Transpile/bundle in isolation — a LOCAL gate (esbuild is a subprocess, links no V8).
+# 1) Transpile/bundle + sourcemap emission in isolation — a LOCAL gate (esbuild is a subprocess,
+# links no V8). Now also round-trips esbuild's REAL Source Map v3 through source_map.h.
 add_executable(context_ts_test_ts_toolchain tests/test_ts_toolchain.cpp)
 target_link_libraries(context_ts_test_ts_toolchain PRIVATE context_ts context_warnings)
 target_compile_definitions(context_ts_test_ts_toolchain PRIVATE ${_ctx_ts_test_defs})
 target_link_options(context_ts_test_ts_toolchain PRIVATE ${_ctx_ts_gcc_static})
 add_test(NAME ts-test_ts_toolchain COMMAND context_ts_test_ts_toolchain)
+
+# 1a) Source Map v3 parser + resolver — a LOCAL gate (no V8, no esbuild needed at runtime; the
+# hand-encoded VLQ maps are inline). The R-OBS-005 mapping foundation.
+add_executable(context_ts_test_source_map tests/test_source_map.cpp)
+target_link_libraries(context_ts_test_source_map PRIVATE context_ts context_warnings)
+target_link_options(context_ts_test_source_map PRIVATE ${_ctx_ts_gcc_static})
+add_test(NAME ts-test_source_map COMMAND context_ts_test_source_map)
+
+# 1b) TS-resolved stack-trace remapper — a LOCAL gate (parses a canned V8 stack + remaps through a
+# known map; no V8 link). The "headless CI still needs symbolicated traces" half of R-OBS-005.
+add_executable(context_ts_test_stack_trace tests/test_stack_trace.cpp)
+target_link_libraries(context_ts_test_stack_trace PRIVATE context_ts context_warnings)
+target_link_options(context_ts_test_stack_trace PRIVATE ${_ctx_ts_gcc_static})
+add_test(NAME ts-test_stack_trace COMMAND context_ts_test_stack_trace)
 
 # 2) Authored TS runs in the V8 host, host<->TS both ways — links context_js. CI-only for its V8
 # path: mirror runtime/js's _ctx_js_v8 gate EXACTLY so the two agree leg-for-leg (real V8 only on
