@@ -51,11 +51,21 @@ struct TsDiagnostic
 // bridge::kScopeDeniedCode uses, so runtime/ts does not link the editor/contract layer.
 inline constexpr std::string_view kTsTranspileFailedCode = "ts.transpile_failed";
 inline constexpr std::string_view kTsBundleFailedCode = "ts.bundle_failed";
+// A RUNTIME throw from authored TypeScript running in the V8 host (R-OBS-005): the diagnostic
+// carries a TS-source-mapped stack trace (stack_trace.h / source_map.h) so the failing authored
+// .ts position — not the transpiled JS position — surfaces in the R-CLI-008 envelope + headless CLI
+// output. The transpile/bundle codes above are BUILD-tier; this one is the RUN-tier sibling.
+inline constexpr std::string_view kTsRuntimeErrorCode = "ts.runtime_error";
 
 struct TranspileOptions
 {
     bool bundle = false;                       // resolve + inline imports (esbuild --bundle)
     ModuleFormat format = ModuleFormat::Esm;   // esbuild --format
+    // Emit a Source Map v3 alongside the JS (esbuild --sourcemap). When true and the transpile
+    // succeeds, TranspileResult::sourceMap holds the map JSON — the R-OBS-005 foundation that lets
+    // a runtime throw's JS stack be remapped back to authored .ts positions (source_map.h). The
+    // emitted JS also carries esbuild's trailing `//# sourceMappingURL=` comment.
+    bool sourcemap = false;
 };
 
 // The result of a transpile/bundle. On success `ok == true` and `js` holds the emitted module;
@@ -65,6 +75,9 @@ struct TranspileResult
 {
     bool ok = false;
     std::string js;
+    // The Source Map v3 JSON, populated only when TranspileOptions::sourcemap was set AND the
+    // transpile succeeded; empty otherwise. Parse it with SourceMap::parse (source_map.h).
+    std::string sourceMap;
     std::vector<TsDiagnostic> diagnostics;
 };
 

@@ -159,6 +159,7 @@ public:
         const fs::path tmp = fs::temp_directory_path();
         const std::string stem = uniqueStem();
         const fs::path outFile = tmp / (stem + ".js");
+        const fs::path mapFile = tmp / (stem + ".js.map"); // esbuild external-map path = <outfile>.map
         const fs::path errFile = tmp / (stem + ".err");
 
         std::string cmd = q(binaryPath_) + " " + q(tsFilePath);
@@ -168,12 +169,26 @@ public:
         }
         cmd += std::string(" --format=") + formatFlag(opts.format);
         cmd += " --log-level=warning";
-        cmd += " >" + q(outFile.string()) + " 2>" + q(errFile.string());
+        if (opts.sourcemap)
+        {
+            // External sourcemap needs an --outfile (esbuild writes <outfile> + <outfile>.map and
+            // appends the trailing `//# sourceMappingURL=` comment to the JS). We read both files
+            // back; stderr still carries diagnostics.
+            cmd += " --sourcemap --outfile=" + q(outFile.string());
+            cmd += " 2>" + q(errFile.string());
+        }
+        else
+        {
+            // No map: esbuild writes the JS module to stdout, which we redirect to outFile.
+            cmd += " >" + q(outFile.string()) + " 2>" + q(errFile.string());
+        }
 
         const int rc = runShell(cmd);
         const std::string js = slurp(outFile);
+        const std::string mapJson = opts.sourcemap ? slurp(mapFile) : std::string{};
         const std::string diag = rstrip(slurp(errFile));
         fs::remove(outFile, ec);
+        fs::remove(mapFile, ec);
         fs::remove(errFile, ec);
 
         if (rc != 0)
@@ -193,6 +208,7 @@ public:
 
         result.ok = true;
         result.js = js;
+        result.sourceMap = mapJson;
         return result;
     }
 

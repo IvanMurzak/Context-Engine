@@ -121,5 +121,16 @@ int main()
         }
     }
 
+    // --- R-OBS-005 TS runtime-error code (task 4b, issue #94) — the RUN-tier sibling of the two
+    // build-tier codes above. Additive-only new row (NOT on the frozen v0 baseline). It carries the
+    // TS-source-mapped stack trace for an authored-TS throw in the V8 host.
+    {
+        const ErrorCode* entry = find_code("ts.runtime_error");
+        CHECK(entry != nullptr);
+        CHECK(entry->exit_code == 5);      // validation class
+        CHECK(entry->retriable == false);  // deterministic — a bare retry re-throws
+        CHECK(entry->origin == "R-OBS-005");
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

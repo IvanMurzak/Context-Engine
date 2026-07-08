@@ -13,12 +13,23 @@ authoring (R-LANG-010) is task 2b-ii; the zero-copy view protocol (R-LANG-009) i
 - **`createEsbuildToolchain`** — the esbuild backend factory.
 - `transpile(tsFilePath, opts)` — transpile a `.ts` file to a JS module; `opts.bundle`
   resolves + inlines its imports, `opts.format` picks the module wrapper (`Iife` self-executes
-  at eval — the shape the V8 host runs; `Esm` emits bare `export`s).
+  at eval — the shape the V8 host runs; `Esm` emits bare `export`s); `opts.sourcemap` emits a
+  **Source Map v3** alongside the JS (`TranspileResult::sourceMap`) — the R-OBS-005 foundation.
 - Transpile/bundle **diagnostics** carrying stable **R-CLI-008 catalog codes**
   (`ts.transpile_failed` / `ts.bundle_failed`) so a CLI/RPC caller branches on the failure
-  class without parsing text.
+  class without parsing text; plus the RUN-tier `ts.runtime_error` code (R-OBS-005) an authored-TS
+  throw surfaces through, carrying a TS-source-mapped stack trace.
+- **`SourceMap`** (`include/context/runtime/ts/source_map.h`) — a Source Map v3 parser + resolver
+  (base64-VLQ mappings, `sources`/`names`) that maps a GENERATED `(line, column)` in the bundle
+  back to the authored `(source, line, column, name)`. STL-only, no V8 — a **LOCAL gate**.
+- **`stack_trace`** (`include/context/runtime/ts/stack_trace.h`) — `parse_v8_stack` /
+  `remap_stack` / `render_stack` / `resolve_ts_stack`: turn a raw V8 error `.stack` string into a
+  **TS-resolved** trace (authored `.ts` positions) for the R-CLI-008 envelope + headless CLI
+  output. Also STL-only, so the whole "JS stack → TS positions" path is locally testable.
 - Authored-TS **examples** (`examples/game.ts` + `examples/util.ts`) — a gameplay entrypoint
-  that exercises the host↔TS boundary **both ways**, used by the tests.
+  that exercises the host↔TS boundary **both ways**; plus `examples/throwing.ts` — a throw-at-load
+  fixture whose V8 stack remaps back to authored TS (the R-OBS-005 end-to-end proof). Used by the
+  tests.
 
 ## Supply chain — SHA-pinned esbuild prebuilt
 
@@ -77,3 +88,13 @@ both ways, green on 3 OS*. The following are intentionally left as clean seams:
   authored TS imports (with `--ignore-scripts`, lockfile-integrity, SHA pins) is a separate
   supply-chain surface. Task 2b-i bundles only first-party project `.ts` (esbuild `--bundle` over
   local imports); it installs nothing.
+- **Interactive CDP inspector attach + source-mapped breakpoints** (R-OBS-005, the debugger half):
+  task 4b lands the source-map + TS-resolved-stack-trace FOUNDATION (this package's `source_map` /
+  `stack_trace` + the `ts.runtime_error` code + the V8 host capturing `error.stack`). Wiring V8's
+  in-box CDP inspector (`v8-inspector.h`; the `V8InspectorSeam` stub in `runtime/js`) through
+  EditorKernel over a WebSocket/CDP transport — so a standard CDP client (Chrome DevTools / VS Code
+  js-debug) attaches and hits a source-mapped breakpoint in authored `.ts` — is the **split-out
+  follow-up** (issue #94's remaining core). It needs a NEW rusty_v8 extern-C shim for the
+  STL-crossing `V8Inspector::create` (see `runtime/js/src/inspector_seam.h` / `v8_rust_stubs.cpp`),
+  which links only under the 3-OS CI V8 legs — none of it is buildable on the local GCC gate, so it
+  is deliberately its own PR rather than folded in here. **Follow-up task.**
