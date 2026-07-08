@@ -1,0 +1,31 @@
+src/editor/schedule/src/schedule.cpp
+  s_681c0f86b30b64::t_7387804856714f 109-112
+  s_681c0f86b30b64::t_837fdaa13d6406 7
+  s_681c0f86b30b64::t_04a8a9772384c2 207,221-229,231-233,235-261,263,265-279
+  s_681c0f86b30b64::t_a0036823694166 188-200
+  s_681c0f86b30b64::t_afd0e01b99f550 285,287-290,292
+src/editor/schedule/include/context/editor/schedule/schedule.h
+  s_681c0f86b30b64::t_daf2482b682673 90-94
+  s_681c0f86b30b64::t_fd01a49df724ee 172-177
+  s_681c0f86b30b64::t_18496195a3b74e 187-191,195-198
+src/editor/schedule/tests/test_schedule.cpp
+  s_681c0f86b30b64::t_e211899138f5a1 23
+  s_681c0f86b30b64::t_d451fa22c62ca1 466-573
+  s_681c0f86b30b64::t_91a5d16b530296 608-609
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4030e46de0313348b8e7bf4785270d6589b6b21e",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
