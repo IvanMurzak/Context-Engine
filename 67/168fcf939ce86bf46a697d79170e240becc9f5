@@ -1,0 +1,34 @@
+src/runtime/ts/src/source_map.cpp
+  s_681c0f86b30b64::t_0fe247fd8e9218 422-428,430,432-433
+  s_681c0f86b30b64::t_4ee50d6d04c010 185-188,190-193,203,205
+  s_681c0f86b30b64::t_92b4eb53664666 292,313
+  s_681c0f86b30b64::t_e33f0cfa02a07b 13
+  s_681c0f86b30b64::t_85b72557368b1e 221-225
+src/runtime/ts/src/esbuild_toolchain.cpp
+  s_681c0f86b30b64::t_8bd6a27c6493b6 191-194
+src/editor/contract/src/error_catalog.cpp
+  s_681c0f86b30b64::t_852256f62fb45e 378-387
+src/runtime/ts/include/context/runtime/ts/ts_toolchain.h
+  s_681c0f86b30b64::t_827df10c351d4a 54-59
+src/runtime/ts/README.md
+  s_681c0f86b30b64::t_ac8f5d670bd58c 20-22
+src/runtime/ts/tests/test_source_map.cpp
+  s_681c0f86b30b64::t_faca977f00c9c1 14
+  s_681c0f86b30b64::t_22eafde56b5b86 194-223,231-232
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "67168fcf939ce86bf46a697d79170e240becc9f5",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
