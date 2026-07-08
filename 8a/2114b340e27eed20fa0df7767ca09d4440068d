@@ -1,0 +1,21 @@
+docs/self-hosted-runners.md
+  s_681c0f86b30b64::t_72a285d909af04 1-126
+tools/setup-self-hosted-runner.ps1
+  s_681c0f86b30b64::t_81c611baa71dd4 1-198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8a2114b340e27eed20fa0df7767ca09d4440068d",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
