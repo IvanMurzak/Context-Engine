@@ -139,6 +139,13 @@ std::optional<std::vector<TarEntry>> tar_read(std::string_view archive)
         entry.path = prefix.empty() ? name : prefix + "/" + name;
         entry.is_dir = (type == '5');
 
+        // A directory entry carries no body; a non-zero declared size is malformed. The body
+        // consumption below only advances `offset` for a file, so a directory claiming a body would
+        // leave those bytes to be misread as the next header — desyncing the parse of untrusted
+        // input. Reject fail-closed (matching tar.h's "truncated header/body -> nullopt" contract).
+        if (entry.is_dir && size != 0)
+            return std::nullopt;
+
         if (!entry.is_dir && size > 0)
         {
             if (offset + size > archive.size())

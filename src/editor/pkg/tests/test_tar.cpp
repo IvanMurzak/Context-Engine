@@ -87,5 +87,43 @@ int main()
     // A full-block of non-ustar garbage IS rejected (bad magic).
     CHECK(!tar_read(std::string(512, 'Z')).has_value());
 
+    // Fail-closed: a directory entry ('5') that declares a NON-ZERO body size is malformed — the
+    // reader neither consumes nor skips the phantom body, so leaving it would let those bytes be
+    // misread as the next header (a parse desync). Forge such a header by hand (valid ustar magic +
+    // recomputed checksum so it survives the magic/checksum gates and reaches the type/size logic)
+    // and assert tar_read rejects it rather than accepting a bogus zero-body directory.
+    {
+        std::string block(512, '\0');
+        block[0] = 'd'; // name "d/"
+        block[1] = '/';
+        // size field [124,136): 11 octal digits + NUL. 512 == 01000 octal.
+        const std::string size_octal = "00000001000";
+        for (std::size_t i = 0; i < size_octal.size(); ++i)
+            block[124 + i] = size_octal[i];
+        block[124 + 11] = '\0';
+        block[156] = '5'; // typeflag: directory
+        const std::string magic = "ustar";
+        for (std::size_t i = 0; i < magic.size(); ++i)
+            block[257 + i] = magic[i];
+        block[262] = '\0';
+        block[263] = '0'; // version "00"
+        block[264] = '0';
+        // Checksum [148,156): field taken as 8 spaces, sum unsigned, then 6 octal digits + NUL + ' '.
+        for (std::size_t i = 0; i < 8; ++i)
+            block[148 + i] = ' ';
+        unsigned sum = 0;
+        for (std::size_t i = 0; i < block.size(); ++i)
+            sum += static_cast<unsigned char>(block[i]);
+        for (int i = 5; i >= 0; --i)
+        {
+            block[148 + i] = static_cast<char>('0' + (sum & 7u));
+            sum >>= 3;
+        }
+        block[154] = '\0';
+        block[155] = ' ';
+        const std::string forged = block + std::string(1024, '\0'); // + two terminating zero blocks
+        CHECK(!tar_read(forged).has_value());
+    }
+
     PKG_TEST_MAIN_END();
 }
