@@ -115,34 +115,6 @@ std::string fromStringView(const v8_inspector::StringView& v)
     return out;
 }
 
-// Describe a caught exception, preferring the full error.stack (so the same TS-source-map remapper
-// runtime/ts uses can resolve the JS frames). Mirrors v8_engine.cpp's describe().
-std::string describe(v8::Isolate* isolate, v8::Local<v8::Context> context,
-                     const v8::TryCatch& tryCatch)
-{
-    v8::Local<v8::Value> stack;
-    if (tryCatch.StackTrace(context).ToLocal(&stack) && !stack.IsEmpty() && stack->IsString())
-    {
-        v8::String::Utf8Value utf8Stack(isolate, stack);
-        if (*utf8Stack != nullptr)
-        {
-            return *utf8Stack;
-        }
-    }
-    v8::Local<v8::Value> ex = tryCatch.Exception();
-    if (ex.IsEmpty())
-    {
-        return "<no exception>";
-    }
-    v8::Local<v8::String> str;
-    if (!ex->ToString(context).ToLocal(&str))
-    {
-        return "<unprintable exception>";
-    }
-    v8::String::Utf8Value utf8(isolate, str);
-    return *utf8 != nullptr ? *utf8 : "<utf8 conversion failed>";
-}
-
 // The embedder-side CDP channel: every response + notification V8 produces is forwarded to the
 // session's sink. Owned by the session; the sink pointer stays valid for its lifetime.
 class ChannelImpl final : public v8_inspector::V8Inspector::Channel
@@ -277,44 +249,9 @@ public:
 
     bool run(std::string_view code, std::string_view resourceName, std::string& err) override
     {
-        v8::Isolate::Scope isolateScope(isolate_);
-        v8::HandleScope handleScope(isolate_);
-        v8::Local<v8::Context> context = context_.Get(isolate_);
-        v8::Context::Scope contextScope(context);
-        v8::TryCatch tryCatch(isolate_);
-
-        v8::Local<v8::String> src;
-        if (!v8::String::NewFromUtf8(isolate_, code.data(), v8::NewStringType::kNormal,
-                                     static_cast<int>(code.size()))
-                 .ToLocal(&src))
-        {
-            err = "source string allocation failed";
-            return false;
-        }
-        v8::Local<v8::String> resource;
-        if (!v8::String::NewFromUtf8(isolate_, resourceName.data(), v8::NewStringType::kNormal,
-                                     static_cast<int>(resourceName.size()))
-                 .ToLocal(&resource))
-        {
-            err = "resource-name string allocation failed";
-            return false;
-        }
-        // A ScriptOrigin carrying the resource name = the CDP script URL Debugger.setBreakpointByUrl
-        // targets and Debugger.scriptParsed reports.
-        v8::ScriptOrigin origin(resource);
-        v8::Local<v8::Script> script;
-        if (!v8::Script::Compile(context, src, &origin).ToLocal(&script))
-        {
-            err = describe(isolate_, context, tryCatch);
-            return false;
-        }
-        v8::Local<v8::Value> result;
-        if (!script->Run(context).ToLocal(&result))
-        {
-            err = describe(isolate_, context, tryCatch);
-            return false;
-        }
-        return true;
+        // Shares the compile+run skeleton with V8Engine::eval; the non-empty resourceName attaches
+        // the ScriptOrigin (CDP script URL) and no numeric result is extracted.
+        return compileAndRun(isolate_, context_, code, resourceName, nullptr, err);
     }
 
     ~SessionImpl() override
@@ -346,6 +283,97 @@ private:
 };
 
 } // namespace
+
+// Describe a caught exception, preferring the full error.stack (so the same TS-source-map remapper
+// runtime/ts uses can resolve the JS frames), falling back to the bare message / stringified
+// non-Error primitive. Shared by V8Engine::eval (which delegates its own describe() member here)
+// and compileAndRun below.
+std::string describeException(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                             const v8::TryCatch& tryCatch)
+{
+    v8::Local<v8::Value> stack;
+    if (tryCatch.StackTrace(context).ToLocal(&stack) && !stack.IsEmpty() && stack->IsString())
+    {
+        v8::String::Utf8Value utf8Stack(isolate, stack);
+        if (*utf8Stack != nullptr)
+        {
+            return *utf8Stack;
+        }
+    }
+    v8::Local<v8::Value> ex = tryCatch.Exception();
+    if (ex.IsEmpty())
+    {
+        return "<no exception>";
+    }
+    v8::Local<v8::String> str;
+    if (!ex->ToString(context).ToLocal(&str))
+    {
+        return "<unprintable exception>";
+    }
+    v8::String::Utf8Value utf8(isolate, str);
+    return *utf8 != nullptr ? *utf8 : "<utf8 conversion failed>";
+}
+
+bool compileAndRun(v8::Isolate* isolate, const v8::Global<v8::Context>& contextGlobal,
+                   std::string_view code, std::string_view resourceName, double* numResult,
+                   std::string& err)
+{
+    v8::Isolate::Scope isolateScope(isolate);
+    v8::HandleScope handleScope(isolate);
+    v8::Local<v8::Context> context = contextGlobal.Get(isolate);
+    v8::Context::Scope contextScope(context);
+    v8::TryCatch tryCatch(isolate);
+
+    v8::Local<v8::String> src;
+    if (!v8::String::NewFromUtf8(isolate, code.data(), v8::NewStringType::kNormal,
+                                 static_cast<int>(code.size()))
+             .ToLocal(&src))
+    {
+        err = "source string allocation failed";
+        return false;
+    }
+
+    v8::Local<v8::Script> script;
+    if (resourceName.empty())
+    {
+        if (!v8::Script::Compile(context, src).ToLocal(&script))
+        {
+            err = describeException(isolate, context, tryCatch);
+            return false;
+        }
+    }
+    else
+    {
+        v8::Local<v8::String> resource;
+        if (!v8::String::NewFromUtf8(isolate, resourceName.data(), v8::NewStringType::kNormal,
+                                     static_cast<int>(resourceName.size()))
+                 .ToLocal(&resource))
+        {
+            err = "resource-name string allocation failed";
+            return false;
+        }
+        // A ScriptOrigin carrying the resource name = the CDP script URL Debugger.setBreakpointByUrl
+        // targets and Debugger.scriptParsed reports.
+        v8::ScriptOrigin origin(resource);
+        if (!v8::Script::Compile(context, src, &origin).ToLocal(&script))
+        {
+            err = describeException(isolate, context, tryCatch);
+            return false;
+        }
+    }
+
+    v8::Local<v8::Value> result;
+    if (!script->Run(context).ToLocal(&result))
+    {
+        err = describeException(isolate, context, tryCatch);
+        return false;
+    }
+    if (numResult != nullptr && result->IsNumber())
+    {
+        *numResult = result.As<v8::Number>()->Value();
+    }
+    return true;
+}
 
 std::unique_ptr<InspectorSession> createInspectorSession(v8::Isolate* isolate,
                                                          const v8::Global<v8::Context>& context,

@@ -8,6 +8,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "context/runtime/js/js_engine.h"
 
@@ -15,12 +16,33 @@ namespace v8
 {
 class Isolate;
 class Context;
+class TryCatch;
+template <class T>
+class Local;
 template <class T>
 class Global;
 } // namespace v8
 
 namespace context::runtime::js::detail
 {
+
+// Describe a caught exception as a diagnostic string, preferring the full error.stack (so the
+// R-OBS-005 TS-source-map remapper sees the raw JS frames and can resolve them to authored .ts
+// positions) and falling back to the bare message / stringified non-Error primitive. Shared by
+// V8Engine::eval and the inspector session's run(); requires an active Isolate + Context scope at
+// the call site (both callers hold one).
+std::string describeException(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                              const v8::TryCatch& tryCatch);
+
+// Compile `code` and run it in `context` (the engine's own Global handle). Establishes the
+// Isolate / Handle / Context scopes internally. When `resourceName` is non-empty it is attached as
+// the ScriptOrigin — the CDP script URL Debugger.setBreakpointByUrl targets and
+// Debugger.scriptParsed reports; when empty no origin is attached. When `numResult` is non-null and
+// the result is numeric it is written there. Returns false + fills `err` (via describeException) on
+// a compile or run failure. Shared by V8Engine::eval and InspectorSession::run.
+bool compileAndRun(v8::Isolate* isolate, const v8::Global<v8::Context>& context,
+                   std::string_view code, std::string_view resourceName, double* numResult,
+                   std::string& err);
 
 // Build a CDP inspector session over `isolate` + `context` (the engine's own handles). Returns
 // nullptr + fills `err` on failure (V8Inspector::connect returning null). The returned session
