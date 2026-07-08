@@ -201,16 +201,40 @@ public:
 
     bool init(std::string& err)
     {
+        // MATERIALIZE the isolate's debug subsystem BEFORE wiring the inspector — the actual fix for
+        // the attach-time SEGV (isolate-level, NOT context-level: entering an Isolate/Handle/Context
+        // scope, done below, is necessary for the handle ops but does NOT create the Debug object).
+        //
+        // V8's V8InspectorImpl constructor (invoked from V8Inspector::create) runs, in its body,
+        // v8::debug::SetIsolateId(isolate, ...) -> isolate->debug()->SetIsolateId(id). On this
+        // rusty_v8 prebuilt the isolate's Debug object is NOT allocated eagerly by Isolate::New; it
+        // is created lazily the first time a script is compiled/run on the isolate. Our attach path
+        // (attachInspector on an engine that has only done Context::New) targets a BARE isolate that
+        // has never compiled a script, so isolate->debug() is still null and SetIsolateId writes
+        // isolate_id_ through a null Debug — the ASan "SEGV 0x100" (null base + field offset). Every
+        // canonical rusty_v8 inspector consumer (Deno bootstraps JS; d8 runs scripts) attaches only
+        // AFTER JS has run, so none of them hit this. Compiling+running a trivial script here forces
+        // V8 down its debug-aware compile path, which lazily instantiates isolate->debug() before
+        // V8Inspector::create dereferences it. (An earlier fix that only added a Context::Scope was
+        // disproven — it never materializes Debug.) The rusty_v8 host is CI-only-buildable, so this
+        // is verified on the 3-OS + sanitize CI legs, not the local Strawberry-GCC stub gate.
+        {
+            std::string warmErr;
+            if (!compileAndRun(isolate_, context_, "0", {}, nullptr, warmErr))
+            {
+                err = "failed to materialize the isolate debug subsystem before inspector attach: " +
+                      warmErr;
+                return false;
+            }
+        }
+
         v8::Isolate::Scope isolateScope(isolate_);
         v8::HandleScope handleScope(isolate_);
         v8::Local<v8::Context> context = context_.Get(isolate_);
-        // Enter the engine's context BEFORE wiring the inspector. V8Inspector::create installs the
-        // isolate's console + debug delegates and materializes the per-context debug state that
-        // contextCreated/connect then register against; on a fresh isolate whose context has never
-        // been entered, that debug state is absent and V8's own V8InspectorImpl constructor
-        // dereferences it (crashing inside v8::debug::SetIsolateId). Every other V8-touching method
-        // in this file (dispatch/run, and V8Engine's eval/getFunction/...) already enters a
-        // Context::Scope; init() must too — it is the R-OBS-005 attach seam's precondition.
+        // Enter the engine's context so the V8Inspector::create / contextCreated / connect handle
+        // operations below run against a live, entered context (matching dispatch()/run() and
+        // V8Engine's eval/getFunction/...). Still required — just not, by itself, sufficient: the
+        // Debug object it operates against is what the warm-up above materialized.
         v8::Context::Scope contextScope(context);
 
         client_ = std::make_unique<ClientImpl>(isolate_, &context_, &pump_);
