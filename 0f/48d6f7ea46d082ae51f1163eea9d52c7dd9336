@@ -1,0 +1,26 @@
+src/runtime/ts/src/stack_trace.cpp
+  s_681c0f86b30b64::t_f29c95d2b1d66c 96-99,102
+src/runtime/ts/src/source_map.cpp
+  s_681c0f86b30b64::t_4a8d3c9115bcb0 582-588
+src/runtime/ts/tests/test_stack_trace.cpp
+  s_681c0f86b30b64::t_2180771764ed18 75-91
+  s_681c0f86b30b64::t_d7c62703e95283 192
+src/runtime/ts/tests/test_source_map.cpp
+  s_681c0f86b30b64::t_9360bc7b5f1620 165-169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0f48d6f7ea46d082ae51f1163eea9d52c7dd9336",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
