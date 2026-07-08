@@ -1,0 +1,59 @@
+src/runtime/session/src/session.cpp
+  s_681c0f86b30b64::t_074db6321c9e9e 182,187-191,197
+src/runtime/session/src/triage.cpp
+  s_681c0f86b30b64::t_50ab6f961a0168 1-245,252,256-317
+  s_681c0f86b30b64::t_f39493c120e932 246-251,253-255
+src/runtime/session/tests/test_triage.cpp
+  s_681c0f86b30b64::t_601265a5fe0ef9 1-205
+src/cli/tests/test_determinism_command.cpp
+  s_681c0f86b30b64::t_fe81dad7248d57 1-112
+src/cli/tests/test_session_command.cpp
+  s_681c0f86b30b64::t_99eeba33b42d62 112-114,116,118
+src/runtime/session/include/context/runtime/session/triage.h
+  s_681c0f86b30b64::t_cce16512fb4110 74-79
+  s_681c0f86b30b64::t_c0e747a8e8192d 71-73
+  s_681c0f86b30b64::t_3f1ca7da543383 80-82
+  s_ee28dacd50f68b::t_6a660a19895c69 1-70,83-106
+src/editor/contract/src/registry.cpp
+  s_681c0f86b30b64::t_fc677f44ae5a9c 447-452,454-456
+src/cli/src/determinism_command.cpp
+  s_681c0f86b30b64::t_72499aec7edc69 1-107
+src/cli/src/app.cpp
+  s_681c0f86b30b64::t_ef575dfcd6344f 8
+  s_681c0f86b30b64::t_80ac07b4acc2cd 144-149
+src/runtime/session/include/context/runtime/session/session.h
+  s_681c0f86b30b64::t_0596b83d7f022e 107-122,160
+src/cli/include/context/cli/determinism_command.h
+  s_681c0f86b30b64::t_2d728206f7abf9 1-22
+src/cli/CMakeLists.txt
+  s_681c0f86b30b64::t_64add3b41ca699 102-106
+  s_681c0f86b30b64::t_44967bdcf0bb46 85
+  s_681c0f86b30b64::t_07949f22000a6b 13
+src/runtime/session/CMakeLists.txt
+  s_681c0f86b30b64::t_006690d515badf 16-17
+  s_681c0f86b30b64::t_e98ab81025a2c5 53-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b024a6acc44d92f698d0c883df9d6012500ff235",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_ee28dacd50f68b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ab08c987287215f01",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
