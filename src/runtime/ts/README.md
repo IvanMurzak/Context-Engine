@@ -17,8 +17,9 @@ authoring (R-LANG-010) is task 2b-ii; the zero-copy view protocol (R-LANG-009) i
   **Source Map v3** alongside the JS (`TranspileResult::sourceMap`) — the R-OBS-005 foundation.
 - Transpile/bundle **diagnostics** carrying stable **R-CLI-008 catalog codes**
   (`ts.transpile_failed` / `ts.bundle_failed`) so a CLI/RPC caller branches on the failure
-  class without parsing text; plus the RUN-tier `ts.runtime_error` code (R-OBS-005) an authored-TS
-  throw surfaces through, carrying a TS-source-mapped stack trace.
+  class without parsing text; plus the RUN-tier `ts.runtime_error` code (R-OBS-005) **registered**
+  for an authored-TS throw's TS-source-mapped stack trace (the emit-path that composes the envelope
+  is the deferred follow-up — see § Deferred seams).
 - **`SourceMap`** (`include/context/runtime/ts/source_map.h`) — a Source Map v3 parser + resolver
   (base64-VLQ mappings, `sources`/`names`) that maps a GENERATED `(line, column)` in the bundle
   back to the authored `(source, line, column, name)`. STL-only, no V8 — a **LOCAL gate**.

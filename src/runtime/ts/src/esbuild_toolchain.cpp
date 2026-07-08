@@ -188,7 +188,10 @@ public:
         const std::string mapJson = opts.sourcemap ? slurp(mapFile) : std::string{};
         const std::string diag = rstrip(slurp(errFile));
         fs::remove(outFile, ec);
-        fs::remove(mapFile, ec);
+        if (opts.sourcemap)
+        {
+            fs::remove(mapFile, ec); // only requested (and only created) when a source map was asked for
+        }
         fs::remove(errFile, ec);
 
         if (rc != 0)

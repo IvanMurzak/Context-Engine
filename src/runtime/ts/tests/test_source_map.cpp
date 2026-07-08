@@ -11,6 +11,7 @@
 // A=0 B=1 C=2 D=3 E=4 ... K=10 ... U=20 ... a=26 ... e=30 ...; a VLQ value is zig-zag encoded
 // (value*2, sign in the LSB) then base64-split low-5-bits-first with 0x20 as the continuation bit.
 
+#include <cstddef>
 #include <cstdio>
 #include <optional>
 #include <string>
@@ -190,6 +191,36 @@ static void test_ignores_extra_fields()
     }
 }
 
+static void test_deeply_nested_extra_field_fails_closed()
+{
+    // A pathologically deep EXTRANEOUS field ("x") must FAIL CLOSED (parse returns nullopt) via the
+    // reader's skip-depth guard rather than driving the mutually-recursive skipValue/skipContainer
+    // into a native-stack overflow. The four required fields parse first; then "x"'s deeply nested
+    // array trips the guard. Without the guard this input would crash the process (stack overflow).
+    std::string deep = R"({"version":3,"sources":[],"names":[],"mappings":"","x":)";
+    const int depth = 512; // well past kMaxSkipDepth (64)
+    deep.append(static_cast<std::size_t>(depth), '[');
+    deep.append(static_cast<std::size_t>(depth), ']');
+    deep.push_back('}');
+    std::string err;
+    std::optional<cts::SourceMap> map = cts::SourceMap::parse(deep, &err);
+    CHECK(!map.has_value());
+    CHECK(!err.empty());
+}
+
+static void test_overlong_vlq_fails_closed()
+{
+    // A VLQ with too many continuation sextets would, at shift 60, left-shift a non-zero 5-bit chunk
+    // into the int64 sign bit — signed-overflow UB. The decoder must FAIL CLOSED (parse nullopt).
+    // "ggggggggggggI" = 12 continuation sextets (char 'g' = base64 32: continuation bit set, payload
+    // 0) followed by a terminal 'I' (base64 8) at shift 60, so the old code's `8 << 60` overflowed.
+    std::string err;
+    std::optional<cts::SourceMap> map = cts::SourceMap::parse(
+        R"({"version":3,"sources":[],"names":[],"mappings":"ggggggggggggI"})", &err);
+    CHECK(!map.has_value());
+    CHECK(!err.empty());
+}
+
 int main()
 {
     test_parse_and_resolve();
@@ -197,6 +228,8 @@ int main()
     test_empty_mappings();
     test_malformed_inputs();
     test_ignores_extra_fields();
+    test_deeply_nested_extra_field_fails_closed();
+    test_overlong_vlq_fails_closed();
     if (smtest::g_failures != 0)
     {
         std::fprintf(stderr, "test_source_map: %d CHECK(s) failed\n", smtest::g_failures);

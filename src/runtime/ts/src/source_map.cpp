@@ -10,6 +10,7 @@
 #include "context/runtime/ts/source_map.h"
 
 #include <cstddef>
+#include <limits>
 
 namespace context::runtime::ts
 {
@@ -181,9 +182,15 @@ public:
     }
 
     // Structurally skip the next JSON value (object/array/string/number/bool/null), keeping the
-    // reader in sync so following fields still parse.
-    bool skipValue()
+    // reader in sync so following fields still parse. `depth` bounds the mutual recursion with
+    // skipContainer so a pathologically nested extraneous value fails closed (per the reader's
+    // "neither throws; both fail-closed" contract) instead of overflowing the native stack.
+    bool skipValue(int depth = 0)
     {
+        if (depth > kMaxSkipDepth)
+        {
+            return fail();
+        }
         const char c = peek();
         switch (c)
         {
@@ -193,9 +200,9 @@ public:
             return parseString(scratch);
         }
         case '{':
-            return skipContainer('{', '}');
+            return skipContainer('{', '}', depth);
         case '[':
-            return skipContainer('[', ']');
+            return skipContainer('[', ']', depth);
         case 't':
             return skipLiteral("true");
         case 'f':
@@ -211,6 +218,11 @@ public:
     }
 
 private:
+    // Bounds skipValue/skipContainer mutual recursion. A real Source Map v3 document nests its
+    // skipped fields only a few levels deep; 64 is far above any legitimate map yet well below the
+    // native-stack limit, so a pathological value fails closed instead of overflowing the stack.
+    static constexpr int kMaxSkipDepth = 64;
+
     bool fail()
     {
         ok_ = false;
@@ -277,7 +289,7 @@ private:
         return true;
     }
 
-    bool skipContainer(char open, char close)
+    bool skipContainer(char open, char close, int depth = 0)
     {
         if (!expect(open))
         {
@@ -298,7 +310,7 @@ private:
                     return false;
                 }
             }
-            if (!skipValue())
+            if (!skipValue(depth + 1))
             {
                 return false;
             }
@@ -407,12 +419,18 @@ bool decodeVlq(std::string_view s, std::size_t& pos, std::int64_t& out)
         ++pos;
         any = true;
         continuation = (digit & 0x20) != 0;
-        result += static_cast<std::int64_t>(digit & 0x1F) << shift;
-        shift += 5;
-        if (shift > 63)
+        const std::int64_t chunk = static_cast<std::int64_t>(digit & 0x1F);
+        // Fail closed on a malformed/adversarial overlong VLQ rather than invoking signed
+        // left-shift UB: at shift 60 a non-zero 5-bit chunk shifted into (or past) the int64 sign
+        // bit is undefined behaviour, and `shift >= 64` would make the headroom shift itself UB.
+        // VLQ chunks occupy disjoint 5-bit windows, so bounding this chunk against the remaining
+        // int64 headroom bounds the accumulated value. (Real esbuild maps never reach shift 60.)
+        if (shift >= 63 || chunk > (std::numeric_limits<std::int64_t>::max() >> shift))
         {
-            return false; // overflow guard
+            return false;
         }
+        result += chunk << shift;
+        shift += 5;
     }
     if (!any)
     {

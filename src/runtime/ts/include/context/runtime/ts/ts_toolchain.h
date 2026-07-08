@@ -51,10 +51,12 @@ struct TsDiagnostic
 // bridge::kScopeDeniedCode uses, so runtime/ts does not link the editor/contract layer.
 inline constexpr std::string_view kTsTranspileFailedCode = "ts.transpile_failed";
 inline constexpr std::string_view kTsBundleFailedCode = "ts.bundle_failed";
-// A RUNTIME throw from authored TypeScript running in the V8 host (R-OBS-005): the diagnostic
-// carries a TS-source-mapped stack trace (stack_trace.h / source_map.h) so the failing authored
-// .ts position — not the transpiled JS position — surfaces in the R-CLI-008 envelope + headless CLI
-// output. The transpile/bundle codes above are BUILD-tier; this one is the RUN-tier sibling.
+// A RUNTIME throw from authored TypeScript running in the V8 host (R-OBS-005): the diagnostic is
+// designed to carry a TS-source-mapped stack trace (stack_trace.h / source_map.h) so the failing
+// authored .ts position — not the transpiled JS position — is surfaced in the R-CLI-008 envelope +
+// headless CLI output. This PR registers the code and lands the remap library (the FOUNDATION); the
+// production path that composes this envelope from a caught V8 runtime throw is the deferred
+// follow-up. The transpile/bundle codes above are BUILD-tier; this one is the RUN-tier sibling.
 inline constexpr std::string_view kTsRuntimeErrorCode = "ts.runtime_error";
 
 struct TranspileOptions
