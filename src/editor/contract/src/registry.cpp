@@ -444,14 +444,16 @@ Registry::Registry()
 
     verbs_.push_back(make_verb(
         "", "determinism", "diff",
-        "Triage a determinism divergence between two runs/artifacts (R-QA-005): replay-bisect to the "
-        "first divergent tick, diff the first divergent system, and report (tick, system, entity, "
-        "componentField). RESERVED — the hierarchical-hash trace it consumes ships now; the "
-        "auto-triage backing lands in the follow-up split.",
+        "Triage a determinism divergence between two replay artifacts (R-QA-005 / L-54): "
+        "replay-bisect the two per-tick root-hash ladders to the first divergent tick, walk that "
+        "tick's per-system hashes to the first divergent system, and attribute the divergence to a "
+        "concrete (entity, component field) by diffing that system's post-run world state — "
+        "reporting (tick, system, entity, componentField). Also flags when the two runs were not the "
+        "same seed/input (an input-driven difference, not a determinism bug).",
         /*params=*/
-        {{"left", "path", true, "The baseline run/artifact."},
-         {"right", "path", true, "The divergent run/artifact to triage against the baseline."}},
-        /*flags=*/{}, /*implemented=*/false));
+        {{"left", "path", true, "The baseline replay artifact."},
+         {"right", "path", true, "The replay artifact to triage against the baseline."}},
+        /*flags=*/{}, /*implemented=*/true));
 
     // --- M3 task 5: the R-SEC-005 engine-driven install verb (issue #100) -----------------------
     // A global, one-shot STABLE verb (served by the CLI like `set`/`migrate`/`new`, not the daemon):

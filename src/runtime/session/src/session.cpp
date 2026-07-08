@@ -179,15 +179,22 @@ StepResult Session::step(std::uint64_t ticks)
         HashTree tree;
         tree.tick = tick;
         StateHash last; // full hierarchical hash after the most recent system ran
+        std::size_t system_index = 0;
         for (const System& sys : systems_)
         {
             SystemContext ctx{world_, rng_, tick, inputs, *registry_};
             sys.run(ctx);
+            // The per-system observer sees the world right after this system ran — the same instant
+            // the trace hashes it — so the determinism triage can snapshot a divergent system's exact
+            // post-run state (R-QA-005). Read-only: it must not touch the world.
+            if (system_observer_)
+                system_observer_(tick, system_index, sys.name, world_);
             if (trace_enabled_)
             {
                 last = hash_world(world_, *registry_);
                 tree.per_system.push_back(SystemHash{sys.name, last.root});
             }
+            ++system_index;
         }
         ++sim_tick_;
 
