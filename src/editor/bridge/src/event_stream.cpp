@@ -227,7 +227,13 @@ Json EventStream::snapshot() const
 std::vector<Event> EventStream::replay_since(std::uint64_t since, bool& gapped) const
 {
     gapped = false;
-    if (!ring_.empty() && ring_.front().seq > since + 1)
+    if (ring_.empty())
+        // Slowest-acked retention (R-CLI-015) can drain the ring entirely while last_seq_ > 0 (every
+        // retained event acked by all live subscribers). A stale reconnect (since < last_seq_) then
+        // predates retention just as it does when the ring is non-empty: gap => fresh snapshot. Only
+        // `since == last_seq_` is genuinely caught-up (nothing after `since` existed to evict).
+        gapped = since < last_seq_;
+    else if (ring_.front().seq > since + 1)
         gapped = true; // events after `since` were already evicted — fresh snapshot needed
 
     std::vector<Event> out;

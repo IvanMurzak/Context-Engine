@@ -217,7 +217,11 @@ int main()
         CHECK(s.slowest_acked_seq() == 5);
         bool g2 = false;
         CHECK(s.replay_since(2, g2).empty()); // 3,4,5 released — no live subscriber still needs them
+        CHECK(g2); // a stale reconnect (since 2 < lastSeq 5) predates the fully-drained ring => gap
         CHECK(s.replay_since(4, g2).empty());
+        CHECK(g2); // since 4 < lastSeq 5 => the missed event 5 was released => gap => re-snapshot
+        CHECK(s.replay_since(5, g2).empty());
+        CHECK(!g2); // since == lastSeq 5: genuinely caught up, nothing evicted => NOT gapped
     }
 
     // --- FAILURE PATH: bounded per-subscription queue overflow -> gap marker + re-snapshot -------
