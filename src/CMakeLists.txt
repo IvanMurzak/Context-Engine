@@ -330,6 +330,19 @@ add_subdirectory(runtime/js)
 # so context_js exists for the integration test's link.
 add_subdirectory(runtime/ts)
 
+# M3 task 3b: the (query, executor) system model over the kernel World + derived TS accessor codegen
+# (src/editor/system/, issue #90 / R-LANG-009 / R-LANG-010 item 1 / R-LANG-002; Part of #88) — the M3
+# keystone that lets gameplay authored in TS mutate the shared World. Builds on the landed runSystemView
+# zero-copy view-lifetime gate (runtime/js, #89) + declarative component storage (editor/component, #87):
+# a system registers as a (query, executor) pair whose executor runs ONCE over zero-copy views of the
+# queried declared components, with typed derived TS accessors over those views. The library builds on
+# EVERY toolchain; only the keystone in-V8 ctest links context_js + context_ts (CI-only for its V8 path,
+# like runtime/ts's in-V8 test). OWN stanza — apart from the editor cluster + the exit-gate block below —
+# so it never collides at the file tail (consumers name the `context_system` target, resolved at generate
+# time regardless of add_subdirectory order). MUST follow add_subdirectory(runtime/js) + runtime/ts so
+# context_js / context_ts exist for the keystone test's link and the esbuild staging is available.
+add_subdirectory(editor/system)
+
 # ---------------------------------------------------------------------------
 # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36): five integration tests, one per exit
 # criterion, registered as the `m1-exit-*` ctest family and CI-gated per the §6 tiering (blocking
