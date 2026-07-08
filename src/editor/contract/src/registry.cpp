@@ -587,6 +587,32 @@ Registry::Registry()
         "Ask the daemon's serve loop to stop after replying. Requires the session_control scope.",
         /*params=*/{}, /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
 
+    // M3 task 4b (issue #94, R-OBS-005 / R-CLI-008 / L-61): the interactive TS-debug attach
+    // affordance — attach a standard CDP client (Chrome DevTools / VS Code js-debug) to the V8
+    // in-box inspector through EditorKernel, to set source-mapped breakpoints in authored TS and
+    // step. The IN-PROCESS CDP session core (runtime/js InspectorSession) + the source-mapped
+    // breakpoint resolution (runtime/ts) are BUILT and tested; this verb registers the CLI≡RPC≡MCP
+    // affordance in the ONE registry (R-CLI-009 honesty, so `context describe` reflects it and every
+    // surface is generated from here). The out-of-process TRANSPORT that binds this verb to a
+    // running daemon (a loopback/websocket CDP endpoint + a `/json` discovery target, or a DAP
+    // bridge) is the tracked follow-up on #94 — so the verb is registered `operational` (a live
+    // daemon serves it) and NOT-YET-implemented, exactly like `build`. Additive-only (protocolMajor
+    // stays 0): a NEW verb at the END, nothing reordered/renamed. The `--endpoint` flag is the
+    // reserved slot for the client's CDP transport address once the follow-up lands.
+    verbs_.push_back(make_verb(
+        "", "debug", "attach",
+        "Attach a Chrome DevTools Protocol (CDP) client to the V8 in-box inspector through "
+        "EditorKernel to set source-mapped breakpoints in authored TypeScript and step (R-OBS-005, "
+        "L-61: config, not a from-scratch debugger). The in-process session + source-mapped "
+        "breakpoint resolution are built; the out-of-process CDP transport is a tracked follow-up.",
+        /*params=*/{},
+        /*flags=*/
+        {{"endpoint", "string",
+          "Reserved: the CDP transport address the client connects to once the out-of-process "
+          "transport lands (a loopback/websocket endpoint). Inert until then.",
+          /*reserved=*/true}},
+        /*implemented=*/false, /*stability=*/"operational"));
+
     // The R-BRIDGE-008 core event topics, each with its event-payload SCHEMA (R-CLI-014 runtime
     // introspection). Registered through register_topic() — the same seam a package-contributed
     // NAMESPACED topic (`<ns>:<topic>`) joins through as the package ecosystem lands, so `describe`

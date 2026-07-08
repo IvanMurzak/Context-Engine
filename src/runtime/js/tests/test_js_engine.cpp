@@ -11,8 +11,10 @@
 // keeping the local non-dependency gate green.
 
 #include <cstdio>
+#include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "context/runtime/js/js_host.h"
 
@@ -417,6 +419,108 @@ static void test_view_no_bindings()
     CHECK(n == 1.0);
 }
 
+// --- R-OBS-005 interactive CDP inspector attach (issue #94) --------------------------------------
+
+namespace
+{
+// True if any collected CDP message contains `needle` (a coarse substring probe — the JSON here is
+// V8's own compact serialization, so a method/field literal is unambiguous).
+bool anyContains(const std::vector<std::string>& msgs, const char* needle)
+{
+    for (const std::string& m : msgs)
+    {
+        if (m.find(needle) != std::string::npos)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+} // namespace
+
+// Attach a CDP session, feed a couple of protocol commands, and confirm responses flow back through
+// the sink — the inspector attach/dispatch/detach lifecycle (the seam a standard CDP client uses).
+static void test_inspector_attach_lifecycle()
+{
+    std::string err;
+    std::unique_ptr<cjs::JsEngine> engine = cjs::createV8Engine(err);
+    CHECK(engine != nullptr);
+    if (!engine)
+    {
+        return;
+    }
+    std::unique_ptr<cjs::InspectorSession> session = engine->attachInspector(err);
+    CHECK(session != nullptr);
+    if (!session)
+    {
+        std::fprintf(stderr, "attachInspector failed: %s\n", err.c_str());
+        return;
+    }
+
+    std::vector<std::string> msgs;
+    session->onMessage([&msgs](std::string_view m) { msgs.emplace_back(m); });
+
+    // Runtime.enable + Debugger.enable each get an id-tagged response; Debugger.enable also emits a
+    // scriptParsed-class stream once a script is parsed (exercised in the pause test below).
+    CHECK(session->dispatch(R"({"id":1,"method":"Runtime.enable"})", err));
+    CHECK(session->dispatch(R"({"id":2,"method":"Debugger.enable"})", err));
+    CHECK(!msgs.empty());
+    CHECK(anyContains(msgs, "\"id\":1"));
+    CHECK(anyContains(msgs, "\"id\":2"));
+
+    // An empty message is rejected before it reaches V8 (a malformed non-JSON is reported by V8 as a
+    // CDP error RESPONSE, not via the return value — so only the empty case returns false here).
+    err.clear();
+    CHECK(!session->dispatch("", err));
+    CHECK(!err.empty());
+
+    // Detach = destroy the session (RAII); the engine (Isolate owner) outlives it.
+    session.reset();
+}
+
+// The pause loop end-to-end WITHOUT source maps: a `debugger;` statement pauses execution, the pump
+// dispatches Debugger.resume, and the statement AFTER the pause runs (proving resume worked). The
+// source-MAPPED breakpoint (authored .ts -> generated JS) is proven in runtime/ts/test_ts_debug.
+static void test_inspector_debugger_statement_pause()
+{
+    std::string err;
+    std::unique_ptr<cjs::JsEngine> engine = cjs::createV8Engine(err);
+    CHECK(engine != nullptr);
+    if (!engine)
+    {
+        return;
+    }
+    std::unique_ptr<cjs::InspectorSession> session = engine->attachInspector(err);
+    CHECK(session != nullptr);
+    if (!session)
+    {
+        return;
+    }
+
+    std::vector<std::string> msgs;
+    session->onMessage([&msgs](std::string_view m) { msgs.emplace_back(m); });
+    CHECK(session->dispatch(R"({"id":1,"method":"Debugger.enable"})", err));
+
+    // On pause, resume once. `resumed` guards against being called without a prior pause.
+    bool paused_seen = false;
+    session->onPause([&]() -> bool {
+        paused_seen = true;
+        std::string e;
+        session->dispatch(R"({"id":100,"method":"Debugger.resume"})", e);
+        return true; // issued a resume — leave the pause loop
+    });
+
+    // `debugger;` pauses (Debugger is enabled); the assignment after it runs only once resumed.
+    CHECK(session->run("debugger; globalThis.__paused_ok = 7;", "test://pause.js", err));
+    CHECK(paused_seen);
+    CHECK(anyContains(msgs, "Debugger.paused"));
+
+    // The post-pause statement executed => resume drove the program to completion.
+    double n = 0.0;
+    CHECK(engine->eval("globalThis.__paused_ok", &n, err));
+    CHECK(n == 7.0);
+}
+
 static void test_lifecycle_no_leak()
 {
     // Repeated create/dispose across the shared process-global platform — the ASan/LSan
@@ -455,6 +559,8 @@ int main()
     test_view_detach_on_throw();
     test_view_no_bindings();
     test_inspector_seam_present();
+    test_inspector_attach_lifecycle();
+    test_inspector_debugger_statement_pause();
     test_lifecycle_no_leak();
     if (jstest::g_failures == 0)
     {

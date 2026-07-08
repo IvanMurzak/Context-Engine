@@ -176,6 +176,32 @@ if(_ctx_js_v8 AND CONTEXT_TSAN)
         "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../js/tsan-suppressions.txt")
 endif()
 
+# 3) R-OBS-005 INTERACTIVE half (issue #94): attach the V8 in-box CDP inspector, set a source-mapped
+# breakpoint in authored TS (resolved to generated JS via the 2b-i map), hit it, resume. Links
+# context_js (CI-only for its V8 path — same _ctx_js_v8 gate as test_ts_in_v8, so the two agree
+# leg-for-leg); on the local stub gate it exercises the source-map half + asserts V8 unavailable.
+add_executable(context_ts_test_ts_debug tests/test_ts_debug.cpp)
+target_link_libraries(context_ts_test_ts_debug PRIVATE context_ts context_js context_warnings)
+target_compile_definitions(context_ts_test_ts_debug PRIVATE ${_ctx_ts_test_defs})
+if(_ctx_js_v8)
+    target_compile_definitions(context_ts_test_ts_debug PRIVATE CONTEXT_JS_HAS_V8)
+endif()
+target_link_options(context_ts_test_ts_debug PRIVATE ${_ctx_ts_gcc_static})
+add_test(NAME ts-test_ts_debug COMMAND context_ts_test_ts_debug)
+
+# Same benign-V8-worker-pool suppressions as ts-test_ts_in_v8 (it links the SAME uninstrumented
+# rusty_v8 prebuilt), scoped to this one test under each sanitizer preset.
+if(_ctx_js_v8 AND CONTEXT_TSAN)
+    set_tests_properties(ts-test_ts_debug PROPERTIES
+        ENVIRONMENT
+        "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../js/tsan-suppressions.txt")
+endif()
+if(_ctx_js_v8 AND CONTEXT_SANITIZE)
+    set_tests_properties(ts-test_ts_debug PROPERTIES
+        ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan-suppressions.txt")
+endif()
+
 # Sanitize preset only (mutually exclusive with the tsan block above — the two presets never
 # co-configure, so their ENVIRONMENT sets never clash): the in-V8 test links the uninstrumented
 # rusty_v8 prebuilt, so ASan's LSan leak-check attributes the SANITIZER's OWN symbolizer/demangler

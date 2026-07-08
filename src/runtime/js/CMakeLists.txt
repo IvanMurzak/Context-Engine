@@ -122,7 +122,10 @@ if(_ctx_js_v8)
     add_library(context_v8_rust_stubs STATIC src/v8_rust_stubs.cpp)
     target_link_libraries(context_v8_rust_stubs PRIVATE context_warnings)
 
-    add_library(context_js STATIC src/v8_engine.cpp src/view_element.cpp)
+    # inspector.cpp = the R-OBS-005 interactive CDP inspector session (issue #94), built out from the
+    # task-2a seam. V8-backend ONLY (links v8-inspector.h out of the rusty_v8 archive), so it joins
+    # context_js only in this branch — the stub branch below has no inspector.
+    add_library(context_js STATIC src/v8_engine.cpp src/view_element.cpp src/inspector.cpp)
     target_link_libraries(context_js
         PRIVATE context_v8_prebuilt
         PUBLIC "$<LINK_LIBRARY:WHOLE_ARCHIVE,context_v8_rust_stubs>")

@@ -439,6 +439,23 @@ const std::vector<ErrorCode>& catalog()
          "this machine-readable code (carrying the requested scope + an approval ref) and resumes the "
          "same idempotency-keyed op once granted out-of-band (R-SEC-011).",
          false, kExitPermission, "R-SEC-011"},
+        // --- M3 R-OBS-005 interactive CDP debug attach (issue #94) ------------------------------
+        // The `debug attach` affordance's failure classes: the V8 in-box CDP inspector could not be
+        // attached (created/connected) through EditorKernel, or the target build has no V8 backend
+        // so no inspector exists to attach at all (the local Strawberry-GCC / stub toolchains — the
+        // attach is available only where the V8 host is linked, the CI/MSVC-tier builds). The
+        // interactive debugger is CONFIGURATION of v8-inspector.h (L-61), not a from-scratch
+        // debugger. Deterministic w.r.t. a bare retry (retriable=false): a retry cannot conjure a
+        // backend or a connection. Additive-only (protocolMajor stays 0): NEW rows at the END, no
+        // existing row reordered/renamed.
+        {"debug.attach_failed",
+         "Attaching the V8 in-box CDP inspector session failed (the inspector could not be created "
+         "or connected through EditorKernel); no debug session was established.",
+         false, kExitInternal, "R-OBS-005"},
+        {"debug.unsupported",
+         "This build has no V8 backend, so no CDP inspector can be attached; the debug attach is "
+         "available only where the V8 host is linked (the CI/MSVC-tier builds).",
+         false, kExitUnimplemented, "R-OBS-005"},
     };
     return the_catalog;
 }

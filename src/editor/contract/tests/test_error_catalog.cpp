@@ -173,5 +173,23 @@ int main()
         CHECK(consent->origin == "R-SEC-011");
     }
 
+    // --- R-OBS-005 interactive CDP debug-attach codes (task 4b, issue #94) ------------------------
+    // Additive-only new rows (NOT on the frozen v0 baseline). attach_failed is an internal-class
+    // failure (the inspector could not be created/connected); unsupported is unimplemented-class (no
+    // V8 backend in this build). Both deterministic (a bare retry cannot conjure a backend).
+    {
+        const ErrorCode* attach = find_code("debug.attach_failed");
+        CHECK(attach != nullptr);
+        CHECK(attach->exit_code == 1);      // internal class
+        CHECK(attach->retriable == false);
+        CHECK(attach->origin == "R-OBS-005");
+
+        const ErrorCode* unsupported = find_code("debug.unsupported");
+        CHECK(unsupported != nullptr);
+        CHECK(unsupported->exit_code == 8); // unimplemented / reserved-surface class
+        CHECK(unsupported->retriable == false);
+        CHECK(unsupported->origin == "R-OBS-005");
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

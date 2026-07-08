@@ -334,6 +334,26 @@ int main()
         CHECK(ackv != nullptr && ackv->params[1].name == "seq" && ackv->params[1].required);
     }
 
+    // --- R-OBS-005 (issue #94): the interactive TS-debug attach affordance is in the ONE registry --
+    // The `debug attach` verb registers the CLI≡RPC≡MCP affordance for attaching a CDP client to the
+    // V8 in-box inspector through EditorKernel; registered `operational` + not-yet-implemented (the
+    // out-of-process CDP transport is a tracked follow-up), so `context describe` reflects it and the
+    // stable ids derive from the (noun, verb) triple.
+    {
+        const VerbSpec* dbg = reg.find_verb("", "debug", "attach");
+        CHECK(dbg != nullptr);
+        if (dbg != nullptr)
+        {
+            CHECK(dbg->stability == "operational");
+            CHECK(!dbg->implemented); // in-process core built; out-of-process transport is follow-up
+            CHECK(dbg->rpc_method == "debug.attach");
+            CHECK(dbg->mcp_tool == "context_debug_attach");
+            CHECK(dbg->cli_command() == "context debug attach");
+            CHECK(dbg->flags.size() == 1 && dbg->flags[0].name == "endpoint" &&
+                  dbg->flags[0].reserved);
+        }
+    }
+
     // --- R-CLI-014: every event topic carries a payload schema; find_topic + the register seam ---
     {
         const Json& c = describe.at("contract");

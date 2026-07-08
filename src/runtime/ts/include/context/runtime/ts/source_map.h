@@ -37,6 +37,17 @@ struct OriginalPosition
     std::string name;         // the mapped symbol name, or empty
 };
 
+// A resolved GENERATED position: a 0-based line/column into the bundled JS. This is the FORWARD
+// (authored-TS -> transpiled-JS) direction resolveGenerated() produces — the primitive an
+// interactive debugger needs to translate a breakpoint set in authored `.ts` into the generated
+// location it hands to CDP `Debugger.setBreakpointByUrl`. (resolve() is the inverse REVERSE
+// direction used to symbolicate a stack frame or a `Debugger.paused` location back to TS.)
+struct GeneratedPosition
+{
+    std::uint32_t line = 0;   // 0-based line into the generated (bundled) JS
+    std::uint32_t column = 0; // 0-based column into the generated JS
+};
+
 // A parsed Source Map v3. Construct via parse(); query via resolve().
 class SourceMap
 {
@@ -54,6 +65,20 @@ public:
     // line, or when the nearest segment is a generated-column-only segment (no source field).
     [[nodiscard]] std::optional<OriginalPosition> resolve(std::uint32_t line,
                                                           std::uint32_t column) const;
+
+    // FORWARD resolution (authored TS -> generated JS), the source-mapped-BREAKPOINT primitive.
+    // Given an ORIGINAL position — a `source` (matched against SourceMap::sources by exact string
+    // OR trailing-path-segment suffix, so a caller may pass "throwing.ts" for a `sources` entry of
+    // "../throwing.ts") and a 0-based (`line`, `column`) — return the generated JS position a
+    // breakpoint set there should map to. Selection rule (the standard "best breakpoint" pick): the
+    // mapping on the SAME original line with the smallest original column >= `column`; if the line
+    // has mappings but all precede `column`, the greatest-column mapping on that line; if the line
+    // has NO mapping for `source`, the first mapping (least original line/column) on the nearest
+    // original line AFTER `line`. Returns std::nullopt when `source` matches no `sources` entry, or
+    // no mapping references that source at or after the requested line. Among equally-good original
+    // positions the EARLIEST generated position wins (a stable, deterministic tie-break).
+    [[nodiscard]] std::optional<GeneratedPosition>
+    resolveGenerated(std::string_view source, std::uint32_t line, std::uint32_t column) const;
 
     [[nodiscard]] const std::vector<std::string>& sources() const { return sources_; }
     [[nodiscard]] const std::vector<std::string>& names() const { return names_; }

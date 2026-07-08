@@ -27,6 +27,7 @@
 #include <v8-typed-array.h>
 
 #include "inspector_seam.h"
+#include "inspector_session.h"
 #include "v8_shims.h"
 
 namespace context::runtime::js
@@ -446,6 +447,13 @@ public:
     }
 
     bool inspectorSeamPresent() const override { return inspector_ != nullptr; }
+
+    std::unique_ptr<InspectorSession> attachInspector(std::string& err) override
+    {
+        // The interactive CDP attach (issue #94), built out from the task-2a seam. Shares THIS
+        // engine's Isolate + Context; the returned session must not outlive the engine.
+        return detail::createInspectorSession(isolate_, context_, err);
+    }
 
 private:
     static constexpr std::size_t kMaxArgs = 8;

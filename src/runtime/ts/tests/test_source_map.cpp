@@ -244,9 +244,114 @@ static void test_overlong_int_fails_closed()
     CHECK(!err.empty());
 }
 
+// The FORWARD (authored TS -> generated JS) direction resolveGenerated() adds — the source-mapped
+// BREAKPOINT primitive. Same kMap grid as above (segments: gen(0,0)->orig(0,0)"boom";
+// gen(0,4)->orig(0,10); gen(1,2)->orig(5,14)), so every expected generated position is known exactly.
+static void test_resolve_generated()
+{
+    std::optional<cts::SourceMap> map = cts::SourceMap::parse(kMap);
+    CHECK(map.has_value());
+    if (!map.has_value())
+    {
+        return;
+    }
+
+    // Exact original position -> its generated position (tier 0: origLine==line, smallest origCol>=col).
+    std::optional<cts::GeneratedPosition> g = map->resolveGenerated("game.ts", 0, 0);
+    CHECK(g.has_value());
+    if (g.has_value())
+    {
+        CHECK(g->line == 0);
+        CHECK(g->column == 0);
+    }
+
+    // origLine 0, col 5 -> the origCol-10 mapping is the smallest origCol >= 5 -> gen (0,4).
+    g = map->resolveGenerated("game.ts", 0, 5);
+    CHECK(g.has_value() && g->line == 0 && g->column == 4);
+
+    // origLine 0, col 10 -> exact origCol 10 -> gen (0,4).
+    g = map->resolveGenerated("game.ts", 0, 10);
+    CHECK(g.has_value() && g->line == 0 && g->column == 4);
+
+    // origLine 0, col 11 -> no mapping at/after col 11 on line 0 (tier 1: greatest origCol < col is
+    // origCol 10) -> gen (0,4).
+    g = map->resolveGenerated("game.ts", 0, 11);
+    CHECK(g.has_value() && g->line == 0 && g->column == 4);
+
+    // origLine 5, col 14 -> the line-5 mapping -> gen (1,2).
+    g = map->resolveGenerated("game.ts", 5, 14);
+    CHECK(g.has_value() && g->line == 1 && g->column == 2);
+
+    // origLine 5, col 0 -> tier 0 (origCol 14 >= 0) -> gen (1,2).
+    g = map->resolveGenerated("game.ts", 5, 0);
+    CHECK(g.has_value() && g->line == 1 && g->column == 2);
+
+    // origLine 1 (no mapping) -> tier 2: nearest original line AFTER 1 is line 5 -> gen (1,2).
+    g = map->resolveGenerated("game.ts", 1, 0);
+    CHECK(g.has_value() && g->line == 1 && g->column == 2);
+
+    // Round-trip: a forward-resolved generated position reverse-resolves back to an original
+    // position on the requested source (the interactive-debugger set-then-verify contract).
+    g = map->resolveGenerated("game.ts", 0, 0);
+    CHECK(g.has_value());
+    if (g.has_value())
+    {
+        std::optional<cts::OriginalPosition> back = map->resolve(g->line, g->column);
+        CHECK(back.has_value());
+        if (back.has_value())
+        {
+            CHECK(back->source == "game.ts");
+            CHECK(back->line == 0);
+            CHECK(back->column == 0);
+        }
+    }
+}
+
+static void test_resolve_generated_unmapped()
+{
+    std::optional<cts::SourceMap> map = cts::SourceMap::parse(kMap);
+    CHECK(map.has_value());
+    if (!map.has_value())
+    {
+        return;
+    }
+    // Original line past the last mapped line -> no mapping at/after it -> nullopt.
+    CHECK(!map->resolveGenerated("game.ts", 6, 0).has_value());
+    CHECK(!map->resolveGenerated("game.ts", 99, 0).has_value());
+    // An unknown source -> nullopt.
+    CHECK(!map->resolveGenerated("nope.ts", 0, 0).has_value());
+    // A partial suffix WITHOUT a '/' path boundary must NOT match "game.ts" -> nullopt (guards
+    // against "ame.ts" matching "game.ts").
+    CHECK(!map->resolveGenerated("ame.ts", 0, 0).has_value());
+}
+
+static void test_resolve_generated_suffix_match()
+{
+    // sources carries a relative prefix; a caller may pass the bare basename and match by the
+    // trailing "/"-bounded path segment.
+    const char* m = R"({"version":3,"sources":["../src/game.ts"],"names":[],"mappings":"AAAA"})";
+    std::optional<cts::SourceMap> map = cts::SourceMap::parse(m);
+    CHECK(map.has_value());
+    if (!map.has_value())
+    {
+        return;
+    }
+    // Bare basename matches "../src/game.ts" by the "/game.ts" suffix.
+    std::optional<cts::GeneratedPosition> g = map->resolveGenerated("game.ts", 0, 0);
+    CHECK(g.has_value() && g->line == 0 && g->column == 0);
+    // The full path also matches exactly.
+    g = map->resolveGenerated("../src/game.ts", 0, 0);
+    CHECK(g.has_value() && g->line == 0 && g->column == 0);
+    // A different basename does not match.
+    CHECK(!map->resolveGenerated("other.ts", 0, 0).has_value());
+}
+
 int main()
 {
     test_parse_and_resolve();
+    test_resolve_generated();
+    test_resolve_generated_unmapped();
+    test_resolve_generated_suffix_match();
     test_unmapped_positions();
     test_empty_mappings();
     test_malformed_inputs();
