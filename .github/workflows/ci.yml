@@ -35,6 +35,15 @@ env:
   # falls back to passthrough/no-cache mode with no backend configured — builds stay green,
   # just without cross-run compiler-object caching.
   SCCACHE_GHA_ENABLED: "false"
+  # Self-hosted-runner safety (2026-07-08): the three Windows CI jobs run as LocalSystem services
+  # on ONE machine and share `C:\WINDOWS\system32\config\systemprofile\.gitconfig`. A per-job
+  # `git config --global --add safe.directory '*'` step raced on `.gitconfig.lock` when >1 runner
+  # ran concurrently ("could not lock config file ...: File exists"). Inject `safe.directory=*`
+  # through git's environment instead — this writes NO file, so concurrent runners never collide.
+  # Applies to every git invocation in every step (GH-hosted legs unaffected; the value is inert).
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: safe.directory
+  GIT_CONFIG_VALUE_0: "*"
 
 jobs:
   license-gate:
@@ -88,11 +97,6 @@ jobs:
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
     steps:
       - uses: actions/checkout@v7
-
-      - name: Git safe.directory (self-hosted LocalSystem)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: git config --global --add safe.directory '*'
 
       - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
         if: runner.os == 'Windows' && runner.environment == 'self-hosted'
@@ -396,11 +400,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Git safe.directory (self-hosted LocalSystem)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: git config --global --add safe.directory '*'
-
       - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
         if: runner.os == 'Windows' && runner.environment == 'self-hosted'
         shell: pwsh
@@ -465,11 +464,6 @@ jobs:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-bincache
     steps:
       - uses: actions/checkout@v7
-
-      - name: Git safe.directory (self-hosted LocalSystem)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: git config --global --add safe.directory '*'
 
       - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
         if: runner.os == 'Windows' && runner.environment == 'self-hosted'
