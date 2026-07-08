@@ -123,7 +123,21 @@ else()
 
     # Offscreen render + pixel readback self-check: needs SOME adapter (a software one is fine —
     # lavapipe/llvmpipe on Linux, WARP on Windows). Exit 77 = clean SKIP when none exists.
-    add_test(NAME context-spike-webgpu-render COMMAND context-spike-webgpu render)
+    #
+    # WINDOWS: force the software fallback adapter (WARP). The self-hosted Windows CI runners are
+    # LocalSystem services in Session 0, which has no reliable WDDM/GPU context — the DEFAULT
+    # (hardware) D3D12 adapter flakes there (readback mismatches, device-lost, and a
+    # 0xc0000409 driver crash), and gets much worse when the three Windows legs hit the one
+    # physical GPU concurrently. WARP is a conformant CPU rasterizer that is always present, runs
+    # headless, is deterministic, and never contends on the GPU — so it makes this leg reliable.
+    # Linux (lavapipe) and macOS (Metal) use the default adapter, which already works there; NOT
+    # forcing fallback on macOS matters because Metal has no software-fallback adapter (it would
+    # SKIP). Hardware-GPU rendering stays covered by the local `window` mode + dev machines.
+    if(WIN32)
+        add_test(NAME context-spike-webgpu-render COMMAND context-spike-webgpu render --fallback)
+    else()
+        add_test(NAME context-spike-webgpu-render COMMAND context-spike-webgpu render)
+    endif()
     set_tests_properties(context-spike-webgpu-render PROPERTIES
         SKIP_RETURN_CODE 77
         WORKING_DIRECTORY $<TARGET_FILE_DIR:context-spike-webgpu>)
