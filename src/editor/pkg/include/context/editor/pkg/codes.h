@@ -25,6 +25,12 @@ inline constexpr std::string_view kInstallIntegrityMismatchCode = "install.integ
 // (pinning is enforced incl. transitive dependencies). Validation class.
 inline constexpr std::string_view kInstallLockfileIncompleteCode = "install.lockfile_incomplete";
 
+// artifact-fetch-failure (R-SEC-005): the package source could not supply a pinned artifact's bytes
+// (e.g. the offline --source cache is missing the `<name>-<version>.tar`). This is a source/cache
+// miss, NOT a lockfile-completeness or integrity defect — a distinct code so a caller keying off the
+// code does not misread it. Fail-closed; validation class.
+inline constexpr std::string_view kInstallFetchFailedCode = "install.fetch_failed";
+
 // install-scripts-required -> native-tier-gated (R-SEC-005 / L-49): the package declares an install
 // lifecycle script, classifying it native-tier; engine-driven installs never run lifecycle scripts,
 // so a scripts-requiring package is refused pending the L-49 consent gate. Permission class.

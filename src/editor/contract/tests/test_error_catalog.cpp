@@ -150,7 +150,8 @@ int main()
     // src/editor/pkg/codes.h (context::editor::pkg::kInstall*Code / kConsentRequiredCode).
     {
         for (const char* code :
-             {"install.version_unpinned", "install.integrity_mismatch", "install.lockfile_incomplete"})
+             {"install.version_unpinned", "install.integrity_mismatch", "install.lockfile_incomplete",
+              "install.fetch_failed"})
         {
             const ErrorCode* entry = find_code(code);
             CHECK(entry != nullptr);

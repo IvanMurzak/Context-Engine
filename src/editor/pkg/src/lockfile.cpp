@@ -7,6 +7,7 @@
 
 #include <exception>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -37,6 +38,37 @@ std::string name_from_install_path(const std::string& path)
     if (pos == std::string::npos)
         return {};
     return path.substr(pos + marker.size());
+}
+
+// A lockfile `packages` key becomes the extraction destination (ResolvedPackage::install_path, joined
+// with project_root in npm_install.cpp). Gate it BEFORE it can escape the project: reject an absolute
+// / drive-rooted key or any ".." path segment. Without this a crafted key like
+// "node_modules/../../evil" walks out of project_root on create_directories/file-write — a directory-
+// traversal / arbitrary-write (the tar-entry sanitizer only guards paths INSIDE an already-resolved
+// dest_dir, not the dest_dir root itself). Splits on both separators so a Windows "..\\" is caught too.
+bool is_safe_install_path(const std::string& path)
+{
+    if (path.empty())
+        return false;
+    if (path.front() == '/' || path.front() == '\\')
+        return false;
+    if (path.size() >= 2 && path[1] == ':') // a Windows drive-absolute path (e.g. "C:...")
+        return false;
+    std::string seg;
+    for (char c : path)
+    {
+        if (c == '/' || c == '\\')
+        {
+            if (seg == "..")
+                return false;
+            seg.clear();
+        }
+        else
+        {
+            seg.push_back(c);
+        }
+    }
+    return seg != "..";
 }
 
 LockfileParse fail(LockParseStatus status, std::string_view code, std::string message,
@@ -198,6 +230,13 @@ LockfileParse parse_lockfile(std::string_view package_json, std::string_view pac
         if (name.empty())
             return fail(LockParseStatus::Malformed, kInstallLockfileIncompleteCode,
                         "a lock entry install path is not under node_modules/.", path);
+        // The key becomes the extraction destination; reject a traversal/absolute path fail-closed so
+        // it can never escape project_root at extract time (R-SEC-008 spirit).
+        if (!is_safe_install_path(path))
+            return fail(LockParseStatus::Malformed, kInstallLockfileIncompleteCode,
+                        "a lock entry install path is absolute or contains a '..' segment; it would "
+                        "escape the project directory.",
+                        path);
         const Json& version = entry.at("version");
         const Json& integrity = entry.at("integrity");
         if (!version.is_string() || version.as_string().empty())
@@ -228,16 +267,17 @@ LockfileParse parse_lockfile(std::string_view package_json, std::string_view pac
     }
 
     // 4) Every root dependency must resolve to its exact spec at node_modules/<name> with integrity.
+    // Index the resolved entries by install path once so the cross-check is O(root_deps) not
+    // O(root_deps × resolved). Lock keys are unique, so first-wins insertion is exact.
+    std::unordered_map<std::string, const ResolvedPackage*> by_install_path;
+    by_install_path.reserve(resolved.size());
+    for (const ResolvedPackage& pkg : resolved)
+        by_install_path.emplace(pkg.install_path, &pkg);
     for (const RootDep& dep : root_deps)
     {
         const std::string expected_path = "node_modules/" + dep.name;
-        const ResolvedPackage* match = nullptr;
-        for (const ResolvedPackage& pkg : resolved)
-            if (pkg.install_path == expected_path)
-            {
-                match = &pkg;
-                break;
-            }
+        const auto it = by_install_path.find(expected_path);
+        const ResolvedPackage* match = it != by_install_path.end() ? it->second : nullptr;
         if (match == nullptr)
             return fail(LockParseStatus::Incomplete, kInstallLockfileIncompleteCode,
                         "declared dependency '" + dep.name +

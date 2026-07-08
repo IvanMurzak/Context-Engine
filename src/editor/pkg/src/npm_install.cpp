@@ -77,6 +77,20 @@ std::string strip_package_prefix(const std::string& path)
     return path;
 }
 
+// True when `child` is `base` itself or nested under it (both should be canonical). Compared
+// component-wise so "/a/bc" is NOT treated as within "/a/b". Used as the extraction path jail.
+bool is_within(const fs::path& base, const fs::path& child)
+{
+    auto b = base.begin();
+    auto c = child.begin();
+    for (; b != base.end(); ++b, ++c)
+    {
+        if (c == child.end() || *c != *b)
+            return false;
+    }
+    return true;
+}
+
 InstallOutcome outcome_fail(InstallStatus status, std::string_view code, std::string message,
                             std::string offending)
 {
@@ -201,7 +215,7 @@ InstallOutcome execute_install(const InstallPlan& plan, PackageSource& source,
         // Only sandbox-tier packages reach here (natives already short-circuited above).
         const std::optional<std::string> bytes = source.fetch(planned.pkg);
         if (!bytes.has_value())
-            return outcome_fail(InstallStatus::FetchFailed, kInstallLockfileIncompleteCode,
+            return outcome_fail(InstallStatus::FetchFailed, kInstallFetchFailedCode,
                                 "could not fetch artifact for '" + planned.pkg.name + "@" +
                                     planned.pkg.version + "' from the package source.",
                                 planned.pkg.name + "@" + planned.pkg.version);
@@ -228,6 +242,18 @@ InstallOutcome execute_install(const InstallPlan& plan, PackageSource& source,
                                 planned.pkg.name + "@" + planned.pkg.version);
 
         const fs::path dest = fs::path(project_root) / fs::path(planned.pkg.install_path);
+        // Defense-in-depth path jail: parse_lockfile already rejects a traversing install_path, but
+        // execute_install is a public entry point reachable with a hand-built plan — never extract
+        // outside project_root regardless (R-SEC-008 spirit, fail-closed).
+        std::error_code jail_ec;
+        const fs::path root_canon = fs::weakly_canonical(fs::path(project_root), jail_ec);
+        const fs::path dest_canon = fs::weakly_canonical(dest, jail_ec);
+        if (jail_ec || !is_within(root_canon, dest_canon))
+            return outcome_fail(InstallStatus::IntegrityMismatch, kInstallIntegrityMismatchCode,
+                                "refusing to extract '" + planned.pkg.name + "@" +
+                                    planned.pkg.version +
+                                    "' outside the project root (path-jail violation, R-SEC-008).",
+                                planned.pkg.install_path);
         std::string err;
         if (!extract_into(*entries, dest, err))
             return outcome_fail(InstallStatus::IntegrityMismatch, kInstallIntegrityMismatchCode,

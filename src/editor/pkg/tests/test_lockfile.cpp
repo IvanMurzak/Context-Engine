@@ -138,6 +138,26 @@ int main()
         CHECK(p.packages[0].has_install_script);
     }
 
+    // --- a traversing install path is rejected fail-closed (directory-traversal guard, R-SEC-008) --
+    // The `packages` key becomes the extraction destination; a ".." segment would escape project_root
+    // at extract time, so it must be refused at parse — before it ever becomes an install_path.
+    {
+        const std::string min_manifest = R"({ "dependencies": { "left-pad": "1.3.0" } })";
+        for (const char* evil_key :
+             {"node_modules/../../../../tmp/evil", "node_modules/left-pad/../../../evil"})
+        {
+            const std::string traversal_lock =
+                std::string("{ \"lockfileVersion\": 3, \"packages\": {"
+                            " \"\": { \"name\": \"app\" }, \"") +
+                evil_key +
+                "\": { \"version\": \"1.3.0\", \"resolved\": \"https://r/x-1.3.0.tgz\","
+                " \"integrity\": \"sha512-AAAA\" } } }";
+            const LockfileParse p = parse_lockfile(min_manifest, traversal_lock);
+            CHECK(p.status == LockParseStatus::Malformed);
+            CHECK(p.error_code == std::string(kInstallLockfileIncompleteCode));
+        }
+    }
+
     // --- malformed JSON / non-v3 shape -> fail-closed -------------------------------------------
     CHECK(parse_lockfile("{ not json", lock).status == LockParseStatus::Malformed);
     CHECK(parse_lockfile(manifest, "{ \"lockfileVersion\": 1 }").status ==

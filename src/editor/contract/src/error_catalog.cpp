@@ -426,6 +426,11 @@ const std::vector<ErrorCode>& catalog()
          "driven installs never run lifecycle scripts (--ignore-scripts, all tiers), so it is refused "
          "pending the L-49 consent gate (see consent_required).",
          false, kExitPermission, "R-SEC-005"},
+        {"install.fetch_failed",
+         "The package source could not supply a pinned artifact's bytes (e.g. the offline --source "
+         "cache lacks the tarball) — a source/cache miss, distinct from a lockfile-completeness or "
+         "integrity defect. The install is refused fail-closed.",
+         false, kExitValidation, "R-SEC-005"},
         // The R-SEC-011 machine-readable consent-gate code, reserved from day one (the catalog is
         // additive-only, so reserving the slot now keeps the v2 async park-and-resume protocol
         // non-breaking). A bare retry cannot grant consent, so retriable=false (like scope.denied).
