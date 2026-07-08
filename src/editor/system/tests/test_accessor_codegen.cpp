@@ -42,7 +42,7 @@ ccomp::ComponentTypeSchema compile_mover()
     std::optional<ccomp::ComponentTypeSchema> t = ccomp::compile_component_type(def, problems);
     CHECK(t.has_value());
     CHECK(problems.empty());
-    return t.value();
+    return t.value_or(ccomp::ComponentTypeSchema{}); // degrade to empty on a failed compile (CHECK logs it)
 }
 
 void test_class_name_rule()

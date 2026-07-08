@@ -33,7 +33,7 @@ ccomp::ComponentTypeSchema compile_def(const std::string& def)
     std::optional<ccomp::ComponentTypeSchema> t = ccomp::compile_component_type(def, problems);
     CHECK(t.has_value());
     CHECK(problems.empty());
-    return t.value();
+    return t.value_or(ccomp::ComponentTypeSchema{}); // degrade to empty on a failed compile (CHECK logs it)
 }
 
 // A "mover" component: pos (f32x3) + hits (u32). A "tag" component: flag (u8).
@@ -189,6 +189,86 @@ void test_gather_scatter_roundtrip()
     }
 }
 
+// Two components with DIFFERENT record sizes, gathered and scattered over the SAME selected entity set
+// (exactly what run_system does one column at a time), prove the per-column packing keeps each entity's
+// records aligned and never cross-contaminates one column with another. This is the multi-column
+// analogue of the single-column round-trip above; the full run_system positional-view path needs the
+// V8 host, so it is exercised by the CI-only keystone in test_system_in_v8.cpp — this LOCAL gate covers
+// the World-storage column math for a multi-component query.
+void test_multi_component_gather_scatter()
+{
+    ck::World world;
+    ccomp::ComponentTypeRegistry reg;
+    const ccomp::RegisteredComponentType& mover = reg.register_type(mover_def()); // pos f32x3 + hits u32
+    const ccomp::RegisteredComponentType& tag = reg.register_type(tag_def());     // flag u8
+    const std::size_t mrec = mover.schema.size;
+    const std::size_t trec = tag.schema.size;
+    const ccomp::ComponentField* hits = mover.schema.field("hits");
+    const ccomp::ComponentField* flag = tag.schema.field("flag");
+    CHECK(hits != nullptr);
+    CHECK(flag != nullptr);
+
+    // Four entities carrying BOTH components (one shared archetype), seeded with distinct known values.
+    // Fetch the record pointers AFTER both components are added — the second add_default migrates the
+    // entity to the {mover,tag} archetype, invalidating a pointer taken before it.
+    std::vector<ck::Entity> ents;
+    for (int i = 0; i < 4; ++i)
+    {
+        const ck::Entity e = world.create();
+        (void)reg.add_default(world, e, mover);
+        (void)reg.add_default(world, e, tag);
+        auto* mr = static_cast<unsigned char*>(world.get_raw(e, mover.component_id));
+        auto* tr = static_cast<unsigned char*>(world.get_raw(e, tag.component_id));
+        CHECK(mr != nullptr);
+        CHECK(tr != nullptr);
+        const std::uint32_t h = static_cast<std::uint32_t>(200 + i);
+        const std::uint8_t f = static_cast<std::uint8_t>(i + 1);
+        std::memcpy(mr + hits->offset, &h, sizeof(h));
+        std::memcpy(tr + flag->offset, &f, sizeof(f));
+        ents.push_back(e);
+    }
+
+    const std::vector<ck::Entity> sel =
+        csys::select_entities(world, {mover.component_id, tag.component_id});
+    CHECK(sel.size() == ents.size());
+
+    // Gather each column into its OWN packed buffer (per-column, like run_system's per-view gather).
+    std::vector<unsigned char> mbuf(sel.size() * mrec, 0xEE);
+    std::vector<unsigned char> tbuf(sel.size() * trec, 0xEE);
+    csys::gather_column(world, sel, mover.component_id, mrec, mbuf.data());
+    csys::gather_column(world, sel, tag.component_id, trec, tbuf.data());
+    for (std::size_t i = 0; i < sel.size(); ++i)
+    {
+        CHECK(std::memcmp(mbuf.data() + i * mrec, world.get_raw(sel[i], mover.component_id), mrec) == 0);
+        CHECK(std::memcmp(tbuf.data() + i * trec, world.get_raw(sel[i], tag.component_id), trec) == 0);
+    }
+
+    // Mutate BOTH columns independently, scatter both back into the World.
+    for (std::size_t i = 0; i < sel.size(); ++i)
+    {
+        std::uint32_t h = 0;
+        std::memcpy(&h, mbuf.data() + i * mrec + hits->offset, sizeof(h));
+        h += 50;
+        std::memcpy(mbuf.data() + i * mrec + hits->offset, &h, sizeof(h));
+        tbuf[i * trec + flag->offset] = static_cast<unsigned char>(tbuf[i * trec + flag->offset] * 10);
+    }
+    csys::scatter_column(world, sel, mover.component_id, mrec, mbuf.data());
+    csys::scatter_column(world, sel, tag.component_id, trec, tbuf.data());
+
+    // Each column's mutation landed on the right entity, with no cross-column contamination.
+    for (std::size_t i = 0; i < sel.size(); ++i)
+    {
+        const auto* mr = static_cast<const unsigned char*>(world.get_raw(sel[i], mover.component_id));
+        const auto* tr = static_cast<const unsigned char*>(world.get_raw(sel[i], tag.component_id));
+        CHECK(mr != nullptr);
+        CHECK(tr != nullptr);
+        std::uint32_t h = 0;
+        std::memcpy(&h, mr + hits->offset, sizeof(h));
+        CHECK(h == static_cast<std::uint32_t>(200 + i) + 50);
+        CHECK(tr[flag->offset] == static_cast<unsigned char>((i + 1) * 10));
+    }
+}
+
 } // namespace
 
 int main()
@@ -196,6 +276,7 @@ int main()
     test_selection();
     test_intra_archetype_order();
     test_gather_scatter_roundtrip();
+    test_multi_component_gather_scatter();
     if (systemtest::g_failures == 0)
     {
         std::printf("system query/gather/scatter: all checks passed\n");

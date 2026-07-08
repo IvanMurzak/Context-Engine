@@ -65,6 +65,12 @@ void scatter_column(kernel::World& world, const std::vector<kernel::Entity>& ent
 // A `query` with zero matched entities still invokes `executor` (with zero-length views), so a system
 // observes "no entities" rather than being skipped. `query` must not exceed JsEngine::kMaxSystemViews
 // components (one view per column); exceeding it is reported, not silently clamped.
+//
+// Precondition: `query` must not list the same component type twice. Unlike select_entities (which
+// dedupes ids for the archetype subset test), run_system binds one column/view PER `query` entry
+// positionally, so a duplicate would gather two independent columns from the same storage and scatter
+// them back in `query` order — last-index-wins, silently discarding an earlier duplicate view's writes.
+// Callers pass each declared component at most once (not validated here; a duplicate is a caller error).
 [[nodiscard]] bool run_system(kernel::World& world, runtime::js::JsEngine& engine,
                               runtime::js::FunctionHandle executor,
                               const std::vector<const component::RegisteredComponentType*>& query,
