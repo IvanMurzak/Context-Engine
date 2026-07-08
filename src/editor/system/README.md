@@ -59,6 +59,8 @@ across the 3-OS matrix). A future big-endian port would flip the endianness flag
   item 4).
 - **VM-interior World columns** — removes the gather/scatter copy (#88 item 5).
 - **The safe parallel scheduler** (R-LANG-011, task 4) — running disjoint-write systems concurrently.
+  **Landed** in `editor/schedule` (#92): declared-access DAG (computed once/cached), non-conflicting
+  native systems in parallel, TS on the single JS-VM lane.
 
 ## Layering + local vs CI
 

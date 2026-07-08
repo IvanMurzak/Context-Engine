@@ -343,6 +343,19 @@ add_subdirectory(runtime/ts)
 # context_js / context_ts exist for the keystone test's link and the esbuild staging is available.
 add_subdirectory(editor/system)
 
+# M3 task 4a: the safe parallel scheduler (src/editor/schedule/, issue #92 / R-SIM-006 / R-LANG-011 /
+# L-38; Part of #88) — from the systems' STATIC declared component read/write sets it derives a
+# parallel schedule DAG ONCE and CACHES it (invalidated only on a composition change, never per frame):
+# non-conflicting native/engine systems run in parallel batches, conflicting writes serialize, and TS
+# systems are EXCLUDED from the DAG entirely (the single JS-VM lane, R-LANG-011). The core library
+# names only ComponentId + std::thread, so its DAG/batching/parallel gates build + run on EVERY
+# toolchain (and are the real subject of the ASan/UBSan + TSan CI legs); only the C++-and-TS-both-
+# mutate-World keystone links context_js/context_ts/context_system and is CI-only for its V8 path. OWN
+# stanza — apart from the editor cluster + the exit-gate block below — so it never collides at the file
+# tail (consumers name the `context_schedule` target, resolved at generate time regardless of order).
+# MUST follow add_subdirectory(editor/system) so context_system exists for the keystone test's link.
+add_subdirectory(editor/schedule)
+
 # ---------------------------------------------------------------------------
 # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36): five integration tests, one per exit
 # criterion, registered as the `m1-exit-*` ctest family and CI-gated per the §6 tiering (blocking
