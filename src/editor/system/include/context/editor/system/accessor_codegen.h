@@ -28,6 +28,15 @@ namespace context::editor::system
 // host's native records bit-for-bit (the L-54 determinism law holds across the 3-OS matrix). A future
 // big-endian port would flip the endianness flag here and in the gather/scatter memcpy — documented in
 // README.md § Endianness, out of scope for this task.
+//
+// PRECONDITION — field names must be UNIQUE under the PascalCase method mapping. Each field `f` emits a
+// `get<Pascal(f)>` / `set<Pascal(f)>` accessor pair, where Pascal() splits on '_' and capitalizes each
+// run's first letter. Two distinct schema-valid names (`[a-z][a-z0-9_]*`) that differ only in underscore
+// runs — e.g. "max_hp" and "max__hp" — both map to "MaxHp", so a schema carrying both would emit two
+// identically-named members and the JS class would silently keep only the last (one field's accessor is
+// unreachable). Uniqueness is the component compiler's job (it already owns field-name validation for
+// the derived accessor surface, see component_type.cpp); this codegen assumes a validated, collision-free
+// field set and does NOT re-check it.
 [[nodiscard]] std::string generate_component_accessor_ts(const component::ComponentTypeSchema& type);
 
 // The class identifier `generate_component_accessor_ts` emits for `id` (a component "$id" such as

@@ -57,6 +57,9 @@ struct DvSpec
 
 // PascalCase a field name ("max_hp" -> "MaxHp"): split on '_', capitalize each non-empty run's first
 // letter. Field names are validated `[a-z][a-z0-9_]*` by the component compiler, so this is total.
+// NOTE: this mapping is NOT injective — names differing only in underscore runs ("max_hp" / "max__hp")
+// collapse to the same result. Method-name uniqueness across a component's fields is the component
+// compiler's precondition (see accessor_codegen.h § PRECONDITION); this codegen does not re-check it.
 [[nodiscard]] std::string pascal_case(std::string_view name)
 {
     std::string out;
