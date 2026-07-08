@@ -1,0 +1,55 @@
+src/runtime/ts/CMakeLists.txt
+  s_681c0f86b30b64::t_9d3ebada2e51c0 179-204
+src/runtime/ts/tests/test_source_map.cpp
+  s_681c0f86b30b64::t_eec377d7cf6178 247-348,352-354
+src/runtime/js/src/inspector_session.h
+  s_681c0f86b30b64::t_00ce2d391a37ac 1-33
+src/runtime/ts/include/context/runtime/ts/source_map.h
+  s_681c0f86b30b64::t_acc6cfd4b7026b 40-50
+  s_681c0f86b30b64::t_29c702844f4b61 69-82
+src/runtime/ts/tests/test_ts_debug.cpp
+  s_681c0f86b30b64::t_67f35605e60987 1-104,107-273
+  s_681c0f86b30b64::t_cdfd7bf033aa76 105-106
+src/runtime/js/src/v8_engine.cpp
+  s_681c0f86b30b64::t_b4841719631b63 451-457
+  s_681c0f86b30b64::t_b22f5a26138840 30
+src/runtime/js/src/inspector.cpp
+  s_681c0f86b30b64::t_3e068c46861bbd 1-351
+src/runtime/js/tests/test_js_engine.cpp
+  s_681c0f86b30b64::t_242314c39547bd 562-563
+  s_681c0f86b30b64::t_5d390e27569bc2 422-523
+src/editor/contract/tests/test_registry_parity.cpp
+  s_681c0f86b30b64::t_bba6954dc2f803 337-356
+src/runtime/js/CMakeLists.txt
+  s_681c0f86b30b64::t_fb895758ee8c2e 125-128
+src/runtime/js/include/context/runtime/js/js_engine.h
+  s_681c0f86b30b64::t_4866360314ba72 89-133,192
+  s_681c0f86b30b64::t_bd3aaf93de6bbb 12-13
+  s_681c0f86b30b64::t_32401c74b834a3 193-195
+src/runtime/ts/src/source_map.cpp
+  s_681c0f86b30b64::t_21bf8122d3d162 725-833
+src/editor/contract/tests/test_error_catalog.cpp
+  s_681c0f86b30b64::t_1cc9e9c655020d 176-193
+src/editor/contract/src/registry.cpp
+  s_681c0f86b30b64::t_6f5ed58de374fd 590-615
+src/editor/contract/src/error_catalog.cpp
+  s_681c0f86b30b64::t_aa6eb4f7a11a9c 442-458
+src/runtime/ts/examples/breakpoint.ts
+  s_681c0f86b30b64::t_a8ecb8341e37c3 1-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "80eb45729243f4ba347acaae93e00bf84e521abd",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
