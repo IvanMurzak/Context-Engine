@@ -1,0 +1,35 @@
+src/editor/contract/src/error_catalog.cpp
+  s_681c0f86b30b64::t_471f191cddafc3 429-433
+src/editor/pkg/include/context/editor/pkg/codes.h
+  s_681c0f86b30b64::t_ebf21623bfda0f 28-33
+src/editor/pkg/src/npm_install.cpp
+  s_681c0f86b30b64::t_b40d43e4a9739b 80-93
+  s_681c0f86b30b64::t_e89356f18354ac 218
+  s_681c0f86b30b64::t_86db7f33d2a0fa 245-256
+src/editor/pkg/src/lockfile.cpp
+  s_681c0f86b30b64::t_242c6fd388e3c3 10
+  s_681c0f86b30b64::t_e087743827f6ed 270-275,279-280
+  s_681c0f86b30b64::t_fb00d06c64b5e9 43-73
+  s_681c0f86b30b64::t_98ed8fabc0a4ab 233-239
+src/editor/pkg/tests/test_lockfile.cpp
+  s_681c0f86b30b64::t_20b0e27ee6df69 141,144-145,148,155-160
+  s_681c0f86b30b64::t_413acfea71db54 142-143,146-147,149-154
+src/editor/contract/tests/test_error_catalog.cpp
+  s_681c0f86b30b64::t_34346ff67cf107 153-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7530ad5ccd77cfb44eac770b011055fe3e7a1dd3",
+  "prompts": {},
+  "sessions": {
+    "s_681c0f86b30b64": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69992962-728e-4857-9a7f-c5e4fad3119b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
