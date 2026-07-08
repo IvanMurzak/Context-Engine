@@ -1,36 +1,46 @@
 // R-OBS-005 interactive CDP inspector session over V8's in-box inspector (issue #94 / L-61: this is
-// CONFIGURATION of v8-inspector.h, NOT building a debugger from scratch). Built out from the task-2a
-// seam (inspector_seam.h) into a real V8Inspector + V8InspectorSession + Channel + Client with a
-// synchronous nested pause loop, so a CDP client can attach, set a source-mapped breakpoint, hit it,
-// and resume/step. Compiled ONLY on toolchains that can link the rusty_v8 prebuilt (CONTEXT_JS_HAS_V8
-// — the 3-OS CI build legs); the local Strawberry-GCC Windows dev gate builds the js stub instead
-// (js_host_stub.cpp), which offers no inspector. See src/runtime/js/README.md.
+// CONFIGURATION of v8-inspector.h, NOT building a debugger from scratch). A CDP client can attach,
+// set a source-mapped breakpoint, hit it, and resume/step. Compiled ONLY on toolchains that can link
+// the rusty_v8 prebuilt (CONTEXT_JS_HAS_V8 — the 3-OS CI build legs); the local Strawberry-GCC
+// Windows dev gate builds the js stub instead (js_host_stub.cpp), which offers no inspector.
 //
-// HYBRID-libc++-ABI note (why direct C++ subclassing of the v8_inspector classes is link-safe across
-// the __Cr boundary — the same boundary v8_shims.h documents for platform boot):
-//   * V8Inspector::create / V8Inspector::connect / V8InspectorSession::stateJSON return
-//     std::unique_ptr / std::shared_ptr. A RETURN type is NOT part of C++ name mangling, so the
-//     symbol these resolve to is identical whether the caller's std::unique_ptr is libstdc++/MSVC-STL
-//     or the archive's Chromium libc++ (__Cr). std::unique_ptr<T> with the default deleter is a
-//     single pointer with a non-trivial destructor, so it is returned via the sret/invisible-reference
-//     ABI on every target — one pointer, identical layout on both sides. So create()/connect() link
-//     AND are ABI-correct directly, without an extern-"C" shim (the seam header's TODO note about a
-//     shim is superseded: the return-type-immunity makes the shim unnecessary).
-//   * The Channel virtuals take std::unique_ptr<StringBuffer> BY VALUE. A non-trivially-copyable
-//     argument is passed by invisible reference (a pointer to a single-pointer temporary the CALLEE
-//     destroys) on Itanium AND MSVC, so the archive's __Cr unique_ptr and our system-STL unique_ptr
-//     are layout-identical across the call; our override destroys it (delete -> StringBuffer's virtual
-//     dtor -> archive), never double-freeing. The Client virtuals we override carry NO STL types.
-//   * Vtable slot ordering is fixed by v8-inspector.h, which the prebuilt archive was compiled
-//     against too, so our overrides land in the slots V8 calls. Task 2a already subclassed
-//     V8InspectorClient (inspector_seam.h) and shipped green on all three CI legs — proof the
-//     subclass-and-link approach holds; this file only widens the same technique.
+// CROSS-ABI SEAM (issue #104 — the fix for the attach-time SEGV):
+//   The rusty_v8 prebuilt is use_custom_libcxx=true — every v8_inspector class it defines carries a
+//   vtable laid out and dispatched inside the archive's Chromium-libc++ (`__Cr`) ABI. DIRECTLY
+//   subclassing v8_inspector::V8InspectorClient / V8Inspector::Channel from this system-STL TU (the
+//   prior task-2b approach) emitted OUR vtable, and when V8's V8InspectorImpl ctor called back into
+//   the client (e.g. m_client->generateUniqueId(), v8::debug::SetIsolateId()), the cross-ABI virtual
+//   dispatch faulted — the SEGV read @0x100 this file previously mis-attributed to a lazy Debug
+//   object. Instead we route through rusty_v8's OWN extern-"C" __BASE seam (identical technique to
+//   the V8-embed backing-store shims in v8_shims.h): the archive-defined
+//   v8_inspector__{V8InspectorClient,Channel}__BASE subclass is placement-constructed INSIDE the
+//   archive (its vtable is the archive's, so V8's callbacks dispatch correctly), and every virtual it
+//   overrides forwards OUT to an extern-"C" v8_inspector__..._BASE__<method> thunk — unmangled, no
+//   by-value STL in the signature, hence ABI-namespace-immune from this system-STL TU. Those thunks
+//   are IMPLEMENTED below and carry the real client/channel logic; they were previously fail-closed
+//   traps in v8_rust_stubs.cpp (now removed from that trap set — a symbol is defined exactly once).
+//   The __BASE object is the FIRST member (offset 0) of our SeamClient / SeamChannel, so the
+//   V8InspectorClient* / Channel* V8 hands back to a thunk casts straight to our state — the same
+//   containing-struct trick rusty_v8 uses when the client is implemented from Rust.
+//
+//   V8Inspector::create / connect / contextCreated / V8InspectorSession::stateJSON are still called
+//   DIRECTLY: a std::unique_ptr RETURN is ABI-immune (not part of name mangling; returned via the
+//   sret single-pointer path identical on both STLs), and their arguments carry no by-value STL. Only
+//   the CALLBACK (V8-vtable-into-us) direction crossed the ABI unsafely, so only it needed the seam.
+//
+// Signatures of the archive-side seam functions were verified verbatim against
+//   https://github.com/denoland/rusty_v8/blob/v149.4.0/src/binding.cc
+// (the pin in tools/v8-prebuilt.json). Keep them in lockstep with that pin — a __BASE thunk
+// signature is an ABI contract.
 
 #include "inspector_session.h"
 
 #include "context/runtime/js/js_engine.h"
 
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <string>
@@ -45,6 +55,18 @@
 #include <v8-persistent-handle.h>
 #include <v8-primitive.h>
 #include <v8-script.h>
+
+// rusty_v8 archive-provided extern-"C" seam entry points we CALL. CONSTRUCT placement-builds the
+// archive-side __BASE subclass into our buffer (declared void* here — the archive's parameter is an
+// `uninit_t<__BASE>*`, ABI-identical to a plain pointer). StringBuffer__DELETE frees a StringBuffer
+// allocated inside the archive's libc++ heap (deleting it from this TU's operator delete would be a
+// cross-heap mismatch). Defined inside the pinned librusty_v8 archive; do not redefine.
+extern "C"
+{
+    void v8_inspector__V8InspectorClient__BASE__CONSTRUCT(void* buf);
+    void v8_inspector__V8Inspector__Channel__BASE__CONSTRUCT(void* buf);
+    void v8_inspector__StringBuffer__DELETE(v8_inspector::StringBuffer* self);
+}
 
 namespace context::runtime::js::detail
 {
@@ -115,81 +137,73 @@ std::string fromStringView(const v8_inspector::StringView& v)
     return out;
 }
 
+// The embedder-side CDP client. Its `base` member is the archive-constructed
+// v8_inspector__V8InspectorClient__BASE (a real V8InspectorClient whose vtable lives in the archive);
+// V8's virtual callbacks land in the archive vtable and forward through the extern-"C"
+// v8_inspector__V8InspectorClient__BASE__* thunks below, which recover this struct from the client
+// pointer (base is at offset 0). runMessageLoopOnPause is the synchronous nested pause loop the
+// embedder drives via the pump.
+struct SeamClient
+{
+    // MUST be the first member (offset 0). sizeof/alignof match the base class because the archive's
+    // __BASE subclass adds no data members (it only overrides virtuals), so `sizeof(__BASE)` ==
+    // `sizeof(V8InspectorClient)` — one vtable pointer.
+    alignas(v8_inspector::V8InspectorClient) unsigned char base[sizeof(v8_inspector::V8InspectorClient)];
+
+    v8::Isolate* isolate = nullptr;
+    v8::Global<v8::Context>* context = nullptr;
+    std::function<bool()>* pump = nullptr;
+    bool paused = false;
+
+    SeamClient(v8::Isolate* iso, v8::Global<v8::Context>* ctx, std::function<bool()>* p)
+        : isolate(iso), context(ctx), pump(p)
+    {
+        v8_inspector__V8InspectorClient__BASE__CONSTRUCT(&base);
+    }
+    ~SeamClient() { asClient()->~V8InspectorClient(); }
+
+    SeamClient(const SeamClient&) = delete;
+    SeamClient& operator=(const SeamClient&) = delete;
+
+    v8_inspector::V8InspectorClient* asClient()
+    {
+        return reinterpret_cast<v8_inspector::V8InspectorClient*>(&base);
+    }
+};
+static_assert(offsetof(SeamClient, base) == 0, "the __BASE storage must be at offset 0");
+
 // The embedder-side CDP channel: every response + notification V8 produces is forwarded to the
-// session's sink. Owned by the session; the sink pointer stays valid for its lifetime.
-class ChannelImpl final : public v8_inspector::V8Inspector::Channel
+// session's sink. Same __BASE seam as SeamClient.
+struct SeamChannel
 {
-public:
-    explicit ChannelImpl(std::function<void(std::string_view)>* sink) : sink_(sink) {}
+    alignas(v8_inspector::V8Inspector::Channel) unsigned char
+        base[sizeof(v8_inspector::V8Inspector::Channel)];
 
-    void sendResponse(int /*callId*/,
-                      std::unique_ptr<v8_inspector::StringBuffer> message) override
-    {
-        emit(*message);
-    }
-    void sendNotification(std::unique_ptr<v8_inspector::StringBuffer> message) override
-    {
-        emit(*message);
-    }
-    void flushProtocolNotifications() override {}
+    std::function<void(std::string_view)>* sink = nullptr;
 
-private:
-    void emit(const v8_inspector::StringBuffer& buffer)
+    explicit SeamChannel(std::function<void(std::string_view)>* s) : sink(s)
     {
-        if (sink_ != nullptr && *sink_)
+        v8_inspector__V8Inspector__Channel__BASE__CONSTRUCT(&base);
+    }
+    ~SeamChannel() { asChannel()->~Channel(); }
+
+    SeamChannel(const SeamChannel&) = delete;
+    SeamChannel& operator=(const SeamChannel&) = delete;
+
+    v8_inspector::V8Inspector::Channel* asChannel()
+    {
+        return reinterpret_cast<v8_inspector::V8Inspector::Channel*>(&base);
+    }
+
+    void emit(const v8_inspector::StringBuffer* buffer)
+    {
+        if (sink != nullptr && *sink && buffer != nullptr)
         {
-            (*sink_)(fromStringView(buffer.string()));
+            (*sink)(fromStringView(buffer->string()));
         }
     }
-    std::function<void(std::string_view)>* sink_;
 };
-
-// The V8InspectorClient: its runMessageLoopOnPause is the synchronous nested pause loop the embedder
-// drives via the pump. When V8 stops at a breakpoint it calls runMessageLoopOnPause(groupId); we
-// loop calling the pump (which dispatches the next CDP command) until V8 signals resume through
-// quitMessageLoopOnPause (or the pump returns true, or the safety bound trips).
-class ClientImpl final : public v8_inspector::V8InspectorClient
-{
-public:
-    ClientImpl(v8::Isolate* isolate, v8::Global<v8::Context>* context,
-               std::function<bool()>* pump)
-        : isolate_(isolate), context_(context), pump_(pump)
-    {
-    }
-
-    void runMessageLoopOnPause(int /*contextGroupId*/) override
-    {
-        paused_ = true;
-        int guard = 0;
-        while (paused_ && guard++ < kMaxPauseIterations)
-        {
-            if (pump_ == nullptr || !*pump_)
-            {
-                break; // no pump installed: return so V8 continues rather than deadlocking
-            }
-            if ((*pump_)())
-            {
-                break; // pump reports it issued a resume/step
-            }
-        }
-        paused_ = false;
-    }
-
-    void quitMessageLoopOnPause() override { paused_ = false; }
-
-    void runIfWaitingForDebugger(int /*contextGroupId*/) override {}
-
-    v8::Local<v8::Context> ensureDefaultContextInGroup(int /*contextGroupId*/) override
-    {
-        return context_->Get(isolate_);
-    }
-
-private:
-    v8::Isolate* isolate_;
-    v8::Global<v8::Context>* context_;
-    std::function<bool()>* pump_;
-    bool paused_ = false;
-};
+static_assert(offsetof(SeamChannel, base) == 0, "the __BASE storage must be at offset 0");
 
 class SessionImpl final : public InspectorSession
 {
@@ -201,23 +215,15 @@ public:
 
     bool init(std::string& err)
     {
-        // MATERIALIZE the isolate's debug subsystem BEFORE wiring the inspector — the actual fix for
-        // the attach-time SEGV (isolate-level, NOT context-level: entering an Isolate/Handle/Context
-        // scope, done below, is necessary for the handle ops but does NOT create the Debug object).
-        //
-        // V8's V8InspectorImpl constructor (invoked from V8Inspector::create) runs, in its body,
-        // v8::debug::SetIsolateId(isolate, ...) -> isolate->debug()->SetIsolateId(id). On this
-        // rusty_v8 prebuilt the isolate's Debug object is NOT allocated eagerly by Isolate::New; it
-        // is created lazily the first time a script is compiled/run on the isolate. Our attach path
-        // (attachInspector on an engine that has only done Context::New) targets a BARE isolate that
-        // has never compiled a script, so isolate->debug() is still null and SetIsolateId writes
-        // isolate_id_ through a null Debug — the ASan "SEGV 0x100" (null base + field offset). Every
-        // canonical rusty_v8 inspector consumer (Deno bootstraps JS; d8 runs scripts) attaches only
-        // AFTER JS has run, so none of them hit this. Compiling+running a trivial script here forces
-        // V8 down its debug-aware compile path, which lazily instantiates isolate->debug() before
-        // V8Inspector::create dereferences it. (An earlier fix that only added a Context::Scope was
-        // disproven — it never materializes Debug.) The rusty_v8 host is CI-only-buildable, so this
-        // is verified on the 3-OS + sanitize CI legs, not the local Strawberry-GCC stub gate.
+        // Materialize the isolate's Debug subsystem before wiring the inspector. V8's
+        // V8InspectorImpl ctor runs v8::debug::SetIsolateId(isolate, ...) ->
+        // isolate->debug()->SetIsolateId(id); on this rusty_v8 prebuilt isolate->debug() is created
+        // lazily on the first compile, and our attach path targets an isolate that may not have run
+        // any script yet. Compiling+running a trivial script forces V8 down its debug-aware compile
+        // path so isolate->debug() exists before V8Inspector::create touches it. Cheap insurance,
+        // retained ALONGSIDE the primary fix (the __BASE ABI seam, issue #104 — the header comment):
+        // the earlier belief that this warm-up alone resolved the attach SEGV was wrong (main stayed
+        // red), but a live Debug object is still a genuine precondition of a clean attach.
         {
             std::string warmErr;
             if (!compileAndRun(isolate_, context_, "0", {}, nullptr, warmErr))
@@ -233,24 +239,24 @@ public:
         v8::Local<v8::Context> context = context_.Get(isolate_);
         // Enter the engine's context so the V8Inspector::create / contextCreated / connect handle
         // operations below run against a live, entered context (matching dispatch()/run() and
-        // V8Engine's eval/getFunction/...). Still required — just not, by itself, sufficient: the
-        // Debug object it operates against is what the warm-up above materialized.
+        // V8Engine's eval/getFunction/...).
         v8::Context::Scope contextScope(context);
 
-        client_ = std::make_unique<ClientImpl>(isolate_, &context_, &pump_);
-        inspector_ = v8_inspector::V8Inspector::create(isolate_, client_.get());
+        client_ = std::make_unique<SeamClient>(isolate_, &context_, &pump_);
+        inspector_ = v8_inspector::V8Inspector::create(isolate_, client_->asClient());
         if (!inspector_)
         {
             err = "v8_inspector::V8Inspector::create returned null";
             return false;
         }
-        channel_ = std::make_unique<ChannelImpl>(&sink_);
+        channel_ = std::make_unique<SeamChannel>(&sink_);
 
         const std::string name = "context-engine";
         v8_inspector::V8ContextInfo info(context, kContextGroupId, toStringView(name));
         inspector_->contextCreated(info);
 
-        session_ = inspector_->connect(kContextGroupId, channel_.get(), v8_inspector::StringView(),
+        session_ = inspector_->connect(kContextGroupId, channel_->asChannel(),
+                                       v8_inspector::StringView(),
                                        v8_inspector::V8Inspector::kFullyTrusted,
                                        v8_inspector::V8Inspector::kNotWaitingForDebugger);
         if (!session_)
@@ -296,8 +302,7 @@ public:
         v8::HandleScope handleScope(isolate_);
         v8::Local<v8::Context> context = context_.Get(isolate_);
         // Mirror init(): enter the context so the session disconnect + contextDestroyed unwind the
-        // same per-context inspector/debug state they were registered against (and ~V8InspectorImpl's
-        // own SetIsolateId runs against a live, entered context).
+        // same per-context inspector/debug state they were registered against.
         v8::Context::Scope contextScope(context);
         session_.reset();
         if (inspector_)
@@ -306,6 +311,9 @@ public:
         }
         inspector_.reset();
         context_.Reset();
+        // client_ / channel_ (the SeamClient/SeamChannel) are destroyed after this body, as members,
+        // so they outlive inspector_.reset() above — the inspector must not be holding them when it
+        // is torn down.
     }
 
 private:
@@ -313,13 +321,123 @@ private:
     v8::Global<v8::Context> context_;
     std::function<void(std::string_view)> sink_;
     std::function<bool()> pump_;
-    std::unique_ptr<ClientImpl> client_;
+    std::unique_ptr<SeamClient> client_;
     std::unique_ptr<v8_inspector::V8Inspector> inspector_;
-    std::unique_ptr<ChannelImpl> channel_;
+    std::unique_ptr<SeamChannel> channel_;
     std::unique_ptr<v8_inspector::V8InspectorSession> session_;
 };
 
 } // namespace
+
+// ---- extern-"C" __BASE callback implementations ------------------------------------------------
+// The archive's __BASE subclass forwards V8's virtual calls here across the STL-free, unmangled
+// seam. `self` is the address of the __BASE object, which is the offset-0 `base` member of our
+// SeamClient/SeamChannel, so the reinterpret_cast recovers the owning struct. These REPLACE the
+// fail-closed traps that lived in v8_rust_stubs.cpp for these ten symbols (the header comment).
+//
+// LINK-ORDER SAFETY (why defining them here, not in the WHOLE_ARCHIVE'd stub lib, is safe): unlike
+// the pure trap-only stub TU — which nothing else references, so the single-pass GNU-ld/lld legs
+// need --whole-archive to keep it — inspector.o is unconditionally pulled into the link by
+// createInspectorSession (referenced from v8_engine.cpp's attachInspector). Once inspector.o is in,
+// all ten definitions are present, and librusty_v8.a's undefined references to them resolve as
+// usual. Verified against the CI build + sanitize legs (the authoritative gate for the V8 path).
+extern "C"
+{
+    std::int64_t v8_inspector__V8InspectorClient__BASE__generateUniqueId(
+        v8_inspector::V8InspectorClient* /*self*/)
+    {
+        // Monotonic, process-global, positive. V8 uses these only to tag scripts/objects uniquely;
+        // any never-repeating value is correct.
+        static std::atomic<std::int64_t> counter{1};
+        return counter.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void v8_inspector__V8InspectorClient__BASE__runMessageLoopOnPause(
+        v8_inspector::V8InspectorClient* self, int /*contextGroupId*/)
+    {
+        auto* c = reinterpret_cast<SeamClient*>(self);
+        c->paused = true;
+        int guard = 0;
+        while (c->paused && guard++ < kMaxPauseIterations)
+        {
+            if (c->pump == nullptr || !*c->pump)
+            {
+                break; // no pump installed: return so V8 continues rather than deadlocking
+            }
+            if ((*c->pump)())
+            {
+                break; // pump reports it issued a resume/step
+            }
+        }
+        c->paused = false;
+    }
+
+    void v8_inspector__V8InspectorClient__BASE__quitMessageLoopOnPause(
+        v8_inspector::V8InspectorClient* self)
+    {
+        reinterpret_cast<SeamClient*>(self)->paused = false;
+    }
+
+    void v8_inspector__V8InspectorClient__BASE__runIfWaitingForDebugger(
+        v8_inspector::V8InspectorClient* /*self*/, int /*contextGroupId*/)
+    {
+    }
+
+    void v8_inspector__V8InspectorClient__BASE__consoleAPIMessage(
+        v8_inspector::V8InspectorClient* /*self*/, int /*contextGroupId*/,
+        v8::Isolate::MessageErrorLevel /*level*/, const v8_inspector::StringView& /*message*/,
+        const v8_inspector::StringView& /*url*/, unsigned /*lineNumber*/, unsigned /*columnNumber*/,
+        v8_inspector::V8StackTrace* /*stackTrace*/)
+    {
+        // Console output routing is out of scope for the attach/breakpoint DoD; intentionally no-op.
+    }
+
+    v8::Context* v8_inspector__V8InspectorClient__BASE__ensureDefaultContextInGroup(
+        v8_inspector::V8InspectorClient* self, int /*context_group_id*/)
+    {
+        // Return the engine's context in rusty_v8's raw-slot form (the __BASE override wraps it back
+        // into a v8::Local via ptr_to_local). A v8::Local is a single slot pointer, so the raw form
+        // is its bit pattern — the same Local<->ptr reinterpret the v8_shims.h backing-store seam uses.
+        static_assert(sizeof(v8::Local<v8::Context>) == sizeof(v8::Context*),
+                      "v8::Local must be a single-slot pointer for the raw-slot round-trip");
+        auto* c = reinterpret_cast<SeamClient*>(self);
+        v8::Local<v8::Context> ctx = c->context->Get(c->isolate);
+        v8::Context* raw = nullptr;
+        std::memcpy(&raw, &ctx, sizeof(raw));
+        return raw;
+    }
+
+    v8_inspector::StringBuffer* v8_inspector__V8InspectorClient__BASE__resourceNameToUrl(
+        v8_inspector::V8InspectorClient* /*self*/,
+        const v8_inspector::StringView& /*resource_name_view*/)
+    {
+        // nullptr => no transformation: V8 keeps the resource name as the script URL (our CDP client
+        // sets breakpoints against that same URL, e.g. context://breakpoint.js).
+        return nullptr;
+    }
+
+    void v8_inspector__V8Inspector__Channel__BASE__sendResponse(
+        v8_inspector::V8Inspector::Channel* self, int /*callId*/,
+        v8_inspector::StringBuffer* message)
+    {
+        // `message` is a raw, caller-owned StringBuffer (the __BASE override called message.release()
+        // before crossing the seam): emit its contents, then free it via the archive's deleter.
+        reinterpret_cast<SeamChannel*>(self)->emit(message);
+        v8_inspector__StringBuffer__DELETE(message);
+    }
+
+    void v8_inspector__V8Inspector__Channel__BASE__sendNotification(
+        v8_inspector::V8Inspector::Channel* self, v8_inspector::StringBuffer* message)
+    {
+        reinterpret_cast<SeamChannel*>(self)->emit(message);
+        v8_inspector__StringBuffer__DELETE(message);
+    }
+
+    void v8_inspector__V8Inspector__Channel__BASE__flushProtocolNotifications(
+        v8_inspector::V8Inspector::Channel* /*self*/)
+    {
+    }
+}
 
 // Describe a caught exception, preferring the full error.stack (so the same TS-source-map remapper
 // runtime/ts uses can resolve the JS frames), falling back to the bare message / stringified

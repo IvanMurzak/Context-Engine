@@ -15,10 +15,11 @@
 //     forwards to. This host boots the real C++ default platform via
 //     v8__Platform__NewDefaultPlatform (v8_shims.h); it never constructs a rusty_v8 custom
 //     platform, so these are unreachable.
-//   * v8_inspector__V8Inspector{,Client}__BASE__*  - the rusty_v8 Rust-side inspector trait
-//     thunks. The R-OBS-005 seam (inspector_seam.h) derives from the REAL C++
-//     v8_inspector::V8InspectorClient, NOT rusty_v8's BASE wrapper, and no channel/debugger is
-//     built in task 2a - unreachable.
+//   * v8_inspector__V8Inspector{,Client}__BASE__*  - the rusty_v8 Rust-side inspector trait thunks.
+//     NO LONGER STUBBED HERE: the R-OBS-005 interactive CDP session (src/inspector.cpp, issue #104)
+//     now routes the Client + Channel THROUGH this __BASE seam (the ABI-safe alternative to direct
+//     C++ subclassing), so it provides the ten __BASE__* symbols as real implementations. They are
+//     removed from this trap set — see the NOTE where they used to sit, below.
 //   * v8__Value{,De}Serializer__Delegate__*  - structured-clone serializer delegate thunks;
 //     this host never serializes - unreachable.
 //   * rusty_v8_RustObj_{drop,trace,get_name}  - the cppgc lifecycle callbacks for Rust-managed
@@ -65,17 +66,12 @@ static void ctx_v8_rust_stub_trap(const char* symbol)
     void v8__Platform__CustomPlatform__BASE__PostNonNestableTask(void) { ctx_v8_rust_stub_trap("v8__Platform__CustomPlatform__BASE__PostNonNestableTask"); }
     void v8__Platform__CustomPlatform__BASE__PostTask(void) { ctx_v8_rust_stub_trap("v8__Platform__CustomPlatform__BASE__PostTask"); }
 
-    // --- v8_inspector V8Inspector/V8InspectorClient BASE thunks (Rust-side inspector) - unreached (10) ---
-    void v8_inspector__V8InspectorClient__BASE__consoleAPIMessage(void) { ctx_v8_rust_stub_trap("v8_inspector__V8InspectorClient__BASE__consoleAPIMessage"); }
-    void v8_inspector__V8InspectorClient__BASE__ensureDefaultContextInGroup(void) { ctx_v8_rust_stub_trap("v8_inspector__V8InspectorClient__BASE__ensureDefaultContextInGroup"); }
-    void v8_inspector__V8InspectorClient__BASE__generateUniqueId(void) { ctx_v8_rust_stub_trap("v8_inspector__V8InspectorClient__BASE__generateUniqueId"); }
-    void v8_inspector__V8InspectorClient__BASE__quitMessageLoopOnPause(void) { ctx_v8_rust_stub_trap("v8_inspector__V8InspectorClient__BASE__quitMessageLoopOnPause"); }
-    void v8_inspector__V8InspectorClient__BASE__resourceNameToUrl(void) { ctx_v8_rust_stub_trap("v8_inspector__V8InspectorClient__BASE__resourceNameToUrl"); }
-    void v8_inspector__V8InspectorClient__BASE__runIfWaitingForDebugger(void) { ctx_v8_rust_stub_trap("v8_inspector__V8InspectorClient__BASE__runIfWaitingForDebugger"); }
-    void v8_inspector__V8InspectorClient__BASE__runMessageLoopOnPause(void) { ctx_v8_rust_stub_trap("v8_inspector__V8InspectorClient__BASE__runMessageLoopOnPause"); }
-    void v8_inspector__V8Inspector__Channel__BASE__flushProtocolNotifications(void) { ctx_v8_rust_stub_trap("v8_inspector__V8Inspector__Channel__BASE__flushProtocolNotifications"); }
-    void v8_inspector__V8Inspector__Channel__BASE__sendNotification(void) { ctx_v8_rust_stub_trap("v8_inspector__V8Inspector__Channel__BASE__sendNotification"); }
-    void v8_inspector__V8Inspector__Channel__BASE__sendResponse(void) { ctx_v8_rust_stub_trap("v8_inspector__V8Inspector__Channel__BASE__sendResponse"); }
+    // NOTE: the ten v8_inspector__{V8InspectorClient,V8Inspector__Channel}__BASE__* thunks that used
+    // to trap here are now REALLY implemented in src/inspector.cpp (R-OBS-005 interactive CDP attach,
+    // issue #104): the inspector Client + Channel route through rusty_v8's extern-"C" __BASE seam
+    // instead of direct C++ subclassing, so V8's cross-ABI virtual callbacks land in the archive's
+    // __BASE vtable and forward to those real impls. They are intentionally ABSENT from this trap set
+    // — each __BASE__* symbol must be defined exactly once, and inspector.cpp owns it now.
 
     // --- v8::Value{,De}Serializer::Delegate thunks (structured clone) - unreached (11) ---
     void v8__ValueDeserializer__Delegate__GetSharedArrayBufferFromId(void) { ctx_v8_rust_stub_trap("v8__ValueDeserializer__Delegate__GetSharedArrayBufferFromId"); }
