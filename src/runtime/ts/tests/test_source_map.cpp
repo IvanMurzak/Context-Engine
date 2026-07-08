@@ -221,6 +221,29 @@ static void test_overlong_vlq_fails_closed()
     CHECK(!err.empty());
 }
 
+static void test_overlong_int_fails_closed()
+{
+    // A JSON integer with more digits than int64 can hold would overflow `value * 10 + digit`
+    // (signed-overflow UB) in the reader's parseInt. The reader must FAIL CLOSED (parse nullopt),
+    // mirroring the sibling VLQ overflow guard. parseInt is reachable both on `version` AND — via
+    // skipValue's default branch — on any extraneous numeric field, so exercise both paths.
+    const std::string bigNum(40, '9'); // 40 digits — far past int64's ~19-digit range
+    std::string err;
+    // (a) oversized `version` value.
+    std::optional<cts::SourceMap> vmap = cts::SourceMap::parse(
+        R"({"version":)" + bigNum + R"(,"sources":[],"names":[],"mappings":""})", &err);
+    CHECK(!vmap.has_value());
+    CHECK(!err.empty());
+    // (b) oversized value on an EXTRANEOUS numeric field (skipped via skipValue -> parseInt). Without
+    // the guard this parse would SUCCEED (the overflow is silent UB during the skip); with it, the
+    // whole map fails closed.
+    err.clear();
+    std::optional<cts::SourceMap> xmap = cts::SourceMap::parse(
+        R"({"version":3,"x":)" + bigNum + R"(,"sources":[],"names":[],"mappings":""})", &err);
+    CHECK(!xmap.has_value());
+    CHECK(!err.empty());
+}
+
 int main()
 {
     test_parse_and_resolve();
@@ -230,6 +253,7 @@ int main()
     test_ignores_extra_fields();
     test_deeply_nested_extra_field_fails_closed();
     test_overlong_vlq_fails_closed();
+    test_overlong_int_fails_closed();
     if (smtest::g_failures != 0)
     {
         std::fprintf(stderr, "test_source_map: %d CHECK(s) failed\n", smtest::g_failures);

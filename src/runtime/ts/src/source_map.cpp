@@ -155,7 +155,18 @@ public:
         bool anyDigit = false;
         while (pos_ < s_.size() && s_[pos_] >= '0' && s_[pos_] <= '9')
         {
-            value = value * 10 + (s_[pos_] - '0');
+            const int digit = s_[pos_] - '0';
+            // Fail closed on a malformed/adversarial overlong integer rather than invoking
+            // signed-overflow UB. parseInt is reachable on `version` AND — via skipValue's default
+            // branch — on any extraneous numeric field, so an oversized literal must not overflow
+            // `value * 10 + digit`. Mirrors decodeVlq's pre-add headroom guard (the reader's
+            // "neither throws; both fail-closed" contract).
+            if (value > (std::numeric_limits<long long>::max() - digit) / 10)
+            {
+                pos_ = start;
+                return fail();
+            }
+            value = value * 10 + digit;
             anyDigit = true;
             ++pos_;
         }

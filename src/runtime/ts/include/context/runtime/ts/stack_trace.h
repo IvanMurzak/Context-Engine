@@ -36,7 +36,9 @@ struct StackFrame
 // "at "), matching V8/Node/Chrome:
 //   at <function> (<file>:<line>:<column>)
 //   at <file>:<line>:<column>
-//   at <function> (<file>:<line>:<column>), eval-wrapped, and async prefixes are tolerated.
+// Async-prefixed frames ("at async <function> (...)") are handled. An eval-wrapped frame does not
+// error (its outer parenthesised location is parsed) but is not resolved to a meaningful TS
+// position — full eval-frame support belongs to the split-out interactive-debugger half.
 // The leading header line (e.g. "Error: boom") and any unrecognised line are skipped — only true
 // frames are returned. A frame whose location is not "<file>:<line>:<column>" is skipped.
 [[nodiscard]] std::vector<StackFrame> parse_v8_stack(std::string_view stack);
