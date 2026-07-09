@@ -53,6 +53,17 @@
                 "CONTEXT_BUILD_SPIKES": "ON",
                 "VCPKG_MANIFEST_FEATURES": "spikes"
             }
+        },
+        {
+            "name": "shader-crosscompile",
+            "displayName": "Shader cross-compile toolchain (opt-in glslang/SPIRV-Cross/SPIRV-Tools de-risk; Release; vcpkg toolchain via $env{VCPKG_ROOT})",
+            "inherits": "base",
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CONTEXT_BUILD_SHADER_CROSSCOMPILE": "ON",
+                "VCPKG_MANIFEST_FEATURES": "shader-crosscompile"
+            }
         }
     ],
     "buildPresets": [
@@ -79,6 +90,11 @@
         {
             "name": "spikes",
             "configurePreset": "spikes",
+            "configuration": "Release"
+        },
+        {
+            "name": "shader-crosscompile",
+            "configurePreset": "shader-crosscompile",
             "configuration": "Release"
         }
     ],
@@ -108,6 +124,12 @@
         {
             "name": "spikes",
             "configurePreset": "spikes",
+            "configuration": "Release",
+            "output": { "outputOnFailure": true }
+        },
+        {
+            "name": "shader-crosscompile",
+            "configurePreset": "shader-crosscompile",
             "configuration": "Release",
             "output": { "outputOnFailure": true }
         }

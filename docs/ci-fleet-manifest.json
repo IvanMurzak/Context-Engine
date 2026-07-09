@@ -314,6 +314,16 @@
       "description": "M4 render foundation (src/render/, issue #114): the production T1 native backend (context_render_wgpu over the SHA-pinned wgpu-native prebuilt, R-SEC-009) builds on all 3 desktop OSes and the offscreen render/pixel-readback proof — driven through the rhi.h RHI abstraction (R-REND-001/002) — runs on the software adapter (lavapipe on ubuntu; skips cleanly where none; not registered on Windows). The library half (RHI abstraction + L-39 sim->render extract + double-buffer + R-HEAD-002 detachable renderer, context_render) is exercised by the build job's ctest with the wgpu toggle OFF. The real-GPU visual-equivalence gate (visual-equivalence, gpu-runner) stays advisory until that runner class is provisioned."
     },
     {
+      "id": "shader-crosscompile",
+      "requirement": "R-REND-005",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "shader-crosscompile",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "shader-crosscompile",
+      "description": "Native shader cross-compile toolchain de-risk (src/render/shadercc/, issue #125, sub-task B of #119): glslang + SPIRV-Cross + SPIRV-Tools (the vcpkg `shader-crosscompile` manifest feature) build/link behind the default-OFF CONTEXT_BUILD_SHADER_CROSSCOMPILE flag, and a glslang->SPIR-V smoke (validated by SPIRV-Tools, reflected by SPIRV-Cross) runs — a CPU compile path (no GPU/native-render leg). Linux is the blocking build/link/smoke gate on the GH-hosted trio; macOS and Windows are advisory (continue-on-error) desktop-parity legs. Default-OFF means the main build matrix + local dev gate never resolve the toolchain. The real backend wires behind material/'s IShaderCompiler seam in sub-task C."
+    },
+    {
       "id": "fleet-manifest-validation",
       "requirement": "R-QA-012",
       "runner_class": "gh-ubuntu-shared",
