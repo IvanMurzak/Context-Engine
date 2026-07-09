@@ -667,6 +667,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Apply the same per-job toolchain + build-environment composites every other build-capable
+      # job uses (build, bench-baseline, spike-*, render): on the BLOCKING Linux leg pinned-toolchain
+      # installs/exports the L-42 pinned clang (CC/CXX) and setup-build-env exports CMAKE_GENERATOR=Ninja
+      # + the sccache launchers (the shader-crosscompile preset inherits `base` and sets no generator,
+      # so without this the configure would fall back to Unix Makefiles and skip compiler caching).
+      # Both are safe no-ops on GH-hosted Windows (informational / default-VS-generator) and advisory on
+      # macOS — identical to how the matrix spike-* jobs apply them across the trio.
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
       # Persist the built glslang/spirv-cross/spirv-tools archives across runs so the from-source
       # vcpkg build only pays full cost on a manifest change (key = src/vcpkg.json hash).
       - name: vcpkg binary cache
