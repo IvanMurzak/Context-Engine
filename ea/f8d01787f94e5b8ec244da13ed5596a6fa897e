@@ -1,0 +1,36 @@
+src/packages/spatial/tests/test_spatial_index.cpp
+  s_e054cff650e8f2::t_d8a4545c4c6974 1-230
+src/packages/spatial/tests/test_spatial_index_perf.cpp
+  s_e054cff650e8f2::t_91d8a9280a5438 1-143
+src/packages/spatial/README.md
+  s_e054cff650e8f2::t_e8ab13816e5925 1-50
+src/packages/spatial/src/spatial_index.cpp
+  s_e054cff650e8f2::t_6ded7899058a0c 1-659,661-686
+  s_e054cff650e8f2::t_7a00d78635a371 660
+src/packages/spatial/include/context/packages/spatial/spatial_index.h
+  s_e054cff650e8f2::t_4327026dd785b2 1-147
+src/packages/spatial/tests/spatial_test.h
+  s_e054cff650e8f2::t_85abf25b5b8967 1-27
+src/packages/spatial/CMakeLists.txt
+  s_e054cff650e8f2::t_a83ecc28d22279 1-45
+src/packages/README.md
+  s_e054cff650e8f2::t_8cb1c0a848a218 5,8-13
+src/CMakeLists.txt
+  s_e054cff650e8f2::t_d1f3cbbdfbf270 85-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "eaf8d01787f94e5b8ec244da13ed5596a6fa897e",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
