@@ -50,6 +50,14 @@ foreach(_t IN LISTS _context_render_tests)
 endforeach()
 
 # ---------------------------------------------------------------------------------------------
+# Feature packages layered on the RHI abstraction. Each is its own subdirectory building a CPU
+# library over context_render (GPU-free, locally tested) plus a header-only GPU proof wired into the
+# wgpu offscreen executable below. Sub-packages are added at NON-ADJACENT anchors so concurrent M4
+# tasks (sprite/2D vs material IR) that each add one here merge without a text conflict.
+# ---------------------------------------------------------------------------------------------
+add_subdirectory(sprite)   # R-2D-001 / L-55 — the 2D sprite path (issue #122)
+
+# ---------------------------------------------------------------------------------------------
 # context_render_wgpu — the T1 native backend + offscreen pixel-readback proof (CI-only dep path).
 # Opt-in: default OFF so the local GCC dev gate and the default 3-OS build matrix never fetch the
 # wgpu-native prebuilt. The dedicated `render` CI job configures with -DCONTEXT_BUILD_RENDER_WGPU=ON.
@@ -120,8 +128,11 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
     endif()
 
     # The offscreen proof executable: probe | render (the offscreen readback via the RHI abstraction).
+    # context_render_sprite: the offscreen exe's `sprite` mode runs the R-2D-001 GPU sprite-draw proof
+    # (sprite_offscreen.h) through the SAME wgpu backend — reusing the ONE prebuilt, not forking it.
     add_executable(context_render_wgpu_offscreen src/wgpu/offscreen_main.cpp)
-    target_link_libraries(context_render_wgpu_offscreen PRIVATE context_render_wgpu context_warnings)
+    target_link_libraries(context_render_wgpu_offscreen
+        PRIVATE context_render_wgpu context_render_sprite context_warnings)
     if(WIN32)
         # Stage wgpu_native.dll next to the exe so the dynamic import resolves at run time.
         add_custom_command(TARGET context_render_wgpu_offscreen POST_BUILD
@@ -158,6 +169,15 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
     if(NOT WIN32)
         add_test(NAME render-wgpu-offscreen COMMAND context_render_wgpu_offscreen render)
         set_tests_properties(render-wgpu-offscreen PROPERTIES
+            SKIP_RETURN_CODE 77
+            WORKING_DIRECTORY $<TARGET_FILE_DIR:context_render_wgpu_offscreen>)
+
+        # The R-2D-001 GPU sprite-draw proof: ortho-projected quads + sorting-layer overdraw, read
+        # back + asserted. Like render-wgpu-offscreen it needs a rasterizing adapter (software is
+        # fine — lavapipe/Metal), exit 77 = clean SKIP when none exists, and is NOT registered on
+        # Windows (the same Session-0 native-render carve-out the offscreen proof documents above).
+        add_test(NAME render-wgpu-sprite COMMAND context_render_wgpu_offscreen sprite)
+        set_tests_properties(render-wgpu-sprite PROPERTIES
             SKIP_RETURN_CODE 77
             WORKING_DIRECTORY $<TARGET_FILE_DIR:context_render_wgpu_offscreen>)
     endif()

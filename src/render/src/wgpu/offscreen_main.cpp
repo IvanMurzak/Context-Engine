@@ -6,8 +6,11 @@
 //   probe  — R-HEAD-002 seam: enumerate adapters / report absence WITHOUT creating a device. Exit 0.
 //   render — offscreen triangle -> texture -> readback buffer -> pixel asserts. Exit 0 pass /
 //            77 skip (no adapter) / 1 fail. (default)
+//   sprite — R-2D-001 GPU sprite-draw proof: ortho-projected quads + sorting-layer overdraw ->
+//            texture -> readback -> pixel asserts. Same exit convention as `render`.
 
 #include "context/render/offscreen_scene.h"
+#include "context/render/sprite/sprite_offscreen.h"
 #include "context/render/wgpu/wgpu_rhi.h"
 
 #include <cstdio>
@@ -90,6 +93,27 @@ int main(int argc, char** argv)
         return code;
     }
 
-    std::fprintf(stderr, "usage: %s [probe|render]\n", argv[0]);
+    if (mode == "sprite")
+    {
+        const AdapterProbe probe = rhi->probe();
+        if (!probe.has_adapter)
+        {
+            std::printf("[render-wgpu] SKIP: no WebGPU adapter available\n");
+            finish(77);
+            return 77;
+        }
+        std::unique_ptr<IDevice> device = rhi->create_device();
+        if (device == nullptr)
+        {
+            std::fprintf(stderr, "[render-wgpu] FAIL: device creation failed despite an adapter\n");
+            finish(1);
+            return 1;
+        }
+        const int code = context::render::sprite::render_offscreen_sprite(*device) ? 0 : 1;
+        finish(code);
+        return code;
+    }
+
+    std::fprintf(stderr, "usage: %s [probe|render|sprite]\n", argv[0]);
     return 2;
 }
