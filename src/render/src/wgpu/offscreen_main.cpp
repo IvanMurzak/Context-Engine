@@ -11,10 +11,41 @@
 #include "context/render/wgpu/wgpu_rhi.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 
 using namespace context::render;
+
+namespace
+{
+
+// Exit past wgpu-native's flaky Windows teardown once the asserts are done.
+//
+// On the self-hosted Windows CI runners (LocalSystem services in Session 0) wgpu-native's
+// instance/device TEARDOWN — wgpuInstanceRelease plus the Vulkan/DX backend worker-thread join it
+// triggers — intermittently __fastfails with 0xc0000409 (STATUS_STACK_BUFFER_OVERRUN). It is a
+// NONDETERMINISTIC native-library teardown race (the same commit passed then failed on rerun),
+// unrelated to our RHI logic: the `probe` path does no buffer/readback work at all, only instance
+// create + adapter enumerate + release. This is exactly why the `render-wgpu-offscreen` ctest is
+// deliberately unregistered on Windows (see src/render/CMakeLists.txt) — the `probe` test hit the
+// same race. Since the process is exiting anyway and every assertion has already run, on Windows we
+// flush stdio (so the [render-wgpu] log lines survive) and std::_Exit past the RAII destructors, so
+// the flaky wgpu teardown never runs. POSIX unwinds normally (clean and validated on the lavapipe
+// leg), keeping the real wgpuInstanceRelease/device-release coverage there — so this is a no-op
+// difference off Windows.
+void finish(int code)
+{
+    std::fflush(stdout);
+    std::fflush(stderr);
+#if defined(_WIN32)
+    std::_Exit(code);
+#else
+    (void)code; // POSIX: fall through to a normal return so the RAII teardown path is exercised.
+#endif
+}
+
+} // namespace
 
 int main(int argc, char** argv)
 {
@@ -33,6 +64,7 @@ int main(int argc, char** argv)
         std::printf("[render-wgpu] probe: %zu adapter(s) enumerated (no GPU device created)%s%s\n",
                     probe.adapter_count, probe.primary_name.empty() ? "" : " — primary: ",
                     probe.primary_name.c_str());
+        finish(0);
         return 0;
     }
 
@@ -42,16 +74,20 @@ int main(int argc, char** argv)
         if (!probe.has_adapter)
         {
             std::printf("[render-wgpu] SKIP: no WebGPU adapter available\n");
+            finish(77);
             return 77;
         }
         std::unique_ptr<IDevice> device = rhi->create_device();
         if (device == nullptr)
         {
             std::fprintf(stderr, "[render-wgpu] FAIL: device creation failed despite an adapter\n");
+            finish(1);
             return 1;
         }
         const OffscreenResult result = render_offscreen_triangle(*device);
-        return result == OffscreenResult::Pass ? 0 : 1;
+        const int code = (result == OffscreenResult::Pass) ? 0 : 1;
+        finish(code);
+        return code;
     }
 
     std::fprintf(stderr, "usage: %s [probe|render]\n", argv[0]);

@@ -132,8 +132,11 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
             COMMENT "context_render_wgpu: staging wgpu_native.dll next to the offscreen exe")
     endif()
 
-    # R-HEAD-002 probe: enumerate adapters / report absence WITHOUT a device — passes everywhere,
-    # incl. adapter-less headless boxes (exit 0 always).
+    # R-HEAD-002 probe: enumerate adapters / report absence WITHOUT a device — exit 0 everywhere,
+    # incl. adapter-less headless boxes. Runs on Windows too: offscreen_main.cpp std::_Exit()s past
+    # wgpu-native's flaky Session-0 teardown after the probe asserts (see its `finish()` note), so
+    # the enumerate/R-HEAD-002 assertion still exercises on the Windows leg WITHOUT hitting the
+    # 0xc0000409 teardown __fastfail that this test originally tripped intermittently.
     add_test(NAME render-wgpu-probe COMMAND context_render_wgpu_offscreen probe)
 
     # Offscreen render + pixel readback: needs SOME adapter (a software one — lavapipe/Metal — is
@@ -142,9 +145,12 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
     # DELIBERATELY NOT REGISTERED ON WINDOWS, matching the proven spikes/webgpu spike: the
     # self-hosted Windows runners are LocalSystem services in Session 0, where the native wgpu-native
     # render path intermittently crashes (0xc0000409) in device/instance teardown regardless of
-    # adapter. A flaky native crash is unacceptable for CI. Render+readback correctness is validated
-    # deterministically on Linux (lavapipe) + (via the same shared proof code) the fake-backend
-    # ctest; Windows stays deterministic via the build+link (MSVC) and the `probe` test.
+    # adapter. offscreen_main.cpp's finish() std::_Exit skips that flaky TEARDOWN, but the render
+    # path also does live device/queue/draw work whose Session-0 stability is not proven, so — unlike
+    # the teardown-only probe — the offscreen readback stays Windows-unregistered. A flaky native
+    # crash is unacceptable for CI. Render+readback correctness is validated deterministically on
+    # Linux (lavapipe) + (via the same shared proof code) the fake-backend ctest; Windows stays
+    # deterministic via the build+link (MSVC) and the `probe` test.
     if(NOT WIN32)
         add_test(NAME render-wgpu-offscreen COMMAND context_render_wgpu_offscreen render)
         set_tests_properties(render-wgpu-offscreen PROPERTIES
