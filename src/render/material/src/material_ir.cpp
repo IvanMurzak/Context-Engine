@@ -87,12 +87,15 @@ std::vector<std::string> tokenize(std::string_view s)
     return tokens;
 }
 
-// A keyword name/value MUST be free of the ';' and '=' characters VariantKey::canonical() uses as its
-// delimiters — otherwise two distinct variants could encode to the same canonical string and collide in
-// the R-FILE-010 content-addressed cache (shader_cache.h), silently returning the wrong artifact.
+// A keyword name/value MUST be free of every byte used as a structural delimiter while deriving the
+// R-FILE-010 content-addressed cache key: ';' and '=' (VariantKey::canonical()'s delimiters) and the
+// 0x1f unit separator ShaderCompileCache::cache_key() splices its components with (shader_cache.cpp).
+// Otherwise two distinct inputs could encode to the same key string and collide in the cache
+// (shader_cache.h), silently returning the wrong artifact.
 bool has_key_delimiter(std::string_view s)
 {
-    return s.find(';') != std::string_view::npos || s.find('=') != std::string_view::npos;
+    return s.find(';') != std::string_view::npos || s.find('=') != std::string_view::npos ||
+           s.find('\x1f') != std::string_view::npos;
 }
 
 std::string join_lines(const std::vector<std::string>& lines)
@@ -370,7 +373,7 @@ std::vector<VariantKey> enumerate_variants(const ShaderIr& ir)
 
 std::string content_hash_hex(std::string_view bytes)
 {
-    std::uint64_t h = 1469598103934665603ULL; // FNV-1a 64-bit offset basis
+    std::uint64_t h = 14695981039346656037ULL; // FNV-1a 64-bit offset basis
     for (char c : bytes)
     {
         h ^= static_cast<std::uint64_t>(static_cast<unsigned char>(c));

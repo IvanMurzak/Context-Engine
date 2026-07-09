@@ -169,6 +169,8 @@ void test_parse_failures()
     CHECK(!parse_shader("shader a\nkeyword K;X on off").has_value());              // ';' in keyword name
     CHECK(!parse_shader("shader a\nkeyword K a=b").has_value());                   // '=' in a value
     CHECK(!parse_shader("shader a\nkeyword K a;b").has_value());                   // ';' in a value
+    // 0x1f is the unit separator ShaderCompileCache::cache_key() splices components with — rejected too.
+    CHECK(!parse_shader("shader a\nkeyword K a\x1f" "b").has_value());             // 0x1f in a value
     // Duplicate keyword name / duplicate value within a keyword are rejected (each would enumerate a
     // variant with a non-unique canonical key).
     CHECK(!parse_shader("shader a\nkeyword FOG off on\nkeyword FOG a b").has_value()); // dup keyword name
