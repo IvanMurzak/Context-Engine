@@ -23,10 +23,20 @@
 //   V8InspectorClient* / Channel* V8 hands back to a thunk casts straight to our state — the same
 //   containing-struct trick rusty_v8 uses when the client is implemented from Rust.
 //
-//   V8Inspector::create / connect / contextCreated / V8InspectorSession::stateJSON are still called
-//   DIRECTLY: a std::unique_ptr RETURN is ABI-immune (not part of name mangling; returned via the
-//   sret single-pointer path identical on both STLs), and their arguments carry no by-value STL. Only
-//   the CALLBACK (V8-vtable-into-us) direction crossed the ABI unsafely, so only it needed the seam.
+//   V8Inspector::create / connect ALSO cross through the archive's extern-"C" seam
+//   (v8_inspector__V8Inspector__{create,connect}): they RETURN a std::unique_ptr, and consuming that
+//   Chromium-libc++ smart-pointer return from this system-STL TU is NOT ABI-safe — the returned
+//   pointer arrives null (issue #104: "V8Inspector::create returned null" on the macOS/Windows CI
+//   legs, where the link succeeds but the attach fails at runtime; an earlier belief that a
+//   unique_ptr return was ABI-immune was WRONG). The archive's __create / __connect shims .release()
+//   the unique_ptr INSIDE the archive and hand back a bare pointer we own and free via
+//   v8_inspector__V8Inspector__DELETE / v8_inspector__V8InspectorSession__DELETE (a system operator
+//   delete would be a cross-heap free of an object allocated in the archive's libc++ heap). By
+//   contrast contextCreated / contextDestroyed / dispatchProtocolMessage stay DIRECT virtual calls:
+//   they return void and take only by-value-POD (V8ContextInfo) / single-slot-Local / StringView
+//   args — no by-value STL, no smart-pointer return — so that direction genuinely is ABI-immune.
+//   Net: smart-pointer RETURNS and the CALLBACK (V8-vtable-into-us) direction both go through the
+//   seam; the void-returning, POD-argument outbound calls do not need it.
 //
 // Signatures of the archive-side seam functions were verified verbatim against
 //   https://github.com/denoland/rusty_v8/blob/v149.4.0/src/binding.cc
@@ -58,14 +68,28 @@
 
 // rusty_v8 archive-provided extern-"C" seam entry points we CALL. CONSTRUCT placement-builds the
 // archive-side __BASE subclass into our buffer (declared void* here — the archive's parameter is an
-// `uninit_t<__BASE>*`, ABI-identical to a plain pointer). StringBuffer__DELETE frees a StringBuffer
-// allocated inside the archive's libc++ heap (deleting it from this TU's operator delete would be a
-// cross-heap mismatch). Defined inside the pinned librusty_v8 archive; do not redefine.
+// `uninit_t<__BASE>*`, ABI-identical to a plain pointer). __create / __connect wrap
+// V8Inspector::create / V8Inspector::connect: they .release() the archive's std::unique_ptr and
+// return a BARE pointer — the ABI-safe alternative to consuming a Chromium-libc++ unique_ptr RETURN
+// in this system-STL TU (which arrives null, issue #104). The __DELETE entry points free objects
+// allocated in the archive's libc++ heap (a system operator delete would be a cross-heap mismatch);
+// StringBuffer__DELETE does the same for a StringBuffer. All are defined inside the pinned librusty_v8
+// archive — signatures verified verbatim against the v149.4.0 binding.cc pin (tools/v8-prebuilt.json,
+// the SAME source the __BASE thunk signatures below were checked against); do not redefine.
 extern "C"
 {
     void v8_inspector__V8InspectorClient__BASE__CONSTRUCT(void* buf);
     void v8_inspector__V8Inspector__Channel__BASE__CONSTRUCT(void* buf);
     void v8_inspector__StringBuffer__DELETE(v8_inspector::StringBuffer* self);
+
+    v8_inspector::V8Inspector* v8_inspector__V8Inspector__create(
+        v8::Isolate* isolate, v8_inspector::V8InspectorClient* client);
+    void v8_inspector__V8Inspector__DELETE(v8_inspector::V8Inspector* self);
+    v8_inspector::V8InspectorSession* v8_inspector__V8Inspector__connect(
+        v8_inspector::V8Inspector* self, int context_group_id,
+        v8_inspector::V8Inspector::Channel* channel, v8_inspector::StringView state,
+        v8_inspector::V8Inspector::ClientTrustLevel client_trust_level);
+    void v8_inspector__V8InspectorSession__DELETE(v8_inspector::V8InspectorSession* self);
 }
 
 namespace context::runtime::js::detail
@@ -205,6 +229,32 @@ struct SeamChannel
 };
 static_assert(offsetof(SeamChannel, base) == 0, "the __BASE storage must be at offset 0");
 
+// v8_inspector__V8Inspector__{create,connect} hand back objects allocated inside the archive's libc++
+// heap (the shims .release() the archive's std::unique_ptr). They MUST be freed by the archive's
+// matching __DELETE — a system operator delete would be a cross-heap free. These custom deleters route
+// unique_ptr teardown back through that archive seam.
+struct InspectorDeleter
+{
+    void operator()(v8_inspector::V8Inspector* p) const
+    {
+        if (p != nullptr)
+        {
+            v8_inspector__V8Inspector__DELETE(p);
+        }
+    }
+};
+
+struct SessionDeleter
+{
+    void operator()(v8_inspector::V8InspectorSession* p) const
+    {
+        if (p != nullptr)
+        {
+            v8_inspector__V8InspectorSession__DELETE(p);
+        }
+    }
+};
+
 class SessionImpl final : public InspectorSession
 {
 public:
@@ -243,25 +293,34 @@ public:
         v8::Context::Scope contextScope(context);
 
         client_ = std::make_unique<SeamClient>(isolate_, &context_, &pump_);
-        inspector_ = v8_inspector::V8Inspector::create(isolate_, client_->asClient());
+        // create() returns std::unique_ptr from the archive's Chromium-libc++ ABI; consuming that
+        // return in this system-STL TU arrives null (issue #104). Go through the archive's raw-pointer
+        // shim, which .release()s inside the archive; InspectorDeleter frees it via the archive's
+        // __DELETE (header comment).
+        inspector_.reset(v8_inspector__V8Inspector__create(isolate_, client_->asClient()));
         if (!inspector_)
         {
-            err = "v8_inspector::V8Inspector::create returned null";
+            err = "v8_inspector__V8Inspector__create returned null";
             return false;
         }
         channel_ = std::make_unique<SeamChannel>(&sink_);
 
         const std::string name = "context-engine";
+        // contextCreated takes a by-value V8ContextInfo (trivially copyable, no by-value STL) and
+        // returns void, so the direct virtual call into the archive is ABI-safe (unlike the
+        // unique_ptr-returning create/connect above/below).
         v8_inspector::V8ContextInfo info(context, kContextGroupId, toStringView(name));
         inspector_->contextCreated(info);
 
-        session_ = inspector_->connect(kContextGroupId, channel_->asChannel(),
-                                       v8_inspector::StringView(),
-                                       v8_inspector::V8Inspector::kFullyTrusted,
-                                       v8_inspector::V8Inspector::kNotWaitingForDebugger);
+        // connect() likewise returns std::unique_ptr — same ABI hazard, same raw-pointer shim. The
+        // shim omits the trailing SessionPauseState arg, defaulting it to kNotWaitingForDebugger inside
+        // the archive (the value the prior direct call passed explicitly).
+        session_.reset(v8_inspector__V8Inspector__connect(
+            inspector_.get(), kContextGroupId, channel_->asChannel(), v8_inspector::StringView(),
+            v8_inspector::V8Inspector::kFullyTrusted));
         if (!session_)
         {
-            err = "v8_inspector::V8Inspector::connect returned null";
+            err = "v8_inspector__V8Inspector__connect returned null";
             return false;
         }
         return true;
@@ -322,9 +381,9 @@ private:
     std::function<void(std::string_view)> sink_;
     std::function<bool()> pump_;
     std::unique_ptr<SeamClient> client_;
-    std::unique_ptr<v8_inspector::V8Inspector> inspector_;
+    std::unique_ptr<v8_inspector::V8Inspector, InspectorDeleter> inspector_;
     std::unique_ptr<SeamChannel> channel_;
-    std::unique_ptr<v8_inspector::V8InspectorSession> session_;
+    std::unique_ptr<v8_inspector::V8InspectorSession, SessionDeleter> session_;
 };
 
 } // namespace

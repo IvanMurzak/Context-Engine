@@ -123,12 +123,30 @@ if(_ctx_js_v8)
     target_link_libraries(context_v8_rust_stubs PRIVATE context_warnings)
 
     # inspector.cpp = the R-OBS-005 interactive CDP inspector session (issue #94), built out from the
-    # task-2a seam. V8-backend ONLY (links v8-inspector.h out of the rusty_v8 archive), so it joins
-    # context_js only in this branch — the stub branch below has no inspector.
-    add_library(context_js STATIC src/v8_engine.cpp src/view_element.cpp src/inspector.cpp)
+    # task-2a seam. V8-backend ONLY (links v8-inspector.h out of the rusty_v8 archive). It ALSO defines
+    # the ten extern-"C" v8_inspector__{V8InspectorClient,V8Inspector__Channel}__BASE__* thunks that
+    # librusty_v8.a(binding.o) references. Those thunks are pulled from an ORDINARY archive member only
+    # when something references an inspector symbol — but the editor/system test executables link
+    # context_js WITHOUT touching the inspector, so a single-pass linker (GNU ld / lld on the Linux +
+    # sanitize legs) discards inspector.o and leaves binding.o's __BASE__* references undefined (the
+    # issue-#104 link failure). Give inspector.cpp its OWN target and force-load it (WHOLE_ARCHIVE),
+    # exactly like context_v8_rust_stubs above, so EVERY consumer of context_js retains the thunks
+    # regardless of link order, on all 3 linkers. v8_engine.cpp's backward references to
+    # describeException / compileAndRun / createInspectorSession (now defined in this lib, declared in
+    # the shared inspector_session.h) resolve for the same force-load reason.
+    add_library(context_js_inspector STATIC src/inspector.cpp)
+    target_link_libraries(context_js_inspector PRIVATE context_v8_prebuilt context_warnings)
+    target_compile_definitions(context_js_inspector PRIVATE CONTEXT_JS_HAS_V8)
+    target_include_directories(context_js_inspector PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    if(MSVC)
+        target_compile_options(context_js_inspector PRIVATE /external:W0 /Zc:__cplusplus)
+    endif()
+
+    add_library(context_js STATIC src/v8_engine.cpp src/view_element.cpp)
     target_link_libraries(context_js
         PRIVATE context_v8_prebuilt
-        PUBLIC "$<LINK_LIBRARY:WHOLE_ARCHIVE,context_v8_rust_stubs>")
+        PUBLIC "$<LINK_LIBRARY:WHOLE_ARCHIVE,context_v8_rust_stubs>"
+               "$<LINK_LIBRARY:WHOLE_ARCHIVE,context_js_inspector>")
     target_compile_definitions(context_js PRIVATE CONTEXT_JS_HAS_V8)
     if(MSVC)
         # /external:W0 keeps /W4 /WX for our code while the SYSTEM V8 headers stay quiet;
