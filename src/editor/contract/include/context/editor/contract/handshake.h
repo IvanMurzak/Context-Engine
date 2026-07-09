@@ -23,6 +23,13 @@ namespace context::editor::contract
 // break without deprecation cycles (R-CLI-004). It bumps to 1 at the M3 freeze.
 inline constexpr std::uint32_t kProtocolMajor = 0;
 
+// The R-CLI-010 written deprecation policy: a deprecated verb / method / flag / capability survives
+// at least this many MINOR protocol versions before it may be removed, giving scripts and agents a
+// bounded migration window. The lifecycle is INERT while kProtocolMajor==0 (the contract may still
+// break without a cycle) and ACTIVATES at the M3 freeze. Surfaced in `context describe` under
+// `contract.deprecationPolicy.minMinorsBeforeRemoval`.
+inline constexpr std::uint32_t kDeprecationMinMinors = 2;
+
 // The capabilities the daemon advertises in the handshake (R-CLI-010). Reserved, grep-stable names.
 [[nodiscard]] const std::vector<std::string>& daemon_capabilities();
 
