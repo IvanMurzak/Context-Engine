@@ -50,6 +50,16 @@ foreach(_t IN LISTS _context_render_tests)
 endforeach()
 
 # ---------------------------------------------------------------------------------------------
+# context_render_material — the backend-free material/shader AUTHORING layer (R-REND-005; issue #121,
+# Part of #119): authoring IR + shader-variant enumeration + the IShaderCompiler seam (fake backend) +
+# the R-FILE-010 content-addressed shader-compile cache. Wired here — HIGH in this file, right after
+# the context_render tests — so a concurrent sibling task (sprite/2D, src/render/sprite/, issue #122)
+# adding its own add_subdirectory() at the TAIL of this file merges cleanly against a NON-ADJACENT
+# anchor. context_render_material declares its own target, resolved at generate time regardless of
+# add_subdirectory order.
+add_subdirectory(material)
+
+# ---------------------------------------------------------------------------------------------
 # context_render_wgpu — the T1 native backend + offscreen pixel-readback proof (CI-only dep path).
 # Opt-in: default OFF so the local GCC dev gate and the default 3-OS build matrix never fetch the
 # wgpu-native prebuilt. The dedicated `render` CI job configures with -DCONTEXT_BUILD_RENDER_WGPU=ON.
