@@ -1,10 +1,12 @@
 # src/render/shadercc/ — the M4 native shader cross-compile TOOLCHAIN de-risk (R-REND-005; issue
-# #125, sub-task B of #119). This directory is entered ONLY when CONTEXT_BUILD_SHADER_CROSSCOMPILE=ON
-# (gated from src/render/CMakeLists.txt), which is a vcpkg-manifest dependency path
+# #125, sub-task B of #119) PLUS the REAL cross-compile backend (issue #130, sub-task C of #119). This
+# directory is entered ONLY when CONTEXT_BUILD_SHADER_CROSSCOMPILE=ON (gated from
+# src/render/CMakeLists.txt), which is a vcpkg-manifest dependency path
 # (VCPKG_MANIFEST_FEATURES=shader-crosscompile) — like the wgpu backend it is a CI-gated path the
-# local default dev gate never resolves. It does NOT yet wire cross-compile logic into the engine
-# (that is sub-task C, behind material/'s IShaderCompiler seam); it only proves the native toolchain
-# resolves/builds/links and that glslang lowers GLSL -> SPIR-V.
+# local default dev gate never resolves. Sub-task B proves the native toolchain resolves/builds/links
+# and that glslang lowers GLSL -> SPIR-V (the smoke below); sub-task C hosts the real context_shadercc
+# cross-compile backend behind material/'s IShaderCompiler seam (the context_shadercc library +
+# round-trip test below).
 
 # glslang / SPIRV-Cross / SPIRV-Tools come from the vcpkg `shader-crosscompile` manifest feature.
 # Their imported CONFIG targets carry SYSTEM include dirs, so their own headers never trip our
