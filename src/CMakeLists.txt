@@ -82,6 +82,18 @@ add_spike(hello)
 # stable interfaces; src/editor/, src/runtime/, src/packages/ gain their targets in later M1 tasks.
 add_subdirectory(kernel)
 
+# M4 wave-1: the broad-phase spatial acceleration structure (src/packages/spatial/, R-SIM-007, issue
+# #115) — the FIRST real first-party package under src/packages/. An incrementally-updated dynamic
+# AABB tree over transform-bearing entities: O(log N) insert/update/remove (never rebuilt per frame)
+# and O(result + log N) radius/AABB queries, designed as the ONE index shared by render culling
+# (L-39), spatial queries (R-CLI-006), and asset streaming (R-ASSET-003) in later waves. It is a
+# PACKAGE, not kernel core (R-KERNEL-001 stays minimal): it composes on context_kernel's Entity and
+# the kernel never links back. Wired here immediately after add_subdirectory(kernel) — its only dep —
+# and deliberately far from the editor/runtime clusters and the file tail, so the concurrent sibling
+# task inserting add_subdirectory(render) elsewhere merges cleanly (consumers name the
+# `context_spatial` target, which CMake resolves at generate time regardless of add_subdirectory order).
+add_subdirectory(packages/spatial)
+
 # M2: the REAL canonical-JSON serializer (src/editor/serializer/, issue #42) — R-FILE-001/L-32:
 # strict JSON parse -> NFC-normalized canonical bytes + the canonical-content hash. Dependency-free
 # (stdlib only); wired BEFORE editor/derivation, whose canonical-parse node delegates to it.
