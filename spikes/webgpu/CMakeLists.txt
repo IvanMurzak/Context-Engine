@@ -76,15 +76,21 @@ else()
                             "SHA256 from the ${CTX_WGPU_NATIVE_VERSION} release.")
     endif()
 
+    # Resilient downloader (retry/backoff + fail-closed SHA verify, Context-Engine#129). Guarded
+    # include so it works both standalone (`cmake -S spikes/webgpu`) and via the src/ spikes preset.
+    if(NOT COMMAND context_download)
+        include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/ContextDownload.cmake")
+    endif()
     set(_wgpu_root "${CMAKE_BINARY_DIR}/_deps/wgpu-native")
     set(_wgpu_pkg "${_wgpu_root}/pkg")
     if(NOT EXISTS "${_wgpu_pkg}/include/webgpu/webgpu.h")
         message(STATUS "webgpu spike: downloading wgpu-native ${CTX_WGPU_NATIVE_VERSION} "
                        "prebuilt (${_wgpu_asset}, ~14-17 MB)")
-        file(DOWNLOAD
-            "https://github.com/gfx-rs/wgpu-native/releases/download/${CTX_WGPU_NATIVE_VERSION}/${_wgpu_asset}"
-            "${_wgpu_root}/${_wgpu_asset}"
-            EXPECTED_HASH SHA256=${_wgpu_sha256})
+        context_download(
+            URL "https://github.com/gfx-rs/wgpu-native/releases/download/${CTX_WGPU_NATIVE_VERSION}/${_wgpu_asset}"
+            PATH "${_wgpu_root}/${_wgpu_asset}"
+            EXPECTED_SHA256 "${_wgpu_sha256}"
+            DESCRIPTION "wgpu-native ${CTX_WGPU_NATIVE_VERSION} (${_wgpu_asset})")
         file(ARCHIVE_EXTRACT INPUT "${_wgpu_root}/${_wgpu_asset}" DESTINATION "${_wgpu_pkg}")
     endif()
 

@@ -49,6 +49,7 @@ import stat
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -57,6 +58,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MANIFEST = REPO_ROOT / "tools" / "ts-toolchain.json"
 
 _CHUNK = 1 << 20
+
+# Retry policy for transient upstream failures (Context-Engine#129): a single npm-registry / CDN
+# 504 or timeout must not hard-fail the fetch. SHA-256 verification still runs AFTER the download
+# completes (fail-closed), so retrying never weakens the pin.
+_MAX_ATTEMPTS = 4
+_BASE_DELAY = 3.0
 
 
 class FetchError(Exception):
@@ -100,6 +107,27 @@ def check_coherence(manifest: dict) -> str:
     return version
 
 
+def _download_with_retry(url: str, dest: Path, *, attempts: int = _MAX_ATTEMPTS,
+                         base_delay: float = _BASE_DELAY, sleep=time.sleep) -> None:
+    """Download `url` to `dest` over TLS, retrying transient network failures with exponential
+    backoff (Context-Engine#129). Raises FetchError only after `attempts` failures. The SHA-256
+    pin is checked by the caller afterwards, so this resilience never bypasses verification."""
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as resp, dest.open("wb") as out:  # noqa: S310
+                shutil.copyfileobj(resp, out)
+            return
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            last_exc = exc
+            if attempt < attempts:
+                delay = base_delay * (3 ** (attempt - 1))
+                print(f"[fetch_esbuild] download attempt {attempt}/{attempts} of {url} failed "
+                      f"({exc}); retrying in {delay:.0f}s", file=sys.stderr)
+                sleep(delay)
+    raise FetchError(f"download of {url} failed after {attempts} attempts: {last_exc}") from last_exc
+
+
 def _obtain(name: str, url: str, source: Path | None, work: Path) -> Path:
     """Return a local path to the artifact `name`, from --source or by TLS download."""
     if source is not None:
@@ -108,11 +136,7 @@ def _obtain(name: str, url: str, source: Path | None, work: Path) -> Path:
             raise FetchError(f"--source given but '{name}' not found in {source}")
         return local
     dest = work / name
-    try:
-        with urllib.request.urlopen(url, timeout=60) as resp, dest.open("wb") as out:  # noqa: S310
-            shutil.copyfileobj(resp, out)
-    except (urllib.error.URLError, OSError) as exc:
-        raise FetchError(f"download of {url} failed: {exc}") from exc
+    _download_with_retry(url, dest)
     return dest
 
 

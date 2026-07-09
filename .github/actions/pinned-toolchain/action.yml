@@ -43,9 +43,14 @@ runs:
             eval "$VARS"
             python3 tools/check_toolchain.py --platform "$PLATFORM" --describe
             echo "[toolchain] installing clang $PIN (apt.llvm.org, major $MAJOR)"
-            wget -q https://apt.llvm.org/llvm.sh -O "$RUNNER_TEMP/llvm.sh"
-            chmod +x "$RUNNER_TEMP/llvm.sh"
-            sudo "$RUNNER_TEMP/llvm.sh" "$MAJOR"
+            # Retry/backoff around apt.llvm.org (Context-Engine#129): both the llvm.sh fetch AND the
+            # apt operations llvm.sh runs internally hit apt.llvm.org, which had a full-day outage
+            # (blocked #116). Retry the whole install so a transient blip no longer hard-fails CI.
+            # ($MAJOR is passed as $0 to the inner shell; RUNNER_TEMP is inherited from the env.)
+            bash tools/ci-retry.sh -- bash -c '
+              wget -q https://apt.llvm.org/llvm.sh -O "$RUNNER_TEMP/llvm.sh" \
+                && chmod +x "$RUNNER_TEMP/llvm.sh" \
+                && sudo "$RUNNER_TEMP/llvm.sh" "$0"' "$MAJOR"
             "clang-$MAJOR" --version
             "clang-$MAJOR" --version | python3 tools/check_toolchain.py --platform "$PLATFORM" --verify
             echo "CC=clang-$MAJOR" >> "$GITHUB_ENV"

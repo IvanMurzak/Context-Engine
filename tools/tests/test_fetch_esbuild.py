@@ -194,3 +194,53 @@ def test_real_manifest_is_coherent_and_complete():
     formatted = manifest["package_url_template"].format(
         platform="linux-x64", esbuild_version=version)
     assert formatted.startswith("https://")
+
+
+# --- retry/backoff for transient upstream failures (Context-Engine#129) ----------------------
+
+
+class _FlakyUrlopen:
+    """A urlopen stand-in: raises URLError the first `fail_times` calls, then serves bytes."""
+
+    def __init__(self, fail_times: int, payload: bytes = b"payload-bytes"):
+        self.fail_times = fail_times
+        self.payload = payload
+        self.calls = 0
+
+    def __call__(self, url, timeout=60):  # noqa: ARG002
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise fetch_esbuild.urllib.error.URLError("simulated transient 504")
+        return io.BytesIO(self.payload)
+
+
+def test_download_retries_then_succeeds(tmp_path: Path, monkeypatch):
+    opener = _FlakyUrlopen(fail_times=2)
+    monkeypatch.setattr(fetch_esbuild.urllib.request, "urlopen", opener)
+    dest = tmp_path / "out.bin"
+    slept: list[float] = []
+    fetch_esbuild._download_with_retry(
+        "https://example.invalid/x", dest, attempts=4, base_delay=0, sleep=slept.append)
+    assert dest.read_bytes() == b"payload-bytes"
+    assert opener.calls == 3   # two transient failures + one success
+    assert len(slept) == 2     # backed off before each retry
+
+
+def test_download_gives_up_after_attempts(tmp_path: Path, monkeypatch):
+    opener = _FlakyUrlopen(fail_times=99)
+    monkeypatch.setattr(fetch_esbuild.urllib.request, "urlopen", opener)
+    with pytest.raises(fetch_esbuild.FetchError, match="after 3 attempts"):
+        fetch_esbuild._download_with_retry(
+            "https://example.invalid/x", tmp_path / "o", attempts=3, base_delay=0,
+            sleep=lambda *_: None)
+    assert opener.calls == 3
+
+
+def test_download_backoff_grows_exponentially(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(fetch_esbuild.urllib.request, "urlopen", _FlakyUrlopen(fail_times=99))
+    slept: list[float] = []
+    with pytest.raises(fetch_esbuild.FetchError):
+        fetch_esbuild._download_with_retry(
+            "https://example.invalid/x", tmp_path / "o", attempts=4, base_delay=1,
+            sleep=slept.append)
+    assert slept == [1, 3, 9]  # exponential: base * 3**(attempt-1), no sleep after the last try

@@ -499,7 +499,8 @@ jobs:
       # readback self-check actually renders on CI instead of skipping.
       - name: Install software Vulkan adapter (lavapipe)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+        # Retry/backoff around apt (Context-Engine#129) so a transient mirror blip is not a hard fail.
+        run: bash tools/ci-retry.sh -- bash -c 'sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers'
 
       - name: Configure (standalone spike)
         run: cmake -S spikes/webgpu -B build/spike-webgpu -DCMAKE_BUILD_TYPE=Release
@@ -551,10 +552,15 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install emsdk (latest)
+        # Retry/backoff (Context-Engine#129): the git clone + `emsdk install latest` both download
+        # from GitHub, which was part of the 504 outage wave. rm -rf before each attempt so a
+        # retried clone into an existing dir does not fail.
         run: |
-          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
-          "$RUNNER_TEMP/emsdk/emsdk" install latest
-          "$RUNNER_TEMP/emsdk/emsdk" activate latest
+          bash tools/ci-retry.sh -- bash -c '
+            rm -rf "$RUNNER_TEMP/emsdk" \
+              && git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk" \
+              && "$RUNNER_TEMP/emsdk/emsdk" install latest \
+              && "$RUNNER_TEMP/emsdk/emsdk" activate latest'
 
       - name: Configure + build (wasm)
         run: |
@@ -614,7 +620,8 @@ jobs:
       # offscreen readback self-check actually renders on CI instead of skipping.
       - name: Install software Vulkan adapter (lavapipe)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+        # Retry/backoff around apt (Context-Engine#129) so a transient mirror blip is not a hard fail.
+        run: bash tools/ci-retry.sh -- bash -c 'sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers'
 
       # Configure the dev preset with the wgpu backend ON (it fetches + SHA-verifies the pinned
       # wgpu-native prebuilt). The context_render library half already builds in the main `build`

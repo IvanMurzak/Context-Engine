@@ -15,6 +15,12 @@
 
 include(FetchContent)
 
+# Resilient prebuilt downloader (retry/backoff + fail-closed SHA verify, Context-Engine#129).
+# Guarded include so this spike works both standalone and via the src/ spikes preset.
+if(NOT COMMAND context_download)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/ContextDownload.cmake")
+endif()
+
 option(CONTEXT_SPIKE_JSENGINE_QUICKJS "js-engine spike: build the QuickJS backend" ON)
 # The V8 prebuilt is MSVC-v143-only: its import libs use MSVC name mangling, so GCC/Clang-GNU
 # on Windows cannot link it (measured: MinGW ld fails with undefined v8:: references).
@@ -59,16 +65,16 @@ if(CONTEXT_SPIKE_JSENGINE_V8)
         set(_v8_redist "${_v8_nuget_root}/v8redist")
         if(NOT EXISTS "${_v8_dev}/include/v8.h")
             message(STATUS "js-engine spike: downloading v8-v143-x64 13.0.245.25 NuGet packages (~53 MB)")
-            file(DOWNLOAD
-                "https://api.nuget.org/v3-flatcontainer/v8-v143-x64/13.0.245.25/v8-v143-x64.13.0.245.25.nupkg"
-                "${_v8_nuget_root}/v8.nupkg"
-                EXPECTED_HASH SHA256=ecc0c861324daa683dae32be3f6e517af9741b2174ce48a98999a5c3a1b902ed
-                STATUS _dl_status)
-            file(DOWNLOAD
-                "https://api.nuget.org/v3-flatcontainer/v8.redist-v143-x64/13.0.245.25/v8.redist-v143-x64.13.0.245.25.nupkg"
-                "${_v8_nuget_root}/v8redist.nupkg"
-                EXPECTED_HASH SHA256=6ae157305deb3e0136fc66e0d72df4904117d8fb2b10a6b492150e306ee61055
-                STATUS _dl_status2)
+            context_download(
+                URL "https://api.nuget.org/v3-flatcontainer/v8-v143-x64/13.0.245.25/v8-v143-x64.13.0.245.25.nupkg"
+                PATH "${_v8_nuget_root}/v8.nupkg"
+                EXPECTED_SHA256 "ecc0c861324daa683dae32be3f6e517af9741b2174ce48a98999a5c3a1b902ed"
+                DESCRIPTION "v8-v143-x64 13.0.245.25 NuGet")
+            context_download(
+                URL "https://api.nuget.org/v3-flatcontainer/v8.redist-v143-x64/13.0.245.25/v8.redist-v143-x64.13.0.245.25.nupkg"
+                PATH "${_v8_nuget_root}/v8redist.nupkg"
+                EXPECTED_SHA256 "6ae157305deb3e0136fc66e0d72df4904117d8fb2b10a6b492150e306ee61055"
+                DESCRIPTION "v8.redist-v143-x64 13.0.245.25 NuGet")
             file(ARCHIVE_EXTRACT INPUT "${_v8_nuget_root}/v8.nupkg" DESTINATION "${_v8_dev}")
             file(ARCHIVE_EXTRACT INPUT "${_v8_nuget_root}/v8redist.nupkg" DESTINATION "${_v8_redist}")
         endif()

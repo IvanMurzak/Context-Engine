@@ -39,6 +39,12 @@ endif()
 # Warnings-as-errors baseline: the `context_warnings` interface target (../cmake/ContextWarnings.cmake).
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextWarnings.cmake)
 
+# Resilient prebuilt downloader: context_download() = retry/backoff + fail-closed SHA verify
+# (../cmake/ContextDownload.cmake, Context-Engine#129). Included here so every src/ subdirectory
+# (e.g. src/render's wgpu-native fetch) can call it; the spikes that configure STANDALONE include
+# it themselves under a `if(NOT COMMAND context_download)` guard.
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextDownload.cmake)
+
 # Threads: the bridge IPC transport uses <thread> (backoff sleep) and the cross-process tests spawn a
 # server thread; on Linux/GCC that requires -pthread. Threads::Threads is a no-op on the Windows/MSVC
 # and MinGW legs (native threads), so the toolchain matrix is untouched.
@@ -260,6 +266,16 @@ add_test(NAME versioned-install-layout
         -D "CONTEXT_INSTALL_SUBDIR=${CONTEXT_INSTALL_SUBDIR}"
         -D "CONTEXT_BUILD_CONFIG=$<CONFIG>"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/versioned-install-check.cmake")
+
+# CI proof for the resilient prebuilt downloader (context_download, Context-Engine#129): exercises
+# the success / fail-closed-on-wrong-pin / retry-then-fail paths OFFLINE via file:// URLs, so it
+# runs on the local GCC dev gate AND every OS leg of the CI build matrix (no network, no prebuilt).
+add_test(NAME download-retry-selfcheck
+    COMMAND "${CMAKE_COMMAND}"
+        -D "CONTEXT_DOWNLOAD_MODULE=${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextDownload.cmake"
+        -D "FIXTURE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../cmake/tests/fixtures"
+        -D "WORK_DIR=${CMAKE_BINARY_DIR}/download-retry-selfcheck"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/tests/test_download_retry.cmake")
 
 # M2 wave 4: the importer framework (src/editor/import/, issue #60) — package-based glTF/PNG/WAV
 # importers -> canonical engine descriptors, run-deterministic (R-ASSET-001 double-run byte-compare
