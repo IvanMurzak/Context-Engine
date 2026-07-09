@@ -29,7 +29,9 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -67,16 +69,14 @@ std::set<std::string> g_exercised;
 
 std::string read_file(const fs::path& path)
 {
-    std::FILE* f = std::fopen(path.string().c_str(), "rb");
-    if (f == nullptr)
+    // Portable binary slurp via C++ streams — a raw std::fopen trips MSVC /WX (C4996 'fopen' may be
+    // unsafe) on the Windows CI leg while compiling clean on gcc/clang.
+    std::ifstream in(path, std::ios::binary);
+    if (!in)
         return std::string();
-    std::string out;
-    char buf[4096];
-    std::size_t n = 0;
-    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0)
-        out.append(buf, n);
-    std::fclose(f);
-    return out;
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
 }
 
 // A unique temp path, cleared but NOT created — fs::copy of a directory onto an already-existing
