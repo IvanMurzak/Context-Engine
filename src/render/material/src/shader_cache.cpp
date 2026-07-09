@@ -28,8 +28,8 @@ const CompiledArtifact& ShaderCompileCache::get_or_compile(const ShaderIr& ir,
 {
     const std::string key = cache_key(ir, variant, *compiler_);
 
-    const auto it = entries_.find(key);
-    if (it != entries_.end())
+    const auto it = entries_.lower_bound(key);
+    if (it != entries_.end() && it->first == key)
     {
         ++hits_;
         return it->second; // cache hit — no recompute
@@ -37,8 +37,8 @@ const CompiledArtifact& ShaderCompileCache::get_or_compile(const ShaderIr& ir,
 
     ++misses_;
     // Write-once: the key is content-addressed, so a fresh compile of the same inputs is byte-identical.
-    const auto [inserted, ok] = entries_.emplace(key, compiler_->compile(ir, variant));
-    (void)ok;
+    // lower_bound above doubles as the insertion hint, so the miss path walks the tree only once.
+    const auto inserted = entries_.emplace_hint(it, key, compiler_->compile(ir, variant));
     return inserted->second;
 }
 
