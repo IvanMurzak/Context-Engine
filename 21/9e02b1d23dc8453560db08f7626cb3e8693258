@@ -1,0 +1,24 @@
+samples/topdown-rpg/tilemaps/town.tilemap.json
+  s_e054cff650e8f2::t_d5252c395de8c3 52-55
+  s_e054cff650e8f2::t_3d6e7a97c03c08 11-14
+  s_e054cff650e8f2::t_a40335f62ab407 31-34
+samples/platformer-2d/tilemaps/level-1.tilemap.json
+  s_e054cff650e8f2::t_22447f7f08c307 36-39
+  s_e054cff650e8f2::t_0c5395bc4b81ab 11-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "219e02b1d23dc8453560db08f7626cb3e8693258",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
