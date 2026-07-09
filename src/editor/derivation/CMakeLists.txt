@@ -12,7 +12,8 @@
 
 add_library(context_derivation STATIC
     src/canonical_parse.cpp
-    src/derivation_graph.cpp)
+    src/derivation_graph.cpp
+    src/shader_compile_node.cpp)
 
 target_include_directories(context_derivation PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -29,6 +30,15 @@ target_include_directories(context_derivation PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 # the ComposedView surface, so it is PUBLIC too.
 target_link_libraries(context_derivation
     PUBLIC context_filesync context_kernel context_serializer context_schema context_compose)
+
+# The R-FILE-010 shader-compile node (issue #126, src/shader_compile_node.cpp) re-homes the T3a
+# content-addressed shader-compile cache behind the derivation-graph node contract: it wraps the
+# backend-free IShaderCompiler seam from context_render_material. PUBLIC — shader_compile_node.h exposes
+# render::material types (CompiledArtifact / ShaderIr / VariantKey / IShaderCompiler) in its API, so
+# consumers need that target's include path. context_render_material is itself dependency-free (links
+# only context_warnings), so this adds no native/GPU dependency to the derivation graph. CMake resolves
+# the target at generate time regardless of add_subdirectory order (render is wired elsewhere in src/).
+target_link_libraries(context_derivation PUBLIC context_render_material)
 
 # The L-37 parse-time migration node (M2 wave 3, src/editor/migrate/): PRIVATE — the public header
 # only forward-declares migrate::MigrationSet (an opaque seam pointer); the .cpp calls
@@ -52,7 +62,8 @@ set(_context_derivation_tests
     test_query_barrier
     test_validate_node
     test_compose_node
-    test_migrate_node)
+    test_migrate_node
+    test_shader_compile_node)
 
 foreach(_t IN LISTS _context_derivation_tests)
     add_executable(context_derivation_${_t} tests/${_t}.cpp)

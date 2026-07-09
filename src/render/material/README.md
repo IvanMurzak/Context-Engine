@@ -1,4 +1,4 @@
-# `src/render/material/` — material/shader authoring IR + compiler seam + shader-compile cache
+# `src/render/material/` — material/shader authoring IR + compiler seam
 
 The **backend-free** first slice of the R-REND-005 material/shader system (issue #121, `Part of #119`).
 Deliberately pulls **no native shader toolchain**, so it builds + `ctest`s under every toolchain,
@@ -17,10 +17,12 @@ lands in a later sub-task **behind the `IShaderCompiler` seam**, without touchin
   plus `FakeShaderCompiler`, a deterministic GPU-free reference backend that maps `(IR + variant)` to a
   stand-in stub artifact (never real SPIR-V) so the whole author → enumerate → compile → cache pipeline
   is exercised with no toolchain.
-- **The R-FILE-010 shader-compile cache** (`shader_cache.h`) — `ShaderCompileCache`, a content-addressed
-  cache keyed on `(IR content hash, variant key, compiler id)`. A repeated request is served without a
-  recompute; entries are write-once. Shader compilation is a derivation-graph node (R-FILE-005), cached
-  like any other derived artifact — not an unbudgeted per-build side pipeline.
+The **R-FILE-010 content-addressed shader-compile cache** that used to live here was **re-homed** behind
+a first-class derivation-graph node — `context::editor::derivation::ShaderCompileNode`
+(`src/editor/derivation/shader_compile_node.h`, issue #126, `Part of #119`). Shader compilation is now a
+keyed / cached / **invalidated** (R-FILE-005) / **backpressured** (R-FILE-013) derived artifact like any
+other derivation node, not a standalone side cache. It wraps the `IShaderCompiler` seam above, so this
+layer keeps only the backend-free authoring IR + the compiler seam it depends on.
 
 ## Corpus
 
@@ -39,7 +41,7 @@ local gate green with no native shader toolchain.
 
 ## Tests (R-QA-013 — ship with the feature)
 
-`ctest` targets `render-material-{test_material_ir,test_variants,test_compile,test_cache}`: IR
-round-trip over the real corpus + the malformed-document family, variant enumeration (incl. the
-no-keyword and multi-value edges), fake-backend compile determinism, and R-FILE-010 cache-hit
-behaviour.
+`ctest` targets `render-material-{test_material_ir,test_variants,test_compile}`: IR round-trip over the
+real corpus + the malformed-document family, variant enumeration (incl. the no-keyword and multi-value
+edges), and fake-backend compile determinism. The R-FILE-010 cache-hit coverage moved with the cache to
+the re-homed node (`derivation-test_shader_compile_node`).
