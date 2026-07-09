@@ -44,8 +44,9 @@ const CompiledArtifact& ShaderCompileNode::resolve(const std::string& key, const
     // above doubles as the insertion hint, so the miss path walks the tree only once.
     const auto inserted = entries_.emplace_hint(it, key, compiler_->compile(ir, variant));
     // Index the entry under its IR content hash so a later invalidate_ir() can evict every variant of a
-    // re-authored shader in one shot (R-FILE-005).
-    ir_index_[inserted->second.ir_hash].insert(key);
+    // re-authored shader in one shot (R-FILE-005). Hash the `ir` parameter directly (not the artifact's
+    // ir_hash field) so invalidation stays correct even if a backend fails to populate that field.
+    ir_index_[context::render::material::ir_content_hash(ir)].insert(key);
     return inserted->second;
 }
 
@@ -72,7 +73,8 @@ void ShaderCompileNode::request(const ShaderIr& ir, const VariantKey& variant, b
         return;
     }
 
-    pending_.emplace(key, Pending{ir, variant, priority});
+    pending_.emplace(key, Pending{ir, variant, priority,
+                                  context::render::material::ir_content_hash(ir)});
     refresh_signal();
 }
 
@@ -144,7 +146,7 @@ std::size_t ShaderCompileNode::invalidate_ir(const ShaderIr& superseded_ir)
     // artifacts the caller has already declared stale.
     for (auto it = pending_.begin(); it != pending_.end();)
     {
-        if (context::render::material::ir_content_hash(it->second.ir) == ir_hash)
+        if (it->second.ir_hash == ir_hash)
         {
             it = pending_.erase(it);
         }

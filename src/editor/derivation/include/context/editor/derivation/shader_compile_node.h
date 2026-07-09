@@ -106,6 +106,8 @@ private:
         ShaderIr ir;
         VariantKey variant;
         bool priority = false;
+        std::string ir_hash; // ir_content_hash(ir), cached at enqueue so invalidate_ir() compares
+                             // strings instead of re-hashing every pending request (R-FILE-013)
     };
 
     // Compile (miss) or serve (hit) the request under `key`; inserts + indexes on a miss. Returns the

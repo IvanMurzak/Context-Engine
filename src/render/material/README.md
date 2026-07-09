@@ -17,6 +17,7 @@ lands in a later sub-task **behind the `IShaderCompiler` seam**, without touchin
   plus `FakeShaderCompiler`, a deterministic GPU-free reference backend that maps `(IR + variant)` to a
   stand-in stub artifact (never real SPIR-V) so the whole author → enumerate → compile → cache pipeline
   is exercised with no toolchain.
+
 The **R-FILE-010 content-addressed shader-compile cache** that used to live here was **re-homed** behind
 a first-class derivation-graph node — `context::editor::derivation::ShaderCompileNode`
 (`src/editor/derivation/shader_compile_node.h`, issue #126, `Part of #119`). Shader compilation is now a
