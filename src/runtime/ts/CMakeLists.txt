@@ -195,7 +195,7 @@ target_link_options(context_ts_test_ts_debug PRIVATE ${_ctx_ts_gcc_static})
 # prebuilt, NOT a Context-code defect). Drop ONLY the vptr sub-check for THIS TU under the sanitize
 # preset (ASan + every other UBSan check stay ON); scoped to CONTEXT_SANITIZE so dev/CI release builds
 # are byte-identical, and gated non-MSVC because -fno-sanitize=vptr is a Clang/GCC UBSan flag.
-if(CONTEXT_SANITIZE AND NOT MSVC)
+if(_ctx_js_v8 AND CONTEXT_SANITIZE AND NOT MSVC)
     target_compile_options(context_ts_test_ts_debug PRIVATE -fno-sanitize=vptr)
 endif()
 add_test(NAME ts-test_ts_debug COMMAND context_ts_test_ts_debug)
