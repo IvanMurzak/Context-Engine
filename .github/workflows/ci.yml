@@ -681,12 +681,13 @@ jobs:
         uses: ./.github/actions/setup-build-env
 
       # Persist the built glslang/spirv-cross/spirv-tools archives across runs so the from-source
-      # vcpkg build only pays full cost on a manifest change (key = src/vcpkg.json hash).
+      # vcpkg build only pays full cost on a manifest change (key = src/vcpkg.json +
+      # src/vcpkg-configuration.json hash, matching the bench-baseline / spike-webgpu jobs).
       - name: vcpkg binary cache
         uses: actions/cache@v6
         with:
           path: .vcpkg-bincache
-          key: vcpkg-bin-shadercc-${{ runner.os }}-${{ hashFiles('src/vcpkg.json') }}
+          key: vcpkg-bin-shadercc-${{ runner.os }}-${{ hashFiles('src/vcpkg.json', 'src/vcpkg-configuration.json') }}
           restore-keys: vcpkg-bin-shadercc-${{ runner.os }}-
 
       # The shader-crosscompile preset pulls the toolchain via the vcpkg manifest feature
