@@ -7,8 +7,8 @@ namespace context::editor::contract
 
 const std::vector<std::string>& daemon_capabilities()
 {
-    // The v0 advertised capability set. Reserved names; grows additively with the surface. These
-    // mirror contract features clients can branch on before the protocol freeze.
+    // The advertised capability set. Reserved, grep-stable names; grows additively with the
+    // surface. These mirror contract features clients can branch on (R-CLI-010).
     static const std::vector<std::string> caps = {
         "describe",      // R-CLI-013 whole-contract self-description
         "result-envelope", // R-CLI-008 uniform envelope + catalog
