@@ -304,6 +304,16 @@
       "description": "WebGPU spike Emscripten/emdawnwebgpu wasm+JS build (in-browser render is a local step)."
     },
     {
+      "id": "render-offscreen",
+      "requirement": "R-REND-002",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "render",
+      "description": "M4 render foundation (src/render/, issue #114): the production T1 native backend (context_render_wgpu over the SHA-pinned wgpu-native prebuilt, R-SEC-009) builds on all 3 desktop OSes and the offscreen render/pixel-readback proof — driven through the rhi.h RHI abstraction (R-REND-001/002) — runs on the software adapter (lavapipe on ubuntu; skips cleanly where none; not registered on Windows). The library half (RHI abstraction + L-39 sim->render extract + double-buffer + R-HEAD-002 detachable renderer, context_render) is exercised by the build job's ctest with the wgpu toggle OFF. The real-GPU visual-equivalence gate (visual-equivalence, gpu-runner) stays advisory until that runner class is provisioned."
+    },
+    {
       "id": "fleet-manifest-validation",
       "requirement": "R-QA-012",
       "runner_class": "gh-ubuntu-shared",
