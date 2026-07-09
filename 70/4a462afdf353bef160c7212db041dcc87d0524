@@ -1,0 +1,25 @@
+src/render/shadercc/tests/test_roundtrip.cpp
+  s_e054cff650e8f2::t_b49e10d75f92f0 271-305
+  s_e054cff650e8f2::t_e3a37e7f75459d 315
+src/render/shadercc/src/cross_compiler.cpp
+  s_e054cff650e8f2::t_051bd29e3b9784 175-180
+  s_e054cff650e8f2::t_254cd8dde82441 220-221,225-232
+  s_e054cff650e8f2::t_eb3725944a0136 20
+  s_e054cff650e8f2::t_b5c417540697a3 233
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "704a462afdf353bef160c7212db041dcc87d0524",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
