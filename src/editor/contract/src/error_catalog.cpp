@@ -456,6 +456,15 @@ const std::vector<ErrorCode>& catalog()
          "This build has no V8 backend, so no CDP inspector can be attached; the debug attach is "
          "available only where the V8 host is linked (the CI/MSVC-tier builds).",
          false, kExitUnimplemented, "R-OBS-005"},
+        // --- validate stable-id FORMAT gate (issue #108 Gap 1: L-33 / R-FILE-012) ----------------
+        // `context validate` asserted id UNIQUENESS but not FORMAT — a non-hex authored id slipped
+        // past the duplicate-id gate silently (that gate only groups ids already of stable form). A
+        // deterministic validation-class refusal, the format sibling of merge.duplicate_id. Additive-
+        // only (protocolMajor stays 0): a NEW row at the END, no existing row reordered/renamed.
+        {"merge.invalid_stable_id",
+         "A stable intra-file id is not the L-33 form (16..32 lowercase hex chars); re-key it via "
+         "`context re-key`. The `context validate` FORMAT gate, sibling to merge.duplicate_id.",
+         false, kExitValidation, "R-FILE-012"},
     };
     return the_catalog;
 }

@@ -2,12 +2,15 @@
 
 #include "context/cli/merge_command.h"
 
+#include "context/editor/compose/stable_id.h"
 #include "context/editor/contract/json.h"
 #include "context/editor/contract/registry.h"
 #include "context/editor/merge/conflict.h"
 #include "context/editor/merge/rekey.h"
 #include "context/editor/merge/resolve.h"
 #include "context/editor/merge/three_way_merge.h"
+#include "context/editor/schema/kind_schema.h"
+#include "context/editor/schema/validator.h"
 #include "context/editor/serializer/canonical.h"
 #include "context/editor/serializer/json_parse.h"
 #include "context/editor/serializer/json_tree.h"
@@ -29,6 +32,8 @@ using editor::contract::Envelope;
 using editor::contract::Json;
 using editor::contract::Registry;
 namespace merge = editor::merge;
+namespace schema = editor::schema;
+namespace compose = editor::compose;
 namespace serializer = editor::serializer;
 namespace fs = std::filesystem;
 
@@ -188,6 +193,63 @@ std::string reindex_after_array_removal(const std::string& path, const std::stri
         return path; // an object key, or an earlier/equal element — unaffected by the shift
     const std::string tail = slash == std::string::npos ? std::string() : rest.substr(slash);
     return prefix + std::to_string(index - 1) + tail;
+}
+
+// One stable-id FORMAT finding (L-33): an object carries a string `id` member whose value is not the
+// pinned stable-id form (16..32 lowercase hex). Distinct from the duplicate-id gate — a MALFORMED id
+// slips past uniqueness entirely (the dup walk only groups ids that already have stable form), so a
+// non-hex id shipped silent until this check (issue #108 Gap 1).
+struct InvalidStableId
+{
+    std::string pointer; // RFC 6901 pointer to the offending object's /id
+    std::string id;      // the malformed id value (verbatim)
+};
+
+// Escape one object key for embedding in an RFC 6901 pointer ('~' -> "~0", '/' -> "~1").
+std::string pointer_escape(const std::string& key)
+{
+    std::string out;
+    out.reserve(key.size());
+    for (const char ch : key)
+    {
+        if (ch == '~')
+            out += "~0";
+        else if (ch == '/')
+            out += "~1";
+        else
+            out.push_back(ch);
+    }
+    return out;
+}
+
+// Depth-first walk collecting every object with a string `id` member of NON-stable-id form. Scoped by
+// the caller to schema-bound authored documents (scene/tilemap kinds declare `id` as a stable id under
+// additionalProperties:false), so a non-authored file that merely carries an `id` string — a CI/bench
+// manifest, a test vector — is never format-checked and cannot be false-rejected (issue #108).
+void collect_invalid_stable_ids(const serializer::JsonValue& node, const std::string& pointer,
+                                std::vector<InvalidStableId>& out)
+{
+    if (node.type == serializer::JsonValue::Type::object)
+    {
+        for (const serializer::JsonMember& m : node.members)
+            if (m.key == "id" && m.value.type == serializer::JsonValue::Type::string &&
+                !compose::is_stable_id(m.value.string_value))
+                out.push_back({pointer + "/id", m.value.string_value});
+        for (const serializer::JsonMember& m : node.members)
+            collect_invalid_stable_ids(m.value, pointer + "/" + pointer_escape(m.key), out);
+    }
+    else if (node.type == serializer::JsonValue::Type::array)
+    {
+        for (std::size_t i = 0; i < node.elements.size(); ++i)
+            collect_invalid_stable_ids(node.elements[i], pointer + "/" + std::to_string(i), out);
+    }
+}
+
+// A schema ValidationDiagnostic that is INFORMATIONAL (kinds/versions register incrementally, so an
+// unrecognized binding must never fail validation). Mirrors validator.cpp's internal is_blocking_code.
+bool is_blocking_schema_code(const std::string& code) noexcept
+{
+    return code != "schema.unknown_kind" && code != "schema.version_unregistered";
 }
 
 } // namespace
@@ -527,6 +589,9 @@ Envelope run_validate(const std::map<std::string, std::string>& params,
     Json diagnostics = Json::array();
     std::uint64_t scanned = 0;
     std::uint64_t duplicate_ids = 0;
+    std::uint64_t invalid_stable_ids = 0; // Gap 1: stable-id FORMAT (L-33)
+    std::uint64_t schema_violations = 0;  // Gap 2: schema-SHAPE via editor::schema Validator
+    const schema::SchemaSet& schemas = schema::engine_schemas();
     for (const fs::path& file : files)
     {
         std::string text;
@@ -534,8 +599,9 @@ Envelope run_validate(const std::map<std::string, std::string>& params,
             continue;
         serializer::ParseResult parsed = serializer::parse_json(text);
         if (!parsed.ok)
-            continue; // non-JSON / malformed files are out of scope for the dup-id gate
+            continue; // non-JSON / malformed files are out of scope for the validate gates
         ++scanned;
+        // Gate 1 — duplicate intra-file ids (the post-merge convergence gate).
         for (const merge::DuplicateId& dup : merge::find_duplicate_ids(parsed.root))
         {
             ++duplicate_ids;
@@ -552,13 +618,64 @@ Envelope run_validate(const std::map<std::string, std::string>& params,
                                       " objects — re-key one via `context re-key`"));
             diagnostics.push_back(std::move(entry));
         }
+
+        // The schema report drives BOTH remaining gates: schema_bound gates the stable-id FORMAT walk
+        // (so only authored kinds are format-checked — never a foreign JSON that merely carries an
+        // `id`), and its blocking diagnostics are the schema-SHAPE findings (issue #108).
+        const schema::ValidationReport report =
+            schema::validate_document(parsed.root, text, schemas);
+
+        // Gate 2 — stable-id FORMAT (L-33): 16..32 lowercase hex. Scoped to schema-bound authored
+        // documents; a malformed id escapes the duplicate-id gate entirely (that gate only groups ids
+        // ALREADY of stable form), so this is the check that catches a non-hex authored id.
+        if (report.schema_bound)
+        {
+            std::vector<InvalidStableId> bad;
+            collect_invalid_stable_ids(parsed.root, "", bad);
+            for (const InvalidStableId& b : bad)
+            {
+                ++invalid_stable_ids;
+                Json entry = Json::object();
+                entry.set("code", Json("merge.invalid_stable_id"));
+                entry.set("file", Json(file.generic_string()));
+                entry.set("id", Json(b.id));
+                entry.set("pointer", Json(b.pointer));
+                entry.set("message",
+                          Json("stable intra-file id '" + b.id +
+                               "' is not the L-33 form (16..32 lowercase hex chars)"));
+                diagnostics.push_back(std::move(entry));
+            }
+        }
+
+        // Gate 3 — schema SHAPE via the editor::schema Validator (R-DATA-006): a payload that fails
+        // its kind schema (a wrong-typed / missing / undeclared field) is a validate error, so a
+        // shape bug can no longer pass the gate green. Only BLOCKING findings are reported; an
+        // unregistered kind/version is informational and never fails validation.
+        if (!report.ok)
+            for (const schema::ValidationDiagnostic& d : report.diagnostics)
+            {
+                if (!is_blocking_schema_code(d.code))
+                    continue;
+                ++schema_violations;
+                Json entry = Json::object();
+                entry.set("code", Json(d.code));
+                entry.set("file", Json(file.generic_string()));
+                entry.set("pointer", Json(d.pointer));
+                entry.set("line", Json(static_cast<std::int64_t>(d.line)));
+                entry.set("column", Json(static_cast<std::int64_t>(d.column)));
+                entry.set("message", Json(d.message));
+                diagnostics.push_back(std::move(entry));
+            }
     }
 
+    const bool valid = duplicate_ids == 0 && invalid_stable_ids == 0 && schema_violations == 0;
     Json data = Json::object();
     data.set("target", Json(target_path.generic_string()));
     data.set("scanned", Json(scanned));
-    data.set("valid", Json(duplicate_ids == 0));
+    data.set("valid", Json(valid));
     data.set("duplicateIds", Json(duplicate_ids));
+    data.set("invalidStableIds", Json(invalid_stable_ids));
+    data.set("schemaViolations", Json(schema_violations));
     data.set("diagnostics", std::move(diagnostics));
     return Envelope::success(std::move(data));
 }
