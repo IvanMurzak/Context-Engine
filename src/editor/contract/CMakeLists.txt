@@ -33,6 +33,7 @@ set(_context_contract_tests
     test_envelope
     test_handshake
     test_registry_parity
+    test_deprecation
     test_resource_handle
     test_query_language)
 

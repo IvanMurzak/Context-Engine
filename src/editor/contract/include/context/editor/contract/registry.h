@@ -28,6 +28,13 @@ struct FlagSpec
     std::string value_type;  // "bool" | "string" | "hash" | "generation" | "json"
     std::string description;
     bool reserved = false;
+
+    // Deprecation lifecycle (R-CLI-010). A flag marked deprecated:true carries the version it will
+    // be removed in (removed_in), surfaced in `describe`. The name/grammar slot stays STABLE across
+    // the whole lifecycle (a deprecated flag keeps its spelling until removal). No core or verb flag
+    // is deprecated at the M3 freeze — the machinery is inert until the first real deprecation.
+    bool deprecated = false;
+    std::string removed_in{}; // the protocol version the flag is scheduled for removal in (SemVer)
 };
 
 // A positional/named argument to a verb.
@@ -70,6 +77,14 @@ struct VerbSpec
     // the R-CLI-017 name). Lives IN the registry so the alias is introspectable and the CLI resolver
     // generates it from the one source of truth — never hand-maintained parity (R-CLI-009).
     std::string cli_alias;
+
+    // Deprecation lifecycle (R-CLI-010). A verb marked deprecated:true carries the version it will
+    // be removed in (removed_in), surfaced on every generated surface. rpc_method / mcp_tool (the
+    // R-CLI-004 STABLE method-ids) NEVER change across the lifecycle — a deprecated verb keeps its
+    // id until removal so a client's stored id resolves for the whole compatibility window. No real
+    // verb is deprecated at the M3 freeze; the metadata is inert until the first real deprecation.
+    bool deprecated = false;
+    std::string removed_in{}; // the protocol version the verb is scheduled for removal in (SemVer)
 
     // The canonical CLI invocation form, e.g. "context describe" or "context [<ns>:]package add".
     [[nodiscard]] std::string cli_command() const;
@@ -157,5 +172,12 @@ private:
     std::vector<TopicSpec> topics_;
     std::vector<FileKindSpec> file_kinds_;
 };
+
+// The pure per-entry `describe` projections (R-CLI-009: ONE projection, used by both the describe
+// generator and the conformance test, so the deprecation metadata a describe consumer reads is
+// exactly what the test asserts — never a hand-maintained second copy). Each emits the R-CLI-010
+// deprecation lifecycle fields: always a boolean `deprecated`, plus `removedIn` when deprecated.
+[[nodiscard]] Json flag_describe_json(const FlagSpec& flag);
+[[nodiscard]] Json verb_describe_json(const VerbSpec& verb);
 
 } // namespace context::editor::contract
