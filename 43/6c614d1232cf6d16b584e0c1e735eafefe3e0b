@@ -1,0 +1,59 @@
+.github/workflows/ci.yml
+  s_e054cff650e8f2::t_1f1097e19cad2e 502-503,623-624
+  s_e054cff650e8f2::t_d0b17d0045a000 555-557,559-563
+.github/actions/pinned-toolchain/action.yml
+  s_e054cff650e8f2::t_36910e3c03f7fc 46-53
+src/CMakeLists.txt
+  s_e054cff650e8f2::t_ad24086e3e7ab4 270-279
+  s_e054cff650e8f2::t_548941f888884e 42-47
+tools/fetch_v8.py
+  s_e054cff650e8f2::t_4f2280a0971054 47,57-61
+  s_e054cff650e8f2::t_8b0345c90b4924 106-126,135
+  s_e054cff650e8f2::t_805f1b4b88a632 62
+spikes/webgpu/CMakeLists.txt
+  s_e054cff650e8f2::t_dd587701851aa1 79-83,89-93
+src/render/CMakeLists.txt
+  s_e054cff650e8f2::t_f0df1fa3748efe 106-112
+spikes/wasm/CMakeLists.txt
+  s_e054cff650e8f2::t_9656fcad1b64c5 82-86
+  s_e054cff650e8f2::t_47757072330626 27-32
+  s_e054cff650e8f2::t_e9b6b6f5465131 255-259
+tools/fetch_esbuild.py
+  s_e054cff650e8f2::t_a1243ecda675c9 110-130,139
+  s_e054cff650e8f2::t_faad49dd6dc390 52,62-66
+  s_e054cff650e8f2::t_abdad8ffa5b83e 67
+cmake/tests/fixtures/payload.bin
+  s_e054cff650e8f2::t_4c7f7c9a8e98c5 1-2
+tools/ci-retry.sh
+  s_e054cff650e8f2::t_d9eecdc1eafca4 1-47
+tools/tests/test_ci_retry.py
+  s_e054cff650e8f2::t_de3566d6fca277 1-24,42-69
+  s_e054cff650e8f2::t_4e4bd05df2f1e1 25-41
+cmake/ContextDownload.cmake
+  s_e054cff650e8f2::t_51153ef0698f87 1-103
+spikes/js-engine/CMakeLists.txt
+  s_e054cff650e8f2::t_c2827fe2218ed1 18-23
+  s_e054cff650e8f2::t_dba30d8e203ed6 68-77
+cmake/tests/test_download_retry.cmake
+  s_e054cff650e8f2::t_f21f68f26ab070 1-80
+tools/tests/test_fetch_esbuild.py
+  s_e054cff650e8f2::t_390dc03544ffe4 197-246
+tools/tests/test_fetch_v8.py
+  s_e054cff650e8f2::t_bd1ad295cb97fa 187-236
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "436c614d1232cf6d16b584e0c1e735eafefe3e0b",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
