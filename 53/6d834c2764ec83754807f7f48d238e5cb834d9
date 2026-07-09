@@ -1,0 +1,26 @@
+src/render/sprite/src/atlas.cpp
+  s_e054cff650e8f2::t_f7707de506368c 89-93,100-102,109
+  s_e054cff650e8f2::t_e9d9fd61f5b41f 18-22
+src/render/src/wgpu/offscreen_main.cpp
+  s_e054cff650e8f2::t_34cedf5f077b67 51-71
+  s_e054cff650e8f2::t_2da93201a44a7a 95,97-98,101-102,104-107
+src/render/sprite/include/context/render/sprite/sprite_offscreen.h
+  s_e054cff650e8f2::t_82aaf72519c3e9 42
+  s_e054cff650e8f2::t_60076edb1feac8 28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "536d834c2764ec83754807f7f48d238e5cb834d9",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
