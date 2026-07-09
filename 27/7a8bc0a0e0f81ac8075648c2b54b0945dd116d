@@ -1,0 +1,21 @@
+src/runtime/js/src/inspector.cpp
+  s_e054cff650e8f2::t_8fa54756dd9b68 497-498,500-503,510-513
+  s_e054cff650e8f2::t_107903f014da67 164-177
+  s_e054cff650e8f2::t_2a101dd0c7acc5 478,480
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "277a8bc0a0e0f81ac8075648c2b54b0945dd116d",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
