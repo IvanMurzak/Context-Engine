@@ -445,15 +445,19 @@ bool Aabb::overlaps_sphere(const Vec3& c, float radius) const noexcept
     {
         return false;
     }
-    // Squared distance from the sphere center to the closest point on the box.
-    float d2 = 0.0f;
-    const float cx = std::clamp(c.x, min.x, max.x);
-    const float cy = std::clamp(c.y, min.y, max.y);
-    const float cz = std::clamp(c.z, min.z, max.z);
+    // Normalize each axis first: the Aabb contract lets callers pass either corner ordering, but
+    // std::clamp requires lo <= hi (an inverted box would be undefined behavior). Repair per-axis.
+    const float lo_x = std::min(min.x, max.x), hi_x = std::max(min.x, max.x);
+    const float lo_y = std::min(min.y, max.y), hi_y = std::max(min.y, max.y);
+    const float lo_z = std::min(min.z, max.z), hi_z = std::max(min.z, max.z);
+    // Closest point on the box to the sphere center, then its squared distance.
+    const float cx = std::clamp(c.x, lo_x, hi_x);
+    const float cy = std::clamp(c.y, lo_y, hi_y);
+    const float cz = std::clamp(c.z, lo_z, hi_z);
     const float dx = c.x - cx;
     const float dy = c.y - cy;
     const float dz = c.z - cz;
-    d2 = dx * dx + dy * dy + dz * dz;
+    const float d2 = dx * dx + dy * dy + dz * dz;
     return d2 <= radius * radius;
 }
 
