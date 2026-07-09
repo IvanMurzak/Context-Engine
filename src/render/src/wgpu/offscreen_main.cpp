@@ -48,6 +48,27 @@ void finish(int code)
 #endif
 }
 
+// Probe + create a device for the readback modes. Returns the device, or nullptr with *exit_code set
+// to the process exit code (77 = no adapter -> SKIP, 1 = device creation failed -> FAIL). Shared by
+// the `render` and `sprite` modes, which differ only in which proof they then run.
+std::unique_ptr<IDevice> acquire_device(IRhi& rhi, int& exit_code)
+{
+    const AdapterProbe probe = rhi.probe();
+    if (!probe.has_adapter)
+    {
+        std::printf("[render-wgpu] SKIP: no WebGPU adapter available\n");
+        exit_code = 77;
+        return nullptr;
+    }
+    std::unique_ptr<IDevice> device = rhi.create_device();
+    if (device == nullptr)
+    {
+        std::fprintf(stderr, "[render-wgpu] FAIL: device creation failed despite an adapter\n");
+        exit_code = 1;
+    }
+    return device;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -71,45 +92,19 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    if (mode == "render")
+    if (mode == "render" || mode == "sprite")
     {
-        const AdapterProbe probe = rhi->probe();
-        if (!probe.has_adapter)
-        {
-            std::printf("[render-wgpu] SKIP: no WebGPU adapter available\n");
-            finish(77);
-            return 77;
-        }
-        std::unique_ptr<IDevice> device = rhi->create_device();
+        int exit_code = 0;
+        std::unique_ptr<IDevice> device = acquire_device(*rhi, exit_code);
         if (device == nullptr)
         {
-            std::fprintf(stderr, "[render-wgpu] FAIL: device creation failed despite an adapter\n");
-            finish(1);
-            return 1;
+            finish(exit_code);
+            return exit_code;
         }
-        const OffscreenResult result = render_offscreen_triangle(*device);
-        const int code = (result == OffscreenResult::Pass) ? 0 : 1;
-        finish(code);
-        return code;
-    }
-
-    if (mode == "sprite")
-    {
-        const AdapterProbe probe = rhi->probe();
-        if (!probe.has_adapter)
-        {
-            std::printf("[render-wgpu] SKIP: no WebGPU adapter available\n");
-            finish(77);
-            return 77;
-        }
-        std::unique_ptr<IDevice> device = rhi->create_device();
-        if (device == nullptr)
-        {
-            std::fprintf(stderr, "[render-wgpu] FAIL: device creation failed despite an adapter\n");
-            finish(1);
-            return 1;
-        }
-        const int code = context::render::sprite::render_offscreen_sprite(*device) ? 0 : 1;
+        const bool pass = (mode == "render")
+                              ? (render_offscreen_triangle(*device) == OffscreenResult::Pass)
+                              : context::render::sprite::render_offscreen_sprite(*device);
+        const int code = pass ? 0 : 1;
         finish(code);
         return code;
     }

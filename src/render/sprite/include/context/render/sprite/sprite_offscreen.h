@@ -25,6 +25,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <locale>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -38,6 +39,7 @@ namespace context::render::sprite
 inline std::string quad_wgsl(const std::array<Vec2, 4>& c, const float color[4])
 {
     std::ostringstream w;
+    w.imbue(std::locale::classic()); // force '.' decimals: a non-classic locale would emit invalid WGSL
     w.setf(std::ios::fixed);
     w.precision(6);
     w << "@vertex\n"

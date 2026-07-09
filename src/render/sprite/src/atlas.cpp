@@ -15,8 +15,11 @@ bool TextureAtlas::add(const std::string& name, const AtlasRegion& region)
         return false; // duplicate name
     }
     // Reject a region that extends past the atlas bounds (a zero-size atlas rejects everything).
-    if (region.width == 0 || region.height == 0 || region.x + region.width > width_ ||
-        region.y + region.height > height_)
+    // Compare via subtraction (width_ - region.width, guarded by region.width <= width_) rather than
+    // addition so a pathological region.x/width near UINT32_MAX cannot wrap past the check.
+    if (region.width == 0 || region.height == 0 || region.width > width_ ||
+        region.x > width_ - region.width || region.height > height_ ||
+        region.y > height_ - region.height)
     {
         return false;
     }
@@ -83,22 +86,27 @@ PackResult pack_atlas(std::uint32_t atlas_width, std::uint32_t atlas_height,
     {
         const PackItem& item = items[idx];
         // An item that cannot fit the atlas even on an empty shelf (padding on both sides) overflows.
-        if (item.width == 0 || item.height == 0 ||
-            item.width + 2 * padding > atlas_width || item.height + 2 * padding > atlas_height)
+        // Guard 2*padding first (padding > dim/2 <=> 2*padding > dim), then compare via subtraction so
+        // a pathological item.width/height near UINT32_MAX cannot wrap the `+ 2 * padding` past atlas.
+        if (item.width == 0 || item.height == 0 || padding > atlas_width / 2 ||
+            padding > atlas_height / 2 || item.width > atlas_width - 2 * padding ||
+            item.height > atlas_height - 2 * padding)
         {
             result.overflow.push_back(item.name);
             all_placed = false;
             continue;
         }
         // Wrap to a new shelf when the item would run past the right edge (reserve right padding).
-        if (shelf_x + item.width + padding > atlas_width)
+        // Subtraction form is safe: the fit check above guarantees item.width + 2*padding <= atlas_width,
+        // so atlas_width - padding - item.width >= padding >= 0.
+        if (shelf_x > atlas_width - padding - item.width)
         {
             shelf_y += shelf_height + padding;
             shelf_x = padding;
             shelf_height = 0;
         }
         // Not enough vertical room left for a new shelf holding this item -> overflow.
-        if (shelf_y + item.height + padding > atlas_height)
+        if (shelf_y > atlas_height - padding - item.height)
         {
             result.overflow.push_back(item.name);
             all_placed = false;
