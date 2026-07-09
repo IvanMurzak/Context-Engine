@@ -8,7 +8,10 @@
     {
       "chunks": [
         {
-          "cells": "tilemaps/level-1.ground.0.cells.bin",
+          "cells": {
+            "$sidecar": "tilemaps/level-1.ground.0.cells.bin",
+            "hash": "14709328510472183424"
+          },
           "region": [
             0,
             0,
@@ -30,7 +33,10 @@
   ],
   "tileSets": [
     {
-      "atlas": "atlases/terrain.atlas.json",
+      "atlas": {
+        "$ref": "a7c3e5f1b9d20648",
+        "path": "atlases/terrain.atlas.json"
+      },
       "firstTileId": 1,
       "id": "7777777777777701",
       "name": "terrain",

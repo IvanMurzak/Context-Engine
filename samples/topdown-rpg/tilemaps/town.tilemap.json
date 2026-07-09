@@ -8,7 +8,10 @@
     {
       "chunks": [
         {
-          "cells": "tilemaps/town.ground.0.cells.bin",
+          "cells": {
+            "$sidecar": "tilemaps/town.ground.0.cells.bin",
+            "hash": "9223372036854775808"
+          },
           "region": [
             0,
             0,
@@ -25,7 +28,10 @@
     {
       "chunks": [
         {
-          "cells": "tilemaps/town.decals.0.cells.bin",
+          "cells": {
+            "$sidecar": "tilemaps/town.decals.0.cells.bin",
+            "hash": "13835058055282163712"
+          },
           "region": [
             0,
             0,
@@ -43,7 +49,10 @@
   "notes": "A two-layer town tilemap: a ground layer and a semi-transparent overlay.",
   "tileSets": [
     {
-      "atlas": "atlases/town.atlas.json",
+      "atlas": {
+        "$ref": "c4e8a2b6d0f31759",
+        "path": "atlases/town.atlas.json"
+      },
       "firstTileId": 1,
       "id": "9a9a9a9a9a9a9a01",
       "name": "town",
