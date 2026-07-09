@@ -1,0 +1,27 @@
+src/runtime/js/src/inspector.cpp
+  s_e054cff650e8f2::t_a431338b56790c 71
+  s_e054cff650e8f2::t_484e584a3dd0e6 96-98
+  s_e054cff650e8f2::t_3a97f744734c7c 93-95,99-113
+  s_e054cff650e8f2::t_8d7a99788bcbcb 218-225,228
+  s_e054cff650e8f2::t_143cbd0142f994 217,226-227,229-230
+  s_e054cff650e8f2::t_9c9cd0fa4b5df7 308-312
+  s_e054cff650e8f2::t_62153a76cead47 63
+  s_e054cff650e8f2::t_f92d69d07e95a1 144
+  s_e054cff650e8f2::t_c834d52759d308 134-136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9aa53934192f5034c8689d1558dbb441b6cb25ca",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
