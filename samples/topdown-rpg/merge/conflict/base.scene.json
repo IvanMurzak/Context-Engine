@@ -1,0 +1,21 @@
+{
+  "$schema": "ctx:scene",
+  "entities": [
+    {
+      "components": {
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      "id": "c0nf11c70000ab01",
+      "name": "Boss"
+    }
+  ],
+  "kind": "scene",
+  "notes": "Merge corpus (conflict): the common ancestor. ours + theirs edit the SAME field, so the three-way merge (R-FILE-012) emits a machine-readable field conflict (never a text marker) that `context resolve-conflict` clears.",
+  "version": 1
+}

@@ -126,11 +126,11 @@ jobs:
         run: cmake --build --preset dev
         working-directory: src
 
-      # Every registered suite EXCEPT the M1 + M2 exit gates and the M3 determinism gate — those
-      # families run in their own named steps below so each milestone/QA gate is legible per OS leg
-      # (same tests, each runs exactly once).
+      # Every registered suite EXCEPT the M1 + M2 exit gates, the M3 determinism gate, and the
+      # samples-corpus gate — those families run in their own named steps below so each milestone/QA
+      # gate is legible per OS leg (same tests, each runs exactly once).
       - name: Run test suites (ctest)
-        run: ctest --preset dev --verbose -E "^m1-exit-|^m2-exit-|^determinism-"
+        run: ctest --preset dev --verbose -E "^m1-exit-|^m2-exit-|^determinism-|^samples-corpus"
         working-directory: src
 
       # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36) — the five exit criteria as a BLOCKING
@@ -160,6 +160,17 @@ jobs:
       # divergence turns that leg red. Registered in docs/ci-fleet-manifest.json as determinism-state-hash.
       - name: Determinism gate (R-QA-005 / L-54, blocking — Linux-x64 / Win-x64 / macOS-ARM64)
         run: ctest --preset dev --output-on-failure -R "^determinism-"
+        working-directory: src
+
+      # The SAMPLES CORPUS gate (R-QA-006 agent few-shot corpus; R-BUILD-009 / R-QA-008, issue #106)
+      # — a BLOCKING per-PR check on every OS leg: the maintained sample projects under samples/ build
+      # + headless-smoke-run through the REAL `context` binary (rots-if-broken), and the corpus is
+      # asserted to exercise the breadth of the R-CLI-009 registry surface (the stable one-shot CLI
+      # verbs ≡ RPC methods ≡ MCP tools, plus every registered file kind) — the M3-exit contract-freeze
+      # READINESS artifact (it does NOT freeze; protocolMajor stays 0). Registered in
+      # docs/ci-fleet-manifest.json as the samples-corpus gate.
+      - name: Samples corpus gate (R-QA-006 / R-BUILD-009 / R-QA-008, blocking)
+        run: ctest --preset dev --output-on-failure -R "^samples-corpus"
         working-directory: src
 
       - name: sccache stats

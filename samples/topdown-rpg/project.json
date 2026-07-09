@@ -1,0 +1,13 @@
+{
+  "$schema": "ctx:project",
+  "engine": "context",
+  "name": "topdown-rpg",
+  "notes": [
+    "Agent few-shot sample (R-QA-006): a tiny top-down RPG Context project.",
+    "It exercises structural composition overrides (add/remove, L-35) and ships a",
+    "three-way merge corpus under `merge/` so the merge/resolve-conflict verbs have",
+    "real inputs. Pairs with platformer-2d to cover the breadth of the contract surface."
+  ],
+  "scene": "scenes/town.scene.json",
+  "version": 1
+}

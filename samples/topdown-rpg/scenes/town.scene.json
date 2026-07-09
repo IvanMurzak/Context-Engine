@@ -1,0 +1,71 @@
+{
+  "$schema": "ctx:scene",
+  "entities": [
+    {
+      "components": {
+        "camera": {
+          "far": 1000,
+          "fov": 1.0471975511965976,
+          "near": 0.1
+        },
+        "transform": {
+          "position": [
+            0,
+            8,
+            0
+          ]
+        }
+      },
+      "id": "e5e5e5e5e5e5e501",
+      "name": "MainCamera"
+    }
+  ],
+  "instances": [
+    {
+      "id": "f6f6f6f6f6f6f601",
+      "scene": "scenes/world.scene.json"
+    }
+  ],
+  "kind": "scene",
+  "notes": [
+    "The startup scene. It instances the world sub-scene and applies STRUCTURAL overrides",
+    "(L-35): remove the placeholder npc, add a real shopkeeper, then field-override the",
+    "shopkeeper's name -- the three structural override kinds (remove / add / pointer)."
+  ],
+  "overrides": [
+    {
+      "path": [
+        "f6f6f6f6f6f6f601",
+        "d4d4d4d4d4d4d402"
+      ],
+      "remove": true
+    },
+    {
+      "add": {
+        "components": {
+          "transform": {
+            "position": [
+              2,
+              0,
+              1
+            ]
+          }
+        },
+        "id": "0abc0abc0abc0a01",
+        "name": "Shopkeeper"
+      },
+      "path": [
+        "f6f6f6f6f6f6f601"
+      ]
+    },
+    {
+      "path": [
+        "f6f6f6f6f6f6f601",
+        "0abc0abc0abc0a01"
+      ],
+      "pointer": "/name",
+      "value": "Greta the Shopkeeper"
+    }
+  ],
+  "version": 1
+}

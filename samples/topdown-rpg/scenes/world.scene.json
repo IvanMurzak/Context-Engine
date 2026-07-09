@@ -1,0 +1,38 @@
+{
+  "$schema": "ctx:scene",
+  "entities": [
+    {
+      "components": {
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      "id": "d4d4d4d4d4d4d401",
+      "name": "Fountain"
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            2,
+            0,
+            1
+          ]
+        }
+      },
+      "id": "d4d4d4d4d4d4d402",
+      "name": "PlaceholderNpc",
+      "notes": "The town removes this placeholder and adds a real shopkeeper in its place."
+    }
+  ],
+  "kind": "scene",
+  "notes": [
+    "The shared world sub-scene the town instances. Two entities carry stable ids (L-33)",
+    "so the town can structurally remove one and add another under the instance subtree."
+  ],
+  "version": 1
+}

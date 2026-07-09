@@ -1,0 +1,21 @@
+{
+  "$schema": "ctx:scene",
+  "entities": [
+    {
+      "components": {
+        "transform": {
+          "position": [
+            5,
+            0,
+            0
+          ]
+        }
+      },
+      "id": "c0nf11c70000ab01",
+      "name": "Boss"
+    }
+  ],
+  "kind": "scene",
+  "notes": "Merge corpus (conflict, ours/%A): sets the Boss to one position.",
+  "version": 1
+}

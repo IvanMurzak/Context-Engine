@@ -1,0 +1,58 @@
+{
+  "$schema": "ctx:tilemap",
+  "grid": {
+    "height": 8,
+    "width": 8
+  },
+  "layers": [
+    {
+      "chunks": [
+        {
+          "cells": "tilemaps/town.ground.0.cells.bin",
+          "region": [
+            0,
+            0,
+            8,
+            8
+          ]
+        }
+      ],
+      "id": "b0b0b0b0b0b0b001",
+      "name": "ground",
+      "opacity": 1,
+      "visible": true
+    },
+    {
+      "chunks": [
+        {
+          "cells": "tilemaps/town.decals.0.cells.bin",
+          "region": [
+            0,
+            0,
+            8,
+            8
+          ]
+        }
+      ],
+      "id": "b0b0b0b0b0b0b002",
+      "name": "decals",
+      "opacity": 0.5,
+      "visible": true
+    }
+  ],
+  "notes": "A two-layer town tilemap: a ground layer and a semi-transparent overlay.",
+  "tileSets": [
+    {
+      "atlas": "atlases/town.atlas.json",
+      "firstTileId": 1,
+      "id": "9a9a9a9a9a9a9a01",
+      "name": "town",
+      "tileCount": 128
+    }
+  ],
+  "tileSize": [
+    1,
+    1
+  ],
+  "version": 1
+}

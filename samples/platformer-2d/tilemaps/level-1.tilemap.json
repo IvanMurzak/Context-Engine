@@ -1,0 +1,45 @@
+{
+  "$schema": "ctx:tilemap",
+  "grid": {
+    "height": 8,
+    "width": 8
+  },
+  "layers": [
+    {
+      "chunks": [
+        {
+          "cells": "tilemaps/level-1.ground.0.cells.bin",
+          "region": [
+            0,
+            0,
+            8,
+            8
+          ]
+        }
+      ],
+      "id": "8888888888888801",
+      "name": "ground",
+      "opacity": 1,
+      "visible": true
+    }
+  ],
+  "notes": [
+    "A 2D tilemap (R-2D-003, L-33): back-to-front layers of chunked cell regions.",
+    "The heavy per-cell tile-id grid lives OUT of the JSON in a binary sidecar so the",
+    "authored file stays small and diff-friendly; `tileSize` is meters (SI units law)."
+  ],
+  "tileSets": [
+    {
+      "atlas": "atlases/terrain.atlas.json",
+      "firstTileId": 1,
+      "id": "7777777777777701",
+      "name": "terrain",
+      "tileCount": 64
+    }
+  ],
+  "tileSize": [
+    1,
+    1
+  ],
+  "version": 1
+}

@@ -1,0 +1,39 @@
+{
+  "$schema": "ctx:scene",
+  "entities": [
+    {
+      "components": {
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      "id": "a1a1a1a1a1a1a101",
+      "name": "Floor"
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            3,
+            0,
+            2
+          ]
+        }
+      },
+      "id": "a1a1a1a1a1a1a102",
+      "name": "Torch",
+      "notes": "The instancing level overrides this torch's position per-instance."
+    }
+  ],
+  "kind": "scene",
+  "notes": [
+    "A reusable sub-scene (L-35 composition): a room the level instances.",
+    "Each entity carries a stable, collision-resistant, file-scoped hex id (L-33) so",
+    "composition overrides can address it by id-path from the instancing scene."
+  ],
+  "version": 1
+}

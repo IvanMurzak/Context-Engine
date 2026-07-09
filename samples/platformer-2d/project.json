@@ -1,0 +1,13 @@
+{
+  "$schema": "ctx:project",
+  "engine": "context",
+  "name": "platformer-2d",
+  "notes": [
+    "Agent few-shot sample (R-QA-006): a tiny but real 2D platformer Context project.",
+    "The startup scene composes a shared room sub-scene (L-35) and adds a camera.",
+    "Every authored file is canonical JSON (L-32): UTF-8, LF, no comments -- human/AI",
+    "annotations live in schema-blessed `notes` fields like this one."
+  ],
+  "scene": "scenes/level-1.scene.json",
+  "version": 1
+}

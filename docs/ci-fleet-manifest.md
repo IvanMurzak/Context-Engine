@@ -74,6 +74,7 @@ Every gate carries exactly one written red-X policy:
 | `bench-dense-reference` | R-FILE-011 | gh-ubuntu-shared | nightly | **advisory** | `bench-100k-nightly` |
 | `bench-multiworktree-contention` | R-FILE-010 | n-daemons-host | nightly | **advisory** ⏳ | `bench-100k-nightly` |
 | `determinism-state-hash` | R-QA-005 | determinism-matrix | per-PR | **advisory** ⏳ | — |
+| `samples-corpus` | R-QA-006 | gh-ubuntu-shared | per-PR | blocking | `build` |
 | `visual-equivalence` | R-REND-005 | gpu-runner | nightly | **advisory** ⏳ | — |
 | `n-daemons-budget` | R-FILE-011 | n-daemons-host | nightly | **advisory** ⏳ | `bench-100k-nightly` |
 
