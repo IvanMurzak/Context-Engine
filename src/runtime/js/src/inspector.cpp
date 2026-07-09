@@ -60,6 +60,7 @@
 #include "context/runtime/js/js_engine.h"
 
 #include <atomic>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -67,6 +68,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 #include <v8-context.h>
 #include <v8-exception.h>
@@ -88,6 +90,27 @@
 // StringBuffer__DELETE does the same for a StringBuffer. All are defined inside the pinned librusty_v8
 // archive — signatures verified verbatim against the v149.4.0 binding.cc pin (tools/v8-prebuilt.json,
 // the SAME source the __BASE thunk signatures below were checked against); do not redefine.
+
+// A C-ABI-clean POD image of the 24-byte value the archive's __StringBuffer__string wrapper returns
+// for a v8_inspector::StringView. StringView is a user-defined C++ type, so returning it BY VALUE
+// across an extern-"C" seam trips -Wreturn-type-c-linkage (Clang -Werror, on the Linux/macOS build +
+// both sanitize legs) and MSVC C4190 (the Windows leg) — the exact compile regression this fixes.
+// rusty_v8 hits the identical constraint and sidesteps it the
+// SAME way: its wrapper returns support.h's `three_pointers_t` (three void*), guarded by
+// `static_assert(sizeof(three_pointers_t) == sizeof(v8_inspector::StringView))`, having make_pod-
+// bit-copied the whole StringView into it. We mirror that POD exactly and bit-copy it back to a
+// StringView on our side (fromInspectorStringViewPod below). Field order is opaque by design: the
+// whole StringView goes in as raw bytes and the whole POD comes back out as raw bytes — a
+// byte-identical ABI, independent of StringView's private member layout.
+struct InspectorStringViewPod
+{
+    void* a;
+    void* b;
+    void* c;
+};
+static_assert(sizeof(InspectorStringViewPod) == sizeof(v8_inspector::StringView),
+              "InspectorStringViewPod must be a byte-image of v8_inspector::StringView");
+
 extern "C"
 {
     void v8_inspector__V8InspectorClient__BASE__CONSTRUCT(void* buf);
@@ -108,8 +131,9 @@ extern "C"
     // archive wrappers resolve V8's vtable slot INSIDE the archive. `contextCreated`/`contextDestroyed`
     // take `const v8::Context&` and reconstitute the Local via ptr_to_local(&context) archive-side, so
     // the caller passes *local_to_ptr(localContext) (the raw handle-slot pointer, exactly as rusty_v8
-    // passes a Local across this seam). `__StringBuffer__string` returns the StringView BY VALUE —
-    // ABI-identical to rusty_v8's 24-byte three_pointers_t POD return (bool+size_t+ptr, all-scalar).
+    // passes a Local across this seam). `__StringBuffer__string` returns the StringView as the
+    // C-ABI-clean InspectorStringViewPod bit-image above (rusty_v8's 24-byte three_pointers_t POD
+    // return) — NOT the StringView type by value, which would trip -Wreturn-type-c-linkage / C4190.
     void v8_inspector__V8Inspector__contextCreated(
         v8_inspector::V8Inspector* self, const v8::Context& context, int context_group_id,
         v8_inspector::StringView human_readable_name, v8_inspector::StringView aux_data);
@@ -117,7 +141,7 @@ extern "C"
                                                      const v8::Context& context);
     void v8_inspector__V8InspectorSession__dispatchProtocolMessage(
         v8_inspector::V8InspectorSession* self, v8_inspector::StringView message);
-    v8_inspector::StringView v8_inspector__StringBuffer__string(
+    InspectorStringViewPod v8_inspector__StringBuffer__string(
         const v8_inspector::StringBuffer& self);
 }
 
@@ -188,6 +212,20 @@ std::string fromStringView(const v8_inspector::StringView& v)
         }
     }
     return out;
+}
+
+// Bit-copy the archive's InspectorStringViewPod return back into a v8_inspector::StringView (the
+// inverse of rusty_v8's make_pod). `std::bit_cast` is the C++20 well-defined, strict-aliasing-clean
+// reinterpretation: it requires both types be trivially copyable and equal-sized (the static_assert
+// on the POD guarantees the size; StringView carries no vtable and no user-declared copy/move/dtor, so
+// it is trivially copyable — asserted below). Chosen over `std::memcpy` because memcpy into a class
+// that has a user-provided constructor trips GCC's -Wclass-memaccess under -Werror; bit_cast is
+// warning-clean on GCC/Clang/MSVC alike and needs no layout assumptions about StringView's members.
+static_assert(std::is_trivially_copyable_v<v8_inspector::StringView>,
+              "bit_cast reconstruction requires a trivially-copyable StringView");
+v8_inspector::StringView fromInspectorStringViewPod(const InspectorStringViewPod& pod)
+{
+    return std::bit_cast<v8_inspector::StringView>(pod);
 }
 
 // Bit-copy a v8::Local<T> (a single pointer to its handle slot) to a raw T* in rusty_v8's raw-slot
@@ -267,8 +305,11 @@ struct SeamChannel
         if (sink != nullptr && *sink && buffer != nullptr)
         {
             // Archive wrapper, NOT buffer->string(): a direct virtual call on this archive-allocated
-            // StringBuffer would dispatch through this TU's view of its vtable (issue #104).
-            (*sink)(fromStringView(v8_inspector__StringBuffer__string(*buffer)));
+            // StringBuffer would dispatch through this TU's view of its vtable (issue #104). The
+            // wrapper hands back the StringView as a C-ABI-clean POD; bit-copy it back to a StringView.
+            const v8_inspector::StringView view =
+                fromInspectorStringViewPod(v8_inspector__StringBuffer__string(*buffer));
+            (*sink)(fromStringView(view));
         }
     }
 };
