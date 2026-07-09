@@ -31,12 +31,24 @@
 //   unique_ptr return was ABI-immune was WRONG). The archive's __create / __connect shims .release()
 //   the unique_ptr INSIDE the archive and hand back a bare pointer we own and free via
 //   v8_inspector__V8Inspector__DELETE / v8_inspector__V8InspectorSession__DELETE (a system operator
-//   delete would be a cross-heap free of an object allocated in the archive's libc++ heap). By
-//   contrast contextCreated / contextDestroyed / dispatchProtocolMessage stay DIRECT virtual calls:
-//   they return void and take only by-value-POD (V8ContextInfo) / single-slot-Local / StringView
-//   args — no by-value STL, no smart-pointer return — so that direction genuinely is ABI-immune.
-//   Net: smart-pointer RETURNS and the CALLBACK (V8-vtable-into-us) direction both go through the
-//   seam; the void-returning, POD-argument outbound calls do not need it.
+//   delete would be a cross-heap free of an object allocated in the archive's libc++ heap).
+//   contextCreated / contextDestroyed / dispatchProtocolMessage / StringBuffer::string ALSO route
+//   through the archive's extern-"C" wrappers (v8_inspector__V8Inspector__context{Created,Destroyed},
+//   __V8InspectorSession__dispatchProtocolMessage, __StringBuffer__string). A void/POD signature is
+//   NOT sufficient to make a DIRECT virtual call safe: a direct `inspector_->contextCreated(info)`
+//   resolves the vtable SLOT using THIS system-STL TU's view of the archive class's vtable, which
+//   mis-dispatches if the prebuilt was compiled with a gn-arg-conditional virtual the header crate
+//   does not model (a one-slot shift calls the WRONG method). A mis-dispatched contextCreated leaves
+//   the context unregistered, so when `debugger;` breaks, V8's didPause -> currentCallFrames ->
+//   wrapObject -> ValueMirror::create dereferences a null inspector/injected-script and SEGVs at
+//   @0x10 (issue #104 — the exact crash this pass targets). The archive wrapper resolves the slot
+//   INSIDE the archive, so it is vtable-layout-divergence-immune, exactly like create/connect/DELETE.
+//   Net: EVERY us->archive call goes through the seam; the only direct virtual calls left are the two
+//   ~SeamClient/~SeamChannel destructors, whose slots sit at the HEAD of the vtable (before any
+//   conditional virtual could shift them). The UBSan `vptr` "member call not of type X" notes that
+//   those two destructors (+ v8_engine.cpp's array_buffer_allocator delete) still emit are RTTI false
+//   positives from an instrumented embedder + an uninstrumented (no-rtti/libc++) prebuilt — silenced
+//   by the -fno-sanitize=vptr carve-out in CMakeLists.txt (the same one runtime/ts already applies).
 //
 // Signatures of the archive-side seam functions were verified verbatim against
 //   https://github.com/denoland/rusty_v8/blob/v149.4.0/src/binding.cc
@@ -90,6 +102,23 @@ extern "C"
         v8_inspector::V8Inspector::Channel* channel, v8_inspector::StringView state,
         v8_inspector::V8Inspector::ClientTrustLevel client_trust_level);
     void v8_inspector__V8InspectorSession__DELETE(v8_inspector::V8InspectorSession* self);
+
+    // us->archive calls that MUST NOT be direct virtual calls from this system-STL TU (a vtable-slot
+    // mismatch vs the prebuilt would mis-dispatch — see the header comment / issue #104). These
+    // archive wrappers resolve V8's vtable slot INSIDE the archive. `contextCreated`/`contextDestroyed`
+    // take `const v8::Context&` and reconstitute the Local via ptr_to_local(&context) archive-side, so
+    // the caller passes *local_to_ptr(localContext) (the raw handle-slot pointer, exactly as rusty_v8
+    // passes a Local across this seam). `__StringBuffer__string` returns the StringView BY VALUE —
+    // ABI-identical to rusty_v8's 24-byte three_pointers_t POD return (bool+size_t+ptr, all-scalar).
+    void v8_inspector__V8Inspector__contextCreated(
+        v8_inspector::V8Inspector* self, const v8::Context& context, int context_group_id,
+        v8_inspector::StringView human_readable_name, v8_inspector::StringView aux_data);
+    void v8_inspector__V8Inspector__contextDestroyed(v8_inspector::V8Inspector* self,
+                                                     const v8::Context& context);
+    void v8_inspector__V8InspectorSession__dispatchProtocolMessage(
+        v8_inspector::V8InspectorSession* self, v8_inspector::StringView message);
+    v8_inspector::StringView v8_inspector__StringBuffer__string(
+        const v8_inspector::StringBuffer& self);
 }
 
 namespace context::runtime::js::detail
@@ -237,7 +266,9 @@ struct SeamChannel
     {
         if (sink != nullptr && *sink && buffer != nullptr)
         {
-            (*sink)(fromStringView(buffer->string()));
+            // Archive wrapper, NOT buffer->string(): a direct virtual call on this archive-allocated
+            // StringBuffer would dispatch through this TU's view of its vtable (issue #104).
+            (*sink)(fromStringView(v8_inspector__StringBuffer__string(*buffer)));
         }
     }
 };
@@ -320,11 +351,15 @@ public:
         channel_ = std::make_unique<SeamChannel>(&sink_);
 
         const std::string name = "context-engine";
-        // contextCreated takes a by-value V8ContextInfo (trivially copyable, no by-value STL) and
-        // returns void, so the direct virtual call into the archive is ABI-safe (unlike the
-        // unique_ptr-returning create/connect above/below).
-        v8_inspector::V8ContextInfo info(context, kContextGroupId, toStringView(name));
-        inspector_->contextCreated(info);
+        // Register the context through the archive wrapper (NOT a direct inspector_->contextCreated):
+        // the wrapper builds the V8ContextInfo and dispatches contextCreated INSIDE the archive, so a
+        // header-vs-prebuilt V8Inspector vtable-slot divergence cannot mis-route it (issue #104 — a
+        // mis-dispatched contextCreated leaves the context unregistered and crashes didPause). Pass the
+        // context as its raw handle-slot pointer (ptr_to_local's inverse), matching the seam ABI; the
+        // name StringView is consumed synchronously inside the call so `name` outliving it suffices.
+        v8_inspector__V8Inspector__contextCreated(inspector_.get(), *local_to_ptr(context),
+                                                  kContextGroupId, toStringView(name),
+                                                  v8_inspector::StringView());
 
         // connect() likewise returns std::unique_ptr — same ABI hazard, same raw-pointer shim. The
         // shim omits the trailing SessionPauseState arg, defaulting it to kNotWaitingForDebugger inside
@@ -354,7 +389,10 @@ public:
         v8::HandleScope handleScope(isolate_);
         v8::Local<v8::Context> context = context_.Get(isolate_);
         v8::Context::Scope contextScope(context);
-        session_->dispatchProtocolMessage(toStringView(cdpMessage));
+        // Archive wrapper, NOT session_->dispatchProtocolMessage: keep the CDP dispatch on the vtable-
+        // slot-safe seam like every other us->archive call (issue #104).
+        v8_inspector__V8InspectorSession__dispatchProtocolMessage(session_.get(),
+                                                                  toStringView(cdpMessage));
         return true;
     }
 
@@ -380,7 +418,8 @@ public:
         session_.reset();
         if (inspector_)
         {
-            inspector_->contextDestroyed(context);
+            // Archive wrapper, mirroring the init()-side contextCreated (issue #104).
+            v8_inspector__V8Inspector__contextDestroyed(inspector_.get(), *local_to_ptr(context));
         }
         inspector_.reset();
         context_.Reset();

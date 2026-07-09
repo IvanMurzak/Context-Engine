@@ -141,6 +141,17 @@ if(_ctx_js_v8)
     if(MSVC)
         target_compile_options(context_js_inspector PRIVATE /external:W0 /Zc:__cplusplus)
     endif()
+    # UBSan `vptr` false-positive carve-out (issue #104), identical rationale to runtime/ts/CMakeLists.txt:
+    # inspector.cpp's two ~SeamClient/~SeamChannel destructor calls dispatch virtually into archive-
+    # allocated objects; the UNINSTRUMENTED rusty_v8 prebuilt (no-rtti/bundled libc++) carries no
+    # matching RTTI, so UBSan's `vptr` sub-check reports "member call ... not of type ..." even though
+    # the object IS valid — a FALSE POSITIVE of an instrumented embedder + uninstrumented prebuilt (it
+    # also spawns demangler-driven LSan symbolizer allocations that read as leaks). Drop ONLY the vptr
+    # sub-check for this TU under the sanitize preset (ASan + every other UBSan check stay ON); scoped
+    # to CONTEXT_SANITIZE so dev/CI release builds are byte-identical, gated non-MSVC (a Clang/GCC flag).
+    if(CONTEXT_SANITIZE AND NOT MSVC)
+        target_compile_options(context_js_inspector PRIVATE -fno-sanitize=vptr)
+    endif()
 
     add_library(context_js STATIC src/v8_engine.cpp src/view_element.cpp)
     target_link_libraries(context_js
@@ -152,6 +163,13 @@ if(_ctx_js_v8)
         # /external:W0 keeps /W4 /WX for our code while the SYSTEM V8 headers stay quiet;
         # /Zc:__cplusplus makes v8config.h see the real __cplusplus value (MSVC lies by default).
         target_compile_options(context_js PRIVATE /external:W0 /Zc:__cplusplus)
+    endif()
+    # Same UBSan `vptr` false-positive carve-out (issue #104): v8_engine.cpp's `delete
+    # createParams_.array_buffer_allocator` is a virtual-destructor call on an archive-allocated
+    # ArrayBuffer::Allocator, which trips the vptr sub-check against the uninstrumented prebuilt's
+    # RTTI — a FALSE POSITIVE. Scoped/gated exactly as context_js_inspector above.
+    if(CONTEXT_SANITIZE AND NOT MSVC)
+        target_compile_options(context_js PRIVATE -fno-sanitize=vptr)
     endif()
 else()
     add_library(context_js STATIC src/js_host_stub.cpp src/view_element.cpp)
@@ -168,6 +186,13 @@ add_executable(context_js_test_js_engine tests/test_js_engine.cpp)
 target_link_libraries(context_js_test_js_engine PRIVATE context_js context_warnings)
 if(_ctx_js_v8)
     target_compile_definitions(context_js_test_js_engine PRIVATE CONTEXT_JS_HAS_V8)
+endif()
+# Same UBSan `vptr` false-positive carve-out as context_js_inspector/context_js (issue #104), mirroring
+# ts-test_ts_debug: this test links the uninstrumented rusty_v8 prebuilt (via context_js), so any
+# polymorphic-object member call the UBSan `vptr` sub-check inspects can false-positive against the
+# prebuilt's absent RTTI. Drop ONLY the vptr sub-check for this TU under the sanitize preset.
+if(_ctx_js_v8 AND CONTEXT_SANITIZE AND NOT MSVC)
+    target_compile_options(context_js_test_js_engine PRIVATE -fno-sanitize=vptr)
 endif()
 add_test(NAME js-test_js_engine COMMAND context_js_test_js_engine)
 
