@@ -483,7 +483,7 @@ constexpr std::string_view kReplaySchemaJson = R"({
     "tickCount": {"type": "integer", "description": "The number of fixed ticks the run advanced (R-SIM-002)."},
     "scenario": {"type": "string", "description": "The named headless scenario the session ran (the built-in default is `demo`)."},
     "engineVersion": {"type": "string", "description": "The engine version that recorded the artifact (semver)."},
-    "protocolMajor": {"type": "integer", "description": "The contract protocol major the artifact was recorded under (stays 0 until the M3 freeze, R-CLI-004)."},
+    "protocolMajor": {"type": "integer", "description": "The contract protocol major the artifact was recorded under (frozen at 1 by the M3 contract freeze, R-CLI-004)."},
     "deterministic": {"type": "boolean", "description": "Whether the run is deterministically reproducible; a non-deterministic artifact carries no expected trace and replays best-effort."},
     "contentManifest": {
       "type": "array",

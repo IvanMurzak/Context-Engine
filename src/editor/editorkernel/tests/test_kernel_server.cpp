@@ -15,6 +15,7 @@
 #include "context/editor/editorkernel/kernel_server.h"
 
 #include "context/editor/contract/envelope.h"
+#include "context/editor/contract/handshake.h" // kProtocolMajor (the frozen major the daemon accepts)
 #include "context/editor/contract/json.h"
 #include "context/editor/contract/registry.h"
 #include "context/editor/derivation/canonical_parse.h"
@@ -73,7 +74,8 @@ std::string rpc(std::int64_t id, const std::string& method, Json params)
 Json attach_params(const std::string& scope)
 {
     Json p = Json::object();
-    p.set("protocolMajor", Json(static_cast<std::uint64_t>(0)));
+    p.set("protocolMajor",
+          Json(static_cast<std::uint64_t>(context::editor::contract::kProtocolMajor)));
     p.set("scope", Json(scope));
     return p;
 }

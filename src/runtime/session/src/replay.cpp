@@ -69,7 +69,7 @@ ReplayArtifact record_replay(const SessionConfig& config, const InputStream& str
     artifact.tick_count = ticks;
     artifact.scenario = session.scenario();
     artifact.engine_version = CONTEXT_ENGINE_VERSION;
-    artifact.protocol_major = 0; // protocolMajor stays 0 (additive-only, R-CLI-004)
+    artifact.protocol_major = 1; // the FROZEN contract major (kProtocolMajor, M3 freeze, R-CLI-004)
     artifact.input_stream = session.input_log();
     artifact.content_manifest = std::move(manifest);
     artifact.deterministic = deterministic;

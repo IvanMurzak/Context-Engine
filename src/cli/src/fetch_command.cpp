@@ -5,6 +5,7 @@
 #include "context/cli/wire_client.h"
 #include "context/editor/bridge/resource_store.h" // hex_decode (the chunk codec)
 #include "context/editor/bridge/transport.h"
+#include "context/editor/contract/handshake.h"
 #include "context/editor/contract/resource_handle.h"
 
 #include <algorithm>
@@ -123,7 +124,8 @@ Envelope run_fetch(const std::string& handle_uri, const std::map<std::string, st
     std::string err;
 
     Json attach_params = Json::object();
-    attach_params.set("protocolMajor", Json(static_cast<std::uint64_t>(0)));
+    attach_params.set("protocolMajor",
+                      Json(static_cast<std::uint64_t>(editor::contract::kProtocolMajor)));
     attach_params.set("scope", Json(std::string("read")));
     bool attach_rejected = false;
     if (!call(client, ++id, "attach", std::move(attach_params), err, &attach_rejected).has_value())

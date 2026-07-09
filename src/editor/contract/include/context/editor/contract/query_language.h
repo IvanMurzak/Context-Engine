@@ -15,8 +15,8 @@
 // of the ONE registry, `context describe --json` publishes it (query_language_descriptor()) and the
 // conformance test locks the published grammar to the parser the engine actually runs.
 //
-// protocolMajor stays 0 (the contract is UNSTABLE until the M3 freeze); every addition here is
-// additive-only.
+// The query language is FROZEN with the contract at the M3 freeze (protocolMajor == 1); every future
+// change is governed by the R-CLI-010 deprecation lifecycle.
 
 #pragma once
 

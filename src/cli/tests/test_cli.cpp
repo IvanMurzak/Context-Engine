@@ -29,7 +29,7 @@ int main()
         const Envelope e = run({"describe"});
         CHECK(e.ok());
         CHECK(e.exit_code() == 0);
-        CHECK(e.data().at("contract").at("protocol").at("protocolMajor").as_int() == 0);
+        CHECK(e.data().at("contract").at("protocol").at("protocolMajor").as_int() == 1);
         const Json round = Json::parse(e.dump());
         CHECK(round.at("data").at("contract").contains("verbs"));
     }

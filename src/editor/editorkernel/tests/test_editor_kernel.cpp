@@ -102,7 +102,7 @@ int main()
     // --- a client attaches over the capability handshake, scopes clamped to the launch ceiling ----
     {
         ClientHandshake client;
-        client.protocol_major = 0;
+        client.protocol_major = context::editor::contract::kProtocolMajor; // in-window (frozen major)
         client.capabilities = {"describe"};
         auto result = kernel.attach(client, ScopeSet::parse("write"));
         CHECK(std::holds_alternative<Session>(result));

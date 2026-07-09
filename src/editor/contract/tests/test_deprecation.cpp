@@ -1,12 +1,14 @@
 // Deprecation-lifecycle conformance tests (R-CLI-010): the deprecation metadata + policy machinery
-// that ACTIVATES at the M3 contract freeze, so the frozen 1.0 surface can evolve after protocolMajor
-// bumps to 1 without silently breaking agents. This lands the MECHANISM (per-entry deprecated /
-// removedIn on verbs, methods, tools, and flags; a written policy section in `describe`), NOT the
-// protocolMajor bump and NOT the negotiation behavior (v1 stays hard-fail-on-mismatch).
+// that is now ACTIVE at the M3 contract freeze (protocolMajor == 1), so the frozen 1.0 surface can
+// evolve without silently breaking agents. The MECHANISM (per-entry deprecated / removedIn on verbs,
+// methods, tools, and flags; a written policy section in `describe`) is exercised here; the freeze
+// itself flipped protocolMajor 0 -> 1, which auto-activates the lifecycle (active = major != 0). The
+// negotiation behavior stays hard-fail-on-mismatch (only one released protocol version exists).
 //
 // Coverage (R-QA-013 happy + edge + failure/no-op):
-//   * No real surface is deprecated at the freeze — the machinery is inert (no live deprecations).
-//   * `describe` carries the R-CLI-010 deprecationPolicy section with the right shape + inactive state.
+//   * No real surface is deprecated at the freeze — the machinery is inert of live deprecations even
+//     though the lifecycle itself is now ACTIVE.
+//   * `describe` carries the R-CLI-010 deprecationPolicy section with the right shape + ACTIVE state.
 //   * An EXAMPLE (test-only) deprecated verb/flag advertises deprecated + removedIn AND keeps its
 //     stable method-id across the lifecycle — the guarantee R-CLI-010 makes.
 
@@ -80,14 +82,16 @@ int main()
         }
     }
 
-    // --- 2. describe carries the R-CLI-010 deprecationPolicy section, INACTIVE at protocolMajor=0 --
+    // --- 2. describe carries the R-CLI-010 deprecationPolicy section, ACTIVE at protocolMajor=1 ----
     {
         const Json& dp = contract.at("deprecationPolicy");
         CHECK(dp.is_object());
         CHECK(dp.at("requirement").as_string() == "R-CLI-010");
-        // Inert at the freeze-entry surface: protocolMajor is still 0, so the lifecycle is inactive.
-        CHECK(!dp.at("active").as_bool());
-        CHECK(contract.at("protocol").at("protocolMajor").as_int() == 0); // task keeps protocolMajor 0
+        // The M3 freeze bumped protocolMajor 0 -> 1, so the lifecycle auto-activates (active = major
+        // != 0): the frozen surface may now change ONLY through a deprecation cycle.
+        CHECK(dp.at("active").as_bool());
+        CHECK(contract.at("protocol").at("protocolMajor").as_int() == 1); // FROZEN at 1 (M3 freeze)
+        CHECK(kProtocolMajor == 1);                                       // the single source of truth
         // A defined migration window of N minors (kDeprecationMinMinors).
         CHECK(dp.at("minMinorsBeforeRemoval").as_int() ==
               static_cast<std::int64_t>(kDeprecationMinMinors));

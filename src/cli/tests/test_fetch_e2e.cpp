@@ -11,6 +11,7 @@
 #include "context/cli/wire_client.h"
 #include "context/editor/bridge/resource_store.h" // hex codec
 #include "context/editor/bridge/transport.h"
+#include "context/editor/contract/handshake.h" // kProtocolMajor (the frozen major the daemon accepts)
 #include "context/editor/contract/json.h"
 
 #include "cli_test.h"
@@ -114,7 +115,8 @@ int main()
         std::int64_t id = 0;
         std::string err;
         Json attach_params = Json::object();
-        attach_params.set("protocolMajor", Json(static_cast<std::uint64_t>(0)));
+        attach_params.set("protocolMajor", Json(static_cast<std::uint64_t>(
+                                               context::editor::contract::kProtocolMajor)));
         attach_params.set("scope", Json(std::string("read")));
         CHECK(call(client, ++id, "attach", std::move(attach_params), err).has_value());
 
@@ -217,7 +219,8 @@ int main()
                 std::int64_t id = 0;
                 std::string err;
                 Json attach_params = Json::object();
-                attach_params.set("protocolMajor", Json(static_cast<std::uint64_t>(0)));
+                attach_params.set("protocolMajor", Json(static_cast<std::uint64_t>(
+                                                       context::editor::contract::kProtocolMajor)));
                 attach_params.set("scope", Json(std::string("session")));
                 (void)call(client, ++id, "attach", std::move(attach_params), err);
                 (void)call(client, ++id, "shutdown", Json::object(), err);

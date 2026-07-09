@@ -7,8 +7,8 @@ namespace context::editor::contract
 
 const std::vector<std::string>& daemon_capabilities()
 {
-    // The v0 advertised capability set. Reserved names; grows additively with the surface. These
-    // mirror contract features clients can branch on before the protocol freeze.
+    // The advertised capability set. Reserved, grep-stable names; grows additively with the
+    // surface. These mirror contract features clients can branch on (R-CLI-010).
     static const std::vector<std::string> caps = {
         "describe",      // R-CLI-013 whole-contract self-description
         "result-envelope", // R-CLI-008 uniform envelope + catalog
@@ -21,7 +21,7 @@ const std::vector<std::string>& daemon_capabilities()
 
 HandshakeResult negotiate(const ClientHandshake& client)
 {
-    // Compatibility window: while only major 0 exists, the window is exactly {kProtocolMajor}. A
+    // Compatibility window: while only one major exists, the window is exactly {kProtocolMajor}. A
     // client on any other major hard-fails through the R-CLI-008 envelope (never a silent degrade).
     if (client.protocol_major != kProtocolMajor)
     {
@@ -60,8 +60,8 @@ Json protocol_descriptor()
     for (const std::string& c : daemon_capabilities())
         caps.push_back(Json(c));
     out.set("capabilities", std::move(caps));
-    out.set("note", Json("UNSTABLE at protocolMajor=0 — the contract MAY break without deprecation "
-                         "cycles until the M3 freeze (R-CLI-004)."));
+    out.set("note", Json("FROZEN at protocolMajor=1 (M3 contract freeze, R-CLI-004) — the surface "
+                         "is stable and changes only through the R-CLI-010 deprecation lifecycle."));
     return out;
 }
 

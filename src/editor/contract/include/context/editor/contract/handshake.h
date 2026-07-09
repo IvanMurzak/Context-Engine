@@ -2,10 +2,12 @@
 //
 // From day one the attach exchange carries `{ protocolMajor, supportedCapabilities[],
 // minClientProtocol }` and hard-fails (through the R-CLI-008 envelope) outside the compatibility
-// window — even though M1 ships UNSTABLE at protocolMajor == 0. The negotiation LOGIC (degrade to
-// the intersected capability subset) is wired now so activating it at the 2nd protocol version is
-// non-breaking; while only major 0 exists the window is exactly {0}, so any other client major is
-// an immediate hard-fail. The engine NEVER silently degrades below the negotiated subset.
+// window. At the M3 freeze the contract is FROZEN at protocolMajor == 1 (R-CLI-004): the surface
+// no longer breaks without a deprecation cycle (R-CLI-010 governs every future change). The
+// negotiation LOGIC (degrade to the intersected capability subset) was wired from day one so
+// activating it at the 2nd protocol version is non-breaking; while only one major exists the window
+// is exactly {kProtocolMajor}, so any other client major is an immediate hard-fail. The engine
+// NEVER silently degrades below the negotiated subset.
 
 #pragma once
 
@@ -19,15 +21,16 @@
 namespace context::editor::contract
 {
 
-// The engine's current protocol major. M1 is explicitly UNSTABLE: while this is 0 the contract MAY
-// break without deprecation cycles (R-CLI-004). It bumps to 1 at the M3 freeze.
-inline constexpr std::uint32_t kProtocolMajor = 0;
+// The engine's current protocol major. FROZEN at 1 by the M3 contract freeze (R-CLI-004): the
+// public surface is now stable and no longer breaks without a deprecation cycle — every future
+// change is governed by the R-CLI-010 deprecation lifecycle (which ACTIVATES now that this != 0).
+inline constexpr std::uint32_t kProtocolMajor = 1;
 
 // The R-CLI-010 written deprecation policy: a deprecated verb / method / flag / capability survives
 // at least this many MINOR protocol versions before it may be removed, giving scripts and agents a
-// bounded migration window. The lifecycle is INERT while kProtocolMajor==0 (the contract may still
-// break without a cycle) and ACTIVATES at the M3 freeze. Surfaced in `context describe` under
-// `contract.deprecationPolicy.minMinorsBeforeRemoval`.
+// bounded migration window. The lifecycle is ACTIVE now that kProtocolMajor != 0 (the M3 freeze):
+// the frozen surface may only change through a deprecation cycle. Surfaced in `context describe`
+// under `contract.deprecationPolicy.minMinorsBeforeRemoval`.
 inline constexpr std::uint32_t kDeprecationMinMinors = 2;
 
 // The capabilities the daemon advertises in the handshake (R-CLI-010). Reserved, grep-stable names.

@@ -104,7 +104,7 @@ int main()
 
         // Required top-level sections, each with the right shape.
         CHECK(c.at("protocol").is_object());
-        CHECK(c.at("protocol").at("protocolMajor").as_int() == 0);
+        CHECK(c.at("protocol").at("protocolMajor").as_int() == 1);
         CHECK(c.at("protocol").at("capabilities").is_array());
         CHECK(c.at("coreFlags").is_array());
         CHECK(c.at("coreFlags").size() == reg.core_flags().size());

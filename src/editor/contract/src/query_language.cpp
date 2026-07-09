@@ -3,6 +3,8 @@
 
 #include "context/editor/contract/query_language.h"
 
+#include "context/editor/contract/handshake.h" // kProtocolMajor (the M3-freeze stability source)
+
 #include <array>
 #include <cctype>
 #include <cstddef>
@@ -1222,7 +1224,7 @@ Json query_language_descriptor()
 {
     Json out = Json::object();
     out.set("requirement", Json(std::string("R-CLI-012")));
-    out.set("stable", Json(false)); // protocolMajor 0 until the M3 freeze
+    out.set("stable", Json(kProtocolMajor != 0)); // FROZEN with the contract at the M3 freeze
     out.set("ebnf", Json(std::string(query_ebnf())));
 
     // The enumerated operator set: one entry per operator with its published token + class + the

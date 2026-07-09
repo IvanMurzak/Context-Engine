@@ -861,9 +861,8 @@ Json Registry::describe() const
 
     // The R-CLI-010 written deprecation lifecycle, surfaced as a policy section so a client reads
     // the RULES governing contract change (not only the per-entry `deprecated`/`removedIn` flags on
-    // verbs, methods, tools, and flags above/below). The machinery is INERT while protocolMajor=0:
-    // the M1/M3-entry surface is explicitly UNSTABLE and MAY still break without a cycle. It ACTIVATES
-    // at the M3 freeze (protocolMajor -> 1), after which a deprecated entry must survive
+    // verbs, methods, tools, and flags above/below). The machinery is now ACTIVE at the M3 freeze
+    // (protocolMajor == 1): the surface is FROZEN, so a deprecated entry must survive
     // >= minMinorsBeforeRemoval minor versions before removal, and its stable method-id never changes
     // across the whole lifecycle. v1 negotiation behavior stays hard-fail-on-mismatch (only one
     // released protocol version exists — nothing to negotiate with yet).
@@ -886,8 +885,9 @@ Json Registry::describe() const
                                      "the negotiation/degradation behavior activates at the 2nd "
                                      "released protocol version (v1 is hard-fail-on-mismatch).")));
     deprecation.set("note",
-                    Json(std::string("Inert while protocolMajor=0 — the contract MAY break without "
-                                     "a deprecation cycle until the M3 freeze (R-CLI-004).")));
+                    Json(std::string("Active at protocolMajor=1 (M3 contract freeze) — the frozen "
+                                     "surface changes only through this deprecation lifecycle; a "
+                                     "breaking change without a cycle is rejected (R-CLI-004).")));
     contract.set("deprecationPolicy", std::move(deprecation));
 
     contract.set("rpcMethods", rpc_surface());
