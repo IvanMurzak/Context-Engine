@@ -158,6 +158,17 @@ Json flag_names(const VerbSpec& v, const std::vector<FlagSpec>& core)
         names.push_back(Json(f.name));
     return names;
 }
+
+// R-CLI-010 deprecation lifecycle: one property, every surface. Always emit `deprecated`; add
+// `removedIn` only when set. Templated over VerbSpec/FlagSpec (both carry `deprecated`/`removed_in`)
+// so the verb/method/tool/flag surfaces share a single source of the emission rule.
+template <typename Spec>
+void set_deprecation(Json& entry, const Spec& spec)
+{
+    entry.set("deprecated", Json(spec.deprecated));
+    if (spec.deprecated)
+        entry.set("removedIn", Json(spec.removed_in));
+}
 } // namespace
 
 Json flag_describe_json(const FlagSpec& f)
@@ -167,10 +178,7 @@ Json flag_describe_json(const FlagSpec& f)
     out.set("type", Json(f.value_type));
     out.set("description", Json(f.description));
     out.set("reserved", Json(f.reserved));
-    // R-CLI-010 deprecation lifecycle: always emit `deprecated`; add `removedIn` only when set.
-    out.set("deprecated", Json(f.deprecated));
-    if (f.deprecated)
-        out.set("removedIn", Json(f.removed_in));
+    set_deprecation(out, f);
     return out;
 }
 
@@ -188,11 +196,9 @@ Json verb_describe_json(const VerbSpec& v)
     entry.set("mcpTool", Json(v.mcp_tool));
     entry.set("implemented", Json(v.implemented));
     entry.set("stability", Json(v.stability));
-    // R-CLI-010 deprecation lifecycle: always emit `deprecated`; add `removedIn` only when set. The
-    // stable method-ids (rpcMethod / mcpTool) above are UNCHANGED across the lifecycle by construction.
-    entry.set("deprecated", Json(v.deprecated));
-    if (v.deprecated)
-        entry.set("removedIn", Json(v.removed_in));
+    // The stable method-ids (rpcMethod / mcpTool) above are UNCHANGED across the lifecycle by
+    // construction; set_deprecation emits the R-CLI-010 `deprecated`/`removedIn` pair.
+    set_deprecation(entry, v);
     Json params = Json::array();
     for (const ParamSpec& p : v.params)
         params.push_back(param_to_json(p));
@@ -784,9 +790,7 @@ Json Registry::cli_surface() const
         entry.set("noun", Json(v.noun));
         entry.set("verb", Json(v.verb));
         entry.set("stability", Json(v.stability));
-        entry.set("deprecated", Json(v.deprecated)); // R-CLI-010: one property, every surface
-        if (v.deprecated)
-            entry.set("removedIn", Json(v.removed_in));
+        set_deprecation(entry, v);
         entry.set("params", param_names(v));
         entry.set("flags", flag_names(v, core_flags_));
         out.push_back(std::move(entry));
@@ -805,9 +809,7 @@ Json Registry::rpc_surface() const
         entry.set("noun", Json(v.noun));
         entry.set("verb", Json(v.verb));
         entry.set("stability", Json(v.stability));
-        entry.set("deprecated", Json(v.deprecated)); // R-CLI-010: one property, every surface
-        if (v.deprecated)
-            entry.set("removedIn", Json(v.removed_in));
+        set_deprecation(entry, v);
         entry.set("params", param_names(v));
         entry.set("flags", flag_names(v, core_flags_));
         out.push_back(std::move(entry));
@@ -832,9 +834,7 @@ Json Registry::mcp_surface() const
         entry.set("noun", Json(v.noun));
         entry.set("verb", Json(v.verb));
         entry.set("stability", Json(v.stability));
-        entry.set("deprecated", Json(v.deprecated)); // R-CLI-010: one property, every surface
-        if (v.deprecated)
-            entry.set("removedIn", Json(v.removed_in));
+        set_deprecation(entry, v);
         entry.set("params", param_names(v));
         entry.set("flags", flag_names(v, core_flags_));
         entry.set("inputSchema", std::move(input_schema));

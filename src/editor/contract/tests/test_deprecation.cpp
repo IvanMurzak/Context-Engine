@@ -98,7 +98,7 @@ int main()
         CHECK(dp.at("perEntryFields").is_array());
         CHECK(dp.at("perEntryFields").size() == 2); // deprecated + removedIn
         CHECK(dp.at("appliesTo").is_array());
-        CHECK(dp.at("appliesTo").size() >= 4); // verb / rpcMethod / mcpTool / flag (+ capability)
+        CHECK(dp.at("appliesTo").size() == 5); // verb / rpcMethod / mcpTool / flag / capability
         CHECK(!dp.at("compatibilityWindow").as_string().empty());
         CHECK(!dp.at("note").as_string().empty());
     }
