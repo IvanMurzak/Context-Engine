@@ -1,0 +1,104 @@
+src/editor/contract/src/query_language.cpp
+  s_e054cff650e8f2::t_8eb4c0c5176d7d 6-7
+  s_e054cff650e8f2::t_45255bce17f9c4 1227
+src/editor/contract/src/handshake.cpp
+  s_e054cff650e8f2::t_0a5661f4c698a0 24
+  s_e054cff650e8f2::t_8b4038b779464a 63-64
+src/editor/contract/tests/test_query_language.cpp
+  s_e054cff650e8f2::t_c42be49e4d1319 394
+src/cli/src/editor_driver.cpp
+  s_e054cff650e8f2::t_b8887328050287 113
+src/tests/integration/test_samples_corpus.cpp
+  s_e054cff650e8f2::t_25272ef71e935e 388
+src/editor/bridge/tests/test_daemon.cpp
+  s_e054cff650e8f2::t_f2362d01c58899 89
+src/editor/editorkernel/tests/test_editor_kernel.cpp
+  s_e054cff650e8f2::t_56c442eb9d0908 105
+src/runtime/session/src/replay.cpp
+  s_e054cff650e8f2::t_0950811fe14d19 72
+src/editor/schema/src/kind_schema.cpp
+  s_e054cff650e8f2::t_3e002e72f510ed 486
+src/editor/contract/include/context/editor/contract/query_language.h
+  s_e054cff650e8f2::t_f0af528bcb23c4 18-19
+src/cli/src/fetch_command.cpp
+  s_e054cff650e8f2::t_32677a55c1111f 127-128
+  s_e054cff650e8f2::t_e5e21d25673691 8
+src/editor/editorkernel/tests/test_kernel_server.cpp
+  s_e054cff650e8f2::t_1cfd551f28829e 18
+  s_e054cff650e8f2::t_95ba20019d6c1f 77-78
+src/editor/contract/tests/test_registry_parity.cpp
+  s_e054cff650e8f2::t_5fa20924cb7763 107
+src/editor/bridge/tests/test_dispatcher.cpp
+  s_e054cff650e8f2::t_214b6449a446a9 108
+  s_e054cff650e8f2::t_435d3e3d707209 21
+  s_e054cff650e8f2::t_9d42bd68ad8ca0 101,120,138,187,251
+  s_e054cff650e8f2::t_04b4bc962bd01d 29,35
+  s_e054cff650e8f2::t_7d3babf9b9bbc8 51
+src/editor/contract/tests/test_deprecation.cpp
+  s_e054cff650e8f2::t_1aee5543d2d06a 2-6,9-11
+  s_e054cff650e8f2::t_eebe8c9508c93b 85,90-94
+src/editor/contract/include/context/editor/contract/handshake.h
+  s_e054cff650e8f2::t_c5d4c6eaa8a489 24-27
+  s_e054cff650e8f2::t_8f36a7995ac4af 31-33
+  s_e054cff650e8f2::t_8459a1fafb157f 5-10
+src/editor/contract/include/context/editor/contract/contract_freeze.h
+  s_e054cff650e8f2::t_68930beb47a60c 1-52
+src/editor/contract/tests/test_handshake.cpp
+  s_e054cff650e8f2::t_f8cdca7d5bd9b4 1-4
+  s_e054cff650e8f2::t_ccdae3bd6a4191 16,18,20-22
+  s_e054cff650e8f2::t_8b7b8c6e51c45c 47
+  s_e054cff650e8f2::t_5a8e82cab58487 32,37
+  s_e054cff650e8f2::t_f6bdb84e295639 57
+src/editor/contract/tests/test_contract_freeze.cpp
+  s_e054cff650e8f2::t_fb17e6f4d28618 1-95
+src/runtime/session/tests/test_replay.cpp
+  s_e054cff650e8f2::t_1b981d34e58e59 48
+src/cli/src/attach_command.cpp
+  s_e054cff650e8f2::t_bc9fe0003018eb 8
+  s_e054cff650e8f2::t_ad271a89b6db5d 76-77
+src/tests/integration/test_exit3_crash_recovery_kill9.cpp
+  s_e054cff650e8f2::t_5639be63a04d28 126,220,290
+src/editor/contract/CMakeLists.txt
+  s_e054cff650e8f2::t_2e28bcead88b0e 10
+  s_e054cff650e8f2::t_022f83b983b12a 34
+src/tests/integration/test_exit2_second_client_attach.cpp
+  s_e054cff650e8f2::t_242cd5ad8691e5 52,132,157
+  s_e054cff650e8f2::t_1bfe792cc80a53 124-126,131
+  s_e054cff650e8f2::t_9c7c8900de9270 75
+  s_e054cff650e8f2::t_fde855a0cfe14f 3
+  s_e054cff650e8f2::t_99954a88c25181 57
+src/tests/integration/test_exit5_scope_enforcement.cpp
+  s_e054cff650e8f2::t_dcad60ee707e32 86,183,204,217
+src/editor/contract/src/contract_freeze.cpp
+  s_e054cff650e8f2::t_9a3bcb11b71fa2 1-65,268-272
+  s_e054cff650e8f2::t_974c46a8917dd3 66-267
+src/editor/contract/src/registry.cpp
+  s_e054cff650e8f2::t_b772db81e8d74b 864-865
+  s_e054cff650e8f2::t_9228087f4b59a1 888-890
+src/tests/integration/test_exit1_files_as_truth.cpp
+  s_e054cff650e8f2::t_a3fcb788a86f1b 212
+src/tests/integration/test_exit4_contract_parity.cpp
+  s_e054cff650e8f2::t_74a1371a72047c 87
+src/cli/tests/test_cli.cpp
+  s_e054cff650e8f2::t_32e329376bcb2b 32
+src/cli/tests/test_fetch_e2e.cpp
+  s_e054cff650e8f2::t_d45908a8ef6b3b 118-119
+  s_e054cff650e8f2::t_040a1615c5c491 222-223
+  s_e054cff650e8f2::t_15623cdf387a38 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8213c4fda6af8465258a610fd0d1506df7366524",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
