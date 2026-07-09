@@ -1,21 +1,39 @@
-# `src/render/shadercc/` — native shader cross-compile toolchain (de-risk)
+# `src/render/shadercc/` — native shader cross-compile toolchain + real backend
 
-Sub-task **B** of the R-REND-005 shader pipeline (issue #125, Part of #119). This directory makes
-the native shader cross-compile toolchain **available and CI-proven to build/link**, behind a
-default-**OFF** CMake option — mirroring `CONTEXT_BUILD_RENDER_WGPU`. It does **not** yet wire any
-cross-compile logic into the engine; that is sub-task **C**, which lands the real backend behind the
-`IShaderCompiler` seam in [`../material/`](../material/README.md) without touching callers.
+Sub-tasks **B** (issue #125) and **C** (issue #130) of the R-REND-005 shader pipeline (Part of #119).
+This directory both makes the native shader cross-compile toolchain **available and CI-proven to
+build/link** behind a default-**OFF** CMake option (`CONTEXT_BUILD_SHADER_CROSSCOMPILE`, mirroring
+`CONTEXT_BUILD_RENDER_WGPU`) **and** wires the **real cross-compile backend** behind the
+`IShaderCompiler` seam in [`../material/`](../material/README.md) — without touching callers. The
+default local dev gate and the 3-OS build matrix never resolve the toolchain; the fake/reference
+backend (`context::render::material::FakeShaderCompiler`) stays the default-OFF/local path.
+
+> The **WGSL** leg + the Tint-vs-Naga tool decision are a separate later sub-task **D** — not here.
 
 ## What it is
 
 - **Dependencies** (vcpkg `shader-crosscompile` manifest feature — the sanctioned channel):
   - [`glslang`](https://github.com/KhronosGroup/glslang) — GLSL/HLSL → SPIR-V.
-  - [`spirv-cross`](https://github.com/KhronosGroup/SPIRV-Cross) — SPIR-V → GLSL/MSL/HLSL reflection.
-  - [`spirv-tools`](https://github.com/KhronosGroup/SPIRV-Tools) — SPIR-V validation/optimization.
-- **`smoke.cpp` → `context_shadercc_smoke`** — a throwaway proof exe (ctest
+  - [`spirv-cross`](https://github.com/KhronosGroup/SPIRV-Cross) — SPIR-V → GLSL/MSL/HLSL.
+  - [`spirv-tools`](https://github.com/KhronosGroup/SPIRV-Tools) — SPIR-V validation/optimization
+    (used by the sub-task B smoke).
+- **`smoke.cpp` → `context_shadercc_smoke`** — sub-task **B** de-risk proof exe (ctest
   `shader-crosscompile-smoke`): compiles a trivial GLSL vertex shader to SPIR-V via glslang,
   validates the module with SPIRV-Tools, and reflects it back to GLSL with SPIRV-Cross — so all
   three deps are exercised at run time. Never a shipped target.
+- **`src/cross_compiler.cpp` → `context_shadercc`** — sub-task **C**: the REAL
+  `GlslangSpirvCrossCompiler` (an `IShaderCompiler`). Per authored stage it lowers the GLSL to SPIR-V
+  via glslang, then cross-compiles the SPIR-V to **HLSL** (SM 5.0), **MSL**, and **GLSL** via
+  SPIRV-Cross. It injects the variant's keyword `#define`s (honouring both the `#ifdef KW` and
+  `#if KW == token` authoring idioms) and an entry-point trampoline (`#define <entry> main`) so the
+  non-`main` corpus entry points compile under the GLSL frontend. `compile()` is a pure deterministic
+  function of `(ir, variant, id())`, keeping the R-FILE-010 content-addressed cache
+  (`ShaderCompileNode`) sound. Header: [`include/context/render/shadercc/cross_compiler.h`](include/context/render/shadercc/cross_compiler.h).
+- **`tests/test_roundtrip.cpp` → `context_shadercc_roundtrip`** (ctest `shader-crosscompile-roundtrip`)
+  — the R-QA-013 round-trip proof: author → SPIR-V → {HLSL,MSL,GLSL} over the **real authored corpus**
+  (reused from [`../material/corpus/`](../material/corpus/)), asserting each target compiles, is
+  deterministic/stable, that distinct variants produce distinct artifacts, plus a compute-stage path
+  and a malformed-source failure path.
 
 ## How it is gated
 
