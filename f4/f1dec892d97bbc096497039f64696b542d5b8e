@@ -1,0 +1,26 @@
+src/editor/contract/src/registry.cpp
+  s_e054cff650e8f2::t_9a804883bc9f12 181
+  s_e054cff650e8f2::t_81024f9bb1c9d5 161-171
+  s_e054cff650e8f2::t_3b09a60a4152c2 837
+  s_e054cff650e8f2::t_98788d08425f6e 793
+  s_e054cff650e8f2::t_caba6d0732f8be 812
+  s_e054cff650e8f2::t_9c74b8c142c244 199-201
+src/editor/contract/tests/test_deprecation.cpp
+  s_e054cff650e8f2::t_b089d0fb55afb8 101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f4f1dec892d97bbc096497039f64696b542d5b8e",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
