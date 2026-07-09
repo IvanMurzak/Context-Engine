@@ -571,3 +571,68 @@ jobs:
             build/spike-webgpu-web/context-spike-webgpu.js
             build/spike-webgpu-web/context-spike-webgpu.wasm
           if-no-files-found: error
+
+  # M4 render foundation (src/render/, issue #114): the PRODUCTION T1 native backend
+  # (context_render_wgpu over the SHA-pinned wgpu-native prebuilt) + the offscreen pixel-readback
+  # proof, driven through the rhi.h abstraction. Generalizes the spike-webgpu job to the promoted
+  # subsystem: build on all 3 desktop platforms (MSVC on Windows = the /W4 /WX + link signal),
+  # run `probe` (R-HEAD-002, adapter enumeration, no device) everywhere + the offscreen render/
+  # readback wherever a software adapter exists (lavapipe on ubuntu; skips cleanly elsewhere; not
+  # registered on Windows — the Session-0 self-hosted runner's non-deterministic teardown crash,
+  # same carve-out the spike documents). The library half (context_render: RHI + extract +
+  # double-buffer + detachable renderer) is exercised by the main `build` job's ctest under
+  # CONTEXT_BUILD_RENDER_WGPU=OFF, so this job is only the native dependency path.
+  render:
+    name: render (${{ matrix.os }})
+    needs: [license-gate, python-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
+        if: runner.os == 'Windows' && runner.environment == 'self-hosted'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $out = cmd /c "`"$vs\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 -no_logo && set"
+          foreach ($name in 'PATH','INCLUDE','LIB','LIBPATH') {
+            $line = ($out | Where-Object { $_ -like "$name=*" } | Select-Object -First 1)
+            if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+          }
+          "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      # lavapipe (Mesa's software Vulkan rasterizer) gives the ubuntu leg a real adapter, so the
+      # offscreen readback self-check actually renders on CI instead of skipping.
+      - name: Install software Vulkan adapter (lavapipe)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+
+      # Configure the dev preset with the wgpu backend ON (it fetches + SHA-verifies the pinned
+      # wgpu-native prebuilt). The context_render library half already builds in the main `build`
+      # job with the toggle OFF; here we only build + test the native offscreen proof.
+      - name: Configure (dev preset + wgpu render backend)
+        run: cmake -S src --preset dev -DCONTEXT_BUILD_RENDER_WGPU=ON
+
+      - name: Build offscreen proof
+        run: cmake --build --preset dev --target context_render_wgpu_offscreen
+        working-directory: src
+
+      - name: Run probe + offscreen render/readback
+        run: ctest --preset dev -R "^render-wgpu-" --output-on-failure
+        working-directory: src
+
+      - name: sccache stats
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ${SCCACHE_PATH} --show-stats

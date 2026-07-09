@@ -366,6 +366,18 @@ add_subdirectory(editor/system)
 # MUST follow add_subdirectory(editor/system) so context_system exists for the keystone test's link.
 add_subdirectory(editor/schedule)
 
+# M4 foundation: the render subsystem (src/render/, R-REND-001/002 / R-HEAD-002 / L-11/L-39/L-56,
+# issue #114) — the tiered RHI abstraction (WebGPU T1 semantics) + the L-39 sim->render extract +
+# double buffer + the detachable renderer (context_render, built + tested everywhere), plus the
+# opt-in wgpu-native T1 backend + offscreen pixel-readback proof (context_render_wgpu, behind
+# CONTEXT_BUILD_RENDER_WGPU — a CI-gated dependency path like V8). Rendering composes ON TOP of the
+# kernel (R-KERNEL-002): render depends on context_kernel, never the reverse, so a headless build
+# never pulls a GPU backend (R-HEAD-002). OWN stanza — deliberately apart from the editor/runtime
+# cluster above and from the exit-gate block below — so concurrent sibling tasks inserting into this
+# file merge cleanly (consumers name the `context_render` target, resolved at generate time
+# regardless of add_subdirectory order).
+add_subdirectory(render)
+
 # ---------------------------------------------------------------------------
 # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36): five integration tests, one per exit
 # criterion, registered as the `m1-exit-*` ctest family and CI-gated per the §6 tiering (blocking
