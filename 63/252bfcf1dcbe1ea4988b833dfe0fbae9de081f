@@ -1,0 +1,23 @@
+src/render/material/tests/test_material_ir.cpp
+  s_e054cff650e8f2::t_baed70b25b90f2 166-176
+src/render/material/src/material_ir.cpp
+  s_e054cff650e8f2::t_3b09aa3268bdcc 200-212,215-229
+  s_e054cff650e8f2::t_ffa100e6cf9805 184
+  s_e054cff650e8f2::t_f9a05b71d151eb 90-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "63252bfcf1dcbe1ea4988b833dfe0fbae9de081f",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
