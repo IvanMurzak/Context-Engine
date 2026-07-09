@@ -10,6 +10,11 @@
 # Their imported CONFIG targets carry SYSTEM include dirs, so their own headers never trip our
 # -Werror / /WX baseline.
 find_package(glslang CONFIG REQUIRED)
+# vcpkg packages SPIRV-Cross as per-component CONFIG packages (spirv_cross_core, spirv_cross_glsl, …),
+# and spirv_cross_glslConfig.cmake references the `spirv-cross-core` imported target WITHOUT
+# find_dependency-ing it. So spirv_cross_core MUST be found FIRST — otherwise spirv_cross_glsl_FOUND is
+# set FALSE ("imported target spirv-cross-core is missing") and the REQUIRED find_package below errors.
+find_package(spirv_cross_core CONFIG REQUIRED)
 find_package(spirv_cross_glsl CONFIG REQUIRED)
 find_package(SPIRV-Tools CONFIG REQUIRED)
 
