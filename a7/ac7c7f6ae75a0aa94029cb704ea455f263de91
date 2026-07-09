@@ -1,0 +1,60 @@
+src/render/src/extract.cpp
+  s_e054cff650e8f2::t_b6cdee23a0306e 1-64
+src/render/include/context/render/extract.h
+  s_e054cff650e8f2::t_998f029fcf68f9 1-30
+src/render/src/wgpu/offscreen_main.cpp
+  s_e054cff650e8f2::t_88c5f62f97df30 1-59
+src/render/include/context/render/offscreen_scene.h
+  s_e054cff650e8f2::t_ac890065cf9dbe 1-166
+docs/ci-fleet-manifest.json
+  s_e054cff650e8f2::t_5ebfb82f47fa8a 307-315
+  s_e054cff650e8f2::t_850e5650a418d6 306
+src/render/tests/test_rhi.cpp
+  s_e054cff650e8f2::t_c34b54e7a418f0 1-98
+src/render/include/context/render/rhi.h
+  s_e054cff650e8f2::t_ec3f73ff033cf0 1-260
+src/render/tests/render_test_rhi.h
+  s_e054cff650e8f2::t_e9a27e05a17bb6 1-328
+.github/workflows/ci.yml
+  s_e054cff650e8f2::t_f0fec5ca62e1da 574-638
+src/render/tests/test_extract.cpp
+  s_e054cff650e8f2::t_7167ec95cf3599 1-138
+src/render/src/wgpu/wgpu_rhi.cpp
+  s_e054cff650e8f2::t_4b6a0569bab32e 1-615
+src/render/CMakeLists.txt
+  s_e054cff650e8f2::t_d1cd0e05779061 1-154
+src/render/include/context/render/wgpu/wgpu_rhi.h
+  s_e054cff650e8f2::t_01b4217c095774 1-20
+src/render/tests/render_test.h
+  s_e054cff650e8f2::t_e9add235051f10 1-27
+src/render/include/context/render/render_world.h
+  s_e054cff650e8f2::t_c8f314c08bd8ee 1-89
+src/render/include/context/render/renderer.h
+  s_e054cff650e8f2::t_b4cd91270da92c 1-58
+docs/ci-fleet-manifest.md
+  s_e054cff650e8f2::t_8eff6eca8f751b 70
+src/render/README.md
+  s_e054cff650e8f2::t_862f91f5622bf4 1-78
+src/render/src/renderer.cpp
+  s_e054cff650e8f2::t_939f7f5d30a995 1-46
+src/render/tests/test_headless.cpp
+  s_e054cff650e8f2::t_74656a024f1932 1-101
+src/CMakeLists.txt
+  s_e054cff650e8f2::t_65dab3e93fce59 369-380
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a7ac7c7f6ae75a0aa94029cb704ea455f263de91",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
