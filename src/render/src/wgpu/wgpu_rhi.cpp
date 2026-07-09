@@ -426,7 +426,10 @@ public:
     }
     ~WgpuDevice() override
     {
-        // Release in reverse acquisition order (queue via member dtor first, then device/adapter).
+        // The destructor body runs before member destructors: release device_ then adapter_
+        // here; queue_ is released afterward by WgpuQueue's member destructor (wgpuQueueRelease).
+        // wgpu-native objects are independently ref-counted, so this device->adapter->queue
+        // release order is safe.
         if (device_ != nullptr)
         {
             wgpuDeviceRelease(device_);
