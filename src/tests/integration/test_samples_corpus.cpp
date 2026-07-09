@@ -160,7 +160,11 @@ int main()
             ctest_proc::Process p = ctest_proc::spawn(bin, argv);
             CHECK(ctest_proc::valid(p));
             int code = -1;
-            const bool done = ctest_proc::wait_for(p, 30000, code);
+            // Read-only validate / migrate --dry-run on a tiny sample return in well under a second;
+            // keep the per-spawn ceiling low so the 4 Leg-A spawns (4 x 15s) stay under the binary's
+            // TIMEOUT 120 (CMakeLists) with headroom for Leg B, letting a real regression surface its
+            // diagnostics instead of silently truncating the whole gate at the outer timeout.
+            const bool done = ctest_proc::wait_for(p, 15000, code);
             if (!done)
                 ctest_proc::kill(p);
             ctest_proc::release(p);
