@@ -242,6 +242,72 @@ void test_validate()
     CHECK(bad.data().at("diagnostics").at(0).at("code").as_string() == "merge.duplicate_id");
 }
 
+// Issue #108 Gap 1 — `context validate` asserts stable-id FORMAT (L-33: 16..32 lowercase hex), not
+// just uniqueness. A malformed id slips past the duplicate-id gate silently (that gate only groups
+// ids already of stable form), so this is the check that catches a non-hex authored id.
+void test_validate_stable_id_format()
+{
+    // A schema-bound scene whose entity id is NOT the L-33 form -> the FORMAT gate flags it with the
+    // matching R-CLI-008 catalog code (merge.invalid_stable_id); the envelope stays success (report).
+    write(p("badid.scene.json"),
+          R"({"$schema": "ctx:scene", "version": 1, "entities": [{"id": "NOT-HEX-ID", "name": "E", "components": {}}]})");
+    const Envelope bad = run({"validate", p("badid.scene.json").string()});
+    CHECK(bad.ok());
+    CHECK(bad.data().at("valid").as_bool() == false);
+    CHECK(bad.data().at("invalidStableIds").as_int() >= 1);
+    bool found_format = false;
+    const Json& diags = bad.data().at("diagnostics");
+    for (std::size_t i = 0; i < diags.size(); ++i)
+        if (diags.at(i).at("code").as_string() == "merge.invalid_stable_id")
+            found_format = true;
+    CHECK(found_format);
+
+    // Out-of-range (too short — < 16 hex) is equally rejected.
+    write(p("shortid.scene.json"),
+          R"({"$schema": "ctx:scene", "version": 1, "entities": [{"id": "abc123", "name": "E", "components": {}}]})");
+    const Envelope short_id = run({"validate", p("shortid.scene.json").string()});
+    CHECK(short_id.data().at("valid").as_bool() == false);
+    CHECK(short_id.data().at("invalidStableIds").as_int() >= 1);
+
+    // FALSE-REJECT GUARD: a bare (NON schema-bound) document carrying the same non-hex `id` is never
+    // format-checked — only authored kinds are — so a CI/bench manifest or a test vector that merely
+    // has an `id` string is never rejected (the additive-validation must-not-false-reject rule).
+    write(p("bareid.json"), R"({"entities": [{"id": "e1", "name": "E"}]})");
+    const Envelope bare = run({"validate", p("bareid.json").string()});
+    CHECK(bare.ok());
+    CHECK(bare.data().at("valid").as_bool() == true);
+    CHECK(bare.data().at("invalidStableIds").as_int() == 0);
+}
+
+// Issue #108 Gap 2 — `context validate` invokes the editor::schema Validator so a schema-SHAPE
+// violation (a wrong-typed / missing / undeclared field) is rejected instead of passing the gate green.
+void test_validate_schema_shape()
+{
+    // `entities` must be an array; here it is a string -> a blocking schema.* shape finding.
+    write(p("badshape.scene.json"),
+          R"({"$schema": "ctx:scene", "version": 1, "entities": "oops"})");
+    const Envelope bad = run({"validate", p("badshape.scene.json").string()});
+    CHECK(bad.ok());
+    CHECK(bad.data().at("valid").as_bool() == false);
+    CHECK(bad.data().at("schemaViolations").as_int() >= 1);
+    bool found_schema = false;
+    const Json& diags = bad.data().at("diagnostics");
+    for (std::size_t i = 0; i < diags.size(); ++i)
+        if (diags.at(i).at("code").as_string().rfind("schema.", 0) == 0)
+            found_schema = true;
+    CHECK(found_schema);
+
+    // A well-formed schema-bound scene validates clean through the Validator (no false-reject).
+    write(p("goodshape.scene.json"),
+          R"({"$schema": "ctx:scene", "version": 1, "entities": [{"id": "aaaa0000aaaa0001", "name": "E", "components": {}}]})");
+    const Envelope good = run({"validate", p("goodshape.scene.json").string()});
+    CHECK(good.ok());
+    CHECK(good.data().at("valid").as_bool() == true);
+    CHECK(good.data().at("schemaViolations").as_int() == 0);
+    CHECK(good.data().at("invalidStableIds").as_int() == 0);
+    CHECK(good.data().at("duplicateIds").as_int() == 0);
+}
+
 void test_merge_file_dry_run_writes_nothing()
 {
     // --dry-run is a core flag ("honored by EVERY verb"): COMPUTE + report the conflict, write NOTHING
@@ -344,6 +410,8 @@ int main()
     test_rekey_at_pathological_index_no_crash();
     test_rekey_at_and_id_mutually_exclusive();
     test_validate();
+    test_validate_stable_id_format();
+    test_validate_schema_shape();
     test_merge_file_dry_run_writes_nothing();
     test_resolve_conflict_dry_run_writes_nothing();
     test_rekey_dry_run_writes_nothing();

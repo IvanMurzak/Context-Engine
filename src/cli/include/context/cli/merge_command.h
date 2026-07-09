@@ -34,8 +34,12 @@ run_resolve_conflict(const std::map<std::string, std::string>& params,
 run_rekey(const std::map<std::string, std::string>& params,
           const std::map<std::string, std::string>& flags);
 
-// `context validate [path]` — the post-merge convergence gate: report the duplicate-intra-file-id
-// diagnostic (merge.duplicate_id) across the target file or project tree.
+// `context validate [path]` — the authored-document gate across the target file or project tree.
+// Reports three diagnostic classes: the duplicate-intra-file-id convergence finding
+// (merge.duplicate_id), the stable-id FORMAT finding (merge.invalid_stable_id — L-33 16..32 lowercase
+// hex, scoped to schema-bound authored kinds), and schema-SHAPE findings from the editor::schema
+// Validator (schema.* — R-DATA-006). A reporting verb: the envelope is always success; `data.valid`
+// is false and `data.diagnostics` lists the findings when any gate trips (issue #108).
 [[nodiscard]] editor::contract::Envelope
 run_validate(const std::map<std::string, std::string>& params,
              const std::map<std::string, std::string>& flags);
