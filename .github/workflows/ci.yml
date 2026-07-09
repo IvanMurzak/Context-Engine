@@ -575,36 +575,34 @@ jobs:
   # M4 render foundation (src/render/, issue #114): the PRODUCTION T1 native backend
   # (context_render_wgpu over the SHA-pinned wgpu-native prebuilt) + the offscreen pixel-readback
   # proof, driven through the rhi.h abstraction. Generalizes the spike-webgpu job to the promoted
-  # subsystem: build on all 3 desktop platforms (MSVC on Windows = the /W4 /WX + link signal),
-  # run `probe` (R-HEAD-002, adapter enumeration, no device) everywhere + the offscreen render/
-  # readback wherever a software adapter exists (lavapipe on ubuntu; skips cleanly elsewhere; not
-  # registered on Windows — the Session-0 self-hosted runner's non-deterministic teardown crash,
-  # same carve-out the spike documents). The library half (context_render: RHI + extract +
-  # double-buffer + detachable renderer) is exercised by the main `build` job's ctest under
-  # CONTEXT_BUILD_RENDER_WGPU=OFF, so this job is only the native dependency path.
+  # subsystem.
+  #
+  # Policy (M4 visual-equivalence method, ROADMAP §1): Linux-Vulkan is the BLOCKING correctness gate;
+  # other backends are advisory. lavapipe (Mesa's software Vulkan rasterizer) gives the ubuntu leg a
+  # real adapter, so `render (ubuntu-latest)` runs the real offscreen render/readback and is the
+  # authoritative gate. macOS is kept as an advisory desktop signal. Windows native render is
+  # INTENTIONALLY NOT run in this job: it is already covered by the `build (windows-latest)` MSVC
+  # compile+link leg and the `spike webgpu (windows-latest)` probe, and running the native wgpu-native
+  # offscreen build + `ctest -R "^render-wgpu-"` on the Session-0 self-hosted Windows runner crashed
+  # non-deterministically on native-GPU teardown (0xc0000409 / STATUS_STACK_BUFFER_OVERRUN) — the same
+  # Session-0 carve-out documented in the M1 webgpu spike history (PR #97), where the fix was to NOT run
+  # native render on Session-0 Windows. Dropping windows-latest from this matrix removes that crash
+  # surface entirely with no loss of Windows coverage. So: build + probe (R-HEAD-002, adapter
+  # enumeration, no device) on ubuntu (blocking) and macOS (advisory), with the offscreen render/
+  # readback running wherever a software adapter exists (lavapipe on ubuntu; skips cleanly on macOS).
+  # The library half (context_render: RHI + extract + double-buffer + detachable renderer) is exercised
+  # by the main `build` job's ctest under CONTEXT_BUILD_RENDER_WGPU=OFF, so this job is only the native
+  # dependency path.
   render:
     name: render (${{ matrix.os }})
     needs: [license-gate, python-tests]
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-
-      - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
-        if: runner.os == 'Windows' && runner.environment == 'self-hosted'
-        shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vs = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          $out = cmd /c "`"$vs\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 -no_logo && set"
-          foreach ($name in 'PATH','INCLUDE','LIB','LIBPATH') {
-            $line = ($out | Where-Object { $_ -like "$name=*" } | Select-Object -First 1)
-            if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
-          }
-          "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
