@@ -52,9 +52,13 @@ endforeach()
 # ---------------------------------------------------------------------------------------------
 # Feature packages layered on the RHI abstraction. Each is its own subdirectory building a CPU
 # library over context_render (GPU-free, locally tested) plus a header-only GPU proof wired into the
-# wgpu offscreen executable below. Sub-packages are added at NON-ADJACENT anchors so concurrent M4
-# tasks (sprite/2D vs material IR) that each add one here merge without a text conflict.
+# wgpu offscreen executable below. Each sub-package declares its own target, resolved at generate
+# time regardless of add_subdirectory order (order below is cosmetic — an append-only catalog).
 # ---------------------------------------------------------------------------------------------
+# context_render_material — the backend-free material/shader AUTHORING layer (R-REND-005; issue #121,
+# Part of #119): authoring IR + shader-variant enumeration + the IShaderCompiler seam (fake backend) +
+# the R-FILE-010 content-addressed shader-compile cache.
+add_subdirectory(material)
 add_subdirectory(sprite)   # R-2D-001 / L-55 — the 2D sprite path (issue #122)
 
 # ---------------------------------------------------------------------------------------------
