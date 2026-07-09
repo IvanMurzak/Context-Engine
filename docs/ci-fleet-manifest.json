@@ -374,6 +374,16 @@
       "description": "R-QA-005 / L-54 headless-session state-hash determinism (issue #74): a fixed seed + fixed injected input stream, stepped a fixed tick count, asserted against a cross-platform GOLDEN hierarchical state-hash (root + per-system + per-archetype + trace). Runs as the blocking 'Determinism gate' named step of the build job on ALL THREE build-matrix legs — ubuntu-latest (Linux-x64), windows-latest (Win-x64), macos-latest (macOS-ARM64) — so any per-platform divergence turns that leg red (ctest determinism-state-hash). The bisect/triage `context determinism diff` auto-triage is the reserved follow-up split."
     },
     {
+      "id": "samples-corpus",
+      "requirement": "R-QA-006",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "R-QA-006 agent few-shot corpus / R-BUILD-009 / R-QA-008 (issue #106): the maintained sample projects under samples/ build + headless-smoke-run through the REAL `context` binary (rots-if-broken), and the corpus is asserted to exercise the breadth of the R-CLI-009 registry surface — the stable one-shot CLI verbs (each certifying its RPC method + MCP tool by construction) plus every registered file kind (scene/camera, tilemap, string-table, project, ctx:replay). Runs as the blocking 'Samples corpus gate' named step of the build job on all three build-matrix legs (ctest samples-corpus). The M3-exit contract-freeze READINESS artifact — it does NOT perform the R-CLI-004 freeze; protocolMajor stays 0."
+    },
+    {
       "id": "visual-equivalence",
       "requirement": "R-REND-005",
       "runner_class": "gpu-runner",

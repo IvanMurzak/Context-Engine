@@ -155,3 +155,33 @@ set_tests_properties(
     m2-exit-5-per-payload-migration
     m2-exit-6-seam-checklist
     PROPERTIES TIMEOUT 120)
+
+# ===================================================================================================
+# The SAMPLES CORPUS gate (R-QA-006 agent few-shot corpus; R-BUILD-009 / R-QA-008; issue #106) — the
+# M3-exit contract-freeze READINESS artifact (it does NOT perform the freeze; protocolMajor stays 0).
+# One blocking per-PR ctest on every OS leg (`samples-corpus`, run by the "Samples corpus gate" step
+# in .github/workflows/ci.yml): Leg A spawns the REAL `context` binary to build + headless-smoke-run
+# each committed sample project; Leg B exercises the breadth of the stable one-shot CLI surface in
+# process over a staged copy and asserts the corpus covers the R-CLI-009 registry (verbs ≡ methods ≡
+# tools by construction) + every registered file kind — the maintained rots-if-broken gate.
+add_executable(context_test_samples_corpus test_samples_corpus.cpp)
+# context_cli (the shipped verb grammar, cli::run) transitively carries its private backing libraries
+# (compose/merge/migrate/session/pkg/…) for linking; context_contract PUBLICly exposes the ONE
+# registry the coverage assertion enumerates. Self-contained GCC runtime (std::filesystem), gated to
+# GNU so the macOS/Clang + Windows/MSVC CI legs are untouched (mirrors m1/m2-exit + src/cli).
+target_link_libraries(context_test_samples_corpus
+    PRIVATE context_cli context_contract context_warnings Threads::Threads)
+target_link_options(context_test_samples_corpus PRIVATE ${_m2_exit_static_runtime})
+target_include_directories(context_test_samples_corpus PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../cli/tests) # process_util.h (header-only, test-only)
+# Leg A spawns the REAL built `context` binary; both legs read the committed corpus under samples/
+# (repo root — one level above CMAKE_SOURCE_DIR, which is src/ under the `-S src` configure).
+target_compile_definitions(context_test_samples_corpus PRIVATE
+    CONTEXT_BINARY="$<TARGET_FILE:context>"
+    CONTEXT_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/../samples")
+add_dependencies(context_test_samples_corpus context)
+
+add_test(NAME samples-corpus COMMAND context_test_samples_corpus)
+# Leg A spawns child processes + Leg B records/replays sessions; cap so a regression never hangs CI.
+set_tests_properties(samples-corpus PROPERTIES TIMEOUT 120)

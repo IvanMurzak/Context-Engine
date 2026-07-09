@@ -1,0 +1,21 @@
+{
+  "$schema": "ctx:scene",
+  "entities": [
+    {
+      "components": {
+        "transform": {
+          "position": [
+            3,
+            0,
+            0
+          ]
+        }
+      },
+      "id": "c1ea0c1ea0c1ea01",
+      "name": "Hero"
+    }
+  ],
+  "kind": "scene",
+  "notes": "Merge corpus (clean, ours/%A): moves the Hero. Field-disjoint from theirs.",
+  "version": 1
+}

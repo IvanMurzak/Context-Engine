@@ -1,0 +1,58 @@
+{
+  "$schema": "ctx:string-table",
+  "keys": [
+    {
+      "key": "hud.score",
+      "values": [
+        {
+          "locale": "en",
+          "text": "Score"
+        },
+        {
+          "locale": "pt-BR",
+          "text": "Pontos"
+        }
+      ]
+    },
+    {
+      "key": "hud.lives",
+      "notes": "A CLDR plural: `other` is the required catch-all.",
+      "values": [
+        {
+          "locale": "en",
+          "plural": {
+            "one": "1 life",
+            "other": "{count} lives"
+          }
+        },
+        {
+          "locale": "pt-BR",
+          "plural": {
+            "one": "1 vida",
+            "other": "{count} vidas"
+          }
+        }
+      ]
+    }
+  ],
+  "locales": [
+    {
+      "fallback": [],
+      "locale": "en",
+      "name": "English"
+    },
+    {
+      "fallback": [
+        "en"
+      ],
+      "locale": "pt-BR",
+      "name": "Portuguese (Brazil)"
+    }
+  ],
+  "notes": [
+    "A localization string table (R-I18N-001, L-32): locales with fallback chains and",
+    "ICU/CLDR plural rules. Downstream systems bind string KEYS, never literals."
+  ],
+  "sourceLocale": "en",
+  "version": 1
+}

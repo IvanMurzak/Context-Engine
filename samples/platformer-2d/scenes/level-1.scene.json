@@ -1,0 +1,56 @@
+{
+  "$schema": "ctx:scene",
+  "entities": [
+    {
+      "components": {
+        "camera": {
+          "far": 1000,
+          "fov": 1.0471975511965976,
+          "near": 0.1
+        },
+        "transform": {
+          "position": [
+            0,
+            1,
+            -5
+          ]
+        }
+      },
+      "id": "b2b2b2b2b2b2b201",
+      "name": "MainCamera"
+    }
+  ],
+  "instances": [
+    {
+      "id": "c3c3c3c3c3c3c301",
+      "notes": "One instance of the room; per-instance state lives in `overrides` below.",
+      "scene": "scenes/room.scene.json"
+    }
+  ],
+  "kind": "scene",
+  "notes": [
+    "The startup scene. It instances the shared room sub-scene (L-35) and adds a camera.",
+    "The `overrides` array retargets the instanced torch: an id-path override with a",
+    "recorded `base` so `context query --overrides diverged` can flag drift (R-CLI-006)."
+  ],
+  "overrides": [
+    {
+      "base": [
+        3,
+        0,
+        2
+      ],
+      "path": [
+        "c3c3c3c3c3c3c301",
+        "a1a1a1a1a1a1a102"
+      ],
+      "pointer": "/components/transform/position",
+      "value": [
+        5,
+        0,
+        2
+      ]
+    }
+  ],
+  "version": 1
+}

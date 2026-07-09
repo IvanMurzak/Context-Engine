@@ -1,0 +1,67 @@
+{
+  "$schema": "ctx:string-table",
+  "keys": [
+    {
+      "key": "npc.shopkeeper.greeting",
+      "values": [
+        {
+          "locale": "en",
+          "text": "Welcome, traveler!"
+        },
+        {
+          "locale": "es",
+          "text": "Bienvenido, viajero!"
+        },
+        {
+          "locale": "pt-BR",
+          "text": "Bem-vindo, viajante!"
+        }
+      ]
+    },
+    {
+      "key": "inventory.gold",
+      "notes": "Plural forms; `other` is the required CLDR catch-all.",
+      "values": [
+        {
+          "locale": "en",
+          "plural": {
+            "one": "1 gold",
+            "other": "{count} gold"
+          }
+        },
+        {
+          "locale": "es",
+          "plural": {
+            "one": "1 oro",
+            "other": "{count} oro"
+          }
+        }
+      ]
+    }
+  ],
+  "locales": [
+    {
+      "fallback": [],
+      "locale": "en",
+      "name": "English"
+    },
+    {
+      "fallback": [
+        "en"
+      ],
+      "locale": "es",
+      "name": "Spanish"
+    },
+    {
+      "fallback": [
+        "es",
+        "en"
+      ],
+      "locale": "pt-BR",
+      "name": "Portuguese (Brazil)"
+    }
+  ],
+  "notes": "Three locales with a fallback chain (pt-BR -> es -> en) and a plural key.",
+  "sourceLocale": "en",
+  "version": 1
+}
