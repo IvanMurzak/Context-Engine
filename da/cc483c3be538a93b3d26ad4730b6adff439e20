@@ -1,0 +1,41 @@
+src/render/shadercc/README.md
+  s_e054cff650e8f2::t_07409bdee8afca 1-37
+src/CMakePresets.json
+  s_e054cff650e8f2::t_67d5ccde9b38b9 56-66
+  s_e054cff650e8f2::t_1273c065fbb88e 129-134
+  s_e054cff650e8f2::t_8ff8948173fc67 94-98
+src/render/shadercc/smoke.cpp
+  s_e054cff650e8f2::t_d9ae68a922ea40 1-107
+src/render/shadercc/CMakeLists.txt
+  s_e054cff650e8f2::t_db9d5229624480 1-40
+.github/workflows/ci.yml
+  s_e054cff650e8f2::t_3a4384e0af02ab 637-695
+tools/license-allowlist.json
+  s_e054cff650e8f2::t_edb1209e7bac85 2
+  s_e054cff650e8f2::t_b04ce3135106e1 19,23-24
+docs/ci-fleet-manifest.json
+  s_e054cff650e8f2::t_8121a3d70cc8b0 317-325
+  s_e054cff650e8f2::t_627f7f742db046 316
+docs/ci-fleet-manifest.md
+  s_e054cff650e8f2::t_645bc93d93bded 71
+src/vcpkg.json
+  s_e054cff650e8f2::t_61e3eb4059e230 17-24
+src/render/CMakeLists.txt
+  s_e054cff650e8f2::t_adf81823f9c8b3 189-208
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dacc483c3be538a93b3d26ad4730b6adff439e20",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
