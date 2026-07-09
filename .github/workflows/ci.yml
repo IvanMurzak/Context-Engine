@@ -634,3 +634,76 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: ${SCCACHE_PATH} --show-stats
+
+  # Native shader cross-compile TOOLCHAIN de-risk (src/render/shadercc/, issue #125, sub-task B of
+  # #119): make glslang + SPIRV-Cross + SPIRV-Tools (the vcpkg `shader-crosscompile` manifest feature)
+  # AVAILABLE + CI-proven to build/link behind the default-OFF CONTEXT_BUILD_SHADER_CROSSCOMPILE flag —
+  # mirroring the render (CONTEXT_BUILD_RENDER_WGPU) dependency-path job. It does NOT wire cross-compile
+  # logic into the engine (that is sub-task C, behind material/'s IShaderCompiler seam); it only builds
+  # the toolchain + runs a glslang->SPIR-V smoke (validated by SPIRV-Tools, reflected by SPIRV-Cross).
+  #
+  # This is a CPU compile path — there is NO GPU / native-render leg here, so (unlike the render/build
+  # jobs) it runs on the GH-hosted trio: vcpkg is preinstalled as $VCPKG_INSTALLATION_ROOT and the
+  # toolchain builds from source under the vcpkg triplet compiler. Uniform `shell: bash` (Git Bash on
+  # the Windows GH runner) keeps the 3-OS steps identical.
+  #
+  # Policy (standing M4 CI policy, issue #125): Linux is the BLOCKING build/link/smoke gate; macOS and
+  # Windows are ADVISORY (continue-on-error) desktop-parity signals — a red advisory leg never blocks
+  # the PR. Default-OFF means the main `build` matrix + the local dev gate never resolve this toolchain.
+  shader-crosscompile:
+    name: shader-crosscompile (${{ matrix.os }})
+    needs: [license-gate, python-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os != 'ubuntu-latest' }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-bincache
+    steps:
+      - uses: actions/checkout@v7
+
+      # Apply the same per-job toolchain + build-environment composites every other build-capable
+      # job uses (build, bench-baseline, spike-*, render): on the BLOCKING Linux leg pinned-toolchain
+      # installs/exports the L-42 pinned clang (CC/CXX) and setup-build-env exports CMAKE_GENERATOR=Ninja
+      # + the sccache launchers (the shader-crosscompile preset inherits `base` and sets no generator,
+      # so without this the configure would fall back to Unix Makefiles and skip compiler caching).
+      # Both are safe no-ops on GH-hosted Windows (informational / default-VS-generator) and advisory on
+      # macOS — identical to how the matrix spike-* jobs apply them across the trio.
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      # Persist the built glslang/spirv-cross/spirv-tools archives across runs so the from-source
+      # vcpkg build only pays full cost on a manifest change (key = src/vcpkg.json +
+      # src/vcpkg-configuration.json hash, matching the bench-baseline / spike-webgpu jobs).
+      - name: vcpkg binary cache
+        uses: actions/cache@v6
+        with:
+          path: .vcpkg-bincache
+          key: vcpkg-bin-shadercc-${{ runner.os }}-${{ hashFiles('src/vcpkg.json', 'src/vcpkg-configuration.json') }}
+          restore-keys: vcpkg-bin-shadercc-${{ runner.os }}-
+
+      # The shader-crosscompile preset pulls the toolchain via the vcpkg manifest feature
+      # (VCPKG_MANIFEST_FEATURES=shader-crosscompile) under the vcpkg toolchain ($VCPKG_ROOT) and sets
+      # CONTEXT_BUILD_SHADER_CROSSCOMPILE=ON. GH-hosted runners preinstall vcpkg as
+      # $VCPKG_INSTALLATION_ROOT (same as the bench-baseline job).
+      - name: Configure (shader-crosscompile toolchain, vcpkg)
+        run: |
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+          export VCPKG_ROOT="$VCPKG_INSTALLATION_ROOT"
+          cmake -S src --preset shader-crosscompile
+
+      - name: Build the toolchain + smoke
+        run: cmake --build --preset shader-crosscompile
+        working-directory: src
+
+      - name: Run the glslang->SPIR-V smoke (SPIRV-Tools validate + SPIRV-Cross reflect)
+        run: ctest --preset shader-crosscompile --output-on-failure
+        working-directory: src

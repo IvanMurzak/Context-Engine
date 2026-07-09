@@ -14,6 +14,14 @@
                 "quickjs-ng",
                 "simdjson"
             ]
+        },
+        "shader-crosscompile": {
+            "description": "Native shader cross-compile toolchain for the opt-in CONTEXT_BUILD_SHADER_CROSSCOMPILE path (R-REND-005, issue #125); never part of the default build. glslang lowers GLSL->SPIR-V, spirv-tools validates/optimizes SPIR-V, spirv-cross reflects SPIR-V back to GLSL/MSL/HLSL.",
+            "dependencies": [
+                "glslang",
+                "spirv-cross",
+                "spirv-tools"
+            ]
         }
     }
 }

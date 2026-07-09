@@ -186,3 +186,23 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
             WORKING_DIRECTORY $<TARGET_FILE_DIR:context_render_wgpu_offscreen>)
     endif()
 endif()
+
+# ---------------------------------------------------------------------------------------------
+# shadercc — the native shader cross-compile TOOLCHAIN de-risk (R-REND-005; issue #125, sub-task B
+# of #119). Like context_render_wgpu this is a CI-gated dependency path: the toolchain (glslang +
+# SPIRV-Cross + SPIRV-Tools) comes from the vcpkg `shader-crosscompile` manifest feature, so it is
+# NOT resolved by the default local dev gate or the 3-OS build matrix. Default OFF -> the normal
+# build is unaffected. It only proves the toolchain resolves/builds/links + a glslang->SPIR-V smoke;
+# the real backend wires behind material/'s IShaderCompiler seam in sub-task C. Declared here as its
+# OWN tail stanza — deliberately apart from add_subdirectory(material) above — so the concurrent
+# sibling task editing material/ merges cleanly (the shadercc subdir is added only under the flag).
+# ---------------------------------------------------------------------------------------------
+option(CONTEXT_BUILD_SHADER_CROSSCOMPILE
+    "Build the native shader cross-compile toolchain proof (glslang + SPIRV-Cross + SPIRV-Tools from \
+the vcpkg shader-crosscompile manifest feature) + a glslang->SPIR-V smoke test. Off by default — the \
+toolchain is a vcpkg dependency path (VCPKG_MANIFEST_FEATURES=shader-crosscompile), CI-gated like the \
+wgpu backend, that the local default dev gate never resolves. Sub-task B of #119 (issue #125)." OFF)
+
+if(CONTEXT_BUILD_SHADER_CROSSCOMPILE)
+    add_subdirectory(shadercc)
+endif()

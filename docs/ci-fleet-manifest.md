@@ -68,6 +68,7 @@ Every gate carries exactly one written red-X policy:
 | `spike-webgpu-native` | R-REND-005 | gh-ubuntu-shared | per-PR | blocking | `spike-webgpu` |
 | `spike-webgpu-web` | R-REND-005 | gh-ubuntu-shared | per-PR | blocking | `spike-webgpu-web` |
 | `render-offscreen` | R-REND-002 | gh-ubuntu-shared | per-PR | blocking | `render` |
+| `shader-crosscompile` | R-REND-005 | gh-ubuntu-shared | per-PR | blocking | `shader-crosscompile` |
 | `fleet-manifest-validation` | R-QA-012 | gh-ubuntu-shared | per-PR | blocking | `python-tests` |
 | `perf-filesync-attach-100k` | R-FILE-011 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
 | `bench-query-p99` | R-BRIDGE-008 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
