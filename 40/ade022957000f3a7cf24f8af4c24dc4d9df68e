@@ -1,0 +1,22 @@
+src/render/sprite/include/context/render/sprite/sprite_offscreen.h
+  s_e054cff650e8f2::t_c2a823dccdcd9f 21
+  s_e054cff650e8f2::t_cadb47293612ba 184,186,188,190
+src/render/sprite/tests/test_atlas.cpp
+  s_e054cff650e8f2::t_f123a3ed446bc0 69-85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "40ade022957000f3a7cf24f8af4c24dc4d9df68e",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
