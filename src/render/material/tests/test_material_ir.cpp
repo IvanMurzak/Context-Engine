@@ -163,6 +163,17 @@ void test_parse_failures()
     CHECK(!parse_shader("shader a\nstage bogus main\nendstage").has_value()); // bad stage kind
     CHECK(!parse_shader("shader a\nstage vertex\nendstage").has_value());     // stage missing entry
 
+    // Canonical-key hygiene: a ';' or '=' in a shader/keyword name or a keyword value is rejected —
+    // otherwise two distinct variants could collide on one VariantKey::canonical() cache key.
+    CHECK(!parse_shader("shader a;b\nstage vertex m\nx\nendstage").has_value());   // ';' in shader name
+    CHECK(!parse_shader("shader a\nkeyword K;X on off").has_value());              // ';' in keyword name
+    CHECK(!parse_shader("shader a\nkeyword K a=b").has_value());                   // '=' in a value
+    CHECK(!parse_shader("shader a\nkeyword K a;b").has_value());                   // ';' in a value
+    // Duplicate keyword name / duplicate value within a keyword are rejected (each would enumerate a
+    // variant with a non-unique canonical key).
+    CHECK(!parse_shader("shader a\nkeyword FOG off on\nkeyword FOG a b").has_value()); // dup keyword name
+    CHECK(!parse_shader("shader a\nkeyword FOG on on").has_value());                   // dup value
+
     // Sanity: the minimal well-formed document DOES parse.
     const std::optional<ShaderIr> ok = parse_shader("shader a\nstage vertex main\nx\nendstage");
     CHECK(ok.has_value());

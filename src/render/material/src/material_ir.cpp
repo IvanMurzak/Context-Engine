@@ -87,6 +87,14 @@ std::vector<std::string> tokenize(std::string_view s)
     return tokens;
 }
 
+// A keyword name/value MUST be free of the ';' and '=' characters VariantKey::canonical() uses as its
+// delimiters — otherwise two distinct variants could encode to the same canonical string and collide in
+// the R-FILE-010 content-addressed cache (shader_cache.h), silently returning the wrong artifact.
+bool has_key_delimiter(std::string_view s)
+{
+    return s.find(';') != std::string_view::npos || s.find('=') != std::string_view::npos;
+}
+
 std::string join_lines(const std::vector<std::string>& lines)
 {
     std::string out;
@@ -173,7 +181,7 @@ std::optional<ShaderIr> parse_shader(std::string_view text)
 
         if (directive == "shader")
         {
-            if (tok.size() != 2)
+            if (tok.size() != 2 || has_key_delimiter(tok[1]))
             {
                 return std::nullopt;
             }
@@ -189,9 +197,36 @@ std::optional<ShaderIr> parse_shader(std::string_view text)
             }
             ShaderKeyword k;
             k.name = tok[1];
+            // Reject a name carrying a canonical-key delimiter, or a duplicate keyword name — either
+            // would let two enumerated variants share one canonical (cache-key) string.
+            if (has_key_delimiter(k.name))
+            {
+                return std::nullopt;
+            }
+            for (const ShaderKeyword& existing : ir.keywords)
+            {
+                if (existing.name == k.name)
+                {
+                    return std::nullopt; // duplicate keyword name
+                }
+            }
             for (std::size_t v = 2; v < tok.size(); ++v)
             {
-                k.values.push_back(tok[v]);
+                const std::string& value = tok[v];
+                // Same delimiter guard for values, plus reject a duplicate value within one keyword
+                // (which would enumerate the same variant twice).
+                if (has_key_delimiter(value))
+                {
+                    return std::nullopt;
+                }
+                for (const std::string& existing_value : k.values)
+                {
+                    if (existing_value == value)
+                    {
+                        return std::nullopt; // duplicate value within this keyword
+                    }
+                }
+                k.values.push_back(value);
             }
             ir.keywords.push_back(std::move(k));
             ++i;
