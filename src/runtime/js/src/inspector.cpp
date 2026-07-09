@@ -370,9 +370,15 @@ public:
         }
         inspector_.reset();
         context_.Reset();
-        // client_ / channel_ (the SeamClient/SeamChannel) are destroyed after this body, as members,
-        // so they outlive inspector_.reset() above — the inspector must not be holding them when it
-        // is torn down.
+        // Destroy the channel + client (the SeamClient/SeamChannel) HERE, while the Isolate/Handle/
+        // Context scope guards declared above are still alive: ~SeamChannel()/~SeamClient() dispatch
+        // virtually into the archive's __BASE vtable, so they must run inside the same isolate scope as
+        // the rest of teardown — NOT in the compiler's member-destruction epilogue, which fires after
+        // these guards unwind (at the closing brace) and after context_ is reset. Reset after
+        // inspector_ so the inspector is never holding them when it is torn down; the unique_ptrs are
+        // left null, so the trailing epilogue destruction is a no-op.
+        channel_.reset();
+        client_.reset();
     }
 
 private:
