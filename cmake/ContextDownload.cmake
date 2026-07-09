@@ -55,7 +55,12 @@ function(context_download)
     while(_attempt LESS_EQUAL ${CD_RETRIES})
         # Remove any partial/previous artifact so a failed attempt never leaves a stale file.
         file(REMOVE "${CD_PATH}")
-        file(DOWNLOAD "${CD_URL}" "${CD_PATH}" STATUS _dl_status)
+        # INACTIVITY_TIMEOUT bounds a STALLED transfer (a connection that opens then goes silent,
+        # e.g. a half-dead CDN edge) so it surfaces as a retryable STATUS failure instead of hanging
+        # the configure until the outer CI job timeout kills it. Mirrors the Python fetchers'
+        # urlopen(timeout=60). Deliberately NOT a total TIMEOUT: a legitimately slow-but-progressing
+        # large artifact must not be converted into a failure — only a genuine stall is aborted.
+        file(DOWNLOAD "${CD_URL}" "${CD_PATH}" INACTIVITY_TIMEOUT 60 STATUS _dl_status)
         list(GET _dl_status 0 _dl_code)
 
         if(_dl_code EQUAL 0)

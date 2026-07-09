@@ -125,7 +125,7 @@ def _download_with_retry(url: str, dest: Path, *, attempts: int = _MAX_ATTEMPTS,
                 print(f"[fetch_esbuild] download attempt {attempt}/{attempts} of {url} failed "
                       f"({exc}); retrying in {delay:.0f}s", file=sys.stderr)
                 sleep(delay)
-    raise FetchError(f"download of {url} failed after {attempts} attempts: {last_exc}")
+    raise FetchError(f"download of {url} failed after {attempts} attempts: {last_exc}") from last_exc
 
 
 def _obtain(name: str, url: str, source: Path | None, work: Path) -> Path:
