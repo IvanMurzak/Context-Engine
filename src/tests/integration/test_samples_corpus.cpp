@@ -385,7 +385,7 @@ int main()
     CHECK(targets > 0);
     std::fprintf(stderr,
                  "[samples-corpus] contract-surface coverage: %d/%d stable one-shot CLI verbs "
-                 "exercised (%zu documented exemptions); protocolMajor stays 0 (no freeze).\n",
+                 "exercised (%zu documented exemptions); protocolMajor frozen at 1 (M3 freeze).\n",
                  covered, targets, exempt.size());
 
     remove_quiet(stage);

@@ -123,7 +123,7 @@ std::optional<MidOpKill> attempt_mid_op_kill(const std::string& bin, int attempt
 
     itest::RpcClient rpc;
     CHECK(rpc.connect(project));
-    const auto attached = rpc.attach(0, {"describe"}, "write");
+    const auto attached = rpc.attach(1,{"describe"}, "write");
     CHECK(itest::is_ok(attached));
 
     std::string incarnation_before;
@@ -217,7 +217,7 @@ int main()
     {
         itest::RpcClient rpc;
         CHECK(rpc.connect(project));
-        const auto attached = rpc.attach(0, {"describe"}, ""); // read/query baseline only
+        const auto attached = rpc.attach(1,{"describe"}, ""); // read/query baseline only
         CHECK(itest::is_ok(attached));
 
         const auto snap = rpc.call("snapshot", Json::object());
@@ -287,7 +287,7 @@ int main()
     {
         itest::RpcClient rpc;
         CHECK(rpc.connect(project));
-        const auto attached = rpc.attach(0, {"describe"}, "write,session");
+        const auto attached = rpc.attach(1,{"describe"}, "write,session");
         CHECK(itest::is_ok(attached));
 
         Json files = Json::array();

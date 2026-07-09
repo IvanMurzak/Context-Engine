@@ -110,7 +110,7 @@ Envelope run_smoke(const std::vector<std::string>& args)
 
     // Attach a client over the capability handshake, requesting the file-write scope.
     ClientHandshake client;
-    client.protocol_major = 0;
+    client.protocol_major = context::editor::contract::kProtocolMajor;
     client.capabilities = {"describe"};
     auto attached = kernel.attach(client, ScopeSet::parse("write"));
     if (const Envelope* fail = std::get_if<Envelope>(&attached))

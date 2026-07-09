@@ -5,6 +5,7 @@
 
 #include "context/cli/wire_client.h"
 #include "context/editor/bridge/transport.h"
+#include "context/editor/contract/handshake.h"
 #include "context/editor/contract/json.h"
 
 #include <cstdint>
@@ -72,7 +73,8 @@ Envelope run_attach(const std::vector<std::string>& args)
 
     // --- attach: the capability handshake (requesting the file_write scope) ----------------------
     Json attach_params = Json::object();
-    attach_params.set("protocolMajor", Json(static_cast<std::uint64_t>(0)));
+    attach_params.set("protocolMajor",
+                      Json(static_cast<std::uint64_t>(editor::contract::kProtocolMajor)));
     Json caps = Json::array();
     caps.push_back(Json(std::string("describe")));
     attach_params.set("capabilities", std::move(caps));

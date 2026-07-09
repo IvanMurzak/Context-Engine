@@ -7,6 +7,7 @@
 add_library(context_contract STATIC
     src/json.cpp
     src/error_catalog.cpp
+    src/contract_freeze.cpp
     src/envelope.cpp
     src/handshake.cpp
     src/registry.cpp
@@ -30,6 +31,7 @@ target_link_libraries(context_contract PRIVATE context_warnings context_schema c
 set(_context_contract_tests
     test_json
     test_error_catalog
+    test_contract_freeze
     test_envelope
     test_handshake
     test_registry_parity

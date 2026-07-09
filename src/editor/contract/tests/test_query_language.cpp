@@ -391,7 +391,7 @@ int main()
     {
         const Json d = query_language_descriptor();
         CHECK(d.at("requirement").as_string() == "R-CLI-012");
-        CHECK(!d.at("stable").as_bool()); // protocolMajor 0 until the M3 freeze
+        CHECK(d.at("stable").as_bool()); // FROZEN with the contract at the M3 freeze (protocolMajor 1)
         CHECK(!d.at("ebnf").as_string().empty());
         CHECK(d.at("ebnf").as_string() == std::string(query_ebnf())); // ONE spelling
 

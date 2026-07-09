@@ -86,7 +86,7 @@ int main()
         CHECK(d.start(/*write_capable=*/true, ScopeSet::parse("write")) == StartOutcome::booted);
 
         ClientHandshake client;
-        client.protocol_major = 0;
+        client.protocol_major = context::editor::contract::kProtocolMajor; // in-window (frozen major)
         client.capabilities = {"describe"};
         // The client asks for build+install, but the operator ceiling only permits file-write.
         auto result = d.attach_client(client, ScopeSet::parse("write build"));

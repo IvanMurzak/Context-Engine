@@ -84,7 +84,7 @@ int main()
 
         itest::RpcClient rpc;
         CHECK(rpc.connect(project));
-        const auto attached = rpc.attach(0, {"describe"}, "session");
+        const auto attached = rpc.attach(1,{"describe"}, "session");
         CHECK(itest::is_ok(attached));
 
         const auto described = rpc.call("describe", Json::object());

@@ -18,6 +18,7 @@ using namespace context::editor::bridge;
 using context::editor::contract::ClientHandshake;
 using context::editor::contract::Envelope;
 using context::editor::contract::Json;
+using context::editor::contract::kProtocolMajor;
 
 int main()
 {
@@ -25,13 +26,13 @@ int main()
     {
         Dispatcher d;
         ClientHandshake client;
-        client.protocol_major = 0;
+        client.protocol_major = kProtocolMajor; // in-window (the frozen major)
         client.capabilities = {"describe", "dry-run", "not-a-real-cap"};
         auto result = d.attach(client, ScopeSet::read_query());
         CHECK(std::holds_alternative<Session>(result));
         const Session& s = std::get<Session>(result);
         CHECK(s.attached);
-        CHECK(s.protocol_major == 0);
+        CHECK(s.protocol_major == kProtocolMajor);
         // Negotiated subset = client ∩ daemon; the bogus capability is dropped.
         bool has_describe = false, has_bogus = false;
         for (const std::string& c : s.capabilities)
@@ -47,7 +48,7 @@ int main()
     {
         Dispatcher d;
         ClientHandshake client;
-        client.protocol_major = 1; // outside the {0} window at v1
+        client.protocol_major = kProtocolMajor + 1; // outside the {1} window at the freeze
         auto result = d.attach(client, ScopeSet::read_query());
         CHECK(std::holds_alternative<Envelope>(result));
         const Envelope& env = std::get<Envelope>(result);
@@ -97,14 +98,14 @@ int main()
 
         Session session;
         const std::string req =
-            R"({"jsonrpc":"2.0","id":1,"method":"attach","params":{"protocolMajor":0,)"
+            R"({"jsonrpc":"2.0","id":1,"method":"attach","params":{"protocolMajor":1,)"
             R"("capabilities":["describe"],"scope":"read"}})";
         const std::string resp = d.handle(req, session);
         const Json parsed = Json::parse(resp);
         CHECK(parsed.at("jsonrpc").as_string() == "2.0");
         CHECK(parsed.at("id").as_int() == 1);
         CHECK(parsed.contains("result"));
-        CHECK(parsed.at("result").at("protocolMajor").as_int() == 0);
+        CHECK(parsed.at("result").at("protocolMajor").as_int() == 1);
         CHECK(session.attached); // the session was mutated in place
         // A `clients` "attached" event was emitted on the stream.
         auto ev = clients.drain();
@@ -116,7 +117,7 @@ int main()
     {
         Dispatcher d;
         Session session;
-        (void)d.handle(R"({"jsonrpc":"2.0","id":1,"method":"attach","params":{"protocolMajor":0,)"
+        (void)d.handle(R"({"jsonrpc":"2.0","id":1,"method":"attach","params":{"protocolMajor":1,)"
                        R"("capabilities":[],"scope":"read"}})",
                        session);
         CHECK(session.attached);
@@ -134,7 +135,7 @@ int main()
     {
         Dispatcher d;
         Session session;
-        (void)d.handle(R"({"jsonrpc":"2.0","id":1,"method":"attach","params":{"protocolMajor":0,)"
+        (void)d.handle(R"({"jsonrpc":"2.0","id":1,"method":"attach","params":{"protocolMajor":1,)"
                        R"("capabilities":["describe"],"scope":"read"}})",
                        session);
         const std::string resp =
@@ -183,7 +184,7 @@ int main()
         Dispatcher d;
         Session session;
         const std::string resp =
-            d.handle(R"({"jsonrpc":"2.0","method":"attach","params":{"protocolMajor":0,)"
+            d.handle(R"({"jsonrpc":"2.0","method":"attach","params":{"protocolMajor":1,)"
                      R"("capabilities":[]}})",
                      session);
         CHECK(resp.empty());
@@ -247,7 +248,7 @@ int main()
         EventStream stream("inc-wire");
         Dispatcher d(&stream);
         Session session;
-        (void)d.handle(R"({"jsonrpc":"2.0","id":1,"method":"attach","params":{"protocolMajor":0,)"
+        (void)d.handle(R"({"jsonrpc":"2.0","id":1,"method":"attach","params":{"protocolMajor":1,)"
                        R"("capabilities":[],"scope":"read"}})",
                        session);
         const std::string resp = d.handle(
