@@ -24,6 +24,12 @@
 
 include(FetchContent)
 
+# Resilient prebuilt downloader (retry/backoff + fail-closed SHA verify, Context-Engine#129).
+# Guarded include so this spike works both standalone and via the src/ spikes preset.
+if(NOT COMMAND context_download)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/ContextDownload.cmake")
+endif()
+
 option(CONTEXT_SPIKE_WASM_WASMTIME "wasm spike: build the wasmtime backend (prebuilt C API)" ON)
 option(CONTEXT_SPIKE_WASM_WAMR "wasm spike: build the WAMR backend (from source)" ON)
 
@@ -73,11 +79,11 @@ if(CONTEXT_SPIKE_WASM_WASMTIME)
         set(_wasmtime_root "${_wasmtime_dl}/${_wasmtime_name}")
         if(NOT EXISTS "${_wasmtime_root}/include/wasmtime.h")
             message(STATUS "wasm spike: downloading wasmtime ${_wasmtime_ver} C API (${_wasmtime_plat})")
-            file(DOWNLOAD
-                "https://github.com/bytecodealliance/wasmtime/releases/download/v${_wasmtime_ver}/${_wasmtime_name}.${_wasmtime_ext}"
-                "${_wasmtime_dl}/${_wasmtime_name}.${_wasmtime_ext}"
-                EXPECTED_HASH SHA256=${_wasmtime_sha}
-                STATUS _dl_status)
+            context_download(
+                URL "https://github.com/bytecodealliance/wasmtime/releases/download/v${_wasmtime_ver}/${_wasmtime_name}.${_wasmtime_ext}"
+                PATH "${_wasmtime_dl}/${_wasmtime_name}.${_wasmtime_ext}"
+                EXPECTED_SHA256 "${_wasmtime_sha}"
+                DESCRIPTION "wasmtime ${_wasmtime_ver} C API (${_wasmtime_plat})")
             file(ARCHIVE_EXTRACT
                 INPUT "${_wasmtime_dl}/${_wasmtime_name}.${_wasmtime_ext}"
                 DESTINATION "${_wasmtime_dl}")
@@ -246,11 +252,11 @@ if(CONTEXT_SPIKE_WASM_AOT AND CONTEXT_SPIKE_WASM_WAMR)
         set(_wamrc "${_wamrc_dl}/${_wamrc_exe}")
         if(NOT EXISTS "${_wamrc}")
             message(STATUS "wasm spike: downloading wamrc ${_wamrc_ver} prebuilt")
-            file(DOWNLOAD
-                "https://github.com/bytecodealliance/wasm-micro-runtime/releases/download/WAMR-${_wamrc_ver}/${_wamrc_asset}"
-                "${_wamrc_dl}/${_wamrc_asset}"
-                EXPECTED_HASH SHA256=${_wamrc_sha}
-                STATUS _dl_status3)
+            context_download(
+                URL "https://github.com/bytecodealliance/wasm-micro-runtime/releases/download/WAMR-${_wamrc_ver}/${_wamrc_asset}"
+                PATH "${_wamrc_dl}/${_wamrc_asset}"
+                EXPECTED_SHA256 "${_wamrc_sha}"
+                DESCRIPTION "wamrc ${_wamrc_ver} (${_wamrc_asset})")
             file(ARCHIVE_EXTRACT INPUT "${_wamrc_dl}/${_wamrc_asset}" DESTINATION "${_wamrc_dl}")
             # The tarball may nest the binary; normalize to ${_wamrc_dl}/${_wamrc_exe}.
             if(NOT EXISTS "${_wamrc}")

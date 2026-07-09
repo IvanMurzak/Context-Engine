@@ -103,10 +103,13 @@ ${CTX_WGPU_NATIVE_VERSION} release.")
     if(NOT EXISTS "${_wgpu_pkg}/include/webgpu/webgpu.h")
         message(STATUS "context_render_wgpu: downloading wgpu-native ${CTX_WGPU_NATIVE_VERSION} \
 prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
-        file(DOWNLOAD
-            "https://github.com/gfx-rs/wgpu-native/releases/download/${CTX_WGPU_NATIVE_VERSION}/${_wgpu_asset}"
-            "${_wgpu_root}/${_wgpu_asset}"
-            EXPECTED_HASH SHA256=${_wgpu_sha256})
+        # Retry/backoff + fail-closed SHA verify (Context-Engine#129): a transient GitHub-releases
+        # 504/timeout no longer hard-fails this dependency-path configure. The pin is unchanged.
+        context_download(
+            URL "https://github.com/gfx-rs/wgpu-native/releases/download/${CTX_WGPU_NATIVE_VERSION}/${_wgpu_asset}"
+            PATH "${_wgpu_root}/${_wgpu_asset}"
+            EXPECTED_SHA256 "${_wgpu_sha256}"
+            DESCRIPTION "wgpu-native ${CTX_WGPU_NATIVE_VERSION} (${_wgpu_asset})")
         file(ARCHIVE_EXTRACT INPUT "${_wgpu_root}/${_wgpu_asset}" DESTINATION "${_wgpu_pkg}")
     endif()
 
