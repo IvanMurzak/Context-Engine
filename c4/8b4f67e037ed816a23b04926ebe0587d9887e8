@@ -1,0 +1,29 @@
+src/editor/contract/src/error_catalog.cpp
+  s_e054cff650e8f2::t_ae1ffbf0931553 459-467
+src/cli/tests/test_merge_command.cpp
+  s_e054cff650e8f2::t_d996881f57cf32 245-310
+  s_e054cff650e8f2::t_ff651de53a5efd 413-414
+src/cli/src/merge_command.cpp
+  s_e054cff650e8f2::t_1faaf9c0b2ac93 592-594,602,604,621-668,671,675,677-678
+  s_e054cff650e8f2::t_7d41985220d4e7 5,12-13
+  s_e054cff650e8f2::t_eb7bb545e62643 198-254
+  s_e054cff650e8f2::t_664654113406c5 35-36
+src/cli/include/context/cli/merge_command.h
+  s_e054cff650e8f2::t_56a28f5eed9247 37-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c48b4f67e037ed816a23b04926ebe0587d9887e8",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
