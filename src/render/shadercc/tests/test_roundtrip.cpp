@@ -220,6 +220,54 @@ void test_compile_failure_throws()
     CHECK(threw);
 }
 
+// White-box unit test of the PURE assemble_stage_source() keyword-injection + entry-trampoline logic
+// (the header documents it as "white-box testable — no native toolchain needed"). Realizes that
+// documented benefit directly, rather than only exercising it indirectly through cross_compile(): it
+// pins the boolean `#ifdef` idiom, the multi-value `#if KW == token` idiom (value tokens numbered),
+// the entry-point trampoline, and the `#version`-stays-first rule — all deterministic string output.
+void test_assemble_stage_source()
+{
+    using context::render::shadercc::assemble_stage_source;
+
+    ShaderIr ir;
+    ir.name = "inject_probe";
+    ir.keywords = {
+        {"FOG", {"off", "on"}},              // boolean axis -> `#ifdef KW` idiom
+        {"QUALITY", {"low", "med", "high"}}, // multi-value axis -> `#if KW == token` idiom
+    };
+
+    ShaderStage stage;
+    stage.kind = ShaderStageKind::Vertex;
+    stage.entry_point = "vs_main";
+    stage.source = "#version 450\nvoid vs_main() {}\n";
+
+    // Boolean ENABLED + a selected multi-value token.
+    VariantKey on;
+    on.defines = {{"FOG", "on"}, {"QUALITY", "high"}};
+    const std::string a = assemble_stage_source(stage, ir, on);
+    CHECK(a.rfind("#version 450", 0) == 0);                      // #version stays the first line
+    CHECK(a.find("#define FOG 1") != std::string::npos);         // boolean enabled -> defined to 1
+    CHECK(a.find("#define low 0") != std::string::npos);         // value tokens numbered by ordinal
+    CHECK(a.find("#define med 1") != std::string::npos);
+    CHECK(a.find("#define high 2") != std::string::npos);
+    CHECK(a.find("#define QUALITY high") != std::string::npos);  // keyword bound to its selected token
+    CHECK(a.find("#define vs_main main") != std::string::npos);  // entry-point trampoline
+
+    // Boolean DISABLED must be LEFT UNDEFINED (the `#ifdef KW` idiom).
+    VariantKey off;
+    off.defines = {{"FOG", "off"}, {"QUALITY", "low"}};
+    const std::string b = assemble_stage_source(stage, ir, off);
+    CHECK(b.find("#define FOG") == std::string::npos);
+
+    // A `main` entry point needs no trampoline (no self-referential `#define main main`).
+    ShaderStage main_stage;
+    main_stage.kind = ShaderStageKind::Fragment;
+    main_stage.entry_point = "main";
+    main_stage.source = "#version 450\nvoid main() {}\n";
+    const std::string c = assemble_stage_source(main_stage, ir, VariantKey{});
+    CHECK(c.find("main main") == std::string::npos);
+}
+
 } // namespace
 
 int main()
@@ -228,6 +276,7 @@ int main()
     test_determinism();
     test_variants_differ();
     test_programmatic_shaders();
+    test_assemble_stage_source();
     test_compile_failure_throws();
     SHADERCC_TEST_MAIN_END();
 }

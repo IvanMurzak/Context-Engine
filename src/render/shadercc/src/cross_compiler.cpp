@@ -64,7 +64,13 @@ EShLanguage to_glslang_stage(ShaderStageKind kind)
     case ShaderStageKind::Compute:
         return EShLangCompute;
     }
-    return EShLangVertex; // unreachable — the enum is exhaustive; keeps -Werror quiet
+    // The switch is exhaustive over today's ShaderStageKind and has no `default`, so -Wswitch already
+    // fails a future enumerator at compile time on the GCC/Clang legs. This throw is the belt to that
+    // suspenders: it keeps -Werror quiet here (a non-returning terminator satisfies "control reaches
+    // end of non-void function") AND, per material_ir.h ("the real backend adds more as needed"), fails
+    // LOUDLY at runtime rather than silently mis-lowering a new stage to Vertex on a leg where the
+    // missing-case warning is off by default (MSVC C4062).
+    throw ShaderCompileError("to_glslang_stage: unhandled ShaderStageKind");
 }
 
 std::string to_lower(std::string_view s)
