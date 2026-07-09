@@ -111,7 +111,6 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
         target_link_libraries(context_render_wgpu PUBLIC "${_wgpu_pkg}/lib/wgpu_native.dll.lib")
     elseif(APPLE)
         target_link_libraries(context_render_wgpu PUBLIC "${_wgpu_pkg}/lib/libwgpu_native.dylib")
-        set_target_properties(context_render_wgpu PROPERTIES BUILD_RPATH "${_wgpu_pkg}/lib")
     else()
         target_link_libraries(context_render_wgpu PUBLIC "${_wgpu_pkg}/lib/libwgpu_native.so")
     endif()
@@ -130,6 +129,11 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
                 "${_wgpu_pkg}/lib/wgpu_native.dll"
                 "$<TARGET_FILE_DIR:context_render_wgpu_offscreen>"
             COMMENT "context_render_wgpu: staging wgpu_native.dll next to the offscreen exe")
+    elseif(APPLE)
+        # RPATH goes on the EXECUTABLE (the actual runtime loader of libwgpu_native.dylib), not the
+        # static context_render_wgpu archive, which has no load step. BUILD_RPATH is additive to the
+        # RPATH CMake auto-derives from the full-path dylib link, so this only ensures resolution.
+        set_target_properties(context_render_wgpu_offscreen PROPERTIES BUILD_RPATH "${_wgpu_pkg}/lib")
     endif()
 
     # R-HEAD-002 probe: enumerate adapters / report absence WITHOUT a device — exit 0 everywhere,
