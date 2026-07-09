@@ -66,6 +66,23 @@ void test_pack_all_fit()
             CHECK(reg->width == it.width && reg->height == it.height);
         }
     }
+    // Pairwise non-overlap: no two placed regions may share any area (a shelf-packer wrap/height
+    // regression that double-places a slot would otherwise slip through the per-item checks above).
+    for (std::size_t i = 0; i < items.size(); ++i)
+    {
+        const AtlasRegion* p = r.atlas.find(items[i].name);
+        for (std::size_t j = i + 1; j < items.size(); ++j)
+        {
+            const AtlasRegion* q = r.atlas.find(items[j].name);
+            CHECK(p != nullptr && q != nullptr);
+            if (p != nullptr && q != nullptr)
+            {
+                const bool disjoint = p->x + p->width <= q->x || q->x + q->width <= p->x ||
+                                      p->y + p->height <= q->y || q->y + q->height <= p->y;
+                CHECK(disjoint);
+            }
+        }
+    }
 }
 
 void test_pack_overflow()

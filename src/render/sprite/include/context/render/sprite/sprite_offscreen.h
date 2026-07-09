@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include "context/render/offscreen_scene.h"
 #include "context/render/rhi.h"
 #include "context/render/sprite/batch.h"
 #include "context/render/sprite/ortho.h"
@@ -93,21 +94,6 @@ inline SpriteScene reference_sprite_scene()
     scene.sprites = {a, b};
     return scene;
 }
-
-namespace detail
-{
-
-inline bool sprite_pixel_near(const std::uint8_t* px, int r, int g, int b, int a, int tol)
-{
-    auto close = [tol](int actual, int expected)
-    {
-        const int d = actual - expected;
-        return d >= -tol && d <= tol;
-    };
-    return close(px[0], r) && close(px[1], g) && close(px[2], b) && close(px[3], a);
-}
-
-} // namespace detail
 
 // Render the reference sprite scene offscreen through `device` and assert the readback. `device` must
 // be a live GPU device that actually rasterizes (the wgpu backend on CI); adapter presence / headless
@@ -195,13 +181,13 @@ inline bool render_offscreen_sprite(IDevice& device)
     { return pixels + (static_cast<std::size_t>(row) * kBytesPerRow) + (col * kBpp); };
 
     // (a) background — a corner no sprite covers -> the clear color (~26/51/77).
-    const bool bg_ok = detail::sprite_pixel_near(at(8, 8), 26, 51, 77, 255, 6);
+    const bool bg_ok = context::render::detail::pixel_near(at(8, 8), 26, 51, 77, 255, 6);
     // (b) sprite A only (red) — screen (60,128), left of the overlap.
-    const bool red_ok = detail::sprite_pixel_near(at(60, 128), 255, 0, 0, 255, 4);
+    const bool red_ok = context::render::detail::pixel_near(at(60, 128), 255, 0, 0, 255, 4);
     // (c) sprite B only (green) — screen (170,128), right of the overlap.
-    const bool green_ok = detail::sprite_pixel_near(at(170, 128), 0, 255, 0, 255, 4);
+    const bool green_ok = context::render::detail::pixel_near(at(170, 128), 0, 255, 0, 255, 4);
     // (d) overlap — screen (118,128): B (layer 1) must win over A (layer 0). THE sort-order assertion.
-    const bool overlap_ok = detail::sprite_pixel_near(at(118, 128), 0, 255, 0, 255, 4);
+    const bool overlap_ok = context::render::detail::pixel_near(at(118, 128), 0, 255, 0, 255, 4);
 
     const std::uint8_t* ov = at(118, 128);
     std::printf("[render-sprite] bg(8,8)=%u,%u,%u,%u red(60,128)=%s green(170,128)=%s "
