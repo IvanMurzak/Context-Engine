@@ -1,0 +1,91 @@
+samples/platformer-2d/i18n/strings.string-table.json
+  s_e054cff650e8f2::t_b5c3085b9fdb61 1-21,24,27
+  s_e054cff650e8f2::t_aa8cad6e29716e 22-23,25-26,28-58
+src/tests/integration/test_samples_corpus.cpp
+  s_e054cff650e8f2::t_34f4af410eee58 302-304
+  s_e054cff650e8f2::t_2851408bfdbb71 176
+  s_e054cff650e8f2::t_8a146f1128a019 1-81,85-119,124-125,127-134,136-175,177-238,241-245,253,257,263-301,305-389
+  s_e054cff650e8f2::t_d3ee9148883772 82-84
+  s_e054cff650e8f2::t_28e9cf5a31b54c 239-240,246-252,254-256,258-262
+  s_e054cff650e8f2::t_d2cb45dcdad054 120-123,126,135
+samples/topdown-rpg/project.json
+  s_e054cff650e8f2::t_b1b55a516680c7 1-11
+  s_e054cff650e8f2::t_a26a1a90ca9c8f 12-13
+samples/platformer-2d/scenes/level-1.scene.json
+  s_e054cff650e8f2::t_5245c18981af56 1-28,33
+  s_e054cff650e8f2::t_bd7453b9a2f4b2 29-32,34-56
+samples/platformer-2d/tilemaps/level-1.tilemap.json
+  s_e054cff650e8f2::t_3b350f022bf47d 1-30,32
+  s_e054cff650e8f2::t_4e78cab981129f 31,33-45
+samples/topdown-rpg/tilemaps/town.tilemap.json
+  s_e054cff650e8f2::t_2da12c80955bcc 1-36
+  s_e054cff650e8f2::t_17b133e0a3a04e 37-58
+samples/platformer-2d/project.json
+  s_e054cff650e8f2::t_a74aac8f3de073 1-11
+  s_e054cff650e8f2::t_3c1a81a604f922 12-13
+docs/ci-fleet-manifest.json
+  s_e054cff650e8f2::t_421338348a4257 377-385
+  s_e054cff650e8f2::t_ef63b39656c64d 376
+samples/topdown-rpg/scenes/town.scene.json
+  s_e054cff650e8f2::t_ee2f87a1d0cb5c 1-39,43
+  s_e054cff650e8f2::t_015e6c535ecf21 40-42,44-71
+.github/workflows/ci.yml
+  s_e054cff650e8f2::t_13e5523e0803e2 165-175
+  s_e054cff650e8f2::t_b45733f20ef75c 129-131,133
+samples/topdown-rpg/scenes/world.scene.json
+  s_e054cff650e8f2::t_77370010632894 1-21,23
+  s_e054cff650e8f2::t_4194cbb7eb0fa2 22,24-38
+samples/platformer-2d/scripts/movement.ts
+  s_e054cff650e8f2::t_c225542eac3609 1-27
+samples/topdown-rpg/i18n/strings.string-table.json
+  s_e054cff650e8f2::t_b2917ab40921ed 1-21,23,26
+  s_e054cff650e8f2::t_f28bed8b587192 22,24-25,27-67
+src/tests/integration/CMakeLists.txt
+  s_e054cff650e8f2::t_34a63739103459 158-187
+docs/ci-fleet-manifest.md
+  s_e054cff650e8f2::t_3f78ea3431b211 77
+samples/platformer-2d/scenes/room.scene.json
+  s_e054cff650e8f2::t_1f4a0339d587d1 1-20,22,24
+  s_e054cff650e8f2::t_f8a6bb14c79739 21,23,25-39
+samples/topdown-rpg/merge/clean/base.scene.json
+  s_e054cff650e8f2::t_df6e50005e19a8 1-10
+  s_e054cff650e8f2::t_1a901e3f3a5ac1 11-21
+samples/README.md
+  s_cb41aadbde3305::t_ffd771eb5156ce 1-81
+samples/replays/demo.replay.json
+  s_e054cff650e8f2::t_12b4e08c469798 1-34
+samples/topdown-rpg/merge/clean/ours.scene.json
+  s_e054cff650e8f2::t_ac11b2bfdb36e3 1-21
+samples/topdown-rpg/merge/clean/theirs.scene.json
+  s_e054cff650e8f2::t_daa65730a26a2b 1-21
+samples/topdown-rpg/merge/conflict/base.scene.json
+  s_e054cff650e8f2::t_ecc65be15650cc 1-21
+samples/topdown-rpg/merge/conflict/ours.scene.json
+  s_e054cff650e8f2::t_0be80e94ed8738 1-21
+samples/topdown-rpg/merge/conflict/theirs.scene.json
+  s_e054cff650e8f2::t_6f9624ec6597d4 1-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d87546b80ac90570b110fccf83eb20f92dbd300b",
+  "prompts": {},
+  "sessions": {
+    "s_cb41aadbde3305": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e52f295f-a887-4d28-a18e-567076052857",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
