@@ -1,0 +1,21 @@
+src/runtime/ts/README.md
+  s_e054cff650e8f2::t_0613a15375420d 95,99
+src/runtime/js/src/v8_engine.cpp
+  s_e054cff650e8f2::t_f4c6e65edc1f05 419-437
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6a8abe7e8a82b5537632f044f4402fad4db88d55",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
