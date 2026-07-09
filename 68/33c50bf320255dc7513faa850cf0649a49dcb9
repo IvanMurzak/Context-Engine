@@ -1,0 +1,25 @@
+src/runtime/js/src/inspector.cpp
+  s_e054cff650e8f2::t_cf79b840177a3c 26-39
+  s_e054cff650e8f2::t_e8e293d72aad06 296-300,303,309-311,315-320,323
+  s_e054cff650e8f2::t_8029c7e7868eb2 232-257
+  s_e054cff650e8f2::t_fcaf177ba6b924 384,386
+  s_e054cff650e8f2::t_8942bce07beef0 71-78,84-92
+src/runtime/js/CMakeLists.txt
+  s_e054cff650e8f2::t_8a1671397f5cc1 126-145,148-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6833c50bf320255dc7513faa850cf0649a49dcb9",
+  "prompts": {},
+  "sessions": {
+    "s_e054cff650e8f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "185692d5-2d62-4b89-a46d-259ee55dda18",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
