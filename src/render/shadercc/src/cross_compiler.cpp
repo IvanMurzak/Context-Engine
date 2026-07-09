@@ -17,7 +17,7 @@
 #include <cctype>
 #include <cstddef>
 #include <exception>
-#include <set>
+#include <map>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -172,7 +172,12 @@ std::string assemble_stage_source(const ShaderStage& stage, const ShaderIr& ir,
                                   const VariantKey& variant)
 {
     std::ostringstream defines;
-    std::set<std::string> defined_tokens; // guards against redefining a value token to a clashing ordinal
+    // Value token -> the ordinal it was `#define`d to. Value tokens are GLOBAL in the assembled source
+    // (the `#if KW == token` idiom compares against a bare `token`), so a token spelling can carry only
+    // ONE ordinal for the whole stage. Two keywords may legitimately SHARE a token at the SAME ordinal
+    // (deduped below); but two keywords declaring the same token at DIFFERENT positions cannot both be
+    // honoured — that is an authoring collision we fail LOUDLY on rather than silently mis-numbering.
+    std::map<std::string, std::size_t> defined_tokens;
 
     for (const auto& [name, value] : variant.defines)
     {
@@ -212,9 +217,19 @@ std::string assemble_stage_source(const ShaderStage& stage, const ShaderIr& ir,
                 for (std::size_t i = 0; i < values->size(); ++i)
                 {
                     const std::string& token = (*values)[i];
-                    if (defined_tokens.insert(token).second)
+                    const auto [it, inserted] = defined_tokens.emplace(token, i);
+                    if (inserted)
                     {
                         defines << "#define " << token << " " << i << "\n";
+                    }
+                    else if (it->second != i)
+                    {
+                        // Another keyword already `#define`d this token to a different ordinal; a single
+                        // global macro cannot satisfy both, so `#if KW == token` would silently resolve
+                        // against the wrong keyword's numbering. Fail loudly instead of mis-numbering.
+                        throw ShaderCompileError("assemble_stage_source: value token '" + token +
+                                                 "' is declared at conflicting ordinals across keywords "
+                                                 "of shader '" + ir.name + "'");
                     }
                 }
             }

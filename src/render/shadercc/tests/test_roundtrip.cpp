@@ -268,6 +268,41 @@ void test_assemble_stage_source()
     CHECK(c.find("main main") == std::string::npos);
 }
 
+// White-box failure path for the token-numbering: value tokens are GLOBAL in the assembled source, so
+// two keywords declaring the SAME token spelling at DIFFERENT ordinals cannot both be honoured by a
+// single `#define`. assemble_stage_source() must throw ShaderCompileError on that authoring collision
+// rather than silently mis-number one keyword against the other's ordinal.
+void test_assemble_stage_source_token_collision_throws()
+{
+    using context::render::shadercc::assemble_stage_source;
+
+    ShaderIr ir;
+    ir.name = "collision_probe";
+    ir.keywords = {
+        {"QUALITY", {"low", "high"}}, // low=0, high=1
+        {"DETAIL", {"high", "low"}},  // high=0, low=1  -> both tokens collide at conflicting ordinals
+    };
+
+    ShaderStage stage;
+    stage.kind = ShaderStageKind::Vertex;
+    stage.entry_point = "vs_main";
+    stage.source = "#version 450\nvoid vs_main() {}\n";
+
+    VariantKey key;
+    key.defines = {{"QUALITY", "low"}, {"DETAIL", "high"}};
+
+    bool threw = false;
+    try
+    {
+        (void)assemble_stage_source(stage, ir, key);
+    }
+    catch (const ShaderCompileError&)
+    {
+        threw = true;
+    }
+    CHECK(threw);
+}
+
 } // namespace
 
 int main()
@@ -277,6 +312,7 @@ int main()
     test_variants_differ();
     test_programmatic_shaders();
     test_assemble_stage_source();
+    test_assemble_stage_source_token_collision_throws();
     test_compile_failure_throws();
     SHADERCC_TEST_MAIN_END();
 }
