@@ -1,16 +1,16 @@
 // M1 exit criterion 2 — second CLI live attach (R-CLI-010, issue #36):
 // a SECOND CLI process attaches LIVE to the running daemon via the capability-negotiation
 // handshake — `protocolMajor=1` carried on the wire, hard-fail-on-mismatch semantics (v1: the
-// compatibility window is exactly {0}).
+// compatibility window is exactly {1}).
 //
 // All of this runs against a REAL `context daemon` process over the REAL loopback IPC wire (#35):
 //   * happy path — two REAL sequential `context attach` CLI processes each drive the daemon; the
 //     daemon lifetime (incarnationId) is stable across them (it is the SAME live daemon).
 //   * negotiation — the handshake carries {protocolMajor, capabilities[]}; an unknown client
 //     capability is dropped from the negotiated subset (client ∩ daemon), never invented.
-//   * failure path — a client with protocolMajor=1 HARD-FAILS with the catalog code
-//     `handshake.incompatible_protocol` (R-CLI-008 schema on the wire), and the daemon SURVIVES:
-//     the same connection renegotiates at major 0 successfully.
+//   * failure path — a client with protocolMajor=2 (outside the frozen v1 window {1}) HARD-FAILS
+//     with the catalog code `handshake.incompatible_protocol` (R-CLI-008 schema on the wire), and
+//     the daemon SURVIVES: the same connection renegotiates at the frozen major 1 successfully.
 //   * failure path — a method before any attach is refused (usage.invalid): no session without a
 //     handshake.
 //
@@ -49,7 +49,7 @@ int main()
 
         // The handshake carries protocolMajor + capabilities from day one (R-CLI-010). Request one
         // real capability plus one the daemon has never heard of.
-        const auto attached = rpc.attach(1,{"describe", "bogus-capability-xyz"}, "");
+        const auto attached = rpc.attach(1, {"describe", "bogus-capability-xyz"}, "");
         CHECK(itest::is_ok(attached));
         if (itest::is_ok(attached))
         {
@@ -129,7 +129,7 @@ int main()
         CHECK(itest::error_code_of(rejected) == "handshake.incompatible_protocol");
 
         // The daemon SURVIVES a failed handshake: the same connection renegotiates at the frozen major 1.
-        const auto renegotiated = rpc.attach(1,{"describe"}, "");
+        const auto renegotiated = rpc.attach(1, {"describe"}, "");
         CHECK(itest::is_ok(renegotiated));
 
         // Same daemon lifetime end-to-end: the incarnation id never changed while clients came,
@@ -154,7 +154,7 @@ int main()
         CHECK(itest::error_code_of(premature) == "usage.invalid");
 
         // Attach with session scope and shut the daemon down cleanly.
-        const auto attached = rpc.attach(1,{"describe"}, "session");
+        const auto attached = rpc.attach(1, {"describe"}, "session");
         CHECK(itest::is_ok(attached));
         const auto stopped = rpc.call("shutdown", Json::object());
         CHECK(itest::is_ok(stopped));

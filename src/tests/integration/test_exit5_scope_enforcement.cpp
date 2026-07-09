@@ -83,7 +83,7 @@ int main()
         CHECK(rpc.connect(project));
 
         // The client ASKS for everything; the launch-time ceiling clamps it to read/query only.
-        const auto attached = rpc.attach(1,{"describe"}, "write,session,build");
+        const auto attached = rpc.attach(1, {"describe"}, "write,session,build");
         CHECK(itest::is_ok(attached));
         if (itest::is_ok(attached))
         {
@@ -180,7 +180,7 @@ int main()
         {
             itest::RpcClient rpc;
             CHECK(rpc.connect(project));
-            const auto attached = rpc.attach(1,{"describe"}, "write");
+            const auto attached = rpc.attach(1, {"describe"}, "write");
             CHECK(itest::is_ok(attached));
             const auto edit = rpc.call("edit", edit_params("proj/allow.scene", "entity: 1"));
             CHECK(itest::is_ok(edit));
@@ -201,7 +201,7 @@ int main()
         {
             itest::RpcClient rpc;
             CHECK(rpc.connect(project));
-            const auto attached = rpc.attach(1,{"describe"}, "");
+            const auto attached = rpc.attach(1, {"describe"}, "");
             CHECK(itest::is_ok(attached));
             const auto edit = rpc.call("edit", edit_params("proj/default-deny.scene", "entity: 2"));
             CHECK(!itest::is_ok(edit));
@@ -214,7 +214,7 @@ int main()
         {
             itest::RpcClient rpc;
             CHECK(rpc.connect(project));
-            const auto attached = rpc.attach(1,{"describe"}, "session");
+            const auto attached = rpc.attach(1, {"describe"}, "session");
             CHECK(itest::is_ok(attached));
             const auto stopped = rpc.call("shutdown", Json::object());
             CHECK(itest::is_ok(stopped));

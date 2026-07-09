@@ -35,8 +35,11 @@ int main()
         CHECK(missing.empty());
     }
 
-    // The snapshot is non-trivial (it actually froze the surface, not an empty list).
-    CHECK(frozen_v1_surface().size() >= 40);
+    // The snapshot is non-trivial and COMPLETE: an exact count so an accidental truncation of the
+    // hardcoded snapshot (e.g. losing a block of error codes) regresses loudly instead of sliding
+    // under a loose lower bound. Bump this deliberately when the frozen surface legitimately grows
+    // (a new stable entry, or a deprecation-window removal).
+    CHECK(frozen_v1_surface().size() == 202);
 
     // --- 2. TEETH: a breaking change (removed / renamed / retyped) IS detected --------------------
     {

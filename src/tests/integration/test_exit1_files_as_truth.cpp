@@ -209,7 +209,7 @@ int main()
         // reconcile crawl. Identical canonical hash == identical derived World state for the pair.
         itest::RpcClient rpc;
         CHECK(rpc.connect(project));
-        const auto attached = rpc.attach(1,{"describe"}, "session");
+        const auto attached = rpc.attach(1, {"describe"}, "session");
         CHECK(itest::is_ok(attached));
 
         const auto reconciled = rpc.call("reconcile", Json::object());
