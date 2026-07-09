@@ -187,6 +187,17 @@ if(_ctx_js_v8)
     target_compile_definitions(context_ts_test_ts_debug PRIVATE CONTEXT_JS_HAS_V8)
 endif()
 target_link_options(context_ts_test_ts_debug PRIVATE ${_ctx_ts_gcc_static})
+# Same UBSan `vptr` false-positive carve-out as context_ts above (issue #104): this test TU links the
+# UNINSTRUMENTED rusty_v8 prebuilt (via context_js) — its bundled Chromium libc++/libc++abi RTTI in
+# the same binary confuses UBSan's `vptr` sub-check into flagging this TU's own std::ifstream / std
+# stream member calls as "member call on ... not of type ...", even though the object IS a valid
+# libstdc++ stream (a false positive of mixing an instrumented embedder with an uninstrumented
+# prebuilt, NOT a Context-code defect). Drop ONLY the vptr sub-check for THIS TU under the sanitize
+# preset (ASan + every other UBSan check stay ON); scoped to CONTEXT_SANITIZE so dev/CI release builds
+# are byte-identical, and gated non-MSVC because -fno-sanitize=vptr is a Clang/GCC UBSan flag.
+if(_ctx_js_v8 AND CONTEXT_SANITIZE AND NOT MSVC)
+    target_compile_options(context_ts_test_ts_debug PRIVATE -fno-sanitize=vptr)
+endif()
 add_test(NAME ts-test_ts_debug COMMAND context_ts_test_ts_debug)
 
 # Same benign-V8-worker-pool suppressions as ts-test_ts_in_v8 (it links the SAME uninstrumented

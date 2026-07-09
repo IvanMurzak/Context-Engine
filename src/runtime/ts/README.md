@@ -92,10 +92,10 @@ both ways, green on 3 OS*. The following are intentionally left as clean seams:
 - **Interactive CDP inspector attach + source-mapped breakpoints** (R-OBS-005, the debugger half):
   task 4b lands the source-map + TS-resolved-stack-trace FOUNDATION (this package's `source_map` /
   `stack_trace` + the `ts.runtime_error` code + the V8 host capturing `error.stack`). Wiring V8's
-  in-box CDP inspector (`v8-inspector.h`; the `V8InspectorSeam` stub in `runtime/js`) through
+  in-box CDP inspector (`v8-inspector.h`; the real session in `runtime/js/src/inspector.cpp`) through
   EditorKernel over a WebSocket/CDP transport — so a standard CDP client (Chrome DevTools / VS Code
   js-debug) attaches and hits a source-mapped breakpoint in authored `.ts` — is the **split-out
   follow-up** (issue #94's remaining core). It needs a NEW rusty_v8 extern-C shim for the
-  STL-crossing `V8Inspector::create` (see `runtime/js/src/inspector_seam.h` / `v8_rust_stubs.cpp`),
+  STL-crossing `V8Inspector::create` (see `runtime/js/src/inspector.cpp` / `v8_rust_stubs.cpp`),
   which links only under the 3-OS CI V8 legs — none of it is buildable on the local GCC gate, so it
   is deliberately its own PR rather than folded in here. **Follow-up task.**

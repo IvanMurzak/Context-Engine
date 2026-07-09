@@ -26,7 +26,6 @@
 #include <v8-template.h>
 #include <v8-typed-array.h>
 
-#include "inspector_seam.h"
 #include "inspector_session.h"
 #include "v8_shims.h"
 
@@ -144,7 +143,6 @@ public:
         v8::HandleScope handleScope(isolate_);
         v8::Local<v8::Context> context = v8::Context::New(isolate_);
         context_.Reset(isolate_, context);
-        inspector_ = std::make_unique<detail::V8InspectorSeam>();
         return true;
     }
 
@@ -418,7 +416,25 @@ public:
         return ok;
     }
 
-    bool inspectorSeamPresent() const override { return inspector_ != nullptr; }
+    // The V8 backend always carries the interactive CDP inspector seam (attachInspector below wires
+    // a real V8Inspector session). This is a compile-time fact of THIS TU (it exists only under
+    // CONTEXT_JS_HAS_V8), so it is a constant `true` rather than a runtime flag.
+    //
+    // Historically this returned `inspector_ != nullptr`, where `inspector_` was a
+    // detail::V8InspectorSeam — a client that DIRECTLY subclassed v8_inspector::V8InspectorClient
+    // from this system-STL TU. That subclass was the ONLY thing in our code that forced the compiler
+    // to emit the v8_inspector::V8InspectorClient vtable + its INLINE virtual defaults (valueSubtype,
+    // deepSerialize, … — each returning a std::unique_ptr<StringBuffer> BY VALUE) as weak symbols in
+    // our object, compiled against the SYSTEM libc++. The rusty_v8 prebuilt is use_custom_libcxx=true
+    // and defines the SAME weak vtable/inline-defaults against its Chromium libc++. When the hybrid
+    // link deduplicated those weak symbols and kept OUR system-STL `valueSubtype`, an archive-side
+    // caller (value-mirror.cc: `clientFor(context)->valueSubtype(object)`) received a system-libc++
+    // std::unique_ptr<StringBuffer> whose bytes it reinterpreted as a Chromium-libc++ unique_ptr — a
+    // spuriously non-null StringBuffer* whose `->string()` then dereferenced @0x10 during the
+    // debugger-break call-frame walk (issue #104, the attach-time SEGV). The live inspector client is
+    // the archive-vtable SeamClient in inspector.cpp; nothing needs a directly-subclassed client, so
+    // V8InspectorSeam (and inspector_seam.h) are removed and this returns the compile-time constant.
+    bool inspectorSeamPresent() const override { return true; }
 
     std::unique_ptr<InspectorSession> attachInspector(std::string& err) override
     {
@@ -472,7 +488,6 @@ private:
     std::vector<v8::Global<v8::Function>> functions_;
     std::vector<std::unique_ptr<HostEntry>> hostEntries_;
     std::vector<v8::BackingStore*> vmBuffers_;  // owned; freed via v8__BackingStore__DELETE
-    std::unique_ptr<detail::V8InspectorSeam> inspector_;
 };
 
 }  // namespace
