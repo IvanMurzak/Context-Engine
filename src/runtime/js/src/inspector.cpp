@@ -161,6 +161,20 @@ std::string fromStringView(const v8_inspector::StringView& v)
     return out;
 }
 
+// Bit-copy a v8::Local<T> (a single pointer to its handle slot) to a raw T* in rusty_v8's raw-slot
+// form — the inverse of v8_engine.cpp's ptr_to_local, and the same Local<->ptr bit-copy the
+// v8_shims.h backing-store seam uses. A memcpy (not a reinterpret-deref) so it is strict-aliasing-
+// clean; V8's __BASE override reconstitutes the raw pointer back into a v8::Local.
+template <typename T>
+T* local_to_ptr(v8::Local<T> local)
+{
+    static_assert(sizeof(v8::Local<T>) == sizeof(T*),
+                  "v8::Local must be a single-slot pointer for the raw-slot round-trip");
+    T* raw = nullptr;
+    std::memcpy(&raw, &local, sizeof(raw));
+    return raw;
+}
+
 // The embedder-side CDP client. Its `base` member is the archive-constructed
 // v8_inspector__V8InspectorClient__BASE (a real V8InspectorClient whose vtable lives in the archive);
 // V8's virtual callbacks land in the archive vtable and forward through the extern-"C"
@@ -461,15 +475,9 @@ extern "C"
         v8_inspector::V8InspectorClient* self, int /*context_group_id*/)
     {
         // Return the engine's context in rusty_v8's raw-slot form (the __BASE override wraps it back
-        // into a v8::Local via ptr_to_local). A v8::Local is a single slot pointer, so the raw form
-        // is its bit pattern — the same Local<->ptr reinterpret the v8_shims.h backing-store seam uses.
-        static_assert(sizeof(v8::Local<v8::Context>) == sizeof(v8::Context*),
-                      "v8::Local must be a single-slot pointer for the raw-slot round-trip");
+        // into a v8::Local via ptr_to_local); local_to_ptr does the inverse bit-copy (see its def).
         auto* c = reinterpret_cast<SeamClient*>(self);
-        v8::Local<v8::Context> ctx = c->context->Get(c->isolate);
-        v8::Context* raw = nullptr;
-        std::memcpy(&raw, &ctx, sizeof(raw));
-        return raw;
+        return local_to_ptr(c->context->Get(c->isolate));
     }
 
     v8_inspector::StringBuffer* v8_inspector__V8InspectorClient__BASE__resourceNameToUrl(
@@ -486,16 +494,23 @@ extern "C"
         v8_inspector::StringBuffer* message)
     {
         // `message` is a raw, caller-owned StringBuffer (the __BASE override called message.release()
-        // before crossing the seam): emit its contents, then free it via the archive's deleter.
+        // before crossing the seam): emit its contents, then free it via the archive's deleter. Guard
+        // the free like InspectorDeleter/SessionDeleter do — the archive __DELETE isn't null-safe.
         reinterpret_cast<SeamChannel*>(self)->emit(message);
-        v8_inspector__StringBuffer__DELETE(message);
+        if (message != nullptr)
+        {
+            v8_inspector__StringBuffer__DELETE(message);
+        }
     }
 
     void v8_inspector__V8Inspector__Channel__BASE__sendNotification(
         v8_inspector::V8Inspector::Channel* self, v8_inspector::StringBuffer* message)
     {
         reinterpret_cast<SeamChannel*>(self)->emit(message);
-        v8_inspector__StringBuffer__DELETE(message);
+        if (message != nullptr)
+        {
+            v8_inspector__StringBuffer__DELETE(message);
+        }
     }
 
     void v8_inspector__V8Inspector__Channel__BASE__flushProtocolNotifications(
