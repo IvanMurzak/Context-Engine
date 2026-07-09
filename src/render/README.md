@@ -62,13 +62,13 @@ build.
 
 ```sh
 # The library half — builds + tests everywhere (the local dev gate):
-cmake -S src --preset dev && cmake --build --preset dev -C src
-ctest --preset dev -R "^render-" -C src        # render-test_extract / -test_headless / -test_rhi
+cmake -S src --preset dev   # configure from the repo root — note the explicit -S src
+cd src                      # build/test presets resolve CMakePresets.json from the working dir
+cmake --build --preset dev && ctest --preset dev -R "^render-"   # render-test_extract / -test_headless / -test_rhi
 
 # The native backend + offscreen proof (needs a wgpu-native prebuilt for this platform):
 cmake -S src --preset dev -DCONTEXT_BUILD_RENDER_WGPU=ON
-cmake --build --preset dev --target context_render_wgpu_offscreen -C src
-ctest --preset dev -R "^render-wgpu-" -C src   # render-wgpu-probe (+ -offscreen where an adapter exists)
+cd src && cmake --build --preset dev --target context_render_wgpu_offscreen && ctest --preset dev -R "^render-wgpu-"   # render-wgpu-probe (+ -offscreen where an adapter exists)
 ```
 
 CI: the `render` job (`.github/workflows/ci.yml`) builds the native backend on ubuntu/macos/windows
