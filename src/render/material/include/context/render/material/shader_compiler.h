@@ -1,9 +1,9 @@
 // The shader-compiler seam (R-REND-005) + a deterministic, GPU-free fake/reference backend. Every
-// consumer — including the R-FILE-010 shader-compile cache (shader_cache.h) — depends ONLY on the
-// IShaderCompiler interface, so the real glslang/SPIRV-Cross backend (a later sub-task) drops in behind
-// it without touching callers. This slice is BACKEND-FREE: the fake backend maps (IR + variant) -> a
-// deterministic STUB artifact (never real SPIR-V), which is enough to exercise the whole
-// author -> enumerate -> compile -> cache pipeline with no native toolchain.
+// consumer — including the R-FILE-010 shader-compile node (ShaderCompileNode in src/editor/derivation/,
+// issue #126) — depends ONLY on the IShaderCompiler interface, so the real glslang/SPIRV-Cross backend
+// (a later sub-task) drops in behind it without touching callers. This slice is BACKEND-FREE: the fake
+// backend maps (IR + variant) -> a deterministic STUB artifact (never real SPIR-V), which is enough to
+// exercise the whole author -> enumerate -> compile -> cache pipeline with no native toolchain.
 
 #pragma once
 

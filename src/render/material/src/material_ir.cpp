@@ -89,9 +89,9 @@ std::vector<std::string> tokenize(std::string_view s)
 
 // A keyword name/value MUST be free of every byte used as a structural delimiter while deriving the
 // R-FILE-010 content-addressed cache key: ';' and '=' (VariantKey::canonical()'s delimiters) and the
-// 0x1f unit separator ShaderCompileCache::cache_key() splices its components with (shader_cache.cpp).
-// Otherwise two distinct inputs could encode to the same key string and collide in the cache
-// (shader_cache.h), silently returning the wrong artifact.
+// 0x1f unit separator ShaderCompileNode::cache_key() splices its components with (src/editor/derivation/
+// shader_compile_node.cpp). Otherwise two distinct inputs could encode to the same key string and
+// collide in the cache, silently returning the wrong artifact.
 bool has_key_delimiter(std::string_view s)
 {
     return s.find(';') != std::string_view::npos || s.find('=') != std::string_view::npos ||

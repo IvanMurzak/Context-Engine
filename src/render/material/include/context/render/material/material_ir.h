@@ -3,7 +3,8 @@
 // shader toolchain is pulled here, so this builds and tests under every toolchain including the local
 // Ninja+Strawberry-GCC Windows dev gate. The real glslang/SPIRV-Cross backend lands in a later
 // sub-task behind the IShaderCompiler seam (shader_compiler.h); shader compilation + variant
-// generation are derivation-graph nodes cached per R-FILE-010 (shader_cache.h).
+// generation are derivation-graph nodes cached per R-FILE-010 (the re-homed ShaderCompileNode in
+// src/editor/derivation/, issue #126).
 
 #pragma once
 
@@ -70,7 +71,7 @@ struct VariantKey
     std::vector<std::pair<std::string, std::string>> defines;
 
     // Canonical "KW=VAL;KW=VAL;..." rendering (already sorted by keyword name); "" for the empty
-    // (no-keyword) variant. This string is a cache-key component (shader_cache.h).
+    // (no-keyword) variant. This string is a cache-key component (ShaderCompileNode, R-FILE-010).
     [[nodiscard]] std::string canonical() const;
 
     bool operator==(const VariantKey&) const = default;
@@ -98,7 +99,7 @@ struct VariantKey
 [[nodiscard]] std::string content_hash_hex(std::string_view bytes);
 
 // Content hash of the canonical IR serialization (content_hash_hex(serialize_shader(ir))). The
-// R-FILE-010 shader-compile cache keys on this (shader_cache.h) — see § "cache key" there.
+// R-FILE-010 shader-compile node keys on this (ShaderCompileNode::cache_key, src/editor/derivation/).
 [[nodiscard]] std::string ir_content_hash(const ShaderIr& ir);
 
 } // namespace context::render::material

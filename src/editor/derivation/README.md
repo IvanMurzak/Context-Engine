@@ -33,6 +33,20 @@ canonical parse node's real body, and `context_warnings`). Namespace:
   `wait_for_generation` is the **foreign-generation** barrier (`--after-generation`); an unsatisfiable
   barrier **times out explicitly** rather than hanging.
 
+- **Shader-compile node (R-FILE-005 / R-FILE-010 / R-FILE-013, issue #126)** —
+  `ShaderCompileNode` (`shader_compile_node.h`) makes shader compilation a first-class derived
+  artifact rather than a standalone side cache. It wraps the backend-free `IShaderCompiler` seam
+  (`src/render/material/`): inputs `(authoring IR, variant key, compiler id)` → a `CompiledArtifact`,
+  cached under the **content-addressed** R-FILE-010 key (`ir_content_hash | variant | compiler id`).
+  The node OWNS the content-addressed store re-homed from the T3a `ShaderCompileCache`, and adds the
+  two derivation-graph behaviours a side cache lacked: **invalidation** (`invalidate_ir()` drops every
+  stale variant of a re-authored shader, so the next request recompiles under the new content) and
+  **backpressure** (a coalesced `request()` queue drained by `run_pass()` under a per-pass compile
+  budget, load-shedding non-priority work under overload and publishing the shared `BackpressureSignal`
+  — the same bounded-lag vocabulary the file→World graph uses). The synchronous `get_or_compile()`
+  preserves the exact T3a cache-hit semantics for a query that needs the artifact immediately. Backend-
+  agnostic: the fake/reference backend is retained; the real toolchain drops in behind the seam later.
+
 ## Known M1 simplifications (deliberate, documented)
 
 - ~~The canonical parse is a whitespace-normalizing placeholder~~ **RESOLVED (M2 wave 1, #42)**: the
@@ -74,4 +88,8 @@ encoding heals), the end-to-end change→World+generation flow
 read-your-writes barrier (own-write hash, foreign generation, explicit timeout, load-shed
 robustness), and the compose node (`test_compose_node`: ingest→flatten, template-edit fan-out to
 dependents, memoized no-op edits leaving composed output untouched, removal → missing-scene
-diagnostics on dependents, last-good retention under a failing ingest, closure-aware stability).
+diagnostics on dependents, last-good retention under a failing ingest, closure-aware stability), and
+the shader-compile node (`test_shader_compile_node`: the re-homed T3a cache-hit / distinct-variant /
+full-variant-space / cache-key-enumerates-inputs semantics now driven through the node, plus the added
+request-queue coalescing + overload load-shed with a bounded per-pass fill and the R-FILE-005
+invalidate-drops-stale-variants + invalidate-drops-pending-requests paths).
