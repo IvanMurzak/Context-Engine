@@ -75,6 +75,34 @@ target_link_libraries(context_render_test_web_parity
 target_include_directories(context_render_test_web_parity PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME render-web-parity COMMAND context_render_test_web_parity)
 
+# --- M4 T7: golden-scene corpus + min-spec bench local coverage (issue #141; R-QA-013) -----------
+# Self-contained GCC runtime on both (setup.md § static-link note): test_golden_cpu does stream
+# file IO (the PPM round-trip) and golden_lit.h pulls std::string/chrono — a stale libstdc++-6.dll
+# on PATH would otherwise crash the exe at launch on the MinGW host though the build was clean.
+set(_context_render_golden_static_runtime
+    $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
+
+# m4-exit-headless-no-render — the M4 EXIT gate's headless criterion (R-HEAD-002/004): run by the
+# CI build job's blocking "M4 exit gate" named step on all three legs (wgpu toggle OFF — no GPU
+# backend compiled), and by the local dev gate. The other two exit criteria are CI-job gates on the
+# real backends (the goldens/ SSIM corpus + the min-spec bench in the render / render-web jobs).
+add_executable(context_render_test_m4_exit tests/test_m4_exit.cpp)
+target_link_libraries(context_render_test_m4_exit
+    PRIVATE context_render context_render_sprite context_warnings)
+target_include_directories(context_render_test_m4_exit PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+target_link_options(context_render_test_m4_exit PRIVATE ${_context_render_golden_static_runtime})
+add_test(NAME m4-exit-headless-no-render COMMAND context_render_test_m4_exit)
+
+# render-golden-cpu — drives golden.h + golden_lit.h (corpus render, PPM writer, bench loop + its
+# JSON contract) end-to-end on the fake backend, so the whole T7 surface compiles AND runs under
+# the local GPU-less dev gate (the real rasterization signal is the CI render job + goldens/).
+add_executable(context_render_test_golden_cpu tests/test_golden_cpu.cpp)
+target_link_libraries(context_render_test_golden_cpu
+    PRIVATE context_render context_render_sprite context_render_lit context_warnings)
+target_include_directories(context_render_test_golden_cpu PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+target_link_options(context_render_test_golden_cpu PRIVATE ${_context_render_golden_static_runtime})
+add_test(NAME render-golden-cpu COMMAND context_render_test_golden_cpu)
+
 # ---------------------------------------------------------------------------------------------
 # context_render_wgpu — the T1 native backend + offscreen pixel-readback proof (CI-only dep path).
 # Opt-in: default OFF so the local GCC dev gate and the default 3-OS build matrix never fetch the

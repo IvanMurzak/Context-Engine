@@ -95,13 +95,21 @@ inline SpriteScene reference_sprite_scene()
     return scene;
 }
 
-// Render the reference sprite scene offscreen through `device` and assert the readback. `device` must
-// be a live GPU device that actually rasterizes (the wgpu backend on CI); adapter presence / headless
-// SKIP is the caller's concern. Returns true on a passing readback.
-inline bool render_offscreen_sprite(IDevice& device)
+// The reference sprite scene's offscreen target edge (square RGBA8), shared by the proof
+// assertions, the golden-scene corpus dump (golden.h), and the committed baselines under goldens/.
+[[nodiscard]] constexpr std::uint32_t sprite_target_size()
 {
-    constexpr std::uint32_t kW = 256;
-    constexpr std::uint32_t kH = 256;
+    return 256;
+}
+
+// Render the reference sprite scene offscreen through `device` and return the raw RGBA8 readback in
+// `out` (row-major, rows top-first, sprite_target_size()^2 * 4 bytes). The one render path the
+// proof assertions AND the golden-scene corpus dump share, so the committed golden IS the proof's
+// frame by construction. Returns false only when the readback map fails.
+inline bool render_sprite_scene_pixels(IDevice& device, std::vector<std::uint8_t>& out)
+{
+    constexpr std::uint32_t kW = sprite_target_size();
+    constexpr std::uint32_t kH = sprite_target_size();
     constexpr std::uint32_t kBpp = 4;
     constexpr std::uint32_t kBytesPerRow = kW * kBpp; // 1024, already a 256-multiple
 
@@ -176,6 +184,25 @@ inline bool render_offscreen_sprite(IDevice& device)
         std::fprintf(stderr, "[render-sprite] FAIL: buffer map failed\n");
         return false;
     }
+    out.assign(pixels, pixels + static_cast<std::size_t>(kBytesPerRow) * kH);
+    readback->unmap();
+    return true;
+}
+
+// Render the reference sprite scene offscreen through `device` and assert the readback. `device` must
+// be a live GPU device that actually rasterizes (the wgpu backend on CI); adapter presence / headless
+// SKIP is the caller's concern. Returns true on a passing readback.
+inline bool render_offscreen_sprite(IDevice& device)
+{
+    constexpr std::uint32_t kBpp = 4;
+    constexpr std::uint32_t kBytesPerRow = sprite_target_size() * kBpp;
+
+    std::vector<std::uint8_t> image;
+    if (!render_sprite_scene_pixels(device, image))
+    {
+        return false;
+    }
+    const std::uint8_t* pixels = image.data();
 
     auto at = [&](std::uint32_t col, std::uint32_t row)
     { return pixels + (static_cast<std::size_t>(row) * kBytesPerRow) + (col * kBpp); };
@@ -195,8 +222,6 @@ inline bool render_offscreen_sprite(IDevice& device)
                 at(8, 8)[0], at(8, 8)[1], at(8, 8)[2], at(8, 8)[3], red_ok ? "ok" : "MISMATCH",
                 green_ok ? "ok" : "MISMATCH", ov[0], ov[1], ov[2], ov[3],
                 overlap_ok ? "ok/B-on-top" : "MISMATCH");
-
-    readback->unmap();
 
     const bool ok = bg_ok && red_ok && green_ok && overlap_ok;
     if (ok)

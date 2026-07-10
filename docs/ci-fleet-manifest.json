@@ -51,7 +51,23 @@
       "gpu": true,
       "isolation": "shared",
       "provisioned": false,
-      "notes": "M4 visual-equivalence gate needs a real GPU. Advisory until provisioned."
+      "notes": "REAL-GPU leg of the M4 visual-equivalence gate. Advisory until provisioned; the per-PR corpus gates run TODAY on software rasterizers (lavapipe + SwiftShader — the golden-scene-* gates)."
+    },
+    "minspec-desktop-proxy": {
+      "os": "linux-x64 (proxy for win/linux/macos desktop)",
+      "hardware": "R-QA-007 DESKTOP reference min-spec device: 2020 integrated-GPU ultrabook class — Intel Iris Xe (i5-1135G7-class), 16 GB RAM",
+      "gpu": true,
+      "isolation": "perf-isolated",
+      "provisioned": false,
+      "notes": "The named R-QA-007 desktop floor proxy (committed floor: minspec_floors.platforms.desktop). NOT yet provisioned -> the desktop floor gate is advisory; the per-PR methodology proxy runs on gh-ubuntu-shared + lavapipe (numbers advisory there too — a shared runner + software rasterizer is not this device)."
+    },
+    "minspec-web-proxy": {
+      "os": "linux-x64 + Chromium stable",
+      "hardware": "R-QA-007 WEB reference min-spec device: the desktop min-spec class running latest stable Chromium (the v1 blocking browser)",
+      "gpu": true,
+      "isolation": "perf-isolated",
+      "provisioned": false,
+      "notes": "The named R-QA-007 web floor proxy (committed floor: minspec_floors.platforms.web). Advisory until provisioned; the per-PR render-web golden run (headless Chromium + SwiftShader) gates EQUIVALENCE, not perf."
     },
     "n-daemons-host": {
       "os": "linux-x64",
@@ -60,6 +76,38 @@
       "isolation": "perf-isolated",
       "provisioned": false,
       "notes": "R-FILE-011 N-daemons-on-one-box scenario: validates composed watcher/fd/index-memory/cache budgets. Advisory until provisioned."
+    }
+  },
+  "minspec_floors": {
+    "requirement": "R-QA-007",
+    "methodology": "R-QA-009: named proxy device (the runner_class rows above), median of >= 5 runs with dispersion recorded, ±10% variance band, results archived as a time series (CI artifacts).",
+    "bench_subject": "context_render_wgpu_offscreen bench — the representative T1 scene (lit3d: PBR + directional/point lights + shadow depth pass, src/render/lit/) rendered offscreen frame-after-frame; driver/gate: bench/minspec_floor.py.",
+    "review_note": "Initial floor commitments made at M4 exit (issue #141) within the R-QA-007/009 framework; the design docs name no device/rate, so these rows ARE the committed table — revise by reviewed PR, and ratify when provisioning each runner class.",
+    "platforms": {
+      "desktop": {
+        "reference_device": "2020 integrated-GPU ultrabook class — Intel Iris Xe (i5-1135G7-class), 16 GB RAM",
+        "target_frame_rate_hz": 60,
+        "resolution": "1920x1080",
+        "runner_class": "minspec-desktop-proxy",
+        "ci_proxy": "per-PR methodology smoke on gh-ubuntu-shared + lavapipe (render job): measure step BLOCKING (the subject must run green, results archived), floor gate ADVISORY until the runner class is provisioned."
+      },
+      "linux-server": {
+        "reference_device": "4-vCPU x86-64-v2 cloud/bare-metal Linux server, no GPU (the R-QA-009 perf-box class)",
+        "target_tick_rate_hz": 60,
+        "runner_class": "perf-linux-bare-metal",
+        "ci_proxy": "headless — no render floor (R-HEAD-002; the m4-exit-headless-no-render gate proves the render-absent path per PR). The 60 Hz fixed-timestep tick floor activates as a bench when the perf box is provisioned."
+      },
+      "web": {
+        "reference_device": "the desktop min-spec class running latest stable Chromium (the v1 blocking browser)",
+        "target_frame_rate_hz": 60,
+        "resolution": "1920x1080",
+        "runner_class": "minspec-web-proxy",
+        "ci_proxy": "per-PR render-web golden run (headless Chromium + SwiftShader) gates T1 EQUIVALENCE, not perf; the web floor bench activates when the runner class is provisioned."
+      }
+    },
+    "not_applicable": {
+      "android": "Trailing SHOULD — the Android floor activates when Android lands and never blocks a wedge milestone before then (R-QA-007 platform scope; R-BUILD-001).",
+      "ios": "v2 — the iOS reference-device floor ships with iOS, v2's first deliverable (R-QA-007 platform scope)."
     }
   },
   "gates": [
@@ -321,7 +369,87 @@
       "tier": "per-PR",
       "red_x_policy": "blocking",
       "ci_job_id": "render-web",
-      "description": "M4 render foundation, WEB leg (src/render/web/, issue #137 T6): the T1 RHI backend on the BROWSER's WebGPU via Emscripten + the emdawnwebgpu port (webgpu.h -> navigator.gpu; the L-56-locked web path, NOT a Dawn cross-compile). The SAME rhi.h implementation as the native render job (context_render_wgpu), compiled to wasm+JS from the standalone src/render/web target, rendering the same triangle (3D pipeline) + sprite (2D) T1 proofs — the M4 'one browser blocking backend' build gate (ROADMAP §1). The in-browser render RUN + the golden-scene SSIM visual-equivalence gate are the T7 follow-up (GH runners have no browser+WebGPU; visual-equivalence/gpu-runner stays advisory until provisioned)."
+      "description": "M4 render foundation, WEB leg (src/render/web/, issue #137 T6): the T1 RHI backend on the BROWSER's WebGPU via Emscripten + the emdawnwebgpu port (webgpu.h -> navigator.gpu; the L-56-locked web path, NOT a Dawn cross-compile). The SAME rhi.h implementation as the native render job (context_render_wgpu), compiled to wasm+JS from the standalone src/render/web target, rendering the same triangle (3D pipeline) + sprite (2D) T1 proofs. Since T7 (issue #141) the job also RUNS the harness in headless Chromium + SwiftShader WebGPU (tools/web_golden_run.py) — the M4 'one browser blocking' run gate; the collected frames feed golden-scene-web-chromium."
+    },
+    {
+      "id": "golden-scene-native-linux",
+      "requirement": "R-REND-002",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "render",
+      "description": "M4 golden-scene visual-equivalence corpus, NATIVE Linux-Vulkan leg (issue #141; ROADMAP §1 M4 exit): the render job dumps every corpus scene (triangle3d 3D pipeline + sprite2d 2D + lit3d representative lit scene) through the wgpu-native backend on lavapipe and gates each against its committed goldens/ baseline with the named mean block-SSIM metric + per-scene tolerances (tools/golden_compare.py). Identical-within-T1 = same semantics, not bit-identical. Rebaselines are reviewed changes (goldens/README.md). BLOCKING per the minimal-v1 ruling: Linux-Vulkan + one browser."
+    },
+    {
+      "id": "golden-scene-web-chromium",
+      "requirement": "R-REND-002",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "web",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "render-web",
+      "description": "M4 golden-scene visual-equivalence corpus, BROWSER leg (issue #141): the render-web job runs the built wasm harness in headless CHROMIUM (the v1 blocking browser — the only browser shipping WebGPU on headless Linux; the design record's reference browser since the M0 Tint/Chrome spike) over SwiftShader WebGPU, collects the kernel-free corpus frames (triangle3d + sprite2d) it POSTs back (tools/web_golden_run.py), and gates each against the SAME committed goldens/ baselines the native leg uses (tools/golden_compare.py). This closes the M4 exit's 'render 3D+2D desktop+web, identical within T1' criterion. BLOCKING per the minimal-v1 ruling; other browsers join as advisory rows when their runner classes are provisioned."
+    },
+    {
+      "id": "m4-exit-headless-no-render",
+      "requirement": "R-HEAD-002",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M4 exit criterion (issue #141): headless still runs with the render module ABSENT — under CONTEXT_BUILD_RENDER_WGPU=OFF (no GPU backend compiled), probing creates no device, no-adapter attach yields no Renderer, the engine steps 100 ticks through the extract/double-buffer loop renderer-less, and offscreen rendering is the OPT-IN, detachable path (R-HEAD-004): attach renders the corpus scene, detach returns to headless (ctest m4-exit-headless-no-render; runs on all three build-matrix legs via the 'M4 exit gate' step)."
+    },
+    {
+      "id": "minspec-floor-proxy-measure",
+      "requirement": "R-QA-007",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "render",
+      "description": "R-QA-007 min-spec floor bench, per-PR METHODOLOGY proxy (issue #141): bench/minspec_floor.py measure runs the representative lit3d scene offscreen at the committed floor resolution on lavapipe (median-of-5, dispersion recorded, results archived as artifacts — the R-QA-009 time series). The MEASURE step is blocking: the bench subject must run green end-to-end. The floor NUMBERS are enforced by the sibling advisory gate — a shared runner + software rasterizer is not the named proxy device."
+    },
+    {
+      "id": "minspec-floor-proxy-gate",
+      "requirement": "R-QA-007",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "advisory",
+      "ci_job_id": "render",
+      "description": "R-QA-007 floor ENFORCEMENT on the per-PR proxy (bench/minspec_floor.py gate, ±10% band vs minspec_floors.platforms.desktop): continue-on-error until minspec-desktop-proxy is provisioned — reported and tracked, never silently green, never blocking on a number a shared software-rasterizer runner cannot honestly measure (R-QA-012 advisory-until-provisioned)."
+    },
+    {
+      "id": "minspec-floor-desktop",
+      "requirement": "R-QA-007",
+      "runner_class": "minspec-desktop-proxy",
+      "build_flavor": "release",
+      "tier": "nightly",
+      "red_x_policy": "advisory",
+      "ci_job_id": null,
+      "description": "The committed DESKTOP min-spec floor (minspec_floors.platforms.desktop: Iris-Xe-class @ 60 fps, 1920x1080, lit3d subject, R-QA-009 methodology). Becomes a real blocking nightly floor when its named runner class is provisioned; until then the per-PR proxy pair above keeps the harness + numbers visible."
+    },
+    {
+      "id": "minspec-floor-linux-server",
+      "requirement": "R-QA-007",
+      "runner_class": "perf-linux-bare-metal",
+      "build_flavor": "dev",
+      "tier": "nightly",
+      "red_x_policy": "advisory",
+      "ci_job_id": null,
+      "description": "The committed LINUX-SERVER min-spec floor (minspec_floors.platforms.linux-server: 4-vCPU x86-64-v2 class @ 60 Hz headless fixed-timestep tick — no render floor, R-HEAD-002). The tick bench activates with the perf box; the render-absent path itself is gated per-PR by m4-exit-headless-no-render."
+    },
+    {
+      "id": "minspec-floor-web",
+      "requirement": "R-QA-007",
+      "runner_class": "minspec-web-proxy",
+      "build_flavor": "web",
+      "tier": "nightly",
+      "red_x_policy": "advisory",
+      "ci_job_id": null,
+      "description": "The committed WEB min-spec floor (minspec_floors.platforms.web: the desktop min-spec class in latest stable Chromium @ 60 fps, 1920x1080). Activates as a bench when its runner class is provisioned; per-PR the render-web golden run gates T1 equivalence, not perf."
     },
     {
       "id": "shader-crosscompile",
@@ -421,7 +549,7 @@
       "tier": "nightly",
       "red_x_policy": "advisory",
       "ci_job_id": null,
-      "description": "M4 visual-equivalence gate; needs a GPU runner. Advisory until provisioned."
+      "description": "The REAL-GPU leg of the M4 golden-scene visual-equivalence corpus (goldens/ + tools/golden_compare.py): reruns the same corpus on real-driver hardware when the gpu-runner class is provisioned (advisory until then). The corpus itself is ALREADY per-PR blocking on software rasterizers — golden-scene-native-linux (lavapipe) + golden-scene-web-chromium (SwiftShader)."
     },
     {
       "id": "n-daemons-budget",

@@ -54,7 +54,15 @@ dependency path (`src/runtime/js/`) — the local Strawberry-GCC dev gate cannot
 - **`wgpu/offscreen_main.cpp`** — the `context_render_wgpu_offscreen` executable: `probe` (R-HEAD-002,
   no device) / `render` (offscreen readback, exit 0 pass / 77 skip / 1 fail) / `sprite` (the
   R-2D-001 sprite proof) / `lit` (the R-REND-004/006 PBR + shadow + lightmap-hook proof —
-  see `lit/README.md`).
+  see `lit/README.md`) / `golden <scene> <out.ppm>` (dump a golden-corpus frame for the SSIM gate —
+  `goldens/README.md`) / `bench [frames] [warmup] [WxH]` (the R-QA-007 min-spec floor bench subject,
+  driven by `bench/minspec_floor.py`). M4 T7, issue #141.
+- **`golden.h`** (+ `lit/golden_lit.h`) — the **M4 golden-scene corpus** renderer: each corpus scene
+  (`triangle3d`, `sprite2d`, `lit3d`) renders through the SAME factored proof path
+  (`render_offscreen_triangle_pixels` / `render_sprite_scene_pixels` / `LitOffscreen`), so the
+  committed baselines under `goldens/` are the proofs' frames by construction. `golden.h` is
+  kernel-free (the web harness renders the same pair); `golden_lit.h` adds the kernel-backed lit
+  scene + the bench frame loop.
 
 ### `context_render_web` — the T1 browser WebGPU backend (emscripten/emdawnwebgpu; CI-gated)
 
@@ -84,11 +92,13 @@ enumerate-adapters extra), and `backend_name()` reports `browser-webgpu`.
   map (`rhi.h` `IBindGroupLayout` note).
 
 Built by the `render-web` CI job (`.github/workflows/ci.yml`; emsdk `latest`, emits
-`context-render-web.{html,js,wasm}`) — the M4 "one browser blocking backend" build gate. The
-**in-browser render RUN** and the automated **golden-scene SSIM** visual-equivalence gate are the M4
-**T7** follow-up (GH runners have no browser+WebGPU). The lit/PBR (3D lighting/shadow) web proof —
-which pulls the kernel + extract — also lands with T7. Locally guarded by the native `render-web-parity`
-ctest (the web harness's proof set asserted on the fake backend / CPU under the dev gate).
+`context-render-web.{html,js,wasm}`), then **RUN in headless Chromium + SwiftShader WebGPU** by the
+same job (M4 T7, issue #141): `tools/web_golden_run.py` serves the page, collects the golden-corpus
+frames the harness POSTs back, and `tools/golden_compare.py` gates them against `goldens/` — the M4
+"one browser blocking" run gate. The lit/PBR (3D lighting/shadow) web proof — which pulls the kernel
+\+ extract into the emscripten build — is a deferred follow-up (`web/README.md`). Locally guarded by
+the native `render-web-parity` ctest (the web harness's proof set asserted on the fake backend / CPU
+under the dev gate).
 
 ## wgpu-native prebuilt (R-SEC-009)
 
@@ -116,5 +126,8 @@ cd src && cmake --build --preset dev --target context_render_wgpu_offscreen && c
 CI: the `render` job (`.github/workflows/ci.yml`) builds the native backend on ubuntu/macos/windows
 and runs `probe` everywhere + the offscreen readback where a software adapter exists (lavapipe on
 ubuntu; not registered on Windows — the same Session-0 teardown-crash carve-out the spike documents).
-Registered in `docs/ci-fleet-manifest.json` as the `render-offscreen` gate. The real-GPU
-visual-equivalence gate stays advisory until a GPU runner class is provisioned.
+Registered in `docs/ci-fleet-manifest.json` as the `render-offscreen` gate. Since M4 T7 (issue
+#141) the ubuntu leg also runs the **golden-scene SSIM corpus** (dump + gate vs `goldens/`,
+`golden-scene-native-linux`) and the **R-QA-007 min-spec floor bench** (`bench/minspec_floor.py`
+measure blocking / floor gate advisory — see the manifest's `minspec_floors` table). The real-GPU
+visual-equivalence leg stays advisory until a GPU runner class is provisioned.

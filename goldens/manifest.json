@@ -1,0 +1,53 @@
+{
+  "manifest_version": 1,
+  "requirement": "R-REND-002",
+  "description": "M4 golden-scene visual-equivalence corpus (ROADMAP §1 M4 exit; issue #141): each corpus scene is rendered offscreen per backend and gated against the committed baseline with the named SSIM-class metric below. 'Identical desktop+web' = the same T1 semantics within per-scene tolerances, NOT bit-identical frames (float->unorm rounding legally differs per backend).",
+  "metric": {
+    "name": "mean block-SSIM",
+    "window": 8,
+    "k1": 0.01,
+    "k2": 0.03,
+    "luma": "rec709",
+    "tool": "tools/golden_compare.py",
+    "note": "SSIM computed per 8x8 non-overlapping Rec.709-luma window, averaged; 1.0 = identical."
+  },
+  "rebaseline_policy": "Baselines are committed, review-gated artifacts (ROADMAP §1 M4 exit: rebaselines are REVIEWED changes, never automatic). To rebaseline, replace the goldens/*.ppm in a PR that names the intentional visual change; never regenerate silently. Reference renders: `context_render_wgpu_offscreen golden <scene> <out.ppm>` (native) / tools/web_golden_run.py (browser).",
+  "blocking_policy": "Minimal v1 (M4 exit ruling): Linux-Vulkan (lavapipe, CI render job) + one browser (headless Chromium + SwiftShader, CI render-web job) are BLOCKING; other backends are advisory until their R-QA-012 runner rows are provisioned.",
+  "scenes": {
+    "triangle3d": {
+      "file": "triangle3d.ppm",
+      "min_ssim": 0.995,
+      "size": "256x256",
+      "renderer": "offscreen_scene.h::render_offscreen_triangle_pixels (the 3D clip-space render pipeline)",
+      "backends": {
+        "native-vulkan-lavapipe": "blocking",
+        "browser-chromium-swiftshader": "blocking",
+        "native-metal": "advisory"
+      },
+      "description": "The 3D render-pipeline scene: clear + one clip-space triangle through the T1 RHI. Flat colors — the M0 spike measured byte-identical frames through Naga (native) and Tint (browser), so the tolerance is tight."
+    },
+    "sprite2d": {
+      "file": "sprite2d.ppm",
+      "min_ssim": 0.995,
+      "size": "256x256",
+      "renderer": "sprite_offscreen.h::render_sprite_scene_pixels (R-2D-001 ortho sprite path)",
+      "backends": {
+        "native-vulkan-lavapipe": "blocking",
+        "browser-chromium-swiftshader": "blocking",
+        "native-metal": "advisory"
+      },
+      "description": "The 2D scene: ortho-projected overlapping sprites with sorting-layer overdraw. Flat colors — tight tolerance."
+    },
+    "lit3d": {
+      "file": "lit3d.ppm",
+      "min_ssim": 0.98,
+      "size": "256x256",
+      "renderer": "golden_lit.h::render_golden_lit3d (lit_offscreen.h base config: PBR + directional/point lights + shadow depth pass)",
+      "backends": {
+        "native-vulkan-lavapipe": "blocking",
+        "native-metal": "advisory"
+      },
+      "description": "The representative T1 scene: World -> extract -> shadow pass + PBR main pass. Gradients + shadow edges - tolerance absorbs software-rasterizer depth/float differences. Browser coverage joins when the lit web proof lands (src/render/web/README.md § follow-ups); web T1 equivalence is gated today by triangle3d + sprite2d plus the shared-WGSL construction."
+    }
+  }
+}

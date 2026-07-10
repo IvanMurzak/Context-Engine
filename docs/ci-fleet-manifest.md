@@ -23,8 +23,10 @@ marked **advisory until provisioned** — visibly degraded, never silently green
 | `gh-windows-shared` | windows-latest, GitHub-hosted | shared | no | ✅ |
 | `perf-linux-bare-metal` | Linux-x64, bare-metal perf box | **perf-isolated** | no | ❌ (R-QA-009 v1) |
 | `determinism-matrix` | Linux-x64 · Win-x64 · macOS-ARM64 | shared | no | ❌ (M6) |
-| `gpu-runner` | Linux-x64 + GPU | shared | **yes** | ❌ (M4) |
+| `gpu-runner` | Linux-x64 + GPU | shared | **yes** | ❌ (real-GPU corpus leg) |
 | `n-daemons-host` | Linux-x64 multi-worktree host | perf-isolated | no | ❌ (R-FILE-011) |
+| `minspec-desktop-proxy` | R-QA-007 desktop floor device: Iris-Xe-class ultrabook (i5-1135G7-class, 16 GB) | perf-isolated | **yes** | ❌ (R-QA-007) |
+| `minspec-web-proxy` | the desktop min-spec class + latest stable Chromium | perf-isolated | **yes** | ❌ (R-QA-007) |
 
 A shared GitHub-hosted runner **cannot** host an R-QA-009 performance floor (rule 1 of the
 [perf-gate methodology](perf-gate-methodology.md)); those floors map to `perf-linux-bare-metal`.
@@ -69,6 +71,14 @@ Every gate carries exactly one written red-X policy:
 | `spike-webgpu-web` | R-REND-005 | gh-ubuntu-shared | per-PR | blocking | `spike-webgpu-web` |
 | `render-offscreen` | R-REND-002 | gh-ubuntu-shared | per-PR | blocking | `render` |
 | `render-web` | R-REND-002 | gh-ubuntu-shared | per-PR | blocking | `render-web` |
+| `golden-scene-native-linux` | R-REND-002 | gh-ubuntu-shared | per-PR | blocking | `render` |
+| `golden-scene-web-chromium` | R-REND-002 | gh-ubuntu-shared | per-PR | blocking | `render-web` |
+| `m4-exit-headless-no-render` | R-HEAD-002 | gh-ubuntu-shared | per-PR | blocking | `build` |
+| `minspec-floor-proxy-measure` | R-QA-007 | gh-ubuntu-shared | per-PR | blocking | `render` |
+| `minspec-floor-proxy-gate` | R-QA-007 | gh-ubuntu-shared | per-PR | **advisory** | `render` |
+| `minspec-floor-desktop` | R-QA-007 | minspec-desktop-proxy | nightly | **advisory** ⏳ | — |
+| `minspec-floor-linux-server` | R-QA-007 | perf-linux-bare-metal | nightly | **advisory** ⏳ | — |
+| `minspec-floor-web` | R-QA-007 | minspec-web-proxy | nightly | **advisory** ⏳ | — |
 | `shader-crosscompile` | R-REND-005 | gh-ubuntu-shared | per-PR | blocking | `shader-crosscompile` |
 | `fleet-manifest-validation` | R-QA-012 | gh-ubuntu-shared | per-PR | blocking | `python-tests` |
 | `perf-filesync-attach-100k` | R-FILE-011 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
@@ -91,6 +101,21 @@ M1 Exit criteria themselves (issue #36): the `m1-exit-<n>-*` ctest family under
 under `src/tests/integration/`, run by the dedicated "M2 exit gate (5 criteria + seam audit,
 blocking)" step of the `build` job on all three OS legs (representative leg shown) — the
 milestone-closing mirror of the M1 gate.
+
+**The M4 exit trio (issue #141, ROADMAP §1 M4 Exit):** `golden-scene-native-linux` +
+`golden-scene-web-chromium` are the **golden-scene visual-equivalence corpus** (`goldens/` +
+`tools/golden_compare.py` — mean block-SSIM, per-scene tolerances, rebaselines are REVIEWED
+changes): every corpus scene rendered offscreen per backend — native wgpu on lavapipe (`render`
+job) and the BROWSER's WebGPU in headless Chromium + SwiftShader (`render-web` job,
+`tools/web_golden_run.py`) — per the minimal-v1 ruling (Linux-Vulkan + one browser blocking,
+others advisory; `visual-equivalence` remains the real-GPU nightly leg, advisory until
+`gpu-runner` provisions). `m4-exit-headless-no-render` is the R-HEAD-002/004 headless criterion
+(the "M4 exit gate" step of the `build` job, all three legs). The `minspec-floor-*` rows are the
+**R-QA-007 committed floor table** — reference device + target rate per v1 platform live in the
+manifest's `minspec_floors` section (Android trailing / iOS v2 = explicitly N/A); the per-PR
+proxy pair measures the lit3d subject on lavapipe under the R-QA-009 discipline
+(`bench/minspec_floor.py`, measure blocking / floor gate advisory-until-provisioned), and each
+platform's nightly floor row activates when its named runner class provisions.
 
 **The two-tier R-FILE-011 benchmark (issue #38, ROADMAP §6 tiering):** `bench-attach-10k` is the
 **per-PR blocking 10k proxy** on the REAL attach pipeline (filesync reconcile index + derivation
@@ -125,6 +150,9 @@ enforces:
 4. Every `quarantine-with-issue` gate **names an `issue`**.
 5. Every gate with a non-null `ci_job_id` maps to a **real job** in the live workflow (the
    consumption/sync check — the manifest cannot claim a CI job that does not exist).
+6. The **R-QA-007 `minspec_floors` table** is present and well-formed: every v1 platform row names
+   a non-empty reference device, exactly one positive target rate, and a declared runner class,
+   and the Android/iOS N/A scope notes stay stated.
 
 `tools/tests/test_check_fleet_manifest.py` is the R-QA-013 coverage for the validator itself.
 

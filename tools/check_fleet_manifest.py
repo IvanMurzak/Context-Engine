@@ -14,6 +14,10 @@ Checks:
   5. Every quarantine-with-issue gate NAMES an issue.
   6. (with --ci-workflow, repeatable) every gate with a non-null ci_job_id maps to a REAL job in
      one of the given workflows (per-PR gates live in ci.yml; nightly gates in bench-nightly.yml).
+  7. minspec_floors (R-QA-007 — the committed floor table lives HERE, M4 T7 issue #141): present,
+     with a non-empty platforms table; every platform row names a non-empty reference_device,
+     exactly one positive target (target_frame_rate_hz | target_tick_rate_hz), and a DECLARED
+     runner class; the not_applicable scope notes (android, ios) stay stated.
 
 Exit code 0 = manifest valid; 1 = violation(s); 2 = configuration error.
 """
@@ -93,6 +97,44 @@ def validate(manifest: dict, workflow_text: str | None) -> list[str]:
             if not re.search(rf"(?m)^\s{{0,4}}{re.escape(job)}:\s*$", workflow_text):
                 errors.append(
                     f"gate {gid!r}: ci_job_id {job!r} has no matching job in the workflow")
+
+    # Rule 7: the R-QA-007 min-spec floor table (committed HERE per R-QA-007/R-QA-012).
+    floors = manifest.get("minspec_floors")
+    if not isinstance(floors, dict):
+        errors.append("missing minspec_floors — the R-QA-007 floor table lives in this manifest")
+    else:
+        platforms = floors.get("platforms")
+        if not isinstance(platforms, dict) or not platforms:
+            errors.append("minspec_floors.platforms must be a non-empty object")
+            platforms = {}
+        for name, row in platforms.items():
+            if not isinstance(row, dict):
+                errors.append(f"minspec_floors platform {name!r}: must be an object")
+                continue
+            device = row.get("reference_device")
+            if not isinstance(device, str) or not device.strip():
+                errors.append(
+                    f"minspec_floors platform {name!r}: missing non-empty 'reference_device'")
+            targets = [k for k in ("target_frame_rate_hz", "target_tick_rate_hz") if k in row]
+            if len(targets) != 1:
+                errors.append(
+                    f"minspec_floors platform {name!r}: exactly ONE of target_frame_rate_hz / "
+                    f"target_tick_rate_hz required (found {len(targets)})")
+            else:
+                value = row[targets[0]]
+                if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+                    errors.append(
+                        f"minspec_floors platform {name!r}: {targets[0]} must be a positive "
+                        f"number (was {value!r})")
+            rc_name = row.get("runner_class")
+            if rc_name not in runner_classes:
+                errors.append(
+                    f"minspec_floors platform {name!r}: unknown runner_class {rc_name!r}")
+        not_applicable = floors.get("not_applicable")
+        if not isinstance(not_applicable, dict) or not {"android", "ios"} <= set(not_applicable):
+            errors.append(
+                "minspec_floors.not_applicable must state the android + ios scope notes "
+                "(R-QA-007 platform scope honesty)")
 
     return errors
 

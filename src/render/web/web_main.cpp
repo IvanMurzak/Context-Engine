@@ -9,25 +9,75 @@
 // frames across backends are NOT required; float->unorm rounding legally differs per backend, see
 // spikes/webgpu/FINDINGS.md).
 //
-// Built to wasm+JS+HTML by the `render-web` CI leg (the emscripten compile is the R-QA-013 gate for
-// the web backend, mirroring the spike-webgpu-web precedent). The in-browser RUN — served + opened
-// in a WebGPU browser — is a local/manual step today; the automated headless-browser golden-scene
-// SSIM gate is the M4 T7 follow-up (ROADMAP §1). Emscripten -sEXIT_RUNTIME=1 makes main's return the
-// process exit code: 0 = PASS, 77 = SKIP (no browser WebGPU / no adapter), 1 = FAIL.
+// Built to wasm+JS+HTML by the `render-web` CI leg and RUN in headless Chromium by the same job's
+// golden step (M4 T7, issue #141): tools/web_golden_run.py serves this page, and the harness POSTs
+// each golden-corpus frame back to it for the SSIM visual-equivalence gate vs goldens/ — the M4
+// "one browser blocking" run gate. Opened manually in a WebGPU browser the POSTs simply find no
+// collector and are skipped (the proofs still print PASS/FAIL to the page + console). Emscripten
+// -sEXIT_RUNTIME=1 makes main's return the process exit code: 0 = PASS, 77 = SKIP (no browser
+// WebGPU / no adapter), 1 = FAIL.
 //
-// Kernel-free by design: the triangle + sprite proofs drive only the RHI abstraction + the pure-CPU
-// 2D math (ortho/atlas/batch), so the web build needs no kernel/extract/filesystem surface under
-// emscripten. The lit/PBR (3D lighting+shadow) web proof, which pulls the kernel + extract, lands
-// with the T7 golden gate — see src/render/web/README.md.
+// Kernel-free by design: the triangle + sprite proofs and the golden.h corpus pair drive only the
+// RHI abstraction + the pure-CPU 2D math (ortho/atlas/batch), so the web build needs no
+// kernel/extract/filesystem surface under emscripten. The lit/PBR (3D lighting+shadow) web proof,
+// which pulls the kernel + extract, is a deferred follow-up — see src/render/web/README.md.
 
+#include "context/render/golden.h"
 #include "context/render/offscreen_scene.h"
 #include "context/render/sprite/sprite_offscreen.h"
 #include "context/render/wgpu/wgpu_rhi.h"
 
 #include <cstdio>
 #include <memory>
+#include <string>
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 using namespace context::render;
+
+namespace
+{
+
+// POST `size` bytes to `path` on the page's own origin — the channel back to the golden collector
+// (tools/web_golden_run.py). Returns true when a collector accepted the body; false when none is
+// listening (the manual in-browser run) or the request errored. Console-log-free by design: pixel
+// payloads travel as request bodies, never as console lines Chrome could truncate.
+bool post_bytes(const char* path, const void* data, std::size_t size)
+{
+#ifdef __EMSCRIPTEN__
+    // The fetch is async; ASYNCIFY's emscripten_sleep yields to the event loop until it settles.
+    // The body is COPIED out of the wasm heap before fetch takes it (typed-array views over the
+    // heap must not outlive a yield).
+    EM_ASM(
+        {
+            globalThis.__ctxGoldenPost = 0;
+            const path = UTF8ToString($0);
+            const body = new Uint8Array(HEAPU8.subarray($1, $1 + $2));
+            fetch(path, {method : 'POST', body : body})
+                .then(function(r) { globalThis.__ctxGoldenPost = r.ok ? 1 : 2; })
+                .catch(function() { globalThis.__ctxGoldenPost = 2; });
+        },
+        path, data, size);
+    for (int waited_ms = 0; waited_ms < 20000; waited_ms += 50)
+    {
+        if (emscripten_run_script_int("globalThis.__ctxGoldenPost|0") != 0)
+        {
+            break;
+        }
+        emscripten_sleep(50);
+    }
+    return emscripten_run_script_int("globalThis.__ctxGoldenPost|0") == 1;
+#else
+    (void)path;
+    (void)data;
+    (void)size;
+    return false;
+#endif
+}
+
+} // namespace
 
 int main()
 {
@@ -60,11 +110,48 @@ int main()
     const bool triangle_ok = render_offscreen_triangle(*device) == OffscreenResult::Pass;
     const bool sprite_ok = sprite::render_offscreen_sprite(*device);
 
-    if (triangle_ok && sprite_ok)
+    // M4 T7 golden-scene corpus (issue #141): render each kernel-free corpus scene through THIS
+    // browser backend and POST the raw RGBA frame to the collector when one is serving. A missing
+    // collector (manual run) is fine; a scene that fails to RENDER is a real failure.
+    bool goldens_ok = true;
+    for (const std::string& scene : golden::kernel_free_scene_ids())
+    {
+        golden::GoldenImage image;
+        if (!golden::render_golden_scene(*device, scene, image))
+        {
+            std::fprintf(stderr, "[render-web] FAIL: golden scene '%s' did not render\n",
+                         scene.c_str());
+            goldens_ok = false;
+            continue;
+        }
+        const std::string path = "/golden/" + scene + "?w=" + std::to_string(image.width) +
+                                 "&h=" + std::to_string(image.height);
+        if (post_bytes(path.c_str(), image.rgba.data(), image.rgba.size()))
+        {
+            std::printf("[render-web] golden scene=%s (%ux%u) posted to collector\n",
+                        scene.c_str(), image.width, image.height);
+        }
+        else
+        {
+            std::printf("[render-web] golden scene=%s rendered (no collector — manual run)\n",
+                        scene.c_str());
+        }
+    }
+
+    int exit_code = 1;
+    if (triangle_ok && sprite_ok && goldens_ok)
     {
         std::printf("[render-web] PASS (triangle + sprite; browser WebGPU T1 parity with native)\n");
-        return 0;
+        exit_code = 0;
     }
-    std::fprintf(stderr, "[render-web] FAIL: triangle=%d sprite=%d\n", triangle_ok, sprite_ok);
-    return 1;
+    else
+    {
+        std::fprintf(stderr, "[render-web] FAIL: triangle=%d sprite=%d goldens=%d\n", triangle_ok,
+                     sprite_ok, goldens_ok);
+    }
+
+    // Tell the collector the harness is complete (ignored when none is listening).
+    const std::string done = "/done?exit=" + std::to_string(exit_code);
+    post_bytes(done.c_str(), "", 0);
+    return exit_code;
 }
