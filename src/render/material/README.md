@@ -7,9 +7,18 @@ lands in a later sub-task **behind the `IShaderCompiler` seam**, without touchin
 
 ## Pieces
 
-- **Authoring IR** (`material_ir.h`) — `ShaderIr` (name + keyword axes + stages), the in-memory form an
-  authored shader/material compiles from, with a canonical text (de)serializer. `serialize_shader()`
-  is canonicalizing (keywords emitted sorted by name), so it is a stable content-hash subject.
+- **Authoring IR** (`material_ir.h`) — `ShaderIr` (name + keyword axes + the material contract +
+  stages), the in-memory form an authored shader/material compiles from, with a canonical text
+  (de)serializer. `serialize_shader()` is canonicalizing (keywords/params/textures emitted sorted
+  by name), so it is a stable content-hash subject.
+- **The material contract** (M4, issue #135) — typed parameters (`param NAME float|vec2|vec3|vec4
+  DEFAULTS…`, defaults kept as validated float-literal TOKENS so the canonical form is locale- and
+  float-formatting-independent) and semantic texture slots (`texture NAME base_color|
+  metallic_roughness|normal|emissive|occlusion|lightmap [uv0..uv3]`) — the metallic-roughness
+  input surface R-REND-004 shades with. The **`lightmap` slot + its UV-channel selection are the
+  R-REND-006 baked-lighting INPUT hooks** (uv1 = the reserved UV2 channel); the baker is
+  COULD/post-v1 and absent. A contract-free document serializes byte-identically to the
+  pre-contract format, so existing content hashes / R-FILE-010 cache keys are unchanged.
 - **Shader-variant enumeration** — `enumerate_variants()` produces the cartesian product of the
   keyword value sets (define/keyword permutations), in a deterministic order, each a canonical
   `VariantKey`.
@@ -28,10 +37,13 @@ layer keeps only the backend-free authoring IR + the compiler seam it depends on
 ## Corpus
 
 `corpus/*.shader` are real authored shaders in the module's small line-oriented format
-(`shader NAME` / `keyword KW VAL…` / `stage KIND ENTRY … endstage`), parsed by `parse_shader()`:
+(`shader NAME` / `keyword KW VAL…` / `param NAME TYPE DEFAULTS…` / `texture NAME SEMANTIC [uvN]` /
+`stage KIND ENTRY … endstage`), parsed by `parse_shader()`:
 
 - `unlit_color.shader` — solid color; `FOG` × `INSTANCED` → 4 variants.
-- `lit_pbr.shader` — PBR-ish; `NORMAL_MAP` × `QUALITY{low,med,high}` × `SHADOWS` → 12 variants.
+- `lit_pbr.shader` — PBR-ish; `NORMAL_MAP` × `QUALITY{low,med,high}` × `SHADOWS` → 12 variants;
+  carries the M4 material contract (metallic-roughness params + texture slots incl. the
+  R-REND-006 `lightmap_tex` hook on uv1).
 - `postprocess_blit.shader` — fullscreen blit; `TONEMAP` → 2 variants.
 
 ## Dependencies
@@ -42,7 +54,9 @@ local gate green with no native shader toolchain.
 
 ## Tests (R-QA-013 — ship with the feature)
 
-`ctest` targets `render-material-{test_material_ir,test_variants,test_compile}`: IR round-trip over the
-real corpus + the malformed-document family, variant enumeration (incl. the no-keyword and multi-value
-edges), and fake-backend compile determinism. The R-FILE-010 cache-hit coverage moved with the cache to
-the re-homed node (`derivation-test_shader_compile_node`).
+`ctest` targets `render-material-{test_material_ir,test_variants,test_compile,test_material_contract}`:
+IR round-trip over the real corpus + the malformed-document family, variant enumeration (incl. the
+no-keyword and multi-value edges), fake-backend compile determinism, and the material contract
+(param/texture parsing + canonical round-trip + its malformed family + the lit_pbr corpus lightmap
+hooks). The R-FILE-010 cache-hit coverage moved with the cache to the re-homed node
+(`derivation-test_shader_compile_node`).

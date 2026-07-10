@@ -8,7 +8,11 @@
 //            77 skip (no adapter) / 1 fail. (default)
 //   sprite — R-2D-001 GPU sprite-draw proof: ortho-projected quads + sorting-layer overdraw ->
 //            texture -> readback -> pixel asserts. Same exit convention as `render`.
+//   lit    — R-REND-004/006 GPU PBR proof: World -> extract -> shadow depth pass + lit main pass ->
+//            readback asserts vs the CPU reference (lighting/shadow/lightmap-hook deltas). Same
+//            exit convention as `render`.
 
+#include "context/render/lit/lit_offscreen.h"
 #include "context/render/offscreen_scene.h"
 #include "context/render/sprite/sprite_offscreen.h"
 #include "context/render/wgpu/wgpu_rhi.h"
@@ -92,7 +96,7 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    if (mode == "render" || mode == "sprite")
+    if (mode == "render" || mode == "sprite" || mode == "lit")
     {
         int exit_code = 0;
         std::unique_ptr<IDevice> device = acquire_device(*rhi, exit_code);
@@ -101,14 +105,24 @@ int main(int argc, char** argv)
             finish(exit_code);
             return exit_code;
         }
-        const bool pass = (mode == "render")
-                              ? (render_offscreen_triangle(*device) == OffscreenResult::Pass)
-                              : context::render::sprite::render_offscreen_sprite(*device);
+        bool pass = false;
+        if (mode == "render")
+        {
+            pass = render_offscreen_triangle(*device) == OffscreenResult::Pass;
+        }
+        else if (mode == "sprite")
+        {
+            pass = context::render::sprite::render_offscreen_sprite(*device);
+        }
+        else
+        {
+            pass = context::render::lit::render_offscreen_lit(*device);
+        }
         const int code = pass ? 0 : 1;
         finish(code);
         return code;
     }
 
-    std::fprintf(stderr, "usage: %s [probe|render|sprite]\n", argv[0]);
+    std::fprintf(stderr, "usage: %s [probe|render|sprite|lit]\n", argv[0]);
     return 2;
 }

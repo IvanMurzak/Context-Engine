@@ -77,6 +77,8 @@ WGPUTextureFormat to_wgpu_format(TextureFormat f)
     {
     case TextureFormat::BGRA8Unorm:
         return WGPUTextureFormat_BGRA8Unorm;
+    case TextureFormat::Depth32Float:
+        return WGPUTextureFormat_Depth32Float;
     case TextureFormat::RGBA8Unorm:
     default:
         return WGPUTextureFormat_RGBA8Unorm;
@@ -91,6 +93,42 @@ WGPULoadOp to_wgpu_load(LoadOp op)
 WGPUStoreOp to_wgpu_store(StoreOp op)
 {
     return op == StoreOp::Discard ? WGPUStoreOp_Discard : WGPUStoreOp_Store;
+}
+
+WGPUCompareFunction to_wgpu_compare(CompareFunction f)
+{
+    switch (f)
+    {
+    case CompareFunction::Never:
+        return WGPUCompareFunction_Never;
+    case CompareFunction::Less:
+        return WGPUCompareFunction_Less;
+    case CompareFunction::LessEqual:
+        return WGPUCompareFunction_LessEqual;
+    case CompareFunction::Greater:
+        return WGPUCompareFunction_Greater;
+    case CompareFunction::GreaterEqual:
+        return WGPUCompareFunction_GreaterEqual;
+    case CompareFunction::Equal:
+        return WGPUCompareFunction_Equal;
+    case CompareFunction::NotEqual:
+        return WGPUCompareFunction_NotEqual;
+    case CompareFunction::Always:
+        return WGPUCompareFunction_Always;
+    case CompareFunction::Undefined:
+    default:
+        return WGPUCompareFunction_Undefined;
+    }
+}
+
+WGPUFilterMode to_wgpu_filter(FilterMode f)
+{
+    return f == FilterMode::Linear ? WGPUFilterMode_Linear : WGPUFilterMode_Nearest;
+}
+
+WGPUAddressMode to_wgpu_address(AddressMode m)
+{
+    return m == AddressMode::Repeat ? WGPUAddressMode_Repeat : WGPUAddressMode_ClampToEdge;
 }
 
 // -------------------------------------------------------------------- async request wrappers
@@ -274,6 +312,57 @@ private:
     std::uint64_t size_;
 };
 
+class WgpuSampler final : public ISampler
+{
+public:
+    explicit WgpuSampler(WGPUSampler sampler) : sampler_(sampler) {}
+    ~WgpuSampler() override
+    {
+        if (sampler_ != nullptr)
+        {
+            wgpuSamplerRelease(sampler_);
+        }
+    }
+    [[nodiscard]] WGPUSampler raw() const { return sampler_; }
+
+private:
+    WGPUSampler sampler_;
+};
+
+class WgpuBindGroupLayout final : public IBindGroupLayout
+{
+public:
+    explicit WgpuBindGroupLayout(WGPUBindGroupLayout layout) : layout_(layout) {}
+    ~WgpuBindGroupLayout() override
+    {
+        if (layout_ != nullptr)
+        {
+            wgpuBindGroupLayoutRelease(layout_);
+        }
+    }
+    [[nodiscard]] WGPUBindGroupLayout raw() const { return layout_; }
+
+private:
+    WGPUBindGroupLayout layout_;
+};
+
+class WgpuBindGroup final : public IBindGroup
+{
+public:
+    explicit WgpuBindGroup(WGPUBindGroup group) : group_(group) {}
+    ~WgpuBindGroup() override
+    {
+        if (group_ != nullptr)
+        {
+            wgpuBindGroupRelease(group_);
+        }
+    }
+    [[nodiscard]] WGPUBindGroup raw() const { return group_; }
+
+private:
+    WGPUBindGroup group_;
+};
+
 class WgpuRenderPipeline final : public IRenderPipeline
 {
 public:
@@ -285,6 +374,15 @@ public:
             wgpuRenderPipelineRelease(pipeline_);
         }
     }
+
+    std::unique_ptr<IBindGroupLayout> bind_group_layout(std::uint32_t group) override
+    {
+        // Reflect the auto-generated layout from the pipeline's shader (rhi.h's only layout source
+        // — the seam that stays correct under Tint's combined-sampler binding renumbering, T3d).
+        return std::make_unique<WgpuBindGroupLayout>(
+            wgpuRenderPipelineGetBindGroupLayout(pipeline_, group));
+    }
+
     [[nodiscard]] WGPURenderPipeline raw() const { return pipeline_; }
 
 private:
@@ -305,6 +403,11 @@ public:
     void set_pipeline(IRenderPipeline& pipeline) override
     {
         wgpuRenderPassEncoderSetPipeline(pass_, static_cast<WgpuRenderPipeline&>(pipeline).raw());
+    }
+    void set_bind_group(std::uint32_t index, IBindGroup& group) override
+    {
+        wgpuRenderPassEncoderSetBindGroup(pass_, index, static_cast<WgpuBindGroup&>(group).raw(), 0,
+                                          nullptr);
     }
     void draw(std::uint32_t vertex_count, std::uint32_t instance_count) override
     {
@@ -369,6 +472,16 @@ public:
         pass.label = sv("context-render-pass");
         pass.colorAttachmentCount = colors.size();
         pass.colorAttachments = colors.data();
+        WGPURenderPassDepthStencilAttachment depth{};
+        if (desc.depth.has_value() && desc.depth->view != nullptr)
+        {
+            depth.view = static_cast<WgpuTextureView*>(desc.depth->view)->raw();
+            depth.depthLoadOp = to_wgpu_load(desc.depth->load);
+            depth.depthStoreOp = to_wgpu_store(desc.depth->store);
+            depth.depthClearValue = desc.depth->clear_depth;
+            // No stencil aspect on Depth32Float: leave the stencil ops Undefined (zero-init).
+            pass.depthStencilAttachment = &depth;
+        }
         return std::make_unique<WgpuRenderPassEncoder>(
             wgpuCommandEncoderBeginRenderPass(encoder_, &pass));
     }
@@ -410,6 +523,24 @@ public:
     {
         WGPUCommandBuffer raw = static_cast<WgpuCommandBuffer&>(commands).raw();
         wgpuQueueSubmit(queue_, 1, &raw);
+    }
+
+    void write_buffer(IBuffer& buffer, std::uint64_t offset, const void* data,
+                      std::size_t size) override
+    {
+        wgpuQueueWriteBuffer(queue_, static_cast<WgpuBuffer&>(buffer).raw(), offset, data, size);
+    }
+
+    void write_texture(ITexture& texture, const void* data, std::size_t size,
+                       const TexelCopyBufferLayout& layout, Extent2D extent) override
+    {
+        WGPUTexelCopyTextureInfo dst{};
+        dst.texture = static_cast<WgpuTexture&>(texture).raw();
+        WGPUTexelCopyBufferLayout src_layout{};
+        src_layout.bytesPerRow = layout.bytes_per_row;
+        src_layout.rowsPerImage = layout.rows_per_image;
+        WGPUExtent3D write_size = {extent.width, extent.height, 1};
+        wgpuQueueWriteTexture(queue_, &dst, data, size, &src_layout, &write_size);
     }
 
 private:
@@ -455,6 +586,14 @@ public:
         {
             td.usage |= WGPUTextureUsage_CopySrc;
         }
+        if (desc.copy_dst)
+        {
+            td.usage |= WGPUTextureUsage_CopyDst;
+        }
+        if (desc.texture_binding)
+        {
+            td.usage |= WGPUTextureUsage_TextureBinding;
+        }
         td.dimension = WGPUTextureDimension_2D;
         td.size = {desc.size.width, desc.size.height, 1};
         td.format = to_wgpu_format(desc.format);
@@ -476,9 +615,68 @@ public:
         {
             bd.usage |= WGPUBufferUsage_MapRead;
         }
+        if (desc.uniform)
+        {
+            bd.usage |= WGPUBufferUsage_Uniform;
+        }
         bd.size = desc.size;
         return std::make_unique<WgpuBuffer>(instance_, wgpuDeviceCreateBuffer(device_, &bd),
                                             desc.size);
+    }
+
+    std::unique_ptr<ISampler> create_sampler(const SamplerDesc& desc) override
+    {
+        WGPUSamplerDescriptor sd{};
+        sd.label = sv("context-render-sampler");
+        sd.addressModeU = to_wgpu_address(desc.address_mode);
+        sd.addressModeV = to_wgpu_address(desc.address_mode);
+        sd.addressModeW = to_wgpu_address(desc.address_mode);
+        sd.magFilter = to_wgpu_filter(desc.mag_filter);
+        sd.minFilter = to_wgpu_filter(desc.min_filter);
+        sd.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+        sd.lodMinClamp = 0.0f;
+        sd.lodMaxClamp = 32.0f;
+        // != Undefined makes this a comparison sampler (the shadow-map PCF primitive).
+        sd.compare = to_wgpu_compare(desc.compare);
+        sd.maxAnisotropy = 1; // zero fails validation — 1 is the WebGPU default
+        return std::make_unique<WgpuSampler>(wgpuDeviceCreateSampler(device_, &sd));
+    }
+
+    std::unique_ptr<IBindGroup> create_bind_group(IBindGroupLayout& layout,
+                                                  const std::vector<BindGroupEntry>& entries) override
+    {
+        std::vector<WGPUBindGroupEntry> raw_entries;
+        raw_entries.reserve(entries.size());
+        for (const BindGroupEntry& e : entries)
+        {
+            WGPUBindGroupEntry entry{};
+            entry.binding = e.binding;
+            if (e.buffer != nullptr)
+            {
+                entry.buffer = static_cast<WgpuBuffer*>(e.buffer)->raw();
+                entry.offset = e.buffer_offset;
+                entry.size = (e.buffer_size != 0) ? e.buffer_size : WGPU_WHOLE_SIZE;
+            }
+            else
+            {
+                entry.size = WGPU_WHOLE_SIZE; // the header's INIT default; ignored without a buffer
+            }
+            if (e.texture != nullptr)
+            {
+                entry.textureView = static_cast<WgpuTextureView*>(e.texture)->raw();
+            }
+            if (e.sampler != nullptr)
+            {
+                entry.sampler = static_cast<WgpuSampler*>(e.sampler)->raw();
+            }
+            raw_entries.push_back(entry);
+        }
+        WGPUBindGroupDescriptor bd{};
+        bd.label = sv("context-render-bind-group");
+        bd.layout = static_cast<WgpuBindGroupLayout&>(layout).raw();
+        bd.entryCount = raw_entries.size();
+        bd.entries = raw_entries.data();
+        return std::make_unique<WgpuBindGroup>(wgpuDeviceCreateBindGroup(device_, &bd));
     }
 
     std::unique_ptr<IRenderPipeline> create_render_pipeline(const RenderPipelineDesc& desc) override
@@ -510,7 +708,23 @@ public:
         pd.primitive.cullMode = WGPUCullMode_None;
         pd.multisample.count = 1;
         pd.multisample.mask = 0xFFFFFFFFu;
-        pd.fragment = &fragment;
+        // An empty fragment entry = a depth-only pipeline (the shadow pass): no fragment stage,
+        // no color targets (WebGPU allows a vertex-only pipeline when a depth attachment exists).
+        pd.fragment = desc.fragment_entry.empty() ? nullptr : &fragment;
+
+        WGPUDepthStencilState depth{};
+        if (desc.depth.has_value())
+        {
+            depth.format = to_wgpu_format(desc.depth->format);
+            depth.depthWriteEnabled =
+                desc.depth->depth_write ? WGPUOptionalBool_True : WGPUOptionalBool_False;
+            depth.depthCompare = to_wgpu_compare(desc.depth->depth_compare);
+            // No stencil on Depth32Float: Undefined face states (zero-init) default to Always/Keep;
+            // the masks follow the WebGPU defaults.
+            depth.stencilReadMask = 0xFFFFFFFFu;
+            depth.stencilWriteMask = 0xFFFFFFFFu;
+            pd.depthStencil = &depth;
+        }
 
         WGPURenderPipeline pipeline = wgpuDeviceCreateRenderPipeline(device_, &pd);
         wgpuShaderModuleRelease(shader);

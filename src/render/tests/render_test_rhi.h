@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace rendertest
@@ -145,8 +146,55 @@ private:
     bool mapped_;
 };
 
+class FakeSampler : public ISampler
+{
+public:
+    explicit FakeSampler(const SamplerDesc& desc) : desc_(desc) {}
+    [[nodiscard]] const SamplerDesc& desc() const { return desc_; }
+
+private:
+    SamplerDesc desc_;
+};
+
+class FakeBindGroupLayout : public IBindGroupLayout
+{
+public:
+    explicit FakeBindGroupLayout(std::uint32_t group) : group_(group) {}
+    [[nodiscard]] std::uint32_t group() const { return group_; }
+
+private:
+    std::uint32_t group_;
+};
+
+class FakeBindGroup : public IBindGroup
+{
+public:
+    FakeBindGroup(std::uint32_t group, std::vector<BindGroupEntry> entries)
+        : group_(group), entries_(std::move(entries))
+    {
+    }
+    [[nodiscard]] std::uint32_t group() const { return group_; }
+    [[nodiscard]] const std::vector<BindGroupEntry>& entries() const { return entries_; }
+
+private:
+    std::uint32_t group_;
+    std::vector<BindGroupEntry> entries_;
+};
+
 class FakePipeline : public IRenderPipeline
 {
+public:
+    explicit FakePipeline(const RenderPipelineDesc& desc) : desc_(desc) {}
+
+    std::unique_ptr<IBindGroupLayout> bind_group_layout(std::uint32_t group) override
+    {
+        return std::make_unique<FakeBindGroupLayout>(group);
+    }
+
+    [[nodiscard]] const RenderPipelineDesc& desc() const { return desc_; }
+
+private:
+    RenderPipelineDesc desc_;
 };
 
 class FakeCommandBuffer : public ICommandBuffer
@@ -163,11 +211,18 @@ public:
 
     void set_pipeline(IRenderPipeline& /*pipeline*/) override { pipeline_set_ = true; }
 
+    void set_bind_group(std::uint32_t /*index*/, IBindGroup& /*group*/) override
+    {
+        ++bind_group_sets_;
+    }
+
     void draw(std::uint32_t vertex_count, std::uint32_t instance_count) override
     {
         draw_vertices_ = vertex_count;
         draw_instances_ = instance_count;
     }
+
+    [[nodiscard]] int bind_group_sets() const { return bind_group_sets_; }
 
     void end() override
     {
@@ -203,6 +258,7 @@ private:
     Color clear_;
     LoadOp load_;
     bool pipeline_set_ = false;
+    int bind_group_sets_ = 0;
     std::uint32_t draw_vertices_ = 0;
     std::uint32_t draw_instances_ = 0;
 };
@@ -254,6 +310,34 @@ class FakeQueue : public IQueue
 {
 public:
     void submit(ICommandBuffer& /*commands*/) override { ++submit_count_; }
+
+    void write_buffer(IBuffer& buffer, std::uint64_t offset, const void* data,
+                      std::size_t size) override
+    {
+        auto& fake = static_cast<FakeBuffer&>(buffer);
+        if (offset + size <= fake.bytes().size())
+        {
+            std::memcpy(fake.bytes().data() + offset, data, size);
+        }
+    }
+
+    void write_texture(ITexture& texture, const void* data, std::size_t size,
+                       const TexelCopyBufferLayout& layout, Extent2D extent) override
+    {
+        auto& fake = static_cast<FakeTexture&>(texture);
+        const auto* src = static_cast<const std::uint8_t*>(data);
+        const std::uint32_t row_bytes = extent.width * 4u;
+        for (std::uint32_t row = 0; row < extent.height; ++row)
+        {
+            const std::size_t src_off = static_cast<std::size_t>(row) * layout.bytes_per_row;
+            const std::size_t dst_off = static_cast<std::size_t>(row) * row_bytes;
+            if (src_off + row_bytes <= size && dst_off + row_bytes <= fake.pixels().size())
+            {
+                std::memcpy(fake.pixels().data() + dst_off, src + src_off, row_bytes);
+            }
+        }
+    }
+
     [[nodiscard]] int submit_count() const { return submit_count_; }
 
 private:
@@ -275,9 +359,21 @@ public:
         return std::make_unique<FakeBuffer>(desc.size);
     }
 
-    std::unique_ptr<IRenderPipeline> create_render_pipeline(const RenderPipelineDesc& /*desc*/) override
+    std::unique_ptr<ISampler> create_sampler(const SamplerDesc& desc) override
     {
-        return std::make_unique<FakePipeline>();
+        return std::make_unique<FakeSampler>(desc);
+    }
+
+    std::unique_ptr<IRenderPipeline> create_render_pipeline(const RenderPipelineDesc& desc) override
+    {
+        return std::make_unique<FakePipeline>(desc);
+    }
+
+    std::unique_ptr<IBindGroup> create_bind_group(IBindGroupLayout& layout,
+                                                  const std::vector<BindGroupEntry>& entries) override
+    {
+        auto& fake_layout = static_cast<FakeBindGroupLayout&>(layout);
+        return std::make_unique<FakeBindGroup>(fake_layout.group(), entries);
     }
 
     std::unique_ptr<ICommandEncoder> create_command_encoder() override

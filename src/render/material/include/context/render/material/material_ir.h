@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -54,11 +56,82 @@ struct ShaderKeyword
     bool operator==(const ShaderKeyword&) const = default;
 };
 
-// The authoring IR for one shader/material: a name, its keyword axes, and its stages.
+// ------------------------------------------------------------------ the material contract (M4)
+// The material-facing input surface an authored shader declares: typed scalar/vector parameters and
+// semantic texture slots (R-REND-004 metallic-roughness baseline). This is the M4 "material
+// contract" R-REND-006 requires to carry LIGHTMAP INPUTS: a slot with TextureSemantic::Lightmap plus
+// its UV-channel selection (channel 1 = the reserved UV2), so the frozen contract never forecloses
+// baked lighting — the baker itself is COULD/post-v1 and deliberately absent here.
+
+// The type of one material parameter (its component count).
+enum class MaterialParamType
+{
+    Float,
+    Vec2,
+    Vec3,
+    Vec4,
+};
+
+// Number of components of a parameter type (Float=1 ... Vec4=4).
+[[nodiscard]] std::size_t component_count(MaterialParamType type) noexcept;
+
+// Canonical lowercase token ("float", "vec2", ...) and its inverse; nullopt for an unknown token.
+[[nodiscard]] std::string_view to_string(MaterialParamType type) noexcept;
+[[nodiscard]] std::optional<MaterialParamType> param_type_from_string(std::string_view name) noexcept;
+
+// What a texture slot feeds in the metallic-roughness model. Lightmap is the R-REND-006 hook.
+enum class TextureSemantic
+{
+    BaseColor,
+    MetallicRoughness,
+    Normal,
+    Emissive,
+    Occlusion,
+    Lightmap,
+};
+
+// Canonical lowercase token ("base_color", "lightmap", ...) and its inverse; nullopt when unknown.
+[[nodiscard]] std::string_view to_string(TextureSemantic semantic) noexcept;
+[[nodiscard]] std::optional<TextureSemantic> semantic_from_string(std::string_view name) noexcept;
+
+// One declared material parameter. Defaults are kept as the authored decimal TOKENS (validated float
+// literals, one per component) rather than parsed floats: the canonical serialized form — and thus
+// the ir_content_hash / R-FILE-010 cache key — is then byte-stable with no locale- or
+// float-formatting dependency (the R-DATA-006 canonical-form discipline). Factors are unitless; any
+// angular parameter is radians (R-DATA-006 SI + radians).
+struct MaterialParam
+{
+    std::string name;
+    MaterialParamType type = MaterialParamType::Float;
+    std::vector<std::string> defaults; // component_count(type) validated float-literal tokens
+
+    bool operator==(const MaterialParam&) const = default;
+};
+
+// One declared texture slot: its binding name, semantic, and which UV set it samples. uv_channel 1
+// is the UV2 channel mesh import reserves (R-REND-006); the parser bounds the channel to [0,3].
+struct TextureSlot
+{
+    std::string name;
+    TextureSemantic semantic = TextureSemantic::BaseColor;
+    std::uint32_t uv_channel = 0;
+
+    bool operator==(const TextureSlot&) const = default;
+};
+
+// Validate one float-literal token: [+-]?digits[.digits]?([eE][+-]?digits)? — locale-independent by
+// construction (the token is never converted through the C locale machinery on the authoring path).
+[[nodiscard]] bool is_float_literal(std::string_view token) noexcept;
+
+// The authoring IR for one shader/material: a name, its keyword axes, its material contract
+// (parameters + texture slots — possibly empty; a contract-free document serializes exactly as it
+// did before the contract existed, so pre-contract content hashes are unchanged), and its stages.
 struct ShaderIr
 {
     std::string name;
     std::vector<ShaderKeyword> keywords;
+    std::vector<MaterialParam> params;
+    std::vector<TextureSlot> textures;
     std::vector<ShaderStage> stages;
 
     bool operator==(const ShaderIr&) const = default;
