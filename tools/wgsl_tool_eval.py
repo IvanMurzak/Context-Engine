@@ -280,13 +280,17 @@ def main() -> int:
             cells = []
             for t in tools:
                 d = r[t]
-                cells.append("/".join([
-                    "ok" if d["emit_ok"] else "FAIL",
-                    "yes" if d["deterministic"] else "NO",
-                    "yes" if d.get(f"valid_{t}") else "NO",
-                    "yes" if all(d.get(f"valid_{v}") for v in tools) else "NO",
-                ]) if d["emit_ok"] else "FAIL: " + d["diag"].splitlines()[0][:80]
-                if d["emit_ok"] or d["diag"] else "FAIL")
+                if d["emit_ok"]:
+                    cells.append("/".join([
+                        "ok",
+                        "yes" if d["deterministic"] else "NO",
+                        "yes" if d.get(f"valid_{t}") else "NO",
+                        "yes" if all(d.get(f"valid_{v}") for v in tools) else "NO",
+                    ]))
+                elif d["diag"]:
+                    cells.append("FAIL: " + d["diag"].splitlines()[0][:80])
+                else:
+                    cells.append("FAIL")
             lines.append(f"| {r['shader']} | {r['variant']} | {r['stage']} | " +
                          " | ".join(cells) + " |")
         args.out_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
