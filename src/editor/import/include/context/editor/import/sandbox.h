@@ -77,7 +77,7 @@ struct SandboxPolicy
 struct OsSandboxSupport
 {
     std::string primitive;  // "seccomp-bpf" / "windows-appcontainer" / "macos-sandbox-exec" / "none"
-    bool enforced = false;  // true where the primitive is actually applied (Linux today)
+    bool enforced = false;  // true where the primitive is actually applied (Linux + macOS today)
     std::string follow_up;  // the tracked note for a not-yet-enforced platform ("" when enforced)
 };
 [[nodiscard]] OsSandboxSupport os_sandbox_support();
@@ -97,7 +97,7 @@ struct OsSandboxSupport
 // importer. Never throws.
 struct SandboxApplyResult
 {
-    bool applied = false;   // true iff the OS primitive was actually installed (Linux today)
+    bool applied = false;   // true iff the OS primitive was actually installed (Linux + macOS today)
     std::string primitive;  // mirrors os_sandbox_support().primitive
     std::string error;      // "" on success; else why the primitive could not be installed
 };

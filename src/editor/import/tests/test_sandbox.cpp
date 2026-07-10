@@ -1,6 +1,7 @@
 // Importer isolation slice: the narrowed read scope (owner ruling, issue #72), write scoping, scrubbed
 // env, honest OS-support reporting, the portable subprocess result codec, the run_isolated() +
-// run_subprocess() policy gates, and — on Linux — the real seccomp-bpf permit-vs-deny syscall filter.
+// run_subprocess() policy gates, and — on Linux — the real seccomp-bpf permit-vs-deny syscall filter
+// (and — on macOS — the real deny-default Seatbelt permit-vs-deny operation gate).
 
 #include "context/editor/import/isolated_runner.h"
 #include "context/editor/import/sandbox.h"
