@@ -1,0 +1,49 @@
+src/editor/import/src/sandbox.cpp
+  s_44eec50eafd91a::t_666de4915300a7 25-30,33-42
+  s_44eec50eafd91a::t_aa601b9da2a863 59-64,66,69-71,74-76,79-81
+src/editor/import/tests/test_sandbox.cpp
+  s_44eec50eafd91a::t_859e01f47a9781 1-3,16-23,36-38,81-82,89-92,103-130,135-138,141-142,146-153,156-201,210-211,222,225,238,241,250-358
+  s_44eec50eafd91a::t_9439e86af6c4db 359
+src/editor/import/README.md
+  s_44eec50eafd91a::t_f7250a5abbc1a3 38,40-48
+  s_44eec50eafd91a::t_3db7746fd374db 76-81
+  s_44eec50eafd91a::t_788bcbead535b7 82-87
+src/editor/contract/tests/test_error_catalog.cpp
+  s_44eec50eafd91a::t_ef34b216feea49 176-188
+src/editor/import/src/isolated_runner.cpp
+  s_44eec50eafd91a::t_1c079484bccfcb 242
+  s_44eec50eafd91a::t_276f7c793f7ddb 1-2,6-7,9-16,20-21,23-110,116,118-120,122-125,131-132,134-135,140-141,143-223,226-227,232-241,243-321,330-382
+  s_44eec50eafd91a::t_60c23c023f585a 322-329
+  s_44eec50eafd91a::t_3c50c93d46872f 383
+src/editor/import/src/sandbox_lockdown.cpp
+  s_44eec50eafd91a::t_1ce8f3d2ce033b 1-143
+src/editor/import/include/context/editor/import/sandbox.h
+  s_44eec50eafd91a::t_ace1b6fd9f0766 24-36,42-47
+  s_44eec50eafd91a::t_d96d1642f7315a 56-61
+  s_44eec50eafd91a::t_81bcacf5ec413e 69-70,72,76,81-96
+  s_44eec50eafd91a::t_61901d6d21ab86 97
+src/editor/import/CMakeLists.txt
+  s_44eec50eafd91a::t_6cfd7ed0c6ba63 14
+src/editor/contract/src/error_catalog.cpp
+  s_44eec50eafd91a::t_3864e57faa08da 241-245
+src/editor/import/include/context/editor/import/isolated_runner.h
+  s_44eec50eafd91a::t_fec63f7a670c27 56-74
+  s_44eec50eafd91a::t_7f57377a7b2fbc 3-13,15-18
+  s_44eec50eafd91a::t_91d4b1066baaef 26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4205ec8e9bcd7931a44ee32550bdc45db52fb1c4",
+  "prompts": {},
+  "sessions": {
+    "s_44eec50eafd91a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45ca24c7-35c0-4b9c-bad8-a75dda1846ba",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
