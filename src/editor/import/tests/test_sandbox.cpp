@@ -268,8 +268,14 @@ int main()
             const IsolatedImport iso = run_subprocess(stub, in, policy);
             CHECK(iso.result.ok);
             CHECK(iso.result.artifacts.size() == 1);
-            CHECK(iso.result.artifacts[0].name == "stub");
-            CHECK(iso.result.artifacts[0].bytes == "payload-bytes"); // round-tripped through the pipe
+            // Guarded dereference: on a fail-closed run (e.g. the child was killed by its sandbox)
+            // the artifact vector is EMPTY — the size CHECK above must be the recorded failure,
+            // never an out-of-bounds element access (UBSan null-reference + SEGV, run 29081682083).
+            if (iso.result.artifacts.size() == 1)
+            {
+                CHECK(iso.result.artifacts[0].name == "stub");
+                CHECK(iso.result.artifacts[0].bytes == "payload-bytes"); // round-tripped over the pipe
+            }
             CHECK(iso.audit.input_path == policy.input_path);
             CHECK(!iso.audit.network_allowed);
             CHECK(iso.audit.os_primitive_enforced == os_sandbox_support().enforced);

@@ -31,6 +31,20 @@
 #define SECCOMP_RET_KILL_PROCESS SECCOMP_RET_KILL
 #endif
 
+// AddressSanitizer detection (GCC defines __SANITIZE_ADDRESS__; Clang signals via __has_feature).
+// Consumed below to widen the allow-set by ONE benign syscall in ASan-instrumented builds only —
+// see the CONTEXT_IMPORT_ASAN_RUNTIME block inside the filter for the full rationale.
+#if defined(__SANITIZE_ADDRESS__)
+#define CONTEXT_IMPORT_ASAN_RUNTIME 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define CONTEXT_IMPORT_ASAN_RUNTIME 1
+#endif
+#endif
+#ifndef CONTEXT_IMPORT_ASAN_RUNTIME
+#define CONTEXT_IMPORT_ASAN_RUNTIME 0
+#endif
+
 namespace context::editor::import
 {
 namespace
@@ -119,6 +133,18 @@ SandboxApplyResult apply_importer_sandbox()
         CONTEXT_ALLOW_SYSCALL(futex),
         CONTEXT_ALLOW_SYSCALL(rt_sigprocmask),
         CONTEXT_ALLOW_SYSCALL(rt_sigreturn),
+#if CONTEXT_IMPORT_ASAN_RUNTIME
+        // ASan-instrumented builds ONLY (never the production filter): the compiler emits
+        // __asan_handle_no_return before every noreturn call — including the child's _exit — and the
+        // ASan runtime then QUERIES the alternate signal stack (sigaltstack(nullptr, ...) in
+        // asan_posix.cpp PlatformUnpoisonStacks) to unpoison it. Denying it fails the runtime's
+        // internal CHECK and aborts the child, so the sanitize CI leg could never run the REAL
+        // filter end-to-end (observed: `sanitize (ASan+UBSan, ubuntu)`, run 29081682083).
+        // sigaltstack is pure in-process signal-stack bookkeeping — no filesystem / network / exec /
+        // memory-permission capability — and gating it on the sanitizer build keeps the production
+        // allow-set unchanged while the sanitizers exercise this exact filter logic.
+        CONTEXT_ALLOW_SYSCALL(sigaltstack),
+#endif
         // Clean termination.
         CONTEXT_ALLOW_SYSCALL(exit),
         CONTEXT_ALLOW_SYSCALL(exit_group),
@@ -146,6 +172,7 @@ SandboxApplyResult apply_importer_sandbox()
 
 #undef CONTEXT_ALLOW_SYSCALL
 #undef CONTEXT_ALLOW_SYSCALL_NO_EXEC
+#undef CONTEXT_IMPORT_ASAN_RUNTIME
 
 } // namespace context::editor::import
 
