@@ -106,12 +106,14 @@ int main()
         }
     }
 
-    // --- R-LANG-002 M3 TS-toolchain codes (issue #83) map to the validation class ----------------
+    // --- R-LANG-002 M3 TS-toolchain codes (issue #83 + the #85 typecheck follow-up) --------------
     // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
-    // holds because baseline is a subset of the live catalog). These are the codes src/runtime/ts's
-    // esbuild toolchain emits by string; assert the registry agrees on class + provenance.
+    // holds because baseline is a subset of the live catalog). These are the codes src/runtime/ts
+    // emits by string: the esbuild transpile/bundle failures AND the tsgo semantic-typecheck failure
+    // (ts.type_error, issue #85 — the one esbuild cannot catch because it strips types). Assert the
+    // registry agrees on class + provenance.
     {
-        for (const char* code : {"ts.transpile_failed", "ts.bundle_failed"})
+        for (const char* code : {"ts.transpile_failed", "ts.bundle_failed", "ts.type_error"})
         {
             const ErrorCode* entry = find_code(code);
             CHECK(entry != nullptr);

@@ -8,10 +8,14 @@
 // binary, NOT linked into the engine — so this driver builds + runs on EVERY toolchain
 // (including the local Strawberry-GCC Windows dev gate), unlike the V8-linking runtime/js.
 //
+// Landed follow-ups (issue #85, on top of 2b-i):
+//   * A tsc-class SEMANTIC typecheck (--noEmit) whose findings surface as `ts.type_error` envelopes
+//     through the R-CLI-008 catalog — the author->typecheck->fix loop. esbuild strips types without
+//     checking them, so this is a SEPARATE tsgo backend: see ts_typecheck.h (this header stays the
+//     transpile/bundle seam; kTsTypeErrorCode is defined below alongside the transpile-class codes).
+//   * Wiring the transpile as a derivation-graph node cached per R-FILE-010 (unchanged TS is not
+//     re-transpiled): src/editor/derivation/ts_compile_node.h wraps the TsToolchain seam below.
 // Deferred seams (documented, NOT built here — see README.md § Deferred seams):
-//   * A tsc-class SEMANTIC typecheck (--noEmit) whose findings surface as `ts.type_error`
-//     envelopes through the R-CLI-008 catalog — the author->typecheck->fix loop (follow-up).
-//   * Wiring the transpile as a derivation-graph node cached per R-FILE-010 (follow-up).
 //   * R-LANG-010 declarative-component TS-accessor codegen (task 2b-ii) plugs in as an extra
 //     generated input to the bundle; R-LANG-009 zero-copy views (task 3) and R-SEC-005
 //     engine-driven npm install (task 5, --ignore-scripts + lockfile integrity) are separate.
@@ -35,15 +39,19 @@ enum class ModuleFormat
     Esm,
 };
 
-// One transpile/bundle diagnostic, carrying the STABLE R-CLI-008 catalog code so a CLI/RPC
-// caller branches on the failure class without parsing the message. Task 2b-i emits transpile-
-// class codes only (kTsTranspileFailedCode / kTsBundleFailedCode); the semantic-typecheck
-// `ts.type_error` code is the deferred follow-up (see header note above).
+// One transpile/bundle/typecheck diagnostic, carrying the STABLE R-CLI-008 catalog code so a
+// CLI/RPC caller branches on the failure class without parsing the message. The transpile path
+// emits the transpile-class codes (kTsTranspileFailedCode / kTsBundleFailedCode); the semantic
+// typecheck (ts_typecheck.h) emits kTsTypeErrorCode. Shared so the two report one diagnostic shape.
 struct TsDiagnostic
 {
-    std::string code;    // an error_catalog.h code, e.g. "ts.transpile_failed"
-    std::string message; // the tool's human-facing diagnostic text (esbuild stderr)
+    std::string code;    // an error_catalog.h code, e.g. "ts.transpile_failed" / "ts.type_error"
+    std::string message; // the tool's human-facing diagnostic text (esbuild stderr / tsgo diagnostic)
     std::string file;    // the source file the failure is attributed to (may be empty)
+    int line = 0;        // 1-based source line the diagnostic points at, or 0 when the tool gives
+                         // none — esbuild's transpile diagnostics are free-form text (left 0); the
+                         // tsc-class typecheck fills line/column from tsgo's `file(line,col)` position
+    int column = 0;      // 1-based source column, or 0 when unknown
 };
 
 // The stable catalog codes this toolchain emits. DEFINED here (a runtime-tier constant) and
@@ -51,6 +59,13 @@ struct TsDiagnostic
 // bridge::kScopeDeniedCode uses, so runtime/ts does not link the editor/contract layer.
 inline constexpr std::string_view kTsTranspileFailedCode = "ts.transpile_failed";
 inline constexpr std::string_view kTsBundleFailedCode = "ts.bundle_failed";
+// A SEMANTIC typecheck finding from the tsc-class --noEmit pass (issue #85, R-LANG-002/004): the
+// authored TypeScript is syntactically valid (esbuild WOULD transpile it) but type-INVALID. esbuild
+// strips types without checking them, so this code has NO esbuild sibling — it is emitted by the
+// separate tsgo typechecker (ts_typecheck.h) and closes the agent author->typecheck->fix loop.
+// Validation-class + deterministic in the R-CLI-008 catalog. Defined here alongside the transpile-
+// class codes for one place to find every ts.* string; the typecheck seam lives in ts_typecheck.h.
+inline constexpr std::string_view kTsTypeErrorCode = "ts.type_error";
 // A RUNTIME throw from authored TypeScript running in the V8 host (R-OBS-005): the diagnostic is
 // designed to carry a TS-source-mapped stack trace (stack_trace.h / source_map.h) so the failing
 // authored .ts position — not the transpiled JS position — is surfaced in the R-CLI-008 envelope +

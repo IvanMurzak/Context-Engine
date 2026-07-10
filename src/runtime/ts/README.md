@@ -20,6 +20,15 @@ authoring (R-LANG-010) is task 2b-ii; the zero-copy view protocol (R-LANG-009) i
   class without parsing text; plus the RUN-tier `ts.runtime_error` code (R-OBS-005) **registered**
   for an authored-TS throw's TS-source-mapped stack trace (the emit-path that composes the envelope
   is the deferred follow-up — see § Deferred seams).
+- **`TsTypechecker`** (`include/context/runtime/ts/ts_typecheck.h`) — the backend-agnostic SEMANTIC
+  typecheck seam (issue #85). esbuild transpiles by STRIPPING types without checking them, so a
+  `--noEmit` typecheck is a **separate** tsc-class tool: **tsgo** (microsoft/typescript-go), a
+  SHA-pinned native prebuilt (`tools/tsc-toolchain.json` + `tools/fetch_tsc.py`) invoked as a
+  subprocess (`createTsgoTypechecker` → `check(tsFilePath)`). Each type error surfaces as a
+  **`ts.type_error`** R-CLI-008 diagnostic carrying the tsc code (`TSxxxx`) and the authored `.ts`
+  line:column — the agent's author→typecheck→fix loop. Like esbuild, tsgo runs on EVERY toolchain,
+  so its ctest (`ts-test_ts_typecheck`) is a **LOCAL gate** (the loop converges on the dev machine,
+  not only at CI).
 - **`SourceMap`** (`include/context/runtime/ts/source_map.h`) — a Source Map v3 parser + resolver
   (base64-VLQ mappings, `sources`/`names`) that maps a GENERATED `(line, column)` in the bundle
   back to the authored `(source, line, column, name)`. STL-only, no V8 — a **LOCAL gate**.
@@ -66,18 +75,23 @@ The 3-OS CI `build` legs are the **authoritative gate** for the in-V8 flow.
 
 ## Deferred seams (documented; NOT built in task 2b-i)
 
-This task lands the DoD floor — *authored TS transpiles + runs in the V8 host + calls the host
-both ways, green on 3 OS*. The following are intentionally left as clean seams:
+Task 2b-i landed the DoD floor — *authored TS transpiles + runs in the V8 host + calls the host
+both ways, green on 3 OS*. Two of its clean seams have since **LANDED** (issue #85):
 
-- **Semantic typecheck loop** (R-LANG-002/004, R-CLI-008): a `tsc`-class `--noEmit` pass whose
-  findings surface as a `ts.type_error` validation-class catalog code — the agent's
+- **Semantic typecheck loop** ✅ (R-LANG-002/004, R-CLI-008): a `tsc`-class `--noEmit` pass whose
+  findings surface as the `ts.type_error` validation-class catalog code — the agent's
   author→typecheck→fix loop. esbuild deliberately does **not** typecheck (it transpiles + strips
-  types), so this needs a separate `tsc`-class tool (its own SHA-pinned prebuilt, or `tsc` run in
-  the V8 host). The `ts.type_error` code is **reserved but not registered** until its emitter
-  lands (`error_catalog.cpp` notes this). **Follow-up task.**
-- **Derivation-graph compile caching** (R-FILE-010): wiring the TS→JS compile as a cached
-  derivation node keyed on the source + toolchain version. Today it is a clean per-call build
-  step; the caching seam is left for a follow-up. **Follow-up task.**
+  types), so this is a **separate** `tsc`-class tool: **tsgo** (microsoft/typescript-go), a
+  SHA-pinned native prebuilt (`tools/tsc-toolchain.json` + `tools/fetch_tsc.py`) invoked as a
+  subprocess — `ts_typecheck.h` / `tsgo_typecheck.cpp` (see § What this package provides). The
+  `ts.type_error` code is now **registered** in `error_catalog.cpp` (was reserved).
+- **Derivation-graph compile caching** ✅ (R-FILE-010): the TS→JS compile is now a content-addressed
+  cached derivation node keyed on (source bytes + transpile options + toolchain version), so
+  unchanged TS is not re-transpiled — `src/editor/derivation/ts_compile_node.h` (the peer of the
+  shader-compile node, wrapping this package's `TsToolchain` seam).
+
+The following remain intentionally left as clean seams:
+
 - **R-LANG-010 declarative component-type TS accessors** (task 2b-ii): the codegen hook plugs in
   as an extra **generated input** to the bundle (the accessor `.ts`/`.d.ts` becomes an import the
   authored gameplay TS resolves) — `game.ts`'s `declare function hostBias(...)` stands in for the
