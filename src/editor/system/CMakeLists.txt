@@ -127,6 +127,26 @@ endif()
 # legs are untouched (profile setup.md § the std::filesystem note).
 target_link_options(context_system_test_in_v8 PRIVATE
     $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
+
+# Sanitize preset (ASan+UBSan, Linux/clang CI leg) UBSan `vptr` carve-out (issue #145; SAME false
+# positive + SAME fix as runtime/ts's context_ts / context_ts_test_ts_debug, issue #104). This test TU
+# links the UNINSTRUMENTED rusty_v8 prebuilt (via context_js), which bundles Chromium's OWN
+# libc++/libc++abi statically (use_custom_libcxx, the `__Cr` ABI). Its RTTI in the same binary confuses
+# UBSan's `vptr` sub-check into flagging this TU's own std stream member calls — the read_file helper's
+# `in.rdbuf()` / `ss << in.rdbuf()` / `ss.str()` (test_system_in_v8.cpp:77-78) — as "member call on ...
+# not of type std::basic_ostream", even though the object IS a valid libstdc++ std::__cxx11 stream and
+# every functional assertion passes (the diagnostics rode green CI under UBSan default-recover). It is a
+# FALSE POSITIVE of mixing an instrumented embedder with an uninstrumented prebuilt, NOT a Context-code
+# defect (Context stays libstdc++, never libc++). Drop ONLY the vptr sub-check for THIS TU under the
+# sanitize preset (ASan + every other UBSan check stay ON); this also trims the demangler-driven LSan
+# symbolizer allocations those vptr diagnostics produced (see the LSan block below). Scoped to
+# CONTEXT_SANITIZE so dev/CI release builds stay byte-identical, gated on _ctx_js_v8 (only the real-V8
+# legs link rusty_v8), and gated non-MSVC because -fno-sanitize=vptr is a Clang/GCC UBSan flag (MSVC has
+# no vptr sanitizer, and CONTEXT_SANITIZE already FATAL_ERRORs under MSVC).
+if(_ctx_js_v8 AND CONTEXT_SANITIZE AND NOT MSVC)
+    target_compile_options(context_system_test_in_v8 PRIVATE -fno-sanitize=vptr)
+endif()
+
 add_test(NAME system-test_in_v8 COMMAND context_system_test_in_v8)
 
 # TSan preset only: the in-V8 test links the rusty_v8 prebuilt (NOT TSan-instrumented), so reuse
