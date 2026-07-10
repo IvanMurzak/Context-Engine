@@ -22,6 +22,7 @@
 #include <linux/audit.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
+#include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 
@@ -40,6 +41,23 @@ namespace
 #define CONTEXT_ALLOW_SYSCALL(name)                                                                \
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_##name, 0, 1),                                         \
         BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW)
+
+// Allow `name` ONLY when its `prot` argument (args[2] for both mmap and mprotect on x86_64) does NOT
+// request PROT_EXEC. A pure importer never needs to create executable memory after fork — the dynamic
+// linker mapped every code segment before fork — so refusing PROT_EXEC denies a memory-corruption bug
+// (e.g. in a hand-written PNG/WAV/glTF parser) the W^X pivot of mmap/mprotect-ing RWX memory and
+// jumping to it, even though the syscall number itself is on the allow-set. Self-contained like
+// CONTEXT_ALLOW_SYSCALL: on a nr MISMATCH A is left untouched (still the syscall number) so the
+// following dispatch entries keep matching; on a MATCH A is reloaded with prot and the block returns
+// ALLOW / EPERM inline. Only tiny fixed in-block offsets — no deny-terminal distance to get wrong.
+#define CONTEXT_ALLOW_SYSCALL_NO_EXEC(name)                                                        \
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_##name, 0, 4),                                         \
+        BPF_STMT(BPF_LD | BPF_W | BPF_ABS,                                                          \
+                 static_cast<__u32>(offsetof(struct seccomp_data, args[2]))),                       \
+        BPF_JUMP(BPF_JMP | BPF_JSET | BPF_K, PROT_EXEC, 1, 0),                                       \
+        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),                                               \
+        BPF_STMT(BPF_RET | BPF_K,                                                                    \
+                 static_cast<__u32>(SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA)))
 
 } // namespace
 
@@ -62,7 +80,9 @@ SandboxApplyResult apply_importer_sandbox()
     // are input-bytes-only structurally: there is no `open`/`openat` in the set, so the child cannot
     // reach any path the policy did not grant (owner ruling, issue #72; in v1 the source bytes arrive
     // in-memory — see run_subprocess). No `socket`/`connect` => no network (R-SEC-010); no
-    // `execve`/`clone`/`fork` => no process creation; no `ptrace`. The arch is gated first (x86_64, the
+    // `execve`/`clone`/`fork` => no process creation; no `ptrace`. `mmap`/`mprotect` are on the set but
+    // argument-gated to REFUSE PROT_EXEC (W^X): the child cannot mint executable memory post-fork, so a
+    // parser memory-corruption bug has no mmap/mprotect pivot to native code. The arch is gated first (x86_64, the
     // Linux-first server target) to close the i386/x32 syscall-ABI-confusion hole; a wrong-arch call is
     // KILLED, not merely denied. NOTE: signal-raising syscalls (`tgkill`/`kill`/`rt_sigaction`) are
     // deliberately omitted — an importer that hits abort()/assert() is denied its SIGABRT path (EPERM)
@@ -86,12 +106,14 @@ SandboxApplyResult apply_importer_sandbox()
         CONTEXT_ALLOW_SYSCALL(close),
         CONTEXT_ALLOW_SYSCALL(lseek),
         CONTEXT_ALLOW_SYSCALL(fstat),
-        // Memory management for the allocator.
+        // Memory management for the allocator. mmap/mprotect are additionally gated to REFUSE PROT_EXEC
+        // (no executable-memory creation post-fork — W^X for the pure-computation child); mremap carries
+        // no prot argument (it preserves the existing protection) so it cannot add PROT_EXEC.
         CONTEXT_ALLOW_SYSCALL(brk),
-        CONTEXT_ALLOW_SYSCALL(mmap),
+        CONTEXT_ALLOW_SYSCALL_NO_EXEC(mmap),
         CONTEXT_ALLOW_SYSCALL(munmap),
         CONTEXT_ALLOW_SYSCALL(mremap),
-        CONTEXT_ALLOW_SYSCALL(mprotect),
+        CONTEXT_ALLOW_SYSCALL_NO_EXEC(mprotect),
         CONTEXT_ALLOW_SYSCALL(madvise),
         // Threading/signal machinery libstdc++/glibc may touch on the pure path.
         CONTEXT_ALLOW_SYSCALL(futex),
@@ -123,6 +145,7 @@ SandboxApplyResult apply_importer_sandbox()
 }
 
 #undef CONTEXT_ALLOW_SYSCALL
+#undef CONTEXT_ALLOW_SYSCALL_NO_EXEC
 
 } // namespace context::editor::import
 

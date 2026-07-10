@@ -16,6 +16,7 @@
 #if defined(__linux__)
 #include <cerrno>
 #include <fcntl.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -298,10 +299,11 @@ int main()
 
 #if defined(__linux__)
     // The REAL seccomp-bpf syscall filter (Linux, the enforced platform): in a fork()ed child that has
-    // called apply_importer_sandbox(), a DENIED syscall (openat -> a fresh file, socket -> network)
-    // fails closed with EPERM, while a PERMITTED syscall (write to an already-open descriptor) succeeds.
-    // This is the "test permitted vs denied syscalls" gate (issue #72). NOTE: apply_importer_sandbox()
-    // is irreversible, so it is called ONLY in the child — never in this test process.
+    // called apply_importer_sandbox(), a DENIED syscall (openat -> a fresh file, socket -> network, or
+    // an mmap requesting PROT_EXEC -> W^X) fails closed with EPERM, while a PERMITTED syscall (a
+    // non-executable mmap, or a write to an already-open descriptor) succeeds. This is the "test
+    // permitted vs denied syscalls" gate (issue #72). NOTE: apply_importer_sandbox() is irreversible, so
+    // it is called ONLY in the child — never in this test process.
     {
         int pfd[2];
         CHECK(::pipe(pfd) == 0);
@@ -326,11 +328,30 @@ int main()
             if (sock >= 0)
                 ::close(sock);
 
+            // DENIED: mapping executable memory (W^X — the child cannot mint PROT_EXEC pages post-fork,
+            // so a parser memory-corruption bug has no mmap/mprotect pivot to native code).
+            void* const rwx =
+                ::mmap(nullptr, 4096, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            const bool exec_map_denied = (rwx == MAP_FAILED && errno == EPERM);
+            if (rwx != MAP_FAILED)
+                ::munmap(rwx, 4096);
+
+            // PERMITTED: a non-executable anonymous mapping (the allocator's bread and butter — the
+            // PROT_EXEC gate must NOT break ordinary read/write allocation).
+            void* const rw =
+                ::mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            const bool rw_map_permitted = (rw != MAP_FAILED);
+            if (rw != MAP_FAILED)
+                ::munmap(rw, 4096);
+
             // PERMITTED: writing to the already-open result pipe descriptor.
             const char ok = 'y';
             const bool write_permitted_syscall = (::write(pfd[1], &ok, 1) == 1);
 
-            ::_exit((open_denied && socket_denied && write_permitted_syscall) ? 0 : 11);
+            ::_exit((open_denied && socket_denied && exec_map_denied && rw_map_permitted &&
+                     write_permitted_syscall)
+                        ? 0
+                        : 11);
         }
 
         // Parent: drain the permitted-write byte, then confirm the child validated every case (exit 0).
