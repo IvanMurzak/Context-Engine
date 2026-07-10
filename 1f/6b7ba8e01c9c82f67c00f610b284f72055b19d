@@ -1,0 +1,116 @@
+src/render/lit/include/context/render/lit/lit_scene.h
+  s_e37cb8916c7fcf::t_e267bb3f23b492 1-164
+src/render/lit/include/context/render/lit/lit_math.h
+  s_e37cb8916c7fcf::t_91d84df7966040 1-98
+src/render/lit/include/context/render/lit/pbr.h
+  s_e37cb8916c7fcf::t_94eafec05aed79 1-73
+src/render/src/wgpu/wgpu_rhi.cpp
+  s_e37cb8916c7fcf::t_d88a17b6e62fe2 528-545
+  s_e37cb8916c7fcf::t_6bc468616dbf88 80-81,98-132
+  s_e37cb8916c7fcf::t_7381625ab7121d 411,589-596,618-621,627-680
+  s_e37cb8916c7fcf::t_8fd5c47993ea0a 315-365,377-385,407-410
+  s_e37cb8916c7fcf::t_79f8368ef4355d 475-484
+  s_e37cb8916c7fcf::t_bdf0515cd71de3 711-727
+  s_e37cb8916c7fcf::t_6a687f1b59a26e 133
+  s_e37cb8916c7fcf::t_c1db074ae4ed05 681
+src/render/lit/tests/test_lit_math.cpp
+  s_e37cb8916c7fcf::t_5119c21f80b794 1-141
+src/render/include/context/render/rhi.h
+  s_e37cb8916c7fcf::t_807d1c8ac98f5e 19
+  s_e37cb8916c7fcf::t_bf1646e4566669 311-318
+  s_e37cb8916c7fcf::t_6aeea810687d12 331,334-336
+  s_e37cb8916c7fcf::t_1d684038a04a3d 264-268,278
+  s_e37cb8916c7fcf::t_1f6231938d9e2f 106-108,111-112,118-119,122-141,149-150,154-155
+  s_e37cb8916c7fcf::t_3a751fc435b643 245
+  s_e37cb8916c7fcf::t_9e551a8d94bf72 35-36,41-68
+  s_e37cb8916c7fcf::t_a328e979a77d69 169-178,182
+  s_e37cb8916c7fcf::t_a4f789dc75c341 214-244,246-251
+src/render/lit/src/lit_scene.cpp
+  s_e37cb8916c7fcf::t_5afa0f8e7ecfba 1-231,235,237-247,251-375,382-443,445-446,448,450,452-456,458-492,497,500-555
+  s_e37cb8916c7fcf::t_b0dbad527d88b6 444,447,449,451,457
+  s_e37cb8916c7fcf::t_ceac69473017e4 493-496,498-499
+  s_e37cb8916c7fcf::t_56e672900c4f12 232-234,236,248-250
+  s_e37cb8916c7fcf::t_829099a3c84f03 376-381
+src/render/lit/README.md
+  s_e37cb8916c7fcf::t_c11783e75240b0 1-76
+src/render/material/src/material_ir.cpp
+  s_e37cb8916c7fcf::t_6e63a05bafd139 537-571
+  s_e37cb8916c7fcf::t_77678fc0161fb3 148-293
+  s_e37cb8916c7fcf::t_e93b3865de7116 383-464
+src/render/src/extract.cpp
+  s_e37cb8916c7fcf::t_c6616631bd977b 8,13-31,39-40,43-45,54-64,66-67,69-79,83-86,88-106,109-111,113-123
+src/render/lit/tests/test_lit_scene.cpp
+  s_e37cb8916c7fcf::t_b153e2316f4498 1-267
+src/render/include/context/render/render_world.h
+  s_e37cb8916c7fcf::t_ab7838b5c7a4fa 39-84,90-105,108-110,115-116,122-123
+src/render/lit/tests/test_pbr.cpp
+  s_e37cb8916c7fcf::t_49517ae0fb0011 154
+  s_e37cb8916c7fcf::t_8662cc5ce39b9b 126-137
+  s_e37cb8916c7fcf::t_d6c71944c63479 1-76,80,86-125,138-153,155-170
+  s_e37cb8916c7fcf::t_38a1cd89c5fed4 77-79,81-85
+src/render/material/include/context/render/material/material_ir.h
+  s_e37cb8916c7fcf::t_5bc19d0faac9d2 59-128,133-134
+  s_e37cb8916c7fcf::t_5a0f75ea77c8c2 11-12
+src/render/material/corpus/lit_pbr.shader
+  s_e37cb8916c7fcf::t_6296baaa92d30f 4-9,14-21
+src/render/tests/test_light_extract.cpp
+  s_e37cb8916c7fcf::t_68491d91330fa1 1-51,58-214
+  s_e37cb8916c7fcf::t_859622e2351d85 52-57
+src/render/tests/test_rhi.cpp
+  s_e37cb8916c7fcf::t_b35cb2694a2d62 10-12
+  s_e37cb8916c7fcf::t_6cdeb52e939fb0 94-206,213
+src/render/lit/include/context/render/lit/lit_offscreen.h
+  s_e37cb8916c7fcf::t_3b5b4228ece7e2 1-421
+src/render/CMakeLists.txt
+  s_e37cb8916c7fcf::t_197a0ea146dc5b 194-202
+  s_e37cb8916c7fcf::t_671b6c6fd2d4a3 42-45
+  s_e37cb8916c7fcf::t_10f68ae73c701d 142-143,146
+  s_e37cb8916c7fcf::t_187788012373f9 64
+src/render/material/CMakeLists.txt
+  s_e37cb8916c7fcf::t_2bc0210e4561e2 57-59,62
+  s_e37cb8916c7fcf::t_1f30c7f527dcc3 43-45
+  s_e37cb8916c7fcf::t_579f20844b4bd1 63
+src/render/lit/src/lit_math.cpp
+  s_e37cb8916c7fcf::t_680c1025091be6 1-68
+src/render/README.md
+  s_e37cb8916c7fcf::t_9efe5ffbd92fb2 18-26,29-32
+  s_e37cb8916c7fcf::t_d22d08adf7d379 55-57
+tools/wgsl_tool_eval.py
+  s_e37cb8916c7fcf::t_fa45afc2f426e5 104-108
+src/render/lit/CMakeLists.txt
+  s_e37cb8916c7fcf::t_8f99aaa2b19b9f 1-49
+src/render/material/tests/test_material_contract.cpp
+  s_e37cb8916c7fcf::t_0505d83fbe71fa 1-261
+src/render/tests/render_test_rhi.h
+  s_e37cb8916c7fcf::t_7d7c6b188c3147 14
+  s_e37cb8916c7fcf::t_8db3f39bdf52c6 214-218,225
+  s_e37cb8916c7fcf::t_0a92f37b04d3ec 261
+  s_e37cb8916c7fcf::t_c7af551ef9ccd4 149-183,186-197
+  s_e37cb8916c7fcf::t_2b29a0ea932869 313-340,362-373,375-376
+  s_e37cb8916c7fcf::t_7ff4a76a39b417 226
+src/render/material/README.md
+  s_e37cb8916c7fcf::t_399af7080bb909 10-21
+  s_e37cb8916c7fcf::t_21fb038d4037d3 40-41,44-46
+  s_e37cb8916c7fcf::t_f75c9dcd1f5135 57-62
+src/render/lit/src/pbr.cpp
+  s_e37cb8916c7fcf::t_f5d25c3b529531 1-103
+src/render/src/wgpu/offscreen_main.cpp
+  s_e37cb8916c7fcf::t_c0e19be666c444 11-13,15
+  s_e37cb8916c7fcf::t_92cb9d77cf049c 99,108-120,126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1f6b7ba8e01c9c82f67c00f610b284f72055b19d",
+  "prompts": {},
+  "sessions": {
+    "s_e37cb8916c7fcf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "79ebcd73-a5ef-46fd-ac35-a6d058b74895",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
