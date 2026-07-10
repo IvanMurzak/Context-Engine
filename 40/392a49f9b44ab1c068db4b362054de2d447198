@@ -1,0 +1,50 @@
+src/editor/import/tests/test_sandbox.cpp
+  s_451acb3c1599bf::t_6271c19d77fef0 372-373,377-378,382-427,443-444
+  s_451acb3c1599bf::t_abbb665c1539ee 16
+  s_451acb3c1599bf::t_eba55d94f82770 143-144,152-155,157
+  s_8f64ec35f1807f::t_a0ea5dcd588ff5 368-371,374-376,379-381
+src/editor/import/include/context/editor/import/sandbox.h
+  s_451acb3c1599bf::t_b309b29df0e734 9-11
+  s_451acb3c1599bf::t_f9d36f845e6002 74-76
+  s_451acb3c1599bf::t_3792ded5a3b0df 93-97
+src/editor/import/src/sandbox_lockdown.cpp
+  s_451acb3c1599bf::t_7ba34f9065b6eb 187-248
+  s_451acb3c1599bf::t_ce108cd695fa40 3-14,16-21
+src/editor/import/include/context/editor/import/isolated_runner.h
+  s_451acb3c1599bf::t_5e6344925f68c4 8-13
+  s_451acb3c1599bf::t_50d7ae8e7ef27d 59-66
+src/editor/import/src/isolated_runner.cpp
+  s_451acb3c1599bf::t_b1bf771911aea0 328-334
+  s_451acb3c1599bf::t_8aaf26aebb6831 234-238,243-244
+  s_451acb3c1599bf::t_2c1009fb91ad66 12
+  s_451acb3c1599bf::t_c21d9d3b60ef78 374-375,384
+src/editor/import/src/sandbox.cpp
+  s_451acb3c1599bf::t_0ce896a9f25b3e 60-65,68-69
+src/editor/import/README.md
+  s_451acb3c1599bf::t_6a76aeef355719 77-89
+  s_451acb3c1599bf::t_385de813a25c3f 44-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "40392a49f9b44ab1c068db4b362054de2d447198",
+  "prompts": {},
+  "sessions": {
+    "s_451acb3c1599bf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e54b1a55-e81f-4344-8103-323cb94b125b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_8f64ec35f1807f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fa039127-b01d-4d6a-a384-92e85b0bdef6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
