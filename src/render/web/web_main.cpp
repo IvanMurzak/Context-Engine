@@ -50,6 +50,15 @@ bool post_bytes(const char* path, const void* data, std::size_t size)
     // The fetch is async; ASYNCIFY's emscripten_sleep yields to the event loop until it settles.
     // The body is COPIED out of the wasm heap before fetch takes it (typed-array views over the
     // heap must not outlive a yield).
+    //
+    // EM_ASM's $0/$1/$2 placeholders are Emscripten's own argument syntax, but clang's -Wpedantic
+    // (context_warnings) lexes the '$' as -Wdollar-in-identifier-extension -> -Werror on the
+    // render-web CI leg. Suppress exactly this block via pragma: a target-level -Wno- flag would
+    // be re-enabled by the -Wpedantic that context_warnings' INTERFACE options append AFTER the
+    // target's own options (later warning flags win), whereas a source pragma always overrides
+    // the command line.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
     EM_ASM(
         {
             globalThis.__ctxGoldenPost = 0;
@@ -60,6 +69,7 @@ bool post_bytes(const char* path, const void* data, std::size_t size)
                 .catch(function() { globalThis.__ctxGoldenPost = 2; });
         },
         path, data, size);
+#pragma clang diagnostic pop
     for (int waited_ms = 0; waited_ms < 20000; waited_ms += 50)
     {
         if (emscripten_run_script_int("globalThis.__ctxGoldenPost|0") != 0)
