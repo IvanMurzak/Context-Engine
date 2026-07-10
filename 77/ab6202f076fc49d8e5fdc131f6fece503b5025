@@ -1,0 +1,46 @@
+src/editor/cef/mac/helper-Info.plist.in
+  s_901c74ae05ccf4::t_8f2f43579a556f 1-35
+src/editor/cef/CMakeLists.txt
+  s_901c74ae05ccf4::t_7e714ab6dba769 1-163
+src/editor/cef/src/cef_boot_smoke.cpp
+  s_901c74ae05ccf4::t_7c3a18749fa495 22-27
+  s_901c74ae05ccf4::t_83341b4e4a3455 1-21,28-211
+src/editor/cef/README.md
+  s_901c74ae05ccf4::t_285f7d3e9e27a2 1-39
+tools/fetch_cef.py
+  s_901c74ae05ccf4::t_cff692994307d1 1-273
+src/editor/cef/mac/Info.plist.in
+  s_901c74ae05ccf4::t_f2651f6648908e 1-41
+tools/tests/test_fetch_cef.py
+  s_901c74ae05ccf4::t_cc8dc797a5b159 1-259
+tools/cef-prebuilt.json
+  s_901c74ae05ccf4::t_a2ab477f2381d4 1-30
+.github/workflows/ci.yml
+  s_901c74ae05ccf4::t_bed23aa9b46713 879-969
+docs/ci-fleet-manifest.json
+  s_901c74ae05ccf4::t_4f503198bf8e91 465-473
+  s_901c74ae05ccf4::t_aa41fcc2054a98 464
+src/CMakeLists.txt
+  s_901c74ae05ccf4::t_bf5a6976a6731f 419-429
+  s_901c74ae05ccf4::t_ad439b9c214474 30
+tools/license-allowlist.json
+  s_901c74ae05ccf4::t_3421481ed97cd9 2
+src/editor/cef/src/cef_boot_smoke_helper_mac.cpp
+  s_901c74ae05ccf4::t_06a2fec5818254 1-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "77ab6202f076fc49d8e5fdc131f6fece503b5025",
+  "prompts": {},
+  "sessions": {
+    "s_901c74ae05ccf4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1627ea81-2121-4ad3-a743-aeb95994b255",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
