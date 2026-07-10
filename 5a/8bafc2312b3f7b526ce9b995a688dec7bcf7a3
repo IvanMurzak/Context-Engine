@@ -1,0 +1,89 @@
+tools/tests/test_web_golden_run.py
+  s_44eec50eafd91a::t_161ba652807eee 1-133
+src/render/include/context/render/offscreen_scene.h
+  s_44eec50eafd91a::t_1eabd6113920ed 15
+  s_44eec50eafd91a::t_ae63499aa07dfd 48-54
+  s_44eec50eafd91a::t_de434033d7e2d1 70-75,77-78
+  s_44eec50eafd91a::t_579130a2e158a5 130-149,152
+src/render/sprite/include/context/render/sprite/sprite_offscreen.h
+  s_44eec50eafd91a::t_550efed9aa458a 187-205
+  s_44eec50eafd91a::t_e52ae20b01c5dc 98-100,102-112
+tools/web_golden_run.py
+  s_44eec50eafd91a::t_6fa6be272fa4f5 1-257
+goldens/manifest.json
+  s_44eec50eafd91a::t_466bd6d1285d26 1-53
+tools/check_fleet_manifest.py
+  s_44eec50eafd91a::t_607c35f4ed03f8 101-138
+  s_44eec50eafd91a::t_aa8de278e8220a 17-20
+tools/tests/test_check_fleet_manifest.py
+  s_44eec50eafd91a::t_e6885ddfcc664b 38-47
+  s_44eec50eafd91a::t_a7921ea0006018 120-182
+tools/golden_compare.py
+  s_44eec50eafd91a::t_f4b8f7f10bf599 1-215
+src/render/lit/include/context/render/lit/golden_lit.h
+  s_44eec50eafd91a::t_f9020171a47174 1-10,12-110
+  s_44eec50eafd91a::t_92bbacc3d6969d 11
+bench/minspec_floor.py
+  s_44eec50eafd91a::t_1a2327b09acc11 1-218
+bench/tests/test_minspec_floor.py
+  s_44eec50eafd91a::t_845da6d92b7ef9 1-184
+src/render/CMakeLists.txt
+  s_44eec50eafd91a::t_742072b5f7b0f0 78-105
+src/render/tests/test_m4_exit.cpp
+  s_44eec50eafd91a::t_bff795106f83bb 1-124
+src/render/tests/test_golden_cpu.cpp
+  s_44eec50eafd91a::t_5aa74307b5dfe8 51-60
+  s_44eec50eafd91a::t_4cd0ef13d79d64 1-50,61-139
+src/render/src/wgpu/offscreen_main.cpp
+  s_44eec50eafd91a::t_ebb6ddff37c9eb 33
+  s_44eec50eafd91a::t_c768949b877804 209-217,222-223
+  s_44eec50eafd91a::t_c635c260f714ad 14-24,26-27
+  s_44eec50eafd91a::t_23ac754b7902fa 140-208,218-221,224-253
+tools/tests/test_golden_compare.py
+  s_44eec50eafd91a::t_537c053a703fb7 1-220
+src/render/lit/include/context/render/lit/lit_offscreen.h
+  s_44eec50eafd91a::t_62385a62f490a7 15-19,35,65-69,71-78,80,82-86,89-96,98-110,112-114,117-119,122-132,134-135,137,141,147-148,155,158,161-162,169-171,174,176,182-183,185-333,391-394
+src/render/web/web_main.cpp
+  s_44eec50eafd91a::t_4ed3d9f1093581 113-142,145,147-156
+  s_44eec50eafd91a::t_d279eca274135b 12-18,20-23,25,32-36,40-80
+  s_44eec50eafd91a::t_7ae645dd133ccc 81
+docs/ci-fleet-manifest.json
+  s_44eec50eafd91a::t_cafc74039c10c7 372-452
+  s_44eec50eafd91a::t_12db0fe8788ace 54-70
+  s_44eec50eafd91a::t_e3fca74cac78ad 81-112
+  s_44eec50eafd91a::t_9481800b1b76bf 552
+src/render/include/context/render/golden.h
+  s_44eec50eafd91a::t_4a85634763976b 1-98
+goldens/README.md
+  s_44eec50eafd91a::t_2571c310f2fe1d 1-54
+.github/workflows/ci.yml
+  s_44eec50eafd91a::t_9837b6250f6ece 129-131,133,176-187,652-704,743-762,770
+docs/ci-fleet-manifest.md
+  s_44eec50eafd91a::t_05123a59f8dea3 26,28-29,74-81,105-119,153-155
+goldens/lit3d.ppm
+  s_44eec50eafd91a::t_b32b3c1684d670 1-25539
+goldens/sprite2d.ppm
+  s_44eec50eafd91a::t_d0259657a50051 1-4
+goldens/triangle3d.ppm
+  s_44eec50eafd91a::t_97689dadc5c70f 1-4
+src/render/README.md
+  s_44eec50eafd91a::t_ac02aaacd04169 57-65,95-101,129-133
+src/render/web/README.md
+  s_44eec50eafd91a::t_6f41e1c9175ae3 25-30,69-76,78,81-85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5a8bafc2312b3f7b526ce9b995a688dec7bcf7a3",
+  "prompts": {},
+  "sessions": {
+    "s_44eec50eafd91a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45ca24c7-35c0-4b9c-bad8-a75dda1846ba",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
