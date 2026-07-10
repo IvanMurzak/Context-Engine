@@ -1,0 +1,81 @@
+tools/fetch_tint.py
+  s_e37cb8916c7fcf::t_8f78dd7e8fc7c9 118-122,124-140
+  s_e37cb8916c7fcf::t_0171ba05174141 47
+  s_e37cb8916c7fcf::t_f3c94c46f18892 1-46,48-117,123,141-203
+tools/tests/test_fetch_naga.py
+  s_e37cb8916c7fcf::t_6a430ecba5f166 1-120
+src/render/shadercc/tests/test_roundtrip.cpp
+  s_e37cb8916c7fcf::t_23bba9032a2179 199
+  s_e37cb8916c7fcf::t_a98625688a9c19 119-123,133-136
+  s_e37cb8916c7fcf::t_b464ae3175cb85 429-430
+  s_e37cb8916c7fcf::t_4854e3deeeb3c1 221-233
+  s_e37cb8916c7fcf::t_b9b68ae4251468 1-10,18-19,26-29,41-95
+  s_e37cb8916c7fcf::t_cbc22a2a246e39 280-297,299-307
+  s_e37cb8916c7fcf::t_9a16aa6d81ae97 96
+tools/tests/test_fetch_tint.py
+  s_e37cb8916c7fcf::t_02dc1929a0f2eb 1-149
+tools/tests/test_wgsl_tool_eval.py
+  s_e37cb8916c7fcf::t_2f8a32bde269f7 1-120
+tools/naga-toolchain.json
+  s_e37cb8916c7fcf::t_ab76528ae0eac1 1,3-6
+  s_e37cb8916c7fcf::t_c5745a06eda8f3 2
+src/render/shadercc/include/context/render/shadercc/cross_compiler.h
+  s_e37cb8916c7fcf::t_bd7443d6d21ca0 117-128
+  s_e37cb8916c7fcf::t_e0096a83592459 86-88
+  s_e37cb8916c7fcf::t_0ae68884b10dc9 44,54
+  s_e37cb8916c7fcf::t_3722bdb1fd93ad 1-8,10-15,17-22
+  s_e1fe74694a527e::t_2b2df821d38adf 57-58,64-66,76-77,81
+tools/tint-toolchain.json
+  s_e37cb8916c7fcf::t_9b8c5e40533a2a 1-28
+src/render/shadercc/src/cross_compiler.cpp
+  s_e37cb8916c7fcf::t_b05f94de6e8e0f 250-251,254-259
+  s_e37cb8916c7fcf::t_1794ebea3dd8f2 408-444
+  s_e37cb8916c7fcf::t_87d2b4cecb7b4f 477,481-484,488,490
+  s_e37cb8916c7fcf::t_eed2cd7c5ae7f8 512-514,516,518,535-536
+  s_e37cb8916c7fcf::t_4e2313a0bc5ea1 1-6,18,21-22,24-25,27,31,35-49
+  s_e37cb8916c7fcf::t_eea7c7ee5bf201 193-228,233-249,252-253,260-309
+  s_e37cb8916c7fcf::t_8665739f28bf00 229-232
+  s_e37cb8916c7fcf::t_bf13367b76af04 50
+tools/wgsl_tool_eval.py
+  s_e37cb8916c7fcf::t_e82c6cdfacb0b4 182-184
+  s_e37cb8916c7fcf::t_dcc5d9ece5f771 47
+  s_e37cb8916c7fcf::t_de1c5709fe2f0f 1-46,48-181,185-299
+.github/workflows/ci.yml
+  s_e37cb8916c7fcf::t_231bdb42309710 700-732
+  s_e37cb8916c7fcf::t_adab75494c949d 747
+src/render/shadercc/CMakeLists.txt
+  s_e37cb8916c7fcf::t_a5e6a8abc45629 112,116-119,124-125
+  s_e37cb8916c7fcf::t_e22434d043e988 54-61,63-88,91-93
+tools/fetch_naga.py
+  s_e37cb8916c7fcf::t_40d9a620c1f4b7 1-130
+docs/wgsl-tool-decision.md
+  s_e37cb8916c7fcf::t_22647e0cf9a6aa 1-144
+src/render/shadercc/README.md
+  s_e37cb8916c7fcf::t_ead0dfd9dbeea6 3-6,26,29-32,38-45,54-57,65-67
+tools/license-allowlist.json
+  s_e37cb8916c7fcf::t_f30f499bebe204 2,17,20,26,28,30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2edc149cae80a60a75fee98b53ada74569ee386a",
+  "prompts": {},
+  "sessions": {
+    "s_e1fe74694a527e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aab44b8bfa3dd8eed",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e37cb8916c7fcf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "79ebcd73-a5ef-46fd-ac35-a6d058b74895",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
