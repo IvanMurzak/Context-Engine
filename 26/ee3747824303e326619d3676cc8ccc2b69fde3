@@ -1,0 +1,41 @@
+src/render/web/README.md
+  s_44eec50eafd91a::t_ff2b5eeaeb55c2 1-76
+src/render/web/web_main.cpp
+  s_44eec50eafd91a::t_4e17d4fa736669 1-70
+src/render/README.md
+  s_44eec50eafd91a::t_1114b21af38a5b 59-92
+src/render/CMakeLists.txt
+  s_44eec50eafd91a::t_1dc22e6cea744e 66-77
+src/render/tests/test_web_parity.cpp
+  s_44eec50eafd91a::t_9711cd0fb9c4d6 56-58,62,70-71,73
+  s_44eec50eafd91a::t_e7d4fab0ffd7f1 1-55,59-61,63-69,72,74-87
+src/render/web/CMakeLists.txt
+  s_44eec50eafd91a::t_f3dfb53d50cc79 1-86
+src/render/src/wgpu/wgpu_rhi.cpp
+  s_44eec50eafd91a::t_ab5292438d4491 1,6-17,27-29,31-33
+  s_44eec50eafd91a::t_f379b64c08c0e1 781-788
+  s_44eec50eafd91a::t_ccc63a703cf0fb 63-66,70-72,74
+docs/ci-fleet-manifest.md
+  s_44eec50eafd91a::t_2c07d21da4aea3 71
+docs/ci-fleet-manifest.json
+  s_44eec50eafd91a::t_f0fed44ef95880 317-325
+  s_44eec50eafd91a::t_b735695d892d00 316
+.github/workflows/ci.yml
+  s_44eec50eafd91a::t_45549eccc2c485 645-687
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "26ee3747824303e326619d3676cc8ccc2b69fde3",
+  "prompts": {},
+  "sessions": {
+    "s_44eec50eafd91a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45ca24c7-35c0-4b9c-bad8-a75dda1846ba",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
