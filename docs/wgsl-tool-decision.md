@@ -85,15 +85,16 @@ bind-group layout must follow the same split convention — flagged for the RHI 
 
 - **Backend:** `GlslangSpirvCrossCompiler::compile()`/`cross_compile()` emit `wgsl` per stage via
   the pinned `tint` subprocess (`src/render/shadercc/`). `compile()` stays a pure deterministic
-  function of `(ir, variant, id())`; the backend id bumped to `glslang-spirvcross-v2` and every
-  artifact carries a `wgsltool=tint dawn-<tag>` line, so a tool bump can never silently reuse
-  stale R-FILE-010 cache entries.
+  function of `(ir, variant, id())`; the default id folds the pin in
+  (`glslang-spirvcross-v2+tint dawn-<tag>`), so a tool bump changes every R-FILE-010 cache key —
+  stale entries can never be silently reused — and every artifact carries a matching `wgsltool=`
+  line for inspection.
 - **Acquisition (fail-closed):** `tools/tint-toolchain.json` (single source of truth: repo, tag,
   **pinned commit**, cmake args) + `tools/fetch_tint.py` — shallow-clone the tag over publisher
   TLS, **verify `rev-parse HEAD` against the pinned commit before building**, build the `tint` CLI
   target only, functional smoke, stamp. Tint has no `--version`, so acquisition-time pinning is
-  the enforcement point (plus the artifact `wgsltool=` line). From-source is the L-42-preferred
-  channel; there is no official prebuilt alternative.
+  the enforcement point (plus the id()-folded pin / artifact `wgsltool=` line). From-source is the
+  L-42-preferred channel; there is no official prebuilt alternative.
 - **Cross-consumer guard:** the `shader-crosscompile-roundtrip` ctest validates every emitted WGSL
   module under **tint** (`validate_wgsl()`, the chosen tool's validator — AC1) **and** under the
   pinned **naga** (`tools/naga-toolchain.json` / `tools/fetch_naga.py`) — the native path consumes

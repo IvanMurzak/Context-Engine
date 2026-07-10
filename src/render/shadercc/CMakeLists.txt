@@ -65,8 +65,9 @@ add_test(NAME shader-crosscompile-smoke COMMAND context_shadercc_smoke)
 # and prepends them to PATH before this configure):
 #   * tint — the WIRED SPIR-V->WGSL tool, built from Dawn source at the tag pinned in
 #     tools/tint-toolchain.json (tools/fetch_tint.py; commit-verified, fail-closed). tint has no
-#     --version self-report, so the pin string is baked into the backend and folded into every
-#     artifact (`wgsltool=` line) for R-FILE-010 cache-key hygiene.
+#     --version self-report, so the pin string is baked into the backend, where it is folded into
+#     the default compiler id (an R-FILE-010 cache-key input — a pin bump re-keys the cache) and
+#     recorded in every artifact (`wgsltool=` line).
 #   * naga — the round-trip test's NATIVE-CONSUMER cross-validator (the in-tree wgpu-native parses
 #     WGSL with naga), pinned in tools/naga-toolchain.json (tools/fetch_naga.py).
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/tint-toolchain.json" _tint_manifest)

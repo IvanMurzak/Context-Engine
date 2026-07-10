@@ -93,7 +93,10 @@ def stamp_matches(dest: Path, manifest: dict) -> bool:
 
 def run(cmd: list[str], **kwargs) -> None:
     print(f"[fetch_tint] $ {' '.join(str(c) for c in cmd)}", flush=True)
-    proc = subprocess.run(cmd, **kwargs)
+    try:
+        proc = subprocess.run(cmd, **kwargs)
+    except OSError as exc:  # git/cmake not installed -> the documented exit-2 config error
+        raise FetchError(f"cannot run '{cmd[0]}': {exc}") from exc
     if proc.returncode != 0:
         raise FetchError(f"'{cmd[0]}' failed with exit code {proc.returncode}")
 

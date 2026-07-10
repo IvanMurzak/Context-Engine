@@ -33,7 +33,8 @@ backend (`context::render::material::FakeShaderCompiler`) stays the default-OFF/
   `#if KW == token` authoring idioms) and an entry-point trampoline (`#define <entry> main`) so the
   non-`main` corpus entry points compile under the GLSL frontend. `compile()` is a pure deterministic
   function of `(ir, variant, id())`, keeping the R-FILE-010 content-addressed cache
-  (`ShaderCompileNode`) sound. Header: [`include/context/render/shadercc/cross_compiler.h`](include/context/render/shadercc/cross_compiler.h).
+  (`ShaderCompileNode`) sound — the default `id()` folds the tint pin in, so a tool bump re-keys the
+  cache. Header: [`include/context/render/shadercc/cross_compiler.h`](include/context/render/shadercc/cross_compiler.h).
 - **`tests/test_roundtrip.cpp` → `context_shadercc_roundtrip`** (ctest `shader-crosscompile-roundtrip`)
   — the R-QA-013 round-trip proof: author → SPIR-V → {HLSL,MSL,GLSL,WGSL} over the **real authored
   corpus** (reused from [`../material/corpus/`](../material/corpus/)), asserting each target compiles,

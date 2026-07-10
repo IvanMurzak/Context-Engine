@@ -72,6 +72,17 @@ def test_clone_and_verify_rejects_commit_mismatch(tmp_path: Path,
         fetch_tint.clone_and_verify(PIN, tmp_path)
 
 
+def test_run_missing_tool_is_config_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing git/cmake maps to the documented exit-2 FetchError, not an uncaught traceback."""
+
+    def raise_missing(*_a, **_k):
+        raise FileNotFoundError(2, "No such file or directory", "git")
+
+    monkeypatch.setattr(fetch_tint.subprocess, "run", raise_missing)
+    with pytest.raises(fetch_tint.FetchError, match="cannot run 'git'"):
+        fetch_tint.run(["git", "clone", "https://example.invalid/dawn"])
+
+
 # --- main() paths ---------------------------------------------------------------------
 
 

@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -44,10 +45,14 @@ constexpr std::uint32_t kSpirvMagic = 0x07230203u;
 // plumbing — the backend deliberately does not expose its internals.
 bool naga_accepts_wgsl(const std::string& wgsl)
 {
+    // Per-process random tag + counter (the backend's make_scratch_path scheme) so concurrent
+    // processes sharing the temp dir can never collide on the scratch name.
+    static const unsigned process_tag = std::random_device{}();
     static int counter = 0;
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() /
-        ("ctx-shadercc-xval-" + std::to_string(++counter) + ".wgsl");
+        ("ctx-shadercc-xval-" + std::to_string(process_tag) + "-" + std::to_string(++counter) +
+         ".wgsl");
     {
         std::ofstream out(path, std::ios::binary);
         out << wgsl;
@@ -143,6 +148,10 @@ void test_corpus_cross_compiles()
     const std::vector<std::string> names = {"unlit_color.shader", "lit_pbr.shader",
                                             "postprocess_blit.shader"};
     GlslangSpirvCrossCompiler backend;
+
+    // The pinned WGSL tool must participate in id() — and thus in every R-FILE-010 cache key — so a
+    // tint pin bump can never silently serve stale cached WGSL (see default_id()).
+    CHECK(backend.id().find("tint") != std::string::npos);
 
     for (const std::string& name : names)
     {

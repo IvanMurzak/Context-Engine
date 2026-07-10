@@ -719,9 +719,10 @@ jobs:
       - name: Stage pinned WGSL tools (tint + naga)
         run: |
           # macOS GH images ship no Rust toolchain; bootstrap a minimal one ONLY when needed (the
-          # cache-hit path needs no cargo). rustup.rs is the publisher TLS channel.
+          # cache-hit path needs no cargo). rustup.rs is the publisher TLS channel; retry-wrapped
+          # like every other external download in CI (Context-Engine#132 posture).
           if ! command -v cargo >/dev/null 2>&1 && [ ! -d "${RUNNER_TEMP}/naga-tool/bin" ]; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            bash tools/ci-retry.sh -- bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable"
             export PATH="$HOME/.cargo/bin:$PATH"
           fi
           PY="$(command -v python3 || command -v python)"

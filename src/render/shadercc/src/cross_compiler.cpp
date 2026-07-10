@@ -38,7 +38,8 @@
 
 // The pinned WGSL tool, baked in by src/render/shadercc/CMakeLists.txt: the tint executable path
 // (found/staged at configure time) and the human-readable pin string (the Dawn release tag from
-// tools/tint-toolchain.json) that is folded into every artifact. tint has no --version self-report,
+// tools/tint-toolchain.json) that is folded into the backend's default id() — and thus into every
+// R-FILE-010 cache key — plus every artifact's `wgsltool=` line. tint has no --version self-report,
 // so the pin is enforced at acquisition (tools/fetch_tint.py verifies the pinned commit, fail-closed)
 // and recorded here for cache-key hygiene.
 #ifndef CONTEXT_SHADERCC_WGSL_TOOL_EXECUTABLE
@@ -442,6 +443,15 @@ void validate_wgsl(const std::string& wgsl)
     }
 }
 
+std::string GlslangSpirvCrossCompiler::default_id()
+{
+    // `glslang-spirvcross-v2` = the artifact SHAPE tag (v2 grew the WGSL leg); the appended
+    // CMake-baked tool pin makes a tint bump change the id — and with it every R-FILE-010 cache key
+    // (ShaderCompileNode hashes (ir | variant | id)) — with no manual version bump to forget. The
+    // artifact's `wgsltool=` line echoes the same pin for inspection; only the id is keyed.
+    return "glslang-spirvcross-v2+" CONTEXT_SHADERCC_WGSL_TOOL_PIN;
+}
+
 GlslangSpirvCrossCompiler::GlslangSpirvCrossCompiler(std::string id) : id_(std::move(id))
 {
 }
@@ -510,8 +520,9 @@ CompiledArtifact GlslangSpirvCrossCompiler::compile(const ShaderIr& ir, const Va
     // size of the SPIR-V and of each cross-compiled target. Pure function of (ir, variant, id), so the
     // R-FILE-010 content-addressed cache (ShaderCompileNode) stays sound with the real backend. Hashes
     // rather than the full sources keep the artifact compact while still proving all four targets were
-    // produced and pinning them against drift. The `wgsltool=` line folds the pinned WGSL tool into
-    // the artifact bytes, so a tool bump can never silently reuse stale cache entries.
+    // produced and pinning them against drift. The `wgsltool=` line records the pinned WGSL tool in
+    // the artifact bytes for inspection; cache soundness across tool bumps comes from the pin living
+    // in the default id() (a cache-key input — see default_id()), not from this line.
     std::ostringstream os;
     os << "SPIRV-CROSS-ARTIFACT v2\n";
     os << "compiler=" << id_ << "\n";

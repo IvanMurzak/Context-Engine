@@ -18,8 +18,10 @@
 // stable library API surface for out-of-tree consumers and no official prebuilts, so the binary is
 // built from Dawn source at a pinned release tag by tools/fetch_tint.py (commit-verified,
 // fail-closed). tint has no `--version` self-report, so the pin is enforced at ACQUISITION time (the
-// fetch stamp) and the CMake-baked pin string is folded into every artifact (`wgsltool=` line), which
-// keeps the content-addressed cache sound across tool bumps.
+// fetch stamp) and the CMake-baked pin string is folded into the backend's default id() — the
+// R-FILE-010 cache key hashes (ir, variant, id), so a tool bump changes every key and can never
+// silently reuse stale cache entries — and echoed in every artifact (`wgsltool=` line) for human
+// inspection.
 
 #pragma once
 
@@ -73,12 +75,18 @@ public:
 // The real backend. Aside from glslang's once-per-process init (owned by an internal RAII guard), it
 // is stateless, so one instance is reusable and every call is independent + deterministic. Implements
 // the material/ IShaderCompiler seam WITHOUT modifying it.
-// Default id is v2: the artifact grew the WGSL leg (per-stage `wgsl=` + the `wgsltool=` pin line),
-// so v1 cache entries must never be shared with the v1 artifact shape (R-FILE-010 key hygiene).
+// Default id is default_id(): the `glslang-spirvcross-v2` shape tag (v2 = the artifact grew the WGSL
+// leg, so v1 cache entries are never shared with the new shape) PLUS the pinned WGSL tool, so a tool
+// pin bump changes id() — and with it every R-FILE-010 cache key — with no manual bump to forget.
 class GlslangSpirvCrossCompiler final : public IShaderCompiler
 {
 public:
-    explicit GlslangSpirvCrossCompiler(std::string id = "glslang-spirvcross-v2");
+    // "glslang-spirvcross-v2" + the CMake-baked WGSL tool pin (defined in the .cpp, where the pin
+    // macro is visible). The pin lives in the id so it participates in the ShaderCompileNode cache
+    // key — the artifact's `wgsltool=` line merely echoes it for inspection.
+    [[nodiscard]] static std::string default_id();
+
+    explicit GlslangSpirvCrossCompiler(std::string id = default_id());
 
     [[nodiscard]] std::string id() const override;
 
