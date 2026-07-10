@@ -80,8 +80,13 @@ This tier orchestrates **opaque runnables** and makes the parallel-safety guaran
 - **Debug-mode undeclared-access Proxy** (#88 item 2) — a debug build that **throws** on access outside
   a system's declaration. Release hands declared views only, which is enough for the guarantee here;
   the throw-on-undeclared half is separate.
-- **End-of-system command buffer** (#88 item 3) — deferred structural changes (add/remove component,
-  entity create/destroy). Systems in this tier do read/write over a **stable** archetype set only.
+- **End-of-system command buffer** (#88 item 3) — **landed**, in this module + the kernel: a system
+  registers a `run_cmd` runnable that records structural changes (add/remove component, entity
+  create/destroy) into its per-system `kernel::CommandBuffer`, and the World-taking `run_tick`
+  applies the buffers between systems — at native batch boundaries in ascending registration order
+  (deterministic, L-54) and after each TS system on the single lane. A running system still does
+  read/write over a **stable** archetype set only; its structural mutations take effect after it
+  returns, before the next dependent (strictly-later-batch) system runs.
 - **WASM-tier systems** (#88 item 4 remainder) — a WASM system participates in the native DAG by its
   declared access; `memory.grow` contract-invalidation is its own task.
 - **TS source-map debug** (R-OBS-005, task 4b).

@@ -15,6 +15,12 @@ game-feature semantics (R-KERNEL-001).
 - **World** (`world.h`, `entity.h`, `component.h`) — the data-oriented, **custom archetype/SoA** ECS
   (L-60, R-SIM-003). Stable generation-checked entity ids; create/destroy; add/remove/get
   components with archetype migration; cache-friendly column queries (`each<Cs...>`).
+- **CommandBuffer** (`command_buffer.h`) — deferred structural changes (the R-LANG-009
+  command-buffer clause, #88 item 3): a running system RECORDS add/remove component and entity
+  create/destroy (owned payloads, pending-entity placeholders) instead of applying them, and
+  `apply(world)` executes the commands in recorded FIFO order between systems — so archetype memory
+  never moves under a live zero-copy view. The scheduler (`editor/schedule`) owns the per-system
+  buffers and the between-systems flush ordering.
 - **Scheduler** (`scheduler.h`) — the **fixed-timestep** loop and the sim→render timing contract
   (R-SIM-002, L-39): accumulator-based fixed ticks, interpolation `alpha`, tick-rate policy, and the
   high-refresh presentation rule. Full contract in

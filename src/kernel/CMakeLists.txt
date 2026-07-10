@@ -4,6 +4,7 @@
 
 add_library(context_kernel STATIC
     src/world.cpp
+    src/command_buffer.cpp
     src/scheduler.cpp
     src/module.cpp
     src/event_bus.cpp
@@ -22,6 +23,7 @@ target_link_libraries(context_kernel PRIVATE context_warnings)
 set(_context_kernel_tests
     test_world
     test_world_raw
+    test_command_buffer
     test_scheduler
     test_module_registry
     test_event_bus

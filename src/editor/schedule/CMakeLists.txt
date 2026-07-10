@@ -51,6 +51,18 @@ target_link_libraries(context_schedule_test_schedule
 target_include_directories(context_schedule_test_schedule PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME schedule-test_schedule COMMAND context_schedule_test_schedule)
 
+# 2b) Deferred structural changes (#88 item 3 — the R-LANG-009 command-buffer clause): per-system
+#     kernel::CommandBuffer recording + the World-taking run_tick's between-systems flush (batch
+#     boundaries in ascending registration order; per-system on the TS lane). Links no V8, so it is a
+#     LOCAL gate on every leg AND a full subject of the ASan/UBSan + TSan CI legs — the parallel-safety
+#     gate extends to the deferred-structural path (16 systems recording into their own buffers across
+#     a real fork-join).
+add_executable(context_schedule_test_deferred tests/test_schedule_deferred.cpp)
+target_link_libraries(context_schedule_test_deferred
+    PRIVATE context_schedule context_kernel context_warnings Threads::Threads)
+target_include_directories(context_schedule_test_deferred PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME schedule-test_deferred COMMAND context_schedule_test_deferred)
+
 # 3) Keystone: a C++ (native) system and a TS system both mutate the shared World, scheduled safely in
 #    one tick. The TS lane drives context_system's run_system in the V8 host; the native batch runs two
 #    disjoint-write C++ systems in parallel. CI-only for its V8 path — mirror editor/system's

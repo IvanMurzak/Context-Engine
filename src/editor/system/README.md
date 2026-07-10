@@ -39,8 +39,10 @@ The World's hot columns are not yet VM-allocated, so this tier **copies** each q
 **VM-interior World columns** seam (R-LANG-008 / L-60, #88 item 5) makes the columns themselves
 VM-allocated — at which point the views alias the columns directly and the copy vanishes. Structural
 changes inside an executor (add/remove component, entity create/destroy) are **unsupported** (memory
-may move under a live view); the **end-of-system command buffer** that defers them is a separate
-split-out task (#88 item 3).
+may move under a live view); the **end-of-system command buffer** that defers them landed on #88
+item 3 — the system's host-side closure records them into its per-system `kernel::CommandBuffer`
+(`kernel/command_buffer.h`) and the scheduler's World-taking `run_tick` applies them between systems
+(`editor/schedule`).
 
 ## Endianness
 
@@ -54,7 +56,9 @@ across the 3-OS matrix). A future big-endian port would flip the endianness flag
 
 - **Write-set enforcement** — a debug-build `Proxy` that throws on undeclared component access (#88
   item 2). This tier hands out only the declared-component views; the throw-on-undeclared half is split.
-- **End-of-system command buffer** — deferred structural changes (#88 item 3).
+- **End-of-system command buffer** — deferred structural changes (#88 item 3). **Landed** in
+  `kernel/command_buffer.h` + the scheduler's World-taking `run_tick` (`editor/schedule`): recorded
+  per system, applied between systems.
 - **WASM-tier analog** — `memory.grow` contract-invalidates the host-mapped linear-memory base (#88
   item 4).
 - **VM-interior World columns** — removes the gather/scatter copy (#88 item 5).
