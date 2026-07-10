@@ -1,10 +1,13 @@
-// Round-trip proof for the real glslang + SPIRV-Cross backend (R-REND-005; sub-task C of #119, issue
-// #130): author -> SPIR-V -> {HLSL, MSL, GLSL} over the REAL authored corpus (the same
-// src/render/material/corpus/*.shader the fake backend exercises), plus determinism/stability +
-// variant-sensitivity + a compute-stage path + a malformed-source failure path (R-QA-013:
-// happy/edge/failure ship in the same PR). This exe is registered under the `shader-crosscompile`
-// ctest preset, so the existing `shader-crosscompile` CI job (issue #128) runs it via `ctest` with NO
-// .github/** change. Satisfies AC #1 of #119 minus the WGSL leg (sub-task D).
+// Round-trip proof for the real glslang + SPIRV-Cross + Tint backend (R-REND-005; sub-tasks C+D of
+// #119, issues #130/#133): author -> SPIR-V -> {HLSL, MSL, GLSL, WGSL} over the REAL authored corpus
+// (the same src/render/material/corpus/*.shader the fake backend exercises), plus
+// determinism/stability + variant-sensitivity + a compute-stage path + malformed-input failure paths
+// (R-QA-013: happy/edge/failure ship in the same PR). Every emitted WGSL module is validated TWICE:
+// with the chosen tool's own validator (tint — validate_wgsl(), AC1 of #133) AND with the pinned
+// naga, because the native path consumes WGSL through naga inside the in-tree wgpu-native
+// (spikes/webgpu/FINDINGS.md — the emitted WGSL must satisfy BOTH consumers). This exe is registered
+// under the `shader-crosscompile` ctest preset, so the existing `shader-crosscompile` CI job (issue
+// #128) runs it via `ctest` with no new job. Satisfies AC #1 of #119 in full.
 
 #include "context/render/material/material_ir.h"
 #include "context/render/shadercc/cross_compiler.h"
@@ -12,11 +15,17 @@
 #include "shadercc_test.h"
 
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
+
+#ifndef _WIN32
+#include <sys/wait.h> // WIFEXITED/WEXITSTATUS for decoding std::system()'s wait status
+#endif
 
 using namespace context::render::material;
 using context::render::shadercc::CrossCompiledStage;
@@ -28,6 +37,62 @@ namespace
 {
 
 constexpr std::uint32_t kSpirvMagic = 0x07230203u;
+
+// Cross-validate one WGSL module under the pinned naga (the NATIVE consumer's WGSL frontend —
+// `naga <file.wgsl>` parses + validates, exit 0 on success). The backend's own validate_wgsl()
+// covers the chosen tool's validator; this guards the OTHER consumer. Test-local subprocess
+// plumbing — the backend deliberately does not expose its internals.
+bool naga_accepts_wgsl(const std::string& wgsl)
+{
+    static int counter = 0;
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        ("ctx-shadercc-xval-" + std::to_string(++counter) + ".wgsl");
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << wgsl;
+        if (!out)
+        {
+            return false;
+        }
+    }
+
+#ifdef _WIN32
+    const char* null_dev = "NUL";
+#else
+    const char* null_dev = "/dev/null";
+#endif
+    // stdout (naga's per-file "Validation successful") goes to the null device; stderr stays on the
+    // ctest output so a rejection is diagnosable.
+    std::string command = std::string("\"") + CONTEXT_SHADERCC_NAGA_EXECUTABLE + "\" \"" +
+                          path.string() + "\" > " + null_dev;
+#ifdef _WIN32
+    // cmd.exe strips the OUTERMOST quote pair from `cmd /c <line>`; wrap in one extra pair.
+    command = "\"" + command + "\"";
+    const int rc = std::system(command.c_str());
+#else
+    const int status = std::system(command.c_str());
+    const int rc = (status != -1 && WIFEXITED(status)) ? WEXITSTATUS(status) : -1;
+#endif
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    return rc == 0;
+}
+
+// The chosen tool's validator (AC1): validate_wgsl() throws on an invalid module.
+bool tint_accepts_wgsl(const std::string& wgsl)
+{
+    try
+    {
+        context::render::shadercc::validate_wgsl(wgsl);
+        return true;
+    }
+    catch (const ShaderCompileError&)
+    {
+        return false;
+    }
+}
 
 std::optional<std::string> read_file(const std::string& path)
 {
@@ -51,9 +116,11 @@ ShaderIr load_corpus(const std::string& name)
     return ir.value_or(ShaderIr{});
 }
 
-// Every stage cross-compiled to all three C++ targets: real SPIR-V (magic-checked) + non-empty
-// HLSL/MSL/GLSL, with a reliable per-target sentinel (SPIRV-Cross GLSL always emits a `#version`
-// line; MSL always emits the `metal_stdlib` include / `using namespace metal`).
+// Every stage cross-compiled to all four targets: real SPIR-V (magic-checked) + non-empty
+// HLSL/MSL/GLSL/WGSL, with a reliable per-target sentinel (SPIRV-Cross GLSL always emits a
+// `#version` line; MSL always emits the `metal_stdlib` include / `using namespace metal`; tint WGSL
+// always carries a stage attribute). The WGSL leg is additionally VALIDATED under both consumers:
+// tint's own validator (AC1 of #133) and the pinned native-consumer naga.
 void assert_stage_ok(const CrossCompiledStage& s)
 {
     CHECK(!s.spirv.empty());
@@ -63,6 +130,10 @@ void assert_stage_ok(const CrossCompiledStage& s)
     CHECK(!s.glsl.empty());
     CHECK(s.glsl.find("#version") != std::string::npos);
     CHECK(s.msl.find("metal") != std::string::npos);
+    CHECK(!s.wgsl.empty());
+    CHECK(s.wgsl.find("@") != std::string::npos); // @vertex/@fragment/@compute stage attribute
+    CHECK(tint_accepts_wgsl(s.wgsl));
+    CHECK(naga_accepts_wgsl(s.wgsl));
 }
 
 // The whole authored corpus, EVERY variant, author -> SPIR-V -> HLSL/MSL/GLSL succeeds; the seam
@@ -125,6 +196,7 @@ void test_determinism()
         CHECK(ca.stages[i].hlsl == cb.stages[i].hlsl);
         CHECK(ca.stages[i].msl == cb.stages[i].msl);
         CHECK(ca.stages[i].glsl == cb.stages[i].glsl);
+        CHECK(ca.stages[i].wgsl == cb.stages[i].wgsl);
     }
 }
 
@@ -146,6 +218,19 @@ void test_variants_differ()
     const CompiledArtifact last = backend.compile(ir, variants.back());
     CHECK(first.variant_key != last.variant_key);
     CHECK(first.artifact != last.artifact);
+
+    // The WGSL leg is variant-sensitive too: the keyword `#define`s reach the emitted WGSL, not
+    // just the artifact hash — at least one stage's WGSL must differ between all-off and all-on
+    // (unlit_color's FOG axis rewrites the fragment; INSTANCED rewrites the vertex inputs).
+    const CrossCompileResult cc_first = backend.cross_compile(ir, variants.front());
+    const CrossCompileResult cc_last = backend.cross_compile(ir, variants.back());
+    CHECK(cc_first.stages.size() == cc_last.stages.size());
+    bool any_wgsl_differs = false;
+    for (std::size_t i = 0; i < cc_first.stages.size() && i < cc_last.stages.size(); ++i)
+    {
+        any_wgsl_differs = any_wgsl_differs || (cc_first.stages[i].wgsl != cc_last.stages[i].wgsl);
+    }
+    CHECK(any_wgsl_differs);
 }
 
 // Edge: a no-keyword shader compiles to its single default variant; and a COMPUTE stage exercises the
@@ -192,7 +277,34 @@ void test_programmatic_shaders()
         CHECK(!ccc.stages.front().hlsl.empty());
         CHECK(!ccc.stages.front().msl.empty());
         CHECK(!ccc.stages.front().glsl.empty());
+        CHECK(!ccc.stages.front().wgsl.empty());
+        CHECK(ccc.stages.front().wgsl.find("@compute") != std::string::npos);
     }
+}
+
+// Failure path (WGSL leg, R-QA-013): garbage SPIR-V words must make the tint leg throw
+// ShaderCompileError (carrying the tool's diagnostics) — never a crash or a silent empty result.
+void test_wgsl_malformed_spirv_throws()
+{
+    const std::vector<std::uint32_t> garbage = {0xDEADBEEFu, 0x01020304u, 0x0BADF00Du};
+    bool threw = false;
+    try
+    {
+        (void)context::render::shadercc::spirv_to_wgsl(garbage);
+    }
+    catch (const ShaderCompileError&)
+    {
+        threw = true;
+    }
+    CHECK(threw);
+}
+
+// Failure path (WGSL validator, R-QA-013): the chosen tool's validator must REJECT a malformed
+// module — proving the AC1 validity checks above can actually fail.
+void test_validate_wgsl_rejects_malformed()
+{
+    CHECK(!tint_accepts_wgsl("this is not wgsl @@@"));
+    CHECK(!naga_accepts_wgsl("this is not wgsl @@@"));
 }
 
 // Failure path: malformed GLSL throws ShaderCompileError, not a crash or a silent empty artifact
@@ -314,5 +426,7 @@ int main()
     test_assemble_stage_source();
     test_assemble_stage_source_token_collision_throws();
     test_compile_failure_throws();
+    test_wgsl_malformed_spirv_throws();
+    test_validate_wgsl_rejects_malformed();
     SHADERCC_TEST_MAIN_END();
 }

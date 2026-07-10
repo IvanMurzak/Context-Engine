@@ -1,8 +1,9 @@
-// The real glslang + SPIRV-Cross backend behind the material/ IShaderCompiler seam (R-REND-005;
-// sub-task C of #119, issue #130). See cross_compiler.h for the design + the keyword-injection
-// convention. Built ONLY under CONTEXT_BUILD_SHADER_CROSSCOMPILE (the shadercc/ dir is gated), so this
-// TU never compiles on the default dev gate — its authoritative signal is the `shader-crosscompile`
-// CI job (glslang/SPIRV-Cross from the vcpkg manifest feature).
+// The real glslang + SPIRV-Cross + Tint backend behind the material/ IShaderCompiler seam
+// (R-REND-005; sub-tasks C+D of #119, issues #130/#133). See cross_compiler.h for the design + the
+// keyword-injection convention; docs/wgsl-tool-decision.md for the measured Tint-vs-Naga ruling.
+// Built ONLY under CONTEXT_BUILD_SHADER_CROSSCOMPILE (the shadercc/ dir is gated), so this TU never
+// compiles on the default dev gate — its authoritative signal is the `shader-crosscompile` CI job
+// (glslang/SPIRV-Cross from the vcpkg manifest feature; tint staged by tools/fetch_tint.py).
 
 #include "context/render/shadercc/cross_compiler.h"
 
@@ -14,15 +15,38 @@
 #include <spirv_cross/spirv_hlsl.hpp>
 #include <spirv_cross/spirv_msl.hpp>
 
+#include <atomic>
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <map>
+#include <random>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
+
+#ifndef _WIN32
+#include <sys/wait.h> // WIFEXITED/WEXITSTATUS for decoding std::system()'s wait status
+#endif
+
+// The pinned WGSL tool, baked in by src/render/shadercc/CMakeLists.txt: the tint executable path
+// (found/staged at configure time) and the human-readable pin string (the Dawn release tag from
+// tools/tint-toolchain.json) that is folded into every artifact. tint has no --version self-report,
+// so the pin is enforced at acquisition (tools/fetch_tint.py verifies the pinned commit, fail-closed)
+// and recorded here for cache-key hygiene.
+#ifndef CONTEXT_SHADERCC_WGSL_TOOL_EXECUTABLE
+#error "CONTEXT_SHADERCC_WGSL_TOOL_EXECUTABLE must be defined (see src/render/shadercc/CMakeLists.txt)"
+#endif
+#ifndef CONTEXT_SHADERCC_WGSL_TOOL_PIN
+#error "CONTEXT_SHADERCC_WGSL_TOOL_PIN must be defined (see src/render/shadercc/CMakeLists.txt)"
+#endif
 
 namespace context::render::shadercc
 {
@@ -166,6 +190,123 @@ std::string spirv_to_glsl(const std::vector<std::uint32_t>& spirv)
     return compiler.compile();
 }
 
+// ---- the WGSL leg: pinned-tint subprocess plumbing (sub-task D, issue #133) ----------------------
+
+// A unique scratch path under the system temp dir. The random per-process prefix + an atomic counter
+// keep concurrent test executables (ctest -j) and repeated calls from colliding. Scratch paths are
+// I/O plumbing only — the translation OUTPUT stays a pure function of the input module.
+std::filesystem::path make_scratch_path(const char* suffix)
+{
+    static const std::uint64_t process_tag = [] {
+        std::random_device rd;
+        return (static_cast<std::uint64_t>(rd()) << 32) ^ rd();
+    }();
+    static std::atomic<std::uint64_t> counter{0};
+
+    std::ostringstream name;
+    name << "ctx-shadercc-" << std::hex << process_tag << "-" << std::dec
+         << counter.fetch_add(1, std::memory_order_relaxed) << suffix;
+    return std::filesystem::temp_directory_path() / name.str();
+}
+
+// Removes its file on scope exit so no scratch accumulates across the corpus-sized test runs.
+struct ScratchFile
+{
+    std::filesystem::path path;
+    explicit ScratchFile(std::filesystem::path p) : path(std::move(p)) {}
+    ~ScratchFile()
+    {
+        std::error_code ec;
+        std::filesystem::remove(path, ec); // best-effort; never throws in a destructor
+    }
+    ScratchFile(const ScratchFile&) = delete;
+    ScratchFile& operator=(const ScratchFile&) = delete;
+};
+
+void write_scratch(const std::filesystem::path& path, const void* data, std::size_t bytes)
+{
+    std::ofstream out(path, std::ios::binary);
+    if (bytes != 0) // an empty input still creates the (empty) file for the tool to reject loudly
+    {
+        out.write(static_cast<const char*>(data), static_cast<std::streamsize>(bytes));
+    }
+    if (!out)
+    {
+        throw ShaderCompileError("wgsl leg: cannot write scratch file " + path.string());
+    }
+}
+
+std::string read_scratch(const std::filesystem::path& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+// Quote one command-line argument for std::system(). Scratch paths are ours; the tool path comes
+// from CMake — none may legitimately contain quote/expansion metacharacters, so REFUSE loudly
+// rather than build an ambiguous command line (fail-closed, mirrors the backend's error posture).
+// The metacharacter set is per shell: cmd.exe expands `%VAR%` even inside quotes (backslash is the
+// path separator there — legitimate); POSIX sh expands `$`/backtick/backslash inside double quotes.
+std::string quote_argument(const std::string& arg)
+{
+#ifdef _WIN32
+    constexpr const char* kMeta = "\"%";
+#else
+    constexpr const char* kMeta = "\"$`\\";
+#endif
+    if (arg.find_first_of(kMeta) != std::string::npos)
+    {
+        throw ShaderCompileError("wgsl leg: refusing to quote argument with shell metacharacters: " +
+                                 arg);
+    }
+    return "\"" + arg + "\"";
+}
+
+// Run one tool command line via std::system(), returning the tool's exit code (or -1 when the
+// shell/tool could not be launched at all).
+int run_tool_command(const std::string& command)
+{
+#ifdef _WIN32
+    // cmd.exe strips the OUTERMOST quote pair from `cmd /c <line>`; the documented workaround is to
+    // wrap the whole (already fully quoted) line in one extra pair.
+    const int rc = std::system(("\"" + command + "\"").c_str());
+    return rc;
+#else
+    const int status = std::system(command.c_str());
+    if (status == -1)
+    {
+        return -1;
+    }
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+#endif
+}
+
+// Invoke the pinned tint on `input`, writing WGSL to `output` (the validate path writes to the null
+// device). Returns tint's stderr text on failure via `diagnostics`.
+int run_tint(const std::filesystem::path& input, const std::string& output,
+             std::string& diagnostics)
+{
+    const ScratchFile err(make_scratch_path(".stderr"));
+    const std::string command = quote_argument(CONTEXT_SHADERCC_WGSL_TOOL_EXECUTABLE) +
+                                " --format wgsl -o " + quote_argument(output) + " " +
+                                quote_argument(input.string()) + " 2> " +
+                                quote_argument(err.path.string());
+    const int rc = run_tool_command(command);
+    diagnostics = (rc == 0) ? std::string{} : read_scratch(err.path);
+    return rc;
+}
+
+const char* null_device()
+{
+#ifdef _WIN32
+    return "NUL";
+#else
+    return "/dev/null";
+#endif
+}
+
 } // namespace
 
 std::string assemble_stage_source(const ShaderStage& stage, const ShaderIr& ir,
@@ -264,6 +405,43 @@ std::string assemble_stage_source(const ShaderStage& stage, const ShaderIr& ir,
     return out.str();
 }
 
+std::string spirv_to_wgsl(const std::vector<std::uint32_t>& spirv)
+{
+    const ScratchFile in(make_scratch_path(".spv"));
+    const ScratchFile out(make_scratch_path(".wgsl"));
+    write_scratch(in.path, spirv.data(), spirv.size() * sizeof(std::uint32_t));
+
+    std::string diagnostics;
+    const int rc = run_tint(in.path, out.path.string(), diagnostics);
+    if (rc != 0)
+    {
+        throw ShaderCompileError("tint SPIR-V->WGSL translation failed (exit " +
+                                 std::to_string(rc) + "):\n" + diagnostics);
+    }
+    std::string wgsl = read_scratch(out.path);
+    if (wgsl.empty())
+    {
+        throw ShaderCompileError("tint produced an empty WGSL translation");
+    }
+    return wgsl;
+}
+
+void validate_wgsl(const std::string& wgsl)
+{
+    const ScratchFile in(make_scratch_path(".wgsl"));
+    write_scratch(in.path, wgsl.data(), wgsl.size());
+
+    // tint has no validate-only switch; parse+resolve+re-emit to the null device is the working
+    // equivalent (probed against the pinned Dawn tag — see docs/wgsl-tool-decision.md).
+    std::string diagnostics;
+    const int rc = run_tint(in.path, null_device(), diagnostics);
+    if (rc != 0)
+    {
+        throw ShaderCompileError("tint WGSL validation failed (exit " + std::to_string(rc) +
+                                 "):\n" + diagnostics);
+    }
+}
+
 GlslangSpirvCrossCompiler::GlslangSpirvCrossCompiler(std::string id) : id_(std::move(id))
 {
 }
@@ -296,18 +474,20 @@ CrossCompileResult GlslangSpirvCrossCompiler::cross_compile(const ShaderIr& ir,
             out.hlsl = spirv_to_hlsl(out.spirv);
             out.msl = spirv_to_msl(out.spirv);
             out.glsl = spirv_to_glsl(out.spirv);
+            out.wgsl = spirv_to_wgsl(out.spirv);
         }
         catch (const std::exception& e)
         {
-            // SPIRV-Cross throws spirv_cross::CompilerError (a std::runtime_error) on failure; wrap it
-            // with the shader/stage context so the ctest failure is self-explanatory.
-            throw ShaderCompileError("SPIRV-Cross failed for shader '" + ir.name + "' (entry '" +
+            // SPIRV-Cross throws spirv_cross::CompilerError (a std::runtime_error) and the WGSL leg
+            // throws ShaderCompileError on failure; wrap either with the shader/stage context so the
+            // ctest failure is self-explanatory.
+            throw ShaderCompileError("cross-compile failed for shader '" + ir.name + "' (entry '" +
                                      stage.entry_point + "'): " + e.what());
         }
 
-        if (out.hlsl.empty() || out.msl.empty() || out.glsl.empty())
+        if (out.hlsl.empty() || out.msl.empty() || out.glsl.empty() || out.wgsl.empty())
         {
-            throw ShaderCompileError("SPIRV-Cross produced an empty translation for shader '" +
+            throw ShaderCompileError("cross-compile produced an empty translation for shader '" +
                                      ir.name + "' (entry '" + stage.entry_point + "')");
         }
 
@@ -329,11 +509,13 @@ CompiledArtifact GlslangSpirvCrossCompiler::compile(const ShaderIr& ir, const Va
     // A deterministic, human-inspectable manifest of the REAL outputs: per stage, the content hash +
     // size of the SPIR-V and of each cross-compiled target. Pure function of (ir, variant, id), so the
     // R-FILE-010 content-addressed cache (ShaderCompileNode) stays sound with the real backend. Hashes
-    // rather than the full sources keep the artifact compact while still proving all three targets were
-    // produced and pinning them against drift.
+    // rather than the full sources keep the artifact compact while still proving all four targets were
+    // produced and pinning them against drift. The `wgsltool=` line folds the pinned WGSL tool into
+    // the artifact bytes, so a tool bump can never silently reuse stale cache entries.
     std::ostringstream os;
-    os << "SPIRV-CROSS-ARTIFACT v1\n";
+    os << "SPIRV-CROSS-ARTIFACT v2\n";
     os << "compiler=" << id_ << "\n";
+    os << "wgsltool=" << CONTEXT_SHADERCC_WGSL_TOOL_PIN << "\n";
     os << "shader=" << ir.name << "\n";
     os << "ir=" << art.ir_hash << "\n";
     os << "variant=" << (art.variant_key.empty() ? "<default>" : art.variant_key) << "\n";
@@ -350,6 +532,8 @@ CompiledArtifact GlslangSpirvCrossCompiler::compile(const ShaderIr& ir, const Va
            << " bytes=" << s.msl.size() << "\n";
         os << "  glsl=" << context::render::material::content_hash_hex(s.glsl)
            << " bytes=" << s.glsl.size() << "\n";
+        os << "  wgsl=" << context::render::material::content_hash_hex(s.wgsl)
+           << " bytes=" << s.wgsl.size() << "\n";
     }
     art.artifact = os.str();
     return art;
