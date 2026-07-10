@@ -112,6 +112,10 @@ def cmd_measure(args: argparse.Namespace) -> int:
         print(f"[minspec] ERROR: bench subject not found: {exe}", file=sys.stderr)
         return 2
 
+    if args.runs < 1:
+        print(f"[minspec] ERROR: --runs must be >= 1 (got {args.runs})", file=sys.stderr)
+        return 2
+
     run_medians: list[float] = []
     raw_runs: list[dict] = []
     for run in range(args.runs):

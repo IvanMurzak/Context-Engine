@@ -152,6 +152,17 @@ def test_measure_unknown_platform_is_config_error(tmp_path):
     assert rc == 2
 
 
+def test_measure_non_positive_runs_is_config_error(tmp_path):
+    # A non-positive --runs would leave the run set empty and IndexError on raw_runs[0];
+    # it must be a clean exit-2 config error (the tool's documented contract), not a traceback.
+    exe = tmp_path / "bench-subject"
+    exe.write_text("stub", encoding="utf-8")
+    rc = minspec_floor.main(["measure", "--exe", str(exe), "--platform", "desktop",
+                             "--manifest", str(LIVE_MANIFEST), "--runs", "0", "--out",
+                             str(tmp_path / "r.json")])
+    assert rc == 2
+
+
 # ---------------------------------------------------------------------------
 # gate
 # ---------------------------------------------------------------------------
