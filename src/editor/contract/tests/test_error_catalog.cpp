@@ -173,6 +173,19 @@ int main()
         CHECK(consent->origin == "R-SEC-011");
     }
 
+    // --- R-SEC-006 importer subprocess-sandbox failure code (issue #72) --------------------------
+    // Additive-only new row (NOT on the frozen v0 baseline — the additive-only check above still
+    // holds). Emitted by run_subprocess (isolated_runner) when the unprivileged importer child fails
+    // to spawn, is killed by its per-OS sandbox primitive (seccomp-bpf), or exits without a result:
+    // an internal-class fail-closed (a bare retry cannot repair a broken sandbox).
+    {
+        const ErrorCode* entry = find_code("import.subprocess_failed");
+        CHECK(entry != nullptr);
+        CHECK(entry->exit_code == 1);      // internal class (fail-closed)
+        CHECK(entry->retriable == false);
+        CHECK(entry->origin == "R-SEC-006");
+    }
+
     // --- R-OBS-005 interactive CDP debug-attach codes (task 4b, issue #94) ------------------------
     // Additive-only new rows (NOT on the frozen v0 baseline). attach_failed is an internal-class
     // failure (the inspector could not be created/connected); unsupported is unimplemented-class (no

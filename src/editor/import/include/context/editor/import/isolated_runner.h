@@ -1,17 +1,21 @@
 // Running an importer under the R-SEC-006 isolation slice + the R-ASSET-001 determinism gate.
 //
-// The v1 reference runner executes the importer IN-PROCESS behind the SandboxPolicy — enforcing the
-// portable half of the slice (path jail R-SEC-008, scrubbed env R-SEC-010, input-bytes-only, no
-// network) and producing a SandboxAudit of exactly what the run was permitted to touch. That is
-// enough for the determinism gate and to make the isolation CONTRACT real and tested. The
-// unprivileged-subprocess + per-OS sandbox-primitive lockdown (seccomp-bpf Linux-first) is the
-// staged rollout (sandbox.h::os_sandbox_support); the daemon swaps this in-process runner for the
-// subprocess one without any importer change, since importers are already pure (importer.h).
+// Two runners share the SandboxPolicy contract:
+//   * run_isolated() — the IN-PROCESS reference runner. Enforces the portable half of the slice (path
+//     jail R-SEC-008, scrubbed env R-SEC-010, input-bytes-only read scope, no network) and produces a
+//     SandboxAudit of exactly what the run was permitted to touch. It underpins the determinism gate +
+//     the fuzz replay, and is the honest fallback where no OS primitive is enforced yet.
+//   * run_subprocess() — the UNPRIVILEGED-SUBPROCESS runner (issue #72). On Linux it fork()s a child,
+//     locks it down with the seccomp-bpf primitive (sandbox.h::apply_importer_sandbox), runs the pure
+//     importer there, and pipes the ImportResult back — a real OS-enforced sandbox
+//     (os_primitive_enforced=true). Where the primitive is not yet enforced (Windows/macOS) it falls
+//     back to run_isolated. Importers are pure over source_bytes (importer.h), so the result is
+//     identical across the swap and NO importer changes.
 //
-// OPEN (issue #72): the "input-bytes-only" framing here and sandbox.cpp's jail-wide read_permitted
-// (R-SEC-008) coincide only because a v1 importer reads nothing but its source bytes. When the
-// subprocess syscall read-filter lands, whether the ENFORCED read set is the jail-wide structural
-// jail or is narrowed to input-bytes-only is an OWNER ruling — pre-decided by neither surface.
+// Read scope (owner ruling, issue #72 — RESOLVED 2026-07-09): input-bytes-only by default, with a
+// declared-read-paths escape hatch, all ⊆ the R-SEC-008 jail (see sandbox.h::SandboxPolicy /
+// read_permitted). The seccomp filter enforces it structurally: the child gets no `open*`, so it can
+// read only the descriptors the parent pre-opened for the granted set.
 
 #pragma once
 
@@ -19,6 +23,7 @@
 #include "context/editor/import/sandbox.h"
 
 #include <string>
+#include <string_view>
 
 namespace context::editor::import
 {
@@ -47,6 +52,25 @@ struct IsolatedImport
 // never throws; a jail/policy violation surfaces as an `import.jail_escape` diagnostic with ok=false.
 [[nodiscard]] IsolatedImport run_isolated(const Importer& importer, const ImportInput& input,
                                          const SandboxPolicy& policy);
+
+// Run `importer` on `input` in an UNPRIVILEGED SUBPROCESS confined to `policy` (R-SEC-006, issue #72).
+// On Linux the child is fork()ed, locked down with the seccomp-bpf primitive
+// (sandbox.h::apply_importer_sandbox), runs the pure importer, and pipes its ImportResult back to the
+// parent — os_primitive_enforced=true in the audit. Where the OS primitive is not enforced yet
+// (Windows/macOS in v1) it transparently delegates to run_isolated (os_primitive_enforced=false,
+// honest staging). The policy pre-checks (network / jail-escape refusals) run in the PARENT, so a bad
+// policy never even forks. Total: never throws; a spawn/pipe/decode failure of the isolated child
+// surfaces as an `import.subprocess_failed` diagnostic with ok=false.
+[[nodiscard]] IsolatedImport run_subprocess(const Importer& importer, const ImportInput& input,
+                                            const SandboxPolicy& policy);
+
+// Encode/decode an ImportResult across the importer-subprocess pipe — PORTABLE (no platform code), so
+// the wire framing is unit-tested directly on every host. The child serializes its ImportResult to a
+// length-prefixed byte frame written to the result pipe; the parent decodes it back. `decode` is total:
+// it returns false on any truncation / length-overrun instead of throwing (a short read from a child
+// that died mid-write is a subprocess failure, not a crash).
+[[nodiscard]] std::string encode_import_result(const ImportResult& result);
+[[nodiscard]] bool decode_import_result(std::string_view frame, ImportResult& out);
 
 // The R-ASSET-001 determinism gate: import twice and byte-compare EVERY artifact (kind, name, and
 // bytes). `deterministic` is false on any divergence, with `divergence` naming the first mismatch
