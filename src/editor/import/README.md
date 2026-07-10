@@ -41,11 +41,12 @@ and the autonomy envelope safe.
   scope with a declared-read-paths escape hatch** (owner ruling, issue #72 — `read_permitted` grants
   only `input_path ∪ declared_read_paths`, all ⊆ jail; the writable set is the own cache-output key).
   Two runners share the policy: `run_isolated()` (the in-process reference) and **`run_subprocess()`**
-  — on Linux it fork()s an **unprivileged child locked down by a hand-written seccomp-bpf filter**
-  (`apply_importer_sandbox`, no libseccomp dep), runs the pure importer there, and pipes the
-  `ImportResult` back (`encode/decode_import_result`); `os_sandbox_support()` reports the primitive is
-  **enforced** on Linux and honestly `enforced=false` (in-process fallback) on Windows/macOS.
-  `check_deterministic()` is the double-run byte-compare gate.
+  — on Linux + macOS it fork()s an **unprivileged child locked down by the OS primitive** (a
+  hand-written seccomp-bpf filter on Linux / a deny-default Seatbelt profile via `sandbox_init` on
+  macOS, `apply_importer_sandbox`, no third-party dep on either), runs the pure importer there, and
+  pipes the `ImportResult` back (`encode/decode_import_result`); `os_sandbox_support()` reports the
+  primitive is **enforced** on Linux + macOS and honestly `enforced=false` (in-process fallback) on
+  Windows. `check_deterministic()` is the double-run byte-compare gate.
 - **The per-platform transcode SKELETON** (`platform_profile.h`) — the v1 platform set + the
   data-driven `(kind × platform) → format` table. The platform profile is a cache-key component, so
   per-platform variants coexist as separate entries (platform switches instant after first import).
@@ -73,18 +74,19 @@ hooks staked out now** with the heavy work tracked, never silent stubs:
    each row (texture BC7/ASTC, mesh meshopt quantization, audio compression) are the transcode
    milestone. `transcode_target_for()` already keys per platform so an encoder drops in without a
    cache-key change.
-2. **Per-OS subprocess sandbox lockdown — LANDED Linux-first (issue #72).** `run_subprocess()` now
-   runs the pure importer in a fork()ed, **seccomp-bpf-locked** unprivileged child on Linux (the wedge
-   server platform) — `os_sandbox_support()` reports `enforced=true` there. Windows AppContainer /
-   restricted Job Object and macOS sandbox-exec remain **tracked de-risk items** (`enforced=false`,
-   in-process fallback). Two residual follow-ups, staged honestly: (a) the reference runner forks
-   **without exec**, which is safe in the single-threaded CLI/reference context but not in a
-   multi-threaded daemon, and the child inherits the parent's fd table (the filter allows read/write
-   on already-open fds, blocking only fresh `open*`) — the daemon integration hardens BOTH by moving
-   to a fork+exec importer-host (O_CLOEXEC scrubs the fd table) or a pre-forked zygote (the seccomp
-   filter + read-scope contract are unchanged); (b) the Linux filter gates on the x86_64 ABI (the
-   Linux-first server target) — an ARM64 Linux runner is a follow-up. Importers stayed pure, so the
-   swap needed **no importer change**.
+2. **Per-OS subprocess sandbox lockdown — LANDED on Linux + macOS (issue #72).** `run_subprocess()`
+   now runs the pure importer in a fork()ed, OS-locked unprivileged child on Linux (a **seccomp-bpf**
+   filter) AND on macOS (a **deny-default Seatbelt profile** applied post-fork via `sandbox_init` — the
+   same SBPL/Seatbelt mechanism as the `sandbox-exec` CLI, in-process; no third-party dependency) —
+   `os_sandbox_support()` reports `enforced=true` on both. Windows AppContainer / restricted Job Object
+   remains the one **tracked de-risk item** (`enforced=false`, in-process fallback). Residual
+   follow-ups, staged honestly: (a) the reference runner forks **without exec**, which is safe in the
+   single-threaded CLI/reference context but not in a multi-threaded daemon, and the child inherits the
+   parent's fd table (the primitive allows read/write on already-open fds, blocking only fresh `open*`)
+   — the daemon integration hardens BOTH by moving to a fork+exec importer-host (O_CLOEXEC scrubs the fd
+   table) or a pre-forked zygote (the sandbox primitive + read-scope contract are unchanged); (b) the
+   Linux seccomp filter gates on the x86_64 ABI (the Linux-first server target) — an ARM64 Linux runner
+   is a follow-up. Importers stayed pure, so the swap needed **no importer change**.
 3. **Importer build hash.** v1 derives it from the framework epoch + the toolchain stamp (re-keys on
    a toolchain change — the cross-machine determinism scope R-FILE-010 defers). A real per-importer
    compiled-object hash lands with the native build pipeline.

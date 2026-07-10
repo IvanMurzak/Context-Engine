@@ -1,16 +1,24 @@
 // The per-OS unprivileged-subprocess sandbox PRIMITIVE (R-SEC-006) — apply_importer_sandbox().
 //
-// Linux (the wedge server platform) is the enforced path: a hand-written seccomp-bpf classic-BPF
-// filter locks the importer child down to a pure-computation syscall set. It is HAND-WRITTEN on
-// purpose — pulling libseccomp would add a third-party dependency and trip the deny-by-default license
-// gate for zero benefit (the filter is tiny + fixed). Windows AppContainer / restricted Job Object and
-// macOS sandbox-exec are tracked de-risk items (honest staging, R-SEC-006): this returns applied=false
-// there and the runner falls back to the portable in-process slice.
+// Two OS primitives are enforced today, both applied POST-FORK to the pure-computation importer child:
+//   * Linux (the wedge server platform): a hand-written seccomp-bpf classic-BPF filter locks the child
+//     down to a pure-computation syscall set. It is HAND-WRITTEN on purpose — pulling libseccomp would
+//     add a third-party dependency and trip the deny-by-default license gate for zero benefit (the
+//     filter is tiny + fixed).
+//   * macOS: a deny-by-default Seatbelt profile applied via sandbox_init() (the same SBPL/Seatbelt
+//     mechanism the `sandbox-exec` CLI drives, called in-process instead) — no third-party dependency
+//     either. It mirrors the seccomp filter's INTENT: deny fresh file opens (input-bytes-only), deny
+//     sockets/network, deny process creation.
+// Windows AppContainer / restricted Job Object is the one remaining tracked de-risk item (honest
+// staging, R-SEC-006): this returns applied=false there and the runner falls back to the portable
+// in-process slice.
 //
-// NOTE: the Linux body is compiled ONLY on the `build (ubuntu-latest)` CI leg — the local Windows
-// Strawberry-GCC gate and the macOS leg preprocess it out (the platform-#if blind spot documented in
-// test.md). Keep it self-contained and heavily reviewed; its permit/deny behaviour is proven by the
-// syscall assertions in tests/test_sandbox.cpp (Linux-only section).
+// NOTE: each platform body is compiled ONLY on its own CI leg — the Linux seccomp body only on
+// `build (ubuntu-latest)`, the macOS body only on `build (macos-latest)`; the local Windows
+// Strawberry-GCC gate preprocesses BOTH out (the platform-#if blind spot documented in test.md), so CI
+// is the authoritative gate for either primitive. Keep each self-contained and heavily reviewed; the
+// permit/deny behaviour is proven by the syscall/operation assertions in tests/test_sandbox.cpp (per-OS
+// sections).
 
 #include "context/editor/import/sandbox.h"
 
@@ -176,7 +184,68 @@ SandboxApplyResult apply_importer_sandbox()
 
 } // namespace context::editor::import
 
-#else // non-Linux: the OS primitive is a tracked follow-up (honest staging, R-SEC-006).
+#elif defined(__APPLE__) // macOS: a deny-by-default Seatbelt profile applied post-fork via sandbox_init().
+
+#include <sandbox.h>
+
+#include <string>
+
+namespace context::editor::import
+{
+
+SandboxApplyResult apply_importer_sandbox()
+{
+    SandboxApplyResult out;
+    out.primitive = "macos-sandbox-exec";
+
+    // A deny-by-default Seatbelt profile (SBPL) — the macOS mirror of the Linux seccomp filter's
+    // deny-by-default terminal: every operation the importer child is not explicitly granted is
+    // refused. Applied POST-FORK exactly like the seccomp filter, so the parent already did all dyld /
+    // libSystem / framework initialization and the child needs NO process-startup rules (hence no
+    // `(import "bsd.sb")`): it runs nothing but the pure importer + a write of the result frame to the
+    // already-open pipe, then _exit. Under `(deny default)`:
+    //   * fresh file opens are denied (file-read* / file-write*) => input-bytes-only STRUCTURALLY,
+    //     matching the seccomp "no open*" set and the owner read-scope ruling (issue #72). In v1 the
+    //     source bytes reach the pure importer in-memory, so it opens nothing anyway.
+    //   * sockets / network are denied (system-socket / network*) => no ambient network (R-SEC-010),
+    //     matching the seccomp deny of socket/connect.
+    //   * process creation is denied (process-exec* / process-fork) => no execve/fork, matching the
+    //     seccomp deny of execve/clone/fork; ptrace is likewise unreachable.
+    // Memory allocation (VM ops are not Seatbelt-gated) and writes to the ALREADY-OPEN inherited result
+    // pipe (an anonymous pipe, not a filesystem vnode) survive, so the pure-computation path completes.
+    // A denied operation returns an error to the child (fail-closed) rather than killing it — the coarse
+    // analogue of the seccomp EPERM terminal. This platform-#if body is compiled only on the macOS CI
+    // leg (test.md § platform-#if blind spot), so `build (macos-latest)` is its authoritative gate; its
+    // permit/deny behaviour is proven end-to-end by the macOS section of tests/test_sandbox.cpp.
+    static const char kImporterSandboxProfile[] = "(version 1)\n(deny default)\n";
+
+    char* errbuf = nullptr;
+    // sandbox_init() / sandbox_free_error() are marked deprecated in <sandbox.h> since macOS 10.8 but
+    // remain the shipping unprivileged in-process sandbox API (Apple's own apps + Chromium use it); the
+    // documented replacement (the App Sandbox entitlement) does not apply to a headless fork()ed
+    // importer child. Suppress the -Wdeprecated-declarations that Apple Clang -Werror would otherwise
+    // fail the build on. flags=0 => kImporterSandboxProfile is a literal SBPL profile string (not a
+    // SANDBOX_NAMED builtin).
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    const int rc = ::sandbox_init(kImporterSandboxProfile, 0, &errbuf);
+    if (rc != 0)
+    {
+        out.error = errbuf != nullptr ? std::string("sandbox_init failed: ") + errbuf
+                                      : std::string("sandbox_init failed");
+        if (errbuf != nullptr)
+            ::sandbox_free_error(errbuf);
+        return out;
+    }
+#pragma clang diagnostic pop
+
+    out.applied = true;
+    return out;
+}
+
+} // namespace context::editor::import
+
+#else // Windows / other: the OS primitive is a tracked follow-up (honest staging, R-SEC-006).
 
 namespace context::editor::import
 {

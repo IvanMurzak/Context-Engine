@@ -57,23 +57,21 @@ bool write_permitted(const SandboxPolicy& policy, std::string_view path)
 OsSandboxSupport os_sandbox_support()
 {
     // HONEST staging (R-SEC-006): report the primitive this OS is locked down with, and truthfully
-    // whether it is enforced. Linux (seccomp-bpf) is the wedge server platform and IS enforced now
-    // (apply_importer_sandbox installs the filter in the importer subprocess). Windows / macOS still
-    // report `enforced=false` — their primitives are tracked de-risk items and the runner falls back
-    // to the portable in-process slice (jail + scrubbed env + no network + input-bytes-only) there.
-    // Never claim a lockdown that is not there.
+    // whether it is enforced. Linux (seccomp-bpf) and macOS (a deny-by-default Seatbelt profile via
+    // sandbox_init) are BOTH enforced now — apply_importer_sandbox installs the primitive in the
+    // importer subprocess on each. Windows (AppContainer / restricted Job Object) still reports
+    // `enforced=false` — its primitive is a tracked de-risk item and the runner falls back to the
+    // portable in-process slice (jail + scrubbed env + no network + input-bytes-only) there. Never
+    // claim a lockdown that is not there.
 #if defined(__linux__)
     return {"seccomp-bpf", true, ""};
+#elif defined(__APPLE__)
+    return {"macos-sandbox-exec", true, ""};
 #elif defined(_WIN32)
     return {"windows-appcontainer", false,
             "Windows AppContainer / restricted Job Object lockdown is a tracked de-risk item; the "
             "runner falls back to the portable in-process slice (path jail + scrubbed env + "
             "no-ambient-network + input-bytes-only) here."};
-#elif defined(__APPLE__)
-    return {"macos-sandbox-exec", false,
-            "macOS sandbox-exec lockdown is a tracked de-risk item; the runner falls back to the "
-            "portable in-process slice (path jail + scrubbed env + no-ambient-network + "
-            "input-bytes-only) here."};
 #else
     return {"none", false,
             "No per-OS sandbox primitive is mapped for this platform; the runner falls back to the "

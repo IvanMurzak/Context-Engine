@@ -1,6 +1,7 @@
 // Importer isolation slice: the narrowed read scope (owner ruling, issue #72), write scoping, scrubbed
 // env, honest OS-support reporting, the portable subprocess result codec, the run_isolated() +
-// run_subprocess() policy gates, and — on Linux — the real seccomp-bpf permit-vs-deny syscall filter.
+// run_subprocess() policy gates, and — on Linux — the real seccomp-bpf permit-vs-deny syscall filter
+// (and — on macOS — the real deny-default Seatbelt permit-vs-deny operation gate).
 
 #include "context/editor/import/isolated_runner.h"
 #include "context/editor/import/sandbox.h"
@@ -13,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 #include <cerrno>
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -140,7 +141,8 @@ int main()
     }
 
     // HONEST staging (R-SEC-006): the primitive is named, and `enforced` is reported TRUTHFULLY per OS
-    // — seccomp-bpf IS enforced on Linux now; Windows/macOS remain tracked follow-ups (not enforced).
+    // — seccomp-bpf IS enforced on Linux and the Seatbelt profile IS enforced on macOS now; Windows
+    // (AppContainer / restricted Job Object) remains a tracked follow-up (not enforced).
     {
         const OsSandboxSupport support = os_sandbox_support();
         CHECK(!support.primitive.empty());
@@ -148,8 +150,12 @@ int main()
         CHECK(support.enforced);                  // seccomp-bpf lockdown is live on Linux
         CHECK(support.primitive == "seccomp-bpf");
         CHECK(support.follow_up.empty());         // enforced => no outstanding follow-up note
+#elif defined(__APPLE__)
+        CHECK(support.enforced);                       // Seatbelt (sandbox_init) lockdown is live on macOS
+        CHECK(support.primitive == "macos-sandbox-exec");
+        CHECK(support.follow_up.empty());              // enforced => no outstanding follow-up note
 #else
-        CHECK(!support.enforced);       // Windows AppContainer / macOS sandbox-exec are follow-ups
+        CHECK(!support.enforced);       // Windows AppContainer / restricted Job Object is a follow-up
         CHECK(!support.follow_up.empty()); // a tracked note is always present when not enforced
 #endif
     }
@@ -374,9 +380,69 @@ int main()
         CHECK(WIFEXITED(status));
         CHECK(WEXITSTATUS(status) == 0);
     }
+#elif defined(__APPLE__)
+    // The REAL macOS Seatbelt sandbox (deny-default profile via sandbox_init, the enforced platform):
+    // in a fork()ed child that has called apply_importer_sandbox(), a DENIED operation (opening a fresh
+    // file -> input-bytes-only) fails, while a PERMITTED operation (a non-executable mmap, or a write to
+    // an already-open descriptor) succeeds. This is the macOS analogue of the Linux "permitted vs denied
+    // syscalls" gate (issue #72), adapted to Seatbelt's operation model. NOTE: apply_importer_sandbox()
+    // is irreversible, so it is called ONLY in the child — never in this test process. macOS does NOT
+    // gate mmap-PROT_EXEC via the sandbox (W^X there is codesigning / hardened-runtime, not Seatbelt),
+    // so — unlike the Linux test — no exec-map denial is asserted. Network denial (R-SEC-010) is proven
+    // at the PARENT (the run_subprocess allow_network refusal above, before any fork) and is a
+    // consequence of the same deny-default profile; the child opens no socket on the pure path.
+    {
+        int pfd[2];
+        CHECK(::pipe(pfd) == 0);
+        const pid_t pid = ::fork();
+        CHECK(pid >= 0);
+        if (pid == 0)
+        {
+            ::close(pfd[0]);
+            const SandboxApplyResult applied = apply_importer_sandbox();
+            if (!applied.applied)
+                ::_exit(10); // the Seatbelt profile must install on macOS
+
+            // DENIED: opening a fresh file (input-bytes-only => the deny-default profile refuses
+            // file-read*). Unsandboxed this world-readable file opens; under the profile it must fail.
+            const int fd = ::open("/etc/passwd", O_RDONLY);
+            const bool open_denied = (fd < 0);
+            if (fd >= 0)
+                ::close(fd);
+
+            // PERMITTED: a non-executable anonymous mapping (VM ops are not Seatbelt-gated — the pure
+            // importer's allocator must keep working under the profile).
+            void* const rw =
+                ::mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+            const bool rw_map_permitted = (rw != MAP_FAILED);
+            if (rw != MAP_FAILED)
+                ::munmap(rw, 4096);
+
+            // PERMITTED: writing to the already-open result pipe descriptor (an inherited anonymous
+            // pipe, not a filesystem vnode — this is how the sandboxed child returns its result).
+            const char ok = 'y';
+            const bool write_permitted_syscall = (::write(pfd[1], &ok, 1) == 1);
+
+            ::_exit((open_denied && rw_map_permitted && write_permitted_syscall) ? 0 : 11);
+        }
+
+        // Parent: drain the permitted-write byte, then confirm the child validated every case (exit 0).
+        ::close(pfd[1]);
+        char drained = 0;
+        while (::read(pfd[0], &drained, 1) < 0 && errno == EINTR)
+        {
+        }
+        ::close(pfd[0]);
+        int status = 0;
+        while (::waitpid(pid, &status, 0) < 0 && errno == EINTR)
+        {
+        }
+        CHECK(WIFEXITED(status));
+        CHECK(WEXITSTATUS(status) == 0);
+    }
 #else
-    // Non-Linux: apply_importer_sandbox() is a safe no-op (no enforced primitive yet) — calling it in
-    // this process cannot lock it down. It honestly reports not-applied with the intended primitive.
+    // Windows / other: apply_importer_sandbox() is a safe no-op (no enforced primitive yet) — calling
+    // it in this process cannot lock it down. It honestly reports not-applied with the intended primitive.
     {
         const SandboxApplyResult applied = apply_importer_sandbox();
         CHECK(!applied.applied);

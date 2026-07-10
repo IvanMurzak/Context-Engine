@@ -5,12 +5,12 @@
 //     jail R-SEC-008, scrubbed env R-SEC-010, input-bytes-only read scope, no network) and produces a
 //     SandboxAudit of exactly what the run was permitted to touch. It underpins the determinism gate +
 //     the fuzz replay, and is the honest fallback where no OS primitive is enforced yet.
-//   * run_subprocess() — the UNPRIVILEGED-SUBPROCESS runner (issue #72). On Linux it fork()s a child,
-//     locks it down with the seccomp-bpf primitive (sandbox.h::apply_importer_sandbox), runs the pure
-//     importer there, and pipes the ImportResult back — a real OS-enforced sandbox
-//     (os_primitive_enforced=true). Where the primitive is not yet enforced (Windows/macOS) it falls
-//     back to run_isolated. Importers are pure over source_bytes (importer.h), so the result is
-//     identical across the swap and NO importer changes.
+//   * run_subprocess() — the UNPRIVILEGED-SUBPROCESS runner (issue #72). On Linux + macOS it fork()s a
+//     child, locks it down with the OS primitive (sandbox.h::apply_importer_sandbox — seccomp-bpf on
+//     Linux, a deny-default Seatbelt profile on macOS), runs the pure importer there, and pipes the
+//     ImportResult back — a real OS-enforced sandbox (os_primitive_enforced=true). Where the primitive
+//     is not yet enforced (Windows) it falls back to run_isolated. Importers are pure over source_bytes
+//     (importer.h), so the result is identical across the swap and NO importer changes.
 //
 // Read scope (owner ruling, issue #72 — RESOLVED 2026-07-09): input-bytes-only by default, with a
 // declared-read-paths escape hatch, all ⊆ the R-SEC-008 jail (see sandbox.h::SandboxPolicy /
@@ -56,13 +56,14 @@ struct IsolatedImport
                                          const SandboxPolicy& policy);
 
 // Run `importer` on `input` in an UNPRIVILEGED SUBPROCESS confined to `policy` (R-SEC-006, issue #72).
-// On Linux the child is fork()ed, locked down with the seccomp-bpf primitive
-// (sandbox.h::apply_importer_sandbox), runs the pure importer, and pipes its ImportResult back to the
-// parent — os_primitive_enforced=true in the audit. Where the OS primitive is not enforced yet
-// (Windows/macOS in v1) it transparently delegates to run_isolated (os_primitive_enforced=false,
-// honest staging). The policy pre-checks (network / jail-escape refusals) run in the PARENT, so a bad
-// policy never even forks. Total: never throws; a spawn/pipe/decode failure of the isolated child
-// surfaces as an `import.subprocess_failed` diagnostic with ok=false.
+// On Linux + macOS the child is fork()ed, locked down with the OS primitive
+// (sandbox.h::apply_importer_sandbox — seccomp-bpf on Linux, a deny-default Seatbelt profile on macOS),
+// runs the pure importer, and pipes its ImportResult back to the parent — os_primitive_enforced=true in
+// the audit. Where the OS primitive is not enforced yet (Windows in v1) it transparently delegates to
+// run_isolated (os_primitive_enforced=false, honest staging). The policy pre-checks (network /
+// jail-escape refusals) run in the PARENT, so a bad policy never even forks. Total: never throws; a
+// spawn/pipe/decode failure of the isolated child surfaces as an `import.subprocess_failed` diagnostic
+// with ok=false.
 [[nodiscard]] IsolatedImport run_subprocess(const Importer& importer, const ImportInput& input,
                                             const SandboxPolicy& policy);
 
