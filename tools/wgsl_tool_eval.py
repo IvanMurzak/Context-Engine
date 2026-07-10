@@ -101,6 +101,11 @@ def parse_shader(text: str, path: str) -> Shader:
             shader.keywords.append((tok[1], tok[2:]))
         elif tok[0] == "stage" and len(tok) == 3 and shader is not None:
             stage = Stage(kind=tok[1], entry=tok[2], source="")
+        elif tok[0] in ("param", "texture") and shader is not None:
+            # The M4 material contract (typed params + semantic texture slots, incl. the R-REND-006
+            # lightmap input hook). Irrelevant to SPIR-V->WGSL translation — the contract never
+            # reaches the compiled stages — so the eval skips it (material_ir.cpp validates it).
+            continue
         else:
             raise SystemExit(f"[wgsl-eval] ERROR: unrecognized line in {path}: {line!r}")
     if shader is None or stage is not None:

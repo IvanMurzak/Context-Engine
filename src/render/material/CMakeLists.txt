@@ -40,7 +40,9 @@ set(_context_render_material_static_runtime
 set(_context_render_material_tests
     test_material_ir
     test_variants
-    test_compile)
+    test_compile
+    test_material_contract) # M4 material contract: params + texture slots incl. the R-REND-006
+                            # lightmap input hooks (issue #135)
 foreach(_t IN LISTS _context_render_material_tests)
     add_executable(context_render_material_${_t} tests/${_t}.cpp)
     target_link_libraries(context_render_material_${_t}
@@ -52,7 +54,10 @@ foreach(_t IN LISTS _context_render_material_tests)
     add_test(NAME render-material-${_t} COMMAND context_render_material_${_t})
 endforeach()
 
-# The IR round-trip test parses the REAL authored corpus (corpus/*.shader). Hand it the corpus dir as
-# an ABSOLUTE compile definition so the test never depends on the ctest working directory.
+# The IR round-trip + contract tests parse the REAL authored corpus (corpus/*.shader). Hand them the
+# corpus dir as an ABSOLUTE compile definition so the tests never depend on the ctest working
+# directory.
 target_compile_definitions(context_render_material_test_material_ir
+    PRIVATE CONTEXT_MATERIAL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/corpus")
+target_compile_definitions(context_render_material_test_material_contract
     PRIVATE CONTEXT_MATERIAL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/corpus")

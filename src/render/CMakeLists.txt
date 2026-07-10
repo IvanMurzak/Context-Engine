@@ -39,9 +39,10 @@ target_link_libraries(context_render PRIVATE context_warnings)
 # Plain assertion-bearing executables registered with ctest (the sibling module pattern; the repo
 # carries no C++ test framework). All three build + run under the local GCC dev gate.
 set(_context_render_tests
-    test_extract      # L-39 extract selects only drawables; double-buffer no-tearing semantics
-    test_headless     # R-HEAD-002: probe creates no device; no-adapter is headless; engine runs absent
-    test_rhi)         # RHI object model driven end-to-end (offscreen readback) via the fake backend
+    test_extract        # L-39 extract selects only drawables; double-buffer no-tearing semantics
+    test_headless       # R-HEAD-002: probe creates no device; no-adapter is headless; engine runs absent
+    test_rhi            # RHI object model driven end-to-end (offscreen readback) via the fake backend
+    test_light_extract) # R-REND-004: light/material extraction incl. the malformed/absent edges
 foreach(_t IN LISTS _context_render_tests)
     add_executable(context_render_${_t} tests/${_t}.cpp)
     target_link_libraries(context_render_${_t} PRIVATE context_render context_warnings)
@@ -60,6 +61,7 @@ endforeach()
 # the R-FILE-010 content-addressed shader-compile cache.
 add_subdirectory(material)
 add_subdirectory(sprite)   # R-2D-001 / L-55 — the 2D sprite path (issue #122)
+add_subdirectory(lit)      # R-REND-004/006 — PBR + lighting/shadows + lightmap hooks (issue #135)
 
 # ---------------------------------------------------------------------------------------------
 # context_render_wgpu — the T1 native backend + offscreen pixel-readback proof (CI-only dep path).
@@ -137,9 +139,11 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
     # The offscreen proof executable: probe | render (the offscreen readback via the RHI abstraction).
     # context_render_sprite: the offscreen exe's `sprite` mode runs the R-2D-001 GPU sprite-draw proof
     # (sprite_offscreen.h) through the SAME wgpu backend — reusing the ONE prebuilt, not forking it.
+    # context_render_lit: likewise, the `lit` mode runs the R-REND-004/006 GPU PBR/shadow/lightmap
+    # proof (lit_offscreen.h) through the same backend.
     add_executable(context_render_wgpu_offscreen src/wgpu/offscreen_main.cpp)
     target_link_libraries(context_render_wgpu_offscreen
-        PRIVATE context_render_wgpu context_render_sprite context_warnings)
+        PRIVATE context_render_wgpu context_render_sprite context_render_lit context_warnings)
     if(WIN32)
         # Stage wgpu_native.dll next to the exe so the dynamic import resolves at run time.
         add_custom_command(TARGET context_render_wgpu_offscreen POST_BUILD
@@ -185,6 +189,15 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
         # Windows (the same Session-0 native-render carve-out the offscreen proof documents above).
         add_test(NAME render-wgpu-sprite COMMAND context_render_wgpu_offscreen sprite)
         set_tests_properties(render-wgpu-sprite PROPERTIES
+            SKIP_RETURN_CODE 77
+            WORKING_DIRECTORY $<TARGET_FILE_DIR:context_render_wgpu_offscreen>)
+
+        # The R-REND-004/006 GPU lit/PBR proof: World -> extract -> shadow depth pass + PBR main
+        # pass -> readback asserted against the CPU reference (lit-vs-unlit / parameter deltas,
+        # shadowed-vs-unshadowed probes, lightmap-hook round-trip). Same adapter requirement, SKIP
+        # convention, and Windows carve-out as the sibling proofs.
+        add_test(NAME render-wgpu-lit COMMAND context_render_wgpu_offscreen lit)
+        set_tests_properties(render-wgpu-lit PROPERTIES
             SKIP_RETURN_CODE 77
             WORKING_DIRECTORY $<TARGET_FILE_DIR:context_render_wgpu_offscreen>)
     endif()

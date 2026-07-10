@@ -15,15 +15,21 @@ gate. Pulls in NO GPU backend, so a headless build never links one.
 
 - **`rhi.h`** — the tiered **Render Hardware Interface** (R-REND-002). WebGPU T1 semantics as
   abstract interfaces: `IRhi` (probe / create device), `IDevice`, `IQueue`, `IBuffer`, `ITexture`,
-  `ITextureView`, `IRenderPipeline`, `ICommandEncoder`, `IRenderPassEncoder`, `ICommandBuffer`, plus
-  the `ISurface`/`ISwapchain` seam for the later windowed-present path. `RhiTier { T1_WebGPU,
-  T2_Native }` is the T1/T2 tier seam (L-56 collapsed the tiers to T1 floor / T2 advanced); only T1
-  native is implemented in this foundation. The header is dependency-free — the R-HEAD-002 detach
-  seam.
+  `ITextureView`, `ISampler`, `IRenderPipeline`, `IBindGroupLayout`/`IBindGroup`,
+  `ICommandEncoder`, `IRenderPassEncoder`, `ICommandBuffer`, plus the `ISurface`/`ISwapchain` seam
+  for the later windowed-present path. Depth textures/attachments, depth-only pipelines,
+  comparison samplers (the shadow-PCF primitive), uniform buffers + queue writes, and REFLECTED
+  ("auto") bind-group layouts landed with the lit path (issue #135) — reflection is deliberately
+  the ONLY layout source, which keeps the seam stable under Tint's combined-sampler binding
+  renumbering (`docs/wgsl-tool-decision.md`). `RhiTier { T1_WebGPU, T2_Native }` is the T1/T2 tier
+  seam (L-56 collapsed the tiers to T1 floor / T2 advanced); only T1 native is implemented in this
+  foundation. The header is dependency-free — the R-HEAD-002 detach seam.
 - **`render_world.h` / `extract.h`** — the **L-39 sim→render extract**. `extract_render_world()` is a
   read-only observer of the kernel World (R-REND-003): it walks archetypes through the World's
-  `for_each_archetype` seam and copies render-relevant components (`Transform`, `Renderable`) into a
-  `RenderSnapshot`. `RenderDoubleBuffer` gives the sim/extract side a back buffer to write while the
+  `for_each_archetype` seam and copies render-relevant components (`Transform`, `Renderable`, the
+  R-REND-004 `PbrMaterial`/`DirectionalLight`/`PointLight`) into a `RenderSnapshot` — a
+  zero-length light direction or a point light without a Transform is malformed/absent and
+  skipped. `RenderDoubleBuffer` gives the sim/extract side a back buffer to write while the
   render side reads a stable front buffer — no tearing, and the two endpoints render-side
   interpolation needs. (The visible-set bound — L-39's R-SIM-007 broad-phase query so extract cost
   scales with the visible set — wires in a later wave; the walk is structured for it to drop in.)
@@ -46,7 +52,9 @@ dependency path (`src/runtime/js/`) — the local Strawberry-GCC dev gate cannot
   ctest) and the wgpu backend (CI), so a green fake test means the abstraction is coherent and the
   real backend only has to implement `rhi.h` correctly.
 - **`wgpu/offscreen_main.cpp`** — the `context_render_wgpu_offscreen` executable: `probe` (R-HEAD-002,
-  no device) / `render` (offscreen readback, exit 0 pass / 77 skip / 1 fail).
+  no device) / `render` (offscreen readback, exit 0 pass / 77 skip / 1 fail) / `sprite` (the
+  R-2D-001 sprite proof) / `lit` (the R-REND-004/006 PBR + shadow + lightmap-hook proof —
+  see `lit/README.md`).
 
 ## wgpu-native prebuilt (R-SEC-009)
 

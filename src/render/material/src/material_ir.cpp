@@ -145,6 +145,152 @@ std::optional<ShaderStageKind> stage_from_string(std::string_view name) noexcept
     return std::nullopt;
 }
 
+std::size_t component_count(MaterialParamType type) noexcept
+{
+    switch (type)
+    {
+    case MaterialParamType::Float:
+        return 1;
+    case MaterialParamType::Vec2:
+        return 2;
+    case MaterialParamType::Vec3:
+        return 3;
+    case MaterialParamType::Vec4:
+        return 4;
+    }
+    return 1;
+}
+
+std::string_view to_string(MaterialParamType type) noexcept
+{
+    switch (type)
+    {
+    case MaterialParamType::Float:
+        return "float";
+    case MaterialParamType::Vec2:
+        return "vec2";
+    case MaterialParamType::Vec3:
+        return "vec3";
+    case MaterialParamType::Vec4:
+        return "vec4";
+    }
+    return "float";
+}
+
+std::optional<MaterialParamType> param_type_from_string(std::string_view name) noexcept
+{
+    if (name == "float")
+    {
+        return MaterialParamType::Float;
+    }
+    if (name == "vec2")
+    {
+        return MaterialParamType::Vec2;
+    }
+    if (name == "vec3")
+    {
+        return MaterialParamType::Vec3;
+    }
+    if (name == "vec4")
+    {
+        return MaterialParamType::Vec4;
+    }
+    return std::nullopt;
+}
+
+std::string_view to_string(TextureSemantic semantic) noexcept
+{
+    switch (semantic)
+    {
+    case TextureSemantic::BaseColor:
+        return "base_color";
+    case TextureSemantic::MetallicRoughness:
+        return "metallic_roughness";
+    case TextureSemantic::Normal:
+        return "normal";
+    case TextureSemantic::Emissive:
+        return "emissive";
+    case TextureSemantic::Occlusion:
+        return "occlusion";
+    case TextureSemantic::Lightmap:
+        return "lightmap";
+    }
+    return "base_color";
+}
+
+std::optional<TextureSemantic> semantic_from_string(std::string_view name) noexcept
+{
+    if (name == "base_color")
+    {
+        return TextureSemantic::BaseColor;
+    }
+    if (name == "metallic_roughness")
+    {
+        return TextureSemantic::MetallicRoughness;
+    }
+    if (name == "normal")
+    {
+        return TextureSemantic::Normal;
+    }
+    if (name == "emissive")
+    {
+        return TextureSemantic::Emissive;
+    }
+    if (name == "occlusion")
+    {
+        return TextureSemantic::Occlusion;
+    }
+    if (name == "lightmap")
+    {
+        return TextureSemantic::Lightmap;
+    }
+    return std::nullopt;
+}
+
+bool is_float_literal(std::string_view token) noexcept
+{
+    std::size_t i = 0;
+    if (i < token.size() && (token[i] == '+' || token[i] == '-'))
+    {
+        ++i;
+    }
+    const auto digits = [&token, &i]
+    {
+        std::size_t n = 0;
+        while (i < token.size() && token[i] >= '0' && token[i] <= '9')
+        {
+            ++i;
+            ++n;
+        }
+        return n;
+    };
+    if (digits() == 0)
+    {
+        return false; // at least one integer digit required ("0.5", never ".5")
+    }
+    if (i < token.size() && token[i] == '.')
+    {
+        ++i;
+        if (digits() == 0)
+        {
+            return false; // "1." is not canonical
+        }
+    }
+    if (i < token.size() && (token[i] == 'e' || token[i] == 'E'))
+    {
+        ++i;
+        if (i < token.size() && (token[i] == '+' || token[i] == '-'))
+        {
+            ++i;
+        }
+        if (digits() == 0)
+        {
+            return false;
+        }
+    }
+    return i == token.size();
+}
+
 std::string VariantKey::canonical() const
 {
     std::string out;
@@ -234,6 +380,88 @@ std::optional<ShaderIr> parse_shader(std::string_view text)
             ir.keywords.push_back(std::move(k));
             ++i;
         }
+        else if (directive == "param")
+        {
+            // param <name> <float|vec2|vec3|vec4> <default per component> — the material contract's
+            // typed parameters (defaults kept as validated float-literal TOKENS; see material_ir.h).
+            if (tok.size() < 3)
+            {
+                return std::nullopt;
+            }
+            MaterialParam p;
+            p.name = tok[1];
+            if (has_key_delimiter(p.name))
+            {
+                return std::nullopt;
+            }
+            for (const MaterialParam& existing : ir.params)
+            {
+                if (existing.name == p.name)
+                {
+                    return std::nullopt; // duplicate parameter name
+                }
+            }
+            const std::optional<MaterialParamType> type = param_type_from_string(tok[2]);
+            if (!type.has_value())
+            {
+                return std::nullopt;
+            }
+            p.type = *type;
+            if (tok.size() != 3 + component_count(p.type)) // arity must match the type
+            {
+                return std::nullopt;
+            }
+            for (std::size_t v = 3; v < tok.size(); ++v)
+            {
+                if (!is_float_literal(tok[v]))
+                {
+                    return std::nullopt;
+                }
+                p.defaults.push_back(tok[v]);
+            }
+            ir.params.push_back(std::move(p));
+            ++i;
+        }
+        else if (directive == "texture")
+        {
+            // texture <name> <semantic> [uv<0..3>] — the material contract's texture slots. The
+            // `lightmap` semantic + its uv channel are the R-REND-006 baked-lighting INPUT hooks.
+            if (tok.size() != 3 && tok.size() != 4)
+            {
+                return std::nullopt;
+            }
+            TextureSlot slot;
+            slot.name = tok[1];
+            if (has_key_delimiter(slot.name))
+            {
+                return std::nullopt;
+            }
+            for (const TextureSlot& existing : ir.textures)
+            {
+                if (existing.name == slot.name)
+                {
+                    return std::nullopt; // duplicate texture-slot name
+                }
+            }
+            const std::optional<TextureSemantic> semantic = semantic_from_string(tok[2]);
+            if (!semantic.has_value())
+            {
+                return std::nullopt;
+            }
+            slot.semantic = *semantic;
+            if (tok.size() == 4)
+            {
+                const std::string& uv = tok[3];
+                // Exactly "uv<d>" with one digit 0..3 (four UV sets is the mesh-vertex bound).
+                if (uv.size() != 3 || uv[0] != 'u' || uv[1] != 'v' || uv[2] < '0' || uv[2] > '3')
+                {
+                    return std::nullopt;
+                }
+                slot.uv_channel = static_cast<std::uint32_t>(uv[2] - '0');
+            }
+            ir.textures.push_back(std::move(slot));
+            ++i;
+        }
         else if (directive == "stage")
         {
             if (tok.size() != 3)
@@ -303,6 +531,41 @@ std::string serialize_shader(const ShaderIr& ir)
             out += ' ';
             out += v;
         }
+        out += '\n';
+    }
+
+    // The material contract, canonicalized like keywords: params then textures, each sorted by name.
+    // The uv channel is always emitted explicitly ("uv0" even when defaulted) so the canonical form
+    // is a parse/serialize fixed point. An empty contract emits nothing — a contract-free document
+    // serializes byte-identically to the pre-contract format (hash/cache-key compatible).
+    std::vector<MaterialParam> params = ir.params;
+    std::sort(params.begin(), params.end(),
+              [](const MaterialParam& a, const MaterialParam& b) { return a.name < b.name; });
+    for (const MaterialParam& p : params)
+    {
+        out += "param ";
+        out += p.name;
+        out += ' ';
+        out += to_string(p.type);
+        for (const std::string& v : p.defaults)
+        {
+            out += ' ';
+            out += v;
+        }
+        out += '\n';
+    }
+
+    std::vector<TextureSlot> textures = ir.textures;
+    std::sort(textures.begin(), textures.end(),
+              [](const TextureSlot& a, const TextureSlot& b) { return a.name < b.name; });
+    for (const TextureSlot& t : textures)
+    {
+        out += "texture ";
+        out += t.name;
+        out += ' ';
+        out += to_string(t.semantic);
+        out += " uv";
+        out += static_cast<char>('0' + (t.uv_channel & 3u));
         out += '\n';
     }
 
