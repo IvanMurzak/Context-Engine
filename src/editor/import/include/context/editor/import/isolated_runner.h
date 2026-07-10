@@ -14,8 +14,10 @@
 //
 // Read scope (owner ruling, issue #72 — RESOLVED 2026-07-09): input-bytes-only by default, with a
 // declared-read-paths escape hatch, all ⊆ the R-SEC-008 jail (see sandbox.h::SandboxPolicy /
-// read_permitted). The seccomp filter enforces it structurally: the child gets no `open*`, so it can
-// read only the descriptors the parent pre-opened for the granted set.
+// read_permitted). The seccomp filter enforces it structurally: the child gets no `open*`, so it
+// cannot open any path the policy did not grant. (In v1 the source bytes reach the pure importer
+// in-memory; a daemon fork+exec host will pre-open exactly the granted set — a tracked follow-up, see
+// run_subprocess.)
 
 #pragma once
 

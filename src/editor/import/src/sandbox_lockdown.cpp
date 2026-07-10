@@ -57,13 +57,17 @@ SandboxApplyResult apply_importer_sandbox()
     }
 
     // The pure-computation allow-set: memory management (a malloc-heavy importer), pipe read/write of
-    // already-open descriptors (the parent-granted input + the result pipe — never a fresh open), and
+    // already-open descriptors (the result pipe + any parent-granted input — never a fresh open), and
     // a clean exit. Everything NOT listed falls through to the deny-by-default terminal below. Reads
-    // are input-bytes-only structurally: there is no `open`/`openat` in the set, so the child can only
-    // read descriptors the parent opened for the granted read set (owner ruling, issue #72). No
-    // `socket`/`connect` => no network (R-SEC-010); no `execve`/`clone`/`fork` => no process creation;
-    // no `ptrace`. The arch is gated first (x86_64, the Linux-first server target) to close the i386/
-    // x32 syscall-ABI-confusion hole; a wrong-arch call is KILLED, not merely denied.
+    // are input-bytes-only structurally: there is no `open`/`openat` in the set, so the child cannot
+    // reach any path the policy did not grant (owner ruling, issue #72; in v1 the source bytes arrive
+    // in-memory — see run_subprocess). No `socket`/`connect` => no network (R-SEC-010); no
+    // `execve`/`clone`/`fork` => no process creation; no `ptrace`. The arch is gated first (x86_64, the
+    // Linux-first server target) to close the i386/x32 syscall-ABI-confusion hole; a wrong-arch call is
+    // KILLED, not merely denied. NOTE: signal-raising syscalls (`tgkill`/`kill`/`rt_sigaction`) are
+    // deliberately omitted — an importer that hits abort()/assert() is denied its SIGABRT path (EPERM)
+    // and dies via glibc's illegal-instruction fallback instead; still fail-closed, just a coarser
+    // diagnostic (grant `tgkill` if a clean SIGABRT is ever wanted).
     struct sock_filter filter[] = {
         // Guard: only trust syscall numbers under the expected ABI.
         BPF_STMT(BPF_LD | BPF_W | BPF_ABS,

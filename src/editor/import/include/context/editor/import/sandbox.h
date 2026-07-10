@@ -31,9 +31,10 @@ namespace context::editor::import
 // hatch narrows FROM jail-wide, it can never widen past the jail. Effective read set =
 // (input-bytes ∪ declared-paths) ⊆ jail. `read_permitted` enforces exactly this narrowed set; the
 // per-OS syscall sandbox enforces it STRUCTURALLY — the child process is granted no `open*` capability
-// at all (the parent pre-opens the granted set and the child reads only those already-open
-// descriptors), so it physically cannot open anything the policy did not grant. Writes stay narrowed
-// to `output_key` (write_permitted).
+// at all, so it physically cannot open anything the policy did not grant. (In v1 the source bytes
+// reach the pure importer in-memory, and a daemon fork+exec host will pre-open exactly the granted
+// set — a tracked follow-up, see run_subprocess.) Writes stay narrowed to `output_key`
+// (write_permitted).
 struct SandboxPolicy
 {
     std::string jail_root;  // the project/cache root the importer is jailed under (R-SEC-008)
@@ -57,8 +58,10 @@ struct SandboxPolicy
 // OR at/under one of `declared_read_paths`, AND stays inside the R-SEC-008 jail (`jail_root`) — the
 // narrowed input-bytes ∪ declared-paths set, NOT the whole jail. Delegates to filesync's structural
 // jail primitive (normalize + is_inside_jail) for containment. The parent consults this to decide
-// which files it may pre-open for the child; the per-OS syscall sandbox then denies the child any
-// `open*`, so the grant is structurally enforced. The writable set is narrower still (write_permitted).
+// which files the importer may read; the per-OS syscall sandbox then denies the child any `open*`
+// (v1: the source reaches the importer in-memory; a daemon fork+exec host will pre-open the granted
+// set — a tracked follow-up), so the grant is structurally enforced. The writable set is narrower
+// still (write_permitted).
 [[nodiscard]] bool read_permitted(const SandboxPolicy& policy, std::string_view path);
 
 // R-SEC-006: may the importer WRITE `path`? Only its own cache-output key (and paths beneath it, for
@@ -80,11 +83,13 @@ struct OsSandboxSupport
 
 // Apply the per-OS sandbox primitive to the CURRENT process — called inside the unprivileged importer
 // subprocess (after fork, before the importer runs) to lock it down to a pure-computation syscall set:
-// no `open*` (input-bytes-only — the child reads only descriptors the parent already opened for the
-// granted set), no network (`socket`/`connect`), no process creation (`execve`/`clone`/`fork`), no
-// `ptrace`. On Linux this installs a seccomp-bpf filter (PR_SET_NO_NEW_PRIVS + a hand-written classic
-// BPF syscall program — no libseccomp dependency, so the deny-by-default license gate stays clean); a
-// denied syscall fails closed with EPERM and the dangerous classes above are killed. On Windows/macOS
+// no `open*` (input-bytes-only — with no `open*` the child cannot reach any path the policy did not
+// grant; in v1 the source bytes reach it in-memory), no network (`socket`/`connect`), no process
+// creation (`execve`/`clone`/`fork`), no `ptrace`. On Linux this installs a seccomp-bpf filter
+// (PR_SET_NO_NEW_PRIVS + a hand-written classic BPF syscall program — no libseccomp dependency, so the
+// deny-by-default license gate stays clean); a denied syscall fails closed with EPERM (only a
+// wrong-arch/ABI syscall is killed outright — the x86_64 guard closes the i386/x32 ABI-confusion
+// hole). On Windows/macOS
 // it is a no-op reporting `applied=false` (their primitives are tracked follow-ups). Irreversible for
 // the process, so call it only in a child that runs nothing but the pure importer. Never throws.
 struct SandboxApplyResult

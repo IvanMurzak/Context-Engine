@@ -345,12 +345,16 @@ IsolatedImport run_subprocess(const Importer& importer, const ImportInput& input
     ::close(fds[0]);
 
     int status = 0;
-    while (::waitpid(pid, &status, 0) < 0 && errno == EINTR)
+    pid_t waited = 0;
+    while ((waited = ::waitpid(pid, &status, 0)) < 0 && errno == EINTR)
     {
     }
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    if (waited < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
     {
-        mark_subprocess_failed(out); // killed by seccomp/a signal, or a fail-closed child _exit
+        // waitpid error (e.g. ECHILD under an embedder's SIGCHLD auto-reaper), killed by seccomp/a
+        // signal, or a fail-closed child _exit — treat every non-clean wait as a subprocess failure,
+        // never a silent exit-0 (a real exit status was never obtained when waited < 0).
+        mark_subprocess_failed(out);
         return out;
     }
 
