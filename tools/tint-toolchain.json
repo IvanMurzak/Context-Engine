@@ -1,0 +1,28 @@
+{
+    "$comment": "Pinned Tint acquisition manifest for the SPIR-V->WGSL leg of the shader cross-compile backend (R-REND-005, issue #133, sub-task D of #119 — measured tool ruling: docs/wgsl-tool-decision.md). SINGLE source of truth for the pin — parsed by tools/fetch_tint.py (clone + commit-verify + build + stage, fail-closed) AND by src/render/shadercc/CMakeLists.txt (string(JSON) — the tag is baked into every compiled artifact as the `wgsltool=` line, so a tool bump can never silently reuse stale R-FILE-010 cache entries; tint has NO --version self-report, so acquisition-time pinning is the enforcement point). Channel = FROM SOURCE at a pinned Dawn release tag over publisher TLS (github.com/google/dawn is Google's official mirror of dawn.googlesource.com), with the resolved HEAD commit verified against the pinned hash BEFORE building (fail-closed — a re-pointed tag is refused). Tint publishes NO official standalone prebuilts (Dawn releases carry only emdawnwebgpu), so from-source is both the only official channel and the L-42-PREFERRED one; the tint-only build is minutes-class (measured ~2.5 min: clone ~30 s + configure/dep-fetch ~26 s + 742-object build ~111 s), cached in CI keyed on this manifest. tint is a standalone CLI invoked as a SUBPROCESS by the flag-gated backend, never linked into the engine (the esbuild/naga precedent). cmake_args notes: the TINT_BUILD_* trio trims the build to exactly the SPIR-V reader + WGSL reader/writer this leg needs; the DAWN_* OFF flags cut the dawn-native GPU backends (X11/Vulkan etc.) the CLI does not need; DAWN_SUPPORTS_CXX_MODULES=FALSE pre-seeds Dawn's compiler check so the experimental dawncpp_module target (which needs CMake>=3.28 module scanning) never configures.",
+    "repository": "https://github.com/google/dawn",
+    "tag": "v20260624.223603",
+    "commit": "87169444b43cca1a346f842a515c49c667c4f17c",
+    "target": "tint_cmd_tint_cmd",
+    "binary": "tint",
+    "cmake_args": [
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DDAWN_FETCH_DEPENDENCIES=ON",
+        "-DTINT_BUILD_CMD_TOOLS=ON",
+        "-DTINT_BUILD_SPV_READER=ON",
+        "-DTINT_BUILD_WGSL_READER=ON",
+        "-DTINT_BUILD_WGSL_WRITER=ON",
+        "-DTINT_BUILD_TESTS=OFF",
+        "-DDAWN_BUILD_SAMPLES=OFF",
+        "-DDAWN_BUILD_TESTS=OFF",
+        "-DDAWN_USE_GLFW=OFF",
+        "-DDAWN_ENABLE_D3D12=OFF",
+        "-DDAWN_ENABLE_METAL=OFF",
+        "-DDAWN_ENABLE_DESKTOP_GL=OFF",
+        "-DDAWN_ENABLE_OPENGLES=OFF",
+        "-DDAWN_ENABLE_VULKAN=OFF",
+        "-DDAWN_USE_X11=OFF",
+        "-DDAWN_USE_WAYLAND=OFF",
+        "-DDAWN_SUPPORTS_CXX_MODULES=FALSE"
+    ]
+}

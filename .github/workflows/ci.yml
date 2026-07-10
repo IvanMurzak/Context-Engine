@@ -697,6 +697,40 @@ jobs:
           key: vcpkg-bin-shadercc-${{ runner.os }}-${{ hashFiles('src/vcpkg.json', 'src/vcpkg-configuration.json') }}
           restore-keys: vcpkg-bin-shadercc-${{ runner.os }}-
 
+      # The WGSL leg's pinned tools (issue #133, sub-task D of #119 — measured ruling:
+      # docs/wgsl-tool-decision.md): tint (the wired SPIR-V->WGSL tool, built from Dawn source at
+      # the tag pinned in tools/tint-toolchain.json — minutes-class, commit-verified fail-closed)
+      # and naga-cli (the roundtrip test's native-consumer WGSL cross-validator, cargo-installed at
+      # the pin in tools/naga-toolchain.json). Both caches are keyed on their pin manifest, so a pin
+      # bump rebuilds exactly once per OS; on a cache hit the fetch scripts are no-ops needing
+      # neither cargo nor a compiler. No restore-keys: a stale tool must never satisfy a new pin.
+      - name: WGSL tool cache (tint)
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/tint-tool
+          key: tint-tool-${{ runner.os }}-${{ hashFiles('tools/tint-toolchain.json') }}
+
+      - name: WGSL tool cache (naga)
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/naga-tool
+          key: naga-tool-${{ runner.os }}-${{ hashFiles('tools/naga-toolchain.json') }}
+
+      - name: Stage pinned WGSL tools (tint + naga)
+        run: |
+          # macOS GH images ship no Rust toolchain; bootstrap a minimal one ONLY when needed (the
+          # cache-hit path needs no cargo). rustup.rs is the publisher TLS channel; retry-wrapped
+          # like every other external download in CI (Context-Engine#132 posture).
+          if ! command -v cargo >/dev/null 2>&1 && [ ! -d "${RUNNER_TEMP}/naga-tool/bin" ]; then
+            bash tools/ci-retry.sh -- bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          PY="$(command -v python3 || command -v python)"
+          "$PY" tools/fetch_naga.py --dest "${RUNNER_TEMP}/naga-tool"
+          "$PY" tools/fetch_tint.py --dest "${RUNNER_TEMP}/tint-tool"
+          echo "${RUNNER_TEMP}/naga-tool/bin" >> "$GITHUB_PATH"
+          echo "${RUNNER_TEMP}/tint-tool/bin" >> "$GITHUB_PATH"
+
       # The shader-crosscompile preset pulls the toolchain via the vcpkg manifest feature
       # (VCPKG_MANIFEST_FEATURES=shader-crosscompile) under the vcpkg toolchain ($VCPKG_ROOT) and sets
       # CONTEXT_BUILD_SHADER_CROSSCOMPILE=ON. GH-hosted runners preinstall vcpkg as
@@ -711,6 +745,6 @@ jobs:
         run: cmake --build --preset shader-crosscompile
         working-directory: src
 
-      - name: Run the glslang->SPIR-V smoke (SPIRV-Tools validate + SPIRV-Cross reflect)
+      - name: Run the shader-crosscompile ctests (smoke + author->SPIR-V->{HLSL,MSL,GLSL,WGSL} roundtrip)
         run: ctest --preset shader-crosscompile --output-on-failure
         working-directory: src

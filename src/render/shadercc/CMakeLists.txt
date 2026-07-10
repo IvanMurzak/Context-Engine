@@ -51,15 +51,47 @@ target_link_options(context_shadercc_smoke
 add_test(NAME shader-crosscompile-smoke COMMAND context_shadercc_smoke)
 
 # ---------------------------------------------------------------------------------------------
-# context_shadercc — the REAL cross-compile backend (sub-task C of #119, issue #130): a concrete
-# context::render::material::IShaderCompiler that lowers each authored stage to SPIR-V via glslang and
-# cross-compiles it to HLSL/MSL/GLSL via SPIRV-Cross. It plugs in BEHIND the backend-free material/
-# seam (it links context_render_material for the interface + ShaderIr types) WITHOUT touching callers;
-# the fake backend stays the default path. Built only under this flag, so the default dev gate + 3-OS
-# build matrix never resolve the toolchain (like context_render_wgpu / the smoke above).
+# context_shadercc — the REAL cross-compile backend (sub-tasks C+D of #119, issues #130/#133): a
+# concrete context::render::material::IShaderCompiler that lowers each authored stage to SPIR-V via
+# glslang and cross-compiles it to HLSL/MSL/GLSL via SPIRV-Cross plus WGSL via the pinned tint
+# subprocess (the measured M4 tool ruling — docs/wgsl-tool-decision.md). It plugs in BEHIND the
+# backend-free material/ seam (it links context_render_material for the interface + ShaderIr types)
+# WITHOUT touching callers; the fake backend stays the default path. Built only under this flag, so
+# the default dev gate + 3-OS build matrix never resolve the toolchain (like context_render_wgpu /
+# the smoke above).
 # ---------------------------------------------------------------------------------------------
+
+# The WGSL leg's tools are staged by the fetch scripts (CI: the `shader-crosscompile` job stages both
+# and prepends them to PATH before this configure):
+#   * tint — the WIRED SPIR-V->WGSL tool, built from Dawn source at the tag pinned in
+#     tools/tint-toolchain.json (tools/fetch_tint.py; commit-verified, fail-closed). tint has no
+#     --version self-report, so the pin string is baked into the backend, where it is folded into
+#     the default compiler id (an R-FILE-010 cache-key input — a pin bump re-keys the cache) and
+#     recorded in every artifact (`wgsltool=` line).
+#   * naga — the round-trip test's NATIVE-CONSUMER cross-validator (the in-tree wgpu-native parses
+#     WGSL with naga), pinned in tools/naga-toolchain.json (tools/fetch_naga.py).
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/tint-toolchain.json" _tint_manifest)
+string(JSON _tint_pin_tag GET "${_tint_manifest}" tag)
+find_program(CONTEXT_SHADERCC_TINT_EXECUTABLE NAMES tint
+    DOC "tint executable for the SPIR-V->WGSL leg (staged by tools/fetch_tint.py)")
+if(NOT CONTEXT_SHADERCC_TINT_EXECUTABLE)
+    message(FATAL_ERROR "CONTEXT_BUILD_SHADER_CROSSCOMPILE needs the pinned `tint` on PATH — "
+        "run `python3 tools/fetch_tint.py --dest <dir>` and add <dir>/bin to PATH "
+        "(or pass -DCONTEXT_SHADERCC_TINT_EXECUTABLE=<path>).")
+endif()
+find_program(CONTEXT_SHADERCC_NAGA_EXECUTABLE NAMES naga
+    DOC "naga executable for the round-trip test's native-consumer WGSL cross-validation (staged by tools/fetch_naga.py)")
+if(NOT CONTEXT_SHADERCC_NAGA_EXECUTABLE)
+    message(FATAL_ERROR "CONTEXT_BUILD_SHADER_CROSSCOMPILE needs the pinned `naga` on PATH — "
+        "run `python3 tools/fetch_naga.py --dest <dir>` and add <dir>/bin to PATH "
+        "(or pass -DCONTEXT_SHADERCC_NAGA_EXECUTABLE=<path>).")
+endif()
+
 add_library(context_shadercc STATIC src/cross_compiler.cpp)
 target_include_directories(context_shadercc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_definitions(context_shadercc PRIVATE
+    CONTEXT_SHADERCC_WGSL_TOOL_EXECUTABLE="${CONTEXT_SHADERCC_TINT_EXECUTABLE}"
+    CONTEXT_SHADERCC_WGSL_TOOL_PIN="tint dawn-${_tint_pin_tag}")
 target_link_libraries(context_shadercc
     PUBLIC context_render_material   # the IShaderCompiler seam + authoring IR (propagates its include)
     PRIVATE
@@ -78,17 +110,20 @@ if(MSVC)
 endif()
 
 # --- tests (R-QA-013: behaviour ships WITH its tests in the same PR) -----------------------------
-# The author->SPIR-V->{HLSL,MSL,GLSL} round-trip over the REAL authored corpus (reused from
+# The author->SPIR-V->{HLSL,MSL,GLSL,WGSL} round-trip over the REAL authored corpus (reused from
 # material/corpus/ via an ABSOLUTE compile definition so the test never depends on the ctest working
 # directory — the same pattern context_render_material_test_material_ir uses). Registered under the
 # `shader-crosscompile` preset, so the EXISTING `shader-crosscompile` CI job (issue #128) runs it via
-# `ctest` with NO .github/** change. The test TU includes no third-party headers (the backend hides
-# them), so it needs no /external:W0.
+# `ctest` with NO new job. The test TU includes no third-party headers (the backend hides them), so
+# it needs no /external:W0. The naga definition feeds the WGSL cross-validation: every emitted WGSL
+# module must ALSO parse under the native consumer's naga generation (spikes/webgpu/FINDINGS.md —
+# emitted WGSL is consumed by BOTH Tint on web and naga inside wgpu-native on native).
 add_executable(context_shadercc_roundtrip tests/test_roundtrip.cpp)
 target_link_libraries(context_shadercc_roundtrip PRIVATE context_shadercc context_warnings)
 target_include_directories(context_shadercc_roundtrip PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 target_compile_definitions(context_shadercc_roundtrip
-    PRIVATE CONTEXT_MATERIAL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../material/corpus")
+    PRIVATE CONTEXT_MATERIAL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../material/corpus"
+            CONTEXT_SHADERCC_NAGA_EXECUTABLE="${CONTEXT_SHADERCC_NAGA_EXECUTABLE}")
 # Self-contained GCC runtime (gated to GNU; inert on the Clang/MSVC/AppleClang CI legs) — the round-trip
 # exe reads the corpus via std::ifstream/std::ostringstream (setup.md § static-link note).
 target_link_options(context_shadercc_roundtrip
