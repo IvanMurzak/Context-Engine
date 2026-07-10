@@ -6,8 +6,9 @@
 //   * no ambient network (R-SEC-010) — network is a granted capability, never a default,
 // all inside an unprivileged subprocess. This header pins the PORTABLE, enforceable half of that
 // slice (the policy + the checks the reference runner applies) as real, tested code. The per-OS
-// sandbox-primitive lockdown (seccomp-bpf / AppContainer / sandbox-exec) is STAGED Linux-first and
-// surfaced by os_sandbox_support() below — never silently assumed to be active (R-SEC-006).
+// sandbox-primitive lockdown (seccomp-bpf on Linux / a deny-default Seatbelt profile on macOS /
+// AppContainer on Windows) is ENFORCED on Linux + macOS and still STAGED on Windows, surfaced by
+// os_sandbox_support() below — never silently assumed to be active (R-SEC-006).
 
 #pragma once
 
@@ -70,9 +71,9 @@ struct SandboxPolicy
 [[nodiscard]] bool write_permitted(const SandboxPolicy& policy, std::string_view path);
 
 // The per-OS unprivileged-subprocess sandbox primitive and whether it is ENFORCED on this platform.
-// Honest staging (R-SEC-006): Linux (seccomp-bpf) is the wedge server platform and IS enforced now;
-// Windows (AppContainer / restricted Job Object) and macOS (sandbox-exec) are TRACKED de-risk items,
-// still reported `enforced=false` so a caller never assumes a lockdown that is not there.
+// Honest staging (R-SEC-006): Linux (seccomp-bpf) and macOS (a deny-default Seatbelt profile applied
+// via sandbox_init) are BOTH enforced now; Windows (AppContainer / restricted Job Object) is a TRACKED
+// de-risk item, still reported `enforced=false` so a caller never assumes a lockdown that is not there.
 struct OsSandboxSupport
 {
     std::string primitive;  // "seccomp-bpf" / "windows-appcontainer" / "macos-sandbox-exec" / "none"
@@ -89,9 +90,11 @@ struct OsSandboxSupport
 // (PR_SET_NO_NEW_PRIVS + a hand-written classic BPF syscall program — no libseccomp dependency, so the
 // deny-by-default license gate stays clean); a denied syscall fails closed with EPERM (only a
 // wrong-arch/ABI syscall is killed outright — the x86_64 guard closes the i386/x32 ABI-confusion
-// hole). On Windows/macOS
-// it is a no-op reporting `applied=false` (their primitives are tracked follow-ups). Irreversible for
-// the process, so call it only in a child that runs nothing but the pure importer. Never throws.
+// hole). On macOS it installs a deny-by-default Seatbelt profile via sandbox_init (no third-party
+// dependency either): fresh file opens, sockets, and process creation are all refused, mirroring the
+// seccomp intent. On Windows it is a no-op reporting `applied=false` (its primitive is a tracked
+// follow-up). Irreversible for the process, so call it only in a child that runs nothing but the pure
+// importer. Never throws.
 struct SandboxApplyResult
 {
     bool applied = false;   // true iff the OS primitive was actually installed (Linux today)

@@ -9,7 +9,7 @@
 #include <string_view>
 #include <utility>
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 #include <cerrno>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -231,13 +231,17 @@ IsolatedImport run_isolated(const Importer& importer, const ImportInput& input,
 
 // --- the unprivileged-subprocess runner (issue #72) ----------------------------------------------
 
-#if defined(__linux__)
+// The POSIX fork()+seccomp/Seatbelt path — shared by Linux (seccomp-bpf) and macOS (a deny-by-default
+// Seatbelt profile via sandbox_init). Both apply their OS primitive in the child via
+// apply_importer_sandbox() (sandbox.h), so this fork/pipe/wait plumbing is identical; only the
+// primitive installed inside apply_importer_sandbox() differs per platform.
+#if defined(__linux__) || defined(__APPLE__)
 
 namespace
 {
 
-// Child-side _exit codes (Linux). The parent only distinguishes 0 vs non-zero, so exact values are
-// diagnostic-only, but naming them keeps the fail-closed intent legible.
+// Child-side _exit codes (POSIX: Linux + macOS). The parent only distinguishes 0 vs non-zero, so exact
+// values are diagnostic-only, but naming them keeps the fail-closed intent legible.
 constexpr int kExitSandboxApplyFailed = 42; // apply_importer_sandbox() failed => run NOTHING unsandboxed
 constexpr int kExitResultWriteFailed = 43;  // the result frame could not be written to the parent
 
@@ -321,12 +325,13 @@ IsolatedImport run_subprocess(const Importer& importer, const ImportInput& input
         // pipe write, then _exit — no exec, no further spawning. NOTE (honest staging): this forks
         // WITHOUT exec, so (a) it is safe only in the single-threaded reference/CLI context — a
         // multi-threaded daemon fork snapshot can hold another thread's allocator lock — and (b) the
-        // child inherits the parent's open descriptors, and the seccomp filter allows read/write on
-        // ALREADY-OPEN fds (blocking only fresh `open*`). The daemon integration hardens BOTH by
-        // switching to a fork+exec importer-host (O_CLOEXEC scrubs the fd table so the child starts
-        // with only the result pipe) or a pre-forked zygote — a tracked follow-up; the seccomp
-        // lockdown (no fresh open => input-bytes-only for the filesystem, no network) + the read-scope
-        // contract are identical either way.
+        // child inherits the parent's open descriptors, and the OS sandbox primitive (the Linux seccomp
+        // filter / the macOS deny-default Seatbelt profile) allows read/write on ALREADY-OPEN fds
+        // (blocking only fresh `open*`). The daemon integration hardens BOTH by switching to a
+        // fork+exec importer-host (O_CLOEXEC scrubs the fd table so the child starts with only the
+        // result pipe) or a pre-forked zygote — a tracked follow-up; the lockdown (no fresh open =>
+        // input-bytes-only for the filesystem, no network) + the read-scope contract are identical
+        // either way.
         ::close(fds[0]); // the child never reads the result pipe
         const SandboxApplyResult applied = apply_importer_sandbox();
         if (!applied.applied)
@@ -366,7 +371,8 @@ IsolatedImport run_subprocess(const Importer& importer, const ImportInput& input
     }
 
     out.result = std::move(decoded);
-    out.audit.os_primitive_enforced = true; // the seccomp-bpf lockdown WAS applied in the child
+    // The OS primitive (seccomp-bpf on Linux / the Seatbelt profile on macOS) WAS applied in the child.
+    out.audit.os_primitive_enforced = true;
     return out;
 }
 
@@ -375,7 +381,7 @@ IsolatedImport run_subprocess(const Importer& importer, const ImportInput& input
 IsolatedImport run_subprocess(const Importer& importer, const ImportInput& input,
                               const SandboxPolicy& policy)
 {
-    // Windows AppContainer / macOS sandbox-exec are tracked follow-ups; until they land the runner is
+    // Windows AppContainer / restricted Job Object is a tracked follow-up; until it lands the runner is
     // the portable in-process slice (os_primitive_enforced stays false). No importer change when the
     // primitive arrives — importers are pure over source_bytes.
     return run_isolated(importer, input, policy);
