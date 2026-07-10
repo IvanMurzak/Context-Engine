@@ -1,0 +1,42 @@
+src/render/shadercc/include/context/render/shadercc/cross_compiler.h
+  s_e37cb8916c7fcf::t_61e45cb387c33c 21-24
+  s_e37cb8916c7fcf::t_71f5b1d8727899 78-80,84-89
+tools/fetch_tint.py
+  s_e37cb8916c7fcf::t_523f74a08b11e1 96-99
+src/render/shadercc/src/cross_compiler.cpp
+  s_e37cb8916c7fcf::t_9205f8820534be 446-454
+  s_e37cb8916c7fcf::t_f1e266271d45bd 523-525
+  s_e37cb8916c7fcf::t_86653d5aebd31f 41-42
+.github/workflows/ci.yml
+  s_e37cb8916c7fcf::t_4e94adf3e1e624 722-723,725
+src/render/shadercc/CMakeLists.txt
+  s_e37cb8916c7fcf::t_885b4ef74617d2 68-70
+src/render/shadercc/tests/test_roundtrip.cpp
+  s_e37cb8916c7fcf::t_8e6c20b655fa0c 152-155
+  s_e37cb8916c7fcf::t_44ba9a4ebebe2d 22
+  s_e37cb8916c7fcf::t_6318fd001b2065 48-50,54-55
+docs/wgsl-tool-decision.md
+  s_e37cb8916c7fcf::t_d87da5b35c86a1 96
+  s_e37cb8916c7fcf::t_9c7db27f02da00 88-91
+  s_e37cb8916c7fcf::t_8ad3926c44541f 97
+src/render/shadercc/README.md
+  s_e37cb8916c7fcf::t_d49128835efedc 36-37
+tools/tests/test_fetch_tint.py
+  s_e37cb8916c7fcf::t_cacdc1e7d0cc09 75-85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9d76d6b36a4afbb75be98775e8c6a413d339c510",
+  "prompts": {},
+  "sessions": {
+    "s_e37cb8916c7fcf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "79ebcd73-a5ef-46fd-ac35-a6d058b74895",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
