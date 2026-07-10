@@ -261,3 +261,78 @@ def test_download_gives_up_after_attempts(tmp_path: Path, monkeypatch):
             "https://example.invalid/x", tmp_path / "o", attempts=3, base_delay=0,
             sleep=lambda *_: None)
     assert opener.calls == 3
+
+
+# --- re-stage prunes stale members so <dest> mirrors the current pin exactly -------------------
+
+
+def _make_pkg_tgz_with(member_dir: str, files: dict[str, bytes]) -> bytes:
+    """Build a synthetic npm tarball carrying exactly `files` (relpath-under-member_dir -> bytes),
+    plus a non-member README sibling (proving the member_dir filter)."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for rel, data in files.items():
+            info = tarfile.TarInfo(name=f"{member_dir}/{rel}")
+            info.size = len(data)
+            info.mode = 0o755
+            tar.addfile(info, io.BytesIO(data))
+        readme = b"# tsgo\n"
+        rinfo = tarfile.TarInfo(name="package/README.md")
+        rinfo.size = len(readme)
+        tar.addfile(rinfo, io.BytesIO(readme))
+    return buf.getvalue()
+
+
+def _source_with(tmp_path: Path, platform: str, binary: str, version: str,
+                 files: dict[str, bytes]) -> tuple[Path, Path]:
+    """Write a --source dir + matching manifest for a tarball carrying exactly `files`, at `version`.
+    Distinct `version`s stage into the same dest as a genuine re-pin (the stamp mismatches)."""
+    source = tmp_path / f"source-{version}"
+    source.mkdir()
+    member_dir = "package/lib"
+    tgz = _make_pkg_tgz_with(member_dir, files)
+    file_name = f"native-preview-{platform}-{version}.tgz"
+    (source / file_name).write_bytes(tgz)
+    manifest = {
+        "tsc_version": version,
+        "package_url_template":
+            "https://example.invalid/@typescript/native-preview-{platform}/{tsc_version}",
+        "platforms": {
+            platform: {
+                "package": f"@typescript/native-preview-{platform}",
+                "file": file_name,
+                "sha256": _sha(tgz),
+                "member_dir": member_dir,
+                "binary": binary,
+            },
+        },
+    }
+    manifest_path = tmp_path / f"manifest-{version}.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    return source, manifest_path
+
+
+def test_restage_prunes_stale_lib_files(tmp_path: Path):
+    """A version bump whose member set SHRANK must not leave the dropped lib.*.d.ts behind — the
+    staged dir mirrors the current pin exactly (the whole-dir-stage residue guard)."""
+    dest = tmp_path / "out"
+    # v1 carries an extra lib file that v2 drops.
+    src1, man1 = _source_with(tmp_path, "linux-x64", "tsgo", "7.0.0-dev.1", {
+        "tsgo": BINARY_BYTES, "lib.d.ts": LIBDTS_BYTES, "lib.es2020.d.ts": LIBDTS_BYTES,
+    })
+    fetch_tsc.fetch(man1, "linux-x64", dest, source=src1)
+    assert (dest / "lib.es2020.d.ts").exists()
+
+    # v2 (a distinct version -> stamp mismatch -> re-stage) drops lib.es2020.d.ts.
+    src2, man2 = _source_with(tmp_path, "linux-x64", "tsgo", "7.0.0-dev.2", {
+        "tsgo": BINARY_BYTES, "lib.d.ts": LIBDTS_BYTES,
+    })
+    result = fetch_tsc.fetch(man2, "linux-x64", dest, source=src2)
+
+    assert result["cached"] is False
+    assert (dest / "tsgo").read_bytes() == BINARY_BYTES        # current members present
+    assert (dest / "lib.d.ts").read_bytes() == LIBDTS_BYTES
+    assert not (dest / "lib.es2020.d.ts").exists()             # the dropped member was pruned
+    # The idempotency stamp survives the prune, so a third identical run is a no-op cache hit.
+    third = fetch_tsc.fetch(man2, "linux-x64", dest, source=src2)
+    assert third["cached"] is True

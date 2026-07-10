@@ -83,7 +83,12 @@ std::string rstrip(std::string s)
     return s;
 }
 
-// Wrap a token in double quotes for the shell (paths may contain spaces).
+// Wrap a token in double quotes for the shell (paths may contain spaces). SECURITY: this does NOT
+// escape a double-quote (or other shell metacharacter) already inside `s`, so every caller MUST pass
+// a CONTROLLED value — today the CMake-staged tsgo binary path (binaryPath_) and a caller-owned .ts
+// path — never an untrusted / agent-authored string. A hardened shared escaper is the tracked P3
+// subprocess-runner consolidation (see the file header + PR #134 finding); until it lands, the
+// trusted-callers precondition is what keeps this injection-safe.
 std::string q(const std::string& s) { return "\"" + s + "\""; }
 
 // Run `command` (already fully quoted), returning the process exit code. Applies the Windows cmd.exe

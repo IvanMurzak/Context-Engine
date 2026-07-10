@@ -166,7 +166,7 @@ target_compile_definitions(context_ts_test_ts_toolchain PRIVATE ${_ctx_ts_test_d
 target_link_options(context_ts_test_ts_toolchain PRIVATE ${_ctx_ts_gcc_static})
 add_test(NAME ts-test_ts_toolchain COMMAND context_ts_test_ts_toolchain)
 
-# 1d) SEMANTIC typecheck via tsgo (--noEmit) — a LOCAL gate (tsgo is a subprocess, links no V8). It
+# 1a) SEMANTIC typecheck via tsgo (--noEmit) — a LOCAL gate (tsgo is a subprocess, links no V8). It
 # needs the staged TSGO path plus esbuild + the examples dir (the duality test transpiles a
 # type-invalid file with esbuild and shows the typecheck rejects it). The author->typecheck->fix loop.
 add_executable(context_ts_test_ts_typecheck tests/test_ts_typecheck.cpp)
@@ -177,21 +177,21 @@ target_compile_definitions(context_ts_test_ts_typecheck PRIVATE
 target_link_options(context_ts_test_ts_typecheck PRIVATE ${_ctx_ts_gcc_static})
 add_test(NAME ts-test_ts_typecheck COMMAND context_ts_test_ts_typecheck)
 
-# 1a) Source Map v3 parser + resolver — a LOCAL gate (no V8, no esbuild needed at runtime; the
+# 1b) Source Map v3 parser + resolver — a LOCAL gate (no V8, no esbuild needed at runtime; the
 # hand-encoded VLQ maps are inline). The R-OBS-005 mapping foundation.
 add_executable(context_ts_test_source_map tests/test_source_map.cpp)
 target_link_libraries(context_ts_test_source_map PRIVATE context_ts context_warnings)
 target_link_options(context_ts_test_source_map PRIVATE ${_ctx_ts_gcc_static})
 add_test(NAME ts-test_source_map COMMAND context_ts_test_source_map)
 
-# 1b) TS-resolved stack-trace remapper — a LOCAL gate (parses a canned V8 stack + remaps through a
+# 1c) TS-resolved stack-trace remapper — a LOCAL gate (parses a canned V8 stack + remaps through a
 # known map; no V8 link). The "headless CI still needs symbolicated traces" half of R-OBS-005.
 add_executable(context_ts_test_stack_trace tests/test_stack_trace.cpp)
 target_link_libraries(context_ts_test_stack_trace PRIVATE context_ts context_warnings)
 target_link_options(context_ts_test_stack_trace PRIVATE ${_ctx_ts_gcc_static})
 add_test(NAME ts-test_stack_trace COMMAND context_ts_test_stack_trace)
 
-# 1c) R-SEC-005 end-to-end (issue #100): an engine-INSTALLED pure-JS package resolves + imports in
+# 1d) R-SEC-005 end-to-end (issue #100): an engine-INSTALLED pure-JS package resolves + imports in
 # the TS host. Installs a fixture package via context_editor_pkg (the R-SEC-005 install path) then
 # bundles an authored .ts entry importing it through esbuild — proving node module-resolution finds
 # the installed package. A LOCAL gate (esbuild is a subprocess; no V8 link). Links context_editor_pkg

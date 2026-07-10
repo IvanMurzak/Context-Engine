@@ -54,6 +54,10 @@ canonical parse node's real body, and `context_warnings`). Namespace:
   content-addressed store keyed under the **R-FILE-010** key `hash(source bytes | transpile options |
   toolchain version)` — the same "every input enumerated exhaustively, instance-independent" rule the
   shader/import caches use (a toolchain-version bump re-keys every entry rather than serving stale JS).
+  That key is exhaustive for a transpile-only compile; under `opts.bundle` esbuild inlines the entry's
+  transitive imports from disk, so a bundle-mode caller must `invalidate()` on any imported-file change
+  (enumerating the resolved import closure as derivation edges is a documented deferred extension — see
+  the BUNDLE-MODE CAVEAT in `ts_compile_node.h`).
   `get_or_compile()` is the synchronous cache path (a hit skips the toolchain call); `invalidate()`
   reclaims a superseded entry. Backend-agnostic — a fake toolchain drives the tests, so the node's
   ctest needs no esbuild binary. (The R-FILE-013 backpressured request queue the shader node adds is a

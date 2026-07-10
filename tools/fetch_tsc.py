@@ -66,6 +66,9 @@ DEFAULT_MANIFEST = REPO_ROOT / "tools" / "tsc-toolchain.json"
 
 _CHUNK = 1 << 20
 
+# The idempotency stamp written into <dest>; excluded from the stale-file prune (fetch rewrites it).
+_STAMP_NAME = ".tsc-fetch-stamp.json"
+
 # Retry policy for transient upstream failures (mirrors fetch_esbuild.py, Context-Engine#129): a
 # single npm-registry / CDN 504 or timeout must not hard-fail the fetch. SHA-256 verification still
 # runs AFTER the download completes (fail-closed), so retrying never weakens the pin.
@@ -156,15 +159,39 @@ def _verify(path: Path, expected_sha: str, what: str) -> None:
             f"SHA-256 mismatch for {what}: expected {expected_sha}, got {actual} — REFUSED")
 
 
+def _prune_stale(dest: Path, keep: set[str]) -> None:
+    """Remove any regular file under ``dest`` the current pin did NOT just stage, so a member set that
+    SHRANK across a version bump leaves no residue and ``dest`` mirrors the pin exactly. ``keep`` holds
+    the normalized relpaths just written; the idempotency stamp (``_STAMP_NAME``) is always preserved
+    (``fetch`` rewrites it). Emptied directories are pruned too; a dir still holding a kept file stays."""
+    # Deepest paths first (files before their parent dirs), so a dir is only rmdir'd once emptied.
+    for path in sorted(dest.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        if path.is_dir():
+            try:
+                path.rmdir()  # succeeds only when empty — a dir with kept files is left intact
+            except OSError:
+                pass
+            continue
+        rel = os.path.normpath(str(path.relative_to(dest)))
+        if rel == _STAMP_NAME or rel in keep:
+            continue
+        path.unlink()
+
+
 def _extract_member_dir(tarball: Path, member_dir: str, binary: str, dest: Path) -> Path:
     """Extract every regular file under ``member_dir`` from the npm tar.gz into ``dest``, preserving
     the layout RELATIVE TO ``member_dir`` (so the binary lands next to its lib.*.d.ts). Returns the
     staged binary path. tsgo needs its whole lib dir adjacent — extracting only the binary makes it
-    panic ('bundled: lib.d.ts does not exist')."""
+    panic ('bundled: lib.d.ts does not exist').
+
+    Stale files from a PRIOR pin are pruned after extraction so ``dest`` is byte-for-byte reproducible
+    from the current pin alone: unlike ``fetch_esbuild.py``'s single-binary overwrite, staging a whole
+    directory can accrete residue when a version bump DROPS a member (a renamed/removed lib.*.d.ts)."""
     prefix = member_dir.rstrip("/") + "/"
     if ".." in Path(member_dir).parts or member_dir.startswith("/"):
         raise FetchError(f"refusing unsafe member_dir '{member_dir}'")
     staged_binary: Path | None = None
+    staged_rel: set[str] = set()
     with tarfile.open(tarball, "r:gz") as tar:
         members = [m for m in tar.getmembers() if m.isfile() and m.name.startswith(prefix)]
         if not members:
@@ -181,11 +208,13 @@ def _extract_member_dir(tarball: Path, member_dir: str, binary: str, dest: Path)
                 raise FetchError(f"member '{info.name}' could not be read from {tarball.name}")
             with extracted, out_path.open("wb") as out:
                 shutil.copyfileobj(extracted, out)
+            staged_rel.add(os.path.normpath(rel))
             if rel == binary:
                 staged_binary = out_path
     if staged_binary is None:
         raise FetchError(
             f"binary '{binary}' not found under '{member_dir}' in {tarball.name} — layout changed?")
+    _prune_stale(dest, staged_rel)
     # Make the binary executable on POSIX (npm tars carry the mode, but be explicit + robust).
     if os.name != "nt":
         mode = staged_binary.stat().st_mode
@@ -213,7 +242,7 @@ def fetch(manifest_path: Path, platform: str, dest: Path,
     spec = platforms[platform]
 
     bin_out = dest / spec["binary"]
-    stamp_path = dest / ".tsc-fetch-stamp.json"
+    stamp_path = dest / _STAMP_NAME
     want_stamp = {
         "tsc_version": version,
         "platform": platform,

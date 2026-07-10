@@ -12,6 +12,20 @@
 // serving artifacts transpiled by the old tool — the same "importer version" component the shader
 // node and the asset importer use). The key is instance-independent, so a shared cache is sound.
 //
+// BUNDLE-MODE CAVEAT (issue #85 scopes the R-FILE-010 key to source|options|toolchain-version): the
+// exhaustiveness above holds for a transpile-only compile (opts.bundle == false), where esbuild
+// transpiles the given source bytes in isolation. When opts.bundle == true esbuild ALSO resolves +
+// inlines the entry file's transitive imports FROM DISK, so the emitted JS additionally depends on
+// every imported file's content — inputs this key does NOT enumerate. Two consequences a bundle-mode
+// caller must own: (1) two entry files with byte-identical source but different local imports share a
+// key, and (2) an edit to an imported file (the entry's own bytes unchanged) is NOT detected — so a
+// bundle-mode caller MUST invalidate() whenever any transitively-imported file changes (the node
+// cannot observe that on its own). Folding the entry file PATH into the key was considered and
+// rejected: it still would not detect an imported-file edit (path unchanged), and it would break the
+// content-addressed dedup of identical transpile-only source authored at two paths. Enumerating the
+// resolved import closure as first-class derivation edges is the correct fix and a documented deferred
+// extension (out of issue #85's R-FILE-010-cache scope). No production caller wires bundle mode yet.
+//
 // Backend-agnostic + single-threaded/deterministic by construction, like the rest of the derivation
 // graph. This node keeps the SYNCHRONOUS get_or_compile() cache path (the R-FILE-010 DoD: unchanged TS
 // is not re-transpiled); the R-FILE-013 backpressured request()/run_pass() queue the shader node adds
