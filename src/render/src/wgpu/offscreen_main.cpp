@@ -11,12 +11,26 @@
 //   lit    — R-REND-004/006 GPU PBR proof: World -> extract -> shadow depth pass + lit main pass ->
 //            readback asserts vs the CPU reference (lighting/shadow/lightmap-hook deltas). Same
 //            exit convention as `render`.
+//   golden <scene> <out.ppm>
+//          — M4 T7 (issue #141): render a golden-corpus scene (triangle3d | sprite2d | lit3d) and
+//            write the frame as binary PPM for the SSIM visual-equivalence gate
+//            (tools/golden_compare.py vs the committed baseline under goldens/). Same exit
+//            convention as `render`; exit 2 on a bad scene id / unwritable path.
+//   bench [frames] [warmup] [WxH]
+//          — M4 T7 (issue #141): the R-QA-007 min-spec floor bench subject — the representative
+//            lit scene rendered frame-after-frame offscreen (defaults 60 frames, 10 warmup,
+//            1920x1080, the committed floor resolution). Prints one JSON line of raw per-frame
+//            samples; bench/minspec_floor.py owns the R-QA-009 median-of-5/band policy. Same exit
+//            convention as `render`; exit 2 on bad arguments.
 
+#include "context/render/golden.h"
+#include "context/render/lit/golden_lit.h"
 #include "context/render/lit/lit_offscreen.h"
 #include "context/render/offscreen_scene.h"
 #include "context/render/sprite/sprite_offscreen.h"
 #include "context/render/wgpu/wgpu_rhi.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -123,6 +137,119 @@ int main(int argc, char** argv)
         return code;
     }
 
-    std::fprintf(stderr, "usage: %s [probe|render|sprite|lit]\n", argv[0]);
+    if (mode == "golden")
+    {
+        if (argc < 4)
+        {
+            std::fprintf(stderr, "usage: %s golden <triangle3d|sprite2d|lit3d> <out.ppm>\n",
+                         argv[0]);
+            return 2;
+        }
+        const std::string scene = argv[2];
+        const std::string out_path = argv[3];
+
+        int exit_code = 0;
+        std::unique_ptr<IDevice> device = acquire_device(*rhi, exit_code);
+        if (device == nullptr)
+        {
+            finish(exit_code);
+            return exit_code;
+        }
+        golden::GoldenImage image;
+        bool rendered = false;
+        if (scene == "lit3d")
+        {
+            rendered = lit::render_golden_lit3d(*device, image);
+        }
+        else if (scene == "triangle3d" || scene == "sprite2d")
+        {
+            rendered = golden::render_golden_scene(*device, scene, image);
+        }
+        else
+        {
+            std::fprintf(stderr, "[render-golden] unknown scene '%s'\n", scene.c_str());
+            finish(2);
+            return 2;
+        }
+        if (!rendered)
+        {
+            std::fprintf(stderr, "[render-golden] FAIL: could not render scene '%s'\n",
+                         scene.c_str());
+            finish(1);
+            return 1;
+        }
+        if (!golden::write_ppm(image, out_path))
+        {
+            std::fprintf(stderr, "[render-golden] FAIL: could not write '%s'\n", out_path.c_str());
+            finish(2);
+            return 2;
+        }
+        std::printf("[render-golden] scene=%s -> %s (%ux%u)\n", scene.c_str(), out_path.c_str(),
+                    image.width, image.height);
+        finish(0);
+        return 0;
+    }
+
+    if (mode == "bench")
+    {
+        std::uint32_t frames = 60;
+        std::uint32_t warmup = 10;
+        std::uint32_t width = 1920;
+        std::uint32_t height = 1080;
+        if (argc > 2)
+        {
+            frames = static_cast<std::uint32_t>(std::strtoul(argv[2], nullptr, 10));
+        }
+        if (argc > 3)
+        {
+            warmup = static_cast<std::uint32_t>(std::strtoul(argv[3], nullptr, 10));
+        }
+        if (argc > 4)
+        {
+            // Parse "WxH" without sscanf (raw C stdio trips MSVC /W4 /WX C4996 — conventions.md).
+            const std::string res = argv[4];
+            const std::size_t sep = res.find('x');
+            char* rest = nullptr;
+            const unsigned long parsed_w =
+                (sep == std::string::npos) ? 0 : std::strtoul(res.c_str(), &rest, 10);
+            const unsigned long parsed_h =
+                (sep == std::string::npos) ? 0 : std::strtoul(res.c_str() + sep + 1, &rest, 10);
+            if (parsed_w == 0 || parsed_h == 0)
+            {
+                std::fprintf(stderr, "[render-bench] bad resolution '%s' (want WxH)\n", argv[4]);
+                return 2;
+            }
+            width = static_cast<std::uint32_t>(parsed_w);
+            height = static_cast<std::uint32_t>(parsed_h);
+        }
+        if (frames == 0)
+        {
+            std::fprintf(stderr, "[render-bench] frames must be > 0\n");
+            return 2;
+        }
+
+        int exit_code = 0;
+        std::unique_ptr<IDevice> device = acquire_device(*rhi, exit_code);
+        if (device == nullptr)
+        {
+            finish(exit_code);
+            return exit_code;
+        }
+        lit::LitBenchResult result;
+        if (!lit::bench_lit_frames(*device, width, height, warmup, frames, result))
+        {
+            std::fprintf(stderr, "[render-bench] FAIL: bench loop did not complete\n");
+            finish(1);
+            return 1;
+        }
+        std::printf("%s\n", lit::bench_result_json(result).c_str());
+        finish(0);
+        return 0;
+    }
+
+    std::fprintf(stderr,
+                 "usage: %s [probe|render|sprite|lit|golden <scene> <out.ppm>|bench [frames] "
+                 "[warmup] [WxH]]\n",
+                 argv[0]);
     return 2;
 }

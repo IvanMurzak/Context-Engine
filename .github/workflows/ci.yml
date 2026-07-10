@@ -126,11 +126,11 @@ jobs:
         run: cmake --build --preset dev
         working-directory: src
 
-      # Every registered suite EXCEPT the M1 + M2 exit gates, the M3 determinism gate, and the
-      # samples-corpus gate — those families run in their own named steps below so each milestone/QA
-      # gate is legible per OS leg (same tests, each runs exactly once).
+      # Every registered suite EXCEPT the M1 + M2 + M4 exit gates, the M3 determinism gate, and
+      # the samples-corpus gate — those families run in their own named steps below so each
+      # milestone/QA gate is legible per OS leg (same tests, each runs exactly once).
       - name: Run test suites (ctest)
-        run: ctest --preset dev --verbose -E "^m1-exit-|^m2-exit-|^determinism-|^samples-corpus"
+        run: ctest --preset dev --verbose -E "^m1-exit-|^m2-exit-|^m4-exit-|^determinism-|^samples-corpus"
         working-directory: src
 
       # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36) — the five exit criteria as a BLOCKING
@@ -171,6 +171,18 @@ jobs:
       # docs/ci-fleet-manifest.json as the samples-corpus gate.
       - name: Samples corpus gate (R-QA-006 / R-BUILD-009 / R-QA-008, blocking)
         run: ctest --preset dev --output-on-failure -R "^samples-corpus"
+        working-directory: src
+
+      # The M4 EXIT GATE, headless criterion (ROADMAP §1 M4 Exit / issue #141) — a BLOCKING per-PR
+      # check on every OS leg: with the render toggle OFF (this job compiles NO GPU backend),
+      # headless still runs with the render module ABSENT (R-HEAD-002 — probe creates no device,
+      # no-adapter attach yields no renderer, the engine steps renderer-less) and offscreen render
+      # stays the OPT-IN detachable path (R-HEAD-004). The M4 exit's other two criteria are gated
+      # on the real backends: the golden-scene SSIM corpus (render + render-web jobs vs goldens/)
+      # and the min-spec floor bench (render job, bench/minspec_floor.py). Registered in
+      # docs/ci-fleet-manifest.json as m4-exit-headless-no-render.
+      - name: M4 exit gate (headless-no-render, R-HEAD-002/004, blocking)
+        run: ctest --preset dev --output-on-failure -R "^m4-exit-"
         working-directory: src
 
       - name: sccache stats
@@ -637,6 +649,59 @@ jobs:
         run: ctest --preset dev -R "^render-wgpu-" --output-on-failure
         working-directory: src
 
+      # --- M4 T7 (issue #141): golden-scene visual-equivalence corpus, NATIVE Linux-Vulkan leg ---
+      # Dump every corpus scene through the wgpu backend on lavapipe, then gate each against its
+      # committed goldens/ baseline with the named metric (mean block-SSIM + per-scene tolerances,
+      # goldens/manifest.json). BLOCKING per the minimal-v1 ruling (Linux-Vulkan + one browser);
+      # macOS stays the advisory desktop signal via the probe/skip tests above (no rasterizing
+      # adapter there). Fleet manifest: golden-scene-native-linux. Rebaselines are REVIEWED
+      # changes, never automatic (goldens/README.md).
+      - name: Golden-scene corpus — dump (native, lavapipe)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p out/golden-native
+          exe=src/build/dev/render/context_render_wgpu_offscreen
+          "$exe" golden triangle3d out/golden-native/triangle3d.ppm
+          "$exe" golden sprite2d out/golden-native/sprite2d.ppm
+          "$exe" golden lit3d out/golden-native/lit3d.ppm
+
+      - name: Golden-scene SSIM gate (native-vulkan-lavapipe, blocking)
+        if: runner.os == 'Linux'
+        run: |
+          python3 tools/golden_compare.py --scene triangle3d --candidate out/golden-native/triangle3d.ppm
+          python3 tools/golden_compare.py --scene sprite2d --candidate out/golden-native/sprite2d.ppm
+          python3 tools/golden_compare.py --scene lit3d --candidate out/golden-native/lit3d.ppm
+
+      # --- M4 T7 (issue #141): R-QA-007 min-spec floor bench, per-PR methodology proxy ---
+      # MEASURE is BLOCKING: the representative lit3d subject must run green end-to-end under the
+      # R-QA-009 discipline (median-of-5 runs at the committed floor resolution; results archived
+      # below as the time series). The floor ENFORCEMENT is ADVISORY (continue-on-error) until the
+      # minspec-desktop-proxy runner class is provisioned — a shared runner + software rasterizer
+      # is NOT the named proxy device (R-QA-012 advisory-until-provisioned). Fleet manifest:
+      # minspec-floor-proxy-measure / minspec-floor-proxy-gate; floor table: minspec_floors.
+      - name: Min-spec floor bench — measure (R-QA-009 median-of-5, blocking)
+        if: runner.os == 'Linux'
+        run: >
+          python3 bench/minspec_floor.py measure
+          --exe src/build/dev/render/context_render_wgpu_offscreen
+          --platform desktop --runs 5 --frames 30 --warmup 5
+          --out out/minspec/results.json
+
+      - name: Min-spec floor gate (R-QA-007, advisory until the proxy runner is provisioned)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: python3 bench/minspec_floor.py gate --results out/minspec/results.json
+
+      - name: Upload golden + min-spec artifacts
+        if: runner.os == 'Linux' && always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: golden-native-and-minspec
+          path: |
+            out/golden-native/
+            out/minspec/
+          if-no-files-found: warn
+
       - name: sccache stats
         if: runner.os != 'Windows'
         shell: bash
@@ -675,7 +740,26 @@ jobs:
           emcmake cmake -S src/render/web -B build/render-web -DCMAKE_BUILD_TYPE=Release
           cmake --build build/render-web
 
-      - name: Upload wasm artifact
+      # --- M4 T7 (issue #141): the in-browser golden run — the "one browser blocking" gate ---
+      # Runs the just-built harness in headless CHROMIUM (the v1 blocking browser — the only
+      # browser shipping WebGPU on headless Linux; the design record's reference browser since the
+      # M0 Tint/Chrome spike) over SwiftShader WebGPU (the browser analog of lavapipe), collects
+      # the corpus frames the harness POSTs back over its own origin (tools/web_golden_run.py),
+      # and gates them against the SAME goldens/ baselines the native leg uses. This closes the M4
+      # exit "render 3D+2D desktop+web, identical within T1" criterion. Fleet manifest:
+      # golden-scene-web-chromium.
+      - name: In-browser golden run (headless Chromium + SwiftShader WebGPU)
+        run: |
+          google-chrome --version
+          python3 tools/web_golden_run.py             --html build/render-web/context-render-web.html             --out-dir out/golden-web --scenes triangle3d,sprite2d
+
+      - name: Golden-scene SSIM gate (browser-chromium-swiftshader, blocking)
+        run: |
+          python3 tools/golden_compare.py --scene triangle3d --candidate out/golden-web/triangle3d.ppm
+          python3 tools/golden_compare.py --scene sprite2d --candidate out/golden-web/sprite2d.ppm
+
+      - name: Upload wasm + web golden artifacts
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: render-web
@@ -683,6 +767,7 @@ jobs:
             build/render-web/context-render-web.html
             build/render-web/context-render-web.js
             build/render-web/context-render-web.wasm
+            out/golden-web/
           if-no-files-found: error
 
   # Native shader cross-compile TOOLCHAIN de-risk (src/render/shadercc/, issue #125, sub-task B of

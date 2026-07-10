@@ -22,8 +22,12 @@ the R-HEAD-002 probe uses `requestAdapter` (emdawnwebgpu has no enumerate-adapte
   (`../include/context/render/offscreen_scene.h`, `../sprite/.../sprite_offscreen.h`), through the
   **same** `rhi.h`. Desktop and web are therefore **identical within the T1 feature set** by
   construction (same semantics — bit-identical frames are NOT required; float→unorm rounding legally
-  differs per backend, see `spikes/webgpu/FINDINGS.md`). Exit 0 = PASS, 77 = SKIP (no browser
-  WebGPU / no adapter — R-HEAD-002), 1 = FAIL.
+  differs per backend, see `spikes/webgpu/FINDINGS.md`). Since M4 T7 (issue #141) it also renders
+  the kernel-free **golden-corpus pair** (`golden.h`: `triangle3d` + `sprite2d`) and POSTs each raw
+  frame back over its own origin (`/golden/<scene>?w=&h=`, then `/done?exit=`) to the
+  `tools/web_golden_run.py` collector — the measured half of the golden-scene SSIM gate; opened
+  manually (no collector) the POSTs are skipped. Exit 0 = PASS, 77 = SKIP (no browser WebGPU / no
+  adapter — R-HEAD-002), 1 = FAIL.
 - **`CMakeLists.txt`** — standalone (`emcmake cmake -S src/render/web`), like the spike's web leg.
   Deliberately **not** `add_subdirectory()`'d from the main `src/` tree — the rest of the engine
   (editor/runtime/cli daemon+IPC) does not compile under emscripten, so keeping this standalone leaves
@@ -62,15 +66,20 @@ caller ever hardcodes a pre-split binding map (see `../include/context/render/rh
 ## CI
 
 `.github/workflows/ci.yml` job **`render-web`** (→ rollup check `CI / render (web, emscripten)`) builds
-this target to wasm+JS with emsdk `latest` and uploads the artifact — the M4 "one browser blocking
-backend" **build** gate (blocking; generalizes `spike-webgpu-web`). Recorded in
-`docs/ci-fleet-manifest.json` as the `render-web` gate. The locally-runnable native guard on the same
-proof set is the `render-web-parity` ctest (`../tests/test_web_parity.cpp`).
+this target to wasm+JS with emsdk `latest`, then **runs it in headless Chromium over SwiftShader
+WebGPU** (M4 T7, issue #141; `tools/web_golden_run.py` — Chromium is the v1 blocking browser: the
+only browser shipping WebGPU on headless Linux, and the design record's reference browser since the
+M0 Tint/Chrome spike) and gates the collected frames against `goldens/` with
+`tools/golden_compare.py` — the M4 "one browser blocking" **run** gate. Recorded in
+`docs/ci-fleet-manifest.json` as the `render-web` + `golden-scene-web-chromium` gates. The
+locally-runnable native guard on the same proof set is the `render-web-parity` ctest
+(`../tests/test_web_parity.cpp`).
 
-## T7 follow-up (out of scope here)
+## Deferred follow-up
 
-- The **in-browser render RUN** + the automated **golden-scene SSIM** visual-equivalence gate
-  (Linux-Vulkan + one browser blocking, others advisory) — GH runners have no browser+WebGPU today.
 - The **lit/PBR** (3D lighting + shadow) web proof — it pulls the kernel + `extract` into the
-  emscripten build (both are emscripten-safe pure C++, but a heavier surface); it lands with the T7
-  golden gate. The triangle (3D pipeline) + sprite (2D) proofs here are kernel-free.
+  emscripten build (both are emscripten-safe pure C++, but a heavier surface, and the kernel is
+  under active sibling churn). The lit scene is corpus-gated on the NATIVE leg today
+  (`goldens/manifest.json` `lit3d`); its browser leg joins by adding the kernel + extract + lit
+  sources to `CMakeLists.txt` here and extending `web_main.cpp` with the `lit3d` golden POST. The
+  triangle (3D pipeline) + sprite (2D) proofs + goldens here are kernel-free.

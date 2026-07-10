@@ -35,6 +35,16 @@ def base_manifest() -> dict:
             {"id": "perf", "runner_class": "perf-box", "tier": "nightly",
              "red_x_policy": "advisory", "ci_job_id": None},
         ],
+        "minspec_floors": {
+            "requirement": "R-QA-007",
+            "platforms": {
+                "desktop": {"reference_device": "Iris-Xe-class ultrabook",
+                            "target_frame_rate_hz": 60, "runner_class": "perf-box"},
+                "linux-server": {"reference_device": "4-vCPU x86-64-v2 server",
+                                 "target_tick_rate_hz": 60, "runner_class": "perf-box"},
+            },
+            "not_applicable": {"android": "trailing SHOULD", "ios": "v2"},
+        },
     }
 
 
@@ -105,6 +115,69 @@ def test_missing_gates_array():
     errors = check_fleet_manifest.validate({"manifest_version": 1, "runner_classes": {
         "x": {"isolation": "shared", "provisioned": True}}}, None)
     assert any("gates must be a non-empty array" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Rule 7 — the R-QA-007 min-spec floor table (M4 T7, issue #141)
+# ---------------------------------------------------------------------------
+
+
+def test_minspec_floors_required():
+    m = base_manifest()
+    del m["minspec_floors"]
+    errors = check_fleet_manifest.validate(m, None)
+    assert any("missing minspec_floors" in e for e in errors)
+
+
+def test_minspec_floor_needs_reference_device():
+    m = base_manifest()
+    m["minspec_floors"]["platforms"]["desktop"]["reference_device"] = "  "
+    errors = check_fleet_manifest.validate(m, None)
+    assert any("reference_device" in e for e in errors)
+
+
+def test_minspec_floor_needs_exactly_one_target():
+    m = base_manifest()
+    row = m["minspec_floors"]["platforms"]["desktop"]
+    row["target_tick_rate_hz"] = 60  # now BOTH targets present
+    errors = check_fleet_manifest.validate(m, None)
+    assert any("exactly ONE" in e for e in errors)
+
+    del row["target_frame_rate_hz"]
+    del row["target_tick_rate_hz"]  # now NO target
+    errors = check_fleet_manifest.validate(m, None)
+    assert any("exactly ONE" in e for e in errors)
+
+
+def test_minspec_floor_target_must_be_positive():
+    m = base_manifest()
+    m["minspec_floors"]["platforms"]["desktop"]["target_frame_rate_hz"] = 0
+    errors = check_fleet_manifest.validate(m, None)
+    assert any("positive number" in e for e in errors)
+
+
+def test_minspec_floor_runner_class_must_be_declared():
+    m = base_manifest()
+    m["minspec_floors"]["platforms"]["desktop"]["runner_class"] = "ghost-box"
+    errors = check_fleet_manifest.validate(m, None)
+    assert any("minspec_floors platform 'desktop': unknown runner_class" in e for e in errors)
+
+
+def test_minspec_floor_scope_notes_required():
+    m = base_manifest()
+    del m["minspec_floors"]["not_applicable"]["ios"]
+    errors = check_fleet_manifest.validate(m, None)
+    assert any("not_applicable" in e for e in errors)
+
+
+def test_live_manifest_commits_the_three_v1_floors():
+    """R-QA-007 platform scope: the live manifest must carry the three v1 floors (desktop,
+    linux-server, web) with named devices — the M4 exit's committed floor table."""
+    manifest = json.loads(LIVE_MANIFEST.read_text(encoding="utf-8"))
+    platforms = manifest["minspec_floors"]["platforms"]
+    assert {"desktop", "linux-server", "web"} <= set(platforms)
+    for row in platforms.values():
+        assert row["reference_device"].strip()
 
 
 def test_live_manifest_validates_against_live_workflows():

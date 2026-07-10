@@ -12,6 +12,11 @@
 //   * the R-REND-006 lightmap INPUT hook round-trips: enabling it shifts a ground pixel by exactly
 //     lightmap * albedo, and leaves the hook-free blocker untouched.
 //
+// The scene's GPU residency is factored as the reusable LitOffscreen class (build the World +
+// resources + pipelines once; render frames under a LitSceneConfig) so the proof assertions, the
+// golden-scene corpus dump (golden_lit.h — M4 T7), and the R-QA-007 min-spec bench loop all drive
+// the ONE render path — a committed golden or a bench sample is the proof's frame by construction.
+//
 // Like the sprite proof this needs an adapter that actually rasterizes — the CI `render` job's
 // lavapipe leg. Assertions are TOLERANCE-AWARE (never exact-pixel): lavapipe's software depth
 // precision may differ from hardware, which the shadow bias + probe placement absorb.
@@ -27,6 +32,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace context::render::lit
@@ -56,6 +62,261 @@ inline int luminance(const std::uint8_t* px)
 
 } // namespace detail
 
+// The reference lit scene resident on a GPU device: World -> extract -> resources + pipelines built
+// ONCE, then rendered per frame (shadow depth pass -> PBR main pass -> readback) under a
+// LitSceneConfig. `device` must be a live, rasterizing GPU device that outlives this object;
+// adapter presence / headless SKIP is the caller's concern.
+class LitOffscreen
+{
+public:
+    // Build the scene + GPU residency at `width` x `height` (defaults: the proof's analytic target
+    // size). `width` must keep the readback row 256-byte aligned (width % 64 == 0 — WebGPU
+    // COPY_BYTES_PER_ROW_ALIGNMENT). Returns nullptr with a diagnostic on stderr on a bad extract
+    // shape or invalid size.
+    static std::unique_ptr<LitOffscreen> create(IDevice& device,
+                                                std::uint32_t width = lit_target_size(),
+                                                std::uint32_t height = lit_target_size())
+    {
+        if (width == 0 || height == 0 || (width % 64) != 0)
+        {
+            std::fprintf(stderr,
+                         "[render-lit] FAIL: invalid offscreen size %ux%u (width must be a "
+                         "non-zero multiple of 64 for the 256-byte readback row alignment)\n",
+                         width, height);
+            return nullptr;
+        }
+
+        std::unique_ptr<LitOffscreen> lit(new LitOffscreen(device, width, height));
+
+        // ---- the sim side: authored components -> extract -> snapshot (R-REND-003 one-way) ----
+        kernel::World world;
+        populate_reference_world(world);
+        extract_render_world(world, 1u, lit->snapshot_);
+        if (lit->snapshot_.items.size() != 2u || lit->snapshot_.directional_lights.size() != 1u ||
+            lit->snapshot_.point_lights.size() != 1u)
+        {
+            std::fprintf(
+                stderr,
+                "[render-lit] FAIL: extract shape (items=%zu dir=%zu point=%zu, want 2/1/1)\n",
+                lit->snapshot_.items.size(), lit->snapshot_.directional_lights.size(),
+                lit->snapshot_.point_lights.size());
+            return nullptr;
+        }
+        {
+            // The authored sun direction was deliberately unnormalized — the extract must
+            // normalize.
+            const float* d = lit->snapshot_.directional_lights.front().light.direction;
+            const float len_sq = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+            if (len_sq < 0.99f || len_sq > 1.01f)
+            {
+                std::fprintf(stderr,
+                             "[render-lit] FAIL: extracted sun direction not unit length\n");
+                return nullptr;
+            }
+        }
+
+        lit->build_gpu_residency();
+        return lit;
+    }
+
+    [[nodiscard]] std::uint32_t width() const { return width_; }
+    [[nodiscard]] std::uint32_t height() const { return height_; }
+    [[nodiscard]] std::uint32_t bytes_per_row() const { return width_ * 4u; }
+    [[nodiscard]] const RenderSnapshot& snapshot() const { return snapshot_; }
+
+    // The clear color behind the scene geometry (asserted by the proof's corner probe).
+    [[nodiscard]] static Color clear_color() { return Color{0.02, 0.02, 0.04, 1.0}; }
+
+    // Render one frame under `config` and read it back into `out` (raw RGBA8, row-major, rows
+    // top-first, width*height*4 bytes). Returns false when the readback map fails.
+    bool render_frame(const LitSceneConfig& config, std::vector<std::uint8_t>& out)
+    {
+        const SceneUniformData uniform = pack_scene_uniform(snapshot_, config);
+        device_.queue().write_buffer(*uniform_buf_, 0, &uniform, sizeof uniform);
+
+        std::unique_ptr<ICommandEncoder> encoder = device_.create_command_encoder();
+        {
+            RenderPassDesc pass;
+            DepthAttachment depth;
+            depth.view = shadow_view_.get();
+            depth.load = LoadOp::Clear;
+            depth.store = StoreOp::Store;
+            depth.clear_depth = 1.0f;
+            pass.depth = depth;
+            std::unique_ptr<IRenderPassEncoder> shadow_pass = encoder->begin_render_pass(pass);
+            shadow_pass->set_pipeline(*shadow_pipe_);
+            shadow_pass->set_bind_group(0, *shadow_bind_);
+            shadow_pass->draw(scene_vertex_count(), 1);
+            shadow_pass->end();
+        }
+        {
+            RenderPassDesc pass;
+            ColorAttachment attach;
+            attach.view = color_view_.get();
+            attach.load = LoadOp::Clear;
+            attach.store = StoreOp::Store;
+            attach.clear = clear_color();
+            pass.color.push_back(attach);
+            std::unique_ptr<IRenderPassEncoder> main_pass = encoder->begin_render_pass(pass);
+            main_pass->set_pipeline(*main_pipe_);
+            main_pass->set_bind_group(0, *main_bind_);
+            // Painter order inside one draw: ground triangles first, blocker after — the camera
+            // pass needs no depth buffer for this two-layer scene.
+            main_pass->draw(scene_vertex_count(), 1);
+            main_pass->end();
+        }
+        TexelCopyBufferLayout layout;
+        layout.bytes_per_row = bytes_per_row();
+        layout.rows_per_image = height_;
+        encoder->copy_texture_to_buffer(*color_tex_, *readback_, layout, {width_, height_});
+
+        std::unique_ptr<ICommandBuffer> commands = encoder->finish();
+        device_.queue().submit(*commands);
+
+        const auto* pixels = static_cast<const std::uint8_t*>(readback_->map_read());
+        if (pixels == nullptr)
+        {
+            std::fprintf(stderr, "[render-lit] FAIL: readback map failed\n");
+            return false;
+        }
+        out.assign(pixels, pixels + static_cast<std::size_t>(bytes_per_row()) * height_);
+        readback_->unmap();
+        return true;
+    }
+
+private:
+    LitOffscreen(IDevice& device, std::uint32_t width, std::uint32_t height)
+        : device_(device), width_(width), height_(height)
+    {
+    }
+
+    // ---- GPU resources (built once; render_frame only writes the uniform + encodes passes) ----
+    void build_gpu_residency()
+    {
+        constexpr std::uint32_t kBpp = 4;
+
+        TextureDesc color_desc;
+        color_desc.size = {width_, height_};
+        color_desc.format = TextureFormat::RGBA8Unorm;
+        color_desc.render_attachment = true;
+        color_desc.copy_src = true;
+        color_tex_ = device_.create_texture(color_desc);
+        color_view_ = color_tex_->create_view();
+
+        TextureDesc shadow_desc;
+        shadow_desc.size = {width_, height_};
+        shadow_desc.format = TextureFormat::Depth32Float;
+        shadow_desc.render_attachment = true;
+        shadow_desc.texture_binding = true;
+        shadow_tex_ = device_.create_texture(shadow_desc);
+        shadow_view_ = shadow_tex_->create_view();
+
+        // The 2x2 constant lightmap INPUT (R-REND-006 hook), uploaded through the queue.
+        TextureDesc lightmap_desc;
+        lightmap_desc.size = {2, 2};
+        lightmap_desc.format = TextureFormat::RGBA8Unorm;
+        lightmap_desc.texture_binding = true;
+        lightmap_desc.copy_dst = true;
+        lightmap_tex_ = device_.create_texture(lightmap_desc);
+        lightmap_view_ = lightmap_tex_->create_view();
+        {
+            std::uint8_t texels[16];
+            for (int t = 0; t < 4; ++t)
+            {
+                for (int c = 0; c < 4; ++c)
+                {
+                    texels[t * 4 + c] = lightmap_texel_rgba()[c];
+                }
+            }
+            TexelCopyBufferLayout layout;
+            layout.bytes_per_row = 2 * kBpp;
+            layout.rows_per_image = 2;
+            device_.queue().write_texture(*lightmap_tex_, texels, sizeof texels, layout, {2, 2});
+        }
+
+        BufferDesc uniform_desc;
+        uniform_desc.size = sizeof(SceneUniformData);
+        uniform_desc.uniform = true;
+        uniform_desc.copy_dst = true;
+        uniform_buf_ = device_.create_buffer(uniform_desc);
+
+        BufferDesc readback_desc;
+        readback_desc.size = static_cast<std::uint64_t>(bytes_per_row()) * height_;
+        readback_desc.copy_dst = true;
+        readback_desc.map_read = true;
+        readback_ = device_.create_buffer(readback_desc);
+
+        SamplerDesc shadow_sampler_desc;
+        shadow_sampler_desc.min_filter = FilterMode::Linear;
+        shadow_sampler_desc.mag_filter = FilterMode::Linear;
+        shadow_sampler_desc.compare = CompareFunction::LessEqual; // the 2x2 PCF comparison sampler
+        shadow_sampler_ = device_.create_sampler(shadow_sampler_desc);
+
+        SamplerDesc lightmap_sampler_desc; // nearest/clamp — the constant lightmap, no filtering
+        lightmap_sampler_ = device_.create_sampler(lightmap_sampler_desc);
+
+        const std::string wgsl = lit_wgsl();
+
+        RenderPipelineDesc main_desc;
+        main_desc.wgsl = wgsl;
+        main_desc.vertex_entry = "vs_main";
+        main_desc.fragment_entry = "fs_main";
+        main_desc.color_format = TextureFormat::RGBA8Unorm;
+        main_pipe_ = device_.create_render_pipeline(main_desc);
+
+        RenderPipelineDesc shadow_pipe_desc;
+        shadow_pipe_desc.wgsl = wgsl;
+        shadow_pipe_desc.vertex_entry = "vs_shadow";
+        shadow_pipe_desc.fragment_entry = ""; // depth-only
+        shadow_pipe_desc.depth =
+            DepthState{TextureFormat::Depth32Float, true, CompareFunction::Less};
+        shadow_pipe_ = device_.create_render_pipeline(shadow_pipe_desc);
+
+        // Bind groups against each pipeline's REFLECTED layout (rhi.h auto-layout; see
+        // IBindGroupLayout for the T3d Tint binding-renumbering contract this model absorbs). The
+        // depth-only pipeline statically uses only the uniform, so its group 0 carries binding 0.
+        std::unique_ptr<IBindGroupLayout> shadow_layout = shadow_pipe_->bind_group_layout(0);
+        std::vector<BindGroupEntry> shadow_entries(1);
+        shadow_entries[0].binding = 0;
+        shadow_entries[0].buffer = uniform_buf_.get();
+        shadow_bind_ = device_.create_bind_group(*shadow_layout, shadow_entries);
+
+        std::unique_ptr<IBindGroupLayout> main_layout = main_pipe_->bind_group_layout(0);
+        std::vector<BindGroupEntry> main_entries(5);
+        main_entries[0].binding = 0;
+        main_entries[0].buffer = uniform_buf_.get();
+        main_entries[1].binding = 1;
+        main_entries[1].texture = shadow_view_.get();
+        main_entries[2].binding = 2;
+        main_entries[2].sampler = shadow_sampler_.get();
+        main_entries[3].binding = 3;
+        main_entries[3].texture = lightmap_view_.get();
+        main_entries[4].binding = 4;
+        main_entries[4].sampler = lightmap_sampler_.get();
+        main_bind_ = device_.create_bind_group(*main_layout, main_entries);
+    }
+
+    IDevice& device_;
+    std::uint32_t width_;
+    std::uint32_t height_;
+    RenderSnapshot snapshot_;
+
+    std::unique_ptr<ITexture> color_tex_;
+    std::unique_ptr<ITextureView> color_view_;
+    std::unique_ptr<ITexture> shadow_tex_;
+    std::unique_ptr<ITextureView> shadow_view_;
+    std::unique_ptr<ITexture> lightmap_tex_;
+    std::unique_ptr<ITextureView> lightmap_view_;
+    std::unique_ptr<IBuffer> uniform_buf_;
+    std::unique_ptr<IBuffer> readback_;
+    std::unique_ptr<ISampler> shadow_sampler_;
+    std::unique_ptr<ISampler> lightmap_sampler_;
+    std::unique_ptr<IRenderPipeline> main_pipe_;
+    std::unique_ptr<IRenderPipeline> shadow_pipe_;
+    std::unique_ptr<IBindGroup> shadow_bind_;
+    std::unique_ptr<IBindGroup> main_bind_;
+};
+
 // Render the reference lit scene offscreen through `device` under several uniform variants and
 // assert the readbacks. `device` must be a live, rasterizing GPU device; adapter presence /
 // headless SKIP is the caller's concern. Returns true on a passing readback.
@@ -64,189 +325,12 @@ inline bool render_offscreen_lit(IDevice& device)
     constexpr std::uint32_t kSize = lit_target_size();
     constexpr std::uint32_t kBpp = 4;
     constexpr std::uint32_t kBytesPerRow = kSize * kBpp; // 1024 — already 256-aligned
-    const Color kClear{0.02, 0.02, 0.04, 1.0};
 
-    // ---- the sim side: authored components -> extract -> snapshot (R-REND-003 one-way) --------
-    kernel::World world;
-    populate_reference_world(world);
-    RenderSnapshot snapshot;
-    extract_render_world(world, 1u, snapshot);
-    if (snapshot.items.size() != 2u || snapshot.directional_lights.size() != 1u ||
-        snapshot.point_lights.size() != 1u)
+    std::unique_ptr<LitOffscreen> lit = LitOffscreen::create(device);
+    if (lit == nullptr)
     {
-        std::fprintf(stderr,
-                     "[render-lit] FAIL: extract shape (items=%zu dir=%zu point=%zu, want 2/1/1)\n",
-                     snapshot.items.size(), snapshot.directional_lights.size(),
-                     snapshot.point_lights.size());
         return false;
     }
-    {
-        // The authored sun direction was deliberately unnormalized — the extract must normalize.
-        const float* d = snapshot.directional_lights.front().light.direction;
-        const float len_sq = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-        if (len_sq < 0.99f || len_sq > 1.01f)
-        {
-            std::fprintf(stderr, "[render-lit] FAIL: extracted sun direction not unit length\n");
-            return false;
-        }
-    }
-
-    // ---- GPU resources -------------------------------------------------------------------------
-    TextureDesc color_desc;
-    color_desc.size = {kSize, kSize};
-    color_desc.format = TextureFormat::RGBA8Unorm;
-    color_desc.render_attachment = true;
-    color_desc.copy_src = true;
-    std::unique_ptr<ITexture> color_tex = device.create_texture(color_desc);
-    std::unique_ptr<ITextureView> color_view = color_tex->create_view();
-
-    TextureDesc shadow_desc;
-    shadow_desc.size = {kSize, kSize};
-    shadow_desc.format = TextureFormat::Depth32Float;
-    shadow_desc.render_attachment = true;
-    shadow_desc.texture_binding = true;
-    std::unique_ptr<ITexture> shadow_tex = device.create_texture(shadow_desc);
-    std::unique_ptr<ITextureView> shadow_view = shadow_tex->create_view();
-
-    // The 2x2 constant lightmap INPUT (R-REND-006 hook), uploaded through the queue.
-    TextureDesc lightmap_desc;
-    lightmap_desc.size = {2, 2};
-    lightmap_desc.format = TextureFormat::RGBA8Unorm;
-    lightmap_desc.texture_binding = true;
-    lightmap_desc.copy_dst = true;
-    std::unique_ptr<ITexture> lightmap_tex = device.create_texture(lightmap_desc);
-    std::unique_ptr<ITextureView> lightmap_view = lightmap_tex->create_view();
-    {
-        std::uint8_t texels[16];
-        for (int t = 0; t < 4; ++t)
-        {
-            for (int c = 0; c < 4; ++c)
-            {
-                texels[t * 4 + c] = lightmap_texel_rgba()[c];
-            }
-        }
-        TexelCopyBufferLayout layout;
-        layout.bytes_per_row = 2 * kBpp;
-        layout.rows_per_image = 2;
-        device.queue().write_texture(*lightmap_tex, texels, sizeof texels, layout, {2, 2});
-    }
-
-    BufferDesc uniform_desc;
-    uniform_desc.size = sizeof(SceneUniformData);
-    uniform_desc.uniform = true;
-    uniform_desc.copy_dst = true;
-    std::unique_ptr<IBuffer> uniform_buf = device.create_buffer(uniform_desc);
-
-    BufferDesc readback_desc;
-    readback_desc.size = static_cast<std::uint64_t>(kBytesPerRow) * kSize;
-    readback_desc.copy_dst = true;
-    readback_desc.map_read = true;
-    std::unique_ptr<IBuffer> readback = device.create_buffer(readback_desc);
-
-    SamplerDesc shadow_sampler_desc;
-    shadow_sampler_desc.min_filter = FilterMode::Linear;
-    shadow_sampler_desc.mag_filter = FilterMode::Linear;
-    shadow_sampler_desc.compare = CompareFunction::LessEqual; // the 2x2 PCF comparison sampler
-    std::unique_ptr<ISampler> shadow_sampler = device.create_sampler(shadow_sampler_desc);
-
-    SamplerDesc lightmap_sampler_desc; // nearest/clamp — the constant lightmap needs no filtering
-    std::unique_ptr<ISampler> lightmap_sampler = device.create_sampler(lightmap_sampler_desc);
-
-    const std::string wgsl = lit_wgsl();
-
-    RenderPipelineDesc main_desc;
-    main_desc.wgsl = wgsl;
-    main_desc.vertex_entry = "vs_main";
-    main_desc.fragment_entry = "fs_main";
-    main_desc.color_format = TextureFormat::RGBA8Unorm;
-    std::unique_ptr<IRenderPipeline> main_pipe = device.create_render_pipeline(main_desc);
-
-    RenderPipelineDesc shadow_pipe_desc;
-    shadow_pipe_desc.wgsl = wgsl;
-    shadow_pipe_desc.vertex_entry = "vs_shadow";
-    shadow_pipe_desc.fragment_entry = ""; // depth-only
-    shadow_pipe_desc.depth = DepthState{TextureFormat::Depth32Float, true, CompareFunction::Less};
-    std::unique_ptr<IRenderPipeline> shadow_pipe = device.create_render_pipeline(shadow_pipe_desc);
-
-    // Bind groups against each pipeline's REFLECTED layout (rhi.h auto-layout; see IBindGroupLayout
-    // for the T3d Tint binding-renumbering contract this model absorbs). The depth-only pipeline
-    // statically uses only the uniform, so its group 0 carries just binding 0.
-    std::unique_ptr<IBindGroupLayout> shadow_layout = shadow_pipe->bind_group_layout(0);
-    std::vector<BindGroupEntry> shadow_entries(1);
-    shadow_entries[0].binding = 0;
-    shadow_entries[0].buffer = uniform_buf.get();
-    std::unique_ptr<IBindGroup> shadow_bind =
-        device.create_bind_group(*shadow_layout, shadow_entries);
-
-    std::unique_ptr<IBindGroupLayout> main_layout = main_pipe->bind_group_layout(0);
-    std::vector<BindGroupEntry> main_entries(5);
-    main_entries[0].binding = 0;
-    main_entries[0].buffer = uniform_buf.get();
-    main_entries[1].binding = 1;
-    main_entries[1].texture = shadow_view.get();
-    main_entries[2].binding = 2;
-    main_entries[2].sampler = shadow_sampler.get();
-    main_entries[3].binding = 3;
-    main_entries[3].texture = lightmap_view.get();
-    main_entries[4].binding = 4;
-    main_entries[4].sampler = lightmap_sampler.get();
-    std::unique_ptr<IBindGroup> main_bind = device.create_bind_group(*main_layout, main_entries);
-
-    // ---- one render variant: shadow depth pass -> PBR main pass -> readback --------------------
-    auto render_variant = [&](const LitSceneConfig& config, std::vector<std::uint8_t>& out)
-    {
-        const SceneUniformData uniform = pack_scene_uniform(snapshot, config);
-        device.queue().write_buffer(*uniform_buf, 0, &uniform, sizeof uniform);
-
-        std::unique_ptr<ICommandEncoder> encoder = device.create_command_encoder();
-        {
-            RenderPassDesc pass;
-            DepthAttachment depth;
-            depth.view = shadow_view.get();
-            depth.load = LoadOp::Clear;
-            depth.store = StoreOp::Store;
-            depth.clear_depth = 1.0f;
-            pass.depth = depth;
-            std::unique_ptr<IRenderPassEncoder> shadow_pass = encoder->begin_render_pass(pass);
-            shadow_pass->set_pipeline(*shadow_pipe);
-            shadow_pass->set_bind_group(0, *shadow_bind);
-            shadow_pass->draw(scene_vertex_count(), 1);
-            shadow_pass->end();
-        }
-        {
-            RenderPassDesc pass;
-            ColorAttachment attach;
-            attach.view = color_view.get();
-            attach.load = LoadOp::Clear;
-            attach.store = StoreOp::Store;
-            attach.clear = kClear;
-            pass.color.push_back(attach);
-            std::unique_ptr<IRenderPassEncoder> main_pass = encoder->begin_render_pass(pass);
-            main_pass->set_pipeline(*main_pipe);
-            main_pass->set_bind_group(0, *main_bind);
-            // Painter order inside one draw: ground triangles first, blocker after — the camera
-            // pass needs no depth buffer for this two-layer scene.
-            main_pass->draw(scene_vertex_count(), 1);
-            main_pass->end();
-        }
-        TexelCopyBufferLayout layout;
-        layout.bytes_per_row = kBytesPerRow;
-        layout.rows_per_image = kSize;
-        encoder->copy_texture_to_buffer(*color_tex, *readback, layout, {kSize, kSize});
-
-        std::unique_ptr<ICommandBuffer> commands = encoder->finish();
-        device.queue().submit(*commands);
-
-        const auto* pixels = static_cast<const std::uint8_t*>(readback->map_read());
-        if (pixels == nullptr)
-        {
-            std::fprintf(stderr, "[render-lit] FAIL: readback map failed\n");
-            return false;
-        }
-        out.assign(pixels, pixels + static_cast<std::size_t>(kBytesPerRow) * kSize);
-        readback->unmap();
-        return true;
-    };
 
     auto at = [&](const std::vector<std::uint8_t>& img, PixelCoord p) -> const std::uint8_t*
     { return img.data() + (static_cast<std::size_t>(p.y) * kBytesPerRow) + (p.x * kBpp); };
@@ -304,10 +388,10 @@ inline bool render_offscreen_lit(IDevice& device)
     std::vector<std::uint8_t> img_recolor;
     std::vector<std::uint8_t> img_no_shadow;
     std::vector<std::uint8_t> img_lightmap;
-    if (!render_variant(base_cfg, img_base) || !render_variant(unlit_cfg, img_unlit) ||
-        !render_variant(dim_cfg, img_dim) || !render_variant(recolor_cfg, img_recolor) ||
-        !render_variant(no_shadow_cfg, img_no_shadow) ||
-        !render_variant(lightmap_cfg, img_lightmap))
+    if (!lit->render_frame(base_cfg, img_base) || !lit->render_frame(unlit_cfg, img_unlit) ||
+        !lit->render_frame(dim_cfg, img_dim) || !lit->render_frame(recolor_cfg, img_recolor) ||
+        !lit->render_frame(no_shadow_cfg, img_no_shadow) ||
+        !lit->render_frame(lightmap_cfg, img_lightmap))
     {
         return false;
     }

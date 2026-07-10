@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <vector>
 
 namespace context::render
 {
@@ -44,6 +45,13 @@ enum class OffscreenResult
     Fail,
 };
 
+// The reference triangle's offscreen target edge (square RGBA8), shared by the proof assertions,
+// the golden-scene corpus dump (golden.h), and the committed baselines under goldens/.
+[[nodiscard]] constexpr std::uint32_t offscreen_triangle_size()
+{
+    return 256;
+}
+
 namespace detail
 {
 
@@ -59,13 +67,15 @@ inline bool pixel_near(const std::uint8_t* px, int r, int g, int b, int a, int t
 
 } // namespace detail
 
-// Render the reference triangle offscreen through `device` and assert the readback. Returns Pass /
-// Fail. `device` must be a live GPU (or fake) device; adapter presence / headless SKIP is the
-// caller's concern.
-inline OffscreenResult render_offscreen_triangle(IDevice& device)
+// Render the reference triangle offscreen through `device` and return the raw RGBA8 readback in
+// `out` (row-major, rows top-first, offscreen_triangle_size()^2 * 4 bytes). The one render path the
+// proof assertions AND the golden-scene corpus dump share, so the committed golden IS the proof's
+// frame by construction. Returns false only when the readback map fails. `device` must be a live
+// GPU (or fake) device; adapter presence / headless SKIP is the caller's concern.
+inline bool render_offscreen_triangle_pixels(IDevice& device, std::vector<std::uint8_t>& out)
 {
-    constexpr std::uint32_t kWidth = 256;
-    constexpr std::uint32_t kHeight = 256;
+    constexpr std::uint32_t kWidth = offscreen_triangle_size();
+    constexpr std::uint32_t kHeight = offscreen_triangle_size();
     constexpr std::uint32_t kBpp = 4;
     // bytesPerRow must be a multiple of 256 (WebGPU COPY_BYTES_PER_ROW_ALIGNMENT); 256*4 = 1024.
     constexpr std::uint32_t kBytesPerRow = kWidth * kBpp;
@@ -117,8 +127,29 @@ inline OffscreenResult render_offscreen_triangle(IDevice& device)
     if (pixels == nullptr)
     {
         std::fprintf(stderr, "[render-offscreen] FAIL: buffer map failed\n");
+        return false;
+    }
+    out.assign(pixels, pixels + static_cast<std::size_t>(kBytesPerRow) * kHeight);
+    readback->unmap();
+    return true;
+}
+
+// Render the reference triangle offscreen through `device` and assert the readback. Returns Pass /
+// Fail. `device` must be a live GPU (or fake) device; adapter presence / headless SKIP is the
+// caller's concern.
+inline OffscreenResult render_offscreen_triangle(IDevice& device)
+{
+    constexpr std::uint32_t kWidth = offscreen_triangle_size();
+    constexpr std::uint32_t kHeight = offscreen_triangle_size();
+    constexpr std::uint32_t kBpp = 4;
+    constexpr std::uint32_t kBytesPerRow = kWidth * kBpp;
+
+    std::vector<std::uint8_t> image;
+    if (!render_offscreen_triangle_pixels(device, image))
+    {
         return OffscreenResult::Fail;
     }
+    const std::uint8_t* pixels = image.data();
 
     // (a) background pixel — clear 0.1/0.2/0.3 -> ~26/51/77 in unorm8 (rounding may differ by 1).
     const std::uint8_t* bg = pixels + (8u * kBytesPerRow) + (8u * kBpp);
@@ -151,8 +182,6 @@ inline OffscreenResult render_offscreen_triangle(IDevice& device)
                 tri[3], tri_ok ? "ok" : "MISMATCH");
     std::printf("[render-offscreen] red coverage      = %.2f%% (expected 12.50%%, accept 11..14)\n",
                 coverage);
-
-    readback->unmap();
 
     if (bg_ok && tri_ok && coverage_ok)
     {
