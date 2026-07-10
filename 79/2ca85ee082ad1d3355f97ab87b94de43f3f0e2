@@ -1,0 +1,65 @@
+tools/fetch_tsc.py
+  s_44eec50eafd91a::t_10f488f0cf4b51 1-272
+src/editor/contract/tests/test_error_catalog.cpp
+  s_44eec50eafd91a::t_ef951c76469751 109,111-114,116
+src/runtime/ts/CMakeLists.txt
+  s_44eec50eafd91a::t_89898f096b6bf1 64-115
+  s_44eec50eafd91a::t_bc273d470fc13d 123
+  s_44eec50eafd91a::t_cfbbc9ec113b9e 169-179
+src/editor/derivation/README.md
+  s_44eec50eafd91a::t_dd4592f5990e93 50-61
+  s_44eec50eafd91a::t_15192d89274b70 107-110
+src/runtime/ts/src/tsgo_typecheck.cpp
+  s_44eec50eafd91a::t_6d46f70e427cd9 1-295
+src/runtime/ts/include/context/runtime/ts/ts_toolchain.h
+  s_44eec50eafd91a::t_7479475268ec14 62-68
+  s_44eec50eafd91a::t_c986a9227851a2 42-45,48-49,51-54
+  s_44eec50eafd91a::t_61da540d520779 11-17
+src/editor/contract/src/error_catalog.cpp
+  s_44eec50eafd91a::t_0769fd05ee6658 365-367,376-384
+  s_44eec50eafd91a::t_bcba9cd52c0745 385
+src/editor/derivation/tests/test_ts_compile_node.cpp
+  s_44eec50eafd91a::t_9168c10f77702c 1-222
+src/runtime/ts/README.md
+  s_44eec50eafd91a::t_1f93512f7cddc9 78-79,81-82,84-94
+  s_44eec50eafd91a::t_e4e178b0b04eb7 23-31
+src/editor/derivation/include/context/editor/derivation/ts_compile_node.h
+  s_44eec50eafd91a::t_e8c663debd5efa 1-93
+tools/license-allowlist.json
+  s_44eec50eafd91a::t_af88e2a63a7094 27
+  s_44eec50eafd91a::t_17ea80c0c0ab62 2
+tools/tsc-toolchain.json
+  s_44eec50eafd91a::t_72cfc4e67924a0 1-28
+src/runtime/ts/include/context/runtime/ts/ts_typecheck.h
+  s_44eec50eafd91a::t_cb76afa1a3a3f9 1-70
+src/runtime/ts/examples/type_error.ts
+  s_44eec50eafd91a::t_ded7482b2b5850 1-12
+src/runtime/ts/examples/typecheck_ok.ts
+  s_44eec50eafd91a::t_92d613e8f6713b 1-10
+src/editor/derivation/CMakeLists.txt
+  s_44eec50eafd91a::t_72dd0435efd38d 16-17
+  s_44eec50eafd91a::t_cf535e8721ee5c 75-76
+  s_44eec50eafd91a::t_adbd4333341fd8 44-51
+src/runtime/ts/tests/test_ts_typecheck.cpp
+  s_44eec50eafd91a::t_46436501961d4c 1-197
+tools/tests/test_fetch_tsc.py
+  s_44eec50eafd91a::t_37cd0abe9e7380 1-263
+src/editor/derivation/src/ts_compile_node.cpp
+  s_44eec50eafd91a::t_8cf511094a00b0 1-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "792ca85ee082ad1d3355f97ab87b94de43f3f0e2",
+  "prompts": {},
+  "sessions": {
+    "s_44eec50eafd91a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45ca24c7-35c0-4b9c-bad8-a75dda1846ba",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
