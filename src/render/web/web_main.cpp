@@ -77,6 +77,16 @@ bool post_bytes(const char* path, const void* data, std::size_t size)
 #endif
 }
 
+// Tell the golden collector the harness is finished with `exit_code` (a no-op when nothing is
+// listening — a manual in-browser run). EVERY harness exit path routes through here, including the
+// early no-WebGPU / no-adapter / device-fail skips, so tools/web_golden_run.py always observes a
+// /done and never blocks on its wait for the full --timeout on a degraded runner.
+void post_done(int exit_code)
+{
+    const std::string done = "/done?exit=" + std::to_string(exit_code);
+    post_bytes(done.c_str(), "", 0);
+}
+
 } // namespace
 
 int main()
@@ -86,6 +96,7 @@ int main()
     {
         // On the web this is the "browser has no WebGPU" case — a clean skip, not a failure.
         std::printf("[render-web] SKIP: no WebGPU instance (browser WebGPU unavailable)\n");
+        post_done(77);
         return 77;
     }
     std::printf("[render-web] backend=%s tier=T1\n", rhi->backend_name());
@@ -95,6 +106,7 @@ int main()
     if (!probe.has_adapter)
     {
         std::printf("[render-web] SKIP: no WebGPU adapter (navigator.gpu unavailable)\n");
+        post_done(77);
         return 77;
     }
 
@@ -102,6 +114,7 @@ int main()
     if (device == nullptr)
     {
         std::fprintf(stderr, "[render-web] FAIL: device creation failed despite an adapter\n");
+        post_done(1);
         return 1;
     }
 
@@ -151,7 +164,6 @@ int main()
     }
 
     // Tell the collector the harness is complete (ignored when none is listening).
-    const std::string done = "/done?exit=" + std::to_string(exit_code);
-    post_bytes(done.c_str(), "", 0);
+    post_done(exit_code);
     return exit_code;
 }

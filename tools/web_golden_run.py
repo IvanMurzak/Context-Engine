@@ -84,11 +84,8 @@ def rgba_to_ppm_bytes(rgba: bytes, width: int, height: int) -> bytes:
     if len(rgba) != width * height * 4:
         raise ValueError(f"payload is {len(rgba)} bytes, want {width * height * 4}")
     header = f"P6\n{width} {height}\n255\n".encode("ascii")
-    rgb = bytearray(width * height * 3)
-    for px in range(width * height):
-        rgb[px * 3 + 0] = rgba[px * 4 + 0]
-        rgb[px * 3 + 1] = rgba[px * 4 + 1]
-        rgb[px * 3 + 2] = rgba[px * 4 + 2]
+    rgb = bytearray(rgba)
+    del rgb[3::4]  # drop every 4th byte (alpha) in one pass, leaving tight RGB rows
     return header + bytes(rgb)
 
 
