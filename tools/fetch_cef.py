@@ -192,7 +192,14 @@ def _extract(archive: Path, prefix: str, dest: Path) -> int:
                 if link.startswith("/") or ".." in Path(link).parts:
                     continue
             member.name = rel
-            tar.extract(member, dest, set_attrs=True)
+            # filter="tar" is explicit on purpose: it strips absolute/'..'-escaping link targets
+            # (defense-in-depth alongside _safe_relname) while PRESERVING file modes — the macOS
+            # framework's executable bits. Python 3.12/3.13 deprecate a filterless extract, and
+            # Python 3.14 flips the implicit default to the "data" filter, which SANITIZES modes
+            # (drops setuid/setgid/sticky + group/other-write) and would silently violate the
+            # "modes preserved" contract above. Pinning "tar" makes extraction deterministic across
+            # 3.12–3.14+ (all CI interpreters are >= 3.12, where the `filter` kwarg exists).
+            tar.extract(member, dest, set_attrs=True, filter="tar")
             count += 1
     if count == 0:
         raise FetchError(
