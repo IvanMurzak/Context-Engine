@@ -22,19 +22,24 @@ std::vector<std::pair<std::string, std::string>> scrubbed_environment()
 
 bool read_permitted(const SandboxPolicy& policy, std::string_view path)
 {
-    // R-SEC-008: reads are confined to the jail root (the project/cache root). The ONE jail
-    // primitive, shared with the file-write path (filesync).
-    //
-    // OPEN — OWNER RULING NEEDED when the seccomp-bpf sandbox lands (issue #72): this predicate
-    // grants the BROAD R-SEC-008 *structural* jail (reads anywhere under jail_root), whereas
-    // isolated_runner.h frames the v1 effective guarantee as "input-bytes-only". The two COINCIDE
-    // today (a v1 importer is a pure function of source_bytes and reads nothing of its own), so
-    // nothing is observably narrowed or widened either way. When the subprocess syscall read-filter
-    // lands it makes the choice enforceable, and the owner must rule which is the real read set —
-    // jail-wide vs input-bytes-only. Do NOT pre-decide it here by narrowing/widening this check.
+    // OWNER RULING (issue #72 — RESOLVED 2026-07-09): the enforced read set is input-bytes-only by
+    // default, with a declared-read-paths escape hatch, all inside the R-SEC-008 jail. This predicate
+    // NARROWS from the former jail-wide grant: a read is permitted iff `path` is the source
+    // `input_path`, OR is at/under one of the importer's `declared_read_paths` — AND (outer bound) it
+    // stays inside `jail_root`. The escape hatch can never widen past the jail. Fails closed on an
+    // empty/malformed policy. Containment uses the ONE shared jail primitive (filesync).
     if (policy.jail_root.empty())
         return false;
-    return filesync::is_inside_jail(policy.jail_root, path);
+    if (!filesync::is_inside_jail(policy.jail_root, path))
+        return false; // outer bound: never past the R-SEC-008 structural jail
+    // Input bytes: the source the importer converts (its sole default read).
+    if (!policy.input_path.empty() && filesync::is_inside_jail(policy.input_path, path))
+        return true;
+    // Escape hatch: an explicitly-declared sibling-asset path (each already ⊆ jail, re-checked here).
+    for (const std::string& declared : policy.declared_read_paths)
+        if (!declared.empty() && filesync::is_inside_jail(declared, path))
+            return true;
+    return false; // inside the jail but not in the narrowed input-bytes ∪ declared-paths set
 }
 
 bool write_permitted(const SandboxPolicy& policy, std::string_view path)
@@ -51,27 +56,29 @@ bool write_permitted(const SandboxPolicy& policy, std::string_view path)
 
 OsSandboxSupport os_sandbox_support()
 {
-    // HONEST staging (R-SEC-006): report the primitive this OS WILL be locked down with, and that v1
-    // does NOT yet apply it in-process. `enforced` is false across the board here because the
-    // unprivileged-subprocess + sandbox-primitive lockdown is the staged rollout — this PR ships the
-    // portable slice (jail + scrubbed env + no network + input-bytes-only). Never claim a lockdown
-    // that is not there.
+    // HONEST staging (R-SEC-006): report the primitive this OS is locked down with, and truthfully
+    // whether it is enforced. Linux (seccomp-bpf) is the wedge server platform and IS enforced now
+    // (apply_importer_sandbox installs the filter in the importer subprocess). Windows / macOS still
+    // report `enforced=false` — their primitives are tracked de-risk items and the runner falls back
+    // to the portable in-process slice (jail + scrubbed env + no network + input-bytes-only) there.
+    // Never claim a lockdown that is not there.
 #if defined(__linux__)
-    return {"seccomp-bpf", false,
-            "Linux-first subprocess lockdown (seccomp-bpf) is the next importer-isolation milestone; "
-            "v1 enforces the path jail + scrubbed env + no-ambient-network in-process."};
+    return {"seccomp-bpf", true, ""};
 #elif defined(_WIN32)
     return {"windows-appcontainer", false,
-            "Windows AppContainer / restricted Job Object lockdown is a tracked de-risk item; v1 "
-            "enforces the path jail + scrubbed env + no-ambient-network in-process."};
+            "Windows AppContainer / restricted Job Object lockdown is a tracked de-risk item; the "
+            "runner falls back to the portable in-process slice (path jail + scrubbed env + "
+            "no-ambient-network + input-bytes-only) here."};
 #elif defined(__APPLE__)
     return {"macos-sandbox-exec", false,
-            "macOS sandbox-exec lockdown is a tracked de-risk item; v1 enforces the path jail + "
-            "scrubbed env + no-ambient-network in-process."};
+            "macOS sandbox-exec lockdown is a tracked de-risk item; the runner falls back to the "
+            "portable in-process slice (path jail + scrubbed env + no-ambient-network + "
+            "input-bytes-only) here."};
 #else
     return {"none", false,
-            "No per-OS sandbox primitive is mapped for this platform; v1 enforces the path jail + "
-            "scrubbed env + no-ambient-network in-process."};
+            "No per-OS sandbox primitive is mapped for this platform; the runner falls back to the "
+            "portable in-process slice (path jail + scrubbed env + no-ambient-network + "
+            "input-bytes-only) here."};
 #endif
 }
 

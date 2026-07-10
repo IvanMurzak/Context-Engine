@@ -238,6 +238,11 @@ const std::vector<ErrorCode>& catalog()
          "An importer run attempted to read or write outside its TOCTOU-safe path jail, or requested "
          "the denied network capability; the run was refused (R-SEC-006/008/010).",
          false, kExitPermission, "R-SEC-008"},
+        {"import.subprocess_failed",
+         "The isolated importer subprocess failed to spawn, was killed by its per-OS sandbox primitive "
+         "(seccomp-bpf and friends), or exited without returning a result; nothing was imported and "
+         "the run fails closed (R-SEC-006).",
+         false, kExitInternal, "R-SEC-006"},
         {"import.non_deterministic",
          "An importer produced different bytes across the CI double-run byte-compare; the shared "
          "cache is only sound for run-deterministic importers, so this fails the gate.",

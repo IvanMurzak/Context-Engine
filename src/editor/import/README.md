@@ -35,11 +35,17 @@ and the autonomy envelope safe.
   registered schema/migration set hash. `make_cache_key()` fills the build-hash/ISA automatically.
   It EXTENDS the engine's existing FNV-1a content-hash machinery — no new hash family, no restructure
   of the derivation graph's memoization.
-- **Isolation** (`sandbox.h`, `isolated_runner.h`) — the **v1 slice** of R-SEC-006: the shared
+- **Isolation** (`sandbox.h`, `isolated_runner.h`, `sandbox_lockdown.cpp`) — R-SEC-006: the shared
   TOCTOU-safe path jail (R-SEC-008, reused from filesync), a **scrubbed environment** (R-SEC-010, C
-  locale only — no ambient secret/token), **no ambient network**, and **input-bytes-only + own
-  cache-output key**. `run_isolated()` enforces the policy; `check_deterministic()` is the
-  double-run byte-compare gate.
+  locale only — no ambient secret/token), **no ambient network**, and the **input-bytes-only read
+  scope with a declared-read-paths escape hatch** (owner ruling, issue #72 — `read_permitted` grants
+  only `input_path ∪ declared_read_paths`, all ⊆ jail; the writable set is the own cache-output key).
+  Two runners share the policy: `run_isolated()` (the in-process reference) and **`run_subprocess()`**
+  — on Linux it fork()s an **unprivileged child locked down by a hand-written seccomp-bpf filter**
+  (`apply_importer_sandbox`, no libseccomp dep), runs the pure importer there, and pipes the
+  `ImportResult` back (`encode/decode_import_result`); `os_sandbox_support()` reports the primitive is
+  **enforced** on Linux and honestly `enforced=false` (in-process fallback) on Windows/macOS.
+  `check_deterministic()` is the double-run byte-compare gate.
 - **The per-platform transcode SKELETON** (`platform_profile.h`) — the v1 platform set + the
   data-driven `(kind × platform) → format` table. The platform profile is a cache-key component, so
   per-platform variants coexist as separate entries (platform switches instant after first import).
@@ -67,13 +73,18 @@ hooks staked out now** with the heavy work tracked, never silent stubs:
    each row (texture BC7/ASTC, mesh meshopt quantization, audio compression) are the transcode
    milestone. `transcode_target_for()` already keys per platform so an encoder drops in without a
    cache-key change.
-2. **Per-OS subprocess sandbox lockdown.** v1 ships the portable isolation slice (jail + scrubbed
-   env + no-network + input-bytes-only) enforced by the in-process reference runner. The
-   **unprivileged-subprocess + sandbox-primitive** lockdown (**seccomp-bpf Linux-first**, then
-   Windows AppContainer / macOS sandbox-exec) is the next isolation milestone —
-   `os_sandbox_support()` reports the intended primitive and honestly reports `enforced=false` until
-   it lands. Importers are already pure, so the daemon swaps the in-process runner for the subprocess
-   one with **no importer change**.
+2. **Per-OS subprocess sandbox lockdown — LANDED Linux-first (issue #72).** `run_subprocess()` now
+   runs the pure importer in a fork()ed, **seccomp-bpf-locked** unprivileged child on Linux (the wedge
+   server platform) — `os_sandbox_support()` reports `enforced=true` there. Windows AppContainer /
+   restricted Job Object and macOS sandbox-exec remain **tracked de-risk items** (`enforced=false`,
+   in-process fallback). Two residual follow-ups, staged honestly: (a) the reference runner forks
+   **without exec**, which is safe in the single-threaded CLI/reference context but not in a
+   multi-threaded daemon, and the child inherits the parent's fd table (the filter allows read/write
+   on already-open fds, blocking only fresh `open*`) — the daemon integration hardens BOTH by moving
+   to a fork+exec importer-host (O_CLOEXEC scrubs the fd table) or a pre-forked zygote (the seccomp
+   filter + read-scope contract are unchanged); (b) the Linux filter gates on the x86_64 ABI (the
+   Linux-first server target) — an ARM64 Linux runner is a follow-up. Importers stayed pure, so the
+   swap needed **no importer change**.
 3. **Importer build hash.** v1 derives it from the framework epoch + the toolchain stamp (re-keys on
    a toolchain change — the cross-machine determinism scope R-FILE-010 defers). A real per-importer
    compiled-object hash lands with the native build pipeline.

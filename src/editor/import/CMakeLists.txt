@@ -11,6 +11,7 @@ add_library(context_import STATIC
     src/import_settings.cpp
     src/cache_key.cpp
     src/sandbox.cpp
+    src/sandbox_lockdown.cpp
     src/isolated_runner.cpp
     src/importer_registry.cpp
     src/importers/png_importer.cpp
