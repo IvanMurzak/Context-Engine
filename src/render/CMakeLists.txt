@@ -63,6 +63,18 @@ add_subdirectory(material)
 add_subdirectory(sprite)   # R-2D-001 / L-55 — the 2D sprite path (issue #122)
 add_subdirectory(lit)      # R-REND-004/006 — PBR + lighting/shadows + lightmap hooks (issue #135)
 
+# --- WEB backend local parity guard (M4 T6, issue #137; R-QA-013) --------------------------------
+# The emdawnwebgpu web backend (src/render/web/, a CI-only emscripten build) renders the SAME
+# triangle (3D pipeline) + sprite (2D) proofs native renders. This native ctest is the
+# locally-runnable guard on that exact proof set: the triangle asserted through the RHI on the fake
+# backend + the sprite scene's draw order / baked quad geometry pinned (its GPU rasterization is the
+# browser/Linux-CI gate). Links context_render_sprite (declared just above) for the 2D inputs.
+add_executable(context_render_test_web_parity tests/test_web_parity.cpp)
+target_link_libraries(context_render_test_web_parity
+    PRIVATE context_render context_render_sprite context_warnings)
+target_include_directories(context_render_test_web_parity PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME render-web-parity COMMAND context_render_test_web_parity)
+
 # ---------------------------------------------------------------------------------------------
 # context_render_wgpu — the T1 native backend + offscreen pixel-readback proof (CI-only dep path).
 # Opt-in: default OFF so the local GCC dev gate and the default 3-OS build matrix never fetch the
