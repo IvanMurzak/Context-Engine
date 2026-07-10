@@ -58,7 +58,8 @@ add_test(NAME merge-test_corpus COMMAND context_merge_test_corpus)
 # when git is absent). Module-local by design (the brief keeps it out of tests/integration/, whose
 # index-zipped exit-test lists are reserved for the exit-gate task).
 add_executable(context_merge_test_git_driver tests/test_git_driver.cpp)
-target_link_libraries(context_merge_test_git_driver PRIVATE context_merge context_warnings)
+# context_common: the shared std::system subprocess runner (issue #146) the driver test now uses.
+target_link_libraries(context_merge_test_git_driver PRIVATE context_merge context_common context_warnings)
 target_link_options(context_merge_test_git_driver
     PRIVATE $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
 target_include_directories(context_merge_test_git_driver PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)

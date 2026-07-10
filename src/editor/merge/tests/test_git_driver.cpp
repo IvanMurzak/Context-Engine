@@ -6,11 +6,11 @@
 
 #include "merge_test.h"
 
+#include "context/common/subprocess.h"
 #include "context/editor/serializer/json_parse.h"
 #include "context/editor/serializer/json_tree.h"
 
 #include <cstdio>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -21,6 +21,7 @@ using context::editor::serializer::JsonValue;
 namespace
 {
 namespace fs = std::filesystem;
+namespace subprocess = context::common::subprocess;
 
 #ifdef _WIN32
 constexpr const char* kDevNull = "nul";
@@ -53,23 +54,19 @@ bool read_file(const fs::path& path, std::string& out)
     return true;
 }
 
-// Run a shell command; return its process exit code.
+// Run a shell command through the shared std::system runner (context/common/subprocess.h, issue
+// #146): the Windows cmd.exe outer-quote fix + POSIX exit-code decode, replacing this test's former
+// private copy. Returns the process exit code.
 int run(const std::string& cmd)
 {
-#ifdef _WIN32
-    // cmd.exe /c strips ONE outer quote pair when the command has multiple quoted segments, which
-    // mangles `"exe" ... "path"`; wrapping the whole command in an extra pair makes cmd strip the
-    // OUTER pair and preserve the inner quotes (the classic Windows system() quirk).
-    return std::system(("\"" + cmd + "\"").c_str());
-#else
-    return std::system(cmd.c_str());
-#endif
+    return subprocess::run_command(cmd);
 }
 
-// git -C "<repo>" <args>
+// git -C "<repo>" <args>. The repo path is quoted via the shared fail-closed policy; `args` is a
+// pre-composed token string (it carries its own quoting) passed through as-is.
 int git(const std::string& repo, const std::string& args)
 {
-    return run("git -C \"" + repo + "\" " + args);
+    return run("git -C " + subprocess::quote_argument(repo) + " " + args);
 }
 
 const JsonValue* member(const JsonValue& v, const char* key)
@@ -115,7 +112,8 @@ int main()
     git(repo_s, "config commit.gpgsign false");
 
     // 2. `context new` auto-installs the driver (the .gitattributes mapping + git config stanza).
-    CHECK(run("\"" + context_bin + "\" new \"" + repo_s + "\" > " + kDevNull + " 2>&1") == 0);
+    CHECK(run(subprocess::quote_argument(context_bin) + " new " + subprocess::quote_argument(repo_s) +
+              " > " + kDevNull + " 2>&1") == 0);
 
     std::string gitattributes;
     CHECK(read_file(repo / ".gitattributes", gitattributes));

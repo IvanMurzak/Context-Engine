@@ -8,28 +8,21 @@
 // esbuild (ts_toolchain.h) transpiles by STRIPPING types without checking them; tsgo is the tsc-class
 // tool that actually type-analyzes, closing the agent author->typecheck->fix loop.
 //
-// Subprocess model + the std::system quoting/redirect helpers mirror esbuild_toolchain.cpp (and
-// src/editor/merge/tests/test_git_driver.cpp), including the Windows cmd.exe outer-quote fix (cmd /c
-// strips ONE outer quote pair). The small subprocess helpers are duplicated from esbuild_toolchain.cpp
-// on purpose for now — consolidating the repo's several std::system runner copies is a tracked P3
-// backlog item (PR #134 finding); a premature shared header would couple the transpile + typecheck TUs.
+// Subprocess model: the std::system quoting/redirect/scratch helpers now come from the shared runner
+// (context/common/subprocess.h, issue #146) — one hardened quoting/metacharacter policy + scratch-file
+// RAII + the Windows cmd.exe outer-quote fix. This retires the deliberate copy that formerly lived here
+// (the "tracked P3 subprocess-runner consolidation, PR #134 finding"). Argument quoting is now
+// fail-closed: a path bearing a shell metacharacter is refused and surfaced as a ts.type_error
+// diagnostic rather than run through an ambiguous command line.
 
 #include "context/runtime/ts/ts_typecheck.h"
 
-#include <atomic>
-#include <cstdlib>
+#include "context/common/subprocess.h"
+
 #include <filesystem>
-#include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
-
-#if defined(_WIN32)
-#include <process.h> // _getpid
-#else
-#include <sys/wait.h> // WIFEXITED / WEXITSTATUS
-#include <unistd.h>   // getpid
-#endif
 
 namespace context::runtime::ts
 {
@@ -37,36 +30,7 @@ namespace
 {
 
 namespace fs = std::filesystem;
-
-// A unique temp-file stem per call, so concurrent typechecks (ctest -j) never collide.
-std::string uniqueStem()
-{
-    static std::atomic<unsigned long long> counter{0};
-    const unsigned long long n = counter.fetch_add(1, std::memory_order_relaxed);
-    std::ostringstream os;
-    os << "ctx-tsc-" << static_cast<unsigned long long>(
-#if defined(_WIN32)
-              _getpid()
-#else
-              ::getpid()
-#endif
-              )
-       << "-" << n;
-    return os.str();
-}
-
-// Read a whole file into a string ("" if absent/unreadable).
-std::string slurp(const fs::path& p)
-{
-    std::ifstream in(p, std::ios::binary);
-    if (!in)
-    {
-        return {};
-    }
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    return ss.str();
-}
+namespace subprocess = context::common::subprocess;
 
 // Trim trailing whitespace/newlines.
 std::string rstrip(std::string s)
@@ -81,35 +45,6 @@ std::string rstrip(std::string s)
         s.pop_back();
     }
     return s;
-}
-
-// Wrap a token in double quotes for the shell (paths may contain spaces). SECURITY: this does NOT
-// escape a double-quote (or other shell metacharacter) already inside `s`, so every caller MUST pass
-// a CONTROLLED value — today the CMake-staged tsgo binary path (binaryPath_) and a caller-owned .ts
-// path — never an untrusted / agent-authored string. A hardened shared escaper is the tracked P3
-// subprocess-runner consolidation (see the file header + PR #134 finding); until it lands, the
-// trusted-callers precondition is what keeps this injection-safe.
-std::string q(const std::string& s) { return "\"" + s + "\""; }
-
-// Run `command` (already fully quoted), returning the process exit code. Applies the Windows cmd.exe
-// extra-outer-quote-pair fix so a multi-quoted command survives `cmd /c`.
-int runShell(const std::string& command)
-{
-#if defined(_WIN32)
-    const std::string wrapped = "\"" + command + "\"";
-#else
-    const std::string wrapped = command;
-#endif
-    const int rc = std::system(wrapped.c_str());
-#if defined(_WIN32)
-    return rc;
-#else
-    if (rc == -1)
-    {
-        return -1;
-    }
-    return WIFEXITED(rc) ? WEXITSTATUS(rc) : (rc == 0 ? 0 : 1);
-#endif
 }
 
 // Parse a decimal integer (all digits, non-empty). No exceptions, warning-clean under -Werror.
@@ -178,14 +113,20 @@ public:
 
     std::string version(std::string& err) const override
     {
-        const fs::path tmp = fs::temp_directory_path();
-        const std::string stem = uniqueStem();
-        const fs::path out = tmp / (stem + ".ver");
-        const std::string cmd = q(binaryPath_) + " --version >" + q(out.string());
-        const int rc = runShell(cmd);
-        std::string v = rstrip(slurp(out));
-        std::error_code ec;
-        fs::remove(out, ec);
+        const subprocess::ScratchFile out(subprocess::make_scratch_path("ctx-tsc", ".ver"));
+        std::string cmd;
+        try
+        {
+            cmd = subprocess::quote_argument(binaryPath_) + " --version >" +
+                  subprocess::quote_argument(out.path().string());
+        }
+        catch (const subprocess::MetacharacterError& e)
+        {
+            err = e.what();
+            return {};
+        }
+        const int rc = subprocess::run_command(cmd);
+        std::string v = rstrip(subprocess::read_file(out.path()));
         if (rc != 0 || v.empty())
         {
             err = "tsgo --version failed (rc=" + std::to_string(rc) + ")";
@@ -213,21 +154,31 @@ public:
             return result;
         }
 
-        const fs::path tmp = fs::temp_directory_path();
-        const std::string stem = uniqueStem();
-        const fs::path outFile = tmp / (stem + ".out");
-        const fs::path errFile = tmp / (stem + ".err");
+        const subprocess::ScratchFile outFile(subprocess::make_scratch_path("ctx-tsc", ".out"));
+        const subprocess::ScratchFile errFile(subprocess::make_scratch_path("ctx-tsc", ".err"));
 
         // `--noEmit` = typecheck only (no JS written; the transpile is ts_toolchain.h's job).
         // `--pretty false` = stable, ANSI-free, one-line-per-diagnostic output for parsing.
-        std::string cmd = q(binaryPath_) + " --noEmit --pretty false " + q(tsFilePath);
-        cmd += " >" + q(outFile.string()) + " 2>" + q(errFile.string());
-        const int rc = runShell(cmd);
+        std::string cmd;
+        try
+        {
+            cmd = subprocess::quote_argument(binaryPath_) + " --noEmit --pretty false " +
+                  subprocess::quote_argument(tsFilePath);
+            cmd += " >" + subprocess::quote_argument(outFile.path().string()) + " 2>" +
+                   subprocess::quote_argument(errFile.path().string());
+        }
+        catch (const subprocess::MetacharacterError& e)
+        {
+            // A path carrying a shell metacharacter is refused fail-closed (reconciled policy); surface
+            // it as ONE ts.type_error rather than running an ambiguous command line.
+            result.diagnostics.push_back(
+                {std::string(kTsTypeErrorCode), e.what(), tsFilePath, 0, 0});
+            return result;
+        }
+        const int rc = subprocess::run_command(cmd);
 
-        const std::string out = slurp(outFile);
-        const std::string errText = slurp(errFile);
-        fs::remove(outFile, ec);
-        fs::remove(errFile, ec);
+        const std::string out = subprocess::read_file(outFile.path());
+        const std::string errText = subprocess::read_file(errFile.path());
 
         if (rc == 0)
         {

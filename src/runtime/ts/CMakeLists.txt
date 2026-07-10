@@ -124,8 +124,11 @@ add_library(context_ts STATIC
     src/source_map.cpp
     src/stack_trace.cpp)
 target_include_directories(context_ts PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-# Every Context target links the warnings-as-errors baseline (conventions.md).
-target_link_libraries(context_ts PRIVATE context_warnings)
+# context_common: the shared std::system subprocess + scratch-temp-file runner (issue #146) the
+# esbuild + tsgo drivers now share instead of their former private copies. PRIVATE — an implementation
+# detail (the public ts headers expose no subprocess types). Every Context target also links the
+# warnings-as-errors baseline (conventions.md).
+target_link_libraries(context_ts PRIVATE context_common context_warnings)
 
 # Sanitize preset (ASan+UBSan, Linux/clang CI leg) carve-out. ts-test_ts_in_v8 links the
 # UNINSTRUMENTED rusty_v8 prebuilt (via context_js), which bundles Chromium's OWN libc++/libc++abi
