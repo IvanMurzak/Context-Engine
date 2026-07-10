@@ -88,6 +88,15 @@ add_spike(hello)
 # stable interfaces; src/editor/, src/runtime/, src/packages/ gain their targets in later M1 tasks.
 add_subdirectory(kernel)
 
+# Shared cross-cutting infrastructure (src/common/, issue #146): the ONE hardened std::system
+# subprocess + scratch-temp-file runner (context_common) consolidating the copies that had diverged
+# across the shadercc WGSL leg, the esbuild + tsgo TS drivers, and the real-git merge test. Stdlib +
+# the warnings baseline only — no engine-domain deps — so it builds on EVERY toolchain. Wired here,
+# right after kernel and deliberately far from the editor/runtime/render clusters and the file tail,
+# so concurrent sibling tasks inserting into those clusters merge cleanly (consumers name the
+# `context_common` target, resolved at generate time regardless of add_subdirectory order).
+add_subdirectory(common)
+
 # M4 wave-1: the broad-phase spatial acceleration structure (src/packages/spatial/, R-SIM-007, issue
 # #115) — the FIRST real first-party package under src/packages/. An incrementally-updated dynamic
 # AABB tree over transform-bearing entities: O(log N) insert/update/remove (never rebuilt per frame)

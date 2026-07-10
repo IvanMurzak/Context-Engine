@@ -101,6 +101,8 @@ target_link_libraries(context_shadercc
         spirv-cross-glsl
         spirv-cross-hlsl
         spirv-cross-msl
+        context_common          # the shared std::system subprocess runner (issue #146; this backend
+                                # was its hardened reference — the WGSL/tint leg)
         context_warnings)
 
 if(MSVC)
@@ -119,7 +121,9 @@ endif()
 # module must ALSO parse under the native consumer's naga generation (spikes/webgpu/FINDINGS.md —
 # emitted WGSL is consumed by BOTH Tint on web and naga inside wgpu-native on native).
 add_executable(context_shadercc_roundtrip tests/test_roundtrip.cpp)
-target_link_libraries(context_shadercc_roundtrip PRIVATE context_shadercc context_warnings)
+# context_common: the shared subprocess runner (issue #146) the naga cross-validator now drives
+# (context_shadercc links it PRIVATE, so the test names it directly for its own naga invocation).
+target_link_libraries(context_shadercc_roundtrip PRIVATE context_shadercc context_common context_warnings)
 target_include_directories(context_shadercc_roundtrip PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 target_compile_definitions(context_shadercc_roundtrip
     PRIVATE CONTEXT_MATERIAL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../material/corpus"

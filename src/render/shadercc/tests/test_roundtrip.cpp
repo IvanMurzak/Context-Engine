@@ -12,21 +12,16 @@
 #include "context/render/material/material_ir.h"
 #include "context/render/shadercc/cross_compiler.h"
 
+#include "context/common/subprocess.h"
 #include "shadercc_test.h"
 
 #include <cstdint>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <optional>
-#include <random>
 #include <sstream>
 #include <string>
 #include <vector>
-
-#ifndef _WIN32
-#include <sys/wait.h> // WIFEXITED/WEXITSTATUS for decoding std::system()'s wait status
-#endif
 
 using namespace context::render::material;
 using context::render::shadercc::CrossCompiledStage;
@@ -37,29 +32,24 @@ using context::render::shadercc::ShaderCompileError;
 namespace
 {
 
+namespace subprocess = context::common::subprocess;
+
 constexpr std::uint32_t kSpirvMagic = 0x07230203u;
 
 // Cross-validate one WGSL module under the pinned naga (the NATIVE consumer's WGSL frontend —
 // `naga <file.wgsl>` parses + validates, exit 0 on success). The backend's own validate_wgsl()
-// covers the chosen tool's validator; this guards the OTHER consumer. Test-local subprocess
-// plumbing — the backend deliberately does not expose its internals.
+// covers the chosen tool's validator; this guards the OTHER consumer. The subprocess plumbing
+// (scratch-file RAII, quoting/metacharacter policy, cmd.exe outer-quote fix, exit-code decode) now
+// comes from the shared runner (context/common/subprocess.h, issue #146) — the backend deliberately
+// does not expose its internals, so the test drives naga through the SAME shared helper the backend
+// drives tint through.
 bool naga_accepts_wgsl(const std::string& wgsl)
 {
-    // Per-process random tag + counter (the backend's make_scratch_path scheme) so concurrent
-    // processes sharing the temp dir can never collide on the scratch name.
-    static const unsigned process_tag = std::random_device{}();
-    static int counter = 0;
-    const std::filesystem::path path =
-        std::filesystem::temp_directory_path() /
-        ("ctx-shadercc-xval-" + std::to_string(process_tag) + "-" + std::to_string(++counter) +
-         ".wgsl");
+    const subprocess::ScratchFile scratch(
+        subprocess::make_scratch_path("ctx-shadercc-xval", ".wgsl"));
+    if (!subprocess::write_file(scratch.path(), wgsl.data(), wgsl.size()))
     {
-        std::ofstream out(path, std::ios::binary);
-        out << wgsl;
-        if (!out)
-        {
-            return false;
-        }
+        return false;
     }
 
 #ifdef _WIN32
@@ -67,22 +57,19 @@ bool naga_accepts_wgsl(const std::string& wgsl)
 #else
     const char* null_dev = "/dev/null";
 #endif
-    // stdout (naga's per-file "Validation successful") goes to the null device; stderr stays on the
-    // ctest output so a rejection is diagnosable.
-    std::string command = std::string("\"") + CONTEXT_SHADERCC_NAGA_EXECUTABLE + "\" \"" +
-                          path.string() + "\" > " + null_dev;
-#ifdef _WIN32
-    // cmd.exe strips the OUTERMOST quote pair from `cmd /c <line>`; wrap in one extra pair.
-    command = "\"" + command + "\"";
-    const int rc = std::system(command.c_str());
-#else
-    const int status = std::system(command.c_str());
-    const int rc = (status != -1 && WIFEXITED(status)) ? WEXITSTATUS(status) : -1;
-#endif
-
-    std::error_code ec;
-    std::filesystem::remove(path, ec);
-    return rc == 0;
+    // stdout (naga's per-file "Validation successful") goes to the null device (unquoted redirect
+    // token); stderr stays on the ctest output so a rejection is diagnosable.
+    try
+    {
+        const std::string command =
+            subprocess::quote_argument(CONTEXT_SHADERCC_NAGA_EXECUTABLE) + " " +
+            subprocess::quote_argument(scratch.path().string()) + " > " + null_dev;
+        return subprocess::run_command(command) == 0;
+    }
+    catch (const subprocess::MetacharacterError&)
+    {
+        return false; // a scratch/tool path with a shell metacharacter can't be validated -> reject
+    }
 }
 
 // The chosen tool's validator (AC1): validate_wgsl() throws on an invalid module.

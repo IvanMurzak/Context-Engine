@@ -6,27 +6,18 @@
 // (unlike runtime/js, whose V8 link is CI-only).
 //
 // Subprocess model: esbuild reads the input .ts and writes the emitted JS to stdout and any
-// diagnostics to stderr. We redirect both to temp files via std::system and read them back —
-// the same std::system pattern src/editor/merge/tests/test_git_driver.cpp uses, including the
-// Windows cmd.exe outer-quote fix (cmd /c strips ONE outer quote pair, so a command with several
-// quoted segments is wrapped in an extra outer pair on _WIN32).
+// diagnostics to stderr. We redirect both to scratch files and read them back via the shared
+// std::system runner (context/common/subprocess.h, issue #146) — one hardened quoting/metacharacter
+// policy + scratch-file RAII + the Windows cmd.exe outer-quote fix, replacing this driver's former
+// private copy. Argument quoting is now fail-closed: a path bearing a shell metacharacter is refused
+// and surfaced as a structured transpile diagnostic rather than run through an ambiguous command line.
 
 #include "context/runtime/ts/ts_toolchain.h"
 
-#include <atomic>
-#include <cstdio>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-#include <string>
+#include "context/common/subprocess.h"
 
-#if defined(_WIN32)
-#include <process.h> // _getpid
-#else
-#include <sys/wait.h> // WIFEXITED / WEXITSTATUS
-#include <unistd.h>   // getpid
-#endif
+#include <filesystem>
+#include <string>
 
 namespace context::runtime::ts
 {
@@ -34,37 +25,7 @@ namespace
 {
 
 namespace fs = std::filesystem;
-
-// A unique temp-file stem per call, so concurrent transpiles (ctest -j) never collide.
-std::string uniqueStem()
-{
-    static std::atomic<unsigned long long> counter{0};
-    const unsigned long long n = counter.fetch_add(1, std::memory_order_relaxed);
-    std::ostringstream os;
-    os << "ctx-ts-" << static_cast<unsigned long long>(
-#if defined(_WIN32)
-              _getpid()
-#else
-              ::getpid()
-#endif
-              )
-       << "-" << n;
-    return os.str();
-}
-
-// Read a whole file into a string ("" if absent/unreadable — a missing esbuild stdout on a
-// failed run is expected, not an error to re-report).
-std::string slurp(const fs::path& p)
-{
-    std::ifstream in(p, std::ios::binary);
-    if (!in)
-    {
-        return {};
-    }
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    return ss.str();
-}
+namespace subprocess = context::common::subprocess;
 
 // Trim trailing whitespace/newlines (esbuild --version prints a trailing newline).
 std::string rstrip(std::string s)
@@ -79,32 +40,6 @@ std::string rstrip(std::string s)
         s.pop_back();
     }
     return s;
-}
-
-// Wrap a token in double quotes for the shell (paths may contain spaces).
-std::string q(const std::string& s) { return "\"" + s + "\""; }
-
-// Run `command` (already fully quoted), returning the process exit code. Applies the Windows
-// cmd.exe extra-outer-quote-pair fix so a multi-quoted command survives `cmd /c`.
-int runShell(const std::string& command)
-{
-#if defined(_WIN32)
-    const std::string wrapped = "\"" + command + "\"";
-#else
-    const std::string wrapped = command;
-#endif
-    const int rc = std::system(wrapped.c_str());
-    // std::system encodes the child status; on POSIX extract the exit code, on Windows it is the
-    // code directly. A non-zero result is all this driver needs (esbuild returns 1 on failure).
-#if defined(_WIN32)
-    return rc;
-#else
-    if (rc == -1)
-    {
-        return -1;
-    }
-    return WIFEXITED(rc) ? WEXITSTATUS(rc) : (rc == 0 ? 0 : 1);
-#endif
 }
 
 const char* formatFlag(ModuleFormat f)
@@ -128,14 +63,20 @@ public:
 
     std::string version(std::string& err) const override
     {
-        const fs::path tmp = fs::temp_directory_path();
-        const std::string stem = uniqueStem();
-        const fs::path out = tmp / (stem + ".ver");
-        const std::string cmd = q(binaryPath_) + " --version >" + q(out.string());
-        const int rc = runShell(cmd);
-        std::string v = rstrip(slurp(out));
-        std::error_code ec;
-        fs::remove(out, ec);
+        const subprocess::ScratchFile out(subprocess::make_scratch_path("ctx-ts", ".ver"));
+        std::string cmd;
+        try
+        {
+            cmd = subprocess::quote_argument(binaryPath_) + " --version >" +
+                  subprocess::quote_argument(out.path().string());
+        }
+        catch (const subprocess::MetacharacterError& e)
+        {
+            err = e.what();
+            return {};
+        }
+        const int rc = subprocess::run_command(cmd);
+        std::string v = rstrip(subprocess::read_file(out.path()));
         if (rc != 0 || v.empty())
         {
             err = "esbuild --version failed (rc=" + std::to_string(rc) + ")";
@@ -156,43 +97,52 @@ public:
             return result;
         }
 
-        const fs::path tmp = fs::temp_directory_path();
-        const std::string stem = uniqueStem();
-        const fs::path outFile = tmp / (stem + ".js");
-        const fs::path mapFile = tmp / (stem + ".js.map"); // esbuild external-map path = <outfile>.map
-        const fs::path errFile = tmp / (stem + ".err");
+        const subprocess::ScratchFile out(subprocess::make_scratch_path("ctx-ts", ".js"));
+        // esbuild's external map path = <outfile>.map; RAII-remove it too (a no-op when no map is
+        // requested and none is written).
+        const subprocess::ScratchFile mapScratch(fs::path(out.path().string() + ".map"));
+        const subprocess::ScratchFile err(subprocess::make_scratch_path("ctx-ts", ".err"));
 
-        std::string cmd = q(binaryPath_) + " " + q(tsFilePath);
-        if (opts.bundle)
+        std::string cmd;
+        try
         {
-            cmd += " --bundle";
+            cmd = subprocess::quote_argument(binaryPath_) + " " + subprocess::quote_argument(tsFilePath);
+            if (opts.bundle)
+            {
+                cmd += " --bundle";
+            }
+            cmd += std::string(" --format=") + formatFlag(opts.format);
+            cmd += " --log-level=warning";
+            if (opts.sourcemap)
+            {
+                // External sourcemap needs an --outfile (esbuild writes <outfile> + <outfile>.map and
+                // appends the trailing `//# sourceMappingURL=` comment to the JS). We read both files
+                // back; stderr still carries diagnostics.
+                cmd += " --sourcemap --outfile=" + subprocess::quote_argument(out.path().string());
+                cmd += " 2>" + subprocess::quote_argument(err.path().string());
+            }
+            else
+            {
+                // No map: esbuild writes the JS module to stdout, which we redirect to the out scratch.
+                cmd += " >" + subprocess::quote_argument(out.path().string()) + " 2>" +
+                       subprocess::quote_argument(err.path().string());
+            }
         }
-        cmd += std::string(" --format=") + formatFlag(opts.format);
-        cmd += " --log-level=warning";
-        if (opts.sourcemap)
+        catch (const subprocess::MetacharacterError& e)
         {
-            // External sourcemap needs an --outfile (esbuild writes <outfile> + <outfile>.map and
-            // appends the trailing `//# sourceMappingURL=` comment to the JS). We read both files
-            // back; stderr still carries diagnostics.
-            cmd += " --sourcemap --outfile=" + q(outFile.string());
-            cmd += " 2>" + q(errFile.string());
-        }
-        else
-        {
-            // No map: esbuild writes the JS module to stdout, which we redirect to outFile.
-            cmd += " >" + q(outFile.string()) + " 2>" + q(errFile.string());
+            // A path carrying a shell metacharacter is refused fail-closed (reconciled policy); surface
+            // it as ONE structured envelope rather than running an ambiguous command line.
+            const std::string_view code =
+                opts.bundle ? kTsBundleFailedCode : kTsTranspileFailedCode;
+            result.diagnostics.push_back({std::string(code), e.what(), tsFilePath});
+            return result;
         }
 
-        const int rc = runShell(cmd);
-        const std::string js = slurp(outFile);
-        const std::string mapJson = opts.sourcemap ? slurp(mapFile) : std::string{};
-        const std::string diag = rstrip(slurp(errFile));
-        fs::remove(outFile, ec);
-        if (opts.sourcemap)
-        {
-            fs::remove(mapFile, ec); // only requested (and only created) when a source map was asked for
-        }
-        fs::remove(errFile, ec);
+        const int rc = subprocess::run_command(cmd);
+        const std::string js = subprocess::read_file(out.path());
+        const std::string mapJson = opts.sourcemap ? subprocess::read_file(mapScratch.path())
+                                                   : std::string{};
+        const std::string diag = rstrip(subprocess::read_file(err.path()));
 
         if (rc != 0)
         {
