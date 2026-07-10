@@ -1,0 +1,19 @@
+tools/wgsl_tool_eval.py
+  s_e37cb8916c7fcf::t_14d90b01a7e351 283-293
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c62653e59b54598e754402bc3270735bd39f07a6",
+  "prompts": {},
+  "sessions": {
+    "s_e37cb8916c7fcf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "79ebcd73-a5ef-46fd-ac35-a6d058b74895",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
