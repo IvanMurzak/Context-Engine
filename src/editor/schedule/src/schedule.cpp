@@ -30,17 +30,30 @@ namespace
     return policy.small_batch_target == 0 ? std::size_t{8} : policy.small_batch_target;
 }
 
+// Run one system: a run_cmd system records into its per-system buffer when one is available (the
+// World-taking tick); otherwise fall back to `run`; a system with neither (or a run_cmd-only system
+// in the World-free tick) is skipped. `buffers` is indexed by SystemId (nullable).
+void run_one(const SystemRegistry& reg, SystemId id, kernel::CommandBuffer* buffers)
+{
+    const SystemDesc& sys = reg.at(id);
+    if (buffers != nullptr && sys.run_cmd)
+    {
+        sys.run_cmd(buffers[id]);
+    }
+    else if (sys.run)
+    {
+        sys.run();
+    }
+}
+
 // Run every system in a chunk sequentially (a chunk is a coalesced worker task). All ids are active
-// native systems by construction; an empty `run` is skipped.
-void run_chunk(const SystemRegistry& reg, const std::vector<SystemId>& chunk)
+// native systems by construction.
+void run_chunk(const SystemRegistry& reg, const std::vector<SystemId>& chunk,
+               kernel::CommandBuffer* buffers)
 {
     for (const SystemId id : chunk)
     {
-        const SystemDesc& sys = reg.at(id);
-        if (sys.run)
-        {
-            sys.run();
-        }
+        run_one(reg, id, buffers);
     }
 }
 
@@ -204,13 +217,14 @@ const Schedule& ParallelScheduler::schedule(const SystemRegistry& reg)
 }
 
 void ParallelScheduler::run_native_batch(const SystemRegistry& reg,
-                                         const std::vector<std::vector<SystemId>>& chunks)
+                                         const std::vector<std::vector<SystemId>>& chunks,
+                                         kernel::CommandBuffer* buffers)
 {
     if (chunks.size() <= 1)
     {
         if (!chunks.empty())
         {
-            run_chunk(reg, chunks.front());
+            run_chunk(reg, chunks.front(), buffers);
         }
         return;
     }
@@ -246,11 +260,11 @@ void ParallelScheduler::run_native_batch(const SystemRegistry& reg,
         for (std::size_t c = 1; c < chunks.size(); ++c)
         {
             helpers.emplace_back(
-                [&reg, &chunks, &errors, c]
+                [&reg, &chunks, &errors, buffers, c]
                 {
                     try
                     {
-                        run_chunk(reg, chunks[c]);
+                        run_chunk(reg, chunks[c], buffers);
                     }
                     catch (...)
                     {
@@ -258,7 +272,7 @@ void ParallelScheduler::run_native_batch(const SystemRegistry& reg,
                     }
                 });
         }
-        run_chunk(reg, chunks.front()); // the inline chunk, on the calling thread
+        run_chunk(reg, chunks.front(), buffers); // the inline chunk, on the calling thread
     }
     catch (...)
     {
@@ -289,18 +303,75 @@ void ParallelScheduler::run_tick(const SystemRegistry& reg)
     // a tick runs them, never re-plans them.
     for (const std::vector<std::vector<SystemId>>& chunks : cached_chunks_)
     {
-        run_native_batch(reg, chunks);
+        run_native_batch(reg, chunks, nullptr);
     }
 
     // TS phase: the single JS-VM lane, sequential, AFTER the native phase has fully joined — so a
     // native system and a TS system that both mutate the World this tick never overlap.
     for (const SystemId id : sched.ts_lane())
     {
-        const SystemDesc& sys = reg.at(id);
-        if (sys.run)
+        run_one(reg, id, nullptr);
+    }
+}
+
+void ParallelScheduler::run_tick(const SystemRegistry& reg, kernel::World& world)
+{
+    const Schedule& sched = schedule(reg); // (re)builds the DAG + chunk plan iff composition changed
+
+    // Per-system command buffers, indexed by SystemId. Grown lazily; every buffer is empty here
+    // (applied or discarded at the end of every deferred tick), so this is allocation-free once the
+    // registry size has been seen.
+    if (cmd_buffers_.size() < reg.size())
+    {
+        cmd_buffers_.resize(reg.size());
+    }
+    kernel::CommandBuffer* buffers = cmd_buffers_.data();
+
+    // Discard every recorded-but-unapplied buffer — a throwing system must not leave its (or its
+    // siblings') structural commands to leak into the NEXT tick as stale state.
+    const auto discard_all = [this]() noexcept
+    {
+        for (kernel::CommandBuffer& buf : cmd_buffers_)
         {
-            sys.run();
+            buf.clear();
         }
+    };
+
+    try
+    {
+        // Native phase: after each batch fully joins, apply that batch's recorded buffers in
+        // ascending registration order (the batch vector is id-ascending by construction) — the
+        // deterministic L-54 ordering, independent of which helper thread finished first. Dependent
+        // (conflicting) systems sit in strictly later batches, so they observe these changes; the
+        // batch's own systems ran over the stable pre-batch World (deferred-invisibility).
+        for (std::size_t b = 0; b < cached_chunks_.size(); ++b)
+        {
+            run_native_batch(reg, cached_chunks_[b], buffers);
+            for (const SystemId id : sched.native_batches()[b])
+            {
+                if (!buffers[id].empty())
+                {
+                    buffers[id].apply(world);
+                }
+            }
+        }
+
+        // TS phase: sequential single lane; apply each TS system's buffer immediately after it
+        // returns, BEFORE the next TS system runs (on a sequential lane every later system is a
+        // potential dependent).
+        for (const SystemId id : sched.ts_lane())
+        {
+            run_one(reg, id, buffers);
+            if (!buffers[id].empty())
+            {
+                buffers[id].apply(world);
+            }
+        }
+    }
+    catch (...)
+    {
+        discard_all();
+        throw;
     }
 }
 

@@ -17,10 +17,21 @@
 // access of #88 item 2) is deliberately out of scope here — release hands declared views only, which
 // is enough for the parallel-safety guarantee this scheduler makes. See README § Deliberately out of
 // scope.
+//
+// Deferred structural changes (#88 item 3, the R-LANG-009 command-buffer clause): a running system
+// must never add/remove components or create/destroy entities directly — archetype migration would
+// move memory under a live view. A system that needs structural changes registers a `run_cmd`
+// runnable instead, which receives a per-system kernel::CommandBuffer to RECORD them into; the
+// World-taking run_tick overload applies the recorded buffers BETWEEN systems: at each native batch
+// boundary (in ascending registration order — deterministic regardless of thread completion order),
+// and after each TS system on the single JS-VM lane. A dependent (conflicting) system always sits in
+// a strictly later batch, so a system's structural mutations are visible to every dependent system
+// and invisible to its own batch — the flush ordering respects the declared-access DAG.
 
 #pragma once
 
 #include "context/editor/schedule/access.h"
+#include "context/kernel/command_buffer.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -55,12 +66,22 @@ enum class CostHint
 };
 
 // The runnable a system executes each tick. A native system's closure mutates the World's declared
-// component records (no structural change — that is deferred to the #88-item-3 command buffer); a TS
-// system's closure drives the (query, executor) run_system on the JS lane. The scheduler never
+// component records (no structural change — that is deferred to the command buffer, see SystemCmdFn);
+// a TS system's closure drives the (query, executor) run_system on the JS lane. The scheduler never
 // inspects the body — it only decides WHERE (which batch / the TS lane) and WHEN it runs.
 using SystemFn = std::function<void()>;
 
-// One registered system.
+// The command-buffer-aware runnable (the R-LANG-009 deferred-structural-change shape). The scheduler
+// hands the system its own per-tick kernel::CommandBuffer; the body RECORDS structural changes
+// (add/remove component, entity create/destroy) into it — alongside its ordinary declared-record
+// mutations — and the scheduler applies the buffer between systems (see run_tick(reg, world)). Only
+// the World-taking run_tick overload services run_cmd systems (there is no World to apply buffers to
+// otherwise); the World-free overload skips them like an empty `run`.
+using SystemCmdFn = std::function<void(kernel::CommandBuffer&)>;
+
+// One registered system. Set exactly one of `run` / `run_cmd` (a system either needs the deferred
+// structural-change buffer or does not); if both are set, `run_cmd` wins whenever a buffer is
+// available (the World-taking run_tick) and `run` wins otherwise.
 struct SystemDesc
 {
     std::string name;
@@ -68,6 +89,7 @@ struct SystemDesc
     AccessSet access; // consulted for DAG placement only when lane == Native
     CostHint cost = CostHint::Normal;
     SystemFn run;
+    SystemCmdFn run_cmd;
 };
 
 // The parallel-execution / batching policy.
@@ -171,11 +193,31 @@ public:
     // Run exactly one tick: the native parallel batches (fork-join, batching policy applied), then the
     // TS single lane sequentially. Reuses the cached schedule AND the cached per-batch chunk plan; a
     // tick NEVER rebuilds the DAG or re-plans chunks (only a composition change does). A system whose
-    // `run` is empty is skipped. An exception thrown by a system's `run` (on any lane, including a
-    // helper thread) propagates out of run_tick after the batch's fork-join barrier — it never calls
-    // std::terminate. Precondition: no system's `run` mutates `reg`'s composition mid-tick (see
-    // SystemRegistry).
+    // `run` is empty is skipped — including a run_cmd-only system (this overload has no World to apply
+    // its buffer to; use run_tick(reg, world)). An exception thrown by a system's `run` (on any lane,
+    // including a helper thread) propagates out of run_tick after the batch's fork-join barrier — it
+    // never calls std::terminate. Precondition: no system's `run` mutates `reg`'s composition mid-tick
+    // (see SystemRegistry).
     void run_tick(const SystemRegistry& reg);
+
+    // Run exactly one tick WITH deferred structural changes (the R-LANG-009 command-buffer clause).
+    // Identical scheduling to run_tick(reg), plus: every system may record structural changes into its
+    // own per-system kernel::CommandBuffer (a run_cmd system receives it as its argument), and the
+    // scheduler applies the recorded buffers to `world` BETWEEN systems:
+    //   - native phase: at each batch boundary — after the batch fully joins, before the next batch
+    //     starts — in ascending registration order within the batch (deterministic regardless of
+    //     which helper thread finished first). A dependent (conflicting) system is always in a
+    //     strictly later batch, so it observes the changes; same-batch (non-conflicting) systems do
+    //     not — they ran over the stable pre-batch World.
+    //   - TS phase: immediately after each TS system returns, before the next TS system runs (the
+    //     single JS-VM lane is sequential, so every later TS system is a potential dependent).
+    // A system therefore observes a stable World for its whole invocation, and its structural
+    // mutations take effect after it returns, before the next dependent system runs — memory never
+    // moves under a live view. If any system throws, every recorded-but-unapplied buffer is DISCARDED
+    // (no half-tick structural state lands) and the exception propagates after the join barrier.
+    // Buffers are recorded per-system (no cross-thread sharing) and applied from the calling thread
+    // after each join, so the parallel-safety guarantee is unchanged.
+    void run_tick(const SystemRegistry& reg, kernel::World& world);
 
     // Total number of times the DAG has been (re)built over this scheduler's lifetime. A run of N
     // ticks with no composition change leaves this at 1 — the "computed once, not per frame" proof.
@@ -186,9 +228,12 @@ public:
 private:
     // Run one native batch from its PRE-PLANNED worker chunks (planned once in schedule(), not per
     // tick). Fork-join over the chunks; any exception a system throws is captured and rethrown after
-    // every helper joins.
+    // every helper joins. `buffers` (nullable — the World-free tick) is the per-system command-buffer
+    // array indexed by SystemId; each chunk's systems record only into their OWN buffers, so helper
+    // threads never share one.
     void run_native_batch(const SystemRegistry& reg,
-                          const std::vector<std::vector<SystemId>>& chunks);
+                          const std::vector<std::vector<SystemId>>& chunks,
+                          kernel::CommandBuffer* buffers);
 
     SchedulePolicy policy_;
     std::optional<Schedule> cached_;
@@ -196,6 +241,10 @@ private:
     // alongside the DAG in schedule() (a pure function of batch + composition + policy, invariant until
     // the next composition change) so run_tick reuses it instead of re-planning every tick.
     std::vector<std::vector<std::vector<SystemId>>> cached_chunks_;
+    // Per-system command buffers for the World-taking tick, indexed by SystemId. Kept as a member so
+    // the empty buffers' storage is reused across ticks (no per-tick allocation churn); always left
+    // empty between ticks (applied or discarded).
+    std::vector<kernel::CommandBuffer> cmd_buffers_;
     std::uint64_t rebuild_count_ = 0;
 };
 

@@ -17,8 +17,10 @@
 // VM-allocated (the R-LANG-008/L-60 "VM-interior World columns" seam, split out on #88) — at which
 // point the views alias the columns directly and this copy disappears. Structural changes (add/remove
 // component, entity create/destroy) MUST NOT happen inside the executor: memory may move under a live
-// view. Deferring them to an end-of-system command buffer is a separate split-out task (#88 item 3);
-// this tier runs read/write systems over a stable archetype set.
+// view. They are deferred instead (#88 item 3, landed): the system's host-side closure records them
+// into its per-system kernel::CommandBuffer (kernel/command_buffer.h) and the scheduler's World-taking
+// run_tick applies them between systems (editor/schedule); an invocation always runs over a stable
+// archetype set.
 
 #pragma once
 
