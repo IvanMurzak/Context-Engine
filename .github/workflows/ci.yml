@@ -642,6 +642,49 @@ jobs:
         shell: bash
         run: ${SCCACHE_PATH} --show-stats
 
+  # M4 render foundation, WEB leg (src/render/web/, issue #137 T6): the T1 RHI backend on the
+  # BROWSER's WebGPU via Emscripten + the emdawnwebgpu port (webgpu.h -> navigator.gpu; the
+  # L-56-locked web path, NOT a Dawn cross-compile). Generalizes the `spike-webgpu-web` job to the
+  # promoted subsystem — the SAME rhi.h implementation as the native `render` job (context_render_wgpu),
+  # compiled to wasm+JS from the standalone src/render/web target, rendering the same triangle (3D
+  # pipeline) + sprite (2D) T1 proofs the native offscreen exe runs. This is the M4 "one browser
+  # blocking backend" build gate (ROADMAP §1); the in-browser render RUN + the golden-scene SSIM
+  # gate are the T7 follow-up (GH runners have no browser+WebGPU). Toolchain note: emsdk `latest`
+  # (bundled emdawnwebgpu port), recorded 'documented'/unpinned in cmake/toolchain-versions.json like
+  # the spike-webgpu-web leg — pinning emsdk is a staged follow-up.
+  render-web:
+    name: render (web, emscripten)
+    needs: [license-gate, python-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install emsdk (latest)
+        # Retry/backoff (Context-Engine#129): the git clone + `emsdk install latest` both download
+        # from GitHub. rm -rf before each attempt so a retried clone into an existing dir does not fail.
+        run: |
+          bash tools/ci-retry.sh -- bash -c '
+            rm -rf "$RUNNER_TEMP/emsdk" \
+              && git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk" \
+              && "$RUNNER_TEMP/emsdk/emsdk" install latest \
+              && "$RUNNER_TEMP/emsdk/emsdk" activate latest'
+
+      - name: Configure + build (wasm)
+        run: |
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          emcmake cmake -S src/render/web -B build/render-web -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/render-web
+
+      - name: Upload wasm artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: render-web
+          path: |
+            build/render-web/context-render-web.html
+            build/render-web/context-render-web.js
+            build/render-web/context-render-web.wasm
+          if-no-files-found: error
+
   # Native shader cross-compile TOOLCHAIN de-risk (src/render/shadercc/, issue #125, sub-task B of
   # #119): make glslang + SPIRV-Cross + SPIRV-Tools (the vcpkg `shader-crosscompile` manifest feature)
   # AVAILABLE + CI-proven to build/link behind the default-OFF CONTEXT_BUILD_SHADER_CROSSCOMPILE flag —

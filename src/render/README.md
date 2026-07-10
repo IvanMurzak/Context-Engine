@@ -56,6 +56,40 @@ dependency path (`src/runtime/js/`) — the local Strawberry-GCC dev gate cannot
   R-2D-001 sprite proof) / `lit` (the R-REND-004/006 PBR + shadow + lightmap-hook proof —
   see `lit/README.md`).
 
+### `context_render_web` — the T1 browser WebGPU backend (emscripten/emdawnwebgpu; CI-gated)
+
+The **web** T1 RHI backend (`src/render/web/`, issue #137 T6; R-REND-002, **L-56**). It is a **new
+RHI backend, not a renderer fork** — the sim→render extract + double-buffer + detachable renderer
+facade stay shared with native. It reuses the **same `wgpu/wgpu_rhi.cpp`** the native backend uses,
+compiled for the **browser's** WebGPU via Emscripten + the **emdawnwebgpu** port (`webgpu.h` →
+`navigator.gpu`; the L-56-locked web path, **not** a Dawn cross-compile). The spike proved one
+source compiles both ways with near-zero conditionals; the only `__EMSCRIPTEN__` divergences are the
+three the spike documented: the poll pump yields to the browser event loop (Asyncify
+`emscripten_sleep`), the R-HEAD-002 probe uses `requestAdapter` (emdawnwebgpu has no
+enumerate-adapters extra), and `backend_name()` reports `browser-webgpu`.
+
+- **`web/web_main.cpp`** — the offscreen parity harness. Runs the **same** triangle (3D pipeline) +
+  sprite (2D) proofs the native offscreen exe runs, through the **same** `rhi.h` — so desktop/web are
+  identical **within the T1 feature set** by construction (same semantics; bit-identical frames are
+  NOT required — float→unorm rounding legally differs per backend). Kernel-free (no extract/kernel
+  surface under emscripten).
+- **`web/CMakeLists.txt`** — standalone (`emcmake cmake -S src/render/web`), like the spike's web
+  leg. Deliberately **not** part of the native build. emdawnwebgpu constraints honored: `-sASYNCIFY`,
+  `-sEXIT_RUNTIME=1`, heap sized up front (`-sINITIAL_MEMORY`) and **no `-sALLOW_MEMORY_GROWTH`** (it
+  breaks emdawnwebgpu device acquisition — a resizable ArrayBuffer throws in its `TextDecoder` glue).
+- **Bind-group parity (Tint combined-sampler split, `docs/wgsl-tool-decision.md`):** free — the RHI's
+  bind-group layouts are always **reflected** from the pipeline's shader
+  (`IRenderPipeline::bind_group_layout` → `wgpuRenderPipelineGetBindGroupLayout`), so post-split
+  binding renumbering is picked up identically on web and native with no caller hardcoding a pre-split
+  map (`rhi.h` `IBindGroupLayout` note).
+
+Built by the `render-web` CI job (`.github/workflows/ci.yml`; emsdk `latest`, emits
+`context-render-web.{html,js,wasm}`) — the M4 "one browser blocking backend" build gate. The
+**in-browser render RUN** and the automated **golden-scene SSIM** visual-equivalence gate are the M4
+**T7** follow-up (GH runners have no browser+WebGPU). The lit/PBR (3D lighting/shadow) web proof —
+which pulls the kernel + extract — also lands with T7. Locally guarded by the native `render-web-parity`
+ctest (the web harness's proof set asserted on the fake backend / CPU under the dev gate).
+
 ## wgpu-native prebuilt (R-SEC-009)
 
 The native backend links the **wgpu-native `v29.0.1.1` PREBUILT** (gfx-rs GitHub release),

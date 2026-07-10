@@ -1,11 +1,20 @@
-// The T1 native RHI backend over wgpu-native (R-REND-001/002) — see wgpu/wgpu_rhi.h.
+// The T1 RHI backend over webgpu.h (R-REND-001/002, L-56) — see wgpu/wgpu_rhi.h.
 //
 // Implements the rhi.h object model over webgpu.h, faithfully reusing the wgpu calls proven by the
 // throwaway spikes/webgpu spike (adapter/device request + pump loop, offscreen texture + readback
 // buffer, WGSL pipeline, render pass, texture->buffer copy, async map). This TU is the ONLY place
-// webgpu.h is included; it is compiled solely under CONTEXT_BUILD_RENDER_WGPU (a CI-gated dependency
-// path, like V8) because the sole off-the-shelf Windows prebuilt is MSVC-ABI. It is platform-neutral
-// (no window/surface code — offscreen only) so it has no #if platform branches.
+// webgpu.h is included. It compiles two ways from ONE source (the spike's proven "zero #ifdef in the
+// API-usage code" property):
+//   * NATIVE — the wgpu-native PREBUILT, compiled under CONTEXT_BUILD_RENDER_WGPU (a CI-gated
+//     dependency path, like V8, because the sole off-the-shelf Windows prebuilt is MSVC-ABI).
+//   * WEB (M4 T6, issue #137) — the BROWSER's WebGPU via Emscripten + the emdawnwebgpu port
+//     (webgpu.h -> navigator.gpu; the L-56-locked web path, NOT a Dawn cross-compile), built by the
+//     standalone src/render/web/ target under emcc. The ONLY divergences vs native are the three the
+//     spike documented and are gated on __EMSCRIPTEN__ here: the poll pump yields to the browser
+//     event loop (Asyncify emscripten_sleep) instead of a thread sleep, the R-HEAD-002 probe has no
+//     enumerate-adapters extra (emdawnwebgpu offers requestAdapter only — the CTX_RENDER_HAS_WGPU_
+//     EXTRAS-off fallback below), and backend_name() reports the browser backend. It is otherwise
+//     platform-neutral (no window/surface code — offscreen only).
 
 #include "context/render/wgpu/wgpu_rhi.h"
 
@@ -15,12 +24,17 @@
 #include <webgpu/wgpu.h> // wgpuInstanceEnumerateAdapters — the R-HEAD-002 device-free probe.
 #endif
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h> // emscripten_sleep — yield to the browser event loop (Asyncify).
+#else
 #include <chrono>
+#include <thread>
+#endif
+
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace context::render
@@ -46,11 +60,18 @@ std::string sv_to_string(WGPUStringView view)
     return std::string(view.data, view.length);
 }
 
-// One poll step: deliver completed async events, then yield briefly (native path).
+// One poll step: deliver completed async events, then yield briefly so the pending async request
+// (adapter/device/map) can resolve. Native pumps events + sleeps a thread; on the web the browser
+// owns the event loop, so we yield to it via Asyncify (emscripten_sleep) — WebGPU promises resolve
+// only when control returns to JS. This is the sole pump divergence the spike documented.
 void pump(WGPUInstance instance)
 {
     wgpuInstanceProcessEvents(instance);
+#if defined(__EMSCRIPTEN__)
+    emscripten_sleep(1); // Asyncify: yield to the browser event loop (needs -sASYNCIFY).
+#else
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#endif
 }
 
 void on_uncaptured_error(WGPUDevice const* /*device*/, WGPUErrorType type, WGPUStringView message,
@@ -757,7 +778,14 @@ public:
     }
 
     [[nodiscard]] RhiTier tier() const override { return RhiTier::T1_WebGPU; }
-    [[nodiscard]] const char* backend_name() const override { return "wgpu-native"; }
+    [[nodiscard]] const char* backend_name() const override
+    {
+#if defined(__EMSCRIPTEN__)
+        return "browser-webgpu"; // emdawnwebgpu -> navigator.gpu (the web T1 backend, issue #137).
+#else
+        return "wgpu-native";
+#endif
+    }
 
     AdapterProbe probe() override
     {
