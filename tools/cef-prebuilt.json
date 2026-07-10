@@ -1,0 +1,30 @@
+{
+    "$comment": "Pinned, SHA-256-verified CEF prebuilt channel for the M5 observer-editor GUI build substrate (src/editor/cef/, issue #150 / L-15 / L-41 / R-UI-007 / R-SEC-009). SINGLE source of truth for the pins — parsed by tools/fetch_cef.py (download + verify-before-use + decompress). src/editor/cef/CMakeLists.txt forwards this file's PATH to fetch_cef.py (it does NOT parse the pins itself, so they are never duplicated). Channel = the official CEF 'minimal' binary distribution from the Spotify CDN (cef-builds.spotifycdn.com — the CEF project's own binary host): a third-party build lib authenticated by its OWN publisher via TLS + SHA-256 verify-before-use + SHA-pin, and explicitly OUT of scope for the engine first-party R-SEC-009 trust root (do NOT route these through tools/verify_artifact.py) — the SAME wgpu-native / rusty_v8 signed-prebuilt precedent recorded in docs/signing.md and tools/license-allowlist.json (#76 Option-A carve-out). CEF is BSD-3-Clause (recorded in tools/license-allowlist.json); the distribution bundles Chromium/third-party notices in its own LICENSE.txt / about:credits (a fuller shipped-editor notice pass is an F0b/packaging concern, not this substrate task). The CDN's index.json publishes only a SHA1 per file (recorded below as 'sha1' and cross-checked at pin time); the SHA-256 'sha256' pins here are computed over the exact published archives and are the fail-closed verify-before-use anchor fetch_cef.py enforces. The spikes/cef-compositing L-41 de-risk (CONTEXT_BUILD_SPIKE_CEF) stays for reference — this promotes the SAME pinned CEF build to a production CONTEXT_BUILD_GUI_CEF option (src/editor/cef/). Three DESKTOP triples matching the CI build matrix (Linux-x64 / macOS-ARM64 / Win-x64), sharing the exact triple names of tools/v8-prebuilt.json. Like wgpu-native / rusty_v8 the local Strawberry-GCC Windows dev gate cannot link the MSVC-ABI Windows prebuilt, so this is a CI-only dependency path. A from-source / vcpkg-owned CEF is out of scope pre-1.0 (an L-42 deviation, like wgpu-native/rusty_v8).",
+    "cef_version": "149.0.6+g0d0eeb6+chromium-149.0.7827.201",
+    "chromium_version": "149.0.7827.201",
+    "distribution": "minimal",
+    "url_template": "https://cef-builds.spotifycdn.com/{url_file}",
+    "archives": {
+        "x86_64-unknown-linux-gnu": {
+            "platform": "linux64",
+            "file": "cef_binary_149.0.6+g0d0eeb6+chromium-149.0.7827.201_linux64_minimal.tar.bz2",
+            "sha256": "f90dec4c5c42a7bbd4f2bd80a7a77e0ac6aacfc6627bb43572d803e77f26dfbc",
+            "sha1": "d46ec0d5723771bd1c9678c429e1cdb1f1ef0a72",
+            "size": 310966119
+        },
+        "aarch64-apple-darwin": {
+            "platform": "macosarm64",
+            "file": "cef_binary_149.0.6+g0d0eeb6+chromium-149.0.7827.201_macosarm64_minimal.tar.bz2",
+            "sha256": "232412125e50f61597151eba49cee4082ccde55dc900bd8fd3252662f8c230f4",
+            "sha1": "c8defef52974eb8fe01f556f16efd7f51c7b5972",
+            "size": 122897374
+        },
+        "x86_64-pc-windows-msvc": {
+            "platform": "windows64",
+            "file": "cef_binary_149.0.6+g0d0eeb6+chromium-149.0.7827.201_windows64_minimal.tar.bz2",
+            "sha256": "a8942099a69e46c1d7243068303d21df5cab3bcdea82f55ef1aa07ee99d70ac0",
+            "sha1": "fe8f461b743f03dc640e998ae08264407d8bc2c9",
+            "size": 162012830
+        }
+    }
+}

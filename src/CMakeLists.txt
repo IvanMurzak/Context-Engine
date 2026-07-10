@@ -27,6 +27,7 @@ option(CONTEXT_TSAN "Build with ThreadSanitizer (non-MSVC only; mutually exclusi
 option(CONTEXT_BUILD_SPIKES "Build the M0 de-risking spike targets under spikes/ (opt-in; the default CI matrix stays spike-free; some spikes require the vcpkg toolchain with VCPKG_MANIFEST_FEATURES=spikes)" OFF)
 option(CONTEXT_BUILD_SPIKE_WASM "Build ONLY spikes/wasm (subset of CONTEXT_BUILD_SPIKES; acquires its own runtimes — needs no vcpkg toolchain), so CI can exercise the WASM spike without configuring the vcpkg-dependent spikes" OFF)
 option(CONTEXT_BUILD_SPIKE_CEF "Build the CEF accelerated-OSR compositing spike (L-41) — downloads the pinned ~162 MB CEF binary distribution; Windows/MSVC-only, local runs only, NEVER enabled in CI" OFF)
+option(CONTEXT_BUILD_GUI_CEF "Build the M5 editor-GUI CEF build substrate (src/editor/cef/, issue #150) — fetches + SHA-verifies the pinned CEF prebuilt and boots it headless. A CI-only dependency path like V8 / wgpu-native (the MSVC/Clang-ABI prebuilt cannot link under the local Strawberry-GCC dev gate); default OFF so the default matrix + local dev gate never fetch CEF. The dedicated cef-substrate CI job sets it ON." OFF)
 
 # spikes/wasm builds WAMR (a C library): the C language must be enabled HERE — at top-level
 # scope, BEFORE any add_subdirectory — not inside the spike's directory. Enabling C mid-tree
@@ -414,6 +415,17 @@ add_subdirectory(editor/schedule)
 # file merge cleanly (consumers name the `context_render` target, resolved at generate time
 # regardless of add_subdirectory order).
 add_subdirectory(render)
+
+# M5-F0a foundation: the CEF editor-GUI BUILD SUBSTRATE (src/editor/cef/, L-15 / L-41 / R-UI-007 /
+# R-SEC-009, issue #150) — fetch + SHA-verify the pinned CEF prebuilt (tools/fetch_cef.py) + boot it
+# headless (a CEF browser subprocess boots + exits 0). Behind CONTEXT_BUILD_GUI_CEF (default OFF): a
+# CI-only dependency path like V8 (src/runtime/js/) + wgpu-native (src/render/) — the MSVC/Clang-ABI
+# CEF prebuilt cannot link under the local Strawberry-GCC dev gate, so the default matrix + local dev
+# gate never enter it (the subdir early-returns when OFF). NO editor host / panels / RPC (that is
+# M5-F0b / src/editor/gui/, which links this substrate). OWN stanza — deliberately apart from the
+# editor/runtime cluster above and the exit-gate block below — so concurrent sibling tasks inserting
+# into this file merge cleanly (consumers name targets resolved at generate time regardless of order).
+add_subdirectory(editor/cef)
 
 # ---------------------------------------------------------------------------
 # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36): five integration tests, one per exit

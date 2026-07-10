@@ -876,3 +876,94 @@ jobs:
       - name: Run the shader-crosscompile ctests (smoke + author->SPIR-V->{HLSL,MSL,GLSL,WGSL} roundtrip)
         run: ctest --preset shader-crosscompile --output-on-failure
         working-directory: src
+
+  # M5-F0a CEF build substrate (src/editor/cef/, issue #150; L-15 / L-41 / R-UI-007 / R-SEC-009): fetch
+  # + SHA-256-verify the pinned CEF prebuilt (tools/fetch_cef.py, verify-before-use fail-closed), build
+  # libcef_dll_wrapper from the distribution, link a minimal headless boot substrate, and BOOT a CEF
+  # browser subprocess headless (`cef-substrate-boot` ctest → exit 0). A CI-gated dependency path like
+  # the `render` job (CONTEXT_BUILD_RENDER_WGPU): the MSVC/Clang-ABI CEF prebuilt cannot link under the
+  # local Strawberry-GCC dev gate, so it is built + booted ONLY here behind -DCONTEXT_BUILD_GUI_CEF=ON.
+  # The main `build` job already compiles src/editor/cef with the toggle OFF (it early-returns), so this
+  # job is only the native CEF dependency path. This is the build-SUBSTRATE smoke (fetch → verify → link
+  # → headless boot), NOT the editor host boot smoke (that is M5-F0b — no host / panels / RPC here).
+  #
+  # Policy: Linux is the primary boot leg (headless under xvfb, GPU disabled). Windows rides the
+  # SELF-HOSTED MSVC runner (standing M4 CI policy: no new Windows GPU legs — this leg disables the GPU;
+  # the boot code hard-exits after success to skip CEF's flaky Session-0 teardown, the same carve-out
+  # src/render/ documents). macOS boots the bundled app (arm64 = the macos-latest Apple-Silicon runner,
+  # matching the aarch64-apple-darwin pin). The pinned CEF archive (~123-311 MB) is fetched ONCE at
+  # configure time (fetch_cef.py retry/backoff) and CACHED across runs keyed on the pin manifest hash
+  # (version-keyed cache) so CI cost stays bounded — the download hardening the issue asks for.
+  cef-substrate:
+    name: cef-substrate (${{ matrix.os }})
+    needs: [license-gate, python-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
+        if: runner.os == 'Windows' && runner.environment == 'self-hosted'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $out = cmd /c "`"$vs\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 -no_logo && set"
+          foreach ($name in 'PATH','INCLUDE','LIB','LIBPATH') {
+            $line = ($out | Where-Object { $_ -like "$name=*" } | Select-Object -First 1)
+            if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+          }
+          "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      # Version-keyed cache of the fetched + extracted CEF distribution: the ~123-311 MB archive is
+      # downloaded once per pin and reused (keeps CI cost bounded). Keyed on the pin manifest hash so a
+      # pin bump invalidates it and re-fetches; no restore-keys (a stale CEF must never satisfy a new
+      # pin). fetch_cef.py's idempotency stamp short-circuits the download on a cache hit.
+      - name: CEF prebuilt cache
+        uses: actions/cache@v6
+        with:
+          path: src/build/dev/_cef
+          key: cef-prebuilt-${{ runner.os }}-${{ hashFiles('tools/cef-prebuilt.json') }}
+
+      # CEF's Linux runtime dependencies + xvfb (even OSR/windowless CEF needs an X display connection
+      # to initialize its ozone/X11 backend on Linux). Retry-wrapped like the render job's lavapipe step.
+      - name: Install CEF runtime deps + xvfb (Linux)
+        if: runner.os == 'Linux'
+        run: >
+          bash tools/ci-retry.sh -- bash -c 'sudo apt-get update && sudo apt-get install -y
+          libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0
+          libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2
+          libasound2t64 libatspi2.0-0 libxshmfence1 xvfb'
+
+      - name: Configure (dev preset + CEF GUI substrate)
+        run: cmake -S src --preset dev -DCONTEXT_BUILD_GUI_CEF=ON
+
+      - name: Build the CEF boot substrate
+        run: cmake --build --preset dev --target context_cef_boot_smoke
+        working-directory: src
+
+      # Boot the CEF browser subprocess headless and assert exit 0. Linux runs under xvfb; macOS +
+      # Windows run the bundled/staged binary directly (GPU disabled — no adapter required anywhere).
+      - name: Boot-substrate ctest (Linux, headless under xvfb)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a ctest --preset dev -R "^cef-substrate-" --output-on-failure
+        working-directory: src
+
+      - name: Boot-substrate ctest (macOS / Windows)
+        if: runner.os != 'Linux'
+        run: ctest --preset dev -R "^cef-substrate-" --output-on-failure
+        working-directory: src
+
+      - name: sccache stats
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ${SCCACHE_PATH} --show-stats

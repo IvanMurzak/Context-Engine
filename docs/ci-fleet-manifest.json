@@ -462,6 +462,16 @@
       "description": "Native shader cross-compile toolchain de-risk (src/render/shadercc/, issue #125, sub-task B of #119): glslang + SPIRV-Cross + SPIRV-Tools (the vcpkg `shader-crosscompile` manifest feature) build/link behind the default-OFF CONTEXT_BUILD_SHADER_CROSSCOMPILE flag, and a glslang->SPIR-V smoke (validated by SPIRV-Tools, reflected by SPIRV-Cross) runs — a CPU compile path (no GPU/native-render leg). Linux is the blocking build/link/smoke gate on the GH-hosted trio; macOS and Windows are advisory (continue-on-error) desktop-parity legs. Default-OFF means the main build matrix + local dev gate never resolve the toolchain. The real backend wires behind material/'s IShaderCompiler seam in sub-task C."
     },
     {
+      "id": "cef-substrate-boot",
+      "requirement": "R-UI-007",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "cef-substrate",
+      "description": "M5-F0a CEF build substrate (src/editor/cef/, issue #150; L-15 / L-41 / R-UI-007 / R-SEC-009): fetch + SHA-256-verify the pinned CEF prebuilt (tools/fetch_cef.py + tools/cef-prebuilt.json, verify-before-use fail-closed), build libcef_dll_wrapper, link a minimal headless boot substrate, and BOOT a CEF browser subprocess headless (`cef-substrate-boot` ctest -> exit 0). A CI-gated dependency path like render (behind default-OFF CONTEXT_BUILD_GUI_CEF): the MSVC/Clang-ABI CEF prebuilt cannot link under the local Strawberry-GCC dev gate, so the main build matrix + local dev gate never fetch CEF (the subdir early-returns when OFF). 3-OS matrix — Linux boots headless under xvfb (GPU disabled), Windows rides the self-hosted MSVC runner, macOS boots the bundled app. Build-SUBSTRATE smoke only (fetch/verify/link/boot), NOT the editor host boot smoke (M5-F0b). The pinned CEF archive is fetched once and version-keyed cached to bound CI cost."
+    },
+    {
       "id": "fleet-manifest-validation",
       "requirement": "R-QA-012",
       "runner_class": "gh-ubuntu-shared",
