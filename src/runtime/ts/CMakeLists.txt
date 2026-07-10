@@ -61,6 +61,58 @@ else()
     set(_ctx_esbuild_bin "${_ctx_ts_dest}/bin/esbuild")
 endif()
 
+# --- resolve the tsgo platform key (OS + arch only; tsgo is compiler-agnostic) ------------------
+# The tsc-class SEMANTIC typechecker for the author->typecheck->fix loop (issue #85). esbuild strips
+# types without checking them, so a --noEmit typecheck needs a SEPARATE tsc-class tool. tsgo
+# (microsoft/typescript-go) is a native Go binary invoked as a SUBPROCESS (never linked), so — like
+# esbuild — it builds/runs on EVERY toolchain including this Strawberry-GCC Windows dev gate, and its
+# typecheck ctest is a LOCAL gate. Same OS+arch platform keys as esbuild (compiler-agnostic).
+set(_ctx_tsgo_platform "")
+if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8
+   AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64|X86_64")
+    set(_ctx_tsgo_platform "win32-x64")
+elseif(APPLE AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    set(_ctx_tsgo_platform "darwin-arm64")
+elseif(UNIX AND NOT APPLE AND CMAKE_SIZEOF_VOID_P EQUAL 8
+       AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64|X86_64")
+    set(_ctx_tsgo_platform "linux-x64")
+else()
+    message(FATAL_ERROR
+        "context_ts: no pinned tsgo prebuilt for host '${CMAKE_SYSTEM_NAME}/"
+        "${CMAKE_SYSTEM_PROCESSOR}' — add a platform to tools/tsc-toolchain.json (R-LANG-002).")
+endif()
+
+# --- acquire + verify the pinned tsgo binary + its lib dir (verify-before-use, fail-closed) -----
+# fetch_tsc.py stages the WHOLE package/lib/ dir (the binary next to its lib.*.d.ts) — tsgo resolves
+# its default libs from its own exe dir and PANICS if they are missing. Python3 was already resolved
+# for the esbuild fetch above.
+set(_ctx_tsc_manifest "${CMAKE_SOURCE_DIR}/../tools/tsc-toolchain.json")
+set(_ctx_tsc_fetch "${CMAKE_SOURCE_DIR}/../tools/fetch_tsc.py")
+set(_ctx_tsc_dest "${CMAKE_BINARY_DIR}/_tsc/${_ctx_tsgo_platform}")
+message(STATUS "context_ts: fetching + verifying pinned tsgo for ${_ctx_tsgo_platform}")
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${_ctx_tsc_fetch}"
+            --manifest "${_ctx_tsc_manifest}"
+            --platform "${_ctx_tsgo_platform}"
+            --dest "${_ctx_tsc_dest}"
+    RESULT_VARIABLE _ctx_tsc_rc
+    OUTPUT_VARIABLE _ctx_tsc_out
+    ERROR_VARIABLE _ctx_tsc_err)
+if(NOT _ctx_tsc_rc EQUAL 0)
+    message(FATAL_ERROR
+        "context_ts: tsgo prebuilt fetch/verify FAILED (rc=${_ctx_tsc_rc}) — refusing to build "
+        "against an unverified tsgo (verify-before-use fail-closed).\nstdout: ${_ctx_tsc_out}\n"
+        "stderr: ${_ctx_tsc_err}")
+endif()
+string(STRIP "${_ctx_tsc_out}" _ctx_tsc_out)
+message(STATUS "context_ts: ${_ctx_tsc_out}")
+
+if(WIN32)
+    set(_ctx_tsgo_bin "${_ctx_tsc_dest}/tsgo.exe")
+else()
+    set(_ctx_tsgo_bin "${_ctx_tsc_dest}/tsgo")
+endif()
+
 # --- the toolchain driver -----------------------------------------------------------------------
 # esbuild_toolchain.cpp = the transpile/bundle + sourcemap-emission driver (subprocess); source_map
 # .cpp + stack_trace.cpp = the STL-only, V8-free R-OBS-005 half (parse a Source Map v3, remap a raw
@@ -68,6 +120,7 @@ endif()
 # ctests are LOCAL gates.
 add_library(context_ts STATIC
     src/esbuild_toolchain.cpp
+    src/tsgo_typecheck.cpp
     src/source_map.cpp
     src/stack_trace.cpp)
 target_include_directories(context_ts PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -113,21 +166,32 @@ target_compile_definitions(context_ts_test_ts_toolchain PRIVATE ${_ctx_ts_test_d
 target_link_options(context_ts_test_ts_toolchain PRIVATE ${_ctx_ts_gcc_static})
 add_test(NAME ts-test_ts_toolchain COMMAND context_ts_test_ts_toolchain)
 
-# 1a) Source Map v3 parser + resolver — a LOCAL gate (no V8, no esbuild needed at runtime; the
+# 1a) SEMANTIC typecheck via tsgo (--noEmit) — a LOCAL gate (tsgo is a subprocess, links no V8). It
+# needs the staged TSGO path plus esbuild + the examples dir (the duality test transpiles a
+# type-invalid file with esbuild and shows the typecheck rejects it). The author->typecheck->fix loop.
+add_executable(context_ts_test_ts_typecheck tests/test_ts_typecheck.cpp)
+target_link_libraries(context_ts_test_ts_typecheck PRIVATE context_ts context_warnings)
+target_compile_definitions(context_ts_test_ts_typecheck PRIVATE
+    ${_ctx_ts_test_defs}
+    "CONTEXT_TSGO_PATH=\"${_ctx_tsgo_bin}\"")
+target_link_options(context_ts_test_ts_typecheck PRIVATE ${_ctx_ts_gcc_static})
+add_test(NAME ts-test_ts_typecheck COMMAND context_ts_test_ts_typecheck)
+
+# 1b) Source Map v3 parser + resolver — a LOCAL gate (no V8, no esbuild needed at runtime; the
 # hand-encoded VLQ maps are inline). The R-OBS-005 mapping foundation.
 add_executable(context_ts_test_source_map tests/test_source_map.cpp)
 target_link_libraries(context_ts_test_source_map PRIVATE context_ts context_warnings)
 target_link_options(context_ts_test_source_map PRIVATE ${_ctx_ts_gcc_static})
 add_test(NAME ts-test_source_map COMMAND context_ts_test_source_map)
 
-# 1b) TS-resolved stack-trace remapper — a LOCAL gate (parses a canned V8 stack + remaps through a
+# 1c) TS-resolved stack-trace remapper — a LOCAL gate (parses a canned V8 stack + remaps through a
 # known map; no V8 link). The "headless CI still needs symbolicated traces" half of R-OBS-005.
 add_executable(context_ts_test_stack_trace tests/test_stack_trace.cpp)
 target_link_libraries(context_ts_test_stack_trace PRIVATE context_ts context_warnings)
 target_link_options(context_ts_test_stack_trace PRIVATE ${_ctx_ts_gcc_static})
 add_test(NAME ts-test_stack_trace COMMAND context_ts_test_stack_trace)
 
-# 1c) R-SEC-005 end-to-end (issue #100): an engine-INSTALLED pure-JS package resolves + imports in
+# 1d) R-SEC-005 end-to-end (issue #100): an engine-INSTALLED pure-JS package resolves + imports in
 # the TS host. Installs a fixture package via context_editor_pkg (the R-SEC-005 install path) then
 # bundles an authored .ts entry importing it through esbuild — proving node module-resolution finds
 # the installed package. A LOCAL gate (esbuild is a subprocess; no V8 link). Links context_editor_pkg

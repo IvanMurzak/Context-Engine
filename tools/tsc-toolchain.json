@@ -1,0 +1,28 @@
+{
+    "$comment": "Pinned, SHA-verified tsgo (native TypeScript / microsoft/typescript-go) prebuilt channel for the M3 TS SEMANTIC typecheck (src/runtime/ts/, issue #85 — the 2b-i follow-up; R-LANG-002/004 / R-CLI-008). SINGLE source of truth for the pins — parsed by tools/fetch_tsc.py (download + verify-before-use + extract the whole lib/ member dir). src/runtime/ts/CMakeLists.txt forwards this file's PATH to fetch_tsc.py (it does NOT parse the pins itself, so they are never duplicated) and resolves the extracted binary name (tsgo / tsgo.exe) by the platform naming convention. Channel = the TypeScript team's OWN per-platform npm packages (@typescript/native-preview-<platform>), the canonical publisher artifacts — the SAME SHA-pinned third-party build-tool precedent as tools/ts-toolchain.json (esbuild) / tools/v8-prebuilt.json / wgpu-native / CEF codified in docs/signing.md: third-party build tools are authenticated by their OWN publisher via TLS + SHA-pin + verify-before-use, and are explicitly OUT of scope for the engine R-SEC-009 first-party trust root (do NOT route these through tools/verify_artifact.py). tsgo is a standalone native Go binary (a build-TIME semantic typechecker driven with --noEmit; NOT linked into the shipped engine — like esbuild, invoked as a subprocess), so unlike the V8 prebuilt it builds/runs on EVERY toolchain including the local Ninja+Strawberry-GCC Windows dev gate. esbuild deliberately does NOT typecheck (it transpiles + strips types); tsgo is the tsc-class tool that CLOSES the agent author->typecheck->fix loop, surfacing its diagnostics through the R-CLI-008 catalog under the ts.type_error code. UNLIKE esbuild's single-binary member, each tsgo per-platform package ships the binary (package/lib/tsgo[.exe]) ALONGSIDE its default lib.*.d.ts type library in package/lib/ — tsgo resolves those libs RELATIVE TO ITS OWN executable dir and PANICS if they are missing ('bundled: lib.d.ts does not exist; this executable may be misplaced'), so fetch_tsc.py stages the WHOLE package/lib/ dir (member_dir), not one file. VERSION-COHERENCE (every per-platform package carries the SAME tsc_version) is the critical correctness invariant — fetch_tsc.py asserts it at runtime (fail-closed) and tools/tests/test_fetch_tsc.py asserts it statically. tsgo (@typescript/native-preview) is a dev/preview channel (TypeScript 7 / typescript-go), so the version is date-stamped; the EXACT-version SHA pin makes it fully reproducible regardless. License: Apache-2.0 (recorded in tools/license-allowlist.json for provenance, the same build-tool clearance treatment as esbuild).",
+    "tsc_version": "7.0.0-dev.20260707.2",
+    "package_url_template": "https://registry.npmjs.org/@typescript/native-preview-{platform}/-/native-preview-{platform}-{tsc_version}.tgz",
+    "platforms": {
+        "linux-x64": {
+            "package": "@typescript/native-preview-linux-x64",
+            "file": "native-preview-linux-x64-7.0.0-dev.20260707.2.tgz",
+            "sha256": "5e6ee1052190526ae0ac277b2fb52ba0c7e880619201493bd5342976a0b33eb6",
+            "member_dir": "package/lib",
+            "binary": "tsgo"
+        },
+        "darwin-arm64": {
+            "package": "@typescript/native-preview-darwin-arm64",
+            "file": "native-preview-darwin-arm64-7.0.0-dev.20260707.2.tgz",
+            "sha256": "a6d0b46d71358db2d602324c553366a58fa1d031f5dfa12c09a35b6be17fe503",
+            "member_dir": "package/lib",
+            "binary": "tsgo"
+        },
+        "win32-x64": {
+            "package": "@typescript/native-preview-win32-x64",
+            "file": "native-preview-win32-x64-7.0.0-dev.20260707.2.tgz",
+            "sha256": "d46d4a1c2990f81c92953eddcbb66ca38c6532d30ca6b96769888e2e453afe56",
+            "member_dir": "package/lib",
+            "binary": "tsgo.exe"
+        }
+    }
+}

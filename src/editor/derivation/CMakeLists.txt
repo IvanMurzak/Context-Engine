@@ -13,7 +13,8 @@
 add_library(context_derivation STATIC
     src/canonical_parse.cpp
     src/derivation_graph.cpp
-    src/shader_compile_node.cpp)
+    src/shader_compile_node.cpp
+    src/ts_compile_node.cpp)
 
 target_include_directories(context_derivation PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -40,6 +41,14 @@ target_link_libraries(context_derivation
 # the target at generate time regardless of add_subdirectory order (render is wired elsewhere in src/).
 target_link_libraries(context_derivation PUBLIC context_render_material)
 
+# The R-FILE-010 TS-compile node (issue #85, src/ts_compile_node.cpp) caches TS->JS transpiles behind
+# the derivation-graph node contract: it wraps the runtime/ts esbuild TsToolchain seam. PUBLIC —
+# ts_compile_node.h exposes runtime::ts types (TsToolchain / TranspileOptions / TranspileResult) in its
+# API, so consumers need context_ts's include path. context_ts is a subprocess driver (esbuild is
+# invoked as a subprocess, never linked), so this adds no native/V8 dependency to the derivation graph.
+# CMake resolves the target at generate time regardless of add_subdirectory order.
+target_link_libraries(context_derivation PUBLIC context_ts)
+
 # The L-37 parse-time migration node (M2 wave 3, src/editor/migrate/): PRIVATE — the public header
 # only forward-declares migrate::MigrationSet (an opaque seam pointer); the .cpp calls
 # migrate_document on ingest. CMake resolves the target at generate time regardless of
@@ -63,7 +72,8 @@ set(_context_derivation_tests
     test_validate_node
     test_compose_node
     test_migrate_node
-    test_shader_compile_node)
+    test_shader_compile_node
+    test_ts_compile_node)
 
 foreach(_t IN LISTS _context_derivation_tests)
     add_executable(context_derivation_${_t} tests/${_t}.cpp)

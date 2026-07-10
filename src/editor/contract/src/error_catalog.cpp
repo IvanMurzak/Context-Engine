@@ -362,10 +362,9 @@ const std::vector<ErrorCode>& catalog()
         // source cannot succeed. The toolchain owns the code STRINGS as ts::kTs*Code constants and
         // this catalog registers them (the same promote-a-local-string pattern as bridge's
         // scope.denied), so src/runtime/ts does not link the editor/contract layer. Additive-only
-        // (protocolMajor stays 0): NEW rows at the END, no existing row reordered/renamed.
-        // DEFERRED (task 2b-i follow-up, NOT registered here until its emitter lands): a
-        // tsc-class SEMANTIC typecheck (--noEmit) would add a `ts.type_error` validation-class code
-        // — the author->typecheck->fix loop. See src/runtime/ts/README.md § Deferred seams.
+        // (protocolMajor stays 0): NEW rows at the END, no existing row reordered/renamed. NB: this
+        // ts.* block is deliberately NOT at the catalog tail, so a NEW row appended HERE (ts.type_error
+        // below) does not collide with concurrent sibling appends into the render.*/import.* blocks.
         {"ts.transpile_failed",
          "TypeScript could not be transpiled to JavaScript (a syntax or transform error); see the "
          "diagnostic text.",
@@ -373,6 +372,16 @@ const std::vector<ErrorCode>& catalog()
         {"ts.bundle_failed",
          "The TypeScript entrypoint could not be bundled (an unresolved import or transform "
          "error); see the diagnostic text.",
+         false, kExitValidation, "R-LANG-002"},
+        // The SEMANTIC-typecheck sibling (task 2b-i follow-up, issue #85): a tsc-class --noEmit pass
+        // (tsgo, src/runtime/ts/ts_typecheck.h) type-analyzes authored TS that esbuild transpiled
+        // WITHOUT checking (it strips types). This CLOSES the agent author->typecheck->fix loop
+        // (R-LANG-002 rationale) — was RESERVED, now REGISTERED (its emitter, the tsgo typechecker,
+        // has landed). The toolchain owns the string as ts::kTsTypeErrorCode. Validation-class +
+        // deterministic (a bare retry re-checks the same source). Additive-only.
+        {"ts.type_error",
+         "TypeScript failed a semantic typecheck (a --noEmit type error); the diagnostic carries the "
+         "tsc code (TSxxxx) and the authored .ts line:column.",
          false, kExitValidation, "R-LANG-002"},
         // The RUN-tier sibling of the two build-tier codes above (task 4b, R-OBS-005): authored
         // TypeScript threw at runtime in the V8 host. The diagnostic is designed to carry a

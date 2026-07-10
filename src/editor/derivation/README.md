@@ -47,6 +47,22 @@ canonical parse node's real body, and `context_warnings`). Namespace:
   preserves the exact T3a cache-hit semantics for a query that needs the artifact immediately. Backend-
   agnostic: the fake/reference backend is retained; the real toolchain drops in behind the seam later.
 
+- **TS-compile node (R-FILE-010, issue #85)** — `TsCompileNode` (`ts_compile_node.h`) makes the
+  TypeScript→JavaScript transpile a first-class **cached** derived artifact rather than a per-call
+  build step, so **unchanged TS is not re-transpiled**. The exact peer of the shader-compile node:
+  it wraps the backend-free `TsToolchain` seam (`src/runtime/ts/`, the esbuild transpiler) and OWNS a
+  content-addressed store keyed under the **R-FILE-010** key `hash(source bytes | transpile options |
+  toolchain version)` — the same "every input enumerated exhaustively, instance-independent" rule the
+  shader/import caches use (a toolchain-version bump re-keys every entry rather than serving stale JS).
+  That key is exhaustive for a transpile-only compile; under `opts.bundle` esbuild inlines the entry's
+  transitive imports from disk, so a bundle-mode caller must `invalidate()` on any imported-file change
+  (enumerating the resolved import closure as derivation edges is a documented deferred extension — see
+  the BUNDLE-MODE CAVEAT in `ts_compile_node.h`).
+  `get_or_compile()` is the synchronous cache path (a hit skips the toolchain call); `invalidate()`
+  reclaims a superseded entry. Backend-agnostic — a fake toolchain drives the tests, so the node's
+  ctest needs no esbuild binary. (The R-FILE-013 backpressured request queue the shader node adds is a
+  clean later extension over the shared `BackpressureSignal`; issue #85 scopes only the R-FILE-010 cache.)
+
 ## Known M1 simplifications (deliberate, documented)
 
 - ~~The canonical parse is a whitespace-normalizing placeholder~~ **RESOLVED (M2 wave 1, #42)**: the
@@ -92,4 +108,7 @@ diagnostics on dependents, last-good retention under a failing ingest, closure-a
 the shader-compile node (`test_shader_compile_node`: the re-homed T3a cache-hit / distinct-variant /
 full-variant-space / cache-key-enumerates-inputs semantics now driven through the node, plus the added
 request-queue coalescing + overload load-shed with a bounded per-pass fill and the R-FILE-005
-invalidate-drops-stale-variants + invalidate-drops-pending-requests paths).
+invalidate-drops-stale-variants + invalidate-drops-pending-requests paths), and the TS-compile node
+(`test_ts_compile_node`: a cache hit skips the re-transpile, the R-FILE-010 key enumerates
+source/options/toolchain-version, distinct inputs are distinct entries, a deterministic failure is
+cached, and `invalidate()` reclaims an entry — driven by a fake toolchain, so no esbuild binary).
