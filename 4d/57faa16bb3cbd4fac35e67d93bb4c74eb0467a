@@ -1,0 +1,22 @@
+src/editor/import/tests/test_sandbox.cpp
+  s_451acb3c1599bf::t_1f65c359642c35 3-4
+src/editor/import/include/context/editor/import/sandbox.h
+  s_451acb3c1599bf::t_a628e62cab84ee 80
+  s_451acb3c1599bf::t_b14b7ceb4545c8 100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "4d57faa16bb3cbd4fac35e67d93bb4c74eb0467a",
+  "prompts": {},
+  "sessions": {
+    "s_451acb3c1599bf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e54b1a55-e81f-4344-8103-323cb94b125b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
