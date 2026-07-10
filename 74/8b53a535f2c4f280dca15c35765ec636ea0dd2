@@ -1,0 +1,23 @@
+src/editor/import/src/sandbox_lockdown.cpp
+  s_44eec50eafd91a::t_031c6069f860b4 175
+  s_44eec50eafd91a::t_5771de4f95f8f0 34-47
+  s_44eec50eafd91a::t_1ad16b01aa2419 136-147
+src/editor/import/tests/test_sandbox.cpp
+  s_44eec50eafd91a::t_0c9a3cbd0862cb 271-278
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "748b53a535f2c4f280dca15c35765ec636ea0dd2",
+  "prompts": {},
+  "sessions": {
+    "s_44eec50eafd91a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45ca24c7-35c0-4b9c-bad8-a75dda1846ba",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
