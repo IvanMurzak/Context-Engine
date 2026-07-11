@@ -1,0 +1,49 @@
+src/editor/gui/a11y/coverage/problems.json
+  s_424670fc09e783::t_8bb4a711dbc159 1-17
+src/editor/gui/panels/CMakeLists.txt
+  s_cb41aadbde3305::t_958fb9c478f270 8
+src/editor/gui/panels/problems/CMakeLists.txt
+  s_424670fc09e783::t_8fbd870f03ac78 1-50
+src/editor/gui/panels/problems/README.md
+  s_424670fc09e783::t_c4edc117acfdc0 1-73
+src/editor/gui/panels/problems/include/context/editor/gui/panels/problems/problems_model.h
+  s_424670fc09e783::t_0db3f2e0e8482d 1-129
+src/editor/gui/panels/problems/include/context/editor/gui/panels/problems/problems_panel.h
+  s_424670fc09e783::t_8e0a3585c442d4 1-110
+src/editor/gui/panels/problems/src/problems_model.cpp
+  s_424670fc09e783::t_e06a900025edd3 1-174
+src/editor/gui/panels/problems/src/problems_panel.cpp
+  s_424670fc09e783::t_718fe05e458303 1-299
+src/editor/gui/panels/problems/tests/problems_test.h
+  s_424670fc09e783::t_b69f05d71aed7b 1-28
+src/editor/gui/panels/problems/tests/test_a11y.cpp
+  s_424670fc09e783::t_414c05afdcdc9c 1-99
+src/editor/gui/panels/problems/tests/test_problems_model.cpp
+  s_424670fc09e783::t_c1ed68e0012bd7 1-151
+src/editor/gui/panels/problems/tests/test_problems_panel.cpp
+  s_424670fc09e783::t_30fe94bd20fba8 1-203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "f4671a50262475870d48439a11be02ec73ee9bba",
+  "prompts": {},
+  "sessions": {
+    "s_424670fc09e783": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6cbd9e5d-e64d-4079-bb4d-6c1ad4979eae",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_cb41aadbde3305": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e52f295f-a887-4d28-a18e-567076052857",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
