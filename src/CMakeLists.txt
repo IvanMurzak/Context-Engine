@@ -24,6 +24,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(CONTEXT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors (baseline: ON)" ON)
 option(CONTEXT_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer (non-MSVC only)" OFF)
 option(CONTEXT_TSAN "Build with ThreadSanitizer (non-MSVC only; mutually exclusive with CONTEXT_SANITIZE — TSan cannot combine with ASan in one binary)" OFF)
+option(CONTEXT_DETERMINISTIC "Build the OPT-IN deterministic flavor (M6-F0a, R-SIM-005 / L-54): strict-FP engine-wide on the sim path (no fast-math; FP contraction pinned OFF), so the build PRODUCES a verified deterministic:true attestation. OFF by default — the routine dev/CI build stays non-deterministic; the dedicated `deterministic` preset + CI job turn it ON." OFF)
 option(CONTEXT_BUILD_SPIKES "Build the M0 de-risking spike targets under spikes/ (opt-in; the default CI matrix stays spike-free; some spikes require the vcpkg toolchain with VCPKG_MANIFEST_FEATURES=spikes)" OFF)
 option(CONTEXT_BUILD_SPIKE_WASM "Build ONLY spikes/wasm (subset of CONTEXT_BUILD_SPIKES; acquires its own runtimes — needs no vcpkg toolchain), so CI can exercise the WASM spike without configuring the vcpkg-dependent spikes" OFF)
 option(CONTEXT_BUILD_SPIKE_CEF "Build the CEF accelerated-OSR compositing spike (L-41) — downloads the pinned ~162 MB CEF binary distribution; Windows/MSVC-only, local runs only, NEVER enabled in CI" OFF)
@@ -73,6 +74,35 @@ endif()
 if(CONTEXT_TSAN)
     add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
     add_link_options(-fsanitize=thread)
+endif()
+
+# ---------------------------------------------------------------------------
+# M6-F0a — the OPT-IN DETERMINISTIC BUILD FLAVOR (R-SIM-005 / L-54, issue #170).
+#
+# Determinism is a WHOLE-BUILD property, not a per-system flag (R-SIM-005): strict-FP flags are set
+# ENGINE-WIDE on the sim path (no fast-math anywhere the sim can reach) and FMA / floating-point
+# contraction is PINNED (uniformly OFF, never compiler-discretionary), with the sim path forbidden
+# from platform `libm` (a rule the F0b deterministic transcendental lib will enforce structurally).
+# Applied here as global compile options — BEFORE any add_subdirectory — so every engine target
+# inherits them (the sanitizer blocks above use the same global-add pattern). The per-compiler
+# spellings differ: clang / Apple clang / GCC take `-ffp-contract=off`; MSVC takes `/fp:strict`. The
+# EXACT applied-flag string is recorded into CONTEXT_DETERMINISTIC_APPLIED_FLAGS so src/runtime/
+# determinism/ can bake it into the PRODUCED attestation (never a self-declared bit). Default OFF: the
+# routine dev/CI build stays non-deterministic; the `deterministic` preset + its CI job turn it ON.
+set(CONTEXT_DETERMINISTIC_APPLIED_FLAGS "")
+if(CONTEXT_DETERMINISTIC)
+    if(MSVC)
+        set(CONTEXT_DETERMINISTIC_APPLIED_FLAGS "/fp:strict")
+    else()
+        # -ffast-math is deliberately NOT added (and MUST NOT be): the produced attestation VERIFIES
+        # its absence via the compiler-set __FAST_MATH__ macro. GCC/Clang default FP contraction to
+        # `fast` at -O, so pinning it OFF is meaningful — it is what makes an FMA non-discretionary.
+        set(CONTEXT_DETERMINISTIC_APPLIED_FLAGS "-ffp-contract=off")
+    endif()
+    separate_arguments(_context_deterministic_flag_list NATIVE_COMMAND
+        "${CONTEXT_DETERMINISTIC_APPLIED_FLAGS}")
+    add_compile_options(${_context_deterministic_flag_list})
+    add_compile_definitions(CONTEXT_DETERMINISTIC=1)
 endif()
 
 enable_testing()
@@ -334,6 +364,16 @@ add_subdirectory(editor/compose)
 # above and before the M1 exit-gate block — so it never collides at the file tail (consumers name
 # the `context_save` target, resolved at generate time regardless of add_subdirectory order).
 add_subdirectory(runtime/save)
+
+# M6-F0a foundation: the deterministic-build ATTESTATION (src/runtime/determinism/, R-SIM-005 / L-54,
+# anchored in R-SEC-009, issue #170) — the engine-PRODUCED `deterministic:true` attestation, emitted
+# from the actually-applied, verified strict-FP flags (the CONTEXT_DETERMINISTIC flag block above),
+# never a self-declared manifest bit. Mints the determinism.attestation_* fail-closed codes (registered
+# in the contract error catalog). OWN stanza — deliberately apart from the editor cluster + the
+# exit-gate block below — so concurrent sibling tasks inserting into this file merge cleanly (consumers
+# name the `context_determinism` target, resolved at generate time regardless of add_subdirectory order).
+# Placed before runtime/session so the determinism foundation reads as the first runtime/ target.
+add_subdirectory(runtime/determinism)
 
 # M3 entry: the headless simulation session + versioned replay artifact + hierarchical determinism
 # hashing (src/runtime/session/, R-QA-005 / L-54, issue #74) — the deterministic headless harness the

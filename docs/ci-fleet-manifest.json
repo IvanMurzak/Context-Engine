@@ -569,7 +569,17 @@
       "tier": "per-PR",
       "red_x_policy": "blocking",
       "ci_job_id": "build",
-      "description": "R-QA-005 / L-54 headless-session state-hash determinism (issue #74): a fixed seed + fixed injected input stream, stepped a fixed tick count, asserted against a cross-platform GOLDEN hierarchical state-hash (root + per-system + per-archetype + trace). Runs as the blocking 'Determinism gate' named step of the build job on ALL THREE build-matrix legs — ubuntu-latest (Linux-x64), windows-latest (Win-x64), macos-latest (macOS-ARM64) — so any per-platform divergence turns that leg red (ctest determinism-state-hash). The bisect/triage `context determinism diff` auto-triage is the reserved follow-up split."
+      "description": "R-QA-005 / L-54 headless-session state-hash determinism (issue #74): a fixed seed + fixed injected input stream, stepped a fixed tick count, asserted against a cross-platform GOLDEN hierarchical state-hash (root + per-system + per-archetype + trace). Runs as the blocking 'Determinism gate' named step of the build job on ALL THREE build-matrix legs — ubuntu-latest (Linux-x64), windows-latest (Win-x64), macos-latest (macOS-ARM64) — so any per-platform divergence turns that leg red (ctest determinism-state-hash). The bisect/triage `context determinism diff` auto-triage is the reserved follow-up split. Since M6-F0a (issue #170) the family also carries determinism-physics-wedge (a fixed-point physics-shaped step, the physics-core determinism proof) — both run in this same blocking Determinism gate step."
+    },
+    {
+      "id": "deterministic-attestation",
+      "requirement": "R-SIM-005",
+      "runner_class": "determinism-matrix",
+      "build_flavor": "deterministic",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "deterministic",
+      "description": "R-SIM-005 / L-54 opt-in deterministic BUILD FLAVOR (M6-F0a, issue #170), anchored in R-SEC-009. The dedicated `deterministic` job proves the `deterministic` CMake preset CONFIGURES + BUILDS on the wedge trio — ubuntu-latest (Linux-x64, clang), macos-latest (macOS-ARM64, Apple clang), windows-latest (Win-x64, MSVC) — with the correct per-compiler strict-FP spellings (-ffp-contract=off vs /fp:strict), and that the build PRODUCES a verified deterministic:true attestation from the ACTUALLY-APPLIED flags (never a self-declared bit; the tamper/missing-flag paths fail closed with a determinism.attestation_* code). Runs the determinism-* family under strict-FP as the blocking 'Deterministic attestation + determinism gates' step: determinism-attestation (produces deterministic:true here vs an honest false on the default `build` job), determinism-state-hash, and determinism-physics-wedge."
     },
     {
       "id": "samples-corpus",
