@@ -1,0 +1,78 @@
+docs/physics-determinism-decision.md
+  s_38060a3b4e0e82::t_3d5cf9e6b59cda 1-99
+src/CMakeLists.txt
+  s_38060a3b4e0e82::t_765d1ddba79589 27
+  s_38060a3b4e0e82::t_c4764ded4d16b5 368-377
+  s_38060a3b4e0e82::t_a2c2a59a6873f2 79-107
+src/editor/contract/tests/test_error_catalog.cpp
+  s_38060a3b4e0e82::t_24d2f801cee466 264-282
+src/runtime/determinism/include/context/runtime/determinism/attestation.h
+  s_38060a3b4e0e82::t_2a66a7bc75d0ec 1-94
+src/runtime/session/CMakeLists.txt
+  s_38060a3b4e0e82::t_4c8823e0e1bf16 75-86
+src/runtime/session/tests/determinism_physics_gate.cpp
+  s_38060a3b4e0e82::t_ea24aebb46a0a3 140-141
+  s_38060a3b4e0e82::t_5b59f7d9404605 1-139,142-165
+src/runtime/determinism/tests/determinism_test.h
+  s_38060a3b4e0e82::t_3a9c80d8dc504a 1-28
+docs/ci-fleet-manifest.json
+  s_38060a3b4e0e82::t_7807aadf65fa3d 572-582
+src/runtime/determinism/CMakeLists.txt
+  s_38060a3b4e0e82::t_4ecbb430e1fe5f 1-37
+docs/ci-fleet-manifest.md
+  s_38060a3b4e0e82::t_ddf60e6d2bfa31 93
+src/runtime/determinism/tests/test_attestation.cpp
+  s_38060a3b4e0e82::t_6c5a6d756c02c3 1-127
+src/CMakePresets.json
+  s_38060a3b4e0e82::t_61baccf3167612 89-92
+  s_07a5b1f61ef274::t_69f0cf84f04d35 88
+  s_4493ec3419a09e::t_3321edb5747b0d 30,127
+  s_38060a3b4e0e82::t_900a61a61e7871 128-132
+  s_38060a3b4e0e82::t_b0b60bacfbab58 31-37
+src/editor/contract/src/error_catalog.cpp
+  s_38060a3b4e0e82::t_0008177710e050 532-586
+.github/workflows/ci.yml
+  s_38060a3b4e0e82::t_5726afb27d9fa8 209-264
+src/runtime/determinism/src/attestation.cpp
+  s_5292f63d8e83c9::t_cc012fd13904c2 1-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "fd854e241c602d9e2755d137e4d50986ef90793f",
+  "prompts": {},
+  "sessions": {
+    "s_07a5b1f61ef274": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "57f2b19d-14bf-4d29-989f-00c4695bddcf",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_38060a3b4e0e82": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "edda8706-b868-417a-afa5-049b33a40e21",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_4493ec3419a09e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a347b1db-e13e-4b65-b447-64ae761e5b39",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_5292f63d8e83c9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d3a0d21-6d64-43ad-9722-911ea60169ce",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
