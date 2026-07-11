@@ -1,0 +1,51 @@
+src/editor/gui/a11y/coverage/scenetree.json
+  s_844c06e0e5a07d::t_6a36c18be706e9 1-17
+src/editor/gui/panels/CMakeLists.txt
+  s_844c06e0e5a07d::t_b313b2f85701a8 1-7
+src/editor/gui/panels/scenetree/CMakeLists.txt
+  s_844c06e0e5a07d::t_54c366bfc30a1c 1-49
+src/editor/gui/panels/scenetree/README.md
+  s_844c06e0e5a07d::t_756dbe5ba1eb19 1-61
+src/editor/gui/panels/scenetree/include/context/editor/gui/panels/scenetree/scene_tree_model.h
+  s_844c06e0e5a07d::t_99f9f927197f0c 1-65
+src/editor/gui/panels/scenetree/include/context/editor/gui/panels/scenetree/scene_tree_panel.h
+  s_844c06e0e5a07d::t_0ee7a0eeecd4e0 1-86
+src/editor/gui/panels/scenetree/src/scene_tree_model.cpp
+  s_844c06e0e5a07d::t_3ade78c1473164 1-202
+src/editor/gui/panels/scenetree/src/scene_tree_panel.cpp
+  s_844c06e0e5a07d::t_b2cddce4cde456 1-180
+src/editor/gui/panels/scenetree/tests/scenetree_test.h
+  s_844c06e0e5a07d::t_57c7df7b0fa34c 1-27
+src/editor/gui/panels/scenetree/tests/test_a11y.cpp
+  s_844c06e0e5a07d::t_9d4ef5f9926258 1-127
+src/editor/gui/panels/scenetree/tests/test_scene_tree_model.cpp
+  s_844c06e0e5a07d::t_c277a3aa407670 1-243
+src/editor/gui/panels/scenetree/tests/test_scene_tree_panel.cpp
+  s_844c06e0e5a07d::t_407e943b095c42 1-219
+src/editor/gui/CMakeLists.txt
+  s_3d875bf8dd80a7::t_35b016e28fee68 25-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "86a9bef153d341b55c98483bf46e8311f61fbe85",
+  "prompts": {},
+  "sessions": {
+    "s_3d875bf8dd80a7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a47db3b2e03c42282",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_844c06e0e5a07d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "29a3a35c-4ec8-495e-9122-2e4106577dd4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
