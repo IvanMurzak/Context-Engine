@@ -75,6 +75,11 @@ set(USE_SANDBOX OFF CACHE BOOL "" FORCE)
 set(CEF_RUNTIME_LIBRARY_FLAG "/MD" CACHE STRING "" FORCE)
 set(USE_ATL OFF CACHE BOOL "" FORCE)
 set(CEF_ROOT "${_cef_dest}" CACHE INTERNAL "Pinned CEF distribution root")
+# The CEF binary distribution ships its OWN CMake as a MODULE package (cmake/FindCEF.cmake), NOT a
+# CONFIG package — so CMake can only locate FindCEF.cmake if ${CEF_ROOT}/cmake is on CMAKE_MODULE_PATH
+# BEFORE find_package(CEF). (FindCEF.cmake itself re-appends that dir for its internal cef_variables /
+# cef_macros includes, but that runs only AFTER the module is found.) Mirrors spikes/cef-compositing.
+list(APPEND CMAKE_MODULE_PATH "${CEF_ROOT}/cmake")
 find_package(CEF REQUIRED)
 
 # Output binaries into a config subdir (CEF's convention; also where libcef + resources are staged).

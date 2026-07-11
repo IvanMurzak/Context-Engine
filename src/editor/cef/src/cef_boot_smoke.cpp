@@ -28,7 +28,14 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <string>
+#include <system_error>
 #include <thread>
+
+#if !defined(_WIN32)
+#include <unistd.h> // getpid()
+#endif
 
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
@@ -155,6 +162,28 @@ int main(int argc, char* argv[]) {
     settings.windowless_rendering_enabled = true;
     settings.multi_threaded_message_loop = false;
     settings.log_severity = LOGSEVERITY_WARNING;
+
+    // A private, writable root cache path is REQUIRED for a healthy Chromium process singleton: an
+    // empty CefSettings.root_cache_path falls back to a shared default location (the "Please customize
+    // CefSettings.root_cache_path" warning), whose singleton lock makes CefInitialize FAIL on headless
+    // CI, on repeated runs, and when two boots share the box. Give each boot its OWN per-PID cache dir
+    // under the OS temp dir (cache_path left empty = in-memory disk cache, all we need for the smoke).
+    // Mirrors spikes/cef-compositing, which sets root_cache_path explicitly.
+#if defined(_WIN32)
+    const long long boot_pid = static_cast<long long>(::GetCurrentProcessId());
+#else
+    const long long boot_pid = static_cast<long long>(::getpid());
+#endif
+    std::error_code cache_ec;
+    const std::filesystem::path cache_dir =
+        std::filesystem::temp_directory_path(cache_ec) /
+        ("context-cef-boot-smoke-" + std::to_string(boot_pid));
+    std::filesystem::create_directories(cache_dir, cache_ec);
+#if defined(_WIN32)
+    CefString(&settings.root_cache_path).FromWString(cache_dir.wstring());
+#else
+    CefString(&settings.root_cache_path).FromString(cache_dir.string());
+#endif
 
     if (!CefInitialize(main_args, settings, app.get(), nullptr)) {
         std::fprintf(stderr, "[cef-boot] CefInitialize failed\n");
