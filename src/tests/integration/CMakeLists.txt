@@ -185,3 +185,71 @@ add_dependencies(context_test_samples_corpus context)
 add_test(NAME samples-corpus COMMAND context_test_samples_corpus)
 # Leg A spawns child processes + Leg B records/replays sessions; cap so a regression never hangs CI.
 set_tests_properties(samples-corpus PROPERTIES TIMEOUT 120)
+
+# ===================================================================================================
+# The M5 EXIT GATE (ROADMAP §1 M5 Exit / issue #168) — the observer-editor milestone-closing mirror of
+# the M1/M2/M4 gates: the headless end-to-end walkthrough + the a11y/keyboard-nav + coverage gate + the
+# M5 seam checklist, each a BLOCKING per-PR ctest on every OS leg (registered in
+# docs/ci-fleet-manifest.json as the m5-exit-* gates; run by the "M5 exit gate" step in
+# .github/workflows/ci.yml):
+#   m5-exit-1-walkthrough    — open -> inspect (scene-tree F2 / inspector F3 / Problems F4) -> play (F5)
+#                              -> override-edit (F3) -> undo (F7) -> viewport (F1) observes the SAME
+#                              render snapshot; R-HUX-011 human-loops measured from instrumented timestamps
+#   m5-exit-2-a11y-coverage  — a11y scan + keyboard-only nav green on every panel; coverage.manifest.jsonl
+#                              complete (the a11y registry ⟷ the manifest; F4 Problems now registered)
+#   m5-exit-3-seam-checklist — the M5 observer-editor seam set, one assertion per seam (executable audit)
+#
+# All three drive the LANDED headless editor-GUI panels (uitree / scenetree / inspector / problems /
+# viewport / playbar / undo — CEF-free, R-EDIT-001 testable-by-construction) IN PROCESS: no CEF, no GPU,
+# no daemon, so they run on the default 3-OS build matrix ("headlessly across the OS matrix"). The per-OS
+# CEF boot smoke (editor-cef-smoke), the native-vs-web golden-scene SSIM equivalence (render / render-web
+# jobs vs goldens/), and the axe-class DOM a11y re-scan (tools/a11y_scan.py) are the SIBLING CI-job gates
+# the M5 exit references.
+set(_m5_exit_tests
+    "test_m5exit1_walkthrough"
+    "test_m5exit2_a11y_coverage"
+    "test_m5exit3_seam_checklist")
+
+set(_m5_exit_names
+    "m5-exit-1-walkthrough"
+    "m5-exit-2-a11y-coverage"
+    "m5-exit-3-seam-checklist")
+
+# Self-contained GCC runtime (mirrors m1/m2-exit + src/cli): m5-exit-2 uses std::ifstream to read the
+# coverage manifest, whose newer-libstdc++ symbols a stale libstdc++-6.dll on PATH could shadow
+# (STATUS_ENTRYPOINT_NOT_FOUND). Gated to GNU so the macOS/Clang + Windows/MSVC CI legs are untouched.
+set(_m5_exit_static_runtime
+    $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
+
+list(LENGTH _m5_exit_tests _m5_exit_count)
+math(EXPR _m5_exit_last "${_m5_exit_count} - 1")
+foreach(_i RANGE ${_m5_exit_last})
+    list(GET _m5_exit_tests ${_i} _t)
+    list(GET _m5_exit_names ${_i} _name)
+
+    add_executable(context_${_t} ${_t}.cpp)
+    # The union of the M5 headless editor-GUI libraries the exit gates drive (all CEF-free, default-built
+    # on the 3-OS matrix): the a11y harness + registry, the R-EDIT-001 extension contract, the L-41
+    # compositor seam, every observer panel (scene-tree / inspector / problems / viewport / playbar) + the
+    # F7 session undo, over uitree. context_compose / context_serializer / context_render back the
+    # composed-world + `context set` write-path + render-snapshot seams the walkthrough exercises.
+    target_link_libraries(context_${_t}
+        PRIVATE context_gui_a11y context_gui_contract context_gui_compositor
+                context_gui_panel_scenetree context_gui_panel_inspector context_gui_panel_problems
+                context_gui_viewport context_gui_playbar context_gui_undo context_gui_uitree
+                context_compose context_serializer context_render context_warnings)
+    target_link_options(context_${_t} PRIVATE ${_m5_exit_static_runtime})
+    target_include_directories(context_${_t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    # m5-exit-2 cross-checks the a11y registry against the on-disk coverage manifest (declared == scanned).
+    target_compile_definitions(context_${_t} PRIVATE
+        CONTEXT_GUI_A11Y_MANIFEST="${CMAKE_SOURCE_DIR}/editor/gui/a11y/coverage.manifest.jsonl")
+
+    add_test(NAME ${_name} COMMAND context_${_t})
+endforeach()
+
+# The walkthrough chains seven panels + a compose/flatten; cap each so a regression never hangs CI.
+set_tests_properties(
+    m5-exit-1-walkthrough
+    m5-exit-2-a11y-coverage
+    m5-exit-3-seam-checklist
+    PROPERTIES TIMEOUT 120)
