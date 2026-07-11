@@ -15,6 +15,12 @@ add_subdirectory(uitree)
 add_subdirectory(contract)
 add_subdirectory(compositor)
 
+# The M5 built-in panels (panels/) — headless libraries built ON uitree + the R-EDIT-001 contract,
+# default-built + unit-tested on the 3-OS matrix WITHOUT CEF (M5-F2 scene-tree onward). Added here,
+# after the three headless libs it builds on and before the CEF host toggle, so the panels are part
+# of the default gate.
+add_subdirectory(panels)
+
 # The CEF editor host + the per-OS editor-cef-smoke boot (host/). Behind CONTEXT_BUILD_GUI_CEF (the
 # same toggle the F0a substrate uses). MUST be added AFTER src/editor/cef in src/CMakeLists.txt so the
 # shared CEF acquisition (fetch + libcef_dll_wrapper) runs there first; host/ reuses it (see
