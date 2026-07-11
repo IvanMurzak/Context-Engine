@@ -1,0 +1,49 @@
+src/editor/gui/a11y/coverage.manifest.jsonl
+  s_844c06e0e5a07d::t_dbde7dc3ae4705 1-8
+tools/tests/test_a11y_scan.py
+  s_844c06e0e5a07d::t_f36f105379f636 1-233
+src/editor/gui/CMakeLists.txt
+  s_844c06e0e5a07d::t_5617254d7ea827 18-24
+.gitattributes
+  s_844c06e0e5a07d::t_4a4760b8c3f9f9 16-21
+src/editor/gui/a11y/src/main.cpp
+  s_844c06e0e5a07d::t_ad1c1320307d70 1-83
+src/editor/gui/a11y/CMakeLists.txt
+  s_844c06e0e5a07d::t_c50709a42334e0 1-43
+src/editor/gui/a11y/tests/a11y_test.h
+  s_844c06e0e5a07d::t_ac020b8453e58a 1-28
+src/editor/gui/a11y/include/context/editor/gui/a11y/harness.h
+  s_844c06e0e5a07d::t_a9742346e05abf 1-46
+.github/workflows/ci.yml
+  s_844c06e0e5a07d::t_06635ff289650a 1059-1060
+  s_844c06e0e5a07d::t_5ca96d4d9b6cc8 1047-1058,1061-1062
+src/editor/gui/a11y/README.md
+  s_844c06e0e5a07d::t_75f3259d797599 1-50
+src/editor/gui/a11y/tests/test_harness.cpp
+  s_844c06e0e5a07d::t_413754041e3a5e 103-105,108-109,114
+  s_844c06e0e5a07d::t_0d69db446fc6f0 1-102,106-107,110-113,115-135
+tools/a11y_scan.py
+  s_844c06e0e5a07d::t_a6e86954af6035 1-220
+src/editor/gui/a11y/src/harness.cpp
+  s_844c06e0e5a07d::t_d2b3806ef6df7d 1-131
+src/editor/gui/a11y/src/registry.cpp
+  s_844c06e0e5a07d::t_55faa60aef332a 1-25
+src/editor/gui/a11y/include/context/editor/gui/a11y/registry.h
+  s_844c06e0e5a07d::t_7f534c2f252134 1-37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "2f356c6a5b676414affaaf82d4e4e90b6942246d",
+  "prompts": {},
+  "sessions": {
+    "s_844c06e0e5a07d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "29a3a35c-4ec8-495e-9122-2e4106577dd4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
