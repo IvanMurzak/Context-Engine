@@ -3,6 +3,7 @@
 
 #include "context/editor/gui/a11y/registry.h"
 
+#include "context/editor/gui/panels/inspector/inspector_panel.h"
 #include "context/editor/gui/panels/scenetree/scene_tree_panel.h"
 #include "context/editor/gui/uitree/builtin.h"
 #include "context/editor/gui/uitree/panel.h"
@@ -28,6 +29,15 @@ std::vector<RegisteredPanel> registered_panels()
     panels.push_back(RegisteredPanel{
         panels::scenetree::SceneTreePanel::kContributionId,
         []() { return panels::scenetree::SceneTreePanel{}.build_panel(); }});
+
+    // M5-F3 — the inspector panel (gui/panels/inspector/). The harness scans its default
+    // (no-selection) rendered state, exactly as it scans the placeholder / scene-tree defaults; the
+    // panel's own gui-panel-inspector-test_a11y ctest additionally covers its populated / overridden /
+    // all-readonly worlds. Registered per issue #160's Coordination clause + the M5-F6 harness contract
+    // (coverage.manifest.jsonl carries the matching builtin.inspector line).
+    panels.push_back(RegisteredPanel{
+        panels::inspector::InspectorPanel::kContributionId,
+        []() { return panels::inspector::InspectorPanel{}.build_panel(); }});
 
     return panels;
 }
