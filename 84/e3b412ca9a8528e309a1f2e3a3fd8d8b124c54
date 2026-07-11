@@ -1,0 +1,91 @@
+.github/workflows/ci.yml
+  s_e4f237ad68fce1::t_6c75e03ce66856 667,675
+src/render/src/wgpu/offscreen_main.cpp
+  s_e4f237ad68fce1::t_dc9d8363645dfc 34
+  s_e4f237ad68fce1::t_749685d3a6b201 263-264
+  s_e4f237ad68fce1::t_6976a15db7cbac 152,172-174
+  s_e4f237ad68fce1::t_c7f9a8e6c6e0dd 117,135-137
+  s_e4f237ad68fce1::t_aeefafd7a3ac17 14-16
+  s_e4f237ad68fce1::t_ef0912c02eddf4 138
+  s_e4f237ad68fce1::t_23732ab79ebdfe 175
+src/render/include/context/render/viewport_scene.h
+  s_e4f237ad68fce1::t_934706090a9161 111
+  s_e4f237ad68fce1::t_df9b4271f69a6d 1-110,112-220
+src/editor/gui/viewport/include/context/editor/gui/viewport/viewport_model.h
+  s_e4f237ad68fce1::t_73b6d42ce6558d 1-69,74-75
+  s_e4f237ad68fce1::t_da315a249d396e 70-73
+src/editor/gui/viewport/README.md
+  s_e4f237ad68fce1::t_6f61f19ab0c3e9 1-65
+goldens/README.md
+  s_e4f237ad68fce1::t_c597c9c62bfcdc 26
+  s_e4f237ad68fce1::t_fbe4d54eaa4a4d 42-45,48-56
+  s_3c149407cdd5d4::t_60a9511dd333f4 57
+src/editor/gui/viewport/include/context/editor/gui/viewport/viewport_panel.h
+  s_e4f237ad68fce1::t_ae83e4e46d7263 1-86
+src/render/CMakeLists.txt
+  s_e4f237ad68fce1::t_71d390aa566d55 243-251
+src/editor/gui/viewport/src/viewport_model.cpp
+  s_e4f237ad68fce1::t_6658cc3ba2c03c 17-19
+  s_e4f237ad68fce1::t_5c54bbb0137e09 1-16,20-56
+src/editor/contract/tests/test_error_catalog.cpp
+  s_e4f237ad68fce1::t_92aa056f2df686 209-233
+src/editor/gui/viewport/tests/test_viewport_panel.cpp
+  s_e4f237ad68fce1::t_134969e0df1683 1-135
+src/editor/gui/a11y/coverage/viewport.json
+  s_e4f237ad68fce1::t_016709b187c057 1-17
+src/editor/gui/viewport/tests/test_a11y.cpp
+  s_e4f237ad68fce1::t_8d87201e738189 1-90
+src/editor/gui/viewport/tests/viewport_test.h
+  s_e4f237ad68fce1::t_eb15b10095848b 1-27
+src/editor/gui/a11y/CMakeLists.txt
+  s_e4f237ad68fce1::t_b5e03354ad139b 24-25
+src/editor/gui/viewport/CMakeLists.txt
+  s_e4f237ad68fce1::t_8f7cdc68281e09 1-53
+src/editor/contract/src/error_catalog.cpp
+  s_e4f237ad68fce1::t_6c374de66c73a0 482-503
+src/render/tests/test_golden_cpu.cpp
+  s_e4f237ad68fce1::t_0a6c434c42cb81 10
+  s_e4f237ad68fce1::t_07ce18e927dd5d 132-164,172
+src/editor/gui/CMakeLists.txt
+  s_e4f237ad68fce1::t_fbb2f962bb35a0 24-30
+src/editor/gui/a11y/src/registry.cpp
+  s_e4f237ad68fce1::t_da457f041a639d 10
+  s_e4f237ad68fce1::t_ac017f11883526 43-52
+goldens/manifest.json
+  s_e4f237ad68fce1::t_4365cf14493ff9 51-61
+src/editor/gui/viewport/tests/test_viewport_model.cpp
+  s_e4f237ad68fce1::t_9e31a98facf081 1-48,50-63,65-73,75-85,87-92,94-102,104-134
+  s_e4f237ad68fce1::t_d74788255329e0 49,64,74,86,93,103
+src/editor/gui/a11y/coverage.manifest.jsonl
+  s_e4f237ad68fce1::t_52f981f8a9e66c 11
+src/editor/gui/viewport/src/viewport_panel.cpp
+  s_e4f237ad68fce1::t_abda076852b051 104
+  s_e4f237ad68fce1::t_7ca98121f86039 1-89,92-103,105-170
+  s_e4f237ad68fce1::t_f63fb9d7b48ebb 90-91
+goldens/viewport.ppm
+  s_e4f237ad68fce1::t_3b9ea6fa545498 1-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "84e3b412ca9a8528e309a1f2e3a3fd8d8b124c54",
+  "prompts": {},
+  "sessions": {
+    "s_3c149407cdd5d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "845aef5f-a4aa-4844-b9e6-479df3530c09",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e4f237ad68fce1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fa3c53d9-ea17-4625-baf6-060e1c5f9ef9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
