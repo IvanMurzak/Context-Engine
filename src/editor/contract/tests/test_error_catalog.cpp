@@ -261,5 +261,24 @@ int main()
         CHECK(hot_reload->origin == "R-PLAY-003");
     }
 
+    // --- M6-F0a deterministic-build attestation codes (issue #170) -------------------------------
+    // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
+    // holds). The determinism.attestation_* fail-closed codes the deterministic build PRODUCES when it
+    // cannot verify determinism from the applied flags: all validation-class, deterministic (a bare
+    // retry cannot repair a build's flags). The strings are the source-of-truth in
+    // src/runtime/determinism/.../attestation.h (context::runtime::determinism::kAttestation*).
+    {
+        for (const char* code :
+             {"determinism.attestation_fastmath_forbidden", "determinism.attestation_strict_fp_missing",
+              "determinism.attestation_flags_unverified"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 5);      // validation class
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-SIM-005");
+        }
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

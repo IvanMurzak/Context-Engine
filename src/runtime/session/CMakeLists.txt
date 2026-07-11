@@ -72,3 +72,15 @@ target_link_libraries(context_session_determinism_gate PRIVATE context_session c
 target_link_options(context_session_determinism_gate PRIVATE ${_context_session_static_runtime})
 target_include_directories(context_session_determinism_gate PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME determinism-state-hash COMMAND context_session_determinism_gate)
+
+# M6-F0a physics-determinism SPIKE PROOF (issue #170): a trivial fixed-point physics-shaped step
+# (integration + fixed-point drag + integer-restitution collisions, all integer arithmetic) folded
+# through the same big-endian FNV-1a primitive, asserted against a cross-platform GOLDEN hash. Joins
+# the `determinism-*` family so the blocking CI "Determinism gate" step runs it on all three legs —
+# the evidence behind the fixed-point physics-core decision (docs/physics-determinism-decision.md).
+# Only hash.h is used (header-only), but it links context_session for the shared test wiring pattern.
+add_executable(context_session_determinism_physics tests/determinism_physics_gate.cpp)
+target_link_libraries(context_session_determinism_physics PRIVATE context_session context_warnings)
+target_link_options(context_session_determinism_physics PRIVATE ${_context_session_static_runtime})
+target_include_directories(context_session_determinism_physics PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME determinism-physics-wedge COMMAND context_session_determinism_physics)

@@ -529,6 +529,61 @@ const std::vector<ErrorCode>& catalog()
          "A live authored edit could not be reflected into the running play session (L-22 hot reload); "
          "the running session is unchanged.",
          false, kExitValidation, "R-PLAY-003"},
+        // --- M6-F0a deterministic-build attestation (issue #170: R-SIM-005 / L-54, anchored R-SEC-009) --
+        // The determinism.attestation_* fail-closed codes the deterministic build PRODUCES when it
+        // cannot verify `deterministic:true` from the actually-applied flags — never a self-declared
+        // manifest bit (R-SIM-005). The strings are DEFINED in
+        // src/runtime/determinism/include/context/runtime/determinism/attestation.h as
+        // context::runtime::determinism::kAttestation*  (the same promote-a-local-string pattern as
+        // bridge's scope.denied / runtime/ts's kTs*Code / pkg's kInstall*Code — so the determinism lib
+        // does not link this contract layer) and this catalog registers them. All validation-class
+        // fail-closed refusals: a fast-math flag leaked onto the sim path, MSVC /fp:strict was not in
+        // effect, or the build recorded no applied strict-FP flags to attest over. All deterministic (a
+        // bare retry cannot repair a build's flags). Additive-only (protocolMajor stays 0): NEW rows
+        // appended at the END, no existing row reordered/renamed.
+        {"determinism.attestation_fastmath_forbidden",
+         "A forbidden relaxed-FP flag (fast-math) reached the sim path of a deterministic build; "
+         "deterministic:true is refused, never forged (R-SIM-005).",
+         false, kExitValidation, "R-SIM-005"},
+        {"determinism.attestation_strict_fp_missing",
+         "A deterministic build did not have the strict floating-point model in effect (MSVC "
+         "/fp:strict); the produced attestation fails closed rather than claim unverified determinism.",
+         false, kExitValidation, "R-SIM-005"},
+        {"determinism.attestation_flags_unverified",
+         "A deterministic build was requested but recorded no applied strict-FP flags to attest over; "
+         "the attestation cannot be PRODUCED from verified flags, so it is refused (R-SEC-009 fail-closed).",
+         false, kExitValidation, "R-SIM-005"},
+        // ============================================================================================
+        // M6 CATALOG DOMAIN BLOCKS — PRE-RESERVED by M6-F0a (issue #170), reserved-not-filled.
+        //
+        // Each M6 gameplay/cross-cutting package is the SINGLE code-minter for its own domain and fills
+        // ONLY its block below (append its `{...}` rows directly UNDER its header, never at the shared
+        // catalog tail). F0a stakes out the nine headers, in the design's dispatch order, so package
+        // tasks stay catalog-disjoint: a package inserts into its own comment-delimited region, which is
+        // a distinct diff hunk from every sibling's region, so even a hypothetical 2-pool wave merges
+        // cleanly (the M5 pre-reserved-domain-block discipline — cf. the filled viewport.* / play.*
+        // blocks above). Additive-only (protocolMajor stays 0): a package only APPENDS within its block.
+        // Design: .claude/plans/designs/2026-07-11-m6-core-systems-decomposition.md § Seams (anchor 2).
+        //
+        // --- physics3d.* — reserved for M6 P1 (packages/physics3d/, R-SYS-001). Minter: P1. ----------
+        // (reserved — filled by the Physics-3D package task.)
+        // --- physics2d.* — reserved for M6 P2 (packages/physics2d/, R-2D-002 / L-55). Minter: P2. -----
+        // (reserved — filled by the Physics-2D package task.)
+        // --- anim.* — reserved for M6 P3 (packages/animation/, R-SYS-002/008). Minter: P3. ------------
+        // (reserved — filled by the Animation package task.)
+        // --- particle.* — reserved for M6 P4 (packages/particles/, R-SYS-003). Minter: P4. ------------
+        // (reserved — filled by the Particles package task.)
+        // --- spline.* — reserved for M6 P5 (packages/spline/, R-SYS-004 SHOULD). Minter: P5. ----------
+        // (reserved — filled by the Spline package task.)
+        // --- audio.* — reserved for M6 P6 (packages/audio/, R-SYS-006 / L-46). Minter: P6. ------------
+        // (reserved — filled by the Audio package task.)
+        // --- input.* — reserved for M6 P7 (packages/input/, R-SYS-007 / L-45). Minter: P7. ------------
+        // (reserved — filled by the Input package task.)
+        // --- sim.gc.* — reserved for M6 X1 (JS-tier GC discipline, R-SIM-008 / L-47). Minter: X1. ------
+        // (reserved — filled by the GC-discipline cross-cutting task.)
+        // --- net.* — reserved for M6 X2 (replication + state-sync, R-NET-001 / L-48). Minter: X2. ------
+        // (reserved — filled by the replication / state-sync cross-cutting task.)
+        // ============================================================================================
     };
     return the_catalog;
 }
