@@ -1,0 +1,75 @@
+src/editor/gui/a11y/src/registry.cpp
+  s_03045664401733::t_6dcac01cde5bcd 8-9
+  s_03045664401733::t_ea66cba840520a 55-63
+src/editor/contract/tests/test_error_catalog.cpp
+  s_03045664401733::t_81b5d39c0f8e4b 234-263
+src/editor/gui/a11y/coverage.manifest.jsonl
+  s_03045664401733::t_11ea00b18806e7 12
+src/editor/gui/playbar/CMakeLists.txt
+  s_03045664401733::t_b4ca700d4c86cf 1-67
+src/editor/gui/a11y/coverage/playbar.json
+  s_03045664401733::t_daaf2296aece19 1-17
+src/editor/gui/a11y/CMakeLists.txt
+  s_03045664401733::t_e944302a6094d2 25
+src/editor/gui/playbar/include/context/editor/gui/playbar/playbar_panel.h
+  s_03045664401733::t_b1dfc74e468d24 1-25
+src/editor/gui/playbar/tests/playbar_test.h
+  s_03045664401733::t_18a0abb6151ab4 1-27
+src/editor/gui/playbar/src/playbar_model.cpp
+  s_03045664401733::t_dabdf3bb00d74d 1-168
+src/editor/gui/playbar/README.md
+  s_03045664401733::t_4662bf4c615fd0 1-84
+src/editor/gui/playbar/src/session_control.cpp
+  s_03045664401733::t_81238eac92a2a6 1-101
+src/editor/gui/playbar/tests/test_session_control.cpp
+  s_03045664401733::t_bb2ae90c354748 1-71,73-101
+  s_03045664401733::t_7f4a7d13ac024f 72
+src/editor/gui/playbar/src/playbar_panel.cpp
+  s_03045664401733::t_79215ae8a63ab7 1-131
+src/editor/gui/playbar/tests/test_a11y.cpp
+  s_03045664401733::t_2a4116cdf9f0f2 1-92
+src/editor/gui/playbar/include/context/editor/gui/playbar/playbar_model.h
+  s_03045664401733::t_f560315428e0a5 1-135
+src/editor/gui/CMakeLists.txt
+  s_03045664401733::t_77ff4f74251ec7 31-39
+src/editor/contract/src/error_catalog.cpp
+  s_03045664401733::t_e121cd8743abc6 504-531
+src/editor/gui/playbar/tests/test_playbar_panel.cpp
+  s_03045664401733::t_ef9be77f42a370 1-152
+src/editor/gui/playbar/include/context/editor/gui/playbar/session_control.h
+  s_cb41aadbde3305::t_3c9c10be4e73b4 1-128
+src/editor/gui/playbar/tests/test_playbar_model.cpp
+  s_3c149407cdd5d4::t_639b885fd57c57 1-274
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "c3c690f4b30a9da4a444b0aac72151bc5caf126b",
+  "prompts": {},
+  "sessions": {
+    "s_03045664401733": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e9465523-70c8-47a9-a678-b533ae6557db",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_3c149407cdd5d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "845aef5f-a4aa-4844-b9e6-479df3530c09",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_cb41aadbde3305": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e52f295f-a887-4d28-a18e-567076052857",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
