@@ -1,0 +1,31 @@
+src/editor/cef/src/cef_boot_smoke.cpp
+  s_5db89c5b4b9b6a::t_b38e7cfcd23517 166-187
+  s_5db89c5b4b9b6a::t_fed3333fac2897 31-33,36-38
+  s_cb41aadbde3305::t_3fd88a69cd87ed 39
+src/editor/cef/CMakeLists.txt
+  s_5db89c5b4b9b6a::t_c39b248457236f 78-82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "d064d9c17a224bda49213cc182cef6c8e33608a8",
+  "prompts": {},
+  "sessions": {
+    "s_5db89c5b4b9b6a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2863a6fe-6191-4b1b-9975-dfe155cfb42d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_cb41aadbde3305": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e52f295f-a887-4d28-a18e-567076052857",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
