@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Main app bundle Info.plist for the M5-F0a CEF boot substrate (issue #150). CMake substitutes
-     the ${MACOSX_BUNDLE_*} variables from the target properties set in src/editor/cef/CMakeLists.txt.
+     the MACOSX_BUNDLE_* variables from the target properties set in src/editor/cef/CMakeLists.txt.
      LSUIElement=1 keeps this a headless agent (no Dock icon / no foreground activation) so it boots
      cleanly on a windowless CI box. -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

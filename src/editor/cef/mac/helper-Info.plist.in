@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- CEF subprocess helper Info.plist for the M5-F0a CEF boot substrate (issue #150). One helper
      bundle is built per CEF_HELPER_APP_SUFFIXES entry (main / GPU / renderer / plugin / alerts);
-     CMake substitutes ${MACOSX_BUNDLE_*} per helper (the executable + identifier carry the suffix).
+     CMake substitutes the MACOSX_BUNDLE_* variables per helper (the executable + identifier carry the suffix).
      LSUIElement=1 keeps each helper a background process; NSSupportsAutomaticGraphicsSwitching aids
      the GPU helper. Helpers have no principal class — they only load the framework + CefExecuteProcess. -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

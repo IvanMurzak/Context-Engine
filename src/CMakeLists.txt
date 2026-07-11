@@ -29,11 +29,13 @@ option(CONTEXT_BUILD_SPIKE_WASM "Build ONLY spikes/wasm (subset of CONTEXT_BUILD
 option(CONTEXT_BUILD_SPIKE_CEF "Build the CEF accelerated-OSR compositing spike (L-41) — downloads the pinned ~162 MB CEF binary distribution; Windows/MSVC-only, local runs only, NEVER enabled in CI" OFF)
 option(CONTEXT_BUILD_GUI_CEF "Build the M5 editor-GUI CEF build substrate (src/editor/cef/, issue #150) — fetches + SHA-verifies the pinned CEF prebuilt and boots it headless. A CI-only dependency path like V8 / wgpu-native (the MSVC/Clang-ABI prebuilt cannot link under the local Strawberry-GCC dev gate); default OFF so the default matrix + local dev gate never fetch CEF. The dedicated cef-substrate CI job sets it ON." OFF)
 
-# spikes/wasm builds WAMR (a C library): the C language must be enabled HERE — at top-level
-# scope, BEFORE any add_subdirectory — not inside the spike's directory. Enabling C mid-tree
-# under a chainloaded vcpkg toolchain leaves earlier-processed directories with a stale
-# no-C-compiler snapshot and generation fails with "No known features for C compiler".
-if(CONTEXT_BUILD_SPIKES OR CONTEXT_BUILD_SPIKE_WASM)
+# spikes/wasm builds WAMR (a C library), and the CEF editor-GUI substrate's own bundled cmake
+# (_cef/.../cmake/cef_variables.cmake) runs CHECK_C_COMPILER_FLAG on Linux — both need the C
+# language. It must be enabled HERE — at top-level scope, BEFORE any add_subdirectory — not inside a
+# subdirectory (e.g. src/editor/cef/). Enabling C mid-tree under a chainloaded vcpkg toolchain leaves
+# earlier-processed directories with a stale no-C-compiler snapshot and generation fails with
+# "No known features for C compiler".
+if(CONTEXT_BUILD_SPIKES OR CONTEXT_BUILD_SPIKE_WASM OR CONTEXT_BUILD_GUI_CEF)
     enable_language(C)
 endif()
 
