@@ -18,6 +18,12 @@ sbom.json
 bench/corpora/
 bench/results/
 
+# Editor session / control state (daemon + GUI): the gitignored per-project control dir holding
+# instance.json (R-ARCH-005 discovery), the index, the crash-recovery intent log, and the GUI
+# session undo/redo journal session.json (R-FILE-006 / R-HUX-001 — ephemeral session state, never
+# authored file state).
+.editor/
+
 # IDE / editor
 .vs/
 .vscode/

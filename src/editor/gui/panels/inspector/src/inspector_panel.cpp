@@ -104,6 +104,85 @@ constexpr int kMaxRebaseRetries = 8;
 
 } // namespace
 
+CommitResult commit_override_write(const OverrideWriteGateway& gateway,
+                                   const compose::WriteRequest& request, const std::string& root_scene,
+                                   const std::vector<std::string>& id_path, const std::string& pointer,
+                                   const serializer::JsonValue& collision_base,
+                                   std::uint64_t base_raw_hash)
+{
+    CommitResult result;
+    result.pointer = pointer;
+
+    // First attempt: CAS-guarded on the caller's snapshot base hash.
+    const WriteAttempt attempt = gateway.attempt(request, base_raw_hash);
+    if (attempt.applied)
+    {
+        result.status = CommitResult::Status::applied;
+        result.file = attempt.file;
+        result.written_pointer = attempt.pointer;
+        result.raw_hash = attempt.raw_hash;
+        return result;
+    }
+    if (!attempt.cas_mismatch)
+    {
+        // The write path refused the request (e.g. compose.write_target_not_found / immutable) — not a
+        // concurrency event; surface it as an error (the caller keeps its edit for the caller to fix).
+        result.status = CommitResult::Status::error;
+        result.code = attempt.code;
+        result.message = attempt.message;
+        result.raw_hash = attempt.raw_hash;
+        return result;
+    }
+
+    // --- L-30 rebase-or-drop: a concurrent writer advanced the target file --------------------------
+    std::uint64_t last_seen_hash = attempt.raw_hash; // the file's current CAS token, refreshed per read
+    for (int retry = 0; retry < kMaxRebaseRetries; ++retry)
+    {
+        const FieldState current = gateway.read(root_scene, id_path, pointer);
+        last_seen_hash = current.raw_hash;
+        if (!canonical_equal(current.value, collision_base))
+        {
+            // The external change TOUCHED this field path -> drop loudly, never a silent overwrite.
+            result.status = CommitResult::Status::dropped;
+            result.code = "cas.mismatch";
+            result.message = "the field `" + pointer +
+                             "` changed under your in-flight edit (a concurrent writer); the gesture "
+                             "was dropped, not overwritten (L-30 rebase-or-drop) — re-open the field "
+                             "and re-apply against the current value";
+            result.raw_hash = current.raw_hash;
+            return result;
+        }
+
+        // This field path is UNTOUCHED by the external change -> rebase onto the new state and retry.
+        const WriteAttempt rebased = gateway.attempt(request, current.raw_hash);
+        if (rebased.applied)
+        {
+            result.status = CommitResult::Status::rebased;
+            result.file = rebased.file;
+            result.written_pointer = rebased.pointer;
+            result.raw_hash = rebased.raw_hash;
+            return result;
+        }
+        if (!rebased.cas_mismatch)
+        {
+            result.status = CommitResult::Status::error;
+            result.code = rebased.code;
+            result.message = rebased.message;
+            result.raw_hash = rebased.raw_hash;
+            return result;
+        }
+        // Another concurrent writer raced the rebase -> loop and re-read.
+    }
+
+    // Exhausted the rebase budget under a sustained concurrent-write burst -> drop loudly.
+    result.status = CommitResult::Status::dropped;
+    result.code = "cas.mismatch";
+    result.message = "concurrent writers kept advancing the file; the gesture was dropped after " +
+                     std::to_string(kMaxRebaseRetries) + " rebase attempts (L-30) — re-apply it";
+    result.raw_hash = last_seen_hash;
+    return result;
+}
+
 void InspectorPanel::set_model(InspectorModel model, std::uint64_t base_raw_hash)
 {
     model_ = std::move(model);
@@ -140,103 +219,41 @@ void InspectorPanel::discard_edit()
 
 CommitResult InspectorPanel::commit()
 {
-    CommitResult result;
     if (!staged_.has_value() || gateway_ == nullptr)
     {
+        CommitResult result;
         result.status = CommitResult::Status::none;
         last_result_ = result;
         return result;
     }
 
     const StagedEdit edit = *staged_;
-    result.pointer = edit.pointer;
-
     const compose::WriteRequest request =
         override_write_request(model_, edit.pointer, edit.new_value);
 
-    // First attempt: CAS-guarded on the base hash observed when the model was snapshotted.
-    WriteAttempt attempt = gateway_->attempt(request, base_raw_hash_);
-    if (attempt.applied)
+    // Route the gesture through the ONE L-20/L-30 commit engine (shared with the session undo/redo
+    // replay): CAS-guarded on the snapshot base hash, rebase-or-drop under a concurrent writer.
+    const CommitResult result = commit_override_write(*gateway_, request, model_.root_scene,
+                                                      model_.id_path, edit.pointer, edit.base_value,
+                                                      base_raw_hash_);
+
+    switch (result.status)
     {
-        result.status = CommitResult::Status::applied;
-        result.file = attempt.file;
-        result.written_pointer = attempt.pointer;
-        result.raw_hash = attempt.raw_hash;
-        base_raw_hash_ = attempt.raw_hash;
+    case CommitResult::Status::applied:
+    case CommitResult::Status::rebased:
+    case CommitResult::Status::dropped:
+        // The gesture is resolved (landed or loudly dropped, L-30) — consume it and adopt the file's
+        // new/current CAS token so the next gesture guards on live state.
+        base_raw_hash_ = result.raw_hash;
         staged_.reset();
         staged_pointer_.clear();
-        last_result_ = result;
-        notify(result);
-        return result;
-    }
-    if (!attempt.cas_mismatch)
-    {
-        // The write path refused the request (e.g. compose.write_target_not_found / immutable) — not
-        // a concurrency event; surface it as an error (the gesture stays staged for the caller to fix).
-        result.status = CommitResult::Status::error;
-        result.code = attempt.code;
-        result.message = attempt.message;
-        last_result_ = result;
-        notify(result);
-        return result;
+        break;
+    case CommitResult::Status::error:
+        // A write-path refusal (not a concurrency event) — keep the staged gesture for the caller to fix.
+    case CommitResult::Status::none:
+        break;
     }
 
-    // --- L-30 rebase-or-drop: a concurrent writer advanced the target file --------------------------
-    for (int retry = 0; retry < kMaxRebaseRetries; ++retry)
-    {
-        const FieldState current = gateway_->read(model_.root_scene, model_.id_path, edit.pointer);
-        if (!canonical_equal(current.value, edit.base_value))
-        {
-            // The external change TOUCHED this field path -> drop loudly, never a silent overwrite.
-            result.status = CommitResult::Status::dropped;
-            result.code = "cas.mismatch";
-            result.message = "the field `" + edit.pointer +
-                             "` changed under your in-flight edit (a concurrent writer); the gesture "
-                             "was dropped, not overwritten (L-30 rebase-or-drop) — re-open the field "
-                             "and re-apply against the current value";
-            staged_.reset();
-            staged_pointer_.clear();
-            base_raw_hash_ = current.raw_hash;
-            last_result_ = result;
-            notify(result);
-            return result;
-        }
-
-        // This field path is UNTOUCHED by the external change -> rebase onto the new state and retry.
-        base_raw_hash_ = current.raw_hash;
-        WriteAttempt rebased = gateway_->attempt(request, current.raw_hash);
-        if (rebased.applied)
-        {
-            result.status = CommitResult::Status::rebased;
-            result.file = rebased.file;
-            result.written_pointer = rebased.pointer;
-            result.raw_hash = rebased.raw_hash;
-            base_raw_hash_ = rebased.raw_hash;
-            staged_.reset();
-            staged_pointer_.clear();
-            last_result_ = result;
-            notify(result);
-            return result;
-        }
-        if (!rebased.cas_mismatch)
-        {
-            result.status = CommitResult::Status::error;
-            result.code = rebased.code;
-            result.message = rebased.message;
-            last_result_ = result;
-            notify(result);
-            return result;
-        }
-        // Another concurrent writer raced the rebase -> loop and re-read.
-    }
-
-    // Exhausted the rebase budget under a sustained concurrent-write burst -> drop loudly.
-    result.status = CommitResult::Status::dropped;
-    result.code = "cas.mismatch";
-    result.message = "concurrent writers kept advancing the file; the gesture was dropped after " +
-                     std::to_string(kMaxRebaseRetries) + " rebase attempts (L-30) — re-apply it";
-    staged_.reset();
-    staged_pointer_.clear();
     last_result_ = result;
     notify(result);
     return result;

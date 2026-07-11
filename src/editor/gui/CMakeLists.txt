@@ -21,6 +21,12 @@ add_subdirectory(compositor)
 # of the default gate. Added BEFORE a11y, which links + scans each registered panel.
 add_subdirectory(panels)
 
+# The M5 GUI SESSION-state surfaces (session/) — headless affordances layered on the panel write
+# seams (R-FILE-006 ephemeral session state). Added AFTER panels/ because M5-F7 session undo/redo
+# (session/undo/, issue #162) builds ON context_gui_panel_inspector's L-30 commit engine + gateway
+# seam. CEF-free, so it is part of the default 3-OS gate.
+add_subdirectory(session)
+
 # M5-F6 (issue #154): the a11y enforcement harness (context_gui_a11y) — the headless per-panel
 # accessibility gate built ON uitree. Unconditional (CEF-free), so it builds + tests on the default
 # 3-OS matrix + local dev gate; the editor-cef-smoke CI job additionally runs tools/a11y_scan.py over
