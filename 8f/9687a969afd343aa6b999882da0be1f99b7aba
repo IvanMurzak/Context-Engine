@@ -1,0 +1,23 @@
+src/CMakeLists.txt
+  s_5db89c5b4b9b6a::t_a995c6c05d2435 32-38
+src/editor/cef/mac/Info.plist.in
+  s_5db89c5b4b9b6a::t_6718b6eef7a2c7 3
+src/editor/cef/mac/helper-Info.plist.in
+  s_5db89c5b4b9b6a::t_dec6eb104c4ebd 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "8f9687a969afd343aa6b999882da0be1f99b7aba",
+  "prompts": {},
+  "sessions": {
+    "s_5db89c5b4b9b6a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2863a6fe-6191-4b1b-9975-dfe155cfb42d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
