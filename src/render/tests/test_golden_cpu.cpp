@@ -7,6 +7,7 @@
 
 #include "context/render/golden.h"
 #include "context/render/lit/golden_lit.h"
+#include "context/render/viewport_scene.h"
 
 #include "render_test.h"
 #include "render_test_rhi.h"
@@ -128,6 +129,39 @@ void test_lit3d_golden_and_bench_contract()
     CHECK(!lit::bench_lit_frames(*device, 100, 128, 0, 1, bad));
 }
 
+void test_viewport_composite_shape_and_layers()
+{
+    // M5-F1 (issue #164): the observer-viewport composite (3D triangle base + 2D sprites overlaid).
+    // The fake backend rasterizes only the 3-vertex triangle Clear pass; the sprite quads are
+    // Load-pass no-ops there, so on the fake backend the composite == the triangle3d frame (the
+    // sprite overlay's real rasterization is the CI render job's lavapipe leg + goldens/viewport.ppm).
+    rendertest::FakeRhi rhi(/*adapter_count=*/1);
+    std::unique_ptr<IDevice> device = make_fake_device(rhi);
+
+    golden::GoldenImage image;
+    CHECK(render_golden_viewport(*device, image));
+    CHECK(image.width == viewport_target_size());
+    CHECK(image.height == viewport_target_size());
+    CHECK(image.rgba.size() == static_cast<std::size_t>(image.width) * image.height * 4u);
+    // Same target edge as the triangle + sprite corpus scenes (the layers composite 1:1).
+    CHECK(viewport_target_size() == offscreen_triangle_size());
+    CHECK(viewport_target_size() == sprite::sprite_target_size());
+
+    const std::size_t row = static_cast<std::size_t>(image.width) * 4u;
+    // The 3D triangle base rasterized: an interior triangle pixel is red.
+    const std::uint8_t* tri = image.rgba.data() + 150u * row + 128u * 4u;
+    CHECK(tri[0] > 200 && tri[1] < 60 && tri[2] < 60);
+    // A background corner (neither layer) is the clear color (~26/51/77).
+    const std::uint8_t* bg = image.rgba.data();
+    CHECK(bg[0] < 40 && bg[2] > bg[0] && bg[3] == 255);
+
+    // The composite round-trips through the PPM writer (the golden interchange format).
+    CHECK(golden::write_ppm(image, (std::filesystem::temp_directory_path() /
+                                    "context-golden-cpu-viewport.ppm").string()));
+    std::filesystem::remove(std::filesystem::temp_directory_path() /
+                            "context-golden-cpu-viewport.ppm");
+}
+
 } // namespace
 
 int main()
@@ -135,5 +169,6 @@ int main()
     test_triangle3d_renders_and_round_trips_ppm();
     test_sprite2d_shape_and_unknown_scene();
     test_lit3d_golden_and_bench_contract();
+    test_viewport_composite_shape_and_layers();
     RENDER_TEST_MAIN_END();
 }

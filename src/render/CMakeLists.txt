@@ -240,6 +240,15 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
         set_tests_properties(render-wgpu-lit PROPERTIES
             SKIP_RETURN_CODE 77
             WORKING_DIRECTORY $<TARGET_FILE_DIR:context_render_wgpu_offscreen>)
+
+        # M5-F1 (issue #164): the observer-viewport composite proof — the 3D triangle base + the 2D
+        # sprites overlaid, read back + asserted (clear + 3D layer + 2D-on-top). The frame the
+        # "viewport" golden gates. Same adapter requirement, SKIP convention, and Windows carve-out as
+        # the sibling proofs; auto-picked by the render CI job's `^render-wgpu-` regex.
+        add_test(NAME render-wgpu-viewport COMMAND context_render_wgpu_offscreen viewport)
+        set_tests_properties(render-wgpu-viewport PROPERTIES
+            SKIP_RETURN_CODE 77
+            WORKING_DIRECTORY $<TARGET_FILE_DIR:context_render_wgpu_offscreen>)
     endif()
 endif()
 

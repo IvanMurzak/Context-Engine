@@ -21,6 +21,13 @@ add_subdirectory(compositor)
 # of the default gate. Added BEFORE a11y, which links + scans each registered panel.
 add_subdirectory(panels)
 
+# The M5-F1 native viewport OBSERVER panel (viewport/) — a headless library built ON uitree + the
+# L-41 compositor seam + the render RHI abstraction (context_render), default-built + unit-tested on
+# the 3-OS matrix WITHOUT CEF (issue #164). A sibling of panels/ (the DoD path is gui/viewport/), added
+# after them and BEFORE a11y, which links + scans the registered viewport panel. Its render pixels +
+# golden-scene equivalence are the render-layer proof (src/render/viewport_scene.h + goldens/).
+add_subdirectory(viewport)
+
 # The M5 GUI SESSION-state surfaces (session/) — headless affordances layered on the panel write
 # seams (R-FILE-006 ephemeral session state). Added AFTER panels/ because M5-F7 session undo/redo
 # (session/undo/, issue #162) builds ON context_gui_panel_inspector's L-30 commit engine + gateway

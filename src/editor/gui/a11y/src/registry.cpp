@@ -7,6 +7,7 @@
 #include "context/editor/gui/panels/scenetree/scene_tree_panel.h"
 #include "context/editor/gui/uitree/builtin.h"
 #include "context/editor/gui/uitree/panel.h"
+#include "context/editor/gui/viewport/viewport_panel.h"
 
 namespace context::editor::gui::a11y
 {
@@ -38,6 +39,16 @@ std::vector<RegisteredPanel> registered_panels()
     panels.push_back(RegisteredPanel{
         panels::inspector::InspectorPanel::kContributionId,
         []() { return panels::inspector::InspectorPanel{}.build_panel(); }});
+
+    // M5-F1 — the native viewport observer panel (gui/viewport/). The harness scans its default
+    // (presentable, empty-scene) rendered state, exactly as it scans the placeholder / scene-tree /
+    // inspector defaults; the panel's own gui-viewport-test_a11y ctest additionally covers its
+    // adapter-absent / surface-unavailable / render-failed / populated states. Registered per issue
+    // #164 + the M5-F6 harness contract (coverage.manifest.jsonl carries the matching builtin.viewport
+    // line). Read-only observer — no new authoring surface (R-HUX-006 in-viewport editing is M8.5).
+    panels.push_back(RegisteredPanel{
+        viewport::ViewportPanel::kContributionId,
+        []() { return viewport::ViewportPanel{}.build_panel(); }});
 
     return panels;
 }

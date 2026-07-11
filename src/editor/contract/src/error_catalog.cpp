@@ -479,6 +479,28 @@ const std::vector<ErrorCode>& catalog()
          "A stable intra-file id is not the L-33 form (16..32 lowercase hex chars); re-key it via "
          "`context re-key`. The `context validate` FORMAT gate, sibling to merge.duplicate_id.",
          false, kExitValidation, "R-FILE-012"},
+        // --- M5-F1 native viewport panel (issue #164: R-UI-007 / L-41 / R-REND-002 / R-HEAD-002) ----
+        // The reserved viewport.* error-domain block the observer viewport mints (M5-F1 is the wave's
+        // single code-minter). The strings are DEFINED in src/editor/gui/viewport/viewport_model.h as
+        // context::editor::gui::viewport::kViewport*Code (the same promote-a-local-string pattern as
+        // bridge's scope.denied / runtime/ts's kTs*Code / pkg's kInstall*Code — so the GUI viewport lib
+        // does not link this contract layer) and this catalog registers them. adapter_absent is
+        // unimplemented-class (no GPU adapter for the observer viewport in this environment — the
+        // capability is absent, like debug.unsupported); surface_unavailable / render_failed are
+        // internal-class fail-closed. All deterministic (a bare retry cannot conjure a GPU / surface /
+        // successful readback). Additive-only (protocolMajor stays 0): NEW rows appended at the END, no
+        // existing row reordered/renamed.
+        {"viewport.adapter_absent",
+         "No GPU adapter is available to render the observer viewport; absence is reported, never a "
+         "fabricated frame (R-HEAD-002).",
+         false, kExitUnimplemented, "R-HEAD-002"},
+        {"viewport.surface_unavailable",
+         "The L-41 CEF compositing surface for the observer viewport could not be acquired (e.g. the "
+         "selected mode needs a GPU shared-texture surface but no GPU compositor is present).",
+         false, kExitInternal, "R-UI-007"},
+        {"viewport.render_failed",
+         "The observer viewport's scene render or pixel readback failed (R-REND-002).", false,
+         kExitInternal, "R-REND-002"},
     };
     return the_catalog;
 }

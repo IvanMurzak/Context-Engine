@@ -23,6 +23,7 @@ here with a **named SSIM-class perceptual metric + per-scene tolerances** (`mani
 | `triangle3d.ppm` | 3D render pipeline | clear + clip-space triangle through the T1 RHI |
 | `sprite2d.ppm` | 2D sprite path (R-2D-001) | ortho projection + sorting-layer overdraw |
 | `lit3d.ppm` | representative lit scene | PBR + dir/point lights + shadow depth pass (R-REND-004/006) |
+| `viewport.ppm` | M5-F1 observer viewport (3D+2D) | the 3D triangle base + the 2D sprites composited on top (issue #164) |
 
 Format: binary PPM (P6, maxval 255) — stdlib-parseable, no image dependency anywhere in the chain.
 Baselines were rendered through the native backend on real hardware; the per-scene `min_ssim` in
@@ -38,7 +39,21 @@ python3 tools/golden_compare.py --scene triangle3d --candidate out/triangle3d.pp
 # browser (headless Chromium + SwiftShader; serves + runs the T6 web harness):
 python3 tools/web_golden_run.py --html build/render-web/context-render-web.html --out-dir out/web
 python3 tools/golden_compare.py --scene triangle3d --candidate out/web/triangle3d.ppm
+
+# M5-F1 observer viewport composite (native only, like lit3d):
+context_render_wgpu_offscreen golden viewport out/viewport.ppm
+python3 tools/golden_compare.py --scene viewport --candidate out/viewport.ppm
 ```
+
+The **`viewport`** scene is the M5-F1 observer-viewport composite (issue #164): the 3D triangle base
+(`triangle3d`) with the 2D sprites (`sprite2d`) painted on top in one frame — the "live scene (3D+2D)"
+the native viewport panel renders over `context_render(_wgpu)`. Because the T1 primitives use opaque
+replace with **no alpha blending and no MSAA**, the composite is deterministic and its baseline equals
+compositing the committed `triangle3d.ppm` + `sprite2d.ppm` (sprite-over-triangle-over-clear) — so
+`goldens/viewport.ppm` is **byte-identical** to `context_render_wgpu_offscreen golden viewport`, which
+the CI `render` job re-renders and SSIM-gates. It is **native-only** (like `lit3d`); web T1
+equivalence is gated by the `triangle3d` + `sprite2d` browser goldens, whose exact primitives the
+composite reuses.
 
 ## Rebaselining — REVIEWED changes only
 
