@@ -191,6 +191,12 @@ struct World::Impl
     std::map<std::vector<ComponentId>, std::unique_ptr<Archetype>> archetypes;
     std::size_t alive = 0;
 
+    // L-48 replication metadata (the fifth in-storage protocol): a per-entity side table plus the
+    // monotonic replication version. Keyed by the (index+generation) Entity so a stale handle never
+    // aliases a recycled slot's metadata; cleared on destroy.
+    std::unordered_map<Entity, World::ReplicationMetadata> replication;
+    std::uint64_t replication_version = 0;
+
     Archetype* get_or_create_archetype(const std::vector<ComponentId>& types)
     {
         auto it = archetypes.find(types);
@@ -271,6 +277,7 @@ void World::destroy(Entity e)
     rec.alive = false;
     rec.archetype = nullptr;
     impl_->free_list.push_back(e.index);
+    impl_->replication.erase(e); // L-48: a destroyed entity is no longer replicated.
     --impl_->alive;
 }
 
@@ -454,5 +461,85 @@ void World::for_each_archetype(const std::function<void(const ArchetypeView&)>& 
         fn(view);
     }
 }
+
+// --- L-48 replication metadata (the fifth in-storage protocol, R-NET-001) ------------------------
+
+bool World::set_replication(Entity e, std::uint64_t net_id, std::uint32_t authority)
+{
+    if (!is_alive(e))
+        return false;
+    ReplicationMetadata meta;
+    meta.net_id = net_id;
+    meta.authority = authority;
+    meta.dirty_version = ++impl_->replication_version; // fresh registration is dirty since any cursor
+    impl_->replication[e] = meta;
+    return true;
+}
+
+const World::ReplicationMetadata* World::replication_of(Entity e) const
+{
+    if (!is_alive(e))
+        return nullptr;
+    auto it = impl_->replication.find(e);
+    return it != impl_->replication.end() ? &it->second : nullptr;
+}
+
+bool World::has_replication(Entity e) const { return replication_of(e) != nullptr; }
+
+bool World::set_replication_authority(Entity e, std::uint32_t authority)
+{
+    if (!is_alive(e))
+        return false;
+    auto it = impl_->replication.find(e);
+    if (it == impl_->replication.end())
+        return false;
+    it->second.authority = authority;
+    it->second.dirty_version = ++impl_->replication_version; // an authority handover is replicated
+    return true;
+}
+
+bool World::mark_replication_dirty(Entity e)
+{
+    if (!is_alive(e))
+        return false;
+    auto it = impl_->replication.find(e);
+    if (it == impl_->replication.end())
+        return false;
+    it->second.dirty_version = ++impl_->replication_version;
+    return true;
+}
+
+bool World::clear_replication(Entity e)
+{
+    // Not gated on is_alive: destroy() clears via impl_ directly, and clearing a stale handle's
+    // (already-absent) metadata is simply false.
+    return impl_->replication.erase(e) != 0;
+}
+
+std::uint64_t World::replication_version() const noexcept { return impl_->replication_version; }
+
+std::vector<Entity> World::replication_delta_since(std::uint64_t since) const
+{
+    std::vector<Entity> out;
+    for (const auto& kv : impl_->replication)
+        if (kv.second.dirty_version > since)
+            out.push_back(kv.first);
+    // Deterministic order: by net_id, then entity (index, generation) — so the delta a state-sync
+    // layer sends is identical across platforms (the unordered_map iteration order is not).
+    std::sort(out.begin(), out.end(),
+              [&](Entity a, Entity b)
+              {
+                  const std::uint64_t na = impl_->replication.at(a).net_id;
+                  const std::uint64_t nb = impl_->replication.at(b).net_id;
+                  if (na != nb)
+                      return na < nb;
+                  if (a.index != b.index)
+                      return a.index < b.index;
+                  return a.generation < b.generation;
+              });
+    return out;
+}
+
+std::size_t World::replicated_count() const noexcept { return impl_->replication.size(); }
 
 } // namespace context::kernel

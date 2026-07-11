@@ -4,8 +4,10 @@
 // grouped by archetype — the exact set of component types an entity has. Adding or removing a
 // component migrates the entity to a different archetype; storage for a component type is one
 // contiguous, cache-friendly column, which is what makes zero-copy views possible downstream
-// (R-LANG-008). The concrete storage/allocator seam is deliberately owned in-kernel so the five
-// locked in-storage protocols (R-LANG-008/009/010/012, L-39) have a home to grow into.
+// (R-LANG-008). The concrete storage/allocator seam is deliberately owned in-kernel so the locked
+// in-storage protocols (R-LANG-008/009/010/012, L-39) have a home to grow into — plus the L-48
+// per-entity REPLICATION metadata (net id / authority / dirty-delta, R-NET-001) added below, which
+// L-60 homes alongside component storage rather than in a package.
 
 #pragma once
 
@@ -150,6 +152,58 @@ public:
     // (R-QA-005 hierarchical state hash). Component identity is by ComponentId here; a higher layer
     // that needs stable cross-process names maps ids to registered names itself.
     void for_each_archetype(const std::function<void(const ArchetypeView&)>& fn) const;
+
+    // --- L-48 replication metadata (the fifth in-storage protocol, R-NET-001, M6-F0b) ---------
+    //
+    // Networked play needs per-entity metadata that is NOT a gameplay component: the entity's stable
+    // NETWORK IDENTITY (bound to the L-37 composed id so it survives re-derivation), which peer holds
+    // AUTHORITY over it, and DIRTY/DELTA versioning so a state-sync layer can replicate only what
+    // changed since a peer's last snapshot. L-60 homes this alongside component storage — the kernel
+    // owns the storage seam, so this metadata lives in the World, not in a package (the microkernel
+    // never depends on a package). These are the HOOKS ONLY; the state-sync harness that drives them
+    // is X2 (later). The net id is an opaque std::uint64_t here: the caller passes the L-37 composed
+    // identity (the 16-hex composed id), so the kernel needs no dependency on the editor/compose layer.
+
+    struct ReplicationMetadata
+    {
+        std::uint64_t net_id = 0;        // network identity == the L-37 composed id (0 == unassigned)
+        std::uint32_t authority = 0;     // owning peer/authority id (0 == the server/default authority)
+        std::uint64_t dirty_version = 0; // world replication version at which this entity last changed
+    };
+
+    // Register `e` for replication with `net_id` + `authority` (overwrites any existing metadata) and
+    // mark it dirty at the next replication version — so a freshly-registered entity is part of the
+    // delta since any earlier cursor. Returns false (no-op) for a dead/invalid handle.
+    bool set_replication(Entity e, std::uint64_t net_id, std::uint32_t authority = 0);
+
+    // The replication metadata for `e`, or nullptr if `e` is not replicated (or dead).
+    [[nodiscard]] const ReplicationMetadata* replication_of(Entity e) const;
+
+    // Whether `e` is currently registered for replication.
+    [[nodiscard]] bool has_replication(Entity e) const;
+
+    // Change the AUTHORITY over an already-replicated entity. Marks it dirty (an authority handover is
+    // replicated state). Returns false if `e` is not replicated / dead.
+    bool set_replication_authority(Entity e, std::uint32_t authority);
+
+    // Mark `e`'s replicated state changed: bump its dirty_version to the next world replication
+    // version. Returns false if `e` is not replicated / dead.
+    bool mark_replication_dirty(Entity e);
+
+    // Stop replicating `e`; false if it was not replicated. (Called automatically on destroy(e).)
+    bool clear_replication(Entity e);
+
+    // The current monotonic replication version — the cursor a delta consumer advances to AFTER
+    // draining replication_delta_since(). Starts at 0; bumped by each set/dirty/authority change.
+    [[nodiscard]] std::uint64_t replication_version() const noexcept;
+
+    // Every replicated entity whose dirty_version > `since`, in a DETERMINISTIC order (ascending by
+    // net_id, then by entity index/generation) — the delta set the L-48 / R-NET-001 state-sync
+    // harness replicates. Pass 0 for a full snapshot of every replicated entity.
+    [[nodiscard]] std::vector<Entity> replication_delta_since(std::uint64_t since) const;
+
+    // Count of entities currently registered for replication.
+    [[nodiscard]] std::size_t replicated_count() const noexcept;
 
 private:
     template <class... Cs, class F, std::size_t... Is>

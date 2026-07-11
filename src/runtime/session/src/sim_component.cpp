@@ -94,4 +94,18 @@ const SimComponentRegistry& builtin_components()
     return registry;
 }
 
+namespace detail
+{
+SimComponentRegistry& mutable_sim_components()
+{
+    // Seeded ONCE from the pristine built-in set, then extended by package registrations. A function-
+    // local static: it is constructed on first use — before main() when the first package's
+    // SimComponentRegistrar runs — so there is no static-init-order race with builtin_components()
+    // (also a function-local static, constructed on demand by this copy). Package registrations that
+    // run at static-init all land before the Session first hashes through it.
+    static SimComponentRegistry registry = builtin_components();
+    return registry;
+}
+} // namespace detail
+
 } // namespace context::runtime::session

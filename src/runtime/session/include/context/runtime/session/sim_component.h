@@ -24,6 +24,7 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace context::runtime::session
@@ -130,7 +131,54 @@ private:
 };
 
 // The engine's built-in simulation components (position, velocity, health, input_state), each at a
-// stable name. Built once; process-wide.
+// stable name. Built once; process-wide. This is the PRISTINE built-in-only set the golden L-54
+// determinism gate pins — it is never mutated by package registration (that lands in sim_components()).
 [[nodiscard]] const SimComponentRegistry& builtin_components();
+
+// --- package-contributed sim components (M6-F0b) --------------------------------------------------
+//
+// The seam the SimComponentRegistry was built for: a sim PACKAGE (physics, animation, particles, …)
+// contributes its own integer-only sim components so they fold into the hierarchical canonical state
+// hash BY STABLE NAME, exactly like the built-ins — foundation work, not per-package. A package
+// registers each of its sim-component types through register_package_sim_component (typically at
+// static-init via SimComponentRegistrar); the components join sim_components(), the combined registry
+// the headless Session hashes through. builtin_components() stays untouched, so a world that uses only
+// built-ins hashes identically (the L-54 golden gate stays green).
+
+namespace detail
+{
+// The process-wide MUTABLE registry: seeded once from builtin_components(), then extended by each
+// package registration. Internal — packages go through register_package_sim_component().
+[[nodiscard]] SimComponentRegistry& mutable_sim_components();
+} // namespace detail
+
+// Register a package-contributed sim component (a POD of int64 fields; `name` stable + unique,
+// `fields` the ordered field-name list) into the process-wide sim_components() set. Idempotent per
+// component type (re-registration overwrites, matching SimComponentRegistry::add). Aborts (dev guard)
+// if T is not exactly fields.size() contiguous int64s — the layout the generic hash walk assumes.
+template <class T>
+void register_package_sim_component(std::string name, std::vector<std::string> fields)
+{
+    detail::mutable_sim_components().register_component<T>(std::move(name), std::move(fields));
+}
+
+// The process-wide registry of ALL sim components — the engine built-ins PLUS every package-contributed
+// component registered above. This is the registry the headless Session hashes through, so a package
+// component folds into the hierarchical state hash by stable name.
+[[nodiscard]] inline const SimComponentRegistry& sim_components()
+{
+    return detail::mutable_sim_components();
+}
+
+// A static-init registrar so a package TU can contribute a sim component BEFORE main runs. Declare a
+// file-scope `static const SimComponentRegistrar<MyComp> reg{"my_comp", {"a", "b"}};` in the package.
+template <class T>
+struct SimComponentRegistrar
+{
+    SimComponentRegistrar(std::string name, std::vector<std::string> fields)
+    {
+        register_package_sim_component<T>(std::move(name), std::move(fields));
+    }
+};
 
 } // namespace context::runtime::session

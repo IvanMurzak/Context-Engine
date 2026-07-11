@@ -114,7 +114,11 @@ void setup_demo(Session& session)
 } // namespace
 
 Session::Session(SessionConfig config, bool run_setup)
-    : registry_(&builtin_components()), seed_(config.seed), rng_(config.seed),
+    // sim_components() = the built-ins PLUS any package-contributed sim components (M6-F0b), so a
+    // package component folds into this session's hierarchical state hash by stable name. With no
+    // package registered it is content-identical to builtin_components(), so the L-54 golden gate is
+    // unchanged.
+    : registry_(&sim_components()), seed_(config.seed), rng_(config.seed),
       tick_hz_(config.tick_hz == 0 ? 60 : config.tick_hz),
       scenario_(config.scenario.empty() ? "demo" : config.scenario)
 {

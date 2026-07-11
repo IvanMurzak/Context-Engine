@@ -14,7 +14,11 @@ game-feature semantics (R-KERNEL-001).
 
 - **World** (`world.h`, `entity.h`, `component.h`) — the data-oriented, **custom archetype/SoA** ECS
   (L-60, R-SIM-003). Stable generation-checked entity ids; create/destroy; add/remove/get
-  components with archetype migration; cache-friendly column queries (`each<Cs...>`).
+  components with archetype migration; cache-friendly column queries (`each<Cs...>`). Also hosts the
+  **L-48 replication metadata** in-storage protocol (`ReplicationMetadata`, R-NET-001): per-entity
+  network identity (the L-37 composed id), authority, and dirty/delta versioning
+  (`set_replication`/`mark_replication_dirty`/`replication_delta_since`) — L-60 homes it alongside
+  component storage so netcode is a package concern over kernel hooks, not a kernel feature.
 - **CommandBuffer** (`command_buffer.h`) — deferred structural changes (the R-LANG-009
   command-buffer clause, #88 item 3): a running system RECORDS add/remove component and entity
   create/destroy (owned payloads, pending-entity placeholders) instead of applying them, and
