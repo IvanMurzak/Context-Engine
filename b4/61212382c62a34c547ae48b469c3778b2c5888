@@ -1,0 +1,48 @@
+src/editor/gui/a11y/CMakeLists.txt
+  s_424670fc09e783::t_ad57dd1d9f2750 24
+src/editor/gui/panels/inspector/src/inspector_model.cpp
+  s_424670fc09e783::t_b7769c6c7b0d3c 1-254
+src/editor/gui/panels/inspector/include/context/editor/gui/panels/inspector/inspector_panel.h
+  s_424670fc09e783::t_551072b3f24619 1-171
+src/editor/gui/a11y/src/registry.cpp
+  s_424670fc09e783::t_13a6e1ecf844d7 6
+  s_424670fc09e783::t_6c1fd2c39ca19f 33-41
+src/editor/gui/panels/inspector/tests/test_a11y.cpp
+  s_424670fc09e783::t_65ee8adef9d6c9 1-146
+src/editor/gui/a11y/coverage.manifest.jsonl
+  s_424670fc09e783::t_590c3937953c44 10
+src/editor/gui/panels/inspector/tests/inspector_test.h
+  s_424670fc09e783::t_561797fae824d5 1-28
+src/editor/gui/panels/inspector/CMakeLists.txt
+  s_424670fc09e783::t_cc75104fb5f544 1-56
+src/editor/gui/panels/inspector/include/context/editor/gui/panels/inspector/inspector_model.h
+  s_424670fc09e783::t_b770a3da82e0a6 1-91
+src/editor/gui/panels/inspector/src/inspector_panel.cpp
+  s_424670fc09e783::t_227defc09d9ff4 1-331
+src/editor/gui/panels/inspector/tests/test_inspector_model.cpp
+  s_424670fc09e783::t_06e1477a9b271f 1-213
+src/editor/gui/panels/inspector/README.md
+  s_424670fc09e783::t_8dd5551b3067e8 1-68
+src/editor/gui/a11y/coverage/inspector.json
+  s_424670fc09e783::t_f5c95dbcff0709 1-17
+src/editor/gui/panels/inspector/tests/test_inspector_panel.cpp
+  s_424670fc09e783::t_8a01606d4d293d 1-322
+src/editor/gui/panels/CMakeLists.txt
+  s_424670fc09e783::t_93b6e32227e932 8-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "b461212382c62a34c547ae48b469c3778b2c5888",
+  "prompts": {},
+  "sessions": {
+    "s_424670fc09e783": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6cbd9e5d-e64d-4079-bb4d-6c1ad4979eae",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
