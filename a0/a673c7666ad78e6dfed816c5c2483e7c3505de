@@ -1,0 +1,52 @@
+src/editor/gui/panels/problems/tests/test_problems_model.cpp
+  s_f1b588c9b33c23::t_6b6f47cc8ad4a9 1-151
+src/editor/gui/panels/problems/tests/problems_test.h
+  s_f1b588c9b33c23::t_1a12e4cb7a56de 1-28
+src/editor/gui/panels/problems/src/problems_model.cpp
+  s_f1b588c9b33c23::t_892f9749497280 1-174
+src/editor/gui/a11y/coverage/problems.json
+  s_f1b588c9b33c23::t_e5a4a6320267f3 1-17
+src/editor/gui/panels/problems/src/problems_panel.cpp
+  s_f1b588c9b33c23::t_9c0f7b0c40e920 1-299
+src/editor/gui/panels/problems/CMakeLists.txt
+  s_f1b588c9b33c23::t_2460cfbb209d88 1-50
+src/editor/gui/panels/problems/tests/test_problems_panel.cpp
+  s_f1b588c9b33c23::t_411b0099bd2c5e 151-155
+  s_f1b588c9b33c23::t_64fc139e37fe8d 148-150
+  s_f1b588c9b33c23::t_05ad4a647a8c29 156-158
+  s_06cfc2d554b11d::t_c50732dfb28f1e 1-147,159-203
+src/editor/gui/panels/problems/include/context/editor/gui/panels/problems/problems_model.h
+  s_f1b588c9b33c23::t_a7dd6db6ef72cd 1-129
+src/editor/gui/panels/problems/tests/test_a11y.cpp
+  s_f1b588c9b33c23::t_5bffe8c4dd83b1 1-99
+src/editor/gui/panels/CMakeLists.txt
+  s_f1b588c9b33c23::t_01d1e7dab5e17e 8
+src/editor/gui/panels/problems/README.md
+  s_f1b588c9b33c23::t_2bdbffccc705cf 1-73
+src/editor/gui/panels/problems/include/context/editor/gui/panels/problems/problems_panel.h
+  s_06cfc2d554b11d::t_10359b829ca758 1-110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "a0a673c7666ad78e6dfed816c5c2483e7c3505de",
+  "prompts": {},
+  "sessions": {
+    "s_06cfc2d554b11d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a2b01cf5426e89683",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_f1b588c9b33c23": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a4eb82cb-6ccd-4aee-bd2d-a6f011d4d13a",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
