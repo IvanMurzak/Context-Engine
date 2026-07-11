@@ -429,6 +429,17 @@ add_subdirectory(render)
 # into this file merge cleanly (consumers name targets resolved at generate time regardless of order).
 add_subdirectory(editor/cef)
 
+# M5-F0b foundation: the CEF editor HOST + R-EDIT-001 extension contract + headless UI-logic tree +
+# minimal L-41 compositing seam + a11y hook (src/editor/gui/, issue #152; L-15 / L-41 / R-EDIT-001 /
+# R-UI-007 / R-A11Y-001 / R-SEC-007). The three headless libs (uitree / contract / compositor) build +
+# unit-test on the DEFAULT matrix; the CEF host is a CI-only dependency path behind CONTEXT_BUILD_GUI_CEF
+# (the editor-cef-smoke job), linking the F0a CEF substrate above. Added AFTER editor/cef so the shared
+# CEF acquisition (fetch + libcef_dll_wrapper) runs there first and the host reuses it. OWN stanza —
+# deliberately apart from the editor/runtime cluster + the exit-gate block below — so concurrent sibling
+# tasks inserting into this file merge cleanly (consumers name targets resolved at generate time
+# regardless of add_subdirectory order).
+add_subdirectory(editor/gui)
+
 # ---------------------------------------------------------------------------
 # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36): five integration tests, one per exit
 # criterion, registered as the `m1-exit-*` ctest family and CI-gated per the §6 tiering (blocking
