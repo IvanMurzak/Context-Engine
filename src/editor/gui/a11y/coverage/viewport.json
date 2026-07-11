@@ -1,0 +1,17 @@
+{
+  "_note": "M5-F1 defensive per-panel a11y coverage fragment (create-or-append). The M5-F6 a11y harness reconciles these via the append-only coverage.manifest.jsonl (which carries the matching builtin.viewport line + the registry.cpp registration); this per-panel file documents the panel's own gui-viewport-test_a11y coverage.",
+  "panel": "viewport",
+  "contribution_id": "builtin.viewport",
+  "source": "src/editor/gui/viewport/",
+  "requirements": ["R-A11Y-001", "R-EDIT-001", "R-UI-007", "R-HUX-011"],
+  "headless": true,
+  "cef_required": false,
+  "a11y_scan": {
+    "ctest": "gui-viewport-test_a11y",
+    "assertion": "uitree::audit_a11y() returns zero violations for the observer viewport across ready / adapter-absent / surface-unavailable / render-failed present states and empty vs populated scenes (including after re-framing)"
+  },
+  "keyboard_nav": {
+    "ctest": "gui-viewport-test_a11y",
+    "assertion": "uitree::focus_order() reaches the single focusable node (the frame-scene button) and the viewport.frame-scene command has a keyboard path (complete keyboard-only navigation)"
+  }
+}

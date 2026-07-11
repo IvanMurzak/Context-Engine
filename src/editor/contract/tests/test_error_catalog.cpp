@@ -206,5 +206,30 @@ int main()
         CHECK(unsupported->origin == "R-OBS-005");
     }
 
+    // --- M5-F1 native viewport panel reserved codes (issue #164) ---------------------------------
+    // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
+    // holds). The reserved viewport.* block the observer viewport mints: adapter_absent is
+    // unimplemented-class (the GPU adapter capability is absent in this environment); surface_unavailable
+    // + render_failed are internal-class fail-closed. All deterministic (a bare retry cannot conjure a
+    // GPU / surface / successful readback). The strings are the source-of-truth in
+    // src/editor/gui/viewport/viewport_model.h (context::editor::gui::viewport::kViewport*Code).
+    {
+        const ErrorCode* adapter = find_code("viewport.adapter_absent");
+        CHECK(adapter != nullptr);
+        CHECK(adapter->exit_code == 8); // unimplemented / capability-absent class
+        CHECK(adapter->retriable == false);
+        CHECK(adapter->origin == "R-HEAD-002");
+
+        for (const char* code : {"viewport.surface_unavailable", "viewport.render_failed"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 1);     // internal class (fail-closed)
+            CHECK(entry->retriable == false); // deterministic — a bare retry cannot help
+        }
+        CHECK(find_code("viewport.surface_unavailable")->origin == "R-UI-007");
+        CHECK(find_code("viewport.render_failed")->origin == "R-REND-002");
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

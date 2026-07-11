@@ -664,6 +664,7 @@ jobs:
           "$exe" golden triangle3d out/golden-native/triangle3d.ppm
           "$exe" golden sprite2d out/golden-native/sprite2d.ppm
           "$exe" golden lit3d out/golden-native/lit3d.ppm
+          "$exe" golden viewport out/golden-native/viewport.ppm
 
       - name: Golden-scene SSIM gate (native-vulkan-lavapipe, blocking)
         if: runner.os == 'Linux'
@@ -671,6 +672,7 @@ jobs:
           python3 tools/golden_compare.py --scene triangle3d --candidate out/golden-native/triangle3d.ppm
           python3 tools/golden_compare.py --scene sprite2d --candidate out/golden-native/sprite2d.ppm
           python3 tools/golden_compare.py --scene lit3d --candidate out/golden-native/lit3d.ppm
+          python3 tools/golden_compare.py --scene viewport --candidate out/golden-native/viewport.ppm
 
       # --- M4 T7 (issue #141): R-QA-007 min-spec floor bench, per-PR methodology proxy ---
       # MEASURE is BLOCKING: the representative lit3d subject must run green end-to-end under the

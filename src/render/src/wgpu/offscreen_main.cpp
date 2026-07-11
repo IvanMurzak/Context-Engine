@@ -11,6 +11,9 @@
 //   lit    — R-REND-004/006 GPU PBR proof: World -> extract -> shadow depth pass + lit main pass ->
 //            readback asserts vs the CPU reference (lighting/shadow/lightmap-hook deltas). Same
 //            exit convention as `render`.
+//   viewport — M5-F1 (issue #164): the observer viewport's "live scene (3D+2D)" composite — the 3D
+//            triangle base with the 2D sprites overlaid — read back + asserted (clear + 3D layer +
+//            2D-on-top). Same exit convention as `render`.
 //   golden <scene> <out.ppm>
 //          — M4 T7 (issue #141): render a golden-corpus scene (triangle3d | sprite2d | lit3d) and
 //            write the frame as binary PPM for the SSIM visual-equivalence gate
@@ -28,6 +31,7 @@
 #include "context/render/lit/lit_offscreen.h"
 #include "context/render/offscreen_scene.h"
 #include "context/render/sprite/sprite_offscreen.h"
+#include "context/render/viewport_scene.h"
 #include "context/render/wgpu/wgpu_rhi.h"
 
 #include <cstdint>
@@ -110,7 +114,7 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    if (mode == "render" || mode == "sprite" || mode == "lit")
+    if (mode == "render" || mode == "sprite" || mode == "lit" || mode == "viewport")
     {
         int exit_code = 0;
         std::unique_ptr<IDevice> device = acquire_device(*rhi, exit_code);
@@ -128,6 +132,10 @@ int main(int argc, char** argv)
         {
             pass = context::render::sprite::render_offscreen_sprite(*device);
         }
+        else if (mode == "viewport")
+        {
+            pass = render_offscreen_viewport(*device); // M5-F1: the 3D+2D observer composite (#164)
+        }
         else
         {
             pass = context::render::lit::render_offscreen_lit(*device);
@@ -141,7 +149,7 @@ int main(int argc, char** argv)
     {
         if (argc < 4)
         {
-            std::fprintf(stderr, "usage: %s golden <triangle3d|sprite2d|lit3d> <out.ppm>\n",
+            std::fprintf(stderr, "usage: %s golden <triangle3d|sprite2d|lit3d|viewport> <out.ppm>\n",
                          argv[0]);
             return 2;
         }
@@ -160,6 +168,10 @@ int main(int argc, char** argv)
         if (scene == "lit3d")
         {
             rendered = lit::render_golden_lit3d(*device, image);
+        }
+        else if (scene == "viewport")
+        {
+            rendered = render_golden_viewport(*device, image); // M5-F1 observer composite (#164)
         }
         else if (scene == "triangle3d" || scene == "sprite2d")
         {
@@ -248,8 +260,8 @@ int main(int argc, char** argv)
     }
 
     std::fprintf(stderr,
-                 "usage: %s [probe|render|sprite|lit|golden <scene> <out.ppm>|bench [frames] "
-                 "[warmup] [WxH]]\n",
+                 "usage: %s [probe|render|sprite|lit|viewport|golden <scene> <out.ppm>|bench "
+                 "[frames] [warmup] [WxH]]\n",
                  argv[0]);
     return 2;
 }

@@ -8,3 +8,4 @@
 {"id": "placeholder", "title": "Context Editor", "owner": "M5-F0b", "requires": ["semantic-scan", "keyboard-nav"]}
 {"id": "builtin.scene-tree", "title": "Scene Tree", "owner": "M5-F2", "requires": ["semantic-scan", "keyboard-nav"]}
 {"id": "builtin.inspector", "title": "Inspector", "owner": "M5-F3", "requires": ["semantic-scan", "keyboard-nav"]}
+{"id": "builtin.viewport", "title": "Viewport", "owner": "M5-F1", "requires": ["semantic-scan", "keyboard-nav"]}

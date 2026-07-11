@@ -48,6 +48,17 @@
         "native-metal": "advisory"
       },
       "description": "The representative T1 scene: World -> extract -> shadow pass + PBR main pass. Gradients + shadow edges - tolerance absorbs software-rasterizer depth/float differences. Browser coverage joins when the lit web proof lands (src/render/web/README.md § follow-ups); web T1 equivalence is gated today by triangle3d + sprite2d plus the shared-WGSL construction."
+    },
+    "viewport": {
+      "file": "viewport.ppm",
+      "min_ssim": 0.995,
+      "size": "256x256",
+      "renderer": "viewport_scene.h::render_golden_viewport (the M5-F1 observer viewport composite: the 3D triangle base + the R-2D-001 sprites overlaid on top, one frame)",
+      "backends": {
+        "native-vulkan-lavapipe": "blocking",
+        "native-metal": "advisory"
+      },
+      "description": "The M5-F1 observer-viewport composite (issue #164): the 'live scene (3D+2D)' the native viewport panel renders over context_render(_wgpu) composited via the L-41 seam - the T1 3D triangle (triangle3d) as the base layer with the T1 2D sprites (sprite2d) painted on top. Flat colors, opaque replace, no MSAA - tight tolerance. Native-only (like lit3d); web T1 equivalence is gated by the triangle3d + sprite2d browser goldens plus the shared-WGSL construction (the composite reuses those exact primitives, so equivalence within the T1 feature set follows). The committed baseline is the sprite-over-triangle-over-clear composite of the triangle3d + sprite2d goldens - byte-identical to `context_render_wgpu_offscreen golden viewport` (no blend / no MSAA), which the CI render job re-renders and SSIM-gates on every PR."
     }
   }
 }
