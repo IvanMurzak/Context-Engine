@@ -1,0 +1,21 @@
+src/editor/gui/compositor/tests/test_surface.cpp
+  s_6aeb7bc4121d51::t_9b0be32d726d15 85
+src/editor/gui/compositor/tests/compositor_test.h
+  s_6aeb7bc4121d51::t_5eff67c23c892e 26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "5c101384e74f94899b01f2c8ec2552eddc0cc891",
+  "prompts": {},
+  "sessions": {
+    "s_6aeb7bc4121d51": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0a40a86c-85ea-46ce-9e1b-05c168544fca",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
