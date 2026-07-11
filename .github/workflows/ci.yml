@@ -1044,6 +1044,22 @@ jobs:
           ctest --preset dev -R "^gui-uitree-test_a11y$" --output-on-failure
         working-directory: src
 
+      # M5-F6 (R-A11Y-001, issue #154): the hardened a11y ENFORCEMENT gate over the F0b hook above.
+      # Build + run the headless per-panel harness (context_gui_a11y_scan — semantic/ARIA audit +
+      # keyboard-only focus order over every REGISTERED panel; the gui-a11y-* ctests also run on the
+      # default 3-OS `build` matrix, so Windows/macOS a11y is covered there), then dump the report and
+      # run tools/a11y_scan.py for the axe-class DOM re-scan + coverage-manifest cross-check. Pure
+      # stdlib + headless (no CEF, no xvfb needed). BLOCKING on the Linux leg per the M5 exit.
+      - name: a11y enforcement gate (per-panel scan + keyboard-nav + coverage, Linux blocking)
+        if: runner.os == 'Linux'
+        run: |
+          cmake --build --preset dev --target context_gui_a11y_scan context_gui_a11y_test_harness
+          ctest --preset dev -R "^gui-a11y-" --output-on-failure
+          a11y_scan_exe="$(find build/dev -type f -name context_gui_a11y_scan | head -n1)"
+          "$a11y_scan_exe" --out build/dev/a11y-report.json
+          python3 ../tools/a11y_scan.py --report build/dev/a11y-report.json --manifest editor/gui/a11y/coverage.manifest.jsonl
+        working-directory: src
+
       - name: Build the CEF editor host
         run: cmake --build --preset dev --target context_gui_host
         working-directory: src

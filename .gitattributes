@@ -13,6 +13,12 @@
 tools/tests/fixtures/** -text
 *.sig -text
 
+# M5-F6 a11y coverage manifest (R-A11Y-001): an append-only shared anchor (one JSON object per
+# line). Concurrent M5 panel waves each append their panel entry; union-merge makes disjoint appends
+# conflict-free (a panel is "covered" only once it appears here AND in registered_panels() —
+# tools/a11y_scan.py cross-checks the two).
+src/editor/gui/a11y/coverage.manifest.jsonl merge=union
+
 # Binary assets — never normalize.
 *.png binary
 *.jpg binary

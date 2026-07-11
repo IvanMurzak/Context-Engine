@@ -1,0 +1,9 @@
+# M5-F6 a11y coverage manifest (R-A11Y-001) — the append-only shared anchor every M5 editor panel
+# registers into. One JSON object per line (JSON Lines). A panel is "covered" only when it appears
+# HERE and in registered_panels() (src/editor/gui/a11y/registry.cpp); tools/a11y_scan.py cross-checks
+# the two on every PR. Blank lines and lines starting with '#' are ignored. Concurrent M5 waves
+# union-merge their appends (see .gitattributes: merge=union) — keep one panel per line so appends
+# never collide. Fields: id (matches the registry id), title, owner (the task that added it),
+# requires (the checks the panel must pass).
+{"id": "placeholder", "title": "Context Editor", "owner": "M5-F0b", "requires": ["semantic-scan", "keyboard-nav"]}
+{"id": "builtin.scene-tree", "title": "Scene Tree", "owner": "M5-F2", "requires": ["semantic-scan", "keyboard-nav"]}
