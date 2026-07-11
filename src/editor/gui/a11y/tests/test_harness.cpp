@@ -119,16 +119,23 @@ int main()
         const std::vector<a11y::RegisteredPanel> panels = a11y::registered_panels();
         CHECK(!panels.empty());
         bool saw_placeholder = false;
+        bool saw_scene_tree = false;
         for (const a11y::RegisteredPanel& rp : panels)
         {
             if (rp.id == "placeholder")
             {
                 saw_placeholder = true;
             }
+            if (rp.id == "builtin.scene-tree")
+            {
+                saw_scene_tree = true;
+            }
             PanelReport r = a11y::scan_panel(rp.id, rp.factory());
             CHECK(r.passed);
         }
         CHECK(saw_placeholder);
+        // M5-F2 scene-tree panel is registered + scanned (issue #154 Coordination clause).
+        CHECK(saw_scene_tree);
     }
 
     A11Y_TEST_MAIN_END();

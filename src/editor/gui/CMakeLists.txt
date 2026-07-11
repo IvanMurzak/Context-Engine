@@ -15,18 +15,19 @@ add_subdirectory(uitree)
 add_subdirectory(contract)
 add_subdirectory(compositor)
 
-# M5-F6 (issue #154): the a11y enforcement harness (context_gui_a11y) — the headless per-panel
-# accessibility gate built ON uitree. Unconditional (CEF-free), so it builds + tests on the default
-# 3-OS matrix + local dev gate; the editor-cef-smoke CI job additionally runs tools/a11y_scan.py over
-# its report. Added after uitree (which it links). M5 fan-out panels add their own add_subdirectory
-# stanza here (this file is the shared sub-anchor).
-add_subdirectory(a11y)
-
 # The M5 built-in panels (panels/) — headless libraries built ON uitree + the R-EDIT-001 contract,
 # default-built + unit-tested on the 3-OS matrix WITHOUT CEF (M5-F2 scene-tree onward). Added here,
 # after the three headless libs it builds on and before the CEF host toggle, so the panels are part
-# of the default gate.
+# of the default gate. Added BEFORE a11y, which links + scans each registered panel.
 add_subdirectory(panels)
+
+# M5-F6 (issue #154): the a11y enforcement harness (context_gui_a11y) — the headless per-panel
+# accessibility gate built ON uitree. Unconditional (CEF-free), so it builds + tests on the default
+# 3-OS matrix + local dev gate; the editor-cef-smoke CI job additionally runs tools/a11y_scan.py over
+# its report. Added after uitree + panels — it links each registered panel lib to instantiate + scan
+# it. M5 fan-out panels register into a11y/registry.cpp + coverage.manifest.jsonl (the shared
+# sub-anchors) and add their lib to a11y/CMakeLists.txt.
+add_subdirectory(a11y)
 
 # The CEF editor host + the per-OS editor-cef-smoke boot (host/). Behind CONTEXT_BUILD_GUI_CEF (the
 # same toggle the F0a substrate uses). MUST be added AFTER src/editor/cef in src/CMakeLists.txt so the

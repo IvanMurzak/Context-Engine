@@ -3,6 +3,7 @@
 
 #include "context/editor/gui/a11y/registry.h"
 
+#include "context/editor/gui/panels/scenetree/scene_tree_panel.h"
 #include "context/editor/gui/uitree/builtin.h"
 #include "context/editor/gui/uitree/panel.h"
 
@@ -18,6 +19,15 @@ std::vector<RegisteredPanel> registered_panels()
 
     // --- M5 fan-out panels append their RegisteredPanel BELOW (one entry each). Keep in lockstep
     //     with coverage.manifest.jsonl — tools/a11y_scan.py cross-checks the two on every PR. ---
+
+    // M5-F2 — the scene-tree observer panel (gui/panels/scenetree/). The harness scans its default
+    // (empty-world) rendered state, exactly as it scans the placeholder's default; the panel's own
+    // gui-panel-scenetree-test_a11y ctest additionally covers its populated / deep / overridden
+    // worlds. Registered here per issue #154's Coordination clause ("if F2 lands its panel first,
+    // this harness must scan it") now that M5-F2 (#156) has landed on main.
+    panels.push_back(RegisteredPanel{
+        panels::scenetree::SceneTreePanel::kContributionId,
+        []() { return panels::scenetree::SceneTreePanel{}.build_panel(); }});
 
     return panels;
 }

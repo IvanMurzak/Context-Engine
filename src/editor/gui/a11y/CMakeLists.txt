@@ -14,11 +14,14 @@ add_library(context_gui_a11y STATIC
 target_include_directories(context_gui_a11y PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # context_gui_uitree is PUBLIC: harness.h / registry.h expose uitree::Panel / uitree::A11yViolation in
-# their public API (the registry maps ids to headless panel factories). context_warnings is PRIVATE so
-# no warning flags leak to the CEF host consumer (conventions.md). NO new third-party dependency.
+# their public API (the registry maps ids to headless panel factories). context_gui_panel_scenetree is
+# PRIVATE — registry.cpp instantiates the M5-F2 panel to scan it, but the panel type never appears in
+# a11y's public headers (registry.h maps ids to uitree::Panel factories). Each M5 fan-out panel the
+# registry scans adds its lib here likewise. context_warnings is PRIVATE so no warning flags leak to
+# the CEF host consumer (conventions.md). NO new third-party dependency.
 target_link_libraries(context_gui_a11y
     PUBLIC context_gui_uitree
-    PRIVATE context_warnings)
+    PRIVATE context_gui_panel_scenetree context_warnings)
 
 # harness.cpp uses std::ostringstream and the scan exe uses std::ofstream, so static-link the GCC
 # runtime (gated to GNU) to keep the local ctest gate deterministic against a PATH-shadowed

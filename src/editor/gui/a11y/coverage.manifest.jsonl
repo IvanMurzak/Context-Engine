@@ -6,3 +6,4 @@
 # never collide. Fields: id (matches the registry id), title, owner (the task that added it),
 # requires (the checks the panel must pass).
 {"id": "placeholder", "title": "Context Editor", "owner": "M5-F0b", "requires": ["semantic-scan", "keyboard-nav"]}
+{"id": "builtin.scene-tree", "title": "Scene Tree", "owner": "M5-F2", "requires": ["semantic-scan", "keyboard-nav"]}
