@@ -1,0 +1,17 @@
+{
+  "_note": "M5-F5 defensive per-panel a11y coverage fragment (create-or-append). The M5-F6 a11y harness reconciles these via the append-only coverage.manifest.jsonl (which carries the matching builtin.playbar line + the registry.cpp registration); this per-panel file documents the panel's own gui-playbar-test_a11y coverage.",
+  "panel": "playbar",
+  "contribution_id": "builtin.playbar",
+  "source": "src/editor/gui/playbar/",
+  "requirements": ["R-A11Y-001", "R-EDIT-001", "R-PLAY-001", "R-PLAY-003", "R-PLAY-004", "R-HUX-011"],
+  "headless": true,
+  "cef_required": false,
+  "a11y_scan": {
+    "ctest": "gui-playbar-test_a11y",
+    "assertion": "uitree::audit_a11y() returns zero violations for the playbar across edit / playing / paused states, after an error, and with a populated observed play frame (the L-51 loud play-mode indicator surfaces as labelled status text, never an unlabelled node)"
+  },
+  "keyboard_nav": {
+    "ctest": "gui-playbar-test_a11y",
+    "assertion": "uitree::focus_order() reaches all four transport controls and the play.play / play.pause / play.stop / play.step commands each have a keyboard path (complete keyboard-only navigation)"
+  }
+}

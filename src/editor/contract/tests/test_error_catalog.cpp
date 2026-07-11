@@ -231,5 +231,35 @@ int main()
         CHECK(find_code("viewport.render_failed")->origin == "R-REND-002");
     }
 
+    // --- M5-F5 play-in-editor playbar reserved codes (issue #166) --------------------------------
+    // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
+    // holds). The reserved play.* block the playbar mints: not_running is usage-class (a control issued
+    // with no live session); session_failed + step_failed are internal-class fail-closed; hot_reload_
+    // failed is validation-class. All deterministic (a bare retry cannot help). The strings are the
+    // source-of-truth in src/editor/gui/playbar/playbar_model.h (context::editor::gui::playbar::kPlay*Code).
+    {
+        const ErrorCode* not_running = find_code("play.not_running");
+        CHECK(not_running != nullptr);
+        CHECK(not_running->exit_code == 2); // usage class
+        CHECK(not_running->retriable == false);
+        CHECK(not_running->origin == "R-PLAY-001");
+
+        for (const char* code : {"play.session_failed", "play.step_failed"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 1);     // internal class (fail-closed)
+            CHECK(entry->retriable == false); // deterministic
+        }
+        CHECK(find_code("play.session_failed")->origin == "R-PLAY-001");
+        CHECK(find_code("play.step_failed")->origin == "R-PLAY-002");
+
+        const ErrorCode* hot_reload = find_code("play.hot_reload_failed");
+        CHECK(hot_reload != nullptr);
+        CHECK(hot_reload->exit_code == 5); // validation class
+        CHECK(hot_reload->retriable == false);
+        CHECK(hot_reload->origin == "R-PLAY-003");
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

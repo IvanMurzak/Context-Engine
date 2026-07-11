@@ -28,6 +28,15 @@ add_subdirectory(panels)
 # golden-scene equivalence are the render-layer proof (src/render/viewport_scene.h + goldens/).
 add_subdirectory(viewport)
 
+# The M5-F5 play-in-editor PLAYBAR (playbar/) — a headless library built ON uitree + the runtime
+# session (context_session) + the render extract (context_render), default-built + unit-tested on the
+# 3-OS matrix WITHOUT CEF (issue #166). Drives session-control (play/pause/stop/step) over
+# src/runtime/session/, honors the L-51 edit/play split + L-22 hot reload, and yields the rendered play
+# frame the F1 viewport observes (the SAME render::RenderSnapshot — no second render path). Added after
+# viewport (its panel test links context_gui_viewport to assert the play->viewport path) and BEFORE
+# a11y, which links + scans the registered playbar panel. Mints the reserved play.* codes.
+add_subdirectory(playbar)
+
 # The M5 GUI SESSION-state surfaces (session/) — headless affordances layered on the panel write
 # seams (R-FILE-006 ephemeral session state). Added AFTER panels/ because M5-F7 session undo/redo
 # (session/undo/, issue #162) builds ON context_gui_panel_inspector's L-30 commit engine + gateway

@@ -5,6 +5,8 @@
 
 #include "context/editor/gui/panels/inspector/inspector_panel.h"
 #include "context/editor/gui/panels/scenetree/scene_tree_panel.h"
+#include "context/editor/gui/playbar/playbar_model.h"
+#include "context/editor/gui/playbar/playbar_panel.h"
 #include "context/editor/gui/uitree/builtin.h"
 #include "context/editor/gui/uitree/panel.h"
 #include "context/editor/gui/viewport/viewport_panel.h"
@@ -49,6 +51,15 @@ std::vector<RegisteredPanel> registered_panels()
     panels.push_back(RegisteredPanel{
         viewport::ViewportPanel::kContributionId,
         []() { return viewport::ViewportPanel{}.build_panel(); }});
+
+    // M5-F5 — the play-in-editor playbar panel (gui/playbar/). The harness scans its default (edit-mode,
+    // no live session) rendered state, exactly as it scans the placeholder / scene-tree / inspector /
+    // viewport defaults; the panel's own gui-playbar-test_a11y ctest additionally covers its playing /
+    // paused / error states. Registered per issue #166 + the M5-F6 harness contract (coverage.manifest.
+    // jsonl carries the matching builtin.playbar line). Completes the M5 observer fan-out (F1-F7).
+    panels.push_back(RegisteredPanel{
+        playbar::PlaybarModel::kContributionId,
+        []() { return playbar::build_playbar_panel(playbar::PlaybarModel{}); }});
 
     return panels;
 }

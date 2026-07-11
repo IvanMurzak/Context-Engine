@@ -501,6 +501,34 @@ const std::vector<ErrorCode>& catalog()
         {"viewport.render_failed",
          "The observer viewport's scene render or pixel readback failed (R-REND-002).", false,
          kExitInternal, "R-REND-002"},
+        // --- M5-F5 play-in-editor playbar (issue #166: R-PLAY-001/002/003, L-51 / L-22) --------------
+        // The reserved play.* error-domain block the playbar mints (M5-F5 is this leg's single
+        // code-minter). The strings are DEFINED in src/editor/gui/playbar/playbar_model.h as
+        // context::editor::gui::playbar::kPlay*Code (the same promote-a-local-string pattern as the
+        // viewport's kViewport*Code / bridge's scope.denied / runtime/ts's kTs*Code — so the GUI playbar
+        // lib does not link this contract layer) and this catalog registers them. not_running is a usage
+        // guard (a control verb issued with no live session); session_failed / step_failed are
+        // internal-class fail-closed (the play session could not start / could not advance);
+        // hot_reload_failed is validation-class (a live authored edit could not be reflected into the
+        // running session, L-22). All deterministic (a bare retry cannot conjure a session, a successful
+        // step, or a valid reload). Additive-only (protocolMajor stays 0): NEW rows appended at the END,
+        // no existing row reordered/renamed.
+        {"play.not_running",
+         "A play control (pause / step / hot-reload) was issued with no live play session; start play "
+         "first (L-51 edit state).",
+         false, kExitUsage, "R-PLAY-001"},
+        {"play.session_failed",
+         "The play session could not be started over the edit state; nothing was played and no authored "
+         "file was written (L-51 fail-closed).",
+         false, kExitInternal, "R-PLAY-001"},
+        {"play.step_failed",
+         "Advancing the running play session by a fixed tick failed; the session state is unchanged "
+         "(R-SIM-002 fail-closed).",
+         false, kExitInternal, "R-PLAY-002"},
+        {"play.hot_reload_failed",
+         "A live authored edit could not be reflected into the running play session (L-22 hot reload); "
+         "the running session is unchanged.",
+         false, kExitValidation, "R-PLAY-003"},
     };
     return the_catalog;
 }
