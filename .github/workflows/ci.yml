@@ -967,3 +967,100 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: ${SCCACHE_PATH} --show-stats
+
+  # M5-F0b CEF editor host boot smoke (src/editor/gui/, issue #152; R-EDIT-001 / R-UI-007 / L-41 /
+  # R-A11Y-001 / R-SEC-007): boot the CEF editor HOST headless, register the built-in placeholder panel
+  # through the R-EDIT-001 extension contract, attach the capability-scoped bridge + run ONE command,
+  # select the L-41 surface mode, RENDER the placeholder panel, exit 0 (`editor-cef-smoke-boot` ctest).
+  # Distinct from cef-substrate (M5-F0a), which only proves the CEF fetch/link/headless boot with NO
+  # host / panels / RPC. This job is the editor-host boot smoke the M5 exit criterion requires per OS.
+  #
+  # A CI-only dependency path like cef-substrate: the MSVC/Clang-ABI CEF prebuilt cannot link under the
+  # local Strawberry-GCC dev gate, so the host is built + booted ONLY here behind -DCONTEXT_BUILD_GUI_CEF
+  # =ON. The three headless gui libs it links (uitree/contract/compositor) are ALSO unit-tested WITHOUT
+  # CEF on the default `build` matrix (ctest gui-*). Policy: Linux is the primary boot leg (BLOCKING per
+  # the M5 exit — headless under xvfb, GPU disabled); Windows rides the self-hosted MSVC runner (no new
+  # Windows GPU legs — GPU disabled, hard-exit after success to skip CEF's flaky Session-0 teardown);
+  # macOS boots the bundled app (arm64). Models cef-substrate verbatim (CEF fetch + apt deps + xvfb +
+  # per-PID root_cache_path + version-keyed cache), so the two jobs share the fetched CEF cache.
+  editor-cef-smoke:
+    name: editor-cef-smoke (${{ matrix.os }})
+    needs: [license-gate, python-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
+        if: runner.os == 'Windows' && runner.environment == 'self-hosted'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $out = cmd /c "`"$vs\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 -no_logo && set"
+          foreach ($name in 'PATH','INCLUDE','LIB','LIBPATH') {
+            $line = ($out | Where-Object { $_ -like "$name=*" } | Select-Object -First 1)
+            if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+          }
+          "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      # Version-keyed cache of the fetched + extracted CEF distribution — the SAME key as cef-substrate
+      # so the two CEF jobs share one download. Keyed on the pin manifest hash (a pin bump re-fetches).
+      - name: CEF prebuilt cache
+        uses: actions/cache@v6
+        with:
+          path: src/build/dev/_cef
+          key: cef-prebuilt-${{ runner.os }}-${{ hashFiles('tools/cef-prebuilt.json') }}
+
+      # CEF's Linux runtime dependencies + xvfb (windowless CEF still needs an X display to init its
+      # ozone/X11 backend on Linux). Retry-wrapped like cef-substrate.
+      - name: Install CEF runtime deps + xvfb (Linux)
+        if: runner.os == 'Linux'
+        run: >
+          bash tools/ci-retry.sh -- bash -c 'sudo apt-get update && sudo apt-get install -y
+          libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0
+          libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2
+          libasound2t64 libatspi2.0-0 libxshmfence1 libx11-dev xvfb'
+
+      - name: Configure (dev preset + CEF GUI host)
+        run: cmake -S src --preset dev -DCONTEXT_BUILD_GUI_CEF=ON
+
+      # a11y-harness HOOK (R-A11Y-001): the headless automated accessibility + keyboard-only navigation
+      # audit over the placeholder panel's UI-logic tree (gui-uitree-test_a11y), run here per-OS as the
+      # M5 a11y gate hook. A later task HARDENS it with the CEF/axe DOM scan + a real keyboard-driver
+      # test against the booted host DOM; the headless audit is the present, green hook.
+      - name: a11y-harness hook (headless a11y + keyboard-nav audit)
+        run: |
+          cmake --build --preset dev --target context_gui_uitree_test_a11y
+          ctest --preset dev -R "^gui-uitree-test_a11y$" --output-on-failure
+        working-directory: src
+
+      - name: Build the CEF editor host
+        run: cmake --build --preset dev --target context_gui_host
+        working-directory: src
+
+      # Boot the CEF editor host headless and assert exit 0. Linux runs under xvfb; macOS + Windows run
+      # the bundled/staged binary directly (GPU disabled — no adapter required anywhere).
+      - name: Editor-host boot smoke ctest (Linux, headless under xvfb)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a ctest --preset dev -R "^editor-cef-smoke-" --output-on-failure
+        working-directory: src
+
+      - name: Editor-host boot smoke ctest (macOS / Windows)
+        if: runner.os != 'Linux'
+        run: ctest --preset dev -R "^editor-cef-smoke-" --output-on-failure
+        working-directory: src
+
+      - name: sccache stats
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ${SCCACHE_PATH} --show-stats
