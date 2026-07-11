@@ -82,5 +82,5 @@ int main()
               m == CompositingMode::iosurface);
     }
 
-    UITREE_TEST_MAIN_END();
+    COMPOSITOR_TEST_MAIN_END();
 }

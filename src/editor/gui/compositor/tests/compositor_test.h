@@ -23,4 +23,4 @@ inline void fail(const char* file, int line, const char* expr)
             ctest::fail(__FILE__, __LINE__, #cond);                                                \
     } while (false)
 
-#define UITREE_TEST_MAIN_END() return ctest::g_failures == 0 ? 0 : 1
+#define COMPOSITOR_TEST_MAIN_END() return ctest::g_failures == 0 ? 0 : 1
