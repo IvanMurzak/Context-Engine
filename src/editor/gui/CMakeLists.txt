@@ -15,6 +15,13 @@ add_subdirectory(uitree)
 add_subdirectory(contract)
 add_subdirectory(compositor)
 
+# M5-F6 (issue #154): the a11y enforcement harness (context_gui_a11y) — the headless per-panel
+# accessibility gate built ON uitree. Unconditional (CEF-free), so it builds + tests on the default
+# 3-OS matrix + local dev gate; the editor-cef-smoke CI job additionally runs tools/a11y_scan.py over
+# its report. Added after uitree (which it links). M5 fan-out panels add their own add_subdirectory
+# stanza here (this file is the shared sub-anchor).
+add_subdirectory(a11y)
+
 # The CEF editor host + the per-OS editor-cef-smoke boot (host/). Behind CONTEXT_BUILD_GUI_CEF (the
 # same toggle the F0a substrate uses). MUST be added AFTER src/editor/cef in src/CMakeLists.txt so the
 # shared CEF acquisition (fetch + libcef_dll_wrapper) runs there first; host/ reuses it (see
