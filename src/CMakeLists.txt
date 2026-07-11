@@ -142,6 +142,17 @@ add_subdirectory(common)
 # `context_spatial` target, which CMake resolves at generate time regardless of add_subdirectory order).
 add_subdirectory(packages/spatial)
 
+# M6-F0b foundation: the shared no-alloc DETERMINISTIC sim-math library (src/packages/simmath/,
+# R-SIM-008 math half, issue #172) — the ONE fixed-point vector/quaternion/transform + deterministic
+# transcendental (sin/cos/tan/sqrt/atan/atan2) library every M6 sim package composes on. Integer-only
+# by law (Q16 int64, no float, no platform libm), so its results fold into the L-54 hierarchical state
+# hash bit-identically across the determinism matrix. It is a PACKAGE, not kernel core (R-KERNEL-001 /
+# L-60): it composes on context_kernel and the kernel never links back. Wired here immediately after
+# packages/spatial (its sibling package) and deliberately far from the editor/runtime clusters and the
+# file tail, so concurrent sibling tasks inserting elsewhere merge cleanly (consumers name the
+# `context_simmath` target, which CMake resolves at generate time regardless of add_subdirectory order).
+add_subdirectory(packages/simmath)
+
 # M2: the REAL canonical-JSON serializer (src/editor/serializer/, issue #42) — R-FILE-001/L-32:
 # strict JSON parse -> NFC-normalized canonical bytes + the canonical-content hash. Dependency-free
 # (stdlib only); wired BEFORE editor/derivation, whose canonical-parse node delegates to it.

@@ -23,6 +23,7 @@ target_link_libraries(context_kernel PRIVATE context_warnings)
 set(_context_kernel_tests
     test_world
     test_world_raw
+    test_world_replication
     test_command_buffer
     test_scheduler
     test_module_registry

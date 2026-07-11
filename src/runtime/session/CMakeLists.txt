@@ -47,6 +47,7 @@ set(_context_session_static_runtime
 # carries no C++ test framework). tests/session_test.h is the tiny CHECK() harness.
 set(_context_session_tests
     test_sim_component
+    test_package_sim_component
     test_state_hash
     test_session
     test_session_state
