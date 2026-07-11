@@ -1,0 +1,29 @@
+tools/a11y_scan.py
+  s_844c06e0e5a07d::t_ed33b4e9d29c80 132-139
+tools/tests/test_a11y_scan.py
+  s_b70f76653c38a0::t_53cfb84481034c 186-193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "b997aec4aadcda744261f90ca3b94b36cf511b19",
+  "prompts": {},
+  "sessions": {
+    "s_844c06e0e5a07d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "29a3a35c-4ec8-495e-9122-2e4106577dd4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_b70f76653c38a0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "30d82811-e706-433d-b6f2-6d53ec6adfc7",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
