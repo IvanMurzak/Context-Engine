@@ -183,6 +183,14 @@ def test_gate_missing_panels_array_raises():
         a11y_scan.gate({}, {"placeholder": {"id": "placeholder"}})
 
 
+def test_gate_panel_without_id_raises():
+    # a report panel missing its 'id' is a malformed report -> clean config error (ValueError ->
+    # main() exit 2), not an uncaught TypeError from sorting a None panel id.
+    report = {"panels": [{"title": "no id here", "passed": True}]}
+    with pytest.raises(ValueError):
+        a11y_scan.gate(report, {"placeholder": {"id": "placeholder"}})
+
+
 # ---------------------------------------------------------------------------
 # CLI exit codes
 # ---------------------------------------------------------------------------

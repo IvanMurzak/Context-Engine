@@ -129,7 +129,14 @@ def gate(report: dict, manifest: dict[str, dict]) -> dict:
     panels = report.get("panels")
     if not isinstance(panels, list):
         raise ValueError("report has no 'panels' array")
-    report_panels = {p.get("id"): p for p in panels if isinstance(p, dict)}
+    report_panels: dict[str, dict] = {}
+    for p in panels:
+        if not isinstance(p, dict):
+            continue
+        pid = p.get("id")
+        if not isinstance(pid, str) or not pid:
+            raise ValueError(f"report panel missing a non-empty string 'id': {p!r}")
+        report_panels[pid] = p
 
     declared = set(manifest.keys())
     scanned = set(report_panels.keys())
