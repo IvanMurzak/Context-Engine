@@ -168,4 +168,28 @@ private:
     CommitResult last_result_;
 };
 
+// The shared L-20/L-30 override-write commit engine: attempt `request` through `gateway` CAS-guarded
+// on `base_raw_hash`, then — under a concurrent-writer `cas.mismatch` — apply the L-30 rebase-or-drop
+// policy at FIELD-PATH granularity. `collision_base` is the value the field is expected to currently
+// hold (the caller's snapshot base): after a mismatch the engine re-reads (root_scene, id_path,
+// pointer) and, if the current value STILL equals `collision_base`, the external change touched an
+// UNRELATED field, so it rebases onto the new state and retries (bounded); if the current value
+// DIFFERS, the same field path collided, so it drops LOUDLY (a `cas.mismatch` diagnostic, never a
+// silent overwrite). Pure over the gateway seam, total (never throws), and owns NO panel/journal
+// state — the ONE implementation of the L-30 policy, shared by the inspector's gesture commit and the
+// session undo/redo replay (R-HUX-001: undo replays through the SAME CAS + rebase-or-drop path).
+//
+// The returned CommitResult carries `pointer` = `pointer`; on applied/rebased the landed file +
+// written pointer + new raw hash; on a drop the current raw hash + the loud `cas.mismatch` code and
+// message; on a write-path refusal (neither applied nor a CAS mismatch) Status::error + the code. The
+// caller updates its own CAS token from `result.raw_hash` (applied/rebased/dropped) and decides
+// whether to keep its staged/queued edit (an error keeps it; a drop consumes it).
+[[nodiscard]] CommitResult commit_override_write(const OverrideWriteGateway& gateway,
+                                                 const compose::WriteRequest& request,
+                                                 const std::string& root_scene,
+                                                 const std::vector<std::string>& id_path,
+                                                 const std::string& pointer,
+                                                 const serializer::JsonValue& collision_base,
+                                                 std::uint64_t base_raw_hash);
+
 } // namespace context::editor::gui::panels::inspector
