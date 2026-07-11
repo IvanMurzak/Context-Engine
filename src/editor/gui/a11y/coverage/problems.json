@@ -1,0 +1,17 @@
+{
+  "_note": "M5-F4 defensive per-panel a11y coverage fragment (create-or-append). The M5-F6 a11y harness reconciles these fragments via append-only union-merge; a per-panel filename keeps F4/F6 conflict-free. If F6 landed a monolithic manifest instead, ingest src/editor/gui/a11y/coverage/*.json.",
+  "panel": "problems",
+  "contribution_id": "builtin.problems",
+  "source": "src/editor/gui/panels/problems/",
+  "requirements": ["R-A11Y-001", "R-EDIT-001", "R-HUX-005"],
+  "headless": true,
+  "cef_required": false,
+  "a11y_scan": {
+    "ctest": "gui-panel-problems-test_a11y",
+    "assertion": "uitree::audit_a11y() returns zero violations for the Problems panel across empty / navigable / provisional / grouped / non-navigable diagnostic sets (including with an active navigation target)"
+  },
+  "keyboard_nav": {
+    "ctest": "gui-panel-problems-test_a11y",
+    "assertion": "uitree::focus_order() reaches every rendered diagnostic row and the problems.navigate command has a keyboard path (complete keyboard-only navigation)"
+  }
+}

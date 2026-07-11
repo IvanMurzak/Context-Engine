@@ -5,3 +5,4 @@
 # on their OWN line so concurrent sibling tasks inserting here merge cleanly.
 
 add_subdirectory(scenetree)
+add_subdirectory(problems)
