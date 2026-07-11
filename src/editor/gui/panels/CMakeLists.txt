@@ -6,3 +6,4 @@
 
 add_subdirectory(scenetree)
 add_subdirectory(problems)
+add_subdirectory(inspector)
