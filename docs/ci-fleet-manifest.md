@@ -74,6 +74,9 @@ Every gate carries exactly one written red-X policy:
 | `golden-scene-native-linux` | R-REND-002 | gh-ubuntu-shared | per-PR | blocking | `render` |
 | `golden-scene-web-chromium` | R-REND-002 | gh-ubuntu-shared | per-PR | blocking | `render-web` |
 | `m4-exit-headless-no-render` | R-HEAD-002 | gh-ubuntu-shared | per-PR | blocking | `build` |
+| `m5-exit-walkthrough` | R-EDIT-001 | gh-ubuntu-shared | per-PR | blocking | `build` |
+| `m5-exit-a11y-coverage` | R-A11Y-001 | gh-ubuntu-shared | per-PR | blocking | `build` |
+| `m5-exit-seam-checklist` | R-EDIT-001 | gh-ubuntu-shared | per-PR | blocking | `build` |
 | `minspec-floor-proxy-measure` | R-QA-007 | gh-ubuntu-shared | per-PR | blocking | `render` |
 | `minspec-floor-proxy-gate` | R-QA-007 | gh-ubuntu-shared | per-PR | **advisory** | `render` |
 | `minspec-floor-desktop` | R-QA-007 | minspec-desktop-proxy | nightly | **advisory** ⏳ | — |
@@ -116,6 +119,21 @@ manifest's `minspec_floors` section (Android trailing / iOS v2 = explicitly N/A)
 proxy pair measures the lit3d subject on lavapipe under the R-QA-009 discipline
 (`bench/minspec_floor.py`, measure blocking / floor gate advisory-until-provisioned), and each
 platform's nightly floor row activates when its named runner class provisions.
+
+**The M5 exit trio (issue #168, ROADMAP §1 M5 Exit):** the three `m5-exit-*` gates are the
+observer-editor milestone-closing mirror of the M1/M2/M4 gates — the `m5-exit-*` ctest family under
+`src/tests/integration/`, run by the dedicated "M5 exit gate" step of the `build` job on all three OS
+legs (representative leg shown), driving the LANDED headless editor-GUI panels with no CEF / no GPU /
+no daemon. `m5-exit-walkthrough` is the headless end-to-end user journey (open a project → inspect via
+scene-tree F2 / inspector F3 / Problems F4 → play F5 → override-edit F3 → undo F7 → the F1 viewport
+observes the SAME render snapshot; the R-HUX-011 human-loops are measured from instrumented timestamps,
+a SHOULD recorded in `docs/human-latency-budget.md`). `m5-exit-a11y-coverage` asserts every editor
+panel is a11y-clean + keyboard-navigable AND the a11y registry matches `coverage.manifest.jsonl` (the
+exit registered the historically-missing F4 Problems, completing the manifest). `m5-exit-seam-checklist`
+is the executable M5 seam audit (one assertion per seam). The **sibling** M5 CI-job gates the exit
+references are `editor-cef-smoke` (the per-OS CEF host boot smoke + the axe-class DOM a11y re-scan via
+`tools/a11y_scan.py`, Linux blocking) and the M4 golden-scene rows above (the native-vs-web WebGPU
+visual-equivalence within the T1 feature set — the `viewport` scene is the M5-F1 observer composite).
 
 **The two-tier R-FILE-011 benchmark (issue #38, ROADMAP §6 tiering):** `bench-attach-10k` is the
 **per-PR blocking 10k proxy** on the REAL attach pipeline (filesync reconcile index + derivation

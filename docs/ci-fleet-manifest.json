@@ -402,6 +402,36 @@
       "description": "M4 exit criterion (issue #141): headless still runs with the render module ABSENT — under CONTEXT_BUILD_RENDER_WGPU=OFF (no GPU backend compiled), probing creates no device, no-adapter attach yields no Renderer, the engine steps 100 ticks through the extract/double-buffer loop renderer-less, and offscreen rendering is the OPT-IN, detachable path (R-HEAD-004): attach renders the corpus scene, detach returns to headless (ctest m4-exit-headless-no-render; runs on all three build-matrix legs via the 'M4 exit gate' step)."
     },
     {
+      "id": "m5-exit-walkthrough",
+      "requirement": "R-EDIT-001",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M5 exit criterion 1 (issue #168): the headless observer-editor WALKTHROUGH — open a project (compose a real scene, L-19) -> inspect (scene-tree F2 selection + inspector F3 + Problems F4 grouping/promotion) -> play it (F5 session-control over the edit-state view, L-51) -> make an override edit through the inspector (F3, L-20/L-30 CAS-guarded write) -> undo it (F7, replayed through the SAME path, R-HUX-001 no-clobber) -> the F1 viewport observes the SAME render::RenderSnapshot the play output produced (no second render path) composited via the L-41 handoff. Drives the LANDED CEF-free panels in process; the R-HUX-011 human-loops (selection / gesture->viewport / inspector-commit) are measured from instrumented timestamps (SHOULD, recorded in docs/human-latency-budget.md) (ctest m5-exit-1-walkthrough; runs on all three build-matrix legs via the 'M5 exit gate' step). The native-vs-web golden-scene SSIM equivalence is the sibling render / render-web job gate; the per-OS CEF boot smoke is the editor-cef-smoke job."
+    },
+    {
+      "id": "m5-exit-a11y-coverage",
+      "requirement": "R-A11Y-001",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M5 exit criterion 2 (issue #168): the a11y scan + keyboard-only navigation gate — every registered editor panel is a11y-clean (uitree::audit_a11y: semantic/ARIA names, unique ids, every command keyboard-reachable) AND the a11y registry (registered_panels(), what the harness scans) exactly matches src/editor/gui/a11y/coverage.manifest.jsonl (the declared set tools/a11y_scan.py cross-checks), covering every M5 observer panel — placeholder + F1 viewport + F2 scene-tree + F3 inspector + F4 Problems + F5 playbar (this exit registers the historically-missing F4 Problems, completing the coverage manifest); F7 undo/redo's command panel is a11y-clean too (ctest m5-exit-2-a11y-coverage; all three build-matrix legs). The axe-class CEF-rendered DOM re-scan is the sibling editor-cef-smoke job gate (tools/a11y_scan.py, Linux blocking)."
+    },
+    {
+      "id": "m5-exit-seam-checklist",
+      "requirement": "R-EDIT-001",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M5 exit criterion 3 (issue #168): the M5 observer-editor SEAM CHECKLIST as an executable audit (the milestone-closing mirror of m2-exit-6) — one assertion per M5 seam so a regression that quietly drops one turns the gate red: the R-EDIT-001 extension contract (deny-by-default trust boundary), the L-41 per-platform CEF surface handoff (never SendExternalBeginFrame), the headless UI-logic tree + a11y hook, the F2/F3/F4/F5/F1/F7 panel seams over the ONE bridge + the ONE `context set` write path (L-35/L-20/L-30/L-51/L-22/R-HUX-001), the F6 a11y coverage tie, the R-HUX-011 human-loop listener seams, and the error-catalog minting discipline (viewport.* + play.* are the reserved minted domains) (ctest m5-exit-3-seam-checklist; all three build-matrix legs)."
+    },
+    {
       "id": "minspec-floor-proxy-measure",
       "requirement": "R-QA-007",
       "runner_class": "gh-ubuntu-shared",

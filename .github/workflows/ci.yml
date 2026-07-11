@@ -126,11 +126,11 @@ jobs:
         run: cmake --build --preset dev
         working-directory: src
 
-      # Every registered suite EXCEPT the M1 + M2 + M4 exit gates, the M3 determinism gate, and
+      # Every registered suite EXCEPT the M1 + M2 + M4 + M5 exit gates, the M3 determinism gate, and
       # the samples-corpus gate — those families run in their own named steps below so each
       # milestone/QA gate is legible per OS leg (same tests, each runs exactly once).
       - name: Run test suites (ctest)
-        run: ctest --preset dev --verbose -E "^m1-exit-|^m2-exit-|^m4-exit-|^determinism-|^samples-corpus"
+        run: ctest --preset dev --verbose -E "^m1-exit-|^m2-exit-|^m4-exit-|^m5-exit-|^determinism-|^samples-corpus"
         working-directory: src
 
       # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36) — the five exit criteria as a BLOCKING
@@ -183,6 +183,22 @@ jobs:
       # docs/ci-fleet-manifest.json as m4-exit-headless-no-render.
       - name: M4 exit gate (headless-no-render, R-HEAD-002/004, blocking)
         run: ctest --preset dev --output-on-failure -R "^m4-exit-"
+        working-directory: src
+
+      # The M5 EXIT GATE (ROADMAP §1 M5 Exit / issue #168) — the observer-editor milestone-closing mirror
+      # of the M1/M2/M4 gates: a BLOCKING per-PR check on every OS leg. The headless end-to-end
+      # walkthrough (open a project -> inspect via scene-tree F2 / inspector F3 / Problems F4 -> play F5
+      # -> override-edit F3 -> undo F7 -> the F1 viewport observes the SAME render snapshot, R-HUX-011
+      # human-loops measured), the a11y + keyboard-only-nav + coverage-manifest gate (every panel a11y-
+      # clean; the a11y registry ⟷ coverage.manifest.jsonl), and the M5 observer-editor seam checklist —
+      # all drive the LANDED headless editor-GUI panels with NO CEF / NO GPU / NO daemon, so they run on
+      # this default build matrix "headlessly across the OS matrix". The per-OS CEF boot smoke
+      # (editor-cef-smoke job), the native-vs-web golden-scene SSIM equivalence (render / render-web
+      # jobs), and the axe-class DOM a11y re-scan (editor-cef-smoke job, tools/a11y_scan.py) are the
+      # SIBLING CI-job gates the M5 exit references. Registered in docs/ci-fleet-manifest.json as the
+      # m5-exit-* gates.
+      - name: M5 exit gate (observer-editor walkthrough + a11y/coverage + seam checklist, blocking)
+        run: ctest --preset dev --output-on-failure -R "^m5-exit-"
         working-directory: src
 
       - name: sccache stats
