@@ -1,0 +1,20 @@
+src/runtime/session/tests/determinism_gameplay_scene.cpp
+  s_4d68fcead85c12::t_860cdb9212f4a7 72-74
+  s_4d68fcead85c12::t_2794964fe83ee2 431-432
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "f66b0cce16c98f2244d7fddb9531dc1fce0da764",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
