@@ -213,15 +213,7 @@ const NamedPosition* find_entity(const std::vector<NamedPosition>& layout, const
     return nullptr;
 }
 
-RollGame read_roll_game(const kernel::World& world)
-{
-    RollGame out;
-    // World::each has no const overload; the walk is read-only, so the cast is benign (the same
-    // shape the session's own read-back helpers use).
-    kernel::World& mutable_world = const_cast<kernel::World&>(world);
-    mutable_world.each<RollGame>([&](kernel::Entity, RollGame& g) { out = g; });
-    return out;
-}
+RollGame read_roll_game(const kernel::World& world) { return read_singleton<RollGame>(world); }
 
 void register_roll3d_scenario(const std::string& samples_dir)
 {

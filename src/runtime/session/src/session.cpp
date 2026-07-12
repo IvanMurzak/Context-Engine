@@ -22,6 +22,7 @@ namespace context::runtime::session
 namespace
 {
 constexpr int kDemoActors = 4; // actor 0 is the player; 1..3 are seeded movers
+constexpr const char* kDemoScenario = "demo"; // the reserved built-in scenario name (single source)
 
 // The process-global scenario registry (session.h § scenario registry). Function-local static so
 // static-init-order is a non-issue; mirrors the sim-component registrar's process-global contract.
@@ -131,7 +132,7 @@ Session::Session(SessionConfig config, bool run_setup)
     // unchanged.
     : registry_(&sim_components()), seed_(config.seed), rng_(config.seed),
       tick_hz_(config.tick_hz == 0 ? 60 : config.tick_hz),
-      scenario_(config.scenario.empty() ? "demo" : config.scenario)
+      scenario_(config.scenario.empty() ? kDemoScenario : config.scenario)
 {
     build_systems();
     if (run_setup)
@@ -144,7 +145,7 @@ void Session::setup_scenario()
     sim_tick_ = 0;
     rng_.set_state(seed_);
     trace_.clear();
-    if (scenario_ == "demo")
+    if (scenario_ == kDemoScenario)
     {
         setup_demo(*this);
         return;
@@ -153,20 +154,24 @@ void Session::setup_scenario()
     // its systems capture is recreated together with the world (fresh on every set_seed re-setup).
     const auto it = scenario_registry().find(scenario_);
     if (it != scenario_registry().end())
-        install_systems(it->second(*this));
+    {
+        // Copy the factory out before invoking it: a factory that itself calls register_scenario()
+        // would rehash scenario_registry() and invalidate `it`, moving the std::function that is
+        // still executing (undefined behavior). A local copy is immune to that reentrancy.
+        const ScenarioFactory factory = it->second;
+        install_systems(factory(*this));
+    }
     // Unknown scenario: empty world + the built-in demo systems (pre-existing behavior, unchanged).
 }
 
 void Session::build_systems()
 {
-    systems_ = {
+    // The built-in "demo" tenant's fixed system list; install_systems owns the system_names_ rebuild.
+    install_systems({
         {"input", &system_input},
         {"control", &system_control},
         {"motion", &system_motion},
-    };
-    system_names_.clear();
-    for (const System& s : systems_)
-        system_names_.push_back(s.name);
+    });
 }
 
 void Session::install_systems(std::vector<System> systems)
@@ -179,7 +184,7 @@ void Session::install_systems(std::vector<System> systems)
 
 void register_scenario(const std::string& name, ScenarioFactory factory)
 {
-    if (name == "demo" || !factory)
+    if (name == kDemoScenario || !factory)
         return; // "demo" is the reserved built-in; a null factory registers nothing
     scenario_registry()[name] = std::move(factory);
 }

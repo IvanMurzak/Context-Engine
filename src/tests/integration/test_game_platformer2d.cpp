@@ -123,7 +123,6 @@ struct RunResult
     std::int64_t emitted = 0;         // puff emitter's running emission count
     std::size_t max_live = 0;         // peak live particle count over the run
     bool saw_run_state = false;       // the sprite graph reached the run state mid-run
-    int final_anim_state = -1;
     std::int64_t sounds_fired = 0; // jump + coin sounds triggered on the null backend
     std::size_t max_voices = 0;
     bool mixed_nonzero = false;
@@ -274,8 +273,7 @@ RunResult run_fixture()
     r.emitted = emitter.emitted;
 
     anim::AnimatorState animator;
-    CHECK(anim::read_animator(s.world(), player, animator));
-    r.final_anim_state = animator.state;
+    CHECK(anim::read_animator(s.world(), player, animator)); // P3 animator still readable at run end
 
     return r;
 }

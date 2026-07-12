@@ -129,11 +129,7 @@ constexpr std::int64_t kLandingFallRaw = -65536; // -1.0 in Q16
 
 PlatformerGame read_platformer_game(const kernel::World& world)
 {
-    PlatformerGame out;
-    // World::each has no const overload; the walk is read-only, so the cast is benign.
-    kernel::World& mutable_world = const_cast<kernel::World&>(world);
-    mutable_world.each<PlatformerGame>([&](kernel::Entity, PlatformerGame& g) { out = g; });
-    return out;
+    return read_singleton<PlatformerGame>(world);
 }
 
 void register_platformer2d_scenario(const std::string& samples_dir)

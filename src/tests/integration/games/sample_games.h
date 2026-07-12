@@ -57,6 +57,18 @@ struct NamedPosition
                           static_cast<std::uint32_t>(generation)};
 }
 
+// Read a world-singleton sim component out of a (const) world by value (all-defaults when absent).
+// World::each has no const overload, so the read-only walk casts away const — benign; this is the
+// one place both game mirrors funnel their singleton game-state read-back through.
+template <typename T>
+[[nodiscard]] T read_singleton(const kernel::World& world)
+{
+    T out;
+    kernel::World& mutable_world = const_cast<kernel::World&>(world);
+    mutable_world.each<T>([&](kernel::Entity, T& value) { out = value; });
+    return out;
+}
+
 // --- roll-3d --------------------------------------------------------------------------------------
 
 // The roll-3d gameplay singleton sim component (integer-only, registered by stable name so it folds
