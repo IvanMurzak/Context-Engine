@@ -1,0 +1,60 @@
+{
+  "$schema": "ctx:input-bindings",
+  "actions": [
+    {
+      "id": "e8112cc9ea062172",
+      "layer": "gameplay"
+    },
+    {
+      "id": "a2bf29db816e5b80",
+      "layer": "gameplay"
+    },
+    {
+      "id": "7c26f13c5d642bb5",
+      "layer": "ui"
+    }
+  ],
+  "contexts": [
+    {
+      "bindings": [
+        {
+          "action": "e8112cc9ea062172",
+          "code": "A",
+          "device": "keyboard"
+        },
+        {
+          "action": "e8112cc9ea062172",
+          "code": "D",
+          "device": "keyboard"
+        },
+        {
+          "action": "a2bf29db816e5b80",
+          "code": "Space",
+          "device": "keyboard"
+        },
+        {
+          "action": "a2bf29db816e5b80",
+          "code": "ButtonSouth",
+          "device": "gamepad"
+        }
+      ],
+      "capture": false,
+      "id": "a8d87ef64cc30231",
+      "layer": "gameplay"
+    },
+    {
+      "bindings": [
+        {
+          "action": "7c26f13c5d642bb5",
+          "code": "Escape",
+          "device": "keyboard"
+        }
+      ],
+      "capture": true,
+      "id": "bd690d74260afb9b",
+      "layer": "ui"
+    }
+  ],
+  "notes": "The platformer player bindings (R-SYS-007 / L-45). Action/context ids are L-33 stable intra-file ids (the id form is enforced inside a project dir; the standalone samples/input-bindings/ few-shot uses semantic ids). Human mapping: e8112cc9ea062172 = move_x (run axis, keys A/D), a2bf29db816e5b80 = jump (Space / gamepad south button), 7c26f13c5d642bb5 = ui_menu (Escape); context a8d87ef64cc30231 = gameplay, bd690d74260afb9b = the modal pause menu that CAPTURES input while open. The routing front-end (src/packages/input/) feeds the mapped actions into the sim InputState (move_x -> the move channel, jump -> the button channel); the runtime mirror in src/tests/integration/games/ installs these same contexts and scripts/movement.ts authors the same control response in TypeScript.",
+  "version": 1
+}

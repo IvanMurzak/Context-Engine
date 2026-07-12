@@ -1,0 +1,13 @@
+{
+  "$schema": "ctx:audio-event",
+  "bus": "5a08393cca219c68",
+  "clip": "player_jump",
+  "gain": 1,
+  "loop": false,
+  "notes": "The player's jump sound (R-SYS-006): a DCC-imported clip (R-ASSET-001) routed to the Sound Effects bus (game-mix.audio-bus.json id 5a08393cca219c68), triggered at the player's position each time the control system applies a grounded jump, attenuated by listener distance. Fired on miniaudio's NULL backend in the headless smoke gate, off the deterministic sim path (R-SIM-001).",
+  "spatial": {
+    "maxDistance": 20,
+    "minDistance": 1
+  },
+  "version": 1
+}

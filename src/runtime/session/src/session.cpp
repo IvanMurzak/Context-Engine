@@ -13,12 +13,24 @@
 
 #include "context/runtime/session/hash.h"
 
+#include <unordered_map>
+#include <utility>
+
 namespace context::runtime::session
 {
 
 namespace
 {
 constexpr int kDemoActors = 4; // actor 0 is the player; 1..3 are seeded movers
+constexpr const char* kDemoScenario = "demo"; // the reserved built-in scenario name (single source)
+
+// The process-global scenario registry (session.h § scenario registry). Function-local static so
+// static-init-order is a non-issue; mirrors the sim-component registrar's process-global contract.
+std::unordered_map<std::string, ScenarioFactory>& scenario_registry()
+{
+    static std::unordered_map<std::string, ScenarioFactory> registry;
+    return registry;
+}
 
 // `input`: fold this tick's injected input into the world-singleton InputState. Mapped gameplay
 // actions set the move/fire channels; UI actions (ui_*) fold into the ui channel; raw events fold
@@ -120,7 +132,7 @@ Session::Session(SessionConfig config, bool run_setup)
     // unchanged.
     : registry_(&sim_components()), seed_(config.seed), rng_(config.seed),
       tick_hz_(config.tick_hz == 0 ? 60 : config.tick_hz),
-      scenario_(config.scenario.empty() ? "demo" : config.scenario)
+      scenario_(config.scenario.empty() ? kDemoScenario : config.scenario)
 {
     build_systems();
     if (run_setup)
@@ -133,21 +145,51 @@ void Session::setup_scenario()
     sim_tick_ = 0;
     rng_.set_state(seed_);
     trace_.clear();
-    if (scenario_ == "demo")
+    if (scenario_ == kDemoScenario)
+    {
         setup_demo(*this);
+        return;
+    }
+    // A registered scenario builds its world AND supplies its systems in one factory call, so state
+    // its systems capture is recreated together with the world (fresh on every set_seed re-setup).
+    const auto it = scenario_registry().find(scenario_);
+    if (it != scenario_registry().end())
+    {
+        // Copy the factory out before invoking it: a factory that itself calls register_scenario()
+        // would rehash scenario_registry() and invalidate `it`, moving the std::function that is
+        // still executing (undefined behavior). A local copy is immune to that reentrancy.
+        const ScenarioFactory factory = it->second;
+        install_systems(factory(*this));
+    }
+    // Unknown scenario: empty world + the built-in demo systems (pre-existing behavior, unchanged).
 }
 
 void Session::build_systems()
 {
-    systems_ = {
+    // The built-in "demo" tenant's fixed system list; install_systems owns the system_names_ rebuild.
+    install_systems({
         {"input", &system_input},
         {"control", &system_control},
         {"motion", &system_motion},
-    };
+    });
+}
+
+void Session::install_systems(std::vector<System> systems)
+{
+    systems_ = std::move(systems);
     system_names_.clear();
     for (const System& s : systems_)
         system_names_.push_back(s.name);
 }
+
+void register_scenario(const std::string& name, ScenarioFactory factory)
+{
+    if (name == kDemoScenario || !factory)
+        return; // "demo" is the reserved built-in; a null factory registers nothing
+    scenario_registry()[name] = std::move(factory);
+}
+
+bool has_scenario(const std::string& name) { return scenario_registry().count(name) != 0; }
 
 void Session::set_seed(std::uint64_t seed)
 {

@@ -1,0 +1,32 @@
+{
+  "$schema": "ctx:anim-graph",
+  "initial": "03c9697e6cca30f9",
+  "notes": "The FlagPole prop's animation state-machine (R-SYS-008): idle (03c9697e6cca30f9, clip flag_idle) <-> wave (258b1d19abc686ae, clip flag_wave), gated on a control parameter the gameplay couples to the ball's accumulated impact count -- after 3 bounces the flag starts waving. State ids are L-33 stable intra-file ids (16..32 lowercase hex; human labels live here in notes -- inside a project dir the id form is enforced by validate, unlike the standalone samples/anim-graphs/ few-shot). The wave clip carries a non-zero root yaw rate, so the animation package's deterministic root-motion accumulation is sim-visible (the smoke gate asserts it). The runtime mirror in src/tests/integration/games/ compiles this same graph shape into the animation package's Rig.",
+  "states": [
+    {
+      "clip": "flag_idle",
+      "id": "03c9697e6cca30f9",
+      "transitions": [
+        {
+          "duration": 0.25,
+          "op": "ge",
+          "threshold": 3,
+          "to": "258b1d19abc686ae"
+        }
+      ]
+    },
+    {
+      "clip": "flag_wave",
+      "id": "258b1d19abc686ae",
+      "transitions": [
+        {
+          "duration": 0.25,
+          "op": "lt",
+          "threshold": 3,
+          "to": "03c9697e6cca30f9"
+        }
+      ]
+    }
+  ],
+  "version": 1
+}

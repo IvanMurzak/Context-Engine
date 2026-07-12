@@ -1,0 +1,60 @@
+{
+  "$schema": "ctx:input-bindings",
+  "actions": [
+    {
+      "id": "25612509fa7530cb",
+      "layer": "gameplay"
+    },
+    {
+      "id": "37ca9bc636e69ac2",
+      "layer": "gameplay"
+    },
+    {
+      "id": "a8e9ae10fef110ab",
+      "layer": "ui"
+    }
+  ],
+  "contexts": [
+    {
+      "bindings": [
+        {
+          "action": "25612509fa7530cb",
+          "code": "A",
+          "device": "keyboard"
+        },
+        {
+          "action": "25612509fa7530cb",
+          "code": "D",
+          "device": "keyboard"
+        },
+        {
+          "action": "37ca9bc636e69ac2",
+          "code": "W",
+          "device": "keyboard"
+        },
+        {
+          "action": "37ca9bc636e69ac2",
+          "code": "S",
+          "device": "keyboard"
+        }
+      ],
+      "capture": false,
+      "id": "8a804def3881cb2b",
+      "layer": "gameplay"
+    },
+    {
+      "bindings": [
+        {
+          "action": "a8e9ae10fef110ab",
+          "code": "Escape",
+          "device": "keyboard"
+        }
+      ],
+      "capture": true,
+      "id": "0a7ae9fb3d0dd76e",
+      "layer": "ui"
+    }
+  ],
+  "notes": "The roll-3d player bindings (R-SYS-007 / L-45). Action/context ids are L-33 stable intra-file ids (the id form is enforced inside a project dir; the standalone samples/input-bindings/ few-shot uses semantic ids). Human mapping: 25612509fa7530cb = move_x (x-axis roll force, keys A/D), 37ca9bc636e69ac2 = move_y (z-axis roll force, keys W/S), a8e9ae10fef110ab = ui_menu (Escape); context 8a804def3881cb2b = gameplay, 0a7ae9fb3d0dd76e = the modal pause menu that CAPTURES input while open. The routing front-end (src/packages/input/) applies the layered arbitration and feeds mapped actions into the sim InputState; the runtime mirror in src/tests/integration/games/ installs these same contexts and folds these same action ids.",
+  "version": 1
+}

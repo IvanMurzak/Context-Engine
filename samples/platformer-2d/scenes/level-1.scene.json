@@ -18,6 +18,118 @@
       },
       "id": "b2b2b2b2b2b2b201",
       "name": "MainCamera"
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            0,
+            2,
+            0
+          ]
+        }
+      },
+      "id": "919aa8e72e6b3003",
+      "name": "Player",
+      "notes": "THE PLAYER: a dynamic circle body (2D physics in the x/y plane). The input-bindings map A/D to move_x and Space to jump; the control system accelerates toward move_x * max-run-speed and applies the jump impulse when grounded -- the same per-tick logic scripts/movement.ts authors in TypeScript. Its landings open the particle puff; its jumps and the coin pickup fire the authored audio events."
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            0,
+            -1,
+            0
+          ]
+        }
+      },
+      "id": "703654571b24b4e9",
+      "name": "Ground",
+      "notes": "Static box, top face at y == 0 (half-extents (24, 1) in the runtime mirror -- schema v1 transforms carry position only; collider sizes/materials live in the mirror)."
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            -5,
+            3,
+            0
+          ]
+        }
+      },
+      "id": "b71de8a65ea1c100",
+      "name": "Platform-A",
+      "notes": "Static platform (box half-extents (2, 1) in the mirror). The Barrel drops onto it."
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            -9,
+            5,
+            0
+          ]
+        }
+      },
+      "id": "ff24043e233d6d61",
+      "name": "Platform-B",
+      "notes": "A second static platform higher up the left tower."
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            4,
+            1,
+            0
+          ]
+        }
+      },
+      "id": "b11a425f56358a49",
+      "name": "Crate",
+      "notes": "The pushable crate: a dynamic body (mass 2) resting on the ground in the player's run path -- running into it shoves it along (the smoke gate asserts it moved). Its collider is a CIRCLE of radius 1 in the runtime mirror (the classic 2D round-collider-under-a-crate-sprite trick): the physics2d v1 narrow phase resolves circle-circle/circle-box only, so a box collider could not rest on the static box ground; swap to a box collider when the package grows box-box contacts."
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            -5,
+            6,
+            0
+          ]
+        }
+      },
+      "id": "e9c78709d5f80f24",
+      "name": "Barrel",
+      "notes": "A free dynamic circle dropped over Platform-A, so the platform geometry is genuinely load-bearing in the sim (not decorative)."
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            7,
+            1,
+            0
+          ]
+        }
+      },
+      "id": "e0e0c8ced7d744ea",
+      "name": "Coin",
+      "notes": "The pickup: not a physics body -- the gameplay system collects it when the player overlaps its position, firing the coin audio event once."
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      "id": "798cea84d1dd94ef",
+      "name": "LandingPuff",
+      "notes": "The landing particle emitter anchor: rate 0 at rest; each player landing repositions it to the player and opens the rate for a short deterministic puff."
     }
   ],
   "instances": [
@@ -29,9 +141,18 @@
   ],
   "kind": "scene",
   "notes": [
-    "The startup scene. It instances the shared room sub-scene (L-35) and adds a camera.",
-    "The `overrides` array retargets the instanced torch: an id-path override with a",
-    "recorded `base` so `context query --overrides diverged` can flag drift (R-CLI-006)."
+    "The startup scene: a small but REAL 2D platformer level (M6 EXIT). It instances the shared",
+    "room sub-scene (L-35), adds a camera, and lays out the game entities: the input-driven Player,",
+    "the Ground and two Platforms, the pushable Crate, the Barrel that exercises Platform-A, the",
+    "Coin pickup, and the LandingPuff emitter anchor. Authored positions are INTEGERS (exactly",
+    "representable in Q16 fixed-point) -- the runtime scenario mirror registered as session scenario",
+    "'platformer-2d' (src/tests/integration/games/) parses THIS file for the entity layout, so",
+    "renaming or moving an entity fails the game-smoke-platformer-2d ctest (rot-proof beyond schema",
+    "validity). Collider sizes, masses, the anim-graph rig, and the fixed per-tick system order",
+    "(input -> control -> physics2d -> gameplay -> particles -> animation) live in that mirror; the",
+    "player's per-tick control logic is ALSO authored in TypeScript (scripts/movement.ts).",
+    "The `overrides` array retargets the instanced torch: an id-path override with a recorded",
+    "`base` so `context query --overrides diverged` can flag drift (R-CLI-006)."
   ],
   "overrides": [
     {

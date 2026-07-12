@@ -144,7 +144,7 @@ int main()
 {
     const fs::path samples = CONTEXT_SAMPLES_DIR;
     const std::string bin = CONTEXT_BINARY;
-    const std::vector<std::string> projects = {"platformer-2d", "topdown-rpg"};
+    const std::vector<std::string> projects = {"platformer-2d", "topdown-rpg", "roll-3d"};
 
     // =============================================================================================
     // Leg A — the REAL shipped `context` binary builds + headless-smoke-runs each sample project
@@ -161,8 +161,8 @@ int main()
             CHECK(ctest_proc::valid(p));
             int code = -1;
             // Read-only validate / migrate --dry-run on a tiny sample return in well under a second;
-            // keep the per-spawn ceiling low so the 4 Leg-A spawns (4 x 15s) stay under the binary's
-            // TIMEOUT 120 (CMakeLists) with headroom for Leg B, letting a real regression surface its
+            // keep the per-spawn ceiling low so the 6 Leg-A spawns (6 x 15s) stay under the binary's
+            // TIMEOUT 180 (CMakeLists) with headroom for Leg B, letting a real regression surface its
             // diagnostics instead of silently truncating the whole gate at the outer timeout.
             const bool done = ctest_proc::wait_for(p, 15000, code);
             if (!done)
@@ -186,6 +186,7 @@ int main()
     }
     const fs::path platformer = stage / "platformer-2d";
     const fs::path topdown = stage / "topdown-rpg";
+    const fs::path roll3d = stage / "roll-3d";
 
     // --- global surface: describe (the whole self-describing contract) ---------------------------
     exercise("", "describe", {"describe"});
@@ -194,11 +195,13 @@ int main()
     for (const std::string& proj : projects)
         exercise("", "validate", {"validate", (stage / proj).string()});
 
-    // --- migrate: the committed corpus is a canonical FIXPOINT (freeze readiness — a maintained
-    //     corpus is already canonical, so a dry-run migrate would change nothing) -----------------
+    // --- migrate: each committed sample GAME is a canonical FIXPOINT (freeze readiness — a
+    //     maintained corpus is already canonical, so a dry-run migrate would change nothing).
+    //     Both authored game projects are gated (roll-3d is net-new this PR), not just one --------
+    for (const fs::path& game : {platformer, roll3d})
     {
         const Envelope env =
-            exercise("", "migrate", {"migrate", platformer.string(), "--dry-run"});
+            exercise("", "migrate", {"migrate", game.string(), "--dry-run"});
         if (env.ok())
         {
             CHECK(env.data().at("canonicalized").as_number() == 0.0);

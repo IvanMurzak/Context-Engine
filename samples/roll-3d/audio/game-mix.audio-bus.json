@@ -1,0 +1,18 @@
+{
+  "$schema": "ctx:audio-bus",
+  "buses": [
+    {
+      "gain": 1,
+      "id": "bbb1c5526b8a8280",
+      "name": "Master"
+    },
+    {
+      "gain": 0.9,
+      "id": "ac936623e44e8bfb",
+      "name": "Sound Effects",
+      "parent": "bbb1c5526b8a8280"
+    }
+  ],
+  "notes": "The roll-3d mixing-bus graph (R-SYS-006): impact sounds route through Sound Effects (id ac936623e44e8bfb) into Master (id bbb1c5526b8a8280). Bus ids are L-33 stable intra-file ids (the id form is enforced inside a project dir; human labels live in `name`). The presentation-observer audio package (src/packages/audio/) mixes on miniaudio's NULL backend in the headless smoke gate -- entirely OFF the deterministic sim path (R-SIM-001).",
+  "version": 1
+}

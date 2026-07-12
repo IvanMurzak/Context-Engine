@@ -1,0 +1,16 @@
+{
+  "$schema": "ctx:project",
+  "engine": "context",
+  "name": "roll-3d",
+  "notes": [
+    "Agent few-shot sample (R-QA-006): a small but REAL 3D game -- the M6 EXIT roll-3d Context",
+    "project. A player-controlled rolling ball (input -> force), dynamic rigid bodies + a ramp on",
+    "a static floor (physics3d, broad-phased via context_spatial), an impact particle burst on",
+    "collision, a spatialized impact sound (null audio backend), and one skeletal-animated prop.",
+    "Headless-runnable and integer/fixed-point-deterministic: the runtime mirror is registered as",
+    "session scenario 'roll-3d' (src/tests/integration/games/) and smoke-gated by the",
+    "game-smoke-roll-3d ctest. Every authored file is canonical JSON (L-32)."
+  ],
+  "scene": "scenes/arena.scene.json",
+  "version": 1
+}
