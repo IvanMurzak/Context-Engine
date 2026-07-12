@@ -537,6 +537,16 @@ add_subdirectory(editor/pkg)
 # so context_js exists for the integration test's link.
 add_subdirectory(runtime/ts)
 
+# M6 X1: the L-47 profiler substrate (src/runtime/profile/, R-SIM-008 / R-OBS-002) — the FIRST
+# profiler channel in-tree: the GC-pause channel that makes JS-tier GC pauses observable and
+# attributable against the R-LANG-012 frame budget (fed from the JsEngine GC pull seam; the
+# R-SIM-008 inter-tick window is scheduled by runtime/session's inter-tick hook). The channel is
+# backend-agnostic, so its unit ctest is a LOCAL gate on every toolchain. OWN stanza — apart from
+# the editor cluster + the exit-gate block below — so it never collides at the file tail (consumers
+# name the `context_profile` target, resolved at generate time regardless of add_subdirectory
+# order). MUST follow add_subdirectory(runtime/js) so context_js exists for its PUBLIC link.
+add_subdirectory(runtime/profile)
+
 # M3 task 3b: the (query, executor) system model over the kernel World + derived TS accessor codegen
 # (src/editor/system/, issue #90 / R-LANG-009 / R-LANG-010 item 1 / R-LANG-002; Part of #88) — the M3
 # keystone that lets gameplay authored in TS mutate the shared World. Builds on the landed runSystemView

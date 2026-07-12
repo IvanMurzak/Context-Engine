@@ -41,6 +41,30 @@ authoring (R-LANG-010) is task 2b-ii; the zero-copy view protocol (R-LANG-009) i
   fixture whose V8 stack remaps back to authored TS (the R-OBS-005 end-to-end proof). Used by the
   tests.
 
+## The pooled / no-allocation hot API (`hot_api.h`, M6 X1 — R-SIM-008)
+
+R-SIM-008's first lever: hot TS systems should allocate **little or nothing per frame**, so
+allocation-triggered mid-tick GC pauses become rare and collection happens in the scheduled
+inter-tick window (`runtime/js` § GC discipline). `hot_api_js()` is one engine-provided JS module
+(installed idempotently as `globalThis.ctx` via `install_hot_api`) whose APIs are allocation-free
+at steady state:
+
+- **`ctx.pool`** — preallocated `Float64Array` vector registers (`v2()/v3()/v4()`, `reset()` per
+  tick/system); the same objects are reused forever, with a `misses` counter on exhaustion
+  fallback so a test/profiler can assert steady-state zero.
+- **`ctx.math`** — in-place vector math over caller-provided arrays (write `out`, return it; the
+  aliasing-safe `v3cross` included). Presentation-tier floats — OFF the deterministic sim path.
+- **`ctx.fixed`** — the Q16.16 mirror of `packages/simmath` `fixed.h` for SIM-path math in TS:
+  `mul` (floor, exact via a hi/lo split) and `div`/`fromRatio` (C++ truncate-toward-zero, exact
+  via remainder correction) match the C++ core **bit-for-bit** inside the |raw| ≤ 2³¹ domain —
+  proven against the real C++ simmath in `test_hot_api.cpp`.
+- **`ctx.query`** — pooled strided row-cursors over the positional zero-copy views an executor
+  receives from `runSystemView` (R-LANG-009): `ctx.query.reset()` at entry, `open(view, stride)`
+  per view; cursor objects are reused across invocations (`misses` counted).
+
+The header is interface-only over the STL-only `JsEngine` seam (no V8/context_js link is
+introduced by including it); the in-V8 battery runs on the CI legs (`ts-test_hot_api`).
+
 ## Supply chain — SHA-pinned esbuild prebuilt
 
 esbuild is acquired as a **SHA-pinned third-party prebuilt** from esbuild's own per-platform

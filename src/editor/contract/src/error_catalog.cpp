@@ -764,8 +764,30 @@ const std::vector<ErrorCode>& catalog()
          "A rebind named an action that has no binding in the target context; nothing was repointed "
          "(fail-closed).",
          false, kExitUsage, "R-SYS-007"},
-        // --- sim.gc.* — reserved for M6 X1 (JS-tier GC discipline, R-SIM-008 / L-47). Minter: X1. ------
-        // (reserved — filled by the GC-discipline cross-cutting task.)
+        // --- sim.gc.* — M6 X1 (JS-tier GC discipline, R-SIM-008 / L-47). Minter: X1. ------------------
+        // The GC-discipline / GC-pause-profiler refusals (issue #188). The strings are DEFINED in
+        // src/runtime/js/include/context/runtime/js/gc_errors.h as context::runtime::js::k*Code (the
+        // same promote-a-local-string pattern as the sim-package blocks above — the JS host never
+        // links this contract layer) and this catalog registers them. GC touches the JS heap ONLY —
+        // logical sim state (the World + its hierarchical hash) is unreachable from the collector by
+        // construction — so every refusal is fail-closed with the SIM unaffected. unavailable is
+        // internal-class (this build carries the stub JS backend — a capability absence, like
+        // audio.device_unavailable); invalid_budget is validation-class (a rejected window request);
+        // window_failed is internal-class (the VM refused the window/query). All deterministic (a
+        // bare retry cannot conjure a VM or repair a non-finite budget). Appended within this block
+        // only (additive-only, protocolMajor stays 0).
+        {"sim.gc.unavailable",
+         "A JS-tier GC-discipline or GC-profiler operation needs the in-process JS VM, but this "
+         "build carries the stub backend; nothing ran (fail-closed — the simulation is unaffected).",
+         false, kExitInternal, "R-SIM-008"},
+        {"sim.gc.invalid_budget",
+         "A scheduled inter-tick GC window was refused: the requested pause budget is not a finite "
+         "positive duration; nothing was collected (fail-closed validation).",
+         false, kExitValidation, "R-SIM-008"},
+        {"sim.gc.window_failed",
+         "The JS VM reported a failure while running a scheduled inter-tick GC window or a "
+         "GC-profiler query; the simulation state is unaffected (GC touches the JS heap only).",
+         false, kExitInternal, "R-SIM-008"},
         // --- net.* — reserved for M6 X2 (replication + state-sync, R-NET-001 / L-48). Minter: X2. ------
         // (reserved — filled by the replication / state-sync cross-cutting task.)
         // ============================================================================================

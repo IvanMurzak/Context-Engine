@@ -7,12 +7,17 @@
 
 #include "context/runtime/js/js_host.h"
 
+#include <array>
+#include <chrono>
+#include <cmath>
 #include <cstring>
 #include <memory>
 #include <mutex>
 #include <vector>
 
+#include <libplatform/libplatform.h>
 #include <v8-array-buffer.h>
+#include <v8-callbacks.h>
 #include <v8-context.h>
 #include <v8-external.h>
 #include <v8-function.h>
@@ -23,6 +28,7 @@
 #include <v8-persistent-handle.h>
 #include <v8-primitive.h>
 #include <v8-script.h>
+#include <v8-statistics.h>
 #include <v8-template.h>
 #include <v8-typed-array.h>
 
@@ -140,6 +146,11 @@ public:
             return false;
         }
         v8::Isolate::Scope isolateScope(isolate_);
+        // R-SIM-008 GC-pause observation: bracket every GC event with the embedder prologue/
+        // epilogue pair (STL-free, links directly). The callbacks only stamp a steady_clock time
+        // and write a fixed ring slot — a GC callback must never allocate or run arbitrary code.
+        isolate_->AddGCPrologueCallback(&V8Engine::gcPrologue, this);
+        isolate_->AddGCEpilogueCallback(&V8Engine::gcEpilogue, this);
         v8::HandleScope handleScope(isolate_);
         v8::Local<v8::Context> context = v8::Context::New(isolate_);
         context_.Reset(isolate_, context);
@@ -152,6 +163,8 @@ public:
         {
             {
                 v8::Isolate::Scope isolateScope(isolate_);
+                isolate_->RemoveGCPrologueCallback(&V8Engine::gcPrologue, this);
+                isolate_->RemoveGCEpilogueCallback(&V8Engine::gcEpilogue, this);
                 v8::HandleScope handleScope(isolate_);
                 for (v8::BackingStore* bs : vmBuffers_)
                 {
@@ -416,6 +429,105 @@ public:
         return ok;
     }
 
+    // --- R-SIM-008 JS-tier GC discipline (M6 X1) --------------------------------------------
+    //
+    // The scheduled inter-tick GC window. The collection primitive is LowMemoryNotification()
+    // — the embedder-sanctioned "collect all available garbage NOW" (STL-free, links directly;
+    // V8 14.x removed the idle-task GC machinery, so idle notifications are not an option). The
+    // pump phase drains the platform's queued foreground tasks via the REAL
+    // v8::platform::PumpMessageLoop (STL-free signature; the platform g_platform is a genuine
+    // v8::platform::DefaultPlatform from rusty_v8's v8__Platform__NewDefaultPlatform, and the
+    // symbol is linked into the archive — binding.cc's v8__Platform__PumpMessageLoop wraps it),
+    // giving V8's finalization/sweeping tasks their only service point in this embedder.
+    bool gcWindow(const GcWindowOptions& options, GcWindowResult& result,
+                  std::string& err) override
+    {
+        if (!std::isfinite(options.budget_ms) || options.budget_ms <= 0.0)
+        {
+            err = "gc window budget_ms must be finite and > 0";
+            return false;
+        }
+        v8::Isolate::Scope isolateScope(isolate_);
+        const auto t0 = std::chrono::steady_clock::now();
+        auto elapsedMs = [&t0]() {
+            return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                             t0)
+                .count();
+        };
+
+        v8::HeapStatistics hs;
+        isolate_->GetHeapStatistics(&hs);
+        result = GcWindowResult{};
+        result.heap_used_before = static_cast<std::uint64_t>(hs.used_heap_size());
+
+        // The growth baseline is set lazily at the FIRST window, so trigger_bytes measures churn
+        // accumulated since inter-tick windows began — not the isolate's static boot-heap floor.
+        if (!gcBaselineSet_)
+        {
+            gcBaseline_ = result.heap_used_before;
+            gcBaselineSet_ = true;
+        }
+
+        gcInWindow_ = true;
+        const bool grewPastTrigger = options.trigger_bytes > 0 &&
+                                     result.heap_used_before >= gcBaseline_ + options.trigger_bytes;
+        if (options.force_collect || grewPastTrigger)
+        {
+            // Synchronous full collection, deliberately NOT preempted by the budget: the pause is
+            // MEASURED (it lands in the pause ring, attributed in_window) and the R-LANG-012
+            // budget verdict is made from the channel — L-47's "measurable to be budgeted".
+            isolate_->LowMemoryNotification();
+            result.collected = true;
+        }
+        // Pump phase: drain queued foreground tasks within the remaining budget. Hard iteration
+        // cap so a pathological task flood (or a stalled clock) cannot wedge the tick loop.
+        while (elapsedMs() < options.budget_ms && result.tasks_pumped < kMaxWindowTasks)
+        {
+            if (!v8::platform::PumpMessageLoop(g_platform, isolate_,
+                                               v8::platform::MessageLoopBehavior::kDoNotWait))
+            {
+                break;
+            }
+            ++result.tasks_pumped;
+        }
+        gcInWindow_ = false;
+
+        isolate_->GetHeapStatistics(&hs);
+        result.heap_used_after = static_cast<std::uint64_t>(hs.used_heap_size());
+        if (result.collected)
+        {
+            gcBaseline_ = result.heap_used_after;
+        }
+        result.window_ms = elapsedMs();
+        return true;
+    }
+
+    std::size_t drainGcPauses(GcPause* out, std::size_t cap) override
+    {
+        std::size_t n = 0;
+        while (n < cap && gcRingCount_ > 0)
+        {
+            out[n++] = gcRing_[gcRingHead_];
+            gcRingHead_ = (gcRingHead_ + 1) % kGcRingCap;
+            --gcRingCount_;
+        }
+        return n;
+    }
+
+    std::uint64_t gcPausesDropped() const override { return gcDropped_; }
+
+    bool gcHeapStats(GcHeapStats& out, std::string& err) override
+    {
+        (void)err;
+        v8::Isolate::Scope isolateScope(isolate_);
+        v8::HeapStatistics hs;
+        isolate_->GetHeapStatistics(&hs);
+        out.used_bytes = static_cast<std::uint64_t>(hs.used_heap_size());
+        out.total_bytes = static_cast<std::uint64_t>(hs.total_heap_size());
+        out.external_bytes = static_cast<std::uint64_t>(hs.external_memory());
+        return true;
+    }
+
     // The V8 backend always carries the interactive CDP inspector seam (attachInspector below wires
     // a real V8Inspector session). This is a compile-time fact of THIS TU (it exists only under
     // CONTEXT_JS_HAS_V8), so it is a constant `true` rather than a runtime flag.
@@ -445,6 +557,71 @@ public:
 
 private:
     static constexpr std::size_t kMaxArgs = 8;
+    // R-SIM-008 GC observation plumbing. Ring capacity bounds the undrained-pause backlog (the
+    // profiler drains every tick, so 512 is generous headroom); kMaxWindowTasks bounds the window's
+    // pump loop against a task flood. kGcTypeSlots covers V8's five GCType bits (v8-callbacks.h).
+    static constexpr std::size_t kGcRingCap = 512;
+    static constexpr std::uint64_t kMaxWindowTasks = 1024;
+    static constexpr std::size_t kGcTypeSlots = 5;
+
+    // Map a (single-bit) GCType to its start-time slot; kGcTypeSlots for an unexpected value.
+    static std::size_t gcTypeSlot(v8::GCType type)
+    {
+        switch (type)
+        {
+        case v8::kGCTypeScavenge:
+            return 0;
+        case v8::kGCTypeMinorMarkSweep:
+            return 1;
+        case v8::kGCTypeMarkSweepCompact:
+            return 2;
+        case v8::kGCTypeIncrementalMarking:
+            return 3;
+        case v8::kGCTypeProcessWeakCallbacks:
+            return 4;
+        default:
+            return kGcTypeSlots;
+        }
+    }
+
+    // GC prologue/epilogue (fire on the isolate thread, bracketing each GC event). Allocation-free
+    // by contract: stamp a steady_clock time in the per-type slot, and on the epilogue write one
+    // fixed ring slot (drop-newest + count when the ring is full — the profiler reports the loss).
+    static void gcPrologue(v8::Isolate* /*isolate*/, v8::GCType type, v8::GCCallbackFlags /*flags*/,
+                           void* data)
+    {
+        auto* self = static_cast<V8Engine*>(data);
+        const std::size_t slot = gcTypeSlot(type);
+        if (slot < kGcTypeSlots)
+        {
+            self->gcStart_[slot] = std::chrono::steady_clock::now();
+        }
+    }
+
+    static void gcEpilogue(v8::Isolate* /*isolate*/, v8::GCType type, v8::GCCallbackFlags /*flags*/,
+                           void* data)
+    {
+        auto* self = static_cast<V8Engine*>(data);
+        const std::size_t slot = gcTypeSlot(type);
+        if (slot >= kGcTypeSlots || self->gcStart_[slot] == std::chrono::steady_clock::time_point{})
+        {
+            return; // unmatched epilogue (no recorded prologue) — nothing trustworthy to record
+        }
+        GcPause pause;
+        pause.duration_ms = std::chrono::duration<double, std::milli>(
+                                std::chrono::steady_clock::now() - self->gcStart_[slot])
+                                .count();
+        pause.kind = static_cast<std::uint32_t>(type);
+        pause.in_window = self->gcInWindow_;
+        self->gcStart_[slot] = std::chrono::steady_clock::time_point{};
+        if (self->gcRingCount_ == kGcRingCap)
+        {
+            ++self->gcDropped_;
+            return;
+        }
+        self->gcRing_[(self->gcRingHead_ + self->gcRingCount_) % kGcRingCap] = pause;
+        ++self->gcRingCount_;
+    }
 
     static void trampoline(const v8::FunctionCallbackInfo<v8::Value>& info)
     {
@@ -488,6 +665,17 @@ private:
     std::vector<v8::Global<v8::Function>> functions_;
     std::vector<std::unique_ptr<HostEntry>> hostEntries_;
     std::vector<v8::BackingStore*> vmBuffers_;  // owned; freed via v8__BackingStore__DELETE
+
+    // R-SIM-008 GC discipline state (single-threaded like the rest of the engine: the GC
+    // callbacks fire on the isolate thread, never concurrently with the host's calls).
+    std::array<GcPause, kGcRingCap> gcRing_{};
+    std::size_t gcRingHead_ = 0;   // oldest undrained record
+    std::size_t gcRingCount_ = 0;  // undrained records in the ring
+    std::uint64_t gcDropped_ = 0;  // records lost to ring overflow (monotonic)
+    std::array<std::chrono::steady_clock::time_point, kGcTypeSlots> gcStart_{};
+    bool gcInWindow_ = false;          // true while gcWindow() is on the stack (attribution)
+    std::uint64_t gcBaseline_ = 0;     // heap-used baseline for the trigger_bytes growth policy
+    bool gcBaselineSet_ = false;       // baseline initialized lazily at the first window
 };
 
 }  // namespace

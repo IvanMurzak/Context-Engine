@@ -16,6 +16,7 @@ add_library(context_cli STATIC
     src/install_command.cpp
     src/merge_command.cpp
     src/migrate_command.cpp
+    src/profile_command.cpp
     src/replay_command.cpp
     src/scaffold.cpp
     src/session_command.cpp
@@ -60,6 +61,15 @@ target_link_libraries(context_cli PRIVATE context_session)
 # headers; only install_command.cpp touches context_editor_pkg.
 target_link_libraries(context_cli PRIVATE context_editor_pkg)
 
+# M6 X1 (issue #188): `context profile gc` — the L-47 GC-pause profiler channel query
+# (src/runtime/js + src/runtime/profile; the session dep is already linked above). PRIVATE —
+# profile_command.h exposes only the contract Envelope, so no js/profile type appears in the CLI's
+# public headers; only profile_command.cpp touches them. NOTE: on the V8-capable CI legs this
+# links the rusty_v8 static archive into the `context` binary (the in-process VM the profiler
+# measures — the L-61 payload the §2d selection accepted); on the local GCC gate context_js is the
+# tiny stub and `profile gc` refuses fail-closed with sim.gc.unavailable.
+target_link_libraries(context_cli PRIVATE context_js context_profile)
+
 # Self-contained GCC runtime for the CLI executables. context_cli uses std::filesystem (the
 # `context new` scaffolder), whose libstdc++ symbols live in a NEWER libstdc++-6.dll; on a MinGW
 # host a stale libstdc++-6.dll elsewhere on PATH can shadow the toolchain's and be loaded first,
@@ -87,6 +97,7 @@ set(_context_cli_tests
     test_pkg_command
     test_merge_command
     test_migrate_command
+    test_profile_command
     test_scaffold
     test_session_command
     test_set_command)
@@ -109,6 +120,12 @@ target_link_libraries(context_cli_test_determinism_command PRIVATE context_sessi
 # context_cli, so its include path does not propagate through it). NB: the target is NOT named
 # *install* — a Windows UAC installer-detection trap (see editor/pkg/CMakeLists.txt).
 target_link_libraries(context_cli_test_pkg_command PRIVATE context_editor_pkg)
+
+# test_profile_command (the `context profile gc` verb) branches on which JS backend this build
+# carries (v8BackendAvailable: the full channel envelope on the V8 CI legs, the fail-closed
+# sim.gc.unavailable refusal on the local stub gate), so it links context_js directly (PRIVATE in
+# context_cli, so its include path does not propagate through it).
+target_link_libraries(context_cli_test_profile_command PRIVATE context_js)
 
 # test_scaffold additionally asserts the scaffolded files are canonicalization fixpoints
 # (R-FILE-001 tool-save rule) AND that both templates validate clean against the registered engine

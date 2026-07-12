@@ -52,7 +52,8 @@ set(_context_session_tests
     test_session
     test_session_state
     test_replay
-    test_triage)
+    test_triage
+    test_inter_tick_hook)
 
 foreach(_t IN LISTS _context_session_tests)
     add_executable(context_session_${_t} tests/${_t}.cpp)

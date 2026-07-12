@@ -211,6 +211,13 @@ StepResult Session::step(std::uint64_t ticks)
             tree.per_archetype = std::move(last.archetypes);
             trace_.push_back(std::move(tree));
         }
+
+        // The tick is complete — this is the inter-tick gap (R-HEAD-002's bounded per-tick service
+        // point). Between-tick services (the R-SIM-008 JS GC window) run here, AFTER the trace
+        // recorded the tick's end-state hash, so a hook can never sit between a system and its
+        // hash. The hook must not mutate sim state (see session.h).
+        if (inter_tick_hook_)
+            inter_tick_hook_(tick);
     }
 
     StepResult result;

@@ -120,6 +120,22 @@ public:
         return static_cast<bool>(system_observer_);
     }
 
+    // --- inter-tick hook (R-SIM-008 / R-HEAD-002 tick-boundary service point) ------------------
+    // An optional hook invoked AFTER each fixed tick completes — in the gap BETWEEN ticks, never
+    // mid-tick. This is the bounded per-tick service point R-HEAD-002 names: the JS-tier scheduled
+    // inter-tick GC window (R-SIM-008 — the embedder wires this to JsEngine::gcWindow) and similar
+    // between-tick services run here. `completed_tick` is the tick that just ran (the hook for tick
+    // T runs after T's systems and after simTick advanced to T+1). Like the SystemObserver above,
+    // the hook is OFF the logical state path: it must not mutate sim state — a JS-heap GC inside it
+    // changes timing, never the World or its hierarchical hash (test_gc_state_hash proves this).
+    using InterTickHook = std::function<void(std::uint64_t completed_tick)>;
+    void set_inter_tick_hook(InterTickHook hook) { inter_tick_hook_ = std::move(hook); }
+    void clear_inter_tick_hook() noexcept { inter_tick_hook_ = nullptr; }
+    [[nodiscard]] bool has_inter_tick_hook() const noexcept
+    {
+        return static_cast<bool>(inter_tick_hook_);
+    }
+
     // The recorded input stream (== the replay stream).
     [[nodiscard]] const InputStream& input_log() const noexcept { return input_log_; }
 
@@ -158,6 +174,7 @@ private:
     bool trace_enabled_ = false;
     HashTrace trace_;
     SystemObserver system_observer_;
+    InterTickHook inter_tick_hook_;
 };
 
 } // namespace context::runtime::session

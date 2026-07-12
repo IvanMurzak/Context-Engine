@@ -98,6 +98,33 @@ this can link on the local Strawberry-GCC gate — the **3-OS CI legs are author
   VM-allocated (the R-LANG-008 storage-allocator seam, L-60) so the (query, executor) tier needs
   no column↔VmBuffer sync at all.
 
+## GC discipline (R-SIM-008, M6 X1)
+
+The JS tier's GC is *scheduled*, not left to chance: the engine collects in the gap **between
+fixed ticks**, never mid-tick, and makes every pause measurable (L-47's "measurable to be
+budgeted"). `JsEngine` carries the seam:
+
+- **`gcWindow(options, result, err)`** — the scheduled inter-tick GC window, called by the tick
+  loop (runtime/session's inter-tick hook) at each tick boundary. Collection policy: `force_collect`
+  or a `trigger_bytes` heap-growth trigger → a synchronous full collection
+  (`Isolate::LowMemoryNotification` — V8 14.x removed the idle-task GC machinery, so idle
+  notifications are not an option); then a budget-bounded pump of the platform's queued foreground
+  tasks (the REAL `v8::platform::PumpMessageLoop` — STL-free, present in the archive), V8's only
+  finalization/sweeping service point in this embedder. The collection is **measured, not
+  preempted**: its pause lands in the pause channel and the R-LANG-012 verdict is made there.
+- **GC-pause observation** — `AddGCPrologueCallback`/`AddGCEpilogueCallback` bracket every GC
+  event into a fixed, allocation-free ring (`GcPause { duration_ms, kind, in_window }`); pauses
+  inside `gcWindow` are attributed `in_window`, everything else is a mid-tick pause (what the
+  R-SIM-008 budget polices). **Pull model**: `drainGcPauses`/`gcPausesDropped` — a GC callback
+  must never run arbitrary code, so there is no push/sink seam.
+- **`gcHeapStats`** — the JS-heap gauge (used/total/external bytes).
+
+The L-47 profiler channel over this seam lives in `src/runtime/profile/` (`GcPauseChannel`), and
+`context profile gc` surfaces it as JSON. Determinism: GC only ever touches the JS heap — the
+kernel World and its hierarchical state hash are unreachable from the collector by construction;
+`js-test_gc_state_hash` proves a forced GC every tick boundary leaves the hash trace byte-identical.
+The `sim.gc.*` catalog codes are defined in `gc_errors.h`.
+
 ## Local vs CI (build gate)
 
 The rusty_v8 prebuilt is an **MSVC/Clang-ABI static lib**, so it is **CI-only for its
