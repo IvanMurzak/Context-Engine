@@ -1,0 +1,12 @@
+{
+  "$schema": "ctx:audio-bus",
+  "version": 1,
+  "notes": "A game audio mixing-bus graph (R-SYS-006): a master bus that sfx, music, and voice fold into, with an ambient sub-bus under sfx. Each bus scales the sound routed to it (linear gain) and mixes into its parent. The presentation-observer audio package (src/packages/audio/) routes ctx:audio-event sounds through these buses off the deterministic sim path (R-SIM-001). This is the authored ctx:audio-bus few-shot form an AI author should emit.",
+  "buses": [
+    {"id": "master", "name": "Master", "gain": 1.0},
+    {"id": "sfx", "name": "Sound Effects", "gain": 0.9, "parent": "master"},
+    {"id": "music", "name": "Music", "gain": 0.6, "parent": "master"},
+    {"id": "voice", "name": "Dialogue", "gain": 1.0, "parent": "master"},
+    {"id": "ambient", "name": "Ambient", "gain": 0.5, "parent": "sfx"}
+  ]
+}

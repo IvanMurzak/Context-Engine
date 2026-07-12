@@ -1,0 +1,13 @@
+{
+  "$schema": "ctx:audio-event",
+  "version": 1,
+  "notes": "A spatialized footstep sound event (R-SYS-006): a DCC-imported clip (R-ASSET-001 — no in-engine audio authoring) routed to the `sfx` bus, positioned in the world and attenuated by listener distance between minDistance (full gain) and maxDistance (silent). The presentation-observer audio package triggers it off the deterministic sim path (R-SIM-001), reading the emitting entity's sim position to spatialize. This is the authored ctx:audio-event few-shot form an AI author should emit.",
+  "clip": "footstep_stone",
+  "bus": "sfx",
+  "gain": 1.0,
+  "loop": false,
+  "spatial": {
+    "minDistance": 1.0,
+    "maxDistance": 25.0
+  }
+}

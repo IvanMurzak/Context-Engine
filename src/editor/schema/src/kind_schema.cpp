@@ -587,6 +587,72 @@ constexpr std::string_view kAnimGraphSchemaJson = R"({
   }
 })";
 
+// The audio-bus content kind (R-SYS-006 / L-46, M6 P6): a mixing-bus graph the PRESENTATION-observer
+// audio package (src/packages/audio/) consumes. Buses are an id-keyed stable collection (L-33 /
+// R-FILE-001: array of objects, never a map), each with a linear gain and an optional `parent` bus
+// forming the mix tree. Bus-id uniqueness, parent resolution, and parent-acyclicity are REFERENTIAL
+// rules the schema shape cannot express — they live in src/editor/kinds/audio_bus.h. Authored audio is
+// off the deterministic sim path (R-SIM-001), so the mix-graph is pure presentation data.
+constexpr std::string_view kAudioBusSchemaJson = R"({
+  "$id": "ctx:audio-bus",
+  "version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["buses"],
+  "description": "An authored audio mixing-bus graph (R-SYS-006, L-32/L-46): named buses with a linear gain and an optional parent bus, forming the mix tree the presentation-observer audio package routes sound events through. Bus-id uniqueness, parent resolution, and parent-acyclicity are checked by the kind's semantic analyzer beyond this shape.",
+  "properties": {
+    "notes": {"description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."},
+    "buses": {
+      "type": "array",
+      "description": "The mixing buses — an id-keyed stable collection (L-33 / R-FILE-001: array keyed by `id`, never a map). Each bus scales the sound routed to it and folds into its parent bus.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "gain"],
+        "properties": {
+          "notes": {"description": "Schema-blessed annotations."},
+          "id": {"type": "string", "description": "Stable intra-file bus id, unique within the graph (the routing key audio events name)."},
+          "name": {"type": "string", "description": "Human-readable bus name."},
+          "gain": {"type": "number", "x-ctx-units": "1", "x-ctx-storage": "f32", "description": "Linear gain multiplier applied to this bus (dimensionless; >= 0, 1.0 is unity)."},
+          "parent": {"type": "string", "description": "Optional id of the bus this bus folds into; absent means a top-level (master) bus. Must name a declared bus and form no cycle (checked by the kind semantics)."}
+        }
+      }
+    }
+  }
+})";
+
+// The audio-event content kind (R-SYS-006 / L-46, M6 P6): one authored sound event the audio package
+// triggers as a presentation observer. It names a DCC-imported clip (R-ASSET-001 — no in-engine audio
+// authoring), routes to a bus, carries a linear gain, and an OPTIONAL 3D spatialization block
+// (min/max attenuation distances). The attenuation-range consistency (maxDistance > minDistance,
+// both >= 0) is a REFERENTIAL rule the schema shape cannot express — it lives in
+// src/editor/kinds/audio_event.h. Off the deterministic sim path (R-SIM-001).
+constexpr std::string_view kAudioEventSchemaJson = R"({
+  "$id": "ctx:audio-event",
+  "version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["clip", "bus"],
+  "description": "An authored sound event (R-SYS-006, L-32/L-46): a DCC-imported clip routed to a mixing bus with a linear gain and an optional 3D spatialization block. Triggered by the presentation-observer audio package (src/packages/audio/) off the deterministic sim path (R-SIM-001). The attenuation-range consistency is checked by the kind's semantic analyzer beyond this shape.",
+  "properties": {
+    "notes": {"description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."},
+    "clip": {"type": "string", "description": "The DCC-imported audio clip this event plays (R-ASSET-001 — no in-engine audio authoring)."},
+    "bus": {"type": "string", "description": "The id of the mixing bus (in an authored ctx:audio-bus graph) this event routes to."},
+    "gain": {"type": "number", "x-ctx-units": "1", "x-ctx-storage": "f32", "description": "Linear gain applied when this event plays (dimensionless; >= 0, 1.0 is unity)."},
+    "loop": {"type": "boolean", "description": "Whether the event loops until explicitly stopped (default false)."},
+    "spatial": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional 3D spatialization: when present the event is positioned in the world and attenuated by listener distance. Absent means a non-spatial (2D/UI) sound at full gain.",
+      "properties": {
+        "notes": {"description": "Schema-blessed annotations."},
+        "minDistance": {"type": "number", "x-ctx-units": "m", "x-ctx-storage": "f32", "description": "Distance, meters (SI units law), within which the event plays at full `gain` (no attenuation)."},
+        "maxDistance": {"type": "number", "x-ctx-units": "m", "x-ctx-storage": "f32", "description": "Distance, meters (SI units law), beyond which the event is fully attenuated to silence; must exceed minDistance (checked by the kind semantics)."}
+      }
+    }
+  }
+})";
+
 [[nodiscard]] KindSchema compile_engine_schema(std::string_view schema_json)
 {
     std::vector<std::string> problems;
@@ -736,6 +802,8 @@ const SchemaSet& engine_schemas()
         s.add(compile_engine_schema(kStringTableSchemaJson));
         s.add(compile_engine_schema(kReplaySchemaJson));
         s.add(compile_engine_schema(kAnimGraphSchemaJson));
+        s.add(compile_engine_schema(kAudioBusSchemaJson));
+        s.add(compile_engine_schema(kAudioEventSchemaJson));
         return s;
     }();
     return set;

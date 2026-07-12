@@ -707,8 +707,35 @@ const std::vector<ErrorCode>& catalog()
          "A spline simulation step was refused: the fixed tick duration was not positive; the world "
          "is unchanged.",
          false, kExitValidation, "R-SYS-004"},
-        // --- audio.* — reserved for M6 P6 (packages/audio/, R-SYS-006 / L-46). Minter: P6. ------------
-        // (reserved — filled by the Audio package task.)
+        // --- audio.* — M6 P6 (packages/audio/, R-SYS-006 / L-46). Minter: P6. -------------------------
+        // The audio package's fail-closed refusals (issue #184). The strings are DEFINED in
+        // src/packages/audio/include/context/packages/audio/errors.h as
+        // context::packages::audio::k*Code (the same promote-a-local-string pattern as the
+        // physics3d/physics2d/particle/anim/spline blocks above — the package never links this contract
+        // layer) and this catalog registers them. Audio is ENTIRELY a presentation observer (R-SIM-001):
+        // it reads sim state but never writes it and mints no sim-path codes, so unlike the sim packages
+        // it has no missing-component/step refusals. invalid_entity (a dead entity handle passed to a
+        // spatialized-observe op) is usage-class; invalid_bus / invalid_event (a rejected mix-bus graph
+        // or sound event) are validation-class, all deterministic (a bare retry cannot repair a bad
+        // bus graph). device_unavailable is internal-class fail-closed: the miniaudio device could not
+        // initialize, so audio is disabled — the SIM is unaffected (audio is off the sim path).
+        // Appended within this block only (additive-only, protocolMajor stays 0).
+        {"audio.invalid_entity",
+         "A dead or null entity handle was passed to an audio observe/spatialize operation; nothing was "
+         "read or triggered (fail-closed).",
+         false, kExitUsage, "R-SYS-006"},
+        {"audio.invalid_bus",
+         "An audio mixing-bus graph was rejected: it is empty, has a duplicate bus id, or a bus names a "
+         "non-existent or cyclic parent; no bus graph is installed (fail-closed validation).",
+         false, kExitValidation, "R-SYS-006"},
+        {"audio.invalid_event",
+         "An audio event was rejected: a negative gain, an inverted/degenerate spatialization range, or "
+         "a reference to an out-of-range bus; nothing was triggered (fail-closed validation).",
+         false, kExitValidation, "R-SYS-006"},
+        {"audio.device_unavailable",
+         "The audio device could not be initialized; audio playback is disabled. The simulation is "
+         "unaffected — audio is a presentation observer off the sim path (fail-closed for audio only).",
+         false, kExitInternal, "R-SYS-006"},
         // --- input.* — reserved for M6 P7 (packages/input/, R-SYS-007 / L-45). Minter: P7. ------------
         // (reserved — filled by the Input package task.)
         // --- sim.gc.* — reserved for M6 X1 (JS-tier GC discipline, R-SIM-008 / L-47). Minter: X1. ------

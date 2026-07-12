@@ -10,7 +10,9 @@
 add_library(context_kinds STATIC
     src/tilemap.cpp
     src/string_table.cpp
-    src/anim_graph.cpp)
+    src/anim_graph.cpp
+    src/audio_bus.cpp
+    src/audio_event.cpp)
 
 target_include_directories(context_kinds PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -61,3 +63,12 @@ target_link_libraries(context_kinds_test_anim_graph
 target_link_options(context_kinds_test_anim_graph PRIVATE ${_context_kinds_static_runtime})
 target_include_directories(context_kinds_test_anim_graph PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME kinds-anim-graph COMMAND context_kinds_test_anim_graph)
+
+# test_audio_kinds: kinds + schema (fixture validation against the REAL engine_schemas() ctx:audio-bus
+# + ctx:audio-event registration) + the referential-integrity semantic analyzers (M6 P6, issue #184).
+add_executable(context_kinds_test_audio tests/test_audio.cpp)
+target_link_libraries(context_kinds_test_audio
+    PRIVATE context_kinds context_schema context_warnings)
+target_link_options(context_kinds_test_audio PRIVATE ${_context_kinds_static_runtime})
+target_include_directories(context_kinds_test_audio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME kinds-audio COMMAND context_kinds_test_audio)

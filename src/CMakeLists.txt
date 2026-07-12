@@ -474,6 +474,20 @@ add_subdirectory(packages/animation)
 # generate time regardless of add_subdirectory order).
 add_subdirectory(packages/spline)
 
+# M6 P6: the audio package (src/packages/audio/, R-SYS-006 / L-46, issue #184) — the FIRST fully-observer
+# package (no sim-path half). Audio is ENTIRELY a PRESENTATION OBSERVER (R-SIM-001), OFF the deterministic
+# sim path: it READS sim state (positions for spatialization, event triggers) but NEVER writes sim state,
+# registers NO sim component, and does NOT participate in the deterministic build or the L-54 state hash —
+# its miniaudio audio thread + float mixing live entirely off the sim path (the m6-exit-5 seam invariant,
+# proved by tests/test_observer_hash.cpp). Because it has no sim state there is NO determinism-*-scene
+# ctest for audio and it is NOT on the `deterministic` job --target list in ci.yml. miniaudio (the L-46
+# backbone) is vendored + compiled null-backend-only as its own warnings-suppressed sub-lib. It is a
+# PACKAGE, not kernel core (R-KERNEL-001 / L-60): the kernel never links back. Wired here immediately
+# after packages/spline (its M6 WAVE sibling) and deliberately apart from the editor/runtime clusters and
+# the file tail, so concurrent sibling tasks inserting into this file merge cleanly (consumers name the
+# `context_audio` target, resolved at generate time regardless of add_subdirectory order).
+add_subdirectory(packages/audio)
+
 # M3 task 2a: the in-process V8 JavaScript host (src/runtime/js/, issue #76 / L-61 /
 # R-LANG-002/008 / R-SEC-009) — the foundation of the M3 TypeScript scripting tier. A hybrid host
 # over the SHA-pinned rusty_v8 prebuilt channel (real v8:: API for the STL-free majority + rusty_v8

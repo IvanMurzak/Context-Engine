@@ -34,6 +34,14 @@ inline constexpr std::string_view kReplayKindId = "ctx:replay";
 // the animation package (src/packages/animation/). Canonical JSON per L-32; kind SEMANTICS (referential
 // integrity beyond schema shape) live in src/editor/kinds/anim_graph.h, the schema publication here.
 inline constexpr std::string_view kAnimGraphKindId = "ctx:anim-graph";
+// The M6 P6 authored audio kinds (R-SYS-006 / L-46): a mixing-bus graph (named buses with a linear
+// gain and an optional parent bus forming the mix tree) and a sound event (a DCC-imported clip routed
+// to a bus, with an optional 3D spatialization block). Both are consumed by the PRESENTATION-observer
+// audio package (src/packages/audio/) — off the deterministic sim path (R-SIM-001). Canonical JSON
+// (L-32); referential integrity beyond schema shape (unique/resolving/acyclic bus parents, consistent
+// attenuation range) lives in src/editor/kinds/audio_bus.h + audio_event.h; the schema publication here.
+inline constexpr std::string_view kAudioBusKindId = "ctx:audio-bus";
+inline constexpr std::string_view kAudioEventKindId = "ctx:audio-event";
 
 // One compiled per-kind versioned schema. `doc` is the schema DOCUMENT (the dialect below);
 // `canonical_doc` is its canonical-JSON serialization — the published form (R-DATA-006: published,
