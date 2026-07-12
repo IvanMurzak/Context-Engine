@@ -322,7 +322,7 @@ void register_platformer2d_scenario(const std::string& samples_dir)
             // speed + a grounded jump press becoming an instantaneous take-off (P7 → P2).
             systems.push_back(session::System{
                 "control",
-                [st, player](session::SystemContext& ctx)
+                [player](session::SystemContext& ctx)
                 {
                     std::int64_t move_x = 0;
                     std::int64_t jump = 0;
