@@ -1,0 +1,63 @@
+src/packages/input/tests/test_action_map.cpp
+  s_4d68fcead85c12::t_6d02656d1e403e 1-135
+src/packages/input/include/context/packages/input/input_router.h
+  s_4d68fcead85c12::t_acd86e2e22ddfc 1-94
+src/packages/input/tests/test_feed.cpp
+  s_4d68fcead85c12::t_c301db987a36fa 28-29
+  s_4d68fcead85c12::t_6b0db1fc7c2233 1-27,30-121
+src/editor/contract/src/error_catalog.cpp
+  s_4d68fcead85c12::t_e0094940d1d43a 739-766
+src/packages/input/include/context/packages/input/errors.h
+  s_4d68fcead85c12::t_c291246b4ed187 1-33
+src/editor/kinds/include/context/editor/kinds/input_bindings.h
+  s_4d68fcead85c12::t_4648de69bfd447 1-27
+src/editor/schema/src/kind_schema.cpp
+  s_4d68fcead85c12::t_e8b86977ac2361 656-717
+  s_4d68fcead85c12::t_630e681c21e412 869
+src/packages/input/src/input_router.cpp
+  s_4d68fcead85c12::t_21233f584f39cb 1-135
+src/packages/input/README.md
+  s_4d68fcead85c12::t_870203d3f07c39 1-56
+src/packages/input/tests/determinism_input_scene.cpp
+  s_4d68fcead85c12::t_8f63121d904632 122-123
+  s_4d68fcead85c12::t_036051e7be5cc9 1-121,124-148
+src/packages/input/include/context/packages/input/action_map.h
+  s_4d68fcead85c12::t_564980c56cbb7e 1-69
+src/editor/kinds/tests/test_input_bindings.cpp
+  s_4d68fcead85c12::t_17c78d7c54c76f 1-151
+src/packages/input/tests/test_router.cpp
+  s_4d68fcead85c12::t_ccbfad78f6d780 1-142
+src/packages/input/tests/test_errors.cpp
+  s_4d68fcead85c12::t_bf064320d4a7e4 1-81
+src/packages/input/tests/input_test.h
+  s_4d68fcead85c12::t_f2d345806260e6 1-27
+src/packages/input/CMakeLists.txt
+  s_4d68fcead85c12::t_28fabfb2cac398 1-83
+src/CMakeLists.txt
+  s_4d68fcead85c12::t_0b10509aa2f5fd 491-505
+src/editor/kinds/CMakeLists.txt
+  s_4d68fcead85c12::t_4f99141662f2e7 76-84
+  s_4d68fcead85c12::t_37ae7c3a1669a2 15-16
+src/editor/kinds/src/input_bindings.cpp
+  s_4d68fcead85c12::t_efa1dc1ec47cbb 1-93
+samples/input-bindings/default.input-bindings.json
+  s_4d68fcead85c12::t_09b4c64b914e31 1-37
+.github/workflows/ci.yml
+  s_4d68fcead85c12::t_e0f00a63af17e6 253
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "917d4211ce2ee3de66f34b3788e3829e5dea4928",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
