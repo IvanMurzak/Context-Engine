@@ -1,0 +1,51 @@
+src/CMakeLists.txt
+  s_4d68fcead85c12::t_07a0d3e8673f70 400-413
+src/packages/physics3d/include/context/packages/physics3d/physics_world.h
+  s_4d68fcead85c12::t_6d45128278ec39 1-141
+src/packages/physics3d/CMakeLists.txt
+  s_4d68fcead85c12::t_b16907ed19695a 1-82
+src/packages/physics3d/README.md
+  s_4d68fcead85c12::t_25084743f8898c 1-59
+src/editor/contract/src/error_catalog.cpp
+  s_4d68fcead85c12::t_c1c340d00300e1 569-596
+src/packages/physics3d/tests/test_dynamics.cpp
+  s_4d68fcead85c12::t_33b233e4adb91b 1-234
+src/packages/physics3d/tests/physics3d_test.h
+  s_4d68fcead85c12::t_05675ed262cc25 1-27
+src/packages/physics3d/include/context/packages/physics3d/errors.h
+  s_4d68fcead85c12::t_9a90b6be70373f 1-28
+src/packages/physics3d/tests/determinism_physics_scene.cpp
+  s_4d68fcead85c12::t_f0eaeecbf11c91 131-132
+  s_4d68fcead85c12::t_c34e4c3ed3ae74 1-8,10-130,133-178
+  s_4d68fcead85c12::t_e60063b68dc157 9
+src/packages/physics3d/tests/test_components.cpp
+  s_4d68fcead85c12::t_d0f599fba3521c 14
+  s_4d68fcead85c12::t_82252f045e4d49 1-13,15-147
+docs/ci-fleet-manifest.json
+  s_4d68fcead85c12::t_8efcb79c5edcd5 582
+  s_4d68fcead85c12::t_921c23789eef79 572
+src/packages/physics3d/src/physics_world.cpp
+  s_4d68fcead85c12::t_0ab2a90d0afc87 1-668
+src/packages/physics3d/include/context/packages/physics3d/components.h
+  s_4d68fcead85c12::t_6a83c366b95e0e 1-78
+src/packages/physics3d/tests/test_errors.cpp
+  s_4d68fcead85c12::t_aa8f40e43c5068 1-136
+src/editor/contract/tests/test_error_catalog.cpp
+  s_4d68fcead85c12::t_3a22902265448f 264-289
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "eb0ca95e32b9e4a7094209a1d51c1aa96851d698",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
