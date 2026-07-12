@@ -369,6 +369,37 @@ int main()
         }
     }
 
+    // --- M6 P6 audio codes (issue #184) — the F0a-reserved M6 audio domain block -----------------
+    // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
+    // holds). Audio is ENTIRELY a presentation observer (R-SIM-001): it mints no sim-path codes, so
+    // unlike the sim packages it has no missing-component/step refusals. invalid_entity (a dead entity
+    // handle to a spatialize op) is usage-class; invalid_bus / invalid_event are validation-class;
+    // device_unavailable is internal-class fail-closed (the device could not init — the SIM is
+    // unaffected). All deterministic (a bare retry cannot repair a bad bus graph or conjure a device).
+    // The strings are the source-of-truth in src/packages/audio/.../errors.h (context::packages::audio).
+    {
+        const ErrorCode* entity = find_code("audio.invalid_entity");
+        CHECK(entity != nullptr);
+        CHECK(entity->exit_code == 2);      // usage class
+        CHECK(entity->retriable == false);  // deterministic — a bare retry cannot help
+        CHECK(entity->origin == "R-SYS-006");
+
+        for (const char* code : {"audio.invalid_bus", "audio.invalid_event"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 5);      // validation class
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-SYS-006");
+        }
+
+        const ErrorCode* device = find_code("audio.device_unavailable");
+        CHECK(device != nullptr);
+        CHECK(device->exit_code == 1);      // internal class (fail-closed; the sim is unaffected)
+        CHECK(device->retriable == false);
+        CHECK(device->origin == "R-SYS-006");
+    }
+
     // --- M6-F0a deterministic-build attestation codes (issue #170) -------------------------------
     // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
     // holds). The determinism.attestation_* fail-closed codes the deterministic build PRODUCES when it
