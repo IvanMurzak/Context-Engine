@@ -148,6 +148,15 @@ void test_trigger_policy(cjs::JsEngine& engine)
     // Immediately after a collection reset the baseline, a large trigger holds again.
     CHECK(engine.gcWindow(quiet, result, err));
     CHECK(!result.collected);
+
+    // Regression: a near-UINT64_MAX trigger must ALSO hold — the growth comparison must be
+    // computed by subtraction, never `baseline + trigger` (whose wraparound would flip
+    // "effectively never collect" into "collect every window").
+    cjs::GcWindowOptions maximal;
+    maximal.budget_ms = 2.0;
+    maximal.trigger_bytes = std::numeric_limits<std::uint64_t>::max();
+    CHECK(engine.gcWindow(maximal, result, err));
+    CHECK(!result.collected);
 }
 
 void test_heap_stats(cjs::JsEngine& engine)

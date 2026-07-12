@@ -113,7 +113,8 @@ std::string_view hot_api_js()
         abs: function (a) { return a < 0 ? -a : a; },
         min: function (a, b) { return a < b ? a : b; },
         max: function (a, b) { return a > b ? a : b; },
-        clamp: function (v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); },
+        // Q16.16 raw values are ordinary Numbers, so ctx.math's float clamp is exact here too.
+        clamp: math.clamp,
         sign: function (a) { return a > 0 ? 1 : (a < 0 ? -1 : 0); }
     };
     ctx.fixed = fixed;

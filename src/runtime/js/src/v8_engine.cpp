@@ -469,8 +469,12 @@ public:
         }
 
         gcInWindow_ = true;
+        // Growth is compared by subtraction (never `gcBaseline_ + trigger_bytes`): the sum wraps
+        // for a near-UINT64_MAX trigger, which would flip "effectively never collect" into
+        // "collect every window".
         const bool grewPastTrigger = options.trigger_bytes > 0 &&
-                                     result.heap_used_before >= gcBaseline_ + options.trigger_bytes;
+                                     result.heap_used_before >= gcBaseline_ &&
+                                     result.heap_used_before - gcBaseline_ >= options.trigger_bytes;
         if (options.force_collect || grewPastTrigger)
         {
             // Synchronous full collection, deliberately NOT preempted by the budget: the pause is
@@ -492,8 +496,17 @@ public:
         }
         gcInWindow_ = false;
 
-        isolate_->GetHeapStatistics(&hs);
-        result.heap_used_after = static_cast<std::uint64_t>(hs.used_heap_size());
+        if (result.collected || result.tasks_pumped > 0)
+        {
+            // Only a collection or a pumped task can have moved the heap; skip the second
+            // heap-stats walk on the (per-tick) no-op path.
+            isolate_->GetHeapStatistics(&hs);
+            result.heap_used_after = static_cast<std::uint64_t>(hs.used_heap_size());
+        }
+        else
+        {
+            result.heap_used_after = result.heap_used_before;
+        }
         if (result.collected)
         {
             gcBaseline_ = result.heap_used_after;

@@ -148,6 +148,13 @@ Envelope profile_gc(const std::map<std::string, std::string>& flags)
 
     // --- run: mid-tick churn via the observer; the GC window + drain at every tick boundary ----
     profile::GcPauseChannel channel;
+    // Discard GC activity provoked by VM boot + the workload eval above: those pauses predate
+    // tick 0, so leaving them in the ring would let the first inter-tick drain mis-attribute
+    // them as mid-tick gameplay pauses (inflating the R-SIM-008-policed aggregate). clear()
+    // wipes the boot records/aggregates but keeps the engine-drop high-water mark, so only
+    // in-run drops fail the budget verdict.
+    channel.drain(*engine, 0);
+    channel.clear();
     std::string run_err;
     bool run_ok = true;
     std::uint64_t collected_windows = 0;
