@@ -1,0 +1,50 @@
+src/packages/physics2d/src/physics_world.cpp
+  s_4d68fcead85c12::t_0f97af7a204b4b 1-660
+src/packages/physics2d/include/context/packages/physics2d/components.h
+  s_4d68fcead85c12::t_f4fce0c018d738 1-73
+src/packages/physics2d/tests/test_errors.cpp
+  s_4d68fcead85c12::t_b61ca5865d1479 1-134
+src/packages/physics2d/include/context/packages/physics2d/errors.h
+  s_4d68fcead85c12::t_a22eeaf0e70929 1-28
+src/packages/physics2d/README.md
+  s_4d68fcead85c12::t_95d1a3d1237124 1-67
+src/packages/physics2d/tests/test_dynamics.cpp
+  s_4d68fcead85c12::t_0078887175b9d1 102-107,112,118
+  s_4d68fcead85c12::t_5b20dcf4136a77 1-47,51-59,61-62,69-101,108-111,113-117,119-234
+  s_4d68fcead85c12::t_ba225ae591534d 48-50,60,63-68
+src/editor/contract/tests/test_error_catalog.cpp
+  s_4d68fcead85c12::t_686e8875d1b04d 290-316
+src/packages/physics2d/include/context/packages/physics2d/physics_world.h
+  s_4d68fcead85c12::t_8d1356eb965882 1-143
+.github/workflows/ci.yml
+  s_4d68fcead85c12::t_fa8114a2fc8259 253
+src/packages/physics2d/CMakeLists.txt
+  s_4d68fcead85c12::t_03b7865dc9ff22 1-85
+src/packages/physics2d/tests/physics2d_test.h
+  s_4d68fcead85c12::t_96c95fff44bcb1 1-27
+src/editor/contract/src/error_catalog.cpp
+  s_4d68fcead85c12::t_93a81f6b0ff2cf 598-624
+src/packages/physics2d/tests/determinism_physics_scene.cpp
+  s_4d68fcead85c12::t_8206cd4f3eed37 1-130,133-178
+  s_4d68fcead85c12::t_95d04fffbd91a0 131-132
+src/packages/physics2d/tests/test_components.cpp
+  s_4d68fcead85c12::t_0f4b024fc37b4d 1-145
+src/CMakeLists.txt
+  s_4d68fcead85c12::t_3e81ece17da025 414-427
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "406ec7e2b9ce530d1d9d4352fc685b052237f2ad",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
