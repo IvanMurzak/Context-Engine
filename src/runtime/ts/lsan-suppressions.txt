@@ -14,14 +14,20 @@
 # being unable to unwind past the uninstrumented prebuilt. These bytes are allocated INSIDE the
 # sanitizer's symbolizer/demangler, NEVER in Context-Engine (`namespace context::`) code.
 #
-# The PRIMARY fix is in CMakeLists.txt: `-fno-sanitize=vptr` on context_ts removes the false-positive
-# vptr diagnostics whose demangling produced these buffers. This file is a NARROW safety net that
-# matches ONLY the sanitizer's own symbolizer/demangler frames, so it can never mask a real leak in
-# Context code (which, if one existed, would carry a `context::` frame this file does not match — and
-# would be FIXED, not suppressed). Wired into ONLY the ts-test_ts_in_v8 ctest, ONLY under the
-# `sanitize` preset, via LSAN_OPTIONS=suppressions=<abs path> (src/runtime/ts/CMakeLists.txt, guarded
-# by CONTEXT_SANITIZE + _ctx_js_v8). This is the ASan/UBSan analogue of the runtime/js TSan
-# suppressions file for the same uninstrumented-rusty_v8 boundary.
+# For the runtime/ts tests the PRIMARY fix is in CMakeLists.txt: `-fno-sanitize=vptr` on context_ts
+# removes the false-positive vptr diagnostics whose demangling produced these buffers, and this file
+# is a NARROW safety net. For the CLI family (M6 X1: context_cli links context_js, so the `context`
+# binary and every executable linking context_cli carry the prebuilt) the carve-out is NOT viable —
+# the diagnostics fire in TUs of libraries shared with non-V8 binaries whose vptr coverage must
+# stay — so there this file is the operative fix and the vptr diagnostics remain as known-benign
+# stderr noise. Either way the rules match ONLY the sanitizer's own symbolizer/demangler frames, so
+# they can never mask a real leak in Context code (which, if one existed, would carry a `context::`
+# frame this file does not match — and would be FIXED, not suppressed). Wired ONLY under the
+# `sanitize` preset, via LSAN_OPTIONS=suppressions=<abs path>, onto every ctest whose process — or
+# spawned `context` child — carries the V8 prebuilt: see the CONTEXT_SANITIZE blocks in
+# src/runtime/ts, src/cli, src/tests/integration, and src/editor/merge CMakeLists.txt. This is the
+# ASan/UBSan analogue of the runtime/js TSan suppressions file for the same uninstrumented-rusty_v8
+# boundary.
 #
 # Format: one rule per line, `leak:<substring-pattern>` (substring match on a demangled frame in the
 # allocation stack). Ref:

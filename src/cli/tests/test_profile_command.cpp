@@ -62,6 +62,13 @@ int main()
         CHECK(!e.ok());
         CHECK(err_code(e) == "usage.invalid");
     }
+    {
+        // 0 would disable BOTH the force policy and the growth trigger (a run that never
+        // collects); it is rejected like --ticks 0, not silently accepted.
+        const Envelope e = run_profile("gc", {}, {{"trigger-bytes", "0"}});
+        CHECK(!e.ok());
+        CHECK(err_code(e) == "usage.invalid");
+    }
 
     if (!cjs::v8BackendAvailable())
     {

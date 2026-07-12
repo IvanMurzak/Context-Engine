@@ -182,3 +182,36 @@ target_compile_definitions(context_cli_test_fetch_e2e
 add_dependencies(context_cli_test_fetch_e2e context)
 add_test(NAME cli-test_fetch_e2e COMMAND context_cli_test_fetch_e2e)
 set_tests_properties(cli-test_fetch_e2e PROPERTIES TIMEOUT 60)
+
+# Sanitize preset only (mutually exclusive with the TSan block above): linking context_js on the
+# V8-capable legs bakes the uninstrumented rusty_v8 archive — and with it a SECOND, hidden-
+# visibility copy of the C++ runtime's typeinfo — into every cli test executable AND the `context`
+# binary the e2e tests spawn. UBSan's vptr check then false-positives on perfectly valid iostream
+# code in the instrumented libraries (filesync/merge/cli — typeinfo identity compares fail across
+# the duplicate), and PRINTING those diagnostics drives the sanitizer's demangler, whose scratch
+# allocations LSan reports as leaks at exit — failing tests with no Context defect (sanitize
+# (ASan+UBSan, ubuntu) leg: 23 tests, CI run 29197875018). The runtime/ts `-fno-sanitize=vptr`
+# carve-out is NOT viable here: the diagnostics fire in TUs of libraries shared with non-V8
+# binaries, whose vptr coverage must stay. So the narrow demangler/symbolizer LSan suppressions
+# (see runtime/ts/lsan-suppressions.txt — they can never mask a `context::` leak) are the
+# operative fix; the vptr diagnostics remain as known-benign stderr noise. Wired uniformly onto
+# EVERY cli test (spawned `context` children inherit the env); inert on the stub (non-V8) build,
+# so no _ctx_js_v8 gate is needed (same rationale as the TSan block).
+if(CONTEXT_SANITIZE)
+    set_tests_properties(
+        cli-test_bench_command
+        cli-test_cli
+        cli-test_determinism_command
+        cli-test_editor_driver
+        cli-test_pkg_command
+        cli-test_merge_command
+        cli-test_migrate_command
+        cli-test_profile_command
+        cli-test_scaffold
+        cli-test_session_command
+        cli-test_set_command
+        cli-test_attach_e2e
+        cli-test_fetch_e2e
+        PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../runtime/ts/lsan-suppressions.txt")
+endif()

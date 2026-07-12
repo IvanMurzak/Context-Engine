@@ -18,8 +18,8 @@
 # race in Context-Engine's own code (namespace context::), which stays fully instrumented.
 #
 # Wired into EVERY ctest whose executable links the V8-backed context_js (js-test_js_engine,
-# js-test_gc_discipline, js-test_gc_state_hash, ts-test_ts_in_v8, ts-test_hot_api,
-# cli-test_profile_command), and ONLY under the `tsan` preset, via
+# js-test_gc_discipline, js-test_gc_state_hash, ts-test_ts_in_v8, ts-test_ts_debug,
+# ts-test_hot_api, cli-test_profile_command), and ONLY under the `tsan` preset, via
 # TSAN_OPTIONS=suppressions=<abs path> (each registering CMakeLists.txt, guarded by CONTEXT_TSAN).
 # A NEW test that boots the V8 host MUST add the same wiring, or the pool races below fail it.
 #

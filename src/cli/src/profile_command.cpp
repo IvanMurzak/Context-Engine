@@ -2,6 +2,7 @@
 
 #include "context/cli/profile_command.h"
 
+#include "context/cli/wire_client.h" // the exported strict-u64 parser (context::cli::parse_u64)
 #include "context/runtime/js/gc_errors.h"
 #include "context/runtime/js/js_host.h"
 #include "context/runtime/profile/gc_channel.h"
@@ -31,27 +32,9 @@ const std::string* flag(const std::map<std::string, std::string>& flags, const c
     return it != flags.end() ? &it->second : nullptr;
 }
 
-// Strict base-10 unsigned parse (the session_command.cpp contract: reject a leading '-' so the
-// strtoull wraparound never smuggles a negative in; reject leading-zero octal and 0x hex).
-std::optional<std::uint64_t> parse_u64(const std::string& s)
-{
-    const std::size_t first = s.find_first_not_of(" \t");
-    if (first != std::string::npos && s[first] == '-')
-        return std::nullopt;
-    try
-    {
-        std::size_t pos = 0;
-        const unsigned long long v = std::stoull(s, &pos, 10);
-        if (pos != s.size())
-            return std::nullopt;
-        return static_cast<std::uint64_t>(v);
-    }
-    catch (...)
-    {
-        return std::nullopt;
-    }
-}
-
+// Unsigned flag values go through the exported context::cli::parse_u64 (wire_client.h) — the
+// digit-only, overflow-safe parser test_cli.cpp pins — rather than a third file-local copy of the
+// session_command.cpp stoull variant. parse_ms stays local: no shared double parser exists yet.
 std::optional<double> parse_ms(const std::string& s)
 {
     try
@@ -111,10 +94,15 @@ Envelope profile_gc(const std::map<std::string, std::string>& flags)
     window_options.budget_ms = budget_ms;
     if (const std::string* tb = flag(flags, "trigger-bytes"))
     {
+        // Reject 0 explicitly (mirrors the --ticks guard): trigger_bytes == 0 disables the growth
+        // trigger inside gcWindow while this branch also clears force_collect, so accepting it
+        // would silently run a profile that NEVER collects — the opposite of the "collect on any
+        // growth" reading the describe text ("at least this many bytes") invites.
         const std::optional<std::uint64_t> parsed = parse_u64(*tb);
-        if (!parsed.has_value())
+        if (!parsed.has_value() || *parsed == 0)
             return Envelope::failure("usage.invalid",
-                                     "--trigger-bytes must be an unsigned integer");
+                                     "--trigger-bytes must be a positive integer (omit the flag "
+                                     "to force-collect every window)");
         window_options.trigger_bytes = *parsed;
         window_options.force_collect = false;
     }

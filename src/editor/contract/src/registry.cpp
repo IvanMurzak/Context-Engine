@@ -546,7 +546,7 @@ Registry::Registry()
           false},
          {"trigger-bytes", "string",
           "Collect only when the JS heap grew by at least this many bytes since the last "
-          "collecting window (unsigned integer); default: collect every window (force).",
+          "collecting window (positive integer); default: collect every window (force).",
           false},
          {"churn", "string",
           "Short-lived JS objects allocated per system per tick (unsigned integer); defaults to "
