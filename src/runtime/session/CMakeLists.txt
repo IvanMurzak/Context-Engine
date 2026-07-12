@@ -86,3 +86,22 @@ target_link_libraries(context_session_determinism_physics PRIVATE context_sessio
 target_link_options(context_session_determinism_physics PRIVATE ${_context_session_static_runtime})
 target_include_directories(context_session_determinism_physics PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME determinism-physics-wedge COMMAND context_session_determinism_physics)
+
+# M6 X3 COMBINED-GAMEPLAY determinism gate (issue #192): every landed sim package active in ONE
+# world — physics3d spheres/ramp + physics2d circles/box + a root-motion animator + sim-path particle
+# emitters + a transcendental (fixed trig) steer system — stepped N fixed ticks in a FIXED system
+# order, per-tick hierarchical state hash folded and asserted against a cross-platform GOLDEN, plus
+# the `context determinism diff` triage primitives exercised to attribute injected physics/animation
+# divergences to (tick, system, entity, componentField). The per-package scenes prove each system
+# deterministic in isolation; THIS gate proves they compose (shared entities, ordering, combined
+# math). A TEST-ONLY link of the package libraries: the context_session LIBRARY gains no package
+# dependency (L-60 layering unchanged — packages still compose on the session seam, never vice
+# versa). Joins the `determinism-*` family (blocking CI "Determinism gate" step, all three matrix
+# legs) AND the strict-FP `deterministic` job's hand-maintained --target list in ci.yml.
+add_executable(context_session_determinism_gameplay tests/determinism_gameplay_scene.cpp)
+target_link_libraries(context_session_determinism_gameplay
+    PRIVATE context_session context_physics3d context_physics2d context_animation
+            context_particles context_simmath context_warnings)
+target_link_options(context_session_determinism_gameplay PRIVATE ${_context_session_static_runtime})
+target_include_directories(context_session_determinism_gameplay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME determinism-gameplay-scene COMMAND context_session_determinism_gameplay)
