@@ -653,6 +653,68 @@ constexpr std::string_view kAudioEventSchemaJson = R"({
   }
 })";
 
+// The input-bindings content kind (R-SYS-007 / L-45, M6 P7): the authored action maps + stackable
+// input contexts the input package (src/packages/input/) routes with. Declares the named ACTIONS and
+// the CONTEXTS (each a layer — gameplay/ui — an optional capture flag, and its device->action
+// BINDINGS). Action-id / context-id uniqueness and every binding resolving to a declared action are
+// REFERENTIAL rules the schema shape cannot express — they live in src/editor/kinds/input_bindings.h.
+// The bindings feed the sim InputState (R-QA-005) through the routing front-end, not a forked path.
+constexpr std::string_view kInputBindingsSchemaJson = R"({
+  "$id": "ctx:input-bindings",
+  "version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["actions", "contexts"],
+  "description": "An authored input-bindings configuration (R-SYS-007, L-32/L-45): the named input actions plus the stackable input contexts (each on a gameplay/ui layer, optionally capturing) that map raw device sources to those actions. The routing front-end (src/packages/input/) applies the layered UI-capture arbitration and feeds the mapped actions to the sim InputState sink. Action-id / context-id uniqueness and every binding resolving to a declared action are checked by the kind's semantic analyzer beyond this shape.",
+  "properties": {
+    "notes": {"description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."},
+    "actions": {
+      "type": "array",
+      "description": "The named input actions bindings map to — an id-keyed stable collection (L-33 / R-FILE-001: array keyed by `id`, never a map). Gameplay actions (e.g. move_x, fire) feed InputState's gameplay channels; ui_* actions feed its UI channel.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": {
+          "notes": {"description": "Schema-blessed annotations."},
+          "id": {"type": "string", "description": "Stable action id, unique within the document (the name bindings target and the sim InputState sink understands)."},
+          "layer": {"type": "string", "enum": ["gameplay", "ui"], "description": "The routing layer this action belongs to: gameplay (sim-affecting) or ui (arbitrated above gameplay). Advisory; defaults to gameplay."}
+        }
+      }
+    },
+    "contexts": {
+      "type": "array",
+      "description": "The stackable input contexts (the L-45 layered UI-capture stack). Higher contexts take priority; a capturing UI context blocks unbound input from reaching gameplay contexts below it (R-SYS-007 focus arbitration).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "layer"],
+        "properties": {
+          "notes": {"description": "Schema-blessed annotations."},
+          "id": {"type": "string", "description": "Stable context id, unique within the document (the key the router pushes/pops)."},
+          "layer": {"type": "string", "enum": ["gameplay", "ui"], "description": "The context's routing layer: gameplay or ui."},
+          "capture": {"type": "boolean", "description": "When true (a modal UI context), the context swallows any input it does not itself bind so gameplay contexts below never receive it (default false — a non-capturing overlay lets unbound input fall through)."},
+          "bindings": {
+            "type": "array",
+            "description": "The device->action bindings this context contributes.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["device", "code", "action"],
+              "properties": {
+                "notes": {"description": "Schema-blessed annotations."},
+                "device": {"type": "string", "enum": ["keyboard", "mouse", "gamepad", "touch", "vr"], "description": "The raw device source: keyboard | mouse | gamepad | touch | vr (VR-controller)."},
+                "code": {"type": "string", "description": "The device-specific code (e.g. keyboard \"W\", mouse \"MouseLeft\", gamepad \"ButtonSouth\")."},
+                "action": {"type": "string", "description": "The action this source maps to (must name a declared action — checked by the kind semantics)."}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+})";
+
 [[nodiscard]] KindSchema compile_engine_schema(std::string_view schema_json)
 {
     std::vector<std::string> problems;
@@ -804,6 +866,7 @@ const SchemaSet& engine_schemas()
         s.add(compile_engine_schema(kAnimGraphSchemaJson));
         s.add(compile_engine_schema(kAudioBusSchemaJson));
         s.add(compile_engine_schema(kAudioEventSchemaJson));
+        s.add(compile_engine_schema(kInputBindingsSchemaJson));
         return s;
     }();
     return set;

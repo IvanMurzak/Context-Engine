@@ -736,8 +736,34 @@ const std::vector<ErrorCode>& catalog()
          "The audio device could not be initialized; audio playback is disabled. The simulation is "
          "unaffected — audio is a presentation observer off the sim path (fail-closed for audio only).",
          false, kExitInternal, "R-SYS-006"},
-        // --- input.* — reserved for M6 P7 (packages/input/, R-SYS-007 / L-45). Minter: P7. ------------
-        // (reserved — filled by the Input package task.)
+        // --- input.* — M6 P7 (packages/input/, R-SYS-007 / L-45). Minter: P7. -------------------------
+        // The input package's fail-closed refusals (issue #186). The strings are DEFINED in
+        // src/packages/input/include/context/packages/input/errors.h as
+        // context::packages::input::k*Code (the same promote-a-local-string pattern as the
+        // physics3d/physics2d/particle/anim/spline/audio blocks above — the package never links this
+        // contract layer) and this catalog registers them. The input package is the mapping/ROUTING
+        // front-end that FEEDS the existing sim InputState sink (it owns no sim state), so its codes are
+        // all CONFIGURATION refusals (installing / stacking / rebinding contexts), all deterministic (a
+        // bare retry cannot repair a duplicate id or an unknown action). invalid_context / duplicate_context
+        // are validation-class (a rejected/colliding context definition); unknown_context / unknown_action
+        // are usage-class (an op named a non-installed context or an unbound action). Appended within this
+        // block only (additive-only, protocolMajor stays 0).
+        {"input.invalid_context",
+         "An input context was rejected: an empty context id, or a binding with an empty device/code/"
+         "action or an unrecognized device source; no context was installed (fail-closed validation).",
+         false, kExitValidation, "R-SYS-007"},
+        {"input.duplicate_context",
+         "An input context could not be installed: its id is already installed; nothing was overwritten "
+         "(fail-closed validation).",
+         false, kExitValidation, "R-SYS-007"},
+        {"input.unknown_context",
+         "An input operation named a context id that is not installed (or popped an empty active stack); "
+         "the active stack is unchanged.",
+         false, kExitUsage, "R-SYS-007"},
+        {"input.unknown_action",
+         "A rebind named an action that has no binding in the target context; nothing was repointed "
+         "(fail-closed).",
+         false, kExitUsage, "R-SYS-007"},
         // --- sim.gc.* — reserved for M6 X1 (JS-tier GC discipline, R-SIM-008 / L-47). Minter: X1. ------
         // (reserved — filled by the GC-discipline cross-cutting task.)
         // --- net.* — reserved for M6 X2 (replication + state-sync, R-NET-001 / L-48). Minter: X2. ------

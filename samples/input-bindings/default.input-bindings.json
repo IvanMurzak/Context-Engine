@@ -1,0 +1,37 @@
+{
+  "$schema": "ctx:input-bindings",
+  "version": 1,
+  "notes": "A default player input-bindings configuration (R-SYS-007 / L-45): named actions plus a gameplay context (WASD move + mouse fire) and a modal pause-menu UI context that CAPTURES all input while it is on the stack, so gameplay does not receive input while the menu is open. The routing front-end (src/packages/input/) applies this layered UI-capture arbitration and feeds the mapped actions to the sim InputState sink. This is the authored ctx:input-bindings few-shot form an AI author should emit.",
+  "actions": [
+    {"id": "move_x", "layer": "gameplay"},
+    {"id": "move_y", "layer": "gameplay"},
+    {"id": "fire", "layer": "gameplay"},
+    {"id": "ui_menu", "layer": "ui"},
+    {"id": "ui_confirm", "layer": "ui"}
+  ],
+  "contexts": [
+    {
+      "id": "gameplay",
+      "layer": "gameplay",
+      "capture": false,
+      "bindings": [
+        {"device": "keyboard", "code": "A", "action": "move_x"},
+        {"device": "keyboard", "code": "D", "action": "move_x"},
+        {"device": "keyboard", "code": "W", "action": "move_y"},
+        {"device": "keyboard", "code": "S", "action": "move_y"},
+        {"device": "mouse", "code": "MouseLeft", "action": "fire"},
+        {"device": "gamepad", "code": "ButtonSouth", "action": "fire"}
+      ]
+    },
+    {
+      "id": "pause_menu",
+      "layer": "ui",
+      "capture": true,
+      "bindings": [
+        {"device": "keyboard", "code": "Escape", "action": "ui_menu"},
+        {"device": "keyboard", "code": "Enter", "action": "ui_confirm"},
+        {"device": "gamepad", "code": "ButtonStart", "action": "ui_menu"}
+      ]
+    }
+  ]
+}

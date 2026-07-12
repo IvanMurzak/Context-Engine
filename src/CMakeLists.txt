@@ -488,6 +488,21 @@ add_subdirectory(packages/spline)
 # `context_audio` target, resolved at generate time regardless of add_subdirectory order).
 add_subdirectory(packages/audio)
 
+# M6 P7: the input package (src/packages/input/, R-SYS-007 / L-45, issue #186) — the LAST M6 WAVE4
+# gameplay package. The authoring/mapping/routing FRONT-END: it maps raw device events (keyboard /
+# mouse / gamepad / touch / VR-controller) through stackable action maps + a layered UI-capture stack
+# (L-45) into the mapped action layer, with deterministic UI-vs-gameplay focus arbitration (R-SYS-007)
+# + runtime rebinding. THE SEAM: it FEEDS the EXISTING sim-facing InputState sink (src/runtime/session/)
+# — route() emits session::ActionActivation / TickInputs, the existing types — so there is NO forked
+# sim-path input representation; it registers NO sim component of its own (tests/test_feed.cpp). Its
+# device->action->InputState pipeline IS on the deterministic path, so it ships a determinism-input-scene
+# ctest (on the `deterministic` job --target list in ci.yml). It is a PACKAGE, not kernel core (L-60):
+# the kernel never links back. Wired here immediately after packages/audio (its M6 WAVE4 sibling) and
+# apart from the editor/runtime clusters and the file tail, so concurrent sibling tasks inserting into
+# this file merge cleanly (consumers name the `context_input` target, resolved at generate time
+# regardless of add_subdirectory order).
+add_subdirectory(packages/input)
+
 # M3 task 2a: the in-process V8 JavaScript host (src/runtime/js/, issue #76 / L-61 /
 # R-LANG-002/008 / R-SEC-009) — the foundation of the M3 TypeScript scripting tier. A hybrid host
 # over the SHA-pinned rusty_v8 prebuilt channel (real v8:: API for the STL-free majority + rusty_v8
