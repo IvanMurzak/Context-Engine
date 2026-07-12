@@ -1,0 +1,88 @@
+src/packages/animation/include/context/packages/animation/errors.h
+  s_4d68fcead85c12::t_ef856b3716b143 1-32
+src/packages/animation/src/animation_world.cpp
+  s_4d68fcead85c12::t_e0da97a78d01e6 1-301
+src/editor/kinds/src/anim_graph.cpp
+  s_4d68fcead85c12::t_ccada9eaee5ae3 1-86
+src/packages/animation/tests/test_components.cpp
+  s_4d68fcead85c12::t_29b606b9e2fc39 1-98
+src/packages/animation/tests/test_skeletal.cpp
+  s_4d68fcead85c12::t_0eb8132afb7189 1-142
+src/packages/animation/include/context/packages/animation/components.h
+  s_4d68fcead85c12::t_cf878d13d4d5af 1-57
+src/packages/animation/src/skeletal.cpp
+  s_4d68fcead85c12::t_75ffcc88f43d82 1-137,139-183
+  s_4d68fcead85c12::t_1f75b3f46085de 138
+src/packages/animation/tests/rig_fixture.h
+  s_4d68fcead85c12::t_1c9f068fcb9bc5 1-53,57-120
+  s_4d68fcead85c12::t_789cd9c498101a 54-56
+src/packages/animation/tests/test_graph.cpp
+  s_4d68fcead85c12::t_692fff9aaa88b0 1-133
+src/packages/animation/tests/test_cosmetic.cpp
+  s_4d68fcead85c12::t_982f9c20aeba01 1-85
+src/packages/animation/tests/test_errors.cpp
+  s_4d68fcead85c12::t_a056518ab54c17 1-112
+src/packages/animation/src/cosmetic_pose.cpp
+  s_4d68fcead85c12::t_81babd9518d8aa 1-111
+src/editor/schema/include/context/editor/schema/kind_schema.h
+  s_4d68fcead85c12::t_8627e091400cb4 32-36
+src/editor/kinds/include/context/editor/kinds/anim_graph.h
+  s_4d68fcead85c12::t_b36b60b7f26dfd 1-27
+src/packages/animation/include/context/packages/animation/skeletal.h
+  s_4d68fcead85c12::t_6c162c6d2b5999 1-133
+src/packages/animation/include/context/packages/animation/cosmetic_pose.h
+  s_4d68fcead85c12::t_e165c3396bc6e8 1-75
+src/packages/animation/CMakeLists.txt
+  s_4d68fcead85c12::t_a20a29092f8e59 1-94
+src/packages/animation/tests/determinism_animation_scene.cpp
+  s_4d68fcead85c12::t_b47410767511eb 106-107
+  s_4d68fcead85c12::t_3db143a1d101f5 1-105,108-135
+src/editor/schema/src/kind_schema.cpp
+  s_4d68fcead85c12::t_056642e6c5e44e 738
+  s_4d68fcead85c12::t_76cb496b18f157 549-589
+src/editor/kinds/tests/test_anim_graph.cpp
+  s_4d68fcead85c12::t_7801e4f4477ef0 1-141
+.github/workflows/ci.yml
+  s_4d68fcead85c12::t_02d240ae74b0e3 253
+src/editor/contract/src/error_catalog.cpp
+  s_4d68fcead85c12::t_a4384787d6a974 626-654
+samples/README.md
+  s_4d68fcead85c12::t_a83f50c03177ba 52-58
+src/packages/animation/tests/animation_test.h
+  s_4d68fcead85c12::t_86410d1df56271 1-27
+src/packages/animation/include/context/packages/animation/animation_world.h
+  s_4d68fcead85c12::t_2ee59a429cd7f7 1-129
+samples/anim-graphs/locomotion.anim-graph.json
+  s_4d68fcead85c12::t_b3b22dcaaae09d 1-38
+src/editor/kinds/CMakeLists.txt
+  s_4d68fcead85c12::t_6ea4bf15b774e3 55-63
+  s_4d68fcead85c12::t_81abaf283daa04 12-13
+src/CMakeLists.txt
+  s_cb41aadbde3305::t_a07060e44c1428 443-459
+src/packages/animation/README.md
+  s_cb41aadbde3305::t_9882c331e4abdb 1-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "74b4d9dc2f2e64d7a4ef5d775cad0bf7d8ec592f",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_cb41aadbde3305": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e52f295f-a887-4d28-a18e-567076052857",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
