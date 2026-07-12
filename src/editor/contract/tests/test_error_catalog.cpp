@@ -341,6 +341,34 @@ int main()
         }
     }
 
+    // --- M6 P5 spline codes (issue #182) — the F0a-reserved M6 spline domain block ----------------
+    // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
+    // holds). The spline.* fail-closed refusals the spline package mints, mirroring the physics /
+    // particle / anim blocks: dead-entity and missing-component ops are usage-class; invalid path
+    // (empty/malformed set or out-of-range index) / duplicate / step are validation-class. All
+    // deterministic (a bare retry cannot repair an invalid path set). The strings are the
+    // source-of-truth in src/packages/spline/.../errors.h (context::packages::spline). The
+    // tooling/geometry DISPLAY observer path (R-SIM-001) is off the sim path and mints no codes.
+    {
+        for (const char* code : {"spline.invalid_entity", "spline.missing_component"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 2);      // usage class
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-SYS-004");
+        }
+        for (const char* code :
+             {"spline.invalid_path", "spline.duplicate_component", "spline.invalid_step"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 5);      // validation class
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-SYS-004");
+        }
+    }
+
     // --- M6-F0a deterministic-build attestation codes (issue #170) -------------------------------
     // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
     // holds). The determinism.attestation_* fail-closed codes the deterministic build PRODUCES when it
