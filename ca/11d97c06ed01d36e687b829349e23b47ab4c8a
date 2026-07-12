@@ -1,0 +1,21 @@
+src/tests/integration/test_samples_corpus.cpp
+  s_4d68fcead85c12::t_73cd204a280faf 164
+src/tests/integration/CMakeLists.txt
+  s_4d68fcead85c12::t_d0b2cff4878950 187-189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "ca11d97c06ed01d36e687b829349e23b47ab4c8a",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
