@@ -595,7 +595,33 @@ const std::vector<ErrorCode>& catalog()
          "world is unchanged.",
          false, kExitValidation, "R-SYS-001"},
         // --- physics2d.* — reserved for M6 P2 (packages/physics2d/, R-2D-002 / L-55). Minter: P2. -----
-        // (reserved — filled by the Physics-2D package task.)
+        // The deterministic fixed-point rigid-body 2D physics package's fail-closed refusals (issue
+        // #176). The strings are DEFINED in
+        // src/packages/physics2d/include/context/packages/physics2d/errors.h as
+        // context::packages::physics2d::k*Code (the same promote-a-local-string pattern as physics3d's
+        // block above — the package never links this contract layer) and this catalog registers them.
+        // All deterministic (a bare retry cannot repair an invalid body description or a missing
+        // component set); appended within this block only (additive-only, protocolMajor stays 0).
+        {"physics2d.invalid_entity",
+         "A dead or null entity handle was passed to a physics operation; nothing was simulated or "
+         "modified (fail-closed).",
+         false, kExitUsage, "R-2D-002"},
+        {"physics2d.missing_component",
+         "A physics operation targeted an entity that lacks the full physics component set "
+         "(transform + velocity + body + collider); the world is unchanged.",
+         false, kExitUsage, "R-2D-002"},
+        {"physics2d.invalid_shape",
+         "A collider was rejected: a circle radius or box half-extent was not positive; no physics "
+         "components were added (fail-closed validation).",
+         false, kExitValidation, "R-2D-002"},
+        {"physics2d.invalid_mass",
+         "A dynamic body was rejected: its mass was not positive; no physics components were added "
+         "(fail-closed validation).",
+         false, kExitValidation, "R-2D-002"},
+        {"physics2d.invalid_step",
+         "A physics simulation step was refused: the fixed tick duration was not positive; the "
+         "world is unchanged.",
+         false, kExitValidation, "R-2D-002"},
         // --- anim.* — reserved for M6 P3 (packages/animation/, R-SYS-002/008). Minter: P3. ------------
         // (reserved — filled by the Animation package task.)
         // --- particle.* — reserved for M6 P4 (packages/particles/, R-SYS-003). Minter: P4. ------------

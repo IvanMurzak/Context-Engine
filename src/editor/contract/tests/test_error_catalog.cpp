@@ -287,6 +287,33 @@ int main()
         }
     }
 
+    // --- M6 P2 physics2d codes (issue #176) — the second filled F0a-reserved M6 domain block ------
+    // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
+    // holds). The physics2d.* fail-closed refusals the Box2D-class 2D rigid-body package mints,
+    // mirroring the physics3d block: dead-entity and missing-component-set ops are usage-class;
+    // invalid shape / mass / step are validation-class. All deterministic (a bare retry cannot repair
+    // an invalid body description). The strings are the source-of-truth in
+    // src/packages/physics2d/.../errors.h (context::packages::physics2d).
+    {
+        for (const char* code : {"physics2d.invalid_entity", "physics2d.missing_component"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 2);      // usage class
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-2D-002");
+        }
+        for (const char* code :
+             {"physics2d.invalid_shape", "physics2d.invalid_mass", "physics2d.invalid_step"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 5);      // validation class
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-2D-002");
+        }
+    }
+
     // --- M6-F0a deterministic-build attestation codes (issue #170) -------------------------------
     // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
     // holds). The determinism.attestation_* fail-closed codes the deterministic build PRODUCES when it
