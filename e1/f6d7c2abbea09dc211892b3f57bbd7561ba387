@@ -1,0 +1,98 @@
+tools/license-allowlist.json
+  s_4d68fcead85c12::t_c7e959b0316a0a 2
+  s_4d68fcead85c12::t_331c1c451e4541 5,21
+src/editor/kinds/CMakeLists.txt
+  s_4d68fcead85c12::t_e7452014a087e5 13-15
+  s_4d68fcead85c12::t_9d366e432d5e4b 66-74
+samples/audio-events/footstep.audio-event.json
+  s_4d68fcead85c12::t_0736612a81314a 1-13
+src/packages/audio/src/audio_engine.cpp
+  s_4d68fcead85c12::t_1a7e89d8f38edf 13
+  s_4d68fcead85c12::t_143ae447116eb3 94-102
+  s_4d68fcead85c12::t_6b1dfe834de53b 1-12,14-93,103-291
+src/packages/audio/tests/test_observer_hash.cpp
+  s_4d68fcead85c12::t_5fd82a587cd88c 1-122
+src/editor/kinds/src/audio_bus.cpp
+  s_4d68fcead85c12::t_74886ddf8b00d1 1-110
+src/editor/kinds/include/context/editor/kinds/audio_bus.h
+  s_4d68fcead85c12::t_5aaed419a91f92 1-27
+src/editor/kinds/tests/test_audio.cpp
+  s_4d68fcead85c12::t_2ae5005cd53ebb 1-228
+src/editor/contract/tests/test_error_catalog.cpp
+  s_4d68fcead85c12::t_7390ed937b293b 372-402
+src/editor/contract/src/error_catalog.cpp
+  s_4d68fcead85c12::t_78fd29cb5a3349 710-738
+src/packages/audio/include/context/packages/audio/observer.h
+  s_4d68fcead85c12::t_06be7a5097a0da 1-49
+src/packages/audio/include/context/packages/audio/audio_engine.h
+  s_4d68fcead85c12::t_d9f683d7d1370c 1-108
+src/editor/schema/include/context/editor/schema/kind_schema.h
+  s_4d68fcead85c12::t_0b36d9347480b8 37-44
+src/CMakeLists.txt
+  s_4d68fcead85c12::t_3ac022c8661f0c 477-490
+src/editor/kinds/include/context/editor/kinds/audio_event.h
+  s_4d68fcead85c12::t_d967d64b62e7f6 1-27
+src/packages/audio/tests/audio_test.h
+  s_4d68fcead85c12::t_8c0f338a6a0b8c 1-27
+src/packages/audio/CMakeLists.txt
+  s_4d68fcead85c12::t_e340c339b71d8e 1-117
+src/packages/audio/tests/test_engine.cpp
+  s_4d68fcead85c12::t_1fd1e520fbb08e 1-58,67-85,87-89,91-95,97-99,101-208
+  s_4d68fcead85c12::t_678276ccd34f48 59-66
+  s_4d68fcead85c12::t_131258d5f95ad9 86,90,96,100
+src/editor/schema/src/kind_schema.cpp
+  s_4d68fcead85c12::t_d515588a104b54 590-655
+  s_4d68fcead85c12::t_e1effff20b3353 805-806
+src/packages/audio/src/observer.cpp
+  s_4d68fcead85c12::t_4df37f904f2b2c 1-75
+src/packages/audio/tests/test_observer.cpp
+  s_4d68fcead85c12::t_cd6e8c88530a30 76,79
+  s_4d68fcead85c12::t_b44a99c279fd52 1-15,17-21,31-75,77-78,80-93
+  s_4d68fcead85c12::t_4964c6b757fa5c 16,22-30
+src/packages/audio/tests/test_errors.cpp
+  s_4d68fcead85c12::t_07af35ce776c96 1-28
+samples/audio-buses/game-mix.audio-bus.json
+  s_4d68fcead85c12::t_4081aeefd766ef 1-12
+src/packages/audio/README.md
+  s_4d68fcead85c12::t_53eca0db2c5b74 1-76
+src/packages/audio/include/context/packages/audio/errors.h
+  s_4d68fcead85c12::t_54ca22ca4aa6e0 1-30
+src/editor/kinds/src/audio_event.cpp
+  s_3c149407cdd5d4::t_dc0b36db7dded8 1-62
+src/packages/audio/src/miniaudio_impl.cpp
+  s_50edd0e0346255::t_95394d8a4bda07 1-16
+src/packages/audio/third_party/miniaudio/miniaudio.h
+  s_4d68fcead85c12::t_5ef120ad48861a 1-93468
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "e1f6d7c2abbea09dc211892b3f57bbd7561ba387",
+  "prompts": {},
+  "sessions": {
+    "s_3c149407cdd5d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "845aef5f-a4aa-4844-b9e6-479df3530c09",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_50edd0e0346255": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f2164075-e554-49e6-8a57-fdc35f7f7e9d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
