@@ -155,8 +155,9 @@ class DirtyScanner
 {
 public:
     // Scan every replicated entity in `world`; mark dirty each whose set-component bytes changed
-    // since the last scan (or that is seen for the first time with non-empty state). Returns the
-    // number marked dirty this scan.
+    // since the last scan. An entity seen for the FIRST time is only baselined (not marked, not
+    // counted) — a freshly-registered entity is already dirty from set_replication, so it lands in
+    // the first capture regardless. Returns the number of entities marked dirty this scan.
     std::size_t scan(kernel::World& world, const ReplicatedComponentSet& set);
 
     // Forget all tracked state (e.g. before replaying a fresh run).
