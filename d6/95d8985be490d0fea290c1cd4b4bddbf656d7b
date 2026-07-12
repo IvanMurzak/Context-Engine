@@ -1,0 +1,35 @@
+src/cli/src/profile_command.cpp
+  s_4d68fcead85c12::t_5323ebc5d7931b 35-37
+  s_4d68fcead85c12::t_602f2f04ccde11 97-100,102,104-105
+  s_4d68fcead85c12::t_054966f613b25f 5
+src/cli/tests/test_profile_command.cpp
+  s_4d68fcead85c12::t_3564c3010aadde 65-71
+src/cli/CMakeLists.txt
+  s_4d68fcead85c12::t_d5f27de97dea67 185-217
+src/editor/merge/CMakeLists.txt
+  s_4d68fcead85c12::t_a09a7c776953a7 71-83
+src/runtime/ts/lsan-suppressions.txt
+  s_4d68fcead85c12::t_a1723c10ea7442 17-30
+src/runtime/js/tsan-suppressions.txt
+  s_4d68fcead85c12::t_4c17efb2b00950 21-22
+src/editor/contract/src/registry.cpp
+  s_4d68fcead85c12::t_ccdd845a156092 549
+src/tests/integration/CMakeLists.txt
+  s_4d68fcead85c12::t_d2456c3631ec8e 256-275
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "d695d8985be490d0fea290c1cd4b4bddbf656d7b",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
