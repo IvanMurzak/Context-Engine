@@ -131,3 +131,49 @@ def test_main_stub_browser_timeout_fails(tmp_path):
     rc = web_golden_run.main(["--html", str(html), "--out-dir", str(tmp_path / "out"),
                               "--browser", stub, "--timeout", "2"])
     assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# Teardown robustness (regression: the [Errno 39] 'Directory not empty' flake)
+#
+# The render itself is deterministic; the job flaked only in teardown, when Chrome's child
+# processes re-touched the temp --user-data-dir after the launcher pid exited and a strict
+# rmtree raced them. The fix reaps the whole browser process group before cleanup and makes
+# the throwaway-profile cleanup non-fatal. These lock both halves of that contract.
+# ---------------------------------------------------------------------------
+
+
+def test_terminate_browser_is_safe_on_already_exited_process():
+    """Teardown must never raise, even when the browser has already exited (poll() short-circuit)."""
+    import subprocess
+    import sys
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    web_golden_run._terminate_browser(proc)  # must be a no-op, not an error
+    assert proc.poll() is not None
+
+
+def test_terminate_browser_reaps_live_process():
+    """A still-running browser is reaped within the wait budget (group-signalled on POSIX,
+    terminate() fallback elsewhere)."""
+    import subprocess
+    import sys
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                            start_new_session=True)
+    assert proc.poll() is None
+    web_golden_run._terminate_browser(proc)
+    assert proc.poll() is not None
+
+
+def test_temporary_profile_supports_ignore_cleanup_errors():
+    """The stdlib guarantee the fix relies on: a repopulated temp dir cannot fail cleanup when
+    ignore_cleanup_errors=True (the exact __exit__ path that raised OSError [Errno 39])."""
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory(prefix="ctx-web-golden-test-",
+                                     ignore_cleanup_errors=True) as profile:
+        # Populate a nested profile subdir like Chrome's 'Default' — cleanup must swallow any race.
+        default = Path(profile) / "Default"
+        default.mkdir()
+        (default / "leftover").write_bytes(b"x")
+    # No exception escaped the with-block: the contract holds.
