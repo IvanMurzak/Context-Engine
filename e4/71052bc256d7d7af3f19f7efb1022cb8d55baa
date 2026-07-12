@@ -1,0 +1,33 @@
+src/runtime/session/CMakeLists.txt
+  s_4d68fcead85c12::t_95ecb36ef5c846 89-94,96-107
+  s_50edd0e0346255::t_dc1113a8c66b28 95
+.github/workflows/ci.yml
+  s_4d68fcead85c12::t_3dc7299fc0c83e 253
+src/runtime/session/tests/determinism_gameplay_scene.cpp
+  s_4d68fcead85c12::t_2b0956ee0fbf43 1-469,472-526
+  s_4d68fcead85c12::t_12bfd0036e59da 470-471
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "e471052bc256d7d7af3f19f7efb1022cb8d55baa",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_50edd0e0346255": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f2164075-e554-49e6-8a57-fdc35f7f7e9d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
