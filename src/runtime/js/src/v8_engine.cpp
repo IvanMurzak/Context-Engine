@@ -58,10 +58,14 @@ void bootstrapV8Once()
         // Isolate teardown (isolate_->Dispose()) posts a delayed heap-release task to that pool
         // via MemoryPool::PostDelayedReleaseTask. The single-threaded default platform has NO
         // background task runner, so that teardown post derefs a null runner and SEGVs on every
-        // V8-dependent CI leg — do NOT switch back to it. The benign TSan data race inside this
-        // pool (rusty_v8's prebuilt is NOT TSan-instrumented) is handled ORTHOGONALLY by a narrow
-        // TSan suppressions file wired into the js_engine ctest for the tsan preset only
-        // (src/runtime/js/tsan-suppressions.txt + CMakeLists.txt) — NOT by changing this platform.
+        // V8-dependent CI leg — do NOT switch back to it. The benign TSan data races inside this
+        // pool (rusty_v8's prebuilt is NOT TSan-instrumented) are handled ORTHOGONALLY by a narrow
+        // TSan suppressions file wired into EVERY V8-linking ctest for the tsan preset only
+        // (src/runtime/js/tsan-suppressions.txt + each registering CMakeLists.txt) — NOT by
+        // changing this platform, and NOT by adding embedder-side locking here: this bootstrap
+        // already runs exactly once (std::call_once), and the reported races are between V8's OWN
+        // worker threads on V8-internal memory (pool construction, RegionAllocator during GC), so
+        // no serialization in the embedder can remove them (proven on PR #189, run 29196654116).
         g_platform = v8__Platform__NewDefaultPlatform(/*thread_pool_size=*/0,
                                                       /*idle_task_support=*/false);
         v8::V8::InitializePlatform(g_platform);

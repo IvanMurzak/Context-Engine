@@ -127,6 +127,19 @@ target_link_libraries(context_cli_test_pkg_command PRIVATE context_editor_pkg)
 # context_cli, so its include path does not propagate through it).
 target_link_libraries(context_cli_test_profile_command PRIVATE context_js)
 
+# TSan preset only: on the V8-capable CI legs test_profile_command boots the real in-process V8
+# host (profile gc -> createV8Engine), so it inherits the same benign uninstrumented-prebuilt
+# races as every other V8-linking ctest (rusty_v8's archive is not TSan-instrumented) — wire the
+# same narrow suppressions file (see runtime/js/tsan-suppressions.txt for the full rationale;
+# missing this wiring failed the sanitize (TSan, ubuntu) leg with 201 V8-internal reports, CI run
+# 29196654116). No _ctx_js_v8 mirror is needed here, unlike runtime/js|ts: when the stub backend
+# is built instead, no V8 threads exist and the env var is inert, so CONTEXT_TSAN alone guards it.
+if(CONTEXT_TSAN)
+    set_tests_properties(cli-test_profile_command PROPERTIES
+        ENVIRONMENT
+        "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../runtime/js/tsan-suppressions.txt")
+endif()
+
 # test_scaffold additionally asserts the scaffolded files are canonicalization fixpoints
 # (R-FILE-001 tool-save rule) AND that both templates validate clean against the registered engine
 # kind schemas (R-DATA-006/#47 — the templates carry the L-32 `$schema` header from their first
