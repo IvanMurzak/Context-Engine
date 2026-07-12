@@ -1,0 +1,49 @@
+src/runtime/netsync/include/context/runtime/netsync/errors.h
+  s_4d68fcead85c12::t_d06bbb4ddb4502 1-32
+src/runtime/netsync/include/context/runtime/netsync/state_sync.h
+  s_4d68fcead85c12::t_e8c25b48b701f9 1-176
+src/runtime/netsync/tests/test_state_sync.cpp
+  s_4d68fcead85c12::t_5721f12ff13d7c 90
+  s_4d68fcead85c12::t_eafb5cf9fb54c7 283
+  s_4d68fcead85c12::t_659ccff17c8079 45-52
+  s_4d68fcead85c12::t_2c9c2b3eefc706 78
+  s_4d68fcead85c12::t_c458e9189ce87d 228
+  s_4d68fcead85c12::t_f20934c9ff82ed 1-44,53-77,79-89,91-227,229-241,244-253,255-282,284-296
+  s_4d68fcead85c12::t_d4a8e3126b21ed 242-243
+  s_4d68fcead85c12::t_fb4e4ebd2772d5 254
+src/runtime/netsync/tests/test_convergence.cpp
+  s_4d68fcead85c12::t_b9d14e6b21600b 1-250
+src/runtime/netsync/README.md
+  s_4d68fcead85c12::t_c621692aef345d 1-55
+src/runtime/netsync/CMakeLists.txt
+  s_4d68fcead85c12::t_008812fff57f28 1-66
+src/CMakeLists.txt
+  s_4d68fcead85c12::t_7a45319e98f0f5 610-626
+src/runtime/netsync/tests/netsync_test.h
+  s_4d68fcead85c12::t_0dcfa0801f9c7e 1-27
+src/runtime/netsync/tests/test_errors.cpp
+  s_4d68fcead85c12::t_acb00f894fc57d 1-31
+src/editor/contract/src/error_catalog.cpp
+  s_4d68fcead85c12::t_46c195df535add 791-819
+src/editor/contract/tests/test_error_catalog.cpp
+  s_4d68fcead85c12::t_6ce2493321fa4e 447-470
+  s_4d68fcead85c12::t_33bb48c408e935 471-472
+src/runtime/netsync/src/state_sync.cpp
+  s_4d68fcead85c12::t_2791ec55c86350 1-173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "b6b4b1784b92efca5bdc163337a89fda74e46345",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
