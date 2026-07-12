@@ -397,6 +397,20 @@ add_subdirectory(runtime/determinism)
 # ctest family the blocking CI determinism gate runs across the 3-OS matrix.
 add_subdirectory(runtime/session)
 
+# M6 P1: the deterministic fixed-point rigid-body 3D physics package (src/packages/physics3d/,
+# R-SYS-001, issue #174) — the first M6 gameplay package, implementing the F0a physics-core decision
+# (docs/physics-determinism-decision.md): sim state is integer/fixed-point ONLY (the simmath Q16
+# core), broad-phase via context_spatial (a conservative prune — the exact fixed-point narrow phase
+# decides sim state), sim components folded into the L-54 hierarchical state hash by stable name
+# through the M6-F0b sim_components() seam. It is a PACKAGE, not kernel core (R-KERNEL-001 / L-60):
+# the kernel never links back. Registers the determinism-physics3d-scene ctest, joining the
+# determinism-* family the blocking CI Determinism gate runs across the 3-OS matrix. Wired here,
+# immediately after runtime/session (whose context_session provides the sim-component registration
+# seam it links) and deliberately apart from the packages/spatial+simmath cluster above, so
+# concurrent sibling tasks inserting into this file merge cleanly (consumers name the
+# `context_physics3d` target, resolved at generate time regardless of add_subdirectory order).
+add_subdirectory(packages/physics3d)
+
 # M3 task 2a: the in-process V8 JavaScript host (src/runtime/js/, issue #76 / L-61 /
 # R-LANG-002/008 / R-SEC-009) — the foundation of the M3 TypeScript scripting tier. A hybrid host
 # over the SHA-pinned rusty_v8 prebuilt channel (real v8:: API for the STL-free majority + rusty_v8

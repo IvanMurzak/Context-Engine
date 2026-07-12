@@ -566,7 +566,34 @@ const std::vector<ErrorCode>& catalog()
         // Design: .claude/plans/designs/2026-07-11-m6-core-systems-decomposition.md § Seams (anchor 2).
         //
         // --- physics3d.* — reserved for M6 P1 (packages/physics3d/, R-SYS-001). Minter: P1. ----------
-        // (reserved — filled by the Physics-3D package task.)
+        // The deterministic fixed-point rigid-body 3D physics package's fail-closed refusals (issue
+        // #174). The strings are DEFINED in
+        // src/packages/physics3d/include/context/packages/physics3d/errors.h as
+        // context::packages::physics3d::k*Code (the same promote-a-local-string pattern as bridge's
+        // scope.denied / runtime/ts's kTs*Code / determinism's kAttestation* — the package never
+        // links this contract layer) and this catalog registers them. All deterministic (a bare
+        // retry cannot repair an invalid body description or a missing component set); appended
+        // within this block only (additive-only, protocolMajor stays 0).
+        {"physics3d.invalid_entity",
+         "A dead or null entity handle was passed to a physics operation; nothing was simulated or "
+         "modified (fail-closed).",
+         false, kExitUsage, "R-SYS-001"},
+        {"physics3d.missing_component",
+         "A physics operation targeted an entity that lacks the full physics component set "
+         "(transform + velocity + body + collider); the world is unchanged.",
+         false, kExitUsage, "R-SYS-001"},
+        {"physics3d.invalid_shape",
+         "A collider was rejected: a sphere radius or box half-extent was not positive; no physics "
+         "components were added (fail-closed validation).",
+         false, kExitValidation, "R-SYS-001"},
+        {"physics3d.invalid_mass",
+         "A dynamic body was rejected: its mass was not positive; no physics components were added "
+         "(fail-closed validation).",
+         false, kExitValidation, "R-SYS-001"},
+        {"physics3d.invalid_step",
+         "A physics simulation step was refused: the fixed tick duration was not positive; the "
+         "world is unchanged.",
+         false, kExitValidation, "R-SYS-001"},
         // --- physics2d.* — reserved for M6 P2 (packages/physics2d/, R-2D-002 / L-55). Minter: P2. -----
         // (reserved — filled by the Physics-2D package task.)
         // --- anim.* — reserved for M6 P3 (packages/animation/, R-SYS-002/008). Minter: P3. ------------

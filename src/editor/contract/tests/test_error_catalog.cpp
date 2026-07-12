@@ -261,6 +261,32 @@ int main()
         CHECK(hot_reload->origin == "R-PLAY-003");
     }
 
+    // --- M6 P1 physics3d codes (issue #174) — the first filled F0a-reserved M6 domain block ------
+    // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
+    // holds). The physics3d.* fail-closed refusals the rigid-body package mints: dead-entity and
+    // missing-component-set ops are usage-class; invalid shape / mass / step are validation-class.
+    // All deterministic (a bare retry cannot repair an invalid body description). The strings are
+    // the source-of-truth in src/packages/physics3d/.../errors.h (context::packages::physics3d).
+    {
+        for (const char* code : {"physics3d.invalid_entity", "physics3d.missing_component"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 2);      // usage class
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-SYS-001");
+        }
+        for (const char* code :
+             {"physics3d.invalid_shape", "physics3d.invalid_mass", "physics3d.invalid_step"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 5);      // validation class
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-SYS-001");
+        }
+    }
+
     // --- M6-F0a deterministic-build attestation codes (issue #170) -------------------------------
     // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
     // holds). The determinism.attestation_* fail-closed codes the deterministic build PRODUCES when it
