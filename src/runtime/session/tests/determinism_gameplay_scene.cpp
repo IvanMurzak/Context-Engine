@@ -429,7 +429,8 @@ void check_attribution(const RunTrace& left, const RunTrace& right, const Tamper
         }
     }
     CHECK(sys == tamper.system);
-    CHECK(sys < kSystemCount && kSystemNames[sys] == kSystemNames[tamper.system]);
+    // sys == tamper.system (asserted above) is what pins the attributed system NAME
+    // (kSystemNames[sys]); no separate name compare is needed.
 
     // 3. attribute to the concrete (entity, component, field) via the canonical snapshot diff — the
     //    R-LANG-010 schema names the package component + field.
@@ -441,6 +442,20 @@ void check_attribution(const RunTrace& left, const RunTrace& right, const Tamper
     CHECK(fd.component == expected_component);
     CHECK(fd.field == expected_field);
     CHECK(fd.right_value - fd.left_value == expected_delta);
+}
+
+// Run one injected-divergence exercise: tamper the RIGHT run at (tamper.tick, tamper.system),
+// capturing the tampered post-system snapshot there, then attribute it against the clean LEFT run's
+// snapshot at the same point — the four-level (tick, system, entity, componentField) triage.
+void exercise_divergence(const RunTrace& left, const session::WorldSnapshot& left_snap,
+                         const Tamper& tamper, kernel::Entity expected_entity,
+                         const char* expected_component, const char* expected_field,
+                         std::int64_t expected_delta)
+{
+    std::vector<Capture> right_caps = {Capture{tamper.tick, tamper.system, {}}};
+    const RunTrace right = run_fixture(&tamper, &right_caps);
+    check_attribution(left, right, tamper, left_snap, right_caps[0].out, expected_entity,
+                      expected_component, expected_field, expected_delta);
 }
 
 // The controlled divergences: a physics drift (steer3's vertical velocity moved by a few raw
@@ -499,23 +514,16 @@ int main()
     CHECK(a.final_live > 0);              // ...some still alive at the end
     CHECK(a.final_live < static_cast<std::size_t>(a.total_emitted)); // ...and despawn happened
 
-    // --- triage: a PHYSICS divergence is attributed to (tick, system, entity, componentField) ----
+    // --- triage: a PHYSICS then an ANIMATION divergence, each attributed to (tick, system, entity,
+    //     componentField). ONE clean LEFT run captures at BOTH injection points and is shared. ------
     {
-        const Tamper tamper{57, 1, &tamper_physics}; // after the physics3d solve at tick 57
-        std::vector<Capture> right_caps = {Capture{57, 1, {}}};
-        const RunTrace right = run_fixture(&tamper, &right_caps);
         std::vector<Capture> left_caps = {Capture{57, 1, {}}, Capture{130, 3, {}}};
         const RunTrace left = run_fixture(nullptr, &left_caps);
         CHECK(left.final_root == a.final_root); // the capture run is the same clean run
-        check_attribution(left, right, tamper, left_caps[0].out, right_caps[0].out, a.steer3,
-                          "physics3d_velocity", "vy", kPhysDelta);
-
-        // --- triage: an ANIMATION divergence, same four-level attribution ------------------------
-        const Tamper anim_tamper{130, 3, &tamper_animation}; // after the animation step at tick 130
-        std::vector<Capture> anim_caps = {Capture{130, 3, {}}};
-        const RunTrace anim_right = run_fixture(&anim_tamper, &anim_caps);
-        check_attribution(left, anim_right, anim_tamper, left_caps[1].out, anim_caps[0].out, a.hero,
-                          "anim_root_motion", "pz", kAnimDelta);
+        exercise_divergence(left, left_caps[0].out, Tamper{57, 1, &tamper_physics}, a.steer3,
+                            "physics3d_velocity", "vy", kPhysDelta); // after the physics3d solve @57
+        exercise_divergence(left, left_caps[1].out, Tamper{130, 3, &tamper_animation}, a.hero,
+                            "anim_root_motion", "pz", kAnimDelta); // after the animation step @130
     }
 
     // --- the CROSS-PLATFORM golden assertion: identical on Linux-x64 / Win-x64 / macOS-ARM64 -----
