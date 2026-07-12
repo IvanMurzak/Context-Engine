@@ -425,6 +425,21 @@ add_subdirectory(packages/physics3d)
 # generate time regardless of add_subdirectory order).
 add_subdirectory(packages/physics2d)
 
+# M6 P4: the particle-system package (src/packages/particles/, R-SYS-003, issue #178) — authored +
+# simulated effects with the determinism split (docs/physics-determinism-decision.md + R-SIM-001):
+# DETERMINISTIC SIM-PATH particles are integer/fixed-point ONLY (the simmath Q16 core) and fold into
+# the L-54 hierarchical state hash by stable name through the M6-F0b sim_components() seam; FREE-RUNNING
+# COSMETIC particles are a presentation observer that reads sim state read-only, holds its own float
+# state, and folds into NO hash (the R-SIM-001 downstream-observer rule). It is a PACKAGE, not kernel
+# core (R-KERNEL-001 / L-60): the kernel never links back. Particles do not collide, so — unlike the
+# physics packages — it has NO context_spatial dependency. Registers the determinism-particle-scene
+# ctest, joining the determinism-* family the blocking CI Determinism gate runs across the 3-OS matrix.
+# Wired here immediately after packages/physics2d (its M6 WAVE sibling) and deliberately apart from the
+# editor/runtime clusters and the file tail, so concurrent sibling tasks inserting into this file merge
+# cleanly (consumers name the `context_particles` target, resolved at generate time regardless of
+# add_subdirectory order).
+add_subdirectory(packages/particles)
+
 # M3 task 2a: the in-process V8 JavaScript host (src/runtime/js/, issue #76 / L-61 /
 # R-LANG-002/008 / R-SEC-009) — the foundation of the M3 TypeScript scripting tier. A hybrid host
 # over the SHA-pinned rusty_v8 prebuilt channel (real v8:: API for the STL-free majority + rusty_v8

@@ -314,6 +314,33 @@ int main()
         }
     }
 
+    // --- M6 P4 particle codes (issue #178) — the third filled F0a-reserved M6 domain block --------
+    // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
+    // holds). The particle.* fail-closed refusals the particle-system package mints, mirroring the
+    // physics blocks: dead-entity and missing-component ops are usage-class; invalid config / step are
+    // validation-class. All deterministic (a bare retry cannot repair an invalid emitter description).
+    // The strings are the source-of-truth in
+    // src/packages/particles/.../errors.h (context::packages::particles). The COSMETIC observer path
+    // (R-SIM-001) is off the sim path and mints no codes.
+    {
+        for (const char* code : {"particle.invalid_entity", "particle.missing_component"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 2);      // usage class
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-SYS-003");
+        }
+        for (const char* code : {"particle.invalid_config", "particle.invalid_step"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 5);      // validation class
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-SYS-003");
+        }
+    }
+
     // --- M6-F0a deterministic-build attestation codes (issue #170) -------------------------------
     // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
     // holds). The determinism.attestation_* fail-closed codes the deterministic build PRODUCES when it
