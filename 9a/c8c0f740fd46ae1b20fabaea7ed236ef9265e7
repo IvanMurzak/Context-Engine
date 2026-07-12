@@ -1,0 +1,55 @@
+src/packages/particles/include/context/packages/particles/cosmetic.h
+  s_4d68fcead85c12::t_54058bcd6125be 1-67
+src/packages/particles/tests/test_cosmetic.cpp
+  s_4d68fcead85c12::t_94fe0b6d5a2293 1-86
+src/editor/contract/src/error_catalog.cpp
+  s_4d68fcead85c12::t_38441dedac51a3 628-651
+src/packages/particles/tests/test_errors.cpp
+  s_4d68fcead85c12::t_ab439e22d48057 1-95
+src/packages/particles/tests/test_components.cpp
+  s_4d68fcead85c12::t_ce795ddb0417c9 1-101
+src/CMakeLists.txt
+  s_4d68fcead85c12::t_67f7738a2eb428 428-442
+src/packages/particles/README.md
+  s_4d68fcead85c12::t_2898224792e3d7 1-46
+src/packages/particles/include/context/packages/particles/particle_world.h
+  s_4d68fcead85c12::t_dd8ed22f368dbf 1-114
+src/packages/particles/include/context/packages/particles/components.h
+  s_4d68fcead85c12::t_ca0a7231dacd59 1-63
+src/packages/particles/src/cosmetic.cpp
+  s_4d68fcead85c12::t_1ba33704ad3918 1-92
+src/packages/particles/src/particle_world.cpp
+  s_4d68fcead85c12::t_edd50354fe0d68 1-220
+src/editor/contract/tests/test_error_catalog.cpp
+  s_4d68fcead85c12::t_8859888d193ca8 317-343
+src/packages/particles/include/context/packages/particles/errors.h
+  s_4d68fcead85c12::t_a7f588e8f13590 1-26
+src/packages/particles/CMakeLists.txt
+  s_4d68fcead85c12::t_cd3890e4bfcdad 1-88
+src/packages/particles/tests/determinism_particle_scene.cpp
+  s_4d68fcead85c12::t_7f6008646ca476 112-113
+  s_4d68fcead85c12::t_08ba58663f3954 1-111,114-144
+.github/workflows/ci.yml
+  s_4d68fcead85c12::t_5d2bf486e54359 253
+src/packages/particles/tests/particles_test.h
+  s_4d68fcead85c12::t_c6a2270a5ea0f7 1-27
+src/packages/particles/tests/test_simulation.cpp
+  s_4d68fcead85c12::t_dc0624ab2eef61 58-59,70-72
+  s_4d68fcead85c12::t_ebf7ea33d65dfa 1-57,60-69,73-123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "9ac8c0f740fd46ae1b20fabaea7ed236ef9265e7",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
