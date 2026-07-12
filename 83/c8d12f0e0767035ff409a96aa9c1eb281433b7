@@ -1,0 +1,110 @@
+src/tests/integration/test_game_roll3d.cpp
+  s_4d68fcead85c12::t_6059590fd9eb01 271-272
+  s_4d68fcead85c12::t_db82515e0f723e 265-266
+  s_4d68fcead85c12::t_f018a893cf7010 1-68,74-76,84-264,267-270,273-318
+  s_4d68fcead85c12::t_ff0fff5166fe24 69-73,77-83
+samples/platformer-2d/anim/player-sprite.anim-graph.json
+  s_4d68fcead85c12::t_b0a2a5266bf5e6 1-32
+samples/roll-3d/anim/flag-wave.anim-graph.json
+  s_4d68fcead85c12::t_932d6e263238d7 1-2,5-7,9-13,15-19,21-25,27-32
+  s_4d68fcead85c12::t_0da346b3ade442 3-4,8,14,20,26
+src/runtime/session/tests/test_scenario_registry.cpp
+  s_4d68fcead85c12::t_872745f819ca9c 120-122
+  s_4d68fcead85c12::t_a0a07c2cced2d8 117-119
+  s_4d68fcead85c12::t_6e19c107c8f7fc 123-125
+  s_181e90ae67dbef::t_9e58467dbafd97 1-116,126-143
+src/runtime/session/include/context/runtime/session/session.h
+  s_4d68fcead85c12::t_f6a484fa695729 182-198
+  s_4d68fcead85c12::t_c66ec323952a2a 163-164
+src/tests/integration/CMakeLists.txt
+  s_4d68fcead85c12::t_26bf92dc4d3867 190-202,205-219
+  s_4d68fcead85c12::t_7bcc5110f44b7f 203-204
+  s_4d68fcead85c12::t_400ef27f2fc9d3 220-228
+  s_4d68fcead85c12::t_7097a54570fb87 189
+samples/platformer-2d/project.json
+  s_4d68fcead85c12::t_89d0268ad12271 6-14
+src/tests/integration/games/roll3d_scenario.cpp
+  s_4d68fcead85c12::t_27c03a1b5645d6 278-280
+  s_4d68fcead85c12::t_50f0f259744587 302-303,305
+  s_4d68fcead85c12::t_13dc825769fa2a 1-277,281-301,304,306-479
+samples/README.md
+  s_4d68fcead85c12::t_e414b59eb48183 81-87
+  s_4d68fcead85c12::t_6c7120c26b7db1 30-35,39-60
+src/runtime/session/src/session.cpp
+  s_4d68fcead85c12::t_d439b025710195 16-18,26-32
+  s_4d68fcead85c12::t_6be3e023371a7b 148,150-157,172-187
+  s_4d68fcead85c12::t_9090485e5dc5c4 33
+  s_4d68fcead85c12::t_3a635c7be2480f 188
+samples/roll-3d/input/roll.input-bindings.json
+  s_4d68fcead85c12::t_a075c1c617a8b1 1-4,6-8,10-12,14-20,22-25,27-30,32-35,37-41,43-47,49-53,55-57,59-60
+  s_4d68fcead85c12::t_c7559e5992b7e9 5,9,13,21,26,31,36,42,48,54,58
+src/tests/integration/test_samples_corpus.cpp
+  s_4d68fcead85c12::t_534946739e05ec 147
+samples/platformer-2d/scripts/movement.ts
+  s_4d68fcead85c12::t_e355e3f61ff3db 1,5-12,14-27,29-30,33-47,51-52,55-67,69-76
+src/tests/integration/games/platformer2d_scenario.cpp
+  s_4d68fcead85c12::t_0422acff2cd61f 1-209,216-217,219-448
+  s_4d68fcead85c12::t_a8c4556b02aa09 210-215,218
+samples/roll-3d/audio/game-mix.audio-bus.json
+  s_4d68fcead85c12::t_33fb9d0b618275 1-5,7-10,12,14-15,17-18
+  s_4d68fcead85c12::t_8b9db2ba11ee4d 6,11,13,16
+src/tests/integration/test_game_platformer2d.cpp
+  s_4d68fcead85c12::t_586321c9fee13c 1-77,86-284,287-345
+  s_4d68fcead85c12::t_2d5622629f27c4 285-286
+  s_4d68fcead85c12::t_6def9bf046e359 78-85
+samples/roll-3d/scenes/arena.scene.json
+  s_4d68fcead85c12::t_d58b7d67495602 1-132
+src/tests/integration/games/sample_games.h
+  s_4d68fcead85c12::t_3ee8a3a6d475e6 107-155
+  s_4d68fcead85c12::t_374953b0298a0c 1-106,156
+samples/platformer-2d/scenes/level-1.scene.json
+  s_4d68fcead85c12::t_4791cf3bcbe8ee 90
+  s_4d68fcead85c12::t_f2a8ca2edcb661 21-89,91-132,144-155
+samples/platformer-2d/audio/jump.audio-event.json
+  s_4d68fcead85c12::t_22eb905d9684bc 1-13
+samples/platformer-2d/audio/coin.audio-event.json
+  s_4d68fcead85c12::t_c6c2327d7bb512 1-9
+src/runtime/session/CMakeLists.txt
+  s_4d68fcead85c12::t_56028a145def38 56-57
+samples/roll-3d/project.json
+  s_4d68fcead85c12::t_f4b57a1524f3b2 1-16
+samples/roll-3d/audio/impact.audio-event.json
+  s_4d68fcead85c12::t_7a5242c5b4c104 1-2,4-6,8-13
+  s_4d68fcead85c12::t_c3c4ebc1703cf2 3,7
+samples/platformer-2d/audio/game-mix.audio-bus.json
+  s_4d68fcead85c12::t_04cdcfc2ecbe23 1-18
+samples/platformer-2d/input/player.input-bindings.json
+  s_50edd0e0346255::t_f4cc72542c66a5 1-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "83c8d12f0e0767035ff409a96aa9c1eb281433b7",
+  "prompts": {},
+  "sessions": {
+    "s_181e90ae67dbef": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ab2fe5dd73ddcf942",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_50edd0e0346255": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f2164075-e554-49e6-8a57-fdc35f7f7e9d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
