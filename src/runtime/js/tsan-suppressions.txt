@@ -17,8 +17,11 @@
 # own platform/threading internals. We do NOT globally disable TSan and we do NOT suppress any
 # race in Context-Engine's own code (namespace context::), which stays fully instrumented.
 #
-# Wired into ONLY the js-test_js_engine ctest, and ONLY under the `tsan` preset, via
-# TSAN_OPTIONS=suppressions=<abs path> (src/runtime/js/CMakeLists.txt, guarded by CONTEXT_TSAN).
+# Wired into EVERY ctest whose executable links the V8-backed context_js (js-test_js_engine,
+# js-test_gc_discipline, js-test_gc_state_hash, ts-test_ts_in_v8, ts-test_ts_debug,
+# ts-test_hot_api, cli-test_profile_command), and ONLY under the `tsan` preset, via
+# TSAN_OPTIONS=suppressions=<abs path> (each registering CMakeLists.txt, guarded by CONTEXT_TSAN).
+# A NEW test that boots the V8 host MUST add the same wiring, or the pool races below fail it.
 #
 # Format: one rule per line, `<type>:<substring-pattern>` (substring match on the demangled
 # frame / module name). Ref: https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions
@@ -28,8 +31,12 @@ race:v8::platform::DefaultWorkerThreadsTaskRunner
 race:DefaultWorkerThreadsTaskRunner
 # The whole V8 libplatform threading layer (task runners / worker threads) is uninstrumented.
 race:v8::platform::
-# V8's own thread-primitive wrapper used to start the pool's worker threads.
-race:v8::base::Thread
+# The whole v8::base:: support layer (thread primitives, page/region bookkeeping, containers) is
+# likewise archive-internal. Observed racer under the M6 X1 GC-discipline workload (PR #189, CI
+# run 29196654116): v8::base::RegionAllocator::Split (V8 worker) vs ::TrimRegion (main thread,
+# inside a forced GC) — V8's page-region bookkeeping, synchronized by V8's own base::Mutex that
+# TSan cannot see inside the archive. Subsumes the earlier, narrower v8::base::Thread rule.
+race:v8::base::
 # The uninstrumented rusty_v8 prebuilt runs V8's background worker pool CONCURRENTLY with
 # main-thread Isolate teardown (~V8Engine, v8_engine.cpp:102). Those accesses ARE synchronized by
 # V8's own mutexes, but TSan cannot see that synchronization inside the uninstrumented archive, so
@@ -46,6 +53,13 @@ race:v8::base::Thread
 race:std::__Cr::
 race:v8::internal::
 race:cppgc::
+# heap::base:: is V8's shared heap utility namespace (heap::base::Worklist — the marking /
+# scavenging worklists) and absl:: is the abseil copy BUNDLED inside the rusty_v8 prebuilt; both
+# exist only inside the archive (Context-Engine uses neither namespace), so like std::__Cr:: they
+# can never mask a race in namespace context::. Both observed as frame-1 racers under the heavier
+# `context profile gc` workload (cli-test_profile_command, CI run 29196654116).
+race:heap::base::
+race:absl::
 # Belt-and-suspenders: match any frame attributed to the rusty_v8 module (harmless no-op under
 # the static-archive link where symbols land in the test executable rather than a DSO).
 called_from_lib:librusty_v8

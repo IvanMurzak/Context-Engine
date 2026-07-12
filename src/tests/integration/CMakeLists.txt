@@ -253,3 +253,23 @@ set_tests_properties(
     m5-exit-2-a11y-coverage
     m5-exit-3-seam-checklist
     PROPERTIES TIMEOUT 120)
+
+# ===================================================================================================
+# Sanitize preset only: context_cli links context_js (M6 X1 `context profile gc`), so on the
+# V8-capable legs every m1/m2/samples gate executable here — and the REAL `context` binary the
+# cross-process legs spawn — carries the uninstrumented rusty_v8 archive with its duplicate
+# C++-runtime typeinfo. UBSan's vptr check false-positives on valid iostream code in the
+# instrumented libraries, and printing those diagnostics makes the sanitizer's demangler allocate
+# scratch that LSan then reports as a leak — failing the gate with no Context defect (sanitize
+# (ASan+UBSan, ubuntu) leg, CI run 29197875018). Same fix as src/cli: wire the narrow
+# demangler/symbolizer suppressions (runtime/ts/lsan-suppressions.txt — they can never mask a
+# `context::` leak); spawned children inherit the env. Inert on the stub (non-V8) build. The
+# m5-exit gates link only the gui libraries (no context_cli, no V8), so they are not wired.
+if(CONTEXT_SANITIZE)
+    set_tests_properties(
+        ${_m1_exit_names}
+        ${_m2_exit_names}
+        samples-corpus
+        PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
+endif()

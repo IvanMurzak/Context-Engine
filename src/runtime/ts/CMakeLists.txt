@@ -122,8 +122,15 @@ add_library(context_ts STATIC
     src/esbuild_toolchain.cpp
     src/tsgo_typecheck.cpp
     src/source_map.cpp
-    src/stack_trace.cpp)
+    src/stack_trace.cpp
+    src/hot_api.cpp)
 target_include_directories(context_ts PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+# hot_api.h (M6 X1, R-SIM-008) names the STL-only js::JsEngine seam in its inline install helper,
+# so context_ts consumers need the runtime/js INCLUDE path — deliberately the include dir only,
+# NOT a context_js link: the header is interface-only (virtual calls on a caller-supplied engine),
+# and PUBLIC-linking context_js here would drag the V8 archive into every context_ts consumer
+# (context_derivation PUBLIC-links context_ts, so it would reach far beyond the JS tier).
+target_include_directories(context_ts PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../js/include)
 # context_common: the shared std::system subprocess + scratch-temp-file runner (issue #146) the
 # esbuild + tsgo drivers now share instead of their former private copies. PRIVATE — an implementation
 # detail (the public ts headers expose no subprocess types). Every Context target also links the
@@ -292,6 +299,35 @@ endif()
 # toolchains are untouched.
 if(_ctx_js_v8 AND CONTEXT_SANITIZE)
     set_tests_properties(ts-test_ts_in_v8 PROPERTIES
+        ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan-suppressions.txt")
+endif()
+
+# 4) M6 X1 (R-SIM-008): the engine-provided pooled/no-alloc math + query hot API. Links context_js
+# (same _ctx_js_v8 gate — full in-V8 battery on the CI legs: pool identity reuse + zero misses,
+# in-place vector math, Q16.16 fixed-point cross-checked BIT-FOR-BIT against the real C++
+# packages/simmath core, pooled query cursors over real runSystemView zero-copy views) and
+# context_simmath (the C++ truth the fixed mirror is proven against). On the local stub gate it
+# asserts the JS source's structure + V8-unavailable. Same TSan/LSan suppression scoping as the
+# sibling in-V8 tests (it links the same uninstrumented prebuilt).
+add_executable(context_ts_test_hot_api tests/test_hot_api.cpp)
+target_link_libraries(context_ts_test_hot_api
+    PRIVATE context_ts context_js context_simmath context_warnings)
+if(_ctx_js_v8)
+    target_compile_definitions(context_ts_test_hot_api PRIVATE CONTEXT_JS_HAS_V8)
+endif()
+target_link_options(context_ts_test_hot_api PRIVATE ${_ctx_ts_gcc_static})
+if(_ctx_js_v8 AND CONTEXT_SANITIZE AND NOT MSVC)
+    target_compile_options(context_ts_test_hot_api PRIVATE -fno-sanitize=vptr)
+endif()
+add_test(NAME ts-test_hot_api COMMAND context_ts_test_hot_api)
+if(_ctx_js_v8 AND CONTEXT_TSAN)
+    set_tests_properties(ts-test_hot_api PROPERTIES
+        ENVIRONMENT
+        "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../js/tsan-suppressions.txt")
+endif()
+if(_ctx_js_v8 AND CONTEXT_SANITIZE)
+    set_tests_properties(ts-test_hot_api PROPERTIES
         ENVIRONMENT
         "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan-suppressions.txt")
 endif()

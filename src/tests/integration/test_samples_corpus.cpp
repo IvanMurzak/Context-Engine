@@ -338,10 +338,14 @@ int main()
     //                             serializer + structural merge normally PREVENT (an add/add id
     //                             collision surfaces as a resolvable merge conflict, exercised above);
     //                             the raw remediation is covered by src/editor/merge unit tests.
+    //   profile/gc              — needs the in-process JS VM (stub on the local GCC gate — it would
+    //                             refuse with sim.gc.unavailable) and reports wall-clock GC timings,
+    //                             not file-authoring output; covered by cli test test_profile_command
+    //                             (both backend branches) + js-test_gc_discipline / _gc_state_hash.
     // Operational (daemon-served) verbs are stability!="stable" and reserved verbs are
     // implemented==false, so both are excluded by the predicate without needing an exemption entry.
     // =============================================================================================
-    const std::set<std::string> exempt = {"resource/read", "/install", "/re-key"};
+    const std::set<std::string> exempt = {"resource/read", "/install", "/re-key", "profile/gc"};
 
     // Guard: an exemption must name a verb that still exists (so the list cannot rot silently).
     for (const std::string& key : exempt)

@@ -11,6 +11,7 @@
 #include "context/cli/install_command.h"
 #include "context/cli/merge_command.h"
 #include "context/cli/migrate_command.h"
+#include "context/cli/profile_command.h"
 #include "context/cli/replay_command.h"
 #include "context/cli/scaffold.h"
 #include "context/cli/session_command.h"
@@ -146,6 +147,14 @@ Envelope dispatch(const VerbSpec& verb, const std::vector<std::string>& position
     // by src/runtime/session/triage.* over the same hierarchical state hash + replay artifact.
     if (verb.noun == "determinism" && verb.verb == "diff")
         return run_determinism_diff(bound, flags);
+
+    // M6 X1 (issue #188): `context profile gc` — the L-47 GC-pause profiler channel query
+    // (R-SIM-008): a self-contained synthetic churn workload over a headless session with the
+    // scheduled inter-tick GC window, reported as the R-CLI-008 envelope. Backed by
+    // src/cli/profile_command.cpp over runtime/js + runtime/profile + runtime/session; refuses
+    // fail-closed (sim.gc.unavailable) on a stub-JS-backend build.
+    if (verb.noun == "profile")
+        return run_profile(verb.verb, bound, flags);
 
     // M3 task 5 (issue #100): `context install` — the R-SEC-005 engine-driven install. Backed by
     // src/editor/pkg/. --dry-run (core flag) is honored INSIDE the command (validate the plan +

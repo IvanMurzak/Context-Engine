@@ -16,6 +16,7 @@ add_library(context_cli STATIC
     src/install_command.cpp
     src/merge_command.cpp
     src/migrate_command.cpp
+    src/profile_command.cpp
     src/replay_command.cpp
     src/scaffold.cpp
     src/session_command.cpp
@@ -60,6 +61,15 @@ target_link_libraries(context_cli PRIVATE context_session)
 # headers; only install_command.cpp touches context_editor_pkg.
 target_link_libraries(context_cli PRIVATE context_editor_pkg)
 
+# M6 X1 (issue #188): `context profile gc` — the L-47 GC-pause profiler channel query
+# (src/runtime/js + src/runtime/profile; the session dep is already linked above). PRIVATE —
+# profile_command.h exposes only the contract Envelope, so no js/profile type appears in the CLI's
+# public headers; only profile_command.cpp touches them. NOTE: on the V8-capable CI legs this
+# links the rusty_v8 static archive into the `context` binary (the in-process VM the profiler
+# measures — the L-61 payload the §2d selection accepted); on the local GCC gate context_js is the
+# tiny stub and `profile gc` refuses fail-closed with sim.gc.unavailable.
+target_link_libraries(context_cli PRIVATE context_js context_profile)
+
 # Self-contained GCC runtime for the CLI executables. context_cli uses std::filesystem (the
 # `context new` scaffolder), whose libstdc++ symbols live in a NEWER libstdc++-6.dll; on a MinGW
 # host a stale libstdc++-6.dll elsewhere on PATH can shadow the toolchain's and be loaded first,
@@ -87,6 +97,7 @@ set(_context_cli_tests
     test_pkg_command
     test_merge_command
     test_migrate_command
+    test_profile_command
     test_scaffold
     test_session_command
     test_set_command)
@@ -109,6 +120,25 @@ target_link_libraries(context_cli_test_determinism_command PRIVATE context_sessi
 # context_cli, so its include path does not propagate through it). NB: the target is NOT named
 # *install* — a Windows UAC installer-detection trap (see editor/pkg/CMakeLists.txt).
 target_link_libraries(context_cli_test_pkg_command PRIVATE context_editor_pkg)
+
+# test_profile_command (the `context profile gc` verb) branches on which JS backend this build
+# carries (v8BackendAvailable: the full channel envelope on the V8 CI legs, the fail-closed
+# sim.gc.unavailable refusal on the local stub gate), so it links context_js directly (PRIVATE in
+# context_cli, so its include path does not propagate through it).
+target_link_libraries(context_cli_test_profile_command PRIVATE context_js)
+
+# TSan preset only: on the V8-capable CI legs test_profile_command boots the real in-process V8
+# host (profile gc -> createV8Engine), so it inherits the same benign uninstrumented-prebuilt
+# races as every other V8-linking ctest (rusty_v8's archive is not TSan-instrumented) — wire the
+# same narrow suppressions file (see runtime/js/tsan-suppressions.txt for the full rationale;
+# missing this wiring failed the sanitize (TSan, ubuntu) leg with 201 V8-internal reports, CI run
+# 29196654116). No _ctx_js_v8 mirror is needed here, unlike runtime/js|ts: when the stub backend
+# is built instead, no V8 threads exist and the env var is inert, so CONTEXT_TSAN alone guards it.
+if(CONTEXT_TSAN)
+    set_tests_properties(cli-test_profile_command PROPERTIES
+        ENVIRONMENT
+        "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../runtime/js/tsan-suppressions.txt")
+endif()
 
 # test_scaffold additionally asserts the scaffolded files are canonicalization fixpoints
 # (R-FILE-001 tool-save rule) AND that both templates validate clean against the registered engine
@@ -152,3 +182,36 @@ target_compile_definitions(context_cli_test_fetch_e2e
 add_dependencies(context_cli_test_fetch_e2e context)
 add_test(NAME cli-test_fetch_e2e COMMAND context_cli_test_fetch_e2e)
 set_tests_properties(cli-test_fetch_e2e PROPERTIES TIMEOUT 60)
+
+# Sanitize preset only (mutually exclusive with the TSan block above): linking context_js on the
+# V8-capable legs bakes the uninstrumented rusty_v8 archive — and with it a SECOND, hidden-
+# visibility copy of the C++ runtime's typeinfo — into every cli test executable AND the `context`
+# binary the e2e tests spawn. UBSan's vptr check then false-positives on perfectly valid iostream
+# code in the instrumented libraries (filesync/merge/cli — typeinfo identity compares fail across
+# the duplicate), and PRINTING those diagnostics drives the sanitizer's demangler, whose scratch
+# allocations LSan reports as leaks at exit — failing tests with no Context defect (sanitize
+# (ASan+UBSan, ubuntu) leg: 23 tests, CI run 29197875018). The runtime/ts `-fno-sanitize=vptr`
+# carve-out is NOT viable here: the diagnostics fire in TUs of libraries shared with non-V8
+# binaries, whose vptr coverage must stay. So the narrow demangler/symbolizer LSan suppressions
+# (see runtime/ts/lsan-suppressions.txt — they can never mask a `context::` leak) are the
+# operative fix; the vptr diagnostics remain as known-benign stderr noise. Wired uniformly onto
+# EVERY cli test (spawned `context` children inherit the env); inert on the stub (non-V8) build,
+# so no _ctx_js_v8 gate is needed (same rationale as the TSan block).
+if(CONTEXT_SANITIZE)
+    set_tests_properties(
+        cli-test_bench_command
+        cli-test_cli
+        cli-test_determinism_command
+        cli-test_editor_driver
+        cli-test_pkg_command
+        cli-test_merge_command
+        cli-test_migrate_command
+        cli-test_profile_command
+        cli-test_scaffold
+        cli-test_session_command
+        cli-test_set_command
+        cli-test_attach_e2e
+        cli-test_fetch_e2e
+        PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../runtime/ts/lsan-suppressions.txt")
+endif()

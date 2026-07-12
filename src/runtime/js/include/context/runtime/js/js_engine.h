@@ -86,6 +86,64 @@ struct ViewBinding
 // ArrayBuffer create/detach churn; exceeding it is a caller error, not a silent clamp.
 inline constexpr std::size_t kMaxSystemViews = 16;
 
+// --- R-SIM-008 JS-tier GC discipline (M6 X1) ----------------------------------------------------
+//
+// The engine schedules JS-heap collection in the GAP BETWEEN fixed ticks — never mid-tick — and
+// makes every GC pause measurable and attributable (the L-47 GC-pause profiler channel's source).
+// The tick loop (runtime/session's inter-tick hook) calls gcWindow() at each tick boundary; the
+// backend runs collection work there and brackets it so pauses inside the window are attributed
+// `in_window`. Pauses OUTSIDE any window (allocation-triggered scavenges while gameplay JS runs)
+// are the mid-tick pauses the R-SIM-008 budget polices — pooled/no-alloc APIs (runtime/ts hot_api)
+// exist so steady-state gameplay triggers none. Pull model: the backend buffers pause records in a
+// fixed ring (NO allocation on the GC path) and the profiler drains them between ticks — a GC
+// callback must never run arbitrary code, so there is no push/sink seam here.
+
+// One observed JS-heap GC bracket, as reported by the VM's GC prologue/epilogue pair.
+// `kind` carries the VM's GC-type bits verbatim (V8: v8::GCType — scavenge / minor mark-sweep /
+// mark-sweep-compact / incremental-marking / weak-callbacks); an incremental-marking bracket spans
+// the whole incremental CYCLE, not a stop-the-world pause, so aggregate pause statistics exclude it
+// (the sample is still recorded, kind-tagged, for attribution).
+struct GcPause
+{
+    double duration_ms = 0.0;    // wall time of the prologue->epilogue bracket
+    std::uint32_t kind = 0;      // VM GC-type bits (V8 GCType); 0 = unknown
+    bool in_window = false;      // true = inside gcWindow(); false = mid-tick
+};
+
+// JS-heap occupancy snapshot (V8: HeapStatistics) — the profiler channel's heap gauge.
+struct GcHeapStats
+{
+    std::uint64_t used_bytes = 0;
+    std::uint64_t total_bytes = 0;
+    std::uint64_t external_bytes = 0;
+};
+
+// Options for one scheduled inter-tick GC window.
+//
+// Collection policy: a full collection is requested when `force_collect` is true, OR when
+// `trigger_bytes > 0` and the JS heap has grown by at least that many bytes since the last
+// window that collected. `budget_ms` bounds the window's task-pump phase (draining the VM's
+// queued foreground tasks — finalization/sweeping work the embedder otherwise never services);
+// the collection itself is synchronous and is MEASURED rather than preempted — its pause lands
+// in the pause channel, and the R-LANG-012 budget verdict is made from the channel (L-47:
+// pauses must be measurable to be budgeted), not by aborting a collection half-way.
+struct GcWindowOptions
+{
+    double budget_ms = 1.0;           // task-pump budget; must be finite and > 0
+    std::uint64_t trigger_bytes = 0;  // heap growth that triggers a collection (0 = never)
+    bool force_collect = false;       // collect unconditionally in this window
+};
+
+// What one gcWindow() call did.
+struct GcWindowResult
+{
+    bool collected = false;               // a full collection ran in this window
+    double window_ms = 0.0;               // total wall time spent inside the window
+    std::uint64_t heap_used_before = 0;   // used JS-heap bytes entering the window
+    std::uint64_t heap_used_after = 0;    // used JS-heap bytes leaving the window
+    std::uint64_t tasks_pumped = 0;       // VM foreground tasks drained by the pump phase
+};
+
 // --- R-OBS-005 interactive CDP debug session (L-61: "config, not building a debugger") ----------
 //
 // A minimal, SYNCHRONOUS Chrome DevTools Protocol (CDP) session over V8's in-box inspector
@@ -183,6 +241,32 @@ public:
     // buffer is the (query, executor) tier's responsibility (a follow-up task), not this seam's.
     virtual bool runSystemView(FunctionHandle exec, const ViewBinding* bindings,
                                std::size_t nbindings, std::string& err) = 0;
+
+    // --- R-SIM-008 JS-tier GC discipline (M6 X1) --------------------------------------------
+    //
+    // Run one scheduled inter-tick GC window NOW (the caller is the tick loop, in the gap
+    // between fixed ticks). Applies the GcWindowOptions collection policy, drains the VM's
+    // queued foreground tasks within the budget, and attributes every GC pause that fires
+    // inside the call as `in_window`. Returns false + fills `err` on invalid options (a
+    // non-finite or non-positive budget) or a backend failure. GC only ever touches the JS
+    // heap — logical sim state (the kernel World and its hierarchical state hash) is unreachable
+    // from the VM's collector by construction, so a window changes TIMING, never STATE.
+    virtual bool gcWindow(const GcWindowOptions& options, GcWindowResult& result,
+                          std::string& err) = 0;
+
+    // Drain up to `cap` buffered GC-pause records into `out`, returning how many were written
+    // (0 = none pending). Records are produced by the VM's GC prologue/epilogue callbacks into a
+    // fixed internal ring (allocation-free on the GC path); when the ring overflows, the OLDEST
+    // undrained records are kept and the newest are dropped — `gcPausesDropped()` counts the
+    // drops so the profiler channel can report the loss instead of silently under-counting.
+    virtual std::size_t drainGcPauses(GcPause* out, std::size_t cap) = 0;
+
+    // Total pause records dropped to ring overflow since engine creation (monotonic).
+    virtual std::uint64_t gcPausesDropped() const = 0;
+
+    // Snapshot the JS-heap occupancy (the profiler channel's heap gauge). Returns false + fills
+    // `err` only on a backend failure.
+    virtual bool gcHeapStats(GcHeapStats& out, std::string& err) = 0;
 
     // --- R-OBS-005 CDP inspector seam ------------------------------------------------------
     // true when v8-inspector.h is wired into this backend (a real, instantiable

@@ -209,3 +209,46 @@ if(_ctx_js_v8 AND CONTEXT_TSAN)
     set_tests_properties(js-test_js_engine PROPERTIES
         ENVIRONMENT "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tsan-suppressions.txt")
 endif()
+
+# --- M6 X1 (R-SIM-008): the GC-discipline seam ------------------------------------------------
+# Same split as js-test_js_engine: the full battery (inter-tick window force/trigger policies,
+# pause-ring attribution, heap stats, invalid-options failures) on the V8 CI legs; a stub
+# assertion locally. Same TSan suppression scoping (it links the same uninstrumented prebuilt).
+add_executable(context_js_test_gc_discipline tests/test_gc_discipline.cpp)
+target_link_libraries(context_js_test_gc_discipline PRIVATE context_js context_warnings)
+if(_ctx_js_v8)
+    target_compile_definitions(context_js_test_gc_discipline PRIVATE CONTEXT_JS_HAS_V8)
+endif()
+if(_ctx_js_v8 AND CONTEXT_SANITIZE AND NOT MSVC)
+    target_compile_options(context_js_test_gc_discipline PRIVATE -fno-sanitize=vptr)
+endif()
+add_test(NAME js-test_gc_discipline COMMAND context_js_test_gc_discipline)
+if(_ctx_js_v8 AND CONTEXT_TSAN)
+    set_tests_properties(js-test_gc_discipline PROPERTIES
+        ENVIRONMENT "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tsan-suppressions.txt")
+endif()
+
+# --- M6 X1 determinism proof: GC in the inter-tick window leaves the state hash UNCHANGED ------
+# Two identical seeded sessions (trace mode), one with mid-tick JS churn + a forced GC window at
+# every tick boundary (session's inter-tick hook -> JsEngine::gcWindow, drained through the L-47
+# channel): every per-tick/per-system/per-archetype hash must match byte-for-byte. Links
+# context_session (the fixed-tick loop + hash trace) and context_profile (the channel). The local
+# stub toolchain proves the hook mechanics + invariance with pure-C++ churn instead. Static-links
+# the GCC runtime (context_session pulls std::filesystem symbols a stale PATH libstdc++-6.dll can
+# shadow at ctest launch — the setup.md § Preconditions rule; gated to GNU).
+add_executable(context_js_test_gc_state_hash tests/test_gc_state_hash.cpp)
+target_link_libraries(context_js_test_gc_state_hash
+    PRIVATE context_js context_profile context_session context_warnings)
+target_link_options(context_js_test_gc_state_hash
+    PRIVATE $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
+if(_ctx_js_v8)
+    target_compile_definitions(context_js_test_gc_state_hash PRIVATE CONTEXT_JS_HAS_V8)
+endif()
+if(_ctx_js_v8 AND CONTEXT_SANITIZE AND NOT MSVC)
+    target_compile_options(context_js_test_gc_state_hash PRIVATE -fno-sanitize=vptr)
+endif()
+add_test(NAME js-test_gc_state_hash COMMAND context_js_test_gc_state_hash)
+if(_ctx_js_v8 AND CONTEXT_TSAN)
+    set_tests_properties(js-test_gc_state_hash PROPERTIES
+        ENVIRONMENT "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tsan-suppressions.txt")
+endif()

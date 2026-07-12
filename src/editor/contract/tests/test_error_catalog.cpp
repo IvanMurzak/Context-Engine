@@ -419,5 +419,30 @@ int main()
         }
     }
 
+    // --- M6 X1 sim.gc codes (issue #188) — the F0a-reserved JS-tier GC-discipline block ----------
+    // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
+    // holds). GC touches the JS heap ONLY (logical sim state is unreachable from the collector), so
+    // every refusal is fail-closed with the sim unaffected. unavailable = internal-class capability
+    // absence (the stub JS backend — the audio.device_unavailable precedent); invalid_budget =
+    // validation-class (a rejected window request); window_failed = internal-class (the VM refused
+    // the window/query). All deterministic (a bare retry cannot conjure a VM or fix a NaN budget).
+    // The strings are the source-of-truth in src/runtime/js/.../gc_errors.h (context::runtime::js).
+    {
+        for (const char* code : {"sim.gc.unavailable", "sim.gc.window_failed"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 1);      // internal class (fail-closed; the sim is unaffected)
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-SIM-008");
+        }
+
+        const ErrorCode* budget = find_code("sim.gc.invalid_budget");
+        CHECK(budget != nullptr);
+        CHECK(budget->exit_code == 5);      // validation class
+        CHECK(budget->retriable == false);  // deterministic — a bare retry cannot help
+        CHECK(budget->origin == "R-SIM-008");
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

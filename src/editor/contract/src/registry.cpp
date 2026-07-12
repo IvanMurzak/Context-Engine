@@ -521,6 +521,39 @@ Registry::Registry()
          {"production", "bool", "Install only non-dev dependencies (omit devDependencies).", false}},
         /*implemented=*/true));
 
+    // --- M6 X1: the L-47 GC-pause profiler channel query (issue #188, R-SIM-008 / R-OBS-002) ----
+    // A global, one-shot STABLE verb: run a synthetic JS allocation-churn workload over a real
+    // headless session with the R-SIM-008 scheduled inter-tick GC window active, and report the
+    // GC-pause profiler channel (per-tick attributed pauses + aggregates + heap gauge + the
+    // R-LANG-012 budget verdict) as the R-CLI-008 JSON envelope — the v1 of L-47's "all profiling
+    // data CLI-queryable as JSON". Needs the in-process JS VM: on a stub-backend build it refuses
+    // fail-closed with sim.gc.unavailable (the codes live in runtime/js gc_errors.h; registered in
+    // the catalog's sim.gc.* block). Inserted at the END of the stable block (before the
+    // operational surface) so a future sibling insertion merges cleanly. Additive-only —
+    // protocolMajor stays 0.
+    verbs_.push_back(make_verb(
+        "", "profile", "gc",
+        "Measure the JS-tier GC-pause profiler channel (L-47 / R-SIM-008): step a headless session "
+        "N fixed ticks with per-system JS allocation churn and a scheduled inter-tick GC window, "
+        "then report every attributed GC pause (in-window vs mid-tick), the aggregates, the JS-heap "
+        "gauge, and whether every pause fits the R-LANG-012 per-frame budget.",
+        /*params=*/{},
+        /*flags=*/
+        {{"ticks", "string", "Fixed ticks to run (unsigned integer); defaults to 60.", false},
+         {"budget-ms", "string",
+          "Per-window pause budget in milliseconds; defaults to a quarter of the tick gap "
+          "(~4.17 ms at the 60 Hz fixed timestep).",
+          false},
+         {"trigger-bytes", "string",
+          "Collect only when the JS heap grew by at least this many bytes since the last "
+          "collecting window (positive integer); default: collect every window (force).",
+          false},
+         {"churn", "string",
+          "Short-lived JS objects allocated per system per tick (unsigned integer); defaults to "
+          "2000.",
+          false}},
+        /*implemented=*/true));
+
     // --- the OPERATIONAL daemon-driver surface (R-CLI-009 honesty) ------------------------------
     // These RPC methods are genuinely served by a live daemon's method backend (KernelServer) — the
     // cross-process analogue of `context editor smoke`. They are registered here so

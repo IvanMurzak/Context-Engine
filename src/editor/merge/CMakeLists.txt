@@ -68,3 +68,16 @@ target_compile_definitions(context_merge_test_git_driver
 add_dependencies(context_merge_test_git_driver context)
 add_test(NAME merge-test_git_driver COMMAND context_merge_test_git_driver)
 set_tests_properties(merge-test_git_driver PROPERTIES TIMEOUT 120)
+
+# Sanitize preset only: the spawned `context` binary links context_js (M6 X1 `context profile gc`),
+# so on the V8-capable legs the child carries the uninstrumented rusty_v8 archive with its duplicate
+# C++-runtime typeinfo — UBSan vptr false-positives on valid iostream code, whose printed
+# diagnostics drive demangler scratch allocations LSan reports as leaks, failing the child (and thus
+# this test) with no Context defect (sanitize (ASan+UBSan, ubuntu) leg, CI run 29197875018). Same
+# fix as src/cli / src/tests/integration: the narrow demangler/symbolizer LSan suppressions
+# (runtime/ts/lsan-suppressions.txt), inherited by the spawned child; inert on the stub build.
+if(CONTEXT_SANITIZE)
+    set_tests_properties(merge-test_git_driver PROPERTIES
+        ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
+endif()
