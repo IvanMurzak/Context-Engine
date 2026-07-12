@@ -250,7 +250,7 @@ jobs:
         run: cmake -S src --preset deterministic
 
       - name: Build determinism targets under strict-FP
-        run: cmake --build --preset deterministic --target context_determinism_test_attestation context_session_determinism_gate context_session_determinism_physics context_physics3d_determinism_scene context_physics2d_determinism_scene
+        run: cmake --build --preset deterministic --target context_determinism_test_attestation context_session_determinism_gate context_session_determinism_physics context_physics3d_determinism_scene context_physics2d_determinism_scene context_particles_determinism_scene
         working-directory: src
 
       - name: Deterministic attestation + determinism gates (produces deterministic:true, blocking)

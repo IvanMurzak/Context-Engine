@@ -625,7 +625,30 @@ const std::vector<ErrorCode>& catalog()
         // --- anim.* — reserved for M6 P3 (packages/animation/, R-SYS-002/008). Minter: P3. ------------
         // (reserved — filled by the Animation package task.)
         // --- particle.* — reserved for M6 P4 (packages/particles/, R-SYS-003). Minter: P4. ------------
-        // (reserved — filled by the Particles package task.)
+        // The particle-system package's fail-closed refusals (issue #178). The strings are DEFINED in
+        // src/packages/particles/include/context/packages/particles/errors.h as
+        // context::packages::particles::k*Code (the same promote-a-local-string pattern as the
+        // physics3d/physics2d blocks above — the package never links this contract layer) and this
+        // catalog registers them. All deterministic (a bare retry cannot repair an invalid emitter
+        // description or a particle op on a non-emitter entity); appended within this block only
+        // (additive-only, protocolMajor stays 0). The COSMETIC observer path (R-SIM-001) is off the sim
+        // path and mints no codes.
+        {"particle.invalid_entity",
+         "A dead or null entity handle was passed to a particle operation; nothing was simulated or "
+         "modified (fail-closed).",
+         false, kExitUsage, "R-SYS-003"},
+        {"particle.missing_component",
+         "A particle operation targeted an entity that lacks the emitter component; the world is "
+         "unchanged.",
+         false, kExitUsage, "R-SYS-003"},
+        {"particle.invalid_config",
+         "An emitter description was rejected: a negative emission rate, a non-positive particle "
+         "lifetime, or a negative velocity spread; no component was added (fail-closed validation).",
+         false, kExitValidation, "R-SYS-003"},
+        {"particle.invalid_step",
+         "A particle simulation step was refused: the fixed tick duration was not positive; the "
+         "world is unchanged.",
+         false, kExitValidation, "R-SYS-003"},
         // --- spline.* — reserved for M6 P5 (packages/spline/, R-SYS-004 SHOULD). Minter: P5. ----------
         // (reserved — filled by the Spline package task.)
         // --- audio.* — reserved for M6 P6 (packages/audio/, R-SYS-006 / L-46). Minter: P6. ------------
