@@ -1,0 +1,22 @@
+.github/workflows/ci.yml
+  s_4d68fcead85c12::t_e1faac9fbf8933 253
+src/packages/physics3d/src/physics_world.cpp
+  s_4d68fcead85c12::t_ac3e6a185bc70d 615-616
+  s_4d68fcead85c12::t_89613d3c8691e3 449
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "19c83f53fc35e5e002cb8e2cdbea8274861fb0c6",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
