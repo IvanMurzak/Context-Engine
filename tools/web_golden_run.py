@@ -27,6 +27,7 @@ import argparse
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -189,22 +190,26 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # ignore_cleanup_errors: the throwaway CI profile's teardown must NEVER fail an already-decided
+    # render result. Chrome (under --no-sandbox) spawns a tree of child processes that can re-touch
+    # the --user-data-dir profile a moment after we've asked to delete it; a strict rmtree then races
+    # them and raises OSError [Errno 39] Directory not empty ('Default'), flipping a PASS to exit 1.
+    # We also reap the whole browser process GROUP below so the dir is quiescent before cleanup.
     with GoldenCollector(html.parent) as collector, \
-            tempfile.TemporaryDirectory(prefix="ctx-web-golden-") as profile:
+            tempfile.TemporaryDirectory(prefix="ctx-web-golden-",
+                                        ignore_cleanup_errors=True) as profile:
         url = f"http://127.0.0.1:{collector.port}/{html.name}"
         cmd = [browser, *CHROMIUM_FLAGS, f"--user-data-dir={profile}", url]
         print(f"[web-golden] launching: {browser} (headless, SwiftShader WebGPU) -> {url}")
         log_path = out_dir / "browser.log"
         with open(log_path, "wb") as log:
-            proc = subprocess.Popen(cmd, stdout=log, stderr=log)
+            # start_new_session puts the browser in its own process group so we can signal the whole
+            # tree (zygote/GPU children), not just the launcher pid, on teardown.
+            proc = subprocess.Popen(cmd, stdout=log, stderr=log, start_new_session=True)
             try:
                 got_done = collector.done.wait(timeout=args.timeout)
             finally:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=15)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
+                _terminate_browser(proc)
 
         if not got_done:
             print(f"[web-golden] FAIL: no /done from the harness within {args.timeout:.0f}s "
@@ -239,6 +244,39 @@ def main(argv: list[str] | None = None) -> int:
             _dump_log_tail(log_path)
             return 1
         return 0
+
+
+def _terminate_browser(proc: subprocess.Popen) -> None:
+    """Terminate the browser AND its child processes, then wait for the tree to exit.
+
+    Chrome under --no-sandbox spawns a tree of child processes (zygote/GPU); waiting on the launcher
+    pid alone leaves them briefly alive, and they can re-touch the --user-data-dir profile after we
+    delete it (the [Errno 39] 'Directory not empty' teardown race that flakes this job). The browser
+    is started in its own process group (start_new_session=True), so we signal the whole group.
+    Best-effort: a browser that has already exited, or a platform without process groups, degrades
+    to a plain terminate/kill — teardown must never raise.
+    """
+    if proc.poll() is not None:
+        return
+
+    def _signal(hard: bool) -> None:
+        try:
+            # POSIX: signal the whole process group so Chrome's children die too. SIGKILL/killpg/
+            # getpgid are POSIX-only names; on non-POSIX their AttributeError drops us to the pid.
+            sig = signal.SIGKILL if hard else signal.SIGTERM
+            os.killpg(os.getpgid(proc.pid), sig)
+        except (AttributeError, ProcessLookupError, PermissionError, OSError):
+            proc.kill() if hard else proc.terminate()
+
+    _signal(hard=False)
+    try:
+        proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        _signal(hard=True)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
 
 
 def _dump_log_tail(log_path: Path, lines: int = 60) -> None:
