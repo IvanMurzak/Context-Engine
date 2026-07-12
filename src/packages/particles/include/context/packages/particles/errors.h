@@ -3,7 +3,7 @@
 // promote-a-local-string pattern as physics3d's kInvalid*Code / physics2d's block — so this package
 // never links the contract layer (the dependency direction stays package -> kernel/runtime, per the
 // L-60 microkernel model). All deterministic refusals: a bare retry cannot repair an invalid emitter
-// description or a physics op on a non-emitter entity.
+// description or a particle op on a non-emitter entity.
 
 #pragma once
 
