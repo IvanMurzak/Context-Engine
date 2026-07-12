@@ -1,0 +1,70 @@
+src/packages/spline/tests/test_curve.cpp
+  s_4d68fcead85c12::t_e15a1c03c46d20 1-110
+src/packages/spline/include/context/packages/spline/cosmetic_curve.h
+  s_4d68fcead85c12::t_9242169ae62075 1-85
+src/packages/spline/include/context/packages/spline/spline_world.h
+  s_4d68fcead85c12::t_648926ca639c34 1-113
+src/packages/spline/tests/test_cosmetic.cpp
+  s_4d68fcead85c12::t_e864cbae7d8cbe 1-91
+.github/workflows/ci.yml
+  s_4d68fcead85c12::t_98cf2a20a4658a 253
+src/editor/contract/src/error_catalog.cpp
+  s_4d68fcead85c12::t_47af30b6972d95 681-709
+src/editor/contract/tests/test_error_catalog.cpp
+  s_4d68fcead85c12::t_0f85ed85d31ebb 344-371
+src/packages/spline/README.md
+  s_4d68fcead85c12::t_edbc037b103f3f 1-54
+src/packages/spline/src/spline_world.cpp
+  s_4d68fcead85c12::t_42c94d5c04db65 1-269
+src/packages/spline/src/cosmetic_curve.cpp
+  s_4d68fcead85c12::t_282c64ff7edc70 1-179
+src/packages/spline/tests/path_fixture.h
+  s_4d68fcead85c12::t_d5f8e119181c5b 1-52
+src/CMakeLists.txt
+  s_4d68fcead85c12::t_bf721f0c71c858 460-476
+src/packages/spline/tests/spline_test.h
+  s_4d68fcead85c12::t_d02093471d100d 1-27
+src/packages/spline/include/context/packages/spline/errors.h
+  s_4d68fcead85c12::t_54257d18782518 1-30
+src/packages/spline/tests/test_follower.cpp
+  s_4d68fcead85c12::t_88e43be88a0a88 1-118
+src/packages/spline/tests/test_errors.cpp
+  s_4d68fcead85c12::t_eac202484ee5f8 1-116
+src/packages/spline/CMakeLists.txt
+  s_4d68fcead85c12::t_cb617b2d058508 1-94
+src/packages/spline/tests/determinism_spline_scene.cpp
+  s_4d68fcead85c12::t_f158ebf442db51 105-106
+  s_4d68fcead85c12::t_3ff0866d1a3ad0 1-104,107-133
+src/packages/spline/include/context/packages/spline/components.h
+  s_9d3fcae0052186::t_1fec9fb0ddae83 1-42
+src/packages/spline/include/context/packages/spline/curve.h
+  s_9d3fcae0052186::t_237cc689145ac7 1-69
+src/packages/spline/src/curve.cpp
+  s_9d3fcae0052186::t_ffa66d724aedac 1-150
+src/packages/spline/tests/test_components.cpp
+  s_4d68fcead85c12::t_5369ebabab786c 1-89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "b2d071977f51a5d6d9339ef300af295d3dd536dd",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_9d3fcae0052186": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a45d55da7ab35ec59",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
