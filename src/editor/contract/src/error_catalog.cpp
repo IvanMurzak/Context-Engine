@@ -678,7 +678,35 @@ const std::vector<ErrorCode>& catalog()
          "world is unchanged.",
          false, kExitValidation, "R-SYS-003"},
         // --- spline.* — reserved for M6 P5 (packages/spline/, R-SYS-004 SHOULD). Minter: P5. ----------
-        // (reserved — filled by the Spline package task.)
+        // The spline package's fail-closed refusals (issue #182). The strings are DEFINED in
+        // src/packages/spline/include/context/packages/spline/errors.h as
+        // context::packages::spline::k*Code (the same promote-a-local-string pattern as the
+        // physics3d/physics2d/particle/anim blocks above — the package never links this contract layer)
+        // and this catalog registers them. All deterministic (a bare retry cannot repair an invalid
+        // path set / out-of-range path selection, a duplicate attach, or a spline op on the wrong
+        // entity); appended within this block only (additive-only, protocolMajor stays 0). The
+        // tooling/geometry DISPLAY observer path (R-SIM-001) is off the sim path and mints no codes.
+        {"spline.invalid_entity",
+         "A dead or null entity handle was passed to a spline operation; nothing was simulated or "
+         "modified (fail-closed).",
+         false, kExitUsage, "R-SYS-004"},
+        {"spline.missing_component",
+         "A spline operation targeted an entity that lacks the path-follower component; the world is "
+         "unchanged.",
+         false, kExitUsage, "R-SYS-004"},
+        {"spline.invalid_path",
+         "A path selection was rejected: the installed curve set is empty or malformed, or a follower "
+         "named an out-of-range path index; no follower is attached and the world keeps its prior "
+         "paths (fail-closed validation).",
+         false, kExitValidation, "R-SYS-004"},
+        {"spline.duplicate_component",
+         "A path follower could not be attached: the entity already carries one; nothing was "
+         "overwritten (fail-closed validation).",
+         false, kExitValidation, "R-SYS-004"},
+        {"spline.invalid_step",
+         "A spline simulation step was refused: the fixed tick duration was not positive; the world "
+         "is unchanged.",
+         false, kExitValidation, "R-SYS-004"},
         // --- audio.* — reserved for M6 P6 (packages/audio/, R-SYS-006 / L-46). Minter: P6. ------------
         // (reserved — filled by the Audio package task.)
         // --- input.* — reserved for M6 P7 (packages/input/, R-SYS-007 / L-45). Minter: P7. ------------
