@@ -440,6 +440,23 @@ add_subdirectory(packages/physics2d)
 # add_subdirectory order).
 add_subdirectory(packages/particles)
 
+# M6 P3: the animation package (src/packages/animation/, R-SYS-002 / R-SYS-008, issue #180) — skeletal
+# animation with blending + a NEW authored ctx:anim-graph content kind + a deterministic root-motion sim
+# path, with the determinism split (docs/physics-determinism-decision.md + R-SIM-001): the DETERMINISTIC
+# SIM PATH (the anim-graph playback cursor + transition blend drives accumulated ROOT MOTION) is
+# integer/fixed-point ONLY (the simmath Q16 core) and folds into the L-54 hierarchical state hash by
+# stable name through the M6-F0b sim_components() seam, with deterministic fixed-point pose SAMPLE/BLEND;
+# the FULL per-bone POSE is a presentation observer that reads sim state read-only, holds its own float
+# pose, and folds into NO hash (the R-SIM-001 downstream-observer rule). Clips are DCC-import-only
+# (R-ASSET-001). It is a PACKAGE, not kernel core (R-KERNEL-001 / L-60): the kernel never links back;
+# animation needs no broad-phase, so — unlike the physics packages — it has NO context_spatial
+# dependency. Registers the determinism-animation-scene ctest, joining the determinism-* family the
+# blocking CI Determinism gate runs across the 3-OS matrix. Wired here immediately after
+# packages/particles (its M6 WAVE sibling) and deliberately apart from the editor/runtime clusters and
+# the file tail, so concurrent sibling tasks inserting into this file merge cleanly (consumers name the
+# `context_animation` target, resolved at generate time regardless of add_subdirectory order).
+add_subdirectory(packages/animation)
+
 # M3 task 2a: the in-process V8 JavaScript host (src/runtime/js/, issue #76 / L-61 /
 # R-LANG-002/008 / R-SEC-009) — the foundation of the M3 TypeScript scripting tier. A hybrid host
 # over the SHA-pinned rusty_v8 prebuilt channel (real v8:: API for the STL-free majority + rusty_v8

@@ -1,0 +1,38 @@
+{
+  "$schema": "ctx:anim-graph",
+  "version": 1,
+  "notes": "A locomotion animation state-machine (R-SYS-008): idle -> walk -> run, gated on a `speed` control parameter, plus a turn state. Each state plays a DCC-imported clip (R-ASSET-001); the animation package evaluates the transitions deterministically and blends the active clip's root motion into the entity transform. This is the authored ctx:anim-graph few-shot form an AI author should emit.",
+  "initial": "idle",
+  "states": [
+    {
+      "id": "idle",
+      "clip": "hero_idle",
+      "transitions": [
+        {"to": "walk", "op": "ge", "threshold": 1, "duration": 0.2}
+      ]
+    },
+    {
+      "id": "walk",
+      "clip": "hero_walk",
+      "transitions": [
+        {"to": "run", "op": "ge", "threshold": 5, "duration": 0.25},
+        {"to": "turn", "op": "lt", "threshold": 0.5, "duration": 0.15},
+        {"to": "idle", "op": "lt", "threshold": 1, "duration": 0.2}
+      ]
+    },
+    {
+      "id": "run",
+      "clip": "hero_run",
+      "transitions": [
+        {"to": "walk", "op": "lt", "threshold": 5, "duration": 0.25}
+      ]
+    },
+    {
+      "id": "turn",
+      "clip": "hero_turn",
+      "transitions": [
+        {"to": "walk", "op": "ge", "threshold": 0.5, "duration": 0.15}
+      ]
+    }
+  ]
+}

@@ -49,6 +49,13 @@ converge with no conflict) and `conflict/` (same-field edits that yield a machin
 seed + input stream + tick count + the expected per-tick state-hash trace. Deterministic and
 project-manifest-free, so it replays green on every OS.
 
+### `anim-graphs/`
+`locomotion.anim-graph.json` — an authored animation state-machine (the `ctx:anim-graph` kind,
+R-SYS-008): named states each playing a DCC-imported clip, connected by transitions gated on a control
+parameter. The animation package (`src/packages/animation/`) compiles it into a runtime graph it
+evaluates deterministically, blending the active clip's root motion into the entity transform. A
+standalone kind sample (like `replays/`) — not part of a runnable project.
+
 ## Contract-surface coverage (freeze readiness)
 
 Stable, implemented, one-shot CLI verbs the corpus exercises (each ≡ its RPC method + MCP tool):

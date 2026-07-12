@@ -546,6 +546,47 @@ constexpr std::string_view kReplaySchemaJson = R"({
   }
 })";
 
+constexpr std::string_view kAnimGraphSchemaJson = R"({
+  "$id": "ctx:anim-graph",
+  "version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["initial", "states"],
+  "description": "An authored animation state-machine / transition graph (R-SYS-008): named states, each playing one DCC-imported clip, connected by transitions gated on an integer control parameter. Canonical JSON (L-32) evaluated deterministically by the animation package (src/packages/animation/) — no in-engine clip authoring (R-ASSET-001). Referential integrity (the initial state + every transition target + parameter references resolve) is checked by the kind's semantic analyzer beyond this shape.",
+  "properties": {
+    "notes": {"description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."},
+    "initial": {"type": "string", "description": "The id of the state the graph starts in (must name a declared state)."},
+    "states": {
+      "type": "array",
+      "description": "The graph's states. Each plays one clip and lists its outgoing parameter-gated transitions, checked in order (first satisfied wins).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "clip"],
+        "properties": {
+          "id": {"type": "string", "description": "Stable state id, unique within the graph."},
+          "clip": {"type": "string", "description": "The DCC-imported clip this state plays."},
+          "transitions": {
+            "type": "array",
+            "description": "Outgoing transitions, evaluated in authored order; the first whose condition holds fires.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["to", "op", "threshold"],
+              "properties": {
+                "to": {"type": "string", "description": "Target state id (must name a declared state)."},
+                "op": {"type": "string", "enum": ["ge", "gt", "le", "lt"], "description": "The control-parameter comparison: >=, >, <=, <."},
+                "threshold": {"type": "number", "description": "The control-parameter threshold the comparison is against."},
+                "duration": {"type": "number", "description": "The cross-fade duration in seconds when this transition fires (>= 0; 0 is instant)."}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+})";
+
 [[nodiscard]] KindSchema compile_engine_schema(std::string_view schema_json)
 {
     std::vector<std::string> problems;
@@ -694,6 +735,7 @@ const SchemaSet& engine_schemas()
         s.add(compile_engine_schema(kTilemapSchemaJson));
         s.add(compile_engine_schema(kStringTableSchemaJson));
         s.add(compile_engine_schema(kReplaySchemaJson));
+        s.add(compile_engine_schema(kAnimGraphSchemaJson));
         return s;
     }();
     return set;
