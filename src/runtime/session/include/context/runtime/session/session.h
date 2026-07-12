@@ -160,6 +160,8 @@ private:
     void build_systems();
     // (Re)build the initial world for the current scenario + seed (fresh world, rng reset, tick 0).
     void setup_scenario();
+    // Replace the per-tick system list (registered-scenario path; rebuilds system_names_).
+    void install_systems(std::vector<System> systems);
 
     kernel::World world_;
     const SimComponentRegistry* registry_;
@@ -176,5 +178,22 @@ private:
     SystemObserver system_observer_;
     InterTickHook inter_tick_hook_;
 };
+
+// --- scenario registry (M6 EXIT — sample games as session tenants) --------------------------------
+// A registered scenario makes a game a first-class Session tenant next to the built-in "demo": the
+// factory BUILDS the scenario's initial world into `session.world()` (drawing any seeded entropy
+// from `session.rng()`) and RETURNS the ordered per-tick system list — so per-scenario state the
+// systems capture (package worlds, gameplay counters) is created together with the world it drives.
+// The factory runs on every (re)setup — construction with run_setup=true and every set_seed() — so a
+// reseed rebuilds BOTH the world and the captured state (no stale closures). Registration is
+// process-global and idempotent (re-registering a name REPLACES the entry — the SchemaSet contract);
+// the built-in "demo" name is reserved (registering it is a no-op — setup_scenario() resolves "demo"
+// before consulting the registry). A Session constructed with run_setup=false (the session_state
+// restore path) does NOT run the factory: serialized-state restore of a registered scenario is not
+// supported in v1 (the one-shot CLI session files serialize only the built-in demo tenant), matching
+// the pre-existing unknown-scenario behavior (empty world + the built-in demo systems).
+using ScenarioFactory = std::function<std::vector<System>(Session&)>;
+void register_scenario(const std::string& name, ScenarioFactory factory);
+[[nodiscard]] bool has_scenario(const std::string& name);
 
 } // namespace context::runtime::session

@@ -1,0 +1,9 @@
+{
+  "$schema": "ctx:audio-event",
+  "bus": "5a08393cca219c68",
+  "clip": "coin_pickup",
+  "gain": 0.8,
+  "loop": false,
+  "notes": "The coin-pickup jingle (R-SYS-006): a DCC-imported clip (R-ASSET-001) routed to the Sound Effects bus, fired ONCE when the gameplay system detects the player overlapping the Coin entity. Non-spatial (a UI-style pickup chime plays at full gain regardless of listener distance). Fired on miniaudio's NULL backend in the headless smoke gate, off the deterministic sim path (R-SIM-001).",
+  "version": 1
+}

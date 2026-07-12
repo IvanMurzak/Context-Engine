@@ -187,6 +187,46 @@ add_test(NAME samples-corpus COMMAND context_test_samples_corpus)
 set_tests_properties(samples-corpus PROPERTIES TIMEOUT 120)
 
 # ===================================================================================================
+# The M6 EXIT-A SAMPLE-GAME SMOKE GATES (issue #194; R-QA-005 / R-QA-013 / R-HEAD-002) — one per
+# sample game. Each game's runtime mirror (games/) registers as a session SCENARIO (session.h §
+# scenario registry) and PARSES its authored samples/<game>/ scene for the entity layout, so the
+# authored corpus is load-bearing: rename/move an authored entity and the smoke gate goes red
+# (rots-if-broken beyond schema validity). The gates drive the REAL RuntimeKernel session surface —
+# simTick, the ordinary injection sink via the REAL context_input router, the hierarchical state
+# hash — headless, GPU-free, audio on miniaudio's NULL backend, and assert a cross-platform golden
+# (the integer/fixed-point sim law makes the digests portable). These are the per-game proofs the
+# EXIT-B m6-exit-* gates ride; they run in the build job's ordinary ctest pass on all three OS legs.
+#
+# The games library sits ABOVE the session + packages (test-support): the context_session LIBRARY
+# gains no package dependency (L-60 layering unchanged — the determinism_gameplay_scene precedent).
+add_library(context_sample_games STATIC
+    games/roll3d_scenario.cpp
+    games/platformer2d_scenario.cpp)
+target_include_directories(context_sample_games PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/games)
+target_link_libraries(context_sample_games
+    PUBLIC context_session context_physics3d context_physics2d context_animation context_particles
+           context_input context_audio context_simmath
+    PRIVATE context_serializer context_warnings)
+
+add_executable(context_test_game_roll3d test_game_roll3d.cpp)
+target_link_libraries(context_test_game_roll3d PRIVATE context_sample_games context_warnings)
+target_link_options(context_test_game_roll3d PRIVATE ${_m2_exit_static_runtime})
+target_include_directories(context_test_game_roll3d PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(context_test_game_roll3d PRIVATE
+    CONTEXT_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/../samples")
+add_test(NAME game-smoke-roll-3d COMMAND context_test_game_roll3d)
+set_tests_properties(game-smoke-roll-3d PROPERTIES TIMEOUT 120)
+
+add_executable(context_test_game_platformer2d test_game_platformer2d.cpp)
+target_link_libraries(context_test_game_platformer2d PRIVATE context_sample_games context_warnings)
+target_link_options(context_test_game_platformer2d PRIVATE ${_m2_exit_static_runtime})
+target_include_directories(context_test_game_platformer2d PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(context_test_game_platformer2d PRIVATE
+    CONTEXT_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/../samples")
+add_test(NAME game-smoke-platformer-2d COMMAND context_test_game_platformer2d)
+set_tests_properties(game-smoke-platformer-2d PROPERTIES TIMEOUT 120)
+
+# ===================================================================================================
 # The M5 EXIT GATE (ROADMAP §1 M5 Exit / issue #168) — the observer-editor milestone-closing mirror of
 # the M1/M2/M4 gates: the headless end-to-end walkthrough + the a11y/keyboard-nav + coverage gate + the
 # M5 seam checklist, each a BLOCKING per-PR ctest on every OS leg (registered in

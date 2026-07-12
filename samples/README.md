@@ -27,15 +27,37 @@ the `build` job on all three OS legs (`ctest --preset dev -R "^samples-corpus"`;
 The authored JSON is a **canonical fixpoint** (`context migrate --dry-run` reports 0 changes), so a
 non-canonical edit is caught.
 
+The two GAME projects (`platformer-2d/`, `roll-3d/`) are additionally **runtime-load-bearing** (M6
+EXIT, issue #194): each registers as a session **scenario** whose factory PARSES the authored scene
+for the entity layout (`src/tests/integration/games/`), and a per-game **`game-smoke-*`** ctest
+headless-steps it N fixed ticks through the real RuntimeKernel session surface — so renaming/moving
+an authored entity fails the build even when the JSON stays schema-valid.
+
 ## Projects
 
 ### `platformer-2d/`
-A tiny 2D platformer. Startup scene composes a shared room sub-scene (L-35) and adds a camera; the
-instanced torch carries a **field override** with a recorded `base` (R-CLI-006 override hygiene).
-Kinds: `ctx:project`, `ctx:scene` (+ `camera`/`transform` components), `ctx:tilemap`,
-`ctx:string-table`. Plus `scripts/movement.ts` — a TypeScript gameplay system authored as a
-`(query, executor)` pair (R-LANG-002/009/010), the SHAPE an agent should emit (TS *evaluation* is
-covered by the runtime's own suite; this corpus exercises the file-authoring surface).
+A small but REAL 2D platformer (M6 EXIT): an input-driven run+jump **Player** (P7 → P2), static
+**platforms** + a pushable **crate** (P2), a landing particle **puff** (P4), **jump/coin sounds** on
+the null audio backend (P6), and **sprite-sheet animation** via the anim-graph (P3). Startup scene
+composes a shared room sub-scene (L-35) and adds a camera; the instanced torch carries a **field
+override** with a recorded `base` (R-CLI-006 override hygiene). Kinds: `ctx:project`, `ctx:scene`
+(+ `camera`/`transform` components), `ctx:tilemap`, `ctx:string-table`, plus in-project
+`ctx:input-bindings`, `ctx:audio-bus`, `ctx:audio-event`, and `ctx:anim-graph` instances (in-project
+kind files carry L-33 hex ids, unlike the standalone few-shot dirs). `scripts/movement.ts` authors
+the player's REAL per-tick control in TypeScript — a `(query, executor)` system (R-LANG-002/009/010)
+following the M6 X1 pooled/no-allocation discipline (`ctx.fixed` Q16 math), kept in lockstep with
+the native scenario mirror; it is the sustained-run subject of the M6 exit GC-budget assertion.
+Smoke-gated by `game-smoke-platformer-2d`.
+
+### `roll-3d/`
+A small but REAL 3D game (M6 EXIT, net-new): a player-controlled rolling **Ball** (P7 input → force),
+dynamic **boulders** + a **ramp** on a static floor (P1, broad-phased via `context_spatial`), an
+impact particle **burst** on collision (P4), a spatialized **impact sound** on the null audio backend
+(P6), and a skeletal-animated **FlagPole** prop whose anim-graph parameter the gameplay couples to
+the ball's impact count (P3). Kinds: `ctx:project`, `ctx:scene`, plus in-project
+`ctx:input-bindings`, `ctx:audio-bus`, `ctx:audio-event`, and `ctx:anim-graph` instances.
+Integer-authored positions convert losslessly to the Q16 fixed-point sim (wedge-deterministic,
+L-54). Smoke-gated by `game-smoke-roll-3d`.
 
 ### `topdown-rpg/`
 A tiny top-down RPG. Startup scene applies the three **structural override** kinds (remove / add /
@@ -55,6 +77,13 @@ R-SYS-008): named states each playing a DCC-imported clip, connected by transiti
 parameter. The animation package (`src/packages/animation/`) compiles it into a runtime graph it
 evaluates deterministically, blending the active clip's root motion into the entity transform. A
 standalone kind sample (like `replays/`) — not part of a runnable project.
+
+### `audio-buses/`, `audio-events/`, `input-bindings/`
+The P6/P7 standalone kind samples: `game-mix.audio-bus.json` (a mixing-bus graph, `ctx:audio-bus`),
+`footstep.audio-event.json` (a spatialized sound event, `ctx:audio-event`), and
+`default.input-bindings.json` (layered action contexts with modal UI capture, `ctx:input-bindings`).
+Like `anim-graphs/`, these are few-shot forms with semantic ids — the RUNNABLE in-project instances
+of the same kinds live inside the two game projects (with L-33 hex ids, validated + canonical).
 
 ## Contract-surface coverage (freeze readiness)
 

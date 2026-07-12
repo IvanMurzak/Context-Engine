@@ -1,0 +1,18 @@
+{
+  "$schema": "ctx:audio-bus",
+  "buses": [
+    {
+      "gain": 1,
+      "id": "66f78214eb2942ad",
+      "name": "Master"
+    },
+    {
+      "gain": 0.9,
+      "id": "5a08393cca219c68",
+      "name": "Sound Effects",
+      "parent": "66f78214eb2942ad"
+    }
+  ],
+  "notes": "The platformer mixing-bus graph (R-SYS-006): the jump and coin sounds route through Sound Effects (id 5a08393cca219c68) into Master (id 66f78214eb2942ad). Bus ids are L-33 stable intra-file ids (enforced inside a project dir; human labels live in `name`). The presentation-observer audio package (src/packages/audio/) mixes on miniaudio's NULL backend in the headless smoke gate -- entirely OFF the deterministic sim path (R-SIM-001).",
+  "version": 1
+}

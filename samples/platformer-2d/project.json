@@ -3,10 +3,15 @@
   "engine": "context",
   "name": "platformer-2d",
   "notes": [
-    "Agent few-shot sample (R-QA-006): a tiny but real 2D platformer Context project.",
-    "The startup scene composes a shared room sub-scene (L-35) and adds a camera.",
-    "Every authored file is canonical JSON (L-32): UTF-8, LF, no comments -- human/AI",
-    "annotations live in schema-blessed `notes` fields like this one."
+    "Agent few-shot sample (R-QA-006): a small but REAL 2D platformer Context project (M6 EXIT).",
+    "The startup scene composes a shared room sub-scene (L-35), adds a camera, and lays out the",
+    "game: an input-driven run+jump Player (scripts/movement.ts authors the per-tick control in",
+    "TypeScript), 2D physics platforms + a pushable crate, a landing particle puff, jump/coin",
+    "sounds (null audio backend), and sprite-sheet animation via the anim-graph. Headless-runnable",
+    "and integer/fixed-point-deterministic: the runtime mirror is registered as session scenario",
+    "'platformer-2d' (src/tests/integration/games/) and smoke-gated by the",
+    "game-smoke-platformer-2d ctest. Every authored file is canonical JSON (L-32): UTF-8, LF, no",
+    "comments -- human/AI annotations live in schema-blessed `notes` fields like this one."
   ],
   "scene": "scenes/level-1.scene.json",
   "version": 1

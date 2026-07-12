@@ -1,0 +1,32 @@
+{
+  "$schema": "ctx:anim-graph",
+  "initial": "08a07bbdc05f729a",
+  "notes": "The player's sprite-sheet animation state-machine (R-SYS-008): idle (08a07bbdc05f729a, clip player_idle_sheet) <-> run (885be37a91641afe, clip player_run_sheet), gated on a control parameter the gameplay couples to the player's horizontal speed in whole units -- at 1 unit/second or faster the run flipbook plays. State ids are L-33 stable intra-file ids (enforced inside a project dir; human labels live here in notes). The clips are DCC-imported sprite-sheet flipbooks (R-ASSET-001) with NO root motion: the entity is moved by the 2D physics body, and the anim-graph only picks which flipbook plays -- the conventional 2D-platformer split. The runtime mirror in src/tests/integration/games/ compiles this same graph shape into the animation package's Rig.",
+  "states": [
+    {
+      "clip": "player_idle_sheet",
+      "id": "08a07bbdc05f729a",
+      "transitions": [
+        {
+          "duration": 0.125,
+          "op": "ge",
+          "threshold": 1,
+          "to": "885be37a91641afe"
+        }
+      ]
+    },
+    {
+      "clip": "player_run_sheet",
+      "id": "885be37a91641afe",
+      "transitions": [
+        {
+          "duration": 0.125,
+          "op": "lt",
+          "threshold": 1,
+          "to": "08a07bbdc05f729a"
+        }
+      ]
+    }
+  ],
+  "version": 1
+}

@@ -144,7 +144,7 @@ int main()
 {
     const fs::path samples = CONTEXT_SAMPLES_DIR;
     const std::string bin = CONTEXT_BINARY;
-    const std::vector<std::string> projects = {"platformer-2d", "topdown-rpg"};
+    const std::vector<std::string> projects = {"platformer-2d", "topdown-rpg", "roll-3d"};
 
     // =============================================================================================
     // Leg A — the REAL shipped `context` binary builds + headless-smoke-runs each sample project

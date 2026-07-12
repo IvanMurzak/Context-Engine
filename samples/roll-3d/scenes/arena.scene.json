@@ -1,0 +1,132 @@
+{
+  "$schema": "ctx:scene",
+  "entities": [
+    {
+      "components": {
+        "camera": {
+          "far": 1000,
+          "fov": 1.0471975511965976,
+          "near": 0.1
+        },
+        "transform": {
+          "position": [
+            0,
+            6,
+            -14
+          ]
+        }
+      },
+      "id": "9e32f3241baf15fa",
+      "name": "MainCamera"
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            0,
+            -1,
+            0
+          ]
+        }
+      },
+      "id": "66dd5ec232f41e08",
+      "name": "Floor",
+      "notes": "Static box, top face at y == 0. Collider half-extents (20, 1, 20), friction and restitution live in the runtime scenario mirror (positions here are the authored source of truth the mirror parses)."
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            -8,
+            2,
+            0
+          ]
+        }
+      },
+      "id": "a5ad6719d247e052",
+      "name": "Ramp",
+      "notes": "Static box ramp, rotated about z by -0.35 rad in the runtime mirror (entity transforms carry position only in schema v1; orientation, half-extents (6, 0.5, 4) and materials live in the mirror)."
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            0,
+            3,
+            0
+          ]
+        }
+      },
+      "id": "f9578d68666d1c0e",
+      "name": "Ball",
+      "notes": "THE PLAYER: a dynamic unit sphere. The input-bindings map WASD to move_x/move_y actions; the control system converts held move state into rolling impulses. Its floor impacts trigger the particle burst and the spatialized impact sound."
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            6,
+            5,
+            -2
+          ]
+        }
+      },
+      "id": "78841fa195287e52",
+      "name": "Boulder-A",
+      "notes": "Dynamic sphere with an initial drift velocity (set in the runtime mirror) -- free physics activity alongside the player."
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            -4,
+            8,
+            3
+          ]
+        }
+      },
+      "id": "a46bfcd7bb9691b7",
+      "name": "Boulder-B",
+      "notes": "Dynamic sphere dropped over the ramp side so it lands on the incline and rolls off."
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            10,
+            0,
+            4
+          ]
+        }
+      },
+      "id": "0d0b51001232502d",
+      "name": "FlagPole",
+      "notes": "The skeletal-animated prop: a 2-joint rig driven by anim/flag-wave.anim-graph.json. The gameplay couples its control parameter to the ball's accumulated impact count, so the flag transitions idle -> wave once the ball has bounced enough."
+    },
+    {
+      "components": {
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      "id": "2957eaeaa07c859b",
+      "name": "ImpactBurst",
+      "notes": "The impact particle emitter anchor: rate 0 at rest; on a ball floor-impact the gameplay system repositions it to the ball and opens the rate for a short deterministic burst."
+    }
+  ],
+  "kind": "scene",
+  "notes": [
+    "The roll-3d arena. Authored positions are INTEGERS (exactly representable in Q16 fixed-point),",
+    "so the runtime scenario mirror converts them losslessly onto the deterministic sim path.",
+    "Collider shapes/sizes, masses, materials, initial velocities and the fixed per-tick system",
+    "order (input -> control -> physics3d -> impact -> particles -> animation) live in the runtime",
+    "mirror registered as session scenario 'roll-3d' (src/tests/integration/games/), which parses",
+    "THIS file for the entity layout -- renaming or moving an entity here fails the",
+    "game-smoke-roll-3d ctest, keeping the sample rot-proof beyond schema validity."
+  ],
+  "version": 1
+}
