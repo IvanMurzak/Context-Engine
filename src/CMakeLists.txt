@@ -607,6 +607,23 @@ add_subdirectory(editor/cef)
 # regardless of add_subdirectory order).
 add_subdirectory(editor/gui)
 
+# M6 X2: the replication state-sync harness (src/runtime/netsync/, R-NET-001 / L-48, issue X2) — the
+# layer that DRIVES the F0b in-storage L-48 replication metadata hooks (the kernel World's per-entity
+# network identity == the L-37 composed id, authority, and dirty/delta versioning; F0b shipped the
+# hooks and left the harness to X2). Provides the identity guard + dirty-scanner (delta culling) +
+# snapshot capture + fail-closed atomic apply that make a REPLICA world CONVERGE to a SOURCE world
+# over the L-48 dirty/delta — validated by an in-process two-session moving-body harness (dynamic
+# context_physics3d / physics2d bodies replicate source -> replica and converge, R-NET-001 v1; NO
+# network transport). It is a RUNTIME module composing on the kernel World (like runtime/session) and
+# links ONLY context_kernel — physics-agnostic (the moving-body sim it replicates is a TEST-only dep;
+# L-60: the kernel never links back). Fills the F0a-reserved net.* contract-catalog block. This is a
+# CONVERGENCE/netcode harness, NOT a strict-FP determinism scene: it registers NO determinism-* ctest
+# and adds nothing to ci.yml's `deterministic` --target list. OWN stanza — deliberately apart from the
+# editor/runtime clusters above and the exit-gate block below — so concurrent sibling tasks inserting
+# into this file merge cleanly (consumers name the `context_netsync` target, resolved at generate time
+# regardless of add_subdirectory order).
+add_subdirectory(runtime/netsync)
+
 # ---------------------------------------------------------------------------
 # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36): five integration tests, one per exit
 # criterion, registered as the `m1-exit-*` ctest family and CI-gated per the §6 tiering (blocking

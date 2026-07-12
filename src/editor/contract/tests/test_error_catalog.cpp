@@ -444,5 +444,31 @@ int main()
         CHECK(budget->origin == "R-SIM-008");
     }
 
+    // --- M6 X2 net.* codes (issue X2) — the F0a-reserved replication / state-sync block ------------
+    // Additive-only new rows (NOT on the frozen v0 baseline — the additive-only check above still
+    // holds). The netsync harness's fail-closed refusals over the L-48 replication metadata:
+    // invalid_net_id / duplicate_net_id (a rejected replication registration) + snapshot_component_
+    // mismatch (a malformed inbound snapshot) are validation-class; authority_conflict (an inbound
+    // delta targeting a replica-owned entity) is usage-class. All deterministic (a bare retry cannot
+    // repair a bad identity, a size-mismatched payload, or an authority conflict). The strings are the
+    // source-of-truth in src/runtime/netsync/.../errors.h (context::runtime::netsync).
+    {
+        for (const char* code :
+             {"net.invalid_net_id", "net.duplicate_net_id", "net.snapshot_component_mismatch"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 5);      // validation class
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-NET-001");
+        }
+
+        const ErrorCode* conflict = find_code("net.authority_conflict");
+        CHECK(conflict != nullptr);
+        CHECK(conflict->exit_code == 2);      // usage class (authority arbitration)
+        CHECK(conflict->retriable == false);  // deterministic — a bare retry cannot help
+        CHECK(conflict->origin == "R-NET-001");
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

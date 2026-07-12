@@ -788,8 +788,35 @@ const std::vector<ErrorCode>& catalog()
          "The JS VM reported a failure while running a scheduled inter-tick GC window or a "
          "GC-profiler query; the simulation state is unaffected (GC touches the JS heap only).",
          false, kExitInternal, "R-SIM-008"},
-        // --- net.* — reserved for M6 X2 (replication + state-sync, R-NET-001 / L-48). Minter: X2. ------
-        // (reserved — filled by the replication / state-sync cross-cutting task.)
+        // --- net.* — M6 X2 (replication + state-sync, src/runtime/netsync/, R-NET-001 / L-48). Minter: X2.
+        // The state-sync harness's fail-closed refusals. The strings are DEFINED in
+        // src/runtime/netsync/include/context/runtime/netsync/errors.h as
+        // context::runtime::netsync::k*Code (the same promote-a-local-string pattern as the physics3d/
+        // physics2d package blocks above and runtime/js's sim.gc.* block — the netsync module never links
+        // this contract layer) and this catalog registers them. All deterministic (a bare retry cannot
+        // repair an unassigned/duplicate network identity, a size-mismatched snapshot payload, or an
+        // authority conflict). invalid_net_id / duplicate_net_id / snapshot_component_mismatch are
+        // validation-class (a rejected replication registration or a malformed inbound snapshot);
+        // authority_conflict is usage-class (an inbound delta targeted an entity the replica itself owns,
+        // so the authoritative peer's state wins). Appended within this block only (additive-only,
+        // protocolMajor stays 0).
+        {"net.invalid_net_id",
+         "A replication registration used the unassigned network identity (net id 0); nothing was "
+         "registered (fail-closed validation).",
+         false, kExitValidation, "R-NET-001"},
+        {"net.duplicate_net_id",
+         "Two entities were registered for replication with the same network identity; the second was "
+         "refused so the composed-id keyed mapping stays 1:1 (fail-closed validation).",
+         false, kExitValidation, "R-NET-001"},
+        {"net.snapshot_component_mismatch",
+         "A state-sync snapshot carried a component payload whose byte length disagrees with the "
+         "replicated component set's declared size for that component; nothing was applied and the "
+         "replica is unchanged (fail-closed validation).",
+         false, kExitValidation, "R-NET-001"},
+        {"net.authority_conflict",
+         "A state-sync delta targeted an entity the replica itself holds authority over; the "
+         "authoritative peer's local state wins, so the delta is refused and the replica is unchanged.",
+         false, kExitUsage, "R-NET-001"},
         // ============================================================================================
     };
     return the_catalog;
