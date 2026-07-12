@@ -1,0 +1,36 @@
+src/tests/integration/games/sample_games.h
+  s_4d68fcead85c12::t_80102fcf3cb5a6 60-71
+src/runtime/session/src/session.cpp
+  s_4d68fcead85c12::t_7bdb33e50e7c63 157-163
+  s_4d68fcead85c12::t_3114dc456472b4 169-170,174
+  s_4d68fcead85c12::t_7dd415b6d59af3 187
+  s_4d68fcead85c12::t_e47122b973adc9 135
+  s_4d68fcead85c12::t_6c82fc63d93a2c 25
+  s_4d68fcead85c12::t_2b0bf7b5b515c2 148
+src/tests/integration/games/roll3d_scenario.cpp
+  s_4d68fcead85c12::t_e4b8efc341fb4e 216
+src/tests/integration/test_game_platformer2d.cpp
+  s_4d68fcead85c12::t_1ec5a5e2196b80 276
+src/tests/integration/games/platformer2d_scenario.cpp
+  s_4d68fcead85c12::t_179fe6428dd374 132
+src/tests/integration/test_samples_corpus.cpp
+  s_4d68fcead85c12::t_cbc019ab0e6eaa 189
+  s_4d68fcead85c12::t_710b2b843615f4 165
+  s_4d68fcead85c12::t_7ce07d75c3cef3 198-201,204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "95a8d21372ee46015fbca2c824bc0a1dbcf5ab3e",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
