@@ -12,7 +12,8 @@ add_library(context_kinds STATIC
     src/string_table.cpp
     src/anim_graph.cpp
     src/audio_bus.cpp
-    src/audio_event.cpp)
+    src/audio_event.cpp
+    src/input_bindings.cpp)
 
 target_include_directories(context_kinds PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -72,3 +73,12 @@ target_link_libraries(context_kinds_test_audio
 target_link_options(context_kinds_test_audio PRIVATE ${_context_kinds_static_runtime})
 target_include_directories(context_kinds_test_audio PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME kinds-audio COMMAND context_kinds_test_audio)
+
+# test_input_bindings: kinds + schema (fixture validation against the REAL engine_schemas()
+# ctx:input-bindings registration) + the referential-integrity semantic analyzer (M6 P7, issue #186).
+add_executable(context_kinds_test_input_bindings tests/test_input_bindings.cpp)
+target_link_libraries(context_kinds_test_input_bindings
+    PRIVATE context_kinds context_schema context_warnings)
+target_link_options(context_kinds_test_input_bindings PRIVATE ${_context_kinds_static_runtime})
+target_include_directories(context_kinds_test_input_bindings PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME kinds-input-bindings COMMAND context_kinds_test_input_bindings)
