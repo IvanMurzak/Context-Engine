@@ -623,7 +623,35 @@ const std::vector<ErrorCode>& catalog()
          "world is unchanged.",
          false, kExitValidation, "R-2D-002"},
         // --- anim.* — reserved for M6 P3 (packages/animation/, R-SYS-002/008). Minter: P3. ------------
-        // (reserved — filled by the Animation package task.)
+        // The animation package's fail-closed refusals (issue #180). The strings are DEFINED in
+        // src/packages/animation/include/context/packages/animation/errors.h as
+        // context::packages::animation::k*Code (the same promote-a-local-string pattern as the
+        // physics3d/physics2d/particle blocks above — the package never links this contract layer) and
+        // this catalog registers them. All deterministic (a bare retry cannot repair an invalid rig, a
+        // duplicate attach, or an animation op on the wrong entity); appended within this block only
+        // (additive-only, protocolMajor stays 0). The COSMETIC full-pose observer path (R-SIM-001) is
+        // off the sim path and mints no codes.
+        {"anim.invalid_entity",
+         "A dead or null entity handle was passed to an animation operation; nothing was simulated or "
+         "modified (fail-closed).",
+         false, kExitUsage, "R-SYS-002"},
+        {"anim.missing_component",
+         "An animation operation targeted an entity that lacks the animator component; the world is "
+         "unchanged.",
+         false, kExitUsage, "R-SYS-002"},
+        {"anim.invalid_rig",
+         "A rig was rejected: it has no clips or graph states, an out-of-range initial state, a "
+         "non-positive clip duration, or a graph state / transition naming a non-existent clip or "
+         "state; the AnimationWorld keeps its previous rig (fail-closed validation).",
+         false, kExitValidation, "R-SYS-008"},
+        {"anim.duplicate_component",
+         "An animator could not be attached: the entity already carries one; nothing was overwritten "
+         "(fail-closed validation).",
+         false, kExitValidation, "R-SYS-002"},
+        {"anim.invalid_step",
+         "An animation simulation step was refused: the fixed tick duration was not positive; the "
+         "world is unchanged.",
+         false, kExitValidation, "R-SYS-002"},
         // --- particle.* — reserved for M6 P4 (packages/particles/, R-SYS-003). Minter: P4. ------------
         // The particle-system package's fail-closed refusals (issue #178). The strings are DEFINED in
         // src/packages/particles/include/context/packages/particles/errors.h as

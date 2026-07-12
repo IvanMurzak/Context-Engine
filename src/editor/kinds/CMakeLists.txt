@@ -9,7 +9,8 @@
 
 add_library(context_kinds STATIC
     src/tilemap.cpp
-    src/string_table.cpp)
+    src/string_table.cpp
+    src/anim_graph.cpp)
 
 target_include_directories(context_kinds PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -51,3 +52,12 @@ target_link_libraries(context_kinds_test_string_table
 target_link_options(context_kinds_test_string_table PRIVATE ${_context_kinds_static_runtime})
 target_include_directories(context_kinds_test_string_table PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME kinds-string-table COMMAND context_kinds_test_string_table)
+
+# test_anim_graph: kinds + schema (fixture validation against the REAL engine_schemas() ctx:anim-graph
+# registration) + the referential-integrity semantic analyzer (M6 P3, issue #180).
+add_executable(context_kinds_test_anim_graph tests/test_anim_graph.cpp)
+target_link_libraries(context_kinds_test_anim_graph
+    PRIVATE context_kinds context_schema context_warnings)
+target_link_options(context_kinds_test_anim_graph PRIVATE ${_context_kinds_static_runtime})
+target_include_directories(context_kinds_test_anim_graph PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME kinds-anim-graph COMMAND context_kinds_test_anim_graph)

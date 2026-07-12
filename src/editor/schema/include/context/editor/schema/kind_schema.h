@@ -29,6 +29,11 @@ inline constexpr std::string_view kStringTableKindId = "ctx:string-table";
 // trace). RuntimeKernel's own serialization (R-FILE-009), published as a versioned kind so
 // `context describe` introspects it like the authored kinds (R-CLI-005).
 inline constexpr std::string_view kReplayKindId = "ctx:replay";
+// The M6 P3 authored animation-graph kind (R-SYS-008): a state-machine / transition graph of named
+// clips whose transitions are gated on an integer control parameter, evaluated deterministically by
+// the animation package (src/packages/animation/). Canonical JSON per L-32; kind SEMANTICS (referential
+// integrity beyond schema shape) live in src/editor/kinds/anim_graph.h, the schema publication here.
+inline constexpr std::string_view kAnimGraphKindId = "ctx:anim-graph";
 
 // One compiled per-kind versioned schema. `doc` is the schema DOCUMENT (the dialect below);
 // `canonical_doc` is its canonical-JSON serialization — the published form (R-DATA-006: published,
