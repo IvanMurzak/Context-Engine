@@ -446,7 +446,7 @@ const char* PhysicsWorld3d::add_body(kn::World& world, kn::Entity e, const BodyD
         else
         {
             const Vec3 h = desc.half_extents;
-            inertia = desc.mass * (h.x * h.x + h.y * h.y + h.z * h.z) / 3;
+            inertia = desc.mass * sm::length_squared(h) / 3;
         }
         body.inv_inertia = inertia.raw > 0 ? (kOne / inertia).raw : 0;
     }
@@ -612,7 +612,8 @@ const char* PhysicsWorld3d::step(kn::World& world, Fixed dt)
     }
 
     // --- iterative velocity impulses -------------------------------------------------------------
-    const int iterations = impl_->config.solver_iterations > 0 ? impl_->config.solver_iterations : 1;
+    const int iterations =
+        impl_->config.solver_iterations > 0 ? impl_->config.solver_iterations : 1;
     for (int it = 0; it < iterations; ++it)
         for (const Contact& c : contacts)
             solve_contact(bodies[c.a], bodies[c.b], c);
