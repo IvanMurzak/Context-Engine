@@ -69,11 +69,10 @@ constexpr int kTicks = 240;
 const Fixed kDt = Fixed::from_ratio(1, 60);
 
 // The FIXED system order every tick runs (the ordering axis the R-LANG-011 scheduler will own; the
-// per-system hash walk below attributes a divergence to one of these names, exactly as the session's
-// per-system trace does for the demo scenario).
+// per-system hash walk below attributes a divergence to one of the 5 systems — steer, physics3d,
+// physics2d, animation, particles — exactly as the session's per-system trace does for the demo
+// scenario).
 constexpr std::size_t kSystemCount = 5;
-constexpr const char* kSystemNames[kSystemCount] = {"steer", "physics3d", "physics2d", "animation",
-                                                    "particles"};
 
 // The fixed mid-run anim-graph parameter schedule (this scene's "injected input"): applied at the
 // START of the named tick, before any system runs — identically on every run.
@@ -429,8 +428,8 @@ void check_attribution(const RunTrace& left, const RunTrace& right, const Tamper
         }
     }
     CHECK(sys == tamper.system);
-    // sys == tamper.system (asserted above) is what pins the attributed system NAME
-    // (kSystemNames[sys]); no separate name compare is needed.
+    // sys == tamper.system (asserted above) is what pins the attributed system index to the
+    // expected one; no separate name compare is needed.
 
     // 3. attribute to the concrete (entity, component, field) via the canonical snapshot diff — the
     //    R-LANG-010 schema names the package component + field.
