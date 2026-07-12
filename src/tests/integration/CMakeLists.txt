@@ -184,7 +184,9 @@ add_dependencies(context_test_samples_corpus context)
 
 add_test(NAME samples-corpus COMMAND context_test_samples_corpus)
 # Leg A spawns child processes + Leg B records/replays sessions; cap so a regression never hangs CI.
-set_tests_properties(samples-corpus PROPERTIES TIMEOUT 120)
+# 180 (not 120): Leg A is now 6 spawns (3 projects x validate/migrate) at a 15s per-spawn ceiling —
+# 180 keeps the worst case surfacing its per-spawn diagnostics instead of truncating the whole gate.
+set_tests_properties(samples-corpus PROPERTIES TIMEOUT 180)
 
 # ===================================================================================================
 # The M6 EXIT-A SAMPLE-GAME SMOKE GATES (issue #194; R-QA-005 / R-QA-013 / R-HEAD-002) — one per
