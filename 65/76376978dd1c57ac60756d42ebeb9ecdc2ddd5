@@ -1,0 +1,96 @@
+src/runtime/session/include/context/runtime/session/session.h
+  s_4d68fcead85c12::t_ce1526c15a3f41 123-138
+  s_4d68fcead85c12::t_784ec94b0b6e6c 177
+src/runtime/js/tests/test_gc_state_hash.cpp
+  s_4d68fcead85c12::t_0dfd43a9805989 1-207
+src/runtime/profile/README.md
+  s_4d68fcead85c12::t_72368dbc571603 1-38
+src/editor/contract/src/error_catalog.cpp
+  s_4d68fcead85c12::t_e32c36951c02cd 767-790
+src/runtime/js/src/v8_engine.cpp
+  s_4d68fcead85c12::t_389be816a8433f 149-153
+  s_4d68fcead85c12::t_3e79c3c47543f3 166-167
+  s_4d68fcead85c12::t_243e753822a180 432-530
+  s_4d68fcead85c12::t_51d4305cf223d5 668-678
+  s_4d68fcead85c12::t_7126f4d37e468c 560-624
+  s_4d68fcead85c12::t_2263dd29401732 10-12,18,20,31
+src/runtime/js/README.md
+  s_4d68fcead85c12::t_4713c3c1d162ff 101-127
+src/runtime/session/tests/test_inter_tick_hook.cpp
+  s_4d68fcead85c12::t_993f76de95aa44 104
+  s_4d68fcead85c12::t_5ddbd3e0e08e10 1-103,105
+src/runtime/js/include/context/runtime/js/gc_errors.h
+  s_4d68fcead85c12::t_607dc114f131cf 1-26
+src/runtime/ts/README.md
+  s_4d68fcead85c12::t_6e10d2ef8bb983 44-67
+src/runtime/profile/tests/test_gc_channel.cpp
+  s_4d68fcead85c12::t_54123ba3d14ac3 1-152
+src/cli/src/profile_command.cpp
+  s_4d68fcead85c12::t_f1e0125e60c17e 10
+  s_4d68fcead85c12::t_37c87b975a0ec4 1-9,11-103,105,108-248
+  s_4d68fcead85c12::t_52f50acc04cd30 104,106-107
+src/runtime/js/include/context/runtime/js/js_engine.h
+  s_4d68fcead85c12::t_25fb64f8cd9412 89-146
+  s_4d68fcead85c12::t_faee02238a05ae 245-269
+  s_4d68fcead85c12::t_6fdac923869218 244
+src/runtime/session/CMakeLists.txt
+  s_4d68fcead85c12::t_276cd8445a892c 55-56
+src/runtime/ts/CMakeLists.txt
+  s_4d68fcead85c12::t_899439cbd16f6c 125-126,128-133
+  s_4d68fcead85c12::t_054d72a511f556 305-333
+src/tests/integration/test_samples_corpus.cpp
+  s_4d68fcead85c12::t_9187a1630b2b76 341-344,348
+src/runtime/profile/include/context/runtime/profile/gc_channel.h
+  s_4d68fcead85c12::t_702e86f85c57a7 84-86
+  s_4d68fcead85c12::t_b2f26eca38d7d6 1-83,87-93
+src/runtime/ts/include/context/runtime/ts/hot_api.h
+  s_4d68fcead85c12::t_85d4ae4cc1fe67 1-53
+src/runtime/profile/src/gc_channel.cpp
+  s_4d68fcead85c12::t_0cb064745b1f0f 1-95
+src/cli/include/context/cli/profile_command.h
+  s_4d68fcead85c12::t_73fe6ce6a3aaee 1-30
+src/cli/src/app.cpp
+  s_4d68fcead85c12::t_3a64508dbbd363 14
+  s_4d68fcead85c12::t_72a97729330614 151-158
+src/runtime/ts/tests/test_hot_api.cpp
+  s_4d68fcead85c12::t_87dc1cd3a75610 1-287
+src/CMakeLists.txt
+  s_4d68fcead85c12::t_64aa6130330c40 540-549
+src/runtime/profile/CMakeLists.txt
+  s_4d68fcead85c12::t_300b9b112688dd 1-27
+src/runtime/session/src/session.cpp
+  s_4d68fcead85c12::t_4de9509e254200 214-220
+src/runtime/ts/src/hot_api.cpp
+  s_4d68fcead85c12::t_1d39d70be43cd4 1-153
+src/cli/tests/test_profile_command.cpp
+  s_4d68fcead85c12::t_5c51e6da10cd32 1-110
+src/runtime/js/CMakeLists.txt
+  s_4d68fcead85c12::t_3592cd7147060d 212-254
+src/cli/CMakeLists.txt
+  s_4d68fcead85c12::t_490c360f2f2076 100
+  s_4d68fcead85c12::t_a5a8be33c97388 124-129
+  s_4d68fcead85c12::t_e461aca1757bd2 19
+  s_4d68fcead85c12::t_3b8805a70f9b28 64-72
+src/runtime/js/tests/test_gc_discipline.cpp
+  s_4d68fcead85c12::t_217626b7664f02 1-207
+src/editor/contract/tests/test_error_catalog.cpp
+  s_4d68fcead85c12::t_14fb962cb4f894 422-446
+src/editor/contract/src/registry.cpp
+  s_4d68fcead85c12::t_bc73fda8ec441c 523-555
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "6576376978dd1c57ac60756d42ebeb9ecdc2ddd5",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
