@@ -1,0 +1,24 @@
+tools/web_golden_run.py
+  s_4d68fcead85c12::t_22b6322efce082 249-261,263,268,270,272-274,276-281
+  s_4d68fcead85c12::t_94e07c1ebea0c4 262,264-267,269,271,275
+  s_4d68fcead85c12::t_947846d017be42 30
+  s_4d68fcead85c12::t_f4c0232c5238c5 193-197,199-200,206-208,212
+tools/tests/test_web_golden_run.py
+  s_4d68fcead85c12::t_8b2bd6407a840a 134-179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "320d384aef5346b2f72a7ce1caa0a04b1e7821f0",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
