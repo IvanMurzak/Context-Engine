@@ -1,0 +1,19 @@
+src/tests/integration/games/platformer2d_scenario.cpp
+  s_4d68fcead85c12::t_65f415a7fb5ba9 325
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "6cee6360b57eb0ca6a9853962bf8d3191c310f76",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
