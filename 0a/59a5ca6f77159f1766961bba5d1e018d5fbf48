@@ -1,0 +1,84 @@
+src/editor/migrate/include/context/editor/migrate/migration_runner.h
+  s_4d68fcead85c12::t_899a4df9af2ff6 112-118
+  s_4d68fcead85c12::t_01bc04aa55e0a7 76-79
+src/editor/derivation/include/context/editor/derivation/derivation_graph.h
+  s_4d68fcead85c12::t_64d82058b2d317 291-292
+  s_4d68fcead85c12::t_feae4dcbd5d961 31
+  s_4d68fcead85c12::t_2827edaaca6f37 166-171,176-177
+src/runtime/wasm/src/wasm_runner_stub.cpp
+  s_4d68fcead85c12::t_e4e6224c70b99f 1-56
+src/editor/derivation/src/derivation_graph.cpp
+  s_4d68fcead85c12::t_4d6db2d7f87b6b 45-46,48-49
+  s_4d68fcead85c12::t_d03f5755ea8769 84-88,90
+src/runtime/wasm/tests/wasm_test.h
+  s_4d68fcead85c12::t_7e7977a51bef02 1-365
+src/runtime/wasm/src/wasm_runner.cpp
+  s_4d68fcead85c12::t_badb98aa38a08f 1-437
+src/editor/editorkernel/src/editor_kernel.cpp
+  s_4d68fcead85c12::t_4dc1e9db0f7453 271,355
+  s_4d68fcead85c12::t_0b4b2f9707707a 183-186,188
+  s_4d68fcead85c12::t_3f213e08a4f747 135-136,143-146
+src/runtime/wasm/CMakeLists.txt
+  s_4d68fcead85c12::t_af322b396129f5 2-8,24-35,38-43,49-63,67-69,75-142,144-147,150-165,168-179,181,184-204,206-207
+src/runtime/wasm/tests/test_wasm_migrate_document.cpp
+  s_4d68fcead85c12::t_9d1725dbc3123c 1-158
+src/runtime/wasm/include/context/runtime/wasm/wasm_runner.h
+  s_4d68fcead85c12::t_311bafecdcaa79 1-116
+src/editor/editorkernel/include/context/editor/editorkernel/editor_kernel.h
+  s_4d68fcead85c12::t_ad083d43c0997c 56-57
+  s_4d68fcead85c12::t_aa2e3490465d44 93,95-105
+src/editor/migrate/tests/mock_runner.h
+  s_4d68fcead85c12::t_81bff17594b660 47-55
+  s_4d68fcead85c12::t_42133803ded864 94-97
+src/runtime/wasm/tests/test_wasm_runner.cpp
+  s_4d68fcead85c12::t_338d9a49d86ef3 1-269
+src/runtime/wasm/tests/test_wasm_fuel.cpp
+  s_4d68fcead85c12::t_62d57586b9fc45 182
+  s_4d68fcead85c12::t_4007b7e48cab38 1-111,113-152,154-181,183-235,237-270
+  s_4d68fcead85c12::t_e2e6440a3c22f3 236
+  s_1fa507dcfe6e4b::t_afbac3636c13d4 112,153
+src/editor/migrate/src/migrate_document.cpp
+  s_4d68fcead85c12::t_79e31b81c0e8af 199-213
+src/editor/derivation/tests/test_migrate_node.cpp
+  s_4d68fcead85c12::t_bd944daaeaa244 225-273
+  s_4d68fcead85c12::t_c69a0744f2ef6b 14
+src/editor/migrate/tests/test_migration_runner.cpp
+  s_4d68fcead85c12::t_5d7ca21a53dae7 121-144
+  s_4d68fcead85c12::t_17fc7d116166e3 302
+.github/workflows/ci.yml
+  s_4d68fcead85c12::t_b23cceeece058c 564-622
+docs/ci-fleet-manifest.json
+  s_4d68fcead85c12::t_01b6e91892f269 334-343
+src/editor/derivation/CMakeLists.txt
+  s_4d68fcead85c12::t_d95d1ca85a6296 86-88,90-91
+src/editor/migrate/README.md
+  s_4d68fcead85c12::t_e501809c04501c 26,46-54
+src/editor/migrate/include/context/editor/migrate/migration_set.h
+  s_1fa507dcfe6e4b::t_e37ba36435a232 72-73
+src/runtime/wasm/README.md
+  s_4d68fcead85c12::t_781eaf9883b556 9,11-14,24-34,44-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "0a59a5ca6f77159f1766961bba5d1e018d5fbf48",
+  "prompts": {},
+  "sessions": {
+    "s_1fa507dcfe6e4b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8c5cccaf-6d8b-406c-bca4-4326ca56510f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
