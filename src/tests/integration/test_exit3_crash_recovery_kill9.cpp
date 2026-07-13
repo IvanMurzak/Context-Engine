@@ -43,6 +43,20 @@ namespace
 
 constexpr int kBatchFiles = 150;
 
+// Ceiling for the post-recovery daemon process-EXIT waits (the killed daemon reaping mid-op, and
+// daemon2 exiting after a clean `shutdown`). A killed process reaps at once and a clean shutdown
+// returns in well under a second, but on a saturated CI runner (many parallel jobs contending) the
+// daemon2 exit has overshot a tight 15s ceiling on a NON-sanitizer leg — the failing
+// `CHECK failed: daemon2_code == 0` at line ~325 on `shader-crosscompile (macos-latest)` (owner-
+// flagged run 29201369515: attempt 1 RED, attempt 2 GREEN, same commit). CE PR #202 widened only the
+// two `wait_for_instance` BOOT waits and only under sanitizers, so these UNSCALED process-exit waits
+// stayed load-fragile. 60s is load-safe headroom (~4x the observed overshoot) yet far below the 600s
+// ctest TIMEOUT, and it is routed through itest::scaled_timeout_ms() so the sanitizer legs keep their
+// instrumentation headroom too. The REAL kill-9-then-recover assertion is unchanged: a crashed daemon
+// still returns a non-zero code immediately, and a genuinely non-recovering (hung) daemon still trips
+// this ceiling and fails `CHECK(daemon..._done)` — only the false-timeout-under-load is removed.
+constexpr int kDaemonExitWaitMs = 60000;
+
 std::string batch_path(int i)
 {
     return "proj/f" + std::to_string(i) + ".scene";
@@ -166,7 +180,8 @@ std::optional<MidOpKill> attempt_mid_op_kill(const std::string& bin, int attempt
 
     ctest_proc::kill(daemon); // SIGKILL / TerminateProcess — no cleanup runs in the daemon
     int daemon_code = -1;
-    (void)ctest_proc::wait_for(daemon, 15000, daemon_code);
+    // Load-safe, sanitizer-aware ceiling for the killed daemon's reap (see kDaemonExitWaitMs).
+    (void)ctest_proc::wait_for(daemon, itest::scaled_timeout_ms(kDaemonExitWaitMs), daemon_code);
     ctest_proc::release(daemon);
 
     batcher.join();
@@ -322,7 +337,10 @@ int main()
     }
 
     int daemon2_code = -1;
-    const bool daemon2_done = ctest_proc::wait_for(daemon2, 15000, daemon2_code);
+    // Load-safe, sanitizer-aware ceiling for daemon2's post-recovery clean exit (see kDaemonExitWaitMs)
+    // — this is the wait that false-timed-out under concurrent runner load on the macos leg.
+    const bool daemon2_done =
+        ctest_proc::wait_for(daemon2, itest::scaled_timeout_ms(kDaemonExitWaitMs), daemon2_code);
     if (!daemon2_done)
         ctest_proc::kill(daemon2);
     ctest_proc::release(daemon2);

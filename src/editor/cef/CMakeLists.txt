@@ -71,9 +71,21 @@ message(STATUS "context_cef: ${_cef_out}")
 #   * CEF_RUNTIME_LIBRARY_FLAG /MD — match this repo's dynamic MSVC runtime (CEF defaults to /MT, which
 #     LNK2038-clashes), mirroring the spike.
 #   * USE_ATL OFF — the boot substrate needs no ATL; keep the toolchain requirement minimal.
+#   * CEF_DEBUG_INFO_FLAG /Z7 (Windows) — CEF defaults this to /Zi, which writes a separate .pdb through
+#     the ONE shared mspdbsrv.exe server. Under CEF's /MP parallel build on the self-hosted Windows
+#     runner (amplified by sccache) the parallel cl.exe instances contend on that shared PDB server and
+#     intermittently fail the many libcef_dll_wrapper cpptoc .obj compiles with `fatal error C1090: PDB
+#     API call failed, error code '23'` — a transient runner-load FLAKE that passes on re-run (owner-
+#     flagged run 29201369515: attempt 1 RED, attempt 2 GREEN, same commit). /Z7 embeds debug info in
+#     each .obj (no shared .pdb server), so /MP has zero PDB-server contention; this is CEF's own
+#     documented knob for exactly this case (its default comment recommends /Z7 for caching build tools
+#     like clcache). Windows/MSVC-only (the C1090 is MSVC-specific); the linker still emits a .pdb.
 set(USE_SANDBOX OFF CACHE BOOL "" FORCE)
 set(CEF_RUNTIME_LIBRARY_FLAG "/MD" CACHE STRING "" FORCE)
 set(USE_ATL OFF CACHE BOOL "" FORCE)
+if(WIN32)
+    set(CEF_DEBUG_INFO_FLAG "/Z7" CACHE STRING "" FORCE)
+endif()
 set(CEF_ROOT "${_cef_dest}" CACHE INTERNAL "Pinned CEF distribution root")
 # The CEF binary distribution ships its OWN CMake as a MODULE package (cmake/FindCEF.cmake), NOT a
 # CONFIG package — so CMake can only locate FindCEF.cmake if ${CEF_ROOT}/cmake is on CMAKE_MODULE_PATH
