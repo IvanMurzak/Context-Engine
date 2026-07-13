@@ -118,6 +118,30 @@ void test_guest_failure_is_step_failed_and_rolls_back()
     CHECK(canon(doc) == before);
 }
 
+void test_runner_fuel_exhaustion_is_budget_exceeded_and_rolls_back()
+{
+    // The budget->fuel failure path (issue #71 PR3): a runner reporting DETERMINISTIC fuel
+    // exhaustion (SandboxedStepResult::budget_exceeded — the real WasmRunner's K × max_nodes
+    // grant ran out) maps to the EXISTING migration.budget_exceeded catalog code — NOT
+    // step_failed — with the same all-or-nothing document rollback.
+    MigrationSet set;
+    register_pkg_step(set);
+    JsonValue doc =
+        parse(R"({"componentVersions": {"phys:body": 1}, "c": {"phys:body": {"hp": 10}}})");
+    const std::string before = canon(doc);
+    MockMigrationRunner runner([](std::string_view, std::string&) { return true; });
+    runner.report_budget_exceeded = true;
+    MigrateOptions options;
+    options.runner = &runner;
+    const DocumentMigrationResult r = migrate_document(doc, set, options);
+    CHECK(!r.ok);
+    CHECK(!r.changed);
+    CHECK(runner.run_calls == 1);
+    CHECK(has_code(r, "migration.budget_exceeded"));
+    CHECK(!has_code(r, "migration.step_failed"));
+    CHECK(canon(doc) == before);
+}
+
 void test_guest_non_json_output_is_step_failed()
 {
     MigrationSet set;
@@ -275,6 +299,7 @@ int main()
     test_sandboxed_step_runs_through_injected_runner();
     test_no_runner_keeps_honest_refusal();
     test_guest_failure_is_step_failed_and_rolls_back();
+    test_runner_fuel_exhaustion_is_budget_exceeded_and_rolls_back();
     test_guest_non_json_output_is_step_failed();
     test_runner_output_id_mutation_is_rejected_host_side();
     test_host_budget_refuses_before_calling_the_runner();

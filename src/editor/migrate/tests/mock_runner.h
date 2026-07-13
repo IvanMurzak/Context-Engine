@@ -44,6 +44,15 @@ public:
     {
         ++run_calls;
         SandboxedStepResult result;
+        // Model deterministic VM fuel exhaustion (the real runner's K × max_nodes budget->fuel
+        // mapping, issue #71 PR3): a budget failure, not a step failure — the engine maps it to
+        // migration.budget_exceeded.
+        if (report_budget_exceeded)
+        {
+            result.budget_exceeded = true;
+            result.detail = "fuel exhausted (mock)";
+            return result;
+        }
         // A real runner has nothing to instantiate without a module reference. (register_step
         // rejects an empty wasm ref, but a runner never assumes its caller validated.)
         if (step.wasm_module.empty())
@@ -81,6 +90,10 @@ public:
     // that the outcome looked right).
     int run_calls = 0;
     int map_calls = 0;
+
+    // When true, EVERY run_step reports deterministic fuel exhaustion (budget_exceeded=true) —
+    // the mock knob for the budget->fuel failure path.
+    bool report_budget_exceeded = false;
 
 private:
     GuestMigrate migrate_;

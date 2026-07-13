@@ -73,8 +73,10 @@ static_assert(kGuestAbiVersion == 1,
 //   --------------
 //   Before ctx_migrate the host converts MigrationBudget::max_nodes to VM fuel (K × max_nodes, K
 //   pinned per engine version) so a pathological guest cannot hang derivation with a DETERMINISTIC
-//   limit (L-37 bans wall-clock limits). Fuel exhaustion is migration.budget_exceeded. The K
-//   mapping and the fuel machinery live in the RUNNER (PR3), never in this `migrate` library.
+//   limit (L-37 bans wall-clock limits). Fuel exhaustion is migration.budget_exceeded — the runner
+//   reports it via SandboxedStepResult::budget_exceeded below. The K mapping and the fuel
+//   machinery live in the RUNNER (kWasmFuelPerBudgetNode in src/runtime/wasm/wasm_runner.h, the
+//   PR3 WasmRunner), never in this `migrate` library.
 //
 //   Host-side contract (identical to the engine_native tier — the guest is trusted for NOTHING)
 //   -------------------------------------------------------------------------------------------
@@ -107,7 +109,13 @@ struct SandboxedStepResult
     bool ok = false;    // true: `output` holds the migrated canonical-JSON bytes
     std::string output; // canonical JSON bytes of the migrated payload (meaningful iff ok)
     std::string detail; // short human-readable failure reason (meaningful iff !ok) — folded into
-                        // the host's migration.step_failed message
+                        // the host's migration.step_failed / migration.budget_exceeded message
+    // The failure was the DETERMINISTIC execution budget (VM fuel exhaustion — K × max_nodes, see
+    // the Budget -> fuel section above): the host maps it to the EXISTING
+    // migration.budget_exceeded catalog code instead of migration.step_failed, with the same
+    // all-or-nothing rollback. Meaningful iff !ok. A HOST-side seam field, additive — NOT part of
+    // the frozen guest ABI above (no export/signature/data-format change; kGuestAbiVersion holds).
+    bool budget_exceeded = false;
 };
 
 // The sandboxed-migration execution seam. Injectable exactly like assetdb's GuidGenerator: the

@@ -196,6 +196,21 @@ bool run_sandboxed_step(MigrationRunner& runner, const MigrationStep& step, Json
     const SandboxedStepResult r = runner.run_step(desc, input);
     if (!r.ok)
     {
+        // A DETERMINISTIC budget failure (VM fuel exhaustion — the runner's K × max_nodes
+        // budget->fuel mapping) reuses the EXISTING migration.budget_exceeded catalog code,
+        // exactly like the engine-native tier's post-hoc node-count refusal; every other
+        // runner/guest failure is step_failed. Both are blocking, so the caller applies the same
+        // all-or-nothing document rollback either way.
+        if (r.budget_exceeded)
+        {
+            diagnostics.push_back(
+                {"migration.budget_exceeded",
+                 "package-shipped migration " + step_id +
+                     " exceeded the migration budget in the sandboxed WASM tier" +
+                     (r.detail.empty() ? std::string() : ": " + r.detail),
+                 site_pointer, /*blocking=*/true});
+            return false;
+        }
         diagnostics.push_back({"migration.step_failed",
                                "package-shipped migration " + step_id +
                                    " failed in the sandboxed WASM tier" +

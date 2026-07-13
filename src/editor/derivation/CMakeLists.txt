@@ -83,5 +83,9 @@ foreach(_t IN LISTS _context_derivation_tests)
 endforeach()
 
 # test_migrate_node registers its own migration steps, so it needs the migrate module's headers
-# directly (context_derivation links it PRIVATE — the seam is an opaque pointer in the public API).
+# directly (context_derivation links it PRIVATE — the seam is an opaque pointer in the public API),
+# plus the migrate module's TEST mock (mock_runner.h) for the sandboxed-tier VM-slot cases
+# (issue #71 — the byte-only MockMigrationRunner, shared so no test grows a second seam mock).
 target_link_libraries(context_derivation_test_migrate_node PRIVATE context_migrate)
+target_include_directories(context_derivation_test_migrate_node
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../migrate/tests)

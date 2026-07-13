@@ -561,6 +561,65 @@ jobs:
         shell: bash
         run: ${SCCACHE_PATH} --show-stats
 
+  # The sandboxed WASM migration-runner tier (src/runtime/wasm/, issue #71 PR3; L-37 / L-62 /
+  # R-SEC-009): the deterministic WasmRunner on the SHA-pinned wasmtime C-API prebuilt. A CI-only
+  # dependency path like cef-substrate / V8: CONTEXT_BUILD_WASM stays OFF on the default `build`
+  # matrix and the local dev gate (the MSVC-ABI wasmtime.dll.lib cannot link under the local
+  # Strawberry-GCC toolchain, where the runner builds its honest STUB instead) — THIS job is the
+  # AUTHORITATIVE 3-OS gate for the tier: it flips the toggle ON, requires the REAL backend
+  # (CONTEXT_WASM_REQUIRE_RUNTIME=ON fails the configure if a leg would silently downgrade to the
+  # stub and pass vacuously), builds the runner test executables, and runs the `wasm-runner-*`
+  # ctests (deterministic VM config, budget->fuel = kWasmFuelPerBudgetNode x max_nodes, trap ->
+  # catalog-code mapping, end-to-end document migration through real WAT guests). Windows rides
+  # the self-hosted MSVC runner, like build/spike-wasm. NOTE (the deterministic-job caveat): this
+  # job builds an EXPLICIT --target list — registering a NEW wasm-runner-* ctest means adding its
+  # executable to the build step below too, or the new test reports "Not Run" -> RED here.
+  wasm-runner:
+    name: wasm-runner (${{ matrix.os }})
+    needs: [license-gate, python-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
+        if: runner.os == 'Windows' && runner.environment == 'self-hosted'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $out = cmd /c "`"$vs\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 -no_logo && set"
+          foreach ($name in 'PATH','INCLUDE','LIB','LIBPATH') {
+            $line = ($out | Where-Object { $_ -like "$name=*" } | Select-Object -First 1)
+            if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+          }
+          "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      - name: Configure (dev preset + WASM runner tier, real backend required)
+        run: cmake -S src --preset dev -DCONTEXT_BUILD_WASM=ON -DCONTEXT_WASM_REQUIRE_RUNTIME=ON
+
+      - name: Build the WasmRunner tests
+        run: cmake --build --preset dev --target context_wasm_test_wasm_runner context_wasm_test_wasm_fuel context_wasm_test_wasm_migrate_document
+        working-directory: src
+
+      - name: wasm-runner ctests (deterministic config + budget->fuel + trap mapping + e2e)
+        run: ctest --preset dev -R "^wasm-runner-" --output-on-failure
+        working-directory: src
+
+      - name: sccache stats
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ${SCCACHE_PATH} --show-stats
+
   # WebGPU spike (spikes/webgpu): native build on all three desktop platforms + the offscreen
   # render/readback self-check. The spike is standalone-configurable (no vcpkg — it pins its own
   # wgpu-native prebuilt), so this job stays light: no other spike's deps are configured here.

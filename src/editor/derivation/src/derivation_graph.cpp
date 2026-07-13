@@ -42,9 +42,11 @@ void fold_migration_findings(const std::vector<migrate::MigrationDiagnostic>& fi
 DerivationGraph::DerivationGraph(DerivationConfig config, context::kernel::EventBus* bus,
                                  const schema::SchemaSet* schemas,
                                  const schema::RefTargetResolver* ref_resolver,
-                                 const migrate::MigrationSet* migrations)
+                                 const migrate::MigrationSet* migrations,
+                                 migrate::MigrationRunner* migration_runner)
     : config_(config), bus_(bus), schemas_(schemas), ref_resolver_(ref_resolver),
-      migrations_(migrations), set_hash_(config.registered_set_hash)
+      migrations_(migrations), migration_runner_(migration_runner),
+      set_hash_(config.registered_set_hash)
 {
     signal_.high_watermark = config_.high_watermark;
 }
@@ -79,8 +81,13 @@ WriteTicket DerivationGraph::apply(const ReconcileChange& change, std::string_vi
         bool migration_blocked = false;
         if (migrations_ != nullptr && pending.form.is_json)
         {
+            // Parse-time semantics: no stamping, default budget; `runner` is the injected
+            // sandboxed-tier VM (issue #71) so package_sandboxed steps execute in the sandbox —
+            // null keeps the honest migration.runner_unavailable refusal.
+            migrate::MigrateOptions migrate_options;
+            migrate_options.runner = migration_runner_;
             const migrate::DocumentMigrationResult migrated =
-                migrate::migrate_document(pending.form.root, *migrations_);
+                migrate::migrate_document(pending.form.root, *migrations_, migrate_options);
             if (!migrated.ok)
             {
                 migration_blocked = true;

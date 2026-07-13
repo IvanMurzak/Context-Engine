@@ -6,10 +6,12 @@ The runtime home of the **sandboxed WASM VM tier** that executes package-shipped
 **wasmtime-Cranelift** (owner ruling 2026-07-12), whose per-instruction `consume_fuel` metering is
 what L-37 needs (deterministic budget enforcement, no wall-clock limits).
 
-## Status — PR 1 of 4 (this leg is INERT)
+## Status — PR 3 of 4 (the runner is LIVE)
 
-The #71 work lands as a single-lane 4-PR chain. **This directory today carries only PR 1 — the
-inert wasmtime supply-chain leg. It executes no wasm and links into nothing that runs.**
+The #71 work lands as a single-lane 4-PR chain. **This directory carries PR 1 (the wasmtime
+supply-chain leg, `context_wasm`) and PR 3 (the deterministic `WasmRunner`, `context_wasm_runner`
++ its `wasm-runner-*` ctests). PR 4 — the committed `.wasm` fixture corpus + the cross-OS
+determinism gate — is still to land.**
 
 1. **PR 1 — supply chain (inert, THIS PR).** `tools/wasmtime-prebuilt.json` (pin manifest) +
    `tools/fetch_wasmtime.py` (TLS + SHA-256 pin + verify-before-use, fail-closed + offline
@@ -19,11 +21,17 @@ inert wasmtime supply-chain leg. It executes no wasm and links into nothing that
 2. **PR 2 — MigrationRunner seam + guest ABI.** The runner interface in `src/editor/migrate/` (the
    migrate lib does NOT link the runtime); `apply_step()` routes `package_sandboxed` to an injected
    runner, else the prior honest refusal. Freezes the zero-import guest ABI.
-3. **PR 3 — WasmRunner on wasmtime.** The deterministic config (`consume_fuel`, NaN canonicalization,
-   relaxed-SIMD off, threads off, fixed linear-memory limit), `fuel = K × budget.max_nodes`, the
-   catalog codes (fuel-trap → `migration.budget_exceeded`, trap → `migration.step_failed`), and the
-   R-FILE-005 cold-start slot. **This is where `context_wasm` is first linked + `CONTEXT_BUILD_WASM`
-   flipped ON in the runner's CI path.**
+3. **PR 3 — WasmRunner on wasmtime (LANDED).** `include/context/runtime/wasm/wasm_runner.h` +
+   `src/wasm_runner.cpp` (honest stub: `src/wasm_runner_stub.cpp`): the deterministic config
+   (`consume_fuel`, NaN canonicalization, relaxed-SIMD off/deterministic, threads off, fixed
+   linear-memory limit, a FRESH Store+instance per step), `fuel = kWasmFuelPerBudgetNode ×
+   budget.max_nodes`, the catalog-code mapping (fuel-trap → `migration.budget_exceeded`, other
+   trap/guest failure → `migration.step_failed` — via `SandboxedStepResult::budget_exceeded`, no
+   catalog growth), and the R-FILE-005 cold-start slot (`EditorKernelConfig::migration_runner` —
+   `WasmRunner::create()` is the VM init; threaded to the parse-time migration node + the
+   tool-save path). `context_wasm` is linked by `context_wasm_runner`; the dedicated 3-OS
+   `wasm-runner` CI job flips `CONTEXT_BUILD_WASM=ON` (with `CONTEXT_WASM_REQUIRE_RUNTIME=ON`) and
+   runs `ctest -R "^wasm-runner-"`.
 4. **PR 4 — determinism gate + fixtures.** Committed `.wasm` fixtures + fail-closed tests + the
    cross-OS determinism ctest with fuel-parity; `set_hash()` hashes the wasm module CONTENTS.
 
@@ -33,7 +41,13 @@ inert wasmtime supply-chain leg. It executes no wasm and links into nothing that
 (`src/runtime/js/`), wgpu-native (`src/render/`), and CEF (`src/editor/cef/`): the wasmtime C-API
 prebuilt is an **MSVC/Clang-ABI** archive the local Strawberry-GCC Windows `dev` gate cannot link.
 With the option OFF — the default 3-OS build matrix and the local dev gate — this subdirectory
-early-returns (no fetch, no target), so the routine gate stays fast and green.
+early-returns (no fetch, no target), so the routine gate stays fast and green. The dedicated 3-OS
+**`wasm-runner`** CI job (the `cef-substrate` pattern: ubuntu/macos GH-hosted + the self-hosted
+MSVC Windows runner, gated behind the cheap gates) is the AUTHORITATIVE gate for this tier. With
+`CONTEXT_BUILD_WASM=ON` on a toolchain that cannot link the prebuilt (Windows + MinGW/GCC — the
+local dev host), `context_wasm_runner` builds its honest STUB backend instead: `WasmRunner::create()`
+refuses, embedders inject nothing, and the migrate seam keeps the `migration.runner_unavailable`
+refusal (the `context_js` stub split). Nothing is fetched in stub mode.
 
 The pins are already CI-proven on all three OS by the existing **`spike-wasm`** job (`spikes/wasm/`
 uses the SAME wasmtime 46.0.1 C-API prebuilt + SHA-256 pins), and `test_fetch_wasmtime.py` exercises

@@ -23,7 +23,7 @@ Every step invocation is wrapped by the engine's contract checks (`apply_step`):
 | Rule | Enforcement |
 |---|---|
 | Tier gating | `package_sandboxed` steps run ONLY through an injected `MigrationRunner` (the sandboxed-migration seam, `migration_runner.h`). With NO runner injected they are REFUSED in-process (`migration.runner_unavailable`) — never run unsandboxed; with the wasmtime runner injected (issue #71 PR3) they route to the guest per the frozen ABI under the SAME host-side contract (budget, canonical, id immutability re-checked host-side). `engine_native` (first-party) steps run now. |
-| Budget | `MigrationBudget::max_nodes` bounds a step's input AND output payload (`migration.budget_exceeded`). Deterministic by design (node counts, not wall time); the WASM runner maps the same budget to VM fuel/instruction metering when it lands. |
+| Budget | `MigrationBudget::max_nodes` bounds a step's input AND output payload (`migration.budget_exceeded`). Deterministic by design (node counts, not wall time); the WASM runner (issue #71 PR3, `src/runtime/wasm/`) maps the same budget to deterministic VM fuel (`kWasmFuelPerBudgetNode × max_nodes`), and its fuel exhaustion reuses the SAME catalog code via `SandboxedStepResult::budget_exceeded`. |
 | Purity / determinism | Steps see ONLY the payload (no IO/clock/randomness by API shape) and are pinned forever by the R-QA-011 fixture corpus, round-tripped in CI. |
 | Id immutability | The exact multiset of (`id`/`guid` pointer, canonical value) inside a payload must survive every step (`migration.id_mutated`) — composed identity survives upgrade. |
 | Downgrade rule | A payload stamped NEWER than the installed schema is never best-effort parsed: `schema.newer_than_engine` (engine `ctx:` namespace) / `schema.newer_than_package` (any other), blocking, last-good retained (R-PKG-005). |
@@ -43,11 +43,15 @@ The same header FREEZES the guest ABI (protocolMajor 1) — the wire between the
 compiled package migration module: ZERO host imports; exports `ctx_alloc` + `ctx_migrate` (required)
 and `ctx_map_path` (optional — absent ⇒ identity path mapping); all input/output byte buffers are
 canonical JSON in the module's linear memory; the host maps `MigrationBudget::max_nodes` to VM fuel
-(`K × max_nodes`) and re-checks every structural invariant (budget, canonical serializability, id
-immutability) host-side — the guest is trusted for nothing. A fresh Store+instance per step is a PR3
-runtime concern. `tests/mock_runner.h` is a byte-only mock defined STRICTLY to this contract (never
-more capable than the real runner); `tests/test_migration_runner.cpp` exercises the routing, the
-refusal fall-through, the host re-checks, and the `ctx_map_path` override rewrite.
+(`K × max_nodes` — `kWasmFuelPerBudgetNode` in `src/runtime/wasm/wasm_runner.h`) and re-checks every
+structural invariant (budget, canonical serializability, id immutability) host-side — the guest is
+trusted for nothing. The real runner (`context::runtime::wasm::WasmRunner`, PR3 — LANDED) owns the
+fresh-Store+instance-per-step lifecycle and the deterministic VM config; it is injected at the
+R-FILE-005 cold-start "VM" slot via `EditorKernelConfig::migration_runner`. `tests/mock_runner.h`
+is a byte-only mock defined STRICTLY to this contract (never more capable than the real runner);
+`tests/test_migration_runner.cpp` exercises the routing, the refusal fall-through, the budget->fuel
+failure mapping, the host re-checks, and the `ctx_map_path` override rewrite; the real-VM
+end-to-end equivalents live in `src/runtime/wasm/tests/`.
 
 ## Fixtures (R-QA-011)
 
