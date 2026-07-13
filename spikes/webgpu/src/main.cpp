@@ -637,6 +637,22 @@ int main(int argc, char** argv) {
         exitCode = 2;
     }
 
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    // Windows teardown-race bypass (Context-Engine#210). wgpu-native spins up D3D12/Vulkan driver
+    // threads (adapter enumeration in `probe`, device work in `render`); on the Session-0
+    // LocalSystem CI runners its global/driver-thread teardown intermittently __fastfail's with
+    // 0xc0000409 (STATUS_STACK_BUFFER_OVERRUN) at process exit — NON-deterministically and
+    // REGARDLESS of adapter or mode (see CMakeLists.txt). The result is already computed and the
+    // spike writes no files past this point (the render hash artifact is written+closed inside
+    // runRenderSelfCheck), so flush the reports and skip wgpuInstanceRelease + the Rust-runtime
+    // teardown entirely — the OS reclaims every resource on exit. This makes the Windows probe
+    // DETERMINISTIC BY CONSTRUCTION (the racy teardown code never runs), not merely rarer; a
+    // single green run could never prove a probabilistic fix. Non-Windows paths (Linux lavapipe /
+    // macOS / web-browser render self-checks) keep the full, validated teardown below untouched.
+    std::fflush(nullptr); // quick_exit does not flush stdio buffers
+    std::quick_exit(exitCode);
+#else
     wgpuInstanceRelease(instance);
     return exitCode;
+#endif
 }

@@ -137,8 +137,15 @@ else()
     # non-concurrent runner). A flaky native crash is unacceptable for CI (tests must be
     # deterministic). Render+readback CORRECTNESS is platform-agnostic wgpu-native + WGSL logic and
     # is fully validated DETERMINISTICALLY on Linux (lavapipe) + the web (browser) legs; Windows
-    # coverage stays deterministic via the `build` job (wgpu-native compiles + links under MSVC) and
-    # the `probe` test (adapter enumeration). This matches ROADMAP §1 M4's own visual-equivalence
+    # coverage comes from the `build` job (wgpu-native compiles + links under MSVC) and the `probe`
+    # test (adapter enumeration). NOTE: the `probe` test itself hit this SAME 0xc0000409 teardown
+    # race (issue #210, CI run 29233449101 — enumeration also spins up driver threads whose teardown
+    # races), so it is NOT inherently teardown-safe. It is made DETERMINISTIC BY CONSTRUCTION in
+    # src/main.cpp, which on Windows flushes the report then std::quick_exit()s — bypassing
+    # wgpuInstanceRelease + wgpu-native's Rust-runtime teardown entirely so the racy code never
+    # runs. That same bypass also covers the by-hand `render`/`window` Windows modes; `render` stays
+    # unregistered here on M4-scope grounds (below), not because it would still crash. This matches
+    # ROADMAP §1 M4's own visual-equivalence
     # scope ("Linux-Vulkan + one browser blocking, other backends advisory"). Windows-specific D3D12
     # render validation, if wanted at M4, belongs on a real interactive-session GPU runner — not this
     # throwaway spike on a headless service. The `render` mode itself still works everywhere (it's

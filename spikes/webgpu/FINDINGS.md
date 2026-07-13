@@ -119,6 +119,22 @@ finding (see Headless below). Surface specifics only matter for the windowed pat
   headless kernel. **R-HEAD-002 holds exactly as designed.**
 - CI behavior contract: no adapter ⇒ exit 77 ⇒ ctest **SKIP** (`SKIP_RETURN_CODE`), never a
   red build. Adapter present ⇒ the check genuinely renders and asserts.
+- **Windows teardown-race fix (issue #210).** The `probe` test crashed non-deterministically at
+  **process exit** with `0xc0000409` (`__fastfail` / `STATUS_STACK_BUFFER_OVERRUN`) on the
+  Session-0 LocalSystem Windows CI runners — run 29233449101 FAILED attempt 1
+  (`... Exit code 0xc0000409 ... 2.68 sec`) and PASSED attempt 2 on the same commit, the textbook
+  same-commit pass/fail signature of a teardown/timing race. Root cause is inside the pinned
+  wgpu-native prebuilt: adapter enumeration (`wgpuInstanceEnumerateAdapters` + `wgpuAdapterGetInfo`)
+  spins up D3D12/Vulkan driver threads whose global / Rust-runtime teardown races at exit — the
+  SAME crash class that keeps the `render` self-check off Windows (CMakeLists.txt). The earlier
+  claim that the `probe` test "keeps Windows deterministic" was therefore wrong (the probe hits the
+  same race, just rarer, having created no device). Fix: the probe result is fully computed before
+  teardown and the spike writes no files past that point, so on Windows `main()` flushes its report
+  (`std::fflush(nullptr)`) then `std::quick_exit(exitCode)`s — skipping `wgpuInstanceRelease` and
+  the driver-thread teardown entirely (the OS reclaims resources on process exit). This makes the
+  Windows probe deterministic **by construction** (the racy teardown code never runs), not merely
+  rarer — a distinction that matters because a single green run can never prove a probabilistic
+  fix. Non-Windows legs keep the full, validated teardown.
 
 ## WGSL toolchain note (feeds R-REND-005 / the M0-M4 Tint-vs-Naga deliverable)
 
