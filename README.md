@@ -1,6 +1,6 @@
 # Context Game Engine
 
-> **pre-alpha** · **M0 foundations** · design authority lives in the owner's design docs
+> **pre-alpha** · **M6 complete** (gameplay packages + deterministic wedge) · **M7 next** · design authority lives in the owner's design docs
 
 Context is a minimal-kernel game engine where **every feature is a package**, built AI-first
 without making humans second-class. **Project files are the single source of truth**: a headless
@@ -16,10 +16,33 @@ verifies, and ships a game with zero GPU and zero GUI.
 
 ## Status
 
-This repository is at **M0 — foundations & spikes**: repo scaffold, build system, toolchain and
-CI rails. **No engine feature code yet.** The normative design (requirements, architecture,
-roadmap, decision locks L-1…L-59) lives in the owner's design records, not in this repository;
-directory README stubs below name the documents that govern them.
+Milestones **M0–M6 are complete**: microkernel + file-authoritative EditorKernel (M1), data
+model & asset pipeline (M2), the TS/V8 + WASM scripting tier with the frozen public contract
+(M3), the WebGPU render module (M4), the observer-grade editor (M5, headless-first — see
+below), and the core gameplay packages + the deterministic wedge with its blocking CI exit
+gates (M6). **M7 (runtime UI system) is next.** The normative design (requirements,
+architecture, roadmap, decision locks) lives in the owner's design records, not in this
+repository; directory README stubs below name the documents that govern them.
+
+## Running the editor (current state)
+
+**There is no interactive windowed editor yet.** M5 shipped the observer-grade editor
+*headless-first*: every panel (viewport, scene tree, inspector, Problems, playbar, session
+undo) is a CI-assertable library, plus a CEF host that boots offscreen. What runs today:
+
+```sh
+# Engine + all editor panels + the M5 editor walkthrough — no GPU, no CEF needed:
+cmake -S src --preset dev && cd src && cmake --build --preset dev
+ctest --preset dev -R "^gui-|^m5-exit-" --output-on-failure
+
+# CEF editor host boot (offscreen smoke; MSVC on Windows / clang on Linux+macOS):
+cmake -S src --preset dev -DCONTEXT_BUILD_GUI_CEF=ON
+cmake --build --preset dev --target context_gui_host
+ctest --preset dev -R "^editor-cef-smoke-" --output-on-failure   # Linux: xvfb-run -a
+```
+
+Wiring these panels into an interactive windowed shell (the L-41 accelerated-compositing
+window) is upcoming v1 GUI work.
 
 ## Building
 
