@@ -1,25 +1,43 @@
 // The CROSS-OS determinism gate for the committed WASM migration fixture (issue #71 PR4, L-37 /
-// L-62 / R-SIM-005). The deterministic sandboxed tier's core guarantee: the SAME migration module on
-// the SAME input produces BYTE-IDENTICAL output and spends EQUAL FUEL on every platform of the wedge
-// (Linux-x64 / Win-x64 / macOS-ARM64). Fuel-parity is the determinism guarantee L-37 buys by metering
-// deterministic VM fuel instead of wall-clock time.
+// L-62 / R-SIM-005). The deterministic sandboxed tier's cross-platform guarantee is BYTE-IDENTICAL
+// migrated OUTPUT: the SAME migration module on the SAME input produces the SAME output bytes on
+// every platform of the wedge (Linux-x64 / Win-x64 / macOS-ARM64). That is the determinism contract
+// the engine actually depends on — a document migrates to the same canonical bytes everywhere.
+//
+// Fuel is the OTHER half of L-37 (deterministic VM metering replaces wall-clock limits), but its
+// guarantee is narrower, and this gate asserts exactly the part that holds. Fuel is a PURE,
+// DETERMINISTIC function of (module, input) WITHIN a given platform/wasmtime build — identical on
+// every repeated run — which is what makes the fail-closed budget (fuel = K x max_nodes)
+// reproducible on any one machine. Fuel is NOT byte-equal ACROSS the wedge, and cannot be made so:
+// the observed fuel carries a small platform-specific memory-INITIALIZATION component that tracks
+// the host OS page size and is elided entirely by copy-on-write memory init on Linux. On the pinned
+// wasmtime 46.0.1 C-API prebuilt the identical fixture+input spends fuel =
+//   { Linux-x64: 24, Win-x64: 4121, macOS-ARM64: 16409 }
+// i.e. ~24 guest-execution units PLUS ~one host OS page (4 KiB on x64, 16 KiB on ARM64) on the
+// non-CoW platforms. The two x86_64 legs differ too, so this is a per-BUILD / per-OS artifact, NOT a
+// per-ISA one — no wasmtime/Cranelift config knob equalizes it without changing the runner's own
+// deterministic memory-init config in a fragile, platform-dependent way. Pinning a single cross-OS
+// fuel golden was therefore based on a false premise and has been removed. The cross-platform fuel
+// delta (~one OS page) is dwarfed by the K x max_nodes budget headroom, so it never changes a
+// document's migrate-vs-budget_exceeded verdict in practice.
 //
 // This gate drives the COMMITTED fixture (src/runtime/wasm/fixtures/migrate_hp.wasm — the reproducible
 // checked-in artifact, NOT a runtime-assembled WAT string) two ways:
 //   (a) through the REAL WasmRunner + migrate_document, proving the committed bytes slot into the
 //       actual runner and the full L-37 document pipeline; and
 //   (b) through a direct wasmtime C-API harness under the SAME deterministic config the runner uses,
-//       so it can read the exact fuel spent (the runner's seam surface intentionally hides it).
-// It then asserts (a) byte-identical output against a committed golden and (b) fuel spent against a
-// committed golden magnitude — identical on every leg, so any cross-platform divergence reddens THAT
-// leg. Registered as `wasm-runner-test_wasm_determinism`, run by the 3-OS `wasm-runner` CI job.
+//       reading the exact fuel spent (the runner's seam surface intentionally hides it).
+// It asserts: (1) byte-identical migrated output against a committed golden, EQUAL on every leg (the
+// real cross-OS contract); (2) within-platform determinism — three independent fresh engines+stores
+// reproduce output AND fuel EXACTLY, fuel > 0 (the basis of the fail-closed budget); and (3) a coarse
+// portable sanity ceiling on the fuel so a metering-off / runaway-metering regression still reddens
+// without pinning an OS-page-size-dependent magic number. Registered as
+// `wasm-runner-test_wasm_determinism`, run by the 3-OS `wasm-runner` CI job.
 //
-// The golden fuel is DERIVED ON THE REFERENCE BUILD (== the first CI run, since wasmtime is a CI-only
-// dependency path that cannot link on the local Strawberry-GCC dev host — setup.md § Preconditions).
-// This gate PRINTS the observed fuel; until kGoldenFuel is set from that value the gate fails with a
-// paste instruction (the same "run the gate, it prints the values, paste them" convention as the
-// physics/session determinism gates). Update kGoldenFuel only when the fixture or the pinned wasmtime
-// version changes ON PURPOSE.
+// If a future need ever arises to pin the ABSOLUTE per-platform fuel magnitude, the honest mechanism
+// is per-OS goldens (one constant guarded per platform), NOT a single cross-OS value; it is omitted
+// here on purpose because that magnitude is an incidental OS-page/CoW artifact, and gating on it
+// would flake on a CI-runner image change for no correctness reason.
 
 #include "wasm_test.h"
 
@@ -48,10 +66,14 @@ namespace
 // Byte-identical on every platform; a mismatch means the fixture or the guest ABI changed.
 constexpr const char* kGoldenOutput = R"({"hp":2})";
 
-// The committed golden fuel: the deterministic fuel the fixture migration spends, identical across
-// the wedge. 0 == UNSET (derive it from the first `wasm-runner` CI run's printed value and paste it
-// here; see the file header). A nonzero value is asserted identically on all three legs.
-constexpr std::uint64_t kGoldenFuel = 0;
+// A coarse, PORTABLE ceiling on the fixture's fuel. The fixture's guest work is only a couple dozen
+// wasm ops, and even the largest wedge measurement (macOS-ARM64: 16409 — ~one 16 KiB OS page of
+// non-CoW memory-init overhead, see the file header) sits far below this. This is deliberately NOT a
+// tight golden — fuel's exact magnitude is a per-platform artifact — but a fuel that blows past this
+// ceiling means metering broke (a per-instruction trap path / misconfigured strategy / runaway),
+// which this gate must still catch. The tight, work-scaled metering-overhead check lives in
+// test_wasm_fuel.cpp; here the within-run equality below is the primary determinism assertion.
+constexpr std::uint64_t kFuelSanityCeiling = std::uint64_t{1} << 20; // 1,048,576 (~64x the max leg)
 
 // One measured drive of the fixture through the deterministic wasmtime config, returning the migrated
 // output bytes AND the fuel spent. Mirrors WasmRunner::create()'s config + invoke_guest()'s ABI
@@ -240,28 +262,25 @@ int main()
     CHECK(a.ok);
     CHECK(a.output == kGoldenOutput);
 
-    // --- within-run determinism: three fresh engines+stores reproduce output AND fuel EXACTLY ------
-    // (no wall clock, no sampling — fuel is a pure function of module+input under the pinned config).
+    // --- within-platform determinism: three INDEPENDENT fresh engines+stores reproduce output AND
+    // fuel EXACTLY (run_fixture_measured builds a brand-new engine each call). No wall clock, no
+    // sampling — fuel is a pure function of module+input under the pinned config, which is exactly
+    // what the fail-closed budget (fuel = K x max_nodes) relies on being reproducible on a machine.
     CHECK(a.output == b.output);
     CHECK(b.output == c.output);
     CHECK(a.fuel_spent == b.fuel_spent);
     CHECK(b.fuel_spent == c.fuel_spent);
     CHECK(a.fuel_spent > 0);
 
-    // --- the CROSS-OS golden: byte-identical output + equal fuel on every leg of the wedge ---------
-    if (kGoldenFuel == 0)
-    {
-        std::fprintf(stderr,
-                     "WASM-DETERMINISM-GOLDEN: observed_fuel=%llu — set kGoldenFuel to this value in "
-                     "src/runtime/wasm/tests/test_wasm_determinism.cpp (golden derived on the "
-                     "reference/CI build; wasmtime is a CI-only dependency path)\n",
-                     static_cast<unsigned long long>(a.fuel_spent));
-        CHECK(kGoldenFuel != 0); // fail until the golden is pasted from the reference build
-    }
-    else
-    {
-        CHECK(a.fuel_spent == kGoldenFuel);
-    }
+    // --- the CROSS-OS contract: byte-identical migrated OUTPUT on every leg of the wedge -----------
+    // Asserted above (a.output == kGoldenOutput) and by the whole-document byte-check in
+    // test_fixture_migrates_a_document_through_the_real_runner. Fuel is intentionally NOT asserted
+    // equal across the wedge — it carries a platform-specific memory-init component (see the file
+    // header: Linux-x64 24 / Win-x64 4121 / macOS-ARM64 16409, all with byte-identical output). What
+    // IS portable is that metering stayed ON, deterministic (above), and bounded: the coarse sanity
+    // ceiling catches a metering-off (fuel == 0, already checked) or runaway-metering regression
+    // without pinning an OS-page-size-dependent magic number.
+    CHECK(a.fuel_spent < kFuelSanityCeiling);
 
     WASM_TEST_MAIN_END();
 }

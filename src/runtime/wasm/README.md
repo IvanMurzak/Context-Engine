@@ -37,9 +37,12 @@ under `fixtures/`, the enumerated fail-closed tests, and the cross-OS determinis
    `tools/gen_wasm_fixtures.py`, reproducibility pinned by `tools/tests/test_gen_wasm_fixtures.py`),
    the enumerated fail-closed gate (`test_wasm_fail_closed` — fuel / trap / id-mutation /
    output-budget → all-or-nothing rollback through `migrate_document`), and the cross-OS determinism
-   gate (`test_wasm_determinism` — the committed fixture migrates to byte-identical output AND spends
-   equal fuel across the Linux-x64 / Win-x64 / macOS-ARM64 wedge; the golden fuel is derived on the
-   reference/CI build). `MigrationStep::wasm_module_hash` + `set_hash()` now fold the module CONTENTS,
+   gate (`test_wasm_determinism` — the committed fixture migrates to BYTE-IDENTICAL output across the
+   Linux-x64 / Win-x64 / macOS-ARM64 wedge, the real cross-OS contract; fuel is asserted deterministic
+   and bounded WITHIN each platform — a pure function of module+input, the basis of the fail-closed
+   budget — but NOT equal across the wedge, since it carries a platform-specific memory-init component
+   that tracks the host OS page size and is elided by copy-on-write init on Linux).
+   `MigrationStep::wasm_module_hash` + `set_hash()` now fold the module CONTENTS,
    so a rebuilt module under the same reference re-keys pass-1 derivation (R-FILE-010).
 
 The fixture is a hand-rolled but reproducible module: `tools/gen_wasm_fixtures.py` encodes the
