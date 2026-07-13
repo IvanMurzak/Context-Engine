@@ -1,0 +1,26 @@
+src/editor/gui/a11y/CMakeLists.txt
+  s_4d68fcead85c12::t_1379e38e1a6288 48-59
+src/editor/gui/a11y/README.md
+  s_4d68fcead85c12::t_66bcee29d91b7f 40-41,43-59,64-66
+src/editor/gui/a11y/tests/test_coverage.cpp
+  s_4d68fcead85c12::t_106b37b448bada 17
+  s_4d68fcead85c12::t_922e56ef1e00dc 1-16,18-117
+src/editor/gui/a11y/src/registry.cpp
+  s_4d68fcead85c12::t_b49678a2abadc9 68-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "52160d7e1f1d40cba1003331e860744ab7c45c3c",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
