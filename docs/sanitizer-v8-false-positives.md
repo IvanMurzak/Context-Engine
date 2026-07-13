@@ -128,3 +128,13 @@ The `m1-exit-3-crash-recovery` kill-9 test (`src/tests/integration/`) flaked ~2/
 wait (`itest::wait_for_instance`, plain 15s) is too tight for an instrumented daemon boot. Fixed
 in issue #201 by scaling that wait under a sanitizer build (`itest::scaled_timeout_ms`,
 `integration_test.h`); the plain dev/CI legs keep the tight timeout unchanged.
+
+A **second, distinct** timing flake in the same test hit a NON-sanitizer leg: the post-recovery
+daemon process-EXIT waits (`ctest_proc::wait_for(daemon…, 15000)` — the killed daemon's reap and
+daemon2's clean-shutdown exit) were HARD, UNSCALED 15s ceilings, so under concurrent runner load
+daemon2 overshot 15s and `CHECK failed: daemon2_code == 0` fired (`shader-crosscompile
+(macos-latest)`, run 29201369515: attempt 1 RED, attempt 2 GREEN, same commit). Fixed by raising
+those two ceilings to a load-safe 60s (`kDaemonExitWaitMs`, routed through `itest::scaled_timeout_ms`
+so the sanitizer legs keep their headroom too) — far below the 600s ctest TIMEOUT, so a genuinely
+non-recovering daemon still fails (a crash returns non-zero at once; a true hang still trips the
+ceiling). This is the process-EXIT sibling of the issue #201 daemon-BOOT fix above.
