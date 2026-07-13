@@ -28,6 +28,7 @@ class EventBus;
 namespace context::editor::migrate
 {
 class MigrationSet;
+class MigrationRunner;
 }
 
 namespace context::editor::derivation
@@ -162,11 +163,18 @@ public:
     // consumer see current-version payloads while disk truth stays untouched. A BLOCKING migration
     // finding (newer-than stamps, chain gaps, failed/over-budget steps, id mutation) retains the
     // node's last-good derived state, exactly like a failed validation. nullptr disables the node.
+    // `migration_runner` is the L-37 sandboxed-migration execution seam (issue #71) the parse-time
+    // migration node consults for package_sandboxed steps — the injected R-FILE-005 cold-start
+    // "VM" component (booted by the embedder BEFORE the graph exists — VM precedes registration
+    // and parse; EditorKernelConfig::migration_runner threads it here). nullptr (the default)
+    // keeps the honest migration.runner_unavailable refusal for package steps. Owned by the
+    // caller; must outlive the graph.
     explicit DerivationGraph(DerivationConfig config = {},
                              context::kernel::EventBus* bus = nullptr,
                              const schema::SchemaSet* schemas = nullptr,
                              const schema::RefTargetResolver* ref_resolver = nullptr,
-                             const migrate::MigrationSet* migrations = nullptr);
+                             const migrate::MigrationSet* migrations = nullptr,
+                             migrate::MigrationRunner* migration_runner = nullptr);
 
     // Ingest one reconciled change + its authored bytes. Parses to canonical form NOW so the returned
     // ticket carries the canonical hash (R-CLI-006), then coalesces into the pending dirty set — a later
@@ -280,6 +288,8 @@ private:
     const schema::RefTargetResolver* ref_resolver_; // x-ctx-ref meta-lookup seam (nullptr until
                                                     // the asset database lands)
     const migrate::MigrationSet* migrations_;       // L-37 parse-time migration node (nullptr = off)
+    migrate::MigrationRunner* migration_runner_;    // sandboxed-tier VM seam (issue #71;
+                                                    // nullptr = honest runner_unavailable refusal)
     std::uint64_t set_hash_ = 0;                    // current registered-set hash (pass-0 output)
     context::kernel::World world_;
     std::map<std::string, Node> nodes_;

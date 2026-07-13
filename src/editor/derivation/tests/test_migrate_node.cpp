@@ -11,6 +11,7 @@
 #include "context/editor/schema/kind_schema.h"
 
 #include "derivation_test.h"
+#include "mock_runner.h" // the migrate module's byte-only seam mock (sandboxed VM-slot cases)
 
 #include <algorithm>
 #include <string>
@@ -219,6 +220,55 @@ int main()
         auto pass = graph.run_pass();
         CHECK(pass.nodes_derived == 1); // no migration, no validation: derives as plain content
         CHECK(!graph.validation("f.json").has_value());
+    }
+
+    // --- sandboxed-tier VM slot (issue #71): the graph's injected MigrationRunner routes
+    // package_sandboxed steps at parse time; with NO runner the honest refusal blocks ------------
+    {
+        migrate::MigrationSet pkg_set;
+        std::string problem;
+        CHECK(pkg_set.register_component("phys:body", 2, problem));
+        migrate::MigrationStep pkg_step;
+        pkg_step.component_type = "phys:body";
+        pkg_step.from_version = 1;
+        pkg_step.tier = migrate::MigrationTier::package_sandboxed;
+        pkg_step.wasm_module = "phys/migrations.wasm";
+        CHECK(pkg_set.register_step(std::move(pkg_step), problem));
+        const char* pkg_doc =
+            R"({"componentVersions": {"phys:body": 1}, "c": {"phys:body": {"hp": 5}}})";
+
+        // (a) No runner injected: package steps are refused in-process (runner_unavailable) and
+        // the NEW source never derives — never run unsandboxed (L-37).
+        {
+            DerivationGraph graph({}, nullptr, &schema::engine_schemas(), nullptr, &pkg_set);
+            graph.apply(change("pkg.doc.json", ChangeType::created), pkg_doc);
+            auto pass = graph.run_pass();
+            CHECK(pass.nodes_invalid == 1);
+            CHECK(pass.nodes_derived == 0);
+            CHECK(!graph.node("pkg.doc.json").has_value());
+            auto v = graph.validation("pkg.doc.json");
+            CHECK(v.has_value());
+            CHECK(!v->report.ok);
+            CHECK(v->report.diagnostics[0].code == "migration.runner_unavailable");
+        }
+
+        // (b) A runner injected at the graph's VM slot (the R-FILE-005 cold-start "VM" component,
+        // threaded from EditorKernelConfig::migration_runner): the SAME ingest routes the package
+        // step through the seam and derives.
+        {
+            migratetest::MockMigrationRunner runner([](std::string_view in, std::string& out) {
+                out.assign(in.data(), in.size()); // identity guest — routing is the subject
+                return true;
+            });
+            DerivationGraph graph({}, nullptr, &schema::engine_schemas(), nullptr, &pkg_set,
+                                  &runner);
+            graph.apply(change("pkg.doc.json", ChangeType::created), pkg_doc);
+            auto pass = graph.run_pass();
+            CHECK(pass.nodes_derived == 1);
+            CHECK(pass.nodes_invalid == 0);
+            CHECK(graph.node("pkg.doc.json").has_value());
+            CHECK(runner.run_calls == 1);
+        }
     }
 
     DERIVATION_TEST_MAIN_END();

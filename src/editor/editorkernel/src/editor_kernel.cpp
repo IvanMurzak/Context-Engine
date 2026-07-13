@@ -132,13 +132,18 @@ derivation::DerivationConfig derivation_config_for(const EditorKernelConfig& cfg
 // data this engine version cannot lift; the derivation ingest surfaces the findings and retains
 // last-good derived state (R-FILE-003). Returns the findings for the caller's envelope.
 std::vector<serializer::Diagnostic> migrate_and_stamp_for_save(derivation::CanonicalForm& form,
-                                                               const migrate::MigrationSet& set)
+                                                               const migrate::MigrationSet& set,
+                                                               migrate::MigrationRunner* runner)
 {
     std::vector<serializer::Diagnostic> findings;
     if (!form.is_json)
         return findings;
     migrate::MigrateOptions options;
     options.stamp_registered_sites = true;
+    // The injected sandboxed-tier VM (issue #71): the tool-save path migrates stamped-older
+    // payloads through the SAME runner the parse-time node uses; null keeps the honest
+    // migration.runner_unavailable refusal.
+    options.runner = runner;
     const migrate::DocumentMigrationResult result =
         migrate::migrate_document(form.root, set, options);
     findings.reserve(result.diagnostics.size());
@@ -175,8 +180,12 @@ EditorKernel::EditorKernel(filesync::FileStore& fs, filesync::Watcher& watcher,
       // The L-37 parse-time migration node runs against the composition's migration set, and the
       // derivation config carries the computed R-FILE-005 pass-0 registered-set hash (see
       // derivation_config_for) so pass-1 memoization is keyed on (content, registered set).
+      // config_.migration_runner is the R-FILE-005 cold-start "VM" component (issue #71) — booted
+      // by the embedder BEFORE this constructor, injected here AHEAD of the graph's pass-0
+      // registration hash and every pass-1 parse (… watcher → VM → registration → parse), so
+      // package_sandboxed steps route through the sandbox from the very first document.
       graph_(derivation_config_for(config_), bus, &schema::engine_schemas(), nullptr,
-             &migrations_for(config_))
+             &migrations_for(config_), config_.migration_runner)
 {
 }
 
@@ -259,7 +268,7 @@ EditOutcome EditorKernel::edit_file(std::string_view path, std::string_view data
     // findings leave the content unmigrated (the ingest below retains last-good) but ride the
     // envelope's diagnostics.
     std::vector<serializer::Diagnostic> migration_findings =
-        migrate_and_stamp_for_save(form, migrations_for(config_));
+        migrate_and_stamp_for_save(form, migrations_for(config_), config_.migration_runner);
 
     // Write THROUGH filesync atomic-IO (temp+fsync+rename, R-FILE-004). apply_write registers the
     // write as self-echo, so the reconcile crawl will NOT re-surface our own write as external.
@@ -343,7 +352,7 @@ EditBatchOutcome EditorKernel::edit_files(const std::vector<BatchEdit>& edits,
         // migration findings re-surface through the derivation ingest's validation() — the batch
         // outcome type carries no per-entry diagnostics channel.
         derivation::CanonicalForm form = derivation::canonical_parse(e.data);
-        (void)migrate_and_stamp_for_save(form, migrations_for(config_));
+        (void)migrate_and_stamp_for_save(form, migrations_for(config_), config_.migration_runner);
         const std::optional<std::string> current = fs_.read(key);
         filesync::PlannedWrite w;
         w.path = key;

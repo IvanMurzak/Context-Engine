@@ -332,6 +332,16 @@
       "description": "WAMR AOT smoke + target-pin guard (blocking; un-quarantined 2026-07-04 — #24 SIGILL root-caused to host-CPU wamrc codegen, fixed by the x86-64-v2 pin in spikes/wasm/CMakeLists.txt)."
     },
     {
+      "id": "wasm-runner-deterministic",
+      "requirement": "L-37",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "wasm-runner",
+      "description": "The sandboxed WASM package-migration runner (src/runtime/wasm/, issue #71 PR3; L-37 / L-62 / R-SEC-009): the deterministic WasmRunner on the SHA-pinned wasmtime C-API prebuilt (Cranelift, consume_fuel, NaN canonicalization, relaxed-SIMD off/deterministic, threads off, fixed memory limit, fresh Store+instance per step; budget->fuel = kWasmFuelPerBudgetNode x max_nodes; fuel trap -> migration.budget_exceeded, other traps -> migration.step_failed). A CI-gated dependency path like cef-substrate (behind default-OFF CONTEXT_BUILD_WASM; the MSVC-ABI wasmtime.dll.lib cannot link under the local Strawberry-GCC dev gate, which builds the honest stub) — the 3-OS wasm-runner job flips it ON with CONTEXT_WASM_REQUIRE_RUNTIME=ON and runs the wasm-runner-* ctests (deterministic config, budget->fuel scaling, trap->catalog mapping, fuel-cost micro-validation, end-to-end document migration through real WAT guests). Windows rides the self-hosted MSVC runner. The committed .wasm fixture corpus + cross-OS determinism gate are PR 4 of #71."
+    },
+    {
       "id": "spike-webgpu-native",
       "requirement": "R-REND-005",
       "runner_class": "gh-ubuntu-shared",

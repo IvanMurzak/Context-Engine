@@ -69,7 +69,8 @@ struct MigrationStep
     std::uint64_t revision = 1;
     PayloadTransform transform; // engine_native: the in-process pure function
     PathTransform map_path;     // payload-relative pointer map; null = identity
-    std::string wasm_module;    // package_sandboxed: the module reference (v1: contract only)
+    std::string wasm_module;    // package_sandboxed: the module reference the injected runner's
+                                // ModuleResolver resolves to wasm bytes (issue #71 PR3)
 };
 
 // FNV-1a-style 64-bit hash combiner for set-hash composition (order-insensitive folds use XOR of

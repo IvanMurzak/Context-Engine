@@ -53,7 +53,8 @@ class Watcher;
 namespace context::editor::migrate
 {
 class MigrationSet;
-}
+class MigrationRunner;
+} // namespace context::editor::migrate
 
 namespace context::editor::editorkernel
 {
@@ -89,9 +90,19 @@ struct EditorKernelConfig
     // canonicalize+stamp path (edit_file / edit_files), and (c) the R-FILE-005 pass-0
     // registered-set hash (with the engine kind schemas) that keys pass-1 derivation. In the
     // R-FILE-005 cold-start order this registration point sits where "VM → registration (pass 0)"
-    // boots — the sandboxed-tier VM component itself is contract-stubbed in v1 (see
-    // src/editor/migrate/README.md).
+    // boots.
     const migrate::MigrationSet* migrations = nullptr;
+
+    // The sandboxed-tier VM — the R-FILE-005 cold-start "VM" slot (lock → index → watcher → VM →
+    // registration → content parse), issue #71: the embedder boots the runner (the wasmtime
+    // WasmRunner, src/runtime/wasm/ — WasmRunner::create() IS the VM init; tests inject a mock)
+    // BEFORE constructing the kernel and injects it here, so it exists ahead of pass-0
+    // registration and every pass-1 parse. Threaded into (a) the derivation graph's parse-time
+    // migration node and (b) the tool-save canonicalize+stamp path, where package_sandboxed steps
+    // route through it under the frozen guest ABI (migration_runner.h). nullptr (the default)
+    // keeps the honest migration.runner_unavailable refusal — package migrations never run
+    // unsandboxed (L-37). Owned by the caller; must outlive the kernel.
+    migrate::MigrationRunner* migration_runner = nullptr;
     // (`derivation.registered_set_hash` — the R-FILE-005 pass-0 hash — is COMPUTED at construction
     // from the engine kind schemas + the resolved migration set when left 0; a non-zero value in
     // the embedded DerivationConfig is honored as an explicit override.)
