@@ -1,0 +1,47 @@
+src/editor/migrate/src/migration_set.cpp
+  s_4d68fcead85c12::t_aac29771e43e0a 150-155
+src/runtime/wasm/CMakeLists.txt
+  s_4d68fcead85c12::t_6c80e3f8dd4cb1 170-177,182-184
+  s_4d68fcead85c12::t_7cdbe190c24c2a 213-220
+src/runtime/wasm/tests/test_wasm_fail_closed.cpp
+  s_4d68fcead85c12::t_77f51579327152 1-182
+tools/tests/test_gen_wasm_fixtures.py
+  s_4d68fcead85c12::t_925eb9aa228306 1-113
+.github/workflows/ci.yml
+  s_4d68fcead85c12::t_1be6b5b34ff8ee 611
+src/editor/migrate/tests/test_migration_set.cpp
+  s_4d68fcead85c12::t_bb344691a4bb79 142-163
+src/runtime/wasm/tests/wasm_test.h
+  s_4d68fcead85c12::t_bd7aa34b713b0c 5-8
+  s_4d68fcead85c12::t_6484e16dd7182c 365-434,437
+  s_4d68fcead85c12::t_a0b7803b68bd92 438
+tools/gen_wasm_fixtures.py
+  s_4d68fcead85c12::t_8e621c657c4fdc 1-326
+src/runtime/wasm/tests/test_wasm_determinism.cpp
+  s_4d68fcead85c12::t_a9c3afbec98462 226-227
+  s_4d68fcead85c12::t_02030464502aac 1-91,93-225,228-267
+  s_4d68fcead85c12::t_c18eafcad77d93 92
+src/editor/migrate/include/context/editor/migrate/migration_set.h
+  s_4d68fcead85c12::t_09af17876c0e6b 74-81
+src/runtime/wasm/README.md
+  s_4d68fcead85c12::t_66e771eb06bb93 9,11-14
+  s_4d68fcead85c12::t_33b387e51b1485 35-50
+src/runtime/wasm/fixtures/migrate_hp.wat
+  s_4d68fcead85c12::t_317dee841ac5b4 1-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "6ea0399c0de44e49a3a238b3a2f8d5e661f265eb",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
