@@ -1,0 +1,22 @@
+src/tests/integration/CMakeLists.txt
+  s_4d68fcead85c12::t_16e85d152a25ed 431-437
+src/tests/integration/test_m6exit2_gc_budget.cpp
+  s_4d68fcead85c12::t_5c81b08adb1ae1 74-86
+  s_4d68fcead85c12::t_9012097d5de92d 297,301,307-309
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "b2f2db9b917fc52bc9d2310f9f76542f23390b67",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
