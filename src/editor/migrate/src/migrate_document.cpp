@@ -2,7 +2,9 @@
 
 #include "context/editor/migrate/migrate_document.h"
 
+#include "context/editor/migrate/migration_runner.h"
 #include "context/editor/serializer/canonical.h"
+#include "context/editor/serializer/json_parse.h"
 
 #include <algorithm>
 #include <string>
@@ -171,29 +173,79 @@ void find_unstamped_types(const JsonValue& value, bool is_root, const MigrationS
     }
 }
 
-// Apply one step to one payload under the L-37 execution contract. Appends a diagnostic and
-// returns false on any violation (the caller rolls the whole document back).
-bool apply_step(const MigrationStep& step, JsonValue& payload, const std::string& site_pointer,
-                const MigrationBudget& budget, std::vector<MigrationDiagnostic>& diagnostics)
+// Execute one package_sandboxed step through the injected runner (the L-37 sandboxed WASM tier).
+// The host hands the guest the payload as canonical-JSON bytes (the frozen guest ABI's input
+// format) and rebuilds `payload` from the migrated bytes it returns; the caller re-checks every
+// structural invariant (budget, canonical serializability, id immutability) AROUND this, uniform
+// with the engine_native tier — the guest is trusted for NOTHING structural. Appends a
+// migration.step_failed finding and returns false on any runner/guest failure.
+bool run_sandboxed_step(MigrationRunner& runner, const MigrationStep& step, JsonValue& payload,
+                        const MigrationBudget& budget, const std::string& site_pointer,
+                        std::vector<MigrationDiagnostic>& diagnostics)
 {
-    // Tier gating: package-shipped migrations run ONLY in the sandboxed WASM tier (L-37). The VM
-    // component is not stood up in v1, so the tier boundary REFUSES in-process execution — the
-    // contract is registered; execution is deliberately stubbed, never silently run unsandboxed.
-    // The sandboxed WASM runner is the tracked follow-up (issue #71).
-    if (step.tier != MigrationTier::engine_native)
+    const std::string step_id = "\"" + step.component_type + "\" v" +
+                                std::to_string(step.from_version) + "->v" +
+                                std::to_string(step.from_version + 1);
+
+    // Serialize to the guest ABI's input format. The caller pre-checked canonical serializability,
+    // so this is total here.
+    std::string input;
+    (void)serializer::serialize_canonical(payload, input);
+
+    const SandboxedStep desc{step.wasm_module, step.component_type, step.from_version, budget};
+    const SandboxedStepResult r = runner.run_step(desc, input);
+    if (!r.ok)
+    {
+        diagnostics.push_back({"migration.step_failed",
+                               "package-shipped migration " + step_id +
+                                   " failed in the sandboxed WASM tier" +
+                                   (r.detail.empty() ? std::string() : ": " + r.detail),
+                               site_pointer, /*blocking=*/true});
+        return false;
+    }
+
+    // Rebuild the payload from the guest's output bytes. A guest that returns non-JSON is a step
+    // failure: the host re-parses and re-validates, never trusting the returned bytes blindly. The
+    // re-parsed tree flows through the SAME canonical/budget/id gate below (a non-canonical-but-
+    // valid guest output is healed by that gate's re-serialization).
+    serializer::ParseResult parsed = serializer::parse_json(r.output);
+    if (!parsed.ok)
+    {
+        diagnostics.push_back({"migration.step_failed",
+                               "package-shipped migration " + step_id +
+                                   " returned output that is not valid JSON",
+                               site_pointer, /*blocking=*/true});
+        return false;
+    }
+    payload = std::move(parsed.root);
+    return true;
+}
+
+// Apply one step to one payload under the L-37 execution contract. Appends a diagnostic and
+// returns false on any violation (the caller rolls the whole document back). `runner` is the
+// sandboxed-migration seam consulted for package_sandboxed steps (null ⇒ the honest refusal).
+bool apply_step(const MigrationStep& step, JsonValue& payload, const std::string& site_pointer,
+                const MigrationBudget& budget, MigrationRunner* runner,
+                std::vector<MigrationDiagnostic>& diagnostics)
+{
+    // Tier gating: package-shipped migrations run ONLY in the sandboxed WASM tier (L-37) — through
+    // the injected runner. With NO runner injected the tier boundary REFUSES in-process execution:
+    // the contract is registered; the step is never silently run unsandboxed. This is the honest
+    // migration.runner_unavailable refusal (the wasmtime runtime that lifts it is issue #71 PR3).
+    if (step.tier == MigrationTier::package_sandboxed && runner == nullptr)
     {
         diagnostics.push_back(
             {"migration.runner_unavailable",
              "package-shipped migration \"" + step.component_type + "\" v" +
                  std::to_string(step.from_version) + "->v" + std::to_string(step.from_version + 1) +
-                 " executes only in the sandboxed WASM tier (L-37); the VM component is not stood "
-                 "up yet, and package steps are never run unsandboxed",
+                 " executes only in the sandboxed WASM tier (L-37); no sandboxed runner is "
+                 "injected, and package steps are never run unsandboxed",
              site_pointer, /*blocking=*/true});
         return false;
     }
 
     // Budget, input side (deterministic node metric — the sandboxed tier maps the same budget to
-    // VM instruction/fuel metering when it lands).
+    // VM instruction/fuel metering; the node-count check stays host-side for both tiers).
     if (node_count(payload) > budget.max_nodes)
     {
         diagnostics.push_back({"migration.budget_exceeded",
@@ -209,14 +261,24 @@ bool apply_step(const MigrationStep& step, JsonValue& payload, const std::string
     collect_ids(payload, "", ids_before);
     std::sort(ids_before.begin(), ids_before.end());
 
-    if (!step.transform(payload))
+    // Execute the step body per tier: a first-party pure transform in-process, or the package guest
+    // through the sandboxed runner (guaranteed non-null here by the gate above). Both feed the SAME
+    // structural gate below.
+    if (step.tier == MigrationTier::engine_native)
     {
-        diagnostics.push_back({"migration.step_failed",
-                               "migration step \"" + step.component_type + "\" v" +
-                                   std::to_string(step.from_version) + "->v" +
-                                   std::to_string(step.from_version + 1) + " reported failure",
-                               site_pointer, /*blocking=*/true});
-        return false;
+        if (!step.transform(payload))
+        {
+            diagnostics.push_back({"migration.step_failed",
+                                   "migration step \"" + step.component_type + "\" v" +
+                                       std::to_string(step.from_version) + "->v" +
+                                       std::to_string(step.from_version + 1) + " reported failure",
+                                   site_pointer, /*blocking=*/true});
+            return false;
+        }
+    }
+    else if (!run_sandboxed_step(*runner, step, payload, budget, site_pointer, diagnostics))
+    {
+        return false; // run_sandboxed_step appended the finding
     }
 
     // The output must remain canonically serializable (bans non-finite numbers — R-FILE-001) and
@@ -269,14 +331,16 @@ bool apply_step(const MigrationStep& step, JsonValue& payload, const std::string
 // destroys authored data — flatten excludes the orphan by consulting the same rule, L-37).
 void rewrite_overrides(JsonValue& value, const std::string& pointer, bool is_root,
                        const std::vector<TypePlan>& plans, const MigrationSet& set,
-                       const std::vector<std::string>& stamped, bool& changed,
+                       const std::vector<std::string>& stamped, MigrationRunner* runner,
+                       const MigrationBudget& budget, bool& changed,
                        std::vector<MigrationDiagnostic>& diagnostics)
 {
     if (value.type == JsonValue::Type::array)
     {
         for (std::size_t i = 0; i < value.elements.size(); ++i)
             rewrite_overrides(value.elements[i], pointer + "/" + std::to_string(i),
-                              /*is_root=*/false, plans, set, stamped, changed, diagnostics);
+                              /*is_root=*/false, plans, set, stamped, runner, budget, changed,
+                              diagnostics);
         return;
     }
     if (value.type != JsonValue::Type::object)
@@ -354,10 +418,26 @@ void rewrite_overrides(JsonValue& value, const std::string& pointer, bool is_roo
                 std::optional<std::string> mapped = tail;
                 for (const MigrationStep* step : selected->chain)
                 {
-                    if (step->map_path && mapped.has_value())
-                        mapped = step->map_path(*mapped);
                     if (!mapped.has_value())
                         break;
+                    if (step->tier == MigrationTier::package_sandboxed)
+                    {
+                        // Sandboxed steps map paths through the guest's optional ctx_map_path
+                        // export (migration_runner.h). A step in a SUCCESSFUL chain that reached
+                        // override rewriting was applied via the runner, so `runner` is non-null
+                        // here — guard defensively (identity when somehow absent, matching a module
+                        // that omits the optional export).
+                        if (runner != nullptr)
+                        {
+                            const SandboxedStep desc{step->wasm_module, step->component_type,
+                                                     step->from_version, budget};
+                            mapped = runner->map_path(desc, *mapped);
+                        }
+                    }
+                    else if (step->map_path)
+                    {
+                        mapped = step->map_path(*mapped);
+                    }
                 }
                 if (!mapped.has_value())
                 {
@@ -378,8 +458,8 @@ void rewrite_overrides(JsonValue& value, const std::string& pointer, bool is_roo
             }
             continue;
         }
-        rewrite_overrides(m.value, child, /*is_root=*/false, plans, set, stamped, changed,
-                          diagnostics);
+        rewrite_overrides(m.value, child, /*is_root=*/false, plans, set, stamped, runner, budget,
+                          changed, diagnostics);
     }
 }
 
@@ -419,7 +499,8 @@ std::optional<std::string> transform_payload_path(const MigrationSet& set,
 
 bool migrate_payload(const MigrationSet& set, std::string_view component_type,
                      std::int64_t from_version, JsonValue& payload, const MigrationBudget& budget,
-                     std::string_view site_pointer, std::vector<MigrationDiagnostic>& diagnostics)
+                     std::string_view site_pointer, std::vector<MigrationDiagnostic>& diagnostics,
+                     MigrationRunner* runner)
 {
     const std::int64_t current = set.current_version(component_type);
     if (current == 0)
@@ -480,7 +561,7 @@ bool migrate_payload(const MigrationSet& set, std::string_view component_type,
             payload = snapshot;
             return false;
         }
-        if (!apply_step(*step, payload, pointer, budget, diagnostics))
+        if (!apply_step(*step, payload, pointer, budget, runner, diagnostics))
         {
             payload = snapshot;
             return false;
@@ -598,7 +679,7 @@ DocumentMigrationResult migrate_document(JsonValue& root, const MigrationSet& se
             }
             for (const MigrationStep* step : plan.chain)
             {
-                if (!apply_step(*step, *site.payload, site.pointer, options.budget,
+                if (!apply_step(*step, *site.payload, site.pointer, options.budget, options.runner,
                                 result.diagnostics))
                 {
                     result.ok = false;
@@ -616,9 +697,10 @@ DocumentMigrationResult migrate_document(JsonValue& root, const MigrationSet& se
     if (result.ok && !plans.empty())
     {
         // Override/reference path transforms through the same chains (L-37: migrations transform
-        // paths as well as payloads). Non-blocking orphan findings may be appended here.
-        rewrite_overrides(root, "", /*is_root=*/true, plans, set, stamped, result.changed,
-                          result.diagnostics);
+        // paths as well as payloads). Sandboxed steps map paths through the runner's ctx_map_path.
+        // Non-blocking orphan findings may be appended here.
+        rewrite_overrides(root, "", /*is_root=*/true, plans, set, stamped, options.runner,
+                          options.budget, result.changed, result.diagnostics);
     }
 
     if (!result.ok)

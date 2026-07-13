@@ -22,13 +22,32 @@ Every step invocation is wrapped by the engine's contract checks (`apply_step`):
 
 | Rule | Enforcement |
 |---|---|
-| Tier gating | `package_sandboxed` steps are REFUSED in-process (`migration.runner_unavailable`): package-shipped migrations execute only in the sandboxed WASM tier. v1 registers the CONTRACT; the VM component (booted before pass-1 parsing — R-FILE-005 cold-start order) is not stood up yet, so the runner is deliberately stubbed. `engine_native` (first-party) steps run now. |
+| Tier gating | `package_sandboxed` steps run ONLY through an injected `MigrationRunner` (the sandboxed-migration seam, `migration_runner.h`). With NO runner injected they are REFUSED in-process (`migration.runner_unavailable`) — never run unsandboxed; with the wasmtime runner injected (issue #71 PR3) they route to the guest per the frozen ABI under the SAME host-side contract (budget, canonical, id immutability re-checked host-side). `engine_native` (first-party) steps run now. |
 | Budget | `MigrationBudget::max_nodes` bounds a step's input AND output payload (`migration.budget_exceeded`). Deterministic by design (node counts, not wall time); the WASM runner maps the same budget to VM fuel/instruction metering when it lands. |
 | Purity / determinism | Steps see ONLY the payload (no IO/clock/randomness by API shape) and are pinned forever by the R-QA-011 fixture corpus, round-tripped in CI. |
 | Id immutability | The exact multiset of (`id`/`guid` pointer, canonical value) inside a payload must survive every step (`migration.id_mutated`) — composed identity survives upgrade. |
 | Downgrade rule | A payload stamped NEWER than the installed schema is never best-effort parsed: `schema.newer_than_engine` (engine `ctx:` namespace) / `schema.newer_than_package` (any other), blocking, last-good retained (R-PKG-005). |
 | Path transforms | Migrations transform override/reference paths as well as payloads (per-step `PathTransform`); an unmappable path yields a non-blocking `migration.orphan_override` finding — the entry is preserved on disk/in-memory, and flatten excludes it (the compose layer consults the same rule). |
 | All-or-nothing | Any blocking finding rolls the WHOLE document back; derivation retains last-good derived state (R-FILE-003) and the bulk path does not write the file. |
+
+## The sandboxed execution seam + guest ABI (issue #71)
+
+`migration_runner.h` defines `MigrationRunner` — the dependency-inverted boundary the
+`package_sandboxed` tier runs through. `migrate` DEPENDS ON NOTHING wasm: the wasmtime runtime
+(PR3 of the #71 chain) implements `MigrationRunner` in a separate library and is INJECTED via
+`MigrateOptions::runner` / `migrate_payload(..., runner)`. `apply_step` routes a package step to the
+injected runner and, with no runner injected, keeps the honest `migration.runner_unavailable`
+refusal (the seam never runs package migrations unsandboxed).
+
+The same header FREEZES the guest ABI (protocolMajor 1) — the wire between the host runner and a
+compiled package migration module: ZERO host imports; exports `ctx_alloc` + `ctx_migrate` (required)
+and `ctx_map_path` (optional — absent ⇒ identity path mapping); all input/output byte buffers are
+canonical JSON in the module's linear memory; the host maps `MigrationBudget::max_nodes` to VM fuel
+(`K × max_nodes`) and re-checks every structural invariant (budget, canonical serializability, id
+immutability) host-side — the guest is trusted for nothing. A fresh Store+instance per step is a PR3
+runtime concern. `tests/mock_runner.h` is a byte-only mock defined STRICTLY to this contract (never
+more capable than the real runner); `tests/test_migration_runner.cpp` exercises the routing, the
+refusal fall-through, the host re-checks, and the `ctx_map_path` override rewrite.
 
 ## Fixtures (R-QA-011)
 
