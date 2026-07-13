@@ -45,6 +45,9 @@ int main()
         CHECK(artifact.tick_count == 10);
         CHECK(artifact.deterministic);
         CHECK(artifact.expected_hash_trace.size() == 10); // one root per tick
+        // Literal 1, not `kProtocolMajor`: mirrors replay.cpp's record_replay() — this test does not
+        // link context_contract (runtime/session -> editor/contract stays decoupled); keep in sync
+        // with record_replay() if kProtocolMajor ever moves past 1.
         CHECK(artifact.protocol_major == 1); // the FROZEN contract major (M3 freeze, R-CLI-004)
         CHECK(!artifact.engine_version.empty());
 

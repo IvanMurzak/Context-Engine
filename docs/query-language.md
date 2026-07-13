@@ -12,11 +12,11 @@ hand-maintained alongside it. The conformance test
 (`src/editor/contract/tests/test_query_language.cpp`) locks the emitted grammar to the parser the
 engine actually runs, so both track the same source of truth.
 
-> **Stability.** The contract is UNSTABLE while `protocolMajor == 0` (it may change without a
-> deprecation cycle until the M3 freeze). Everything below is additive-only until then. This module
-> is the language **specification** + parser/AST + comparators + cursor codec; *executing* a parsed
-> query over a live derived world is the `(query, executor)` split (R-LANG-009), which lands with the
-> ECS / spatial index it runs against.
+> **Stability.** The contract is FROZEN at `protocolMajor == 1` (the M3 freeze, R-CLI-004): changes
+> to this grammar now flow through the R-CLI-010 written deprecation lifecycle rather than breaking
+> silently. This module is the language **specification** + parser/AST + comparators + cursor codec;
+> *executing* a parsed query over a live derived world is the `(query, executor)` split (R-LANG-009),
+> which lands with the ECS / spatial index it runs against.
 
 ## Grammar (EBNF)
 

@@ -157,8 +157,9 @@ set_tests_properties(
     PROPERTIES TIMEOUT 120)
 
 # ===================================================================================================
-# The SAMPLES CORPUS gate (R-QA-006 agent few-shot corpus; R-BUILD-009 / R-QA-008; issue #106) — the
-# M3-exit contract-freeze READINESS artifact (it does NOT perform the freeze; protocolMajor stays 0).
+# The SAMPLES CORPUS gate (R-QA-006 agent few-shot corpus; R-BUILD-009 / R-QA-008; issue #106) — was
+# the M3-exit contract-freeze READINESS artifact (protocolMajor 0->1, PR #113, now FROZEN at 1); it
+# continues post-freeze as the maintained breadth-of-surface gate (see samples/README.md).
 # One blocking per-PR ctest on every OS leg (`samples-corpus`, run by the "Samples corpus gate" step
 # in .github/workflows/ci.yml): Leg A spawns the REAL `context` binary to build + headless-smoke-run
 # each committed sample project; Leg B exercises the breadth of the stable one-shot CLI surface in

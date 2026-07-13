@@ -6,17 +6,17 @@ lifecycle** so scripts and agents never break silently across engine updates. Th
 normative home of that policy; the machinery it describes is generated from the single registry
 (R-CLI-009) and self-described by `context describe --json` (R-CLI-013).
 
-## Staged activation — inert until the M3 freeze
+## Staged activation — active since the M3 freeze
 
-The contract ships **explicitly UNSTABLE at `protocolMajor = 0`** through M1/M3-entry. While
-`protocolMajor` is `0` the contract **MAY break without a deprecation cycle**, and `context describe`
-says so loudly (`contract.protocol.note` + `contract.deprecationPolicy.note`) so no client mistakes
+Through M1/M3-entry the contract shipped **explicitly UNSTABLE at `protocolMajor = 0`**: while
+`protocolMajor` was `0` the contract could break without a deprecation cycle, and `context describe`
+said so loudly (`contract.protocol.note` + `contract.deprecationPolicy.note`) so no client mistook
 the pre-freeze surface for a frozen one.
 
-The deprecation lifecycle **activates at the M3 freeze**, when `protocolMajor` bumps to `1` (a
-separate, owner-gated task — *not* this one; this task lands the machinery with `protocolMajor`
-staying `0`). From that point the rules below are binding, and
-`contract.deprecationPolicy.active` reads `true`.
+The M3 freeze (R-CLI-004) **has landed**: `protocolMajor` is now `1` (`kProtocolMajor`,
+`src/editor/contract/include/context/editor/contract/handshake.h`), and the deprecation lifecycle
+described below is **active** — `contract.deprecationPolicy.active` reads `true`. `context describe`
+now reports the surface as FROZEN rather than UNSTABLE.
 
 ## The lifecycle
 
@@ -64,19 +64,22 @@ The policy and the per-entry metadata are both machine-readable:
   **`removedIn`** (the removal version). A non-deprecated entry omits `removedIn`.
 - **Policy section.** `contract.deprecationPolicy` documents the rules:
   - `requirement` — `"R-CLI-010"`.
-  - `active` — `false` while `protocolMajor = 0`; `true` once the freeze activates the lifecycle.
+  - `active` — `true` once `protocolMajor >= 1` (the freeze has activated the lifecycle; `false`
+    only in a pre-freeze `protocolMajor = 0` build).
   - `minMinorsBeforeRemoval` — the `N`-minor retention window (currently `2`).
   - `methodIdStability` — `"stable-across-lifecycle"`.
   - `perEntryFields` — `["deprecated", "removedIn"]`, the per-entry field names above.
   - `appliesTo` — `["verb", "rpcMethod", "mcpTool", "flag", "capability"]`.
   - `compatibilityWindow` — the negotiation intent (hard-fail outside; behavior activates at the 2nd
     released protocol version).
-  - `note` — the pre-freeze "may break without a cycle" caveat.
+  - `note` — *"Active at protocolMajor=1 (M3 contract freeze) — the frozen surface changes only
+    through this deprecation lifecycle; a breaking change without a cycle is rejected (R-CLI-004)."*
 
-## No live deprecations at the freeze
+## No live deprecations yet
 
-There are **no real deprecated entries** at the freeze — every registered verb and flag has
-`deprecated: false`. The machinery is inert until the first genuine deprecation flows through the same
-registry projection. The conformance test (`contract-test_deprecation`) locks both facts: no real
-surface is deprecated, and an *example* (test-only) deprecated entry correctly advertises
-`deprecated` / `removedIn` while keeping its stable method-id.
+There are still **no real deprecated entries** — every registered verb and flag has
+`deprecated: false`. The machinery has been active since the M3 freeze but is otherwise inert until
+the first genuine deprecation flows through the same registry projection. The conformance test
+(`contract-test_deprecation`) locks both facts: no real surface is deprecated, and an *example*
+(test-only) deprecated entry correctly advertises `deprecated` / `removedIn` while keeping its stable
+method-id.
