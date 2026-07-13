@@ -151,8 +151,11 @@ std::uint64_t MigrationSet::set_hash() const noexcept
         // two package versions shipping DIFFERENT bytes under the SAME wasm_module reference would
         // otherwise collide to the same set hash — and serve pass-1 derived state computed under the
         // old module. The content hash is 0 for engine_native steps (and for a package step whose
-        // bytes are not yet resolved), so this is a no-op there and never perturbs existing hashes.
-        h = hash_combine(h, s.wasm_module_hash);
+        // bytes are not yet resolved); GUARD on non-zero so this is a genuine no-op there and never
+        // perturbs existing hashes (hash_combine(h, 0) is NOT the identity — it still folds 8 zero
+        // bytes through the FNV prime, so an unconditional fold would rekey every engine_native set).
+        if (s.wasm_module_hash != 0)
+            h = hash_combine(h, s.wasm_module_hash);
         folded ^= h;
     }
     return folded;
