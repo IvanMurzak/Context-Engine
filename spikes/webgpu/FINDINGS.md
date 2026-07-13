@@ -129,12 +129,15 @@ finding (see Headless below). Surface specifics only matter for the windowed pat
   SAME crash class that keeps the `render` self-check off Windows (CMakeLists.txt). The earlier
   claim that the `probe` test "keeps Windows deterministic" was therefore wrong (the probe hits the
   same race, just rarer, having created no device). Fix: the probe result is fully computed before
-  teardown and the spike writes no files past that point, so on Windows `main()` flushes its report
-  (`std::fflush(nullptr)`) then `std::quick_exit(exitCode)`s — skipping `wgpuInstanceRelease` and
-  the driver-thread teardown entirely (the OS reclaims resources on process exit). This makes the
-  Windows probe deterministic **by construction** (the racy teardown code never runs), not merely
-  rarer — a distinction that matters because a single green run can never prove a probabilistic
-  fix. Non-Windows legs keep the full, validated teardown.
+  teardown and the spike writes no files past that point, so on Windows `main()` flushes stdio
+  (`std::fflush(stdout)` / `std::fflush(stderr)`) then `std::_Exit(exitCode)`s — skipping the racy
+  `wgpuInstanceRelease` call entirely (the OS reclaims resources on process exit). This matches the
+  repo's established idiom for this exact crash class (`src/render/src/wgpu/offscreen_main.cpp`
+  `finish()`, `src/editor/gui/host/src/editor_host.cpp`, `src/editor/cef/src/cef_boot_smoke.cpp`)
+  rather than a bespoke primitive. This makes the Windows probe deterministic **by construction**
+  (the racy `wgpuInstanceRelease` call never runs), not merely rarer — a distinction that matters
+  because a single green run can never prove a probabilistic fix. Non-Windows legs keep the full,
+  validated teardown.
 
 ## WGSL toolchain note (feeds R-REND-005 / the M0-M4 Tint-vs-Naga deliverable)
 

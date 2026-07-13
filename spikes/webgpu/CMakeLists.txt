@@ -141,10 +141,13 @@ else()
     # test (adapter enumeration). NOTE: the `probe` test itself hit this SAME 0xc0000409 teardown
     # race (issue #210, CI run 29233449101 — enumeration also spins up driver threads whose teardown
     # races), so it is NOT inherently teardown-safe. It is made DETERMINISTIC BY CONSTRUCTION in
-    # src/main.cpp, which on Windows flushes the report then std::quick_exit()s — bypassing
-    # wgpuInstanceRelease + wgpu-native's Rust-runtime teardown entirely so the racy code never
-    # runs. That same bypass also covers the by-hand `render`/`window` Windows modes; `render` stays
-    # unregistered here on M4-scope grounds (below), not because it would still crash. This matches
+    # src/main.cpp, which on Windows flushes stdio then std::_Exit()s past the racy
+    # wgpuInstanceRelease call so it never runs (the repo's established idiom for this crash class —
+    # see src/render/src/wgpu/offscreen_main.cpp finish()). The by-hand `render`/`window` Windows
+    # modes benefit from that same instance-teardown bypass, but each still runs its own
+    # wgpuDeviceRelease/wgpuAdapterRelease/wgpuSurfaceRelease calls beforehand (runRenderSelfCheck /
+    # runWindowed), so this is not a full teardown bypass for those modes; `render` stays
+    # unregistered here on M4-scope grounds (below), independent of this fix. This matches
     # ROADMAP §1 M4's own visual-equivalence
     # scope ("Linux-Vulkan + one browser blocking, other backends advisory"). Windows-specific D3D12
     # render validation, if wanted at M4, belongs on a real interactive-session GPU runner — not this
