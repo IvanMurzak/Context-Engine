@@ -428,4 +428,11 @@ endif()
 if(CONTEXT_TSAN)
     set_tests_properties(m6-exit-2-gc-budget PROPERTIES ENVIRONMENT
         "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/js/tsan-suppressions.txt")
+    # TSan's per-access instrumentation inflates measured wall-clock GC-pause duration far beyond
+    # the real R-SIM-008 budget (observed maxPauseMs=113.027 vs the true 4.167ms budget on an
+    # otherwise-green CI run, while the SAME commit's ASan+UBSan leg measured maxPauseMs=0.991) —
+    # a sanitizer-overhead artifact, not a regression. Widen the enforced budget on THIS preset
+    # only; the blocking gate ("M6 exit gate" CI step, `ctest --preset dev`) never sets
+    # CONTEXT_TSAN and always enforces the real, unwidened budget.
+    target_compile_definitions(context_test_m6exit2_gc_budget PRIVATE CONTEXT_TSAN_BUILD=1)
 endif()
