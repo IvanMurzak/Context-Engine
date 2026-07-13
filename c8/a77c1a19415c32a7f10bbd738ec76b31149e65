@@ -1,0 +1,28 @@
+src/tests/integration/integration_test.h
+  s_4d68fcead85c12::t_652037eab31c32 51-81
+src/runtime/ts/lsan-suppressions.txt
+  s_4d68fcead85c12::t_8bf90a72175b3c 3-5
+docs/sanitizer-v8-false-positives.md
+  s_4d68fcead85c12::t_bd1e4976abc021 1-130
+src/tests/integration/test_exit3_crash_recovery_kill9.cpp
+  s_4d68fcead85c12::t_d7058821b331a7 122-124
+  s_4d68fcead85c12::t_63c6f83d586af0 216-217
+src/cli/CMakeLists.txt
+  s_4d68fcead85c12::t_58628d3fd193d4 199-201
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "c8a77c1a19415c32a7f10bbd738ec76b31149e65",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
