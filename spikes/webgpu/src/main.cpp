@@ -637,6 +637,26 @@ int main(int argc, char** argv) {
         exitCode = 2;
     }
 
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    // Windows teardown-race bypass (Context-Engine#210), matching the established idiom already
+    // used for this exact crash class elsewhere in the repo (src/render/src/wgpu/offscreen_main.cpp
+    // finish(), src/editor/gui/host/src/editor_host.cpp, src/editor/cef/src/cef_boot_smoke.cpp).
+    // wgpu-native spins up D3D12/Vulkan driver threads (adapter enumeration in `probe`, device work
+    // in `render`); on the Session-0 LocalSystem CI runners the wgpuInstanceRelease teardown that
+    // joins those threads intermittently __fastfail's with 0xc0000409 (STATUS_STACK_BUFFER_OVERRUN)
+    // at process exit — NON-deterministically (see CMakeLists.txt). The result is already computed
+    // and the spike writes no files past this point (the render hash artifact is written+closed
+    // inside runRenderSelfCheck), so flush stdio (so the [webgpu-spike] report lines survive) and
+    // std::_Exit past wgpuInstanceRelease — the OS reclaims every resource on exit regardless. This
+    // makes the Windows probe DETERMINISTIC BY CONSTRUCTION (the racy wgpuInstanceRelease call never
+    // runs), not merely rarer; a single green run could never prove a probabilistic fix. Non-Windows
+    // paths (Linux lavapipe / macOS / web-browser render self-checks) keep the full, validated
+    // teardown below untouched.
+    std::fflush(stdout);
+    std::fflush(stderr);
+    std::_Exit(exitCode);
+#else
     wgpuInstanceRelease(instance);
     return exitCode;
+#endif
 }
