@@ -147,6 +147,12 @@ std::uint64_t MigrationSet::set_hash() const noexcept
         h = hash_combine(h, static_cast<std::uint64_t>(s.tier));
         h = hash_combine(h, s.revision);
         h = hash_combine(h, s.wasm_module);
+        // Fold the module CONTENT hash, not only the reference string (issue #71 PR4 / R-FILE-010):
+        // two package versions shipping DIFFERENT bytes under the SAME wasm_module reference would
+        // otherwise collide to the same set hash — and serve pass-1 derived state computed under the
+        // old module. The content hash is 0 for engine_native steps (and for a package step whose
+        // bytes are not yet resolved), so this is a no-op there and never perturbs existing hashes.
+        h = hash_combine(h, s.wasm_module_hash);
         folded ^= h;
     }
     return folded;

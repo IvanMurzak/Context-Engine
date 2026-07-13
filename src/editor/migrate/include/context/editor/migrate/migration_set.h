@@ -71,6 +71,14 @@ struct MigrationStep
     PathTransform map_path;     // payload-relative pointer map; null = identity
     std::string wasm_module;    // package_sandboxed: the module reference the injected runner's
                                 // ModuleResolver resolves to wasm bytes (issue #71 PR3)
+    // The CONTENT hash of the resolved wasm module bytes (issue #71 PR4 / R-FILE-010). set_hash()
+    // folds THIS, not just wasm_module, so two package versions that ship DIFFERENT module bytes
+    // under the SAME reference string get DIFFERENT pass-1 cache keys — a rebuilt migration module
+    // never serves derived state computed under the old bytes. Populated at package registration
+    // (pass 0) from the resolved module bytes, e.g. `hash_combine(0, module_bytes)`; 0 until then
+    // (an engine_native step, or a package step whose bytes have not been resolved yet). The runner
+    // itself never sees this — it is a registration-time identity input to the set hash.
+    std::uint64_t wasm_module_hash = 0;
 };
 
 // FNV-1a-style 64-bit hash combiner for set-hash composition (order-insensitive folds use XOR of

@@ -139,6 +139,28 @@ void test_set_hash_properties()
                                problem));
     CHECK(wasm_a.set_hash() != wasm_b.set_hash());
 
+    // The module CONTENT hash participates too (issue #71 PR4 / R-FILE-010): two steps with the SAME
+    // wasm_module reference but DIFFERENT resolved bytes (different wasm_module_hash) must NOT
+    // collide — a rebuilt module under the same reference re-keys pass-1 derivation.
+    const auto pkg_step = [](std::uint64_t content_hash) {
+        MigrationStep s = step("pkg:t", 1, MigrationTier::package_sandboxed, 1, "same.wasm");
+        s.transform = nullptr; // a package step has no in-process transform
+        s.wasm_module_hash = content_hash;
+        return s;
+    };
+    MigrationSet content_a;
+    CHECK(content_a.register_component("pkg:t", 2, problem));
+    CHECK(content_a.register_step(pkg_step(0x1111111111111111ULL), problem));
+    MigrationSet content_b;
+    CHECK(content_b.register_component("pkg:t", 2, problem));
+    CHECK(content_b.register_step(pkg_step(0x2222222222222222ULL), problem));
+    CHECK(content_a.set_hash() != content_b.set_hash()); // same ref, different bytes -> no collision
+
+    MigrationSet content_a2;
+    CHECK(content_a2.register_component("pkg:t", 2, problem));
+    CHECK(content_a2.register_step(pkg_step(0x1111111111111111ULL), problem));
+    CHECK(content_a.set_hash() == content_a2.set_hash()); // same ref + same bytes -> equal
+
     // Registration-order independence: the same set registered in a different order hashes equal.
     MigrationSet order_a;
     CHECK(order_a.register_component("test:sprite", 3, problem));
