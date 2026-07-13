@@ -246,20 +246,17 @@ void run_roll3d()
 
 // --- platformer-2d ---------------------------------------------------------------------------------
 
-// The fixed input schedule the platformer-2d smoke gate established: run right, tap jump twice,
-// release and coast (the rightward run shoves the crate and crosses the coin).
+// The fixed input schedule the platformer-2d smoke gate established: run right so the player shoves
+// the box crate along the ground (box-box, issue #199), tap jump once past the crate, release and
+// coast (the rightward run shoves the crate a good distance and crosses the coin).
 std::vector<session::InputEvent> plat_raw_for_tick(int t)
 {
     std::vector<session::InputEvent> raw;
     if (t == 10)
         raw.push_back(session::InputEvent{"keyboard", "D", 1});
-    else if (t == 60)
-        raw.push_back(session::InputEvent{"keyboard", "Space", 1});
-    else if (t == 61)
-        raw.push_back(session::InputEvent{"keyboard", "Space", 0});
-    else if (t == 140)
-        raw.push_back(session::InputEvent{"keyboard", "Space", 1});
     else if (t == 150)
+        raw.push_back(session::InputEvent{"keyboard", "Space", 1});
+    else if (t == 151)
         raw.push_back(session::InputEvent{"keyboard", "Space", 0});
     else if (t == 200)
         raw.push_back(session::InputEvent{"keyboard", "D", 0});
@@ -408,9 +405,10 @@ void run_platformer2d()
     r.player_travel = abs_delta(player_spawn.position.x.raw, player_end.position.x.raw);
     CHECK(r.player_travel > (3LL << 16)); // P7: the injected input drove the player over 3 units
 
-    CHECK(game.jumps == 2);                                                    // P2 + P7
-    CHECK(game.landings >= 3);                                                 // P2
-    CHECK(abs_delta(crate_spawn.position.x.raw, crate_end.position.x.raw) > 0); // P2: crate shoved
+    CHECK(game.jumps == 1);                                                    // P2 + P7
+    CHECK(game.landings >= 2);                                                 // P2
+    CHECK(abs_delta(crate_spawn.position.x.raw, crate_end.position.x.raw) >
+          (1LL << 16)); // P2: the box crate shoved over a unit (box-box)
     CHECK(abs_delta(barrel_spawn.position.y.raw, barrel_end.position.y.raw) > (1LL << 16));
     CHECK(game.coin_collected == 1); // gameplay: the pickup happened
 

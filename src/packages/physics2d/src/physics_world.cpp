@@ -3,7 +3,9 @@
 // packages/physics3d. Every sim-affecting computation below is simmath integer arithmetic (including
 // the integer-only fixed_sin/fixed_cos for rotation); the ONLY float in this translation unit is the
 // conservative fixed->float broad-phase conversion (broadphase_coord / broadphase_box), which prunes
-// candidate pairs and never decides sim state (the exact fixed-point narrow phase does).
+// candidate pairs and never decides sim state (the exact fixed-point narrow phase does). The narrow
+// phase resolves circle-circle, circle-box, and box-box (an oriented-box SAT + reference-face clip
+// producing a up-to-two-point manifold) — all exact fixed-point.
 
 #include "context/packages/physics2d/physics_world.h"
 
@@ -265,41 +267,227 @@ struct Contact
     return true;
 }
 
-// Dispatch on the pair's shapes. Box-box pairs produce no contact in v1 (physics_world.h).
-[[nodiscard]] bool collide(const std::vector<BodyRef>& bodies, std::size_t ia, std::size_t ib,
-                           Contact& c) noexcept
+// --- box-box (oriented) SAT + reference-face clipping ---------------------------------------------
+//
+// Two oriented boxes as 4-vertex CCW polygons; the classic 2D separating-axis test + Sutherland-
+// Hodgman reference-face clip (the Box2D b2CollidePolygons shape), entirely in EXACT fixed-point with
+// NO sqrt and NO float on any path: the world axes u/w are the unit rotation-matrix columns, the edge
+// tangents are exact 90-degree rotations of the unit face normals, and every projection is an integer
+// dot product — so the contact manifold folds into the L-54 state hash byte-identically on every
+// platform. Emits up to TWO manifold points (a stable resting / stacking contact needs both), each
+// with its own penetration depth. A box is convex, so at most one contact per pair per solver pass is
+// wrong for resting stability — hence the two-point manifold, unlike the single-point circle paths.
+
+// Reference-face tie-break bias (Box2D's 0.1 * linearSlop): prefer keeping the same reference box
+// frame-to-frame when the two SAT separations are near-equal, for contact coherence.
+inline constexpr Fixed kBoxRefBias = Fixed::from_ratio(1, 1000);
+
+// An oriented box as a CCW 4-gon: world corners v[0..3] and the unit outward edge normals n[i]
+// (n[i] is the normal of the edge v[i] -> v[(i+1)%4]).
+struct BoxPoly
+{
+    Vec2 v[4];
+    Vec2 n[4];
+};
+
+// Build the oriented box polygon for body `b`. u/w are the world local-x / local-y axes (the unit
+// rotation columns), so the face normals are exact and need no normalization.
+[[nodiscard]] BoxPoly box_poly(const BodyRef& b) noexcept
+{
+    const Fixed hx = Fixed::from_raw(b.collider->ex);
+    const Fixed hy = Fixed::from_raw(b.collider->ey);
+    const Vec2 u{b.cos, b.sin};  // world local +x axis (unit)
+    const Vec2 w{-b.sin, b.cos}; // world local +y axis (unit)
+    const Vec2 ex = u * hx;
+    const Vec2 ey = w * hy;
+    BoxPoly p;
+    p.v[0] = b.pos - ex - ey; // bottom-left  (body frame)
+    p.v[1] = b.pos + ex - ey; // bottom-right
+    p.v[2] = b.pos + ex + ey; // top-right
+    p.v[3] = b.pos - ex + ey; // top-left
+    p.n[0] = -w; // bottom edge v0->v1
+    p.n[1] = u;  // right edge  v1->v2
+    p.n[2] = w;  // top edge    v2->v3
+    p.n[3] = -u; // left edge   v3->v0
+    return p;
+}
+
+// The max separation of `poly`'s faces from the deepest support point of `other` (Box2D's
+// b2FindMaxSeparation): for each face, project `other`'s nearest vertex against the face plane. A
+// positive result on any face means the boxes are disjoint along that axis.
+struct FaceQuery
+{
+    Fixed separation{};
+    int edge = 0;
+};
+
+[[nodiscard]] FaceQuery find_max_separation(const BoxPoly& poly, const BoxPoly& other) noexcept
+{
+    FaceQuery q;
+    for (int i = 0; i < 4; ++i)
+    {
+        const Vec2 n = poly.n[i];
+        Fixed min_proj = sm::dot(n, other.v[0]); // support of `other` along -n
+        for (int j = 1; j < 4; ++j)
+        {
+            const Fixed d = sm::dot(n, other.v[j]);
+            if (d < min_proj)
+                min_proj = d;
+        }
+        const Fixed sep = min_proj - sm::dot(n, poly.v[i]);
+        if (i == 0 || sep > q.separation)
+        {
+            q.separation = sep;
+            q.edge = i;
+        }
+    }
+    return q;
+}
+
+// Clip the segment `in[2]` to the half-plane { p : dot(normal, p) <= offset }, writing the kept
+// endpoints (and the crossing point) into `out`. Returns the count written (0..2). The crossing
+// parameter t is an exact Fixed divide; the sign test is overflow-free (no d0*d1 product).
+[[nodiscard]] int clip_segment(const Vec2 in[2], Vec2 normal, Fixed offset, Vec2 out[2]) noexcept
+{
+    int count = 0;
+    const Fixed d0 = sm::dot(normal, in[0]) - offset;
+    const Fixed d1 = sm::dot(normal, in[1]) - offset;
+    if (d0.raw <= 0)
+        out[count++] = in[0];
+    if (d1.raw <= 0)
+        out[count++] = in[1];
+    if (count < 2 && (d0.raw < 0) != (d1.raw < 0)) // straddles the plane: add the crossing point
+    {
+        const Fixed t = d0 / (d0 - d1);
+        out[count++] = in[0] + (in[1] - in[0]) * t;
+    }
+    return count;
+}
+
+// Oriented box a vs oriented box b: append up to two contacts (normal a->b, world point, penetration)
+// to `out`. Exact fixed-point SAT + reference-incident clipping.
+void box_box(const BodyRef& a, const BodyRef& b, std::size_t ia, std::size_t ib,
+             std::vector<Contact>& out) noexcept
+{
+    const BoxPoly pa = box_poly(a);
+    const BoxPoly pb = box_poly(b);
+
+    const FaceQuery qa = find_max_separation(pa, pb);
+    if (qa.separation.raw > 0)
+        return; // a separating axis on one of a's faces — disjoint
+    const FaceQuery qb = find_max_separation(pb, pa);
+    if (qb.separation.raw > 0)
+        return; // ... or on one of b's faces
+
+    // Reference box = the one whose least-penetrating face is least negative (a shallower overlap =
+    // the more face-aligned contact), with a small bias toward `a` for frame-to-frame coherence.
+    const bool ref_is_b = qb.separation > qa.separation + kBoxRefBias;
+    const BoxPoly& ref = ref_is_b ? pb : pa;
+    const BoxPoly& inc = ref_is_b ? pa : pb;
+    const int ref_edge = ref_is_b ? qb.edge : qa.edge;
+
+    const Vec2 ref_normal = ref.n[ref_edge]; // outward normal of the reference face (unit)
+    const Vec2 rv1 = ref.v[ref_edge];
+    const Vec2 rv2 = ref.v[(ref_edge + 1) & 3];
+
+    // Incident face = the face of `inc` most anti-parallel to the reference normal.
+    int inc_edge = 0;
+    Fixed min_dot = sm::dot(ref_normal, inc.n[0]);
+    for (int j = 1; j < 4; ++j)
+    {
+        const Fixed d = sm::dot(ref_normal, inc.n[j]);
+        if (d < min_dot)
+        {
+            min_dot = d;
+            inc_edge = j;
+        }
+    }
+    const Vec2 seg[2] = {inc.v[inc_edge], inc.v[(inc_edge + 1) & 3]};
+
+    // Clip the incident segment to the reference face's two side planes. The tangent is the exact
+    // 90-degree rotation of the unit reference normal (no sqrt).
+    const Vec2 tangent{-ref_normal.y, ref_normal.x};
+    Vec2 tmp[2];
+    if (clip_segment(seg, -tangent, -sm::dot(tangent, rv1), tmp) < 2)
+        return;
+    Vec2 clipped[2];
+    if (clip_segment(tmp, tangent, sm::dot(tangent, rv2), clipped) < 2)
+        return;
+
+    // ref_normal points out of the REFERENCE box toward the incident box: that is a->b when the
+    // reference is a, and b->a (negate) when the reference is b.
+    const Vec2 normal_ab = ref_is_b ? -ref_normal : ref_normal;
+    const Fixed ref_offset = sm::dot(ref_normal, rv1);
+
+    // Keep clipped points on/behind the reference face (penetrating) — each is a contact point.
+    for (int k = 0; k < 2; ++k)
+    {
+        const Fixed sep = sm::dot(ref_normal, clipped[k]) - ref_offset;
+        if (sep.raw > 0)
+            continue; // this clipped vertex is outside the reference face — not a contact
+        Contact c;
+        c.a = ia;
+        c.b = ib;
+        c.normal = normal_ab;
+        c.point = clipped[k];
+        c.penetration = -sep;
+        out.push_back(c);
+    }
+}
+
+// Dispatch on the pair's shapes, appending each produced contact to `out` (box-box may add two).
+void collide(const std::vector<BodyRef>& bodies, std::size_t ia, std::size_t ib,
+             std::vector<Contact>& out) noexcept
 {
     const BodyRef& a = bodies[ia];
     const BodyRef& b = bodies[ib];
-    c.a = ia;
-    c.b = ib;
-    if (a.collider->shape == kShapeCircle && b.collider->shape == kShapeCircle)
-        return circle_circle(a, b, c);
-    if (a.collider->shape == kShapeCircle && b.collider->shape == kShapeBox)
+    const std::int64_t sa = a.collider->shape;
+    const std::int64_t sb = b.collider->shape;
+
+    if (sa == kShapeCircle && sb == kShapeCircle)
+    {
+        Contact c;
+        c.a = ia;
+        c.b = ib;
+        if (circle_circle(a, b, c))
+            out.push_back(c);
+        return;
+    }
+    if (sa == kShapeCircle && sb == kShapeBox)
     {
         Vec2 n{};
         Vec2 p{};
         Fixed pen{};
-        if (!circle_box(a, b, n, p, pen))
-            return false;
-        c.normal = -n; // n points box(b) -> circle(a); the contact normal is a -> b
-        c.point = p;
-        c.penetration = pen;
-        return true;
+        if (circle_box(a, b, n, p, pen))
+        {
+            Contact c;
+            c.a = ia;
+            c.b = ib;
+            c.normal = -n; // n points box(b) -> circle(a); the contact normal is a -> b
+            c.point = p;
+            c.penetration = pen;
+            out.push_back(c);
+        }
+        return;
     }
-    if (a.collider->shape == kShapeBox && b.collider->shape == kShapeCircle)
+    if (sa == kShapeBox && sb == kShapeCircle)
     {
         Vec2 n{};
         Vec2 p{};
         Fixed pen{};
-        if (!circle_box(b, a, n, p, pen))
-            return false;
-        c.normal = n; // n points box(a) -> circle(b) == a -> b
-        c.point = p;
-        c.penetration = pen;
-        return true;
+        if (circle_box(b, a, n, p, pen))
+        {
+            Contact c;
+            c.a = ia;
+            c.b = ib;
+            c.normal = n; // n points box(a) -> circle(b) == a -> b
+            c.point = p;
+            c.penetration = pen;
+            out.push_back(c);
+        }
+        return;
     }
-    return false;
+    box_box(a, b, ia, ib, out); // box-box
 }
 
 // --- contact solver (iterative velocity impulses + positional correction) --------------------------
@@ -597,11 +785,7 @@ const char* PhysicsWorld2d::step(kn::World& world, Fixed dt)
     // --- narrow phase (exact fixed-point) -------------------------------------------------------
     std::vector<Contact> contacts;
     for (const auto& [ia, ib] : pairs)
-    {
-        Contact c;
-        if (collide(bodies, ia, ib, c))
-            contacts.push_back(c);
-    }
+        collide(bodies, ia, ib, contacts);
 
     // --- iterative velocity impulses -------------------------------------------------------------
     const int iterations = impl_->config.solver_iterations > 0 ? impl_->config.solver_iterations : 1;

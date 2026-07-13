@@ -20,10 +20,12 @@
 // order). The float prune can therefore only ever discard pairs the fixed-point narrow phase would also
 // reject — it never decides sim state.
 //
-// v1 narrow-phase scope: circle-circle and circle-box contacts (a box may be static or dynamic).
-// Box-box pairs are broad-phase detected but produce no contact in v1 (documented — the DoD scene is
-// dynamic circles + a pushable box on static box platforms/ramps). Inertia is the exact 2D scalar
-// moment (circle / box formula — a true scalar in 2D, not a simplification).
+// Narrow-phase scope: circle-circle, circle-box, AND box-box contacts (a box may be static or
+// dynamic). Box-box is an exact fixed-point oriented-box SAT (separating-axis test over the four face
+// normals, deepest-penetration reference axis) with a Sutherland-Hodgman reference-face clip that
+// produces an up-to-two-point contact manifold — the two-point manifold is what lets a box REST or
+// STACK on another box without tipping (a single-point contact cannot). Inertia is the exact 2D
+// scalar moment (circle / box formula — a true scalar in 2D, not a simplification).
 
 #pragma once
 

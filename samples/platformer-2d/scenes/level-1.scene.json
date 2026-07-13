@@ -87,7 +87,7 @@
       },
       "id": "b11a425f56358a49",
       "name": "Crate",
-      "notes": "The pushable crate: a dynamic body (mass 2) resting on the ground in the player's run path -- running into it shoves it along (the smoke gate asserts it moved). Its collider is a CIRCLE of radius 1 in the runtime mirror (the classic 2D round-collider-under-a-crate-sprite trick): the physics2d v1 narrow phase resolves circle-circle/circle-box only, so a box collider could not rest on the static box ground; swap to a box collider when the package grows box-box contacts."
+      "notes": "The pushable crate: a dynamic body (mass 2) resting on the ground in the player's run path -- running into it shoves it along (the smoke gate asserts it moved). Its collider is a BOX of half-extents (1, 1) in the runtime mirror: now that the physics2d narrow phase resolves box-box contacts (issue #199), a box crate rests on the static box ground -- the former round-collider-under-a-crate-sprite workaround has been reverted."
     },
     {
       "components": {

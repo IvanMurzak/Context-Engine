@@ -218,6 +218,9 @@ void build_scene(Scene& s)
     add_circle2(s, s.world.create(), {Fixed::from_int(3), Fixed::from_int(6)}, {-kOne, kOne},
                 Fixed::from_ratio(2, 5), Fixed::from_ratio(2, 5));
     {
+        // A dynamic box that RESTS on the static platform via the box-box narrow phase (issue #199):
+        // before box-box contacts existed it tunnelled through — enabling it moved this scene's
+        // golden (see kGolden* below).
         p2::BodyDesc box;
         box.position = {kZero, Fixed::from_int(2)};
         box.shape = p2::Shape::Box;
@@ -481,8 +484,11 @@ void tamper_animation(Scene& s)
 
 // The golden digests, derived on the reference build and asserted identical on every matrix platform
 // (Linux-x64 / Win-x64 / macOS-ARM64).
-constexpr std::uint64_t kGoldenFinalRoot = 0x120B11291D74B688ULL;
-constexpr std::uint64_t kGoldenTraceFold = 0xFD438111604AD641ULL;
+// (These shifted when physics2d grew box-box contacts — issue #199: the dynamic 2D box below now
+// RESTS on the static platform instead of tunnelling through it, so its trajectory — and the
+// combined per-tick hash — changed on purpose. Integer-only sim => the goldens stay portable.)
+constexpr std::uint64_t kGoldenFinalRoot = 0x518AF24CC1F475FFULL;
+constexpr std::uint64_t kGoldenTraceFold = 0xDD433246B5CAECADULL;
 } // namespace
 
 int main()
