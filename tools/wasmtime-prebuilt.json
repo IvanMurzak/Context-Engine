@@ -1,0 +1,26 @@
+{
+    "$comment": "Pinned, SHA-verified wasmtime C-API prebuilt channel for the sandboxed WASM package-migration runner tier (src/runtime/wasm/, issue #71 / L-37 / L-62 / R-SEC-009). SINGLE source of truth for the pins — parsed by tools/fetch_wasmtime.py (download + verify-before-use + extract). src/runtime/wasm/CMakeLists.txt forwards this file's PATH to fetch_wasmtime.py (it does NOT parse the pins itself, so they are never duplicated) and derives the staged include/ + lib/ layout by convention. Channel = bytecodealliance/wasmtime SHA-pinned third-party prebuilt C-API archive — the same wgpu-native / CEF / rusty_v8 third-party-prebuilt precedent codified in docs/signing.md: a third-party build lib authenticated by its OWN publisher via TLS + SHA-pin + verify-before-use, explicitly OUT of scope for the engine R-SEC-009 first-party trust root (so this deliberately does NOT route through tools/verify_artifact.py). Unlike the V8 channel (a gzipped static lib PLUS a separate version-locked header crate), each wasmtime platform ships ONE archive carrying BOTH the C headers (include/wasmtime.h + wasm.h) AND the libs (static libwasmtime.a on unix, the wasmtime.dll import lib on Windows). Runtime = wasmtime-Cranelift (owner ruling 2026-07-12, memory context-engine-71-wasm-runtime-ruling.md): deterministic per-instruction fuel metering (wasmtime consume_fuel) is L-37's hard need (no wall-clock limits). VERSION-COHERENCE (each platform's archive name embeds wasmtime_version) is asserted at runtime, fail-closed, by fetch_wasmtime.py and statically by tools/tests/test_fetch_wasmtime.py. The per-platform SHA-256 pins are the CI-proven ones from the wasm spike (spikes/wasm/CMakeLists.txt — the SAME wasmtime 46.0.1 C-API prebuilt, already fetched + compiled-against on all 3 OS by the spike-wasm CI job). This is PR 1 of the #71 chain and is INERT: it acquires + exposes the C-API as the context_wasm target but links it into nothing that runs and executes no wasm — the deterministic WasmRunner (budget->fuel, catalog codes) lands in PR 3. A from-source owned vcpkg wasmtime port (full Rust toolchain) is a separate pre-1.0 hardening task, exactly as for V8.",
+    "wasmtime_version": "46.0.1",
+    "release_url_template": "https://github.com/bytecodealliance/wasmtime/releases/download/v{wasmtime_version}/{archive}",
+    "header": "wasmtime.h",
+    "platforms": {
+        "x86_64-linux": {
+            "archive": "wasmtime-v46.0.1-x86_64-linux-c-api.tar.xz",
+            "format": "tar.xz",
+            "sha256": "4b7e7acf08467de6147f11c8fb71c4db7623035064c096976aa969d54171fed4",
+            "lib": "libwasmtime.a"
+        },
+        "aarch64-macos": {
+            "archive": "wasmtime-v46.0.1-aarch64-macos-c-api.tar.xz",
+            "format": "tar.xz",
+            "sha256": "f2a33c780715cbe740ca888ed3ee38a197d970800ca1b117b338db3aed819333",
+            "lib": "libwasmtime.a"
+        },
+        "x86_64-windows": {
+            "archive": "wasmtime-v46.0.1-x86_64-windows-c-api.zip",
+            "format": "zip",
+            "sha256": "5f09e0eb900d83afbbc2dd71183ff3de37ae99c79397acd22c0524f6f32361b8",
+            "lib": "wasmtime.dll.lib"
+        }
+    }
+}
