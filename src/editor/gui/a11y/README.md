@@ -37,14 +37,30 @@ A panel is **covered** only when it appears in **both**:
    harness can instantiate + audit it.
 2. **`coverage.manifest.jsonl`** — one JSON object per line declaring the panel must be scanned.
 
-`tools/a11y_scan.py` fails CI if the two disagree (a panel registered but undeclared, or declared
-but not registered/scanned). Both files are append-only and marked `merge=union` in
-`.gitattributes`, so concurrent M5 fan-out waves append their panel without conflicts.
+Two guards fail CI if the two anchors disagree (a panel registered but undeclared, or declared but
+not registered/scanned):
 
-### Adding a panel (M5 fan-out)
+- **`gui-a11y-coverage`** — the STANDING C++ contract guard (`tests/test_coverage.cpp`). Reads
+  `coverage.manifest.jsonl` and `registered_panels()` and asserts they name the SAME set. Because it
+  is CEF-free it runs on the **default 3-OS `build` matrix** and the local dev gate, so the drift is
+  caught in the panel's OWN PR — not only on the CEF-gated `editor-cef-smoke` leg. It hardcodes no
+  panel names, so it never goes stale as panels land in later milestones.
+- **`tools/a11y_scan.py`** — the CEF-side DOM re-scan gate; it additionally cross-checks the manifest
+  against the *scanned* panels (blocking on the `editor-cef-smoke` Linux leg).
+
+`coverage.manifest.jsonl` is the single source of truth (there are no per-panel `coverage/*.json`
+fragment files — the pre-manifest migration ones were removed). It is append-only and marked
+`merge=union` in `.gitattributes`, so concurrent fan-out waves append their panel without conflicts.
+
+### Adding a panel — register a11y WITH the panel (same PR)
+
+a11y registration is part of a panel's OWN landing wave, NOT a trailing harness wave — the
+process fix for the M5-F4 gap, where the Problems panel landed before the harness and shipped
+uncovered. In the SAME PR that lands a panel:
 
 1. Append one `RegisteredPanel{"<id>", &<factory>}` line to `registered_panels()` in `registry.cpp`.
 2. Append one `{"id": "<id>", "title": "...", "owner": "<task>", "requires": ["semantic-scan", "keyboard-nav"]}`
    line to `coverage.manifest.jsonl`.
-3. Ship the panel's own tests in the same PR (R-QA-013). The `gui-a11y-scan` ctest + the CI gate
-   then enforce a11y on the new panel automatically — no CI-workflow edit needed.
+3. Link the panel's library into `context_gui_a11y` (a11y `CMakeLists.txt`).
+4. Ship the panel's own tests in the same PR (R-QA-013). The `gui-a11y-scan` + `gui-a11y-coverage`
+   ctests + the CI gate then enforce a11y on the new panel automatically — no CI-workflow edit needed.
