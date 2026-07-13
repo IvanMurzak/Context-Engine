@@ -49,6 +49,12 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextWarnings.cmake)
 # it themselves under a `if(NOT COMMAND context_download)` guard.
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextDownload.cmake)
 
+# Shared CEF-acquisition macro: context_acquire_cef() (../cmake/ContextCef.cmake, Context-Engine#214) —
+# fetch/verify the pinned CEF prebuilt + find_package(CEF) + build libcef_dll_wrapper. Included here
+# (unconditionally, like the two modules above) so BOTH CONTEXT_BUILD_GUI_CEF call sites — src/editor/cef/
+# (M5-F0a) and src/editor/gui/host/ (M5-F0b) — share one definition instead of duplicating the prologue.
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextCef.cmake)
+
 # Threads: the bridge IPC transport uses <thread> (backoff sleep) and the cross-process tests spawn a
 # server thread; on Linux/GCC that requires -pthread. Threads::Threads is a no-op on the Windows/MSVC
 # and MinGW legs (native threads), so the toolchain matrix is untouched.
