@@ -48,6 +48,37 @@ namespace fs = std::filesystem;
 using context::editor::bridge::TransportClient;
 using context::editor::contract::Json;
 
+// --- sanitizer-aware timeout scaling -------------------------------------------------------------
+// Instrumented builds boot the REAL `context daemon` child far slower: on the `sanitize`
+// (ASan+UBSan) leg under concurrent runner load the m1-exit-3 kill-9 recovery test's daemon boot
+// has overshot the plain 15s discovery-hint wait ~2/3 of the time — a FLAKE, not a defect (see
+// docs/sanitizer-v8-false-positives.md § Related). Under a sanitizer, widen the cross-process
+// boot wait by kSanitizerTimeoutScale so the boot race has headroom; the plain dev/CI legs are
+// unchanged (scale 1). The `sanitize` preset compiles ASan+UBSan together and the `tsan` preset
+// compiles TSan, so detecting ASan OR TSan covers both CI sanitizer legs (GCC exposes the
+// __SANITIZE_* macros; Clang signals via __has_feature).
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+#define CONTEXT_ITEST_SANITIZED 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+#define CONTEXT_ITEST_SANITIZED 1
+#endif
+#endif
+
+#if defined(CONTEXT_ITEST_SANITIZED)
+inline constexpr int kSanitizerTimeoutScale = 4;
+#else
+inline constexpr int kSanitizerTimeoutScale = 1;
+#endif
+
+// Scale a base wall-clock wait (ms) for the active sanitizer; identity on a non-instrumented
+// build. Never shrinks a timeout (kSanitizerTimeoutScale >= 1, asserted below).
+inline constexpr int scaled_timeout_ms(int base_ms)
+{
+    return base_ms * kSanitizerTimeoutScale;
+}
+static_assert(kSanitizerTimeoutScale >= 1, "sanitizer timeout scale must never shrink a timeout");
+
 inline fs::path make_temp_project(const char* tag)
 {
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();

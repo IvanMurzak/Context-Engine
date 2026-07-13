@@ -196,7 +196,9 @@ set_tests_properties(cli-test_fetch_e2e PROPERTIES TIMEOUT 60)
 # (see runtime/ts/lsan-suppressions.txt — they can never mask a `context::` leak) are the
 # operative fix; the vptr diagnostics remain as known-benign stderr noise. Wired uniformly onto
 # EVERY cli test (spawned `context` children inherit the env); inert on the stub (non-V8) build,
-# so no _ctx_js_v8 gate is needed (same rationale as the TSan block).
+# so no _ctx_js_v8 gate is needed (same rationale as the TSan block). Full root-cause
+# determination (proven tooling false-positive) + the deferred at-source UBSan `vptr_check`
+# recipe: docs/sanitizer-v8-false-positives.md (issue #201).
 if(CONTEXT_SANITIZE)
     set_tests_properties(
         cli-test_bench_command

@@ -119,7 +119,9 @@ std::optional<MidOpKill> attempt_mid_op_kill(const std::string& bin, int attempt
 
     ctest_proc::Process daemon = ctest_proc::spawn(bin, {"daemon", "--project", project.string()});
     CHECK(ctest_proc::valid(daemon));
-    CHECK(itest::wait_for_instance(project, 15000));
+    // Widen the daemon-boot discovery-hint wait under a sanitizer (instrumented boot is far
+    // slower under concurrent runner load — see integration_test.h § sanitizer-aware timeout).
+    CHECK(itest::wait_for_instance(project, itest::scaled_timeout_ms(15000)));
 
     itest::RpcClient rpc;
     CHECK(rpc.connect(project));
@@ -211,7 +213,8 @@ int main()
     const std::string stale_hint = itest::read_file(project / ".editor" / "instance.json");
     ctest_proc::Process daemon2 = ctest_proc::spawn(bin, {"daemon", "--project", project.string()});
     CHECK(ctest_proc::valid(daemon2));
-    CHECK(itest::wait_for_instance(project, 15000, stale_hint));
+    // Same sanitizer-aware widening for the post-crash restart boot (see the first wait above).
+    CHECK(itest::wait_for_instance(project, itest::scaled_timeout_ms(15000), stale_hint));
 
     // ---- a RECONNECTING (read-only) client gets a fresh snapshot on the NEW incarnation ---------
     {
