@@ -315,3 +315,124 @@ if(CONTEXT_SANITIZE)
         PROPERTIES ENVIRONMENT
         "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
 endif()
+
+# ===================================================================================================
+# The M6 EXIT GATE (design §M6-EXIT / issue #197) — the core-systems milestone-closing mirror of the
+# M1/M2/M4/M5 gates: five blocking per-PR ctests on every OS leg (registered in
+# docs/ci-fleet-manifest.json as the m6-exit-* gates; run by the "M6 exit gate" step in
+# .github/workflows/ci.yml). They RIDE the landed M6 machinery — the EXIT-A sample games (#194),
+# the X1 GC-pause profiler channel (#189), the X2 netsync harness (#191), and the X3 combined
+# gameplay determinism scene (#193) — rather than rebuilding any of it:
+#   m6-exit-1-games-run          — both games headless-step N ticks through the session surface with
+#                                  every landed package visibly active (R-QA-005 simTick + queries)
+#   m6-exit-2-gc-budget          — sustained movement.ts run: every JS-tier GC pause inside the
+#                                  R-SIM-008 inter-tick budget via the X1 channel (R-LANG-012)
+#   m6-exit-3-determinism-wedge  — the EXIT alias over the X3 combined-scene wedge gate (same
+#                                  executable: cross-platform golden hash + determinism-diff triage)
+#   m6-exit-4-netcode-harness    — the roll-3d moving-body scene replicated between two sessions on
+#                                  the composed-id identity + dirty/delta metadata, converging
+#   m6-exit-5-seam-checklist     — the executable M6 seam audit (one assertion per seam)
+
+# Self-contained GCC runtime (mirrors m1/m2/m5-exit + src/cli): these executables use
+# std::filesystem / stream IO, whose newer-libstdc++ symbols a stale PATH libstdc++-6.dll could
+# shadow (STATUS_ENTRYPOINT_NOT_FOUND). Gated to GNU so the macOS/Clang + Windows/MSVC CI legs are
+# untouched.
+set(_m6_exit_static_runtime
+    $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
+
+# --- m6-exit-1: both EXIT-A games run headless through the shipped session surface ---------------
+add_executable(context_test_m6exit1_games_run test_m6exit1_games_run.cpp)
+target_link_libraries(context_test_m6exit1_games_run PRIVATE context_sample_games context_warnings)
+target_link_options(context_test_m6exit1_games_run PRIVATE ${_m6_exit_static_runtime})
+target_include_directories(context_test_m6exit1_games_run PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(context_test_m6exit1_games_run PRIVATE
+    CONTEXT_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/../samples")
+add_test(NAME m6-exit-1-games-run COMMAND context_test_m6exit1_games_run)
+
+# --- m6-exit-2: the R-SIM-008 / R-LANG-012 GC-budget verdict over the authored movement.ts --------
+# Links the X1 profiler channel (context_profile PUBLICly carries context_js — the REAL V8 backend
+# on the CI legs, the stub locally) + the esbuild toolchain driver (context_ts). The staged esbuild
+# path is exported by src/runtime/ts (CONTEXT_ESBUILD_BIN); the test branches at RUNTIME on
+# v8BackendAvailable(), so no CONTEXT_JS_HAS_V8 define plumbing is needed here.
+add_executable(context_test_m6exit2_gc_budget test_m6exit2_gc_budget.cpp)
+target_link_libraries(context_test_m6exit2_gc_budget
+    PRIVATE context_ts context_profile context_warnings)
+target_link_options(context_test_m6exit2_gc_budget PRIVATE ${_m6_exit_static_runtime})
+target_include_directories(context_test_m6exit2_gc_budget PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(context_test_m6exit2_gc_budget PRIVATE
+    CONTEXT_ESBUILD_PATH="${CONTEXT_ESBUILD_BIN}"
+    CONTEXT_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/../samples")
+# Same UBSan `vptr` false-positive carve-out as runtime/ts's V8-linking test TUs (issue #104): this
+# TU's own std stream/file IO sits in a binary bundling the UNINSTRUMENTED rusty_v8 prebuilt (its
+# Chromium libc++ RTTI confuses the vptr sub-check on valid libstdc++ streams). ASan + every other
+# UBSan check stay ON; dev/CI release builds are byte-identical; non-MSVC only (a Clang/GCC flag).
+if(CONTEXT_SANITIZE AND NOT MSVC)
+    target_compile_options(context_test_m6exit2_gc_budget PRIVATE -fno-sanitize=vptr)
+endif()
+add_test(NAME m6-exit-2-gc-budget COMMAND context_test_m6exit2_gc_budget)
+
+# --- m6-exit-3: the EXIT alias over the X3 combined-gameplay determinism wedge gate ---------------
+# EXTENDS/RIDES the X3 gate (issue #192) instead of duplicating it: the SAME executable
+# (context_session_determinism_gameplay — the physics-active + animated + particle combined scene,
+# its cross-platform golden hierarchical state-hash, and the `context determinism diff` triage
+# attribution) registered under the m6-exit- family, so the milestone exit formally blocks on the
+# wedge law (L-54: byte-identical on Linux-x64 / Win-x64 / macOS-ARM64 — each build leg asserts the
+# same golden). The F0a `deterministic:true` attestation from actually-applied strict-FP flags
+# stays gated by the blocking `deterministic` job (determinism-attestation), whose hand-maintained
+# --target list is deliberately UNCHANGED (this alias registers no new determinism-* ctest name).
+add_test(NAME m6-exit-3-determinism-wedge COMMAND context_session_determinism_gameplay)
+
+# --- m6-exit-4: the moving-body scene replicated between two sessions (L-48 / R-NET-001) ----------
+add_executable(context_test_m6exit4_netcode_harness test_m6exit4_netcode_harness.cpp)
+target_link_libraries(context_test_m6exit4_netcode_harness
+    PRIVATE context_sample_games context_netsync context_warnings)
+target_link_options(context_test_m6exit4_netcode_harness PRIVATE ${_m6_exit_static_runtime})
+target_include_directories(context_test_m6exit4_netcode_harness PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(context_test_m6exit4_netcode_harness PRIVATE
+    CONTEXT_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/../samples")
+add_test(NAME m6-exit-4-netcode-harness COMMAND context_test_m6exit4_netcode_harness)
+
+# --- m6-exit-5: the executable M6 seam audit (one assertion per seam) -----------------------------
+add_executable(context_test_m6exit5_seam_checklist test_m6exit5_seam_checklist.cpp)
+target_link_libraries(context_test_m6exit5_seam_checklist
+    PRIVATE context_session context_physics3d context_physics2d context_animation
+            context_particles context_spline context_input context_audio context_netsync
+            context_determinism context_warnings)
+target_link_options(context_test_m6exit5_seam_checklist PRIVATE ${_m6_exit_static_runtime})
+target_include_directories(context_test_m6exit5_seam_checklist PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# Seam 1 (the microkernel invariant) is a source audit: it scans the REAL src/kernel/ tree for
+# package includes, so a reach-back can never land silently.
+target_compile_definitions(context_test_m6exit5_seam_checklist PRIVATE
+    CONTEXT_KERNEL_SRC_DIR="${CMAKE_SOURCE_DIR}/kernel")
+add_test(NAME m6-exit-5-seam-checklist COMMAND context_test_m6exit5_seam_checklist)
+
+# Gate 1 runs both 240-tick games; gate 2 boots V8 + 600 scheduled GC windows; the wedge alias
+# re-runs the 5-fixture combined scene. Cap each so a regression never hangs the CI job.
+set_tests_properties(
+    m6-exit-1-games-run
+    m6-exit-4-netcode-harness
+    m6-exit-5-seam-checklist
+    PROPERTIES TIMEOUT 240)
+set_tests_properties(m6-exit-2-gc-budget m6-exit-3-determinism-wedge PROPERTIES TIMEOUT 300)
+
+# Sanitizer-preset wiring for the ONE m6-exit gate that links the uninstrumented rusty_v8 archive
+# (m6-exit-2 via context_profile -> context_js): the same narrow suppressions the sibling V8-linking
+# tests wire — LSan's demangler/symbolizer scratch under ASan (can never mask a `context::` leak)
+# and the benign V8-internal worker-pool races under TSan. The sanitizer presets are non-MSVC only,
+# where the V8 backend links (the stub legs never configure them), so no _ctx_js_v8 re-derivation is
+# needed; the env is inert if the stub is forced.
+if(CONTEXT_SANITIZE)
+    set_tests_properties(m6-exit-2-gc-budget PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
+endif()
+if(CONTEXT_TSAN)
+    set_tests_properties(m6-exit-2-gc-budget PROPERTIES ENVIRONMENT
+        "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/js/tsan-suppressions.txt")
+    # TSan's per-access instrumentation inflates measured wall-clock GC-pause duration far beyond
+    # the real R-SIM-008 budget (observed maxPauseMs=113.027 vs the true 4.167ms budget on an
+    # otherwise-green CI run, while the SAME commit's ASan+UBSan leg measured maxPauseMs=0.991) —
+    # a sanitizer-overhead artifact, not a regression. Widen the enforced budget on THIS preset
+    # only; the blocking gate ("M6 exit gate" CI step, `ctest --preset dev`) never sets
+    # CONTEXT_TSAN and always enforces the real, unwidened budget.
+    target_compile_definitions(context_test_m6exit2_gc_budget PRIVATE CONTEXT_TSAN_BUILD=1)
+endif()

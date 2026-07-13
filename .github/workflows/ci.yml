@@ -126,11 +126,11 @@ jobs:
         run: cmake --build --preset dev
         working-directory: src
 
-      # Every registered suite EXCEPT the M1 + M2 + M4 + M5 exit gates, the M3 determinism gate, and
-      # the samples-corpus gate — those families run in their own named steps below so each
-      # milestone/QA gate is legible per OS leg (same tests, each runs exactly once).
+      # Every registered suite EXCEPT the M1 + M2 + M4 + M5 + M6 exit gates, the M3 determinism
+      # gate, and the samples-corpus gate — those families run in their own named steps below so
+      # each milestone/QA gate is legible per OS leg (same tests, each runs exactly once).
       - name: Run test suites (ctest)
-        run: ctest --preset dev --verbose -E "^m1-exit-|^m2-exit-|^m4-exit-|^m5-exit-|^determinism-|^samples-corpus"
+        run: ctest --preset dev --verbose -E "^m1-exit-|^m2-exit-|^m4-exit-|^m5-exit-|^m6-exit-|^determinism-|^samples-corpus"
         working-directory: src
 
       # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36) — the five exit criteria as a BLOCKING
@@ -199,6 +199,25 @@ jobs:
       # m5-exit-* gates.
       - name: M5 exit gate (observer-editor walkthrough + a11y/coverage + seam checklist, blocking)
         run: ctest --preset dev --output-on-failure -R "^m5-exit-"
+        working-directory: src
+
+      # The M6 EXIT GATE (design §M6-EXIT / issue #197) — the core-systems milestone-closing mirror
+      # of the M1/M2/M4/M5 gates: five blocking per-PR ctests on every OS leg, RIDING the landed M6
+      # machinery. Both EXIT-A sample games headless-step through the shipped RuntimeKernel session
+      # surface with every gameplay package visibly active (R-QA-005); a sustained run of the
+      # authored samples/platformer-2d/scripts/movement.ts in the REAL V8 host keeps every JS-tier
+      # GC pause inside the R-SIM-008 inter-tick budget via the X1 profiler channel (R-LANG-012);
+      # the X3 combined-gameplay determinism wedge (cross-platform golden state-hash + triage) is
+      # re-asserted as the exit alias; the X2 netsync harness replicates the roll-3d moving-body
+      # scene between two sessions on the composed-id identity + dirty/delta metadata and converges
+      # (L-48 / R-NET-001); and the executable M6 seam checklist audits one assertion per seam.
+      # All headless: no GPU, no audio device (miniaudio null backend). This job builds EVERY
+      # target via `--preset dev`, so each gate's executable is always built (never "Not Run"); the
+      # strict-FP `deterministic` job's hand-maintained --target list is deliberately unchanged
+      # (the exit alias registers no new determinism-* ctest name). Registered in
+      # docs/ci-fleet-manifest.json as the m6-exit-* gates. Green here CLOSES M6.
+      - name: M6 exit gate (games-run + gc-budget + determinism wedge + netcode + seam checklist, blocking)
+        run: ctest --preset dev --output-on-failure -R "^m6-exit-"
         working-directory: src
 
       - name: sccache stats
