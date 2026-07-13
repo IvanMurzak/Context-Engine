@@ -1,0 +1,23 @@
+src/runtime/wasm/README.md
+  s_4d68fcead85c12::t_8452328e33456c 40-45
+src/runtime/wasm/tests/test_wasm_determinism.cpp
+  s_4d68fcead85c12::t_821f920d86232b 2-22,29-35,37-40
+  s_4d68fcead85c12::t_f6a9ad72d7d6eb 265-268,275-283
+  s_4d68fcead85c12::t_24d407887e2dbb 69-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "92d6d0c87a0633754387a878e3e03cc6114f4b2d",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
