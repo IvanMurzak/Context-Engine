@@ -1,0 +1,43 @@
+src/packages/physics2d/CMakeLists.txt
+  s_4d68fcead85c12::t_ff6bdc53a2ba25 51-54,61
+src/packages/physics2d/src/physics_world.cpp
+  s_4d68fcead85c12::t_d5f25689f09f4b 788
+  s_4d68fcead85c12::t_e2ed54a8b52e58 6-8
+  s_4d68fcead85c12::t_92c1cbbc0c230c 270-440,444-456,461-471,473,478-488,490
+src/packages/physics2d/tests/test_boxbox.cpp
+  s_4d68fcead85c12::t_d8a91da1d6364f 1-204
+samples/platformer-2d/scenes/level-1.scene.json
+  s_4d68fcead85c12::t_a50e0f3515d262 90
+src/runtime/session/tests/determinism_gameplay_scene.cpp
+  s_4d68fcead85c12::t_ac560bcced2e18 221-223
+  s_4d68fcead85c12::t_3872147918dd63 487-491
+src/tests/integration/games/platformer2d_scenario.cpp
+  s_4d68fcead85c12::t_f7814505661cf4 206-214,218
+  s_4d68fcead85c12::t_c059e0f60df05e 217
+src/tests/integration/test_game_platformer2d.cpp
+  s_4d68fcead85c12::t_eef738fbcc006a 281-282
+  s_4d68fcead85c12::t_96715a0bd62f4e 70-74
+  s_4d68fcead85c12::t_a3ffb12272fcfe 309-312
+  s_4d68fcead85c12::t_e72c4de628fd97 81-82
+src/tests/integration/test_m6exit1_games_run.cpp
+  s_4d68fcead85c12::t_1f36434c90a27d 249-251,258-259
+  s_4d68fcead85c12::t_7f56c25bd57e69 408-411
+src/packages/physics2d/include/context/packages/physics2d/physics_world.h
+  s_4d68fcead85c12::t_f971d06dfba22b 23-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "396203181c2efd1d9105a81493f0f2fc6d7735b8",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
