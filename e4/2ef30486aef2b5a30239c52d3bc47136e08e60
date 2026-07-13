@@ -1,0 +1,31 @@
+docs/deprecation-policy.md
+  s_4d68fcead85c12::t_351989d4753052 9,11-13,16-19
+  s_4d68fcead85c12::t_84037f988ad135 67-68
+  s_4d68fcead85c12::t_bec0cac68e8a05 75-76,78,80-85
+src/runtime/session/src/replay.cpp
+  s_4d68fcead85c12::t_1ae3a66a295bbd 72-75
+src/runtime/session/tests/test_replay.cpp
+  s_4d68fcead85c12::t_a2db11a0b5a646 48-50
+src/tests/integration/CMakeLists.txt
+  s_4d68fcead85c12::t_68075936aaaae4 160-162
+docs/query-language.md
+  s_4d68fcead85c12::t_f392c842ad776f 15-19
+samples/README.md
+  s_4d68fcead85c12::t_961dd694c68a34 5-8,10-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "e42ef30486aef2b5a30239c52d3bc47136e08e60",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
