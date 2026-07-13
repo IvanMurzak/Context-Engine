@@ -1146,7 +1146,7 @@ jobs:
       - name: a11y enforcement gate (per-panel scan + keyboard-nav + coverage, Linux blocking)
         if: runner.os == 'Linux'
         run: |
-          cmake --build --preset dev --target context_gui_a11y_scan context_gui_a11y_test_harness
+          cmake --build --preset dev --target context_gui_a11y_scan context_gui_a11y_test_harness context_gui_a11y_test_coverage
           ctest --preset dev -R "^gui-a11y-" --output-on-failure
           a11y_scan_exe="$(find build/dev -type f -name context_gui_a11y_scan | head -n1)"
           "$a11y_scan_exe" --out build/dev/a11y-report.json

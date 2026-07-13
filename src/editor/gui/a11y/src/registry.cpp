@@ -65,10 +65,11 @@ std::vector<RegisteredPanel> registered_panels()
     // M5-F4 — the Problems observer panel (gui/panels/problems/). The harness scans its default (empty
     // diagnostic set) rendered state, exactly as it scans the other panels' defaults; the panel's own
     // gui-panel-problems-test_a11y ctest additionally covers its navigable / provisional / grouped
-    // states. Registered by the M5 EXIT gate (issue #168): M5-F4 (#159) landed the panel but left its
-    // a11y coverage as a defensive src/editor/gui/a11y/coverage/problems.json fragment expecting F6 to
-    // ingest it; the exit gate completes the coverage manifest by registering it HERE + adding the
-    // matching builtin.problems line to coverage.manifest.jsonl (tools/a11y_scan.py cross-checks both).
+    // states. Registered by the M5 EXIT gate (issue #168): M5-F4 (#159) landed the panel but left it
+    // uncovered (it landed before the F6 harness), so the exit gate completed the coverage manifest by
+    // registering it HERE + adding the matching builtin.problems line to coverage.manifest.jsonl (the
+    // gui-a11y-coverage guard + tools/a11y_scan.py cross-check the two). The old defensive per-panel
+    // coverage/*.json fragments were removed once the monolithic manifest superseded them (issue #206).
     panels.push_back(RegisteredPanel{
         panels::problems::ProblemsPanel::kContributionId,
         []() { return panels::problems::ProblemsPanel{}.build_panel(); }});

@@ -45,3 +45,15 @@ target_link_libraries(context_gui_a11y_test_harness PRIVATE context_gui_a11y con
 target_link_options(context_gui_a11y_test_harness PRIVATE ${_context_gui_a11y_static_runtime})
 target_include_directories(context_gui_a11y_test_harness PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME gui-a11y-test_harness COMMAND context_gui_a11y_test_harness)
+
+# The standing coverage-contract guard (gui-a11y-coverage ctest): registered_panels() and
+# coverage.manifest.jsonl must name the SAME panel set, so a panel added to one without the other
+# fails the CEF-free default 3-OS build matrix in its own PR (not just the CEF-gated a11y_scan.py leg).
+# It reads the manifest via std::ifstream, so static-link the GCC runtime like the harness above.
+add_executable(context_gui_a11y_test_coverage tests/test_coverage.cpp)
+target_link_libraries(context_gui_a11y_test_coverage PRIVATE context_gui_a11y context_warnings)
+target_link_options(context_gui_a11y_test_coverage PRIVATE ${_context_gui_a11y_static_runtime})
+target_include_directories(context_gui_a11y_test_coverage PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+target_compile_definitions(context_gui_a11y_test_coverage PRIVATE
+    CONTEXT_GUI_A11Y_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/coverage.manifest.jsonl")
+add_test(NAME gui-a11y-coverage COMMAND context_gui_a11y_test_coverage)
