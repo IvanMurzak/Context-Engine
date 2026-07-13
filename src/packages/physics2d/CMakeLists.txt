@@ -48,12 +48,17 @@ set(_context_physics2d_static_runtime
 #     resting contact on a static floor, circle-circle impulse exchange + momentum, ramp slide
 #     (circle-vs-rotated-box contact), static bodies never move, far-apart bodies never interact,
 #     within-run determinism (two identical scenes hash identically after N steps);
+#   - test_boxbox: the fixed-point oriented-box SAT + reference-face clip (issue #199) — a dynamic
+#     box rests on a static box floor (no tunnel/tip via the two-point manifold), overlapping boxes
+#     resolve apart, a box is pushable, a two-box stack settles + stays stacked, and the box-box
+#     path is deterministic (two identical scenes hash identically after N steps);
 #   - test_errors: the fail-closed physics2d.* refusals (invalid shape / mass / entity / step,
 #     missing component set), the world left untouched on refusal, static-body no-op impulse, and
 #     the code strings pinned to the contract catalog's physics2d.* block.
 set(_context_physics2d_tests
     test_components
     test_dynamics
+    test_boxbox
     test_errors)
 
 foreach(_t IN LISTS _context_physics2d_tests)

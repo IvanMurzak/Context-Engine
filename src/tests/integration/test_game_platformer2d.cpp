@@ -67,21 +67,19 @@ void fail(const char* file, int line, const char* expr)
 
 constexpr int kTicks = 240;
 
-// The fixed input schedule (the recorded "player"): settle the spawn drop, run right (D held),
-// tap jump twice mid-run (Space press + release), then release and coast. The rightward run
-// shoves the crate and crosses the coin.
+// The fixed input schedule (the recorded "player"): settle the spawn drop, run right (D held) so
+// the player runs INTO the box crate and shoves it along the ground (the box-box contact — issue
+// #199), tap jump once past the crate (Space press + release, grounded), then release and coast.
+// The rightward run shoves the crate a good distance and crosses the coin. (A jump before the
+// crate would clear it in one arc without shoving it, so the shove comes first, then the jump.)
 std::vector<session::InputEvent> raw_for_tick(int t)
 {
     std::vector<session::InputEvent> raw;
     if (t == 10)
         raw.push_back(session::InputEvent{"keyboard", "D", 1});
-    else if (t == 60)
-        raw.push_back(session::InputEvent{"keyboard", "Space", 1}); // jump tap (grounded)
-    else if (t == 61)
-        raw.push_back(session::InputEvent{"keyboard", "Space", 0});
-    else if (t == 140)
-        raw.push_back(session::InputEvent{"keyboard", "Space", 1}); // held: fires on touch-down
     else if (t == 150)
+        raw.push_back(session::InputEvent{"keyboard", "Space", 1}); // jump tap (grounded)
+    else if (t == 151)
         raw.push_back(session::InputEvent{"keyboard", "Space", 0});
     else if (t == 200)
         raw.push_back(session::InputEvent{"keyboard", "D", 0}); // release; coast to the end
@@ -280,8 +278,8 @@ RunResult run_fixture()
 
 // The golden digests, derived on the reference build and asserted identical on every matrix
 // platform (Linux-x64 / Win-x64 / macOS-ARM64).
-constexpr std::uint64_t kGoldenFinalRoot = 0x93EF5B50C4D8FECFULL;
-constexpr std::uint64_t kGoldenTraceFold = 0x92174A3C237700BCULL;
+constexpr std::uint64_t kGoldenFinalRoot = 0xE26C6329382E7435ULL;
+constexpr std::uint64_t kGoldenTraceFold = 0xEE082D3136200C5FULL;
 } // namespace
 
 int main()
@@ -308,10 +306,10 @@ int main()
     CHECK(a.player_travel_x > (3LL << 16)); // the player ran well over 3 world units
 
     // --- P2: platform physics is genuinely active ------------------------------------------------
-    CHECK(a.jumps == 2);            // both jump taps converted (grounded at each press)
-    CHECK(a.landings >= 3);         // the spawn drop + both jump landings
-    CHECK(a.crate_travel > 0);      // the run shoved the pushable crate
-    CHECK(a.barrel_drop > (1LL << 16)); // the barrel fell onto Platform-A
+    CHECK(a.jumps == 1);            // the grounded jump tap converted
+    CHECK(a.landings >= 2);         // the spawn drop + the jump landing
+    CHECK(a.crate_travel > (1LL << 16)); // the run shoved the pushable BOX crate over a unit (box-box)
+    CHECK(a.barrel_drop > (1LL << 16));  // the barrel fell onto Platform-A
 
     // --- P4: the landing puffs emitted (and some particles were alive mid-run) -------------------
     CHECK(a.emitted > 0);

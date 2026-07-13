@@ -203,16 +203,19 @@ void register_platformer2d_scenario(const std::string& samples_dir)
             }
             const kernel::Entity crate = w.create();
             {
-                // The pushable crate carries a CIRCLE collider (radius 1): the physics2d v1 narrow
-                // phase resolves circle-circle and circle-box only — box-box pairs produce no
-                // contact — so a box-collider crate cannot REST on the static box ground. The
-                // classic 2D trick (a round collider under a crate sprite) keeps the crate real:
-                // it rests on the ground, and the player genuinely shoves it (asserted by the
-                // smoke gate). Swap to a box collider when the package grows box-box contacts.
+                // The pushable crate carries a BOX collider (half-extents (0.5, 0.5) — a 1x1 crate):
+                // now that the physics2d narrow phase resolves box-box contacts (issue #199), a box
+                // crate settles onto the static box ground and the player genuinely shoves it along
+                // the ground (asserted by the smoke gate), reverting the classic round-collider-
+                // under-a-crate-sprite trick the v1 narrow phase forced. A 1x1 crate keeps the
+                // crate at the player's run height so a run into it is a shove (a 2-unit-tall box
+                // would instead be a ledge the player jumps onto). It drops the half unit from its
+                // authored center (y == 1) onto the ground (top at y == 0, center rests at 0.5)
+                // in the first ticks, before the player arrives.
                 p2::BodyDesc d;
                 d.position = fixed_pos2(*crate_p);
-                d.shape = p2::Shape::Circle;
-                d.half_extents = {kOne, kOne};
+                d.shape = p2::Shape::Box;
+                d.half_extents = {Fixed::from_ratio(1, 2), Fixed::from_ratio(1, 2)};
                 d.mass = Fixed::from_int(2);
                 d.friction = Fixed::from_ratio(2, 5);
                 d.restitution = Fixed::from_ratio(1, 10);
