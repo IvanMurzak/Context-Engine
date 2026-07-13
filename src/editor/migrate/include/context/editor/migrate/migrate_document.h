@@ -18,6 +18,11 @@
 namespace context::editor::migrate
 {
 
+// The sandboxed-migration execution seam (migration_runner.h). Forward-declared: this header only
+// takes a `const MigrationRunner*` (a nullable pointer — a caller that INJECTS a runner includes
+// migration_runner.h, but a caller that migrates only engine-native payloads needs no VM header).
+class MigrationRunner;
+
 // One machine-readable migration finding. `code` is drawn from the R-CLI-008 catalog
 // (migration.step_missing / migration.step_failed / migration.budget_exceeded /
 // migration.id_mutated / migration.runner_unavailable / migration.orphan_override /
@@ -43,6 +48,15 @@ struct MigrateOptions
     // stamped payloads only and never invents header entries in the in-memory view.
     bool stamp_registered_sites = false;
     MigrationBudget budget{};
+
+    // The sandboxed-migration execution seam (L-37 / issue #71). NULL (the default) keeps the
+    // honest migration.runner_unavailable refusal for every package_sandboxed step — the parse-time
+    // engine never runs package migrations unsandboxed. When a runner IS injected (the wasmtime
+    // runtime, PR3 of the #71 chain), package_sandboxed steps are routed THROUGH it under the same
+    // host-side contract the engine_native tier obeys (budget, canonical, id immutability). Owned by
+    // the caller; must outlive the migrate_document call. Non-const: a runner is a stateful executor
+    // (the wasmtime backend caches a module/store) — running a step may mutate its internals.
+    MigrationRunner* runner = nullptr;
 };
 
 // The outcome of migrating one document in memory.
@@ -85,9 +99,11 @@ struct DocumentMigrationResult
 // never misread as document structure.
 //
 // Around every step invocation the engine enforces the L-37 execution contract:
-//   - tier gating: package_sandboxed steps are REFUSED in-process (migration.runner_unavailable)
-//     until the sandboxed WASM runner lands (tracked follow-up: issue #71) — the contract is
-//     registered, execution is stubbed;
+//   - tier gating: package_sandboxed steps run ONLY through the injected sandboxed MigrationRunner
+//     (MigrateOptions::runner — the wasmtime runtime, issue #71). With NO runner injected they are
+//     REFUSED in-process (migration.runner_unavailable) — never run unsandboxed. With one injected
+//     the step is routed to the guest per the frozen ABI (migration_runner.h) under this SAME
+//     contract (budget, canonical, id immutability re-checked host-side);
 //   - budget: input/output payloads over budget.max_nodes are refused (migration.budget_exceeded);
 //   - id immutability: the exact multiset of ("id"/"guid" member pointer, canonical value) inside
 //     the payload must survive the step unchanged — no mutation, move, addition, or removal
@@ -137,11 +153,15 @@ struct DocumentMigrationResult
 //                                              (step_failed / budget_exceeded / id_mutated /
 //                                              runner_unavailable). On ANY blocking finding the
 //                                              payload is ROLLED BACK to its pre-call bytes.
-// Returns true iff the payload is at the current version afterward.
+// `runner` is the sandboxed-migration seam forwarded to every package_sandboxed step (default null:
+// the honest migration.runner_unavailable refusal, so the RuntimeKernel save path loads player saves
+// through EXACTLY the parse-time refusal until the runner lands). Returns true iff the payload is at
+// the current version afterward.
 [[nodiscard]] bool migrate_payload(const MigrationSet& set, std::string_view component_type,
                                    std::int64_t from_version, serializer::JsonValue& payload,
                                    const MigrationBudget& budget, std::string_view site_pointer,
-                                   std::vector<MigrationDiagnostic>& diagnostics);
+                                   std::vector<MigrationDiagnostic>& diagnostics,
+                                   MigrationRunner* runner = nullptr);
 
 // Count the JSON nodes of a payload subtree (the budget metric: every value + every object member
 // counts one). Exposed for tests pinning the budget rule.

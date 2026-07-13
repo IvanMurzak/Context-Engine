@@ -29,7 +29,8 @@ target_link_libraries(context_migrate PRIVATE context_warnings)
 set(_context_migrate_tests
     test_migration_set
     test_migrate_document
-    test_path_transform)
+    test_path_transform
+    test_migration_runner)
 
 foreach(_t IN LISTS _context_migrate_tests)
     add_executable(context_migrate_${_t} tests/${_t}.cpp)

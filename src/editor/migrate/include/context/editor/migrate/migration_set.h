@@ -17,15 +17,17 @@ namespace context::editor::migrate
 {
 
 // Execution tiers (L-37). Engine-shipped migrations are first-party C++ run in-process NOW;
-// package-shipped migrations execute ONLY in the sandboxed WASM tier — v1 registers the tier's
-// CONTRACT (budget, purity, determinism, CI round-trips) and REFUSES in-process execution of
-// package steps until the VM component (an EditorKernel component booted before pass-1 parsing —
-// R-FILE-005 cold-start order: lock → index → watcher → VM → registration → content parse) is
-// stood up. See MigrationBudget and migrate_document.h for the contract's enforcement points.
+// package-shipped migrations execute ONLY in the sandboxed WASM tier, routed through an INJECTED
+// MigrationRunner (migration_runner.h — the wasmtime runtime, issue #71). With no runner injected
+// the tier boundary keeps the honest migration.runner_unavailable refusal (the CONTRACT — budget,
+// purity, determinism, CI round-trips — is registered; package steps are never run unsandboxed).
+// The VM is an EditorKernel component booted before pass-1 parsing (R-FILE-005 cold-start order:
+// lock → index → watcher → VM → registration → content parse). See MigrationBudget and
+// migrate_document.h for the contract's enforcement points.
 enum class MigrationTier
 {
     engine_native,     // first-party, in-process; purity is CI-enforced (fixture round-trips)
-    package_sandboxed, // WASM sandboxed tier ONLY — contract-stubbed in v1 (VM not stood up)
+    package_sandboxed, // WASM sandboxed tier ONLY — routed through the injected MigrationRunner seam
 };
 
 // The per-invocation execution budget (L-37: "a pathological migration cannot hang derivation").
