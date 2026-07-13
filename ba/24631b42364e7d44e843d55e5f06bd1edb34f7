@@ -1,0 +1,23 @@
+spikes/webgpu/CMakeLists.txt
+  s_4d68fcead85c12::t_6c6efb219a10bb 144-150
+spikes/webgpu/src/main.cpp
+  s_4d68fcead85c12::t_8d3b316ae522bb 641-657
+spikes/webgpu/FINDINGS.md
+  s_4d68fcead85c12::t_114f5fec927f2e 132-140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "ba24631b42364e7d44e843d55e5f06bd1edb34f7",
+  "prompts": {},
+  "sessions": {
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
