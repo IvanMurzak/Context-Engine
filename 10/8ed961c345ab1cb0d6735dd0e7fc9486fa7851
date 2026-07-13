@@ -1,0 +1,68 @@
+src/editor/migrate/tests/test_migration_runner.cpp
+  s_4d68fcead85c12::t_96f9c3a6c1971b 1-285
+src/editor/migrate/CMakeLists.txt
+  s_4d68fcead85c12::t_0595a7561d23c1 32-33
+src/editor/migrate/include/context/editor/migrate/migrate_document.h
+  s_4d68fcead85c12::t_2c52409dea7768 102-106
+  s_4d68fcead85c12::t_fe948122ba204b 51-56
+  s_4d68fcead85c12::t_e2c0eeebe5ae83 164
+  s_4d68fcead85c12::t_36d70d91e21412 57-59
+  s_4d68fcead85c12::t_f06d1d59875659 21-25
+  s_4d68fcead85c12::t_3669d5b1728b0a 163
+  s_4b00789af277a9::t_9aaf9014630755 156-159
+src/editor/migrate/src/migrate_document.cpp
+  s_4d68fcead85c12::t_0677bc259a09ed 228
+  s_4d68fcead85c12::t_385ec9b69fc54f 5,7
+  s_4d68fcead85c12::t_6a07166ff887bc 682
+  s_4d68fcead85c12::t_d42e4ac7b60a1e 503
+  s_4d68fcead85c12::t_a6f16dab292cb2 564
+  s_4d68fcead85c12::t_8c0f27a249551b 334
+  s_4d68fcead85c12::t_76ac9690efe417 335,342-343
+  s_4d68fcead85c12::t_826737671e6146 700-703
+  s_4d68fcead85c12::t_47905b6006d7ce 176-181,183-223,225-226,229,231-235,241-242,248,264-267,269-281
+  s_4d68fcead85c12::t_514ad1032ebbe5 461-462
+  s_4d68fcead85c12::t_7a962b9e28c1d3 502
+  s_4d68fcead85c12::t_088c7c9a9b3230 423-440
+  s_4d68fcead85c12::t_756e099cd89249 182
+src/editor/migrate/README.md
+  s_4d68fcead85c12::t_baaee2b2c9053f 33-51
+  s_4d68fcead85c12::t_eb15f0ab8ff06a 25
+src/editor/migrate/include/context/editor/migrate/migration_runner.h
+  s_4d68fcead85c12::t_d20e34b533d3b2 1-137
+src/editor/migrate/include/context/editor/migrate/migration_set.h
+  s_4d68fcead85c12::t_117c1459aa6035 20-26,30
+src/editor/migrate/tests/mock_runner.h
+  s_3c149407cdd5d4::t_053b150eb34e4c 1-90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "108ed961c345ab1cb0d6735dd0e7fc9486fa7851",
+  "prompts": {},
+  "sessions": {
+    "s_3c149407cdd5d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "845aef5f-a4aa-4844-b9e6-479df3530c09",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_4b00789af277a9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a5a0c483b2adebe5e",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_4d68fcead85c12": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e554db1e-8d99-4f43-8cb8-319a6b2dfb3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
