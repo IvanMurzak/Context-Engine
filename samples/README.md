@@ -2,12 +2,14 @@
 
 Maintained, runnable Context sample projects that exercise the **breadth** of the public contract
 surface. This is the **agent / benchmark** few-shot set (learning-by-example for an AI author),
-distinct from the human-onboarding set (R-HUX-010). It is the prerequisite the ROADMAP (§1, M3 exit)
-names for the owner-gated contract freeze (R-CLI-004, `protocolMajor` `0`→`1`): the corpus must have
-**exercised the surface** before the freeze.
+distinct from the human-onboarding set (R-HUX-010). It was the prerequisite the ROADMAP (§1, M3 exit)
+named for the owner-gated contract freeze (R-CLI-004, `protocolMajor` `0`→`1`) — the corpus had to
+**exercise the surface** before the freeze — and that freeze has since landed (PR #113):
+`protocolMajor` is now `1` (FROZEN), with the R-CLI-010 deprecation lifecycle active.
 
-> This corpus does **NOT** perform the freeze — `protocolMajor` stays `0`. It is the freeze-*readiness*
-> artifact.
+> This corpus continues to serve as the maintained breadth-of-surface gate post-freeze — every
+> registered verb, RPC method, MCP tool, and file kind must stay covered — it is not a one-time
+> freeze-readiness artifact that retires once the freeze lands.
 
 ## Maintained — the corpus rots the build if it breaks
 

@@ -69,6 +69,10 @@ ReplayArtifact record_replay(const SessionConfig& config, const InputStream& str
     artifact.tick_count = ticks;
     artifact.scenario = session.scenario();
     artifact.engine_version = CONTEXT_ENGINE_VERSION;
+    // Literal, not `kProtocolMajor` (src/editor/contract/include/context/editor/contract/handshake.h):
+    // context_session does not (and should not) link context_contract — runtime/session stays
+    // decoupled from the editor/contract layer boundary. Mirror this value if kProtocolMajor ever
+    // moves past 1.
     artifact.protocol_major = 1; // the FROZEN contract major (kProtocolMajor, M3 freeze, R-CLI-004)
     artifact.input_stream = session.input_log();
     artifact.content_manifest = std::move(manifest);
