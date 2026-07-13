@@ -331,3 +331,9 @@ if(_ctx_js_v8 AND CONTEXT_SANITIZE)
         ENVIRONMENT
         "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan-suppressions.txt")
 endif()
+
+# Export the staged esbuild binary path to the parent (src/) scope so sibling test trees added
+# AFTER this directory (src/tests/integration — the m6-exit-2 GC-budget gate bundles the authored
+# samples/platformer-2d/scripts/movement.ts through the same pinned toolchain) reuse the one
+# fetched + SHA-verified binary instead of re-staging their own.
+set(CONTEXT_ESBUILD_BIN "${_ctx_esbuild_bin}" PARENT_SCOPE)

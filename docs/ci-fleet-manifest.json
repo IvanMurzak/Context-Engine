@@ -432,6 +432,56 @@
       "description": "M5 exit criterion 3 (issue #168): the M5 observer-editor SEAM CHECKLIST as an executable audit (the milestone-closing mirror of m2-exit-6) — one assertion per M5 seam so a regression that quietly drops one turns the gate red: the R-EDIT-001 extension contract (deny-by-default trust boundary), the L-41 per-platform CEF surface handoff (never SendExternalBeginFrame), the headless UI-logic tree + a11y hook, the F2/F3/F4/F5/F1/F7 panel seams over the ONE bridge + the ONE `context set` write path (L-35/L-20/L-30/L-51/L-22/R-HUX-001), the F6 a11y coverage tie, the R-HUX-011 human-loop listener seams, and the error-catalog minting discipline (viewport.* + play.* are the reserved minted domains) (ctest m5-exit-3-seam-checklist; all three build-matrix legs)."
     },
     {
+      "id": "m6-exit-games-run",
+      "requirement": "R-QA-005",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M6 exit criterion 1 (design §M6-EXIT, issue #197): BOTH EXIT-A sample games (samples/roll-3d/ + samples/platformer-2d/, issue #194) build and headless-step N fixed ticks through the shipped RuntimeKernel session surface — moving/animated physics objects, particles emitting, audio events firing on miniaudio's NULL backend, injected input driving the player through the REAL context_input router — asserted against the R-QA-005 simTick counter and state queries. No GPU, no audio device; the cross-platform golden digests stay owned by the per-game smoke ctests (game-smoke-*). Runs in the blocking 'M6 exit gate' named step of the build job on all three build-matrix legs (ctest m6-exit-1-games-run)."
+    },
+    {
+      "id": "m6-exit-gc-budget",
+      "requirement": "R-SIM-008",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M6 exit criterion 2 (design §M6-EXIT, issue #197): over a SUSTAINED run of the 2D game's authored TypeScript gameplay (samples/platformer-2d/scripts/movement.ts, transpiled by the pinned esbuild toolchain and executed in the REAL V8 host), the X1 GC-pause profiler channel (L-47, PR #189) shows EVERY JS-tier GC pause inside the R-SIM-008 inter-tick budget (a quarter of the fixed 60 Hz timestep — the `context profile gc` definition), fail-closed on any engine-side record loss (R-LANG-012 verdict). CI-only for its V8 dependency path (the local Strawberry-GCC dev gate builds the js stub and asserts the toolchain half only). Runs in the blocking 'M6 exit gate' named step of the build job on all three build-matrix legs (ctest m6-exit-2-gc-budget)."
+    },
+    {
+      "id": "m6-exit-determinism-wedge",
+      "requirement": "R-SIM-005",
+      "runner_class": "determinism-matrix",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M6 exit criterion 3 (design §M6-EXIT, issue #197): the physics-active + animated + particle COMBINED gameplay scene's hierarchical state-hash is byte-identical on Linux-x64 / Win-x64 / macOS-ARM64 and the `context determinism diff` triage attributes injected divergences to the exact (tick, system, entity, componentField) — the EXIT ALIAS over the X3-hardened wedge gate (issue #192, PR #193): ctest m6-exit-3-determinism-wedge re-runs the SAME context_session_determinism_gameplay executable in the blocking 'M6 exit gate' named step, so the milestone exit formally blocks on the L-54 wedge law without duplicating the scene. The F0a deterministic:true attestation from actually-applied strict-FP flags stays gated by the deterministic job's blocking deterministic-attestation row (its hand-maintained --target list is unchanged)."
+    },
+    {
+      "id": "m6-exit-netcode-harness",
+      "requirement": "R-NET-001",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M6 exit criterion 4 (design §M6-EXIT, issue #197): the L-48/R-NET-001 state-sync harness (src/runtime/netsync, PR #191) replicates the REAL roll-3d game's MOVING-BODY scene between two sessions — the source is the shipped 'roll-3d' RuntimeKernel session (the authority, its ball input-driven through the real router), the replica a bare kernel World that never runs physics — on the composed-id network identity + the dirty/delta replication metadata, and CONVERGES byte-identically (full snapshot first, the static floor culled from every later delta). Runs in the blocking 'M6 exit gate' named step of the build job on all three build-matrix legs (ctest m6-exit-4-netcode-harness)."
+    },
+    {
+      "id": "m6-exit-seam-checklist",
+      "requirement": "R-SIM-001",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M6 exit criterion 5 (design §M6-EXIT, issue #197): the M6 core-systems SEAM CHECKLIST as an executable audit (the milestone-closing mirror of m2-exit-6 / m5-exit-3) — one assertion per M6 seam so a regression that quietly drops one turns the gate red: the microkernel invariant (no src/kernel/ source includes a package header — L-60), every sim package composes on the ONE kernel World, the whole-build deterministic property (the attestation is PRODUCED from actually-applied strict-FP flags and fails closed — R-SIM-005), package sim-components fold into the hierarchical state hash by stable name, audio + cosmetic particles are presentation observers OFF the sim path (R-SIM-001), the input UI-vs-gameplay routing arbitration (R-SYS-007 / L-45), replication metadata bound to the composed id (L-48 / L-37), and the minter discipline (each package confined to its F0a-reserved catalog domain block) (ctest m6-exit-5-seam-checklist; all three build-matrix legs)."
+    },
+    {
       "id": "minspec-floor-proxy-measure",
       "requirement": "R-QA-007",
       "runner_class": "gh-ubuntu-shared",
