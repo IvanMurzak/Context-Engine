@@ -8,14 +8,14 @@
 # built + booted ONLY by the editor-cef-smoke CI job on all 3 desktop OS. The default matrix + local
 # dev gate never enter it (src/editor/gui/CMakeLists.txt only add_subdirectory(host) under the toggle).
 #
-# SHARED CEF ACQUISITION (deliberate): src/editor/cef/ (processed FIRST — it is add_subdirectory'd
-# above this in src/CMakeLists.txt) already fetches + verifies the pinned CEF prebuilt and builds the
-# libcef_dll_wrapper + libcef_lib targets. This file RE-RUNS the acquisition prologue (idempotent —
-# fetch_cef.py has a stamp; the cache knobs are CACHE ... FORCE; find_package(CEF) re-populates the CEF
-# macros/vars in THIS directory scope) but GUARDS the two target-creating calls (add_subdirectory
+# SHARED CEF ACQUISITION: src/editor/cef/ (processed FIRST — it is add_subdirectory'd above this in
+# src/CMakeLists.txt) already fetches + verifies the pinned CEF prebuilt and builds the
+# libcef_dll_wrapper + libcef_lib targets. Both call sites share the acquisition prologue via
+# cmake/ContextCef.cmake's context_acquire_cef() macro (Context-Engine#214) — it is idempotent
+# (fetch_cef.py has a stamp; the cache knobs are CACHE ... FORCE; find_package(CEF) re-populates the
+# CEF macros/vars in THIS directory scope) and guards the two target-creating calls (add_subdirectory
 # libcef_dll / ADD_LOGICAL_TARGET) with `if(NOT TARGET ...)` so processing both subdirs in one
-# configure never double-defines libcef_dll_wrapper. A future cleanup could hoist this into a shared
-# cmake/ContextCef.cmake module consumed by both editor/cef and editor/gui/host (dedup opportunity).
+# configure never double-defines libcef_dll_wrapper.
 #
 # WARNINGS POSTURE (mirrors src/editor/cef/): this host does NOT link context_warnings — CEF ships its
 # own curated -Werror set (SET_EXECUTABLE_TARGET_PROPERTIES), and the repo's -Wpedantic baseline is
@@ -27,54 +27,10 @@ if(NOT CONTEXT_BUILD_GUI_CEF)
     return()
 endif()
 
-# --- resolve the host triple (must match a tools/cef-prebuilt.json key; identical to editor/cef) ---
-set(_cef_triple "")
-if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
-    if(NOT MSVC)
-        message(FATAL_ERROR "CONTEXT_BUILD_GUI_CEF on Windows needs the MSVC-ABI CEF prebuilt; build \
-with MSVC (the editor-cef-smoke CI job does — VsDevCmd + Ninja + cl on the self-hosted runner).")
-    endif()
-    set(_cef_triple "x86_64-pc-windows-msvc")
-elseif(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
-    set(_cef_triple "aarch64-apple-darwin")
-elseif(UNIX AND NOT APPLE AND CMAKE_SIZEOF_VOID_P EQUAL 8
-       AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64|X86_64")
-    set(_cef_triple "x86_64-unknown-linux-gnu")
-else()
-    message(FATAL_ERROR "CONTEXT_BUILD_GUI_CEF: no CEF prebuilt pinned for \
-${CMAKE_SYSTEM_NAME}/${CMAKE_SYSTEM_PROCESSOR} (tools/cef-prebuilt.json has Linux-x64 / macOS-ARM64 / \
-Win-x64).")
-endif()
-
-# --- fetch + verify the pinned CEF prebuilt (idempotent; same dest as editor/cef so CEF_ROOT matches)
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
-set(_cef_manifest "${CMAKE_SOURCE_DIR}/../tools/cef-prebuilt.json")
-set(_cef_fetch "${CMAKE_SOURCE_DIR}/../tools/fetch_cef.py")
-set(_cef_dest "${CMAKE_BINARY_DIR}/_cef/${_cef_triple}")
-execute_process(
-    COMMAND "${Python3_EXECUTABLE}" "${_cef_fetch}"
-            --manifest "${_cef_manifest}" --triple "${_cef_triple}" --dest "${_cef_dest}"
-    RESULT_VARIABLE _cef_rc OUTPUT_VARIABLE _cef_out ERROR_VARIABLE _cef_err)
-if(NOT _cef_rc EQUAL 0)
-    message(FATAL_ERROR
-        "context_gui_host: CEF prebuilt fetch/verify FAILED (rc=${_cef_rc}) — refusing to build "
-        "against an unverified CEF (R-SEC-009 fail-closed).\nstdout: ${_cef_out}\nstderr: ${_cef_err}")
-endif()
-
-# --- consume the CEF distribution's own CMake (idempotent cache knobs; mirrors editor/cef) ----------
-set(USE_SANDBOX OFF CACHE BOOL "" FORCE)
-set(CEF_RUNTIME_LIBRARY_FLAG "/MD" CACHE STRING "" FORCE)
-set(USE_ATL OFF CACHE BOOL "" FORCE)
-set(CEF_ROOT "${_cef_dest}" CACHE INTERNAL "Pinned CEF distribution root")
-list(APPEND CMAKE_MODULE_PATH "${CEF_ROOT}/cmake")
-find_package(CEF REQUIRED)
-SET_CEF_TARGET_OUT_DIR()
-
-# The shared libcef_dll_wrapper target is built by src/editor/cef (processed first). Guard so it is
-# never defined twice when both subdirs are processed in one CONTEXT_BUILD_GUI_CEF configure.
-if(NOT TARGET libcef_dll_wrapper)
-    add_subdirectory("${CEF_ROOT}/libcef_dll" "${CMAKE_CURRENT_BINARY_DIR}/libcef_dll_wrapper")
-endif()
+# Shared CEF-acquisition prologue (identical macro invocation as src/editor/cef/; see its comment +
+# cmake/ContextCef.cmake). Idempotent — the libcef_dll_wrapper target guard inside the macro means
+# this SECOND call is a no-op past the fetch/find_package(CEF) step.
+context_acquire_cef(context_gui_host editor-cef-smoke)
 
 set(_host_target context_gui_host)
 # The headless gui libs this host is BUILT ON (R-EDIT-001: every built-in panel built on the contract).
