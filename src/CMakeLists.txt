@@ -515,6 +515,19 @@ add_subdirectory(packages/input)
 # generate time regardless of add_subdirectory order).
 add_subdirectory(runtime/js)
 
+# M3-exit A / #71 (PR 1 of 4): the sandboxed WASM package-migration runner tier's INERT wasmtime
+# C-API supply-chain leg (src/runtime/wasm/, L-37 / L-62 / R-SEC-009). Acquires + exposes the
+# SHA-pinned wasmtime C-API prebuilt as the context_wasm target (tools/wasmtime-prebuilt.json +
+# tools/fetch_wasmtime.py — TLS + SHA-256 pin + verify-before-use, fail-closed; the V8/rusty_v8 +
+# wgpu-native + CEF third-party-prebuilt precedent). A CI-only dependency path GATED behind
+# CONTEXT_BUILD_WASM (default OFF): the local Strawberry-GCC dev gate + the default 3-OS build matrix
+# never fetch it (the subdir early-returns), so this add is inert for the routine gate. It links into
+# NOTHING and runs NO wasm — the deterministic WasmRunner (which links context_wasm + flips the option
+# ON) lands in PR 3; the src/editor/migrate/ MigrationRunner seam lands in PR 2 (untouched here). OWN
+# stanza next to its runtime/js sibling — consumers name the `context_wasm` target, resolved at
+# generate time regardless of add_subdirectory order.
+add_subdirectory(runtime/wasm)
+
 # M3 task 5: the R-SEC-005 engine-driven install path (src/editor/pkg/, issue #100) — the security
 # envelope for the TS scripting tier's npm installs: pinned-version + lockfile-integrity enforcement
 # (incl. transitive), scripts-requiring -> native-tier L-49 consent gate, and extract-without-scripts
