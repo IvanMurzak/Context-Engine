@@ -608,7 +608,7 @@ jobs:
         run: cmake -S src --preset dev -DCONTEXT_BUILD_WASM=ON -DCONTEXT_WASM_REQUIRE_RUNTIME=ON
 
       - name: Build the WasmRunner tests
-        run: cmake --build --preset dev --target context_wasm_test_wasm_runner context_wasm_test_wasm_fuel context_wasm_test_wasm_migrate_document
+        run: cmake --build --preset dev --target context_wasm_test_wasm_runner context_wasm_test_wasm_fuel context_wasm_test_wasm_migrate_document context_wasm_test_wasm_fail_closed context_wasm_test_wasm_determinism
         working-directory: src
 
       - name: wasm-runner ctests (deterministic config + budget->fuel + trap mapping + e2e)

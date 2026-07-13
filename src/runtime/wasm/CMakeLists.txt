@@ -167,16 +167,21 @@ endif()
 
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) -------------------------------
 # Plain assertion-bearing executables registered with ctest (the sibling module pattern), names
-# `wasm-runner-*` — the regex the dedicated CI job runs. In REAL mode the guests are tiny WAT
-# modules assembled at runtime via wasmtime_wat2wasm (the C-API ships the .wat frontend), so no
-# binary .wasm is committed here (the committed fixture corpus is PR 4). In STUB mode only the core
-# test builds, asserting the stub's honest refusal. Test names deliberately avoid the
-# install/setup/update/patch tokens (setup.md — Windows UAC installer detection).
+# `wasm-runner-*` — the regex the dedicated CI job runs. In REAL mode the failure-mode guests are
+# tiny WAT modules assembled at runtime via wasmtime_wat2wasm (the C-API ships the .wat frontend);
+# the happy-path DETERMINISM gate drives the COMMITTED fixtures/migrate_hp.wasm (issue #71 PR4) off
+# disk via CONTEXT_WASM_FIXTURE_DIR. In STUB mode only the core test builds, asserting the stub's
+# honest refusal. Test names deliberately avoid the install/setup/update/patch tokens (setup.md —
+# Windows UAC installer detection). NOTE: a NEW wasm-runner-* test executable must ALSO be added to
+# the `wasm-runner` CI job's hand-maintained `cmake --build ... --target` list in
+# .github/workflows/ci.yml, or it reports "Not Run" -> RED (the hardcoded-target caveat).
 if(_ctx_wasm_runtime)
     set(_ctx_wasm_tests
         test_wasm_runner
         test_wasm_fuel
-        test_wasm_migrate_document)
+        test_wasm_migrate_document
+        test_wasm_fail_closed
+        test_wasm_determinism)
 else()
     set(_ctx_wasm_tests test_wasm_runner)
 endif()
@@ -205,3 +210,11 @@ foreach(_t IN LISTS _ctx_wasm_tests)
     endif()
     add_test(NAME wasm-runner-${_t} COMMAND context_wasm_${_t})
 endforeach()
+
+# The determinism gate reads the COMMITTED fixture corpus off disk (byte-reproducible artifacts, not
+# runtime-assembled WAT) — hand it the fixtures dir. Only defined in real mode (the target exists
+# only there; the fixtures are executed by wasmtime).
+if(_ctx_wasm_runtime)
+    target_compile_definitions(context_wasm_test_wasm_determinism
+        PRIVATE CONTEXT_WASM_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+endif()

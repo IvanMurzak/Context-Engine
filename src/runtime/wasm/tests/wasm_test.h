@@ -2,8 +2,10 @@
 // modules' tests/*_test.h — the repo carries no C++ test framework), plus the WAT guest corpus the
 // REAL-backend tests assemble at runtime via wasmtime_wat2wasm (the C-API ships the .wat
 // frontend). Guests here are tiny, purpose-built probes of the frozen PR2 guest ABI
-// (ctx_alloc / ctx_migrate / optional ctx_map_path over exported linear memory, ZERO imports) —
-// the committed .wasm fixture corpus is PR 4, so nothing binary is checked in here.
+// (ctx_alloc / ctx_migrate / optional ctx_map_path over exported linear memory, ZERO imports). The
+// COMMITTED, byte-reproducible .wasm fixture corpus (PR 4) lives under fixtures/ and is loaded off
+// disk by the determinism gate via load_fixture() (below); the WAT guests here remain the
+// runtime-assembled probes for the failure modes and the fine-grained ABI surface.
 
 #pragma once
 
@@ -360,6 +362,78 @@ inline constexpr const char* kWatMapPath = R"WAT(
     (i32.const 0)))
 )WAT";
 
+// --- fail-closed guests (issue #71 PR4): guest outputs the host structural gate must REFUSE -------
+// The host re-checks every invariant AROUND a runner call (budget, id immutability), so a guest
+// that returns "valid but forbidden" bytes is rejected and the document rolls back all-or-nothing.
+
+// Mutates an id: emits a payload whose "id" differs from the input's — the host id-multiset check
+// (collect_ids before/after) must fail (migration.id_mutated). ctx_migrate ignores the input and
+// stores the fixed canonical bytes {"id":"beefbeef","hp":2} (24 bytes).
+inline constexpr const char* kWatMutatesId = R"WAT(
+(module
+  (memory (export "memory") 4)
+  (data (i32.const 4096) "{\22id\22:\22beefbeef\22,\22hp\22:2}")
+  (global $next (mut i32) (i32.const 8192))
+  (func (export "ctx_alloc") (param $size i32) (result i32)
+    (local $ptr i32)
+    (local.set $ptr (global.get $next))
+    (global.set $next (i32.add (global.get $next) (local.get $size)))
+    (local.get $ptr))
+  (func (export "ctx_migrate") (param $in i32) (param $inlen i32) (param $outpp i32) (param $outlp i32) (result i32)
+    (i32.store (local.get $outpp) (i32.const 4096))
+    (i32.store (local.get $outlp) (i32.const 24))
+    (i32.const 0)))
+)WAT";
+
+// Output over the node budget: emits a 31-byte payload {"a":1,"b":2,"c":3,"d":4,"e":5} (11 JSON
+// nodes) that the host's POST-step node-count check refuses under a small budget
+// (migration.budget_exceeded) even though the fuel grant was ample and the guest returned 0.
+inline constexpr const char* kWatBigOutput = R"WAT(
+(module
+  (memory (export "memory") 4)
+  (data (i32.const 4096) "{\22a\22:1,\22b\22:2,\22c\22:3,\22d\22:4,\22e\22:5}")
+  (global $next (mut i32) (i32.const 8192))
+  (func (export "ctx_alloc") (param $size i32) (result i32)
+    (local $ptr i32)
+    (local.set $ptr (global.get $next))
+    (global.set $next (i32.add (global.get $next) (local.get $size)))
+    (local.get $ptr))
+  (func (export "ctx_migrate") (param $in i32) (param $inlen i32) (param $outpp i32) (param $outlp i32) (result i32)
+    (i32.store (local.get $outpp) (i32.const 4096))
+    (i32.store (local.get $outlp) (i32.const 31))
+    (i32.const 0)))
+)WAT";
+
 } // namespace wasmtest
+
+// --- committed .wasm fixture loader (issue #71 PR4) -----------------------------------------------
+// The determinism gate drives the COMMITTED migrate_hp.wasm (not a runtime-assembled WAT string), so
+// it needs the fixture bytes off disk. CONTEXT_WASM_FIXTURE_DIR is the fixtures dir the CMake passes.
+#ifdef CONTEXT_WASM_FIXTURE_DIR
+
+#include <fstream>
+#include <sstream>
+
+namespace wasmtest
+{
+// Read the committed fixture `filename` from CONTEXT_WASM_FIXTURE_DIR as raw bytes. CHECK-fails (and
+// returns empty) if it cannot be opened, so a missing/renamed fixture fails the gate loudly.
+inline std::string load_fixture(std::string_view filename)
+{
+    const std::string path = std::string(CONTEXT_WASM_FIXTURE_DIR) + "/" + std::string(filename);
+    std::ifstream in(path, std::ios::binary);
+    if (!in)
+    {
+        std::fprintf(stderr, "cannot open wasm fixture: %s\n", path.c_str());
+        ++g_failures;
+        return {};
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+} // namespace wasmtest
+
+#endif // CONTEXT_WASM_FIXTURE_DIR
 
 #endif // CONTEXT_WASM_HAS_RUNTIME
