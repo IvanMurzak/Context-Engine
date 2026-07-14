@@ -2,6 +2,8 @@
 
 #include "context/packages/ui/damage.h"
 
+#include <cstddef> // std::size_t, std::ptrdiff_t
+
 namespace context::packages::ui
 {
 
