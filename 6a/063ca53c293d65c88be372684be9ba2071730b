@@ -1,0 +1,27 @@
+README.md
+  s_60a8bc93caaf8d::t_ab05ba733c90d4 78-79
+src/packages/README.md
+  s_60a8bc93caaf8d::t_2ed17be7eee2ba 19-43
+.github/workflows/ci.yml
+  s_60a8bc93caaf8d::t_f03456def16b2f 169-173
+.github/CONTRIBUTING.md
+  s_60a8bc93caaf8d::t_9d7005c786ba55 21-29
+src/runtime/README.md
+  s_60a8bc93caaf8d::t_dc91b928017924 15-21,26-41,43-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "6a063ca53c293d65c88be372684be9ba2071730b",
+  "prompts": {},
+  "sessions": {
+    "s_60a8bc93caaf8d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "03188b33-a380-4cc6-8828-e042067a9c50",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
