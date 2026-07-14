@@ -18,8 +18,15 @@ Issues, bug reports, and design discussion are welcome in the meantime.
 
 Once the CLA is in place, contributions will additionally need to pass the standing CI rails:
 
-- **Build + test** on Linux, Windows, and macOS (`dev` preset), plus the ASan/UBSan `sanitize`
-  job.
+- **Build + test** on Linux, Windows, and macOS (`dev` preset), including the blocking milestone
+  exit gates (`m1-exit-*` … `m6-exit-*`) and the samples-corpus gate.
+- **Determinism** — the `deterministic` job (strict-FP build, 3 OS) asserts the cross-platform
+  golden state hash.
+- **Sanitizers** — the ASan+UBSan and TSan `sanitize` jobs (Linux/clang).
+- **Rendering** — golden-scene SSIM gates on the `render` (Linux, blocking) and
+  `render (web, emscripten)` jobs, plus `shader-crosscompile`; the opt-in dependency paths run as
+  their own jobs (`wasm-runner`, `cef-substrate`, `editor-cef-smoke`).
+- **Python tooling tests** — pytest over `tools/tests/` + `bench/tests/` (the `python-tests` job).
 - **Warnings-as-errors** — the baseline is on by default (`CONTEXT_WARNINGS_AS_ERRORS=ON`).
 - **Formatting** — `src/.clang-format` (LLVM-based, 100 columns) and the `src/.clang-tidy` starter
   set (copies in `spikes/` and `bench/` cover those sibling trees).

@@ -75,6 +75,8 @@ cmake -S src --preset sanitize && cd src && cmake --build --preset sanitize && c
 | `src/editor/` | **EditorKernel** — the headless, file-authoritative project language server |
 | `src/runtime/` | **RuntimeKernel** — the runtime the editor embeds and shipped builds use |
 | `src/packages/` | First-party feature packages (every feature is a package) |
+| `samples/` | The maintained agent few-shot corpus — runnable sample projects, CI-gated (rots-if-broken) |
+| `goldens/` | Committed golden-scene SSIM baselines (binary PPM) + `manifest.json` tolerances |
 | `spikes/` | M0 de-risking spikes — throwaway proof code, never production code |
 | `bench/` | R-FILE-011 benchmark harness — corpus generator + median-of-5 runner (Python) |
 | `tools/` | Repository/CI tooling (dependency-license gate, SBOM) |
