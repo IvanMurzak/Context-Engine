@@ -166,9 +166,11 @@ jobs:
       # — a BLOCKING per-PR check on every OS leg: the maintained sample projects under samples/ build
       # + headless-smoke-run through the REAL `context` binary (rots-if-broken), and the corpus is
       # asserted to exercise the breadth of the R-CLI-009 registry surface (the stable one-shot CLI
-      # verbs ≡ RPC methods ≡ MCP tools, plus every registered file kind) — the M3-exit contract-freeze
-      # READINESS artifact (it does NOT freeze; protocolMajor stays 0). Registered in
-      # docs/ci-fleet-manifest.json as the samples-corpus gate.
+      # verbs ≡ RPC methods ≡ MCP tools, plus every registered file kind). Originally the M3-exit
+      # contract-freeze READINESS artifact; the freeze has since landed (PR #113 — protocolMajor is 1,
+      # the surface is FROZEN, the R-CLI-010 deprecation lifecycle is active; see
+      # docs/deprecation-policy.md) and the corpus continues as the post-freeze breadth-of-surface
+      # gate. Registered in docs/ci-fleet-manifest.json as the samples-corpus gate.
       - name: Samples corpus gate (R-QA-006 / R-BUILD-009 / R-QA-008, blocking)
         run: ctest --preset dev --output-on-failure -R "^samples-corpus"
         working-directory: src
