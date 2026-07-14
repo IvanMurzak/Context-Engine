@@ -1,0 +1,57 @@
+src/packages/ui/tests/ui_test.h
+  s_a2906e6a9ceeb4::t_6d6245fdffc3c9 1-27
+src/packages/ui/tests/test_dispatch.cpp
+  s_a2906e6a9ceeb4::t_c748a6db521bd8 1-127,131-135
+  s_a2906e6a9ceeb4::t_0c1888792c7c3a 128-130
+src/packages/ui/src/damage.cpp
+  s_a2906e6a9ceeb4::t_5f8297eccff1b9 1-57
+src/packages/ui/src/provider.cpp
+  s_a2906e6a9ceeb4::t_a0ea48957778d5 1-28
+src/packages/ui/include/context/packages/ui/null_provider.h
+  s_a2906e6a9ceeb4::t_7122663666cf92 1-31
+src/packages/ui/include/context/packages/ui/ui_tree.h
+  s_a2906e6a9ceeb4::t_d33ebb58ba30cd 1-108
+src/packages/ui/tests/test_tree.cpp
+  s_a2906e6a9ceeb4::t_ea748d70089611 50
+  s_a2906e6a9ceeb4::t_7d3ce8c295b183 1-49,51-90
+src/packages/ui/tests/test_null_provider.cpp
+  s_a2906e6a9ceeb4::t_5869ff0b1f8221 1-111
+src/packages/ui/include/context/packages/ui/events.h
+  s_a2906e6a9ceeb4::t_91e3518b6a3b99 1-50
+src/packages/ui/include/context/packages/ui/provider.h
+  s_a2906e6a9ceeb4::t_8c966c45896989 1-60
+src/packages/ui/src/ui_tree.cpp
+  s_a2906e6a9ceeb4::t_276d063aef1d39 1-260
+src/packages/ui/include/context/packages/ui/ui_node.h
+  s_a2906e6a9ceeb4::t_b79853ad896fac 1-174
+src/packages/ui/include/context/packages/ui/damage.h
+  s_a2906e6a9ceeb4::t_92283465850dbd 1-40
+src/packages/ui/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_de5d897d553fb7 1-62
+src/packages/ui/README.md
+  s_a2906e6a9ceeb4::t_923177a0bf9642 1-62
+src/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_bff195bdb43da0 512-526
+src/packages/ui/tests/test_damage.cpp
+  s_a2906e6a9ceeb4::t_f6d26be3ecaef4 1-121
+src/packages/ui/tests/test_provider.cpp
+  s_a2906e6a9ceeb4::t_1e47b4725381f9 1-120
+CLAUDE.md
+  s_a2906e6a9ceeb4::t_519416a53cc429 71-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "c55543e764285bdf3cd0366e2201cba7acc5d009",
+  "prompts": {},
+  "sessions": {
+    "s_a2906e6a9ceeb4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c8df1aa-679b-407a-9c28-132785dc0056",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
