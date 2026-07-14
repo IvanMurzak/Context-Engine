@@ -1,0 +1,62 @@
+# `src/packages/ui/` — Runtime UI package (M7 T1, R-UI-002/005/006)
+
+The **headless foundation** of the pluggable runtime UI system: a retained UI tree, an event + handler
+model, dirty/damage tracking, and the backend-agnostic **UI-Provider contract**. This is the first M7
+task (`a1-ui-foundation`) — it lands the tree, events, damage, the provider seam, and a null provider;
+layout/hit-testing, input-routing, the TS authoring surface, the CLI verbs, and the GPU backend are
+later M7 tasks.
+
+## What it provides
+
+- **Retained tree** (`ui_tree.h` / `ui_node.h`) — `UiTree` owns a `UiNode` store addressed by stable
+  `NodeId` handles (removed nodes are tombstoned, never reused, so a handle never repoints). Nodes carry
+  a **closed `Role` vocabulary** (`role_name()` for a11y/introspection), a small **CSS-like `Style`**
+  (visible, opacity, `Transform`, background/foreground `Color`, padding), optional text/name, and
+  computed `bounds`. Build/mutate: `create_node` / `remove_node` / `reparent` / `set_style` / `set_text`
+  / `set_bounds` / `set_visible`.
+- **Events + handlers** (`events.h`) — pointer / focus / key / custom `Event`s dispatched
+  **target-then-bubble**: `dispatch()` delivers to `ev.target`, then walks toward the root; a handler
+  sets `ev.handled` to stop propagation. A minimal **focus model** (`set_focus`) emits `FocusLost` /
+  `FocusGained`. Hit-testing (which node a pointer hits) is a **later task** — `dispatch` takes an
+  explicit target for now.
+- **Damage tracking** (`damage.h`) — mutations mark dirty regions computed **in the tree**; a structural
+  change marks the whole surface. `DamageList::coalesce()` merges overlapping regions to a minimal set;
+  `UiTree::take_damage()` returns the coalesced damage and resets it.
+- **UI-Provider contract** (`provider.h`) — `Capabilities` is the exact **R-UI-005** set
+  (`gpu_driver`, `damage_repaint`, `composited_transforms`, `text_shaping`, `bidi`, `ime`). A
+  `UiProvider` reports its capabilities and `present`s the tree under a `RepaintPlan`.
+  `negotiate_repaint()` is the **fallback table**: a provider **without** `damage_repaint` falls back to
+  a **full repaint**; a damage-capable one repaints only the coalesced dirty regions.
+- **Null provider** (`null_provider.h`) — the R-UI-006 headless guarantee made concrete: all-false
+  capabilities, and a `present()` that does **no rendering work** (never walks the tree). UI logic runs
+  headless with zero render cost.
+
+## Load-bearing design decisions (locked here)
+
+- **D1 — the UI-Provider contract shape.** The provider consumes the retained tree + damage list and
+  reports a `Capabilities` struct; the engine negotiates + falls back (`negotiate_repaint`). The GPU
+  backend (`src/render/ui/`, a later task) implements this same header.
+- **D2 — a NEW runtime tree, not `context_gui_uitree`.** The editor tree (`src/editor/gui/uitree/`) is
+  editor-scoped, ships only with the editor, and has no layout/events/damage. This runtime tree
+  **borrows its design** (closed role vocabulary so R-A11Y-002 can hook it post-core) with **zero
+  link-level sharing** — editor code never becomes a runtime dependency.
+- **D3 — package placement.** Headless logic is `context_ui` (STATIC, `src/packages/ui/`); the GPU
+  backend is `src/render/ui/` (needs `rhi.h`). The provider **contract header lives here**.
+- **D6 — UI is presentation.** The tree lives **outside** the sim `World` and registers **no hashed sim
+  component**. At this foundation tier the package is **pure stdlib** and does not link the sim at all;
+  every field here is presentation/observer state (`hash_world` is bit-identical with UI present or
+  absent). The L-45 input-routing glue + session composition arrive in a later M7 task.
+
+## Layering
+
+`context_ui` is a **package, not kernel core** (L-60): a STATIC `context_<name>` library under
+`src/packages/` linking only the warnings-as-errors baseline (`context_warnings` PRIVATE). Nothing under
+`src/kernel/` links it. Unlike `context_input` (whose public API is defined in the session input
+vocabulary and so links `context_session` PUBLIC), this foundation tier has **no sim dependency**.
+
+## Tests
+
+Headless `ui-*` ctests (R-QA-013, same PR): `ui-test_tree` (build/mutate), `ui-test_dispatch` (handler
+dispatch + focus), `ui-test_damage` (coalescing + structural-vs-region damage), `ui-test_provider`
+(capability negotiation/fallback table), `ui-test_null_provider` (null-provider zero-cost). Pure stdlib,
+so they build + run on all three CI OS legs and auto-run in the general CI test step.
