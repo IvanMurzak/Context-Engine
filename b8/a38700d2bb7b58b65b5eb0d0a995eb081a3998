@@ -1,0 +1,19 @@
+src/render/ui/include/context/render/ui/worldpanel_scene.h
+  s_a2906e6a9ceeb4::t_8661bd0093c9e0 141
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "b8a38700d2bb7b58b65b5eb0d0a995eb081a3998",
+  "prompts": {},
+  "sessions": {
+    "s_a2906e6a9ceeb4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c8df1aa-679b-407a-9c28-132785dc0056",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
