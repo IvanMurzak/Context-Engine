@@ -1,0 +1,75 @@
+src/render/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_a789b20400a695 45-46
+  s_a2906e6a9ceeb4::t_abab4cc61e4b0a 267-277
+.github/workflows/ci.yml
+  s_a2906e6a9ceeb4::t_3ac588aeae41d6 821,831
+src/render/src/extract.cpp
+  s_a2906e6a9ceeb4::t_a17bc31714609e 60
+  s_a2906e6a9ceeb4::t_94d429d9cec4a6 46
+  s_a2906e6a9ceeb4::t_885cf74f338624 127-144
+src/render/ui/src/dynamic_texture.cpp
+  s_a2906e6a9ceeb4::t_3799758b4b91fc 1-52
+src/render/src/wgpu/offscreen_main.cpp
+  s_a2906e6a9ceeb4::t_67851408b3b6c5 200-203
+  s_a2906e6a9ceeb4::t_87ffa296c78cf7 20-23,26-28
+  s_a2906e6a9ceeb4::t_b78ae5d074d93f 42
+  s_a2906e6a9ceeb4::t_4cac259eb7ac2f 126-127
+  s_a2906e6a9ceeb4::t_5e8fd60fd65e40 153-156
+  s_a2906e6a9ceeb4::t_b65e6d907d3be9 170-173
+goldens/manifest.json
+  s_a2906e6a9ceeb4::t_77d991554111ac 74-84
+src/render/include/context/render/render_world.h
+  s_a2906e6a9ceeb4::t_9790c132ddd2f8 83-102
+  s_a2906e6a9ceeb4::t_c612256b02bf6c 148,156
+  s_a2906e6a9ceeb4::t_cf8ce2a70bc178 128-138
+src/render/ui/include/context/render/ui/provider.h
+  s_a2906e6a9ceeb4::t_94d883ec55d6d2 68-70,76-81,89-90
+  s_a2906e6a9ceeb4::t_2c611952b68127 38-39,42-47
+  s_a2906e6a9ceeb4::t_85ab82e98a3f73 48
+src/render/ui/src/provider.cpp
+  s_a2906e6a9ceeb4::t_e40bc960f0d5c1 80
+  s_a2906e6a9ceeb4::t_6a930190c374a3 163-164,180
+  s_a2906e6a9ceeb4::t_f53888c1a6acf1 45-49
+  s_a2906e6a9ceeb4::t_75eb78dda29c2c 62,64
+src/render/ui/include/context/render/ui/worldpanel_scene.h
+  s_a2906e6a9ceeb4::t_bbeee1c0bea1fc 265,270
+  s_a2906e6a9ceeb4::t_ae70f4c58eb584 1-264,266-269,271-718
+src/render/ui/include/context/render/ui/dynamic_texture.h
+  s_a2906e6a9ceeb4::t_381ef72b08363b 1-65
+src/render/tests/test_ui_panel_extract.cpp
+  s_a2906e6a9ceeb4::t_59d4bf98bf9931 1-140
+docs/ci-fleet-manifest.json
+  s_a2906e6a9ceeb4::t_d17b71d5aacc84 392
+src/render/ui/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_ef246e81d2aa1e 21
+  s_a2906e6a9ceeb4::t_a7c5323e285584 51-53
+  s_a2906e6a9ceeb4::t_003cc0a490241b 22
+src/render/ui/tests/test_ui_worldpanel.cpp
+  s_a2906e6a9ceeb4::t_c8268996f5e244 1-127
+src/render/ui/tests/test_ui_dynamic_texture.cpp
+  s_a2906e6a9ceeb4::t_c19876ecb27d5d 82
+  s_a2906e6a9ceeb4::t_ed7b65569bc323 1-73,80-81,83-148
+  s_a2906e6a9ceeb4::t_2c705a79e021c8 74-79
+goldens/README.md
+  s_a2906e6a9ceeb4::t_6cd4dcb41fd0e3 67-79
+  s_a2906e6a9ceeb4::t_d91653ca4e6834 28
+  s_a2906e6a9ceeb4::t_d09825e82c4d63 53-56
+goldens/ui-worldpanel.ppm
+  s_a2906e6a9ceeb4::t_908d30e2d39f5d 1-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "4b5653f89a55bdc53adea3facd9209eec2034d64",
+  "prompts": {},
+  "sessions": {
+    "s_a2906e6a9ceeb4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c8df1aa-679b-407a-9c28-132785dc0056",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
