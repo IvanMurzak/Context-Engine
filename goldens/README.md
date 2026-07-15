@@ -24,6 +24,7 @@ here with a **named SSIM-class perceptual metric + per-scene tolerances** (`mani
 | `sprite2d.ppm` | 2D sprite path (R-2D-001) | ortho projection + sorting-layer overdraw |
 | `lit3d.ppm` | representative lit scene | PBR + dir/point lights + shadow depth pass (R-REND-004/006) |
 | `viewport.ppm` | M5-F1 observer viewport (3D+2D) | the 3D triangle base + the 2D sprites composited on top (issue #164) |
+| `ui-hud.ppm` | M7 a6 runtime UI HUD (R-UI-005) | a colored-rect HUD (health bar + fill, minimap, GPU-composited badge, status bar) extracted through the GpuUiProvider and repainted into its persistent UI-layer — native + web |
 
 Format: binary PPM (P6, maxval 255) — stdlib-parseable, no image dependency anywhere in the chain.
 Baselines were rendered through the native backend on real hardware; the per-scene `min_ssim` in
@@ -43,7 +44,20 @@ python3 tools/golden_compare.py --scene triangle3d --candidate out/web/triangle3
 # M5-F1 observer viewport composite (native only, like lit3d):
 context_render_wgpu_offscreen golden viewport out/viewport.ppm
 python3 tools/golden_compare.py --scene viewport --candidate out/viewport.ppm
+
+# M7 a6 runtime UI HUD (native AND web — the ui backend compiles into the emscripten target too):
+context_render_wgpu_offscreen golden ui-hud out/ui-hud.ppm
+python3 tools/golden_compare.py --scene ui-hud --candidate out/ui-hud.ppm
+# browser leg: web_golden_run.py delivers ui-hud alongside triangle3d,sprite2d (see ci.yml render-web).
 ```
+
+The **`ui-hud`** scene is the M7 a6 engine-integrated GPU UI backend (issue #141 golden discipline;
+R-UI-005): a HUD of solid opaque colored rectangles authored as an a1 `UiTree`, extracted to draw quads
+and repainted into the `GpuUiProvider`'s persistent UI-layer texture over the SAME ortho quad path the
+`sprite2d` golden already SSIM-gates (opaque replace, no blend / no MSAA — a tight tolerance). It is
+rendered on BOTH the native (lavapipe) and web (SwiftShader) legs — unlike native-only `lit3d`/`viewport`
+— because the UI backend compiles into the Emscripten web target. The committed baseline is the analytic
+(GPU-free) rasterization of the same extracted quads (`hud_scene.h::render_ui_hud_reference_cpu`).
 
 The **`viewport`** scene is the M5-F1 observer-viewport composite (issue #164): the 3D triangle base
 (`triangle3d`) with the 2D sprites (`sprite2d`) painted on top in one frame — the "live scene (3D+2D)"

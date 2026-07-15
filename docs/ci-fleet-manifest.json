@@ -389,7 +389,7 @@
       "tier": "per-PR",
       "red_x_policy": "blocking",
       "ci_job_id": "render",
-      "description": "M4 golden-scene visual-equivalence corpus, NATIVE Linux-Vulkan leg (issue #141; ROADMAP §1 M4 exit): the render job dumps every corpus scene (triangle3d 3D pipeline + sprite2d 2D + lit3d representative lit scene) through the wgpu-native backend on lavapipe and gates each against its committed goldens/ baseline with the named mean block-SSIM metric + per-scene tolerances (tools/golden_compare.py). Identical-within-T1 = same semantics, not bit-identical. Rebaselines are reviewed changes (goldens/README.md). BLOCKING per the minimal-v1 ruling: Linux-Vulkan + one browser."
+      "description": "M4 golden-scene visual-equivalence corpus, NATIVE Linux-Vulkan leg (issue #141; ROADMAP §1 M4 exit): the render job dumps every corpus scene (triangle3d 3D pipeline + sprite2d 2D + lit3d representative lit scene + viewport 3D+2D composite + ui-hud runtime UI HUD, M7 a6/R-UI-005) through the wgpu-native backend on lavapipe and gates each against its committed goldens/ baseline with the named mean block-SSIM metric + per-scene tolerances (tools/golden_compare.py). Identical-within-T1 = same semantics, not bit-identical. Rebaselines are reviewed changes (goldens/README.md). BLOCKING per the minimal-v1 ruling: Linux-Vulkan + one browser."
     },
     {
       "id": "golden-scene-web-chromium",
@@ -399,7 +399,7 @@
       "tier": "per-PR",
       "red_x_policy": "blocking",
       "ci_job_id": "render-web",
-      "description": "M4 golden-scene visual-equivalence corpus, BROWSER leg (issue #141): the render-web job runs the built wasm harness in headless CHROMIUM (the v1 blocking browser — the only browser shipping WebGPU on headless Linux; the design record's reference browser since the M0 Tint/Chrome spike) over SwiftShader WebGPU, collects the kernel-free corpus frames (triangle3d + sprite2d) it POSTs back (tools/web_golden_run.py), and gates each against the SAME committed goldens/ baselines the native leg uses (tools/golden_compare.py). This closes the M4 exit's 'render 3D+2D desktop+web, identical within T1' criterion. BLOCKING per the minimal-v1 ruling; other browsers join as advisory rows when their runner classes are provisioned."
+      "description": "M4 golden-scene visual-equivalence corpus, BROWSER leg (issue #141): the render-web job runs the built wasm harness in headless CHROMIUM (the v1 blocking browser — the only browser shipping WebGPU on headless Linux; the design record's reference browser since the M0 Tint/Chrome spike) over SwiftShader WebGPU, collects the kernel-free corpus frames (triangle3d + sprite2d + ui-hud, the M7 a6 runtime UI HUD) it POSTs back (tools/web_golden_run.py), and gates each against the SAME committed goldens/ baselines the native leg uses (tools/golden_compare.py). This closes the M4 exit's 'render 3D+2D desktop+web, identical within T1' criterion. BLOCKING per the minimal-v1 ruling; other browsers join as advisory rows when their runner classes are provisioned."
     },
     {
       "id": "m4-exit-headless-no-render",

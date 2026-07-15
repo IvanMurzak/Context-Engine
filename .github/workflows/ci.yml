@@ -817,6 +817,7 @@ jobs:
           "$exe" golden sprite2d out/golden-native/sprite2d.ppm
           "$exe" golden lit3d out/golden-native/lit3d.ppm
           "$exe" golden viewport out/golden-native/viewport.ppm
+          "$exe" golden ui-hud out/golden-native/ui-hud.ppm
 
       - name: Golden-scene SSIM gate (native-vulkan-lavapipe, blocking)
         if: runner.os == 'Linux'
@@ -825,6 +826,7 @@ jobs:
           python3 tools/golden_compare.py --scene sprite2d --candidate out/golden-native/sprite2d.ppm
           python3 tools/golden_compare.py --scene lit3d --candidate out/golden-native/lit3d.ppm
           python3 tools/golden_compare.py --scene viewport --candidate out/golden-native/viewport.ppm
+          python3 tools/golden_compare.py --scene ui-hud --candidate out/golden-native/ui-hud.ppm
 
       # --- M4 T7 (issue #141): R-QA-007 min-spec floor bench, per-PR methodology proxy ---
       # MEASURE is BLOCKING: the representative lit3d subject must run green end-to-end under the
@@ -905,12 +907,13 @@ jobs:
       - name: In-browser golden run (headless Chromium + SwiftShader WebGPU)
         run: |
           google-chrome --version
-          python3 tools/web_golden_run.py             --html build/render-web/context-render-web.html             --out-dir out/golden-web --scenes triangle3d,sprite2d
+          python3 tools/web_golden_run.py             --html build/render-web/context-render-web.html             --out-dir out/golden-web --scenes triangle3d,sprite2d,ui-hud
 
       - name: Golden-scene SSIM gate (browser-chromium-swiftshader, blocking)
         run: |
           python3 tools/golden_compare.py --scene triangle3d --candidate out/golden-web/triangle3d.ppm
           python3 tools/golden_compare.py --scene sprite2d --candidate out/golden-web/sprite2d.ppm
+          python3 tools/golden_compare.py --scene ui-hud --candidate out/golden-web/ui-hud.ppm
 
       - name: Upload wasm + web golden artifacts
         if: always()

@@ -59,13 +59,43 @@ target_include_directories(context_render_web_sprite PUBLIC
     ${_render_root}/sprite/include)
 target_link_libraries(context_render_web_sprite PRIVATE context_warnings)
 
+# The a1 runtime UI package (context_ui): the retained UiTree/UiNode + damage + the provider contract,
+# compiled from the SAME sources as native (no fork). Pure stdlib (D6 presentation-only), so it builds
+# under emscripten with no kernel/GPU dependency — the ui-hud golden's web leg (M7 a6, the web-target
+# 4th edit beyond the ci.yml render drill).
+add_library(context_ui_web STATIC
+    ${_render_root}/../packages/ui/src/damage.cpp
+    ${_render_root}/../packages/ui/src/layout.cpp
+    ${_render_root}/../packages/ui/src/provider.cpp
+    ${_render_root}/../packages/ui/src/ui_tree.cpp)
+target_include_directories(context_ui_web PUBLIC ${_render_root}/../packages/ui/include)
+target_link_libraries(context_ui_web PRIVATE context_warnings)
+
+# The M7 a6 engine-integrated GPU UI backend (context_render_ui): extract/composite/batch/provider over
+# the RHI, compiled from the SAME sources as native. The ui-hud golden's web render drives this
+# (hud_scene.h); it reuses the sprite ortho/quad math (context_render_web_sprite) + a1's UiTree.
+add_library(context_render_ui_web STATIC
+    ${_render_root}/ui/src/snapshot.cpp
+    ${_render_root}/ui/src/composite.cpp
+    ${_render_root}/ui/src/batch.cpp
+    ${_render_root}/ui/src/provider.cpp)
+target_include_directories(context_render_ui_web PUBLIC
+    ${_render_root}/include
+    ${_render_root}/sprite/include
+    ${_render_root}/ui/include
+    ${_render_root}/../packages/ui/include)
+target_link_libraries(context_render_ui_web PRIVATE context_warnings)
+
 # The offscreen parity harness -> an .html shell (directly servable for the in-browser run).
 add_executable(context-render-web web_main.cpp)
 target_include_directories(context-render-web PRIVATE
     ${_render_root}/include
-    ${_render_root}/sprite/include)
+    ${_render_root}/sprite/include
+    ${_render_root}/ui/include
+    ${_render_root}/../packages/ui/include)
 target_link_libraries(context-render-web
-    PRIVATE context_render_web context_render_web_sprite context_warnings)
+    PRIVATE context_render_web context_render_web_sprite context_render_ui_web context_ui_web
+            context_warnings)
 target_compile_options(context-render-web PRIVATE "--use-port=emdawnwebgpu")
 
 # emdawnwebgpu build constraints (ROADMAP §5 risk table; spikes/webgpu/FINDINGS.md notes 3-5):
