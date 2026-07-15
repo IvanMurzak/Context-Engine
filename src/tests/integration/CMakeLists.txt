@@ -437,3 +437,122 @@ if(CONTEXT_TSAN)
     # CONTEXT_TSAN and always enforces the real, unwidened budget.
     target_compile_definitions(context_test_m6exit2_gc_budget PRIVATE CONTEXT_TSAN_BUILD=1)
 endif()
+
+# ===================================================================================================
+# The M7 EXIT GATE (design 2026-07-13-m7-runtime-ui / a12-m7-exit) — the runtime-UI milestone-closing
+# mirror of the M1/M2/M4/M5/M6 gates: five blocking per-PR ctests on every OS leg (registered in
+# docs/ci-fleet-manifest.json as the m7-exit-* gates; run by the "M7 exit gate" step in
+# .github/workflows/ci.yml, AFTER the M6 step). They RIDE the landed M7 runtime-UI machinery — the
+# context_ui headless tree/layout/events (a1/a2/a3), the context.ui TS authoring surface (a4), the
+# a5 `context ui` drive/assert verbs, the a6 GPU UI backend + a7/a8 text, the a9/a10 world-space
+# (flat + curved) panels, and the a11 capability matrix — over REAL authored content
+# (samples/platformer-2d/ui/hud.ui-hud.json + samples/roll-3d/ui/panel.ui-worldpanel.json):
+#   m7-exit-1-hud-headless               — the authored platformer HUD data-binds (REAL a5 load path)
+#                                          + renders headless (the a6 read-only extract, no GPU)
+#   m7-exit-2-cli-drive                  — the REAL `context` binary drives the HUD via ui.* verbs
+#                                          (cross-process; fail-closed on a wrong assert)
+#   m7-exit-3-worldpanel                 — the roll-3d world-space panel LOGIC chain: raycast -> UV ->
+#                                          panel coords -> the a3 single sink (a9 flat + a10 curved)
+#   m7-exit-4-determinism-presentation   — hash_world bit-identical with UI absent / null / GPU (D6)
+#   m7-exit-5-seam-checklist             — the executable M7 seam audit (incl. rulings c + d)
+#
+# The build job builds EVERY target via `--preset dev`, so each gate's executable is always built
+# (never "Not Run") — NO `--target` list changes are needed (the M6 precedent); the strict-FP
+# `deterministic` job's hand-maintained --target list is deliberately unchanged (m7-exit-4 registers
+# no new determinism-* ctest name — the m6-exit-3 alias precedent). Green here CLOSES M7.
+
+# Self-contained GCC runtime (mirrors m1/m2/m5/m6-exit + src/cli): these executables use
+# std::filesystem / stream IO (+ spawn the real binary), whose newer-libstdc++ symbols a stale PATH
+# libstdc++-6.dll could shadow (STATUS_ENTRYPOINT_NOT_FOUND). Gated to GNU so the macOS/Clang +
+# Windows/MSVC CI legs are untouched.
+set(_m7_exit_static_runtime
+    $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
+
+# --- m7-exit-1: the authored platformer HUD data-binds (a5 in-process load path) + renders headless
+#     (the a6 read-only extract). Links context_cli (the ui verbs' cli::run) + context_render_ui (the
+#     GPU-free extract) + context_ui (the retained tree + null provider). ------------------------------
+add_executable(context_test_m7exit1_hud_headless test_m7exit1_hud_headless.cpp)
+target_link_libraries(context_test_m7exit1_hud_headless
+    PRIVATE context_cli context_render_ui context_ui context_contract context_warnings)
+target_link_options(context_test_m7exit1_hud_headless PRIVATE ${_m7_exit_static_runtime})
+target_include_directories(context_test_m7exit1_hud_headless PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(context_test_m7exit1_hud_headless PRIVATE
+    CONTEXT_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/../samples")
+add_test(NAME m7-exit-1-hud-headless COMMAND context_test_m7exit1_hud_headless)
+
+# --- m7-exit-2: the REAL `context` binary drives the HUD via the a5 ui.* verbs, cross-process. Links
+#     context_common (the hardened std::system runner + scratch temp file) + context_contract (parse
+#     the captured R-CLI-008 envelope). Spawns the built `context` binary (CONTEXT_BINARY). -----------
+add_executable(context_test_m7exit2_cli_drive test_m7exit2_cli_drive.cpp)
+target_link_libraries(context_test_m7exit2_cli_drive
+    PRIVATE context_common context_contract context_warnings)
+target_link_options(context_test_m7exit2_cli_drive PRIVATE ${_m7_exit_static_runtime})
+target_include_directories(context_test_m7exit2_cli_drive PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(context_test_m7exit2_cli_drive PRIVATE
+    CONTEXT_BINARY="$<TARGET_FILE:context>"
+    CONTEXT_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/../samples")
+add_dependencies(context_test_m7exit2_cli_drive context)
+add_test(NAME m7-exit-2-cli-drive COMMAND context_test_m7exit2_cli_drive)
+
+# --- m7-exit-3: the roll-3d world-space panel LOGIC chain. Links context_ui (curved_panel ray/UV
+#     math + tree/layout) + context_ui_input (the a3 UiInputRouter single sink) + context_ui_raycast
+#     (the a10 broad-phase-pruned picker) + context_input (the InputRouter) + context_session (the
+#     sim sink + hash_world) + context_contract (parse the authored panel). ---------------------------
+add_executable(context_test_m7exit3_worldpanel test_m7exit3_worldpanel.cpp)
+target_link_libraries(context_test_m7exit3_worldpanel
+    PRIVATE context_ui context_ui_input context_ui_raycast context_input context_session
+            context_contract context_warnings)
+target_link_options(context_test_m7exit3_worldpanel PRIVATE ${_m7_exit_static_runtime})
+target_include_directories(context_test_m7exit3_worldpanel PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(context_test_m7exit3_worldpanel PRIVATE
+    CONTEXT_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/../samples")
+add_test(NAME m7-exit-3-worldpanel COMMAND context_test_m7exit3_worldpanel)
+
+# --- m7-exit-4: hash_world bit-identical with UI absent / null / GPU (D6). Runs the platformer sample
+#     game (context_sample_games) and presents a HUD through the null provider (context_ui) + the REAL
+#     GpuUiProvider over the GPU-free fake RHI (context_render_ui + ../../render/tests/render_test_rhi.h,
+#     the a11 capability-matrix precedent). ----------------------------------------------------------
+add_executable(context_test_m7exit4_determinism_presentation test_m7exit4_determinism_presentation.cpp)
+target_link_libraries(context_test_m7exit4_determinism_presentation
+    PRIVATE context_sample_games context_render_ui context_ui context_session context_warnings)
+target_link_options(context_test_m7exit4_determinism_presentation PRIVATE ${_m7_exit_static_runtime})
+target_include_directories(context_test_m7exit4_determinism_presentation PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../../render/tests)
+target_compile_definitions(context_test_m7exit4_determinism_presentation PRIVATE
+    CONTEXT_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/../samples")
+add_test(NAME m7-exit-4-determinism-presentation COMMAND context_test_m7exit4_determinism_presentation)
+
+# --- m7-exit-5: the executable M7 seam audit (incl. rulings c + d). Links the union of the M7 UI
+#     libraries the seams exercise: context_ui + context_ui_text (the a8 shaper) + context_ui_input
+#     (the a3 glue) + context_ui_raycast (the a10 picker) + context_render_ui (the GPU provider, over
+#     the fake RHI) + context_input + context_session (hash_world). -----------------------------------
+add_executable(context_test_m7exit5_seam_checklist test_m7exit5_seam_checklist.cpp)
+target_link_libraries(context_test_m7exit5_seam_checklist
+    PRIVATE context_ui context_ui_text context_ui_input context_ui_raycast context_render_ui
+            context_input context_session context_warnings)
+target_link_options(context_test_m7exit5_seam_checklist PRIVATE ${_m7_exit_static_runtime})
+target_include_directories(context_test_m7exit5_seam_checklist PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../../render/tests)
+add_test(NAME m7-exit-5-seam-checklist COMMAND context_test_m7exit5_seam_checklist)
+
+# m7-exit-2 spawns the real binary per verb (several short-lived processes); m7-exit-4 runs the sample
+# game three times x 90 ticks presenting through both providers. Cap each so a regression never hangs CI.
+set_tests_properties(
+    m7-exit-1-hud-headless
+    m7-exit-3-worldpanel
+    m7-exit-5-seam-checklist
+    PROPERTIES TIMEOUT 120)
+set_tests_properties(m7-exit-2-cli-drive m7-exit-4-determinism-presentation PROPERTIES TIMEOUT 240)
+
+# Sanitizer-preset wiring for the m7-exit gates that reach the uninstrumented rusty_v8 archive:
+# m7-exit-1 links context_cli (-> context_js, the M6 X1 `context profile gc` path) and m7-exit-2
+# SPAWNS the real `context` binary (which links it), so both need the same narrow LSan
+# demangler/symbolizer suppressions the sibling V8-linking tests wire (they can never mask a
+# `context::` leak); the spawned child inherits the env. The other three m7-exit gates link no V8.
+if(CONTEXT_SANITIZE)
+    set_tests_properties(
+        m7-exit-1-hud-headless
+        m7-exit-2-cli-drive
+        PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
+endif()

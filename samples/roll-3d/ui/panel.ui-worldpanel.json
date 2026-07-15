@@ -1,0 +1,102 @@
+{
+  "$schema": "ctx:ui-worldpanel",
+  "notes": "The roll-3d world-space UI panel (M7 a12 exit content) — a diegetic info panel placed in the 3D arena on a curved (cylinder-section) render-to-texture surface (M7 a9 flat -> a10 curved, R-UI-003 / D4 / owner ruling (d)). The `panel` block is an ordinary headless `context_ui` tree (the a1/a2 surface — panel + a status label read-only data-bound to state + an action button covering the panel centre), laid out into the `surface` [w,h] the panel's dynamic texture is sized to; `world` places that surface on a cylinder-section mesh (integer-milli units so the corpus stays a canonical fixpoint). The m7-exit-3-worldpanel gate drives the LOGIC/interaction chain over this content: a screen pick ray -> ray-vs-mesh -> barycentric UV -> panel-space coords (a10 raycast_panel.h, broad-phase-pruned through spatial, IDENTICAL to the linear oracle) -> the SAME a3 UiInputRouter.route_pointer a flat panel uses (L-45) -> the ONE sim InputState sink. Pixels stay with the sibling render jobs (the ui-worldpanel / ui-curvedpanel SSIM goldens); this content + gate are the headless logic chain. UI is presentation (D6): the panel tree lives outside the sim World and never moves hash_world (the m7-exit-4 gate). Node `id`s are L-33 lowercase hex.",
+  "panel": {
+    "root": {
+      "bounds": [
+        0,
+        0,
+        200,
+        120
+      ],
+      "children": [
+        {
+          "bind": {
+            "value": "activated"
+          },
+          "bounds": [
+            12,
+            10,
+            176,
+            24
+          ],
+          "id": "d1a6f05720230226",
+          "name": "status-label",
+          "role": "label",
+          "style": {
+            "foreground": [
+              200,
+              220,
+              255,
+              255
+            ]
+          }
+        },
+        {
+          "bounds": [
+            70,
+            40,
+            60,
+            40
+          ],
+          "id": "e2b70e5720230337",
+          "name": "action-button",
+          "on": {
+            "pointerdown": [
+              {
+                "action": "set-state",
+                "state": "activated",
+                "value": 1
+              }
+            ]
+          },
+          "role": "button",
+          "style": {
+            "background": [
+              40,
+              40,
+              60,
+              255
+            ]
+          }
+        }
+      ],
+      "id": "c0ffee5720230115",
+      "role": "panel",
+      "style": {
+        "background": [
+          10,
+          12,
+          24,
+          200
+        ],
+        "padding": 8
+      }
+    }
+  },
+  "state": [
+    {
+      "id": "a11a5c07e3000abc",
+      "initial": 0,
+      "key": 300,
+      "name": "activated"
+    }
+  ],
+  "surface": [
+    200,
+    120
+  ],
+  "version": 1,
+  "world": {
+    "arcMilliRad": 2356,
+    "center": [
+      0,
+      0,
+      0
+    ],
+    "heightMilli": 1000,
+    "radiusMilli": 1000,
+    "segments": 16,
+    "shape": "curved"
+  }
+}

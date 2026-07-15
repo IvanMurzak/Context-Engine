@@ -1,0 +1,102 @@
+{
+  "$schema": "ctx:ui-hud",
+  "notes": "The platformer-2d in-game HUD (M7 a12 exit content) — the declarative few-shot form of what the authored scripts/hud.ts builds at runtime on the V8 host through the M7 T4 `context.ui` TypeScript surface (R-UI-001, owner ruling (a)). A column HUD panel with a score label + a health bar, each read-only data-bound to a numeric state query, and a collect button whose onClick scores points and spends health through the UI->state action path — the platformer's coin-collect loop. UI is presentation (D6): the tree lives outside the sim World, registers no hashed sim component, and its state store folds into no state hash — the m7-exit-4 determinism-presentation gate pins that hash_world is bit-identical with this HUD absent / null-provider / GPU-provider. The headless m7-exit-1 gate lays this tree out + extracts its draw quads with no GPU (the a6 backend's read-only extract), and the cross-process m7-exit-2 gate drives it through the REAL `context ui` dump/query/send/assert verbs (a5). Node `id`s are L-33 lowercase hex (16 chars); rendered text glyphs + GPU draw are the a6/a7/a8 render path — this authored tree is fully headless/CI-assertable today.",
+  "root": {
+    "children": [
+      {
+        "bind": {
+          "value": "score"
+        },
+        "id": "c1e2f30415263748",
+        "name": "score-label",
+        "role": "label",
+        "style": {
+          "foreground": [
+            255,
+            214,
+            0,
+            255
+          ]
+        }
+      },
+      {
+        "bind": {
+          "value": "health"
+        },
+        "id": "d2f304152637485a",
+        "name": "health-bar",
+        "role": "progressbar",
+        "style": {
+          "foreground": [
+            0,
+            200,
+            0,
+            255
+          ]
+        }
+      },
+      {
+        "id": "e304152637485a6b",
+        "name": "collect-button",
+        "on": {
+          "pointerdown": [
+            {
+              "action": "add-state",
+              "delta": 10,
+              "state": "score"
+            },
+            {
+              "action": "add-state",
+              "delta": -5,
+              "state": "health"
+            }
+          ]
+        },
+        "role": "button",
+        "style": {
+          "background": [
+            40,
+            40,
+            60,
+            255
+          ]
+        }
+      }
+    ],
+    "id": "b0d1e2f304152637",
+    "layout": {
+      "flow": "column",
+      "gap": 6,
+      "position": "flow",
+      "size": [
+        220,
+        96
+      ]
+    },
+    "role": "panel",
+    "style": {
+      "background": [
+        0,
+        0,
+        0,
+        160
+      ],
+      "padding": 8
+    }
+  },
+  "state": [
+    {
+      "id": "7a11c0de5c07e100",
+      "initial": 0,
+      "key": 100,
+      "name": "score"
+    },
+    {
+      "id": "7a11c0de5c07e200",
+      "initial": 100,
+      "key": 200,
+      "name": "health"
+    }
+  ],
+  "version": 1
+}
