@@ -1,0 +1,72 @@
+src/render/ui/include/context/render/ui/panel_mesh.h
+  s_a2906e6a9ceeb4::t_4c2851d263b949 1-80
+src/packages/ui/src/curved_panel.cpp
+  s_a2906e6a9ceeb4::t_5e5e881afa8952 1-172
+src/render/ui/include/context/render/ui/curvedpanel_scene.h
+  s_a2906e6a9ceeb4::t_99164c799b53d2 1-32,34-79,103-105,107-125,127-192,194-405,409-476
+  s_a2906e6a9ceeb4::t_38f099506c4a2b 193
+  s_a2906e6a9ceeb4::t_29138ea6871043 406-408
+  s_a2906e6a9ceeb4::t_70c4a31cf655f4 80-102,106,126
+  s_a2906e6a9ceeb4::t_d1ee28a3609ddc 33
+src/packages/ui/include/context/packages/ui/raycast_panel.h
+  s_a2906e6a9ceeb4::t_16cce00bbcc0fa 1-64
+src/render/ui/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_c59e77a6e20c38 54
+goldens/README.md
+  s_a2906e6a9ceeb4::t_285fdc77d05809 58-63
+  s_a2906e6a9ceeb4::t_5780eecd825291 93-108
+  s_a2906e6a9ceeb4::t_628c1ae1d722bd 29
+src/packages/ui/src/raycast_panel.cpp
+  s_a2906e6a9ceeb4::t_987ba433435631 55-57,60-65
+  s_a2906e6a9ceeb4::t_09165e364ef719 1-54,58-59,66-130
+src/render/src/wgpu/offscreen_main.cpp
+  s_a2906e6a9ceeb4::t_5ac6b70bb50bd7 213-216
+  s_a2906e6a9ceeb4::t_66e8caf35faa59 44
+  s_a2906e6a9ceeb4::t_4b9334622b1f4a 131
+  s_a2906e6a9ceeb4::t_233f190848ca38 178-182
+  s_a2906e6a9ceeb4::t_5ff344c99b34cb 304-305
+  s_a2906e6a9ceeb4::t_b3c4e698cb77f0 161-164
+  s_a2906e6a9ceeb4::t_adc30ff13f8b76 24-26,29-30
+src/render/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_1f90caca346600 280-290
+.github/workflows/ci.yml
+  s_a2906e6a9ceeb4::t_dc52bb74b5b7c1 833
+  s_a2906e6a9ceeb4::t_689690b621aaa6 822
+goldens/manifest.json
+  s_a2906e6a9ceeb4::t_9e475e7a30e74e 85-95
+src/packages/ui/tests/test_curved_panel.cpp
+  s_a2906e6a9ceeb4::t_3f4dce7b5d8339 1-16,19-176
+  s_a2906e6a9ceeb4::t_2ffb990a7930b6 17-18
+src/packages/ui/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_f7a6edd169a6b9 170-189
+  s_a2906e6a9ceeb4::t_adcf9404b20b2f 21-22
+  s_a2906e6a9ceeb4::t_fb37bf445d048a 127-128
+  s_a2906e6a9ceeb4::t_15b2e45dafffee 68-81
+src/packages/ui/include/context/packages/ui/curved_panel.h
+  s_a2906e6a9ceeb4::t_03eb93c97f1c5c 1-129
+src/packages/ui/tests/test_curved_panel_input.cpp
+  s_a2906e6a9ceeb4::t_518a967c2b015b 1-38,40-73,75-96,102-216
+  s_a2906e6a9ceeb4::t_b14ea9459c2c53 74
+  s_a2906e6a9ceeb4::t_b68573a21a86f9 97-101
+  s_a2906e6a9ceeb4::t_daeff638cb0e71 39
+src/render/ui/tests/test_ui_curvedpanel.cpp
+  s_a2906e6a9ceeb4::t_43999b2a65a1d1 1-175
+goldens/ui-curvedpanel.ppm
+  s_a2906e6a9ceeb4::t_79f6d8a9490b99 1-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "60585e96eaa8ce463ceb821e48ad508202b830fa",
+  "prompts": {},
+  "sessions": {
+    "s_a2906e6a9ceeb4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c8df1aa-679b-407a-9c28-132785dc0056",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
