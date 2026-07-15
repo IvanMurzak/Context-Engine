@@ -48,18 +48,15 @@ set(_context_render_ui_static_runtime
 set(_context_render_ui_tests
     test_ui_extract      # extract selects visible drawables; opacity/transform composited; double-buffer
     test_ui_composite    # composite math: transform (translate/scale-about-centre), opacity fold/compose
-    test_ui_batch        # draw-order sort + adjacent coalesce + damage -> MINIMAL draw set (draw counts)
-    test_ui_provider     # capabilities (3 true); present() over the fake RHI: full-clear vs damage-load
-    test_ui_hud_offscreen  # compiles hud_scene.h + pins the reference HUD extract + analytic golden pixels
+    test_ui_provider     # capabilities (shaping+bidi true); present() over the fake RHI: clear vs load
     test_ui_dynamic_texture # M7 a9 (D4): dynamic-texture registry + provider-into-target + extract chain
     test_ui_worldpanel   # M7 a9 (D4): compiles worldpanel_scene.h + pins the analytic ui-worldpanel golden
     test_glyph_atlas     # M7 a7: GLYPH-ID-keyed atlas build/hit/eviction/LRU-touch + blit + edges
     test_text_quads)     # M7 a7: offset-bearing atlas quad emitter — placement/UVs/GPOS offsets/skips
 # These tests (and the atlas + emitter sources) are FreeType-FREE — the glyph atlas rasterizes via a
-# caller-supplied callback, so context_render_ui carries no context_ui_text / FreeType dependency and
-# the atlas/emitter are deliberately NOT added to the web target (context_render_ui_web). The real-font
-# integration (measure -> atlas -> emit over the embedded FreeType face) is the separate
-# test_glyph_atlas_font below, which is the ONE render-ui target that links context_ui_text.
+# caller-supplied callback, so context_render_ui carries no context_ui_text / FreeType dependency. The
+# tests that include hud_scene.h (the ui-hud golden scene, which M7 a8 gave a shaped-text label) OR drive
+# the real font path link context_ui_text — the separate _context_render_ui_text_tests loop below.
 foreach(_t IN LISTS _context_render_ui_tests)
     add_executable(context_render_ui_${_t} tests/${_t}.cpp)
     target_link_libraries(context_render_ui_${_t} PRIVATE context_render_ui context_warnings)
@@ -69,15 +66,24 @@ foreach(_t IN LISTS _context_render_ui_tests)
     add_test(NAME render-ui-${_t} COMMAND context_render_ui_${_t})
 endforeach()
 
-# --- real-font integration (M7 a7): measure -> glyph-id-keyed atlas -> offset-bearing emit ----------
-# The ONE render-ui test that links context_ui_text (the FreeType text package): it drives the whole a7
-# path over the embedded Noto Sans face, proving the FreeType-decoupled backend composes with the real
-# rasterizer and that repeated glyph ids share ONE atlas cell. `ui-*`/`render-ui-*` auto-run in the
-# build job's general step; context_ui_text is built by --preset dev too (no ci.yml edit).
-add_executable(context_render_ui_test_glyph_atlas_font tests/test_glyph_atlas_font.cpp)
-target_link_libraries(context_render_ui_test_glyph_atlas_font
-    PRIVATE context_render_ui context_ui_text context_warnings)
-target_include_directories(context_render_ui_test_glyph_atlas_font
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests ${CMAKE_CURRENT_SOURCE_DIR}/../tests)
-target_link_options(context_render_ui_test_glyph_atlas_font PRIVATE ${_context_render_ui_static_runtime})
-add_test(NAME render-ui-test_glyph_atlas_font COMMAND context_render_ui_test_glyph_atlas_font)
+# --- tests that link context_ui_text (the FreeType text package) ----------------------------------
+# These either include hud_scene.h (the ui-hud golden scene, which M7 a8 gave a SHAPED-TEXT label drawn
+# via measure -> FreeType glyph atlas -> textured-glyph cutout) or drive the real embedded font directly:
+#   * test_ui_batch          — uses hud_scene.h build_reference_hud for its draw-set fixtures
+#   * test_glyph_atlas_font  — measure -> glyph-id-keyed atlas -> emit over the embedded Noto Sans face
+#   * test_ui_hud_offscreen  — the ui-hud golden proof (reference HUD extract + analytic rects + the 1-bit
+#                              text mask + PPM round-trip); the CI render/render-web jobs SSIM-gate the same
+#                              frame. `render-ui-*` auto-run in the build job's general step (no ci.yml edit).
+set(_context_render_ui_text_tests
+    test_ui_batch          # draw-order sort + adjacent coalesce + damage -> MINIMAL draw set (draw counts)
+    test_glyph_atlas_font  # M7 a7: real-font measure -> atlas -> emit; repeated glyph ids share ONE cell
+    test_ui_hud_offscreen) # M7 a6/a8: the ui-hud golden scene (rects + shaped text) analytic + fake-backend
+foreach(_t IN LISTS _context_render_ui_text_tests)
+    add_executable(context_render_ui_${_t} tests/${_t}.cpp)
+    target_link_libraries(context_render_ui_${_t}
+        PRIVATE context_render_ui context_ui_text context_warnings)
+    target_include_directories(context_render_ui_${_t}
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests ${CMAKE_CURRENT_SOURCE_DIR}/../tests)
+    target_link_options(context_render_ui_${_t} PRIVATE ${_context_render_ui_static_runtime})
+    add_test(NAME render-ui-${_t} COMMAND context_render_ui_${_t})
+endforeach()

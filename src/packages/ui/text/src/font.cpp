@@ -8,6 +8,9 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
+#include <hb-ot.h>
+#include <hb.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -29,9 +32,17 @@ struct FontFace::Impl
 {
     FT_Library lib = nullptr;
     FT_Face face = nullptr;
+    // The embedded bytes (caller-owned, static — outlive the face); HarfBuzz references them zero-copy.
+    const std::byte* data = nullptr;
+    std::size_t size = 0;
+    // Lazily created on the first shaping request + cached (created over `data`/`size`). Mutable so the
+    // const hb_font() accessor can memoize.
+    hb_font_t* hb = nullptr;
 
     ~Impl()
     {
+        if (hb != nullptr)
+            hb_font_destroy(hb);
         if (face != nullptr)
             FT_Done_Face(face);
         if (lib != nullptr)
@@ -61,6 +72,11 @@ std::optional<FontFace> FontFace::from_memory(std::span<const std::byte> ttf)
 
     // Prefer a Unicode charmap; FT_New_Memory_Face usually selects one already, so ignore the result.
     (void)FT_Select_Charmap(impl->face, FT_ENCODING_UNICODE);
+
+    // Retain the byte span for HarfBuzz (zero-copy blob, created lazily in hb_font()). The caller
+    // guarantees the bytes outlive the face (the embedded fonts are static), exactly as FreeType requires.
+    impl->data = ttf.data();
+    impl->size = ttf.size();
     return FontFace(std::move(impl));
 }
 
@@ -125,6 +141,36 @@ std::optional<GlyphBitmap> FontFace::rasterize(GlyphId glyph, float pixel_size) 
 const void* FontFace::identity() const noexcept
 {
     return impl_->face;
+}
+
+void* FontFace::hb_font() const noexcept
+{
+    if (impl_->hb != nullptr)
+        return impl_->hb;
+    if (impl_->data == nullptr || impl_->size == 0)
+        return nullptr;
+
+    // Zero-copy blob over the embedded bytes (READONLY — HarfBuzz never mutates or frees them; they are
+    // static and outlive the face). face 0 (the embedded fonts are single-face). hb_ot_font_set_funcs
+    // installs the built-in OpenType glyph/advance/GPOS funcs (no FreeType dependency — the amalgamated
+    // HarfBuzz has no hb-ft), so the shaper reads the font's OpenType tables directly and its glyph ids
+    // are the font's native indices (== FreeType's), keying the FreeType rasterizer + atlas unchanged.
+    hb_blob_t* blob = hb_blob_create(reinterpret_cast<const char*>(impl_->data),
+                                     static_cast<unsigned int>(impl_->size), HB_MEMORY_MODE_READONLY,
+                                     nullptr, nullptr);
+    hb_face_t* face = hb_face_create(blob, 0);
+    hb_blob_destroy(blob); // hb_face retains a reference
+    const unsigned int glyphs = hb_face_get_glyph_count(face);
+    if (glyphs == 0)
+    {
+        hb_face_destroy(face);
+        return nullptr; // HarfBuzz did not recognize the face
+    }
+    hb_font_t* font = hb_font_create(face);
+    hb_face_destroy(face); // hb_font retains a reference
+    hb_ot_font_set_funcs(font);
+    impl_->hb = font;
+    return impl_->hb;
 }
 
 std::string FontFace::family_name() const

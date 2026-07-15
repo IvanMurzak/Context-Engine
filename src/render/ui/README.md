@@ -20,7 +20,9 @@ added to the web target. Keyed on glyph id + GPOS-offset-bearing → a8's shaped
 unchanged. Tests: `render-ui-test_glyph_atlas` (build/hit/eviction/LRU/edges),
 `render-ui-test_text_quads` (placement/UVs/offsets/skips), and `render-ui-test_glyph_atlas_font` (the
 real embedded-font `measure` → atlas → emit path — the one render-ui target that links
-`context_ui_text`). NO text golden lands here — text goldens arrive with a8's shaped output.
+`context_ui_text`). M7 **a8** wires this path into the `ui-hud` golden: `hud_scene.h` draws a shaped-text label as
+atlas-textured glyph **cutout** quads (see below), and `render-ui-test_glyph_atlas_font` also pins the
+a8 identical-rects-across-null-and-GPU-providers invariant.
 
 ## Pieces
 
@@ -49,7 +51,10 @@ real embedded-font `measure` → atlas → emit path — the one render-ui targe
   reference HUD of solid colored rectangles (health bar + fill, minimap, a GPU-composited badge, status
   bar) authored as a `UiTree`, rendered through the provider (`render_golden_ui_hud`), plus the analytic
   GPU-free rasterization of the same extracted quads (`render_ui_hud_reference_cpu`) that generates the
-  committed `goldens/ui-hud.ppm`. Text/glyphs are deliberately absent — they arrive with a7/a8.
+  committed `goldens/ui-hud.ppm`. M7 a8 adds a shaped-text label (measure → FreeType glyph atlas →
+  textured-glyph cutout draw), so `hud_scene.h` links `context_ui_text` and compiles into the native
+  offscreen exe + the Emscripten web target; the GPU cutout (nearest sample + `discard` at 0.5) and the
+  analytic CPU mirror emit the same 1-bit glyph mask (no alpha blend needed at T1).
 
 ## Tests + gates (R-QA-013)
 

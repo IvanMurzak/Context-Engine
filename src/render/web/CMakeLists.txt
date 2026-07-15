@@ -73,12 +73,16 @@ target_link_libraries(context_ui_web PRIVATE context_warnings)
 
 # The M7 a6 engine-integrated GPU UI backend (context_render_ui): extract/composite/batch/provider over
 # the RHI, compiled from the SAME sources as native. The ui-hud golden's web render drives this
-# (hud_scene.h); it reuses the sprite ortho/quad math (context_render_web_sprite) + a1's UiTree.
+# (hud_scene.h); it reuses the sprite ortho/quad math (context_render_web_sprite) + a1's UiTree. M7 a8
+# adds the glyph atlas + textured-quad emitter (FreeType-free — fed by a rasterizer callback), which
+# hud_scene.h's shaped-text draw needs.
 add_library(context_render_ui_web STATIC
     ${_render_root}/ui/src/snapshot.cpp
     ${_render_root}/ui/src/composite.cpp
     ${_render_root}/ui/src/batch.cpp
-    ${_render_root}/ui/src/provider.cpp)
+    ${_render_root}/ui/src/provider.cpp
+    ${_render_root}/ui/src/glyph_atlas.cpp  # M7 a8: glyph-id-keyed R8 atlas + LRU
+    ${_render_root}/ui/src/text_quads.cpp)  # M7 a8: offset-bearing atlas quad emitter
 target_include_directories(context_render_ui_web PUBLIC
     ${_render_root}/include
     ${_render_root}/sprite/include
@@ -86,16 +90,59 @@ target_include_directories(context_render_ui_web PUBLIC
     ${_render_root}/../packages/ui/include)
 target_link_libraries(context_render_ui_web PRIVATE context_warnings)
 
+# --- M7 a8: the shaped-text package for the ui-hud web golden ------------------------------------------
+# hud_scene.h now draws a SHAPED-TEXT label, so the web target must compile context_ui_text (measure ->
+# FreeType glyph rasterization + HarfBuzz shaping) under Emscripten, exactly like native. FreeType /
+# HarfBuzz / SheenBidi / libunibreak are all portable C/C++ that build under emcc (the same fetch/vendor
+# CMake modules the native build uses). The embedded fonts are generated from the vendored TTFs by
+# tools/embed_bin.py (same as packages/ui/text/CMakeLists.txt). All linked PRIVATE (public headers are
+# dependency-free), so context_render_ui_web stays FreeType-free.
+set(_repo_root ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
+include(${_repo_root}/cmake/ContextFreetype.cmake)    # `freetype` target (fetch + build from source)
+include(${_repo_root}/cmake/ContextHarfBuzz.cmake)    # `harfbuzz` target (fetch + amalgamated TU)
+include(${_repo_root}/cmake/ContextSheenBidi.cmake)   # `sheenbidi` target (vendored)
+include(${_repo_root}/cmake/ContextLibunibreak.cmake) # `libunibreak` target (vendored)
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+set(_ui_text_src ${_repo_root}/src/packages/ui/text)
+set(_ui_text_gen ${CMAKE_CURRENT_BINARY_DIR}/ui_text_generated)
+file(MAKE_DIRECTORY ${_ui_text_gen})
+set(_ui_text_ns "context::packages::ui::text::detail")
+set(_embed_py ${_repo_root}/tools/embed_bin.py)
+add_custom_command(
+    OUTPUT ${_ui_text_gen}/noto_sans_regular.cpp
+    COMMAND ${Python3_EXECUTABLE} ${_embed_py}
+            ${_repo_root}/third_party/fonts/NotoSans-Regular.ttf
+            ${_ui_text_gen}/noto_sans_regular.cpp kNotoSansRegularTtf --namespace ${_ui_text_ns}
+    DEPENDS ${_repo_root}/third_party/fonts/NotoSans-Regular.ttf ${_embed_py} VERBATIM)
+add_custom_command(
+    OUTPUT ${_ui_text_gen}/noto_sans_arabic_regular.cpp
+    COMMAND ${Python3_EXECUTABLE} ${_embed_py}
+            ${_repo_root}/third_party/fonts/NotoSansArabic-Regular.ttf
+            ${_ui_text_gen}/noto_sans_arabic_regular.cpp kNotoSansArabicRegularTtf --namespace ${_ui_text_ns}
+    DEPENDS ${_repo_root}/third_party/fonts/NotoSansArabic-Regular.ttf ${_embed_py} VERBATIM)
+
+add_library(context_ui_text_web STATIC
+    ${_ui_text_src}/src/font.cpp
+    ${_ui_text_src}/src/measure.cpp
+    ${_ui_text_src}/src/line_break.cpp
+    ${_ui_text_src}/src/embedded_fonts.cpp
+    ${_ui_text_gen}/noto_sans_regular.cpp
+    ${_ui_text_gen}/noto_sans_arabic_regular.cpp)
+target_include_directories(context_ui_text_web PUBLIC ${_ui_text_src}/include)
+target_link_libraries(context_ui_text_web PRIVATE freetype harfbuzz sheenbidi libunibreak context_warnings)
+
 # The offscreen parity harness -> an .html shell (directly servable for the in-browser run).
 add_executable(context-render-web web_main.cpp)
 target_include_directories(context-render-web PRIVATE
     ${_render_root}/include
     ${_render_root}/sprite/include
     ${_render_root}/ui/include
-    ${_render_root}/../packages/ui/include)
+    ${_render_root}/../packages/ui/include
+    ${_ui_text_src}/include) # M7 a8: hud_scene.h -> context_ui_text (measure/font/embedded_fonts)
 target_link_libraries(context-render-web
     PRIVATE context_render_web context_render_web_sprite context_render_ui_web context_ui_web
-            context_warnings)
+            context_ui_text_web context_warnings) # context_ui_text_web: M7 a8 shaped text
 target_compile_options(context-render-web PRIVATE "--use-port=emdawnwebgpu")
 
 # emdawnwebgpu build constraints (ROADMAP §5 risk table; spikes/webgpu/FINDINGS.md notes 3-5):

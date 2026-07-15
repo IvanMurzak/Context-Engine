@@ -185,10 +185,12 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
     # proof (lit_offscreen.h) through the same backend.
     # context_render_ui: the offscreen exe's `ui` mode + `golden ui-hud` scene run the M7 a6 GPU UI
     # backend (hud_scene.h) through the SAME wgpu backend — reusing the ONE prebuilt, not forking it.
+    # context_ui_text (M7 a8): hud_scene.h now draws a shaped-text label (measure -> FreeType glyph atlas
+    # -> textured-glyph cutout draw), so the golden dump exe links the text package.
     add_executable(context_render_wgpu_offscreen src/wgpu/offscreen_main.cpp)
     target_link_libraries(context_render_wgpu_offscreen
         PRIVATE context_render_wgpu context_render_sprite context_render_lit context_render_ui
-                context_warnings)
+                context_ui_text context_warnings)
     if(WIN32)
         # Stage wgpu_native.dll next to the exe so the dynamic import resolves at run time.
         add_custom_command(TARGET context_render_wgpu_offscreen POST_BUILD

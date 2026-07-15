@@ -24,7 +24,7 @@ here with a **named SSIM-class perceptual metric + per-scene tolerances** (`mani
 | `sprite2d.ppm` | 2D sprite path (R-2D-001) | ortho projection + sorting-layer overdraw |
 | `lit3d.ppm` | representative lit scene | PBR + dir/point lights + shadow depth pass (R-REND-004/006) |
 | `viewport.ppm` | M5-F1 observer viewport (3D+2D) | the 3D triangle base + the 2D sprites composited on top (issue #164) |
-| `ui-hud.ppm` | M7 a6 runtime UI HUD (R-UI-005) | a colored-rect HUD (health bar + fill, minimap, GPU-composited badge, status bar) extracted through the GpuUiProvider and repainted into its persistent UI-layer — native + web |
+| `ui-hud.ppm` | M7 a6 runtime UI HUD + a8 shaped text (R-UI-005) | a colored-rect HUD (health bar + fill, minimap, GPU-composited badge, status bar) PLUS a shaped-text label ("SCORE 1200") drawn as atlas-textured glyph cutout quads, extracted through the GpuUiProvider — native + web |
 | `ui-worldpanel.ppm` | M7 a9 world-space RTT UI panel (R-UI-003, D4) | a UI panel rendered into a dynamic-texture registry target, then sampled onto a rotated world quad over a lit-ground base (native only) |
 
 Format: binary PPM (P6, maxval 255) — stdlib-parseable, no image dependency anywhere in the chain.
@@ -56,13 +56,19 @@ context_render_wgpu_offscreen golden ui-worldpanel out/ui-worldpanel.ppm
 python3 tools/golden_compare.py --scene ui-worldpanel --candidate out/ui-worldpanel.ppm
 ```
 
-The **`ui-hud`** scene is the M7 a6 engine-integrated GPU UI backend (issue #141 golden discipline;
-R-UI-005): a HUD of solid opaque colored rectangles authored as an a1 `UiTree`, extracted to draw quads
-and repainted into the `GpuUiProvider`'s persistent UI-layer texture over the SAME ortho quad path the
-`sprite2d` golden already SSIM-gates (opaque replace, no blend / no MSAA — a tight tolerance). It is
-rendered on BOTH the native (lavapipe) and web (SwiftShader) legs — unlike native-only `lit3d`/`viewport`
-— because the UI backend compiles into the Emscripten web target. The committed baseline is the analytic
-(GPU-free) rasterization of the same extracted quads (`hud_scene.h::render_ui_hud_reference_cpu`).
+The **`ui-hud`** scene is the M7 a6 engine-integrated GPU UI backend + the M7 a8 shaped text (issue #141
+golden discipline; R-UI-005): a HUD of solid opaque colored rectangles authored as an a1 `UiTree`,
+extracted to draw quads and repainted into the `GpuUiProvider`'s persistent UI-layer texture over the
+SAME ortho quad path the `sprite2d` golden already SSIM-gates, PLUS a shaped-text label ("SCORE 1200")
+drawn on top as atlas-textured glyph **cutout** quads (`measure` → FreeType glyph atlas → textured-glyph
+draw; the coverage thresholded at 0.5, integer 1:1 pixel↔texel, so the GPU nearest-sample+`discard` and
+the CPU mirror emit the same 1-bit mask — the T1 RHI has no alpha blend and a cutout needs none). Opaque
+replace, no blend / no MSAA — a tight tolerance. It is rendered on BOTH the native (lavapipe) and web
+(SwiftShader) legs — unlike native-only `lit3d`/`viewport` — because the UI backend AND the shaping text
+stack (FreeType/HarfBuzz/SheenBidi/libunibreak) compile into the Emscripten web target. The committed
+baseline is the analytic (GPU-free) rasterization of the same extracted quads + 1-bit text mask
+(`hud_scene.h::render_ui_hud_reference_cpu`). Shaping correctness is proven headless (`ui-test_shaping` /
+`ui-test_line_break`); this golden pins that shaped text reaches pixels.
 
 The **`ui-worldpanel`** scene is the M7 a9 world-space render-to-texture UI panel (issue #141 golden
 discipline; R-UI-003, lock D4): a teal panel with an amber inner rect is rendered into a persistent 64×64

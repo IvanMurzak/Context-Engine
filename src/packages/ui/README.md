@@ -43,9 +43,11 @@ rework) are later M7 tasks.
   `UiProvider` reports its capabilities and `present`s the tree under a `RepaintPlan`.
   `negotiate_repaint()` is the **fallback table**: a provider **without** `damage_repaint` falls back to
   a **full repaint**; a damage-capable one repaints only the coalesced dirty regions.
-- **Null provider** (`null_provider.h`) — the R-UI-006 headless guarantee made concrete: all-false
+- **Null provider** (`null_provider.h`) — the R-UI-006 headless guarantee made concrete: no **render**
   capabilities, and a `present()` that does **no rendering work** (never walks the tree). UI logic runs
-  headless with zero render cost.
+  headless with zero render cost. It DOES advertise `text_shaping` + `bidi` true (a8): shaping lives in
+  the headless text package (`context_ui_text`), so the null provider computes the same glyph rects the
+  GPU provider draws.
 - **Input routing glue** (`input_routing.h`, `a3`, `context_ui_input`) — the L-45 **consumption** seam
   (R-SYS-007, D5/D6): a `UiInputRouter` binds a headless `UiTree` to the EXISTING input-package
   `InputRouter` and the ONE sim `InputState` sink. `focus()` / `blur()` push/pop a caller-installed
