@@ -137,8 +137,8 @@ struct Vec3
 [[nodiscard]] inline Vec3 rotate(const std::array<float, 4>& q, Vec3 v)
 {
     const Vec3 u{q[0], q[1], q[2]};
-    const Vec3 t = cross(u, cross(u, v));
     const Vec3 w = cross(u, v);
+    const Vec3 t = cross(u, w); // cross(u, cross(u, v)) — reuse w, don't recompute cross(u, v)
     return {v.x + 2.0f * (q[3] * w.x + t.x), v.y + 2.0f * (q[3] * w.y + t.y),
             v.z + 2.0f * (q[3] * w.z + t.z)};
 }
