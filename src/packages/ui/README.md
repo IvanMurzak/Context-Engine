@@ -6,8 +6,11 @@ model, dirty/damage tracking, the backend-agnostic **UI-Provider contract**, (`a
 the **input routing glue** to the L-45 capture stack + the sim InputState sink.
 `a1-ui-foundation` landed the tree, events, damage, the provider seam, and a null provider;
 `a2-layout-hittest` added computed geometry; `a4-ts-authoring` added the `context.ui` authoring
-surface; `a3-input-routing` added the router->session glue (this doc). The CLI verbs and the GPU
-backend are later M7 tasks.
+surface; `a3-input-routing` added the router->session glue (this doc); `a7-font-substrate` added the text
+substrate — FreeType glyph rasterization + the run-based `measure()` seam + the embedded default fonts
+— as the sibling **`context_ui_text`** lib under `text/` (see `text/README.md`). The CLI verbs and
+shaping/bidi (a8, which drops into a7's run-based, glyph-id-keyed, GPOS-offset-bearing seam without
+rework) are later M7 tasks.
 
 ## What it provides
 
