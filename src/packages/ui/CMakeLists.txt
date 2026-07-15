@@ -15,6 +15,7 @@
 
 add_library(context_ui STATIC
     src/damage.cpp
+    src/layout.cpp
     src/provider.cpp
     src/ui_tree.cpp)
 
@@ -44,6 +45,10 @@ set(_context_ui_static_runtime
 #   - test_null_provider: the null/headless provider — all-false capabilities + zero-cost present (no
 #                         tree walk, no mutation), contrasted with a recording provider, plus the
 #                         provider-less headless-logic guarantee (R-UI-006).
+#   - test_layout:        headless layout + hit-testing + focus order (T2) — flow (Row/Column) + absolute
+#                         anchoring computed rects, resize/reflow → damage propagation (drives a1's
+#                         damage), top-most hit-testing (overlap/nesting/hidden/zero-opacity), and
+#                         deterministic document-order focus.
 # The `ui-*` ctest family auto-runs in the general CI test step (no CI job-list edits needed — it is not
 # in the build job's -E gate-exclusion regex and is built by --preset dev like every target).
 set(_context_ui_tests
@@ -51,7 +56,8 @@ set(_context_ui_tests
     test_dispatch
     test_damage
     test_provider
-    test_null_provider)
+    test_null_provider
+    test_layout)
 
 foreach(_t IN LISTS _context_ui_tests)
     add_executable(context_ui_${_t} tests/${_t}.cpp)

@@ -1,10 +1,10 @@
 # `src/packages/ui/` — Runtime UI package (M7 T1, R-UI-002/005/006)
 
 The **headless foundation** of the pluggable runtime UI system: a retained UI tree, an event + handler
-model, dirty/damage tracking, and the backend-agnostic **UI-Provider contract**. This is the first M7
-task (`a1-ui-foundation`) — it lands the tree, events, damage, the provider seam, and a null provider;
-layout/hit-testing, input-routing, the TS authoring surface, the CLI verbs, and the GPU backend are
-later M7 tasks.
+model, dirty/damage tracking, the backend-agnostic **UI-Provider contract**, and (`a2`) headless
+**layout + hit-testing + focus order**. `a1-ui-foundation` landed the tree, events, damage, the
+provider seam, and a null provider; `a2-layout-hittest` added computed geometry (this doc). Input
+routing, the TS authoring surface, the CLI verbs, and the GPU backend are later M7 tasks.
 
 ## What it provides
 
@@ -22,6 +22,16 @@ later M7 tasks.
 - **Damage tracking** (`damage.h`) — mutations mark dirty regions computed **in the tree**; a structural
   change marks the whole surface. `DamageList::coalesce()` merges overlapping regions to a minimal set;
   `UiTree::take_damage()` returns the coalesced damage and resets it.
+- **Layout + hit-testing + focus** (`layout.h`, `a2`) — computed geometry with **no GPU**. Per-node
+  layout inputs (a small closed model on `UiNode::layout`: `Positioning` Flow/Absolute, a `Flow`
+  Row/Column stack container with `gap`, `Anchor`-edge absolute positioning with stretch, `size`,
+  `offset`) drive `compute_layout(tree, viewport)`, which writes each node's computed `bounds`
+  top-down. It writes through `set_bounds`, so a **resize/reflow drives the a1 damage machinery** (only
+  the moved rects are damaged; an unchanged re-layout produces none). `hit_test(tree, x, y)` returns the
+  **top-most** node under a point (a child over its parent, a later sibling over an earlier one),
+  **respecting visibility/opacity** (a `visible == false` or `opacity <= 0` node — and its whole subtree
+  — is not hittable). `focus_order(tree)` is the **deterministic** focus/tab order: visible focusable
+  nodes (the interactive roles, `is_focusable`) in document order, a hidden subtree culled.
 - **UI-Provider contract** (`provider.h`) — `Capabilities` is the exact **R-UI-005** set
   (`gpu_driver`, `damage_repaint`, `composited_transforms`, `text_shaping`, `bidi`, `ime`). A
   `UiProvider` reports its capabilities and `present`s the tree under a `RepaintPlan`.
@@ -58,5 +68,7 @@ vocabulary and so links `context_session` PUBLIC), this foundation tier has **no
 
 Headless `ui-*` ctests (R-QA-013, same PR): `ui-test_tree` (build/mutate), `ui-test_dispatch` (handler
 dispatch + focus), `ui-test_damage` (coalescing + structural-vs-region damage), `ui-test_provider`
-(capability negotiation/fallback table), `ui-test_null_provider` (null-provider zero-cost). Pure stdlib,
-so they build + run on all three CI OS legs and auto-run in the general CI test step.
+(capability negotiation/fallback table), `ui-test_null_provider` (null-provider zero-cost),
+`ui-test_layout` (flow/absolute computed rects, resize/reflow → damage, hit-testing
+overlap/nesting/hidden/zero-opacity, deterministic focus order). Pure stdlib, so they build + run on all
+three CI OS legs and auto-run in the general CI test step.
