@@ -492,6 +492,56 @@
       "description": "M6 exit criterion 5 (design §M6-EXIT, issue #197): the M6 core-systems SEAM CHECKLIST as an executable audit (the milestone-closing mirror of m2-exit-6 / m5-exit-3) — one assertion per M6 seam so a regression that quietly drops one turns the gate red: the microkernel invariant (no src/kernel/ source includes a package header — L-60), every sim package composes on the ONE kernel World, the whole-build deterministic property (the attestation is PRODUCED from actually-applied strict-FP flags and fails closed — R-SIM-005), package sim-components fold into the hierarchical state hash by stable name, audio + cosmetic particles are presentation observers OFF the sim path (R-SIM-001), the input UI-vs-gameplay routing arbitration (R-SYS-007 / L-45), replication metadata bound to the composed id (L-48 / L-37), and the minter discipline (each package confined to its F0a-reserved catalog domain block) (ctest m6-exit-5-seam-checklist; all three build-matrix legs)."
     },
     {
+      "id": "m7-exit-hud-headless",
+      "requirement": "R-UI-006",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M7 exit criterion 1 (design 2026-07-13-m7-runtime-ui / a12-m7-exit): the authored platformer-2d HUD (samples/platformer-2d/ui/hud.ui-hud.json) DATA-BINDS + RENDERS headless with no GPU. Half 1 loads the authored ctx:ui-hud document through the REAL a5 `context ui` load path in-process (cli::run): the score label + health bar resolve their read-only bindings to the seeded numeric state, layout computed real rects, and a click on the collect button scores points through the UI->state action path (the platformer coin-collect loop). Half 2 drives the a6 engine-integrated UI backend's read-only EXTRACT step (extract_ui, src/render/ui/) that walks a HUD's retained tree into flat draw quads with NO rhi.h device at all — the health FILL overdraws its bar in painter order — and the null/headless provider accepts the frame at zero render cost. The pixel-exact HUD is the sibling render job's ui-hud SSIM golden; this gate is the headless extract/present logic that feeds it (ctest m7-exit-1-hud-headless; runs in the blocking 'M7 exit gate' named step of the build job on all three build-matrix legs)."
+    },
+    {
+      "id": "m7-exit-cli-drive",
+      "requirement": "R-UI-006",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M7 exit criterion 2 (design 2026-07-13-m7-runtime-ui / a12-m7-exit): drive the authored platformer-2d HUD through the REAL shipped `context` binary's a5 ui.* verbs across a TRUE process boundary — NOT a mock, NOT the in-process cli::run. The binary is spawned per verb via the shared hardened std::system runner (context_common/subprocess.h; the Windows cmd.exe outer-quote fix + POSIX exit-code decode), its stdout captured to a scratch file and parsed as the R-CLI-008 envelope: ui dump loads + lays out the authored HUD, ui query reads a data-bound node, ui send click runs the UI->state action path (+10 score / -5 health), and ui assert evaluates a bound value (a correct value passes; a wrong one fails closed with the catalog's non-zero exit code + ui.assertion_failed). Proves the a5 headless drive/assert surface works end to end on the shipped executable, two ways (envelope + exit code) (ctest m7-exit-2-cli-drive; blocking 'M7 exit gate' named step, all three build-matrix legs)."
+    },
+    {
+      "id": "m7-exit-worldpanel",
+      "requirement": "R-UI-003",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M7 exit criterion 3 (design 2026-07-13-m7-runtime-ui / a12-m7-exit; R-UI-003 / R-SYS-007 / L-16 / L-45, D4/D5/D6, owner ruling d): the roll-3d world-space UI panel LOGIC / INTERACTION chain, end to end and headless. Pixels stay with the sibling render jobs (the ui-worldpanel / ui-curvedpanel SSIM goldens); this gate is the logic chain that turns a screen pick ray into a gameplay intent in the ONE sim sink: screen ray -> ray-vs-mesh -> barycentric UV -> panel-space coords (a9 FLAT quad AND a10 CURVED cylinder mesh, broad-phase-pruned through spatial IDENTICAL to the linear oracle) -> the SAME a3 UiInputRouter.route_pointer a flat screen HUD uses (L-45) -> the ONE Session InputState sink. The authored samples/roll-3d/ui/panel.ui-worldpanel.json is load-bearing (surface size + curved world-mesh params + the action button's hit rect are read from it). A UI-routed click lands byte-identically to a key-bound fire (D5 single sink) and leaves hash_world unmoved (D6); a miss under a modal is swallowed (ctest m7-exit-3-worldpanel; blocking 'M7 exit gate' named step, all three build-matrix legs)."
+    },
+    {
+      "id": "m7-exit-determinism-presentation",
+      "requirement": "R-SIM-005",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M7 exit criterion 4 (design 2026-07-13-m7-runtime-ui / a12-m7-exit; R-SIM-005 / R-QA-005, lock D6): the sim state hash is BIT-IDENTICAL whether the runtime UI is ABSENT, presented through the NULL provider, or presented through the engine-integrated GPU provider — pinning D6 forever (UI is presentation; reading sim state to drive a HUD, extracting the retained tree, and presenting it null OR GPU must never perturb the deterministic simulation). The SAME platformer sample-game session (same seed, same 90 fixed steps) is run three ways and its per-tick AND final hash_world compared; the GPU leg's provider is the REAL context::render::ui::GpuUiProvider driven over the GPU-free fake RHI (the a11 capability-matrix precedent), pixels staying with the sibling render jobs. Any divergence between the three legs reds the gate. Registers NO new determinism-* ctest name, so the strict-FP `deterministic` job's hand-maintained --target list is unchanged (the m6-exit-3 alias precedent) (ctest m7-exit-4-determinism-presentation; blocking 'M7 exit gate' named step, all three build-matrix legs)."
+    },
+    {
+      "id": "m7-exit-seam-checklist",
+      "requirement": "R-UI-005",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M7 exit criterion 5 (design 2026-07-13-m7-runtime-ui / a12-m7-exit): the M7 runtime-UI SEAM CHECKLIST as an executable audit (the milestone-closing mirror of m2-exit-6 / m5-exit-3 / m6-exit-5) — one assertion per M7 seam so a regression that quietly drops one turns the gate red, additionally encoding the two RULED-scope seams the design's exit-gate section names (owner rulings c + d): (1) provider pluggability (R-UI-002 / D1 — null + engine-integrated both implement UiProvider; negotiate_repaint falls back to a full repaint without damage_repaint, incremental with it); (2) the headless authoring loop (R-UI-006 / D6 — build/layout/hit-test/dispatch a tree with no GPU); (3) RULING (c) shaped-text capability TRUTH — text_shaping + bidi TRUE on both providers AND the headless shaper actually works (a Latin ligature collapses; an Arabic run resolves RTL — the same measure() path the a8 ui-test_shaping gate proves); (4) RULING (d) curved-panel interaction presence — the a10 raycast->UV->panel-coords path is registered + green and the broad-phase-pruned raycaster equals the linear oracle; (5) single-sink input routing (R-SYS-007 / L-45 / D5); (6) determinism/presentation (D6 — no UI operation moves hash_world); (7) minter discipline (the ui.* fail-closed codes live in the reserved ui domain block) (ctest m7-exit-5-seam-checklist; blocking 'M7 exit gate' named step, all three build-matrix legs)."
+    },
+    {
       "id": "minspec-floor-proxy-measure",
       "requirement": "R-QA-007",
       "runner_class": "gh-ubuntu-shared",

@@ -126,11 +126,11 @@ jobs:
         run: cmake --build --preset dev
         working-directory: src
 
-      # Every registered suite EXCEPT the M1 + M2 + M4 + M5 + M6 exit gates, the M3 determinism
+      # Every registered suite EXCEPT the M1 + M2 + M4 + M5 + M6 + M7 exit gates, the M3 determinism
       # gate, and the samples-corpus gate — those families run in their own named steps below so
       # each milestone/QA gate is legible per OS leg (same tests, each runs exactly once).
       - name: Run test suites (ctest)
-        run: ctest --preset dev --verbose -E "^m1-exit-|^m2-exit-|^m4-exit-|^m5-exit-|^m6-exit-|^determinism-|^samples-corpus"
+        run: ctest --preset dev --verbose -E "^m1-exit-|^m2-exit-|^m4-exit-|^m5-exit-|^m6-exit-|^m7-exit-|^determinism-|^samples-corpus"
         working-directory: src
 
       # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36) — the five exit criteria as a BLOCKING
@@ -220,6 +220,27 @@ jobs:
       # docs/ci-fleet-manifest.json as the m6-exit-* gates. Green here CLOSES M6.
       - name: M6 exit gate (games-run + gc-budget + determinism wedge + netcode + seam checklist, blocking)
         run: ctest --preset dev --output-on-failure -R "^m6-exit-"
+        working-directory: src
+
+      # The M7 EXIT GATE (design 2026-07-13-m7-runtime-ui / a12-m7-exit) — the runtime-UI milestone-
+      # closing mirror of the M1/M2/M4/M5/M6 gates: five blocking per-PR ctests on every OS leg,
+      # RIDING the landed M7 machinery over REAL authored content (samples/platformer-2d/ui/hud.ui-hud.json
+      # + samples/roll-3d/ui/panel.ui-worldpanel.json). The authored platformer HUD data-binds through
+      # the REAL a5 `context ui` load path AND renders headless via the a6 read-only extract
+      # (m7-exit-1); the REAL `context` binary drives it cross-process via the ui.* verbs, failing
+      # closed on a wrong assertion (m7-exit-2); the roll-3d world-space panel's logic chain turns a
+      # screen ray into a gameplay intent in the ONE sim sink — raycast -> UV -> panel coords -> the a3
+      # single sink, a9 flat AND a10 curved (m7-exit-3); hash_world is bit-identical with the UI absent /
+      # null-provider / GPU-provider, pinning D6 (m7-exit-4); and the executable M7 seam checklist audits
+      # one assertion per seam, including owner rulings (c) shaped-text-capability-truth and (d)
+      # curved-panel-interaction-presence (m7-exit-5). All headless: no GPU, no renderer, no daemon.
+      # This job builds EVERY target via `--preset dev`, so each gate's executable is always built
+      # (never "Not Run") — NO `--target` list changes are needed (the M6 precedent); the strict-FP
+      # `deterministic` job's hand-maintained --target list is deliberately UNCHANGED (m7-exit-4
+      # registers no new determinism-* ctest name — the m6-exit-3 alias precedent). Registered in
+      # docs/ci-fleet-manifest.json as the m7-exit-* gates. Green here CLOSES M7.
+      - name: M7 exit gate (hud-headless + cli-drive + worldpanel + determinism-presentation + seam checklist, blocking)
+        run: ctest --preset dev --output-on-failure -R "^m7-exit-"
         working-directory: src
 
       - name: sccache stats
