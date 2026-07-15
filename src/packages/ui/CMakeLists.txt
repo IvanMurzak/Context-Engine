@@ -187,3 +187,32 @@ target_link_libraries(context_ui_test_curved_panel_input
 target_link_options(context_ui_test_curved_panel_input PRIVATE ${_context_ui_static_runtime})
 target_include_directories(context_ui_test_curved_panel_input PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME ui-test_curved_panel_input COMMAND context_ui_test_curved_panel_input)
+
+# --- context_ui provider-conformance tests (M7 a11 / a11-capability-conformance) ------------------
+# The reusable, backend-agnostic conformance suite (tests/provider_conformance.h — the R-UI-002
+# pluggability proof + the R-UI-008 out-of-tree on-ramp) driven against BOTH in-repo providers, plus the
+# rots-if-broken capability-matrix cross-check (docs/ui-capability-matrix.md vs the live Capabilities
+# structs, L-53). Both executables instantiate the engine-integrated GpuUiProvider (context_render_ui,
+# src/render/ui/) over the GPU-free fake RHI backend (../../render/tests/render_test_rhi.h) alongside the
+# null provider, so they link context_render_ui and add the render tests dir to the include path.
+# context_render_ui is GPU-free (drives only rhi.h) so both build + run under the local GCC dev gate and
+# the general CI step (the `ui-*` family is not in the build job's -E gate-exclusion regex; no ci.yml
+# edit needed). CMake resolves the context_render_ui target (added by src/CMakeLists.txt after this
+# subdir) at generate time — the same order-independent target resolution the context_ui_input link above
+# relies on.
+set(_context_ui_conformance_tests
+    test_provider_conformance # DoD-1: null + engine-integrated pass the SAME suite (R-UI-002/R-UI-008)
+    test_capability_matrix)   # DoD-2: docs/ui-capability-matrix.md rots-if-broken vs the live structs
+foreach(_t IN LISTS _context_ui_conformance_tests)
+    add_executable(context_ui_${_t} tests/${_t}.cpp)
+    target_link_libraries(context_ui_${_t} PRIVATE context_render_ui context_ui context_warnings)
+    target_link_options(context_ui_${_t} PRIVATE ${_context_ui_static_runtime})
+    target_include_directories(context_ui_${_t}
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests ${CMAKE_CURRENT_SOURCE_DIR}/../../render/tests)
+    add_test(NAME ui-${_t} COMMAND context_ui_${_t})
+endforeach()
+
+# The matrix cross-check reads docs/ui-capability-matrix.md; inject its source-tree path (the
+# coverage.manifest.jsonl precedent, src/editor/gui/a11y/tests/test_coverage.cpp).
+target_compile_definitions(context_ui_test_capability_matrix PRIVATE
+    CONTEXT_UI_CAPABILITY_MATRIX_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../../docs/ui-capability-matrix.md")
