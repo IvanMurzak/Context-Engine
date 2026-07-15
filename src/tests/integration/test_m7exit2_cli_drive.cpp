@@ -38,8 +38,10 @@ const std::string kBin = CONTEXT_BINARY;
 const std::string kHud = std::string(CONTEXT_SAMPLES_DIR) + "/platformer-2d/ui/hud.ui-hud.json";
 
 // One cross-process `context ui …` invocation: spawn the REAL binary via the shared std::system runner,
-// capture stdout+stderr to a scratch file, and return the exit code + the parsed envelope. `argv` is the
-// argument list AFTER the binary (e.g. {"ui","dump","<hud>"}).
+// capture STDOUT ONLY to a scratch file, and return the exit code + the parsed envelope. `argv` is the
+// argument list AFTER the binary (e.g. {"ui","dump","<hud>"}). The R-CLI-008 envelope (success AND
+// error) is a stdout-only contract (app.cpp writes it via fwrite(..., stdout)); stderr carries no
+// envelope, so it is deliberately NOT redirected into the scratch file.
 struct CliResult
 {
     int exit_code = -1;
@@ -52,7 +54,12 @@ CliResult drive(const std::vector<std::string>& argv)
     std::string command = subprocess::quote_argument(kBin);
     for (const std::string& a : argv)
         command += " " + subprocess::quote_argument(a);
-    command += " > " + subprocess::quote_argument(out.string()) + " 2>&1";
+    // Redirect STDOUT ONLY — never `2>&1`. Under the sanitize (ASan+UBSan) leg the spawned `context`
+    // binary links the uninstrumented rusty_v8 prebuilt, whose duplicate C++-runtime typeinfo makes
+    // UBSan's vptr sub-check false-positive on valid libstdc++ streams; those `runtime error:` lines
+    // are recovered (benign) but still print to stderr (docs/sanitizer-v8-false-positives.md). Merging
+    // stderr into the capture would prepend that noise ahead of the `{`, breaking Json::parse at byte 0.
+    command += " > " + subprocess::quote_argument(out.string());
 
     CliResult r;
     r.exit_code = subprocess::run_command(command);
