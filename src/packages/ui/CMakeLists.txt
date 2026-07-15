@@ -43,6 +43,26 @@ add_library(context_ui_script STATIC
 target_link_libraries(context_ui_script PUBLIC context_ui)
 target_link_libraries(context_ui_script PRIVATE context_warnings)
 
+# --- context_ui_input: the UI-side input routing glue (M7 T3 / a3, R-SYS-007 / L-45, D5/D6) --------
+# The router->session glue that binds a headless UiTree to the EXISTING input-package InputRouter and
+# the ONE sim InputState sink (Session::inject_action_at). L-45 CONSUMPTION, not invention: a UI gaining
+# focus pushes a capturing `ui` InputContext onto the router (modal); pointer samples hit-test a2's
+# computed rects (a hit dispatches a UI event + emits UI-originated gameplay intents; a miss is swallowed
+# when modal or falls through to gameplay when an overlay); every gameplay activation is a
+# session::ActionActivation fed through the SAME inject path a key-bound action uses (D5). UI is
+# presentation (D6): this lib registers NO sim component and the tree lives OUTSIDE the sim World, so
+# hash_world is bit-identical with UI present vs absent (tests/test_input_routing.cpp).
+#
+# UNLIKE the pure-stdlib context_ui foundation, this glue needs the sim seam, so it is a SEPARATE STATIC
+# lib (the context_ui_script precedent — keep the foundation minimal). It links context_input PUBLIC
+# (whose public API is the session input vocabulary route() returns — that brings context_session +
+# context_kernel transitively) and context_ui PUBLIC (the tree/hit-test surface). CMake resolves both
+# targets at generate time regardless of add_subdirectory order.
+add_library(context_ui_input STATIC
+    src/input_routing.cpp)
+target_link_libraries(context_ui_input PUBLIC context_ui context_input)
+target_link_libraries(context_ui_input PRIVATE context_warnings)
+
 # The test executables link context_ui; on this MinGW host a stale libstdc++-6.dll elsewhere on PATH can
 # shadow the toolchain's, so they static-link the GCC runtime (gated to GNU — Apple Clang/libc++ and MSVC
 # untouched; the same self-contained-binary rationale as the sibling packages).
@@ -100,3 +120,20 @@ target_link_libraries(context_ui_test_script_bindings
 target_link_options(context_ui_test_script_bindings PRIVATE ${_context_ui_static_runtime})
 target_include_directories(context_ui_test_script_bindings PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME ui-test_script_bindings COMMAND context_ui_test_script_bindings)
+
+# --- context_ui_input tests (M7 T3 / a3) ----------------------------------------------------------
+#   - test_input_routing: THE SEAM — the UI-side router->session glue over a real InputRouter + real
+#                         Session: capture-mode swallows unbound gameplay input (HUD-with-focus), a
+#                         non-capturing overlay passes it through, a UI button press lands in InputState
+#                         IDENTICALLY to a key-bound action (single sink, D5), and hash_world is UNCHANGED
+#                         by UI presence with NO sim-component fork (first D6 assertion). Links
+#                         context_session (Session / InputState / hash_world in assertions) via
+#                         context_ui_input's transitive context_input; static-links the GCC runtime like
+#                         the sibling packages. Auto-runs in the general CI step (the `ui-*` family is
+#                         not in the build job's -E gate-exclusion regex, built by --preset dev).
+add_executable(context_ui_test_input_routing tests/test_input_routing.cpp)
+target_link_libraries(context_ui_test_input_routing
+    PRIVATE context_ui_input context_ui context_input context_session context_warnings)
+target_link_options(context_ui_test_input_routing PRIVATE ${_context_ui_static_runtime})
+target_include_directories(context_ui_test_input_routing PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME ui-test_input_routing COMMAND context_ui_test_input_routing)
