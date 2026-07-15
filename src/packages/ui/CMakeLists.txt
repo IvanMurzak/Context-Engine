@@ -25,6 +25,24 @@ target_include_directories(context_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 # API is defined in the session input vocabulary). Only the warnings-as-errors baseline (conventions.md).
 target_link_libraries(context_ui PRIVATE context_warnings)
 
+# --- context_ui_script: the TypeScript-authoring binding shim (M7 T4 / a4, R-UI-001/006) ----------
+# The doubles-only bridge between an authored `context.ui` TS surface running on the V8 host and a
+# headless UiTree: a UiScriptContext over a caller-owned UiTree + numeric StateStore, plus the table of
+# HostFunction-compatible primitives (tree construction / CSS-like style props / event handlers /
+# read-only data binding) the host binds as globals the TS API wraps. Deliberately JsEngine-FREE (its
+# UiHostFunction typedef is byte-identical to js::HostFunction but names no V8/js header) so it stays
+# PURE STDLIB and builds + unit-tests on EVERY toolchain with no V8 link — the js glue that binds the
+# table + wires the handler callback to JsEngine::callFunction lives with the caller (src/runtime/ts/),
+# CI-only for its V8 path (the m6-exit-2 / test_ts_in_v8 split). Links only context_ui + the warnings
+# baseline; a separate STATIC lib so the context_ui foundation stays minimal (its README charter).
+add_library(context_ui_script STATIC
+    src/script_bindings.cpp)
+# context_ui PUBLIC — script_bindings.h (in context_ui's public include tree) depends on ui_tree.h /
+# events.h / ui_node.h, so the include dir must propagate to context_ui_script consumers. Warnings
+# baseline PRIVATE.
+target_link_libraries(context_ui_script PUBLIC context_ui)
+target_link_libraries(context_ui_script PRIVATE context_warnings)
+
 # The test executables link context_ui; on this MinGW host a stale libstdc++-6.dll elsewhere on PATH can
 # shadow the toolchain's, so they static-link the GCC runtime (gated to GNU — Apple Clang/libc++ and MSVC
 # untouched; the same self-contained-binary rationale as the sibling packages).
@@ -66,3 +84,19 @@ foreach(_t IN LISTS _context_ui_tests)
     target_include_directories(context_ui_${_t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     add_test(NAME ui-${_t} COMMAND context_ui_${_t})
 endforeach()
+
+# --- context_ui_script tests (M7 T4 / a4) ---------------------------------------------------------
+#   - test_script_bindings: the doubles-only authoring binding shim — the numeric protocol decoders,
+#                           the StateStore, tree construction / style props / event handlers /
+#                           read-only data binding through the UiScriptContext AND the host-function
+#                           table (as the V8 host feeds them), the dispatch->handler invoker bridge
+#                           (a C++ invoker stands in for V8 __ui_invoke), plus failure paths. Pure
+#                           C++ (no V8): a LOCAL gate on all 3 OS legs; the authored-TS-in-V8 proof is
+#                           ts-test_ui_ts_authoring (CI-only for its V8 path). Auto-runs in the general
+#                           step (same `ui-*` family, not in the build job's -E gate-exclusion regex).
+add_executable(context_ui_test_script_bindings tests/test_script_bindings.cpp)
+target_link_libraries(context_ui_test_script_bindings
+    PRIVATE context_ui_script context_ui context_warnings)
+target_link_options(context_ui_test_script_bindings PRIVATE ${_context_ui_static_runtime})
+target_include_directories(context_ui_test_script_bindings PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME ui-test_script_bindings COMMAND context_ui_test_script_bindings)

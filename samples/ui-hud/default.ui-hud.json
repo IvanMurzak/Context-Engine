@@ -1,0 +1,43 @@
+{
+  "$schema": "ctx:ui-hud",
+  "version": 1,
+  "notes": "A default in-game HUD authored through the M7 T4 `context.ui` TypeScript surface (R-UI-001, owner ruling (a): a TS retained-tree API with CSS-like style props, NOT an HTML/CSS parser). This is the declarative few-shot form of what the authored script `scripts/hud.ts` builds at runtime on the V8 host: a column HUD panel with a score label + a health bar (each read-only data-bound to a numeric state query) and a play button whose onClick scores points through the UI->state action path. UI is presentation (D6): the tree lives outside the sim World, registers no hashed sim component, and its state store folds into no state hash. Node `id`s are L-33 lowercase hex (16 chars) — this standalone few-shot kind dir is exempt from the validate/canonical gate, but authors the canonical form. Rendering (text glyphs, GPU draw) arrives with the a6 screen-space backend + a7/a8 text; this authored tree is fully headless/CI-assertable today.",
+  "state": [
+    {"id": "5c07e100a1b2c3d4", "name": "score", "key": 100, "initial": 0},
+    {"id": "5c07e200b2c3d4e5", "name": "health", "key": 200, "initial": 100}
+  ],
+  "root": {
+    "id": "a1b2c3d4e5f60789",
+    "role": "panel",
+    "layout": {"position": "flow", "flow": "column", "size": [220, 96], "gap": 6},
+    "style": {"background": [0, 0, 0, 160], "padding": 8},
+    "children": [
+      {
+        "id": "b2c3d4e5f6078901",
+        "role": "label",
+        "name": "score-label",
+        "style": {"foreground": [255, 214, 0, 255]},
+        "bind": {"value": "score"}
+      },
+      {
+        "id": "c3d4e5f607890112",
+        "role": "progressbar",
+        "name": "health-bar",
+        "style": {"foreground": [0, 200, 0, 255]},
+        "bind": {"value": "health"}
+      },
+      {
+        "id": "d4e5f60789011223",
+        "role": "button",
+        "name": "play-button",
+        "style": {"background": [40, 40, 60, 255]},
+        "on": {
+          "pointerdown": [
+            {"action": "add-state", "state": "score", "delta": 10},
+            {"action": "add-state", "state": "health", "delta": -5}
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -1,10 +1,11 @@
 # `src/packages/ui/` — Runtime UI package (M7 T1, R-UI-002/005/006)
 
 The **headless foundation** of the pluggable runtime UI system: a retained UI tree, an event + handler
-model, dirty/damage tracking, the backend-agnostic **UI-Provider contract**, and (`a2`) headless
-**layout + hit-testing + focus order**. `a1-ui-foundation` landed the tree, events, damage, the
-provider seam, and a null provider; `a2-layout-hittest` added computed geometry (this doc). Input
-routing, the TS authoring surface, the CLI verbs, and the GPU backend are later M7 tasks.
+model, dirty/damage tracking, the backend-agnostic **UI-Provider contract**, (`a2`) headless
+**layout + hit-testing + focus order**, and (`a4`) the **TypeScript authoring binding shim**.
+`a1-ui-foundation` landed the tree, events, damage, the provider seam, and a null provider;
+`a2-layout-hittest` added computed geometry; `a4-ts-authoring` added the `context.ui` authoring
+surface (this doc). Input routing, the CLI verbs, and the GPU backend are later M7 tasks.
 
 ## What it provides
 
@@ -40,6 +41,21 @@ routing, the TS authoring surface, the CLI verbs, and the GPU backend are later 
 - **Null provider** (`null_provider.h`) — the R-UI-006 headless guarantee made concrete: all-false
   capabilities, and a `present()` that does **no rendering work** (never walks the tree). UI logic runs
   headless with zero render cost.
+- **TypeScript authoring binding shim** (`script_bindings.h`, `a4`, `context_ui_script`) — the R-UI-001
+  authoring path (owner ruling (a): a **TS retained-tree API with CSS-like style props**, not an
+  HTML/CSS parser). A `UiScriptContext` over a caller-owned `UiTree` + a numeric `StateStore`, plus a
+  table of **doubles-only** `HostFunction`-compatible primitives (`ui_host_bindings()`: tree
+  construction / style props / event handlers / read-only data binding) the V8 host binds as globals the
+  authored `context.ui` TS surface wraps. Only doubles cross `JsEngine::bindHostFunction`, so roles /
+  event kinds / node handles / state keys marshal as numbers (the numeric protocol the `decode_*`
+  helpers police). Event dispatch calls back into the VM through a caller-installed **invoker**
+  (`set_invoker`; the runtime/ts glue wires it to `JsEngine::callFunction("__ui_invoke", …)`), so an
+  authored `onClick` runs in-VM. The shim is a **separate `context_ui_script` STATIC lib** that is
+  **pure stdlib + JsEngine-free** (its `UiHostFunction` typedef is byte-identical to `js::HostFunction`
+  but names no V8 header), so it builds + unit-tests on every toolchain with no V8 link; the js glue
+  lives with the caller (`src/runtime/ts/`), CI-only for its V8 path. UI→state is only the action path
+  (write/add); state→UI is read-only (data binding). Presentation (D6): the `StateStore` is not sim
+  state and folds into no state hash.
 
 ## Load-bearing design decisions (locked here)
 
@@ -64,11 +80,21 @@ routing, the TS authoring surface, the CLI verbs, and the GPU backend are later 
 `src/kernel/` links it. Unlike `context_input` (whose public API is defined in the session input
 vocabulary and so links `context_session` PUBLIC), this foundation tier has **no sim dependency**.
 
+The `a4` authoring shim is a **sibling STATIC lib `context_ui_script`** (links `context_ui` PUBLIC),
+kept separate so the `context_ui` foundation stays minimal. It is **JsEngine-free** (pure stdlib): it
+never names a V8/js header, so the doubles-only host-function table + `UiScriptContext` build + unit-test
+on every toolchain with no V8 link. The js glue that binds the table to a live `JsEngine` and drives the
+authored TS lives with the caller in `src/runtime/ts/` (CI-only for its V8 dependency path).
+
 ## Tests
 
 Headless `ui-*` ctests (R-QA-013, same PR): `ui-test_tree` (build/mutate), `ui-test_dispatch` (handler
 dispatch + focus), `ui-test_damage` (coalescing + structural-vs-region damage), `ui-test_provider`
 (capability negotiation/fallback table), `ui-test_null_provider` (null-provider zero-cost),
 `ui-test_layout` (flow/absolute computed rects, resize/reflow → damage, hit-testing
-overlap/nesting/hidden/zero-opacity, deterministic focus order). Pure stdlib, so they build + run on all
-three CI OS legs and auto-run in the general CI test step.
+overlap/nesting/hidden/zero-opacity, deterministic focus order), and `ui-test_script_bindings` (`a4`:
+the doubles-only authoring shim — numeric-protocol decoders, `StateStore`, tree construction / style
+props / event handlers / read-only data binding through both `UiScriptContext` and the host-function
+table, the dispatch→handler invoker bridge, plus failure paths). Pure stdlib, so they build + run on all
+three CI OS legs and auto-run in the general CI test step. The authored-TS-in-V8 end-to-end proof of the
+`a4` surface is `ts-test_ui_ts_authoring` (`src/runtime/ts/tests/`, CI-only for its V8 path).
