@@ -18,7 +18,8 @@ add_library(context_ui STATIC
     src/introspect.cpp
     src/layout.cpp
     src/provider.cpp
-    src/ui_tree.cpp)
+    src/ui_tree.cpp
+    src/curved_panel.cpp) # M7 a10 (L-16): pure ray-vs-triangle + UV interp + UV->panel-space mapping
 
 target_include_directories(context_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -63,6 +64,20 @@ add_library(context_ui_input STATIC
     src/input_routing.cpp)
 target_link_libraries(context_ui_input PUBLIC context_ui context_input)
 target_link_libraries(context_ui_input PRIVATE context_warnings)
+
+# --- context_ui_raycast: broad-phase-pruned panel picking (M7 a10 / a10-worldpanel-curved; L-16) ---
+# The curved-panel picker: it wraps a PANEL-SCOPED UV-mapped mesh (curved_panel.h, in the context_ui
+# foundation) in the existing spatial broad-phase index (src/packages/spatial/) for CANDIDATE PRUNING
+# ONLY, then runs the exact ray-vs-triangle test (curved_panel.h) on the survivors. UNLIKE the
+# pure-stdlib context_ui foundation it needs the kernel-backed index — spatial's public API is keyed by
+# context::kernel::Entity, so context_spatial PUBLIC-links context_kernel — so, exactly like
+# context_ui_input (which links context_input for the a3 session seam), it is a SEPARATE STATIC lib and
+# the foundation keeps its "no sim link" charter. Links context_ui + context_spatial PUBLIC (the mesh
+# types + the index surface); the warnings baseline PRIVATE.
+add_library(context_ui_raycast STATIC
+    src/raycast_panel.cpp)
+target_link_libraries(context_ui_raycast PUBLIC context_ui context_spatial)
+target_link_libraries(context_ui_raycast PRIVATE context_warnings)
 
 # --- context_ui_text: the M7 text substrate (a7, R-UI-005 / R-SEC-006; issue #237) ----------------
 # FreeType glyph rasterization + the run-based measure() seam + the embedded default fonts. A SIBLING
@@ -109,7 +124,8 @@ set(_context_ui_tests
     test_provider
     test_null_provider
     test_layout
-    test_introspect)
+    test_introspect
+    test_curved_panel) # M7 a10 (L-16): ray-vs-triangle + UV interp + UV->panel-coords, wrap/clamp
 
 foreach(_t IN LISTS _context_ui_tests)
     add_executable(context_ui_${_t} tests/${_t}.cpp)
@@ -151,3 +167,23 @@ target_link_libraries(context_ui_test_input_routing
 target_link_options(context_ui_test_input_routing PRIVATE ${_context_ui_static_runtime})
 target_include_directories(context_ui_test_input_routing PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME ui-test_input_routing COMMAND context_ui_test_input_routing)
+
+# --- context_ui_raycast interaction test (M7 a10 / a10-worldpanel-curved) --------------------------
+#   - test_curved_panel_input: THE a10 interaction proof — a pointer click on a CURVED world-space
+#                         panel routes through the SAME a3 capture path as a flat panel. The only
+#                         curved-specific step is raycast->UV->panel-coords (context_ui_raycast,
+#                         broad-phase-pruned via context_spatial); from there the panel coords feed the
+#                         EXACT SAME UiInputRouter::route_pointer (a3) a flat panel uses — the single
+#                         sim InputState sink (D5), UI presence leaves the world hash unmoved (D6), and
+#                         a miss is swallowed by the modal exactly like a flat panel's off-quad miss.
+#                         Also pins the pruned raycaster == the linear-scan oracle + sub-linear pruning.
+#                         Links context_ui_raycast (curved picking) + context_ui_input (the a3 glue) +
+#                         context_session (Session / InputState / hash_world). Auto-runs in the general
+#                         CI step (the `ui-*` family is not in the build job's -E gate-exclusion regex).
+add_executable(context_ui_test_curved_panel_input tests/test_curved_panel_input.cpp)
+target_link_libraries(context_ui_test_curved_panel_input
+    PRIVATE context_ui_raycast context_ui_input context_ui context_input context_session context_spatial
+            context_warnings)
+target_link_options(context_ui_test_curved_panel_input PRIVATE ${_context_ui_static_runtime})
+target_include_directories(context_ui_test_curved_panel_input PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME ui-test_curved_panel_input COMMAND context_ui_test_curved_panel_input)

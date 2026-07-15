@@ -51,6 +51,7 @@ set(_context_render_ui_tests
     test_ui_provider     # capabilities (shaping+bidi true); present() over the fake RHI: clear vs load
     test_ui_dynamic_texture # M7 a9 (D4): dynamic-texture registry + provider-into-target + extract chain
     test_ui_worldpanel   # M7 a9 (D4): compiles worldpanel_scene.h + pins the analytic ui-worldpanel golden
+    test_ui_curvedpanel  # M7 a10 (D4): curvedpanel_scene.h + panel-mesh seam + the analytic ui-curvedpanel golden
     test_glyph_atlas     # M7 a7: GLYPH-ID-keyed atlas build/hit/eviction/LRU-touch + blit + edges
     test_text_quads)     # M7 a7: offset-bearing atlas quad emitter — placement/UVs/GPOS offsets/skips
 # These tests (and the atlas + emitter sources) are FreeType-FREE — the glyph atlas rasterizes via a
