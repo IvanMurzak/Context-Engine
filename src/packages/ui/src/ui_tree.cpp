@@ -135,6 +135,18 @@ bool UiTree::set_style(NodeId id, const Style& style)
     return true;
 }
 
+bool UiTree::set_layout(NodeId id, const Layout& layout)
+{
+    UiNode* n = node(id);
+    if (n == nullptr)
+        return false;
+    n->layout = layout;
+    // A layout-input change dirties the node's current area; the actual reflow (and the damage its
+    // moved rects produce) happens when compute_layout runs and calls set_bounds.
+    pending_.add(n->bounds);
+    return true;
+}
+
 bool UiTree::set_text(NodeId id, std::string text)
 {
     UiNode* n = node(id);

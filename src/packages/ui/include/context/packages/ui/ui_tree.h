@@ -48,6 +48,7 @@ public:
     // Style / content mutators. Each marks the node's current bounds dirty (region damage) — a repaint
     // of the changed area, not the whole surface. Return false for an invalid/dead id.
     bool set_style(NodeId id, const Style& style);
+    bool set_layout(NodeId id, const Layout& layout); // layout INPUTS; compute_layout (layout.h) reads them
     bool set_text(NodeId id, std::string text);
     bool set_bounds(NodeId id, const Rect& bounds); // layout writes this (T2); also usable in tests
     bool set_visible(NodeId id, bool visible);

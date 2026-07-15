@@ -140,6 +140,16 @@ struct Rect
         return x < o.x + o.w && o.x < x + w && y < o.y + o.h && o.y < y + h;
     }
 
+    // Half-open point-containment test (the left/top edges are inside, the right/bottom edges are
+    // not — the hit-testing convention, so adjacent rects never both claim a shared edge point). An
+    // empty rect contains nothing.
+    [[nodiscard]] bool contains(float px, float py) const noexcept
+    {
+        if (empty())
+            return false;
+        return px >= x && px < x + w && py >= y && py < y + h;
+    }
+
     // The bounding box covering both rects (an empty operand yields the other).
     [[nodiscard]] Rect unite(const Rect& o) const noexcept
     {
@@ -153,6 +163,70 @@ struct Rect
         const float y1 = std::max(y + h, o.y + o.h);
         return Rect{x0, y0, x1 - x0, y1 - y0};
     }
+
+    [[nodiscard]] bool operator==(const Rect& o) const noexcept
+    {
+        return x == o.x && y == o.y && w == o.w && h == o.h;
+    }
+    [[nodiscard]] bool operator!=(const Rect& o) const noexcept { return !(*this == o); }
+};
+
+// --- layout inputs (computed geometry, T2) -------------------------------------------------------
+// The small, CLOSED layout model the headless layout pass (layout.h) reads per node. Deliberately
+// "flex-lite": a flow container stacks its Flow children along one axis; an Absolute node anchors to
+// its parent's content-box edges. Presentation state (D6) — never hashed.
+
+// How a node is placed within its parent's content box.
+enum class Positioning
+{
+    Flow,     // arranged by the parent's Flow (Row/Column); the default
+    Absolute  // anchored to the parent's content-box edges via `anchor` + `offset`, out of flow
+};
+
+// How a node arranges its OWN Flow children.
+enum class Flow
+{
+    None,   // no flow arrangement — children self-place (Absolute, or a single explicit box); default
+    Row,    // stack Flow children left-to-right
+    Column  // stack Flow children top-to-bottom
+};
+
+// Anchor edges (bitmask) for an Absolute node: which parent content-box edges `offset` is measured
+// from. Opposing edges both set ⇒ stretch along that axis (that axis's `size` is ignored, and
+// `offset` is the symmetric margin). Neither edge of an axis set ⇒ centered on that axis.
+enum class Anchor : std::uint8_t
+{
+    None = 0,
+    Left = 1u << 0,
+    Top = 1u << 1,
+    Right = 1u << 2,
+    Bottom = 1u << 3
+};
+
+[[nodiscard]] inline constexpr Anchor operator|(Anchor a, Anchor b) noexcept
+{
+    return static_cast<Anchor>(static_cast<std::uint8_t>(a) | static_cast<std::uint8_t>(b));
+}
+[[nodiscard]] inline constexpr Anchor operator&(Anchor a, Anchor b) noexcept
+{
+    return static_cast<Anchor>(static_cast<std::uint8_t>(a) & static_cast<std::uint8_t>(b));
+}
+// True iff any edge in `bit` is set in `a` (`has(node.layout.anchor, Anchor::Left)`).
+[[nodiscard]] inline constexpr bool has(Anchor a, Anchor bit) noexcept
+{
+    return static_cast<std::uint8_t>(a & bit) != 0;
+}
+
+// Per-node layout inputs. Defaults reproduce the a1 behavior (a Flow node with no size that a None
+// parent places at its content origin), so a1 trees lay out unchanged until inputs are set.
+struct Layout
+{
+    Positioning position = Positioning::Flow; // Flow (parent-arranged) or Absolute (anchored)
+    Vec2 size;                                // this node's box size (Flow item / Absolute extent)
+    Flow flow = Flow::None;                   // how this node arranges its own Flow children
+    float gap = 0.0f;                         // spacing between this node's Flow children
+    Anchor anchor = Anchor::None;             // Absolute: parent edges `offset` is measured from
+    Vec2 offset;                              // Absolute: margin from the anchored edges
 };
 
 // A retained UI node: role + presentation style + optional text/name + computed bounds + tree links.
@@ -165,6 +239,7 @@ struct UiNode
     std::vector<NodeId> children;
     Role role = Role::Group;
     Style style;
+    Layout layout; // computed-geometry inputs (T2); `bounds` is the computed output
     std::string name;
     std::string text;
     Rect bounds;
