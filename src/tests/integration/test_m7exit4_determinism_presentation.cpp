@@ -106,10 +106,13 @@ std::vector<std::uint64_t> run(Presentation mode, std::uint64_t& frames_presente
                 hud.set_text(hud_label, std::to_string(static_cast<long long>(g.jumps + g.coin_collected)));
                 // Extract the retained tree into draw quads (the a6 read-only observer) + present.
                 rui::extract_ui(hud, ui::Rect{0, 0, 208, 56}, snap);
+                // Guard the provider handle uniformly: a null gpu_provider (create_device failed) falls
+                // back to the null provider here too, so the gate reds fail-closed instead of deref'ing.
+                const bool use_gpu = (mode == Presentation::Gpu && gpu_provider);
                 const ui::RepaintPlan plan = ui::negotiate_repaint(
-                    mode == Presentation::Gpu ? gpu_provider->capabilities() : null_provider.capabilities(),
+                    use_gpu ? gpu_provider->capabilities() : null_provider.capabilities(),
                     hud.take_damage(), ui::Rect{0, 0, 208, 56});
-                if (mode == Presentation::Gpu && gpu_provider)
+                if (use_gpu)
                     gpu_provider->present(hud, plan);
                 else
                     null_provider.present(hud, plan);
