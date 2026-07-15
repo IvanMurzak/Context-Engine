@@ -25,6 +25,7 @@ here with a **named SSIM-class perceptual metric + per-scene tolerances** (`mani
 | `lit3d.ppm` | representative lit scene | PBR + dir/point lights + shadow depth pass (R-REND-004/006) |
 | `viewport.ppm` | M5-F1 observer viewport (3D+2D) | the 3D triangle base + the 2D sprites composited on top (issue #164) |
 | `ui-hud.ppm` | M7 a6 runtime UI HUD (R-UI-005) | a colored-rect HUD (health bar + fill, minimap, GPU-composited badge, status bar) extracted through the GpuUiProvider and repainted into its persistent UI-layer — native + web |
+| `ui-worldpanel.ppm` | M7 a9 world-space RTT UI panel (R-UI-003, D4) | a UI panel rendered into a dynamic-texture registry target, then sampled onto a rotated world quad over a lit-ground base (native only) |
 
 Format: binary PPM (P6, maxval 255) — stdlib-parseable, no image dependency anywhere in the chain.
 Baselines were rendered through the native backend on real hardware; the per-scene `min_ssim` in
@@ -49,6 +50,10 @@ python3 tools/golden_compare.py --scene viewport --candidate out/viewport.ppm
 context_render_wgpu_offscreen golden ui-hud out/ui-hud.ppm
 python3 tools/golden_compare.py --scene ui-hud --candidate out/ui-hud.ppm
 # browser leg: web_golden_run.py delivers ui-hud alongside triangle3d,sprite2d (see ci.yml render-web).
+
+# M7 a9 world-space RTT UI panel (native only, like lit3d/viewport):
+context_render_wgpu_offscreen golden ui-worldpanel out/ui-worldpanel.ppm
+python3 tools/golden_compare.py --scene ui-worldpanel --candidate out/ui-worldpanel.ppm
 ```
 
 The **`ui-hud`** scene is the M7 a6 engine-integrated GPU UI backend (issue #141 golden discipline;
@@ -58,6 +63,19 @@ and repainted into the `GpuUiProvider`'s persistent UI-layer texture over the SA
 rendered on BOTH the native (lavapipe) and web (SwiftShader) legs — unlike native-only `lit3d`/`viewport`
 — because the UI backend compiles into the Emscripten web target. The committed baseline is the analytic
 (GPU-free) rasterization of the same extracted quads (`hud_scene.h::render_ui_hud_reference_cpu`).
+
+The **`ui-worldpanel`** scene is the M7 a9 world-space render-to-texture UI panel (issue #141 golden
+discipline; R-UI-003, lock D4): a teal panel with an amber inner rect is rendered into a persistent 64×64
+**dynamic-texture registry** target (the FIRST dynamic-texture entry — the "later wave" the
+`render_world.h` texture handle fields reserved), then **sampled** (nearest) onto a flat quad rotated
+(yaw + roll) / positioned by a `render::Transform` in a lit 3D scene — a receding-floor lit-ground
+trapezoid under the panel, over a dark-slate sky clear. The projection is a straight-on **orthographic**
+camera, so the rotated quad projects affinely (linear UV) and the CPU mirror matches the GPU rasterizer
+within tolerance. It is **native-only first** (like `lit3d`/`viewport`): the web golden target compiles
+only `triangle3d` + `sprite2d` today, so browser coverage joins when the lit web proof lands. The
+committed baseline is the analytic (GPU-free) rasterization of the SAME projected quads + panel content
+(`worldpanel_scene.h::render_worldpanel_reference_cpu`), which the CI `render` job re-renders on the
+wgpu-native (lavapipe) backend and SSIM-gates.
 
 The **`viewport`** scene is the M5-F1 observer-viewport composite (issue #164): the 3D triangle base
 (`triangle3d`) with the 2D sprites (`sprite2d`) painted on top in one frame — the "live scene (3D+2D)"

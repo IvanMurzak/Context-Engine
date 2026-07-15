@@ -80,6 +80,26 @@ struct PointLight
     float range = 10.0f;
 };
 
+// A render-side world-space UI panel (M7 a9, R-UI-003; locks D4 / L-39 / D6). A flat quad in the 3D
+// world textured by a persistent per-panel offscreen render target (RTT): a UI tree is rendered into a
+// dynamic texture (context/render/ui/dynamic_texture.h — the FIRST dynamic-texture registry entry, the
+// "later wave" the mesh_id / *_tex handle fields above reserved), and that texture is sampled onto this
+// quad, positioned / rotated / scaled by the entity's Transform. FLOAT presentation state — never part
+// of a sim state hash (D6), exactly like Transform: a package populates it on entities, the extract
+// reads it, and the kernel never sees it. A UiPanel on an entity WITHOUT a Transform has no world
+// placement and is skipped by the extract (mirroring PointLight).
+struct UiPanel
+{
+    // Handle into the dynamic-texture registry (context/render/ui/dynamic_texture.h). 0 = "unbound" (no
+    // RTT target yet) — the same "0 = slot unused" convention the texture handles above use.
+    std::uint32_t texture = 0;
+    // The quad's world-space extent (width, height in meters, SI per R-DATA-006) in the entity's LOCAL
+    // space, before the Transform's scale / rotation / translation are applied.
+    float size[2] = {1.0f, 1.0f};
+    // A flat tint multiplied over the sampled panel texels (1,1,1,1 = the panel's own colors).
+    float tint[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+};
+
 // One extracted drawable: the entity it came from plus a copy of its render state. material is the
 // entity's PbrMaterial when it carries one, else the default (drawables never require it).
 struct RenderItem
@@ -105,6 +125,17 @@ struct PointLightItem
     float position[3] = {0.0f, 0.0f, 0.0f};
 };
 
+// One extracted world-space UI panel (M7 a9, D4): the entity plus a copy of its Transform + UiPanel.
+// Presentation state only (D6) — the render side reads it to place + sample the panel's RTT texture;
+// the sim World never sees it. The Transform is copied verbatim (position / rotation quaternion / scale),
+// so the render side reconstructs the world quad exactly as authored.
+struct UiPanelItem
+{
+    kernel::Entity entity;
+    Transform transform;
+    UiPanel panel;
+};
+
 // A complete render-side snapshot of one sim tick's drawables + lights. A plain value type:
 // copied/swapped by the double buffer, read by the render side with no reference back into the sim
 // World (R-REND-003 — lights and materials are extracted state; render never mutates sim).
@@ -114,6 +145,7 @@ struct RenderSnapshot
     std::vector<RenderItem> items;
     std::vector<DirectionalLightItem> directional_lights;
     std::vector<PointLightItem> point_lights;
+    std::vector<UiPanelItem> ui_panels; // M7 a9 (D4): world-space RTT UI panels — presentation only
 
     void clear()
     {
@@ -121,6 +153,7 @@ struct RenderSnapshot
         items.clear();
         directional_lights.clear();
         point_lights.clear();
+        ui_panels.clear();
     }
 };
 

@@ -18,7 +18,8 @@ add_library(context_render_ui STATIC
     src/snapshot.cpp
     src/composite.cpp
     src/batch.cpp
-    src/provider.cpp)
+    src/provider.cpp
+    src/dynamic_texture.cpp) # M7 a9 (D4): the first dynamic-texture registry (per-panel RTT targets)
 
 target_include_directories(context_render_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -47,7 +48,9 @@ set(_context_render_ui_tests
     test_ui_composite    # composite math: transform (translate/scale-about-centre), opacity fold/compose
     test_ui_batch        # draw-order sort + adjacent coalesce + damage -> MINIMAL draw set (draw counts)
     test_ui_provider     # capabilities (3 true); present() over the fake RHI: full-clear vs damage-load
-    test_ui_hud_offscreen) # compiles hud_scene.h + pins the reference HUD extract + analytic golden pixels
+    test_ui_hud_offscreen  # compiles hud_scene.h + pins the reference HUD extract + analytic golden pixels
+    test_ui_dynamic_texture # M7 a9 (D4): dynamic-texture registry + provider-into-target + extract chain
+    test_ui_worldpanel)  # M7 a9 (D4): compiles worldpanel_scene.h + pins the analytic ui-worldpanel golden
 foreach(_t IN LISTS _context_render_ui_tests)
     add_executable(context_render_ui_${_t} tests/${_t}.cpp)
     target_link_libraries(context_render_ui_${_t} PRIVATE context_render_ui context_warnings)

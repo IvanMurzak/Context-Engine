@@ -35,8 +35,16 @@ class GpuUiProvider final : public packages::ui::UiProvider
 public:
     // `device` must outlive the provider. `surface` is the UI-layer texture size (pixels). `clear` is
     // the surface background the layer is cleared to on a full repaint — at this offscreen tier it also
-    // stands in for the composited 3D-pass output behind the UI.
+    // stands in for the composited 3D-pass output behind the UI. This form allocates + owns its own
+    // persistent layer texture (the screen-space HUD path, M7 a6).
     GpuUiProvider(IDevice& device, Extent2D surface, Color clear);
+
+    // World-space panel form (M7 a9, D4): render into an EXTERNALLY-owned target instead of a self-
+    // allocated layer — e.g. a dynamic-texture registry panel target (dynamic_texture.h) the world quad
+    // then samples. `target` must outlive the provider and be sized `surface` with render_attachment +
+    // copy_src; the provider repaints into it with the SAME persistent-layer discipline (Clear on a full
+    // repaint / first frame, Load + reduced redraw on a damage repaint) but never owns or reallocates it.
+    GpuUiProvider(IDevice& device, ITexture& target, Extent2D surface, Color clear);
 
     // R-UI-005: GPU-driven + damage repaint + composited transforms. Text features are false at T1.
     [[nodiscard]] packages::ui::Capabilities capabilities() const override;
@@ -57,13 +65,20 @@ public:
     [[nodiscard]] std::size_t last_draw_count() const noexcept { return last_draw_count_; }
     // Whether the LAST present cleared the layer (full/first) vs LOADed it (a damage repaint).
     [[nodiscard]] bool last_was_clear() const noexcept { return last_was_clear_; }
-    // Whether the persistent layer has been allocated (once) and reused across presents.
-    [[nodiscard]] bool layer_persistent() const noexcept { return layer_ != nullptr; }
+    // Whether the persistent layer is live: allocated (once) and reused across presents in the self-
+    // owned form, or the external target in the world-space form (persistent from construction).
+    [[nodiscard]] bool layer_persistent() const noexcept { return active_layer() != nullptr; }
     [[nodiscard]] Extent2D surface() const noexcept { return surface_; }
     [[nodiscard]] const UiRenderSnapshot& snapshot() const noexcept { return buffers_.front(); }
 
 private:
     void ensure_layer();
+    // The live target the provider paints into + reads back: the external target when one was supplied
+    // (world-space panel form), else the self-owned layer (nullptr until the first present allocates it).
+    [[nodiscard]] ITexture* active_layer() const noexcept
+    {
+        return external_target_ != nullptr ? external_target_ : layer_.get();
+    }
     // Repaint `draw_set` (indices into the front snapshot) into the layer; `clear` selects the first
     // pass's LoadOp (Clear ⇒ wipe to clear_ then draw; Load ⇒ preserve then draw on top).
     void repaint(const std::vector<std::uint32_t>& draw_set, bool clear);
@@ -71,7 +86,8 @@ private:
     IDevice& device_;
     Extent2D surface_;
     Color clear_;
-    std::unique_ptr<ITexture> layer_; // the persistent UI-layer texture (allocated once, reused)
+    std::unique_ptr<ITexture> layer_;         // self-owned persistent UI-layer texture (a6 HUD path)
+    ITexture* external_target_ = nullptr;      // borrowed registry panel target (a9 world-space path)
     UiRenderDoubleBuffer buffers_;
 
     std::uint64_t frames_presented_ = 0;

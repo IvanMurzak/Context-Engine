@@ -42,6 +42,11 @@ GpuUiProvider::GpuUiProvider(IDevice& device, Extent2D surface, Color clear)
 {
 }
 
+GpuUiProvider::GpuUiProvider(IDevice& device, ITexture& target, Extent2D surface, Color clear)
+    : device_(device), surface_(surface), clear_(clear), external_target_(&target)
+{
+}
+
 packages::ui::Capabilities GpuUiProvider::capabilities() const
 {
     packages::ui::Capabilities caps;
@@ -54,9 +59,9 @@ packages::ui::Capabilities GpuUiProvider::capabilities() const
 
 void GpuUiProvider::ensure_layer()
 {
-    if (layer_ != nullptr)
+    if (external_target_ != nullptr || layer_ != nullptr)
     {
-        return; // persistent — allocated once, reused across every present
+        return; // external target is owned by the caller; a self-owned layer is allocated once + reused
     }
     TextureDesc desc;
     desc.size = surface_;
@@ -72,7 +77,7 @@ void GpuUiProvider::repaint(const std::vector<std::uint32_t>& draw_set, bool cle
     const UiRenderSnapshot& snap = buffers_.front();
     const sprite::Mat4 proj = surface_projection(surface_);
     const float surface_h = static_cast<float>(surface_.height);
-    std::unique_ptr<ITextureView> view = layer_->create_view();
+    std::unique_ptr<ITextureView> view = active_layer()->create_view();
 
     // A Clear repaint with no quads still issues one clear pass so the layer is wiped (an emptied UI);
     // a Load repaint with no damaged quads leaves the persistent layer untouched (nothing to redraw).
@@ -155,7 +160,8 @@ void GpuUiProvider::present(const packages::ui::UiTree& tree, const packages::ui
 
 bool GpuUiProvider::read_layer(std::vector<std::uint8_t>& out)
 {
-    if (layer_ == nullptr)
+    ITexture* layer = active_layer();
+    if (layer == nullptr)
     {
         return false;
     }
@@ -171,7 +177,7 @@ bool GpuUiProvider::read_layer(std::vector<std::uint8_t>& out)
     TexelCopyBufferLayout layout;
     layout.bytes_per_row = bytes_per_row;
     layout.rows_per_image = surface_.height;
-    encoder->copy_texture_to_buffer(*layer_, *readback, layout, surface_);
+    encoder->copy_texture_to_buffer(*layer, *readback, layout, surface_);
     std::unique_ptr<ICommandBuffer> commands = encoder->finish();
     device_.queue().submit(*commands);
 

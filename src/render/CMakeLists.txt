@@ -42,7 +42,8 @@ set(_context_render_tests
     test_extract        # L-39 extract selects only drawables; double-buffer no-tearing semantics
     test_headless       # R-HEAD-002: probe creates no device; no-adapter is headless; engine runs absent
     test_rhi            # RHI object model driven end-to-end (offscreen readback) via the fake backend
-    test_light_extract) # R-REND-004: light/material extraction incl. the malformed/absent edges
+    test_light_extract  # R-REND-004: light/material extraction incl. the malformed/absent edges
+    test_ui_panel_extract) # M7 a9 (D4/L-39): world-space UiPanel extract incl. the no-Transform edge
 foreach(_t IN LISTS _context_render_tests)
     add_executable(context_render_${_t} tests/${_t}.cpp)
     target_link_libraries(context_render_${_t} PRIVATE context_render context_warnings)
@@ -261,6 +262,17 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
         # auto-picked by the render CI job's `^render-wgpu-` regex (no ci.yml --target edit).
         add_test(NAME render-wgpu-ui COMMAND context_render_wgpu_offscreen ui)
         set_tests_properties(render-wgpu-ui PROPERTIES
+            SKIP_RETURN_CODE 77
+            WORKING_DIRECTORY $<TARGET_FILE_DIR:context_render_wgpu_offscreen>)
+
+        # M7 a9 (R-UI-003, D4): the world-space RTT UI-panel proof — a UI tree rendered into a dynamic-
+        # texture registry target, then sampled onto a rotated world quad over a lit-ground base, read
+        # back + asserted (sky + lit ground + the panel's RTT texel on the quad). The frame the
+        # `ui-worldpanel` golden gates. Same adapter requirement, SKIP convention, and Windows carve-out
+        # as the sibling proofs; auto-picked by the render CI job's `^render-wgpu-` regex (no ci.yml
+        # --target edit).
+        add_test(NAME render-wgpu-worldpanel COMMAND context_render_wgpu_offscreen worldpanel)
+        set_tests_properties(render-wgpu-worldpanel PROPERTIES
             SKIP_RETURN_CODE 77
             WORKING_DIRECTORY $<TARGET_FILE_DIR:context_render_wgpu_offscreen>)
     endif()

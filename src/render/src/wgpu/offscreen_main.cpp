@@ -17,11 +17,15 @@
 //   ui       — M7 a6 (R-UI-005): the engine-integrated GPU UI backend — the reference HUD extracted
 //            through the GpuUiProvider, repainted into its persistent layer, read back + asserted
 //            (clear + solid panel + fill-over-background + composited badge). Same exit convention.
+//   worldpanel — M7 a9 (R-UI-003, D4): the world-space RTT UI panel — a UI tree rendered into a
+//            dynamic-texture registry target, then sampled onto a rotated world quad over a lit-ground
+//            base, read back + asserted (sky + lit ground + the panel's RTT texel on the quad). Same
+//            exit convention.
 //   golden <scene> <out.ppm>
 //          — M4 T7 (issue #141): render a golden-corpus scene (triangle3d | sprite2d | lit3d |
-//            viewport | ui-hud) and write the frame as binary PPM for the SSIM visual-equivalence gate
-//            (tools/golden_compare.py vs the committed baseline under goldens/). Same exit
-//            convention as `render`; exit 2 on a bad scene id / unwritable path.
+//            viewport | ui-hud | ui-worldpanel) and write the frame as binary PPM for the SSIM
+//            visual-equivalence gate (tools/golden_compare.py vs the committed baseline under
+//            goldens/). Same exit convention as `render`; exit 2 on a bad scene id / unwritable path.
 //   bench [frames] [warmup] [WxH]
 //          — M4 T7 (issue #141): the R-QA-007 min-spec floor bench subject — the representative
 //            lit scene rendered frame-after-frame offscreen (defaults 60 frames, 10 warmup,
@@ -35,6 +39,7 @@
 #include "context/render/offscreen_scene.h"
 #include "context/render/sprite/sprite_offscreen.h"
 #include "context/render/ui/hud_scene.h"
+#include "context/render/ui/worldpanel_scene.h"
 #include "context/render/viewport_scene.h"
 #include "context/render/wgpu/wgpu_rhi.h"
 
@@ -118,7 +123,8 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    if (mode == "render" || mode == "sprite" || mode == "lit" || mode == "viewport" || mode == "ui")
+    if (mode == "render" || mode == "sprite" || mode == "lit" || mode == "viewport" ||
+        mode == "ui" || mode == "worldpanel")
     {
         int exit_code = 0;
         std::unique_ptr<IDevice> device = acquire_device(*rhi, exit_code);
@@ -144,6 +150,10 @@ int main(int argc, char** argv)
         {
             pass = context::render::ui::render_offscreen_ui_hud(*device); // M7 a6: the GPU UI backend
         }
+        else if (mode == "worldpanel")
+        {
+            pass = context::render::ui::render_offscreen_worldpanel(*device); // M7 a9: world-space RTT
+        }
         else
         {
             pass = context::render::lit::render_offscreen_lit(*device);
@@ -157,9 +167,10 @@ int main(int argc, char** argv)
     {
         if (argc < 4)
         {
-            std::fprintf(stderr,
-                         "usage: %s golden <triangle3d|sprite2d|lit3d|viewport|ui-hud> <out.ppm>\n",
-                         argv[0]);
+            std::fprintf(
+                stderr,
+                "usage: %s golden <triangle3d|sprite2d|lit3d|viewport|ui-hud|ui-worldpanel> <out.ppm>\n",
+                argv[0]);
             return 2;
         }
         const std::string scene = argv[2];
@@ -185,6 +196,10 @@ int main(int argc, char** argv)
         else if (scene == "ui-hud")
         {
             rendered = ui::render_golden_ui_hud(*device, image); // M7 a6 GPU UI HUD (R-UI-005)
+        }
+        else if (scene == "ui-worldpanel")
+        {
+            rendered = ui::render_golden_worldpanel(*device, image); // M7 a9 world-space RTT (R-UI-003)
         }
         else if (scene == "triangle3d" || scene == "sprite2d")
         {
