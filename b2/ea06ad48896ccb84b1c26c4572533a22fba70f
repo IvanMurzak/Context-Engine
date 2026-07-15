@@ -1,0 +1,51 @@
+samples/roll-3d/scripts/panel.ts
+  s_a2906e6a9ceeb4::t_54885dd53e587c 1-68
+src/tests/integration/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_ea803588b67f1f 440-558
+samples/roll-3d/ui/panel.ui-worldpanel.json
+  s_a2906e6a9ceeb4::t_889177c6b3e063 1-32
+  s_a2906e6a9ceeb4::t_b80507e59a9761 33-102
+src/tests/integration/test_m7exit3_worldpanel.cpp
+  s_a2906e6a9ceeb4::t_fadf5c1f932b25 1-285
+src/tests/integration/test_m7exit4_determinism_presentation.cpp
+  s_a2906e6a9ceeb4::t_68596a34842f78 85
+  s_a2906e6a9ceeb4::t_9ba4ac58f41f85 60-62,74
+  s_a2906e6a9ceeb4::t_1ffadebc11bef5 1-59,63-73,75-84,86-105,107-168
+  s_a2906e6a9ceeb4::t_b3877c53ab585b 106
+docs/ci-fleet-manifest.json
+  s_a2906e6a9ceeb4::t_026a816bad672e 494-543
+.github/workflows/ci.yml
+  s_a2906e6a9ceeb4::t_7ddd8d5364b3a5 129,133
+  s_a2906e6a9ceeb4::t_9876481338f4f7 225-245
+src/tests/integration/test_m7exit1_hud_headless.cpp
+  s_a2906e6a9ceeb4::t_d36001bb4611a6 1-196
+src/tests/integration/test_m7exit5_seam_checklist.cpp
+  s_a2906e6a9ceeb4::t_99f4939c25213c 1-188,191,193,195-234
+  s_a2906e6a9ceeb4::t_e9bed491853db6 189-190,192,194
+samples/platformer-2d/ui/hud.ui-hud.json
+  s_a2906e6a9ceeb4::t_666d9b40a8a543 1-32
+  s_a2906e6a9ceeb4::t_c38ddc3ca85bdc 33-102
+src/tests/integration/m7_exit_test.h
+  s_a2906e6a9ceeb4::t_c7760697f0b5de 1-45
+samples/platformer-2d/scripts/hud.ts
+  s_a2906e6a9ceeb4::t_421fc2edd56546 1-2,7-8,17-20,25-26,28-32,35-36,42-43,46-49
+  s_a2906e6a9ceeb4::t_b16a8057877e6a 3-6,9-16,21-24,27,33-34,37-41,44-45,50-75
+src/tests/integration/test_m7exit2_cli_drive.cpp
+  s_a2906e6a9ceeb4::t_5154b867c5fa6d 1-140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "b2ea06ad48896ccb84b1c26c4572533a22fba70f",
+  "prompts": {},
+  "sessions": {
+    "s_a2906e6a9ceeb4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c8df1aa-679b-407a-9c28-132785dc0056",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
