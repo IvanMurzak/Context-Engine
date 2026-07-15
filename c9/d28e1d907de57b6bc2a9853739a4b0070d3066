@@ -1,0 +1,28 @@
+src/packages/ui/tests/provider_conformance.h
+  s_a2906e6a9ceeb4::t_9f9144d49294ad 1-217
+src/packages/ui/tests/test_provider_conformance.cpp
+  s_a2906e6a9ceeb4::t_27bdbf3eb0744d 1-39
+docs/ui-capability-matrix.md
+  s_a2906e6a9ceeb4::t_bb679c6a0ee812 58
+  s_a2906e6a9ceeb4::t_23a680e019fe22 1-57,59-97
+src/packages/ui/tests/test_capability_matrix.cpp
+  s_a2906e6a9ceeb4::t_7ebadd1009acc4 1-293
+src/packages/ui/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_babfd55ae34f8c 190-218
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "c9d28e1d907de57b6bc2a9853739a4b0070d3066",
+  "prompts": {},
+  "sessions": {
+    "s_a2906e6a9ceeb4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c8df1aa-679b-407a-9c28-132785dc0056",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
