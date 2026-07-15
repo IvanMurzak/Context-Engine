@@ -1,0 +1,86 @@
+src/render/ui/README.md
+  s_a2906e6a9ceeb4::t_20cc9bb27339b1 14-24
+src/render/ui/src/text_quads.cpp
+  s_a2906e6a9ceeb4::t_64c7768ec79bf5 1-44
+src/packages/ui/text/include/context/packages/ui/text/embedded_fonts.h
+  s_a2906e6a9ceeb4::t_76aa835a75de4f 1-26
+src/render/ui/src/glyph_atlas.cpp
+  s_a2906e6a9ceeb4::t_275e6b843a694a 1-158
+src/render/ui/tests/test_text_quads.cpp
+  s_a2906e6a9ceeb4::t_04ebea2c2c8fa7 1-102
+tools/freetype-source.json
+  s_a2906e6a9ceeb4::t_e6141a6e051156 1-6
+src/render/ui/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_7f23a354004e06 55-62,71-83
+  s_a2906e6a9ceeb4::t_88ee7b6710816a 22-24
+src/packages/ui/text/include/context/packages/ui/text/font.h
+  s_a2906e6a9ceeb4::t_e66f34c4d1a6a7 1-75
+src/packages/ui/text/src/font.cpp
+  s_a2906e6a9ceeb4::t_8033be863674c6 1-141
+src/packages/ui/text/src/embedded_fonts.cpp
+  s_a2906e6a9ceeb4::t_ed9cf473d6904b 1-11,13,15-22,24-28,30-32
+  s_a2906e6a9ceeb4::t_f87419a1ed65d7 12,14,23,29
+src/render/ui/include/context/render/ui/glyph_atlas.h
+  s_a2906e6a9ceeb4::t_17effe5aaa6233 1-137
+src/render/ui/tests/test_glyph_atlas.cpp
+  s_a2906e6a9ceeb4::t_5b7c645cd37c5d 1-143
+src/packages/ui/text/include/context/packages/ui/text/measure.h
+  s_a2906e6a9ceeb4::t_a2ebd96e002936 1-45
+src/packages/ui/text/tests/test_font.cpp
+  s_a2906e6a9ceeb4::t_f08e91fb1ae7df 1-95
+src/packages/ui/text/tests/test_measure.cpp
+  s_a2906e6a9ceeb4::t_ac9464cfbd826b 1-101
+cmake/ContextFreetype.cmake
+  s_a2906e6a9ceeb4::t_a6d513037a94a9 1-63
+  s_a2906e6a9ceeb4::t_d4d3a291f5909f 64-73
+src/packages/ui/text/README.md
+  s_a2906e6a9ceeb4::t_40f6f28dc57d6f 1-113
+src/packages/ui/README.md
+  s_a2906e6a9ceeb4::t_cfd1bc388adba3 9-13
+src/packages/ui/text/include/context/packages/ui/text/glyph.h
+  s_a2906e6a9ceeb4::t_184c5dd2f54a84 1-48
+src/packages/ui/text/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_38ba1fa6b76a23 1-72
+tools/license-allowlist.json
+  s_a2906e6a9ceeb4::t_985a758f704dfb 12-13
+  s_a2906e6a9ceeb4::t_499bc73ca3014a 21
+  s_a2906e6a9ceeb4::t_fde04361ed95ef 2
+tools/embed_bin.py
+  s_a2906e6a9ceeb4::t_6f99ac5057d380 1-73
+src/packages/ui/text/src/measure.cpp
+  s_a2906e6a9ceeb4::t_1cd8a741329115 1-107
+src/render/ui/include/context/render/ui/text_quads.h
+  s_a2906e6a9ceeb4::t_cbc3aef4c9e6c3 1-60
+src/packages/ui/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_d29ef433627ffc 67-75
+tools/tests/test_embed_bin.py
+  s_a2906e6a9ceeb4::t_05bb18637ea793 1-75
+src/render/ui/tests/test_glyph_atlas_font.cpp
+  s_a2906e6a9ceeb4::t_6d61742d8e0940 1-90
+third_party/fonts/NotoSans-OFL.txt
+  s_a2906e6a9ceeb4::t_42fc8e303f7a05 1-93
+third_party/fonts/NotoSansArabic-OFL.txt
+  s_a2906e6a9ceeb4::t_a4d97da9cae8a2 1-93
+third_party/freetype/FTL.TXT
+  s_a2906e6a9ceeb4::t_2841b1bf595b61 1-169
+third_party/freetype/GPLv2.TXT
+  s_a2906e6a9ceeb4::t_877e3f7416dea4 1-340
+third_party/freetype/LICENSE.TXT
+  s_a2906e6a9ceeb4::t_4358db9fba65d5 1-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "a0deb2da690d909a0a41f014950b292f521a28bc",
+  "prompts": {},
+  "sessions": {
+    "s_a2906e6a9ceeb4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c8df1aa-679b-407a-9c28-132785dc0056",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
