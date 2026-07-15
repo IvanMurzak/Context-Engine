@@ -554,6 +554,92 @@ Registry::Registry()
           false}},
         /*implemented=*/true));
 
+    // --- M7 T5: the runtime-UI headless drive/assert verbs (issue #223, R-UI-006 / R-CLI-008) ----
+    // The "driven/asserted headless via CLI" exit leg: one-shot verbs over a headless UI-scene file
+    // (the ctx:ui-hud few-shot form authored through the M7 T4 context.ui surface) that dump the
+    // retained tree + computed rects, query/address a node, send a synthetic event (the UI->state
+    // action path runs), and assert a tree fact fail-closed (ui.assertion_failed). Backed by
+    // src/cli/ui_command.cpp over the pure-stdlib context_ui package (UiTree + the a5 introspection
+    // shims). The bare `ui` noun follows the as-built first-party precedent (R-CLI-007): the engine
+    // registry mints session/determinism/profile nouns BARE — a `<ns>:` prefix is reserved for
+    // package-ADD-contributed verbs, and runtime UI is a first-party engine surface, not a package
+    // contribution. New verbs enter the ONE registry so CLI ≡ RPC ≡ MCP ≡ introspection parity holds
+    // by construction (R-CLI-009); their rpc_method (ui.dump/...) + mcp_tool (context_ui_dump/...) are
+    // projected automatically. Inserted at the END of the stable block (before the operational
+    // surface) so a future sibling insertion merges cleanly. Additive-only — protocolMajor stays 0.
+    verbs_.push_back(make_verb(
+        "", "ui", "dump",
+        "Dump the retained UI tree of a headless UI-scene file as JSON (R-UI-006): every live node's "
+        "id, role, name, text, computed rect, visibility, and resolved data-bound value, in document "
+        "order. Runs the headless layout pass first so the rects are the same computed geometry a "
+        "backend would present.",
+        /*params=*/{{"scene", "path", true, "The UI-scene file to load (a ctx:ui-hud document)."}},
+        /*flags=*/
+        {{"width", "string", "Viewport width in pixels for the layout pass (unsigned; default 320).",
+          false},
+         {"height", "string", "Viewport height in pixels for the layout pass (unsigned; default 240).",
+          false}},
+        /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "ui", "query",
+        "Query one node of a headless UI-scene by its author name (R-UI-006): its role, text, computed "
+        "rect, visibility, child count, and resolved data-bound value. Refuses with ui.node_not_found "
+        "when the name is not in the tree.",
+        /*params=*/
+        {{"scene", "path", true, "The UI-scene file to load (a ctx:ui-hud document)."},
+         {"node", "string", true, "The author name of the node to query (UiNode.name)."}},
+        /*flags=*/
+        {{"width", "string", "Viewport width in pixels for the layout pass (unsigned; default 320).",
+          false},
+         {"height", "string", "Viewport height in pixels for the layout pass (unsigned; default 240).",
+          false}},
+        /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "ui", "send",
+        "Send a synthetic UI event to a headless UI-scene node and report the resulting state "
+        "(R-UI-006): click (pointer-down, target-then-bubble — the UI->state action path runs, so a "
+        "data-binding button's click reports the updated bound values), focus, key (--code), or text "
+        "(--text). A one-shot drive: the effect is reported in the envelope; the scene file is not "
+        "mutated.",
+        /*params=*/
+        {{"scene", "path", true, "The UI-scene file to load (a ctx:ui-hud document)."},
+         {"event", "string", true, "The event kind: click | focus | key | text."}},
+        /*flags=*/
+        {{"target", "string",
+          "The author name of the node to deliver the event to (required for click/key/text; focus "
+          "moves focus to it).",
+          false},
+         {"code", "string", "The device-agnostic key name for a `key` event (e.g. Enter, W).", false},
+         {"text", "string", "The text payload for a `text` event.", false},
+         {"width", "string", "Viewport width in pixels for the layout pass (unsigned; default 320).",
+          false},
+         {"height", "string", "Viewport height in pixels for the layout pass (unsigned; default 240).",
+          false}},
+        /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "ui", "assert",
+        "Assert a fact about a headless UI-scene node fail-closed (R-UI-006): existence, role (--role), "
+        "text (--text), visibility (--visible / --hidden), resolved data-bound value (--value), or live "
+        "child count (--child-count). Returns ui.assertion_failed with the expected-vs-actual detail "
+        "when the expectation does not hold — the verdict of the asserted-headless-via-CLI exit leg.",
+        /*params=*/
+        {{"scene", "path", true, "The UI-scene file to load (a ctx:ui-hud document)."},
+         {"node", "string", true, "The author name of the node to assert on (UiNode.name)."}},
+        /*flags=*/
+        {{"exists", "bool", "Assert the named node exists (implied by naming it; explicit for clarity).",
+          false},
+         {"role", "string", "Assert the node's role equals this (e.g. button, progressbar).", false},
+         {"text", "string", "Assert the node's text equals this exactly.", false},
+         {"value", "string", "Assert the node's resolved data-bound value equals this number.", false},
+         {"visible", "bool", "Assert the node is visible.", false},
+         {"hidden", "bool", "Assert the node is not visible.", false},
+         {"child-count", "string", "Assert the node's live child count equals this unsigned integer.",
+          false}},
+        /*implemented=*/true));
+
     // --- the OPERATIONAL daemon-driver surface (R-CLI-009 honesty) ------------------------------
     // These RPC methods are genuinely served by a live daemon's method backend (KernelServer) — the
     // cross-process analogue of `context editor smoke`. They are registered here so

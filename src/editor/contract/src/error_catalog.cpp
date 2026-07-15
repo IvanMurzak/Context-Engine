@@ -818,6 +818,37 @@ const std::vector<ErrorCode>& catalog()
          "authoritative peer's local state wins, so the delta is refused and the replica is unchanged.",
          false, kExitUsage, "R-NET-001"},
         // ============================================================================================
+        // --- ui.* — M7 T5 (runtime UI CLI drive/assert verbs, src/cli/ui_command.cpp, R-UI-006 /
+        //     R-CLI-008/009). Minter: a5. ----------------------------------------------------------
+        // The headless `context ui …` verbs' (dump / query / send / assert) fail-closed refusals. The
+        // strings are DEFINED in src/packages/ui/include/context/packages/ui/errors.h as
+        // context::packages::ui::k*Code (the same promote-a-local-string pattern as the M6 sim-package
+        // blocks above / bridge's scope.denied — so the UI package never links this contract layer) and
+        // this catalog registers them. All deterministic (a bare retry cannot conjure a missing scene
+        // file / node, repair a malformed scene or event, or make a false assertion true).
+        // scene_not_found / node_not_found are not-found class (a named scene file / author-named node
+        // is absent); scene_invalid is validation class (a malformed scene document / unknown role);
+        // invalid_event is usage class (a malformed `ui send` request); assertion_failed is validation
+        // class — the fail-closed verdict of the "asserted headless via CLI" exit leg (R-UI-006). This
+        // is the catalog tail (the one shared single-lane anchor). Additive-only (protocolMajor stays
+        // 0): NEW rows appended at the END, no existing row reordered/renamed.
+        {"ui.scene_not_found", "The named UI-scene file does not exist.", false, kExitNotFound,
+         "R-UI-006"},
+        {"ui.scene_invalid",
+         "The UI-scene document is malformed, an unsupported version, or names an unknown role or event "
+         "kind; nothing was built (fail-closed validation).",
+         false, kExitValidation, "R-UI-006"},
+        {"ui.node_not_found",
+         "A UI drive/assert verb named a node (by author name) that is not present in the tree.", false,
+         kExitNotFound, "R-UI-006"},
+        {"ui.invalid_event",
+         "A `ui send` request was malformed: an unknown event kind, or a required field for it (target "
+         "node, key code, or text) was missing; nothing was dispatched (fail-closed).",
+         false, kExitUsage, "R-UI-006"},
+        {"ui.assertion_failed",
+         "A `ui assert` expectation did not hold over the loaded tree; the diagnostic reports the "
+         "asserted fact, the expected value, and the actual value (the headless-CLI assert verdict).",
+         false, kExitValidation, "R-UI-006"},
     };
     return the_catalog;
 }

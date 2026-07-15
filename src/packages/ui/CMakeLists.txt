@@ -15,6 +15,7 @@
 
 add_library(context_ui STATIC
     src/damage.cpp
+    src/introspect.cpp
     src/layout.cpp
     src/provider.cpp
     src/ui_tree.cpp)
@@ -87,6 +88,9 @@ set(_context_ui_static_runtime
 #                         anchoring computed rects, resize/reflow → damage propagation (drives a1's
 #                         damage), top-most hit-testing (overlap/nesting/hidden/zero-opacity), and
 #                         deterministic document-order focus.
+#   - test_introspect:    the a5 introspection shims (introspect.h) that back `context ui …` — the
+#                         pre-order live-node walk (document order, removed subtrees dropped), name ->
+#                         node lookup, and the string<->Role bridge (round-trips the closed vocabulary).
 # The `ui-*` ctest family auto-runs in the general CI test step (no CI job-list edits needed — it is not
 # in the build job's -E gate-exclusion regex and is built by --preset dev like every target).
 set(_context_ui_tests
@@ -95,7 +99,8 @@ set(_context_ui_tests
     test_damage
     test_provider
     test_null_provider
-    test_layout)
+    test_layout
+    test_introspect)
 
 foreach(_t IN LISTS _context_ui_tests)
     add_executable(context_ui_${_t} tests/${_t}.cpp)
