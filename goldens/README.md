@@ -26,6 +26,7 @@ here with a **named SSIM-class perceptual metric + per-scene tolerances** (`mani
 | `viewport.ppm` | M5-F1 observer viewport (3D+2D) | the 3D triangle base + the 2D sprites composited on top (issue #164) |
 | `ui-hud.ppm` | M7 a6 runtime UI HUD + a8 shaped text (R-UI-005) | a colored-rect HUD (health bar + fill, minimap, GPU-composited badge, status bar) PLUS a shaped-text label ("SCORE 1200") drawn as atlas-textured glyph cutout quads, extracted through the GpuUiProvider — native + web |
 | `ui-worldpanel.ppm` | M7 a9 world-space RTT UI panel (R-UI-003, D4) | a UI panel rendered into a dynamic-texture registry target, then sampled onto a rotated world quad over a lit-ground base (native only) |
+| `ui-curvedpanel.ppm` | M7 a10 CURVED world-space RTT UI panel (R-UI-003, D4; ruling d) | the same panel RTT sampled across a UV-mapped cylinder-section mesh (view-pitched so the arc is visible) over a lit-ground base (native only) |
 
 Format: binary PPM (P6, maxval 255) — stdlib-parseable, no image dependency anywhere in the chain.
 Baselines were rendered through the native backend on real hardware; the per-scene `min_ssim` in
@@ -54,6 +55,12 @@ python3 tools/golden_compare.py --scene ui-hud --candidate out/ui-hud.ppm
 # M7 a9 world-space RTT UI panel (native only, like lit3d/viewport):
 context_render_wgpu_offscreen golden ui-worldpanel out/ui-worldpanel.ppm
 python3 tools/golden_compare.py --scene ui-worldpanel --candidate out/ui-worldpanel.ppm
+
+# M7 a10 CURVED world-space RTT UI panel (native only, like ui-worldpanel):
+context_render_wgpu_offscreen golden ui-curvedpanel out/ui-curvedpanel.ppm
+python3 tools/golden_compare.py --scene ui-curvedpanel --candidate out/ui-curvedpanel.ppm
+# No GPU on the dev host? Emit the analytic baseline the CI lavapipe render SSIM-gates against:
+#   context_render_ui_test_ui_curvedpanel --emit goldens/ui-curvedpanel.ppm
 ```
 
 The **`ui-hud`** scene is the M7 a6 engine-integrated GPU UI backend + the M7 a8 shaped text (issue #141
@@ -82,6 +89,22 @@ only `triangle3d` + `sprite2d` today, so browser coverage joins when the lit web
 committed baseline is the analytic (GPU-free) rasterization of the SAME projected quads + panel content
 (`worldpanel_scene.h::render_worldpanel_reference_cpu`), which the CI `render` job re-renders on the
 wgpu-native (lavapipe) backend and SSIM-gates.
+
+The **`ui-curvedpanel`** scene is the M7 a10 **curved-surface** world-space RTT UI panel (issue #241;
+R-UI-003, lock D4; owner ruling d — curved surfaces are in M7): the a9 flat-quad binding extended to an
+arbitrary UV-mapped mesh. The SAME teal-panel-with-amber-inner content is rendered into the dynamic-texture
+registry target, then **sampled** (nearest) across a UV-mapped **cylinder-section** mesh (12 segments,
+~140° arc facing the camera; `packages/ui/curved_panel.h::build_cylinder_panel_mesh` — the SAME surface the
+a10 pointer picking raycasts) bound to the RTT via the render/ui panel-mesh seam (`panel_mesh.h`), over the
+same lit-ground base. The projection is a straight-on **orthographic** camera with a ~22° view pitch so the
+cylinder's circular cross-section projects to a visible **arc** (the top/bottom edges bow); each triangle
+still projects **affinely** (linear UV), so the CPU mirror matches the GPU rasterizer within tolerance. It
+is **native-only** (like `ui-worldpanel`): the world-space RTT path rides `dynamic_texture.cpp`, which the
+Emscripten web golden target does not compile. The committed baseline is the analytic (GPU-free)
+rasterization of the SAME projected mesh triangles + panel content
+(`curvedpanel_scene.h::render_curvedpanel_reference_cpu`, emitted locally via
+`context_render_ui_test_ui_curvedpanel --emit`), which the CI `render` job re-renders on the wgpu-native
+(lavapipe) backend and SSIM-gates.
 
 The **`viewport`** scene is the M5-F1 observer-viewport composite (issue #164): the 3D triangle base
 (`triangle3d`) with the 2D sprites (`sprite2d`) painted on top in one frame — the "live scene (3D+2D)"

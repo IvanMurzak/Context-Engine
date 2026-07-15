@@ -21,10 +21,13 @@
 //            dynamic-texture registry target, then sampled onto a rotated world quad over a lit-ground
 //            base, read back + asserted (sky + lit ground + the panel's RTT texel on the quad). Same
 //            exit convention.
+//   curvedpanel — M7 a10 (R-UI-003, D4; ruling d): the CURVED world-space RTT UI panel — the same RTT
+//            sampled across a UV-mapped cylinder-section mesh over the lit-ground base, read back +
+//            asserted (sky + lit ground + the panel's RTT texel on the curved surface). Same exit.
 //   golden <scene> <out.ppm>
 //          — M4 T7 (issue #141): render a golden-corpus scene (triangle3d | sprite2d | lit3d |
-//            viewport | ui-hud | ui-worldpanel) and write the frame as binary PPM for the SSIM
-//            visual-equivalence gate (tools/golden_compare.py vs the committed baseline under
+//            viewport | ui-hud | ui-worldpanel | ui-curvedpanel) and write the frame as binary PPM for
+//            the SSIM visual-equivalence gate (tools/golden_compare.py vs the committed baseline under
 //            goldens/). Same exit convention as `render`; exit 2 on a bad scene id / unwritable path.
 //   bench [frames] [warmup] [WxH]
 //          — M4 T7 (issue #141): the R-QA-007 min-spec floor bench subject — the representative
@@ -38,6 +41,7 @@
 #include "context/render/lit/lit_offscreen.h"
 #include "context/render/offscreen_scene.h"
 #include "context/render/sprite/sprite_offscreen.h"
+#include "context/render/ui/curvedpanel_scene.h"
 #include "context/render/ui/hud_scene.h"
 #include "context/render/ui/worldpanel_scene.h"
 #include "context/render/viewport_scene.h"
@@ -124,7 +128,7 @@ int main(int argc, char** argv)
     }
 
     if (mode == "render" || mode == "sprite" || mode == "lit" || mode == "viewport" ||
-        mode == "ui" || mode == "worldpanel")
+        mode == "ui" || mode == "worldpanel" || mode == "curvedpanel")
     {
         int exit_code = 0;
         std::unique_ptr<IDevice> device = acquire_device(*rhi, exit_code);
@@ -154,6 +158,10 @@ int main(int argc, char** argv)
         {
             pass = context::render::ui::render_offscreen_worldpanel(*device); // M7 a9: world-space RTT
         }
+        else if (mode == "curvedpanel")
+        {
+            pass = context::render::ui::render_offscreen_curvedpanel(*device); // M7 a10: curved RTT
+        }
         else
         {
             pass = context::render::lit::render_offscreen_lit(*device);
@@ -167,10 +175,11 @@ int main(int argc, char** argv)
     {
         if (argc < 4)
         {
-            std::fprintf(
-                stderr,
-                "usage: %s golden <triangle3d|sprite2d|lit3d|viewport|ui-hud|ui-worldpanel> <out.ppm>\n",
-                argv[0]);
+            std::fprintf(stderr,
+                         "usage: %s golden "
+                         "<triangle3d|sprite2d|lit3d|viewport|ui-hud|ui-worldpanel|ui-curvedpanel> "
+                         "<out.ppm>\n",
+                         argv[0]);
             return 2;
         }
         const std::string scene = argv[2];
@@ -200,6 +209,10 @@ int main(int argc, char** argv)
         else if (scene == "ui-worldpanel")
         {
             rendered = ui::render_golden_worldpanel(*device, image); // M7 a9 world-space RTT (R-UI-003)
+        }
+        else if (scene == "ui-curvedpanel")
+        {
+            rendered = ui::render_golden_curvedpanel(*device, image); // M7 a10 curved world-space RTT
         }
         else if (scene == "triangle3d" || scene == "sprite2d")
         {
@@ -288,8 +301,8 @@ int main(int argc, char** argv)
     }
 
     std::fprintf(stderr,
-                 "usage: %s [probe|render|sprite|lit|viewport|ui|golden <scene> <out.ppm>|bench "
-                 "[frames] [warmup] [WxH]]\n",
+                 "usage: %s [probe|render|sprite|lit|viewport|ui|worldpanel|curvedpanel|golden "
+                 "<scene> <out.ppm>|bench [frames] [warmup] [WxH]]\n",
                  argv[0]);
     return 2;
 }

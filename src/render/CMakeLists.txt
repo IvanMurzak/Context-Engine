@@ -277,6 +277,17 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
         set_tests_properties(render-wgpu-worldpanel PROPERTIES
             SKIP_RETURN_CODE 77
             WORKING_DIRECTORY $<TARGET_FILE_DIR:context_render_wgpu_offscreen>)
+
+        # M7 a10 (R-UI-003, D4; ruling d): the CURVED world-space RTT UI-panel proof — the same panel
+        # RTT sampled across a UV-mapped cylinder-section mesh over the lit-ground base, read back +
+        # asserted (sky + lit ground + the panel's RTT texel on the curved surface). The frame the
+        # `ui-curvedpanel` golden gates. Same adapter requirement, SKIP convention, and Windows
+        # carve-out as the sibling proofs; auto-picked by the render CI job's `^render-wgpu-` regex
+        # (no ci.yml --target edit).
+        add_test(NAME render-wgpu-curvedpanel COMMAND context_render_wgpu_offscreen curvedpanel)
+        set_tests_properties(render-wgpu-curvedpanel PROPERTIES
+            SKIP_RETURN_CODE 77
+            WORKING_DIRECTORY $<TARGET_FILE_DIR:context_render_wgpu_offscreen>)
     endif()
 endif()
 
