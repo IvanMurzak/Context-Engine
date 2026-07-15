@@ -19,7 +19,9 @@ add_library(context_render_ui STATIC
     src/composite.cpp
     src/batch.cpp
     src/provider.cpp
-    src/dynamic_texture.cpp) # M7 a9 (D4): the first dynamic-texture registry (per-panel RTT targets)
+    src/dynamic_texture.cpp  # M7 a9 (D4): the first dynamic-texture registry (per-panel RTT targets)
+    src/glyph_atlas.cpp      # M7 a7 (issue #237): the GLYPH-ID-keyed R8 glyph atlas + LRU eviction
+    src/text_quads.cpp)      # M7 a7: the offset-bearing atlas-textured quad emitter (a8-ready)
 
 target_include_directories(context_render_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -50,7 +52,14 @@ set(_context_render_ui_tests
     test_ui_provider     # capabilities (3 true); present() over the fake RHI: full-clear vs damage-load
     test_ui_hud_offscreen  # compiles hud_scene.h + pins the reference HUD extract + analytic golden pixels
     test_ui_dynamic_texture # M7 a9 (D4): dynamic-texture registry + provider-into-target + extract chain
-    test_ui_worldpanel)  # M7 a9 (D4): compiles worldpanel_scene.h + pins the analytic ui-worldpanel golden
+    test_ui_worldpanel   # M7 a9 (D4): compiles worldpanel_scene.h + pins the analytic ui-worldpanel golden
+    test_glyph_atlas     # M7 a7: GLYPH-ID-keyed atlas build/hit/eviction/LRU-touch + blit + edges
+    test_text_quads)     # M7 a7: offset-bearing atlas quad emitter — placement/UVs/GPOS offsets/skips
+# These tests (and the atlas + emitter sources) are FreeType-FREE — the glyph atlas rasterizes via a
+# caller-supplied callback, so context_render_ui carries no context_ui_text / FreeType dependency and
+# the atlas/emitter are deliberately NOT added to the web target (context_render_ui_web). The real-font
+# integration (measure -> atlas -> emit over the embedded FreeType face) is the separate
+# test_glyph_atlas_font below, which is the ONE render-ui target that links context_ui_text.
 foreach(_t IN LISTS _context_render_ui_tests)
     add_executable(context_render_ui_${_t} tests/${_t}.cpp)
     target_link_libraries(context_render_ui_${_t} PRIVATE context_render_ui context_warnings)
@@ -59,3 +68,16 @@ foreach(_t IN LISTS _context_render_ui_tests)
     target_link_options(context_render_ui_${_t} PRIVATE ${_context_render_ui_static_runtime})
     add_test(NAME render-ui-${_t} COMMAND context_render_ui_${_t})
 endforeach()
+
+# --- real-font integration (M7 a7): measure -> glyph-id-keyed atlas -> offset-bearing emit ----------
+# The ONE render-ui test that links context_ui_text (the FreeType text package): it drives the whole a7
+# path over the embedded Noto Sans face, proving the FreeType-decoupled backend composes with the real
+# rasterizer and that repeated glyph ids share ONE atlas cell. `ui-*`/`render-ui-*` auto-run in the
+# build job's general step; context_ui_text is built by --preset dev too (no ci.yml edit).
+add_executable(context_render_ui_test_glyph_atlas_font tests/test_glyph_atlas_font.cpp)
+target_link_libraries(context_render_ui_test_glyph_atlas_font
+    PRIVATE context_render_ui context_ui_text context_warnings)
+target_include_directories(context_render_ui_test_glyph_atlas_font
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests ${CMAKE_CURRENT_SOURCE_DIR}/../tests)
+target_link_options(context_render_ui_test_glyph_atlas_font PRIVATE ${_context_render_ui_static_runtime})
+add_test(NAME render-ui-test_glyph_atlas_font COMMAND context_render_ui_test_glyph_atlas_font)

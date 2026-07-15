@@ -64,6 +64,15 @@ add_library(context_ui_input STATIC
 target_link_libraries(context_ui_input PUBLIC context_ui context_input)
 target_link_libraries(context_ui_input PRIVATE context_warnings)
 
+# --- context_ui_text: the M7 text substrate (a7, R-UI-005 / R-SEC-006; issue #237) ----------------
+# FreeType glyph rasterization + the run-based measure() seam + the embedded default fonts. A SIBLING
+# STATIC lib (the context_ui_script / context_ui_input precedent): the pure-stdlib context_ui foundation
+# never links FreeType. FreeType is fetched/built from source (cmake/ContextFreetype.cmake), FTL-elected,
+# every optional subsystem disabled; the public headers are FreeType-free (PIMPL) so nothing downstream
+# (context_render_ui, the web target) inherits FreeType. Own CMakeLists (isolates the FreeType fetch +
+# the embedded-font codegen).
+add_subdirectory(text)
+
 # The test executables link context_ui; on this MinGW host a stale libstdc++-6.dll elsewhere on PATH can
 # shadow the toolchain's, so they static-link the GCC runtime (gated to GNU — Apple Clang/libc++ and MSVC
 # untouched; the same self-contained-binary rationale as the sibling packages).

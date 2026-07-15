@@ -11,6 +11,17 @@ kernel never links back. The whole package drives only `rhi.h` + the pure-CPU sp
 it builds + unit-tests under the local GPU-less GCC dev gate AND compiles into the Emscripten web target
 (the `ui-hud` golden's web leg).
 
+M7 **a7** (issue #237) adds the text-render pieces: the FreeType-free **glyph atlas**
+(`glyph_atlas.h` / `src/glyph_atlas.cpp`, GLYPH-ID-keyed, fixed-cell packer + LRU eviction) and the
+**offset-bearing atlas-textured quad emitter** (`text_quads.h` / `src/text_quads.cpp`). Both rasterize
+via a **caller-supplied callback** (wired to `context_ui_text`'s `FontFace::rasterize`), so
+`context_render_ui` carries **no** `context_ui_text` / FreeType dependency and they are deliberately NOT
+added to the web target. Keyed on glyph id + GPOS-offset-bearing → a8's shaped output flows through
+unchanged. Tests: `render-ui-test_glyph_atlas` (build/hit/eviction/LRU/edges),
+`render-ui-test_text_quads` (placement/UVs/offsets/skips), and `render-ui-test_glyph_atlas_font` (the
+real embedded-font `measure` → atlas → emit path — the one render-ui target that links
+`context_ui_text`). NO text golden lands here — text goldens arrive with a8's shaped output.
+
 ## Pieces
 
 - **`snapshot.h` / `src/snapshot.cpp`** — the **UI extract**: a READ-ONLY observer walks the `UiTree`
