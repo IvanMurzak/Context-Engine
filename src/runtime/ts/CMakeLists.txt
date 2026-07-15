@@ -332,6 +332,37 @@ if(_ctx_js_v8 AND CONTEXT_SANITIZE)
         "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan-suppressions.txt")
 endif()
 
+# 5) M7 T4 / a4 (issue #227): the authored `context.ui` TypeScript HUD runs in the V8 host and drives
+# a headless context_ui UiTree through the doubles-only authoring binding shim (packages/ui
+# script_bindings.h). Links context_ui_script (the shim — pure stdlib, brings context_ui transitively)
+# + context_js (CI-only for its V8 path — same _ctx_js_v8 gate as test_ts_in_v8, so the two agree
+# leg-for-leg) + context_ts (the esbuild toolchain that bundles the authored HUD). On the local stub
+# gate it exercises the esbuild-bundle half + the pure-C++ shim and asserts V8 unavailable; the pure
+# shim logic is separately a LOCAL gate in packages/ui's ui-test_script_bindings. Same TSan/LSan +
+# UBSan-vptr suppression scoping as the sibling in-V8 tests (it links the same uninstrumented prebuilt).
+add_executable(context_ts_test_ui_ts_authoring tests/test_ui_ts_authoring.cpp)
+target_link_libraries(context_ts_test_ui_ts_authoring
+    PRIVATE context_ts context_js context_ui_script context_warnings)
+target_compile_definitions(context_ts_test_ui_ts_authoring PRIVATE ${_ctx_ts_test_defs})
+if(_ctx_js_v8)
+    target_compile_definitions(context_ts_test_ui_ts_authoring PRIVATE CONTEXT_JS_HAS_V8)
+endif()
+target_link_options(context_ts_test_ui_ts_authoring PRIVATE ${_ctx_ts_gcc_static})
+if(_ctx_js_v8 AND CONTEXT_SANITIZE AND NOT MSVC)
+    target_compile_options(context_ts_test_ui_ts_authoring PRIVATE -fno-sanitize=vptr)
+endif()
+add_test(NAME ts-test_ui_ts_authoring COMMAND context_ts_test_ui_ts_authoring)
+if(_ctx_js_v8 AND CONTEXT_TSAN)
+    set_tests_properties(ts-test_ui_ts_authoring PROPERTIES
+        ENVIRONMENT
+        "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../js/tsan-suppressions.txt")
+endif()
+if(_ctx_js_v8 AND CONTEXT_SANITIZE)
+    set_tests_properties(ts-test_ui_ts_authoring PROPERTIES
+        ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan-suppressions.txt")
+endif()
+
 # Export the staged esbuild binary path to the parent (src/) scope so sibling test trees added
 # AFTER this directory (src/tests/integration — the m6-exit-2 GC-budget gate bundles the authored
 # samples/platformer-2d/scripts/movement.ts through the same pinned toolchain) reuse the one

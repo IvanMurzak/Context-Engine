@@ -87,6 +87,16 @@ The P6/P7 standalone kind samples: `game-mix.audio-bus.json` (a mixing-bus graph
 Like `anim-graphs/`, these are few-shot forms with semantic ids — the RUNNABLE in-project instances
 of the same kinds live inside the two game projects (with L-33 hex ids, validated + canonical).
 
+### `ui-hud/`
+`default.ui-hud.json` — the declarative few-shot form of an in-game HUD authored through the M7 T4
+`context.ui` TypeScript surface (`ctx:ui-hud`, R-UI-001): a column HUD panel with a score label + a
+health bar (each read-only data-bound to a numeric state query) and a play button whose `pointerdown`
+scores points (the UI→state action path). It mirrors the authored script the runtime builds on the V8
+host (`src/runtime/ts/examples/ui_hud.ts` + the `context.ui` API in `context_ui.ts`), exercised
+headless by `ts-test_ui_ts_authoring`. A standalone few-shot kind dir (like `input-bindings/`) — the
+`$schema` is informational (unregistered) so it is kind-coverage-neutral for the samples-corpus gate;
+node `id`s author the L-33 hex form. UI is presentation (D6): no sim component, no state-hash effect.
+
 ## Contract-surface coverage (freeze readiness)
 
 Stable, implemented, one-shot CLI verbs the corpus exercises (each ≡ its RPC method + MCP tool):
