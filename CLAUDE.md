@@ -69,11 +69,12 @@ A local GCC-green `dev` run is **not** proof of CI green. Recurring CI-only brea
 
 Tests are ctest registrations, named in families the CI steps select by prefix regex:
 `kernel-test_*`, `gui-*` / `gui-a11y-*`, `ui-*` (runtime UI package, `src/packages/ui/`),
-`render-wgpu-*`, `shader-*`, `wasm-runner-*`, `cef-substrate-*`, `editor-cef-smoke-*`,
-`game-smoke-*`, `determinism-*`, `samples-corpus*`, and the milestone exit gates `m1-exit-*`,
-`m2-exit-*`, `m4-exit-*`, `m5-exit-*`, `m6-exit-*`. The `ui-*` family is a plain package test family
-(not a gate) — it is NOT in the general step's `-E` gate-exclusion regex, so it auto-runs there, and
-the `build` job builds it via `--preset dev` (no `--target`/CI edits needed).
+`render-ui-*` (M7 GPU UI backend, `src/render/ui/`), `render-wgpu-*`, `shader-*`, `wasm-runner-*`,
+`cef-substrate-*`, `editor-cef-smoke-*`, `game-smoke-*`, `determinism-*`, `samples-corpus*`, and the
+milestone exit gates `m1-exit-*`, `m2-exit-*`, `m4-exit-*`, `m5-exit-*`, `m6-exit-*`. The `ui-*` and
+`render-ui-*` families are plain package test families (not gates) — NOT in the general step's `-E`
+gate-exclusion regex, so they auto-run there, and the `build` job builds them via `--preset dev` (no
+`--target`/CI edits needed).
 
 - The `build` job's general ctest step **excludes the gate families**
   (`-E "^m1-exit-|^m2-exit-|^m4-exit-|^m5-exit-|^m6-exit-|^determinism-|^samples-corpus"`); each

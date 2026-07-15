@@ -59,6 +59,18 @@
         "native-metal": "advisory"
       },
       "description": "The M5-F1 observer-viewport composite (issue #164): the 'live scene (3D+2D)' the native viewport panel renders over context_render(_wgpu) composited via the L-41 seam - the T1 3D triangle (triangle3d) as the base layer with the T1 2D sprites (sprite2d) painted on top. Flat colors, opaque replace, no MSAA - tight tolerance. Native-only (like lit3d); web T1 equivalence is gated by the triangle3d + sprite2d browser goldens plus the shared-WGSL construction (the composite reuses those exact primitives, so equivalence within the T1 feature set follows). The committed baseline is the sprite-over-triangle-over-clear composite of the triangle3d + sprite2d goldens - byte-identical to `context_render_wgpu_offscreen golden viewport` (no blend / no MSAA), which the CI render job re-renders and SSIM-gates on every PR."
+    },
+    "ui-hud": {
+      "file": "ui-hud.ppm",
+      "min_ssim": 0.99,
+      "size": "256x256",
+      "renderer": "ui/hud_scene.h::render_golden_ui_hud (M7 a6 engine-integrated GPU UI backend, R-UI-005): the reference HUD (colored rects) authored as a retained UiTree, extracted through the GpuUiProvider and repainted into its persistent UI-layer texture over the T1 RHI",
+      "backends": {
+        "native-vulkan-lavapipe": "blocking",
+        "browser-chromium-swiftshader": "blocking",
+        "native-metal": "advisory"
+      },
+      "description": "The M7 a6 UI HUD (R-UI-005; text arrives with a7/a8): a health bar (dark background + a green fill child painting on top), a blue minimap panel, a GPU-COMPOSITED amber badge (a scale-about-centre + translate applied at composite time, no relayout), and a status bar - all solid opaque colored rectangles composited over the surface clear. Authored as an a1 UiTree, extracted to draw quads (snapshot.h), and repainted into the GpuUiProvider's persistent layer (provider.h) via the SAME ortho quad path (sprite/) the sprite2d golden already SSIM-gates, so the frame is the provider's render by construction. Flat colors, opaque replace, no blend / no MSAA - the axis-aligned integer-aligned rects rasterize essentially identically native (lavapipe) and web (SwiftShader), so the tolerance is tight (0.99, a hair looser than the pure-2D scenes to absorb any 1px edge rounding of the untested-locally CI backends). Rendered on BOTH backends (unlike native-only lit3d/viewport): the ui backend compiles into the Emscripten web target too. The committed baseline is the analytic (GPU-free) rasterization of the SAME extracted quads (ui/hud_scene.h::render_ui_hud_reference_cpu), which the CI render + render-web jobs re-render on real adapters and SSIM-gate on every PR."
     }
   }
 }

@@ -25,6 +25,7 @@
 #include "context/render/golden.h"
 #include "context/render/offscreen_scene.h"
 #include "context/render/sprite/sprite_offscreen.h"
+#include "context/render/ui/hud_scene.h"
 #include "context/render/wgpu/wgpu_rhi.h"
 
 #include <cstdio>
@@ -158,6 +159,33 @@ int main()
         {
             std::printf("[render-web] golden scene=%s rendered (no collector — manual run)\n",
                         scene.c_str());
+        }
+    }
+
+    // M7 a6 (R-UI-005): the engine-integrated GPU UI backend — extract the reference HUD through the
+    // GpuUiProvider, repaint its persistent layer, read it back, and POST it as the `ui-hud` golden.
+    // The SAME provider + extract + ortho-quad path native renders (hud_scene.h), so a pass here is
+    // desktop/web UI parity within the T1 feature set by construction.
+    {
+        golden::GoldenImage ui_image;
+        if (!ui::render_golden_ui_hud(*device, ui_image))
+        {
+            std::fprintf(stderr, "[render-web] FAIL: golden scene 'ui-hud' did not render\n");
+            goldens_ok = false;
+        }
+        else
+        {
+            const std::string path = "/golden/ui-hud?w=" + std::to_string(ui_image.width) +
+                                     "&h=" + std::to_string(ui_image.height);
+            if (post_bytes(path.c_str(), ui_image.rgba.data(), ui_image.rgba.size()))
+            {
+                std::printf("[render-web] golden scene=ui-hud (%ux%u) posted to collector\n",
+                            ui_image.width, ui_image.height);
+            }
+            else
+            {
+                std::printf("[render-web] golden scene=ui-hud rendered (no collector — manual run)\n");
+            }
         }
     }
 

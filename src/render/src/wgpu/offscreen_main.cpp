@@ -14,9 +14,12 @@
 //   viewport — M5-F1 (issue #164): the observer viewport's "live scene (3D+2D)" composite — the 3D
 //            triangle base with the 2D sprites overlaid — read back + asserted (clear + 3D layer +
 //            2D-on-top). Same exit convention as `render`.
+//   ui       — M7 a6 (R-UI-005): the engine-integrated GPU UI backend — the reference HUD extracted
+//            through the GpuUiProvider, repainted into its persistent layer, read back + asserted
+//            (clear + solid panel + fill-over-background + composited badge). Same exit convention.
 //   golden <scene> <out.ppm>
-//          — M4 T7 (issue #141): render a golden-corpus scene (triangle3d | sprite2d | lit3d) and
-//            write the frame as binary PPM for the SSIM visual-equivalence gate
+//          — M4 T7 (issue #141): render a golden-corpus scene (triangle3d | sprite2d | lit3d |
+//            viewport | ui-hud) and write the frame as binary PPM for the SSIM visual-equivalence gate
 //            (tools/golden_compare.py vs the committed baseline under goldens/). Same exit
 //            convention as `render`; exit 2 on a bad scene id / unwritable path.
 //   bench [frames] [warmup] [WxH]
@@ -31,6 +34,7 @@
 #include "context/render/lit/lit_offscreen.h"
 #include "context/render/offscreen_scene.h"
 #include "context/render/sprite/sprite_offscreen.h"
+#include "context/render/ui/hud_scene.h"
 #include "context/render/viewport_scene.h"
 #include "context/render/wgpu/wgpu_rhi.h"
 
@@ -114,7 +118,7 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    if (mode == "render" || mode == "sprite" || mode == "lit" || mode == "viewport")
+    if (mode == "render" || mode == "sprite" || mode == "lit" || mode == "viewport" || mode == "ui")
     {
         int exit_code = 0;
         std::unique_ptr<IDevice> device = acquire_device(*rhi, exit_code);
@@ -136,6 +140,10 @@ int main(int argc, char** argv)
         {
             pass = render_offscreen_viewport(*device); // M5-F1: the 3D+2D observer composite (#164)
         }
+        else if (mode == "ui")
+        {
+            pass = context::render::ui::render_offscreen_ui_hud(*device); // M7 a6: the GPU UI backend
+        }
         else
         {
             pass = context::render::lit::render_offscreen_lit(*device);
@@ -149,7 +157,8 @@ int main(int argc, char** argv)
     {
         if (argc < 4)
         {
-            std::fprintf(stderr, "usage: %s golden <triangle3d|sprite2d|lit3d|viewport> <out.ppm>\n",
+            std::fprintf(stderr,
+                         "usage: %s golden <triangle3d|sprite2d|lit3d|viewport|ui-hud> <out.ppm>\n",
                          argv[0]);
             return 2;
         }
@@ -172,6 +181,10 @@ int main(int argc, char** argv)
         else if (scene == "viewport")
         {
             rendered = render_golden_viewport(*device, image); // M5-F1 observer composite (#164)
+        }
+        else if (scene == "ui-hud")
+        {
+            rendered = ui::render_golden_ui_hud(*device, image); // M7 a6 GPU UI HUD (R-UI-005)
         }
         else if (scene == "triangle3d" || scene == "sprite2d")
         {
@@ -260,7 +273,7 @@ int main(int argc, char** argv)
     }
 
     std::fprintf(stderr,
-                 "usage: %s [probe|render|sprite|lit|viewport|golden <scene> <out.ppm>|bench "
+                 "usage: %s [probe|render|sprite|lit|viewport|ui|golden <scene> <out.ppm>|bench "
                  "[frames] [warmup] [WxH]]\n",
                  argv[0]);
     return 2;

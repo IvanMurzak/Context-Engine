@@ -54,15 +54,17 @@ dependency path (`src/runtime/js/`) — the local Strawberry-GCC dev gate cannot
 - **`wgpu/offscreen_main.cpp`** — the `context_render_wgpu_offscreen` executable: `probe` (R-HEAD-002,
   no device) / `render` (offscreen readback, exit 0 pass / 77 skip / 1 fail) / `sprite` (the
   R-2D-001 sprite proof) / `lit` (the R-REND-004/006 PBR + shadow + lightmap-hook proof —
-  see `lit/README.md`) / `golden <scene> <out.ppm>` (dump a golden-corpus frame for the SSIM gate —
-  `goldens/README.md`) / `bench [frames] [warmup] [WxH]` (the R-QA-007 min-spec floor bench subject,
-  driven by `bench/minspec_floor.py`). M4 T7, issue #141.
-- **`golden.h`** (+ `lit/golden_lit.h`) — the **M4 golden-scene corpus** renderer: each corpus scene
-  (`triangle3d`, `sprite2d`, `lit3d`) renders through the SAME factored proof path
-  (`render_offscreen_triangle_pixels` / `render_sprite_scene_pixels` / `LitOffscreen`), so the
-  committed baselines under `goldens/` are the proofs' frames by construction. `golden.h` is
-  kernel-free (the web harness renders the same pair); `golden_lit.h` adds the kernel-backed lit
-  scene + the bench frame loop.
+  see `lit/README.md`) / `viewport` (the M5-F1 3D+2D observer composite) / `ui` (the M7 a6 GPU UI HUD
+  proof — see `ui/README.md`) / `golden <scene> <out.ppm>` (dump a golden-corpus frame for the SSIM
+  gate — `goldens/README.md`) / `bench [frames] [warmup] [WxH]` (the R-QA-007 min-spec floor bench
+  subject, driven by `bench/minspec_floor.py`). M4 T7, issue #141.
+- **`golden.h`** (+ `lit/golden_lit.h`, `viewport_scene.h`, `ui/hud_scene.h`) — the golden-scene corpus
+  renderer: each corpus scene (`triangle3d`, `sprite2d`, `lit3d`, `viewport`, `ui-hud`) renders through
+  the SAME factored proof path (`render_offscreen_triangle_pixels` / `render_sprite_scene_pixels` /
+  `LitOffscreen` / `render_offscreen_viewport_pixels` / `ui::render_golden_ui_hud`), so the committed
+  baselines under `goldens/` are the proofs' frames by construction. `golden.h` is kernel-free (the web
+  harness renders `triangle3d` + `sprite2d` + `ui-hud`); `golden_lit.h` adds the kernel-backed lit scene
+  + the bench frame loop.
 
 ### `context_render_web` — the T1 browser WebGPU backend (emscripten/emdawnwebgpu; CI-gated)
 
@@ -77,10 +79,11 @@ three the spike documented: the poll pump yields to the browser event loop (Asyn
 enumerate-adapters extra), and `backend_name()` reports `browser-webgpu`.
 
 - **`web/web_main.cpp`** — the offscreen parity harness. Runs the **same** triangle (3D pipeline) +
-  sprite (2D) proofs the native offscreen exe runs, through the **same** `rhi.h` — so desktop/web are
-  identical **within the T1 feature set** by construction (same semantics; bit-identical frames are
-  NOT required — float→unorm rounding legally differs per backend). Kernel-free (no extract/kernel
-  surface under emscripten).
+  sprite (2D) + **ui-hud** (M7 a6 runtime UI, `ui/hud_scene.h`) proofs the native offscreen exe runs,
+  through the **same** `rhi.h` — so desktop/web are identical **within the T1 feature set** by
+  construction (same semantics; bit-identical frames are NOT required — float→unorm rounding legally
+  differs per backend). Kernel-free (no extract/kernel surface under emscripten; the UI backend is
+  presentation-only, D6).
 - **`web/CMakeLists.txt`** — standalone (`emcmake cmake -S src/render/web`), like the spike's web
   leg. Deliberately **not** part of the native build. emdawnwebgpu constraints honored: `-sASYNCIFY`,
   `-sEXIT_RUNTIME=1`, heap sized up front (`-sINITIAL_MEMORY`) and **no `-sALLOW_MEMORY_GROWTH`** (it

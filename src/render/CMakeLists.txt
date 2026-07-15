@@ -62,6 +62,7 @@ endforeach()
 add_subdirectory(material)
 add_subdirectory(sprite)   # R-2D-001 / L-55 — the 2D sprite path (issue #122)
 add_subdirectory(lit)      # R-REND-004/006 — PBR + lighting/shadows + lightmap hooks (issue #135)
+add_subdirectory(ui)       # R-UI-005 — M7 a6 engine-integrated GPU UI backend (context_render_ui)
 
 # --- WEB backend local parity guard (M4 T6, issue #137; R-QA-013) --------------------------------
 # The emdawnwebgpu web backend (src/render/web/, a CI-only emscripten build) renders the SAME
@@ -181,9 +182,12 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
     # (sprite_offscreen.h) through the SAME wgpu backend — reusing the ONE prebuilt, not forking it.
     # context_render_lit: likewise, the `lit` mode runs the R-REND-004/006 GPU PBR/shadow/lightmap
     # proof (lit_offscreen.h) through the same backend.
+    # context_render_ui: the offscreen exe's `ui` mode + `golden ui-hud` scene run the M7 a6 GPU UI
+    # backend (hud_scene.h) through the SAME wgpu backend — reusing the ONE prebuilt, not forking it.
     add_executable(context_render_wgpu_offscreen src/wgpu/offscreen_main.cpp)
     target_link_libraries(context_render_wgpu_offscreen
-        PRIVATE context_render_wgpu context_render_sprite context_render_lit context_warnings)
+        PRIVATE context_render_wgpu context_render_sprite context_render_lit context_render_ui
+                context_warnings)
     if(WIN32)
         # Stage wgpu_native.dll next to the exe so the dynamic import resolves at run time.
         add_custom_command(TARGET context_render_wgpu_offscreen POST_BUILD
@@ -247,6 +251,16 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
         # the sibling proofs; auto-picked by the render CI job's `^render-wgpu-` regex.
         add_test(NAME render-wgpu-viewport COMMAND context_render_wgpu_offscreen viewport)
         set_tests_properties(render-wgpu-viewport PROPERTIES
+            SKIP_RETURN_CODE 77
+            WORKING_DIRECTORY $<TARGET_FILE_DIR:context_render_wgpu_offscreen>)
+
+        # M7 a6 (R-UI-005): the engine-integrated GPU UI proof — the reference HUD extracted through the
+        # GpuUiProvider, repainted into its persistent layer, read back + asserted (clear background,
+        # solid panel, health fill over its background, composited badge). The frame the `ui-hud` golden
+        # gates. Same adapter requirement, SKIP convention, and Windows carve-out as the sibling proofs;
+        # auto-picked by the render CI job's `^render-wgpu-` regex (no ci.yml --target edit).
+        add_test(NAME render-wgpu-ui COMMAND context_render_wgpu_offscreen ui)
+        set_tests_properties(render-wgpu-ui PROPERTIES
             SKIP_RETURN_CODE 77
             WORKING_DIRECTORY $<TARGET_FILE_DIR:context_render_wgpu_offscreen>)
     endif()
