@@ -1,0 +1,48 @@
+src/packages/ui/src/script_bindings.cpp
+  s_a2906e6a9ceeb4::t_2cb42af21e53d0 1-363
+src/runtime/ts/examples/ui_hud.ts
+  s_a2906e6a9ceeb4::t_ff0a3f73cd72a2 1-59
+src/runtime/ts/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_fa5c523b07c4ca 335-365
+src/packages/ui/tests/test_script_bindings.cpp
+  s_a2906e6a9ceeb4::t_08a1fd3c55c272 1-167,169-220
+  s_a2906e6a9ceeb4::t_7f6b08fb90fee0 168
+src/runtime/ts/tests/test_ui_ts_authoring.cpp
+  s_a2906e6a9ceeb4::t_502e1ceb0b3644 25
+  s_a2906e6a9ceeb4::t_9dfac81a52b2f3 63-66
+  s_a2906e6a9ceeb4::t_cfdcfb53a5936f 1-24,26-62,67-161,168-260
+  s_a2906e6a9ceeb4::t_db927580017ddc 162-167
+src/packages/ui/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_6ff5000931a24d 87-102
+  s_a2906e6a9ceeb4::t_a8ab7e6c8462c9 28-39,45
+  s_a2906e6a9ceeb4::t_dd40e0d8812b2b 40-44
+src/packages/ui/include/context/packages/ui/script_bindings.h
+  s_a2906e6a9ceeb4::t_55c5482834689e 1-136
+src/runtime/ts/examples/context_ui.ts
+  s_a2906e6a9ceeb4::t_f8a505a82c7765 1-123
+samples/ui-hud/default.ui-hud.json
+  s_a2906e6a9ceeb4::t_4378dae81ffe03 1-43
+src/packages/ui/README.md
+  s_a2906e6a9ceeb4::t_fc519a34a4711e 83-88
+  s_a2906e6a9ceeb4::t_e5916c7a73059d 44-58
+  s_a2906e6a9ceeb4::t_d915f0107fb9e9 95-100
+  s_a2906e6a9ceeb4::t_013c51483f8e09 4-8
+samples/README.md
+  s_a2906e6a9ceeb4::t_ad3960283190b9 90-99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "8595d0850ea7dc8edd5d4863ae593f555ca4bf9f",
+  "prompts": {},
+  "sessions": {
+    "s_a2906e6a9ceeb4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c8df1aa-679b-407a-9c28-132785dc0056",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
