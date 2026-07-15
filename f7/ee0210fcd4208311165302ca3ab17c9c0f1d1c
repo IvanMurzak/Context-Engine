@@ -1,0 +1,19 @@
+src/tests/integration/test_m7exit4_determinism_presentation.cpp
+  s_a2906e6a9ceeb4::t_b49dc822a6d616 109-111,113,115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "f7ee0210fcd4208311165302ca3ab17c9c0f1d1c",
+  "prompts": {},
+  "sessions": {
+    "s_a2906e6a9ceeb4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c8df1aa-679b-407a-9c28-132785dc0056",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
