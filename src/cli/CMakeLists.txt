@@ -21,6 +21,7 @@ add_library(context_cli STATIC
     src/scaffold.cpp
     src/session_command.cpp
     src/set_command.cpp
+    src/ui_command.cpp
     src/wire_client.cpp)
 
 target_include_directories(context_cli PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -70,6 +71,12 @@ target_link_libraries(context_cli PRIVATE context_editor_pkg)
 # tiny stub and `profile gc` refuses fail-closed with sim.gc.unavailable.
 target_link_libraries(context_cli PRIVATE context_js context_profile)
 
+# M7 T5 (issue #223): `context ui <verb>` — the headless runtime-UI drive/assert verbs
+# (src/packages/ui/). PRIVATE — ui_command.h exposes only the contract Envelope, so no UI type
+# appears in the CLI's public headers; only ui_command.cpp touches the pure-stdlib context_ui
+# package (UiTree + the a5 introspection shims).
+target_link_libraries(context_cli PRIVATE context_ui)
+
 # Self-contained GCC runtime for the CLI executables. context_cli uses std::filesystem (the
 # `context new` scaffolder), whose libstdc++ symbols live in a NEWER libstdc++-6.dll; on a MinGW
 # host a stale libstdc++-6.dll elsewhere on PATH can shadow the toolchain's and be loaded first,
@@ -100,7 +107,8 @@ set(_context_cli_tests
     test_profile_command
     test_scaffold
     test_session_command
-    test_set_command)
+    test_set_command
+    test_ui_command)
 
 foreach(_t IN LISTS _context_cli_tests)
     add_executable(context_cli_${_t} tests/${_t}.cpp)
@@ -212,6 +220,7 @@ if(CONTEXT_SANITIZE)
         cli-test_scaffold
         cli-test_session_command
         cli-test_set_command
+        cli-test_ui_command
         cli-test_attach_e2e
         cli-test_fetch_e2e
         PROPERTIES ENVIRONMENT

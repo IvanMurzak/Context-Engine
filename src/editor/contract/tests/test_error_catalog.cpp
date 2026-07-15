@@ -470,5 +470,37 @@ int main()
         CHECK(conflict->origin == "R-NET-001");
     }
 
+    // --- M7 T5 ui.* codes (issue #223) — the runtime-UI CLI drive/assert domain block --------------
+    // Additive-only new rows at the catalog tail (NOT on the frozen v0 baseline — the additive-only
+    // check above still holds). The `context ui …` verbs' fail-closed refusals: scene_not_found +
+    // node_not_found (a missing scene file / author-named node) are not-found class; scene_invalid +
+    // assertion_failed (a malformed scene / a false assertion) are validation-class; invalid_event (a
+    // malformed `ui send`) is usage-class. All deterministic (a bare retry cannot conjure a missing
+    // file/node or make a false assertion true). The strings are the source-of-truth in
+    // src/packages/ui/.../errors.h (context::packages::ui).
+    {
+        for (const char* code : {"ui.scene_not_found", "ui.node_not_found"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 3);      // not-found class
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-UI-006");
+        }
+        for (const char* code : {"ui.scene_invalid", "ui.assertion_failed"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 5);      // validation class
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-UI-006");
+        }
+        const ErrorCode* invalid_event = find_code("ui.invalid_event");
+        CHECK(invalid_event != nullptr);
+        CHECK(invalid_event->exit_code == 2); // usage class
+        CHECK(invalid_event->retriable == false);
+        CHECK(invalid_event->origin == "R-UI-006");
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

@@ -16,6 +16,7 @@
 #include "context/cli/scaffold.h"
 #include "context/cli/session_command.h"
 #include "context/cli/set_command.h"
+#include "context/cli/ui_command.h"
 #include "context/editor/contract/json.h"
 #include "context/editor/contract/registry.h"
 
@@ -155,6 +156,13 @@ Envelope dispatch(const VerbSpec& verb, const std::vector<std::string>& position
     // fail-closed (sim.gc.unavailable) on a stub-JS-backend build.
     if (verb.noun == "profile")
         return run_profile(verb.verb, bound, flags);
+
+    // M7 T5 (issue #223): `context ui <verb> <scene> …` — the headless runtime-UI drive/assert verbs
+    // (dump / query / send / assert, R-UI-006). Backed by src/cli/ui_command.cpp over the pure-stdlib
+    // context_ui package (UiTree + the a5 introspection shims). One-shot: loads the scene, runs the
+    // headless layout pass, applies the verb, reports the envelope; never mutates the scene file.
+    if (verb.noun == "ui")
+        return run_ui(verb.verb, bound, flags);
 
     // M3 task 5 (issue #100): `context install` — the R-SEC-005 engine-driven install. Backed by
     // src/editor/pkg/. --dry-run (core flag) is honored INSIDE the command (validate the plan +

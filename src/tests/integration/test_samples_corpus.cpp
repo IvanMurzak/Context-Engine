@@ -303,6 +303,25 @@ int main()
                  {"determinism", "diff", replay_a.string(), replay_b.string()});
     }
 
+    // --- M7 T5 (issue #223): the headless runtime-UI drive/assert verbs over the ui-hud few-shot
+    //     scene (R-UI-006) — dump the retained tree + computed rects, query a data-bound node, click
+    //     the action button (the UI->state path scores points), and assert a bound value fail-closed.
+    //     Exercises the full ui dump/query/send/assert surface so the coverage assertion below counts
+    //     them as covered (they are stable ∧ implemented one-shot CLI verbs). --------------------------
+    {
+        const std::string ui_scene = (stage / "ui-hud" / "default.ui-hud.json").string();
+        exercise("ui", "dump", {"ui", "dump", ui_scene});
+        const Envelope q = exercise("ui", "query", {"ui", "query", ui_scene, "health-bar"});
+        if (q.ok())
+            CHECK(q.data().at("boundValue").as_number() == 100.0);
+        const Envelope sent =
+            exercise("ui", "send", {"ui", "send", ui_scene, "click", "--target", "play-button"});
+        if (sent.ok())
+            CHECK(sent.data().at("state").at("score").as_number() == 10.0);
+        exercise("ui", "assert",
+                 {"ui", "assert", ui_scene, "health-bar", "--value", "100"});
+    }
+
     // --- new: the R-QA-006 MUST-half runnable default template, authored into a fresh dir and then
     //     validated clean (the corpus builds ON this M1 surface — issue #106 Context) --------------
     {
