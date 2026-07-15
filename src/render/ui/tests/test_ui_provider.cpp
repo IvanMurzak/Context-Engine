@@ -45,9 +45,9 @@ void test_capabilities_are_the_three_advertised()
     CHECK(caps.gpu_driver);
     CHECK(caps.damage_repaint);
     CHECK(caps.composited_transforms);
-    // Text features are a7/a8, false at T1.
-    CHECK(!caps.text_shaping);
-    CHECK(!caps.bidi);
+    // a8: shaping + bidi are TRUE (headless context_ui_text::measure); IME stays false (out of M7 scope).
+    CHECK(caps.text_shaping);
+    CHECK(caps.bidi);
     CHECK(!caps.ime);
 }
 

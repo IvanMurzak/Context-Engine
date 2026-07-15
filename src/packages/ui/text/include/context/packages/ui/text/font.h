@@ -60,6 +60,14 @@ public:
     // stable across calls. (The underlying FT_Face pointer; never dereferenced by consumers.)
     [[nodiscard]] const void* identity() const noexcept;
 
+    // The HarfBuzz shaping font (an `hb_font_t*`) over the SAME embedded bytes, lazily created + cached
+    // — the shaper a8's `measure()` drives. Returned as an opaque `void*` so this header stays
+    // HarfBuzz-free (PIMPL, like the FreeType handle); the ONE TU that shapes casts it back. HarfBuzz
+    // and FreeType share the font's native glyph-index space, so ids from the shaper key the FreeType
+    // rasterizer + the glyph atlas directly. The scale is set per call by `measure()`. Returns nullptr
+    // only if HarfBuzz rejects the bytes.
+    [[nodiscard]] void* hb_font() const noexcept;
+
     // The face's family name (from its `name` table), for diagnostics + tests. Empty if unavailable.
     [[nodiscard]] std::string family_name() const;
 

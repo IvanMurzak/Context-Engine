@@ -71,6 +71,16 @@ void test_analytic_baseline_pixels()
     CHECK(is(at(208, 208), 40, 80, 160));  // minimap panel
     CHECK(is(at(210, 40), 220, 180, 40));  // the composited (transformed) badge
     CHECK(is(at(100, 230), 30, 30, 36));   // the status bar
+
+    // M7 a8: the shaped-text label rendered — count white (255,255,255) glyph pixels in the label region
+    // (mid-left, clear of every panel), which only the cutout text writes. Proves shaped glyphs reached
+    // the analytic golden (the same 1-bit mask the GPU cutout draws).
+    std::size_t text_ink = 0;
+    for (std::uint32_t row = 92; row < 116; ++row)
+        for (std::uint32_t col = 18; col < 150; ++col)
+            if (is(at(col, row), 255, 255, 255))
+                ++text_ink;
+    CHECK(text_ink > 20); // "SCORE 1200" at 20px has ample ink
 }
 
 void test_analytic_baseline_round_trips_ppm()

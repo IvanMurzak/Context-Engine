@@ -53,7 +53,9 @@ packages::ui::Capabilities GpuUiProvider::capabilities() const
     caps.gpu_driver = true;            // GPU-driven presentation
     caps.damage_repaint = true;        // repaints dirty regions only
     caps.composited_transforms = true; // transform/opacity fold at composite time, no relayout
-    // text_shaping / bidi / ime stay false at T1 (a7/a8).
+    caps.text_shaping = true;          // a8: HarfBuzz-class shaping (context_ui_text::measure, headless)
+    caps.bidi = true;                  // a8: UAX #9 bidi + UAX #24 itemization (SheenBidi)
+    // ime stays false — no OS text-entry integration in M7 exit scope (declared capability, owner O-2).
     return caps;
 }
 

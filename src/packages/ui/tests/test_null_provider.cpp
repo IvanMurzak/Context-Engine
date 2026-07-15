@@ -71,11 +71,11 @@ int main()
 
     const RepaintPlan full_plan = negotiate_repaint(Capabilities{}, tree.take_damage(), Rect{0, 0, 640, 480});
 
-    // --- the null provider: all-false caps, present is a pure no-op -------------------------------
+    // --- the null provider: no RENDER caps, but headless text_shaping+bidi TRUE; present is a no-op --
     NullProvider null;
     const Capabilities caps = null.capabilities();
     CHECK(!caps.gpu_driver && !caps.damage_repaint && !caps.composited_transforms);
-    CHECK(!caps.text_shaping && !caps.bidi && !caps.ime);
+    CHECK(caps.text_shaping && caps.bidi && !caps.ime); // a8: shaping/bidi are headless (context_ui_text)
 
     const std::size_t nodes_before = tree.node_count();
     for (int i = 0; i < 5; ++i)
