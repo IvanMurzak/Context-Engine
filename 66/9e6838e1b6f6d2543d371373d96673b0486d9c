@@ -1,0 +1,40 @@
+src/packages/ui/README.md
+  s_a2906e6a9ceeb4::t_6057aaccc8b88d 122-126
+  s_a2906e6a9ceeb4::t_7b268231e0e771 46-60
+  s_a2906e6a9ceeb4::t_f7abddbb0bae23 89-94
+  s_a2906e6a9ceeb4::t_1871822c1f60dc 5-6,9-10
+  s_a2906e6a9ceeb4::t_6fa308d4dcec5a 109-115
+src/packages/ui/src/input_routing.cpp
+  s_a2906e6a9ceeb4::t_9cc9fecb68c798 1-102
+src/packages/ui/tests/test_input_routing.cpp
+  s_a2906e6a9ceeb4::t_4f7c9117c7eef5 1-245
+src/packages/ui/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_48f3648aed475a 46-65
+  s_a2906e6a9ceeb4::t_7d9dfae0cb062a 123-139
+src/packages/ui/include/context/packages/ui/input_routing.h
+  s_bc9a1eddc7910e::t_d587778b505ab0 1-114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "669e6838e1b6f6d2543d371373d96673b0486d9c",
+  "prompts": {},
+  "sessions": {
+    "s_a2906e6a9ceeb4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c8df1aa-679b-407a-9c28-132785dc0056",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_bc9a1eddc7910e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "07a60c67-96b4-4c41-bbe1-fc86881e3b71",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
