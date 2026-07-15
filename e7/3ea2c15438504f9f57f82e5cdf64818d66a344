@@ -1,0 +1,257 @@
+src/packages/ui/text/tests/test_line_break.cpp
+  s_a2906e6a9ceeb4::t_abb3fe41a48e5f 1-104
+src/packages/ui/text/src/measure.cpp
+  s_a2906e6a9ceeb4::t_c0c55d94d2cc2e 1-6,10-14,16,88-105,111,113-130,132,134-146,148-162,165,168,171-222,224-272
+src/render/ui/src/provider.cpp
+  s_a2906e6a9ceeb4::t_21b36d6f327efa 56-58
+cmake/ContextSheenBidi.cmake
+  s_a2906e6a9ceeb4::t_5e4793301cbae0 22-24
+  s_a2906e6a9ceeb4::t_dd2588c3ec8a70 1-21,25-42
+src/packages/ui/text/src/font.cpp
+  s_a2906e6a9ceeb4::t_f3640fc27d312a 35-40,44-45
+  s_a2906e6a9ceeb4::t_82726be22d6b3d 146-162,165,168,171-175
+  s_a2906e6a9ceeb4::t_ec041e367d250d 163-164,166-167,169-170
+  s_a2906e6a9ceeb4::t_5e12caff8ff44e 11-13
+  s_a2906e6a9ceeb4::t_27b70c1cb111d2 75-79
+src/packages/ui/text/include/context/packages/ui/text/line_break.h
+  s_a2906e6a9ceeb4::t_36ca715842cffd 1-42
+tools/harfbuzz-source.json
+  s_a2906e6a9ceeb4::t_4522029cd080c8 1-6
+tools/license-allowlist.json
+  s_a2906e6a9ceeb4::t_286ccc36923a6f 2
+  s_a2906e6a9ceeb4::t_61d89f1bd3c290 13-14,24-25,28
+src/render/ui/include/context/render/ui/hud_scene.h
+  s_a2906e6a9ceeb4::t_b3dba34461b001 9-16
+  s_a2906e6a9ceeb4::t_96ad629c8f3fd5 413-452
+  s_a2906e6a9ceeb4::t_129330e337601e 113-334,338-345,350-352,355
+  s_a2906e6a9ceeb4::t_1115e1ab292797 28-30,35-36,39,41-43,46-50
+goldens/README.md
+  s_a2906e6a9ceeb4::t_9d4be30af27a1f 27
+  s_a2906e6a9ceeb4::t_0580056ac647cb 59-71
+cmake/ContextHarfBuzz.cmake
+  s_a2906e6a9ceeb4::t_2b67fd06293d19 1-69
+src/packages/ui/text/tests/test_shaping.cpp
+  s_a2906e6a9ceeb4::t_8bcf617dade8e0 1-134
+src/render/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_a3094bd6796699 188-189,193
+src/packages/ui/tests/test_null_provider.cpp
+  s_a2906e6a9ceeb4::t_dda63baf04083b 74,78
+src/render/ui/tests/test_ui_provider.cpp
+  s_a2906e6a9ceeb4::t_162371326e38fc 48-50
+src/packages/ui/text/src/line_break.cpp
+  s_a2906e6a9ceeb4::t_7df79e3f0d841c 31-47,51,62
+  s_a2906e6a9ceeb4::t_f9d30f79cbfffc 1-30,48-50,52-61,63-147
+src/packages/ui/text/README.md
+  s_a2906e6a9ceeb4::t_3525c6b59fd142 89-109
+  s_a2906e6a9ceeb4::t_91643bc08b9f29 146-154,157-158
+  s_a2906e6a9ceeb4::t_49560b0743a206 1,3-9,13-15,22-33,41,43,45-57,59-63
+src/render/ui/README.md
+  s_a2906e6a9ceeb4::t_b5a5c7ef0f0df5 23-25
+  s_a2906e6a9ceeb4::t_e37bed1caf1bfe 54-57
+src/render/web/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_49781571cfa97b 141-142,145
+  s_a2906e6a9ceeb4::t_4d49ff9944e1b1 76-78,83-85,93-133
+  s_a2906e6a9ceeb4::t_7429900c616e2d 134
+src/packages/ui/text/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_a90a1c1533ed03 13-21
+  s_a2906e6a9ceeb4::t_31279aeb81b2f6 56,61-66
+  s_a2906e6a9ceeb4::t_2ad7fcaaf38a0b 74-77
+goldens/manifest.json
+  s_a2906e6a9ceeb4::t_e3a444bc17443d 73
+cmake/ContextLibunibreak.cmake
+  s_a2906e6a9ceeb4::t_c541152a36a7e6 21-23
+  s_a2906e6a9ceeb4::t_bd785fc5eeeaa2 1-20,24-46
+src/render/ui/CMakeLists.txt
+  s_a2906e6a9ceeb4::t_08229d942e234a 51
+  s_a2906e6a9ceeb4::t_9d5a0bd9350600 57-59,69-89
+src/packages/ui/include/context/packages/ui/null_provider.h
+  s_a2906e6a9ceeb4::t_f397882856ea35 1-7
+  s_a2906e6a9ceeb4::t_53abb5ab688e4a 21-29
+src/packages/ui/README.md
+  s_a2906e6a9ceeb4::t_fcefe55e2dca8b 46,48-50
+src/render/ui/tests/test_glyph_atlas_font.cpp
+  s_a2906e6a9ceeb4::t_9be55390e3f3de 14-15
+  s_a2906e6a9ceeb4::t_6e8a6c53962c73 91-159
+src/packages/ui/text/include/context/packages/ui/text/font.h
+  s_a2906e6a9ceeb4::t_7187cafa2dd80e 63-70
+src/render/ui/tests/test_ui_hud_offscreen.cpp
+  s_a2906e6a9ceeb4::t_bc27776a45c297 74-83
+goldens/ui-hud.ppm
+  s_a2906e6a9ceeb4::t_27a34b8d760010 4
+third_party/harfbuzz/COPYING
+  s_a2906e6a9ceeb4::t_c7dd79539d16eb 1-42
+third_party/libunibreak/LICENCE
+  s_a2906e6a9ceeb4::t_81e718fa8a12ca 1-21
+third_party/libunibreak/src/eastasianwidthdata.c
+  s_a2906e6a9ceeb4::t_144459960f6d9b 1-324
+third_party/libunibreak/src/eastasianwidthdef.c
+  s_a2906e6a9ceeb4::t_13bf5211eab824 1-44
+third_party/libunibreak/src/eastasianwidthdef.h
+  s_a2906e6a9ceeb4::t_699db9639e1cbe 1-56
+third_party/libunibreak/src/emojidata.c
+  s_a2906e6a9ceeb4::t_f03ba3407e1354 1-87
+third_party/libunibreak/src/emojidef.c
+  s_a2906e6a9ceeb4::t_42824ae5cb834b 1-47
+third_party/libunibreak/src/emojidef.h
+  s_a2906e6a9ceeb4::t_5f823d3ad25532 1-51
+third_party/libunibreak/src/linebreak.c
+  s_a2906e6a9ceeb4::t_3495d353b23355 1-995
+third_party/libunibreak/src/linebreak.h
+  s_a2906e6a9ceeb4::t_8f90c37be0eecb 1-82
+third_party/libunibreak/src/linebreakdata.c
+  s_a2906e6a9ceeb4::t_481ca4bb0523f9 1-8908
+third_party/libunibreak/src/linebreakdef.c
+  s_a2906e6a9ceeb4::t_ec597eceec49a1 1-125
+third_party/libunibreak/src/linebreakdef.h
+  s_a2906e6a9ceeb4::t_79ed91624c2b86 1-189
+third_party/libunibreak/src/unibreakbase.c
+  s_a2906e6a9ceeb4::t_077333050261d3 1-40
+third_party/libunibreak/src/unibreakbase.h
+  s_a2906e6a9ceeb4::t_e07f468fac8b64 1-56
+third_party/libunibreak/src/unibreakdef.c
+  s_a2906e6a9ceeb4::t_f0f55cab816982 1-173
+third_party/libunibreak/src/unibreakdef.h
+  s_a2906e6a9ceeb4::t_ffbeaf7a726e89 1-108
+third_party/sheenbidi/Headers/SheenBidi/SBAlgorithm.h
+  s_a2906e6a9ceeb4::t_b50b965820e35c 1-123
+third_party/sheenbidi/Headers/SheenBidi/SBBase.h
+  s_a2906e6a9ceeb4::t_77c33d0332667f 1-156
+third_party/sheenbidi/Headers/SheenBidi/SBBidiType.h
+  s_a2906e6a9ceeb4::t_233a43088b6ea7 1-85
+third_party/sheenbidi/Headers/SheenBidi/SBCodepoint.h
+  s_a2906e6a9ceeb4::t_a7a80b60ca08f9 1-184
+third_party/sheenbidi/Headers/SheenBidi/SBCodepointSequence.h
+  s_a2906e6a9ceeb4::t_fedfb5f08acbd2 1-70
+third_party/sheenbidi/Headers/SheenBidi/SBConfig.h
+  s_a2906e6a9ceeb4::t_655e63bced8fdb 1-31
+third_party/sheenbidi/Headers/SheenBidi/SBGeneralCategory.h
+  s_a2906e6a9ceeb4::t_97690c1f62225a 1-110
+third_party/sheenbidi/Headers/SheenBidi/SBLine.h
+  s_a2906e6a9ceeb4::t_132f083b0851fb 1-88
+third_party/sheenbidi/Headers/SheenBidi/SBMirrorLocator.h
+  s_a2906e6a9ceeb4::t_390b0c4f0167f1 1-108
+third_party/sheenbidi/Headers/SheenBidi/SBParagraph.h
+  s_a2906e6a9ceeb4::t_bd3fcf9601a7ad 1-105
+third_party/sheenbidi/Headers/SheenBidi/SBRun.h
+  s_a2906e6a9ceeb4::t_bf941a6112ae62 1-36
+third_party/sheenbidi/Headers/SheenBidi/SBScript.h
+  s_a2906e6a9ceeb4::t_44761335d5435d 1-289
+third_party/sheenbidi/Headers/SheenBidi/SBScriptLocator.h
+  s_a2906e6a9ceeb4::t_5047efe6f5689b 1-106
+third_party/sheenbidi/Headers/SheenBidi/SBVersion.h
+  s_a2906e6a9ceeb4::t_812d2751fe8226 1-41
+third_party/sheenbidi/Headers/SheenBidi/SheenBidi.h
+  s_a2906e6a9ceeb4::t_114da31cd46a9f 1-34
+third_party/sheenbidi/LICENSE
+  s_a2906e6a9ceeb4::t_defb8a981fe63d 1-202
+third_party/sheenbidi/Source/BidiChain.c
+  s_a2906e6a9ceeb4::t_457ce075679442 1-118
+third_party/sheenbidi/Source/BidiChain.h
+  s_a2906e6a9ceeb4::t_b7ff6908af68b3 1-69
+third_party/sheenbidi/Source/BidiTypeLookup.c
+  s_a2906e6a9ceeb4::t_55a8179cb482d8 1-1078
+third_party/sheenbidi/Source/BidiTypeLookup.h
+  s_a2906e6a9ceeb4::t_d9370e8a0dd77f 1-16
+third_party/sheenbidi/Source/BracketQueue.c
+  s_a2906e6a9ceeb4::t_3781011a6af62d 1-225
+third_party/sheenbidi/Source/BracketQueue.h
+  s_a2906e6a9ceeb4::t_930fec9b7b222b 1-75
+third_party/sheenbidi/Source/BracketType.h
+  s_a2906e6a9ceeb4::t_1f0f8309316c56 1-32
+third_party/sheenbidi/Source/GeneralCategoryLookup.c
+  s_a2906e6a9ceeb4::t_a391f3f1e69dba 1-2079
+third_party/sheenbidi/Source/GeneralCategoryLookup.h
+  s_a2906e6a9ceeb4::t_370b378354ad1c 1-16
+third_party/sheenbidi/Source/IsolatingRun.c
+  s_a2906e6a9ceeb4::t_ae7c525817b5c9 1-538
+third_party/sheenbidi/Source/IsolatingRun.h
+  s_a2906e6a9ceeb4::t_865c1b231adb5c 1-47
+third_party/sheenbidi/Source/LevelRun.c
+  s_a2906e6a9ceeb4::t_b4a1052f435a4d 1-69
+third_party/sheenbidi/Source/LevelRun.h
+  s_a2906e6a9ceeb4::t_803f564e7444c1 1-42
+third_party/sheenbidi/Source/Object.c
+  s_a2906e6a9ceeb4::t_9f48d9db998fea 1-156
+third_party/sheenbidi/Source/Object.h
+  s_a2906e6a9ceeb4::t_d91aa2afd8d275 1-114
+third_party/sheenbidi/Source/PairingLookup.c
+  s_a2906e6a9ceeb4::t_027bff69f6fc82 1-267
+third_party/sheenbidi/Source/PairingLookup.h
+  s_a2906e6a9ceeb4::t_b74280b68b186a 1-18
+third_party/sheenbidi/Source/RunExtrema.h
+  s_a2906e6a9ceeb4::t_de0971edf44a93 1-50
+third_party/sheenbidi/Source/RunKind.h
+  s_a2906e6a9ceeb4::t_f1023ce3903c2f 1-81
+third_party/sheenbidi/Source/RunQueue.c
+  s_a2906e6a9ceeb4::t_ea9f2dc7e57ca7 1-164
+third_party/sheenbidi/Source/RunQueue.h
+  s_a2906e6a9ceeb4::t_9fe351c42d677e 1-58
+third_party/sheenbidi/Source/SBAlgorithm.c
+  s_a2906e6a9ceeb4::t_1b06e8e18953d3 1-202
+third_party/sheenbidi/Source/SBAlgorithm.h
+  s_a2906e6a9ceeb4::t_6d29aedcd4d504 1-37
+third_party/sheenbidi/Source/SBAssert.h
+  s_a2906e6a9ceeb4::t_834f5470fddfab 1-24
+third_party/sheenbidi/Source/SBBase.c
+  s_a2906e6a9ceeb4::t_5c17998cdd3917 1-818
+third_party/sheenbidi/Source/SBBase.h
+  s_a2906e6a9ceeb4::t_2c6659041966ed 1-99
+third_party/sheenbidi/Source/SBCodepoint.c
+  s_a2906e6a9ceeb4::t_ae23be6824e4ef 1-250
+third_party/sheenbidi/Source/SBCodepoint.h
+  s_a2906e6a9ceeb4::t_f7bac3226031d6 1-26
+third_party/sheenbidi/Source/SBCodepointSequence.c
+  s_a2906e6a9ceeb4::t_ff1d09d7edee1f 1-100
+third_party/sheenbidi/Source/SBCodepointSequence.h
+  s_a2906e6a9ceeb4::t_e56afb12915524 1-26
+third_party/sheenbidi/Source/SBLine.c
+  s_a2906e6a9ceeb4::t_2d6a70acf16c38 1-327
+third_party/sheenbidi/Source/SBLine.h
+  s_a2906e6a9ceeb4::t_530deb7e18b813 1-42
+third_party/sheenbidi/Source/SBLog.c
+  s_a2906e6a9ceeb4::t_fbf73f4b9660a4 1-305
+third_party/sheenbidi/Source/SBLog.h
+  s_a2906e6a9ceeb4::t_c6f06700aa6a3a 1-152
+third_party/sheenbidi/Source/SBMirrorLocator.c
+  s_a2906e6a9ceeb4::t_460d1b940e3ffb 1-126
+third_party/sheenbidi/Source/SBMirrorLocator.h
+  s_a2906e6a9ceeb4::t_4dd6597ff5c414 1-35
+third_party/sheenbidi/Source/SBParagraph.c
+  s_a2906e6a9ceeb4::t_ac409c0af10a64 1-712
+third_party/sheenbidi/Source/SBParagraph.h
+  s_a2906e6a9ceeb4::t_c44702a472268c 1-41
+third_party/sheenbidi/Source/SBScriptLocator.c
+  s_a2906e6a9ceeb4::t_68304b8fc3fb8e 1-179
+third_party/sheenbidi/Source/SBScriptLocator.h
+  s_a2906e6a9ceeb4::t_fe9ce8eb72618c 1-35
+third_party/sheenbidi/Source/ScriptLookup.c
+  s_a2906e6a9ceeb4::t_33377f4bafd866 1-2360
+third_party/sheenbidi/Source/ScriptLookup.h
+  s_a2906e6a9ceeb4::t_d3aed8e8f58773 1-16
+third_party/sheenbidi/Source/ScriptStack.c
+  s_a2906e6a9ceeb4::t_743ebdc6b221bc 1-84
+third_party/sheenbidi/Source/ScriptStack.h
+  s_a2906e6a9ceeb4::t_5ca1e521598195 1-50
+third_party/sheenbidi/Source/SheenBidi.c
+  s_a2906e6a9ceeb4::t_90bc954b62b315 1-44
+third_party/sheenbidi/Source/StatusStack.c
+  s_a2906e6a9ceeb4::t_5fcd9930e77e79 1-121
+third_party/sheenbidi/Source/StatusStack.h
+  s_a2906e6a9ceeb4::t_3af3c2c84c8d95 1-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "e73ea2c15438504f9f57f82e5cdf64818d66a344",
+  "prompts": {},
+  "sessions": {
+    "s_a2906e6a9ceeb4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5c8df1aa-679b-407a-9c28-132785dc0056",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
