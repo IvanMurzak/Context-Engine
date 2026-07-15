@@ -67,6 +67,15 @@ float viewport_dim(const std::map<std::string, std::string>& flags, const char* 
     }
 }
 
+// The layout viewport a verb lays the scene out in, from the optional --width/--height flags (an
+// advisory, unsigned dimension; defaults 320x240). The one place the shared default lives so the four
+// verbs stay in lockstep.
+ui::Rect viewport_from_flags(const std::map<std::string, std::string>& flags)
+{
+    return ui::Rect{0.0f, 0.0f, viewport_dim(flags, "width", 320.0f),
+                    viewport_dim(flags, "height", 240.0f)};
+}
+
 std::optional<double> parse_double(const std::string& s)
 {
     try
@@ -434,8 +443,7 @@ Json state_json(const LoadedScene& scene)
 Envelope ui_dump(const std::string& scene_path, const std::map<std::string, std::string>& flags)
 {
     LoadedScene scene;
-    const ui::Rect viewport{0.0f, 0.0f, viewport_dim(flags, "width", 320.0f),
-                            viewport_dim(flags, "height", 240.0f)};
+    const ui::Rect viewport = viewport_from_flags(flags);
     if (const std::optional<LoadError> err = load_scene(scene_path, viewport, scene))
         return Envelope::failure(err->code, err->message);
 
@@ -459,8 +467,7 @@ Envelope ui_query(const std::string& scene_path, const std::string& name,
                   const std::map<std::string, std::string>& flags)
 {
     LoadedScene scene;
-    const ui::Rect viewport{0.0f, 0.0f, viewport_dim(flags, "width", 320.0f),
-                            viewport_dim(flags, "height", 240.0f)};
+    const ui::Rect viewport = viewport_from_flags(flags);
     if (const std::optional<LoadError> err = load_scene(scene_path, viewport, scene))
         return Envelope::failure(err->code, err->message);
 
@@ -475,8 +482,7 @@ Envelope ui_send(const std::string& scene_path, const std::string& event,
                  const std::map<std::string, std::string>& flags)
 {
     LoadedScene scene;
-    const ui::Rect viewport{0.0f, 0.0f, viewport_dim(flags, "width", 320.0f),
-                            viewport_dim(flags, "height", 240.0f)};
+    const ui::Rect viewport = viewport_from_flags(flags);
     if (const std::optional<LoadError> err = load_scene(scene_path, viewport, scene))
         return Envelope::failure(err->code, err->message);
 
@@ -546,8 +552,7 @@ Envelope ui_assert(const std::string& scene_path, const std::string& name,
                    const std::map<std::string, std::string>& flags)
 {
     LoadedScene scene;
-    const ui::Rect viewport{0.0f, 0.0f, viewport_dim(flags, "width", 320.0f),
-                            viewport_dim(flags, "height", 240.0f)};
+    const ui::Rect viewport = viewport_from_flags(flags);
     if (const std::optional<LoadError> err = load_scene(scene_path, viewport, scene))
         return Envelope::failure(err->code, err->message);
 
