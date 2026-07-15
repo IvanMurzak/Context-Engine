@@ -43,6 +43,7 @@ void extract_render_world(const kernel::World& world, std::uint64_t sim_tick, Re
     const kernel::ComponentId material_id = kernel::component_id<PbrMaterial>();
     const kernel::ComponentId dir_light_id = kernel::component_id<DirectionalLight>();
     const kernel::ComponentId point_light_id = kernel::component_id<PointLight>();
+    const kernel::ComponentId ui_panel_id = kernel::component_id<UiPanel>();
 
     // Read-only archetype walk: each ArchetypeView exposes the sorted component-id set, the live
     // entities, and raw (col, row) component pointers. The visitor must not mutate the World.
@@ -56,6 +57,7 @@ void extract_render_world(const kernel::World& world, std::uint64_t sim_tick, Re
             const std::size_t material_col = find_column(types, material_id);
             const std::size_t dir_light_col = find_column(types, dir_light_id);
             const std::size_t point_light_col = find_column(types, point_light_id);
+            const std::size_t ui_panel_col = find_column(types, ui_panel_id);
 
             const std::vector<kernel::Entity>& entities = view.entities();
 
@@ -120,6 +122,24 @@ void extract_render_world(const kernel::World& world, std::uint64_t sim_tick, Re
                                         {transform->position[0], transform->position[1],
                                          transform->position[2]}};
                     out.point_lights.push_back(item);
+                }
+            }
+
+            // World-space UI panels (M7 a9, D4 / L-39): a render-side UiPanel is placed by the
+            // entity's Transform, so a UiPanel WITHOUT a Transform has no world quad and is skipped
+            // (the absent-component edge, mirroring point lights). Presentation-only (D6): the extract
+            // copies the float panel state (RTT handle, world size, tint) verbatim, never touching the
+            // sim World.
+            if (ui_panel_col != kNone && transform_col != kNone)
+            {
+                out.ui_panels.reserve(out.ui_panels.size() + entities.size());
+                for (std::size_t row = 0; row < entities.size(); ++row)
+                {
+                    const auto* transform =
+                        static_cast<const Transform*>(view.component(transform_col, row));
+                    const auto* panel =
+                        static_cast<const UiPanel*>(view.component(ui_panel_col, row));
+                    out.ui_panels.push_back(UiPanelItem{entities[row], *transform, *panel});
                 }
             }
         });

@@ -389,7 +389,7 @@
       "tier": "per-PR",
       "red_x_policy": "blocking",
       "ci_job_id": "render",
-      "description": "M4 golden-scene visual-equivalence corpus, NATIVE Linux-Vulkan leg (issue #141; ROADMAP §1 M4 exit): the render job dumps every corpus scene (triangle3d 3D pipeline + sprite2d 2D + lit3d representative lit scene + viewport 3D+2D composite + ui-hud runtime UI HUD, M7 a6/R-UI-005) through the wgpu-native backend on lavapipe and gates each against its committed goldens/ baseline with the named mean block-SSIM metric + per-scene tolerances (tools/golden_compare.py). Identical-within-T1 = same semantics, not bit-identical. Rebaselines are reviewed changes (goldens/README.md). BLOCKING per the minimal-v1 ruling: Linux-Vulkan + one browser."
+      "description": "M4 golden-scene visual-equivalence corpus, NATIVE Linux-Vulkan leg (issue #141; ROADMAP §1 M4 exit): the render job dumps every corpus scene (triangle3d 3D pipeline + sprite2d 2D + lit3d representative lit scene + viewport 3D+2D composite + ui-hud runtime UI HUD, M7 a6/R-UI-005 + ui-worldpanel world-space RTT panel, M7 a9/R-UI-003/D4) through the wgpu-native backend on lavapipe and gates each against its committed goldens/ baseline with the named mean block-SSIM metric + per-scene tolerances (tools/golden_compare.py). Identical-within-T1 = same semantics, not bit-identical. Rebaselines are reviewed changes (goldens/README.md). BLOCKING per the minimal-v1 ruling: Linux-Vulkan + one browser."
     },
     {
       "id": "golden-scene-web-chromium",

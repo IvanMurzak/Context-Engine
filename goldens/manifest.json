@@ -71,6 +71,17 @@
         "native-metal": "advisory"
       },
       "description": "The M7 a6 UI HUD (R-UI-005; text arrives with a7/a8): a health bar (dark background + a green fill child painting on top), a blue minimap panel, a GPU-COMPOSITED amber badge (a scale-about-centre + translate applied at composite time, no relayout), and a status bar - all solid opaque colored rectangles composited over the surface clear. Authored as an a1 UiTree, extracted to draw quads (snapshot.h), and repainted into the GpuUiProvider's persistent layer (provider.h) via the SAME ortho quad path (sprite/) the sprite2d golden already SSIM-gates, so the frame is the provider's render by construction. Flat colors, opaque replace, no blend / no MSAA - the axis-aligned integer-aligned rects rasterize essentially identically native (lavapipe) and web (SwiftShader), so the tolerance is tight (0.99, a hair looser than the pure-2D scenes to absorb any 1px edge rounding of the untested-locally CI backends). Rendered on BOTH backends (unlike native-only lit3d/viewport): the ui backend compiles into the Emscripten web target too. The committed baseline is the analytic (GPU-free) rasterization of the SAME extracted quads (ui/hud_scene.h::render_ui_hud_reference_cpu), which the CI render + render-web jobs re-render on real adapters and SSIM-gate on every PR."
+    },
+    "ui-worldpanel": {
+      "file": "ui-worldpanel.ppm",
+      "min_ssim": 0.95,
+      "size": "256x256",
+      "renderer": "ui/worldpanel_scene.h::render_golden_worldpanel (M7 a9 world-space RTT UI panel, R-UI-003 / D4): a UiTree rendered into a dynamic-texture registry target (dynamic_texture.h) via the GpuUiProvider world-space form, then sampled onto a rotated world quad (a render::Transform-placed UiPanel) over a flat lit-ground base",
+      "backends": {
+        "native-vulkan-lavapipe": "blocking",
+        "native-metal": "advisory"
+      },
+      "description": "The M7 a9 world-space render-to-texture UI panel (R-UI-003; lock D4 dynamic-texture registry): a teal panel with an amber inner rect is rendered into a persistent 64x64 dynamic-texture registry target (the FIRST dynamic-texture entry - the 'later wave' the render_world.h texture handle fields reserved), then SAMPLED (nearest) onto a flat quad rotated (yaw + roll) / positioned by a render::Transform in a lit 3D scene - a receding-floor lit-ground trapezoid base under the panel, over a dark-slate sky clear. Straight-on ORTHOGRAPHIC projection (no perspective divide), so the rotated quad projects affinely and its UV interpolation is linear - the CPU mirror matches the GPU rasterizer within tolerance. Nearest sampling + flat colors + opaque replace / no blend / no MSAA. Native-only FIRST (like lit3d / viewport): the web golden target compiles only triangle3d + sprite2d today, so browser coverage joins when the lit web proof lands; native T1 equivalence is gated here. Tolerance 0.95 - a touch looser than ui-hud to absorb the rotated-quad edge coverage + the nearest-sampled texel boundaries a software rasterizer (lavapipe) resolves slightly differently from the analytic CPU baseline. The committed baseline is the analytic (GPU-free) rasterization of the SAME projected quads + panel content (ui/worldpanel_scene.h::render_worldpanel_reference_cpu), which the CI render job re-renders on the wgpu-native (lavapipe) backend and SSIM-gates on every PR."
     }
   }
 }
