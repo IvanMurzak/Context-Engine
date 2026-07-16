@@ -1,0 +1,36 @@
+src/runtime/host/CMakeLists.txt
+  s_9284ad4c8de2f4::t_f6695cef927169 84-106
+src/runtime/host/README.md
+  s_9284ad4c8de2f4::t_90be42656fc10d 63-69
+src/runtime/netsync/README.md
+  s_9284ad4c8de2f4::t_9ce9714a43263e 50-56
+docs/export-adapters.md
+  s_9284ad4c8de2f4::t_b4606cd42c1533 74-109
+src/runtime/netsync/CMakeLists.txt
+  s_9284ad4c8de2f4::t_afa409de2c515c 67-84
+.github/workflows/ci.yml
+  s_9284ad4c8de2f4::t_9befd8b6720b7b 295
+docs/ci-fleet-manifest.json
+  s_9284ad4c8de2f4::t_cb3b97a462648c 544-573
+src/runtime/netsync/tests/test_packed_replication.cpp
+  s_9284ad4c8de2f4::t_78c81e35d03d9c 1-274
+src/runtime/host/tests/test_packed_determinism.cpp
+  s_9284ad4c8de2f4::t_a6a28f5cf2e6c6 1-68,70-224
+  s_9284ad4c8de2f4::t_476083663cdbc2 69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "8fa65584dd93568078eb9e1262db2be154b30742",
+  "prompts": {},
+  "sessions": {
+    "s_9284ad4c8de2f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "64f4c13c-1681-4443-9cc9-81bbde69cd56",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
