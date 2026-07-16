@@ -59,15 +59,15 @@ void StreamingScheduler::update_observer(const Vec3& pos, float radius)
         }
     }
 
-    // Keep only registered candidates (a provider might return ids we do not manage), dedup, and sort
-    // nearest-first with a unit-id tiebreak so the plan is deterministic.
+    // Keep only registered candidates (a provider might return ids we do not manage), then sort
+    // nearest-first with a unit-id tiebreak so the plan is deterministic. Equal ids compare equal
+    // (equal distance + equal id) so they land adjacent, and a single std::unique then dedups a
+    // provider's repeats — one sort, not two.
     std::vector<std::uint64_t> in_range;
     in_range.reserve(candidates.size());
     for (std::uint64_t id : candidates)
         if (positions_.find(id) != positions_.end())
             in_range.push_back(id);
-    std::sort(in_range.begin(), in_range.end());
-    in_range.erase(std::unique(in_range.begin(), in_range.end()), in_range.end());
     std::sort(in_range.begin(), in_range.end(), [this](std::uint64_t a, std::uint64_t b) {
         const float da = distance_sq_to_observer(a);
         const float db = distance_sq_to_observer(b);
@@ -75,6 +75,7 @@ void StreamingScheduler::update_observer(const Vec3& pos, float radius)
             return da < db;
         return a < b;
     });
+    in_range.erase(std::unique(in_range.begin(), in_range.end()), in_range.end());
 
     // 2. Greedily take the nearest that fit the budget — the target resident set.
     std::unordered_set<std::uint64_t> target;

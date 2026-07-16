@@ -160,7 +160,6 @@ bool PackContentSource::build_index()
         entry.parent_unit = parent_unit;
         entry.is_root = desc.is_root;
         entry.is_sidecar = desc.is_sidecar;
-        entry.entity_count = entity_count;
         entry.chunk_offset = chunk_off;
         entry.chunk_length = chunk_len;
         entry.content_hash = content_hash;

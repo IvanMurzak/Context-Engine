@@ -52,7 +52,6 @@ private:
         std::uint64_t parent_unit = 0;
         bool is_root = false;
         bool is_sidecar = false;
-        std::uint64_t entity_count = 0;
         std::uint64_t chunk_offset = 0;
         std::uint64_t chunk_length = 0;
         std::uint64_t content_hash = 0;
