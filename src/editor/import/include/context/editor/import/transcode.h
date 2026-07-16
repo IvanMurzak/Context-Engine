@@ -41,11 +41,12 @@ struct TranscodedVariant
                                   // applied "mulaw8"; target "bc7", applied "bcn_plan"). Honest, never
                                   // a silent stub: the SIZING/geometry is real + per-platform-distinct.
     std::string bytes;            // the CTXV variant container — the pack-ready payload
-    std::uint64_t content_hash = 0; // canonical_hash_of(bytes): pack self-verify (R-FILE-010) + key input
 };
 
 // The outcome of a transcode. `ok == false` ⇒ `bytes` is empty and `error` names the failure:
 // "transcode.no_target"     — the transcode table has no row for (kind, platform) (surfaced, never guessed);
+// "transcode.unsupported_format" — the table's target format has no encoder here (e.g. an
+//                            uncompressed `rgba8` texture row): a TABLE gap, not a source-asset fault;
 // "transcode.bad_descriptor" — a described-kind artifact whose bytes are not a well-formed descriptor.
 struct TranscodeResult
 {
@@ -59,7 +60,8 @@ struct TranscodeResult
 // missing row is transcode.no_target. Per kind:
 //  - texture: a real BCn/ASTC block-tiled variant container (block geometry + mip pyramid sizing from
 //    the descriptor's width/height/srgb/mipmaps) — genuinely per-platform-distinct (4×4 BCn vs 8×8
-//    ASTC blocks). The perceptual texel encoder awaits the deferred PNG texel DEFLATE-decode.
+//    ASTC blocks). A target format with no block geometry is transcode.unsupported_format. The
+//    perceptual texel encoder awaits the deferred PNG texel DEFLATE-decode.
 //  - audio: verbatim 16-bit PCM (desktop `pcm16`) vs G.711 mu-law companding (the memory-constrained
 //    Web target — a real, deterministic, dependency-free 2:1 compression). Operates on the PCM PAYLOAD
 //    artifact (name contains "pcm"); an audio DESCRIPTOR artifact passes through, format-tagged.

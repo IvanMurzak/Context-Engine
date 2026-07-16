@@ -108,19 +108,19 @@ private:
     CHECK(tex.ok);
     CHECK(pcm.ok);
 
-    const std::uint32_t selector = static_cast<std::uint32_t>(pack::platform_variant_for(platform_id));
+    const pack::PlatformVariant selector = pack::platform_variant_for(platform_id);
 
     pack::PackSidecar tex_sc;
     tex_sc.relpath = "textures/hero.png.bin";
-    tex_sc.raw_hash = 0x1111111111111111ULL; // the untranscoded source's address (the common fallback)
+    tex_sc.raw_hash = 0x1111111111111111ULL; // the authored GUID (matches the scene's $sidecar ref)
     tex_sc.bytes = png_bytes;
-    tex_sc.variants.push_back({selector, tex.variant.content_hash, tex.variant.bytes});
+    tex_sc.variants.push_back({selector, tex.variant.bytes});
 
     pack::PackSidecar pcm_sc;
     pcm_sc.relpath = "audio/shot.wav.bin";
     pcm_sc.raw_hash = 0x2222222222222222ULL;
     pcm_sc.bytes = wav_bytes;
-    pcm_sc.variants.push_back({selector, pcm.variant.content_hash, pcm.variant.bytes});
+    pcm_sc.variants.push_back({selector, pcm.variant.bytes});
 
     return {std::move(tex_sc), std::move(pcm_sc)};
 }
@@ -150,9 +150,9 @@ int main()
 
     pack::PackWriteOptions win_opts;
     win_opts.engine_version = 42;
-    win_opts.target_platform = static_cast<std::uint32_t>(pack::PlatformVariant::windows);
+    win_opts.target_platform = pack::PlatformVariant::windows;
     pack::PackWriteOptions web_opts = win_opts;
-    web_opts.target_platform = static_cast<std::uint32_t>(pack::PlatformVariant::web);
+    web_opts.target_platform = pack::PlatformVariant::web;
 
     const std::vector<pack::PackSidecar> win_sidecars =
         build_sidecars(png_bytes, wav_bytes, meta, "windows");
@@ -204,9 +204,12 @@ int main()
         CHECK(win_tex.variant.target_format == "bc7");
         CHECK(web_tex.variant.target_format == "astc_8x8");
 
-        const pack::PackEntry* win_e = pack::find_unit(win_parsed, win_tex.variant.content_hash);
-        const pack::PackEntry* web_e = pack::find_unit(web_parsed, web_tex.variant.content_hash);
-        CHECK(win_e != nullptr); // addressable by the variant's content hash (load-by-GUID)
+        // Resolved through the AUTHORED GUID — 0x1111111111111111 is exactly the "hash" the scene's
+        // sprite component pins ("1229782938247303441"), so this is the real runtime lookup path: one
+        // platform-neutral reference, each target's payload behind it.
+        const pack::PackEntry* win_e = pack::find_unit(win_parsed, 0x1111111111111111ULL);
+        const pack::PackEntry* web_e = pack::find_unit(web_parsed, 0x1111111111111111ULL);
+        CHECK(win_e != nullptr);
         CHECK(web_e != nullptr);
         CHECK(win_e->chunk_bytes == win_tex.variant.bytes);
         CHECK(web_e->chunk_bytes == web_tex.variant.bytes);
@@ -221,7 +224,9 @@ int main()
             import::WavImporter{}, wav_bytes, "shot.wav", meta, "web",
             import::ArtifactKind::audio, "pcm");
         CHECK(web_pcm.variant.bytes.size() < win_pcm.variant.bytes.size());
-        CHECK(pack::find_unit(web_parsed, web_pcm.variant.content_hash) != nullptr);
+        const pack::PackEntry* web_pcm_e = pack::find_unit(web_parsed, 0x2222222222222222ULL);
+        CHECK(web_pcm_e != nullptr); // the authored sfx ref resolves to the µ-law Web variant
+        CHECK(web_pcm_e->chunk_bytes == web_pcm.variant.bytes);
     }
 
     // --- DoD: cache hit on repeat — the same (project, target) re-packs byte-identically ------------
@@ -231,6 +236,20 @@ int main()
         const pack::PackWriteResult win_again = pack::write_pack(units, scene, again, win_opts);
         CHECK(win_again.ok);
         CHECK(win_again.bytes == win_pack.bytes);
+    }
+
+    // --- DRIFT GUARD: the two frozen platform tables must stay in sync ------------------------------
+    // pack::PlatformVariant (frozen on-disk ids) deliberately MIRRORS import::platform_profiles()
+    // rather than sharing it — context_pack_format stays dependency-free so the a02 runtime loader can
+    // link it without context_import. Two frozen tables that must agree, with nothing binding them, is
+    // exactly how they silently drift: adding a platform profile (android/ios, R-BUILD-001) without its
+    // frozen pack id would leave every variant for that target packing as `common`. This test is the
+    // only place that links BOTH libraries, so the guard belongs here.
+    for (const import::PlatformProfile& profile : import::platform_profiles())
+    {
+        const pack::PlatformVariant id = pack::platform_variant_for(profile.id);
+        CHECK(id != pack::PlatformVariant::common);          // every targeted platform has a frozen id
+        CHECK(pack::platform_variant_name(id) == profile.id); // and it round-trips back to that id
     }
 
     IMPORT_TEST_MAIN_END();

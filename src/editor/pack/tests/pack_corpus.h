@@ -8,10 +8,11 @@
 //    "targetPlatform": "<platform id>",   // optional (default: common — the a01 platform-neutral pack)
 //    "scenes": {"<path>": {<scene doc>}, ...},
 //    "sidecars": [{"relpath": "<owner-relative>", "hash": <u64>, "text": "<verbatim bytes>",
-//                  "variants": [{"platform": "<id>", "hash": <u64>, "text": "<bytes>"}, ...]}, ...]}
+//                  "variants": [{"platform": "<id>", "text": "<bytes>"}, ...]}, ...]}
 //
 // `targetPlatform` + per-sidecar `variants` drive the a03 per-platform variant SELECTION (R-BUILD-003):
-// a case targeting a platform packs each sidecar's matching variant instead of its common blob.
+// a case targeting a platform packs each sidecar's matching variant instead of its common blob. A
+// variant carries no `hash` — the sidecar's own `hash` addresses it on every target (pack_writer.h).
 
 #pragma once
 
@@ -136,9 +137,7 @@ struct CaseResult
                     pack::PackSidecarVariant variant;
                     if (const JsonValue* pid = schema::find_member(v, "platform");
                         pid != nullptr && pid->type == JsonValue::Type::string)
-                        variant.platform =
-                            static_cast<std::uint32_t>(pack::platform_variant_for(pid->string_value));
-                    variant.raw_hash = read_u64_member(v, "hash", 0);
+                        variant.platform = pack::platform_variant_for(pid->string_value);
                     if (const JsonValue* tx = schema::find_member(v, "text");
                         tx != nullptr && tx->type == JsonValue::Type::string)
                         variant.bytes = tx->string_value;
@@ -154,8 +153,7 @@ struct CaseResult
     // The target this golden packs FOR; absent ⇒ the platform-neutral common pack (the a01 default).
     if (const JsonValue* target = schema::find_member(root, "targetPlatform");
         target != nullptr && target->type == JsonValue::Type::string)
-        options.target_platform =
-            static_cast<std::uint32_t>(pack::platform_variant_for(target->string_value));
+        options.target_platform = pack::platform_variant_for(target->string_value);
 
     pack::PackWriteResult written = pack::write_pack(units, scene, sidecars, options);
     if (!written.ok)

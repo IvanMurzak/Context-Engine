@@ -23,13 +23,18 @@ namespace context::editor::pack
 
 // One per-platform variant of a sidecar (task a03, R-BUILD-003): the transcoded payload the pack
 // selects when it targets that platform. `platform` is a frozen PlatformVariant id (pack_format.h);
-// the build pipeline produces `bytes` via the transcode node (import/transcode.h) and the raw hash of
-// the variant is its own load-by-GUID key (per-platform variants coexist as distinct entries).
+// the build pipeline produces `bytes` via the transcode node (import/transcode.h).
+//
+// A variant supplies BYTES, never an identity: the packed entry keeps the owning sidecar's declared
+// `raw_hash` as its unit id on every target, because that is the GUID the composed entity JSON pins
+// in its {"$sidecar", "hash"} reference (L-33) and content units stay platform-neutral. The variant
+// bytes' own content-address is recorded (and self-verified by read_pack) in the entry's
+// `content_hash`, so a variant needs no id of its own — the pack is single-target, so exactly one
+// variant per sidecar is ever emitted.
 struct PackSidecarVariant
 {
-    std::uint32_t platform = kPlatformCommon; // the PlatformVariant this variant targets
-    std::uint64_t raw_hash = 0;               // the variant's content-address (its load-by-GUID key)
-    std::string bytes;                        // the transcoded variant payload, stored verbatim
+    PlatformVariant platform = PlatformVariant::common; // the platform this variant targets
+    std::string bytes;                                  // the transcoded payload, stored verbatim
 };
 
 // A binary sidecar blob to embed in the pack (L-33: textures, meshes, audio referenced from composed
@@ -38,14 +43,15 @@ struct PackSidecarVariant
 // pipeline supplies the bytes it already has on disk; the writer never touches the filesystem.
 //
 // Per-platform variants (a03): when `variants` carries an entry for the write's target platform, the
-// writer packs THAT variant (its bytes / raw_hash / platform column) instead of the common `bytes` —
-// one source asset → each target's optimal format at pack time (R-BUILD-003). A target with no
-// matching variant falls back to the common blob, so a platform-invariant asset (e.g. a `meshopt`
-// mesh, identical on every v1 target) needs no per-platform variant.
+// writer packs THAT variant's bytes under its platform column instead of the common `bytes` — one
+// source asset → each target's optimal format at pack time (R-BUILD-003). A target with no matching
+// variant falls back to the common blob, so a platform-invariant asset (e.g. a `meshopt` mesh,
+// identical on every v1 target) needs no per-platform variant. `raw_hash` addresses the sidecar on
+// EVERY target (variants swap bytes, not identity — see PackSidecarVariant).
 struct PackSidecar
 {
     std::string relpath;            // owner-relative path (the readable hint, stored in sourceScene)
-    std::uint64_t raw_hash = 0;     // the declared raw-byte hash — the common sidecar's load-by-GUID key
+    std::uint64_t raw_hash = 0;     // the declared raw-byte hash — the sidecar's load-by-GUID key
     std::string bytes;              // the common sidecar payload, stored verbatim (codec = store)
     std::vector<PackSidecarVariant> variants; // per-platform variants (a03); empty ⇒ common only (a01)
 };
@@ -55,11 +61,12 @@ struct PackSidecar
 struct PackWriteOptions
 {
     std::uint64_t engine_version = kDefaultEngineVersion;
-    // The platform this pack is built FOR (a PlatformVariant id, pack_format.h). kPlatformCommon (the
-    // a01 default) packs every sidecar's common blob — byte-identical to a pre-a03 pack. A non-common
-    // target selects each sidecar's matching variant (R-BUILD-003): the same project packs per target
-    // with per-target variant payloads.
-    std::uint32_t target_platform = kPlatformCommon;
+    // The platform this pack is built FOR. PlatformVariant::common (the a01 default) packs every
+    // sidecar's common blob — byte-identical to a pre-a03 pack. A non-common target selects each
+    // sidecar's matching variant (R-BUILD-003): the same project packs per target with per-target
+    // variant payloads. Enum-typed like its sibling `Codec`: the u32 is the ON-DISK column's type,
+    // cast at the byte boundary in the writer, not carried through the API.
+    PlatformVariant target_platform = PlatformVariant::common;
 };
 
 // The outcome of a pack write. `ok == true` ⇒ `bytes` is the complete v1 pack stream; `ok == false`

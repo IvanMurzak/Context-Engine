@@ -135,7 +135,12 @@ importer).
 
 **A pack is single-target.** The writer is told the platform it builds FOR
 (`PackWriteOptions::target_platform`) and packs each sidecar's matching variant — its transcoded bytes
-and its own content-address — else that sidecar's common blob at `platform = 0`. A pack therefore
+under the target's `platform` column — else that sidecar's common blob at `platform = 0`. A variant
+swaps the chunk's BYTES, never its `unitId`: that stays the sidecar's declared raw-byte hash on every
+target (§4.3, §4.5), because it is the GUID the `$sidecar` `hash` member pins and content units are
+platform-neutral — re-addressing a variant by its own hash would strand every authored reference on
+exactly the targets a03 serves. The variant bytes' content-address is the entry's `contentHash`, which
+the reader self-verifies. A pack therefore
 carries the target's variant of each asset, not a fat multi-platform payload: per-platform packs are
 per-platform cache entries, matching the R-FILE-010 key (which already includes the target platform).
 Content units are always `platform = 0` — composed entity JSON is platform-neutral; only the

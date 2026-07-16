@@ -9,9 +9,11 @@
 
 #include "detail/json_detail.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace context::editor::import
@@ -23,13 +25,7 @@ using serializer::JsonValue;
 
 // --- little-endian writers (a fixed byte order ⇒ identical variant bytes on every host) -----------
 
-void put_u32le(std::string& out, std::uint32_t v)
-{
-    out.push_back(static_cast<char>(v & 0xFFU));
-    out.push_back(static_cast<char>((v >> 8) & 0xFFU));
-    out.push_back(static_cast<char>((v >> 16) & 0xFFU));
-    out.push_back(static_cast<char>((v >> 24) & 0xFFU));
-}
+using detail::put_u32le; // the module's shared LE writer (detail/json_detail.h)
 
 // A length-prefixed string (u32 length + raw bytes) so component boundaries never collide.
 void put_str(std::string& out, std::string_view s)
@@ -59,15 +55,6 @@ void put_str(std::string& out, std::string_view s)
 
 // --- descriptor readers -------------------------------------------------------------------------
 
-// A boolean member read (default `fallback` for a missing / wrong-typed member).
-[[nodiscard]] bool read_bool(const JsonValue& obj, std::string_view key, bool fallback)
-{
-    const JsonValue* v = detail::member(obj, key);
-    if (v != nullptr && v->type == JsonValue::Type::boolean)
-        return v->boolean_value;
-    return fallback;
-}
-
 // A non-negative dimension read; 0 when absent / non-positive (the caller treats 0 as malformed).
 [[nodiscard]] std::uint32_t read_dim(const JsonValue& obj, std::string_view key)
 {
@@ -86,6 +73,9 @@ struct BlockGeometry
 {
     std::uint32_t block_w = 0;
     std::uint32_t block_h = 0;
+    // Every v1 target format is a 128-bit block (BC7 and ASTC alike, whatever the ASTC footprint),
+    // so this is a constant rather than a per-branch assignment. A future 64-bit-block format (bc1)
+    // makes it a real branch at the point it stops being constant.
     std::uint32_t bytes_per_block = 16;
 };
 
@@ -96,7 +86,6 @@ struct BlockGeometry
     {
         g.block_w = 4;
         g.block_h = 4;
-        g.bytes_per_block = 16; // BC7 (v1) — 128-bit blocks
         return g;
     }
     if (format.rfind("astc_", 0) == 0) // astc_WxH — parse the block footprint from the id
@@ -115,16 +104,18 @@ struct BlockGeometry
                     h = h * 10U + static_cast<std::uint32_t>(c - '0');
             g.block_w = w;
             g.block_h = h;
-            g.bytes_per_block = 16; // ASTC blocks are always 128-bit regardless of footprint
         }
         return g;
     }
-    return g; // unknown → block_w == 0
+    return g; // unknown → block_w == 0 (an uncompressed/unmapped target, e.g. rgba8)
 }
 
+// Ceil-div in 64-bit: `extent + block - 1` WRAPS in 32-bit for an extent near UINT32_MAX (the PNG
+// importer validates only width/height != 0, so a crafted IHDR reaches here), which would silently
+// report 0 blocks for the largest textures. The quotient always fits u32. block >= 1 per the caller.
 [[nodiscard]] std::uint32_t blocks_along(std::uint32_t extent, std::uint32_t block)
 {
-    return (extent + block - 1U) / block; // ceil-div; block >= 1 guaranteed by the caller
+    return static_cast<std::uint32_t>((static_cast<std::uint64_t>(extent) + block - 1U) / block);
 }
 
 // The texture variant payload: the real block-tiled sizing PLAN for the target format — a mip
@@ -138,22 +129,20 @@ struct BlockGeometry
 {
     const std::uint32_t width = read_dim(descriptor, "width");
     const std::uint32_t height = read_dim(descriptor, "height");
-    if (width == 0 || height == 0 || g.block_w == 0 || g.block_h == 0)
+    if (width == 0 || height == 0)
         return false;
-    const bool srgb = read_bool(descriptor, "srgb", true);
-    const bool mipmaps = read_bool(descriptor, "mipmaps", true);
+    const bool srgb = detail::as_bool(detail::member(descriptor, "srgb"), true);
+    const bool mipmaps = detail::as_bool(detail::member(descriptor, "mipmaps"), true);
 
     // The mip chain: full pyramid down to 1×1 when mipmaps are requested, else the base level only.
     std::vector<std::pair<std::uint32_t, std::uint32_t>> mips;
-    std::uint32_t w = width;
-    std::uint32_t h = height;
-    for (;;)
+    for (std::uint32_t w = width, h = height;;)
     {
         mips.emplace_back(w, h);
         if (!mipmaps || (w == 1U && h == 1U))
             break;
-        w = w > 1U ? w / 2U : 1U;
-        h = h > 1U ? h / 2U : 1U;
+        w = std::max(w / 2U, 1U);
+        h = std::max(h / 2U, 1U);
     }
 
     put_u32le(out, width);
@@ -167,11 +156,19 @@ struct BlockGeometry
     {
         const std::uint32_t bx = blocks_along(mip.first, g.block_w);
         const std::uint32_t by = blocks_along(mip.second, g.block_h);
+        // The encoded byte length this level occupies. Computed in 64-bit: bx * by * bytes_per_block
+        // overflows u32 well before the dimensions do (16384² blocks × 16B already wraps to 0). The
+        // v1 container's length field is u32, so a level that genuinely cannot be described is
+        // REFUSED (bad_descriptor) rather than recorded as a wrapped, silently-wrong size.
+        const std::uint64_t level_bytes =
+            static_cast<std::uint64_t>(bx) * by * g.bytes_per_block;
+        if (level_bytes > 0xFFFFFFFFULL)
+            return false;
         put_u32le(out, mip.first);
         put_u32le(out, mip.second);
         put_u32le(out, bx);
         put_u32le(out, by);
-        put_u32le(out, bx * by * g.bytes_per_block); // the encoded byte length this level occupies
+        put_u32le(out, static_cast<std::uint32_t>(level_bytes));
     }
     return true;
 }
@@ -218,11 +215,17 @@ enum class AudioSampleFormat : std::uint8_t
     mulaw8 = 1,
 };
 
-void encode_audio_payload(std::string_view pcm, bool compress, std::string& out,
-                          std::string& applied_encoding)
+// Returns what it ACTUALLY applied, so "every path is labelled" is enforced by the compiler rather
+// than by reading both branches.
+[[nodiscard]] std::string_view encode_audio_payload(std::string_view pcm, bool compress,
+                                                    std::string& out)
 {
     if (compress && !pcm.empty() && (pcm.size() % 2U) == 0U)
     {
+        // The output size is exact and known: the format byte + one µ-law code per 16-bit sample.
+        // Without this a multi-MB PCM buffer pays ~20-34 geometric reallocs and 2-3x its own size in
+        // pure memcpy churn on the one path that actually encodes sample-by-sample.
+        out.reserve(1U + pcm.size() / 2U);
         out.push_back(static_cast<char>(AudioSampleFormat::mulaw8));
         for (std::size_t i = 0; i + 1U < pcm.size(); i += 2U)
         {
@@ -232,12 +235,11 @@ void encode_audio_payload(std::string_view pcm, bool compress, std::string& out,
                                                           (static_cast<std::uint16_t>(hi) << 8));
             out.push_back(static_cast<char>(linear_to_mulaw(sample)));
         }
-        applied_encoding = "mulaw8";
-        return;
+        return "mulaw8";
     }
     out.push_back(static_cast<char>(AudioSampleFormat::pcm16));
     out.append(pcm.data(), pcm.size());
-    applied_encoding = "pcm16";
+    return "pcm16";
 }
 
 [[nodiscard]] bool name_is_pcm_payload(std::string_view name) noexcept
@@ -258,25 +260,39 @@ TranscodeResult transcode_variant(const DerivedArtifact& artifact, const Platfor
         return result;
     }
 
-    std::string payload;
-    std::string applied_encoding;
+    // `payload_buf` owns an ENCODED payload; `payload` views whichever buffer the arm settled on, so
+    // the arms that merely forward the artifact's bytes (mesh, audio descriptor) copy nothing. Assign
+    // the view only once an arm's buffer is final — a view taken of payload_buf up front would be
+    // stale on both data() and size().
+    std::string payload_buf;
+    std::string_view payload;
+    std::string_view applied_encoding;
 
     switch (artifact.kind)
     {
     case ArtifactKind::texture:
     {
+        const BlockGeometry g = block_geometry_for(target->format);
+        if (g.block_w == 0 || g.block_h == 0)
+        {
+            // The TABLE named a target this encoder has no block geometry for (e.g. an uncompressed
+            // `rgba8` row). That is an unsupported target format, NOT a malformed source asset —
+            // surfaced as itself rather than blamed on the descriptor.
+            result.error = "transcode.unsupported_format";
+            return result;
+        }
         serializer::CanonicalizeResult parsed = serializer::canonicalize(artifact.bytes);
         if (!parsed.is_json)
         {
             result.error = "transcode.bad_descriptor";
             return result;
         }
-        const BlockGeometry g = block_geometry_for(target->format);
-        if (!encode_texture_payload(parsed.root, g, payload))
+        if (!encode_texture_payload(parsed.root, g, payload_buf))
         {
             result.error = "transcode.bad_descriptor";
             return result;
         }
+        payload = payload_buf;
         applied_encoding = "block_plan";
         break;
     }
@@ -287,7 +303,8 @@ TranscodeResult transcode_variant(const DerivedArtifact& artifact, const Platfor
             // A memory-constrained target compresses (µ-law); a desktop target keeps verbatim PCM.
             // Driven by the TARGET FORMAT (table), not the flag directly: pcm16 → verbatim, else compress.
             const bool compress = target->format != "pcm16";
-            encode_audio_payload(artifact.bytes, compress, payload, applied_encoding);
+            applied_encoding = encode_audio_payload(artifact.bytes, compress, payload_buf);
+            payload = payload_buf;
         }
         else
         {
@@ -311,10 +328,9 @@ TranscodeResult transcode_variant(const DerivedArtifact& artifact, const Platfor
     TranscodedVariant& variant = result.variant;
     variant.platform_id = platform.id;
     variant.target_format = target->format;
-    variant.applied_encoding = std::move(applied_encoding);
+    variant.applied_encoding = applied_encoding;
     variant.bytes = build_container(artifact.kind, platform.id, target->format,
                                     variant.applied_encoding, payload);
-    variant.content_hash = serializer::canonical_hash_of(variant.bytes);
     result.ok = true;
     return result;
 }
@@ -337,7 +353,18 @@ ImportCacheKey transcode_cache_key(const ImportKeyContext& base_context,
     DerivedArtifact variant_artifact;
     variant_artifact.kind = artifact.kind;
     variant_artifact.name = artifact.name + "#" + format;
-    variant_artifact.derived_format_version = artifact.derived_format_version;
+
+    // The variant's derived format is the CTXV container, so BOTH the source artifact's
+    // derived-format version AND the container encoding version determine the variant bytes — pack
+    // them injectively (16 bits each) into the single derived-format-version component. Folding the
+    // container version is LOAD-BEARING, not decorative: build_container() writes it into the bytes,
+    // and nothing else in the key covers it (importer_build_hash is a constant fold of the epoch +
+    // TOOLCHAIN stamp, not a per-build stamp — see cache_key.cpp). Without this a container bump
+    // would leave the digest unchanged while the bytes changed, and the L-28 shared cache would
+    // serve stale containers — the exact unsoundness R-FILE-010 forbids.
+    static_assert(kTranscodeContainerVersion <= 0xFFFFU, "container version must fit the low 16 bits");
+    variant_artifact.derived_format_version =
+        (artifact.derived_format_version << 16) | (kTranscodeContainerVersion & 0xFFFFU);
     return make_cache_key(ctx, variant_artifact);
 }
 

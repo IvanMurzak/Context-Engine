@@ -219,12 +219,10 @@ int main()
         // via the transcode node (import/transcode.h); the writer's job HERE is SELECTION per target.
         PackSidecar tex;
         tex.relpath = "textures/hero.png.bin";
-        tex.raw_hash = 0x1111111111111111ULL;      // the common/source raw hash
+        tex.raw_hash = 0x1111111111111111ULL;      // the authored GUID — stable on EVERY target
         tex.bytes = "common-source-texture-bytes"; // packed only when a target has no matching variant
-        tex.variants.push_back({static_cast<std::uint32_t>(PlatformVariant::windows),
-                                0xAAAA0000AAAA0000ULL, "bc7-variant-payload-windows"});
-        tex.variants.push_back({static_cast<std::uint32_t>(PlatformVariant::web),
-                                0xBBBB0000BBBB0000ULL, "astc-variant-web"});
+        tex.variants.push_back({PlatformVariant::windows, "bc7-variant-payload-windows"});
+        tex.variants.push_back({PlatformVariant::web, "astc-variant-web"});
 
         PackSidecar mesh; // platform-invariant: no variants ⇒ common on every target
         mesh.relpath = "meshes/hero.mesh.bin";
@@ -234,9 +232,9 @@ int main()
         const std::vector<PackSidecar> sidecars = {tex, mesh};
 
         PackWriteOptions win_opts = options;
-        win_opts.target_platform = static_cast<std::uint32_t>(PlatformVariant::windows);
+        win_opts.target_platform = PlatformVariant::windows;
         PackWriteOptions web_opts = options;
-        web_opts.target_platform = static_cast<std::uint32_t>(PlatformVariant::web);
+        web_opts.target_platform = PlatformVariant::web;
 
         // Same project, two targets → per-target variant payloads (the two packs differ).
         const PackWriteResult win_pack = write_pack(units, scene, sidecars, win_opts);
@@ -248,24 +246,29 @@ int main()
         const ParsedPack web_parsed = read_pack(web_pack.bytes);
         CHECK(win_parsed.ok && web_parsed.ok);
 
-        // windows pack: the texture is the windows variant (own content-address + the frozen platform
-        // column); the mesh stays common (platform 0), having no variant. The web variant is absent.
-        const PackEntry* win_tex = find_unit(win_parsed, 0xAAAA0000AAAA0000ULL);
+        // A variant swaps the BYTES, never the identity: the sidecar's authored raw_hash — the GUID
+        // the composed entity JSON pins in its {"$sidecar", "hash"} ref (L-33) — addresses the chunk
+        // on EVERY target, and resolving it yields THAT target's payload + platform column. Packing a
+        // variant under its own hash instead would leave every authored ref dangling.
+        const PackEntry* win_tex = find_unit(win_parsed, 0x1111111111111111ULL);
         CHECK(win_tex != nullptr);
         CHECK(win_tex->is_sidecar);
         CHECK(win_tex->platform == static_cast<std::uint32_t>(PlatformVariant::windows));
         CHECK(win_tex->chunk_bytes == "bc7-variant-payload-windows");
-        CHECK(find_unit(win_parsed, 0xBBBB0000BBBB0000ULL) == nullptr);
+        // The mesh stays common (platform 0), having no variant.
         const PackEntry* win_mesh = find_unit(win_parsed, 0x2222222222222222ULL);
         CHECK(win_mesh != nullptr);
         CHECK(win_mesh->platform == kPlatformCommon);
         CHECK(win_mesh->chunk_bytes == "meshopt-plan-common");
 
-        // web pack: the texture is the web variant.
-        const PackEntry* web_tex = find_unit(web_parsed, 0xBBBB0000BBBB0000ULL);
+        // web pack: the SAME authored GUID resolves, now to the web variant.
+        const PackEntry* web_tex = find_unit(web_parsed, 0x1111111111111111ULL);
         CHECK(web_tex != nullptr);
         CHECK(web_tex->platform == static_cast<std::uint32_t>(PlatformVariant::web));
         CHECK(web_tex->chunk_bytes == "astc-variant-web");
+        // Each pack carries exactly ONE entry per sidecar (single-target): the other target's variant
+        // is absent, and the id space is unchanged from a01 — same GUIDs, different bytes.
+        CHECK(win_parsed.entries.size() == web_parsed.entries.size());
 
         // Cache hit on repeat: the same (project, target) packs to byte-identical bytes.
         const PackWriteResult win_again = write_pack(units, scene, sidecars, win_opts);
@@ -282,12 +285,11 @@ int main()
         CHECK(common_tex != nullptr);
         CHECK(common_tex->platform == kPlatformCommon);
         CHECK(common_tex->chunk_bytes == "common-source-texture-bytes");
-        CHECK(find_unit(common_parsed, 0xAAAA0000AAAA0000ULL) == nullptr);
 
         // A target with NO matching variant for a sidecar falls back to that sidecar's common blob:
         // macos has no texture variant here → the common bytes at platform 0.
         PackWriteOptions mac_opts = options;
-        mac_opts.target_platform = static_cast<std::uint32_t>(PlatformVariant::macos);
+        mac_opts.target_platform = PlatformVariant::macos;
         const PackWriteResult mac_pack = write_pack(units, scene, sidecars, mac_opts);
         CHECK(mac_pack.ok);
         const ParsedPack mac_parsed = read_pack(mac_pack.bytes);

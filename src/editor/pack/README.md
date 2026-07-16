@@ -42,10 +42,16 @@ One source asset → **each target's optimal format at pack time**. A `PackSidec
 pack is built FOR (a frozen `PlatformVariant` id, `pack_format.h`, mirroring
 `import::platform_profiles()`). For each sidecar the writer then:
 
-1. packs the variant matching `target_platform` — its transcoded bytes, its own content-address
-   (load-by-GUID key), and the frozen `platform` directory column; else
+1. packs the variant matching `target_platform` — its transcoded bytes under the frozen `platform`
+   directory column; else
 2. falls back to the sidecar's **common** blob at `platform = 0` — so a platform-invariant asset
    (a `meshopt` mesh, identical on every v1 target) needs no variant at all.
+
+A variant supplies **bytes, not identity**: the entry's `unitId` stays the sidecar's declared
+`raw_hash` on every target — the GUID the composed entity JSON pins in its `{"$sidecar", "hash"}`
+reference (L-33). Content units are platform-neutral, so one authored reference must resolve on every
+target; the variant's own content-address lives in the entry's `contentHash` (what the reader
+self-verifies), so a variant needs no id of its own.
 
 A pack is therefore **single-target**: it carries the target's variant of each asset, not a fat
 multi-platform payload. `target_platform` defaults to `kPlatformCommon` (the a01 behavior), so a

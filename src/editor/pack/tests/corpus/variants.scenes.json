@@ -14,12 +14,12 @@
   },
   "sidecars": [
     {"relpath": "textures/hero.png.bin", "hash": 1229782938247303441, "text": "common-source-texture-bytes", "variants": [
-      {"platform": "windows", "hash": 12297829382473034410, "text": "bc7-block-plan-variant-windows"},
-      {"platform": "web", "hash": 12297829382473034411, "text": "astc-8x8-block-plan-variant-web"}
+      {"platform": "windows", "text": "bc7-block-plan-variant-windows"},
+      {"platform": "web", "text": "astc-8x8-block-plan-variant-web"}
     ]},
     {"relpath": "audio/shot.wav.bin", "hash": 2459565876494606882, "text": "common-source-pcm-bytes", "variants": [
-      {"platform": "windows", "hash": 2459565876494606883, "text": "pcm16-verbatim-variant-windows"},
-      {"platform": "web", "hash": 2459565876494606884, "text": "mulaw8-variant-web"}
+      {"platform": "windows", "text": "pcm16-verbatim-variant-windows"},
+      {"platform": "web", "text": "mulaw8-variant-web"}
     ]},
     {"relpath": "meshes/statue.mesh.bin", "hash": 3689348814741910323, "text": "meshopt-plan-common-every-target"}
   ]

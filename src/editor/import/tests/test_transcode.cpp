@@ -79,7 +79,6 @@ int main()
         // per-target payload the pack selects. Both are self-describing "CTXV" containers.
         CHECK(win_v.variant.bytes != mac_v.variant.bytes);
         CHECK(win_v.variant.bytes.rfind("CTXV", 0) == 0);
-        CHECK(win_v.variant.content_hash != mac_v.variant.content_hash);
         CHECK(win_v.variant.platform_id == "windows");
 
         // Determinism WITH transcode nodes in the graph (R-ASSET-001 double-run byte-compare).
