@@ -1,0 +1,45 @@
+<svg width="955" height="150" viewBox="0 0 955 150" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Same inputs, same state-hash — on every machine, every run">
+  <style>
+    .c-head { font:600 13px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#e6edf3; }
+    .c-lbl  { font:600 10px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#8b949e; letter-spacing:1px; }
+    .c-hash { font:700 14px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#e6edf3; }
+    .c-hex  { font:500 11px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#8b949e; letter-spacing:2px; }
+    .c-fade { opacity:0; animation:c-in .5s ease-out forwards; }
+    .c-tr   { stroke-dasharray:700; animation:c-draw 5s linear infinite; }
+    .c-chip { transform-box:fill-box; transform-origin:center; animation:c-pop 5s ease-in-out infinite; }
+    .c-ok   { animation:c-okk 5s linear infinite; }
+    .c-rib  { animation:c-scroll 22s linear infinite; }
+    @keyframes c-in   { to { opacity:1; } }
+    @keyframes c-draw { 0% { stroke-dashoffset:700; opacity:1; } 62% { stroke-dashoffset:0; opacity:1; }
+                        86% { opacity:1; } 94% { opacity:0; } 100% { stroke-dashoffset:700; opacity:0; } }
+    @keyframes c-pop  { 0%,60% { transform:scale(1); } 68% { transform:scale(1.07); } 76%,100% { transform:scale(1); } }
+    @keyframes c-okk  { 0%,60% { opacity:.25; } 68%,88% { opacity:1; } 100% { opacity:.25; } }
+    @keyframes c-scroll { from { transform:translateX(0); } to { transform:translateX(-952px); } }
+    @media (prefers-reduced-motion: reduce){
+      .c-fade { animation:none; opacity:1; }
+      .c-tr   { animation:none; stroke-dashoffset:0; }
+      .c-chip,.c-ok,.c-rib { animation:none; opacity:1; }
+    }
+  </style>
+  <defs>
+    <linearGradient id="c-fadem" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="0.08" stop-color="#fff"/>
+      <stop offset="0.92" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="c-mask"><rect x="0" y="120" width="955" height="30" fill="url(#c-fadem)"/></mask>
+  </defs>
+
+  <text class="c-head c-fade" x="477.5" y="24" text-anchor="middle">same inputs → same state-hash — on every machine, every run</text>
+  <text class="c-lbl c-fade" x="70" y="66" style="animation-delay:.5s">run A</text>
+  <text class="c-lbl c-fade" x="70" y="108" style="animation-delay:.5s">run B</text>
+  <path class="c-tr" d="M120 62 h40 l8 -12 8 24 8 -18 8 6 h56 l8 -14 8 14 h64 l8 -9 8 9 h60 L500 76 H600" stroke="#e3b341" stroke-width="1.6"/>
+  <path class="c-tr" d="M120 104 h40 l8 -12 8 24 8 -18 8 6 h56 l8 -14 8 14 h64 l8 -9 8 9 h60 L500 90 H600" stroke="#d29922" stroke-width="1.6" style="animation-delay:.15s"/>
+  <g class="c-chip">
+    <rect x="605" y="67" width="200" height="32" rx="7" fill="#161b22" stroke="#30363d"/>
+    <text class="c-hash" x="623" y="88">#9f3ac2e1 <tspan class="c-ok" fill="#3fb950">✓ match</tspan></text>
+  </g>
+  <g mask="url(#c-mask)" opacity="0.4">
+    <text class="c-hex c-rib" x="0" y="140">9f3ac2e1 07b54cd8 3aa91f0e 5c22d4b7 e10f9a3c 84d6f21b c7e05a93 1b8f4e6a 6d2c9b07 f4a1830e 2e7d5c19 a9b3f860</text>
+    <text class="c-hex c-rib" x="952" y="140">9f3ac2e1 07b54cd8 3aa91f0e 5c22d4b7 e10f9a3c 84d6f21b c7e05a93 1b8f4e6a 6d2c9b07 f4a1830e 2e7d5c19 a9b3f860</text>
+  </g>
+</svg>

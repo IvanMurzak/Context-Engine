@@ -1,0 +1,36 @@
+<svg width="955" height="186" viewBox="0 0 955 186" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Headless terminal: context build, deterministic state-hash, zero GPU, zero GUI">
+  <style>
+    .a-ln   { font:500 13px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#e6edf3; }
+    .a-dim  { fill:#8b949e; }
+    .a-tw   { transform-box:fill-box; transform-origin:left; transform:scaleX(0); }
+    .a-t1   { animation:a-type 1.3s steps(26,end) .3s forwards; }
+    .a-t4   { animation:a-type 1.1s steps(22,end) 3s forwards; }
+    .a-o2   { opacity:0; animation:a-in .4s ease-out 1.8s forwards; }
+    .a-o3   { opacity:0; animation:a-in .4s ease-out 2.4s forwards; }
+    .a-o5   { opacity:0; animation:a-in .2s ease-out 4.3s forwards; }
+    .a-cur  { animation:a-blink 1.1s steps(1) infinite; }
+    @keyframes a-in    { to { opacity:1; } }
+    @keyframes a-type  { to { transform:scaleX(1); } }
+    @keyframes a-blink { 0%,100% { opacity:1; } 50% { opacity:0; } }
+    @media (prefers-reduced-motion: reduce){
+      .a-o2,.a-o3,.a-o5 { animation:none; opacity:1; }
+      .a-tw { animation:none; transform:scaleX(1); }
+      .a-cur { animation:none; }
+    }
+  </style>
+  <defs>
+    <clipPath id="a-c1"><rect class="a-tw a-t1" x="30" y="52" width="212" height="18"/></clipPath>
+    <clipPath id="a-c4"><rect class="a-tw a-t4" x="30" y="124" width="180" height="18"/></clipPath>
+  </defs>
+  <rect x="1.5" y="8" width="952" height="170" rx="10" fill="#090c10" stroke="#30363d"/>
+  <circle cx="26" cy="28" r="4.5" fill="#f85149"/><circle cx="42" cy="28" r="4.5" fill="#d29922"/><circle cx="58" cy="28" r="4.5" fill="#3fb950"/>
+  <text class="a-ln a-dim" x="930" y="32" text-anchor="end" font-size="10">no GPU · no GUI · any cheap machine</text>
+  <text class="a-ln" x="30" y="66" clip-path="url(#a-c1)"><tspan fill="#3fb950">$</tspan> context build --headless</text>
+  <text class="a-ln a-dim a-o2" x="30" y="90"><tspan fill="#3fb950">✔</tspan> 14 packages · kernel · 0 GPU · 0 GUI</text>
+  <text class="a-ln a-dim a-o3" x="30" y="114"><tspan fill="#3fb950">✔</tspan> state-hash 9f3ac2e1 == 9f3ac2e1 <tspan fill="#3fb950">deterministic</tspan></text>
+  <text class="a-ln" x="30" y="138" clip-path="url(#a-c4)"><tspan fill="#3fb950">$</tspan> context run --verify</text>
+  <g class="a-o5">
+    <text class="a-ln" x="30" y="162"><tspan fill="#3fb950">$</tspan></text>
+    <rect class="a-cur" x="46" y="150" width="8" height="14" fill="#56d4dd"/>
+  </g>
+</svg>

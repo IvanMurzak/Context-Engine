@@ -1,0 +1,45 @@
+<svg width="955" height="150" viewBox="0 0 955 150" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Same inputs, same state-hash — on every machine, every run">
+  <style>
+    .cl-head { font:600 13px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#1f2328; }
+    .cl-lbl  { font:600 10px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#57606a; letter-spacing:1px; }
+    .cl-hash { font:700 14px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#1f2328; }
+    .cl-hex  { font:500 11px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#57606a; letter-spacing:2px; }
+    .cl-fade { opacity:0; animation:cl-in .5s ease-out forwards; }
+    .cl-tr   { stroke-dasharray:700; animation:cl-draw 5s linear infinite; }
+    .cl-chip { transform-box:fill-box; transform-origin:center; animation:cl-pop 5s ease-in-out infinite; }
+    .cl-ok   { animation:cl-okk 5s linear infinite; }
+    .cl-rib  { animation:cl-scroll 22s linear infinite; }
+    @keyframes cl-in   { to { opacity:1; } }
+    @keyframes cl-draw { 0% { stroke-dashoffset:700; opacity:1; } 62% { stroke-dashoffset:0; opacity:1; }
+                        86% { opacity:1; } 94% { opacity:0; } 100% { stroke-dashoffset:700; opacity:0; } }
+    @keyframes cl-pop  { 0%,60% { transform:scale(1); } 68% { transform:scale(1.07); } 76%,100% { transform:scale(1); } }
+    @keyframes cl-okk  { 0%,60% { opacity:.25; } 68%,88% { opacity:1; } 100% { opacity:.25; } }
+    @keyframes cl-scroll { from { transform:translateX(0); } to { transform:translateX(-952px); } }
+    @media (prefers-reduced-motion: reduce){
+      .cl-fade { animation:none; opacity:1; }
+      .cl-tr   { animation:none; stroke-dashoffset:0; }
+      .cl-chip,.cl-ok,.cl-rib { animation:none; opacity:1; }
+    }
+  </style>
+  <defs>
+    <linearGradient id="cl-fadem" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="0.08" stop-color="#fff"/>
+      <stop offset="0.92" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="cl-mask"><rect x="0" y="120" width="955" height="30" fill="url(#cl-fadem)"/></mask>
+  </defs>
+
+  <text class="cl-head cl-fade" x="477.5" y="24" text-anchor="middle">same inputs → same state-hash — on every machine, every run</text>
+  <text class="cl-lbl cl-fade" x="70" y="66" style="animation-delay:.5s">run A</text>
+  <text class="cl-lbl cl-fade" x="70" y="108" style="animation-delay:.5s">run B</text>
+  <path class="cl-tr" d="M120 62 h40 l8 -12 8 24 8 -18 8 6 h56 l8 -14 8 14 h64 l8 -9 8 9 h60 L500 76 H600" stroke="#9a6700" stroke-width="1.6"/>
+  <path class="cl-tr" d="M120 104 h40 l8 -12 8 24 8 -18 8 6 h56 l8 -14 8 14 h64 l8 -9 8 9 h60 L500 90 H600" stroke="#bf8700" stroke-width="1.6" style="animation-delay:.15s"/>
+  <g class="cl-chip">
+    <rect x="605" y="67" width="200" height="32" rx="7" fill="#f6f8fa" stroke="#d0d7de"/>
+    <text class="cl-hash" x="623" y="88">#9f3ac2e1 <tspan class="cl-ok" fill="#1a7f37">✓ match</tspan></text>
+  </g>
+  <g mask="url(#cl-mask)" opacity="0.5">
+    <text class="cl-hex cl-rib" x="0" y="140">9f3ac2e1 07b54cd8 3aa91f0e 5c22d4b7 e10f9a3c 84d6f21b c7e05a93 1b8f4e6a 6d2c9b07 f4a1830e 2e7d5c19 a9b3f860</text>
+    <text class="cl-hex cl-rib" x="952" y="140">9f3ac2e1 07b54cd8 3aa91f0e 5c22d4b7 e10f9a3c 84d6f21b c7e05a93 1b8f4e6a 6d2c9b07 f4a1830e 2e7d5c19 a9b3f860</text>
+  </g>
+</svg>

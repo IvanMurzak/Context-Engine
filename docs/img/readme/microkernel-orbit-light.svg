@@ -1,0 +1,70 @@
+<svg width="955" height="200" viewBox="0 0 955 200" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A microkernel where every feature is a package">
+  <style>
+    .bl-head { font:700 20px 'Segoe UI',Ubuntu,sans-serif; fill:#1f2328; }
+    .bl-tag  { font:600 12.5px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#57606a; }
+    .bl-chips{ font:600 10px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#57606a; letter-spacing:1px; }
+    .bl-core { font:600 11px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#ffffff; }
+    .bl-leg  { font:600 9px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#57606a; letter-spacing:1.5px; }
+    .bl-fade { opacity:0; animation:bl-in .5s ease-out forwards; }
+    .bl-halo { animation:bl-breathe 3.2s ease-in-out infinite alternate; }
+    .bl-dot  { animation:bl-pulse 2.6s ease-in-out infinite alternate; }
+    @keyframes bl-in      { to { opacity:1; } }
+    @keyframes bl-breathe { from { opacity:.2; } to { opacity:.5; } }
+    @keyframes bl-pulse   { from { opacity:.45; } to { opacity:1; } }
+    @media (prefers-reduced-motion: reduce){
+      .bl-fade { animation:none; opacity:1; }
+      .bl-halo,.bl-dot { animation:none; }
+    }
+  </style>
+  <defs>
+    <radialGradient id="bl-coreg" cx="0.5" cy="0.4" r="0.8">
+      <stop offset="0" stop-color="#7a4bd8"/><stop offset="1" stop-color="#5427a8"/>
+    </radialGradient>
+    <radialGradient id="bl-halog" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#6639ba" stop-opacity="0.6"/><stop offset="1" stop-color="#6639ba" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <text class="bl-head bl-fade" x="40" y="70">every feature is a package</text>
+  <text class="bl-tag bl-fade" x="41" y="96" style="animation-delay:.25s">render · physics · audio · input — all hot-reload packages</text>
+  <g class="bl-fade" style="animation-delay:.6s">
+    <circle cx="46" cy="128" r="3" fill="#6639ba" class="bl-dot"/>
+    <circle cx="180" cy="128" r="3" fill="#6639ba" class="bl-dot" style="animation-delay:.8s"/>
+    <circle cx="356" cy="128" r="3" fill="#6639ba" class="bl-dot" style="animation-delay:1.6s"/>
+    <text class="bl-chips" x="56" y="132">MINIMAL KERNEL</text>
+    <text class="bl-chips" x="190" y="132">HOT-RELOAD PACKAGES</text>
+    <text class="bl-chips" x="366" y="132">ONE RPC SURFACE</text>
+  </g>
+
+  <circle class="bl-halo" cx="750" cy="97" r="44" fill="url(#bl-halog)"/>
+  <circle cx="750" cy="97" r="52" stroke="#6639ba" stroke-opacity="0.4" stroke-dasharray="3 5">
+    <animateTransform attributeName="transform" type="rotate" from="0 750 97" to="360 750 97" dur="30s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="750" cy="97" r="80" stroke="#0969da" stroke-opacity="0.3" stroke-dasharray="2 6">
+    <animateTransform attributeName="transform" type="rotate" from="360 750 97" to="0 750 97" dur="44s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="750" cy="97" r="24" stroke="#6639ba" opacity="0.5">
+    <animate attributeName="r" values="24;66" dur="3s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.5;0" dur="3s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="750" cy="97" r="24" stroke="#6639ba" opacity="0.5">
+    <animate attributeName="r" values="24;66" dur="3s" begin="1.5s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.5;0" dur="3s" begin="1.5s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="750" cy="97" r="24" fill="url(#bl-coreg)"/>
+  <text class="bl-core" x="750" y="101" text-anchor="middle">kernel</text>
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="0 750 97" to="360 750 97" dur="22s" repeatCount="indefinite"/>
+    <circle cx="802" cy="97" r="5" fill="#ffffff" stroke="#6639ba" stroke-width="1.5"/><circle cx="802" cy="97" r="2" fill="#6639ba"/>
+    <circle cx="724" cy="52" r="5" fill="#ffffff" stroke="#6639ba" stroke-width="1.5"/><circle cx="724" cy="52" r="2" fill="#6639ba"/>
+    <circle cx="724" cy="142" r="5" fill="#ffffff" stroke="#6639ba" stroke-width="1.5"/><circle cx="724" cy="142" r="2" fill="#6639ba"/>
+  </g>
+  <g>
+    <animateTransform attributeName="transform" type="rotate" from="360 750 97" to="0 750 97" dur="34s" repeatCount="indefinite"/>
+    <circle cx="806" cy="40" r="5" fill="#ffffff" stroke="#0969da" stroke-width="1.5"/><circle cx="806" cy="40" r="2" fill="#0969da"/>
+    <circle cx="806" cy="154" r="5" fill="#ffffff" stroke="#0969da" stroke-width="1.5"/><circle cx="806" cy="154" r="2" fill="#0969da"/>
+    <circle cx="694" cy="40" r="5" fill="#ffffff" stroke="#0969da" stroke-width="1.5"/><circle cx="694" cy="40" r="2" fill="#0969da"/>
+    <circle cx="694" cy="154" r="5" fill="#ffffff" stroke="#0969da" stroke-width="1.5"/><circle cx="694" cy="154" r="2" fill="#0969da"/>
+  </g>
+  <text class="bl-leg bl-fade" x="750" y="192" text-anchor="middle" style="animation-delay:.9s">render · physics · audio · input · ui · net</text>
+</svg>

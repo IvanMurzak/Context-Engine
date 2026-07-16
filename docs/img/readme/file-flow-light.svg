@@ -1,0 +1,58 @@
+<svg width="955" height="200" viewBox="0 0 955 200" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Project files flow through the EditorKernel to GUI, CLI and AI agents — equal clients">
+  <style>
+    .dl-head { font:600 15px 'Segoe UI',Ubuntu,sans-serif; fill:#1f2328; }
+    .dl-sub  { font:600 10px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#57606a; letter-spacing:1px; }
+    .dl-node { font:600 11px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#24292f; }
+    .dl-k    { font:700 12px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#0969da; }
+    .dl-fade { opacity:0; animation:dl-in .5s ease-out forwards; }
+    .dl-glow { animation:dl-breathe 3s ease-in-out infinite alternate; }
+    @keyframes dl-in      { to { opacity:1; } }
+    @keyframes dl-breathe { from { stroke-opacity:.35; } to { stroke-opacity:1; } }
+    @media (prefers-reduced-motion: reduce){
+      .dl-fade { animation:none; opacity:1; }
+      .dl-glow { animation:none; }
+    }
+  </style>
+
+  <text class="dl-head dl-fade" x="477.5" y="24" text-anchor="middle">project files are the single source of truth</text>
+  <text class="dl-sub dl-fade" x="477.5" y="46" text-anchor="middle" style="animation-delay:.25s">GUI · CLI · AI AGENTS — EQUAL CLIENTS OVER ONE RPC SURFACE</text>
+
+  <g stroke="#0969da" stroke-opacity="0.35" stroke-width="1.2">
+    <path d="M275 84 C 330 84 355 112 415 112" fill="none"/>
+    <path d="M275 126 C 330 126 355 126 415 126" fill="none"/>
+    <path d="M275 168 C 330 168 355 140 415 140" fill="none"/>
+    <path d="M540 112 C 600 112 625 84 680 84" fill="none"/>
+    <path d="M540 126 C 600 126 625 126 680 126" fill="none"/>
+    <path d="M540 140 C 600 140 625 168 680 168" fill="none"/>
+  </g>
+
+  <g class="dl-fade" style="animation-delay:.3s">
+    <rect x="145" y="70" width="130" height="28" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+    <rect x="145" y="112" width="130" height="28" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+    <rect x="145" y="154" width="130" height="28" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+    <text class="dl-node" x="210" y="88" text-anchor="middle">scene.ctx.json</text>
+    <text class="dl-node" x="210" y="130" text-anchor="middle">player.ts</text>
+    <text class="dl-node" x="210" y="172" text-anchor="middle">level.pack</text>
+  </g>
+
+  <g class="dl-fade" style="animation-delay:.5s">
+    <rect class="dl-glow" x="415" y="104" width="125" height="44" rx="9" fill="#f6f8fa" stroke="#0969da" stroke-width="1.5"/>
+    <text class="dl-k" x="477.5" y="130" text-anchor="middle">EditorKernel</text>
+  </g>
+
+  <g class="dl-fade" style="animation-delay:.7s">
+    <rect x="680" y="70" width="110" height="28" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+    <rect x="680" y="112" width="110" height="28" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+    <rect x="680" y="154" width="110" height="28" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+    <text class="dl-node" x="735" y="88" text-anchor="middle">GUI</text>
+    <text class="dl-node" x="735" y="130" text-anchor="middle">CLI</text>
+    <text class="dl-node" x="735" y="172" text-anchor="middle">AI agent</text>
+  </g>
+
+  <circle r="3" fill="#0969da"><animateMotion dur="1.8s" begin="0s"   repeatCount="indefinite" path="M275 84 C 330 84 355 112 415 112"/></circle>
+  <circle r="3" fill="#0969da"><animateMotion dur="1.8s" begin=".6s"  repeatCount="indefinite" path="M275 126 C 330 126 355 126 415 126"/></circle>
+  <circle r="3" fill="#0969da"><animateMotion dur="1.8s" begin="1.2s" repeatCount="indefinite" path="M275 168 C 330 168 355 140 415 140"/></circle>
+  <circle r="3" fill="#0969da"><animateMotion dur="1.8s" begin=".9s"  repeatCount="indefinite" path="M540 112 C 600 112 625 84 680 84"/></circle>
+  <circle r="3" fill="#0969da"><animateMotion dur="1.8s" begin="1.5s" repeatCount="indefinite" path="M540 126 C 600 126 625 126 680 126"/></circle>
+  <circle r="3" fill="#0969da"><animateMotion dur="1.8s" begin="2.1s" repeatCount="indefinite" path="M540 140 C 600 140 625 168 680 168"/></circle>
+</svg>

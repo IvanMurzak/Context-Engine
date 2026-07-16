@@ -1,6 +1,8 @@
 # Context Game Engine
 
-> **pre-alpha** · **M6 complete** (gameplay packages + deterministic wedge) · **M7 next** · design authority lives in the owner's design docs
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/readme/header-dark.svg"><img src="docs/img/readme/header-light.svg" width="100%" alt="Context — build worlds from files, render them in real time"/></picture>
+
+> **pre-alpha** · **M7 complete** (runtime UI system) · **M8 next** · design authority lives in the owner's design docs
 
 Context is a minimal-kernel game engine where **every feature is a package**, built AI-first
 without making humans second-class. **Project files are the single source of truth**: a headless
@@ -14,17 +16,26 @@ is first-class, determinism is a designed-in tier with a CI state-hash gate, and
 is buildable with zero AI usage. The demo no incumbent engine can match: an agent builds, runs,
 verifies, and ships a game with zero GPU and zero GUI.
 
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/readme/file-flow-dark.svg"><img src="docs/img/readme/file-flow-light.svg" width="100%" alt="Project files flow through the EditorKernel to GUI, CLI and AI agents — equal clients"/></picture>
+
 ## Status
 
-Milestones **M0–M6 are complete**: microkernel + file-authoritative EditorKernel (M1), data
+Milestones **M0–M7 are complete**: microkernel + file-authoritative EditorKernel (M1), data
 model & asset pipeline (M2), the TS/V8 + WASM scripting tier with the frozen public contract
 (M3), the WebGPU render module (M4), the observer-grade editor (M5, headless-first — see
-below), and the core gameplay packages + the deterministic wedge with its blocking CI exit
-gates (M6). **M7 (runtime UI system) is next.** The normative design (requirements,
-architecture, roadmap, decision locks) lives in the owner's design records, not in this
-repository; directory README stubs below name the documents that govern them.
+below), the core gameplay packages + the deterministic wedge with its blocking CI exit gates
+(M6), and the runtime UI system — headless layout/hit-testing, the `context.ui` TypeScript
+authoring surface, the GPU UI backend, FreeType + HarfBuzz text shaping, and world-space (flat
+and curved) panels, all closed by blocking `m7-exit-*` CI gates (M7). **M8 (build pipeline) is
+next.** The normative design (requirements, architecture, roadmap, decision locks) lives in the
+owner's design records, not in this repository; directory README stubs below name the documents
+that govern them.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/readme/determinism-dark.svg"><img src="docs/img/readme/determinism-light.svg" width="100%" alt="Same inputs, same state-hash — on every machine, every run"/></picture>
 
 ## Running the editor (current state)
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/readme/headless-terminal-dark.svg"><img src="docs/img/readme/headless-terminal-light.svg" width="100%" alt="Headless terminal: context build, deterministic state-hash, zero GPU, zero GUI"/></picture>
 
 **There is no interactive windowed editor yet.** M5 shipped the observer-grade editor
 *headless-first*: every panel (viewport, scene tree, inspector, Problems, playbar, session
@@ -68,6 +79,8 @@ cmake -S src --preset sanitize && cd src && cmake --build --preset sanitize && c
 
 ## Repository layout
 
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/readme/microkernel-orbit-dark.svg"><img src="docs/img/readme/microkernel-orbit-light.svg" width="100%" alt="A microkernel where every feature is a package"/></picture>
+
 | Directory | Contents |
 |---|---|
 | `src/` | Engine source **plus all build/lint files** (`CMakeLists.txt`, `CMakePresets.json`, `vcpkg.json`, `.clang-format`, `.clang-tidy`) — configure with `cmake -S src` |
@@ -100,3 +113,5 @@ product or service affects it, and the license has no connection to any AI servi
 
 External contributions are currently blocked until the CLA flow exists — see
 [CONTRIBUTING.md](.github/CONTRIBUTING.md) and [CLA.md](.github/CLA.md).
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/readme/divider-dark.svg"><img src="docs/img/readme/divider-light.svg" width="100%" alt="Build, run, verify, ship — zero GPU, zero GUI"/></picture>
