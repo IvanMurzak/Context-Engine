@@ -97,7 +97,15 @@ ParsedPack read_pack(std::string_view bytes)
         fail("pack.bad_directory");
         return pack;
     }
-    if (dir_size != unit_count * static_cast<std::uint64_t>(kDirectoryEntrySize))
+    // Derive the entry count from the (already bounds-checked) dir_size rather than multiplying
+    // unit_count out: unit_count is an unvalidated u64, and unit_count * kDirectoryEntrySize can
+    // overflow u64 and wrap to match a small dir_size — which would slip past the check and then
+    // drive entries.reserve(unit_count) with a huge value, throwing std::length_error and breaking
+    // this reader's total/never-throws contract. dir_size <= bytes.size() here, so the derived count
+    // (and thus the reserve below) stays bounded. Acceptance is identical for every well-formed pack,
+    // where dir_size == unit_count * kDirectoryEntrySize exactly.
+    if (dir_size % static_cast<std::uint64_t>(kDirectoryEntrySize) != 0
+        || unit_count != dir_size / static_cast<std::uint64_t>(kDirectoryEntrySize))
     {
         fail("pack.bad_directory");
         return pack;

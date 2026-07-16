@@ -236,6 +236,22 @@ int main()
         CHECK(!p.ok);
         CHECK(p.errors.front() == "pack.hash_mismatch");
     }
+    {
+        // A crafted unitCount that overflows unitCount * kDirectoryEntrySize back onto a small
+        // directorySize must be refused cleanly, never throw (read_pack is total). directorySize is
+        // forced to 0 and unitCount to 2^62 (2^62 * 76 wraps to 0 mod 2^64): the size check must not
+        // be fooled into entries.reserve(2^62), which would throw std::length_error.
+        std::string crafted = w.bytes;
+        const auto put_u64_at = [&crafted](std::size_t off, std::uint64_t v) {
+            for (unsigned i = 0; i < 8; ++i)
+                crafted[off + i] = static_cast<char>((v >> (8u * i)) & 0xFFu);
+        };
+        put_u64_at(32, static_cast<std::uint64_t>(1) << 62); // unitCount (header offset 32)
+        put_u64_at(48, 0);                                   // directorySize (header offset 48)
+        ParsedPack p = read_pack(crafted);
+        CHECK(!p.ok);
+        CHECK(p.errors.front() == "pack.bad_directory");
+    }
 
     PACK_TEST_MAIN_END();
 }
