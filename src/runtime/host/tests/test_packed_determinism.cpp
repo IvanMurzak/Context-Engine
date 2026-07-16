@@ -128,28 +128,29 @@ const char* kScene = R"({
     return stepped.state_hash.root;
 }
 
-// Extract the u64 value of a string-valued numeric field (`"<key>":"<decimal>"`) from the host's
-// one-line JSON boot/state signal. The 64-bit hashes are emitted as DECIMAL STRINGS (host.cpp) because
-// a JSON double loses precision above 2^53, so a plain numeric parse would corrupt them.
-[[nodiscard]] bool extract_u64_string_field(const std::string& json, const std::string& key,
-                                            std::uint64_t& out)
+// Scan the run of decimal digits immediately after `needle` in the host's one-line JSON boot/state
+// signal into `out`; returns whether a digit run was found (out is left untouched otherwise). The
+// caller bakes the field prefix into the needle, including an opening quote for the string-valued
+// hashes: the 64-bit hashes are emitted as DECIMAL STRINGS (`"<key>":"<decimal>"`, host.cpp) because a
+// JSON double loses precision above 2^53, while simTick is a bare number (`"simTick":<decimal>`) — one
+// digit scan handles both. A parsed hash is CHECKed against the editor-embedded reference below, so no
+// separate closing-quote validation is needed here.
+[[nodiscard]] bool parse_u64_after(const std::string& json, const std::string& needle,
+                                   std::uint64_t& out)
 {
-    const std::string needle = "\"" + key + "\":\"";
     const std::size_t at = json.find(needle);
     if (at == std::string::npos)
         return false;
-    std::size_t i = at + needle.size();
     std::uint64_t value = 0;
     bool any = false;
-    for (; i < json.size() && json[i] >= '0' && json[i] <= '9'; ++i)
+    for (std::size_t i = at + needle.size(); i < json.size() && json[i] >= '0' && json[i] <= '9'; ++i)
     {
         value = value * 10 + static_cast<std::uint64_t>(json[i] - '0');
         any = true;
     }
-    if (!any || i >= json.size() || json[i] != '"')
-        return false;
-    out = value;
-    return true;
+    if (any)
+        out = value;
+    return any;
 }
 
 // Launch the shipped host binary over `pack_path` with the fixed wedge run and return its stdout. The
@@ -183,22 +184,9 @@ int main()
     int exit_code = -1;
     const std::string signal = run_shipped_wedge(CONTEXT_RUNTIME_SERVER_BIN, pack_path.string(), exit_code);
     std::uint64_t h_shipped = 0;
-    const bool parsed = extract_u64_string_field(signal, "simStateHash", h_shipped);
+    const bool parsed = parse_u64_after(signal, "\"simStateHash\":\"", h_shipped);
     std::uint64_t shipped_tick = 0;
-    const bool tick_parsed = [&] {
-        const std::string needle = "\"simTick\":";
-        const std::size_t at = signal.find(needle);
-        if (at == std::string::npos)
-            return false;
-        std::size_t i = at + needle.size();
-        bool any = false;
-        for (; i < signal.size() && signal[i] >= '0' && signal[i] <= '9'; ++i)
-        {
-            shipped_tick = shipped_tick * 10 + static_cast<std::uint64_t>(signal[i] - '0');
-            any = true;
-        }
-        return any;
-    }();
+    const bool tick_parsed = parse_u64_after(signal, "\"simTick\":", shipped_tick);
 
     std::printf("[determinism-packed-wedge] seed=%llu ticks=%d editorHash=0x%016llX "
                 "shippedHash=0x%016llX exit=%d\n",

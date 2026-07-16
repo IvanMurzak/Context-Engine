@@ -150,6 +150,9 @@ int main()
     CHECK(!pack_bytes.empty());
     const std::vector<std::uint64_t> pack_ids = pack_composed_identities(pack_bytes);
     CHECK(pack_ids.size() >= 4);       // four packed entities -> four distinct composed identities
+    if (pack_ids.size() < 4)           // CHECK only RECORDS the failure (host_test CHECK never aborts),
+        NETSYNC_TEST_MAIN_END();       // so bail before indexing pack_ids[0..3] out of bounds below
+                                       // (a pack-seam failure -> empty ids would be UB / an ASan abort).
     for (const std::uint64_t id : pack_ids)
         CHECK(id != 0);                // a composed identity is never the invalid (zero) net-id
 
