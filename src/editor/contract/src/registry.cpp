@@ -662,7 +662,7 @@ Registry::Registry()
         /*flags=*/
         {{"target", "string", "The build target platform: windows | linux | macos | web.", false},
          {"out", "path",
-          "Write the packed artifact to this path (default: <project>/build/<target>/game.pack).",
+          "Write the packed artifact to this path (default: <project>/build/<target>.pack).",
           false}},
         /*implemented=*/true));
 

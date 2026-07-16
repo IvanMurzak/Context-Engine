@@ -17,7 +17,7 @@ namespace context::cli
 {
 
 // Run `context build`. Reads --target (required: windows|linux|macos|web), --project (default "."),
-// and --out (default <project>/build/<target>/game.pack). --dry-run (core flag) plans without writing.
+// and --out (default <project>/build/<target>.pack). --dry-run (core flag) plans without writing.
 [[nodiscard]] editor::contract::Envelope run_build(const std::map<std::string, std::string>& flags);
 
 } // namespace context::cli

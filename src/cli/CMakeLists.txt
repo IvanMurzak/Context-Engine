@@ -224,6 +224,7 @@ set_tests_properties(cli-test_fetch_e2e PROPERTIES TIMEOUT 60)
 if(CONTEXT_SANITIZE)
     set_tests_properties(
         cli-test_bench_command
+        cli-test_build_command
         cli-test_cli
         cli-test_determinism_command
         cli-test_editor_driver

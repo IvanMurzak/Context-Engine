@@ -87,7 +87,7 @@ public:
                 }
             }
         }
-        const auto [inserted, _] = cache_.emplace(key, std::move(entry));
+        const auto inserted = cache_.emplace(key, std::move(entry)).first;
         return inserted->second.has_doc ? &inserted->second.doc : nullptr;
     }
 
