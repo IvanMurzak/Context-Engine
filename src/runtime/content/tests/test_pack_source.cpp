@@ -111,12 +111,15 @@ int main()
     CHECK(loader.load_now(inst_d_id));
     const std::uint64_t bytes_before = loader.resident_bytes();
     const std::size_t entities_before = loader.resident_entity_count();
+    // Capture unit_a's entity count BEFORE unload — unload() erases its Resident node, so unit_a
+    // (a pointer into residency taken above) would otherwise be read after being freed.
+    const std::size_t unit_a_entity_count = unit_a->entities.size();
     CHECK(loader.unload(inst_a_id));
     CHECK(!loader.is_resident(inst_a_id));
     CHECK(loader.is_resident(inst_d_id));    // the sibling is untouched
     CHECK(loader.is_resident(sc.raw_hash));  // the sidecar is untouched
     CHECK(loader.resident_bytes() < bytes_before);
-    CHECK(loader.resident_entity_count() == entities_before - unit_a->entities.size());
+    CHECK(loader.resident_entity_count() == entities_before - unit_a_entity_count);
     // resident_unit points into residency — it is now dangling for A; re-query proves the drop.
     CHECK(loader.resident_unit(inst_a_id) == nullptr);
 
