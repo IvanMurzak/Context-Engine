@@ -669,7 +669,7 @@ jobs:
         run: cmake -S src --preset dev
 
       - name: Build the CLI + both shipped runtime-host flavors
-        run: cmake --build --preset dev --target context context_runtime_desktop context_runtime_server
+        run: cmake --build --preset dev --target context context_runtime_desktop context_runtime_server context_runtime_host_test_core context_runtime_host_test_render context_runtime_host_test_smoke
         working-directory: src
 
       - name: Assemble each flavor's tarball and boot it on a CLEAN host (no dev tree)
