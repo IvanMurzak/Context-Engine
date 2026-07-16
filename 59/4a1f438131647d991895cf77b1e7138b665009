@@ -1,0 +1,91 @@
+src/editor/pack/tests/corpus/nested.scenes.json
+  s_8c19f166a0a4cd::t_93810717136490 1-29
+src/editor/pack/include/context/editor/pack/pack_format.h
+  s_8c19f166a0a4cd::t_7a228131068e3c 24
+  s_8c19f166a0a4cd::t_1a86745b436d33 1-23,25-60
+src/editor/pack/CMakeLists.txt
+  s_8c19f166a0a4cd::t_13aef150c168fa 1-49,51-63
+  s_8c19f166a0a4cd::t_96ad448f128ddd 50
+src/editor/pack/include/context/editor/pack/pack_writer.h
+  s_8c19f166a0a4cd::t_5dbfe91804acfa 1-63
+src/editor/pack/src/pack_format.cpp
+  s_8c19f166a0a4cd::t_9ef2b086ea88de 1-44
+src/editor/pack/src/pack_reader.cpp
+  s_8c19f166a0a4cd::t_26971143b7d29b 1-198
+src/editor/pack/README.md
+  s_8c19f166a0a4cd::t_9bd5beb181546c 1-50
+src/editor/pack/tests/corpus/overrides.scenes.json
+  s_8c19f166a0a4cd::t_a4e1d8d437ba28 1-23
+src/editor/pack/src/pack_writer.cpp
+  s_8c19f166a0a4cd::t_0d3fb3c6a268a8 1-234
+docs/chunk-pack-format.md
+  s_8c19f166a0a4cd::t_2bff0932394717 1-17,57,59-65,67,69-72,74,78-88,92-102,108-141,143-206,209-210,217,219-221,223-230
+  s_bc9a1eddc7910e::t_e978723dab16f1 142
+src/editor/pack/tests/test_pack_corpus.cpp
+  s_8c19f166a0a4cd::t_f2b0ae201dd743 1-81
+src/editor/pack/tests/pack_corpus.h
+  s_8c19f166a0a4cd::t_62235d93a95877 20
+  s_8c19f166a0a4cd::t_3cbf80ddf4b183 1-19,21-168
+.gitattributes
+  s_8c19f166a0a4cd::t_ba325d10dbac71 23
+src/editor/pack/include/context/editor/pack/pack_reader.h
+  s_8c19f166a0a4cd::t_a0c298caa423f5 1-61
+src/CMakeLists.txt
+  s_8c19f166a0a4cd::t_b3946f99148ae7 375-382
+src/editor/pack/tests/test_pack_writer.cpp
+  s_8c19f166a0a4cd::t_4d696d9c2b11db 1-241
+src/editor/pack/tests/corpus/sidecars.scenes.json
+  s_05d10e00306a5a::t_c133415eae54f1 1-17
+src/editor/pack/tests/pack_test.h
+  s_242c98bbfe21b4::t_a7276de9881c97 1-27
+src/editor/pack/tests/corpus/flat.scenes.json
+  s_752770bbb78024::t_479ef228eeb248 1-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "594a1f438131647d991895cf77b1e7138b665009",
+  "prompts": {},
+  "sessions": {
+    "s_05d10e00306a5a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "12d87733-0647-4d95-979c-b61e0b8743c8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_242c98bbfe21b4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b2ef63dd-57c5-4105-9eba-2347fe89cdfa",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_752770bbb78024": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a740338c20b5cf9d1",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_8c19f166a0a4cd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "df8298f2-beea-41ba-9052-0bf0c5fc46f2",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_bc9a1eddc7910e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "07a60c67-96b4-4c41-bbe1-fc86881e3b71",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
