@@ -1,0 +1,33 @@
+src/cli/include/context/cli/build_command.h
+  s_8c19f166a0a4cd::t_e01e8d721221ba 20
+src/cli/src/build_command.cpp
+  s_8c19f166a0a4cd::t_9796b8cbd10ce5 90
+src/cli/CMakeLists.txt
+  s_9284ad4c8de2f4::t_c9759777cb297f 227
+src/editor/contract/src/registry.cpp
+  s_8c19f166a0a4cd::t_1c4d3a9bf00705 665
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "02dc6980447108344a1d4f5b723232e3ce10afe1",
+  "prompts": {},
+  "sessions": {
+    "s_8c19f166a0a4cd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "df8298f2-beea-41ba-9052-0bf0c5fc46f2",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_9284ad4c8de2f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "64f4c13c-1681-4443-9cc9-81bbde69cd56",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
