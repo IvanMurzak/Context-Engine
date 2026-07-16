@@ -372,6 +372,14 @@ add_subdirectory(editor/kinds)
 # `context_compose` target, which CMake resolves at generate time regardless of order).
 add_subdirectory(editor/compose)
 
+# M8 task a01: the build-side chunked content-pack WRITER (src/editor/pack/, R-ASSET-005 / L-35 /
+# L-37, docs/chunk-pack-format.md) — freezes pack format v1 and packs flatten-emitted content units
+# (context_compose) into a deterministic, GUID-addressed v1 archive (directory + per-chunk hashes +
+# format/engine version header). Wired here right after compose (its input) — deliberately apart from
+# the runtime cluster below so concurrent sibling tasks touching src/editor/ and this file merge
+# cleanly (consumers name the `context_pack` target, resolved at generate time regardless of order).
+add_subdirectory(editor/pack)
+
 # M2 wave 4: player save-game groundwork (src/runtime/save/, R-DATA-005 / L-37, issue #66) — the
 # FIRST src/runtime/ (RuntimeKernel) target. RuntimeKernel's OWN serialization (R-FILE-009 — never
 # authored files): a per-component schemaVersion save header + composed-identity-addressed entity

@@ -1,0 +1,29 @@
+{
+  "root": "root.scene.json",
+  "engineVersion": 1,
+  "scenes": {
+    "child.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [
+        {"id": "ccccccccccccccc1", "name": "C1", "components": {}},
+        {"id": "ccccccccccccccc2", "name": "C2", "components": {}}
+      ]
+    },
+    "mid.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [],
+      "instances": [{"id": "bbbbbbbbbbbbbbb1", "scene": "child.scene.json"}]
+    },
+    "root.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [{"id": "eeeeeeeeeeeeeee1", "name": "RootEnt", "components": {}}],
+      "instances": [
+        {"id": "aaaaaaaaaaaaaaa1", "scene": "mid.scene.json"},
+        {"id": "ddddddddddddddd1", "scene": "child.scene.json"}
+      ]
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "root": "main.scene.json",
+  "engineVersion": 1,
+  "scenes": {
+    "main.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [
+        {"id": "1111111111111111", "name": "Alpha", "components": {"transform": {"position": [1.5, 0.0, -2.25]}}},
+        {"id": "2222222222222222", "name": "Beta", "components": {}}
+      ]
+    }
+  }
+}
