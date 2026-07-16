@@ -165,9 +165,15 @@ int main()
         CHECK(edit.exit_code() == 2); // usage class
         const Envelope snap = run({"snapshot"});
         CHECK(err_code(snap) == "contract.operational_only");
-        // `build` is scope-reserved AND operational — same one-shot rejection.
+    }
+
+    // --- `context build` (M8 a05, issue #257): the M1 reserved-operational `build` placeholder was
+    // --- PROMOTED to a real stable one-shot verb, so it no longer returns contract.operational_only.
+    // --- Without --target it is a usage error; its full happy/failure surface is driven e2e by
+    // --- test_build_command + test_build_orchestrator.
+    {
         const Envelope build = run({"build"});
-        CHECK(err_code(build) == "contract.operational_only");
+        CHECK(err_code(build) == "usage.missing_argument");
     }
 
     // --- wire_client parse_u64: strict operational-flag value parsing. Deliberately NOT stoull,

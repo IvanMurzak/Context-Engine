@@ -502,5 +502,59 @@ int main()
         CHECK(invalid_event->origin == "R-UI-006");
     }
 
+    // --- a03 transcode.* codes (registered by a05, issue #257) — the deferred per-platform transcode
+    // detail. Additive-only new rows (NOT on the frozen v0 baseline). All validation-class + deterministic
+    // (a bare retry of the same artifact + platform re-fails). The strings are the literals
+    // src/editor/import/transcode.cpp emits.
+    {
+        for (const char* code :
+             {"transcode.no_target", "transcode.unsupported_format", "transcode.bad_descriptor"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 5);      // validation class
+            CHECK(entry->retriable == false);  // deterministic — a bare retry cannot help
+            CHECK(entry->origin == "R-BUILD-003");
+        }
+    }
+
+    // --- M8 a05 build.* codes (issue #257) — the build orchestration core's phase refusals -----------
+    // Additive-only new rows (NOT on the frozen v0 baseline). template_unverified is validation-class
+    // (the project failed the pre-build startable check); the rest are internal-class build-process
+    // failures. toolchain_fetch_failed is the ONE retriable build code (a per-target toolchain fetch is
+    // transient); aot_failed / transcode_failed / link_failed are deterministic fail-closed. The strings
+    // are the source-of-truth in src/editor/build/build_errors.h (context::editor::build::kBuild*Code).
+    {
+        const ErrorCode* templ = find_code("build.template_unverified");
+        CHECK(templ != nullptr);
+        CHECK(templ->exit_code == 5);     // validation class
+        CHECK(templ->retriable == false); // deterministic
+        CHECK(templ->origin == "R-BUILD-002");
+
+        const ErrorCode* toolchain = find_code("build.toolchain_fetch_failed");
+        CHECK(toolchain != nullptr);
+        CHECK(toolchain->exit_code == 1); // internal class
+        CHECK(toolchain->retriable == true); // transient — a re-fetch can succeed (the one retriable build code)
+        CHECK(toolchain->origin == "R-PKG-002");
+
+        const ErrorCode* aot = find_code("build.aot_failed");
+        CHECK(aot != nullptr);
+        CHECK(aot->exit_code == 1);      // internal class
+        CHECK(aot->retriable == false);  // deterministic
+        CHECK(aot->origin == "R-BUILD-002");
+
+        const ErrorCode* transcode = find_code("build.transcode_failed");
+        CHECK(transcode != nullptr);
+        CHECK(transcode->exit_code == 1);     // internal class
+        CHECK(transcode->retriable == false); // deterministic
+        CHECK(transcode->origin == "R-BUILD-003");
+
+        const ErrorCode* link = find_code("build.link_failed");
+        CHECK(link != nullptr);
+        CHECK(link->exit_code == 1);      // internal class
+        CHECK(link->retriable == false);  // deterministic
+        CHECK(link->origin == "R-KERNEL-003");
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

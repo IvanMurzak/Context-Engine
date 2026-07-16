@@ -3,6 +3,10 @@ build/
 build-*/
 out/
 cmake-build-*/
+# The `build/` rule above ignores any directory named `build` (CMake output dirs like src/build/).
+# Re-include the src/editor/build/ SOURCE module (the build orchestration core, task a05) — it is
+# engine source, not build output, and only ever contains committed .h/.cpp/CMakeLists/README/tests.
+!src/editor/build/
 
 # vcpkg
 vcpkg_installed/

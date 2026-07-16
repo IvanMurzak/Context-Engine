@@ -4,6 +4,7 @@
 
 #include "context/cli/attach_command.h"
 #include "context/cli/bench_command.h"
+#include "context/cli/build_command.h"
 #include "context/cli/daemon_command.h"
 #include "context/cli/determinism_command.h"
 #include "context/cli/editor_driver.h"
@@ -171,6 +172,14 @@ Envelope dispatch(const VerbSpec& verb, const std::vector<std::string>& position
     if (verb.noun.empty() && verb.verb == "install")
         return run_install(flags);
 
+    // M8 task a05 (issue #257): `context build --target <t>` — the headless per-agent build. Backed by
+    // src/cli/build_command.cpp over context_build (verify → toolchain → aot → transcode → pack → link).
+    // A STABLE one-shot verb (promoted from the M1 reserved-operational placeholder), so it dispatches
+    // here rather than falling through to the operational-only rejection. --dry-run (core flag) is
+    // honored INSIDE the command (plan + verify without writing the pack).
+    if (verb.noun.empty() && verb.verb == "build")
+        return run_build(flags);
+
     // `context resource read <handle> [<offset>:<length>]` (alias: `context fetch ...`) — the
     // R-CLI-017 large-result fetch. Drives a RUNNING daemon over the wire via the shared client
     // plumbing; --project (core flag) names the project whose daemon minted the handle.
@@ -240,6 +249,13 @@ Envelope run(const std::vector<std::string>& args)
     if (args[0] == "attach")
         return run_attach(std::vector<std::string>(args.begin() + 1, args.end()));
 
+    // Global help (`context --help` / `context -h` / `context help`) emits the whole self-describing
+    // contract — the same document `context describe` returns. Per-VERB help (`context <verb> --help`)
+    // is handled in the token loop below, so every registered verb has `--help` (R-CLI-013 introspection
+    // projected as help, no per-verb wiring).
+    if (args[0] == "--help" || args[0] == "-h" || args[0] == "help")
+        return Envelope::success(reg.describe());
+
     // --- resolve the verb selector (1 token global, or 2 tokens noun-scoped) --------------------
     const auto [ns0, head0] = split_ns(args[0]);
     const VerbSpec* verb = nullptr;
@@ -295,6 +311,10 @@ Envelope run(const std::vector<std::string>& args)
                 name = name.substr(0, eq);
                 has_inline_value = true;
             }
+            // Per-verb help: `context <verb> --help` emits this verb's contract entry (summary, params,
+            // flags, stable ids) — the R-CLI-013 introspection for one verb, so every verb has --help.
+            if (name == "help")
+                return Envelope::success(editor::contract::verb_describe_json(*verb));
             const FlagSpec* spec = find_flag(*verb, reg, name);
             if (spec == nullptr)
                 return Envelope::failure("usage.unknown_flag", "unknown flag: --" + name);

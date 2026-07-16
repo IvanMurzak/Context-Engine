@@ -194,6 +194,24 @@ int main()
             if (f.name == "source")
                 saw_source = true;
         CHECK(saw_source);
+
+        // M8 task a05 (issue #257): the build orchestration verb — the M1 reserved-operational `build`
+        // placeholder PROMOTED to a global, implemented, STABLE one-shot verb. Its stable ids are
+        // UNCHANGED (rpc_method `build` / mcp_tool `context_build`, derived from the (noun, verb) triple),
+        // so a client's stored id never drifts across the promotion (R-CLI-004 / R-CLI-009).
+        const VerbSpec* build_verb = reg.find_verb("", "", "build");
+        CHECK(build_verb != nullptr);
+        CHECK(build_verb->cli_command() == "context build");
+        CHECK(build_verb->rpc_method == "build");
+        CHECK(build_verb->mcp_tool == "context_build");
+        CHECK(build_verb->implemented);
+        CHECK(build_verb->stability == "stable"); // promoted from operational — now a real one-shot verb
+        // Its --target flag (the R-BUILD-002 per-target selector) is declared beyond the core set.
+        bool saw_target = false;
+        for (const FlagSpec& f : build_verb->flags)
+            if (f.name == "target")
+                saw_target = true;
+        CHECK(saw_target);
     }
 
     // --- core flags: --after-hash is LIVE, --atomic-plan is grammar-reserved (R-CLI-011) --------
@@ -253,8 +271,7 @@ int main()
             const char* verb;
             bool implemented;
         } operational[] = {{"edit", true},      {"edit-batch", true}, {"query", true},
-                           {"snapshot", true},  {"reconcile", true},  {"build", false},
-                           {"shutdown", true}};
+                           {"snapshot", true},  {"reconcile", true},  {"shutdown", true}};
         for (const auto& op : operational)
         {
             const VerbSpec* v = reg.find_verb("", "", op.verb);
