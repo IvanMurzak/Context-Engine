@@ -1,0 +1,21 @@
+src/editor/pack/tests/test_pack_writer.cpp
+  s_8c19f166a0a4cd::t_e9f69a36eb7ca9 239-254
+src/editor/pack/src/pack_reader.cpp
+  s_8c19f166a0a4cd::t_bf7cd48a6b3029 100-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "236f90f76666da6b9e605e6b4c20bc778538f1cb",
+  "prompts": {},
+  "sessions": {
+    "s_8c19f166a0a4cd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "df8298f2-beea-41ba-9052-0bf0c5fc46f2",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
