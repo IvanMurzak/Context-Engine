@@ -849,6 +849,59 @@ const std::vector<ErrorCode>& catalog()
          "A `ui assert` expectation did not hold over the loaded tree; the diagnostic reports the "
          "asserted fact, the expected value, and the actual value (the headless-CLI assert verdict).",
          false, kExitValidation, "R-UI-006"},
+        // --- transcode.* — a03 per-platform transcode (src/editor/import/transcode.cpp, R-BUILD-003) --
+        // The per-platform transcode node's fail-closed refusals, DEFERRED by a03 and registered here by
+        // a05 (the catalog owner). The strings are the literals src/editor/import/transcode.cpp emits
+        // (there they are raw string literals, not k*Code constants — an older module; the catalog
+        // registers them the same way it registers cas.mismatch / file.* ). All deterministic (same
+        // artifact + platform re-fails): no_target = the (kind, platform) table has no row (surfaced,
+        // never guessed); unsupported_format = the target format has no encoder (a table gap, not a
+        // source fault); bad_descriptor = a described-kind artifact whose bytes are not a well-formed
+        // descriptor. All validation-class. Additive-only (protocolMajor stays 1): NEW rows at the END.
+        {"transcode.no_target",
+         "The per-platform transcode table has no row for this (artifact kind, platform); the variant "
+         "is surfaced as unavailable, never guessed (R-BUILD-003).",
+         false, kExitValidation, "R-BUILD-003"},
+        {"transcode.unsupported_format",
+         "The transcode table named a target engine format this encoder cannot produce (e.g. an "
+         "uncompressed row); a table gap, not a malformed source asset.",
+         false, kExitValidation, "R-BUILD-003"},
+        {"transcode.bad_descriptor",
+         "A described-kind artifact could not be transcoded because its bytes are not a well-formed "
+         "descriptor; nothing was produced (fail-closed).",
+         false, kExitValidation, "R-BUILD-003"},
+        // --- build.* — a05 build orchestration core (src/editor/build/, R-BUILD-002 / R-BUILD-007) -----
+        // The `context build` verb's fail-closed refusals, one per pipeline phase. The strings are the
+        // source-of-truth in src/editor/build/build_errors.h as context::editor::build::kBuild*Code (the
+        // same promote-a-local-string pattern as bridge's scope.denied / the M6 package blocks — so the
+        // build module never links this contract layer) and this catalog registers them. template_unverified
+        // is validation-class (the project failed the pre-build startable check); toolchain_fetch_failed is
+        // internal-class + RETRIABLE (a per-target toolchain fetch/manifest miss is transient — the one
+        // retriable build code, like cas.mismatch / import.cache_corrupt); aot_failed / transcode_failed /
+        // link_failed are internal-class fail-closed build-process failures, all deterministic. Additive-only
+        // (protocolMajor stays 1): NEW rows appended at the END, no existing row reordered/renamed.
+        {"build.template_unverified",
+         "The runnable project/template failed pre-build verification (a missing, malformed, or empty "
+         "root scene, or a blocking composition diagnostic); nothing was built (fail-closed validation).",
+         false, kExitValidation, "R-BUILD-002"},
+        {"build.toolchain_fetch_failed",
+         "The per-target toolchain manifest (R-PKG-002 / L-42) could not supply the requested target's "
+         "toolchain (no manifest entry for the target); the toolchain cannot be fetched. Transient — a "
+         "re-fetch against a repaired manifest can succeed.",
+         true, kExitInternal, "R-PKG-002"},
+        {"build.aot_failed",
+         "The authored-script (TypeScript) AOT tier could not be produced for the target — a malformed or "
+         "unresolvable script entrypoint; the build is refused fail-closed (deterministic).",
+         false, kExitInternal, "R-BUILD-002"},
+        {"build.transcode_failed",
+         "A per-platform asset transcode node failed while producing the target's variant (the diagnostic "
+         "carries the a03 transcode.* detail code); nothing was packed (fail-closed, deterministic).",
+         false, kExitInternal, "R-BUILD-003"},
+        {"build.link_failed",
+         "The final-link path failed: the R-KERNEL-003 generated-registration TU references a package with "
+         "no registrable module (an undefined register_<pkg> — the link's undefined-symbol failure). "
+         "Deterministic — a bare retry cannot conjure the missing module.",
+         false, kExitInternal, "R-KERNEL-003"},
     };
     return the_catalog;
 }

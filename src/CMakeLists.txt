@@ -380,6 +380,14 @@ add_subdirectory(editor/compose)
 # cleanly (consumers name the `context_pack` target, resolved at generate time regardless of order).
 add_subdirectory(editor/pack)
 
+# M8 task a05: the build orchestration core (src/editor/build/, R-BUILD-002 / R-BUILD-007) — the pure,
+# deterministic spine of the per-agent build pipeline (verify → toolchain → aot → transcode → pack →
+# link → adapter). Wired here right after pack (its final chain link) — deliberately apart from the
+# runtime cluster below so concurrent sibling tasks touching src/editor/ and this file merge cleanly
+# (consumers name the `context_build` target, resolved at generate time regardless of order). It binds
+# context_compose + context_import + context_pack; the CLI (add_subdirectory(cli) above) links it.
+add_subdirectory(editor/build)
+
 # M2 wave 4: player save-game groundwork (src/runtime/save/, R-DATA-005 / L-37, issue #66) — the
 # FIRST src/runtime/ (RuntimeKernel) target. RuntimeKernel's OWN serialization (R-FILE-009 — never
 # authored files): a per-component schemaVersion save header + composed-identity-addressed entity

@@ -364,10 +364,16 @@ int main()
     //                             refuse with sim.gc.unavailable) and reports wall-clock GC timings,
     //                             not file-authoring output; covered by cli test test_profile_command
     //                             (both backend branches) + js-test_gc_discipline / _gc_state_hash.
+    //   /build                  — the M8 a05 build verb: needs a whole project + the per-target toolchain
+    //                             manifest fixture, drives the derive→transcode→pack chain, and emits a
+    //                             BINARY pack artifact (not file-authoring output the corpus asserts on);
+    //                             covered end-to-end by cli test test_build_command + the orchestrator's
+    //                             R-QA-011 corpus in build-test_build_orchestrator.
     // Operational (daemon-served) verbs are stability!="stable" and reserved verbs are
     // implemented==false, so both are excluded by the predicate without needing an exemption entry.
     // =============================================================================================
-    const std::set<std::string> exempt = {"resource/read", "/install", "/re-key", "profile/gc"};
+    const std::set<std::string> exempt = {"resource/read", "/install", "/re-key", "profile/gc",
+                                           "/build"};
 
     // Guard: an exemption must name a verb that still exists (so the list cannot rot silently).
     for (const std::string& key : exempt)

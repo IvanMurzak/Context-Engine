@@ -9,6 +9,7 @@ add_library(context_cli STATIC
     src/app.cpp
     src/attach_command.cpp
     src/bench_command.cpp
+    src/build_command.cpp
     src/daemon_command.cpp
     src/determinism_command.cpp
     src/editor_driver.cpp
@@ -77,6 +78,12 @@ target_link_libraries(context_cli PRIVATE context_js context_profile)
 # package (UiTree + the a5 introspection shims).
 target_link_libraries(context_cli PRIVATE context_ui)
 
+# M8 task a05 (issue #257): `context build --target <t>` — the headless per-agent build orchestration
+# (src/editor/build/). PRIVATE — build_command.h exposes only the contract Envelope, so no build type
+# appears in the CLI's public headers; only build_command.cpp touches context_build (which binds
+# context_compose + context_import + context_pack for the derive → transcode → pack chain).
+target_link_libraries(context_cli PRIVATE context_build)
+
 # Self-contained GCC runtime for the CLI executables. context_cli uses std::filesystem (the
 # `context new` scaffolder), whose libstdc++ symbols live in a NEWER libstdc++-6.dll; on a MinGW
 # host a stale libstdc++-6.dll elsewhere on PATH can shadow the toolchain's and be loaded first,
@@ -98,6 +105,7 @@ target_link_options(context PRIVATE ${_context_cli_static_runtime})
 # tests/cli_test.h is the tiny CHECK() harness.
 set(_context_cli_tests
     test_bench_command
+    test_build_command
     test_cli
     test_determinism_command
     test_editor_driver
@@ -122,6 +130,12 @@ endforeach()
 # record_replay/replay_dump from the session runtime, so it links context_session directly (PRIVATE in
 # context_cli, so its include path does not propagate through it — the same pattern as test_pkg_command).
 target_link_libraries(context_cli_test_determinism_command PRIVATE context_session)
+
+# test_build_command (`context build`) reads back the written pack with pack::read_pack + references
+# the build.* code strings, so it links context_build directly (PRIVATE in context_cli, so its include
+# path does not propagate through it — the same pattern as test_pkg_command / test_determinism_command).
+# context_build PUBLIC-links context_pack, so pack_reader.h comes through transitively.
+target_link_libraries(context_cli_test_build_command PRIVATE context_build)
 
 # test_pkg_command (the `context install` verb) builds its fixtures (a ustar artifact + its real SRI)
 # with the pkg module's tar_write / sha512, so it links context_editor_pkg directly (PRIVATE in
@@ -210,6 +224,7 @@ set_tests_properties(cli-test_fetch_e2e PROPERTIES TIMEOUT 60)
 if(CONTEXT_SANITIZE)
     set_tests_properties(
         cli-test_bench_command
+        cli-test_build_command
         cli-test_cli
         cli-test_determinism_command
         cli-test_editor_driver

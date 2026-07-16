@@ -640,6 +640,32 @@ Registry::Registry()
           false}},
         /*implemented=*/true));
 
+    // --- M8 task a05: the build orchestration core verb (issue #257, R-BUILD-002 / R-BUILD-007) -----
+    // A global, one-shot STABLE verb (served by the CLI like `install`/`set`/`migrate`, NOT the daemon):
+    // `context build --target <t>` drives the headless per-agent build pipeline (verify → toolchain →
+    // aot → transcode → pack → link → adapter) over the project and reports the R-CLI-008 envelope with
+    // the build's generation + artifact pointers. Non-interactive (R-CLI-003). Backed by
+    // src/cli/build_command.cpp over context_build. This PROMOTES the M1 reserved-operational `build`
+    // placeholder (which was `operational` + implemented=false, "backing not served yet") into the real
+    // implemented stable verb: its rpc_method (`build`) + mcp_tool (`context_build`) are UNCHANGED (the
+    // R-CLI-004 stable ids derive from the (noun, verb) triple), so no client's stored id drifts. The
+    // freeze gate excludes operational verbs, so `build` was never in the frozen v1 surface — promoting
+    // it is purely ADDITIVE to that surface (nothing frozen is removed/renamed/retyped; protocolMajor
+    // stays 1). Agent-pool honesty (R-BUILD-007): the verb builds THIS agent's target only.
+    verbs_.push_back(make_verb(
+        "", "", "build",
+        "Headless per-agent build (R-BUILD-002): drive the project through verify → toolchain → aot → "
+        "transcode → pack → link for --target and report the packed artifact's generation + pointers as "
+        "the R-CLI-008 envelope. Builds THIS agent's one target (R-BUILD-007); the platform adapter is a "
+        "stub until a06. Non-interactive (R-CLI-003).",
+        /*params=*/{},
+        /*flags=*/
+        {{"target", "string", "The build target platform: windows | linux | macos | web.", false},
+         {"out", "path",
+          "Write the packed artifact to this path (default: <project>/build/<target>.pack).",
+          false}},
+        /*implemented=*/true));
+
     // --- the OPERATIONAL daemon-driver surface (R-CLI-009 honesty) ------------------------------
     // These RPC methods are genuinely served by a live daemon's method backend (KernelServer) — the
     // cross-process analogue of `context editor smoke`. They are registered here so
@@ -734,12 +760,6 @@ Registry::Registry()
         "Fold external (out-of-band) edits into the derived world: drain watcher hints and force "
         "the full re-hash crawl (R-FILE-002), then settle.",
         /*params=*/{}, /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
-
-    verbs_.push_back(make_verb(
-        "", "", "build",
-        "Trigger a build. Scope-mapped (build_install, R-SEC-007) and registered for honesty; the "
-        "backing is not served yet.",
-        /*params=*/{}, /*flags=*/{}, /*implemented=*/false, /*stability=*/"operational"));
 
     verbs_.push_back(make_verb(
         "", "", "shutdown",
