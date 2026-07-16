@@ -643,6 +643,76 @@ jobs:
         shell: bash
         run: ${SCCACHE_PATH} --show-stats
 
+  # M8 a06 export adapters (src/runtime/host/ + src/editor/build/adapter.*, R-BUILD-001/005/009 /
+  # R-HEAD-001/002 / L-5, issue #259): build BOTH Linux flavors — desktop (render subsystem present) and
+  # server/headless (render absent) — then prove each ASSEMBLED tarball artifact boots and steps N fixed
+  # ticks on a CLEAN host with NO dev tree present (extracted to a temp dir outside the repo). Also folds
+  # the R-BUILD-009 `context build --smoke` envelope + the L-5 render-footprint audit (the server binary
+  # carries no render payload and is smaller). ubuntu-only: these are the Linux adapters; the desktop
+  # flavor links only the GPU-free render abstraction (CONTEXT_BUILD_RENDER_WGPU stays OFF), so no GPU is
+  # needed. The `runtime-host-*` ctests (in-process core/render + cross-process smoke + footprint) also
+  # run on all three OS legs of the `build` job — this job adds the clean-host tarball boot.
+  linux-export:
+    name: linux-export (both flavors, clean-host boot)
+    needs: [license-gate, python-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      - name: Configure (dev preset)
+        run: cmake -S src --preset dev
+
+      - name: Build the CLI + both shipped runtime-host flavors
+        run: cmake --build --preset dev --target context context_runtime_desktop context_runtime_server
+        working-directory: src
+
+      - name: Assemble each flavor's tarball and boot it on a CLEAN host (no dev tree)
+        shell: bash
+        run: |
+          set -euo pipefail
+          CTX="src/build/dev/cli/context"
+          DESKTOP="$PWD/src/build/dev/runtime/host/context-runtime"
+          SERVER="$PWD/src/build/dev/runtime/host/context-runtime-server"
+          # A minimal buildable project (L-33 hex ids on every entity). printf, not heredoc — robust in YAML.
+          proj="$(mktemp -d)"
+          mkdir -p "$proj/scenes"
+          printf '%s' '{"$schema":"ctx:project","scene":"scenes/main.scene.json","version":1}' > "$proj/project.json"
+          printf '%s' '{"$schema":"ctx:scene","version":1,"entities":[{"id":"aaaa0000aaaa0001","name":"Camera","components":{"camera":{"fov":1.0}}},{"id":"aaaa0000aaaa0002","name":"Player","components":{"transform":{}}}]}' > "$proj/scenes/main.scene.json"
+          for flavor in server desktop; do
+            if [ "$flavor" = desktop ]; then bin="$DESKTOP"; else bin="$SERVER"; fi
+            tar="$proj/dist/game-linux-$flavor.tar"
+            echo "== build + emit-artifact + smoke ($flavor) =="
+            # R-BUILD-009: `context build --smoke` launches the produced artifact + folds the boot signal.
+            "$CTX" build --target linux --flavor "$flavor" --project "$proj" \
+              --out "$proj/build/$flavor.pack" --runtime "$bin" --emit-artifact "$tar" \
+              --smoke --smoke-ticks 16 | tee "$proj/$flavor-envelope.json"
+            python3 -c "import json,sys; d=json.load(open(sys.argv[1]))['data']; assert d['adapter']['supported'] and d['adapter']['flavor']==sys.argv[2]; assert d['artifactEmit']['emitted']; assert d['smoke']['ran'] and d['smoke']['ok'] and d['smoke']['simTick']==16, d['smoke']" "$proj/$flavor-envelope.json" "$flavor"
+            echo "== clean-host boot from the extracted tarball ($flavor) =="
+            clean="$(mktemp -d)"          # a fresh dir OUTSIDE the repo / build tree — no dev tree present
+            tar -xf "$tar" -C "$clean"
+            chmod +x "$clean/bin/"* "$clean/launch.sh"   # tar_write emits 0644; the launcher/binary need +x
+            signal="$("$clean/launch.sh" --ticks 16)"
+            echo "clean-host $flavor signal: $signal"
+            echo "$signal" | grep -q '"ok":true'
+            echo "$signal" | grep -q '"simTick":16'
+            echo "$signal" | grep -q "\"flavor\":\"$flavor\""
+          done
+          echo "== render-footprint audit (L-5 DCE: headless carries no render payload) =="
+          python3 -c "import sys,pathlib; d=pathlib.Path(sys.argv[1]).read_bytes(); s=pathlib.Path(sys.argv[2]).read_bytes(); assert b'CTXHOST-FOOTPRINT:render-present' in d, 'render marker missing from desktop'; assert b'CTXHOST-FOOTPRINT:render-present' not in s, 'render marker in server (headless leaked render)'; assert len(s) < len(d), f'server {len(s)} not smaller than desktop {len(d)}'; print(f'render-footprint OK: desktop={len(d)} server={len(s)} delta={len(d)-len(s)}')" "$DESKTOP" "$SERVER"
+
+      - name: runtime-host ctests (in-process core/render + cross-process smoke + footprint)
+        run: ctest --preset dev -R "^runtime-host-" --output-on-failure
+        working-directory: src
+
+      - name: sccache stats
+        run: ${SCCACHE_PATH} --show-stats
+
   # WebGPU spike (spikes/webgpu): native build on all three desktop platforms + the offscreen
   # render/readback self-check. The spike is standalone-configurable (no vcpkg — it pins its own
   # wgpu-native prebuilt), so this job stays light: no other spike's deps are configured here.

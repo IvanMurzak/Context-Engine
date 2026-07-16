@@ -655,15 +655,34 @@ Registry::Registry()
     verbs_.push_back(make_verb(
         "", "", "build",
         "Headless per-agent build (R-BUILD-002): drive the project through verify → toolchain → aot → "
-        "transcode → pack → link for --target and report the packed artifact's generation + pointers as "
-        "the R-CLI-008 envelope. Builds THIS agent's one target (R-BUILD-007); the platform adapter is a "
-        "stub until a06. Non-interactive (R-CLI-003).",
+        "transcode → pack → link → adapter for --target and report the packed artifact's generation + "
+        "pointers as the R-CLI-008 envelope. Builds THIS agent's one target (R-BUILD-007). The a06 Linux "
+        "export adapters are real (--flavor desktop|server; --emit-artifact assembles the runnable "
+        "tarball with --runtime; --smoke launches it — R-BUILD-009); other targets report the honest "
+        "adapter stub. Non-interactive (R-CLI-003).",
         /*params=*/{},
         /*flags=*/
         {{"target", "string", "The build target platform: windows | linux | macos | web.", false},
          {"out", "path",
           "Write the packed artifact to this path (default: <project>/build/<target>.pack).",
-          false}},
+          false},
+         {"flavor", "string",
+          "The a06 export flavor: desktop (render subsystem present) | server (headless, render absent). "
+          "Applies to --target linux; default desktop.",
+          false},
+         {"runtime", "path",
+          "The shipped RuntimeKernel host binary for the target/flavor (the export-template binary), "
+          "packaged by --emit-artifact and launched by --smoke.",
+          false},
+         {"emit-artifact", "path",
+          "Assemble the runnable artifact tarball (bin/<runtime> + content/<pack> + launch.sh + "
+          "context.build.json) at this path (R-BUILD-005 minimal packaging); requires --runtime.",
+          false},
+         {"smoke", "bool",
+          "Launch the produced artifact against --runtime, step --smoke-ticks fixed ticks against the "
+          "shipped RuntimeKernel, and fold the R-BUILD-009 boot/state signal into the envelope.",
+          false},
+         {"smoke-ticks", "int", "Fixed ticks to step during --smoke (default 8).", false}},
         /*implemented=*/true));
 
     // --- the OPERATIONAL daemon-driver surface (R-CLI-009 honesty) ------------------------------

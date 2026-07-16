@@ -106,7 +106,15 @@ int main()
         CHECK(r.summary.entity_count == 2);
         CHECK(r.summary.unit_count >= 1);
         CHECK(r.summary.sidecar_count == 0);
-        CHECK(r.summary.adapter_stub); // the a06 adapter is a stub — reported, never faked
+        // a06: the Linux adapter is REAL now (no longer a stub). The default flavor is desktop (render
+        // subsystem present); the plan describes the runnable-artifact tarball layout.
+        CHECK(!r.summary.adapter_stub);
+        CHECK(r.summary.adapter.supported);
+        CHECK(r.summary.adapter.target == "linux");
+        CHECK(r.summary.adapter.flavor == "desktop");
+        CHECK(r.summary.adapter.render_present);
+        CHECK(r.summary.adapter.runtime_binary == "context-runtime");
+        CHECK(r.summary.adapter.layout.size() == 4); // bin/ + content/ + launcher + manifest
 
         // The produced bytes ARE a valid pack (read_pack verifies every chunk's content hash).
         const pack::ParsedPack parsed = pack::read_pack(r.pack_bytes);
@@ -118,6 +126,42 @@ int main()
         CHECK(again.ok);
         CHECK(again.pack_bytes == r.pack_bytes);
         CHECK(again.summary.generation == r.summary.generation);
+    }
+
+    // --- a06 adapter: the server/headless flavor omits render (L-5 DCE) -----------------------------
+    {
+        build::BuildRequest req = base_request();
+        req.flavor = "server";
+        const build::BuildResult r = build::run_build(req);
+        CHECK(r.ok);
+        CHECK(!r.summary.adapter_stub);
+        CHECK(r.summary.adapter.supported);
+        CHECK(r.summary.adapter.flavor == "server");
+        CHECK(!r.summary.adapter.render_present);
+        CHECK(r.summary.adapter.runtime_binary == "context-runtime-server");
+    }
+
+    // --- a06 adapter: a target with no real adapter yet keeps the HONEST stub (R-BUILD-007) ---------
+    {
+        // windows has a toolchain entry + no sidecars, so it builds a pack — but a06 ships no windows
+        // adapter, so the plan is unsupported (adapter_stub true), never a faked artifact.
+        build::BuildRequest req = base_request();
+        req.target = "windows";
+        const build::BuildResult r = build::run_build(req);
+        CHECK(r.ok);
+        CHECK(r.summary.adapter_stub);
+        CHECK(!r.summary.adapter.supported);
+        CHECK(r.summary.adapter.layout.empty());
+    }
+
+    // --- a06 adapter: an unknown flavor on linux is not a supported adapter (honest stub) -----------
+    {
+        build::BuildRequest req = base_request();
+        req.flavor = "console";
+        const build::BuildResult r = build::run_build(req);
+        CHECK(r.ok);
+        CHECK(r.summary.adapter_stub);
+        CHECK(!r.summary.adapter.supported);
     }
 
     // --- build.template_unverified: a missing / malformed / empty project ---------------------------

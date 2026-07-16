@@ -8,6 +8,7 @@
 # lives here too (toolchain_manifest.*, mirroring cmake/toolchain-versions.json).
 add_library(context_build STATIC
     src/build_orchestrator.cpp
+    src/adapter.cpp
     src/toolchain_manifest.cpp)
 
 target_include_directories(context_build PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -42,3 +43,11 @@ target_compile_definitions(context_build_test_build_orchestrator PRIVATE
 target_link_options(context_build_test_build_orchestrator PRIVATE
     $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
 add_test(NAME build-test_build_orchestrator COMMAND context_build_test_build_orchestrator)
+
+# a06 export-adapter (adapter.*): the pure plan + launcher + manifest generators — the two real Linux
+# flavors (desktop/server), the honest stub for uncovered targets, and the deterministic launcher/
+# manifest text. No filesystem, so no static-runtime link needed (unlike the orchestrator drift guard).
+add_executable(context_build_test_adapter tests/test_adapter.cpp)
+target_link_libraries(context_build_test_adapter PRIVATE context_build context_warnings)
+target_include_directories(context_build_test_adapter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME build-test_adapter COMMAND context_build_test_adapter)
