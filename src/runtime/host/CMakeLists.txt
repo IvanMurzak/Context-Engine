@@ -81,6 +81,29 @@ add_dependencies(context_runtime_host_test_smoke context_runtime_server context_
 add_test(NAME runtime-host-smoke COMMAND context_runtime_host_test_smoke)
 set_tests_properties(runtime-host-smoke PROPERTIES TIMEOUT 60)
 
+# The PACKED-WEDGE DETERMINISM gate (M8 task a07, R-BUILD-009 / R-QA-005 / L-54): the L-54 state-hash
+# gate re-run against the SHIPPED wedge build, not the editor-embedded kernel. It launches the shipped
+# server/headless host binary over a real pack (fixed seed + N ticks), reads the SHIPPED kernel's
+# post-step sim state hash, and asserts it equals BOTH the in-process editor-embedded Session hash and a
+# committed cross-platform golden. Links context_session for the in-process reference + the pack/compose/
+# serializer editor side to build the artifact + context_common for the hardened subprocess launch. The
+# server binary path is threaded in as a compile-time define. Registered in the `determinism-*` family
+# (so the blocking CI "Determinism gate" -R "^determinism-" step runs it on all three build-matrix legs)
+# AND added to the strict-FP `deterministic` job's hand-maintained --target list in ci.yml WITH
+# context_runtime_server (the "Not Run = RED" tripwire — an un-built executable would report Not Run).
+add_executable(context_runtime_host_test_packed_determinism tests/test_packed_determinism.cpp)
+target_include_directories(context_runtime_host_test_packed_determinism
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+target_link_libraries(context_runtime_host_test_packed_determinism
+    PRIVATE context_common context_session context_pack context_compose context_serializer
+            context_warnings)
+target_link_options(context_runtime_host_test_packed_determinism PRIVATE ${_host_static_runtime})
+target_compile_definitions(context_runtime_host_test_packed_determinism PRIVATE
+    CONTEXT_RUNTIME_SERVER_BIN="$<TARGET_FILE:context_runtime_server>")
+add_dependencies(context_runtime_host_test_packed_determinism context_runtime_server)
+add_test(NAME determinism-packed-wedge COMMAND context_runtime_host_test_packed_determinism)
+set_tests_properties(determinism-packed-wedge PROPERTIES TIMEOUT 120)
+
 # The render footprint / DCE audit (DoD 2): a toolchain-agnostic file(STRINGS)+file(SIZE) check that the
 # server/headless binary carries NO render payload (marker absent + smaller) while the desktop binary
 # does (marker present). Runs on every build leg (needs both exes built — `--preset dev` builds the tree

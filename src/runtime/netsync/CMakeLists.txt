@@ -64,3 +64,21 @@ target_link_libraries(context_netsync_test_convergence
 target_link_options(context_netsync_test_convergence PRIVATE ${_context_netsync_static_runtime})
 target_include_directories(context_netsync_test_convergence PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME netsync-test_convergence COMMAND context_netsync_test_convergence)
+
+# --- the M8 a07 REPLICATION-AGAINST-PACKS gate (R-NET-001 / L-48) --------------------------------
+# The M6 convergence harness re-run with the replication net-ids sourced FROM THE PACK: a real v1 pack
+# is loaded back through the shipped runtime content seam (context_runtime_content over context_pack),
+# each packed entity's composed identity (L-37) is read out, and the moving-body source->replica
+# convergence is driven keyed by those pack-carried identities — validating the M8-exit clause that the
+# wedge builds carry the validated L-48/R-NET-001 replication metadata. Links context_runtime_content +
+# the pack/compose/serializer editor side (to build + load the pack) in addition to the physics packages.
+# A CONVERGENCE / netcode test, NOT a strict-FP determinism scene — it registers NO determinism-* ctest
+# and is intentionally absent from the ci.yml `deterministic` job --target list (like the sibling
+# convergence test); it auto-runs on all three build-matrix legs via the `build` job's general step.
+add_executable(context_netsync_test_packed_replication tests/test_packed_replication.cpp)
+target_link_libraries(context_netsync_test_packed_replication
+    PRIVATE context_netsync context_runtime_content context_pack context_compose context_serializer
+            context_physics3d context_warnings)
+target_link_options(context_netsync_test_packed_replication PRIVATE ${_context_netsync_static_runtime})
+target_include_directories(context_netsync_test_packed_replication PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME netsync-packed-replication COMMAND context_netsync_test_packed_replication)
