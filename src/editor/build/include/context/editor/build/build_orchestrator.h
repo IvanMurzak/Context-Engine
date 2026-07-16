@@ -88,10 +88,8 @@ struct BuildSummary
     std::string registration_tu;    // the generated registration TU source (per-build, cache-exempt — a12)
     // The a06 export-adapter plan for (target, flavor): the runnable-artifact description (shipped
     // runtime binary + pack + launcher + manifest). adapter.supported=false is the honest stub for a
-    // target with no real adapter yet (R-BUILD-007) — mirrored by adapter_stub below.
+    // target with no real adapter yet (R-BUILD-007) — the single source of truth for "is this a stub".
     AdapterPlan adapter;
-    bool adapter_stub = true;       // == !adapter.supported: true when the adapter is still a stub for
-                                    // this target (kept for the CLI/legacy honesty reporting)
 };
 
 // The outcome. ok ⇒ (pack_bytes, summary) are the build product; !ok ⇒ (error_code, error_message,

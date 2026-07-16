@@ -166,7 +166,7 @@ namespace subprocess = context::common::subprocess;
         return e;
     }
     std::vector<pkg::TarEntry> entries;
-    entries.push_back({"bin/" + plan.runtime_binary, runtime_bytes, false});
+    entries.push_back({"bin/" + plan.runtime_binary, std::move(runtime_bytes), false});
     entries.push_back({"content/" + plan.pack_name, pack_bytes, false});
     entries.push_back({plan.launcher_name, build::render_launcher(plan), false});
     entries.push_back(
@@ -416,6 +416,12 @@ Envelope run_build(const std::map<std::string, std::string>& flags)
                 return Envelope::failure("usage.invalid",
                                          "--smoke-ticks must be a non-negative integer", *t);
             }
+            // A negative value parses cleanly but is invalid: it would reach the runtime as `--ticks -N`,
+            // where std::stoull wraps it to a huge tick count → the smoke child hangs. Reject it here so
+            // the "non-negative integer" contract above holds for real.
+            if (smoke_ticks < 0)
+                return Envelope::failure("usage.invalid",
+                                         "--smoke-ticks must be a non-negative integer", *t);
         }
         data.set("smoke", run_smoke(s.adapter, flag(flags, "runtime"), out_path, dry_run, smoke_ticks));
     }

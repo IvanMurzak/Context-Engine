@@ -108,7 +108,6 @@ int main()
         CHECK(r.summary.sidecar_count == 0);
         // a06: the Linux adapter is REAL now (no longer a stub). The default flavor is desktop (render
         // subsystem present); the plan describes the runnable-artifact tarball layout.
-        CHECK(!r.summary.adapter_stub);
         CHECK(r.summary.adapter.supported);
         CHECK(r.summary.adapter.target == "linux");
         CHECK(r.summary.adapter.flavor == "desktop");
@@ -134,7 +133,6 @@ int main()
         req.flavor = "server";
         const build::BuildResult r = build::run_build(req);
         CHECK(r.ok);
-        CHECK(!r.summary.adapter_stub);
         CHECK(r.summary.adapter.supported);
         CHECK(r.summary.adapter.flavor == "server");
         CHECK(!r.summary.adapter.render_present);
@@ -144,12 +142,11 @@ int main()
     // --- a06 adapter: a target with no real adapter yet keeps the HONEST stub (R-BUILD-007) ---------
     {
         // windows has a toolchain entry + no sidecars, so it builds a pack — but a06 ships no windows
-        // adapter, so the plan is unsupported (adapter_stub true), never a faked artifact.
+        // adapter, so the plan is unsupported (supported=false), never a faked artifact.
         build::BuildRequest req = base_request();
         req.target = "windows";
         const build::BuildResult r = build::run_build(req);
         CHECK(r.ok);
-        CHECK(r.summary.adapter_stub);
         CHECK(!r.summary.adapter.supported);
         CHECK(r.summary.adapter.layout.empty());
     }
@@ -160,7 +157,6 @@ int main()
         req.flavor = "console";
         const build::BuildResult r = build::run_build(req);
         CHECK(r.ok);
-        CHECK(r.summary.adapter_stub);
         CHECK(!r.summary.adapter.supported);
     }
 

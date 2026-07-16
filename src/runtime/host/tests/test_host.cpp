@@ -122,9 +122,10 @@ int main()
 #ifdef CONTEXT_HOST_RENDER
     CHECK(r.flavor == "desktop");
     CHECK(r.render_present);
-    // The GPU-free sim→render extract ran headlessly (no GPU device was created) — render_extract_items
-    // is a valid count (the demo world may carry no drawables, so we assert only that the path ran).
-    CHECK(r.render_extract_items == r.render_extract_items); // extract executed without crashing
+    // The GPU-free sim→render extract ran headlessly (no GPU device was created). The demo world may
+    // carry no drawables, so there is no positive drawable count to assert; reaching this line at all
+    // (run_host returned ok with the render half compiled in) is the proof the extract path ran — a
+    // self-comparison would be a no-op AND a Clang -Wtautological-compare -Werror red on the CI legs.
 #else
     CHECK(r.flavor == "server");
     CHECK(!r.render_present);

@@ -251,6 +251,18 @@ int main()
         remove_quiet(dir);
     }
 
+    // --- a06 --smoke-ticks rejects a negative value (the "non-negative integer" contract holds) ------
+    {
+        const fs::path dir = make_project("smokeneg");
+        const Envelope e = run_build({{"target", "linux"},
+                                      {"project", dir.string()},
+                                      {"smoke", "true"},
+                                      {"smoke-ticks", "-5"}});
+        CHECK(!e.ok());
+        CHECK(e.error()->code == "usage.invalid");
+        remove_quiet(dir);
+    }
+
     // --- per-verb --help + global --help emit the contract self-description --------------------------
     {
         const Envelope verb_help = run({"build", "--help"});

@@ -132,5 +132,15 @@ int main()
         CHECK(contains(stdout_text, f.render_signal));
     }
 
+    // A negative --ticks is rejected by the SHIPPED binary (std::stoull would otherwise wrap it to a
+    // ~1.8e19 tick count and hang the boot); it exits non-zero, matching its "non-negative" contract.
+    {
+        int exit_code = 0;
+        const std::string stdout_text =
+            run_host_binary(CONTEXT_RUNTIME_SERVER_BIN, pack_path.string(), -5, exit_code);
+        CHECK(exit_code != 0);            // fail-closed on a negative tick count, never a hang
+        static_cast<void>(stdout_text);
+    }
+
     HOST_TEST_MAIN_END();
 }

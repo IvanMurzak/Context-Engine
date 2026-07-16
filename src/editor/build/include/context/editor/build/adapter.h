@@ -2,7 +2,7 @@
 // description of the RUNNABLE artifact the build adapter produces for a (target, flavor) — the shipped
 // RuntimeKernel binary + the v1 pack + a launcher + a build manifest, laid out in a documented tarball
 // (R-BUILD-005 minimal packaging: NO code-signing on Linux). a05 ended its pipeline at an honest
-// adapter STUB (BuildSummary::adapter_stub); a06 replaces that stub for the first two real adapters —
+// adapter STUB (BuildSummary::adapter.supported=false); a06 replaces that stub for the first two real adapters —
 // Linux DESKTOP (render subsystem present) and Linux SERVER/headless (render absent, L-5 DCE'd).
 //
 // This is the PURE half (no filesystem, no clock): plan_adapter describes the artifact, and the

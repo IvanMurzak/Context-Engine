@@ -65,14 +65,26 @@ int main(int argc, char** argv)
     const std::string ticks = flag_value(argc, argv, "--ticks");
     const std::string seed = flag_value(argc, argv, "--seed");
     const std::string scenario = flag_value(argc, argv, "--scenario");
-    try
-    {
-        if (!ticks.empty())
-            config.ticks = static_cast<std::uint64_t>(std::stoull(ticks));
-        if (!seed.empty())
-            config.seed = static_cast<std::uint64_t>(std::stoull(seed));
-    }
-    catch (...)
+    // Parse a non-negative u64 flag. std::stoull SILENTLY WRAPS a leading '-' (it negates modulo 2^64
+    // rather than throwing), so rejecting only on the exception would let `--ticks -5` become a ~1.8e19
+    // tick count and hang the boot — reject a leading '-' explicitly so the "non-negative" contract the
+    // error below states actually holds for the SHIPPED binary (and the launch.sh that forwards "$@").
+    const auto parse_u64 = [](const std::string& text, std::uint64_t& out) -> bool {
+        if (text.empty())
+            return true;
+        if (text[0] == '-')
+            return false;
+        try
+        {
+            out = static_cast<std::uint64_t>(std::stoull(text));
+        }
+        catch (...)
+        {
+            return false;
+        }
+        return true;
+    };
+    if (!parse_u64(ticks, config.ticks) || !parse_u64(seed, config.seed))
     {
         std::fprintf(stderr, "context-runtime: --ticks / --seed must be non-negative integers\n");
         return 1;

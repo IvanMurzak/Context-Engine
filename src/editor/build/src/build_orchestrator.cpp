@@ -204,7 +204,6 @@ BuildResult run_build(const BuildRequest& request)
     s.registered_packages = std::move(registered);
     s.registration_tu = std::move(reg_tu);
     s.adapter = plan_adapter(request.target, request.flavor, /*pack_name=*/"");
-    s.adapter_stub = !s.adapter.supported;
     return result;
 }
 
