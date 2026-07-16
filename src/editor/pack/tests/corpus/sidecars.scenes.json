@@ -1,0 +1,17 @@
+{
+  "root": "asset.scene.json",
+  "engineVersion": 7,
+  "scenes": {
+    "asset.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [
+        {"id": "aaaa0000aaaa0000", "name": "Statue", "components": {"mesh": {"$sidecar": "meshes/cube.mesh.bin", "hash": "12345678901234567890"}, "material": {"$sidecar": "textures/albedo.png.bin", "hash": "9988776655443322110"}}}
+      ]
+    }
+  },
+  "sidecars": [
+    {"relpath": "meshes/cube.mesh.bin", "hash": 12345678901234567890, "text": "binary-mesh-bytes-v1-deterministic"},
+    {"relpath": "textures/albedo.png.bin", "hash": 9988776655443322110, "text": "synthetic-albedo-texture-payload"}
+  ]
+}

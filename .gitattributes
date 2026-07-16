@@ -20,6 +20,7 @@ tools/tests/fixtures/** -text
 src/editor/gui/a11y/coverage.manifest.jsonl merge=union
 
 # Binary assets — never normalize.
+*.pack binary
 *.png binary
 *.jpg binary
 *.jpeg binary

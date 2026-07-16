@@ -1,0 +1,23 @@
+{
+  "root": "level.scene.json",
+  "engineVersion": 2,
+  "scenes": {
+    "prop.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [
+        {"id": "9999888877776666", "name": "Prop", "components": {"health": {"value": 100}, "transform": {"position": [0, 0, 0]}}}
+      ]
+    },
+    "level.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [{"id": "5555444433332222", "name": "LevelRoot", "components": {}}],
+      "instances": [{"id": "1010101010101010", "scene": "prop.scene.json"}],
+      "overrides": [
+        {"path": ["1010101010101010", "9999888877776666"], "pointer": "/components/health/value", "value": 50},
+        {"path": ["1010101010101010", "9999888877776666"], "pointer": "/name", "value": "PropOverridden"}
+      ]
+    }
+  }
+}
