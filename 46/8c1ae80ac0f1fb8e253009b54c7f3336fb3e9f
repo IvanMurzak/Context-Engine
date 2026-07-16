@@ -1,0 +1,96 @@
+src/CMakeLists.txt
+  s_8c19f166a0a4cd::t_5cce0d16a46630 383-390
+.gitignore
+  s_8c19f166a0a4cd::t_bee50dbd3a4115 6-9
+src/editor/build/include/context/editor/build/build_errors.h
+  s_8c19f166a0a4cd::t_f99bea8e036dcc 1-38
+src/editor/build/README.md
+  s_8c19f166a0a4cd::t_0c2cb172a8f571 1-44
+src/editor/contract/tests/test_registry_parity.cpp
+  s_8c19f166a0a4cd::t_53feb7d0868b5c 274
+  s_8c19f166a0a4cd::t_862debe47c87a8 197-214
+src/editor/build/include/context/editor/build/toolchain_manifest.h
+  s_8c19f166a0a4cd::t_df2590c33ee9bf 1-47
+src/editor/build/include/context/editor/build/build_orchestrator.h
+  s_8c19f166a0a4cd::t_969d8934e1ec98 1-104
+src/editor/contract/tests/test_error_catalog.cpp
+  s_8c19f166a0a4cd::t_cfb3b659ae06e3 505-558
+src/cli/include/context/cli/build_command.h
+  s_8c19f166a0a4cd::t_1cee91faebf6da 1-23
+src/cli/tests/test_build_command.cpp
+  s_8c19f166a0a4cd::t_7ac939f6e49690 1-11,53-73,85,87-88,104,112,116,124-125,158,167-168
+  s_8c19f166a0a4cd::t_8eb17f561cc0b2 113,117
+  s_8c19f166a0a4cd::t_782d7846c5b5c2 97-98,103
+  s_8c19f166a0a4cd::t_008fb380326836 12-52,74-84,86,89-96,99-102,105-111,114-115,118-123,126-157,159-166,169-189
+src/editor/build/CMakeLists.txt
+  s_8c19f166a0a4cd::t_dab79fec038dc8 1-44
+src/cli/src/app.cpp
+  s_8c19f166a0a4cd::t_08c8f216de4f58 175-182
+  s_8c19f166a0a4cd::t_18be824f4928fb 314-317
+  s_8465cab7df724e::t_256d97569a3a75 7,252-258
+src/cli/src/build_command.cpp
+  s_8c19f166a0a4cd::t_89fe5048109c14 5
+  s_8c19f166a0a4cd::t_130d70076aeb69 199-203,208,223-225
+  s_8c19f166a0a4cd::t_7fe3a1b759417a 1-4,6-198,204-207,209-222,226-228
+src/editor/build/src/toolchain_manifest.cpp
+  s_8c19f166a0a4cd::t_964fef7c288ffa 1-49
+src/editor/build/tests/test_build_orchestrator.cpp
+  s_8c19f166a0a4cd::t_50fd38ea81f924 1-251
+src/editor/contract/src/registry.cpp
+  s_8c19f166a0a4cd::t_9129eb6efef7c1 643-668
+src/cli/CMakeLists.txt
+  s_8c19f166a0a4cd::t_5782ed1d95527a 134-139
+  s_8c19f166a0a4cd::t_83b43b614d5a67 108
+  s_8c19f166a0a4cd::t_5bd1479ab92d73 81-86
+  s_8c19f166a0a4cd::t_79c7db5acd2daf 12
+src/editor/build/src/build_orchestrator.cpp
+  s_8c19f166a0a4cd::t_d9bc26c3542f0c 1-205
+src/tests/integration/test_samples_corpus.cpp
+  s_8c19f166a0a4cd::t_6e0ad06bef3f5e 367-371,375-376
+src/editor/contract/src/error_catalog.cpp
+  s_8c19f166a0a4cd::t_14e382276ddfb9 852-904
+src/cli/tests/test_cli.cpp
+  s_364be739bc892c::t_710f413b813d10 168-174,176
+src/editor/build/tests/build_test.h
+  s_e76879ce38f93b::t_cfddb19b024359 1-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "468c1ae80ac0f1fb8e253009b54c7f3336fb3e9f",
+  "prompts": {},
+  "sessions": {
+    "s_364be739bc892c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b8f91f54-742b-4579-9e3a-eeb38012be81",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_8465cab7df724e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e8f23f15-2ff5-42a9-98c6-407f54660a93",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_8c19f166a0a4cd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "df8298f2-beea-41ba-9052-0bf0c5fc46f2",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e76879ce38f93b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "90bb756d-c158-4063-aaec-3f5e702c2d20",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
