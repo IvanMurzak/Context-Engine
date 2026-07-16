@@ -84,6 +84,13 @@ target_link_libraries(context_cli PRIVATE context_ui)
 # context_compose + context_import + context_pack for the derive → transcode → pack chain).
 target_link_libraries(context_cli PRIVATE context_build)
 
+# M8 task a06 (issue #259): `context build --emit-artifact / --smoke` — the a06 export adapter assembles
+# the runnable tarball (pkg::tar_write in context_editor_pkg, already linked above) and launches it to
+# smoke-run the packed artifact (R-BUILD-009). PRIVATE context_common: build_command.cpp uses the
+# hardened subprocess runner (context::common::subprocess) to spawn the shipped runtime host binary and
+# capture its boot/state signal; no common type appears in the CLI's public headers.
+target_link_libraries(context_cli PRIVATE context_common)
+
 # Self-contained GCC runtime for the CLI executables. context_cli uses std::filesystem (the
 # `context new` scaffolder), whose libstdc++ symbols live in a NEWER libstdc++-6.dll; on a MinGW
 # host a stale libstdc++-6.dll elsewhere on PATH can shadow the toolchain's and be loaded first,

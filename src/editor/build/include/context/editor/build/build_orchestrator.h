@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include "context/editor/build/adapter.h"
 #include "context/editor/build/toolchain_manifest.h"
 #include "context/editor/compose/flatten.h"
 #include "context/editor/import/importer.h"
@@ -54,6 +55,9 @@ struct BuildArtifact
 struct BuildRequest
 {
     std::string target;                 // the build target id: windows | linux | macos | web
+    std::string flavor = kFlavorDesktop; // the a06 export flavor: desktop (render present) | server
+                                         // (headless, render absent). Only "linux" has real adapters
+                                         // yet; other targets ignore it and report the honest stub.
     const compose::SceneResolver* resolver = nullptr; // resolves the project's scene files (for flatten)
     std::string root_scene_path;        // the project's root scene (from the project manifest)
     std::vector<ToolchainEntry> toolchain; // the per-target toolchain manifest (R-PKG-002); usually the
@@ -82,7 +86,10 @@ struct BuildSummary
     std::size_t entity_count = 0;   // composed entities across all units
     std::vector<std::string> registered_packages; // the R-KERNEL-003 reg-TU package set (LTO/DCE footprint)
     std::string registration_tu;    // the generated registration TU source (per-build, cache-exempt — a12)
-    bool adapter_stub = true;       // the platform adapter is a stub until a06 (reported, never faked)
+    // The a06 export-adapter plan for (target, flavor): the runnable-artifact description (shipped
+    // runtime binary + pack + launcher + manifest). adapter.supported=false is the honest stub for a
+    // target with no real adapter yet (R-BUILD-007) — the single source of truth for "is this a stub".
+    AdapterPlan adapter;
 };
 
 // The outcome. ok ⇒ (pack_bytes, summary) are the build product; !ok ⇒ (error_code, error_message,

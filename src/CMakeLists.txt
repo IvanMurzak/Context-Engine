@@ -686,6 +686,16 @@ add_subdirectory(editor/gui)
 # regardless of add_subdirectory order).
 add_subdirectory(runtime/netsync)
 
+# M8 a06: the shipped RuntimeKernel HOST binary (src/runtime/host/, R-BUILD-009 / R-HEAD-001/002 / L-5,
+# issue #259) — the FIRST standalone runtime executable. It boots a packed v1 artifact headlessly (the
+# runtime content seam → a Session → step N ticks) in two DCE flavors: desktop (render subsystem present)
+# and server/headless (render absent). MUST follow add_subdirectory(render) above (the desktop flavor
+# links context_render) as well as runtime/session + runtime/content (both above). OWN stanza —
+# deliberately apart from the editor/runtime clusters and the exit-gate block below — so concurrent
+# sibling tasks inserting into this file merge cleanly (consumers name targets resolved at generate time
+# regardless of add_subdirectory order).
+add_subdirectory(runtime/host)
+
 # ---------------------------------------------------------------------------
 # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36): five integration tests, one per exit
 # criterion, registered as the `m1-exit-*` ctest family and CI-gated per the §6 tiering (blocking

@@ -182,7 +182,12 @@ BuildResult run_build(const BuildRequest& request)
         reg_tu += "    register_" + pkg + "(kernel);\n";
     reg_tu += "    (void)kernel;\n}\n";
 
-    // --- Phase 7: platform adapter (STUB until a06) + success summary ---------------------------------
+    // --- Phase 7: platform adapter (a06: Linux desktop + server/headless) + success summary -----------
+    // The a06 adapter plans the runnable artifact — the shipped RuntimeKernel binary + this pack + a
+    // launcher + a manifest, in the R-BUILD-005 tarball layout. plan_adapter is pure + deterministic;
+    // the CLI (build_command.cpp) owns the on-disk tarball assembly + the R-BUILD-009 smoke launch. A
+    // target with no real adapter yet (windows/macos/web) plans supported=false — the honest stub
+    // (R-BUILD-007), never a faked artifact.
     BuildResult result;
     result.ok = true;
     result.pack_bytes = packed.bytes;
@@ -198,7 +203,7 @@ BuildResult run_build(const BuildRequest& request)
     s.entity_count = scene.entities.size();
     s.registered_packages = std::move(registered);
     s.registration_tu = std::move(reg_tu);
-    s.adapter_stub = true; // the a06 Linux adapter lands the real bootstrap; a05 reports the stub honestly
+    s.adapter = plan_adapter(request.target, request.flavor, /*pack_name=*/"");
     return result;
 }
 

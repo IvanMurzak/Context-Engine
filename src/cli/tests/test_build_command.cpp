@@ -96,7 +96,15 @@ int main()
         CHECK(data.at("target").as_string() == "linux");
         CHECK(!data.at("generation").as_string().empty()); // 64-bit content identity, decimal string
         CHECK(data.at("generation").as_string() != "0");
-        CHECK(data.at("adapter").as_string() == "stub"); // a06 lands the real adapter
+        // a06: the adapter is a machine-readable object (the default flavor is desktop, render present).
+        const Json& adapter = data.at("adapter");
+        CHECK(adapter.at("supported").as_bool());
+        CHECK(!adapter.at("stub").as_bool());
+        CHECK(adapter.at("flavor").as_string() == "desktop");
+        CHECK(adapter.at("renderPresent").as_bool());
+        CHECK(adapter.at("runtimeBinary").as_string() == "context-runtime");
+        CHECK(adapter.at("deterministicModuloLink").as_bool());
+        CHECK(adapter.at("layout").is_array());
         const Json& artifact = data.at("artifact");
         CHECK(artifact.at("written").as_bool());
         CHECK(artifact.at("packSize").as_int() > 0);
@@ -170,6 +178,88 @@ int main()
                                 out.generic_string()});
         CHECK(e.ok());
         CHECK(fs::exists(out));
+        remove_quiet(dir);
+    }
+
+    // --- a06 --flavor server: the headless adapter (render absent) reports its plan -----------------
+    {
+        const fs::path dir = make_project("server");
+        const Envelope e =
+            run_build({{"target", "linux"}, {"flavor", "server"}, {"project", dir.string()}});
+        CHECK(e.ok());
+        const Json& adapter = e.data().at("adapter");
+        CHECK(adapter.at("supported").as_bool());
+        CHECK(adapter.at("flavor").as_string() == "server");
+        CHECK(!adapter.at("renderPresent").as_bool());
+        CHECK(adapter.at("runtimeBinary").as_string() == "context-runtime-server");
+        remove_quiet(dir);
+    }
+
+    // --- a06 unknown --flavor is a usage error (never a silent fallback) -----------------------------
+    {
+        const fs::path dir = make_project("badflavor");
+        const Envelope e =
+            run_build({{"target", "linux"}, {"flavor", "console"}, {"project", dir.string()}});
+        CHECK(!e.ok());
+        CHECK(e.error()->code == "usage.invalid");
+        remove_quiet(dir);
+    }
+
+    // --- a06 --emit-artifact assembles the runnable tarball (R-BUILD-005) ----------------------------
+    {
+        const fs::path dir = make_project("artifact");
+        const fs::path out = dir / "build" / "game.pack";
+        const fs::path runtime = dir / "fake-runtime.bin"; // stand-in for the shipped host binary
+        write_file(runtime, "\x7f\x45\x4c\x46 fake elf bytes for the export template");
+        const fs::path tar = dir / "dist" / "game-linux-server.tar";
+        const Envelope e = run_build({{"target", "linux"},
+                                      {"flavor", "server"},
+                                      {"project", dir.string()},
+                                      {"out", out.generic_string()},
+                                      {"runtime", runtime.string()},
+                                      {"emit-artifact", tar.generic_string()}});
+        CHECK(e.ok());
+        const Json& emit = e.data().at("artifactEmit");
+        CHECK(emit.at("emitted").as_bool());
+        CHECK(emit.at("entryCount").as_int() == 4); // bin/ + content/ + launch.sh + manifest
+        CHECK(fs::exists(tar));
+        CHECK(fs::file_size(tar) > 0);
+        remove_quiet(dir);
+    }
+
+    // --- a06 --emit-artifact without --runtime declares the reason (never a silent skip) ------------
+    {
+        const fs::path dir = make_project("noreq");
+        const fs::path tar = dir / "dist" / "game.tar";
+        const Envelope e = run_build({{"target", "linux"},
+                                      {"project", dir.string()},
+                                      {"emit-artifact", tar.generic_string()}});
+        CHECK(e.ok());
+        CHECK(!e.data().at("artifactEmit").at("emitted").as_bool());
+        CHECK(!e.data().at("artifactEmit").at("reason").as_string().empty());
+        remove_quiet(dir);
+    }
+
+    // --- a06 --smoke without --runtime declares ran=false machine-readably (R-BUILD-009) ------------
+    {
+        const fs::path dir = make_project("smoke");
+        const Envelope e =
+            run_build({{"target", "linux"}, {"project", dir.string()}, {"smoke", "true"}});
+        CHECK(e.ok());
+        CHECK(!e.data().at("smoke").at("ran").as_bool());
+        CHECK(!e.data().at("smoke").at("reason").as_string().empty());
+        remove_quiet(dir);
+    }
+
+    // --- a06 --smoke-ticks rejects a negative value (the "non-negative integer" contract holds) ------
+    {
+        const fs::path dir = make_project("smokeneg");
+        const Envelope e = run_build({{"target", "linux"},
+                                      {"project", dir.string()},
+                                      {"smoke", "true"},
+                                      {"smoke-ticks", "-5"}});
+        CHECK(!e.ok());
+        CHECK(e.error()->code == "usage.invalid");
         remove_quiet(dir);
     }
 

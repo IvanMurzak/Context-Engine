@@ -2,6 +2,8 @@
 
 #include "context/cli/build_command.h"
 
+#include "context/common/subprocess.h"
+#include "context/editor/build/adapter.h"
 #include "context/editor/build/build_errors.h"
 #include "context/editor/build/build_orchestrator.h"
 #include "context/editor/build/toolchain_manifest.h"
@@ -10,6 +12,7 @@
 #include "context/editor/contract/json.h"
 #include "context/editor/filesync/native_file_store.h"
 #include "context/editor/filesync/path_jail.h"
+#include "context/editor/pkg/tar.h"
 #include "context/editor/serializer/canonical.h"
 
 #include <cstdint>
@@ -101,6 +104,161 @@ private:
     mutable std::map<std::string, Entry, std::less<>> cache_;
 };
 
+namespace pkg = editor::pkg;
+namespace subprocess = context::common::subprocess;
+
+// The machine-readable adapter plan (a06). supported=false is the honest stub for a target with no real
+// adapter yet (R-BUILD-007); a supported plan carries the flavor, render presence, runtime binary, the
+// deterministic-modulo-link property, and the documented tarball layout.
+[[nodiscard]] Json adapter_json(const build::AdapterPlan& plan)
+{
+    Json a = Json::object();
+    a.set("supported", Json(plan.supported));
+    a.set("stub", Json(!plan.supported));
+    a.set("target", Json(plan.target));
+    a.set("flavor", Json(plan.flavor));
+    if (!plan.supported)
+        return a;
+    a.set("renderPresent", Json(plan.render_present));
+    a.set("runtimeBinary", Json(plan.runtime_binary));
+    a.set("deterministicModuloLink", Json(true));
+    Json layout = Json::array();
+    for (const build::ArtifactEntry& e : plan.layout)
+    {
+        Json entry = Json::object();
+        entry.set("path", Json(e.archive_path));
+        entry.set("role", Json(e.role));
+        layout.push_back(std::move(entry));
+    }
+    a.set("layout", std::move(layout));
+    return a;
+}
+
+// Assemble the runnable artifact tarball (bin/<runtime> + content/<pack> + launch.sh + manifest) via
+// the deterministic ustar writer (pkg::tar_write). Reports emitted true/false + a reason — never a
+// silent skip. NB: tar_write writes mode 0644; a consumer extracting the tarball must `chmod +x` the
+// runtime binary + launcher before running (documented in the manifest / README — the exec-bit is a
+// tracked tar_write follow-up, like gzip).
+[[nodiscard]] Json emit_artifact(const build::AdapterPlan& plan, const std::string& pack_bytes,
+                                 std::uint64_t engine_version, std::uint64_t generation,
+                                 std::uint64_t pack_hash, const std::optional<std::string>& runtime,
+                                 const std::string& out_tar)
+{
+    Json e = Json::object();
+    e.set("path", Json(out_tar));
+    if (!plan.supported)
+    {
+        e.set("emitted", Json(false));
+        e.set("reason", Json(std::string("no export adapter for this target/flavor")));
+        return e;
+    }
+    if (!runtime.has_value() || runtime->empty())
+    {
+        e.set("emitted", Json(false));
+        e.set("reason", Json(std::string("--emit-artifact requires --runtime <host-binary>")));
+        return e;
+    }
+    std::string runtime_bytes;
+    if (!read_file(fs::path(*runtime), runtime_bytes))
+    {
+        e.set("emitted", Json(false));
+        e.set("reason", Json("could not read --runtime binary: " + *runtime));
+        return e;
+    }
+    std::vector<pkg::TarEntry> entries;
+    entries.push_back({"bin/" + plan.runtime_binary, std::move(runtime_bytes), false});
+    entries.push_back({"content/" + plan.pack_name, pack_bytes, false});
+    entries.push_back({plan.launcher_name, build::render_launcher(plan), false});
+    entries.push_back(
+        {plan.manifest_name, build::render_manifest(plan, engine_version, generation, pack_hash),
+         false});
+    const std::optional<std::string> tar = pkg::tar_write(entries);
+    if (!tar.has_value())
+    {
+        e.set("emitted", Json(false));
+        e.set("reason", Json(std::string("tar assembly failed (a path exceeded the ustar limit)")));
+        return e;
+    }
+    std::error_code ec;
+    const fs::path out_fs(out_tar);
+    if (out_fs.has_parent_path())
+        fs::create_directories(out_fs.parent_path(), ec);
+    std::ofstream os(out_fs, std::ios::binary | std::ios::trunc);
+    if (!os || !os.write(tar->data(), static_cast<std::streamsize>(tar->size())))
+    {
+        e.set("emitted", Json(false));
+        e.set("reason", Json("could not write artifact tarball: " + out_tar));
+        return e;
+    }
+    e.set("emitted", Json(true));
+    e.set("entryCount", Json(static_cast<std::uint64_t>(entries.size())));
+    return e;
+}
+
+// Launch the produced artifact against the shipped runtime binary (R-BUILD-009) and fold its boot/state
+// signal into the envelope. A target that cannot be smoke-run declares ran=false + a reason (never a
+// silent skip). The child's stdout is captured through a scratch file (the subprocess runner returns
+// only the exit code); its JSON signal is parsed and surfaced.
+[[nodiscard]] Json run_smoke(const build::AdapterPlan& plan, const std::optional<std::string>& runtime,
+                             const std::string& pack_path, bool dry_run, int ticks)
+{
+    Json sm = Json::object();
+    const auto not_run = [&sm](const std::string& reason) {
+        sm.set("ran", Json(false));
+        sm.set("reason", Json(reason));
+        return sm;
+    };
+    if (!plan.supported)
+        return not_run("no export adapter for this target/flavor");
+    if (!runtime.has_value() || runtime->empty())
+        return not_run("--smoke requires --runtime <host-binary>");
+    if (dry_run)
+        return not_run("--dry-run wrote no pack to smoke-run");
+    if (!fs::exists(fs::path(pack_path)))
+        return not_run("the built pack is not present at " + pack_path);
+
+    const fs::path out = subprocess::make_scratch_path("ctx-build-smoke", ".json");
+    subprocess::ScratchFile out_guard(out);
+    std::string cmd;
+    try
+    {
+        cmd = subprocess::quote_argument(*runtime) + " --pack " +
+              subprocess::quote_argument(pack_path) + " --ticks " + std::to_string(ticks) + " > " +
+              subprocess::quote_argument(out.string());
+    }
+    catch (const subprocess::MetacharacterError& ex)
+    {
+        return not_run(std::string("could not build a safe launch command: ") + ex.what());
+    }
+    const int exit_code = subprocess::run_command(cmd);
+    const std::string signal = subprocess::read_file(out);
+
+    sm.set("ran", Json(true));
+    sm.set("ticks", Json(static_cast<std::uint64_t>(ticks < 0 ? 0 : ticks)));
+    sm.set("exitCode", Json(static_cast<std::int64_t>(exit_code)));
+    // Parse the runtime's boot/state signal (best-effort — a launch failure yields empty stdout).
+    try
+    {
+        const Json parsed = Json::parse(signal);
+        sm.set("ok", Json(exit_code == 0 && parsed.contains("ok") && parsed.at("ok").as_bool()));
+        if (parsed.contains("simTick"))
+            sm.set("simTick", Json(static_cast<std::uint64_t>(parsed.at("simTick").as_int())));
+        if (parsed.contains("rootScene"))
+            sm.set("rootScene", Json(parsed.at("rootScene").as_string()));
+        if (parsed.contains("flavor"))
+            sm.set("flavor", Json(parsed.at("flavor").as_string()));
+        if (parsed.contains("renderPresent"))
+            sm.set("renderPresent", Json(parsed.at("renderPresent").as_bool()));
+    }
+    catch (const std::exception&)
+    {
+        // The runtime emitted no parseable signal (e.g. it could not be launched on this host).
+        sm.set("ok", Json(false));
+        sm.set("reason", Json(std::string("the runtime emitted no parseable boot/state signal")));
+    }
+    return sm;
+}
+
 } // namespace
 
 Envelope run_build(const std::map<std::string, std::string>& flags)
@@ -112,6 +270,14 @@ Envelope run_build(const std::map<std::string, std::string>& flags)
     const std::string project = flag(flags, "project").value_or(".");
     const bool dry_run = flags.find("dry-run") != flags.end();
 
+    // The a06 export flavor (desktop = render present; server = headless, render absent). Default
+    // desktop. A malformed value is a usage error, not a silent fallback (R-CLI-007).
+    const std::string flavor = flag(flags, "flavor").value_or(build::kFlavorDesktop);
+    if (!build::is_known_flavor(flavor))
+        return Envelope::failure("usage.invalid",
+                                 "unknown --flavor '" + flavor + "' (expected desktop | server)",
+                                 flavor);
+
     // Read the project manifest → the root scene, plus the OPTIONAL scripts / packages declarations the
     // build consumes (absent ⇒ a data-only game: no AOT tier, no linked packages). A missing/malformed
     // manifest is a pre-build template failure.
@@ -122,6 +288,7 @@ Envelope run_build(const std::map<std::string, std::string>& flags)
 
     build::BuildRequest req;
     req.target = target;
+    req.flavor = flavor;
     req.toolchain = build::toolchain_manifest();
     DiskSceneResolver resolver(project);
     req.resolver = &resolver;
@@ -217,8 +384,47 @@ Envelope run_build(const std::map<std::string, std::string>& flags)
     for (const std::string& p : s.registered_packages)
         registered.push_back(Json(p));
     data.set("registeredPackages", std::move(registered));
-    // The platform adapter is a stub until a06 — reported honestly, never a silent fake (R-BUILD-007).
-    data.set("adapter", Json(std::string("stub")));
+
+    // The a06 export adapter (Linux desktop + server/headless are real; other targets report the honest
+    // stub — R-BUILD-007). The plan is machine-readable in the envelope: an autonomous agent shipping
+    // multiple platforms reads whether a runnable artifact is available for (target, flavor).
+    data.set("adapter", adapter_json(s.adapter));
+
+    // --emit-artifact: assemble the runnable artifact tarball (R-BUILD-005 minimal packaging) — the
+    // shipped runtime binary (--runtime) + this pack + launch.sh + the manifest. Reported machine-
+    // readably (emitted true/false + reason), never a silent skip.
+    const std::optional<std::string> emit_path = flag(flags, "emit-artifact");
+    if (emit_path.has_value())
+        data.set("artifactEmit",
+                 emit_artifact(s.adapter, result.pack_bytes, s.engine_version, s.generation,
+                               s.pack_hash, flag(flags, "runtime"), *emit_path));
+
+    // --smoke (R-BUILD-009): launch the produced artifact against the shipped runtime binary, step N
+    // fixed ticks, and fold the boot/state signal into the envelope. A target that cannot be smoke-run
+    // (no adapter, no --runtime, or nothing written) declares that machine-readably rather than skipping.
+    if (flags.find("smoke") != flags.end())
+    {
+        int smoke_ticks = 8;
+        if (const std::optional<std::string> t = flag(flags, "smoke-ticks"); t.has_value())
+        {
+            try
+            {
+                smoke_ticks = std::stoi(*t);
+            }
+            catch (const std::exception&)
+            {
+                return Envelope::failure("usage.invalid",
+                                         "--smoke-ticks must be a non-negative integer", *t);
+            }
+            // A negative value parses cleanly but is invalid: it would reach the runtime as `--ticks -N`,
+            // where std::stoull wraps it to a huge tick count → the smoke child hangs. Reject it here so
+            // the "non-negative integer" contract above holds for real.
+            if (smoke_ticks < 0)
+                return Envelope::failure("usage.invalid",
+                                         "--smoke-ticks must be a non-negative integer", *t);
+        }
+        data.set("smoke", run_smoke(s.adapter, flag(flags, "runtime"), out_path, dry_run, smoke_ticks));
+    }
 
     // A build mutates no authored file, so the envelope's generationAfter (the derived-world generation
     // a WRITE lands in) is 0; the build's own content generation is reported in data above.

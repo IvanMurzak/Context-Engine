@@ -19,7 +19,17 @@ verify → toolchain → aot → transcode → pack → link → adapter
 | transcode | per-platform variant transcode of each binary sidecar (task a03) | `build.transcode_failed` (wraps `transcode.*`) |
 | pack | write the deterministic v1 target pack (task a01) | `internal.error` (defensive) |
 | link | generate the R-KERNEL-003 referenced-only registration TU + LTO/DCE | `build.link_failed` |
-| adapter | the platform bootstrap — **stubbed until a06**, reported honestly | — |
+| adapter | plan the runnable artifact — **a06: real Linux desktop + server/headless adapters** (`adapter.*`); other targets report the honest stub | — |
+
+## The a06 export adapter (`adapter.*`)
+
+The pure `plan_adapter(target, flavor)` describes the runnable artifact — the shipped RuntimeKernel
+binary + the v1 pack + a `launch.sh` + a `context.build.json` manifest, in a documented tarball layout
+(R-BUILD-005). It is IO-free: the CLI (`src/cli/build_command.cpp`) owns the on-disk tarball assembly
+(`pkg::tar_write`) and the R-BUILD-009 smoke launch. Two Linux flavors — `desktop` (render subsystem
+present) and `server`/headless (render absent, L-5 DCE) — differ only in the shipped host binary
+(`src/runtime/host/`). Any target with no real adapter yet reports `supported=false` (R-BUILD-007). The
+artifact is deterministic MODULO the LTO link of the runtime binary; full spec in `docs/export-adapters.md`.
 
 ## Honesty (R-BUILD-007)
 
