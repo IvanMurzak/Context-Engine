@@ -1,0 +1,48 @@
+README.md
+  s_dd5b0581f27552::t_2fdfa60dd23f6e 82-83
+  s_dd5b0581f27552::t_7ec193d198060a 116-117
+  s_dd5b0581f27552::t_db45a2edb028a1 23,26-34
+  s_dd5b0581f27552::t_620c3401324b0e 3-5
+  s_dd5b0581f27552::t_1fb05bc6104662 19-20
+  s_dd5b0581f27552::t_c79b88f79becf4 38-39
+docs/img/readme/determinism-dark.svg
+  s_dd5b0581f27552::t_7aaa2e5cb49b32 1-45
+docs/img/readme/determinism-light.svg
+  s_dd5b0581f27552::t_198ddda5f6c1dc 1-45
+docs/img/readme/divider-dark.svg
+  s_dd5b0581f27552::t_ca1a3db77bec4d 1-61
+docs/img/readme/divider-light.svg
+  s_dd5b0581f27552::t_ea9ef101156509 1-64
+docs/img/readme/file-flow-dark.svg
+  s_dd5b0581f27552::t_b9204e0264d016 1-58
+docs/img/readme/file-flow-light.svg
+  s_dd5b0581f27552::t_5175e351b7c6f5 1-58
+docs/img/readme/header-dark.svg
+  s_dd5b0581f27552::t_ffb76ceda78352 1-121
+docs/img/readme/header-light.svg
+  s_dd5b0581f27552::t_d01d00a44dfb94 1-121
+docs/img/readme/headless-terminal-dark.svg
+  s_dd5b0581f27552::t_0f9d920e504fdb 1-36
+docs/img/readme/headless-terminal-light.svg
+  s_dd5b0581f27552::t_88f35a337e81de 1-36
+docs/img/readme/microkernel-orbit-dark.svg
+  s_dd5b0581f27552::t_d16be1c700a93b 1-70
+docs/img/readme/microkernel-orbit-light.svg
+  s_dd5b0581f27552::t_bb7a0bedae09e2 1-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "6427165c7d026a24669a79ae68d364bd563f27f6",
+  "prompts": {},
+  "sessions": {
+    "s_dd5b0581f27552": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c3530c51-4b24-438d-a375-143bc893dff8",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
