@@ -1,0 +1,71 @@
+src/editor/pack/include/context/editor/pack/pack_format.h
+  s_8c19f166a0a4cd::t_05bb55120c330b 50-76
+  s_8c19f166a0a4cd::t_6b9a22cf7d361a 40-49
+src/editor/import/include/context/editor/import/transcode.h
+  s_8c19f166a0a4cd::t_7e7775b18542a1 1-80
+src/editor/pack/src/pack_writer.cpp
+  s_8c19f166a0a4cd::t_3bcf5ccdf8ba86 155-160,163-178,181,184,188-189
+src/editor/pack/tests/test_pack_writer.cpp
+  s_8c19f166a0a4cd::t_fbf243c6466822 279-281,285,293-295
+  s_8c19f166a0a4cd::t_f38064a38943d3 215-278,282-284,286-292,296-307
+src/editor/pack/tests/corpus/variants.scenes.json
+  s_8c19f166a0a4cd::t_040327f025c3f2 1-26
+docs/chunk-pack-format.md
+  s_8c19f166a0a4cd::t_8582cd0561e336 119-143
+  s_8c19f166a0a4cd::t_e73fc7385cfa39 256
+  s_8c19f166a0a4cd::t_270bb1b135fb30 198-204
+  s_8c19f166a0a4cd::t_53fc1b3ded352d 82
+  s_8c19f166a0a4cd::t_14e411d5ba8f5e 260
+src/editor/import/README.md
+  s_8c19f166a0a4cd::t_5069cfc9f455b4 50-59
+  s_8c19f166a0a4cd::t_8201ff6d4777dd 80-99
+src/editor/pack/include/context/editor/pack/pack_writer.h
+  s_8c19f166a0a4cd::t_79e3c05b38e323 24-34,39-44,48-50,58-62
+src/editor/import/src/transcode.cpp
+  s_8c19f166a0a4cd::t_66ecbd4711c9cb 1-180,185-186,209-333,339,341-344
+  s_8c19f166a0a4cd::t_3fa02e590af5ae 334-338,340
+  s_8c19f166a0a4cd::t_895fa5bef829a5 181-184
+  s_8c19f166a0a4cd::t_cced63b099f011 187-189,206-208
+  s_fd8d2fdd6d7454::t_ca6aab946eb4a4 190-205
+src/editor/pack/CMakeLists.txt
+  s_8c19f166a0a4cd::t_1e674aae1535a6 64-79
+src/editor/pack/tests/pack_corpus.h
+  s_8c19f166a0a4cd::t_a09ad67a5543ee 130-147,154-158
+  s_8c19f166a0a4cd::t_5cb1656027e57c 8,10-14
+src/editor/pack/README.md
+  s_8c19f166a0a4cd::t_a23bcfc16ca366 37-57
+  s_8c19f166a0a4cd::t_7281b046503e40 68-78
+src/editor/pack/src/pack_format.cpp
+  s_8c19f166a0a4cd::t_b42fd907f2ef03 44-76
+src/editor/import/tests/test_transcode.cpp
+  s_8c19f166a0a4cd::t_2ba68c45323bc9 1-199
+src/editor/pack/tests/test_pack_transcode.cpp
+  s_8c19f166a0a4cd::t_90a5e63b28c52c 1-237
+src/editor/import/CMakeLists.txt
+  s_8c19f166a0a4cd::t_f7ef5a46843cab 11
+  s_8c19f166a0a4cd::t_01d5330f7f0088 42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "2ff3fe9a5738d362e9dc8938f0849d5a1dbe2490",
+  "prompts": {},
+  "sessions": {
+    "s_8c19f166a0a4cd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "df8298f2-beea-41ba-9052-0bf0c5fc46f2",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_fd8d2fdd6d7454": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-abf22c008d4e65e9f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
