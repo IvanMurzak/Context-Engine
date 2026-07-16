@@ -61,6 +61,22 @@ endforeach()
 target_compile_definitions(context_pack_test_pack_corpus PRIVATE
     PACK_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/corpus")
 
+# The a03 END-TO-END per-platform variant pack path (import -> transcode -> pack): the real chain the
+# a05 build pipeline drives. It is the ONLY pack test that links context_import — the pack LIBRARY
+# deliberately keeps no import dependency (layering: the writer takes pre-transcoded variant blobs from
+# its caller), so the import+pack wiring is proven HERE, in a test, not by coupling the libraries. It
+# reuses the import module's tests/import_test.h for the CHECK harness + the minimal PNG/WAV asset
+# builders rather than duplicating them, hence the extra include dir.
+add_executable(context_pack_test_pack_transcode tests/test_pack_transcode.cpp)
+target_link_libraries(context_pack_test_pack_transcode
+    PRIVATE context_pack context_import context_serializer context_warnings)
+target_include_directories(context_pack_test_pack_transcode PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/../import/tests)
+target_link_options(context_pack_test_pack_transcode PRIVATE
+    $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
+add_test(NAME pack-test_pack_transcode COMMAND context_pack_test_pack_transcode)
+
 # The golden REBASELINE tool (NOT a ctest): rewrites tests/corpus/<name>.pack from the committed
 # <name>.scenes.json case files. Golden pack bytes are platform-independent (little-endian + FNV +
 # canonical JSON), so a Windows-built golden matches the Linux/macOS CI legs. Run it only for an

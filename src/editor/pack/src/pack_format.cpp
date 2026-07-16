@@ -41,4 +41,37 @@ bool read_u64(std::string_view bytes, std::size_t offset, std::uint64_t& out) no
     return true;
 }
 
+PlatformVariant platform_variant_for(std::string_view platform_id) noexcept
+{
+    // The v1 set; anything else (empty / an untargeted platform) is the platform-neutral common
+    // selector — the directory column never names a variant the format has no frozen id for.
+    if (platform_id == "windows")
+        return PlatformVariant::windows;
+    if (platform_id == "linux")
+        return PlatformVariant::linux;
+    if (platform_id == "macos")
+        return PlatformVariant::macos;
+    if (platform_id == "web")
+        return PlatformVariant::web;
+    return PlatformVariant::common;
+}
+
+std::string_view platform_variant_name(PlatformVariant variant) noexcept
+{
+    switch (variant)
+    {
+    case PlatformVariant::common:
+        return "";
+    case PlatformVariant::windows:
+        return "windows";
+    case PlatformVariant::linux:
+        return "linux";
+    case PlatformVariant::macos:
+        return "macos";
+    case PlatformVariant::web:
+        return "web";
+    }
+    return "";
+}
+
 } // namespace context::editor::pack

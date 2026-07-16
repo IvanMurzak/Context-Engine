@@ -103,6 +103,15 @@ inline void append(JsonValue& arr, JsonValue value)
     return fallback;
 }
 
+// A boolean read; `fallback` for a null / non-boolean value. The sibling of as_int64 — same
+// pointer-taking shape, so `as_bool(member(obj, key), true)` reads like its integer counterpart.
+[[nodiscard]] inline bool as_bool(const JsonValue* v, bool fallback)
+{
+    if (v == nullptr || v->type != JsonValue::Type::boolean)
+        return fallback;
+    return v->boolean_value;
+}
+
 // --- diagnostics hygiene ------------------------------------------------------------------------
 
 // Render `raw` for a human diagnostic message: returned verbatim when every byte is printable ASCII
@@ -138,6 +147,19 @@ inline void append(JsonValue& arr, JsonValue value)
         out.push_back(kHex[b & 0x0FU]);
     }
     return out;
+}
+
+// --- byte writers (little-endian scalar fields into a binary container) --------------------------
+
+// Append a little-endian u32. The write counterpart of read_u32le below — shared for the same
+// reason: a fixed byte order is what makes a container's bytes identical on every host, and each
+// producer re-hand-rolling the shift/mask is how the two directions drift apart.
+inline void put_u32le(std::string& out, std::uint32_t v)
+{
+    out.push_back(static_cast<char>(v & 0xFFU));
+    out.push_back(static_cast<char>((v >> 8) & 0xFFU));
+    out.push_back(static_cast<char>((v >> 16) & 0xFFU));
+    out.push_back(static_cast<char>((v >> 24) & 0xFFU));
 }
 
 // --- byte readers (little-endian scalar fields in a binary container: GLB header, WAV chunks) ----

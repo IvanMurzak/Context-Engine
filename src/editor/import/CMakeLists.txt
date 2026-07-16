@@ -8,6 +8,7 @@
 
 add_library(context_import STATIC
     src/platform_profile.cpp
+    src/transcode.cpp
     src/import_settings.cpp
     src/cache_key.cpp
     src/sandbox.cpp
@@ -38,6 +39,7 @@ target_link_libraries(context_import PRIVATE context_warnings)
 # non-PCM/non-2.0 formats, jail escape, registry collisions).
 set(_context_import_tests
     test_platform_profile
+    test_transcode
     test_import_settings
     test_cache_key
     test_sandbox

@@ -152,19 +152,48 @@ PackWriteResult write_pack(const compose::ContentUnitSet& units, const compose::
         entries.push_back(std::move(e));
     }
 
-    // Packed binary sidecars, in supplied order (docs/chunk-pack-format.md §4.5).
+    // Packed binary sidecars, in supplied order (docs/chunk-pack-format.md §4.5). Per-platform
+    // variant selection (a03, R-BUILD-003): when this pack targets a non-common platform and the
+    // sidecar carries a matching variant, pack THAT variant's transcoded BYTES under the frozen
+    // platform column, instead of the common blob. A target with no matching variant (or a
+    // common-targeted pack — the a01 default) keeps the common blob at platform 0, so pre-a03 packs
+    // are byte-for-byte unchanged.
+    //
+    // The entry's `unit_id` stays the sidecar's DECLARED raw hash on every target — a variant swaps
+    // the bytes, never the identity. That id is the GUID the composed entity JSON pins in its
+    // {"$sidecar": "<relpath>", "hash": "<raw hash>"} reference (L-33), and content units are
+    // deliberately platform-neutral (platform 0), so re-addressing the chunk by the variant's own
+    // hash would leave every authored reference dangling on exactly the targets a03 exists to serve.
+    // Identity vs content-address is the pre-existing split: content units key by their L-37
+    // identity_hash, and the chunk's own content-address lives in `content_hash` below (the field
+    // read_pack actually self-verifies).
     for (const PackSidecar& sc : sidecars)
     {
+        const std::string* chunk_bytes = &sc.bytes;
+        PlatformVariant platform = PlatformVariant::common;
+        if (options.target_platform != PlatformVariant::common)
+        {
+            for (const PackSidecarVariant& variant : sc.variants)
+            {
+                if (variant.platform == options.target_platform)
+                {
+                    chunk_bytes = &variant.bytes;
+                    platform = variant.platform;
+                    break;
+                }
+            }
+        }
         const std::pair<std::uint32_t, std::uint32_t> src = strings.intern(sc.relpath);
         Entry e;
-        e.unit_id = sc.raw_hash;               // content-addressed by the declared raw-byte hash
+        e.unit_id = sc.raw_hash; // the declared raw-byte hash — stable across targets (see above)
         e.parent_unit = 0;
         e.flags = kFlagIsSidecar;
+        e.platform = static_cast<std::uint32_t>(platform); // → the on-disk column (the Codec pattern)
         e.entity_count = 0;
         e.source_off = src.first;
         e.source_len = src.second;
-        e.content_hash = serializer::canonical_hash_of(sc.bytes);
-        e.chunk = sc.bytes;
+        e.content_hash = serializer::canonical_hash_of(*chunk_bytes);
+        e.chunk = *chunk_bytes;
         entries.push_back(std::move(e));
     }
 

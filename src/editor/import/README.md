@@ -47,9 +47,16 @@ and the autonomy envelope safe.
   pipes the `ImportResult` back (`encode/decode_import_result`); `os_sandbox_support()` reports the
   primitive is **enforced** on Linux + macOS and honestly `enforced=false` (in-process fallback) on
   Windows. `check_deterministic()` is the double-run byte-compare gate.
-- **The per-platform transcode SKELETON** (`platform_profile.h`) — the v1 platform set + the
-  data-driven `(kind × platform) → format` table. The platform profile is a cache-key component, so
-  per-platform variants coexist as separate entries (platform switches instant after first import).
+- **The per-platform transcode table** (`platform_profile.h`) — the v1 platform set + the data-driven
+  `(kind × platform) → format` table. The platform profile is a cache-key component, so per-platform
+  variants coexist as separate entries (platform switches instant after first import).
+- **The per-platform transcode NODE** (`transcode.h`, task a03 — R-BUILD-003) — the byte-level encoder
+  over that table: `transcode_variant(artifact, platform)` turns one derived artifact into the target's
+  VARIANT payload (a self-describing `CTXV` container), which the pack writer selects per target
+  (`src/editor/pack/`). PURE + deterministic like an import, so the double-run gate holds with transcode
+  nodes in the graph. It RIDES the existing key — `transcode_cache_key()` reuses the R-FILE-010 platform
+  component rather than forking a second cache. Each variant records the table's `target_format` AND the
+  `applied_encoding` v1 produced, so a trailing encoder is visible in the data (see § Explicitly deferred).
 
 ## The determinism gate + fuzz corpus
 
@@ -70,10 +77,26 @@ and the autonomy envelope safe.
 The owner bar is "very well polished, not just drafted" — the deferrals below are **format/contract
 hooks staked out now** with the heavy work tracked, never silent stubs:
 
-1. **Byte-level transcode.** The descriptors + the transcode TABLE are complete; the encoders behind
-   each row (texture BC7/ASTC, mesh meshopt quantization, audio compression) are the transcode
-   milestone. `transcode_target_for()` already keys per platform so an encoder drops in without a
-   cache-key change.
+1. **Byte-level transcode — LANDED (task a03, R-BUILD-003).** `transcode.h` turns a derived artifact
+   into its per-platform VARIANT payload (a self-describing `CTXV` container), which the pack writer
+   selects per target (`src/editor/pack/`, `PackWriteOptions::target_platform`). As predicted, it
+   needed NO cache-key change: `transcode_cache_key()` RIDES the existing platform component
+   (`transcode_variant`'s target comes from the same `transcode_target_for()` table). Per kind, stated
+   honestly — `TranscodedVariant` records BOTH the table's `target_format` and the `applied_encoding`
+   v1 actually produced, so a trailing encoder is visible in the data, never a silent stub:
+   - **audio — REAL + complete.** Desktop `pcm16` stores the verbatim 16-bit PCM (WAV `data` IS raw
+     PCM); the memory-constrained Web target applies **G.711 µ-law companding** (`mulaw8`) — a real,
+     standard, dependency-free 2:1 compression. Residual: the perceptual **Vorbis** encoder the table
+     names for Web (`target_format` "vorbis" vs `applied_encoding` "mulaw8").
+   - **texture — REAL block geometry, texels residual.** The variant is the true BCn/ASTC block-tiled
+     container: block footprint (4×4 BCn vs 8×8 ASTC), the mip pyramid, and each level's encoded byte
+     length, all computed from the real descriptor — so desktop and Apple/Web variants are genuinely
+     different payloads. The perceptual **texel encoder** (BC7/ASTC compression of actual pixels) is
+     blocked on the PNG **texel DEFLATE-decode**, which this module still defers: the importer emits
+     no texels to compress yet (`applied_encoding` "block_plan"). Landing the decode fills the payload
+     behind the same container + cache key.
+   - **mesh — plan only.** `meshopt` on every v1 target (platform-invariant, so no per-platform pack
+     variant is needed); the vertex-stream quantizer is the residual (`applied_encoding` "meshopt_plan").
 2. **Per-OS subprocess sandbox lockdown — LANDED on Linux + macOS (issue #72).** `run_subprocess()`
    now runs the pure importer in a fork()ed, OS-locked unprivileged child on Linux (a **seccomp-bpf**
    filter) AND on macOS (a **deny-default Seatbelt profile** applied post-fork via `sandbox_init` — the

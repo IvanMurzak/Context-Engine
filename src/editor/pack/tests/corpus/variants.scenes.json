@@ -1,0 +1,26 @@
+{
+  "root": "level.scene.json",
+  "engineVersion": 8,
+  "targetPlatform": "web",
+  "scenes": {
+    "level.scene.json": {
+      "$schema": "ctx:scene",
+      "version": 1,
+      "entities": [
+        {"id": "aaaa0000aaaa0001", "name": "Hero", "components": {"sprite": {"$sidecar": "textures/hero.png.bin", "hash": "1229782938247303441"}, "sfx": {"$sidecar": "audio/shot.wav.bin", "hash": "2459565876494606882"}}},
+        {"id": "aaaa0000aaaa0002", "name": "Statue", "components": {"mesh": {"$sidecar": "meshes/statue.mesh.bin", "hash": "3689348814741910323"}}}
+      ]
+    }
+  },
+  "sidecars": [
+    {"relpath": "textures/hero.png.bin", "hash": 1229782938247303441, "text": "common-source-texture-bytes", "variants": [
+      {"platform": "windows", "text": "bc7-block-plan-variant-windows"},
+      {"platform": "web", "text": "astc-8x8-block-plan-variant-web"}
+    ]},
+    {"relpath": "audio/shot.wav.bin", "hash": 2459565876494606882, "text": "common-source-pcm-bytes", "variants": [
+      {"platform": "windows", "text": "pcm16-verbatim-variant-windows"},
+      {"platform": "web", "text": "mulaw8-variant-web"}
+    ]},
+    {"relpath": "meshes/statue.mesh.bin", "hash": 3689348814741910323, "text": "meshopt-plan-common-every-target"}
+  ]
+}

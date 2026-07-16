@@ -79,7 +79,7 @@ The directory maps a unit id to its chunk, so load-by-GUID is O(1) without scann
 | `parentUnit` | u64 | the containing unit's id for a nested unit; `0` for a top-level unit / the root / a sidecar (§2.1) | **frozen** |
 | `flags` | u32 | bit0 `isRoot`, bit1 `hasParent`, bit2 `isSidecar` (§4.3) | **frozen** |
 | `codec` | u32 | payload codec — `0` = store (v1); `1` = deflate, `2` = zstd are reserved (§4.4) | **frozen** |
-| `platform` | u32 | per-platform variant selector — `0` = common/all (v1); non-zero reserved for R-BUILD-001 / L-36 per-platform variants (re-homed, §7) | **frozen** |
+| `platform` | u32 | per-platform variant selector — `0` = common/all; the v1 platform set has frozen non-zero ids (§3.4) so a chunk can be a target's transcoded variant (a03, R-BUILD-003) | **frozen** |
 | `entityCount` | u64 | composed entities in the unit (`0` for a sidecar entry) | **frozen** |
 | `sourceScene` | string ref | the instanced scene reference — project-root-relative path in v1, widens to the scene GUID when asset-db refs flow through compose (§7); for a sidecar entry, its owner-relative path | **frozen (semantics widen)** |
 | `chunkOffset` | u64 | absolute byte offset of the chunk in the pack stream | **frozen** |
@@ -115,6 +115,36 @@ frozen chunk contract; canonical JSON is the frozen v1 encoding of it (§4.4).
 | `directoryOffset` / `directorySize` | u64 | the directory region | **frozen** |
 | `stringTableOffset` / `stringTableSize` | u64 | the string table region | **frozen** |
 | `chunkRegionOffset` / `chunkRegionSize` | u64 | the chunk region | **frozen** |
+
+### 3.4 Platform-variant selector ids (frozen)
+
+The `platform` column's numeric namespace (`PlatformVariant`, `pack_format.h`). Ids are **frozen and
+append-only** — never renumbered, because they are written into the on-disk directory. The string ids
+**mirror `import::platform_profiles()`**; the pack format keeps its own numeric namespace so
+`context_pack_format` stays dependency-free (the RuntimeKernel loader links it without the editor's
+importer).
+
+| id | platform | notes |
+| --- | --- | --- |
+| `0` | *common / all* | a platform-neutral chunk — every content unit, and any sidecar with no variant for the target |
+| `1` | `windows` | |
+| `2` | `linux` | |
+| `3` | `macos` | |
+| `4` | `web` | the v1 memory-constrained wedge (R-ASSET-003) |
+| `5+` | *reserved* | `android` / `ios` — assigned when their platform legs activate (R-BUILD-001) |
+
+**A pack is single-target.** The writer is told the platform it builds FOR
+(`PackWriteOptions::target_platform`) and packs each sidecar's matching variant — its transcoded bytes
+under the target's `platform` column — else that sidecar's common blob at `platform = 0`. A variant
+swaps the chunk's BYTES, never its `unitId`: that stays the sidecar's declared raw-byte hash on every
+target (§4.3, §4.5), because it is the GUID the `$sidecar` `hash` member pins and content units are
+platform-neutral — re-addressing a variant by its own hash would strand every authored reference on
+exactly the targets a03 serves. The variant bytes' content-address is the entry's `contentHash`, which
+the reader self-verifies. A pack therefore
+carries the target's variant of each asset, not a fat multi-platform payload: per-platform packs are
+per-platform cache entries, matching the R-FILE-010 key (which already includes the target platform).
+Content units are always `platform = 0` — composed entity JSON is platform-neutral; only the
+transcoded binary sidecars vary. `target_platform = 0` (the default) reproduces pre-a03 bytes exactly.
 
 ## 4. On-disk byte layout (frozen v1)
 
@@ -170,8 +200,13 @@ chunk bytes uncompressed (`uncompressedLength == chunkLength`). Rationale:
 3. **Additive, not breaking.** `codec` is a **per-chunk** selector, so introducing `deflate` later
    is one additive enum value and a per-chunk decode branch — **not** a format-version break
    (exactly the R-ASSET-005 "no breaking format change post-freeze" guarantee). The actual
-   compressed codec is re-homed (§7), naturally paired with the a03 per-platform transcode work
-   where payload size is the motivating concern.
+   compressed codec remains re-homed (§7) to a later payload-size task.
+
+   *Note (a03):* the per-platform transcode landed WITHOUT needing this — it compresses at the
+   **asset** layer (e.g. µ-law-companded audio for the memory-constrained Web target), which is
+   format-aware and therefore strictly better than a generic chunk codec for those payloads. `codec`
+   stays `store` for every chunk; a generic compressed codec is still worth having for the canonical-JSON
+   unit chunks, which the asset-layer transcode does not touch.
 
 ### 4.5 Packed binary sidecars (frozen)
 
@@ -223,8 +258,8 @@ format in M2:
 | v0 deferred item | v1 disposition |
 | --- | --- |
 | **On-disk chunk byte encoding** | **RESOLVED** — §4 byte layout: little-endian header → directory → string table → chunk region; chunk body = canonical JSON of the §3.2 identity/id-path/payload triple. |
-| **Payload codec** | **RESOLVED (field) + RE-HOMED (compression)** — §4.4: `codec` enum frozen (`store=0`, `deflate=1`/`zstd=2` reserved), v1 pins `store`; the actual compressed codec is additive (per-chunk) and re-homed to a later payload-size task (pairs with a03 platform-variant transcode). |
+| **Payload codec** | **RESOLVED (field) + RE-HOMED (compression)** — §4.4: `codec` enum frozen (`store=0`, `deflate=1`/`zstd=2` reserved), v1 pins `store`; the actual compressed codec is additive (per-chunk) and re-homed to a later payload-size task. a03 did NOT consume this: it compresses at the ASSET layer (format-aware, e.g. µ-law audio for Web), so `codec` stays `store` and a generic codec remains open for the canonical-JSON unit chunks (§4.4). |
 | **Nested sub-unit granularity** | **RESOLVED (format) + RE-HOMED (partition)** — §2.1: `parentUnit` frozen and written verbatim; the writer packs whatever granularity it is given. v1 emission stays top-level (matching compose); the finer nested-instance *partition* is a compose/loader refinement re-homed to a02, needing no format change. |
 | **sourceScene path→GUID widening** | **RE-HOMED** — the field is frozen as an opaque reference string (path in v1, scene GUID + readable hint once asset-db refs reach compose — L-34/L-36); no format change since it is already a string. Re-homed to the asset-db-through-compose flow. |
 | **Async streaming scheduler (R-ASSET-003)** | **RE-HOMED to a02** — the runtime chunked-loader task (async load/instantiate/unload by GUID + memory-budgeted streaming). It consumes this frozen format. |
-| **Per-platform variant selection (R-BUILD-001 / L-36)** | **RE-HOMED to a03** — the `platform` directory column is frozen (`0` = common in v1); per-platform variant emission + selection is the platform-variants/transcode task. |
+| **Per-platform variant selection (R-BUILD-001 / L-36)** | **RESOLVED in a03** — the frozen `platform` selector ids are §3.4, and the writer selects a sidecar's per-platform transcoded variant for `PackWriteOptions::target_platform` (else the common blob at `0`). No format change was needed: the column was already frozen, so a03 only assigned its ids + the selection rule. `target_platform = 0` reproduces pre-a03 bytes (the committed goldens pin it). Android/iOS ids stay reserved until their legs land (R-BUILD-001). |
