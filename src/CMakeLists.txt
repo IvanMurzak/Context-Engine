@@ -390,6 +390,18 @@ add_subdirectory(editor/pack)
 # the `context_save` target, resolved at generate time regardless of add_subdirectory order).
 add_subdirectory(runtime/save)
 
+# M8 task a02: the RuntimeKernel async streaming content LOADER (src/runtime/content/, R-ASSET-005 /
+# R-ASSET-003 / R-FILE-009 / L-24, docs/chunk-pack-format.md) — the runtime consumer of the a01 v1
+# pack: async load/instantiate/unload of packed content units by GUID, a memory-budgeted streaming
+# scheduler with proximity-driven decisions (R-SIM-007), and the one loading seam fed BOTH by a pack
+# and the live in-editor derived units. Parses the pack via the frozen byte-layout constants
+# (context_pack_format) + the canonical serializer only — never context_compose (L-24: no editor code
+# in a RuntimeKernel build). OWN stanza next to its runtime/save sibling — apart from the editor
+# cluster + the exit-gate block below — so concurrent sibling tasks inserting into this file merge
+# cleanly (consumers name the `context_runtime_content` target, resolved at generate time regardless
+# of add_subdirectory order).
+add_subdirectory(runtime/content)
+
 # M6-F0a foundation: the deterministic-build ATTESTATION (src/runtime/determinism/, R-SIM-005 / L-54,
 # anchored in R-SEC-009, issue #170) — the engine-PRODUCED `deterministic:true` attestation, emitted
 # from the actually-applied, verified strict-FP flags (the CONTEXT_DETERMINISTIC flag block above),

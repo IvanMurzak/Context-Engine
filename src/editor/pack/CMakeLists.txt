@@ -5,18 +5,29 @@
 # byte-identical bytes (cache-keyable per R-FILE-010). Ships a synchronous build-side verification
 # READER too (round-trip + golden gating); the runtime async streaming loader is the a02 task.
 
+# The FROZEN v1 pack byte-layout constants + little-endian primitives (pack_format.h / .cpp), split
+# into their own tiny dependency-free target. This is what lets the RuntimeKernel async streaming
+# loader (src/runtime/content/, a02, R-ASSET-003) parse packs WITHOUT linking the editor writer's
+# context_compose — L-24 / R-FILE-009: no editor/derivation code belongs in a shipped RuntimeKernel
+# build. context_pack (the build-side writer + verification reader) links it PUBLIC so its own headers
+# keep exposing the constants + primitives transitively; the byte layout stays a single source of
+# truth shared by the writer and the runtime reader (no drift on the frozen format).
+add_library(context_pack_format STATIC src/pack_format.cpp)
+target_include_directories(context_pack_format PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(context_pack_format PRIVATE context_warnings)
+
 add_library(context_pack STATIC
-    src/pack_format.cpp
     src/pack_reader.cpp
     src/pack_writer.cpp)
 
 target_include_directories(context_pack PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# PUBLIC context_pack_format: the frozen byte-layout constants + LE primitives the writer/reader use.
 # PUBLIC context_compose: the public writer header exposes the compose ContentUnitSet / ComposedScene
 # it packs (and reuses format_stable_id). context_compose links context_serializer PUBLIC, so the
 # canonical writer + JsonValue tree the writer/reader build on come through transitively; named here
 # too for clarity (pack_reader.cpp verifies chunk hashes via serializer::canonical_hash_of).
-target_link_libraries(context_pack PUBLIC context_compose context_serializer)
+target_link_libraries(context_pack PUBLIC context_pack_format context_compose context_serializer)
 
 # Every Context target links the warnings-as-errors baseline (conventions.md).
 target_link_libraries(context_pack PRIVATE context_warnings)
