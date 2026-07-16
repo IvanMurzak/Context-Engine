@@ -107,11 +107,13 @@ under the dev gate).
 
 The native backend links the **wgpu-native `v29.0.1.1` PREBUILT** (gfx-rs GitHub release),
 SHA256-pinned + verified at configure time before use — the R-SEC-009 signed-prebuilt exception. The
-acquisition channel (SHA-pinned prebuilt + publisher-TLS + verify-before-use now, a from-source
-vcpkg/cargo port deferred pre-1.0) was owner-decided by the #76 (V8) Option-A precedent, which
-explicitly governs M4's wgpu-native. wgpu-native is dual-licensed `MIT OR Apache-2.0` (we elect
-Apache-2.0); it is already recorded in `tools/license-allowlist.json`. Never shipped in the default
-build.
+acquisition channel (SHA-pinned prebuilt + publisher-TLS + verify-before-use) was owner-decided by
+the #76 (V8) Option-A precedent. **M8 ship decision (issue #253, a04):** the deferred M4 Dawn
+re-evaluation is **closed** — wgpu-native is **RETAINED** as the *shipped* native backend (not merely
+the dev pick); Dawn's now-real official vcpkg from-source port did not justify a switch. Measured
+rationale + re-evaluation triggers: `docs/native-webgpu-backend-decision.md`. wgpu-native is
+dual-licensed `MIT OR Apache-2.0` (we elect Apache-2.0); it is already recorded in
+`tools/license-allowlist.json`. Never shipped in the default build.
 
 ## Build & test
 

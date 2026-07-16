@@ -117,8 +117,13 @@ cannot link the MSVC-ABI Windows prebuilt, so this is a CI-gated dependency path
 
 if(CONTEXT_BUILD_RENDER_WGPU)
     # wgpu-native PREBUILT release, pinned version + per-platform SHA256 (R-SEC-009: SHA-pinned +
-    # publisher-TLS + verify-before-use; from-source vcpkg port deferred pre-1.0, #76 precedent).
-    # Same pins the proven spikes/webgpu spike uses.
+    # publisher-TLS + verify-before-use). Same pins the proven spikes/webgpu spike uses.
+    # M8 SHIP DECISION (issue #253, a04): this is the SHIPPED native WebGPU backend, not merely the
+    # M0-M4 dev pick. The deferred M4 Dawn re-evaluation is CLOSED — RETAIN wgpu-native (measured
+    # rationale + re-evaluation triggers in docs/native-webgpu-backend-decision.md). The R-SEC-009
+    # signed-prebuilt exception is the sanctioned L-42 carve-out for build-hostile heavy libs;
+    # Dawn's now-real from-source vcpkg port did not justify a switch. Refresh this pin per that
+    # doc's re-evaluation triggers (a wgpu-native major bump also bumps tools/naga-toolchain.json).
     set(CTX_WGPU_NATIVE_VERSION "v29.0.1.1")
     if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
         if(NOT MSVC)
