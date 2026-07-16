@@ -1,0 +1,91 @@
+src/runtime/content/tests/test_content_loader.cpp
+  s_8c19f166a0a4cd::t_4679e546fa44e9 1-116,118-162
+  s_8c19f166a0a4cd::t_52d560090aa6ef 117
+src/runtime/content/include/context/runtime/content/streaming_scheduler.h
+  s_8c19f166a0a4cd::t_c70edaed574a7c 1-94
+src/CMakeLists.txt
+  s_8c19f166a0a4cd::t_088c54d5fd1763 393-404
+src/runtime/content/src/streaming_scheduler.cpp
+  s_8c19f166a0a4cd::t_9e055ce7178897 1-141
+src/runtime/content/tests/content_test.h
+  s_8c19f166a0a4cd::t_a51bf8d1c21578 1-27
+src/runtime/content/src/content_loader.cpp
+  s_8c19f166a0a4cd::t_90efb69c7d1287 1-192
+src/runtime/content/src/content_detail.h
+  s_8c19f166a0a4cd::t_c58767d84eeaee 1-78
+src/runtime/content/src/editor_source.cpp
+  s_8c19f166a0a4cd::t_da27f4ccdfb4b2 1-72
+src/runtime/content/src/pack_source.cpp
+  s_8c19f166a0a4cd::t_1d79ae59295223 24-33,37
+  s_8c19f166a0a4cd::t_da3a004a248cac 1-23,34-36,38-169,171-248
+  s_8c19f166a0a4cd::t_5c538b65c28ef6 170
+src/runtime/content/include/context/runtime/content/pack_source.h
+  s_8c19f166a0a4cd::t_c279f74c8b5393 44-47
+  s_8c19f166a0a4cd::t_188d0ad724a620 1-43,48-70
+src/runtime/content/tests/test_pack_source.cpp
+  s_8c19f166a0a4cd::t_0fda9b7caf67c0 1-164
+src/runtime/content/tests/test_feed_parity.cpp
+  s_8c19f166a0a4cd::t_d8d805c3311c2e 1-123
+src/runtime/content/tests/test_streaming_budget.cpp
+  s_8c19f166a0a4cd::t_4efa8ab911da7f 1-137
+src/runtime/content/CMakeLists.txt
+  s_8c19f166a0a4cd::t_41734b5b7e75ba 1-39,42-51,57-68
+  s_8c19f166a0a4cd::t_c016c633e140de 40-41,52-56
+src/runtime/content/tests/spatial_provider.h
+  s_8c19f166a0a4cd::t_7f5b9826ffaaf1 1-31,33-63
+  s_6f592db52a45cd::t_8f2f5855df21e4 32
+src/runtime/content/include/context/runtime/content/content_loader.h
+  s_8c19f166a0a4cd::t_bb979e619f3ef3 73-75
+  s_8c19f166a0a4cd::t_33cc9f693a02b2 1-72,76-122
+src/runtime/content/tests/content_fixture.h
+  s_8c19f166a0a4cd::t_d199baf2687fe8 107-116
+  s_8c19f166a0a4cd::t_933e5cd93bdc68 1-106,117
+src/runtime/content/include/context/runtime/content/editor_source.h
+  s_8c19f166a0a4cd::t_acc138fe81e0b5 1-49
+src/editor/pack/CMakeLists.txt
+  s_8c19f166a0a4cd::t_ca7a2ff8d77171 8-18,25,30
+src/runtime/content/include/context/runtime/content/content_source.h
+  s_7a3458111ba12d::t_fa72c40a6bac2d 1-79
+src/runtime/content/README.md
+  s_da2b567c5aa8b8::t_b7c9668f3ca283 1-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "0dad3ad85bb86491fe49eda54d1ac03824367b9b",
+  "prompts": {},
+  "sessions": {
+    "s_6f592db52a45cd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ef366ff5-239c-4fa7-bb64-5cc7ee319537",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_7a3458111ba12d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "67af214c-5970-46d8-ba0c-b1eb09fe36db",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_8c19f166a0a4cd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "df8298f2-beea-41ba-9052-0bf0c5fc46f2",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_da2b567c5aa8b8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-af2a08c0f21f87e7f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
