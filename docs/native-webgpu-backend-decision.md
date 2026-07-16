@@ -27,7 +27,7 @@ collapse that dual-consumer coverage to one ecosystem.
 ## Decisive criterion — build-cost asymmetry that recurs at export-template freeze
 
 Both candidates implement the **same** standard `webgpu.h`, so they are near-interchangeable at the
-`rhi.h` seam (`src/render/wgpu/wgpu_rhi.cpp` is the only TU that includes `webgpu.h`) and neither
+`rhi.h` seam (`src/render/src/wgpu/wgpu_rhi.cpp` is the only TU that includes `webgpu.h`) and neither
 offers a rendering-quality advantage — the goldens are SSIM-gated with per-scene tolerances precisely
 because float→unorm rounding legally differs per backend. With **correctness a wash and licensing a
 wash** (both permissive — wgpu-native `MIT OR Apache-2.0`, we elect Apache-2.0; Dawn BSD-3-Clause),
@@ -122,7 +122,7 @@ R-SEC-009 verify-before-use gate reproduced in seconds.
 ## Wiring (what enforces this ruling in the repo)
 
 - **Backend:** unchanged — `context_render_wgpu` (`src/render/`, `CONTEXT_BUILD_RENDER_WGPU`, default
-  OFF) links the SHA-pinned wgpu-native `v29.0.1.1` prebuilt; `src/render/wgpu/wgpu_rhi.cpp` is the one
+  OFF) links the SHA-pinned wgpu-native `v29.0.1.1` prebuilt; `src/render/src/wgpu/wgpu_rhi.cpp` is the one
   TU that includes `webgpu.h`. The offscreen readback + golden-scene proofs (`render-wgpu-*` ctests)
   are the standing native-backend gate.
 - **Ship pin:** `src/render/CMakeLists.txt` `CTX_WGPU_NATIVE_VERSION "v29.0.1.1"` is now the **shipped**
