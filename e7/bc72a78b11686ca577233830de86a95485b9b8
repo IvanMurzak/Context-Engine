@@ -1,0 +1,19 @@
+src/runtime/content/src/streaming_scheduler.cpp
+  s_8c19f166a0a4cd::t_3cd84245ad1ad7 62-65,78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "e7bc72a78b11686ca577233830de86a95485b9b8",
+  "prompts": {},
+  "sessions": {
+    "s_8c19f166a0a4cd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "df8298f2-beea-41ba-9052-0bf0c5fc46f2",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
