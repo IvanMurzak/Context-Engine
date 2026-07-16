@@ -37,9 +37,43 @@ enum class Codec : std::uint32_t
     zstd = 2,    // reserved
 };
 
-// The v1-only platform variant selector (docs/chunk-pack-format.md §3.1) — 0 = common/all. Non-zero
-// values are re-homed to the a03 per-platform-variant task.
-inline constexpr std::uint32_t kPlatformCommon = 0;
+// `linux` is a PREDEFINED MACRO (= 1) in the GNU dialects (-std=gnu++NN) on Linux hosts, which would
+// mangle the `linux` enumerator below into `PlatformVariant::1`. Context compiles with
+// CMAKE_CXX_EXTENSIONS OFF (strict -std=c++NN), where it is NOT defined — but this is a PUBLIC header,
+// so a consumer building in a GNU dialect would otherwise fail to compile it, and the break would be
+// invisible to a Windows/GCC dev gate (it reds only the ubuntu leg). Undefine the non-standard macro
+// defensively: nothing in the engine reads it — platform checks use __linux__ (platform_profile.cpp).
+#ifdef linux
+#undef linux
+#endif
+
+// The per-platform variant selector for the directory `platform` column (docs/chunk-pack-format.md
+// §3.1). 0 = common/all (a platform-neutral chunk); the v1 platform set gets stable non-zero ids so a
+// pack can carry the target's variant of an asset (task a03, R-BUILD-003 / L-36). The ids are FROZEN +
+// APPEND-ONLY — never renumbered — because they are written into the on-disk directory. The string ids
+// MIRROR import::platform_profiles() (windows/linux/macos/web); the pack format owns its own numeric
+// namespace so context_pack_format stays dependency-free (the runtime loader links it without
+// context_import). Android/iOS ids are reserved for when their platform legs activate (R-BUILD-001).
+enum class PlatformVariant : std::uint32_t
+{
+    common = 0,
+    windows = 1,
+    linux = 2,
+    macos = 3,
+    web = 4,
+    // 5+ reserved (android, ios) — added append-only when their legs land.
+};
+
+// The v1 platform-neutral selector — kept as a named constant (the a01 default; unchanged value).
+inline constexpr std::uint32_t kPlatformCommon = static_cast<std::uint32_t>(PlatformVariant::common);
+
+// Map a platform id string (import::platform_profiles() ids) to its frozen directory selector; returns
+// PlatformVariant::common for an empty / unknown id (a platform-neutral chunk — never guessed).
+[[nodiscard]] PlatformVariant platform_variant_for(std::string_view platform_id) noexcept;
+
+// The stable lowercase id for a selector (the inverse of platform_variant_for) — "" for common,
+// "windows"/"linux"/"macos"/"web" for the v1 set. Diagnostic + round-trip use.
+[[nodiscard]] std::string_view platform_variant_name(PlatformVariant variant) noexcept;
 
 // Directory-entry `flags` bits (docs/chunk-pack-format.md §4.3).
 inline constexpr std::uint32_t kFlagIsRoot = 1u << 0;   // the root unit vs a top-level-instance unit

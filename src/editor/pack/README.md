@@ -34,6 +34,27 @@ Each **directory entry** carries the unit's L-37 **composed identity** as its lo
   raw-byte hash (§4.5).
 - The deferred-list resolution ledger (v0 → v1) is `docs/chunk-pack-format.md` §7.
 
+## Per-platform variant selection (task a03, R-BUILD-003)
+
+One source asset → **each target's optimal format at pack time**. A `PackSidecar` may carry
+`variants` — per-platform transcoded payloads produced by the transcode node
+(`src/editor/import/transcode.h`) — and `PackWriteOptions::target_platform` names the platform this
+pack is built FOR (a frozen `PlatformVariant` id, `pack_format.h`, mirroring
+`import::platform_profiles()`). For each sidecar the writer then:
+
+1. packs the variant matching `target_platform` — its transcoded bytes, its own content-address
+   (load-by-GUID key), and the frozen `platform` directory column; else
+2. falls back to the sidecar's **common** blob at `platform = 0` — so a platform-invariant asset
+   (a `meshopt` mesh, identical on every v1 target) needs no variant at all.
+
+A pack is therefore **single-target**: it carries the target's variant of each asset, not a fat
+multi-platform payload. `target_platform` defaults to `kPlatformCommon` (the a01 behavior), so a
+pre-a03 pack is **byte-for-byte unchanged** — the committed goldens pin that.
+
+Selection is the WRITER's only role here: it never transcodes. The build pipeline transcodes and
+hands over the variant blobs, so `context_pack` keeps **no dependency on `context_import`** (the
+import→transcode→pack wiring is proven in a test, `pack-test_pack_transcode`, which links both).
+
 ## Tests (R-QA-013)
 
 `ctest --preset dev` runs each `pack-*` executable (see `CMakeLists.txt`):
@@ -44,7 +65,14 @@ Each **directory entry** carries the unit's L-37 **composed identity** as its lo
   the reader's self-verification failure paths (bad magic, truncation, a flipped byte ⇒
   `pack.hash_mismatch`).
 - **`pack-test_pack_corpus`** — replays the committed golden pack corpus (`tests/corpus/` — the
-  R-QA-011 versioned deliverable: nested-instance content + sidecar payloads), byte-comparing each
-  freshly built pack against its committed `<name>.pack` golden so a format/encoding change surfaces
-  as a reviewed golden diff. `context_pack_golden_gen` (a build target, NOT a ctest) rebaselines the
-  goldens for an intentional, reviewed format change — never to paper over a red gate.
+  R-QA-011 versioned deliverable: nested-instance content + sidecar payloads + the `variants` case's
+  per-platform selection), byte-comparing each freshly built pack against its committed `<name>.pack`
+  golden so a format/encoding change surfaces as a reviewed golden diff. `context_pack_golden_gen`
+  (a build target, NOT a ctest) rebaselines the goldens for an intentional, reviewed format change —
+  never to paper over a red gate.
+- **`pack-test_pack_transcode`** — the a03 **end-to-end pack path**: import → transcode → pack, the
+  real chain the a05 build pipeline drives. One source project packs for TWO targets with per-target
+  variant payloads (BCn vs ASTC textures, verbatim PCM16 vs µ-law audio), a per-platform meta override
+  (L-36) reaches the packed bytes, every variant chunk self-verifies, and a repeat pack of the same
+  (project, target) is byte-identical (the R-FILE-010 cache-hit property). The only pack test that
+  links `context_import` — deliberately, so the pack LIBRARY keeps no import dependency.
