@@ -1,0 +1,121 @@
+<svg width="955" height="240" viewBox="0 0 955 240" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Context — build worlds from files, render them in real time">
+  <style>
+    .hfl-name { font:800 62px 'Segoe UI',Ubuntu,sans-serif; fill:url(#hfl-tg); letter-spacing:4px; }
+    .hfl-ghost{ font:800 62px 'Segoe UI',Ubuntu,sans-serif; fill:#b8730a; letter-spacing:4px; opacity:.18; }
+    .hfl-ph   { font:700 22px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#33415e; letter-spacing:5px;
+               opacity:0; animation:hfl-cy 18s ease-in-out infinite; }
+    .hfl-st   { animation:hfl-tw 4s ease-in-out infinite alternate; }
+    .hfl-neb  { animation:hfl-breathe 6s ease-in-out infinite alternate; }
+    .hfl-d1   { animation:hfl-drift 170s linear infinite; }
+    .hfl-d2   { animation:hfl-drift 105s linear infinite; }
+    .hfl-d3   { animation:hfl-drift 62s linear infinite; }
+    .hfl-fade { opacity:0; animation:hfl-in .6s ease-out forwards; }
+    @keyframes hfl-in      { to { opacity:1; } }
+    @keyframes hfl-tw      { from { opacity:.2; } to { opacity:.9; } }
+    @keyframes hfl-breathe { from { opacity:.08; } to { opacity:.2; } }
+    @keyframes hfl-cy {
+      0%    { opacity:0; transform:translateY(14px); }
+      2.4%  { opacity:1; transform:translateY(0); }
+      14.2% { opacity:1; transform:translateY(0); }
+      16.6% { opacity:0; transform:translateY(-14px); }
+      100%  { opacity:0; transform:translateY(14px); }
+    }
+    @keyframes hfl-drift { from { transform:translateX(0); } to { transform:translateX(-955px); } }
+    @media (prefers-reduced-motion: reduce){
+      .hfl-st,.hfl-neb { animation:none; opacity:.3; }
+      .hfl-d1,.hfl-d2,.hfl-d3 { animation:none; }
+      .hfl-fade { animation:none; opacity:1; }
+      .hfl-ph { animation:none; }
+      .hfl-ph:first-of-type { opacity:1; }
+    }
+  </style>
+  <defs>
+    <linearGradient id="hfl-tg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0.35" stop-color="#b8730a"/><stop offset="0.5" stop-color="#3c3568"/><stop offset="0.65" stop-color="#0b7ec4"/>
+      <animateTransform attributeName="gradientTransform" type="translate"
+        values="-0.6 0; 0.6 0; -0.6 0" keyTimes="0; 0.5; 1"
+        calcMode="spline" keySplines="0.42 0 0.58 1; 0.42 0 0.58 1"
+        dur="9s" repeatCount="indefinite"/>
+    </linearGradient>
+    <linearGradient id="hfl-bgg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f6fc"/><stop offset="1" stop-color="#ece7f8"/>
+    </linearGradient>
+    <radialGradient id="hfl-neb1" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7d5cff" stop-opacity="0.5"/><stop offset="1" stop-color="#7d5cff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="hfl-neb2" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#22a6e0" stop-opacity="0.45"/><stop offset="1" stop-color="#22a6e0" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="hfl-halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#2f6fd8" stop-opacity="0.22"/><stop offset="1" stop-color="#2f6fd8" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="hfl-rc"><rect x="0" y="0" width="955" height="240" rx="12"/></clipPath>
+    <filter id="hfl-blur" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="6"/></filter>
+    <g id="hfl-sf1" fill="#7c8db5" opacity="0.7">
+      <circle cx="30" cy="20" r="0.8"/><circle cx="85" cy="120" r="0.7"/><circle class="hfl-st" cx="140" cy="60" r="0.9"/>
+      <circle cx="190" cy="200" r="0.7"/><circle cx="245" cy="35" r="0.8"/><circle class="hfl-st" cx="300" cy="150" r="0.8" style="animation-delay:1.3s"/>
+      <circle cx="355" cy="90" r="0.7"/><circle cx="410" cy="220" r="0.9"/><circle cx="460" cy="15" r="0.7"/>
+      <circle class="hfl-st" cx="515" cy="130" r="0.8" style="animation-delay:2.6s"/><circle cx="565" cy="70" r="0.7"/><circle cx="620" cy="185" r="0.9"/>
+      <circle cx="675" cy="45" r="0.7"/><circle cx="730" cy="110" r="0.8"/><circle class="hfl-st" cx="785" cy="210" r="0.8" style="animation-delay:3.4s"/>
+      <circle cx="835" cy="80" r="0.7"/><circle cx="880" cy="160" r="0.9"/><circle cx="925" cy="30" r="0.7"/>
+      <circle cx="60" cy="175" r="0.8"/><circle cx="700" cy="25" r="0.7"/>
+    </g>
+    <g id="hfl-sf2" fill="#47598a" opacity="0.75">
+      <circle cx="50" cy="50" r="1.1"/><circle class="hfl-st" cx="120" cy="140" r="1.2" style="animation-delay:.7s"/><circle cx="210" cy="90" r="1.1"/>
+      <circle cx="280" cy="25" r="1.3"/><circle cx="340" cy="190" r="1.1"/><circle class="hfl-st" cx="430" cy="120" r="1.2" style="animation-delay:1.9s"/>
+      <circle cx="500" cy="60" r="1.1"/><circle cx="580" cy="210" r="1.2"/><circle class="hfl-st" cx="650" cy="100" r="1.3" style="animation-delay:3.1s"/>
+      <circle cx="720" cy="160" r="1.1"/><circle cx="800" cy="40" r="1.2"/><circle cx="860" cy="130" r="1.1"/>
+      <circle cx="910" cy="220" r="1.2"/><circle cx="170" cy="230" r="1.1"/>
+    </g>
+    <g id="hfl-sf3" fill="#2c3a5f">
+      <circle cx="70" cy="90" r="1.5"/><circle class="hfl-st" cx="220" cy="170" r="1.6" style="animation-delay:1.1s"/><circle cx="390" cy="40" r="1.5"/>
+      <circle cx="480" cy="200" r="1.7"/><circle class="hfl-st" cx="610" cy="140" r="1.6" style="animation-delay:2.3s"/><circle cx="760" cy="70" r="1.5"/>
+      <circle cx="890" cy="190" r="1.8"/><circle cx="330" cy="110" r="1.5"/><circle class="hfl-st" cx="940" cy="100" r="1.6" style="animation-delay:3.7s"/>
+    </g>
+  </defs>
+
+  <g clip-path="url(#hfl-rc)">
+    <rect width="955" height="240" fill="url(#hfl-bgg)"/>
+    <ellipse class="hfl-neb" cx="180" cy="40" rx="320" ry="150" fill="url(#hfl-neb1)"/>
+    <ellipse class="hfl-neb" cx="820" cy="210" rx="340" ry="160" fill="url(#hfl-neb2)" style="animation-delay:3s"/>
+    <g class="hfl-d1"><use href="#hfl-sf1"/><use href="#hfl-sf1" x="955"/></g>
+    <g class="hfl-d2"><use href="#hfl-sf2"/><use href="#hfl-sf2" x="955"/></g>
+    <g class="hfl-d3"><use href="#hfl-sf3"/><use href="#hfl-sf3" x="955"/></g>
+
+    <!-- wireframe planet -->
+    <circle cx="230" cy="122" r="98" fill="url(#hfl-halo)"/>
+    <g stroke="#2f6fd8" fill="none">
+      <circle cx="230" cy="122" r="78" stroke-opacity="0.8" stroke-width="1.3"/>
+      <ellipse cx="230" cy="86"  rx="62" ry="11" stroke-opacity="0.35"/>
+      <ellipse cx="230" cy="122" rx="78" ry="14" stroke-opacity="0.45"/>
+      <ellipse cx="230" cy="158" rx="62" ry="11" stroke-opacity="0.35"/>
+      <ellipse cx="230" cy="122" rx="76" ry="78" stroke-opacity="0.5">
+        <animate attributeName="rx" values="76;4;76" dur="6s" repeatCount="indefinite"/>
+      </ellipse>
+      <ellipse cx="230" cy="122" rx="76" ry="78" stroke-opacity="0.35">
+        <animate attributeName="rx" values="4;76;4" dur="6s" repeatCount="indefinite"/>
+      </ellipse>
+      <ellipse cx="230" cy="122" rx="40" ry="78" stroke-opacity="0.3">
+        <animate attributeName="rx" values="40;76;12;40" dur="6s" repeatCount="indefinite"/>
+      </ellipse>
+    </g>
+    <!-- orbiting satellite -->
+    <g transform="rotate(-14 230 122)">
+      <ellipse cx="230" cy="122" rx="112" ry="30" stroke="#6639ba" stroke-opacity="0.4" stroke-dasharray="2 5" fill="none"/>
+      <circle r="3.5" fill="#0b7ec4">
+        <animateMotion dur="7s" repeatCount="indefinite" path="M 230 122 m -112 0 a 112 30 0 1 0 224 0 a 112 30 0 1 0 -224 0"/>
+      </circle>
+    </g>
+
+    <text class="hfl-ghost" x="618" y="112" text-anchor="middle" filter="url(#hfl-blur)">CONTEXT</text>
+    <text class="hfl-name hfl-fade" x="618" y="112" text-anchor="middle">CONTEXT</text>
+    <g>
+      <text class="hfl-ph" x="618" y="166" text-anchor="middle">AI-NATIVE</text>
+      <text class="hfl-ph" x="618" y="166" text-anchor="middle" style="animation-delay:3s">DETERMINISTIC</text>
+      <text class="hfl-ph" x="618" y="166" text-anchor="middle" style="animation-delay:6s">WEBGPU</text>
+      <text class="hfl-ph" x="618" y="166" text-anchor="middle" style="animation-delay:9s">REAL-TIME 3D</text>
+      <text class="hfl-ph" x="618" y="166" text-anchor="middle" style="animation-delay:12s">FILE-AUTHORITATIVE</text>
+      <text class="hfl-ph" x="618" y="166" text-anchor="middle" style="animation-delay:15s">HEADLESS-FIRST</text>
+    </g>
+  </g>
+</svg>

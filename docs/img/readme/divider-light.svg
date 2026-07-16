@@ -1,0 +1,64 @@
+<svg width="955" height="150" viewBox="0 0 955 150" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Build, run, verify, ship — zero GPU, zero GUI">
+  <style>
+    .el-sub  { font:700 16px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:url(#el-grad); letter-spacing:6px; }
+    .el-tag  { font:600 10px ui-monospace,'Cascadia Mono',Consolas,monospace; fill:#57606a; opacity:.9; }
+    .el-st   { animation:el-tw 4s ease-in-out infinite alternate; }
+    .el-sw   { transform-origin:477.5px 86px; animation:el-run 3.5s cubic-bezier(.45,.05,.9,.6) infinite; }
+    .el-fade { opacity:0; animation:el-in .6s ease-out forwards; }
+    .el-glow { animation:el-breathe 4s ease-in-out infinite alternate; }
+    @keyframes el-in      { to { opacity:1; } }
+    @keyframes el-tw      { from { opacity:.2; } to { opacity:.85; } }
+    @keyframes el-breathe { from { opacity:.15; } to { opacity:.3; } }
+    @keyframes el-run     { from { transform:translateY(3px) scaleX(.12); opacity:.9; }
+                           to   { transform:translateY(62px) scaleX(1.9); opacity:0; } }
+    @media (prefers-reduced-motion: reduce){
+      .el-st,.el-glow { animation:none; opacity:.4; }
+      .el-sw { animation:none; opacity:0; }
+      .el-fade { animation:none; opacity:1; }
+    }
+  </style>
+  <defs>
+    <linearGradient id="el-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0.3" stop-color="#bf3989"/><stop offset="0.5" stop-color="#8250df"/><stop offset="0.7" stop-color="#0b7ec4"/>
+      <animateTransform attributeName="gradientTransform" type="translate"
+        values="-0.6 0; 0.6 0; -0.6 0" keyTimes="0; 0.5; 1"
+        calcMode="spline" keySplines="0.42 0 0.58 1; 0.42 0 0.58 1"
+        dur="9s" repeatCount="indefinite"/>
+    </linearGradient>
+    <linearGradient id="el-bgg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f2f5fb"/><stop offset="1" stop-color="#eee9f8"/>
+    </linearGradient>
+    <radialGradient id="el-glowg" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#bf3989" stop-opacity="0.4"/><stop offset="1" stop-color="#bf3989" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="el-clip"><rect x="0" y="0" width="955" height="150" rx="12"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#el-clip)">
+    <rect width="955" height="150" fill="url(#el-bgg)"/>
+    <ellipse class="el-glow" cx="477.5" cy="86" rx="430" ry="90" fill="url(#el-glowg)"/>
+    <g fill="#5a6b8c">
+      <circle class="el-st" cx="90"  cy="24" r="1.2"/><circle class="el-st" cx="180" cy="52" r="1"   style="animation-delay:.7s"/>
+      <circle class="el-st" cx="262" cy="18" r="1.4" style="animation-delay:1.4s"/><circle class="el-st" cx="352" cy="42" r="1" style="animation-delay:2.1s"/>
+      <circle class="el-st" cx="614" cy="30" r="1.3" style="animation-delay:.4s"/><circle class="el-st" cx="700" cy="50" r="1" style="animation-delay:1.1s"/>
+      <circle class="el-st" cx="782" cy="20" r="1.4" style="animation-delay:1.8s"/><circle class="el-st" cx="868" cy="46" r="1.1" style="animation-delay:2.5s"/>
+      <circle class="el-st" cx="45"  cy="66" r="1"   style="animation-delay:3s"/><circle class="el-st" cx="910" cy="68" r="1" style="animation-delay:.9s"/>
+    </g>
+    <g stroke="#0b7ec4">
+      <line x1="467" y1="86" x2="382" y2="150" opacity="0.18"/><line x1="457" y1="86" x2="287" y2="150" opacity="0.18"/>
+      <line x1="447" y1="86" x2="192" y2="150" opacity="0.18"/><line x1="437" y1="86" x2="97"  y2="150" opacity="0.18"/>
+      <line x1="427" y1="86" x2="2"   y2="150" opacity="0.18"/><line x1="417" y1="86" x2="-93" y2="150" opacity="0.18"/>
+      <line x1="488" y1="86" x2="573" y2="150" opacity="0.18"/><line x1="498" y1="86" x2="668" y2="150" opacity="0.18"/>
+      <line x1="508" y1="86" x2="763" y2="150" opacity="0.18"/><line x1="518" y1="86" x2="858" y2="150" opacity="0.18"/>
+      <line x1="528" y1="86" x2="953" y2="150" opacity="0.18"/><line x1="538" y1="86" x2="1048" y2="150" opacity="0.18"/>
+      <line x1="0" y1="91"  x2="955" y2="91"  opacity="0.22"/><line x1="0" y1="97"  x2="955" y2="97"  opacity="0.19"/>
+      <line x1="0" y1="106" x2="955" y2="106" opacity="0.16"/><line x1="0" y1="118" x2="955" y2="118" opacity="0.13"/>
+      <line x1="0" y1="133" x2="955" y2="133" opacity="0.1"/><line x1="0" y1="149" x2="955" y2="149" opacity="0.08"/>
+      <line class="el-sw" x1="182.5" y1="86" x2="772.5" y2="86" stroke-width="1.3"/>
+      <line class="el-sw" x1="182.5" y1="86" x2="772.5" y2="86" stroke-width="1.3" style="animation-delay:-1.17s"/>
+      <line class="el-sw" x1="182.5" y1="86" x2="772.5" y2="86" stroke-width="1.3" style="animation-delay:-2.33s"/>
+    </g>
+    <text class="el-sub el-fade" x="477.5" y="58" text-anchor="middle">BUILD · RUN · VERIFY · SHIP</text>
+    <text class="el-tag" x="932" y="24" text-anchor="end">zero GPU · zero GUI</text>
+  </g>
+</svg>
