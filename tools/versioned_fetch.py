@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 import verify_artifact
@@ -36,26 +35,16 @@ from verify_artifact import (
     DEFAULT_IDENTITY,
     DEFAULT_NAMESPACE,
     DEFAULT_TRUST_ROOT,
-    OK,
     REFUSED,
+    VerifyResult,
 )
 
-
-@dataclass(frozen=True)
-class FetchVerdict:
-    """The verify-before-execute verdict for a fetched engine version.
-
-    code   -- OK / REFUSED / CONFIG_ERROR (mirrors verify_artifact's process exit taxonomy).
-    detail -- human-readable one-liner (ssh-keygen's message or the config/refusal reason).
-    ok     -- True only when the archive verified (safe to unpack + execute).
-    """
-
-    code: int
-    detail: str
-
-    @property
-    def ok(self) -> bool:
-        return self.code == OK
+# The verify-before-execute verdict for a fetched engine version IS verify_artifact's own
+# VerifyResult (fields: code = OK/REFUSED/CONFIG_ERROR, detail; property .ok True iff code == OK)
+# under a purpose-name. The versioned-fetch seam and the shared gate share ONE result taxonomy, so
+# there is nothing to re-declare or re-wrap — aliasing keeps the seam's named contract without
+# duplicating the type (and without silently dropping any field VerifyResult may later gain).
+FetchVerdict = VerifyResult
 
 
 def verify_fetched_version(
@@ -73,10 +62,9 @@ def verify_fetched_version(
     meaningful if the fetched artifact is authenticated before it ever runs. Never raises; a
     fetcher can branch on `.ok` (or the process exit code via `main`).
     """
-    result = verify_artifact.verify_artifact(
+    return verify_artifact.verify_artifact(
         archive, signature, trust_root=trust_root, identity=identity, namespace=namespace
     )
-    return FetchVerdict(result.code, result.detail)
 
 
 def require_verified_before_execute(

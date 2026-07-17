@@ -15,13 +15,6 @@ namespace context::common
 namespace
 {
 
-// The exit code std::system() reports on POSIX when the command itself could not be found
-// (`sh -c` → 127). We map it to ConfigError (like the Python gate's "ssh-keygen not found") so an
-// absent verifier is surfaced as broken plumbing rather than a signature refusal — though BOTH fail
-// closed. Every other non-zero exit (a real verify failure, or Windows' own not-found code) is a
-// fail-closed Refused: the caller must not use the artifact either way.
-constexpr int kCommandNotFound = 127;
-
 [[nodiscard]] bool exists_file(const std::filesystem::path& p)
 {
     std::error_code ec;
@@ -29,6 +22,29 @@ constexpr int kCommandNotFound = 127;
 }
 
 } // namespace
+
+VerifyStatus classify_verify_exit_code(int exit_code, subprocess::Shell shell) noexcept
+{
+    if (exit_code == 0)
+        return VerifyStatus::Ok;
+
+    // Distinguish "the verifier could not be launched at all" (ConfigError — broken plumbing, e.g. an
+    // absent ssh-keygen) from "ssh-keygen ran and refused the signature" (Refused). BOTH fail closed
+    // (VerifyOutcome::ok() is false either way); the split is diagnostic only. Which exit codes mean
+    // which is host-shell-specific because subprocess::run_command()'s contract differs by shell —
+    // see verify_signature.h and subprocess.h.
+    if (shell == subprocess::Shell::Cmd)
+    {
+        // Windows / cmd.exe: run_command() returns the child's RAW exit code. A truly-absent command
+        // makes cmd.exe exit 1 ("'ssh-keygen' is not recognized" / "cannot find the path"), so 1 is
+        // the only not-runnable code. A genuine verify FAILURE exits -1 (Windows-builtin OpenSSH
+        // ssh-keygen) or 255 (Git-for-Windows'), and every other non-zero is likewise a real refusal.
+        return exit_code == 1 ? VerifyStatus::ConfigError : VerifyStatus::Refused;
+    }
+    // POSIX / sh: run_command() maps a shell-launch failure to -1 and `sh -c`'s command-not-found to
+    // 127 — both mean the gate could not run. Any other non-zero (ssh-keygen's own 255, …) is Refused.
+    return (exit_code == -1 || exit_code == 127) ? VerifyStatus::ConfigError : VerifyStatus::Refused;
+}
 
 VerifyOutcome verify_signature(const std::filesystem::path& artifact,
                                const std::filesystem::path& signature,
@@ -73,11 +89,16 @@ VerifyOutcome verify_signature(const std::filesystem::path& artifact,
     }
 
     const int exit_code = subprocess::run_command(command);
-    if (exit_code == 0)
+    switch (classify_verify_exit_code(exit_code, subprocess::host_shell()))
+    {
+    case VerifyStatus::Ok:
         return {VerifyStatus::Ok, "signature OK"};
-    if (exit_code == kCommandNotFound || exit_code == -1)
+    case VerifyStatus::ConfigError:
         return {VerifyStatus::ConfigError,
                 "ssh-keygen could not be run (fail closed — cannot verify). Install OpenSSH."};
+    case VerifyStatus::Refused:
+        break;
+    }
     return {VerifyStatus::Refused,
             "signature rejected by ssh-keygen -Y verify (fail closed; exit " +
                 std::to_string(exit_code) + ")"};

@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include "context/common/subprocess.h" // subprocess::Shell — the exit-code taxonomy is shell-specific
+
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -45,6 +47,18 @@ struct VerifyOutcome
 
     [[nodiscard]] bool ok() const noexcept { return status == VerifyStatus::Ok; }
 };
+
+// Map a raw `ssh-keygen -Y verify` exit code (as returned by subprocess::run_command()) to the
+// fail-closed outcome, for host `shell`. This taxonomy is SHELL-SPECIFIC because run_command()'s
+// exit-code contract differs by shell (subprocess.h): on POSIX it decodes the wait status (so -1
+// means the shell itself could not launch and 127 means `sh -c` could not find ssh-keygen — both
+// ConfigError), whereas cmd.exe returns the child's RAW exit code (so a genuine verify FAILURE is -1
+// on the Windows-builtin OpenSSH ssh-keygen or 255 on Git-for-Windows', while a truly-absent command
+// makes cmd.exe exit 1 — so on Windows ONLY 1 is ConfigError and -1/255 are real Refused). Exposed +
+// parameterized on Shell so BOTH host policies are unit-testable from either host, mirroring
+// subprocess.h's Shell-parameterized quoting policy. Never Ok unless `exit_code == 0`.
+[[nodiscard]] VerifyStatus classify_verify_exit_code(int exit_code,
+                                                     subprocess::Shell shell) noexcept;
 
 // Verify `artifact` against its detached `signature` under the pinned `trust_root` (an OpenSSH
 // allowed_signers file), the expected signer `identity`, and `namespace_`. FAILS CLOSED on every

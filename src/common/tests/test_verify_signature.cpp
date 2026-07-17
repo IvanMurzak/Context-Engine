@@ -15,8 +15,10 @@
 #include <string>
 
 namespace fs = std::filesystem;
+using context::common::classify_verify_exit_code;
 using context::common::verify_signature;
 using context::common::VerifyStatus;
+using Shell = context::common::subprocess::Shell;
 
 namespace
 {
@@ -56,6 +58,30 @@ void write_bytes(const fs::path& p, const std::string& bytes)
 
 int main()
 {
+    // --- Exit-code taxonomy (pure, no ssh-keygen — both shell shapes verified from ANY host) ---------
+    // The regression this whole file guards: a genuine verify FAILURE (tampered / wrong-namespace /
+    // wrong-identity) must map to Refused, never ConfigError. Its exit code is SHELL-SPECIFIC —
+    // -1 on the Windows-builtin OpenSSH ssh-keygen (cmd.exe passes the raw child code through), 255
+    // on POSIX / Git-for-Windows — so the classifier is parameterized on Shell and tested on both.
+    {
+        // A verified signature is Ok on either shell.
+        CHECK(classify_verify_exit_code(0, Shell::Cmd) == VerifyStatus::Ok);
+        CHECK(classify_verify_exit_code(0, Shell::Posix) == VerifyStatus::Ok);
+
+        // Windows / cmd.exe: -1 (Windows-builtin OpenSSH) and 255 (Git-for-Windows) are REAL refusals,
+        // NOT plumbing errors — this is the exact bug that reddened build (windows-latest). Only a
+        // truly-absent command (cmd.exe exit 1, "'ssh-keygen' is not recognized") is ConfigError.
+        CHECK(classify_verify_exit_code(-1, Shell::Cmd) == VerifyStatus::Refused);
+        CHECK(classify_verify_exit_code(255, Shell::Cmd) == VerifyStatus::Refused);
+        CHECK(classify_verify_exit_code(1, Shell::Cmd) == VerifyStatus::ConfigError);
+
+        // POSIX / sh: run_command() reports -1 for a shell-launch failure and 127 for command-not-found
+        // (both ConfigError); ssh-keygen's own 255 verify failure is Refused.
+        CHECK(classify_verify_exit_code(-1, Shell::Posix) == VerifyStatus::ConfigError);
+        CHECK(classify_verify_exit_code(127, Shell::Posix) == VerifyStatus::ConfigError);
+        CHECK(classify_verify_exit_code(255, Shell::Posix) == VerifyStatus::Refused);
+    }
+
     // --- Config-class fail-closed paths (no ssh-keygen needed — deterministic pre-checks) ------------
     {
         // A missing pinned trust root is a ConfigError refusal (we never fall back to implicit trust).
