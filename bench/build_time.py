@@ -147,9 +147,16 @@ def machine_info() -> dict:
 # --------------------------------------------------------------------------- #
 
 def _run_shell(command: str) -> float:
-    """Run a shell command, returning wall-clock seconds. Raises on non-zero exit."""
+    """Run a shell command, returning wall-clock seconds. Raises on non-zero exit.
+
+    stdout is discarded at the kernel (never read) so a heavy phase — e.g. the cold full-engine
+    ``cmake --build`` this harness is built to measure — does not buffer tens of MB in the parent
+    and drain that pipe INSIDE the timed region, which would inflate the measurement. stderr is kept
+    for the failure tail.
+    """
     t0 = time.perf_counter()
-    proc = subprocess.run(command, shell=True, capture_output=True, text=True)
+    proc = subprocess.run(command, shell=True, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.PIPE, text=True)
     wall = time.perf_counter() - t0
     if proc.returncode != 0:
         raise RuntimeError(
