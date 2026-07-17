@@ -333,7 +333,10 @@ jobs:
           "$ctx" build --target macos --flavor server --project "$proj" --out "$proj/build/server.pack" --runtime "$exe" --sign | tee "$proj/envelope.json"
           STATE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"]["signing"]["state"])' "$proj/envelope.json")"
           echo "a13 signing report state: $STATE"
-          if [ -n "${MAC_SIGN_IDENTITY:-}" ] && [ -n "${MAC_CSC_LINK:-}" ]; then
+          # "Signing ran" must match the codesign step's guard EXACTLY (all three signing secrets) — a
+          # partial config (e.g. MAC_CSC_KEY_PASSWORD empty) skips codesign, so the binary is unsigned and
+          # this step must expect "unsigned", not hard-fail expecting "signed".
+          if [ -n "${MAC_SIGN_IDENTITY:-}" ] && [ -n "${MAC_CSC_LINK:-}" ] && [ -n "${MAC_CSC_KEY_PASSWORD:-}" ]; then
             # Signing ran -> the a13 hook MUST detect the embedded Developer-ID code signature.
             [ "$STATE" = "signed" ] || { echo "::error::signing ran but the a13 hook reported '$STATE', expected 'signed'"; exit 1; }
             echo "### a13 hook closed the loop: context build --sign -> state 'signed'" >> "$GITHUB_STEP_SUMMARY"

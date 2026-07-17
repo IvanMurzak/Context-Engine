@@ -51,7 +51,6 @@ inline constexpr const char* kSigningTool = "signtool";
 inline constexpr const char* kSigningMethodDeveloperId = "developer-id-notarization";
 inline constexpr const char* kSigningPrimaryAppleNotary = "apple-notary";
 inline constexpr const char* kSigningToolCodesign = "codesign";
-inline constexpr const char* kSigningToolNotary = "notarytool";
 
 // The signing states evaluate_signing can report (folded into data.signing.state).
 inline constexpr const char* kSigningStateNotRequired = "not-required"; // target needs no code-signing
