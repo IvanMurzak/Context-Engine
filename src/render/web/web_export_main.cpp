@@ -49,14 +49,19 @@ bool post_bytes(const char* path, const void* data, std::size_t size)
     // EM_ASM's $0/$1/$2 placeholders trip clang -Wpedantic (-Wdollar-in-identifier-extension) ->
     // -Werror on the render-web CI leg; a source pragma overrides the command line (a target-level
     // -Wno- flag would be re-enabled by context_warnings' trailing -Wpedantic — later flags win).
+    // JS string literals inside EM_ASM use single quotes (Emscripten convention: EM_ASM's argument
+    // is embedded as real C++ syntax for placeholder scanning, and a double-quoted JS string there
+    // desyncs its brace/paren matching); that trips clang -Wmultichar on any 2+ char literal, so it
+    // is suppressed alongside -Wdollar-in-identifier-extension rather than switched to double quotes.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
+#pragma clang diagnostic ignored "-Wmultichar"
     EM_ASM(
         {
             globalThis.__ctxExportPost = 0;
             const path = UTF8ToString($0);
             const body = new Uint8Array(HEAPU8.subarray($1, $1 + $2));
-            fetch(path, {method : "POST", body : body})
+            fetch(path, {method : 'POST', body : body})
                 .then(function(r) { globalThis.__ctxExportPost = r.ok ? 1 : 2; })
                 .catch(function() { globalThis.__ctxExportPost = 2; });
         },
@@ -96,15 +101,18 @@ public:
     {
 #ifdef __EMSCRIPTEN__
         // A HEAD request yields Content-Length without transferring the body.
+        // See post_bytes() above for why JS strings here stay single-quoted (-Wmultichar suppressed
+        // instead of switching to double quotes, which desyncs EM_ASM's brace/paren matching).
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
+#pragma clang diagnostic ignored "-Wmultichar"
         EM_ASM(
             {
                 globalThis.__ctxExportLen = -1;
                 const url = UTF8ToString($0);
-                fetch(url, {method : "HEAD"})
+                fetch(url, {method : 'HEAD'})
                     .then(function(r) {
-                        globalThis.__ctxExportLen = r.ok ? (parseInt(r.headers.get("Content-Length") || '0', 10) || 0) : -2;
+                        globalThis.__ctxExportLen = r.ok ? (parseInt(r.headers.get('Content-Length') || '0', 10) || 0) : -2;
                     })
                     .catch(function() { globalThis.__ctxExportLen = -2; });
             },
@@ -129,17 +137,20 @@ public:
 #ifdef __EMSCRIPTEN__
         out.resize(static_cast<std::size_t>(length));
         // Range-fetch [offset, offset+length) and copy the response bytes into the pre-sized out buffer.
+        // See post_bytes() above for why JS strings here stay single-quoted (-Wmultichar suppressed
+        // instead of switching to double quotes, which desyncs EM_ASM's brace/paren matching).
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
+#pragma clang diagnostic ignored "-Wmultichar"
         EM_ASM(
             {
                 globalThis.__ctxExportRange = 0;
                 const url = UTF8ToString($0);
                 const start = $1, len = $2, dst = $3;
-                fetch(url, {headers : {"Range" : "bytes=" + start + '-' + (start + len - 1)}})
+                fetch(url, {headers : {'Range' : 'bytes=' + start + '-' + (start + len - 1)}})
                     .then(function(r) {
                         if (!r.ok && r.status !== 206 && r.status !== 200)
-                            throw new Error("status " + r.status);
+                            throw new Error('status ' + r.status);
                         return r.arrayBuffer();
                     })
                     .then(function(buf) {
