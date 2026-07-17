@@ -134,3 +134,23 @@ target_link_options(context_shadercc_roundtrip
     PRIVATE $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
 
 add_test(NAME shader-crosscompile-roundtrip COMMAND context_shadercc_roundtrip)
+
+# -------------------------------------------------------------------------------------------------
+# `shadercc-tests` umbrella target (issue #264 CI-scope fix): the shader-crosscompile CI job builds
+# `--target shadercc-tests` (not the whole engine) and then runs only `ctest -R "^shader-"`, cutting
+# the job to its DESIGNED charter — the shadercc toolchain link-proof + the shader-* proofs — instead
+# of rebuilding/re-running the full 339-test suite the blocking `build` job already gates.
+#
+# "Not Run = RED" tripwire (issue #264): every executable backing a `shader-*` ctest MUST be built by
+# this target, or `ctest -R "^shader-"` selects a test whose exe was never built and reports it
+# "Not Run" -> red. This enumerates EVERY executable defined in this directory and depends on it, so
+# any NEW shader-* test added here (all shader-* ctests live in this file) auto-joins the umbrella
+# with no CI edit. KEEP THIS BLOCK AT THE END OF THE FILE so it sees every target above it.
+add_custom_target(shadercc-tests)
+get_property(_shadercc_dir_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(_t IN LISTS _shadercc_dir_targets)
+    get_target_property(_shadercc_ttype ${_t} TYPE)
+    if(_shadercc_ttype STREQUAL "EXECUTABLE")
+        add_dependencies(shadercc-tests ${_t})
+    endif()
+endforeach()
