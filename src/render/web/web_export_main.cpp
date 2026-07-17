@@ -24,10 +24,72 @@
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+#include <emscripten/em_js.h>
 #endif
 
 using namespace context::render;
 namespace content = context::runtime::content;
+
+#ifdef __EMSCRIPTEN__
+// The browser-side fetch() logic lives in EM_ASYNC_JS *named JS functions*, NOT inline EM_ASM blocks.
+// EM_ASM stringifies only its FIRST macro argument, so any top-level comma inside the JS block (a
+// multi-variable `const a = $1, b = $2;` declaration, or an object literal spanning a comma) is taken
+// as a macro-argument separator: the tail of the JS then leaks out as trailing EM_ASM args that clang
+// compiles as C++ and rejects under -Werror (object-literal `:` -> GNU field-designator, `'Range'` ->
+// multichar character constant, `$2`/`$3` -> undeclared identifiers). EM_JS/EM_ASYNC_JS instead capture
+// the whole body via variadic `#__VA_ARGS__` stringification (comma-safe) and pass real named
+// parameters (no `$N`, so no -Wdollar-in-identifier-extension either) — the JS is never parsed as C++.
+// -sASYNCIFY (CMakeLists.txt) lets each function `await` its fetch and block the calling C++ until the
+// promise settles, replacing the old globalThis flag + emscripten_sleep polling loops.
+
+// POST `size` bytes from the wasm heap at `data` to `path` on the page's own origin (the channel back
+// to tools/web_golden_run.py). Returns 1 when a collector accepted the body (r.ok), else 0 (no
+// collector listening on a manual run, or a network error). The body is COPIED out of the heap before
+// the await — a typed-array view over the heap must not outlive an Asyncify yield.
+EM_ASYNC_JS(int, ctx_export_post, (const char* path, const char* data, int size), {
+    const url = UTF8ToString(path);
+    const body = new Uint8Array(HEAPU8.subarray(data, data + size));
+    try {
+        const r = await fetch(url, { method: 'POST', body: body });
+        return r.ok ? 1 : 0;
+    } catch (e) {
+        return 0;
+    }
+});
+
+// HEAD `url` and return its Content-Length (>= 0 bytes), or -1 on a non-ok response / network error.
+// A HEAD request yields Content-Length without transferring the body.
+EM_ASYNC_JS(double, ctx_export_content_length, (const char* url), {
+    const target = UTF8ToString(url);
+    try {
+        const r = await fetch(target, { method: 'HEAD' });
+        if (!r.ok) return -1;
+        return parseInt(r.headers.get('Content-Length') || '0', 10) || 0;
+    } catch (e) {
+        return -1;
+    }
+});
+
+// Range-fetch [offset, offset + length) of `url` and copy the response bytes into the wasm heap at
+// `dst`. Returns 1 on success, 0 on a wrong-length body or a non-206/200 error response. The heap is
+// sized up front with NO -sALLOW_MEMORY_GROWTH (CMakeLists.txt), so `dst` (a pointer into a caller's
+// pre-sized buffer) stays valid across the await.
+EM_ASYNC_JS(int, ctx_export_fetch_range,
+            (const char* url, double offset, double length, char* dst), {
+    const target = UTF8ToString(url);
+    const end = offset + length - 1;
+    try {
+        const r = await fetch(target, { headers: { 'Range': 'bytes=' + offset + '-' + end } });
+        if (!r.ok && r.status !== 206 && r.status !== 200) return 0;
+        const bytes = new Uint8Array(await r.arrayBuffer());
+        if (bytes.length !== length) return 0;
+        HEAPU8.set(bytes, dst);
+        return 1;
+    } catch (e) {
+        return 0;
+    }
+});
+#endif // __EMSCRIPTEN__
 
 namespace
 {
@@ -42,38 +104,11 @@ constexpr std::uint64_t kMemoryBudget = 262144;
 
 // POST `size` bytes to `path` on the page's own origin — the channel back to tools/web_golden_run.py.
 // Returns true when a collector accepted the body; false when none is listening (manual run) or on
-// error. Copied verbatim from web_main.cpp's proven pattern (the same collector + Asyncify wait).
+// error. Delegates to the ctx_export_post EM_ASYNC_JS above (native builds are a no-op).
 bool post_bytes(const char* path, const void* data, std::size_t size)
 {
 #ifdef __EMSCRIPTEN__
-    // EM_ASM's $0/$1/$2 placeholders trip clang -Wpedantic (-Wdollar-in-identifier-extension) ->
-    // -Werror on the render-web CI leg; a source pragma overrides the command line (a target-level
-    // -Wno- flag would be re-enabled by context_warnings' trailing -Wpedantic — later flags win).
-    // JS string literals inside EM_ASM use single quotes (Emscripten convention: EM_ASM's argument
-    // is embedded as real C++ syntax for placeholder scanning, and a double-quoted JS string there
-    // desyncs its brace/paren matching); that trips clang -Wmultichar on any 2+ char literal, so it
-    // is suppressed alongside -Wdollar-in-identifier-extension rather than switched to double quotes.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
-#pragma clang diagnostic ignored "-Wmultichar"
-    EM_ASM(
-        {
-            globalThis.__ctxExportPost = 0;
-            const path = UTF8ToString($0);
-            const body = new Uint8Array(HEAPU8.subarray($1, $1 + $2));
-            fetch(path, {method : 'POST', body : body})
-                .then(function(r) { globalThis.__ctxExportPost = r.ok ? 1 : 2; })
-                .catch(function() { globalThis.__ctxExportPost = 2; });
-        },
-        path, data, size);
-#pragma clang diagnostic pop
-    for (int waited_ms = 0; waited_ms < 20000; waited_ms += 50)
-    {
-        if (emscripten_run_script_int("globalThis.__ctxExportPost|0") != 0)
-            break;
-        emscripten_sleep(50);
-    }
-    return emscripten_run_script_int("globalThis.__ctxExportPost|0") == 1;
+    return ctx_export_post(path, static_cast<const char*>(data), static_cast<int>(size)) == 1;
 #else
     (void)path;
     (void)data;
@@ -89,9 +124,9 @@ void post_done(int exit_code)
 }
 
 // The a11 HTTP-range ChunkFetcher: pulls byte ranges of the served pack over `fetch()` with a Range
-// header (the production browser transport for R-ASSET-003 streaming). Async fetch + an Asyncify wait
-// loop (the same yield pattern as post_bytes); the response ArrayBuffer is copied into the wasm heap.
-// Non-emscripten builds are a no-op (this TU only ships under emcc).
+// header (the production browser transport for R-ASSET-003 streaming). Both methods delegate to the
+// EM_ASYNC_JS functions above, which await the fetch (Asyncify) and copy the response into the wasm
+// heap. Non-emscripten builds are a no-op (this TU only ships under emcc).
 class HttpRangeFetcher final : public content::ChunkFetcher
 {
 public:
@@ -100,31 +135,7 @@ public:
     [[nodiscard]] std::uint64_t total_size() const override
     {
 #ifdef __EMSCRIPTEN__
-        // A HEAD request yields Content-Length without transferring the body.
-        // See post_bytes() above for why JS strings here stay single-quoted (-Wmultichar suppressed
-        // instead of switching to double quotes, which desyncs EM_ASM's brace/paren matching).
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
-#pragma clang diagnostic ignored "-Wmultichar"
-        EM_ASM(
-            {
-                globalThis.__ctxExportLen = -1;
-                const url = UTF8ToString($0);
-                fetch(url, {method : 'HEAD'})
-                    .then(function(r) {
-                        globalThis.__ctxExportLen = r.ok ? (parseInt(r.headers.get('Content-Length') || '0', 10) || 0) : -2;
-                    })
-                    .catch(function() { globalThis.__ctxExportLen = -2; });
-            },
-            url_.c_str());
-#pragma clang diagnostic pop
-        for (int waited_ms = 0; waited_ms < 20000; waited_ms += 50)
-        {
-            if (emscripten_run_script_int("(globalThis.__ctxExportLen|0) !== -1 ? 1 : 0") != 0)
-                break;
-            emscripten_sleep(50);
-        }
-        const int len = emscripten_run_script_int("globalThis.__ctxExportLen|0");
+        const double len = ctx_export_content_length(url_.c_str());
         return len > 0 ? static_cast<std::uint64_t>(len) : 0;
 #else
         return 0;
@@ -136,45 +147,8 @@ public:
     {
 #ifdef __EMSCRIPTEN__
         out.resize(static_cast<std::size_t>(length));
-        // Range-fetch [offset, offset+length) and copy the response bytes into the pre-sized out buffer.
-        // See post_bytes() above for why JS strings here stay single-quoted (-Wmultichar suppressed
-        // instead of switching to double quotes, which desyncs EM_ASM's brace/paren matching).
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
-#pragma clang diagnostic ignored "-Wmultichar"
-        EM_ASM(
-            {
-                globalThis.__ctxExportRange = 0;
-                const url = UTF8ToString($0);
-                const start = $1, len = $2, dst = $3;
-                fetch(url, {headers : {'Range' : 'bytes=' + start + '-' + (start + len - 1)}})
-                    .then(function(r) {
-                        if (!r.ok && r.status !== 206 && r.status !== 200)
-                            throw new Error('status ' + r.status);
-                        return r.arrayBuffer();
-                    })
-                    .then(function(buf) {
-                        const bytes = new Uint8Array(buf);
-                        if (bytes.length !== len)
-                        {
-                            globalThis.__ctxExportRange = 2;
-                            return;
-                        }
-                        HEAPU8.set(bytes, dst);
-                        globalThis.__ctxExportRange = 1;
-                    })
-                    .catch(function() { globalThis.__ctxExportRange = 2; });
-            },
-            url_.c_str(), static_cast<double>(offset), static_cast<double>(length),
-            reinterpret_cast<std::uintptr_t>(out.data()));
-#pragma clang diagnostic pop
-        for (int waited_ms = 0; waited_ms < 30000; waited_ms += 50)
-        {
-            if (emscripten_run_script_int("globalThis.__ctxExportRange|0") != 0)
-                break;
-            emscripten_sleep(50);
-        }
-        return emscripten_run_script_int("globalThis.__ctxExportRange|0") == 1;
+        return ctx_export_fetch_range(url_.c_str(), static_cast<double>(offset),
+                                      static_cast<double>(length), out.data()) == 1;
 #else
         (void)offset;
         (void)length;
