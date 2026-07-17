@@ -907,6 +907,48 @@ const std::vector<ErrorCode>& catalog()
          "no registrable module (an undefined register_<pkg> — the link's undefined-symbol failure). "
          "Deterministic — a bare retry cannot conjure the missing module.",
          false, kExitInternal, "R-KERNEL-003"},
+        // --- doctor.* — a09 environment doctor (src/editor/build/doctor.*, R-BUILD-008) ----------------
+        // The `context doctor` verb's toolchain/environment diagnostics. The strings are the
+        // source-of-truth in src/editor/build/doctor.h as context::editor::build::kDoctor*Code (the same
+        // promote-a-local-string pattern as build_errors.h's kBuild*Code / bridge's scope.denied — so the
+        // doctor core never links this contract layer) and this catalog registers them.
+        // environment_incomplete is the BLOCKING top-level refusal (a required component is missing or a
+        // strict-pin version is wrong for a requested target); toolchain_missing / toolchain_version_mismatch
+        // are the per-finding component codes — all validation-class, deterministic (a bare re-run without
+        // fixing the env re-fails; the fix is an install/fetch, surfaced by the finding's `fetchable`).
+        // filesync_budget_low (R-FILE-002 up-front watcher.degraded check) + signing_prereq_absent
+        // (R-BUILD-005 ship-time prereq) are ADVISORY per-finding codes (never blocking). unknown_target is
+        // a usage error (an unrecognized --target). Additive-only (protocolMajor stays 1): NEW rows at the
+        // END, no existing row reordered/renamed.
+        {"doctor.environment_incomplete",
+         "One or more required toolchain components for a requested target are missing or the wrong "
+         "version; `context doctor` refuses (the environment cannot build the requested target(s)). The "
+         "report enumerates each finding with its fetchable-vs-preinstalled remediation (fail-closed).",
+         false, kExitValidation, "R-BUILD-008"},
+        {"doctor.toolchain_missing",
+         "A required toolchain component is absent for a requested target; the finding's `fetchable` flag "
+         "says whether the fix is an engine-fetch (via the a08-verified path, R-SEC-009) or a "
+         "dev-preinstalled prerequisite. Deterministic — a bare re-run cannot conjure the component.",
+         false, kExitValidation, "R-BUILD-008"},
+        {"doctor.toolchain_version_mismatch",
+         "A required toolchain component is present but its version does not satisfy the L-42 manifest "
+         "pin; blocking only when the pin's enforcement is `strict` (an advisory/documented drift is a "
+         "non-blocking warning — the drift-alarm, not a build blocker).",
+         false, kExitValidation, "R-BUILD-008"},
+        {"doctor.filesync_budget_low",
+         "The per-user file-sync watch budget is below the project file count × worktree-daemon count "
+         "(the up-front R-FILE-002 check). ADVISORY: raise the limit, or expect the watcher.degraded "
+         "background-crawl fallback. Pairs with the R-FILE-011 N-daemons-on-one-box scenario.",
+         false, kExitValidation, "R-FILE-002"},
+        {"doctor.signing_prereq_absent",
+         "A code-signing prerequisite for a requested target (Windows Authenticode identity, macOS "
+         "signing identity + notary creds) is not configured/reachable. ADVISORY (a ship-time prereq, "
+         "never a build blocker). Presence only — the doctor never surfaces a secret/key value.",
+         false, kExitValidation, "R-BUILD-005"},
+        {"doctor.unknown_target",
+         "`context doctor --target <t>` named a value that is not a known build target "
+         "(windows | linux | macos | web).",
+         false, kExitUsage, "R-BUILD-008"},
     };
     return the_catalog;
 }

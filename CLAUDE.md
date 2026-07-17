@@ -176,7 +176,9 @@ a perf number may gate) · `physics-determinism-decision.md` (fixed-point Q16 si
 sim-vs-presentation-observer split) · `sim-render-timing-contract.md` (fixed timestep +
 interpolation) · `query-language.md` (the one query grammar) · `deprecation-policy.md` (the frozen
 `protocolMajor 1` contract lifecycle) · `wgsl-tool-decision.md` (Tint, measured) ·
-`signing.md` (Ed25519 trust root, verify-before-use) · `versioned-install.md` (side-by-side
+`signing.md` (Ed25519 trust root, verify-before-use) · `toolchain-bootstrap.md` (the R-BUILD-008
+fetchable-vs-preinstalled split per v1 target — what `context doctor` validates) ·
+`versioned-install.md` (side-by-side
 `versions/<semver>/` layout — a day-one contract) · `chunk-pack-format.md` (draft pack spec) ·
 `self-hosted-runners.md` · `sanitizer-v8-false-positives.md` · `test-vector-corpus.md` ·
 `latency-budget-table.md` / `human-latency-budget.md`.

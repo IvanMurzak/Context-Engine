@@ -9,6 +9,7 @@
 add_library(context_build STATIC
     src/build_orchestrator.cpp
     src/adapter.cpp
+    src/doctor.cpp
     src/toolchain_manifest.cpp)
 
 target_include_directories(context_build PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -51,3 +52,13 @@ add_executable(context_build_test_adapter tests/test_adapter.cpp)
 target_link_libraries(context_build_test_adapter PRIVATE context_build context_warnings)
 target_include_directories(context_build_test_adapter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME build-test_adapter COMMAND context_build_test_adapter)
+
+# a09 environment doctor (doctor.*): the R-QA-011 corpus for the PURE diagnosis core — a healthy
+# reference environment passes; deliberately-broken fixtures (a missing/wrong-version toolchain
+# component, a starved file-sync watch budget, an absent signing prereq) produce the documented
+# machine-readable findings + doctor.* codes. No filesystem/subprocess (the core is IO-free — the CLI
+# wrapper owns the real host probing), so no static-runtime link is needed.
+add_executable(context_build_test_doctor tests/test_doctor.cpp)
+target_link_libraries(context_build_test_doctor PRIVATE context_build context_warnings)
+target_include_directories(context_build_test_doctor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME build-test_doctor COMMAND context_build_test_doctor)

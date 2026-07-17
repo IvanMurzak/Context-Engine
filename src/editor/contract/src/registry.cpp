@@ -704,6 +704,38 @@ Registry::Registry()
           false}},
         /*implemented=*/true));
 
+    // --- M8 task a09: the environment doctor verb (issue a09, R-BUILD-008 / R-PKG-002) --------------
+    // A global, one-shot STABLE verb (served by the CLI like `build`/`install`, NOT the daemon):
+    // `context doctor [--target <t>]` validates everything the requested target(s) need — the per-target
+    // toolchain manifest components (presence/versions, fetchable-vs-preinstalled), the file-sync OS
+    // resource budget (R-FILE-002 up-front watcher.degraded check), and the signing prerequisites — and
+    // reports machine-readable diagnostics through the R-CLI-008 envelope so an agent (or a new human)
+    // can diagnose + fix a build environment from branchable output, not prose. Backed by
+    // src/cli/doctor_command.cpp over the pure context_build doctor core. Inserted at the END of the
+    // stable block (before the operational surface) so a future sibling insertion merges cleanly. Its
+    // rpc_method (`doctor`) + mcp_tool (`context_doctor`) are projected from the (noun, verb) triple.
+    // Additive-only — protocolMajor stays 1 (a NEW stable verb, nothing frozen removed/renamed).
+    verbs_.push_back(make_verb(
+        "", "", "doctor",
+        "Validate the toolchain + environment for the requested build target(s) (R-BUILD-008): each "
+        "component's presence/version from the R-PKG-002 per-target manifest (with the "
+        "fetchable-vs-preinstalled split + a remediation pointer), the file-sync OS resource budget "
+        "(per-user watch/fd limits vs project size × worktree-daemon count — the R-FILE-002 "
+        "watcher.degraded up-front check), and the code-signing prerequisites (presence only — never a "
+        "secret value). Reports machine-readable diagnostics through the R-CLI-008 envelope so an agent "
+        "or a new human can diagnose + fix the environment from branchable output.",
+        /*params=*/{},
+        /*flags=*/
+        {{"target", "string",
+          "The build target(s) to validate: windows | linux | macos | web, a comma-separated list, or "
+          "`all`. Defaults to this host's native target.",
+          false},
+         {"fetch", "bool",
+          "Offer to engine-fetch each missing FETCHABLE component now via the a08-verified fetch path "
+          "(fail-closed, R-SEC-009); reported machine-readably per component.",
+          false}},
+        /*implemented=*/true));
+
     // --- the OPERATIONAL daemon-driver surface (R-CLI-009 honesty) ------------------------------
     // These RPC methods are genuinely served by a live daemon's method backend (KernelServer) — the
     // cross-process analogue of `context editor smoke`. They are registered here so

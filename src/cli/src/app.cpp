@@ -7,6 +7,7 @@
 #include "context/cli/build_command.h"
 #include "context/cli/daemon_command.h"
 #include "context/cli/determinism_command.h"
+#include "context/cli/doctor_command.h"
 #include "context/cli/editor_driver.h"
 #include "context/cli/fetch_command.h"
 #include "context/cli/install_command.h"
@@ -179,6 +180,14 @@ Envelope dispatch(const VerbSpec& verb, const std::vector<std::string>& position
     // honored INSIDE the command (plan + verify without writing the pack).
     if (verb.noun.empty() && verb.verb == "build")
         return run_build(flags);
+
+    // M8 task a09 (R-BUILD-008): `context doctor [--target <t>]` — the toolchain + environment diagnosis.
+    // A STABLE one-shot verb (served by the CLI like `build`/`install`, not the daemon). Reports the
+    // diagnosis through the R-CLI-008 envelope and exits 0 for a completed diagnosis (the `validate`
+    // idiom — assert data.ok); an unknown --target is a doctor.unknown_target usage failure. --dry-run is
+    // inert (doctor is a read-only probe — it writes nothing regardless), so it falls through here.
+    if (verb.noun.empty() && verb.verb == "doctor")
+        return run_doctor(flags);
 
     // `context resource read <handle> [<offset>:<length>]` (alias: `context fetch ...`) — the
     // R-CLI-017 large-result fetch. Drives a RUNNING daemon over the wire via the shared client
