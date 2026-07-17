@@ -1,0 +1,25 @@
+src/cli/src/build_command.cpp
+  s_9284ad4c8de2f4::t_6b7f9a478e77a6 257,269,282,284,286
+src/editor/build/src/adapter.cpp
+  s_9284ad4c8de2f4::t_2784af6a22cbba 119-122
+  s_9284ad4c8de2f4::t_ed2276b31f8d7b 85-89
+src/editor/build/include/context/editor/build/adapter.h
+  s_9284ad4c8de2f4::t_50ca8dd6b8d966 36-37
+  s_9284ad4c8de2f4::t_6b95d933182d4c 100-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "1605983604100eadb290694e4f5cf5241a29b3e6",
+  "prompts": {},
+  "sessions": {
+    "s_9284ad4c8de2f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "64f4c13c-1681-4443-9cc9-81bbde69cd56",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
