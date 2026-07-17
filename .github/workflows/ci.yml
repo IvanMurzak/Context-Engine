@@ -536,6 +536,81 @@ jobs:
           path: bench/results/
           if-no-files-found: error
 
+  # R-BUILD-006 committed build-time budgets, per-PR benchmark (M8 a12). Measures the WARM
+  # remote-cache-assisted build path (the default, per R-BUILD-006: hermetic CI seeds a trusted warm
+  # cache so cold-CI is not the default) under the R-QA-009 methodology — median-of-5, dispersion
+  # recorded, a +/-10% band, results archived as a time series. The from-source C++ compile (amortized
+  # by the L-28 / sccache cache) is budgeted separately from the RECURRING per-build cache-exempt costs:
+  # the a03 per-platform transcode and the a05 LTO/DCE final link (the lto-link phase rm's the runtime
+  # binary before each timed run to isolate the real relink). The JOB is BLOCKING (the harness must run
+  # green end to end + archive a time series); the numeric budget GATE is ADVISORY (continue-on-error) —
+  # a shared GH runner is NOT the perf-isolated `perf-linux-bare-metal` runner class the fleet manifest
+  # names, so it cannot gate (docs/perf-gate-methodology.md rule 1 + R-QA-012 advisory-until-provisioned;
+  # the blocking flip is a FUTURE step gated on ops1). The fully COLD worst case is the nightly perf-box
+  # floor (docs/build-time-budget-table.md; docs/ci-fleet-manifest.json build-time-budget gate).
+  build-time-bench:
+    name: build-time bench (warm cache, ubuntu)
+    needs: [license-gate, python-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      - name: Configure (dev preset)
+        run: cmake -S src --preset dev
+
+      # Warm the tree: this is the from-source compile (sccache-assisted = the warm cache path).
+      - name: Build the CLI + shipped server runtime host (warm from-source compile)
+        run: cmake --build --preset dev --target context context_runtime_server
+        working-directory: src
+
+      # median-of-5 over the a05/a06 build pipeline. warm-rebuild = the cache-hot from-source compile;
+      # lto-link rm's the binary before each run to isolate the a05 LTO/DCE relink; transcode times the
+      # a03 per-platform transcode via a real `context build --target linux` over a minimal project.
+      - name: Run the build-time benchmark (median-of-5, R-QA-009 discipline, WARM default)
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJ="$(mktemp -d)"
+          mkdir -p "$PROJ/scenes"
+          printf '%s' '{"$schema":"ctx:project","scene":"scenes/main.scene.json","version":1}' > "$PROJ/project.json"
+          printf '%s' '{"$schema":"ctx:scene","version":1,"entities":[{"id":"aaaa0000aaaa0001","name":"Camera","components":{"camera":{"fov":1.0}}},{"id":"aaaa0000aaaa0002","name":"Player","components":{"transform":{}}}]}' > "$PROJ/scenes/main.scene.json"
+          SERVER="$PWD/src/build/dev/runtime/host/context-runtime-server"
+          python3 bench/build_time.py measure --cache-mode warm --runs 5 \
+            --label ci-warm-ubuntu --runner-class gh-ubuntu-shared \
+            --phase "from-source-compile::warm-rebuild::cmake --build src/build/dev --target context_runtime_server" \
+            --phase "lto-link::runtime-server-link::cmake --build src/build/dev --target context_runtime_server" \
+            --reset "lto-link::rm -f $SERVER" \
+            --phase "transcode::linux-server::src/build/dev/cli/context build --target linux --flavor server --project $PROJ --out $PROJ/server.pack --runtime $SERVER" \
+            --out bench/results/build-time-ci-warm
+
+      # Advisory numbers gate (same contract as the bench-baseline / bench-attach perf gates): archives
+      # the measurement to the time series + emits the budget table; never red-Xs the rollup here.
+      - name: Build-time budget gate (R-BUILD-006, advisory until the perf box is provisioned)
+        continue-on-error: true
+        run: >
+          python3 bench/build_time.py gate
+          --result bench/results/build-time-ci-warm.json
+          --budget bench/build-time-budget.json
+          --archive bench/results/archive
+          --out bench/results/build-time-table
+
+      - name: sccache stats
+        run: ${SCCACHE_PATH} --show-stats
+
+      - name: Upload build-time results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-time-results
+          path: bench/results/
+          if-no-files-found: error
+
   # spikes/wasm smoke on ALL THREE platforms (L-8/R-LANG-003: per-platform WASM backends are
   # the point — wasmtime prebuilt C API + WAMR from source both support win/mac/linux).
   # Uses the stand-alone CONTEXT_BUILD_SPIKE_WASM toggle: no vcpkg toolchain, so the

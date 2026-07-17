@@ -1,0 +1,39 @@
+{
+  "requirement": "R-BUILD-006",
+  "milestone": "M8 a12",
+  "methodology": "R-QA-009: measured on a named perf-isolated runner class, median of >= 5 runs with dispersion recorded, a +/-band vs the committed budget, results archived as a time series. Consumed by bench/build_time.py; normative allocation + rationale in docs/build-time-budget-table.md.",
+  "runner_class": "perf-linux-bare-metal",
+  "advisory_until_provisioned": true,
+  "band_pct": 10.0,
+  "review_note": "Initial v1 build-time budget commitments (M8 a12). The design docs state the DISCIPLINE (committed cold/incremental/clean-CI budgets, cache-exempt costs budgeted separately) but no numbers, so these rows ARE the committed table. Advisory until the perf-isolated perf-linux-bare-metal runner class is provisioned (ops1, an open owner hardware gate); revise by reviewed PR and ratify when provisioning the runner class. The per-PR CI proxy runs on gh-ubuntu-shared (numbers advisory there too — a shared runner is not the named perf box).",
+  "budgets": {
+    "from-source-compile": {
+      "cache_exempt": false,
+      "rationale": "The vcpkg from-source ports (L-42) + engine TU compile, amortized by the L-28 shared content-addressed cache / vcpkg binary cache. Paid in full ONCE per machine (COLD); the WARM remote-cache-assisted path compiles only the changed delta. The WARM path is the default the CI benchmark measures; COLD is the tracked worst case.",
+      "warm": {
+        "seconds": 300.0,
+        "note": "Incremental / remote-cache-assisted engine build: only the changed delta recompiles + relinks. R-BUILD-006 'incremental' + 'clean-CI (warm cache)' budget."
+      },
+      "cold": {
+        "seconds": 2400.0,
+        "note": "Fully COLD from-source build with NO cache (first build on a fresh machine, or a cache miss). Tracked worst case; hermetic CI seeds a trusted read-only warm remote cache so cold-CI is not the default (R-BUILD-006 rationale)."
+      }
+    },
+    "transcode": {
+      "cache_exempt": true,
+      "seconds": 30.0,
+      "task": "a03",
+      "rationale": "Per-platform asset transcode (task a03) over the v1 platform set — a per-build, cache-exempt cost (paid every build regardless of the from-source cache state). Budgeted SEPARATELY from the amortized compile per R-BUILD-006. The Android/ASTC leg joins when trailing-SHOULD Android lands."
+    },
+    "lto-link": {
+      "cache_exempt": true,
+      "seconds": 180.0,
+      "task": "a05",
+      "rationale": "The LTO/DCE final link (task a05): the R-KERNEL-003 generated-registration TU + uniform LTO across the from-source ports + linker garbage collection. A per-build, cache-exempt cost (R-BUILD-006 / L-28) — the LTO final link recurs every build even when every input object is cached."
+    }
+  },
+  "v2_pending": {
+    "wasm-aot": "WASM->native AOT toolchain budget line — v2 with iOS (R-BUILD-006 / R-LANG-005). No v1 target requires WASM->native AOT, so it is NOT budgeted now; tracked, never silently green.",
+    "bytecode-precompile": "JS-VM bytecode-precompile budget line (hermesc/qjsc-class) — v2 with iOS (R-BUILD-006 / L-61). Follows iOS to v2; NOT budgeted in v1."
+  }
+}
