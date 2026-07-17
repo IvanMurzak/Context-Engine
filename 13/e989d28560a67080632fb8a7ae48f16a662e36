@@ -1,0 +1,30 @@
+.github/workflows/ci.yml
+  s_e01c8fb43d2a93::t_ca7bbfb12b6393 375-389,394-397
+  s_2ef2ba6246d405::t_c0d2fc2e39b119 892-900,906-909,1204-1214,1219-1222,1268-1275,1279
+src/render/shadercc/CMakeLists.txt
+  s_2ef2ba6246d405::t_4ba8579c9126ff 137-156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "13e989d28560a67080632fb8a7ae48f16a662e36",
+  "prompts": {},
+  "sessions": {
+    "s_2ef2ba6246d405": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d8273024-6a68-45ea-8d05-2f04efe53a93",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e01c8fb43d2a93": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1291790d-12a3-4be9-b6dd-32c2119a2e21",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
