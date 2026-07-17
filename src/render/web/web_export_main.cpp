@@ -56,7 +56,7 @@ bool post_bytes(const char* path, const void* data, std::size_t size)
             globalThis.__ctxExportPost = 0;
             const path = UTF8ToString($0);
             const body = new Uint8Array(HEAPU8.subarray($1, $1 + $2));
-            fetch(path, {method : 'POST', body : body})
+            fetch(path, {method : "POST", body : body})
                 .then(function(r) { globalThis.__ctxExportPost = r.ok ? 1 : 2; })
                 .catch(function() { globalThis.__ctxExportPost = 2; });
         },
@@ -102,9 +102,9 @@ public:
             {
                 globalThis.__ctxExportLen = -1;
                 const url = UTF8ToString($0);
-                fetch(url, {method : 'HEAD'})
+                fetch(url, {method : "HEAD"})
                     .then(function(r) {
-                        globalThis.__ctxExportLen = r.ok ? (parseInt(r.headers.get('Content-Length') || '0', 10) || 0) : -2;
+                        globalThis.__ctxExportLen = r.ok ? (parseInt(r.headers.get("Content-Length") || '0', 10) || 0) : -2;
                     })
                     .catch(function() { globalThis.__ctxExportLen = -2; });
             },
@@ -136,10 +136,10 @@ public:
                 globalThis.__ctxExportRange = 0;
                 const url = UTF8ToString($0);
                 const start = $1, len = $2, dst = $3;
-                fetch(url, {headers : {'Range' : 'bytes=' + start + '-' + (start + len - 1)}})
+                fetch(url, {headers : {"Range" : "bytes=" + start + '-' + (start + len - 1)}})
                     .then(function(r) {
                         if (!r.ok && r.status !== 206 && r.status !== 200)
-                            throw new Error('status ' + r.status);
+                            throw new Error("status " + r.status);
                         return r.arrayBuffer();
                     })
                     .then(function(buf) {
