@@ -372,12 +372,29 @@ jobs:
       # actions/cache (vcpkg's own GHA backend, x-gha, was removed upstream — the 'files'
       # provider pointed at a cached workspace dir is the supported replacement). The key
       # is shared with the spike-webgpu integration leg, which installs the same manifest.
+      #
+      # The runner IMAGE version folds into the primary key: vcpkg's package ABI hash also
+      # depends on the runner-default compiler, which rolls with each GH image update. Keying
+      # only on the manifest hash means an image roll keeps the SAME key -> actions/cache hits
+      # the stale archive (a primary-key hit is NEVER re-saved) yet vcpkg sees the ABI mismatch
+      # and rebuilds every dep from source, forever (`Restored 0 package(s)`; issue #264 review).
+      # Adding the image dimension forces a fresh key + a re-save when the image rolls.
+      # ImageVersion is a runner-injected env var (absent from the ${{ env }} expression context),
+      # so resolve it in a shell step; it is unset on self-hosted runners -> a stable `selfhosted`
+      # token keeps the key deterministic there. No branch/sha/run_id in any key (owner: no
+      # per-branch cache growth) — the bare-os restore-key lets a PR restore main's entries.
+      - name: Resolve runner image tag (vcpkg ABI cache dimension)
+        shell: bash
+        run: echo "VCPKG_CACHE_IMAGE_TAG=${ImageVersion:-selfhosted}" >> "$GITHUB_ENV"
+
       - name: vcpkg binary cache
         uses: actions/cache@v6
         with:
           path: .vcpkg-bincache
-          key: vcpkg-bin-${{ runner.os }}-${{ hashFiles('src/vcpkg.json', 'src/vcpkg-configuration.json') }}
-          restore-keys: vcpkg-bin-${{ runner.os }}-
+          key: vcpkg-bin-${{ runner.os }}-${{ env.VCPKG_CACHE_IMAGE_TAG }}-${{ hashFiles('src/vcpkg.json', 'src/vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-bin-${{ runner.os }}-${{ env.VCPKG_CACHE_IMAGE_TAG }}-
+            vcpkg-bin-${{ runner.os }}-
 
       - name: Generate seeded 10k corpus
         run: python3 bench/gen_corpus.py --size 10000 --out bench/corpora/corpus-10k --jobs 4
@@ -872,14 +889,24 @@ jobs:
         run: ctest --test-dir build/spike-webgpu -C Release --verbose
 
       # vcpkg binary cache for the integrated configure below (ubuntu only) — same shared
-      # key as the bench-baseline job, which installs the same manifest.
+      # key as the bench-baseline job, which installs the same manifest. Image-version-salted
+      # like bench-baseline so an image roll re-saves instead of getting stuck on a stale
+      # `Restored 0` archive (issue #264 review); the ubuntu legs of both jobs share the same
+      # ImageVersion, so the shared-cache invariant holds. (Linux-only, never self-hosted here.)
+      - name: Resolve runner image tag (vcpkg ABI cache dimension)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: echo "VCPKG_CACHE_IMAGE_TAG=${ImageVersion:-selfhosted}" >> "$GITHUB_ENV"
+
       - name: vcpkg binary cache
         if: runner.os == 'Linux'
         uses: actions/cache@v6
         with:
           path: .vcpkg-bincache
-          key: vcpkg-bin-${{ runner.os }}-${{ hashFiles('src/vcpkg.json', 'src/vcpkg-configuration.json') }}
-          restore-keys: vcpkg-bin-${{ runner.os }}-
+          key: vcpkg-bin-${{ runner.os }}-${{ env.VCPKG_CACHE_IMAGE_TAG }}-${{ hashFiles('src/vcpkg.json', 'src/vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-bin-${{ runner.os }}-${{ env.VCPKG_CACHE_IMAGE_TAG }}-
+            vcpkg-bin-${{ runner.os }}-
 
       # Wiring check (ubuntu only): the spike must also build through the integrated
       # CONTEXT_BUILD_SPIKES=ON path — the same `spikes` preset the bench job uses (vcpkg
@@ -1174,13 +1201,25 @@ jobs:
 
       # Persist the built glslang/spirv-cross/spirv-tools archives across runs so the from-source
       # vcpkg build only pays full cost on a manifest change (key = src/vcpkg.json +
-      # src/vcpkg-configuration.json hash, matching the bench-baseline / spike-webgpu jobs).
+      # src/vcpkg-configuration.json hash). The runner IMAGE version salts the primary key so an
+      # image roll (which rolls the runner-default MSVC/AppleClang, and hence vcpkg's ABI hash)
+      # forces a fresh key + re-save instead of getting stuck on a stale `Restored 0` archive —
+      # the ~30-min win/mac symptom this task fixes (issue #264 review). ImageVersion is a
+      # runner-injected env var (absent from ${{ env }}); resolve it in a shell step, with a
+      # stable `selfhosted` fallback for self-hosted runners. The distinct vcpkg-bin-shadercc-
+      # key prefix (vs the bench/spike vcpkg-bin- key) is preserved. No branch/sha/run_id.
+      - name: Resolve runner image tag (vcpkg ABI cache dimension)
+        shell: bash
+        run: echo "VCPKG_CACHE_IMAGE_TAG=${ImageVersion:-selfhosted}" >> "$GITHUB_ENV"
+
       - name: vcpkg binary cache
         uses: actions/cache@v6
         with:
           path: .vcpkg-bincache
-          key: vcpkg-bin-shadercc-${{ runner.os }}-${{ hashFiles('src/vcpkg.json', 'src/vcpkg-configuration.json') }}
-          restore-keys: vcpkg-bin-shadercc-${{ runner.os }}-
+          key: vcpkg-bin-shadercc-${{ runner.os }}-${{ env.VCPKG_CACHE_IMAGE_TAG }}-${{ hashFiles('src/vcpkg.json', 'src/vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-bin-shadercc-${{ runner.os }}-${{ env.VCPKG_CACHE_IMAGE_TAG }}-
+            vcpkg-bin-shadercc-${{ runner.os }}-
 
       # The WGSL leg's pinned tools (issue #133, sub-task D of #119 — measured ruling:
       # docs/wgsl-tool-decision.md): tint (the wired SPIR-V->WGSL tool, built from Dawn source at
@@ -1226,12 +1265,18 @@ jobs:
           export VCPKG_ROOT="$VCPKG_INSTALLATION_ROOT"
           cmake -S src --preset shader-crosscompile
 
-      - name: Build the toolchain + smoke
-        run: cmake --build --preset shader-crosscompile
+      # Scope the build to this job's designed charter (issue #264): the `shadercc-tests` umbrella
+      # target (src/render/shadercc/CMakeLists.txt) builds the toolchain link-proof/smoke + every
+      # shader-* proof executable — NOT the whole engine + all test exes. Every shader-* ctest's
+      # executable is a dependency of the umbrella, so the `-R "^shader-"` ctest below never selects
+      # a test whose exe was not built ("Not Run = RED" tripwire). The full 339-test suite stays
+      # gated by the blocking 3-OS `build` job; this job proves only the shadercc dependency path.
+      - name: Build the shadercc toolchain link-proof + shader-* proofs
+        run: cmake --build --preset shader-crosscompile --target shadercc-tests
         working-directory: src
 
       - name: Run the shader-crosscompile ctests (smoke + author->SPIR-V->{HLSL,MSL,GLSL,WGSL} roundtrip)
-        run: ctest --preset shader-crosscompile --output-on-failure
+        run: ctest --preset shader-crosscompile --output-on-failure -R "^shader-"
         working-directory: src
 
   # M5-F0a CEF build substrate (src/editor/cef/, issue #150; L-15 / L-41 / R-UI-007 / R-SEC-009): fetch
