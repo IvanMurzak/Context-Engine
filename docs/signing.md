@@ -13,14 +13,21 @@ the first release.
 
 | Piece | Path | State |
 | --- | --- | --- |
-| Verify-before-use gate | `tools/verify_artifact.py` | ✅ implemented + tested |
-| Pinned **production** trust root | `tools/trust-root/allowed_signers` | ✅ committed, **intentionally empty until first release** |
+| Verify-before-use gate (Python) | `tools/verify_artifact.py` | ✅ implemented + tested |
+| Verify-before-use gate (C++ mirror) | `src/common/verify_signature.{h,cpp}` | ✅ the `ssh-keygen -Y verify` seam the C++ build uses (no Python needed) |
+| Pinned **production** trust root | `tools/trust-root/allowed_signers` | ✅ committed, **one production key PINNED** (a08) — `context-engine-release`, `SHA256:4f8ZHq0vI6mKLm8MvKYE8PPslZu5IuA8ZUxtWuZ434U` |
+| R-BUILD-004 export-template / toolchain verify | `src/cli/build_command.cpp` | ✅ `context build --runtime-sig / --toolchain-sig` verify-before-use → `build.template_unverified` / `build.toolchain_fetch_failed` |
+| R-VER-004 versioned-fetch verify seam | `tools/versioned_fetch.py` | ✅ verify-before-execute seam for a fetched `versions/<semver>/` (the fetcher itself is second-release) |
+| Signing release workflow (custody model B) | `.github/workflows/release-sign.yml` | ✅ environment-protected `release` job (required reviewer) signs + verifies via `ssh-keygen -Y sign` |
 | TEST-ONLY trust root + fixtures | `tools/tests/fixtures/` | ✅ committed (public key + sample signature only — **no private key**) |
-| Fail-closed test coverage (R-QA-013) | `tools/tests/test_verify_artifact.py` | ✅ 16 tests: good sig passes; bad / missing / tampered / untrusted-key / wrong-namespace / wrong-identity / missing-trust-root / absent-ssh-keygen / verifier-timeout all fail closed |
+| Fail-closed test coverage (R-QA-013) | `tools/tests/test_verify_artifact.py`, `test_versioned_fetch.py`, `src/common/tests/test_verify_signature.cpp`, `src/cli/tests/test_build_command.cpp` | ✅ good sig passes; bad / missing / tampered / untrusted-key / wrong-namespace / wrong-identity / missing-trust-root / absent-ssh-keygen / verifier-timeout all fail closed — across the Python gate, the versioned-fetch seam, the C++ gate, and the build wiring |
 
-The **production signing key is NOT minted yet** (see § Minting). Because no production
-key is pinned, the default gate refuses every artifact — the correct fail-closed state
-while nothing first-party is published.
+The **production signing key is minted and PINNED** (task a08). The single publisher key
+`context-engine-release` is pinned in `tools/trust-root/allowed_signers` (public half only); its
+private half is held ONLY as the environment-protected `RELEASE_SIGNING_KEY` secret (custody model
+B — see § Key custody). Because the production root pins exactly this one key, the default gate
+**accepts only signatures by that key** (under principal `context-engine-release` / namespace
+`context-engine-artifact`) and **refuses everything else** — the correct fail-closed posture.
 
 ## Mechanism — OpenSSH Ed25519 signatures
 
@@ -66,33 +73,47 @@ callers that want the structured result rather than a process exit code.
 ## Where the gate plugs in
 
 R-SEC-009's subjects are engine binaries, the pinned toolchain (L-42), export templates
-(R-BUILD-004), fetched engine versions (R-VER-004), and cross-domain cache entries. **None
-of those are first-party-published yet** — there are no engine releases, no toolchain
-mirror, no export templates. So today the gate is the *ready mechanism*, wired in at the
-points below as each acquisition path starts serving first-party signed artifacts:
+(R-BUILD-004), fetched engine versions (R-VER-004), and cross-domain cache entries. No
+first-party signed artifact is *published* yet (there are no engine releases), so the seams
+below are the **ready mechanism**, wired in and **opt-in**: each activates the moment a
+detached signature is supplied on its path, and fails closed once its artifacts are signed.
 
-- **R-VER-004 versioned fetch (next).** When the launcher/fetcher (second release) fetches
-  a pinned engine version into `versions/<semver>/` (see `versioned-install.md`), it MUST
-  call `verify_artifact.py` on the downloaded archive against its detached signature
-  **before unpacking/executing** — verify-before-execute, fail closed.
-- **L-42 toolchain fetch.** The `.github/actions/pinned-toolchain` action installs a pinned
-  compiler. It fetches from upstream distributions today (apt.llvm.org) that carry their
-  **own** signing, which the gate does not replace — our root signs **first-party**
-  artifacts. When the engine mirrors/repackages a toolchain as a first-party artifact, that
-  mirrored artifact is signed with the production key and verified through this gate.
-- **Third-party CI downloads** (emsdk, wgpu-native, CEF, wasmtime/WAMR) are **out of scope**
-  for this root: they are upstream third-party artifacts authenticated by their own
-  publishers. Do **not** point this gate at them — it would fail closed on artifacts our
-  root never signed.
+- **R-BUILD-004 export template + engine-fetched toolchain (wired, task a08).** `context build`
+  verifies-before-use the per-platform export template (the shipped `--runtime` host binary) and
+  an engine-fetched/mirrored toolchain artifact against the pinned trust root, via the C++ gate
+  `context::common::verify_signature` (`src/common/verify_signature.cpp` — the `ssh-keygen -Y
+  verify` mirror of this Python gate, so a headless build needs no Python). Supply `--runtime-sig`
+  / `--toolchain-sig` (+ `--trust-root`); a template/toolchain that does not verify refuses the
+  build **fail-closed** with `build.template_unverified` / `build.toolchain_fetch_failed`
+  (registered in the one contract catalog, so CLI ≡ RPC ≡ MCP). Verification is opt-in until export
+  templates are first-party-signed, so an unsigned local/CI build is unchanged.
+- **R-VER-004 versioned fetch (verify seam wired; fetcher is second-release — task a08).** The
+  verify-before-execute seam is `tools/versioned_fetch.py`: the future launcher/fetcher fetches a
+  pinned engine version into `versions/<semver>/` (see `versioned-install.md`) and calls
+  `versioned_fetch.require_verified_before_execute(archive, signature)` **before
+  unpacking/executing** — fail closed. It is a thin wrapper over `verify_artifact.py` (same trust
+  root / principal / namespace).
+- **L-42 toolchain fetch (upstream).** The `.github/actions/pinned-toolchain` action installs a
+  pinned compiler from upstream distributions (apt.llvm.org) that carry their **own** signing,
+  which this gate does not replace — our root signs **first-party** artifacts. When the engine
+  mirrors/repackages a toolchain as a first-party artifact, that mirrored artifact is signed with
+  the production key and verified through the export/toolchain seam above.
+- **Third-party CI downloads** (emsdk, wgpu-native, CEF, V8, wasmtime/WAMR) are **out of scope**
+  for this root: they are upstream third-party artifacts authenticated by their own publishers. Do
+  **not** point this gate at them — it would fail closed on artifacts our root never signed.
 
-Until a first-party signed artifact exists, the deliverable is the **gate + trust root +
-fail-closed tests**, exactly as R-SEC-009's v1 staging intends.
+The signing side is `.github/workflows/release-sign.yml` (custody model B): an environment-protected
+`release` job signs each first-party artifact with `ssh-keygen -Y sign -n context-engine-artifact`
+and publishes the `.sig` beside it, for these seams to verify against the pinned root.
 
-## Minting the production key (first release — owner decision)
+## Minting the production key (DONE — task a08)
 
-**Do this once, at the first release.** It produces the single publisher key R-SEC-009's v1
-posture calls for (TUF/Sigstore-style signed metadata is the v2 upgrade behind the same
-verify-before-use gate).
+**Status: minted + pinned.** The single publisher key R-SEC-009's v1 posture calls for is minted;
+its PUBLIC half is pinned in `tools/trust-root/allowed_signers` (principal `context-engine-release`,
+`SHA256:4f8ZHq0vI6mKLm8MvKYE8PPslZu5IuA8ZUxtWuZ434U`) and its PRIVATE half is held as the
+environment-protected `RELEASE_SIGNING_KEY` secret (custody model B, below). (TUF/Sigstore-style
+signed metadata is the v2 upgrade behind the same verify-before-use gate.) The steps below record
+how the key was produced and how each release artifact is signed against it.
 
 1. **Generate the keypair** (Ed25519), offline, on a trusted machine:
    ```bash
@@ -115,16 +136,19 @@ verify-before-use gate).
    production trust root, the `context-engine-release` principal, and the
    `context-engine-artifact` namespace).
 
-### Key custody — the owner's choice at first release
+### Key custody — model B is ACTIVE (task a08)
 
-The private key must never live in the repo. Pick one custody model:
+The private key must never live in the repo. The chosen model is **B** — the private key is the
+`RELEASE_SIGNING_KEY` secret bound to the protected `release` GitHub Environment (required
+reviewers), and `.github/workflows/release-sign.yml` writes it to a private temp file, signs, and
+deletes it (never echoing it). The alternatives are recorded for completeness:
 
 - **A. GitHub Actions repo/organization secret.** Store the private key as an encrypted
   secret (e.g. `RELEASE_SIGNING_KEY`); the release workflow writes it to a temp file, signs,
   and deletes it. *Pro:* fully automated releases. *Con:* the key material is reachable by
   any workflow with the secret in scope — tighten with environment scoping (below) and
   minimal `permissions:`.
-- **B. Environment-protected secret (recommended).** Bind the secret to a protected
+- **B. Environment-protected secret (CHOSEN — active).** Bind the secret to a protected
   **GitHub Environment** (e.g. `release`) that requires **required reviewers** and/or a
   branch/tag filter, so signing only runs after a human approves the deployment. *Pro:*
   human-in-the-loop gate on every use of the key; smallest blast radius. *Con:* a manual

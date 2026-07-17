@@ -1,0 +1,103 @@
+# Release artifact signing (R-SEC-009 / DESIGN-DECISIONS L-58, task a08) — the environment-protected
+# signing skeleton, custody model B (docs/signing.md § Key custody).
+#
+# This workflow signs first-party release artifacts with the production Ed25519 key using
+# `ssh-keygen -Y sign -n context-engine-artifact`, publishing each `.sig` beside its artifact so
+# consumers can verify-before-use (tools/verify_artifact.py) against the pinned trust root
+# (tools/trust-root/allowed_signers).
+#
+# CUSTODY (model B — human-in-the-loop on every use of the key):
+#   * The PRIVATE key lives ONLY as the `RELEASE_SIGNING_KEY` secret bound to the protected
+#     `release` GitHub Environment (required reviewers). It NEVER lives in the repo.
+#   * `environment: release` means this job does NOT start until a required reviewer APPROVES the
+#     deployment — every use of the signing key is a human-approved action.
+#   * The key is written to a private temp file (umask 077), used, and deleted; it is NEVER echoed,
+#     logged, or written to a tracked file. Only PUBLIC key material is ever committed.
+#
+# This is a DRY-RUN skeleton: it signs a SAMPLE artifact and proves the signature verifies against
+# the pinned production trust root end-to-end (which also confirms the pinned public key matches the
+# `RELEASE_SIGNING_KEY` private half). It runs ONLY on manual dispatch — never on push/PR — so it
+# never appears in a PR's CI rollup. Wiring the real release artifacts into `paths` is a follow-up
+# once a first release exists; the mechanism + the custody gate are proven here.
+
+name: release-sign
+
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: "Optional note recorded in the run summary (e.g. the release being rehearsed)."
+        required: false
+        default: "dry-run: sign + verify a sample artifact via the protected release environment"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-sign
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    name: sign a sample artifact (environment-protected, custody model B)
+    runs-on: ubuntu-latest
+    # The required-reviewer gate: this job does NOT run until a reviewer approves the `release`
+    # environment deployment (approval required to run — custody model B).
+    environment: release
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Sign a sample artifact and verify it against the pinned trust root (fail closed)
+        env:
+          # The production private key — ONLY from the protected environment secret. Never printed.
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          # The dispatch note is passed through the environment (NOT interpolated into the run
+          # script) so a crafted note can never inject shell in a step that holds the signing key.
+          NOTE: ${{ inputs.note }}
+        run: |
+          set -euo pipefail
+          umask 077
+          if [ -z "${RELEASE_SIGNING_KEY:-}" ]; then
+            echo "::error::RELEASE_SIGNING_KEY is not set in the protected 'release' environment." >&2
+            exit 1
+          fi
+
+          workdir="$(mktemp -d)"
+          keyfile="$workdir/release_signing_key"
+          # Write the private key to a private temp file (umask 077 above). Do NOT echo it. `printf`
+          # preserves the multi-line OpenSSH PEM; the secret masker also redacts it from any log.
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > "$keyfile"
+          # Always remove the private key material on exit, even on failure.
+          trap 'rm -f "$keyfile"; rmdir "$workdir" 2>/dev/null || true' EXIT
+
+          artifact="$workdir/context-engine-sample-artifact.bin"
+          printf 'context-engine release-sign dry-run %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$artifact"
+
+          # Sign: detached SSH signature under the artifact namespace (the same namespace verify checks).
+          ssh-keygen -Y sign -f "$keyfile" -n context-engine-artifact "$artifact"
+          rm -f "$keyfile"   # done with the private key — drop it immediately (trap is the backstop)
+
+          # Verify-before-use against the PINNED PRODUCTION trust root (defaults: production root +
+          # principal context-engine-release + namespace context-engine-artifact). This fails closed
+          # if the signature is bad OR if the pinned public key does not match this private key —
+          # an end-to-end proof that the committed pin and the RELEASE_SIGNING_KEY secret agree.
+          python3 tools/verify_artifact.py --artifact "$artifact" --signature "$artifact.sig"
+
+          # Stage the sample + its .sig for the upload step (private key already gone).
+          mkdir -p signed
+          cp "$artifact" "$artifact.sig" signed/
+          {
+            echo "### release-sign dry-run OK"
+            echo ""
+            echo "- note: $NOTE"
+            echo "- signed a sample artifact with the production key (custody model B, environment-protected)"
+            echo "- verified the signature against the pinned trust root (tools/trust-root/allowed_signers)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the signed sample + detached signature
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-sign-sample
+          path: signed/
+          if-no-files-found: error
+          retention-days: 7

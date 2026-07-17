@@ -682,7 +682,26 @@ Registry::Registry()
           "Launch the produced artifact against --runtime, step --smoke-ticks fixed ticks against the "
           "shipped RuntimeKernel, and fold the R-BUILD-009 boot/state signal into the envelope.",
           false},
-         {"smoke-ticks", "int", "Fixed ticks to step during --smoke (default 8).", false}},
+         {"smoke-ticks", "int", "Fixed ticks to step during --smoke (default 8).", false},
+         {"trust-root", "path",
+          "Pinned OpenSSH allowed_signers trust root (R-SEC-009 / L-58) for verify-before-use of the "
+          "export template (--runtime) and the engine-fetched toolchain. Required whenever a "
+          "--runtime-sig / --toolchain-sig is supplied.",
+          false},
+         {"runtime-sig", "path",
+          "Detached signature for the --runtime export template. When supplied, the template is "
+          "verified against --trust-root before packaging; a failure refuses the build fail-closed "
+          "with build.template_unverified (R-BUILD-004 / R-SEC-009).",
+          false},
+         {"toolchain-artifact", "path",
+          "An engine-fetched (mirrored) first-party toolchain artifact to verify-before-use, paired "
+          "with --toolchain-sig (R-PKG-002 / R-SEC-009).",
+          false},
+         {"toolchain-sig", "path",
+          "Detached signature for --toolchain-artifact. When supplied, the toolchain is verified "
+          "against --trust-root before building; a failure refuses the build fail-closed with "
+          "build.toolchain_fetch_failed.",
+          false}},
         /*implemented=*/true));
 
     // --- the OPERATIONAL daemon-driver surface (R-CLI-009 honesty) ------------------------------

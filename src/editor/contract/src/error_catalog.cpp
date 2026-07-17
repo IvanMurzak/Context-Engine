@@ -882,12 +882,17 @@ const std::vector<ErrorCode>& catalog()
         // (protocolMajor stays 1): NEW rows appended at the END, no existing row reordered/renamed.
         {"build.template_unverified",
          "The runnable project/template failed pre-build verification (a missing, malformed, or empty "
-         "root scene, or a blocking composition diagnostic); nothing was built (fail-closed validation).",
+         "root scene, or a blocking composition diagnostic); OR the R-BUILD-004 export template (the "
+         "shipped --runtime host binary) failed verify-before-use against the pinned trust root "
+         "(R-SEC-009 / L-58 — a tampered, unsigned, or untrusted-key signature). Nothing was built/"
+         "packaged (fail-closed validation).",
          false, kExitValidation, "R-BUILD-002"},
         {"build.toolchain_fetch_failed",
          "The per-target toolchain manifest (R-PKG-002 / L-42) could not supply the requested target's "
-         "toolchain (no manifest entry for the target); the toolchain cannot be fetched. Transient — a "
-         "re-fetch against a repaired manifest can succeed.",
+         "toolchain (no manifest entry for the target); OR an engine-fetched toolchain artifact failed "
+         "verify-before-use against the pinned trust root (R-SEC-009 — an unverifiable fetch is a "
+         "failed fetch). The toolchain cannot be fetched/trusted. Transient — a re-fetch against a "
+         "repaired manifest or a correctly-signed artifact can succeed.",
          true, kExitInternal, "R-PKG-002"},
         {"build.aot_failed",
          "The authored-script (TypeScript) AOT tier could not be produced for the target — a malformed or "

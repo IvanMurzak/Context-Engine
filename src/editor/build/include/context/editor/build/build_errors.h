@@ -14,12 +14,17 @@ namespace context::editor::build
 {
 
 // The runnable project/template failed pre-build verification (a malformed or empty root scene, or a
-// blocking composition diagnostic). Deterministic (validation-class): a bare retry re-fails.
+// blocking composition diagnostic) — OR the R-BUILD-004 export template (the shipped --runtime host
+// binary) failed verify-before-use against the pinned trust root (R-SEC-009 / L-58; the CLI fires this
+// code from src/cli/build_command.cpp's verify seam). Deterministic (validation-class): a bare retry
+// re-fails.
 inline constexpr std::string_view kBuildTemplateUnverifiedCode = "build.template_unverified";
 
 // The per-target toolchain manifest (R-PKG-002 / L-42) could not supply the requested target's
-// toolchain — no manifest entry for the target, so the toolchain cannot be fetched. Transient/
-// environmental (retriable): a re-fetch against a repaired manifest can succeed.
+// toolchain — no manifest entry for the target — OR an engine-fetched toolchain artifact failed
+// verify-before-use against the pinned trust root (R-SEC-009; an unverifiable fetch is a failed fetch,
+// fired from the CLI verify seam). Transient/environmental (retriable): a re-fetch against a repaired
+// manifest or a correctly-signed artifact can succeed.
 inline constexpr std::string_view kBuildToolchainFetchFailedCode = "build.toolchain_fetch_failed";
 
 // The authored-script (TypeScript) AOT tier could not be produced for the target — a malformed or
