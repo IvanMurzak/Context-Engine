@@ -1,0 +1,38 @@
+bench/tests/test_build_time.py
+  s_9284ad4c8de2f4::t_f5ce4ebfa8fe56 1-244
+docs/build-time-budget-table.md
+  s_9284ad4c8de2f4::t_b22e3656ad2206 1-96
+CLAUDE.md
+  s_9284ad4c8de2f4::t_1045ff8e2862d9 122-128
+bench/build_time.py
+  s_9284ad4c8de2f4::t_c9f0bbcf20b515 1-445
+bench/README.md
+  s_9284ad4c8de2f4::t_6f2ab1b91aa2ff 21-27
+  s_9284ad4c8de2f4::t_128b725156bad1 31-33
+docs/ci-fleet-manifest.md
+  s_9284ad4c8de2f4::t_998d0ea26a7d45 153-165
+  s_9284ad4c8de2f4::t_483be32bc87f23 68-69
+  s_9284ad4c8de2f4::t_3466392cfe6478 92
+bench/build-time-budget.json
+  s_9284ad4c8de2f4::t_7495de7ab4a7ad 1-39
+.github/workflows/ci.yml
+  s_9284ad4c8de2f4::t_7f3483667d6b6c 539-613
+docs/ci-fleet-manifest.json
+  s_9284ad4c8de2f4::t_925e8e039ffe98 773-802
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "2be0696eb0268a5e446195420db0af823fce6fee",
+  "prompts": {},
+  "sessions": {
+    "s_9284ad4c8de2f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "64f4c13c-1681-4443-9cc9-81bbde69cd56",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
