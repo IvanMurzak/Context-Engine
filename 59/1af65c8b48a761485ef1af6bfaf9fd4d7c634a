@@ -1,0 +1,55 @@
+src/tests/integration/test_samples_corpus.cpp
+  s_9284ad4c8de2f4::t_c382760722995a 372-377,382
+src/editor/contract/src/registry.cpp
+  s_9284ad4c8de2f4::t_c3daeeada8ab53 707-738
+src/editor/build/src/doctor.cpp
+  s_9284ad4c8de2f4::t_fabc9953d36acd 1-283
+src/editor/build/include/context/editor/build/doctor.h
+  s_9284ad4c8de2f4::t_03858faa90ac32 1-223
+src/editor/contract/src/error_catalog.cpp
+  s_9284ad4c8de2f4::t_6066ef93a674be 910-951
+src/editor/build/CMakeLists.txt
+  s_9284ad4c8de2f4::t_002af1507de2b0 55-64
+  s_9284ad4c8de2f4::t_bd95516f3e121d 12
+src/editor/contract/tests/test_registry_parity.cpp
+  s_9284ad4c8de2f4::t_5554ae858fae15 215-234
+src/cli/tests/test_doctor_command.cpp
+  s_9284ad4c8de2f4::t_9a4eceaafb8147 1-204
+docs/toolchain-bootstrap.md
+  s_9284ad4c8de2f4::t_f9fcaa11f38050 1-115
+src/cli/src/app.cpp
+  s_9284ad4c8de2f4::t_06d2f240b5cc33 184-191
+  s_9284ad4c8de2f4::t_39b66db1b06ebe 10
+src/cli/include/context/cli/doctor_command.h
+  s_9284ad4c8de2f4::t_c082374df031b8 1-40
+src/cli/CMakeLists.txt
+  s_9284ad4c8de2f4::t_8168881bd1c0e1 15
+  s_9284ad4c8de2f4::t_5a4e3deb47caeb 149-154
+  s_9284ad4c8de2f4::t_96a0d208db57ad 119
+  s_9284ad4c8de2f4::t_f0c377db5fa2cc 245
+CLAUDE.md
+  s_9284ad4c8de2f4::t_a239ad965e192b 179-181
+src/cli/src/doctor_command.cpp
+  s_9284ad4c8de2f4::t_dd45a726babcc2 20
+  s_9284ad4c8de2f4::t_b9cc4b3eb8dca2 1-19,21-406
+src/editor/contract/tests/test_error_catalog.cpp
+  s_9284ad4c8de2f4::t_62db4d5d685b2f 559-595
+src/editor/build/tests/test_doctor.cpp
+  s_9284ad4c8de2f4::t_9751affe7b543e 1-275
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "591af65c8b48a761485ef1af6bfaf9fd4d7c634a",
+  "prompts": {},
+  "sessions": {
+    "s_9284ad4c8de2f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "64f4c13c-1681-4443-9cc9-81bbde69cd56",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
