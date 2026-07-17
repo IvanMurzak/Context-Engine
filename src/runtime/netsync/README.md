@@ -47,6 +47,13 @@ component ids by stable name (out of scope for v1).
   replica by dirty/delta over N fixed ticks; the replica, which never runs physics, converges to the
   source's positions/velocities (byte-exact), the per-tick delta shrinks as bodies settle, a static
   body is sent only in the initial full snapshot, and an authority handover replicates.
+- `tests/test_packed_replication.cpp` (M8 a07, `netsync-packed-replication`) — the convergence harness
+  re-run **against packs**: a real v1 pack is loaded back through the shipped runtime content seam
+  (`PackContentSource` → `RuntimeContentLoader`), each packed entity's composed identity (L-37 — the ONE
+  identity R-NET-001 binds network ids to) is read out, and the source→replica moving-body convergence
+  is driven keyed by those pack-carried identities — validating that the M8 wedge builds carry the
+  validated L-48/R-NET-001 replication metadata. Every replication net-id is asserted to come from the
+  pack. Not a strict-FP scene (no `determinism-*` ctest); runs on all three `build` legs.
 - `tests/test_errors.cpp` — pins the `net.*` code strings to their catalog identities.
 
 The `net.*` fail-closed codes are defined in `include/context/runtime/netsync/errors.h`

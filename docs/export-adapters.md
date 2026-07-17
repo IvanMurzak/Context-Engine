@@ -71,3 +71,39 @@ So the artifact is **deterministic modulo the LTO link**: every adapter-produced
 reproducible; only the linked binary (an upstream toolchain artifact, not adapter output) is not. A
 fully reproducible binary is a separate, toolchain-level concern (reproducible-build flags), tracked
 outside a06. The `context.build.json` manifest records this as `"deterministicModuloLink": true`.
+
+## Packed-wedge determinism + replication gates (M8 a07)
+
+a06 proves the artifact BOOTS and steps N ticks; a07 adds the two blocking per-PR wedge gates that
+prove the SHIPPED build is *correct*, not merely runnable — R-BUILD-009's point that "editor-embedded
+play proves nothing about the packed binary". Both live beside the a06 host / netsync harness and ride
+the standing CI jobs; the fleet manifest (`docs/ci-fleet-manifest.json`) registers all three of a07's
+gates (`linux-export-smoke`, `determinism-packed-wedge`, `netsync-packed-replication`).
+
+- **Packed determinism (`determinism-packed-wedge`, R-QA-005 / L-54).** The L-54 state-hash gate re-run
+  against the SHIPPED wedge build. It launches the shipped `context-runtime-server` over a real v1 pack
+  with a fixed seed + N fixed ticks, reads the shipped RuntimeKernel's post-step hierarchical sim state
+  hash out of the boot/state signal, and asserts it equals BOTH (a) the in-process **editor-embedded**
+  `Session` hash for the identical run — the packed kernel computes the same trajectory as the editor
+  kernel — AND (b) a committed cross-platform golden. The sim is integer/fixed-point end to end and the
+  hash folds fixed-width big-endian integers, so the golden is portable: any per-platform divergence on
+  Linux-x64 / Win-x64 / macOS-ARM64 reds that leg. It joins the `determinism-*` family (the blocking
+  "Determinism gate" step on all three `build` legs) and is added to the strict-FP `deterministic`
+  job's hand-maintained `--target` list alongside `context_runtime_server` — the "Not Run = RED"
+  tripwire (an un-built executable the `-R "^determinism-"` regex selects reports "Not Run").
+
+- **Replication against packs (`netsync-packed-replication`, R-NET-001 / L-48).** The M6 X2 state-sync
+  convergence harness re-run with the replication net-ids sourced FROM THE PACK — the M8-exit clause
+  that the wedge builds carry the validated L-48/R-NET-001 replication metadata. A real v1 pack is
+  loaded back through the shipped runtime content seam (`PackContentSource` → `RuntimeContentLoader`),
+  each packed entity's composed identity (L-37 — the ONE identity R-NET-001 binds network ids to) is
+  read out, and a real moving-body source→replica convergence is driven keyed by those pack-carried
+  identities: the replica converges byte-identically with the dirty/delta culling (full snapshot first,
+  the static floor never re-sent), and every replication net-id is asserted to come from the pack. A
+  convergence / netcode test, not a strict-FP scene — it registers no `determinism-*` ctest and the
+  `deterministic` job's `--target` list is unchanged; it auto-runs on all three `build` legs.
+
+- **Wedge-target smoke (`linux-export-smoke`, R-BUILD-009, §6).** a06 shipped the `linux-export` job;
+  a07 registers it in the fleet manifest as the blocking per-PR §6 gate. It asserts the
+  `context build --smoke` envelope RESULT (`data.smoke.ran && ok && simTick==N`) for both Linux flavors
+  and boots each assembled tarball clean-host.

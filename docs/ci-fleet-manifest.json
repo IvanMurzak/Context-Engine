@@ -542,6 +542,36 @@
       "description": "M7 exit criterion 5 (design 2026-07-13-m7-runtime-ui / a12-m7-exit): the M7 runtime-UI SEAM CHECKLIST as an executable audit (the milestone-closing mirror of m2-exit-6 / m5-exit-3 / m6-exit-5) — one assertion per M7 seam so a regression that quietly drops one turns the gate red, additionally encoding the two RULED-scope seams the design's exit-gate section names (owner rulings c + d): (1) provider pluggability (R-UI-002 / D1 — null + engine-integrated both implement UiProvider; negotiate_repaint falls back to a full repaint without damage_repaint, incremental with it); (2) the headless authoring loop (R-UI-006 / D6 — build/layout/hit-test/dispatch a tree with no GPU); (3) RULING (c) shaped-text capability TRUTH — text_shaping + bidi TRUE on both providers AND the headless shaper actually works (a Latin ligature collapses; an Arabic run resolves RTL — the same measure() path the a8 ui-test_shaping gate proves); (4) RULING (d) curved-panel interaction presence — the a10 raycast->UV->panel-coords path is registered + green and the broad-phase-pruned raycaster equals the linear oracle; (5) single-sink input routing (R-SYS-007 / L-45 / D5); (6) determinism/presentation (D6 — no UI operation moves hash_world); (7) minter discipline (the ui.* fail-closed codes live in the reserved ui domain block) (ctest m7-exit-5-seam-checklist; blocking 'M7 exit gate' named step, all three build-matrix legs)."
     },
     {
+      "id": "linux-export-smoke",
+      "requirement": "R-BUILD-009",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "linux-export",
+      "description": "M8 wedge-target headless SMOKE — the blocking per-PR §6 gate that activates R-BUILD-009 (a06 job, a07 registration). Builds both Linux flavors (desktop = render present; server/headless = render absent), then for EACH proves the ASSEMBLED tarball artifact boots + steps N fixed ticks on a CLEAN host with no dev tree: `context build --smoke --smoke-ticks 16` launches the produced artifact against the shipped runtime binary and the envelope RESULT is asserted (data.smoke.ran && data.smoke.ok && data.smoke.simTick==16 && the adapter/flavor match), then the extracted launch.sh is re-run clean-host, plus the L-5 render-footprint audit (the server binary carries no render payload + is smaller). ubuntu-only (the desktop flavor links only the GPU-free render abstraction, CONTEXT_BUILD_RENDER_WGPU OFF — no GPU). The runtime-host-* in-process/cross-process ctests also ride the 3-OS build job."
+    },
+    {
+      "id": "determinism-packed-wedge",
+      "requirement": "R-BUILD-009",
+      "runner_class": "determinism-matrix",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8 a07 PACKED-WEDGE determinism gate (R-BUILD-009 / R-QA-005 / L-54): the L-54 state-hash gate re-run against the SHIPPED wedge build, not the editor-embedded kernel — R-BUILD-009's core claim that editor-embedded play proves nothing about the packed binary. Launches the shipped server/headless host binary over a real v1 pack (fixed seed + N fixed ticks), reads the SHIPPED RuntimeKernel's post-step hierarchical sim state hash, and asserts it equals BOTH the in-process editor-embedded Session hash AND a committed cross-platform golden (portable — integer-only sim + fixed-endian hashing, so a per-platform divergence on Linux-x64 / Win-x64 / macOS-ARM64 reds that leg). ctest determinism-packed-wedge joins the determinism-* family the blocking 'Determinism gate' step (-R \"^determinism-\") runs on all three build-matrix legs, AND is added to the strict-FP `deterministic` job's hand-maintained --target list in ci.yml WITH context_runtime_server (the 'Not Run = RED' tripwire)."
+    },
+    {
+      "id": "netsync-packed-replication",
+      "requirement": "R-NET-001",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8 a07 REPLICATION-AGAINST-PACKS gate (R-NET-001 / L-48): the M6 X2 state-sync CONVERGENCE harness re-run with the replication net-ids sourced FROM THE PACK — validating the M8-exit clause that the wedge builds carry the validated L-48/R-NET-001 replication metadata (the M6 harness re-run against packed builds). A real v1 pack is loaded back through the shipped runtime content seam (PackContentSource -> RuntimeContentLoader), each packed entity's composed identity (L-37 — the ONE identity R-NET-001 binds network ids to) is read out, and a real moving-body source->replica convergence (a static floor + three dropped dynamic spheres) is driven keyed by those pack-carried identities: the replica converges byte-identically with the dirty/delta culling (full snapshot first, static floor never re-sent), and every replication net-id is asserted to come from the pack. ctest netsync-packed-replication auto-runs on all three build-matrix legs via the build job's general ctest step (netsync-* is not a gate-exclusion prefix); not a strict-FP scene, so it registers no determinism-* name and the `deterministic` job's --target list is unchanged."
+    },
+    {
       "id": "minspec-floor-proxy-measure",
       "requirement": "R-QA-007",
       "runner_class": "gh-ubuntu-shared",

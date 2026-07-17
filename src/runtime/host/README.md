@@ -60,6 +60,13 @@ pack + a `launch.sh` + a `context.build.json` manifest into a tarball; see `docs
 - `runtime-host-smoke` — cross-process: launches each SHIPPED binary over a real pack and asserts the
   boot signal (the R-BUILD-009 "launch the packed artifact + step N ticks" proof).
 - `runtime-host-render-footprint` — the L-5 DCE size + symbol audit.
+- `determinism-packed-wedge` (M8 a07) — the L-54 state-hash gate re-run against the SHIPPED wedge
+  build: launches `context-runtime-server` over a real pack with a fixed seed + N ticks and asserts the
+  shipped RuntimeKernel's post-step sim state hash equals BOTH the in-process editor-embedded `Session`
+  hash AND a committed cross-platform golden (integer-only sim ⇒ portable across Linux-x64 / Win-x64 /
+  macOS-ARM64). Joins the `determinism-*` family (the blocking "Determinism gate" step on all three
+  `build` legs) and is in the strict-FP `deterministic` job's `--target` list with `context_runtime_server`
+  (the "Not Run = RED" tripwire). See `docs/export-adapters.md` § Packed-wedge determinism.
 
 The dedicated `linux-export` CI job additionally proves the ASSEMBLED tarball boots on a CLEAN host
 (extracted to a temp dir with no dev tree present) — DoD 1 + 4.
