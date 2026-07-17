@@ -82,11 +82,11 @@ AdapterPlan plan_adapter(const std::string& target, const std::string& flavor,
         // The web bundle layout (R-BUILD-005 minimal packaging, adapted for static hosting): the wasm
         // module + its JS loader under bin/, the HTML shell at the root, the pack under content/, and
         // the manifest. Archive paths are always forward-slash.
-        plan.layout.push_back({"bin/" + plan.runtime_binary, "runtime"});
-        plan.layout.push_back({"bin/" + plan.runtime_loader, "runtime-loader"});
-        plan.layout.push_back({plan.launcher_name, "launcher"});
-        plan.layout.push_back({"content/" + plan.pack_name, "pack"});
-        plan.layout.push_back({plan.manifest_name, "manifest"});
+        plan.layout.push_back({"bin/" + plan.runtime_binary, kRoleRuntime});
+        plan.layout.push_back({"bin/" + plan.runtime_loader, kRoleRuntimeLoader});
+        plan.layout.push_back({plan.launcher_name, kRoleLauncher});
+        plan.layout.push_back({"content/" + plan.pack_name, kRolePack});
+        plan.layout.push_back({plan.manifest_name, kRoleManifest});
         return plan;
     }
 
@@ -116,10 +116,10 @@ AdapterPlan plan_adapter(const std::string& target, const std::string& flavor,
     // The documented tarball layout (R-BUILD-005 minimal packaging): the shipped runtime binary under
     // bin/, the v1 pack under content/, the launcher at the root, and the machine-readable manifest.
     // Archive paths are always forward-slash (ustar), even for Windows.
-    plan.layout.push_back({"bin/" + plan.runtime_binary, "runtime"});
-    plan.layout.push_back({"content/" + plan.pack_name, "pack"});
-    plan.layout.push_back({plan.launcher_name, "launcher"});
-    plan.layout.push_back({plan.manifest_name, "manifest"});
+    plan.layout.push_back({"bin/" + plan.runtime_binary, kRoleRuntime});
+    plan.layout.push_back({"content/" + plan.pack_name, kRolePack});
+    plan.layout.push_back({plan.launcher_name, kRoleLauncher});
+    plan.layout.push_back({plan.manifest_name, kRoleManifest});
     return plan;
 }
 

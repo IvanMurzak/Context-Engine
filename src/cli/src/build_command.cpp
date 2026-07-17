@@ -254,7 +254,7 @@ namespace subprocess = context::common::subprocess;
     // launcher, and manifest are pure functions already in hand. `err` is set + emit refused on failure.
     std::string err;
     const auto bytes_for = [&](const build::ArtifactEntry& entry) -> std::string {
-        if (entry.role == "runtime")
+        if (entry.role == build::kRoleRuntime)
         {
             if (!runtime.has_value() || runtime->empty())
             {
@@ -266,7 +266,7 @@ namespace subprocess = context::common::subprocess;
                 err = "could not read --runtime binary: " + *runtime;
             return b;
         }
-        if (entry.role == "runtime-loader")
+        if (entry.role == build::kRoleRuntimeLoader)
         {
             // The a11 web bundle's Emscripten JS glue — the second runtime file (bin/context-runtime.js).
             if (!runtime_loader.has_value() || runtime_loader->empty())
@@ -279,11 +279,11 @@ namespace subprocess = context::common::subprocess;
                 err = "could not read --runtime-loader JS: " + *runtime_loader;
             return b;
         }
-        if (entry.role == "pack")
+        if (entry.role == build::kRolePack)
             return pack_bytes;
-        if (entry.role == "launcher")
+        if (entry.role == build::kRoleLauncher)
             return build::render_launcher(plan);
-        if (entry.role == "manifest")
+        if (entry.role == build::kRoleManifest)
             return build::render_manifest(plan, engine_version, generation, pack_hash);
         err = "unknown artifact layout role: " + entry.role;
         return {};

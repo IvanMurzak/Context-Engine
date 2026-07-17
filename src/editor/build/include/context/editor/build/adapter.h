@@ -33,7 +33,8 @@ namespace context::editor::build
 struct ArtifactEntry
 {
     std::string archive_path; // path inside the tarball, e.g. "bin/context-runtime"
-    std::string role;         // "runtime" | "pack" | "launcher" | "manifest"
+    std::string role;         // one of the kRole* tokens: "runtime" | "runtime-loader" (web) |
+                              // "pack" | "launcher" | "manifest"
 };
 
 // Which launcher dialect a target uses. POSIX targets (linux) ship a `launch.sh`; Windows ships a
@@ -95,6 +96,18 @@ inline constexpr const char* kExeSuffixWindows = ".exe";
 inline constexpr const char* kRuntimeBinaryWeb = "context-runtime.wasm";
 inline constexpr const char* kRuntimeLoaderWeb = "context-runtime.js";
 inline constexpr const char* kWebLauncherName = "index.html";
+
+// The artifact-layout ROLE tokens — the contract between the plan producer (plan_adapter, which tags
+// each ArtifactEntry with a role) and the CLI artifact assembler (build_command.cpp emit_artifact,
+// which resolves each entry's bytes by matching its role). Centralized here — beside the flavor/target/
+// name tokens — so a rename or typo can't silently drift the two modules (an unknown role is a
+// fail-closed emit refusal at runtime, not a compile error). "runtime-loader" is web-only (the
+// Emscripten .js glue paired with the .wasm runtime).
+inline constexpr const char* kRoleRuntime = "runtime";
+inline constexpr const char* kRoleRuntimeLoader = "runtime-loader";
+inline constexpr const char* kRolePack = "pack";
+inline constexpr const char* kRoleLauncher = "launcher";
+inline constexpr const char* kRoleManifest = "manifest";
 
 // True when `flavor` is one of the two a06 flavors (desktop | server).
 [[nodiscard]] bool is_known_flavor(const std::string& flavor);
