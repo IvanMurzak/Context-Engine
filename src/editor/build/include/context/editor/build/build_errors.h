@@ -40,4 +40,10 @@ inline constexpr std::string_view kBuildTranscodeFailedCode = "build.transcode_f
 // Deterministic (a bare retry cannot conjure the missing module).
 inline constexpr std::string_view kBuildLinkFailedCode = "build.link_failed";
 
+// A produced artifact for a target that REQUIRES code-signing (Windows Authenticode, R-SEC-003 / a10)
+// carries no signature — an ADVISORY, never-silent WARNING folded into the build SUCCESS envelope's
+// data.signing (the build still succeeds; the artifact is just unsigned, e.g. a fork PR with no signing
+// secrets). NOT a fail-closed refusal. Deterministic (a bare re-run without a signing identity re-warns).
+inline constexpr std::string_view kBuildArtifactUnsignedCode = "build.artifact_unsigned";
+
 } // namespace context::editor::build

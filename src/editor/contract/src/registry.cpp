@@ -657,9 +657,10 @@ Registry::Registry()
         "Headless per-agent build (R-BUILD-002): drive the project through verify → toolchain → aot → "
         "transcode → pack → link → adapter for --target and report the packed artifact's generation + "
         "pointers as the R-CLI-008 envelope. Builds THIS agent's one target (R-BUILD-007). The a06 Linux "
-        "export adapters are real (--flavor desktop|server; --emit-artifact assembles the runnable "
-        "tarball with --runtime; --smoke launches it — R-BUILD-009); other targets report the honest "
-        "adapter stub. Non-interactive (R-CLI-003).",
+        "and a10 Windows export adapters are real (--flavor desktop|server; --emit-artifact assembles the "
+        "runnable tarball with --runtime; --smoke launches it — R-BUILD-009; --sign folds the a10 "
+        "Authenticode signing report — R-SEC-003); other targets report the honest adapter stub. "
+        "Non-interactive (R-CLI-003).",
         /*params=*/{},
         /*flags=*/
         {{"target", "string", "The build target platform: windows | linux | macos | web.", false},
@@ -683,6 +684,13 @@ Registry::Registry()
           "shipped RuntimeKernel, and fold the R-BUILD-009 boot/state signal into the envelope.",
           false},
          {"smoke-ticks", "int", "Fixed ticks to step during --smoke (default 8).", false},
+         {"sign", "bool",
+          "Evaluate the Authenticode signing hook (a10, R-SEC-003) and fold the machine-readable signing "
+          "report into the envelope (data.signing). For a signing-required target (Windows) whose "
+          "--runtime binary carries no Authenticode signature, this is an EXPLICIT unsigned WARNING "
+          "(state: unsigned + build.artifact_unsigned) — never silent; the actual signing runs in CI "
+          "(Azure Trusted Signing, or a developer-certificate fallback, with a mandatory timestamp).",
+          false},
          {"trust-root", "path",
           "Pinned OpenSSH allowed_signers trust root (R-SEC-009 / L-58) for verify-before-use of the "
           "export template (--runtime) and the engine-fetched toolchain. Required whenever a "

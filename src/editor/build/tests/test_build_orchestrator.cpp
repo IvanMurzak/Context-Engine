@@ -139,12 +139,25 @@ int main()
         CHECK(r.summary.adapter.runtime_binary == "context-runtime-server");
     }
 
-    // --- a06 adapter: a target with no real adapter yet keeps the HONEST stub (R-BUILD-007) ---------
+    // --- a10 adapter: windows is now a REAL adapter (.exe binary + Authenticode signing required) -----
     {
-        // windows has a toolchain entry + no sidecars, so it builds a pack — but a06 ships no windows
-        // adapter, so the plan is unsupported (supported=false), never a faked artifact.
         build::BuildRequest req = base_request();
         req.target = "windows";
+        req.flavor = "desktop";
+        const build::BuildResult r = build::run_build(req);
+        CHECK(r.ok);
+        CHECK(r.summary.adapter.supported);
+        CHECK(r.summary.adapter.render_present);
+        CHECK(r.summary.adapter.requires_signing); // windows requires Authenticode (a10, R-SEC-003)
+        CHECK(r.summary.adapter.runtime_binary == "context-runtime.exe");
+    }
+
+    // --- adapter: a target with no real adapter yet keeps the HONEST stub (R-BUILD-007) --------------
+    {
+        // macos has a toolchain entry + no sidecars, so it builds a pack — but no macos adapter has
+        // landed yet (a13 scope), so the plan is unsupported (supported=false), never a faked artifact.
+        build::BuildRequest req = base_request();
+        req.target = "macos";
         const build::BuildResult r = build::run_build(req);
         CHECK(r.ok);
         CHECK(!r.summary.adapter.supported);

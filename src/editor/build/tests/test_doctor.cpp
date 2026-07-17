@@ -120,6 +120,49 @@ int main()
         CHECK(signing_requirements("web").empty());
     }
 
+    // --- signing PRESENCE (a10): the injected SigningProbe drives configured / absent / unknown -------
+    // The CLI (doctor_command.cpp) fills probe.signing from a real, presence-only host check (never a
+    // secret value); here the injected probe exercises all three verdicts of the pure diagnose spine.
+    {
+        EnvironmentProbe base;
+        base.tools = {tool("cmake", "3.29.2"), tool("node", "20.11.0")};
+
+        // configured: the Windows Authenticode signing identity is present -> status "configured", no warn.
+        {
+            EnvironmentProbe p = base;
+            p.signing = {SigningProbe{"windows", "authenticode", /*configured=*/true, /*known=*/true}};
+            const DoctorReport r = diagnose({"windows"}, manifest, p);
+            const SigningFinding* sf = find_signing(r, "windows", "authenticode");
+            CHECK(sf != nullptr);
+            CHECK(sf->status == "configured");
+            CHECK(sf->code.empty());
+            CHECK(!sf->blocking); // a ship-time prereq NEVER blocks the build
+        }
+
+        // absent: no signing identity -> status "absent" + doctor.signing_prereq_absent + a warning.
+        {
+            EnvironmentProbe p = base;
+            p.signing = {SigningProbe{"windows", "authenticode", /*configured=*/false, /*known=*/true}};
+            const DoctorReport r = diagnose({"windows"}, manifest, p);
+            const SigningFinding* sf = find_signing(r, "windows", "authenticode");
+            CHECK(sf != nullptr);
+            CHECK(sf->status == "absent");
+            CHECK(sf->code == std::string(kDoctorSigningPrereqAbsentCode));
+            CHECK(!sf->blocking);
+            CHECK(!r.warnings.empty()); // advisory warning, but never blocks report.ok on the signing axis
+        }
+
+        // unknown: the check could not run (no probe) -> status "unknown", no code, no warning.
+        {
+            EnvironmentProbe p = base; // no signing probe supplied
+            const DoctorReport r = diagnose({"windows"}, manifest, p);
+            const SigningFinding* sf = find_signing(r, "windows", "authenticode");
+            CHECK(sf != nullptr);
+            CHECK(sf->status == "unknown");
+            CHECK(sf->code.empty());
+        }
+    }
+
     // --- DoD-1 HAPPY: a healthy reference Linux environment passes ---------------------------------
     {
         const DoctorReport r = diagnose({"linux"}, manifest, healthy_linux());

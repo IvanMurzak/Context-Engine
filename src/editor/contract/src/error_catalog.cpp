@@ -949,6 +949,21 @@ const std::vector<ErrorCode>& catalog()
          "`context doctor --target <t>` named a value that is not a known build target "
          "(windows | linux | macos | web).",
          false, kExitUsage, "R-BUILD-008"},
+        // --- M8 a10 Authenticode signing hook (src/editor/build/signing.*, R-SEC-003) ------------------
+        // The `context build --sign` signing report's never-silent WARNING code. The string is the
+        // source-of-truth in src/editor/build/build_errors.h (context::editor::build::kBuildArtifactUnsignedCode);
+        // this catalog registers it (the same promote-a-local-string pattern — the build module never
+        // links this contract layer). Additive-only (protocolMajor stays 1): appended at the END, no
+        // existing row reordered/renamed. ADVISORY (validation-class exit): a produced artifact for a
+        // signing-required target (Windows Authenticode) carries no signature — the build still succeeds
+        // (data.signing.state == "unsigned"), the code names the warning, and it is NEVER silent.
+        {"build.artifact_unsigned",
+         "A produced artifact for a target that REQUIRES code-signing (Windows Authenticode, R-SEC-003) "
+         "carries no signature — an advisory, never-silent WARNING folded into the build SUCCESS "
+         "envelope's data.signing (e.g. a fork PR with no signing secrets). The build still succeeded; "
+         "the artifact must be Authenticode-signed (Azure Trusted Signing, or the developer-certificate "
+         "fallback, with a mandatory RFC-3161 timestamp) before shipping. Deterministic.",
+         false, kExitValidation, "R-SEC-003"},
     };
     return the_catalog;
 }
