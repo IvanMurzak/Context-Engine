@@ -1,14 +1,16 @@
-# Export adapters (M8 a06 + a10 + a11)
+# Export adapters (M8 a06 + a10 + a11 + a13)
 
 How `context build` turns a project into a **runnable packed build**. This doc records the *implemented*
 adapter set and its artifact contract; the normative design is R-BUILD-001/002/005/009 + R-HEAD-001/002
 + R-SEC-003 + R-ASSET-003/005 + L-5 + L-56 in the owner's `engine-design/` records.
 
-## The adapter set (v1, landing incrementally)
+## The adapter set (v1)
 
 a06 shipped the **first two real export adapters** (Linux); **a10** adds the **Windows** pair with a
 signed `.exe` and a batch launcher; **a11** adds the **web** target — an Emscripten/emdawnwebgpu WebGPU
-bundle that streams its pack in the browser:
+bundle that streams its pack in the browser; **a13** adds the **macOS** pair (POSIX like Linux, but
+Developer-ID-signed + notarized like Windows is Authenticode-signed). Every v1 target is now a real
+adapter:
 
 | `--target` | `--flavor` | shipped runtime | render subsystem | code-signing |
 |---|---|---|---|---|
@@ -16,11 +18,18 @@ bundle that streams its pack in the browser:
 | `linux` | `server` | `context-runtime-server` | **absent** (L-5 DCE'd — headless) | — (none) |
 | `windows` | `desktop` (default) | `context-runtime.exe` | present | **Authenticode** (a10) |
 | `windows` | `server` | `context-runtime-server.exe` | **absent** (L-5 DCE'd — headless) | **Authenticode** (a10) |
+| `macos` | `desktop` (default) | `context-runtime` | present | **Developer ID + notarization** (a13) |
+| `macos` | `server` | `context-runtime-server` | **absent** (L-5 DCE'd — headless) | **Developer ID + notarization** (a13) |
 | `web` | `desktop` only | `context-runtime.wasm` + `context-runtime.js` | present (WebGPU, L-56) | — (none) |
 
-The remaining target (`macos`) still reports the **honest adapter stub**
-(`adapter.supported=false` in the envelope) — the pack is real, but no runnable adapter exists for it
-yet (R-BUILD-007: reported, never faked). It lands later in M8.
+An honest **adapter stub** (`adapter.supported=false` in the envelope) is still reported for any
+(target, flavor) with no real adapter — an unknown target, an unknown flavor, or `web` + `server`
+(R-BUILD-007: reported, never faked).
+
+**macOS differs from Linux in one way** (a13): the runtime is a Mach-O that requires **Developer ID
+code-signing + Apple notarization** to ship (`adapter.requiresSigning=true`), whereas Linux has no v1
+code-signing prerequisite. Otherwise macOS is POSIX exactly like Linux — a suffix-less binary and the
+same `launch.sh`. See § macOS Developer-ID signing + notarization below.
 
 **Web differs from the native targets** (a11): it is **desktop-only** (a headless/server web build is
 nonsensical — the browser is inherently render-present), its runtime is the Emscripten **`.wasm` module
@@ -136,6 +145,56 @@ building reputation — but Microsoft SmartScreen's Application Reputation is ea
 volume. A freshly-signed binary from a new publisher can still show the blue SmartScreen prompt until
 reputation accrues; that is expected and separate from signing. The honest signal that signing worked is
 the "Publisher: Ivan Murzak" line in the UAC / properties dialog, not the absence of a SmartScreen prompt.
+
+## macOS Developer-ID signing + notarization (macOS, a13 — R-SEC-003)
+
+The macOS runtime binary must be **Developer-ID-signed AND Apple-notarized** to ship — macOS 15+
+Gatekeeper removed the control-click bypass, so an un-notarized build is effectively undistributable.
+`context build --sign` folds the same machine-readable, **never-silent** signing report into the envelope
+(`data.signing`):
+
+| `data.signing.state` | meaning |
+|---|---|
+| `not-required` | the target has no code-signing prerequisite (linux / web) |
+| `signed` | the shipped `--runtime` Mach-O carries a code signature (an `LC_CODE_SIGNATURE` blob) |
+| `unsigned` | **required but NO signature** — an explicit WARNING (`code: build.artifact_unsigned` + a top-level envelope warning), e.g. a fork PR with no signing secrets |
+
+The report echoes the plan machine-readably: `method: developer-id-notarization`, `tool: codesign`,
+`primary: apple-notary` (the App-Store-Connect-API notary path — there is no v1 fallback),
+`timestampRequired: true` (codesign secure timestamp), and the macOS-only `notarizationRequired: true`
+(notarization + stapling is a *further* ship requirement beyond code-signing). The presence check is a
+pure, cross-platform **Mach-O parse** (`signing.h` / `macho_has_code_signature`): a signed Mach-O carries
+an `LC_CODE_SIGNATURE` load command with a non-empty `__LINKEDIT` signature blob (thin 32/64-bit + fat
+universal handled). No `codesign`, no macOS API, no secret — so the local GCC gate exercises the exact
+code the Apple-clang CI leg does. Detecting **notarization** (a stapled ticket / Apple's notary service)
+is NOT part of this pure presence check — the CI job asserts it (`notarytool ... status == Accepted`).
+
+**Where the actual signing + notarization runs.** `context build` never holds a signing secret. The
+signing + notarization is a CI action:
+
+- **Per-PR (`macos-export` job, `ci.yml`)** — builds + boots both macOS flavors on GH-hosted
+  `macos-latest` and asserts the never-silent `unsigned` state (this path has no signing secrets, and
+  stays green).
+- **Custody-gated release (`sign-macos` job, `release-sign.yml`)** — code-signs the real runtime binary
+  with a **Developer ID Application** identity (`codesign --options runtime --timestamp`, hardened runtime
+  + secure timestamp) in a temporary keychain, then **notarizes** it via `xcrun notarytool submit --wait`
+  against an App-Store-Connect API key, asserting the JSON `status == "Accepted"` (notarytool exits 0 even
+  on an Invalid submission — the JSON status is the only truth). All of it runs in the protected `release`
+  GitHub Environment (required reviewer — custody model B, the same gate as a08 / a10). The a13 signing
+  hook then closes the loop: `context build --sign` over the signed Mach-O reports `state: signed`. The
+  Apple secrets (`MAC_CSC_LINK` / `MAC_CSC_KEY_PASSWORD` / `MAC_SIGN_IDENTITY` / `APPLE_API_KEY_B64` /
+  `APPLE_API_KEY_ID` / `APPLE_API_ISSUER`) live ONLY in that environment; only `${{ secrets.* }}`
+  references appear in the workflow, and every decoded credential + the temporary keychain is scrubbed at
+  job end (R-SEC-010).
+
+### Stapling note
+
+A **bare CLI runtime binary cannot be stapled** — Apple's `stapler staple` supports only `.dmg` / `.pkg`
+/ `.app` containers. A notarized standalone binary's ticket is served **online by Gatekeeper** on first
+launch (the binary still launches without a block once notarization is Accepted). Stapling attaches at the
+`.dmg` / `.pkg` container stage — a full-release *packaging* concern beyond a13's signing/notarization
+*mechanism* scope; the `sign-macos` staple step is best-effort accordingly. iOS (provisioning, device
+builds) is v2 — out of a13 scope.
 
 ## Web export (M8 a11 — R-BUILD-001 / L-56 / R-ASSET-003 / R-ASSET-005)
 

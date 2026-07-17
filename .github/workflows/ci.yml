@@ -910,6 +910,79 @@ jobs:
         run: ctest --preset dev -R "^runtime-host-" --output-on-failure
         working-directory: src
 
+  # M8 a13 macOS export adapter + Developer-ID signing/notarization hook (src/editor/build/adapter.* +
+  # signing.*, R-BUILD-001/005/007 / R-SEC-003, task a13): the macOS sibling of linux-export/windows-export.
+  # Builds BOTH macOS flavors — desktop (render present) and server/headless (render absent) — then proves
+  # each ASSEMBLED tarball artifact boots + steps N fixed ticks on a CLEAN host with no dev tree (extracted
+  # to a temp dir outside the repo), via the POSIX launch.sh (macOS is POSIX, like Linux — NOT a launch.cmd).
+  # Folds the R-BUILD-009 `context build --smoke` envelope AND the a13 `--sign` signing report: this per-PR
+  # path has NO signing secrets, so the report is the EXPLICIT, never-silent `state: unsigned` +
+  # build.artifact_unsigned WARNING with method `developer-id-notarization` + notarizationRequired (DoD 2)
+  # — the actual Developer-ID codesign + notarytool notarization runs custody-gated in the protected
+  # `release` environment (release-sign.yml sign-macos job, custody model B). Plus the L-5 render-footprint
+  # audit (the server binary carries no render payload + is smaller). GH-hosted macos-latest (Apple Silicon
+  # = macOS-ARM64); no GPU — the desktop flavor links only the GPU-free render abstraction
+  # (CONTEXT_BUILD_RENDER_WGPU stays OFF). Blocking, per PR.
+  macos-export:
+    name: macos-export (both flavors, clean-host boot + signing report)
+    needs: [license-gate, python-tests]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      - name: Configure (dev preset)
+        run: cmake -S src --preset dev
+
+      - name: Build the CLI + both shipped runtime-host flavors
+        run: cmake --build --preset dev --target context context_runtime_desktop context_runtime_server context_runtime_host_test_core context_runtime_host_test_render context_runtime_host_test_smoke
+        working-directory: src
+
+      - name: Assemble each flavor's tarball, check the signing report, and boot it CLEAN-host (launch.sh)
+        shell: bash
+        run: |
+          set -euo pipefail
+          CTX="src/build/dev/cli/context"
+          DESKTOP="$PWD/src/build/dev/runtime/host/context-runtime"
+          SERVER="$PWD/src/build/dev/runtime/host/context-runtime-server"
+          # A minimal buildable project (L-33 hex ids on every entity). printf, not heredoc — robust in YAML.
+          proj="$(mktemp -d)"
+          mkdir -p "$proj/scenes"
+          printf '%s' '{"$schema":"ctx:project","scene":"scenes/main.scene.json","version":1}' > "$proj/project.json"
+          printf '%s' '{"$schema":"ctx:scene","version":1,"entities":[{"id":"aaaa0000aaaa0001","name":"Camera","components":{"camera":{"fov":1.0}}},{"id":"aaaa0000aaaa0002","name":"Player","components":{"transform":{}}}]}' > "$proj/scenes/main.scene.json"
+          for flavor in server desktop; do
+            if [ "$flavor" = desktop ]; then bin="$DESKTOP"; else bin="$SERVER"; fi
+            tar="$proj/dist/game-macos-$flavor.tar"
+            echo "== build + emit-artifact + sign + smoke ($flavor) =="
+            # R-BUILD-009: `context build --smoke` launches the produced artifact + folds the boot signal.
+            # a13: --sign folds the Developer-ID signing report; no signing identity is present on this per-PR path.
+            "$CTX" build --target macos --flavor "$flavor" --project "$proj" \
+              --out "$proj/build/$flavor.pack" --runtime "$bin" --emit-artifact "$tar" \
+              --sign --smoke --smoke-ticks 16 | tee "$proj/$flavor-envelope.json"
+            # Assert the adapter/artifact/smoke result AND the a13 never-silent unsigned signing report.
+            python3 -c "import json,sys; e=json.load(open(sys.argv[1])); d=e['data']; f=sys.argv[2]; a=d['adapter']; assert a['supported'] and a['flavor']==f, a; assert a['requiresSigning'], 'macOS adapter must set requiresSigning'; assert d['artifactEmit']['emitted']; sm=d['smoke']; assert sm['ran'] and sm['ok'] and sm['simTick']==16, sm; sg=d['signing']; assert sg['required'] and sg['state']=='unsigned' and sg['code']=='build.artifact_unsigned', sg; assert sg['method']=='developer-id-notarization' and sg.get('notarizationRequired') is True, sg; assert e.get('warnings'), 'the unsigned artifact must surface a top-level warning'; print('signing/adapter/smoke OK for '+f)" "$proj/$flavor-envelope.json" "$flavor"
+            echo "== clean-host boot from the extracted tarball ($flavor) =="
+            clean="$(mktemp -d)"          # a fresh dir OUTSIDE the repo / build tree — no dev tree present
+            tar -xf "$tar" -C "$clean"
+            chmod +x "$clean/bin/"* "$clean/launch.sh"   # tar_write emits 0644; the launcher/binary need +x
+            signal="$("$clean/launch.sh" --ticks 16)"
+            echo "clean-host $flavor signal: $signal"
+            echo "$signal" | grep -q '"ok":true'
+            echo "$signal" | grep -q '"simTick":16'
+            echo "$signal" | grep -q "\"flavor\":\"$flavor\""
+          done
+          echo "== render-footprint audit (L-5 DCE: headless carries no render payload) =="
+          python3 -c "import sys,pathlib; d=pathlib.Path(sys.argv[1]).read_bytes(); s=pathlib.Path(sys.argv[2]).read_bytes(); assert b'CTXHOST-FOOTPRINT:render-present' in d, 'render marker missing from desktop'; assert b'CTXHOST-FOOTPRINT:render-present' not in s, 'render marker in server (headless leaked render)'; assert len(s) < len(d), f'server {len(s)} not smaller than desktop {len(d)}'; print(f'render-footprint OK: desktop={len(d)} server={len(s)} delta={len(d)-len(s)}')" "$DESKTOP" "$SERVER"
+
+      - name: runtime-host ctests (in-process core/render + cross-process smoke + footprint)
+        run: ctest --preset dev -R "^runtime-host-" --output-on-failure
+        working-directory: src
+
   # WebGPU spike (spikes/webgpu): native build on all three desktop platforms + the offscreen
   # render/readback self-check. The spike is standalone-configurable (no vcpkg — it pins its own
   # wgpu-native prebuilt), so this job stays light: no other spike's deps are configured here.

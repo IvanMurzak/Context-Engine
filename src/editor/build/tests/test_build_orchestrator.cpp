@@ -152,25 +152,30 @@ int main()
         CHECK(r.summary.adapter.runtime_binary == "context-runtime.exe");
     }
 
-    // --- adapter: a target with no real adapter yet keeps the HONEST stub (R-BUILD-007) --------------
+    // --- a13 adapter: macos is now a REAL adapter (suffix-less Mach-O + Developer-ID signing required) --
     {
-        // macos has a toolchain entry + no sidecars, so it builds a pack — but no macos adapter has
-        // landed yet (a13 scope), so the plan is unsupported (supported=false), never a faked artifact.
         build::BuildRequest req = base_request();
         req.target = "macos";
+        req.flavor = "desktop";
         const build::BuildResult r = build::run_build(req);
         CHECK(r.ok);
-        CHECK(!r.summary.adapter.supported);
-        CHECK(r.summary.adapter.layout.empty());
+        CHECK(r.summary.adapter.supported);
+        CHECK(r.summary.adapter.render_present);
+        CHECK(r.summary.adapter.requires_signing); // macOS requires Developer ID + notarization (a13)
+        CHECK(r.summary.adapter.runtime_binary == "context-runtime"); // no `.exe` suffix (Mach-O)
     }
 
-    // --- a06 adapter: an unknown flavor on linux is not a supported adapter (honest stub) -----------
+    // --- adapter: a supported target with an unknown FLAVOR keeps the HONEST stub (R-BUILD-007) -------
     {
+        // The project builds a real pack, but an unknown flavor has no adapter plan, so the plan stays
+        // unsupported (supported=false) — never a faked artifact. Post-a13 every toolchain-backed target
+        // (linux/windows/macos/web) has a real adapter, so the honest stub is reached via a bad flavor.
         build::BuildRequest req = base_request();
         req.flavor = "console";
         const build::BuildResult r = build::run_build(req);
         CHECK(r.ok);
         CHECK(!r.summary.adapter.supported);
+        CHECK(r.summary.adapter.layout.empty());
     }
 
     // --- build.template_unverified: a missing / malformed / empty project ---------------------------

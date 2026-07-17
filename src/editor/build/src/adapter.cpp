@@ -90,12 +90,13 @@ AdapterPlan plan_adapter(const std::string& target, const std::string& flavor,
         return plan;
     }
 
-    // The a06/a10 adapter set covers Linux + Windows, each in desktop + server/headless flavor. Any
-    // other target/flavor is an honest stub (supported=false) — the CLI reports it, never fakes an
-    // artifact (R-BUILD-007).
+    // The a06/a10/a13 adapter set covers Linux + Windows + macOS, each in desktop + server/headless
+    // flavor. Any other target/flavor is an honest stub (supported=false) — the CLI reports it, never
+    // fakes an artifact (R-BUILD-007).
     const bool is_linux = (target == kTargetLinux);
     const bool is_windows = (target == kTargetWindows);
-    if ((!is_linux && !is_windows) || !is_known_flavor(flavor))
+    const bool is_macos = (target == kTargetMacos);
+    if ((!is_linux && !is_windows && !is_macos) || !is_known_flavor(flavor))
     {
         plan.launcher_name = "launch.sh"; // a stub echoes the posix default name; layout stays empty
         return plan;
@@ -103,13 +104,16 @@ AdapterPlan plan_adapter(const std::string& target, const std::string& flavor,
 
     plan.supported = true;
     plan.render_present = (flavor == kFlavorDesktop);
-    // Windows ships an Authenticode-signed .exe (R-SEC-003); the POSIX launcher/manifest are unsigned
-    // text either way (only the runtime binary is signed). Linux has no v1 code-signing prerequisite.
-    plan.requires_signing = is_windows;
+    // Windows (Authenticode) and macOS (Developer ID + notarization, a13) ship a code-signed runtime
+    // binary (R-SEC-003); the launcher/manifest are unsigned text either way (only the runtime binary is
+    // signed). Linux has no v1 code-signing prerequisite.
+    plan.requires_signing = is_windows || is_macos;
 
     const std::string base = plan.render_present ? kRuntimeBinaryDesktop : kRuntimeBinaryServer;
+    // Only Windows appends `.exe`; macOS + Linux ship a suffix-less Mach-O/ELF binary.
     plan.runtime_binary = is_windows ? base + kExeSuffixWindows : base;
-    // cmd.exe cannot run the POSIX launch.sh, so Windows ships a launch.cmd batch launcher instead.
+    // cmd.exe cannot run the POSIX launch.sh, so Windows ships a launch.cmd batch launcher instead; macOS
+    // + Linux are POSIX and ship the same launch.sh.
     plan.launcher_kind = is_windows ? LauncherKind::WindowsCmd : LauncherKind::PosixSh;
     plan.launcher_name = is_windows ? "launch.cmd" : "launch.sh";
 
@@ -213,8 +217,9 @@ std::string render_manifest(const AdapterPlan& plan, std::uint64_t engine_versio
         s += "  \"runtimeLoader\": \"bin/" + json_escape(plan.runtime_loader) + "\",\n";
     s += "  \"pack\": \"content/" + json_escape(plan.pack_name) + "\",\n";
     s += "  \"launcher\": \"" + json_escape(plan.launcher_name) + "\",\n";
-    // Whether the shipped runtime binary requires code-signing to ship (Windows Authenticode, R-SEC-003).
-    // The launcher + manifest are unsigned text either way; only the runtime .exe is signed.
+    // Whether the shipped runtime binary requires code-signing to ship (Windows Authenticode / macOS
+    // Developer ID + notarization, R-SEC-003). The launcher + manifest are unsigned text either way;
+    // only the runtime binary is signed.
     s += "  \"requiresSigning\": ";
     s += plan.requires_signing ? "true" : "false";
     s += ",\n";

@@ -200,3 +200,163 @@ jobs:
           path: publish/context-runtime-server.exe
           if-no-files-found: error
           retention-days: 7
+
+  # M8 a13 macOS Developer-ID signing + notarization (R-SEC-003 / R-SEC-010) — the custody-model-B
+  # rehearsal of the shipped macOS runtime binary's Developer-ID signature + Apple notarization, the macOS
+  # sibling of the a10 sign-windows job. Runs ONLY on manual dispatch (never on push/PR — so it never
+  # appears in a PR's CI rollup) and ONLY after a required reviewer approves the `release` environment
+  # (custody model B — every use of the signing identity is human-approved). It builds the REAL shipped
+  # headless runtime binary, code-signs it with a Developer ID Application identity (hardened runtime +
+  # secure timestamp) in a TEMPORARY keychain, notarizes it via notarytool (App-Store-Connect API key)
+  # asserting status=="Accepted" (notarytool submit --wait exits 0 even on Invalid — the JSON status is the
+  # only truth), and proves the a13 signing hook CLOSES THE LOOP: `context build --sign` detects the
+  # embedded Mach-O code signature and reports state "signed" (vs the never-silent "unsigned" WARNING on the
+  # per-PR macos-export job). All decoded creds + the temp keychain are SCRUBBED at job end (R-SEC-010).
+  #
+  # SECURITY (R-SEC-003 / R-SEC-010): the Apple signing/notary secrets live ONLY in the protected `release`
+  # environment; only `${{ secrets.MAC_*/APPLE_* }}` env-references appear here — never a secret VALUE,
+  # never a committed `.secrets/` path. Guarded (`if: env.MAC_CSC_LINK != '' && …`) so a partial/missing-
+  # secrets dispatch degrades to an honest unsigned state rather than a hard failure (mirrors the reference
+  # GameDev-MCP-Server deploy_server_executables.yml, the owner's proven codesign+notarytool pattern).
+  # STAPLING NOTE: a bare CLI runtime binary CANNOT be stapled — Apple supports `stapler staple` only for
+  # .dmg/.pkg/.app containers, so the bare binary's notarization ticket is served ONLINE by Gatekeeper on
+  # first launch. The staple step below is therefore best-effort (it no-ops honestly for the bare binary
+  # and would staple a real container); stapling attaches at the .dmg/.pkg container stage — a full-release
+  # packaging concern beyond a13's signing/notarization-MECHANISM scope.
+  sign-macos:
+    name: sign + notarize the macOS runtime binary (Developer ID, environment-protected, custody model B)
+    runs-on: macos-latest
+    # The required-reviewer gate: this job does NOT run until a reviewer approves the `release` environment
+    # deployment (custody model B). The Apple Developer-ID + notary secrets are environment-scoped.
+    environment: release
+    # Job-level env so the guards (`if: env.MAC_CSC_LINK != ''`) can read them — a step's own env: is not
+    # visible to that step's own if:. NEVER printed/logged (the secret masker also redacts them).
+    env:
+      MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+      MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+      MAC_SIGN_IDENTITY: ${{ secrets.MAC_SIGN_IDENTITY }}
+      APPLE_API_KEY_B64: ${{ secrets.APPLE_API_KEY_B64 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      - name: Build the CLI + the shipped headless runtime binary
+        run: |
+          cmake -S src --preset dev
+          cmake --build --preset dev --target context context_runtime_server
+
+      - name: Stage the runtime binary to sign
+        run: |
+          set -euo pipefail
+          mkdir -p publish
+          cp "src/build/dev/runtime/host/context-runtime-server" "publish/context-runtime-server"
+
+      # Import the Developer ID Application cert into a TEMPORARY keychain. Guarded on all three signing
+      # secrets so a partial/missing-secrets dispatch skips the sign+notarize path cleanly (honest unsigned)
+      # rather than dying under `set -e`. The decoded .p12 is scrubbed immediately after import (R-SEC-010).
+      - name: Import macOS signing certificate (temporary keychain)
+        if: ${{ env.MAC_CSC_LINK != '' && env.MAC_CSC_KEY_PASSWORD != '' && env.MAC_SIGN_IDENTITY != '' }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/context-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          echo "$MAC_CSC_LINK" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$MAC_CSC_KEY_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          rm -f "$CERT_PATH"   # scrub the decoded .p12 immediately (R-SEC-010)
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      # codesign with the Developer ID identity: hardened runtime (--options runtime) + secure timestamp
+      # (--timestamp), then a strict verify. Same all-three-secrets guard as the import step.
+      - name: Code-sign the macOS runtime binary (Developer ID, hardened runtime + secure timestamp)
+        if: ${{ env.MAC_CSC_LINK != '' && env.MAC_CSC_KEY_PASSWORD != '' && env.MAC_SIGN_IDENTITY != '' }}
+        run: |
+          set -euo pipefail
+          BIN="publish/context-runtime-server"
+          codesign --force --options runtime --timestamp --sign "$MAC_SIGN_IDENTITY" "$BIN"
+          codesign --verify --strict --verbose=2 "$BIN"
+
+      # Notarize with notarytool (App-Store-Connect API key). Guarded on the SAME three signing secrets PLUS
+      # the notary API key (notarizing an unsigned binary is meaningless). The decoded .p8 is scrubbed
+      # immediately after use (R-SEC-010).
+      - name: Notarize the macOS runtime binary (notarytool, App Store Connect API key)
+        if: ${{ env.MAC_CSC_LINK != '' && env.MAC_CSC_KEY_PASSWORD != '' && env.MAC_SIGN_IDENTITY != '' && env.APPLE_API_KEY_B64 != '' }}
+        run: |
+          set -euo pipefail
+          KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          echo "$APPLE_API_KEY_B64" | base64 --decode > "$KEY_PATH"
+          ( cd publish && zip -r "context-runtime-server.zip" "context-runtime-server" >/dev/null )
+          # `notarytool submit --wait` EXITS 0 even when the submission is Invalid/Rejected (it only fails
+          # on transport errors), so the exit code alone is NOT proof of acceptance. Capture the JSON and
+          # FAIL the step unless status == "Accepted".
+          SUBMIT_JSON="$(xcrun notarytool submit "publish/context-runtime-server.zip" \
+            --key "$KEY_PATH" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" \
+            --wait --output-format json)"
+          echo "$SUBMIT_JSON"
+          STATUS="$(echo "$SUBMIT_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))')"
+          rm -f "$KEY_PATH"   # scrub the decoded .p8 API key immediately (R-SEC-010)
+          if [ "$STATUS" != "Accepted" ]; then
+            echo "::error::Notarization did not succeed (status: ${STATUS:-unknown})"
+            exit 1
+          fi
+          echo "Notarization accepted (status: Accepted)."
+          # Best-effort staple. A bare CLI Mach-O cannot be stapled (Apple supports .dmg/.pkg/.app only); its
+          # ticket is served online by Gatekeeper. Stapling lands at the container stage (see the job note).
+          xcrun stapler staple "publish/context-runtime-server" \
+            || echo "note: a bare CLI binary's notarization ticket is served online by Gatekeeper (stapling attaches at the .dmg/.pkg container stage)"
+          {
+            echo "### a13 macOS notarization OK"
+            echo "- notarytool status == Accepted asserted for the shipped runtime binary"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prove the a13 signing hook closes the loop (context build --sign detects the signature)
+        run: |
+          set -euo pipefail
+          ctx="src/build/dev/cli/context"
+          exe="publish/context-runtime-server"
+          proj="$RUNNER_TEMP/ctx-sign-proj"
+          rm -rf "$proj"; mkdir -p "$proj/scenes"
+          printf '%s' '{"$schema":"ctx:project","scene":"scenes/main.scene.json","version":1}' > "$proj/project.json"
+          printf '%s' '{"$schema":"ctx:scene","version":1,"entities":[{"id":"aaaa0000aaaa0001","name":"Camera","components":{"camera":{"fov":1.0}}}]}' > "$proj/scenes/main.scene.json"
+          "$ctx" build --target macos --flavor server --project "$proj" --out "$proj/build/server.pack" --runtime "$exe" --sign | tee "$proj/envelope.json"
+          STATE="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"]["signing"]["state"])' "$proj/envelope.json")"
+          echo "a13 signing report state: $STATE"
+          if [ -n "${MAC_SIGN_IDENTITY:-}" ] && [ -n "${MAC_CSC_LINK:-}" ]; then
+            # Signing ran -> the a13 hook MUST detect the embedded Developer-ID code signature.
+            [ "$STATE" = "signed" ] || { echo "::error::signing ran but the a13 hook reported '$STATE', expected 'signed'"; exit 1; }
+            echo "### a13 hook closed the loop: context build --sign -> state 'signed'" >> "$GITHUB_STEP_SUMMARY"
+          else
+            # No signing identity -> the honest never-silent unsigned state (the guarded-skip path).
+            [ "$STATE" = "unsigned" ] || { echo "::error::no signing identity but state was '$STATE', expected 'unsigned'"; exit 1; }
+            echo "### a13 signing dry-run: mac signing secrets empty -> unsigned (honest, never silent)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Scrub ALL signing material regardless of outcome (R-SEC-010): delete the temporary keychain and any
+      # decoded key files that a mid-step failure may have left behind.
+      - name: Scrub signing material (temp keychain + decoded key files)
+        if: ${{ always() }}
+        run: |
+          set +e
+          if [ -n "${KEYCHAIN_PATH:-}" ]; then security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null; fi
+          rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/AuthKey.p8" 2>/dev/null
+          echo "scrubbed signing material (temp keychain + decoded key files)"
+
+      - name: Upload the (signed) macOS runtime binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-sign-macos-runtime
+          path: publish/context-runtime-server
+          if-no-files-found: error
+          retention-days: 7

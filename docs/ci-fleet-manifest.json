@@ -572,6 +572,16 @@
       "description": "M8 a10 Windows export adapter + Authenticode signing hook (R-BUILD-001/005 / R-SEC-003) — the blocking per-PR Windows sibling of linux-export-smoke. Builds both Windows flavors (desktop = render present; server/headless = render absent) as signed-capable .exe binaries, then for EACH proves the ASSEMBLED tarball artifact boots + steps N fixed ticks on a CLEAN host with no dev tree: `context build --target windows --sign --smoke --smoke-ticks 16` and the envelope RESULT is asserted (data.adapter.supported && requiresSigning && data.artifactEmit.emitted && data.smoke.ran && ok && simTick==16), then the extracted launch.cmd batch launcher is re-run clean-host. The a10 SIGNING HOOK is asserted NEVER-SILENT: this per-PR path has no signing secrets, so data.signing.state=='unsigned' + build.artifact_unsigned + a top-level envelope warning (the actual Azure Trusted Signing runs custody-gated in the protected release environment — release-sign.yml sign-windows job). Plus the L-5 render-footprint audit (the server binary carries no render payload + is smaller). Rides the self-hosted MSVC runner for same-repo PRs; a fork PR (no secrets) falls back to GH-hosted windows-latest and stays green, unsigned. No GPU (CONTEXT_BUILD_RENDER_WGPU OFF)."
     },
     {
+      "id": "macos-export-smoke",
+      "requirement": "R-BUILD-005",
+      "runner_class": "gh-macos-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "macos-export",
+      "description": "M8 a13 macOS export adapter + Developer-ID signing/notarization hook (R-BUILD-001/005/007 / R-SEC-003) — the blocking per-PR macOS sibling of linux-export-smoke / windows-export-smoke. Builds both macOS flavors (desktop = render present; server/headless = render absent) as Developer-ID-signable Mach-O binaries, then for EACH proves the ASSEMBLED tarball artifact boots + steps N fixed ticks on a CLEAN host with no dev tree: `context build --target macos --sign --smoke --smoke-ticks 16` and the envelope RESULT is asserted (data.adapter.supported && requiresSigning && data.artifactEmit.emitted && data.smoke.ran && ok && simTick==16), then the extracted POSIX launch.sh (macOS is POSIX, like Linux — NOT a launch.cmd) is re-run clean-host. The a13 SIGNING HOOK is asserted NEVER-SILENT: this per-PR path has no signing secrets, so data.signing.state=='unsigned' + build.artifact_unsigned + method=='developer-id-notarization' + notarizationRequired + a top-level envelope warning (the actual Developer-ID codesign + notarytool notarization runs custody-gated in the protected release environment — release-sign.yml sign-macos job, custody model B). Plus the L-5 render-footprint audit (the server binary carries no render payload + is smaller). GH-hosted macos-latest (Apple Silicon = macOS-ARM64). No GPU (CONTEXT_BUILD_RENDER_WGPU OFF)."
+    },
+    {
       "id": "determinism-packed-wedge",
       "requirement": "R-BUILD-009",
       "runner_class": "determinism-matrix",

@@ -102,6 +102,26 @@ void write_pe(const fs::path& path, bool signed_)
     put_le(sec + 4, signed_ ? 0x2A0 : 0, 4);      // Size — non-zero ⇒ signature present
     write_file(path, b);
 }
+
+// Build a minimal thin 64-bit little-endian Mach-O whose single LC_CODE_SIGNATURE datasize is non-zero
+// iff `signed_` — the exact bit the a13 signing hook (macho_has_code_signature) keys off. Written to
+// `path` so a CLI `--sign --target macos` run can inspect it as the shipped runtime binary.
+void write_macho(const fs::path& path, bool signed_)
+{
+    std::string b(0x40, '\0');
+    const auto put_le = [&b](std::size_t off, unsigned long value, std::size_t n) {
+        for (std::size_t i = 0; i < n; ++i)
+            b[off + i] = static_cast<char>((value >> (8 * i)) & 0xFF);
+    };
+    put_le(0, 0xFEEDFACFul, 4); // MH_MAGIC_64 stored little-endian (file bytes CF FA ED FE)
+    put_le(16, 1, 4);           // ncmds = 1
+    put_le(20, 16, 4);          // sizeofcmds = 16
+    const std::size_t lc = 32;  // load commands begin after the 64-bit mach_header
+    put_le(lc, 0x1Dul, 4);      // cmd = LC_CODE_SIGNATURE
+    put_le(lc + 4, 16, 4);      // cmdsize = 16
+    put_le(lc + 12, signed_ ? 0x120ul : 0ul, 4); // datasize — non-zero ⇒ signature blob present
+    write_file(path, b);
+}
 } // namespace
 
 int main()
@@ -166,6 +186,24 @@ int main()
         CHECK(!adapter.at("renderPresent").as_bool());
         CHECK(adapter.at("requiresSigning").as_bool()); // windows requires Authenticode (R-SEC-003)
         CHECK(adapter.at("runtimeBinary").as_string() == "context-runtime-server.exe");
+        remove_quiet(dir);
+    }
+
+    // --- a13 macOS adapter: supported, suffix-less Mach-O binary, requiresSigning in the envelope -----
+    {
+        const fs::path dir = make_project("mac");
+        const fs::path out = dir / "build" / "game.pack";
+        const Envelope e = run_build({{"target", "macos"},
+                                      {"flavor", "desktop"},
+                                      {"project", dir.string()},
+                                      {"out", out.generic_string()}});
+        CHECK(e.ok());
+        const Json& adapter = e.data().at("adapter");
+        CHECK(adapter.at("supported").as_bool());
+        CHECK(adapter.at("flavor").as_string() == "desktop");
+        CHECK(adapter.at("renderPresent").as_bool());
+        CHECK(adapter.at("requiresSigning").as_bool()); // macOS requires Developer ID + notarization
+        CHECK(adapter.at("runtimeBinary").as_string() == "context-runtime"); // no `.exe` suffix (Mach-O)
         remove_quiet(dir);
     }
 
@@ -273,6 +311,52 @@ int main()
         const fs::path rt = dir / "context-runtime.exe";
         write_pe(rt, /*signed_=*/true); // a well-formed PE with a NON-EMPTY Certificate Table
         const Envelope e = run_build({{"target", "windows"},
+                                      {"project", dir.string()},
+                                      {"out", out.generic_string()},
+                                      {"runtime", rt.string()},
+                                      {"sign", ""}});
+        CHECK(e.ok());
+        const Json& signing = e.data().at("signing");
+        CHECK(signing.at("state").as_string() == "signed");
+        CHECK(signing.at("signed").as_bool());
+        CHECK(!signing.contains("code"));
+        CHECK(e.warnings().empty());
+        remove_quiet(dir);
+    }
+
+    // --- a13 signing hook (--sign): an UNSIGNED macOS runtime is an explicit never-silent WARNING -----
+    {
+        const fs::path dir = make_project("mac-sign-unsigned");
+        const fs::path out = dir / "build" / "game.pack";
+        const fs::path rt = dir / "context-runtime";
+        write_macho(rt, /*signed_=*/false); // a well-formed Mach-O with a zero-datasize LC_CODE_SIGNATURE
+        const Envelope e = run_build({{"target", "macos"},
+                                      {"project", dir.string()},
+                                      {"out", out.generic_string()},
+                                      {"runtime", rt.string()},
+                                      {"sign", ""}});
+        CHECK(e.ok()); // an unsigned/un-notarized artifact is a WARNING, not a build failure
+        const Json& signing = e.data().at("signing");
+        CHECK(signing.at("required").as_bool());
+        CHECK(signing.at("state").as_string() == "unsigned");
+        CHECK(!signing.at("signed").as_bool());
+        CHECK(signing.at("code").as_string() == "build.artifact_unsigned");
+        CHECK(signing.at("method").as_string() == "developer-id-notarization");
+        CHECK(signing.at("primary").as_string() == "apple-notary");
+        CHECK(signing.at("notarizationRequired").as_bool()); // macOS-only field
+        CHECK(!signing.contains("fallback"));                // no v1 macOS fallback (omitted)
+        CHECK(!signing.at("warning").as_string().empty());   // NEVER silent
+        CHECK(!e.warnings().empty());
+        remove_quiet(dir);
+    }
+
+    // --- a13 signing hook (--sign): a SIGNED macOS runtime reports state "signed", no warning ----------
+    {
+        const fs::path dir = make_project("mac-sign-signed");
+        const fs::path out = dir / "build" / "game.pack";
+        const fs::path rt = dir / "context-runtime";
+        write_macho(rt, /*signed_=*/true); // a Mach-O with a NON-EMPTY LC_CODE_SIGNATURE blob
+        const Envelope e = run_build({{"target", "macos"},
                                       {"project", dir.string()},
                                       {"out", out.generic_string()},
                                       {"runtime", rt.string()},

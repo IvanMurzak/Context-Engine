@@ -98,16 +98,138 @@ bool pe_has_authenticode_signature(std::string_view pe_bytes)
     return cert_size != 0;
 }
 
+namespace
+{
+
+// Mach-O magic bytes AS READ big-endian from file offset 0 (so a little-endian macOS binary — file bytes
+// CF FA ED FE — reads here as 0xCFFAEDFE = the CIGAM64 constant). A thin Mach-O stores its header in its
+// OWN endianness (MAGIC = same-endian, CIGAM = byte-swapped); a fat/universal header stores its fields
+// big-endian (FAT_MAGIC) or little-endian (FAT_CIGAM).
+constexpr std::uint32_t kMachoMagic32 = 0xFEEDFACEu; // 32-bit, header fields big-endian
+constexpr std::uint32_t kMachoCigam32 = 0xCEFAEDFEu; // 32-bit, header fields little-endian
+constexpr std::uint32_t kMachoMagic64 = 0xFEEDFACFu; // 64-bit, header fields big-endian
+constexpr std::uint32_t kMachoCigam64 = 0xCFFAEDFEu; // 64-bit, header fields little-endian (macOS case)
+constexpr std::uint32_t kFatMagic = 0xCAFEBABEu;     // fat header, fields big-endian
+constexpr std::uint32_t kFatCigam = 0xBEBAFECAu;     // fat header, fields little-endian
+constexpr std::uint32_t kLcCodeSignature = 0x1Du;    // LC_CODE_SIGNATURE load command
+constexpr std::uint32_t kFatArchLimit = 64;          // sane cap on nfat_arch (guards a crafted header)
+
+// Read a 4-byte unsigned int at `off` in the given endianness. false (out=0) if the read runs past end —
+// every field access is bounds-checked, so a truncated/malformed image is simply "no signature".
+[[nodiscard]] bool read_u32(std::string_view bytes, std::size_t off, bool big_endian, std::uint32_t& out)
+{
+    out = 0;
+    if (off + 4 > bytes.size())
+        return false;
+    for (std::size_t i = 0; i < 4; ++i)
+    {
+        const std::uint32_t b = static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[off + i]));
+        out |= big_endian ? (b << (8 * (3 - i))) : (b << (8 * i));
+    }
+    return true;
+}
+
+// Does ONE thin Mach-O slice (starting at offset 0 of `slice`) carry an LC_CODE_SIGNATURE with a
+// non-empty signature blob? `is_64`/`big_endian` are decided by the caller from the slice's magic. The
+// mach_header is magic(4) cputype(4) cpusubtype(4) filetype(4) ncmds(4) sizeofcmds(4) flags(4)
+// [reserved(4) — 64-bit only]; the load commands begin right after.
+[[nodiscard]] bool thin_macho_signed(std::string_view slice, bool is_64, bool big_endian)
+{
+    std::uint32_t ncmds = 0;
+    if (!read_u32(slice, 16, big_endian, ncmds)) // ncmds sits at header offset 16 in both bit-widths
+        return false;
+    std::size_t cmd_off = is_64 ? 32 : 28; // load commands begin after the (64/32-bit) mach_header
+    for (std::uint32_t i = 0; i < ncmds; ++i)
+    {
+        std::uint32_t cmd = 0;
+        std::uint32_t cmdsize = 0;
+        if (!read_u32(slice, cmd_off, big_endian, cmd) ||
+            !read_u32(slice, cmd_off + 4, big_endian, cmdsize))
+            return false;
+        if (cmdsize < 8) // a load_command is at least cmd(4)+cmdsize(4); a smaller size is malformed
+            return false;
+        if (cmd == kLcCodeSignature)
+        {
+            // linkedit_data_command: cmd(4) cmdsize(4) dataoff(4) datasize(4). A non-zero datasize ⇒ an
+            // embedded __LINKEDIT signature blob is present (the bit the presence check keys off).
+            std::uint32_t datasize = 0;
+            if (!read_u32(slice, cmd_off + 12, big_endian, datasize))
+                return false;
+            if (datasize != 0)
+                return true;
+        }
+        if (cmd_off + cmdsize < cmd_off) // overflow guard on a file-controlled cmdsize
+            return false;
+        cmd_off += cmdsize;
+        if (cmd_off > slice.size())
+            return false;
+    }
+    return false;
+}
+
+// Interpret a single thin Mach-O slice: decide bit-width + endianness from its magic (a nested fat is
+// rejected — a fat cannot contain a fat, so there is NO recursion), then scan its load commands.
+[[nodiscard]] bool thin_slice_signed(std::string_view slice)
+{
+    std::uint32_t magic_be = 0;
+    if (!read_u32(slice, 0, /*big_endian=*/true, magic_be))
+        return false;
+    bool is_64 = false;
+    bool big_endian = false;
+    if (magic_be == kMachoMagic64) { is_64 = true; big_endian = true; }
+    else if (magic_be == kMachoCigam64) { is_64 = true; big_endian = false; }
+    else if (magic_be == kMachoMagic32) { is_64 = false; big_endian = true; }
+    else if (magic_be == kMachoCigam32) { is_64 = false; big_endian = false; }
+    else return false; // not a thin Mach-O
+    return thin_macho_signed(slice, is_64, big_endian);
+}
+
+} // namespace
+
+bool macho_has_code_signature(std::string_view macho_bytes)
+{
+    std::uint32_t magic_be = 0;
+    if (!read_u32(macho_bytes, 0, /*big_endian=*/true, magic_be))
+        return false;
+
+    // Fat/universal binary: a fat_header (magic + nfat_arch), then nfat_arch fat_arch entries — each
+    // cputype(4) cpusubtype(4) offset(4) size(4) align(4) = 20 bytes — pointing at a nested thin Mach-O.
+    // A universal binary is signed iff a slice carries a signature (`codesign` signs every arch slice).
+    if (magic_be == kFatMagic || magic_be == kFatCigam)
+    {
+        const bool fat_be = (magic_be == kFatMagic);
+        std::uint32_t nfat = 0;
+        if (!read_u32(macho_bytes, 4, fat_be, nfat) || nfat == 0 || nfat > kFatArchLimit)
+            return false;
+        for (std::uint32_t i = 0; i < nfat; ++i)
+        {
+            const std::size_t arch_off = 8 + static_cast<std::size_t>(i) * 20;
+            std::uint32_t off = 0;
+            std::uint32_t size = 0;
+            if (!read_u32(macho_bytes, arch_off + 8, fat_be, off) ||
+                !read_u32(macho_bytes, arch_off + 12, fat_be, size))
+                return false;
+            if (size == 0 || static_cast<std::size_t>(off) + size > macho_bytes.size())
+                continue; // a slice that overruns the file is skipped (fail-safe), never an OOB read
+            if (thin_slice_signed(macho_bytes.substr(off, size)))
+                return true;
+        }
+        return false;
+    }
+
+    // A thin (single-arch) Mach-O.
+    return thin_slice_signed(macho_bytes);
+}
+
 SigningPlan plan_signing(std::string_view target)
 {
     SigningPlan plan;
     plan.target = std::string(target);
-    // The v1 code-signing prerequisite: Windows Authenticode. Key the required-decision off the SHARED
-    // target→requirement enumeration (signing_requirements, doctor.*) so plan_signing and the doctor
-    // probe cannot drift — a single source of truth for "which targets sign what". The Authenticode-
-    // specific method/tool/primary/fallback fields are filled here. macOS (developer-id-notarization)
-    // is enumerated there but is a13 scope: its requirement is not "authenticode", so required stays
-    // false here (the honest not-required plan), exactly as before.
+    // The v1 code-signing prerequisites: Windows Authenticode (a10) and macOS Developer ID + notarization
+    // (a13). Key the required-decision off the SHARED target→requirement enumeration
+    // (signing_requirements, doctor.*) so plan_signing and the doctor probe cannot drift — a single
+    // source of truth for "which targets sign what". The method-specific method/tool/primary/fallback
+    // fields are filled here.
     const std::vector<std::string> reqs = signing_requirements(target);
     if (std::find(reqs.begin(), reqs.end(), kSigningMethodAuthenticode) != reqs.end())
     {
@@ -117,6 +239,20 @@ SigningPlan plan_signing(std::string_view target)
         plan.primary = kSigningPrimaryAzure;
         plan.fallback = kSigningFallbackDevCert;
         plan.timestamp_required = true;
+    }
+    else if (std::find(reqs.begin(), reqs.end(), kSigningMethodDeveloperId) != reqs.end())
+    {
+        // macOS (a13): `codesign` with a Developer ID Application identity produces the detectable
+        // signature (hardened runtime + secure timestamp), then `notarytool` submits it to Apple's notary
+        // service (App-Store-Connect API-key primary path) and the ticket is stapled. No v1 fallback —
+        // only the API-key notary path ships. macOS 15+ Gatekeeper hard-blocks an un-notarized build.
+        plan.required = true;
+        plan.method = kSigningMethodDeveloperId;
+        plan.tool = kSigningToolCodesign;
+        plan.primary = kSigningPrimaryAppleNotary;
+        plan.fallback = ""; // no v1 fallback (developer-id-application-cert IS the identity)
+        plan.timestamp_required = true;     // codesign --timestamp (secure timestamp) mandatory
+        plan.notarization_required = true;  // notarytool submit + stapler staple to ship
     }
     return plan;
 }
@@ -131,6 +267,7 @@ SigningReport evaluate_signing(const SigningPlan& plan, const SigningInputs& inp
     r.primary = plan.primary;
     r.fallback = plan.fallback;
     r.timestamp_required = plan.timestamp_required;
+    r.notarization_required = plan.notarization_required;
 
     if (!plan.required)
     {
@@ -152,27 +289,37 @@ SigningReport evaluate_signing(const SigningPlan& plan, const SigningInputs& inp
     // fork PR with no secrets): either way the shipped artifact is unsigned and the operator must see it.
     r.state = kSigningStateUnsigned;
     r.code = std::string(kBuildArtifactUnsignedCode);
+
+    // Method-aware phrasing: Windows Authenticode / SmartScreen vs macOS Developer-ID / Gatekeeper (+ the
+    // further notarization requirement). Both echo the machine-branchable primary signing path.
+    const bool developer_id = (plan.method == kSigningMethodDeveloperId);
+    const std::string sign_kind = developer_id ? "Developer-ID-signed" : "Authenticode-signed";
+    const std::string os_gate = developer_id ? "Gatekeeper" : "SmartScreen";
+    const std::string ship_reqs =
+        developer_id
+            ? "code-signed with a Developer ID identity AND notarized + stapled (via " + plan.primary + ")"
+            : "signed via " + plan.primary + " (or the " + plan.fallback + " fallback)";
+
     if (!inputs.binary_available)
     {
         r.warning = "the " + plan.target +
-                    " runtime binary could not be read to check its Authenticode signature; treat the "
-                    "artifact as UNSIGNED (fail-closed) — sign it via " +
-                    plan.primary + " (or the " + plan.fallback + " fallback) before shipping";
+                    " runtime binary could not be read to check its code signature; treat the "
+                    "artifact as UNSIGNED (fail-closed) — it must be " +
+                    ship_reqs + " before shipping";
     }
     else if (!inputs.requested)
     {
-        r.warning = "the " + plan.target +
-                    " artifact is NOT Authenticode-signed and signing was not requested (--sign); this "
-                    "binary will trip SmartScreen and must be signed via " +
-                    plan.primary + " (or the " + plan.fallback + " fallback) before shipping";
+        r.warning = "the " + plan.target + " artifact is NOT " + sign_kind +
+                    " and signing was not requested (--sign); this binary will be blocked by " + os_gate +
+                    " and must be " + ship_reqs + " before shipping";
     }
     else
     {
-        r.warning = "the " + plan.target +
-                    " artifact is NOT Authenticode-signed (no signing identity was available); this "
-                    "binary will trip SmartScreen and must be signed via " +
-                    plan.primary + " (or the " + plan.fallback +
-                    " fallback), with a mandatory RFC-3161 timestamp, before shipping";
+        r.warning = "the " + plan.target + " artifact is NOT " + sign_kind +
+                    " (no signing identity was available); this binary will be blocked by " + os_gate +
+                    " and must be " + ship_reqs +
+                    (plan.timestamp_required ? ", with a mandatory secure timestamp," : "") +
+                    " before shipping";
     }
     return r;
 }

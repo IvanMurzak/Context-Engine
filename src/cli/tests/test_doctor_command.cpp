@@ -122,6 +122,25 @@ int main()
         CHECK(!s.at("remediationPointer").as_string().empty());
     }
 
+    // --- a13: `context doctor --target macos` PROBES the Developer-ID + notarization prereq -----------
+    // Before a13 macOS notarization had no CLI probe (status stayed "unknown"); a13 adds a presence-only
+    // probe (MAC_CSC_LINK/MAC_SIGN_IDENTITY + APPLE_API_KEY_B64), so the status resolves to
+    // configured/absent — NEVER a secret value. We assert the probe RAN (status != "unknown") without
+    // pinning configured-vs-absent (that depends on the host env, which would be flaky).
+    {
+        const Envelope e = run_doctor({{"target", "macos"}});
+        CHECK(e.ok()); // a completed diagnosis is always a success envelope (exit 0)
+        const Json& data = e.data();
+        CHECK(data.at("signing").size() == 1);
+        const Json& s = data.at("signing").at(0);
+        CHECK(s.at("target").as_string() == "macos");
+        CHECK(s.at("requirement").as_string() == "developer-id-notarization");
+        const std::string status = s.at("status").as_string();
+        CHECK(status == "configured" || status == "absent"); // the a13 probe ran (never "unknown")
+        CHECK(!s.at("blocking").as_bool()); // a ship-time prereq, never a build blocker
+        CHECK(!s.at("remediationPointer").as_string().empty()); // pointer, never a credential value
+    }
+
     // --- unknown --target is a doctor.unknown_target usage failure (a malformed command) ----------
     {
         const Envelope e = run_doctor({{"target", "playstation"}});

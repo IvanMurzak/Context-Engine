@@ -161,7 +161,8 @@ namespace subprocess = context::common::subprocess;
     if (!plan.supported)
         return a;
     a.set("renderPresent", Json(plan.render_present));
-    a.set("requiresSigning", Json(plan.requires_signing)); // windows Authenticode (a10); false elsewhere
+    a.set("requiresSigning",
+          Json(plan.requires_signing)); // windows Authenticode (a10) / macOS Developer ID (a13); else false
     a.set("runtimeBinary", Json(plan.runtime_binary));
     if (!plan.runtime_loader.empty())
         a.set("runtimeLoader", Json(plan.runtime_loader)); // the a11 web Emscripten JS glue (web only)
@@ -178,12 +179,13 @@ namespace subprocess = context::common::subprocess;
     return a;
 }
 
-// The machine-readable signing report (a10). For a target that requires code-signing (Windows
-// Authenticode, R-SEC-003) `context build --sign` folds this into the envelope: the plan (method /
-// primary=Azure Trusted Signing / fallback=developer cert / mandatory timestamp) plus the OBSERVED
-// state of the shipped runtime binary — "signed" when it carries an Authenticode signature, else
-// "unsigned" (an EXPLICIT, never-silent WARNING with the build.artifact_unsigned code). No secret value
-// ever appears here; the presence check is a pure PE parse of the runtime binary bytes.
+// The machine-readable signing report (a10 + a13). For a target that requires code-signing (Windows
+// Authenticode / macOS Developer ID + notarization, R-SEC-003) `context build --sign` folds this into the
+// envelope: the plan (method / primary path / optional fallback / mandatory timestamp / — macOS only —
+// notarizationRequired) plus the OBSERVED state of the shipped runtime binary — "signed" when it carries
+// a code signature, else "unsigned" (an EXPLICIT, never-silent WARNING with the build.artifact_unsigned
+// code). No secret value ever appears here; the presence check is a pure PE / Mach-O parse of the runtime
+// binary bytes.
 [[nodiscard]] Json signing_json(const build::SigningReport& r)
 {
     Json s = Json::object();
@@ -196,8 +198,11 @@ namespace subprocess = context::common::subprocess;
         s.set("method", Json(r.method));
         s.set("tool", Json(r.tool));
         s.set("primary", Json(r.primary));
-        s.set("fallback", Json(r.fallback));
+        if (!r.fallback.empty())
+            s.set("fallback", Json(r.fallback)); // macOS has no v1 fallback — omit rather than emit ""
         s.set("timestampRequired", Json(r.timestamp_required));
+        if (r.notarization_required)
+            s.set("notarizationRequired", Json(true)); // macOS (a13): notarize + staple to ship
     }
     if (!r.code.empty())
         s.set("code", Json(r.code));
@@ -207,9 +212,10 @@ namespace subprocess = context::common::subprocess;
 }
 
 // Compute the signing report for `--sign`: plan the target's signing requirement, and for a required
-// target read the shipped runtime binary (--runtime) and detect whether it carries an Authenticode
-// signature (a pure PE parse, no signtool). A missing/unreadable runtime for a required target is a
-// fail-closed "unsigned" (binary_available=false). Total — never throws.
+// target read the shipped runtime binary (--runtime) and detect whether it carries a code signature with
+// the platform-appropriate PURE byte parser — a PE Certificate Table for Windows Authenticode, an
+// LC_CODE_SIGNATURE blob for a macOS Mach-O (no signtool/codesign). A missing/unreadable runtime for a
+// required target is a fail-closed "unsigned" (binary_available=false). Total — never throws.
 [[nodiscard]] build::SigningReport eval_signing(const std::string& target,
                                                 const std::optional<std::string>& runtime)
 {
@@ -221,8 +227,10 @@ namespace subprocess = context::common::subprocess;
         std::string runtime_bytes;
         in.binary_available = runtime.has_value() && !runtime->empty() &&
                               read_file(fs::path(*runtime), runtime_bytes);
-        in.artifact_signed =
-            in.binary_available && build::pe_has_authenticode_signature(runtime_bytes);
+        if (in.binary_available)
+            in.artifact_signed = (plan.method == build::kSigningMethodDeveloperId)
+                                     ? build::macho_has_code_signature(runtime_bytes)
+                                     : build::pe_has_authenticode_signature(runtime_bytes);
     }
     return build::evaluate_signing(plan, in);
 }
@@ -552,11 +560,12 @@ Envelope run_build(const std::map<std::string, std::string>& flags)
                                s.pack_hash, flag(flags, "runtime"), flag(flags, "runtime-loader"),
                                *emit_path));
 
-    // --sign (a10, R-SEC-003): the Authenticode signing hook. Fold the machine-readable signing report
+    // --sign (a10 + a13, R-SEC-003): the OS code-signing hook. Fold the machine-readable signing report
     // (plan + observed state of the shipped runtime binary) into the envelope. For a signing-required
-    // target (Windows) whose runtime binary is NOT signed, this is an EXPLICIT never-silent WARNING
-    // (data.signing.state == "unsigned", the build.artifact_unsigned code, AND an envelope warning) —
-    // NOT a build failure (the artifact is produced; it just needs signing before it ships).
+    // target (Windows Authenticode / macOS Developer ID + notarization) whose runtime binary is NOT
+    // signed, this is an EXPLICIT never-silent WARNING (data.signing.state == "unsigned", the
+    // build.artifact_unsigned code, AND an envelope warning) — NOT a build failure (the artifact is
+    // produced; it just needs signing/notarization before it ships).
     std::string signing_warning;
     if (flags.find("sign") != flags.end())
     {

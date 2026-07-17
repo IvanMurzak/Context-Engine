@@ -1,4 +1,4 @@
-// The platform export-adapter plan (R-BUILD-001 / R-BUILD-005, M8 tasks a06 + a10): the pure,
+// The platform export-adapter plan (R-BUILD-001 / R-BUILD-005, M8 tasks a06 + a10 + a13): the pure,
 // deterministic description of the RUNNABLE artifact the build adapter produces for a (target, flavor) —
 // the shipped RuntimeKernel binary + the v1 pack + a launcher + a build manifest, laid out in a
 // documented tarball (R-BUILD-005 minimal packaging). a05 ended its pipeline at an honest adapter STUB
@@ -8,6 +8,10 @@
 // carry a `.exe` suffix, use a `launch.cmd` batch launcher (cmd.exe cannot run the POSIX launch.sh), and
 // require Authenticode code-signing to ship (R-SEC-003; the launcher/manifest are still unsigned text —
 // only the runtime `.exe` is signed, by the signtool-compatible signing hook, see signing.h).
+// a13 adds the MACOS desktop + server/headless adapters — POSIX like Linux (no `.exe` suffix, a
+// `launch.sh` launcher), but like Windows they REQUIRE code-signing to ship: a Developer-ID signature +
+// Apple notarization + stapled ticket (R-SEC-003; macOS 15+ Gatekeeper hard-blocks an un-notarized
+// build). Only the runtime binary is signed/notarized; the launcher/manifest stay unsigned text.
 //
 // This is the PURE half (no filesystem, no clock): plan_adapter describes the artifact, and the
 // launcher/manifest are pure text functions of the plan. The CLI (src/cli/build_command.cpp) owns the
@@ -50,18 +54,19 @@ enum class LauncherKind
 };
 
 // The export-adapter plan for a (target, flavor). supported=false is the honest stub for any target the
-// a06/a10/a11 adapter set does not yet cover (linux + windows + web are covered; macos is the remaining
-// stub) — the CLI then reports the stub exactly as a05 did, never a faked artifact (R-BUILD-007). The
-// web target is covered only in the desktop flavor (a headless/server web build is nonsensical — the
-// browser is inherently render-present); web + server plans the honest stub.
+// a06/a10/a11/a13 adapter set does not yet cover (linux + windows + macos + web are all covered now) —
+// the CLI then reports the stub exactly as a05 did, never a faked artifact (R-BUILD-007). The web target
+// is covered only in the desktop flavor (a headless/server web build is nonsensical — the browser is
+// inherently render-present); web + server plans the honest stub.
 struct AdapterPlan
 {
     bool supported = false;
     std::string target;              // the requested build target
     std::string flavor;              // "desktop" | "server" (the a06 flavor axis)
     bool render_present = false;     // desktop links the render subsystem; server omits it (L-5 DCE)
-    bool requires_signing = false;   // windows requires Authenticode code-signing to ship (R-SEC-003);
-                                     // linux does not (a06). See signing.h for the signing hook.
+    bool requires_signing = false;   // windows (Authenticode) + macos (Developer ID + notarization)
+                                     // require code-signing to ship (R-SEC-003); linux/web do not (a06).
+                                     // See signing.h for the per-platform signing hook.
     std::string runtime_binary;      // the shipped host binary name inside bin/ (flavor + OS specific;
                                      // Windows carries a `.exe` suffix; web ships the `.wasm` module)
     std::string runtime_loader;      // the web target's Emscripten JS glue inside bin/ (empty for the
@@ -77,9 +82,10 @@ struct AdapterPlan
 inline constexpr const char* kFlavorDesktop = "desktop";
 inline constexpr const char* kFlavorServer = "server";
 
-// The a06/a10/a11 export targets that plan a real adapter (any other target is the honest stub).
+// The a06/a10/a11/a13 export targets that plan a real adapter (any other target is the honest stub).
 inline constexpr const char* kTargetLinux = "linux";
 inline constexpr const char* kTargetWindows = "windows";
+inline constexpr const char* kTargetMacos = "macos";
 inline constexpr const char* kTargetWeb = "web";
 
 // The shipped host binary BASE name for each flavor (matches the CMake OUTPUT_NAME of the two
@@ -113,9 +119,9 @@ inline constexpr const char* kRoleManifest = "manifest";
 [[nodiscard]] bool is_known_flavor(const std::string& flavor);
 
 // Plan the export adapter for (target, flavor). Total + deterministic. supported=true only for the
-// a06/a10/a11 adapter set (target "linux" | "windows" in flavor desktop|server; target "web" in the
-// desktop flavor only); any other target/flavor yields supported=false (the honest stub). `pack_name`
-// names the content pack inside the artifact (defaults to "game.pack" when empty).
+// a06/a10/a11/a13 adapter set (target "linux" | "windows" | "macos" in flavor desktop|server; target
+// "web" in the desktop flavor only); any other target/flavor yields supported=false (the honest stub).
+// `pack_name` names the content pack inside the artifact (defaults to "game.pack" when empty).
 [[nodiscard]] AdapterPlan plan_adapter(const std::string& target, const std::string& flavor,
                                        const std::string& pack_name);
 
