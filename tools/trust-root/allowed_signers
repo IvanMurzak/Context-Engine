@@ -5,13 +5,20 @@
 # non-TOFU root of trust: an artifact is authentic ONLY if its detached signature was made
 # by a key listed here, under the expected principal and namespace.
 #
-# INTENTIONALLY EMPTY until the first release.
-# R-SEC-009 v1 posture = first-party release signing with ONE pinned publisher key, minted
-# at the first release (owner decides custody then — see docs/signing.md). Because no
-# production key is pinned yet, the default gate REFUSES every artifact — which is the
-# correct fail-closed state while nothing first-party is published. Do NOT add a placeholder
-# or test key here; the TEST-ONLY signer lives in tools/tests/fixtures/allowed_signers and is
-# never trusted in production.
+# One PRODUCTION publisher key is pinned below (R-SEC-009 v1 posture = first-party release
+# signing with ONE pinned publisher key). The matching PRIVATE key is held ONLY as the
+# environment-protected `RELEASE_SIGNING_KEY` GitHub secret (custody model B — see
+# docs/signing.md); it never lives in this repo. Only PUBLIC key material is committed here
+# (safe to commit). Any artifact whose signature is NOT by this key, under principal
+# `context-engine-release` and namespace `context-engine-artifact`, is REFUSED fail-closed.
 #
-# At first release, append exactly one line (see docs/signing.md § Minting the release key):
-#   context-engine-release namespaces="context-engine-artifact" ssh-ed25519 AAAA... <comment>
+# ROTATION discipline (docs/signing.md § Rotation & revocation): rotation is an append/replace
+# in this file + a reviewed commit (a signed, versioned operation per R-SEC-009). When a key
+# rotates, KEEP the retired key's line here until every artifact it signed is out of support,
+# THEN remove it — so already-published artifacts keep verifying across the rotation window.
+# Revocation is removal of the compromised key's line (fail-closed: anything it signed stops
+# verifying). Do NOT add a placeholder or test key here; the TEST-ONLY signer lives in
+# tools/tests/fixtures/allowed_signers and is never trusted in production.
+#
+# fingerprint: SHA256:4f8ZHq0vI6mKLm8MvKYE8PPslZu5IuA8ZUxtWuZ434U
+context-engine-release namespaces="context-engine-artifact" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMDjd8MMQ5SNNqtCafHoquwH3yYwEFvMl1bxlq7IAw/+ context-engine-release 2026-07-15

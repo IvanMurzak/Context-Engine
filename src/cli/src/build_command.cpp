@@ -3,6 +3,7 @@
 #include "context/cli/build_command.h"
 
 #include "context/common/subprocess.h"
+#include "context/common/verify_signature.h"
 #include "context/editor/build/adapter.h"
 #include "context/editor/build/build_errors.h"
 #include "context/editor/build/build_orchestrator.h"
@@ -31,6 +32,7 @@ namespace context::cli
 using editor::contract::Envelope;
 using editor::contract::Json;
 namespace build = editor::build;
+namespace common = context::common;
 namespace compose = editor::compose;
 namespace filesync = editor::filesync;
 namespace serializer = editor::serializer;
@@ -46,6 +48,44 @@ namespace
     if (it == flags.end())
         return std::nullopt;
     return it->second;
+}
+
+// Verify-before-use of a first-party trust-bearing artifact (R-SEC-009 / L-58, task a08). Opt-in:
+// verification runs ONLY when a detached signature is supplied — the per-platform export template
+// (R-BUILD-004, the shipped `--runtime` host binary) and the engine-fetched/mirrored toolchain are not
+// first-party-signed yet, so the gate is the READY MECHANISM wired in here, activating per acquisition
+// path as it starts serving signed artifacts (docs/signing.md § Where the gate plugs in). When a
+// signature IS supplied the artifact MUST verify against the pinned trust root, or the build is refused
+// FAIL-CLOSED with `code`: build.template_unverified for the export template, build.toolchain_fetch_failed
+// for the engine-fetched toolchain. Returns the failure Envelope on any refusal (missing artifact/root,
+// tampered/unsigned/untrusted signature); std::nullopt when verification was not requested or it passed.
+[[nodiscard]] std::optional<Envelope>
+verify_fetched_artifact(const std::optional<std::string>& artifact,
+                        const std::optional<std::string>& signature,
+                        const std::optional<std::string>& trust_root, std::string_view code,
+                        std::string_view role)
+{
+    if (!signature.has_value())
+        return std::nullopt; // opt-in: no signature supplied ⇒ verification not requested (yet)
+    if (!artifact.has_value() || artifact->empty())
+        return Envelope::failure(std::string(code),
+                                 std::string(role) +
+                                     " verification was requested (a signature was supplied) but no "
+                                     "artifact was given to verify (fail closed)");
+    if (!trust_root.has_value() || trust_root->empty())
+        return Envelope::failure(std::string(code),
+                                 std::string(role) +
+                                     " verification was requested but no --trust-root (pinned "
+                                     "allowed_signers) was supplied (fail closed — non-TOFU root)");
+    const common::VerifyOutcome v = common::verify_signature(*artifact, *signature, *trust_root);
+    if (!v.ok())
+        return Envelope::failure(std::string(code),
+                                 std::string(role) +
+                                     " failed verify-before-use against the pinned trust root "
+                                     "(R-SEC-009 fail-closed): " +
+                                     v.detail,
+                                 *artifact);
+    return std::nullopt;
 }
 
 [[nodiscard]] bool read_file(const fs::path& path, std::string& out)
@@ -329,6 +369,15 @@ Envelope run_build(const std::map<std::string, std::string>& flags)
     req.registrable_packages = {"spatial",   "simmath",  "physics3d", "physics2d", "particles",
                                 "animation", "spline",   "audio",     "input",     "ui"};
 
+    // Verify-before-use of the engine-fetched (mirrored) toolchain artifact (R-SEC-009 / R-PKG-002),
+    // when a detached signature is supplied. A first-party toolchain artifact that does not verify
+    // against the pinned trust root cannot be trusted to build with — refuse fail-closed with
+    // build.toolchain_fetch_failed BEFORE building (an unverifiable fetch is a failed fetch).
+    if (std::optional<Envelope> refusal = verify_fetched_artifact(
+            flag(flags, "toolchain-artifact"), flag(flags, "toolchain-sig"), flag(flags, "trust-root"),
+            build::kBuildToolchainFetchFailedCode, "the engine-fetched toolchain"))
+        return *refusal;
+
     const build::BuildResult result = build::run_build(req);
     if (!result.ok)
     {
@@ -389,6 +438,15 @@ Envelope run_build(const std::map<std::string, std::string>& flags)
     // stub — R-BUILD-007). The plan is machine-readable in the envelope: an autonomous agent shipping
     // multiple platforms reads whether a runnable artifact is available for (target, flavor).
     data.set("adapter", adapter_json(s.adapter));
+
+    // Verify-before-use of the R-BUILD-004 export template — the shipped runtime host binary the
+    // runnable artifact is assembled from (--runtime) — when a detached signature (--runtime-sig) is
+    // supplied. An export template that does not verify against the pinned trust root is refused
+    // fail-closed with build.template_unverified BEFORE it is packed into a runnable artifact.
+    if (std::optional<Envelope> refusal = verify_fetched_artifact(
+            flag(flags, "runtime"), flag(flags, "runtime-sig"), flag(flags, "trust-root"),
+            build::kBuildTemplateUnverifiedCode, "the export template (--runtime host binary)"))
+        return *refusal;
 
     // --emit-artifact: assemble the runnable artifact tarball (R-BUILD-005 minimal packaging) — the
     // shipped runtime binary (--runtime) + this pack + launch.sh + the manifest. Reported machine-

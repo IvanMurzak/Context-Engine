@@ -263,6 +263,90 @@ int main()
         remove_quiet(dir);
     }
 
+    // --- a08 verify-before-use: the export template (--runtime) fails closed on a bad signature ------
+    // R-SEC-009: when a detached signature is supplied for the R-BUILD-004 export template, it MUST
+    // verify against the pinned trust root or the build is refused with build.template_unverified.
+    // Robust whether or not ssh-keygen is on PATH: an invalid signature is Refused, an absent verifier
+    // is a ConfigError, and BOTH map to the same fail-closed contract code.
+    {
+        const fs::path dir = make_project("verifytmpl");
+        const fs::path runtime = dir / "fake-runtime.bin";
+        write_file(runtime, "\x7f\x45\x4c\x46 fake export template bytes");
+        const fs::path badsig = dir / "fake-runtime.bin.sig";
+        write_file(badsig, "-----BEGIN SSH SIGNATURE-----\nnot-a-real-signature\n-----END SSH SIGNATURE-----\n");
+        const fs::path root = dir / "allowed_signers";
+        write_file(root, "# a throwaway trust root — the signature is invalid regardless\n");
+        const fs::path tar = dir / "dist" / "game.tar";
+        const Envelope e = run_build({{"target", "linux"},
+                                      {"flavor", "server"},
+                                      {"project", dir.string()},
+                                      {"out", (dir / "build" / "s.pack").generic_string()},
+                                      {"runtime", runtime.string()},
+                                      {"runtime-sig", badsig.string()},
+                                      {"trust-root", root.string()},
+                                      {"emit-artifact", tar.generic_string()}});
+        CHECK(!e.ok());
+        CHECK(e.error()->code == "build.template_unverified");
+        CHECK(!fs::exists(tar)); // the unverified template was never packed
+        remove_quiet(dir);
+    }
+
+    // --- a08 verify-before-use: a template signature with NO --trust-root fails closed (non-TOFU) ----
+    {
+        const fs::path dir = make_project("verifynoroot");
+        const fs::path runtime = dir / "fake-runtime.bin";
+        write_file(runtime, "\x7f\x45\x4c\x46 fake");
+        const fs::path badsig = dir / "fake-runtime.bin.sig";
+        write_file(badsig, "not-a-signature\n");
+        const Envelope e = run_build({{"target", "linux"},
+                                      {"project", dir.string()},
+                                      {"runtime", runtime.string()},
+                                      {"runtime-sig", badsig.string()},
+                                      {"emit-artifact", (dir / "dist" / "g.tar").generic_string()}});
+        CHECK(!e.ok());
+        CHECK(e.error()->code == "build.template_unverified");
+        remove_quiet(dir);
+    }
+
+    // --- a08 verify-before-use: the engine-fetched toolchain fails closed on a bad signature --------
+    // A supplied toolchain-artifact signature that does not verify → build.toolchain_fetch_failed
+    // (an unverifiable fetch is a failed fetch), refused BEFORE the build runs.
+    {
+        const fs::path dir = make_project("verifytc");
+        const fs::path tc = dir / "toolchain.tar";
+        write_file(tc, "fake engine-mirrored toolchain artifact");
+        const fs::path badsig = dir / "toolchain.tar.sig";
+        write_file(badsig, "not-a-signature\n");
+        const fs::path root = dir / "allowed_signers";
+        write_file(root, "# throwaway trust root\n");
+        const Envelope e = run_build({{"target", "linux"},
+                                      {"project", dir.string()},
+                                      {"toolchain-artifact", tc.string()},
+                                      {"toolchain-sig", badsig.string()},
+                                      {"trust-root", root.string()}});
+        CHECK(!e.ok());
+        CHECK(e.error()->code == "build.toolchain_fetch_failed");
+        remove_quiet(dir);
+    }
+
+    // --- a08 opt-in: --emit-artifact WITHOUT a signature still emits (unchanged; the verify gate is
+    // the ready mechanism, activating only once a --runtime-sig is supplied — CI-safe by construction).
+    {
+        const fs::path dir = make_project("verifyoptin");
+        const fs::path runtime = dir / "fake-runtime.bin";
+        write_file(runtime, "\x7f\x45\x4c\x46 unsigned template");
+        const fs::path tar = dir / "dist" / "game.tar";
+        const Envelope e = run_build({{"target", "linux"},
+                                      {"flavor", "server"},
+                                      {"project", dir.string()},
+                                      {"out", (dir / "build" / "s.pack").generic_string()},
+                                      {"runtime", runtime.string()},
+                                      {"emit-artifact", tar.generic_string()}});
+        CHECK(e.ok()); // no signature ⇒ verification not requested ⇒ unchanged a06 behavior
+        CHECK(e.data().at("artifactEmit").at("emitted").as_bool());
+        remove_quiet(dir);
+    }
+
     // --- per-verb --help + global --help emit the contract self-description --------------------------
     {
         const Envelope verb_help = run({"build", "--help"});

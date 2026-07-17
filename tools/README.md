@@ -16,13 +16,19 @@ Repository and CI tooling — not engine code. Currently:
   artifact against a **detached Ed25519 signature** and the **pinned trust root**
   (`trust-root/allowed_signers`), **failing closed** on a missing/bad/tampered/untrusted-key
   signature. Ed25519 only, via `ssh-keygen -Y` (OpenSSH — zero third-party Python deps). The
-  production key is minted at the first release; the procedure + custody options live in
-  `docs/signing.md`. Governed by **DESIGN-DECISIONS.md lock L-58 / R-SEC-009**.
+  production key is **minted + pinned** (task a08); custody model B is active — see `docs/signing.md`.
+  Governed by **DESIGN-DECISIONS.md lock L-58 / R-SEC-009**.
+- `versioned_fetch.py` — the **R-VER-004 versioned-fetch verify SEAM** (task a08): a thin wrapper
+  over `verify_artifact.py` that authenticates a fetched engine-version archive
+  (`versions/<semver>/`) **before it is unpacked/executed**, fail-closed
+  (`require_verified_before_execute`). The fetcher itself is a second-release deliverable; the verify
+  guard it must call is landed now. See `docs/versioned-install.md` / `docs/signing.md`.
 
 Sub-directories:
 
-- `trust-root/allowed_signers` — the pinned production trust root (empty until first release —
-  see `docs/signing.md`); `verify_artifact.py` checks every artifact against it.
+- `trust-root/allowed_signers` — the pinned production trust root: **one production key pinned**
+  (`context-engine-release`, task a08 — see `docs/signing.md`); `verify_artifact.py` checks every
+  artifact against it.
 - `tests/fixtures/` — TEST-ONLY signing material for `test_verify_artifact.py`: a public key,
   its pinned `allowed_signers`, a sample artifact, and a pre-made detached signature. **No
   private key is committed** — cases needing the private half mint an ephemeral key at test time.

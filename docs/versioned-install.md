@@ -51,3 +51,9 @@ The install/package skeleton that stakes out this layout is wired into `src/CMak
 The resolver/fetcher/launcher machinery (second release) will resolve the R-VER-003 project
 pin against this layout, and R-SEC-009 requires every fetched version be **verify-before-use /
 fail closed** (`tools/verify_artifact.py`; see `docs/signing.md`) before it is ever executed.
+
+The **verify SEAM for rule 5 is landed now** (task a08), ahead of the fetcher:
+`tools/versioned_fetch.py` — `require_verified_before_execute(archive, signature)` authenticates a
+fetched version archive against the pinned trust root and **fail-closed refuses** to unpack/execute
+any version that does not verify. The second-release fetcher calls this guard at the execute
+boundary; its fail-closed behavior is pinned by `tools/tests/test_versioned_fetch.py`.

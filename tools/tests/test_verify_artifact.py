@@ -230,19 +230,41 @@ def test_cli_refused_returns_one_and_writes_stderr(tmp_path, capsys):
 
 
 # ---------------------------------------------------------------------------
-# The pinned PRODUCTION trust root is empty in v1 — the default gate refuses everything
+# The pinned PRODUCTION trust root pins EXACTLY ONE production signer (R-SEC-009 v1, task a08)
 # ---------------------------------------------------------------------------
 
+# The pinned production publisher key (a08). Public key material — safe to assert on in a test.
+PRODUCTION_PRINCIPAL = "context-engine-release"
+PRODUCTION_FINGERPRINT = "SHA256:4f8ZHq0vI6mKLm8MvKYE8PPslZu5IuA8ZUxtWuZ434U"
 
-def test_production_trust_root_is_empty_until_first_release():
-    """No active (non-comment) signer line: the day-one fail-closed default (R-SEC-009 v1)."""
+
+def test_production_trust_root_pins_exactly_one_production_signer():
+    """The trust root carries EXACTLY the one pinned production line (a08 DoD): the day-one
+    fail-closed root now anchors first-party release signing on a single publisher key."""
     active = [ln for ln in verify_artifact.DEFAULT_TRUST_ROOT.read_text(encoding="utf-8").splitlines()
               if ln.strip() and not ln.lstrip().startswith("#")]
-    assert active == [], f"production trust root must be empty until first release, found: {active}"
+    assert len(active) == 1, f"production trust root must carry exactly one signer line, found: {active}"
+    fields = active[0].split()
+    assert fields[0] == PRODUCTION_PRINCIPAL, f"unexpected principal: {fields[0]}"
+    assert fields[1] == 'namespaces="context-engine-artifact"', f"unexpected namespaces: {fields[1]}"
+    assert fields[2] == "ssh-ed25519", f"production signer must be ed25519, got: {fields[2]}"
+
+
+def test_pinned_production_signer_fingerprint_is_the_minted_key(tmp_path):
+    """The pinned line's public key is the minted production key (fingerprint match) — guards
+    against a typo/tamper in the committed key blob. Only PUBLIC material is involved."""
+    active = [ln for ln in verify_artifact.DEFAULT_TRUST_ROOT.read_text(encoding="utf-8").splitlines()
+              if ln.strip() and not ln.lstrip().startswith("#")]
+    key_type, key_blob = active[0].split()[2], active[0].split()[3]
+    pub = tmp_path / "pinned.pub"
+    pub.write_text(f"{key_type} {key_blob} {PRODUCTION_PRINCIPAL}\n", encoding="utf-8")
+    out = subprocess.run([SSH_KEYGEN, "-l", "-f", str(pub)], check=True, capture_output=True, text=True)
+    assert PRODUCTION_FINGERPRINT in out.stdout, out.stdout
 
 
 def test_default_production_gate_refuses_a_valid_test_signature():
-    """Even a signature valid under the TEST root is refused by the empty PRODUCTION root."""
+    """A signature valid under the TEST root is refused by the PRODUCTION root: the production
+    root pins ONLY the production key, so the test-key signature is untrusted → fail-closed."""
     result = verify_artifact.verify_artifact(
         SAMPLE_ARTIFACT, SAMPLE_SIG,  # trust_root defaults to the production root
         identity=TEST_IDENTITY, namespace=NAMESPACE)
