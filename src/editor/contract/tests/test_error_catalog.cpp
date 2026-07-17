@@ -556,5 +556,42 @@ int main()
         CHECK(link->origin == "R-KERNEL-003");
     }
 
+    // --- a09 doctor.* codes (R-BUILD-008) — the environment-doctor diagnostics -----------------------
+    // Additive-only new rows at the catalog tail (NOT on the frozen v0 baseline). environment_incomplete
+    // (the blocking top-level refusal) + toolchain_missing / toolchain_version_mismatch (per-finding
+    // component codes) are validation-class; filesync_budget_low (R-FILE-002 advisory) is validation-class
+    // + R-FILE-002; signing_prereq_absent (R-BUILD-005 advisory) is validation-class + R-BUILD-005;
+    // unknown_target is usage-class. All deterministic (a bare re-run without fixing the env re-fails). The
+    // strings are the source-of-truth in src/editor/build/doctor.h (context::editor::build::kDoctor*Code).
+    {
+        for (const char* code : {"doctor.environment_incomplete", "doctor.toolchain_missing",
+                                 "doctor.toolchain_version_mismatch"})
+        {
+            const ErrorCode* entry = find_code(code);
+            CHECK(entry != nullptr);
+            CHECK(entry->exit_code == 5);      // validation class
+            CHECK(entry->retriable == false);  // deterministic — a bare re-run re-fails
+            CHECK(entry->origin == "R-BUILD-008");
+        }
+
+        const ErrorCode* budget = find_code("doctor.filesync_budget_low");
+        CHECK(budget != nullptr);
+        CHECK(budget->exit_code == 5);      // validation class (advisory finding)
+        CHECK(budget->retriable == false);
+        CHECK(budget->origin == "R-FILE-002");
+
+        const ErrorCode* signing = find_code("doctor.signing_prereq_absent");
+        CHECK(signing != nullptr);
+        CHECK(signing->exit_code == 5);     // validation class (advisory ship-time prereq)
+        CHECK(signing->retriable == false);
+        CHECK(signing->origin == "R-BUILD-005");
+
+        const ErrorCode* unknown = find_code("doctor.unknown_target");
+        CHECK(unknown != nullptr);
+        CHECK(unknown->exit_code == 2);     // usage class (a malformed --target)
+        CHECK(unknown->retriable == false);
+        CHECK(unknown->origin == "R-BUILD-008");
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

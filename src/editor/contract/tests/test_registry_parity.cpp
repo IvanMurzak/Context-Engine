@@ -212,6 +212,26 @@ int main()
             if (f.name == "target")
                 saw_target = true;
         CHECK(saw_target);
+
+        // M8 task a09 (R-BUILD-008): the environment doctor verb — a global, implemented, STABLE
+        // one-shot verb. Its stable ids project from the (noun, verb) triple (CLI ≡ RPC ≡ MCP parity).
+        const VerbSpec* doctor = reg.find_verb("", "", "doctor");
+        CHECK(doctor != nullptr);
+        CHECK(doctor->cli_command() == "context doctor");
+        CHECK(doctor->rpc_method == "doctor");
+        CHECK(doctor->mcp_tool == "context_doctor");
+        CHECK(doctor->implemented);
+        CHECK(doctor->stability == "stable");
+        // Its verb-specific flags (--target, --fetch) are declared beyond the core set.
+        bool saw_doctor_target = false;
+        bool saw_doctor_fetch = false;
+        for (const FlagSpec& f : doctor->flags)
+        {
+            saw_doctor_target = saw_doctor_target || f.name == "target";
+            saw_doctor_fetch = saw_doctor_fetch || f.name == "fetch";
+        }
+        CHECK(saw_doctor_target);
+        CHECK(saw_doctor_fetch);
     }
 
     // --- core flags: --after-hash is LIVE, --atomic-plan is grammar-reserved (R-CLI-011) --------

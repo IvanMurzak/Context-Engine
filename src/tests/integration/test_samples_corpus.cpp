@@ -369,11 +369,17 @@ int main()
     //                             BINARY pack artifact (not file-authoring output the corpus asserts on);
     //                             covered end-to-end by cli test test_build_command + the orchestrator's
     //                             R-QA-011 corpus in build-test_build_orchestrator.
+    //   /doctor                 — the M8 a09 environment-doctor verb: probes the HOST toolchain +
+    //                             file-sync OS budget + signing prereqs and reports environment
+    //                             diagnostics, NOT authored file-writing output the corpus asserts on
+    //                             (there is no project file for it to consume); covered by cli test
+    //                             test_doctor_command (envelope shape + unknown-target) + the pure-core
+    //                             R-QA-011 fixture corpus in build-test_doctor (every finding + doctor.* code).
     // Operational (daemon-served) verbs are stability!="stable" and reserved verbs are
     // implemented==false, so both are excluded by the predicate without needing an exemption entry.
     // =============================================================================================
     const std::set<std::string> exempt = {"resource/read", "/install", "/re-key", "profile/gc",
-                                           "/build"};
+                                           "/build",        "/doctor"};
 
     // Guard: an exemption must name a verb that still exists (so the list cannot rot silently).
     for (const std::string& key : exempt)

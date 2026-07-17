@@ -12,6 +12,7 @@ add_library(context_cli STATIC
     src/build_command.cpp
     src/daemon_command.cpp
     src/determinism_command.cpp
+    src/doctor_command.cpp
     src/editor_driver.cpp
     src/fetch_command.cpp
     src/install_command.cpp
@@ -115,6 +116,7 @@ set(_context_cli_tests
     test_build_command
     test_cli
     test_determinism_command
+    test_doctor_command
     test_editor_driver
     test_pkg_command
     test_merge_command
@@ -143,6 +145,12 @@ target_link_libraries(context_cli_test_determinism_command PRIVATE context_sessi
 # path does not propagate through it — the same pattern as test_pkg_command / test_determinism_command).
 # context_build PUBLIC-links context_pack, so pack_reader.h comes through transitively.
 target_link_libraries(context_cli_test_build_command PRIVATE context_build)
+
+# test_doctor_command (`context doctor`, a09) drives the pure context_build doctor core with an injected
+# fixture EnvironmentProbe to assert the R-CLI-008 report shape deterministically (and references the
+# doctor.* code strings), so it links context_build directly (PRIVATE in context_cli, so its include
+# path does not propagate through it — the same pattern as test_build_command).
+target_link_libraries(context_cli_test_doctor_command PRIVATE context_build)
 
 # test_pkg_command (the `context install` verb) builds its fixtures (a ustar artifact + its real SRI)
 # with the pkg module's tar_write / sha512, so it links context_editor_pkg directly (PRIVATE in
@@ -234,6 +242,7 @@ if(CONTEXT_SANITIZE)
         cli-test_build_command
         cli-test_cli
         cli-test_determinism_command
+        cli-test_doctor_command
         cli-test_editor_driver
         cli-test_pkg_command
         cli-test_merge_command
