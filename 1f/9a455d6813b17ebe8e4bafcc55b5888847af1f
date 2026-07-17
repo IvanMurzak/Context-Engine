@@ -1,0 +1,21 @@
+.github/workflows/release-sign.yml
+  s_9284ad4c8de2f4::t_dc9e2ae50ef92a 98
+  s_9284ad4c8de2f4::t_5b8fd8f57287ec 54-56
+  s_9284ad4c8de2f4::t_bccac449ebf553 92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "1f9a455d6813b17ebe8e4bafcc55b5888847af1f",
+  "prompts": {},
+  "sessions": {
+    "s_9284ad4c8de2f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "64f4c13c-1681-4443-9cc9-81bbde69cd56",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
