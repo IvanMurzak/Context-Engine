@@ -1,0 +1,88 @@
+src/render/web/README.md
+  s_9284ad4c8de2f4::t_37505095282afd 31-41,45-46
+src/editor/contract/src/registry.cpp
+  s_9284ad4c8de2f4::t_d76ba1044f13ef 659-665
+  s_0437b8a8fbb7aa::t_5591bd5e0b16d0 674,677-683,686-689
+.github/workflows/ci.yml
+  s_9284ad4c8de2f4::t_4459708758f54a 1149-1151,1153
+  s_9284ad4c8de2f4::t_658424b243de3f 1118-1139
+src/cli/tests/test_build_command.cpp
+  s_9284ad4c8de2f4::t_445cad160e06fa 172-243
+src/cli/src/build_command.cpp
+  s_9284ad4c8de2f4::t_16fcfd4e253c19 273,298
+  s_e01c8fb43d2a93::t_36aa19be4dca45 164,166-167,230-237,241,252-272,274-293,295-297,299-302,342-346,552-553
+src/editor/build/include/context/editor/build/adapter.h
+  s_9284ad4c8de2f4::t_c5ac0cccab906d 79,82
+  s_9284ad4c8de2f4::t_86e4f4c522d27b 65-67
+  s_9284ad4c8de2f4::t_e584dfb3379c46 52-55
+  s_9284ad4c8de2f4::t_b3aa0492798cfd 91-98
+  s_9284ad4c8de2f4::t_059f0f19ee241f 103-105
+  s_9284ad4c8de2f4::t_49ae7afcd3488e 109-115
+  s_9284ad4c8de2f4::t_40e4cdf0799cdc 40-42,45-48
+src/render/web/CMakeLists.txt
+  s_9284ad4c8de2f4::t_0a439debe24d68 164-209
+src/runtime/content/tests/test_web_pack_stream.cpp
+  s_9284ad4c8de2f4::t_dff10b5692dae3 1-203
+src/render/web/web_export_main.cpp
+  s_9284ad4c8de2f4::t_e3591ba5be5840 1-261
+docs/ci-fleet-manifest.json
+  s_9284ad4c8de2f4::t_4f87c9428a41d3 405-413
+  s_2ef2ba6246d405::t_fb3c614d19555d 404
+src/editor/build/src/adapter.cpp
+  s_9284ad4c8de2f4::t_7100f9c0a4a453 62-92
+  s_9284ad4c8de2f4::t_f2440389a91a1d 210-213
+  s_9284ad4c8de2f4::t_18f4d5aef84914 130-166
+docs/export-adapters.md
+  s_9284ad4c8de2f4::t_835ae6541e540c 140-219
+  s_9284ad4c8de2f4::t_1b43998831b484 1,5,10-11,13,19,21,23-29
+src/editor/build/src/build_orchestrator.cpp
+  s_0437b8a8fbb7aa::t_ea27edcd1b6a06 185-190
+src/editor/build/tests/test_adapter.cpp
+  s_e01c8fb43d2a93::t_0c2158f7509877 1,3-8,97-156,164-166
+src/runtime/content/CMakeLists.txt
+  s_2ef2ba6246d405::t_9582ed6b4d5c2c 14-15,42-43
+src/runtime/content/include/context/runtime/content/web_pack_stream.h
+  s_e01c8fb43d2a93::t_825ff2830a759c 1-71
+src/runtime/content/src/web_pack_stream.cpp
+  s_0437b8a8fbb7aa::t_6dba9f29378a8e 1-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "33efb1d3b7a427937e31b574da348742c48d71ee",
+  "prompts": {},
+  "sessions": {
+    "s_0437b8a8fbb7aa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aca23227-fb01-4357-947a-d2d68329d5df",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_2ef2ba6246d405": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d8273024-6a68-45ea-8d05-2f04efe53a93",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_9284ad4c8de2f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "64f4c13c-1681-4443-9cc9-81bbde69cd56",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e01c8fb43d2a93": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1291790d-12a3-4be9-b6dd-32c2119a2e21",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
