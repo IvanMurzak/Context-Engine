@@ -788,7 +788,7 @@ jobs:
             if ($d.adapter.flavor -ne $flavor) { throw "adapter flavor mismatch for $flavor" }
             if (-not $d.adapter.requiresSigning) { throw "windows adapter must set requiresSigning" }
             if (-not $d.artifactEmit.emitted) { throw "artifact not emitted for $flavor" }
-            if (-not ($d.smoke.ran -and $d.smoke.ok -and $d.smoke.simTick -eq 16)) { throw "smoke failed for $flavor: $($d.smoke | ConvertTo-Json -Compress)" }
+            if (-not ($d.smoke.ran -and $d.smoke.ok -and $d.smoke.simTick -eq 16)) { throw "smoke failed for ${flavor}: $($d.smoke | ConvertTo-Json -Compress)" }
             # a10 signing NEVER silent: no signing identity on this PR path -> explicit unsigned WARNING.
             if (-not $d.signing.required) { throw "windows signing must be required for $flavor" }
             if ($d.signing.state -ne "unsigned") { throw "expected unsigned signing state on the unsigned PR path for $flavor, got $($d.signing.state)" }
