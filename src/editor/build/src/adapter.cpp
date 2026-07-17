@@ -59,6 +59,37 @@ AdapterPlan plan_adapter(const std::string& target, const std::string& flavor,
     plan.pack_name = pack_name.empty() ? "game.pack" : pack_name;
     plan.manifest_name = "context.build.json";
 
+    // The web adapter (a11): the Emscripten/emdawnwebgpu web export bundle — the shipped `.wasm` module
+    // + its `.js` glue under bin/, an index.html shell launcher, the v1 pack under content/ (streamed by
+    // HTTP range requests to the browser RuntimeKernel), and the manifest. WebGPU-only (render always
+    // present, L-56); web is never desktop/server-flavored (a headless browser build is nonsensical), so
+    // only the desktop flavor is supported — web + server is the honest stub. No native launcher, no
+    // code-signing (v1).
+    if (target == kTargetWeb)
+    {
+        if (flavor != kFlavorDesktop)
+        {
+            plan.launcher_name = kWebLauncherName; // a stub echoes the web launcher name; layout empty
+            return plan;
+        }
+        plan.supported = true;
+        plan.render_present = true;   // WebGPU-only — the browser build is inherently render-present
+        plan.requires_signing = false; // no v1 web code-signing (unlike the Windows Authenticode axis)
+        plan.runtime_binary = kRuntimeBinaryWeb; // context-runtime.wasm
+        plan.runtime_loader = kRuntimeLoaderWeb; // context-runtime.js (the Emscripten glue)
+        plan.launcher_kind = LauncherKind::WebHtml;
+        plan.launcher_name = kWebLauncherName;   // index.html
+        // The web bundle layout (R-BUILD-005 minimal packaging, adapted for static hosting): the wasm
+        // module + its JS loader under bin/, the HTML shell at the root, the pack under content/, and
+        // the manifest. Archive paths are always forward-slash.
+        plan.layout.push_back({"bin/" + plan.runtime_binary, "runtime"});
+        plan.layout.push_back({"bin/" + plan.runtime_loader, "runtime-loader"});
+        plan.layout.push_back({plan.launcher_name, "launcher"});
+        plan.layout.push_back({"content/" + plan.pack_name, "pack"});
+        plan.layout.push_back({plan.manifest_name, "manifest"});
+        return plan;
+    }
+
     // The a06/a10 adapter set covers Linux + Windows, each in desktop + server/headless flavor. Any
     // other target/flavor is an honest stub (supported=false) — the CLI reports it, never fakes an
     // artifact (R-BUILD-007).
@@ -96,6 +127,43 @@ std::string render_launcher(const AdapterPlan& plan)
 {
     if (!plan.supported)
         return {};
+    if (plan.launcher_kind == LauncherKind::WebHtml)
+    {
+        // The web export shell (a11). A static index.html that boots the Emscripten module over the
+        // browser's WebGPU and streams content/<pack> by HTTP range requests, all page-relative so the
+        // bundle serves from any static host with no absolute paths baked in. The Module.arguments carry
+        // `--pack content/<pack>` (the same contract the native launchers pass), and the canvas is the
+        // WebGPU present surface. Deterministic (a pure function of the plan); LF-only. NB the fixed
+        // heap (-sINITIAL_MEMORY, NO -sALLOW_MEMORY_GROWTH) is a COMPILE-time property of the shipped
+        // .wasm/.js pair, not the shell — see docs/export-adapters.md § Web (emdawnwebgpu constraints).
+        std::string s;
+        s += "<!doctype html>\n";
+        s += "<html lang=\"en\">\n";
+        s += "<head>\n";
+        s += "<meta charset=\"utf-8\">\n";
+        s += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n";
+        s += "<title>Context web build</title>\n";
+        s += "<!-- Context web export shell (M8 a11). Boots the Emscripten/emdawnwebgpu RuntimeKernel\n";
+        s += "     over the v1 chunked pack streamed by HTTP range requests. WebGPU-only (L-56). -->\n";
+        s += "<style>html,body{margin:0;height:100%;background:#101014;color:#e0e0e6;"
+             "font-family:system-ui,sans-serif}#context-canvas{display:block;width:100%;height:100%}"
+             "</style>\n";
+        s += "</head>\n";
+        s += "<body>\n";
+        s += "<canvas id=\"context-canvas\" tabindex=\"-1\"></canvas>\n";
+        s += "<script>\n";
+        s += "  // Emscripten Module config: the present canvas + the page-relative pack argument. The\n";
+        s += "  // runtime streams content/<pack> in HTTP range chunks (see the a11 web pack streamer).\n";
+        s += "  var Module = {\n";
+        s += "    canvas: document.getElementById('context-canvas'),\n";
+        s += "    arguments: ['--pack', 'content/" + plan.pack_name + "'],\n";
+        s += "  };\n";
+        s += "</script>\n";
+        s += "<script src=\"bin/" + plan.runtime_loader + "\"></script>\n";
+        s += "</body>\n";
+        s += "</html>\n";
+        return s;
+    }
     if (plan.launcher_kind == LauncherKind::WindowsCmd)
     {
         // A cmd.exe batch launcher. %~dp0 is the launcher's own directory (with a trailing backslash),
@@ -139,6 +207,10 @@ std::string render_manifest(const AdapterPlan& plan, std::uint64_t engine_versio
     s += plan.render_present ? "true" : "false";
     s += ",\n";
     s += "  \"runtimeBinary\": \"bin/" + json_escape(plan.runtime_binary) + "\",\n";
+    // The web target's Emscripten JS glue (a11) — bin/context-runtime.js. Present only for web; the
+    // native linux/windows runtimes are a single binary and omit it.
+    if (!plan.runtime_loader.empty())
+        s += "  \"runtimeLoader\": \"bin/" + json_escape(plan.runtime_loader) + "\",\n";
     s += "  \"pack\": \"content/" + json_escape(plan.pack_name) + "\",\n";
     s += "  \"launcher\": \"" + json_escape(plan.launcher_name) + "\",\n";
     // Whether the shipped runtime binary requires code-signing to ship (Windows Authenticode, R-SEC-003).

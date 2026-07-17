@@ -169,6 +169,78 @@ int main()
         remove_quiet(dir);
     }
 
+    // --- a11 web adapter: supported (desktop-only), wasm+js runtime, renderPresent, no signing --------
+    {
+        const fs::path dir = make_project("web");
+        const fs::path out = dir / "build" / "web.pack";
+        const Envelope e = run_build(
+            {{"target", "web"}, {"project", dir.string()}, {"out", out.generic_string()}});
+        CHECK(e.ok());
+        const Json& data = e.data();
+        CHECK(data.at("target").as_string() == "web");
+        const Json& adapter = data.at("adapter");
+        CHECK(adapter.at("supported").as_bool());
+        CHECK(!adapter.at("stub").as_bool());
+        CHECK(adapter.at("flavor").as_string() == "desktop"); // web is desktop-only
+        CHECK(adapter.at("renderPresent").as_bool());          // WebGPU-only
+        CHECK(!adapter.at("requiresSigning").as_bool());       // no v1 web code-signing
+        CHECK(adapter.at("runtimeBinary").as_string() == "context-runtime.wasm");
+        CHECK(adapter.at("runtimeLoader").as_string() == "context-runtime.js");
+        // A real pack was written for the web target too (web is a first-class pack platform).
+        CHECK(fs::exists(out));
+        remove_quiet(dir);
+    }
+
+    // --- a11 web --emit-artifact: assembles the 5-file bundle (wasm + js + index.html + pack + manifest)
+    {
+        const fs::path dir = make_project("web-emit");
+        const fs::path out = dir / "build" / "web.pack";
+        const fs::path wasm = dir / "context-runtime.wasm";
+        const fs::path js = dir / "context-runtime.js";
+        write_file(wasm, "\0asm\x01\x00\x00\x00fake-wasm-module-bytes"); // a stand-in wasm blob
+        write_file(js, "// fake emscripten glue\nvar Module;\n");
+        const fs::path tar = dir / "dist" / "web-bundle.tar";
+        const Envelope e = run_build({{"target", "web"},
+                                      {"project", dir.string()},
+                                      {"out", out.generic_string()},
+                                      {"runtime", wasm.string()},
+                                      {"runtime-loader", js.string()},
+                                      {"emit-artifact", tar.generic_string()}});
+        CHECK(e.ok());
+        const Json& emit = e.data().at("artifactEmit");
+        CHECK(emit.at("emitted").as_bool());
+        CHECK(emit.at("entryCount").as_int() == 5); // bin/wasm + bin/js + index.html + content/ + manifest
+        CHECK(fs::exists(tar));
+        remove_quiet(dir);
+    }
+
+    // --- a11 web --emit-artifact WITHOUT --runtime-loader declares the reason (never a silent skip) ---
+    {
+        const fs::path dir = make_project("web-noloader");
+        const fs::path wasm = dir / "context-runtime.wasm";
+        write_file(wasm, "\0asm\x01\x00\x00\x00fake");
+        const fs::path tar = dir / "dist" / "web.tar";
+        const Envelope e = run_build({{"target", "web"},
+                                      {"project", dir.string()},
+                                      {"runtime", wasm.string()},
+                                      {"emit-artifact", tar.generic_string()}});
+        CHECK(e.ok());
+        CHECK(!e.data().at("artifactEmit").at("emitted").as_bool());
+        CHECK(!e.data().at("artifactEmit").at("reason").as_string().empty());
+        remove_quiet(dir);
+    }
+
+    // --- a11 web --smoke: not-run in the native runtime (its smoke gate is the render-web CI job) ------
+    {
+        const fs::path dir = make_project("web-smoke");
+        const Envelope e =
+            run_build({{"target", "web"}, {"project", dir.string()}, {"smoke", "true"}});
+        CHECK(e.ok());
+        CHECK(!e.data().at("smoke").at("ran").as_bool());
+        CHECK(!e.data().at("smoke").at("reason").as_string().empty());
+        remove_quiet(dir);
+    }
+
     // --- a10 signing hook (--sign): an UNSIGNED windows runtime is an explicit never-silent WARNING ---
     {
         const fs::path dir = make_project("sign-unsigned");

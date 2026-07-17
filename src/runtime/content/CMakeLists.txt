@@ -11,7 +11,8 @@ add_library(context_runtime_content STATIC
     src/pack_source.cpp
     src/editor_source.cpp
     src/content_loader.cpp
-    src/streaming_scheduler.cpp)
+    src/streaming_scheduler.cpp
+    src/web_pack_stream.cpp)  # M8 a11: chunked-pack streaming loader (native + Emscripten web export)
 
 target_include_directories(context_runtime_content PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -38,7 +39,8 @@ set(_content_tests
     test_pack_source        # load/instantiate/unload by GUID from a packed archive + failure paths
     test_content_loader     # residency isolation, unload releases residency, async pump, handles
     test_feed_parity        # editor-fed vs pack-fed: identical derived world, identical state hash
-    test_streaming_budget)  # a synthetic over-budget world stays within the configured budget
+    test_streaming_budget   # a synthetic over-budget world stays within the configured budget
+    test_web_pack_stream)   # a11: chunked-range pack stream reassembles + holds the memory budget
 
 foreach(_t IN LISTS _content_tests)
     add_executable(context_runtime_content_${_t} tests/${_t}.cpp)

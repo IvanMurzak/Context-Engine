@@ -402,6 +402,16 @@
       "description": "M4 golden-scene visual-equivalence corpus, BROWSER leg (issue #141): the render-web job runs the built wasm harness in headless CHROMIUM (the v1 blocking browser — the only browser shipping WebGPU on headless Linux; the design record's reference browser since the M0 Tint/Chrome spike) over SwiftShader WebGPU, collects the kernel-free corpus frames (triangle3d + sprite2d + ui-hud, the M7 a6 runtime UI HUD) it POSTs back (tools/web_golden_run.py), and gates each against the SAME committed goldens/ baselines the native leg uses (tools/golden_compare.py). This closes the M4 exit's 'render 3D+2D desktop+web, identical within T1' criterion. BLOCKING per the minimal-v1 ruling; other browsers join as advisory rows when their runner classes are provisioned."
     },
     {
+      "id": "web-export",
+      "requirement": "R-BUILD-001",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "web",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "render-web",
+      "description": "M8 a11 WEB EXPORT adapter (R-BUILD-001 / L-56 / R-ASSET-003 / R-ASSET-005): the browser side of `context build --target web`. The render-web job builds the context-web-export harness (src/render/web/web_export_main.cpp, alongside context-render-web) and runs it in headless CHROMIUM + SwiftShader WebGPU via tools/web_golden_run.py, which serves the committed real v1 pack (src/render/web/testdata/web-sample.pack, a `context build --target web` product) beside the page. The harness (1) STREAMS the pack over HTTP RANGE requests into the a02 RuntimeContentLoader within a fixed memory budget (WebPackStreamer — the R-ASSET-003 Web conditional-MUST; the verdict is enforced by the harness exit code web_golden_run.py checks) and (2) renders the triangle3d golden through the browser's WebGPU backend, SSIM-gated against goldens/ by tools/golden_compare.py — the DoD's 'the packed web build boots in headless Chromium + passes the golden-scene SSIM corpus'. Fixed-memory heap (NO -sALLOW_MEMORY_GROWTH — the emdawnwebgpu TextDecoder-on-resizable-ArrayBuffer device-acquisition break, re-tested a11, tracked upstream); emdawnwebgpu pinned via the shared emsdk. The chunked-stream + budget logic is also locally gated by the native runtime-content-test_web_pack_stream ctest (emcc is CI-only)."
+    },
+    {
       "id": "m4-exit-headless-no-render",
       "requirement": "R-HEAD-002",
       "runner_class": "gh-ubuntu-shared",

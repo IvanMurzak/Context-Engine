@@ -656,11 +656,13 @@ Registry::Registry()
         "", "", "build",
         "Headless per-agent build (R-BUILD-002): drive the project through verify → toolchain → aot → "
         "transcode → pack → link → adapter for --target and report the packed artifact's generation + "
-        "pointers as the R-CLI-008 envelope. Builds THIS agent's one target (R-BUILD-007). The a06 Linux "
-        "and a10 Windows export adapters are real (--flavor desktop|server; --emit-artifact assembles the "
-        "runnable tarball with --runtime; --smoke launches it — R-BUILD-009; --sign folds the a10 "
-        "Authenticode signing report — R-SEC-003); other targets report the honest adapter stub. "
-        "Non-interactive (R-CLI-003).",
+        "pointers as the R-CLI-008 envelope. Builds THIS agent's one target (R-BUILD-007). The a06 Linux, "
+        "a10 Windows, and a11 web (Emscripten/emdawnwebgpu, WebGPU-only, L-56) export adapters are real "
+        "(--flavor desktop|server for the native targets, web is desktop-only; --emit-artifact assembles "
+        "the runnable artifact with --runtime, plus --runtime-loader for the web wasm+js bundle; --smoke "
+        "launches the native artifact — R-BUILD-009, web boots in the render-web CI browser instead; "
+        "--sign folds the a10 Authenticode signing report — R-SEC-003); other targets report the honest "
+        "adapter stub. Non-interactive (R-CLI-003).",
         /*params=*/{},
         /*flags=*/
         {{"target", "string", "The build target platform: windows | linux | macos | web.", false},
@@ -669,15 +671,22 @@ Registry::Registry()
           false},
          {"flavor", "string",
           "The a06 export flavor: desktop (render subsystem present) | server (headless, render absent). "
-          "Applies to --target linux; default desktop.",
+          "Applies to --target linux|windows; web is desktop-only (WebGPU); default desktop.",
           false},
          {"runtime", "path",
-          "The shipped RuntimeKernel host binary for the target/flavor (the export-template binary), "
-          "packaged by --emit-artifact and launched by --smoke.",
+          "The shipped RuntimeKernel host binary for the target/flavor (the export-template binary; for "
+          "--target web the Emscripten .wasm module), packaged by --emit-artifact and launched by --smoke.",
+          false},
+         {"runtime-loader", "path",
+          "The a11 web bundle's Emscripten JS glue (context-runtime.js) — the second runtime file "
+          "packaged alongside --runtime (the .wasm) by --emit-artifact for --target web. Ignored for the "
+          "single-binary native targets.",
           false},
          {"emit-artifact", "path",
-          "Assemble the runnable artifact tarball (bin/<runtime> + content/<pack> + launch.sh + "
-          "context.build.json) at this path (R-BUILD-005 minimal packaging); requires --runtime.",
+          "Assemble the runnable artifact tarball at this path (R-BUILD-005 minimal packaging): "
+          "bin/<runtime> + content/<pack> + launch.sh|launch.cmd + context.build.json for the native "
+          "targets, or bin/<wasm> + bin/<js> + index.html + content/<pack> + context.build.json for "
+          "--target web. Requires --runtime (and --runtime-loader for web).",
           false},
          {"smoke", "bool",
           "Launch the produced artifact against --runtime, step --smoke-ticks fixed ticks against the "

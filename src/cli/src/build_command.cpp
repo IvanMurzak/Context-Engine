@@ -161,8 +161,10 @@ namespace subprocess = context::common::subprocess;
     if (!plan.supported)
         return a;
     a.set("renderPresent", Json(plan.render_present));
-    a.set("requiresSigning", Json(plan.requires_signing)); // windows Authenticode (a10); false on linux
+    a.set("requiresSigning", Json(plan.requires_signing)); // windows Authenticode (a10); false elsewhere
     a.set("runtimeBinary", Json(plan.runtime_binary));
+    if (!plan.runtime_loader.empty())
+        a.set("runtimeLoader", Json(plan.runtime_loader)); // the a11 web Emscripten JS glue (web only)
     a.set("deterministicModuloLink", Json(true));
     Json layout = Json::array();
     for (const build::ArtifactEntry& e : plan.layout)
@@ -225,14 +227,18 @@ namespace subprocess = context::common::subprocess;
     return build::evaluate_signing(plan, in);
 }
 
-// Assemble the runnable artifact tarball (bin/<runtime> + content/<pack> + launch.sh|launch.cmd +
-// manifest) via the deterministic ustar writer (pkg::tar_write). Reports emitted true/false + a reason —
-// never a silent skip. NB: tar_write writes mode 0644; a consumer extracting the tarball must `chmod +x` the
-// runtime binary + launcher before running (documented in the manifest / README — the exec-bit is a
-// tracked tar_write follow-up, like gzip).
+// Assemble the runnable artifact tarball (linux/windows: bin/<runtime> + content/<pack> +
+// launch.sh|launch.cmd + manifest; web (a11): bin/<wasm> + bin/<js> + index.html + content/<pack> +
+// manifest) via the deterministic ustar writer (pkg::tar_write). The entries are LAYOUT-DRIVEN — one
+// tar entry per plan.layout row, its bytes resolved by role — so a new adapter shape ships without a
+// second assembly path. Reports emitted true/false + a reason — never a silent skip. NB: tar_write
+// writes mode 0644; a consumer extracting a NATIVE tarball must `chmod +x` the runtime binary + launcher
+// before running (the exec-bit is a tracked tar_write follow-up, like gzip); the web bundle's files are
+// static-served, so the exec bit is irrelevant there.
 [[nodiscard]] Json emit_artifact(const build::AdapterPlan& plan, const std::string& pack_bytes,
                                  std::uint64_t engine_version, std::uint64_t generation,
                                  std::uint64_t pack_hash, const std::optional<std::string>& runtime,
+                                 const std::optional<std::string>& runtime_loader,
                                  const std::string& out_tar)
 {
     Json e = Json::object();
@@ -243,26 +249,58 @@ namespace subprocess = context::common::subprocess;
         e.set("reason", Json(std::string("no export adapter for this target/flavor")));
         return e;
     }
-    if (!runtime.has_value() || runtime->empty())
-    {
-        e.set("emitted", Json(false));
-        e.set("reason", Json(std::string("--emit-artifact requires --runtime <host-binary>")));
-        return e;
-    }
-    std::string runtime_bytes;
-    if (!read_file(fs::path(*runtime), runtime_bytes))
-    {
-        e.set("emitted", Json(false));
-        e.set("reason", Json("could not read --runtime binary: " + *runtime));
-        return e;
-    }
+    // Resolve one artifact's bytes by its layout role. A "runtime"/"runtime-loader" role reads the
+    // corresponding CLI-supplied file (fail-closed with a reason if absent/unreadable); the pack,
+    // launcher, and manifest are pure functions already in hand. `err` is set + emit refused on failure.
+    std::string err;
+    const auto bytes_for = [&](const build::ArtifactEntry& entry) -> std::string {
+        if (entry.role == "runtime")
+        {
+            if (!runtime.has_value() || runtime->empty())
+            {
+                err = "--emit-artifact requires --runtime <host-binary>";
+                return {};
+            }
+            std::string b;
+            if (!read_file(fs::path(*runtime), b))
+                err = "could not read --runtime binary: " + *runtime;
+            return b;
+        }
+        if (entry.role == "runtime-loader")
+        {
+            // The a11 web bundle's Emscripten JS glue — the second runtime file (bin/context-runtime.js).
+            if (!runtime_loader.has_value() || runtime_loader->empty())
+            {
+                err = "--emit-artifact for a web build requires --runtime-loader <emscripten-js>";
+                return {};
+            }
+            std::string b;
+            if (!read_file(fs::path(*runtime_loader), b))
+                err = "could not read --runtime-loader JS: " + *runtime_loader;
+            return b;
+        }
+        if (entry.role == "pack")
+            return pack_bytes;
+        if (entry.role == "launcher")
+            return build::render_launcher(plan);
+        if (entry.role == "manifest")
+            return build::render_manifest(plan, engine_version, generation, pack_hash);
+        err = "unknown artifact layout role: " + entry.role;
+        return {};
+    };
     std::vector<pkg::TarEntry> entries;
-    entries.push_back({"bin/" + plan.runtime_binary, std::move(runtime_bytes), false});
-    entries.push_back({"content/" + plan.pack_name, pack_bytes, false});
-    entries.push_back({plan.launcher_name, build::render_launcher(plan), false});
-    entries.push_back(
-        {plan.manifest_name, build::render_manifest(plan, engine_version, generation, pack_hash),
-         false});
+    entries.reserve(plan.layout.size());
+    for (const build::ArtifactEntry& entry : plan.layout)
+    {
+        std::string bytes = bytes_for(entry);
+        if (!err.empty())
+        {
+            e.set("emitted", Json(false));
+            e.set("reason", Json(err));
+            return e;
+        }
+        entries.push_back({entry.archive_path, std::move(bytes), false});
+    }
     const std::optional<std::string> tar = pkg::tar_write(entries);
     if (!tar.has_value())
     {
@@ -301,6 +339,11 @@ namespace subprocess = context::common::subprocess;
     };
     if (!plan.supported)
         return not_run("no export adapter for this target/flavor");
+    // The a11 web bundle boots in a browser (Emscripten/WebGPU), not against the native runtime — its
+    // smoke gate is the render-web CI job (headless Chromium + SwiftShader), never this native launch.
+    if (plan.launcher_kind == build::LauncherKind::WebHtml)
+        return not_run("web target boots in a browser — the render-web CI job (headless Chromium) is "
+                       "its smoke gate, not the native runtime");
     if (!runtime.has_value() || runtime->empty())
         return not_run("--smoke requires --runtime <host-binary>");
     if (dry_run)
@@ -506,7 +549,8 @@ Envelope run_build(const std::map<std::string, std::string>& flags)
     if (emit_path.has_value())
         data.set("artifactEmit",
                  emit_artifact(s.adapter, result.pack_bytes, s.engine_version, s.generation,
-                               s.pack_hash, flag(flags, "runtime"), *emit_path));
+                               s.pack_hash, flag(flags, "runtime"), flag(flags, "runtime-loader"),
+                               *emit_path));
 
     // --sign (a10, R-SEC-003): the Authenticode signing hook. Fold the machine-readable signing report
     // (plan + observed state of the shipped runtime binary) into the envelope. For a signing-required

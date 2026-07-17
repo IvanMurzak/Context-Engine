@@ -28,10 +28,22 @@ the R-HEAD-002 probe uses `requestAdapter` (emdawnwebgpu has no enumerate-adapte
   `tools/web_golden_run.py` collector — the measured half of the golden-scene SSIM gate; opened
   manually (no collector) the POSTs are skipped. Exit 0 = PASS, 77 = SKIP (no browser WebGPU / no
   adapter — R-HEAD-002), 1 = FAIL.
+- **`web_export_main.cpp`** (M8 **a11**) — the **web export** harness: the browser side of
+  `context build --target web`. It proves the packed web build **boots** on the browser's WebGPU (same
+  emdawnwebgpu backend) AND **streams** its v1 chunked pack over **HTTP range** requests into the a02
+  `RuntimeContentLoader` within a fixed memory budget (`WebPackStreamer`,
+  `src/runtime/content/web_pack_stream.h`), then renders the `triangle3d` golden as the boot proof. The
+  `render-web` CI job serves `testdata/web-sample.pack` beside the page; the harness fetches + streams it
+  (verdict via the exit code) and POSTs the golden for the SSIM gate. The chunked-stream + budget logic
+  is portable C++, locally gated by the native `runtime-content-test_web_pack_stream` ctest (emcc is
+  CI-only). See `docs/export-adapters.md` § Web export.
+- **`testdata/web-sample.pack`** — a small **real v1 pack** (a `context build --target web` product),
+  committed as the fixture the `render-web` CI job serves for the web-export range-stream run.
 - **`CMakeLists.txt`** — standalone (`emcmake cmake -S src/render/web`), like the spike's web leg.
   Deliberately **not** `add_subdirectory()`'d from the main `src/` tree — the rest of the engine
   (editor/runtime/cli daemon+IPC) does not compile under emscripten, so keeping this standalone leaves
-  the native `dev` build matrix + the local GCC dev gate untouched.
+  the native `dev` build matrix + the local GCC dev gate untouched. Builds two harnesses:
+  `context-render-web` (T1 RHI parity, M4) and `context-web-export` (the a11 export bundle streamer).
 
 ## Build
 

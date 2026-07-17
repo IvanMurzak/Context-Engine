@@ -161,3 +161,49 @@ target_link_options(context-render-web PRIVATE
     "-sEXIT_RUNTIME=1"
     "-sINITIAL_MEMORY=67108864")
 set_target_properties(context-render-web PROPERTIES SUFFIX ".html")
+
+# --- M8 a11: the WEB EXPORT harness (context-web-export) --------------------------------------------
+# The browser side of `context build --target web` (R-BUILD-001 / L-56 / R-ASSET-003 / R-ASSET-005):
+# proves the packed web build BOOTS on the browser's WebGPU (the same emdawnwebgpu backend as
+# context-render-web) AND STREAMS its v1 chunked pack over HTTP RANGE requests into the a02
+# RuntimeContentLoader, holding the resident working set within a configured memory budget
+# (WebPackStreamer). Built by the SAME render-web CI job (emcc is CI-only) and driven in headless
+# Chromium by tools/web_golden_run.py (which serves content/game.pack beside the page and collects the
+# stream verdict + the triangle3d golden the harness POSTs). Depends only on the a02 content loader
+# (frozen pack format + canonical serializer, L-24) + the T1 render backend — no editor/derivation
+# surface under emscripten. The a02 loader subset is compiled here directly (this is a STANDALONE emcc
+# project, deliberately not add_subdirectory()'d from the native src/ tree).
+add_executable(context-web-export
+    web_export_main.cpp
+    ${_repo_root}/src/runtime/content/src/pack_source.cpp
+    ${_repo_root}/src/runtime/content/src/content_loader.cpp
+    ${_repo_root}/src/runtime/content/src/web_pack_stream.cpp   # a11 chunked-pack streamer
+    ${_repo_root}/src/editor/serializer/src/canonical.cpp        # the a02 loader's deps: canonical JSON
+    ${_repo_root}/src/editor/serializer/src/json_parse.cpp
+    ${_repo_root}/src/editor/serializer/src/nfc.cpp
+    ${_repo_root}/src/editor/serializer/src/sidecar_ref.cpp
+    ${_repo_root}/src/editor/pack/src/pack_format.cpp)           # frozen v1 byte-layout constants
+target_include_directories(context-web-export PRIVATE
+    ${_render_root}/include
+    ${_render_root}/sprite/include
+    ${_render_root}/ui/include
+    ${_render_root}/../packages/ui/include
+    ${_ui_text_src}/include
+    ${_repo_root}/src/runtime/content/include
+    ${_repo_root}/src/editor/serializer/include
+    ${_repo_root}/src/editor/pack/include)
+target_link_libraries(context-web-export
+    PRIVATE context_render_web context_render_web_sprite context_render_ui_web context_ui_web
+            context_ui_text_web context_warnings)
+target_compile_options(context-web-export PRIVATE "--use-port=emdawnwebgpu")
+# Same emdawnwebgpu constraints as context-render-web above: --use-port pins the Dawn package for the
+# active emsdk; -sASYNCIFY yields the fetch/pump loops to the browser; -sEXIT_RUNTIME=1 makes main's
+# return the exit code; the heap is sized UP FRONT (128 MiB — pack + WebGPU device + budget) with
+# deliberately NO -sALLOW_MEMORY_GROWTH (a resizable ArrayBuffer breaks emdawnwebgpu's TextDecoder glue
+# -> device acquisition dies; the a11 re-test is recorded in docs/export-adapters.md § Web).
+target_link_options(context-web-export PRIVATE
+    "--use-port=emdawnwebgpu"
+    "-sASYNCIFY"
+    "-sEXIT_RUNTIME=1"
+    "-sINITIAL_MEMORY=134217728")
+set_target_properties(context-web-export PROPERTIES SUFFIX ".html")

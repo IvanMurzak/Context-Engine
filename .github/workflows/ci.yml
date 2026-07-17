@@ -1115,6 +1115,28 @@ jobs:
           python3 tools/golden_compare.py --scene sprite2d --candidate out/golden-web/sprite2d.ppm
           python3 tools/golden_compare.py --scene ui-hud --candidate out/golden-web/ui-hud.ppm
 
+      # --- M8 a11 (web export adapter): the packed web build BOOTS + STREAMS its pack in chunks ---
+      # The context-web-export harness (built above by the same `cmake --build build/render-web`) is
+      # the browser side of `context build --target web`: it fetches the served content/game.pack over
+      # HTTP RANGE requests, streams it into the a02 RuntimeContentLoader within a fixed memory budget
+      # (WebPackStreamer), then renders the triangle3d golden through the browser's WebGPU. The stream
+      # verdict is enforced by the harness EXIT CODE (0 requires stream-within-budget AND WebGPU boot,
+      # which web_golden_run.py checks); the triangle3d frame it POSTs is SSIM-gated below — the DoD's
+      # "boots in headless Chromium + passes the golden-scene SSIM corpus" for the packed web build.
+      # The pack is a committed real v1 fixture (src/render/web/testdata/web-sample.pack, built by
+      # `context build --target web`), served beside the harness page for the range fetch.
+      - name: In-browser web-export run (stream pack over HTTP range + WebGPU boot)
+        run: |
+          mkdir -p build/render-web/content
+          cp src/render/web/testdata/web-sample.pack build/render-web/content/game.pack
+          python3 tools/web_golden_run.py \
+            --html build/render-web/context-web-export.html \
+            --out-dir out/web-export --scenes triangle3d
+
+      - name: Web-export golden SSIM gate (blocking)
+        run: |
+          python3 tools/golden_compare.py --scene triangle3d --candidate out/web-export/triangle3d.ppm
+
       - name: Upload wasm + web golden artifacts
         if: always()
         uses: actions/upload-artifact@v7
@@ -1124,7 +1146,11 @@ jobs:
             build/render-web/context-render-web.html
             build/render-web/context-render-web.js
             build/render-web/context-render-web.wasm
+            build/render-web/context-web-export.html
+            build/render-web/context-web-export.js
+            build/render-web/context-web-export.wasm
             out/golden-web/
+            out/web-export/
           if-no-files-found: error
 
   # Native shader cross-compile TOOLCHAIN de-risk (src/render/shadercc/, issue #125, sub-task B of

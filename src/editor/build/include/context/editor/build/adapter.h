@@ -37,17 +37,22 @@ struct ArtifactEntry
 };
 
 // Which launcher dialect a target uses. POSIX targets (linux) ship a `launch.sh`; Windows ships a
-// `launch.cmd` batch file (cmd.exe cannot run a POSIX sh script).
+// `launch.cmd` batch file (cmd.exe cannot run a POSIX sh script); the web target (a11) ships an
+// `index.html` shell that boots the Emscripten/emdawnwebgpu RuntimeKernel over the browser's WebGPU
+// and streams the v1 pack by HTTP range requests (a static-file "launcher", not an executable script).
 enum class LauncherKind
 {
-    None,      // an unsupported target — no launcher
-    PosixSh,   // launch.sh (linux)
-    WindowsCmd // launch.cmd (windows)
+    None,       // an unsupported target — no launcher
+    PosixSh,    // launch.sh (linux)
+    WindowsCmd, // launch.cmd (windows)
+    WebHtml     // index.html (web — the Emscripten export shell)
 };
 
 // The export-adapter plan for a (target, flavor). supported=false is the honest stub for any target the
-// a06/a10 adapter set does not yet cover (linux + windows are covered) — the CLI then reports the stub
-// exactly as a05 did, never a faked artifact (R-BUILD-007).
+// a06/a10/a11 adapter set does not yet cover (linux + windows + web are covered; macos is the remaining
+// stub) — the CLI then reports the stub exactly as a05 did, never a faked artifact (R-BUILD-007). The
+// web target is covered only in the desktop flavor (a headless/server web build is nonsensical — the
+// browser is inherently render-present); web + server plans the honest stub.
 struct AdapterPlan
 {
     bool supported = false;
@@ -57,7 +62,9 @@ struct AdapterPlan
     bool requires_signing = false;   // windows requires Authenticode code-signing to ship (R-SEC-003);
                                      // linux does not (a06). See signing.h for the signing hook.
     std::string runtime_binary;      // the shipped host binary name inside bin/ (flavor + OS specific;
-                                     // Windows carries a `.exe` suffix)
+                                     // Windows carries a `.exe` suffix; web ships the `.wasm` module)
+    std::string runtime_loader;      // the web target's Emscripten JS glue inside bin/ (empty for the
+                                     // native linux/windows targets, whose runtime is a single binary)
     std::string pack_name;           // the pack file name inside content/
     LauncherKind launcher_kind = LauncherKind::None;
     std::string launcher_name;       // "launch.sh" (posix) | "launch.cmd" (windows)
@@ -69,9 +76,10 @@ struct AdapterPlan
 inline constexpr const char* kFlavorDesktop = "desktop";
 inline constexpr const char* kFlavorServer = "server";
 
-// The a06/a10 export targets that plan a real adapter (any other target is the honest stub).
+// The a06/a10/a11 export targets that plan a real adapter (any other target is the honest stub).
 inline constexpr const char* kTargetLinux = "linux";
 inline constexpr const char* kTargetWindows = "windows";
+inline constexpr const char* kTargetWeb = "web";
 
 // The shipped host binary BASE name for each flavor (matches the CMake OUTPUT_NAME of the two
 // executables src/runtime/host/ builds). Kept in one place so the adapter plan, the launcher, and the
@@ -80,21 +88,31 @@ inline constexpr const char* kRuntimeBinaryDesktop = "context-runtime";
 inline constexpr const char* kRuntimeBinaryServer = "context-runtime-server";
 inline constexpr const char* kExeSuffixWindows = ".exe";
 
+// The web (a11) artifact names. The runtime is the Emscripten pair: a `.wasm` module + its `.js` glue
+// (both under bin/); the launcher is an `index.html` shell that boots the module over the browser's
+// WebGPU and streams content/<pack> by HTTP range requests. Web is WebGPU-only (render always present)
+// and never desktop/server-flavored — a headless web build is nonsensical.
+inline constexpr const char* kRuntimeBinaryWeb = "context-runtime.wasm";
+inline constexpr const char* kRuntimeLoaderWeb = "context-runtime.js";
+inline constexpr const char* kWebLauncherName = "index.html";
+
 // True when `flavor` is one of the two a06 flavors (desktop | server).
 [[nodiscard]] bool is_known_flavor(const std::string& flavor);
 
 // Plan the export adapter for (target, flavor). Total + deterministic. supported=true only for the
-// a06/a10 adapter set (target "linux" | "windows", flavor desktop|server); any other target/flavor
-// yields supported=false (the honest stub). `pack_name` names the content pack inside the tarball
-// (defaults to "game.pack" when empty).
+// a06/a10/a11 adapter set (target "linux" | "windows" in flavor desktop|server; target "web" in the
+// desktop flavor only); any other target/flavor yields supported=false (the honest stub). `pack_name`
+// names the content pack inside the artifact (defaults to "game.pack" when empty).
 [[nodiscard]] AdapterPlan plan_adapter(const std::string& target, const std::string& flavor,
                                        const std::string& pack_name);
 
-// Render the launcher script — a pure function of the plan. For a POSIX target a `#!/bin/sh` launch.sh;
-// for a Windows target a `@echo off` launch.cmd batch file. Both boot the artifact RELATIVE TO THE
-// LAUNCHER'S OWN DIRECTORY (so it runs from anywhere a tarball is extracted): they exec
-// bin/<runtime> --pack content/<pack> and forward any extra args (e.g. --ticks N). Empty for an
-// unsupported plan.
+// Render the launcher — a pure function of the plan. For a POSIX target a `#!/bin/sh` launch.sh; for a
+// Windows target a `@echo off` launch.cmd batch file; for the web target an `index.html` shell. The
+// native launchers boot the artifact RELATIVE TO THE LAUNCHER'S OWN DIRECTORY (so it runs from anywhere
+// a tarball is extracted): they exec bin/<runtime> --pack content/<pack> and forward any extra args
+// (e.g. --ticks N). The web `index.html` loads bin/<runtime-loader> (the Emscripten JS glue) with the
+// canvas + the `--pack content/<pack>` argument, all page-relative so it serves from any static host.
+// Empty for an unsupported plan.
 [[nodiscard]] std::string render_launcher(const AdapterPlan& plan);
 
 // Render the build manifest (context.build.json) — a machine-readable record of the artifact. Pure +
