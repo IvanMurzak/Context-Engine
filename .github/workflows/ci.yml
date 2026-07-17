@@ -713,6 +713,111 @@ jobs:
       - name: sccache stats
         run: ${SCCACHE_PATH} --show-stats
 
+  # M8 a10 Windows export adapter + Authenticode signing hook (src/editor/build/adapter.* + signing.*,
+  # R-BUILD-001/005 / R-SEC-003, task a10): the Windows sibling of linux-export. Builds BOTH Windows
+  # flavors — desktop (render present) and server/headless (render absent) — then proves each ASSEMBLED
+  # tarball artifact boots + steps N fixed ticks on a CLEAN host with no dev tree (extracted to a temp
+  # dir outside the repo), via the launch.cmd batch launcher. Folds the R-BUILD-009 `context build
+  # --smoke` envelope AND the a10 `--sign` signing report: this per-PR path has NO signing secrets, so
+  # the report is the EXPLICIT, never-silent `state: unsigned` + build.artifact_unsigned WARNING (DoD 2)
+  # — the actual Azure Trusted Signing runs custody-gated in the protected `release` environment (see
+  # release-sign.yml, the a08/a10 pattern). Also the L-5 render-footprint audit (the server binary carries
+  # no render payload + is smaller). Rides the self-hosted MSVC runner for same-repo PRs; a fork PR (no
+  # secrets) falls back to GH-hosted windows-latest and stays GREEN, unsigned. No GPU — the desktop flavor
+  # links only the GPU-free render abstraction (CONTEXT_BUILD_RENDER_WGPU stays OFF).
+  windows-export:
+    name: windows-export (both flavors, clean-host boot + signing report)
+    needs: [license-gate, python-tests]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || 'windows-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
+        if: runner.os == 'Windows' && runner.environment == 'self-hosted'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $out = cmd /c "`"$vs\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 -no_logo && set"
+          foreach ($name in 'PATH','INCLUDE','LIB','LIBPATH') {
+            $line = ($out | Where-Object { $_ -like "$name=*" } | Select-Object -First 1)
+            if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+          }
+          "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      - name: Configure (dev preset)
+        run: cmake -S src --preset dev
+
+      - name: Build the CLI + both shipped runtime-host flavors
+        run: cmake --build --preset dev --target context context_runtime_desktop context_runtime_server context_runtime_host_test_core context_runtime_host_test_render context_runtime_host_test_smoke
+        working-directory: src
+
+      - name: Assemble each flavor's tarball, check the signing report, and boot it CLEAN-host (launch.cmd)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ctx = "src/build/dev/cli/context.exe"
+          $desktop = "$PWD/src/build/dev/runtime/host/context-runtime.exe"
+          $server  = "$PWD/src/build/dev/runtime/host/context-runtime-server.exe"
+          # A minimal buildable project (L-33 hex ids on every entity).
+          $proj = Join-Path $env:RUNNER_TEMP "ctx-winexport-proj"
+          if (Test-Path $proj) { Remove-Item -Recurse -Force $proj }
+          New-Item -ItemType Directory -Force -Path (Join-Path $proj "scenes") | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $proj "dist") | Out-Null
+          Set-Content -NoNewline -Encoding ascii -Path (Join-Path $proj "project.json") -Value '{"$schema":"ctx:project","scene":"scenes/main.scene.json","version":1}'
+          Set-Content -NoNewline -Encoding ascii -Path (Join-Path $proj "scenes/main.scene.json") -Value '{"$schema":"ctx:scene","version":1,"entities":[{"id":"aaaa0000aaaa0001","name":"Camera","components":{"camera":{"fov":1.0}}},{"id":"aaaa0000aaaa0002","name":"Player","components":{"transform":{}}}]}'
+          foreach ($flavor in @("server","desktop")) {
+            if ($flavor -eq "desktop") { $bin = $desktop } else { $bin = $server }
+            $tar = Join-Path $proj "dist/game-windows-$flavor.tar"
+            Write-Host "== build + emit-artifact + sign + smoke ($flavor) =="
+            # R-BUILD-009: --smoke launches the produced artifact + folds the boot signal. a10: --sign folds
+            # the Authenticode signing report; no signing identity is present on this per-PR path.
+            & $ctx build --target windows --flavor $flavor --project $proj `
+              --out (Join-Path $proj "build/$flavor.pack") --runtime $bin --emit-artifact $tar `
+              --sign --smoke --smoke-ticks 16 | Tee-Object -FilePath (Join-Path $proj "$flavor-envelope.json") | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "context build failed for $flavor (exit $LASTEXITCODE)" }
+            $env0 = Get-Content (Join-Path $proj "$flavor-envelope.json") -Raw | ConvertFrom-Json
+            $d = $env0.data
+            if (-not $d.adapter.supported) { throw "adapter not supported for $flavor" }
+            if ($d.adapter.flavor -ne $flavor) { throw "adapter flavor mismatch for $flavor" }
+            if (-not $d.adapter.requiresSigning) { throw "windows adapter must set requiresSigning" }
+            if (-not $d.artifactEmit.emitted) { throw "artifact not emitted for $flavor" }
+            if (-not ($d.smoke.ran -and $d.smoke.ok -and $d.smoke.simTick -eq 16)) { throw "smoke failed for $flavor: $($d.smoke | ConvertTo-Json -Compress)" }
+            # a10 signing NEVER silent: no signing identity on this PR path -> explicit unsigned WARNING.
+            if (-not $d.signing.required) { throw "windows signing must be required for $flavor" }
+            if ($d.signing.state -ne "unsigned") { throw "expected unsigned signing state on the unsigned PR path for $flavor, got $($d.signing.state)" }
+            if ($d.signing.code -ne "build.artifact_unsigned") { throw "expected build.artifact_unsigned code for $flavor" }
+            if (-not $env0.warnings -or @($env0.warnings).Count -lt 1) { throw "the unsigned artifact must surface a top-level warning for $flavor" }
+            Write-Host "== clean-host boot from the extracted tarball ($flavor) =="
+            $clean = Join-Path $env:RUNNER_TEMP "ctx-winexport-clean-$flavor"
+            if (Test-Path $clean) { Remove-Item -Recurse -Force $clean }
+            New-Item -ItemType Directory -Force -Path $clean | Out-Null
+            tar -xf $tar -C $clean   # Windows 10+ ships bsdtar; extracts the ustar tarball
+            $signal = & (Join-Path $clean "launch.cmd") --ticks 16 | Out-String
+            Write-Host "clean-host $flavor signal: $signal"
+            if ($signal -notmatch '"ok":true') { throw "clean-host boot for $flavor did not report ok" }
+            if ($signal -notmatch '"simTick":16') { throw "clean-host boot for $flavor did not step 16 ticks" }
+            if ($signal -notmatch "`"flavor`":`"$flavor`"") { throw "clean-host boot for $flavor reported wrong flavor" }
+          }
+          Write-Host "== render-footprint audit (L-5 DCE: headless carries no render payload) =="
+          $latin1 = [System.Text.Encoding]::GetEncoding("ISO-8859-1")
+          $dText = $latin1.GetString([System.IO.File]::ReadAllBytes($desktop))
+          $sText = $latin1.GetString([System.IO.File]::ReadAllBytes($server))
+          if ($dText.IndexOf("CTXHOST-FOOTPRINT:render-present") -lt 0) { throw "render marker missing from desktop" }
+          if ($sText.IndexOf("CTXHOST-FOOTPRINT:render-present") -ge 0) { throw "render marker in server (headless leaked render)" }
+          if ($sText.Length -ge $dText.Length) { throw "server ($($sText.Length)) not smaller than desktop ($($dText.Length))" }
+          Write-Host "render-footprint OK: desktop=$($dText.Length) server=$($sText.Length) delta=$($dText.Length - $sText.Length)"
+
+      - name: runtime-host ctests (in-process core/render + cross-process smoke + footprint)
+        run: ctest --preset dev -R "^runtime-host-" --output-on-failure
+        working-directory: src
+
   # WebGPU spike (spikes/webgpu): native build on all three desktop platforms + the offscreen
   # render/readback self-check. The spike is standalone-configurable (no vcpkg — it pins its own
   # wgpu-native prebuilt), so this job stays light: no other spike's deps are configured here.

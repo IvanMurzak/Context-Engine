@@ -101,3 +101,102 @@ jobs:
           path: signed/
           if-no-files-found: error
           retention-days: 7
+
+  # M8 a10 Windows Authenticode signing (R-SEC-003) — the custody-model-B rehearsal of the shipped
+  # Windows runtime .exe's Authenticode signature, the OS-code-signing sibling of the Ed25519 pack/artifact
+  # signing above. It runs ONLY on manual dispatch (never on push/PR — so it never appears in a PR's CI
+  # rollup) and ONLY after a required reviewer approves the `release` environment (custody model B — every
+  # use of the signing identity is human-approved). It builds the REAL shipped headless runtime binary,
+  # signs it with Azure Trusted Signing (the primary path; signtool-compatible), and then proves the a10
+  # signing hook CLOSES THE LOOP — `context build --sign` detects the embedded Authenticode signature and
+  # reports state "signed" (vs the never-silent "unsigned" WARNING on the per-PR windows-export job).
+  #
+  # SECURITY (R-SEC-003): the Azure service-principal secrets live ONLY in the protected `release`
+  # environment; only `${{ secrets.AZURE_* }}` env-references + the NON-secret endpoint/account/profile
+  # config appear here — never a secret VALUE, never a committed `.secrets/` path. Guarded
+  # `if: env.AZURE_CLIENT_ID != ''` so a misconfigured environment degrades to an honest unsigned state
+  # rather than a hard failure (mirrors the reference GameDev-MCP-Server deploy_server_executables.yml).
+  sign-windows:
+    name: sign the Windows runtime .exe (Authenticode, environment-protected, custody model B)
+    runs-on: windows-latest
+    # The required-reviewer gate: this job does NOT run until a reviewer approves the `release`
+    # environment deployment (custody model B). The Azure Trusted Signing secrets are environment-scoped.
+    environment: release
+    # Job-level env so the guard (`if: env.AZURE_CLIENT_ID != ''`) can read it — a step's own env: is not
+    # visible to that step's own if:. NEVER printed/logged (the secret masker also redacts them).
+    env:
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      - name: Build the CLI + the shipped headless runtime binary
+        run: |
+          cmake -S src --preset dev
+          cmake --build --preset dev --target context context_runtime_server
+        shell: pwsh
+
+      - name: Stage the runtime .exe to sign
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path publish | Out-Null
+          Copy-Item "src/build/dev/runtime/host/context-runtime-server.exe" "publish/context-runtime-server.exe"
+
+      # Sign the runtime .exe via Azure Trusted Signing (the primary path; RFC-3161 timestamp is applied
+      # by the Action). Guarded: skipped when AZURE_CLIENT_ID is empty, leaving the .exe unsigned but the
+      # job green (the honest unsigned state — never a silent failure). Non-secret config is inline yaml.
+      - name: Sign the Windows runtime .exe (Azure Trusted Signing)
+        if: ${{ env.AZURE_CLIENT_ID != '' }}
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: https://eus.codesigning.azure.net
+          trusted-signing-account-name: ivan-murzak
+          certificate-profile-name: ai-game-dev-cert
+          files-folder: ${{ github.workspace }}/publish
+          files-folder-filter: exe
+          files-folder-recurse: true
+
+      - name: Prove the a10 signing hook closes the loop (context build --sign detects the signature)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ctx = "src/build/dev/cli/context.exe"
+          $exe = "publish/context-runtime-server.exe"
+          $proj = Join-Path $env:RUNNER_TEMP "ctx-sign-proj"
+          if (Test-Path $proj) { Remove-Item -Recurse -Force $proj }
+          New-Item -ItemType Directory -Force -Path (Join-Path $proj "scenes") | Out-Null
+          Set-Content -NoNewline -Encoding ascii -Path (Join-Path $proj "project.json") -Value '{"$schema":"ctx:project","scene":"scenes/main.scene.json","version":1}'
+          Set-Content -NoNewline -Encoding ascii -Path (Join-Path $proj "scenes/main.scene.json") -Value '{"$schema":"ctx:scene","version":1,"entities":[{"id":"aaaa0000aaaa0001","name":"Camera","components":{"camera":{"fov":1.0}}}]}'
+          & $ctx build --target windows --flavor server --project $proj --out (Join-Path $proj "build/server.pack") --runtime $exe --sign | Tee-Object -FilePath (Join-Path $proj "envelope.json") | Out-Null
+          $d = (Get-Content (Join-Path $proj "envelope.json") -Raw | ConvertFrom-Json).data
+          Write-Host "signing report: $($d.signing | ConvertTo-Json -Compress)"
+          if ('${{ env.AZURE_CLIENT_ID }}' -ne '') {
+            # Signing ran -> the a10 hook MUST detect the embedded Authenticode signature.
+            if ($d.signing.state -ne "signed") { throw "signing ran but the a10 hook reported state '$($d.signing.state)', expected 'signed'" }
+            "### a10 Windows Authenticode signing OK" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "- signed the real shipped runtime .exe via Azure Trusted Signing (custody model B, environment-protected)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "- the a10 signing hook (context build --sign) detected the embedded signature -> state 'signed'" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          } else {
+            # No signing identity -> the honest never-silent unsigned state (the guarded skip path).
+            if ($d.signing.state -ne "unsigned") { throw "no signing identity but state was '$($d.signing.state)', expected 'unsigned'" }
+            "### a10 signing dry-run: AZURE_CLIENT_ID empty -> unsigned (honest, never silent)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          }
+
+      - name: Upload the (signed) Windows runtime .exe
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-sign-windows-runtime
+          path: publish/context-runtime-server.exe
+          if-no-files-found: error
+          retention-days: 7

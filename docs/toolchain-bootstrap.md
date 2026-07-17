@@ -103,13 +103,17 @@ For the v1 desktop-signing legs, `context doctor` enumerates the signing prerequ
 **presence / reachability only, NEVER a secret, key, or credential value**:
 
 - **Windows** → **Authenticode** identity configured (Azure Artifact Signing — the GA rename of Azure
-  Trusted Signing — or a developer-supplied cert). Signing does not grant instant SmartScreen
-  reputation.
+  Trusted Signing — or a developer-supplied cert). Since **a10**, `context doctor --target windows`
+  reports this as **`configured`** vs **`absent`** from a real, presence-only host check: an Authenticode
+  signing identity is "configured" when the Azure Trusted Signing service principal (`AZURE_CLIENT_ID`,
+  the primary path) OR a developer-supplied identity (`CONTEXT_SIGNING_IDENTITY`, the fallback) is present
+  in the environment. **Presence only — the doctor reads no secret VALUE.** Signing does not grant instant
+  SmartScreen reputation (see [`export-adapters.md`](export-adapters.md) § SmartScreen).
 - **macOS** → **Developer ID** signing identity + **notarytool** credentials reachable
-  (hardened-runtime signing + notarization + stapling). See [`signing.md`](signing.md).
+  (hardened-runtime signing + notarization + stapling). See [`signing.md`](signing.md). *(No presence
+  probe yet — reported `unknown` on the real host until the a13 macOS leg wires one.)*
 
 These are **ship-time** prerequisites, not build blockers, so an absent one is an **advisory**
-`doctor.signing_prereq_absent` warning. *(v1 enumerates the requirement + a remediation pointer and
-reports `unknown` on the real host — a cert-store / notary-creds reachability check that surfaces no
-secret value is a documented R-BUILD-008 seam; the diagnosis core fully supports the
-configured/absent/unknown verdicts, exercised by the corpus fixtures.)*
+`doctor.signing_prereq_absent` warning. The diagnosis core supports the configured/absent/unknown
+verdicts (exercised by the corpus fixtures); the CLI supplies the Windows Authenticode presence probe
+(a10) and leaves macOS `unknown` (a13).

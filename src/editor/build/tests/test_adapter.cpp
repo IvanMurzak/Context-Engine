@@ -1,7 +1,9 @@
-// build-test_adapter (M8 task a06) — the pure export-adapter plan + launcher + manifest generators.
-// Coverage (R-QA-013 happy + edge): the two real Linux flavors (desktop render-present / server render-
-// absent) plan a correct tarball layout; unsupported targets/flavors plan the honest stub; the launcher
-// boots relative to its own dir + forwards args; the manifest is deterministic machine-readable JSON.
+// build-test_adapter (M8 tasks a06 + a10) — the pure export-adapter plan + launcher + manifest
+// generators. Coverage (R-QA-013 happy + edge): the Linux flavors (desktop render-present / server
+// render-absent) AND the a10 Windows flavors (`.exe` binary, launch.cmd batch launcher, requires_signing)
+// plan a correct tarball layout; unsupported targets/flavors plan the honest stub; the launcher boots
+// relative to its own dir + forwards args (posix launch.sh / windows launch.cmd); the manifest is
+// deterministic machine-readable JSON carrying requiresSigning.
 
 #include "context/editor/build/adapter.h"
 
@@ -53,16 +55,77 @@ int main()
         CHECK(p.layout[0].archive_path == "bin/context-runtime-server");
     }
 
+    // --- Windows DESKTOP (a10): .exe binary, launch.cmd, requires_signing, render present ------------
+    {
+        const build::AdapterPlan p = build::plan_adapter("windows", "desktop", "game.pack");
+        CHECK(p.supported);
+        CHECK(p.target == "windows");
+        CHECK(p.flavor == "desktop");
+        CHECK(p.render_present);
+        CHECK(p.requires_signing); // windows ships an Authenticode-signed .exe (R-SEC-003)
+        CHECK(p.runtime_binary == "context-runtime.exe");
+        CHECK(p.launcher_kind == build::LauncherKind::WindowsCmd);
+        CHECK(p.launcher_name == "launch.cmd");
+        CHECK(p.layout.size() == 4);
+        CHECK(p.layout[0].archive_path == "bin/context-runtime.exe"); // forward-slash archive path
+        CHECK(p.layout[0].role == "runtime");
+        CHECK(p.layout[2].archive_path == "launch.cmd");
+        CHECK(p.layout[3].archive_path == "context.build.json");
+    }
+
+    // --- Windows SERVER/headless (a10): .exe server binary, render absent, still signing-required -----
+    {
+        const build::AdapterPlan p = build::plan_adapter("windows", "server", "");
+        CHECK(p.supported);
+        CHECK(p.flavor == "server");
+        CHECK(!p.render_present);
+        CHECK(p.requires_signing);
+        CHECK(p.runtime_binary == "context-runtime-server.exe");
+        CHECK(p.pack_name == "game.pack"); // default when empty
+        CHECK(p.layout[0].archive_path == "bin/context-runtime-server.exe");
+    }
+
+    // --- Linux requires NO signing (a06) — the signing axis is Windows-only here ----------------------
+    {
+        const build::AdapterPlan p = build::plan_adapter("linux", "desktop", "game.pack");
+        CHECK(!p.requires_signing);
+        CHECK(p.launcher_kind == build::LauncherKind::PosixSh);
+    }
+
     // --- unsupported target / flavor: the honest stub (R-BUILD-007) ----------------------------------
     {
-        const build::AdapterPlan win = build::plan_adapter("windows", "desktop", "game.pack");
-        CHECK(!win.supported);
-        CHECK(win.layout.empty());
-        CHECK(build::render_launcher(win).empty());
-        CHECK(build::render_manifest(win, 1, 2, 3).empty());
+        const build::AdapterPlan mac = build::plan_adapter("macos", "desktop", "game.pack");
+        CHECK(!mac.supported);
+        CHECK(mac.layout.empty());
+        CHECK(build::render_launcher(mac).empty());
+        CHECK(build::render_manifest(mac, 1, 2, 3).empty());
 
-        const build::AdapterPlan bad_flavor = build::plan_adapter("linux", "console", "game.pack");
+        const build::AdapterPlan web = build::plan_adapter("web", "desktop", "game.pack");
+        CHECK(!web.supported);
+
+        const build::AdapterPlan bad_flavor = build::plan_adapter("windows", "console", "game.pack");
         CHECK(!bad_flavor.supported);
+    }
+
+    // --- Windows launcher: a launch.cmd batch that boots relative to %~dp0 + forwards args ------------
+    {
+        const build::AdapterPlan p = build::plan_adapter("windows", "desktop", "game.pack");
+        const std::string cmd = build::render_launcher(p);
+        CHECK(contains(cmd, "@echo off"));
+        CHECK(contains(cmd, "\"%~dp0bin\\context-runtime.exe\" --pack \"%~dp0content\\game.pack\" %*"));
+    }
+
+    // --- Windows manifest: requiresSigning is true; Linux manifest carries it false ------------------
+    {
+        const build::AdapterPlan win = build::plan_adapter("windows", "server", "game.pack");
+        const std::string mw = build::render_manifest(win, 1, 2, 3);
+        CHECK(contains(mw, "\"target\": \"windows\""));
+        CHECK(contains(mw, "\"runtimeBinary\": \"bin/context-runtime-server.exe\""));
+        CHECK(contains(mw, "\"launcher\": \"launch.cmd\""));
+        CHECK(contains(mw, "\"requiresSigning\": true"));
+
+        const build::AdapterPlan lin = build::plan_adapter("linux", "server", "game.pack");
+        CHECK(contains(build::render_manifest(lin, 1, 2, 3), "\"requiresSigning\": false"));
     }
 
     CHECK(build::is_known_flavor("desktop"));

@@ -14,7 +14,9 @@
 #include "context/editor/import/platform_profile.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -43,6 +45,22 @@ namespace
     if (it == flags.end())
         return std::nullopt;
     return it->second;
+}
+
+// True when the environment variable `name` is set to a NON-EMPTY value. PRESENCE ONLY — the VALUE is
+// never read out, logged, or returned (R-BUILD-008: the doctor never surfaces a secret/credential). MSVC
+// rejects std::getenv as C4996 under /W4 /WX, so the _MSC_VER branch uses getenv_s (its length-only form
+// touches no value); the local MinGW/GCC gate + the Clang CI legs compile the std::getenv branch, so the
+// branch the local gate exercises is the standard one.
+[[nodiscard]] bool env_present(const char* name)
+{
+#if defined(_MSC_VER)
+    std::size_t len = 0;
+    return ::getenv_s(&len, nullptr, 0, name) == 0 && len > 0;
+#else
+    const char* value = std::getenv(name);
+    return value != nullptr && value[0] != '\0';
+#endif
 }
 
 // This host's native build target (the one a plain `context doctor` validates). Derived from the ONE
@@ -387,9 +405,24 @@ Envelope run_doctor(const std::map<std::string, std::string>& flags)
     probe.filesync.watch_limit = read_watch_limit();
     probe.filesync.fd_limit = -1; // v1: the open-fd cap is a documented probe gap (unknown)
 
-    // Signing prerequisites: the core ENUMERATES them from the requested targets; v1 supplies no presence
-    // probe (a cert-store / notary-creds reachability check without surfacing a secret value is a
-    // documented R-BUILD-008 seam), so each is reported "unknown" with a remediation pointer.
+    // Signing prerequisites (R-BUILD-005 / R-BUILD-008, a10): a PRESENCE-ONLY probe per requested
+    // target's requirement. For Windows Authenticode, "configured" = a signing identity is present in the
+    // environment — the Azure Trusted Signing service principal (AZURE_CLIENT_ID, the primary path) OR a
+    // developer-supplied Authenticode identity (CONTEXT_SIGNING_IDENTITY, the fallback). PRESENCE ONLY:
+    // env_present reads no secret VALUE, so the doctor reports "configured"/"absent" without ever
+    // surfacing a credential. macOS notarization has no v1 probe here (a13 scope), so it stays "unknown".
+    for (const std::string& target : targets)
+        for (const std::string& requirement : build::signing_requirements(target))
+        {
+            if (requirement == "authenticode")
+            {
+                const bool configured =
+                    env_present("AZURE_CLIENT_ID") || env_present("CONTEXT_SIGNING_IDENTITY");
+                probe.signing.push_back(build::SigningProbe{target, requirement, configured,
+                                                            /*known=*/true});
+            }
+            // else: no v1 presence probe for this requirement — the core reports it "unknown".
+        }
 
     const build::DoctorReport report = build::diagnose(targets, manifest, probe);
     const bool fetch_offered = flags.find("fetch") != flags.end();

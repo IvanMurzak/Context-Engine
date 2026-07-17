@@ -7,6 +7,7 @@
 #include "context/editor/build/adapter.h"
 #include "context/editor/build/build_errors.h"
 #include "context/editor/build/build_orchestrator.h"
+#include "context/editor/build/signing.h"
 #include "context/editor/build/toolchain_manifest.h"
 #include "context/editor/compose/flatten.h"
 #include "context/editor/compose/scene_model.h"
@@ -160,6 +161,7 @@ namespace subprocess = context::common::subprocess;
     if (!plan.supported)
         return a;
     a.set("renderPresent", Json(plan.render_present));
+    a.set("requiresSigning", Json(plan.requires_signing)); // windows Authenticode (a10); false on linux
     a.set("runtimeBinary", Json(plan.runtime_binary));
     a.set("deterministicModuloLink", Json(true));
     Json layout = Json::array();
@@ -174,9 +176,58 @@ namespace subprocess = context::common::subprocess;
     return a;
 }
 
-// Assemble the runnable artifact tarball (bin/<runtime> + content/<pack> + launch.sh + manifest) via
-// the deterministic ustar writer (pkg::tar_write). Reports emitted true/false + a reason — never a
-// silent skip. NB: tar_write writes mode 0644; a consumer extracting the tarball must `chmod +x` the
+// The machine-readable signing report (a10). For a target that requires code-signing (Windows
+// Authenticode, R-SEC-003) `context build --sign` folds this into the envelope: the plan (method /
+// primary=Azure Trusted Signing / fallback=developer cert / mandatory timestamp) plus the OBSERVED
+// state of the shipped runtime binary — "signed" when it carries an Authenticode signature, else
+// "unsigned" (an EXPLICIT, never-silent WARNING with the build.artifact_unsigned code). No secret value
+// ever appears here; the presence check is a pure PE parse of the runtime binary bytes.
+[[nodiscard]] Json signing_json(const build::SigningReport& r)
+{
+    Json s = Json::object();
+    s.set("required", Json(r.required));
+    s.set("requested", Json(r.requested));
+    s.set("state", Json(r.state));
+    s.set("signed", Json(r.signed_));
+    if (r.required)
+    {
+        s.set("method", Json(r.method));
+        s.set("tool", Json(r.tool));
+        s.set("primary", Json(r.primary));
+        s.set("fallback", Json(r.fallback));
+        s.set("timestampRequired", Json(r.timestamp_required));
+    }
+    if (!r.code.empty())
+        s.set("code", Json(r.code));
+    if (!r.warning.empty())
+        s.set("warning", Json(r.warning));
+    return s;
+}
+
+// Compute the signing report for `--sign`: plan the target's signing requirement, and for a required
+// target read the shipped runtime binary (--runtime) and detect whether it carries an Authenticode
+// signature (a pure PE parse, no signtool). A missing/unreadable runtime for a required target is a
+// fail-closed "unsigned" (binary_available=false). Total — never throws.
+[[nodiscard]] build::SigningReport eval_signing(const std::string& target,
+                                                const std::optional<std::string>& runtime)
+{
+    const build::SigningPlan plan = build::plan_signing(target);
+    build::SigningInputs in;
+    in.requested = true; // this is only called when --sign was passed
+    if (plan.required)
+    {
+        std::string runtime_bytes;
+        in.binary_available = runtime.has_value() && !runtime->empty() &&
+                              read_file(fs::path(*runtime), runtime_bytes);
+        in.artifact_signed =
+            in.binary_available && build::pe_has_authenticode_signature(runtime_bytes);
+    }
+    return build::evaluate_signing(plan, in);
+}
+
+// Assemble the runnable artifact tarball (bin/<runtime> + content/<pack> + launch.sh|launch.cmd +
+// manifest) via the deterministic ustar writer (pkg::tar_write). Reports emitted true/false + a reason —
+// never a silent skip. NB: tar_write writes mode 0644; a consumer extracting the tarball must `chmod +x` the
 // runtime binary + launcher before running (documented in the manifest / README — the exec-bit is a
 // tracked tar_write follow-up, like gzip).
 [[nodiscard]] Json emit_artifact(const build::AdapterPlan& plan, const std::string& pack_bytes,
@@ -457,6 +508,19 @@ Envelope run_build(const std::map<std::string, std::string>& flags)
                  emit_artifact(s.adapter, result.pack_bytes, s.engine_version, s.generation,
                                s.pack_hash, flag(flags, "runtime"), *emit_path));
 
+    // --sign (a10, R-SEC-003): the Authenticode signing hook. Fold the machine-readable signing report
+    // (plan + observed state of the shipped runtime binary) into the envelope. For a signing-required
+    // target (Windows) whose runtime binary is NOT signed, this is an EXPLICIT never-silent WARNING
+    // (data.signing.state == "unsigned", the build.artifact_unsigned code, AND an envelope warning) —
+    // NOT a build failure (the artifact is produced; it just needs signing before it ships).
+    std::string signing_warning;
+    if (flags.find("sign") != flags.end())
+    {
+        const build::SigningReport report = eval_signing(target, flag(flags, "runtime"));
+        data.set("signing", signing_json(report));
+        signing_warning = report.warning; // "" unless required-but-unsigned
+    }
+
     // --smoke (R-BUILD-009): launch the produced artifact against the shipped runtime binary, step N
     // fixed ticks, and fold the boot/state signal into the envelope. A target that cannot be smoke-run
     // (no adapter, no --runtime, or nothing written) declares that machine-readably rather than skipping.
@@ -486,7 +550,12 @@ Envelope run_build(const std::map<std::string, std::string>& flags)
 
     // A build mutates no authored file, so the envelope's generationAfter (the derived-world generation
     // a WRITE lands in) is 0; the build's own content generation is reported in data above.
-    return Envelope::success(std::move(data), 0);
+    Envelope env = Envelope::success(std::move(data), 0);
+    // The signing hook's never-silent warning: an unsigned artifact for a signing-required target
+    // surfaces in the envelope warnings[] too (not only data.signing) — a legible, top-level signal.
+    if (!signing_warning.empty())
+        env.add_warning(signing_warning);
+    return env;
 }
 
 } // namespace context::cli

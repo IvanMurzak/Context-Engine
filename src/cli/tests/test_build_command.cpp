@@ -17,6 +17,7 @@
 #include "context/editor/pack/pack_reader.h"
 #include "cli_test.h"
 
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -78,6 +79,29 @@ std::string read_bytes(const fs::path& p)
     ss << in.rdbuf();
     return ss.str();
 }
+
+// Build a minimal PE/COFF image whose Security data-directory (index 4) Size is non-zero iff `signed_`
+// — the exact bit the a10 signing hook (pe_has_authenticode_signature) keys off. Written to `path` so a
+// CLI `--sign` run can inspect it as the shipped runtime binary. PE32 layout suffices for the test.
+void write_pe(const fs::path& path, bool signed_)
+{
+    std::string b(0x100, '\0');
+    b[0] = 'M';
+    b[1] = 'Z';
+    const auto put_le = [&b](std::size_t off, unsigned long value, std::size_t n) {
+        for (std::size_t i = 0; i < n; ++i)
+            b[off + i] = static_cast<char>((value >> (8 * i)) & 0xFF);
+    };
+    put_le(0x3C, 0x40, 4); // e_lfanew
+    b[0x40] = 'P';
+    b[0x41] = 'E';
+    const std::size_t opt_off = 0x40 + 4 + 20;
+    put_le(opt_off, 0x010b, 2);     // PE32 magic
+    put_le(opt_off + 92, 16, 4);    // NumberOfRvaAndSizes
+    const std::size_t sec = opt_off + 96 + 4 * 8; // Security dir entry (index 4)
+    put_le(sec + 4, signed_ ? 0x2A0 : 0, 4);      // Size — non-zero ⇒ signature present
+    write_file(path, b);
+}
 } // namespace
 
 int main()
@@ -124,6 +148,85 @@ int main()
         CHECK(read_bytes(out) == first_pack);
         CHECK(again.data().at("generation").as_string() == data.at("generation").as_string());
 
+        remove_quiet(dir);
+    }
+
+    // --- a10 Windows adapter: supported, .exe binary, requiresSigning in the envelope ----------------
+    {
+        const fs::path dir = make_project("win");
+        const fs::path out = dir / "build" / "game.pack";
+        const Envelope e = run_build({{"target", "windows"},
+                                      {"flavor", "server"},
+                                      {"project", dir.string()},
+                                      {"out", out.generic_string()}});
+        CHECK(e.ok());
+        const Json& adapter = e.data().at("adapter");
+        CHECK(adapter.at("supported").as_bool());
+        CHECK(adapter.at("flavor").as_string() == "server");
+        CHECK(!adapter.at("renderPresent").as_bool());
+        CHECK(adapter.at("requiresSigning").as_bool()); // windows requires Authenticode (R-SEC-003)
+        CHECK(adapter.at("runtimeBinary").as_string() == "context-runtime-server.exe");
+        remove_quiet(dir);
+    }
+
+    // --- a10 signing hook (--sign): an UNSIGNED windows runtime is an explicit never-silent WARNING ---
+    {
+        const fs::path dir = make_project("sign-unsigned");
+        const fs::path out = dir / "build" / "game.pack";
+        const fs::path rt = dir / "context-runtime.exe";
+        write_pe(rt, /*signed_=*/false); // a well-formed PE with an EMPTY Certificate Table
+        const Envelope e = run_build({{"target", "windows"},
+                                      {"project", dir.string()},
+                                      {"out", out.generic_string()},
+                                      {"runtime", rt.string()},
+                                      {"sign", ""}});
+        CHECK(e.ok()); // an unsigned artifact is a WARNING, not a build failure
+        const Json& signing = e.data().at("signing");
+        CHECK(signing.at("required").as_bool());
+        CHECK(signing.at("state").as_string() == "unsigned");
+        CHECK(!signing.at("signed").as_bool());
+        CHECK(signing.at("code").as_string() == "build.artifact_unsigned");
+        CHECK(signing.at("primary").as_string() == "azure-trusted-signing");
+        CHECK(signing.at("timestampRequired").as_bool());
+        CHECK(!signing.at("warning").as_string().empty()); // NEVER silent
+        // The warning ALSO surfaces at the envelope top level.
+        CHECK(!e.warnings().empty());
+        remove_quiet(dir);
+    }
+
+    // --- a10 signing hook (--sign): a SIGNED windows runtime reports state "signed", no warning -------
+    {
+        const fs::path dir = make_project("sign-signed");
+        const fs::path out = dir / "build" / "game.pack";
+        const fs::path rt = dir / "context-runtime.exe";
+        write_pe(rt, /*signed_=*/true); // a well-formed PE with a NON-EMPTY Certificate Table
+        const Envelope e = run_build({{"target", "windows"},
+                                      {"project", dir.string()},
+                                      {"out", out.generic_string()},
+                                      {"runtime", rt.string()},
+                                      {"sign", ""}});
+        CHECK(e.ok());
+        const Json& signing = e.data().at("signing");
+        CHECK(signing.at("state").as_string() == "signed");
+        CHECK(signing.at("signed").as_bool());
+        CHECK(!signing.contains("code"));
+        CHECK(e.warnings().empty());
+        remove_quiet(dir);
+    }
+
+    // --- a10 signing hook (--sign) on a NON-signing target reports "not-required", never a warning ----
+    {
+        const fs::path dir = make_project("sign-linux");
+        const fs::path out = dir / "build" / "game.pack";
+        const Envelope e = run_build({{"target", "linux"},
+                                      {"project", dir.string()},
+                                      {"out", out.generic_string()},
+                                      {"sign", ""}});
+        CHECK(e.ok());
+        const Json& signing = e.data().at("signing");
+        CHECK(!signing.at("required").as_bool());
+        CHECK(signing.at("state").as_string() == "not-required");
+        CHECK(e.warnings().empty());
         remove_quiet(dir);
     }
 

@@ -593,5 +593,19 @@ int main()
         CHECK(unknown->origin == "R-BUILD-008");
     }
 
+    // --- a10 build.artifact_unsigned (R-SEC-003) — the Authenticode signing hook's never-silent WARN --
+    // Additive-only new row at the catalog tail (NOT on the frozen v0 baseline — the additive-only check
+    // above still holds). An advisory validation-class warning: a produced artifact for a signing-required
+    // target carries no signature (the build still succeeded). Deterministic (a bare re-run without a
+    // signing identity re-warns). The string is the source-of-truth in src/editor/build/build_errors.h
+    // (context::editor::build::kBuildArtifactUnsignedCode).
+    {
+        const ErrorCode* unsigned_code = find_code("build.artifact_unsigned");
+        CHECK(unsigned_code != nullptr);
+        CHECK(unsigned_code->exit_code == 5);     // validation class (advisory warning)
+        CHECK(unsigned_code->retriable == false); // deterministic — a bare re-run re-warns
+        CHECK(unsigned_code->origin == "R-SEC-003");
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

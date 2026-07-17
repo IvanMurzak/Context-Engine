@@ -552,6 +552,16 @@
       "description": "M8 wedge-target headless SMOKE — the blocking per-PR §6 gate that activates R-BUILD-009 (a06 job, a07 registration). Builds both Linux flavors (desktop = render present; server/headless = render absent), then for EACH proves the ASSEMBLED tarball artifact boots + steps N fixed ticks on a CLEAN host with no dev tree: `context build --smoke --smoke-ticks 16` launches the produced artifact against the shipped runtime binary and the envelope RESULT is asserted (data.smoke.ran && data.smoke.ok && data.smoke.simTick==16 && the adapter/flavor match), then the extracted launch.sh is re-run clean-host, plus the L-5 render-footprint audit (the server binary carries no render payload + is smaller). ubuntu-only (the desktop flavor links only the GPU-free render abstraction, CONTEXT_BUILD_RENDER_WGPU OFF — no GPU). The runtime-host-* in-process/cross-process ctests also ride the 3-OS build job."
     },
     {
+      "id": "windows-export-smoke",
+      "requirement": "R-BUILD-005",
+      "runner_class": "gh-windows-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "windows-export",
+      "description": "M8 a10 Windows export adapter + Authenticode signing hook (R-BUILD-001/005 / R-SEC-003) — the blocking per-PR Windows sibling of linux-export-smoke. Builds both Windows flavors (desktop = render present; server/headless = render absent) as signed-capable .exe binaries, then for EACH proves the ASSEMBLED tarball artifact boots + steps N fixed ticks on a CLEAN host with no dev tree: `context build --target windows --sign --smoke --smoke-ticks 16` and the envelope RESULT is asserted (data.adapter.supported && requiresSigning && data.artifactEmit.emitted && data.smoke.ran && ok && simTick==16), then the extracted launch.cmd batch launcher is re-run clean-host. The a10 SIGNING HOOK is asserted NEVER-SILENT: this per-PR path has no signing secrets, so data.signing.state=='unsigned' + build.artifact_unsigned + a top-level envelope warning (the actual Azure Trusted Signing runs custody-gated in the protected release environment — release-sign.yml sign-windows job). Plus the L-5 render-footprint audit (the server binary carries no render payload + is smaller). Rides the self-hosted MSVC runner for same-repo PRs; a fork PR (no secrets) falls back to GH-hosted windows-latest and stays green, unsigned. No GPU (CONTEXT_BUILD_RENDER_WGPU OFF)."
+    },
+    {
       "id": "determinism-packed-wedge",
       "requirement": "R-BUILD-009",
       "runner_class": "determinism-matrix",
