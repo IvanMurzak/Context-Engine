@@ -1,0 +1,68 @@
+tools/trust-root/allowed_signers
+  s_9284ad4c8de2f4::t_2af7f1b7f0a65f 8-13,15-24
+tools/versioned_fetch.py
+  s_9284ad4c8de2f4::t_839dfc43f81927 1-132
+tools/tests/test_versioned_fetch.py
+  s_9284ad4c8de2f4::t_862f1ea4d076ee 1-179
+src/cli/tests/test_build_command.cpp
+  s_9284ad4c8de2f4::t_ff6ebaddd04378 266-349
+src/editor/contract/src/registry.cpp
+  s_9284ad4c8de2f4::t_e8926ba34b3f1a 685-704
+src/editor/contract/src/error_catalog.cpp
+  s_9284ad4c8de2f4::t_68b52f79112e03 885-888,892-895
+.github/workflows/release-sign.yml
+  s_9284ad4c8de2f4::t_7b6173952108c1 1-100
+docs/signing.md
+  s_9284ad4c8de2f4::t_e40e53d61a41c1 16-21,23,25-30
+  s_9284ad4c8de2f4::t_e31df1ddd7dee8 76-107
+  s_9284ad4c8de2f4::t_9b408cc98a6e5c 139,141-144,151
+  s_9284ad4c8de2f4::t_415f1ff1e0133b 109-116
+  s_f7f7392a09f46e::t_e579f37abfe6a6 108
+tools/tests/test_verify_artifact.py
+  s_9284ad4c8de2f4::t_49a66886fd1858 233,236-238,240-255,258-262,266-267
+src/common/src/verify_signature.cpp
+  s_9284ad4c8de2f4::t_22971425a8df31 1-86
+docs/versioned-install.md
+  s_9284ad4c8de2f4::t_5d1b693eb789ab 54-59
+src/common/CMakeLists.txt
+  s_9284ad4c8de2f4::t_cbb5cb8484adf1 30-44
+  s_9284ad4c8de2f4::t_3905a0481bb3f5 10-11
+src/common/include/context/common/verify_signature.h
+  s_9284ad4c8de2f4::t_848c9726ac9598 1-60
+tools/README.md
+  s_9284ad4c8de2f4::t_f722050d014a02 19-25,29-31
+src/editor/build/include/context/editor/build/build_errors.h
+  s_9284ad4c8de2f4::t_6e37cb53e67aa6 17-20,24-27
+src/common/tests/test_verify_signature.cpp
+  s_9284ad4c8de2f4::t_ed22ad52da06d3 1-126
+src/cli/src/build_command.cpp
+  s_9284ad4c8de2f4::t_7e90e840f815fa 372-380
+  s_9284ad4c8de2f4::t_0949fb9ed13239 35,53-88
+  s_9284ad4c8de2f4::t_fa7d293b8b327e 6
+  s_9284ad4c8de2f4::t_12c3b4fc767fb4 442-450
+  s_9284ad4c8de2f4::t_5dc3b1b5385e01 89-90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "b94232b3a69e2bd64c58b3251611775899e0024c",
+  "prompts": {},
+  "sessions": {
+    "s_9284ad4c8de2f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "64f4c13c-1681-4443-9cc9-81bbde69cd56",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_f7f7392a09f46e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d6d5d57f-6526-4873-9255-59c34d4f8571",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
