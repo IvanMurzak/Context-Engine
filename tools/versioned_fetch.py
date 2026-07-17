@@ -33,7 +33,6 @@ from pathlib import Path
 
 import verify_artifact
 from verify_artifact import (
-    CONFIG_ERROR,
     DEFAULT_IDENTITY,
     DEFAULT_NAMESPACE,
     DEFAULT_TRUST_ROOT,

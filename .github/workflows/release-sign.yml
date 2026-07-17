@@ -51,6 +51,9 @@ jobs:
         env:
           # The production private key — ONLY from the protected environment secret. Never printed.
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          # The dispatch note is passed through the environment (NOT interpolated into the run
+          # script) so a crafted note can never inject shell in a step that holds the signing key.
+          NOTE: ${{ inputs.note }}
         run: |
           set -euo pipefail
           umask 077
@@ -86,13 +89,13 @@ jobs:
           {
             echo "### release-sign dry-run OK"
             echo ""
-            echo "- note: ${{ inputs.note }}"
+            echo "- note: $NOTE"
             echo "- signed a sample artifact with the production key (custody model B, environment-protected)"
             echo "- verified the signature against the pinned trust root (tools/trust-root/allowed_signers)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the signed sample + detached signature
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-sign-sample
           path: signed/
