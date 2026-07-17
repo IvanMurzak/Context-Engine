@@ -11,6 +11,7 @@
 
 #include "context/common/subprocess.h"
 #include "context/editor/build/toolchain_manifest.h"
+#include "context/editor/import/platform_profile.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -28,6 +29,7 @@ namespace context::cli
 using editor::contract::Envelope;
 using editor::contract::Json;
 namespace build = editor::build;
+namespace import = editor::import;
 namespace subprocess = context::common::subprocess;
 namespace fs = std::filesystem;
 
@@ -43,17 +45,13 @@ namespace
     return it->second;
 }
 
-// This host's native build target (the one a plain `context doctor` validates). A trivial per-branch
-// literal — safe under the platform-#if blind spot (each branch is a single return).
+// This host's native build target (the one a plain `context doctor` validates). Derived from the ONE
+// data-driven host-platform seam (import::host_platform_profile) — the build-target ids ARE the
+// import::platform_profiles ids (see toolchain_manifest.h), so this tracks the single source of truth
+// instead of re-deriving the host platform behind a local #if that gets no local CI compile signal.
 std::string host_native_target()
 {
-#if defined(_WIN32)
-    return "windows";
-#elif defined(__APPLE__)
-    return "macos";
-#else
-    return "linux";
-#endif
+    return import::host_platform_profile().id;
 }
 
 // Extract the first dotted numeric version (>= major.minor) from a tool's --version output. "cmake
@@ -229,8 +227,8 @@ std::vector<std::string> parse_targets(const std::string& raw)
             continue;
         const std::string t = tok.substr(b, e - b + 1);
         if (t == "all")
-            for (const char* v : {"windows", "linux", "macos", "web"})
-                add(v);
+            for (const import::PlatformProfile& p : import::platform_profiles()) // the v1 target set
+                add(p.id);
         else
             add(t);
     }
@@ -260,11 +258,11 @@ Json component_json(const build::ComponentFinding& c)
 Json filesync_json(const build::FileSyncFinding& f)
 {
     Json j = Json::object();
-    j.set("projectFileCount", Json(static_cast<std::int64_t>(f.project_file_count)));
-    j.set("worktreeDaemonCount", Json(static_cast<std::int64_t>(f.worktree_daemon_count)));
-    j.set("watchLimit", Json(static_cast<std::int64_t>(f.watch_limit)));
-    j.set("fdLimit", Json(static_cast<std::int64_t>(f.fd_limit)));
-    j.set("requiredWatches", Json(static_cast<std::int64_t>(f.required_watches)));
+    j.set("projectFileCount", Json(f.project_file_count));
+    j.set("worktreeDaemonCount", Json(f.worktree_daemon_count));
+    j.set("watchLimit", Json(f.watch_limit));
+    j.set("fdLimit", Json(f.fd_limit));
+    j.set("requiredWatches", Json(f.required_watches));
     j.set("status", Json(f.status));
     j.set("blocking", Json(f.blocking));
     j.set("code", Json(f.code));
