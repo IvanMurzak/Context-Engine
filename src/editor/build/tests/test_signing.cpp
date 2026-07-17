@@ -156,6 +156,13 @@ int main()
         mz[0] = 'M';
         mz[1] = 'Z';
         CHECK(!build::pe_has_authenticode_signature(mz));
+        // A file-controlled e_lfanew near 0xFFFFFFFF must NOT wrap the pe_off+4 bounds check into an
+        // out-of-range index — a malformed header is simply "unsigned", never an OOB read.
+        std::string huge_lfanew(0x100, '\0');
+        huge_lfanew[0] = 'M';
+        huge_lfanew[1] = 'Z';
+        put_le(huge_lfanew, 0x3C, 0xFFFFFFFEu, 4); // e_lfanew just below UINT32_MAX
+        CHECK(!build::pe_has_authenticode_signature(huge_lfanew));
     }
 
     BUILD_TEST_MAIN_END();

@@ -5,9 +5,13 @@
 #include "context/editor/build/signing.h"
 
 #include "context/editor/build/build_errors.h"
+#include "context/editor/build/doctor.h" // signing_requirements — the shared target→requirement list
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace context::editor::build
 {
@@ -47,9 +51,11 @@ bool pe_has_authenticode_signature(std::string_view pe_bytes)
     std::uint32_t pe_off = 0;
     if (!read_le(pe_bytes, 0x3C, 4, pe_off))
         return false;
-    // "PE\0\0" signature.
-    if (pe_off + 4 > pe_bytes.size() || pe_bytes[pe_off] != 'P' || pe_bytes[pe_off + 1] != 'E' ||
-        pe_bytes[pe_off + 2] != '\0' || pe_bytes[pe_off + 3] != '\0')
+    // "PE\0\0" signature. Widen pe_off to std::size_t BEFORE adding 4: pe_off is a file-controlled
+    // std::uint32_t, so `pe_off + 4` would wrap in 32-bit arithmetic (e_lfanew near 0xFFFFFFFF), pass the
+    // bounds check, then index ~4 GB out of range — the size_t cast keeps the whole read bounds-checked.
+    if (static_cast<std::size_t>(pe_off) + 4 > pe_bytes.size() || pe_bytes[pe_off] != 'P' ||
+        pe_bytes[pe_off + 1] != 'E' || pe_bytes[pe_off + 2] != '\0' || pe_bytes[pe_off + 3] != '\0')
         return false;
 
     // The COFF header is 20 bytes after "PE\0\0"; the optional header follows it.
@@ -96,9 +102,14 @@ SigningPlan plan_signing(std::string_view target)
 {
     SigningPlan plan;
     plan.target = std::string(target);
-    // The v1 code-signing prerequisite: Windows Authenticode. Linux / web / (macOS handled by a13) have
-    // no v1 Authenticode leg here — required stays false (the honest not-required plan).
-    if (target == "windows")
+    // The v1 code-signing prerequisite: Windows Authenticode. Key the required-decision off the SHARED
+    // target→requirement enumeration (signing_requirements, doctor.*) so plan_signing and the doctor
+    // probe cannot drift — a single source of truth for "which targets sign what". The Authenticode-
+    // specific method/tool/primary/fallback fields are filled here. macOS (developer-id-notarization)
+    // is enumerated there but is a13 scope: its requirement is not "authenticode", so required stays
+    // false here (the honest not-required plan), exactly as before.
+    const std::vector<std::string> reqs = signing_requirements(target);
+    if (std::find(reqs.begin(), reqs.end(), kSigningMethodAuthenticode) != reqs.end())
     {
         plan.required = true;
         plan.method = kSigningMethodAuthenticode;
