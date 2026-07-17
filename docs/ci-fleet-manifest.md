@@ -65,6 +65,8 @@ Every gate carries exactly one written red-X policy:
 | `sanitize-tsan` | L-38 | gh-ubuntu-shared | per-PR | blocking | `sanitize` |
 | `bench-baseline-10k` | R-FILE-011 | gh-ubuntu-shared | per-PR | **advisory** | `bench-baseline` |
 | `bench-attach-10k` | R-FILE-011 | gh-ubuntu-shared | per-PR | blocking | `bench-attach-10k` |
+| `build-time-proxy-measure` | R-BUILD-006 | gh-ubuntu-shared | per-PR | blocking | `build-time-bench` |
+| `build-time-proxy-gate` | R-BUILD-006 | gh-ubuntu-shared | per-PR | **advisory** | `build-time-bench` |
 | `spike-wasm-interpreters` | R-LANG-003 | gh-ubuntu-shared | per-PR | blocking | `spike-wasm` |
 | `spike-wasm-wamr-aot` | R-LANG-003 | gh-ubuntu-shared | per-PR | **quarantine** (#24) | `spike-wasm` |
 | `spike-webgpu-native` | R-REND-005 | gh-ubuntu-shared | per-PR | blocking | `spike-webgpu` |
@@ -87,6 +89,7 @@ Every gate carries exactly one written red-X policy:
 | `perf-filesync-attach-100k` | R-FILE-011 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
 | `bench-query-p99` | R-BRIDGE-008 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
 | `bench-sustained-backpressure` | R-FILE-013 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
+| `build-time-budget` | R-BUILD-006 | perf-linux-bare-metal | nightly | **advisory** ⏳ | — |
 | `bench-dense-reference` | R-FILE-011 | gh-ubuntu-shared | nightly | **advisory** | `bench-100k-nightly` |
 | `bench-multiworktree-contention` | R-FILE-010 | n-daemons-host | nightly | **advisory** ⏳ | `bench-100k-nightly` |
 | `determinism-state-hash` | R-QA-005 | determinism-matrix | per-PR | **advisory** ⏳ | — |
@@ -146,6 +149,19 @@ benchmark + the dense-reference, session-query-p99, sustained-backpressure, and 
 scenarios as an **advisory trend** on `gh-ubuntu-shared`; the nightly gates' `runner_class`
 columns name the class that will make each a real floor once provisioned (never silently green).
 The normative budget allocation lives in [`latency-budget-table.md`](latency-budget-table.md).
+
+**The R-BUILD-006 build-time budgets (M8 a12):** the `build-time-bench` per-PR job (`build_time.py
+measure` → `gate`) times the a05/a06 build pipeline under the same R-QA-009 discipline
+(median-of-5, dispersion, a ±10% band, archived time series). The from-source C++ compile (amortized
+by the L-28 / sccache cache) is budgeted SEPARATELY from the recurring per-build cache-exempt costs —
+the a03 per-platform transcode and the a05 LTO/DCE final link. The MEASURE step blocks (the harness
+runs green + archives); the budget GATE is advisory (`continue-on-error`) until the perf-isolated
+`perf-linux-bare-metal` runner class is provisioned — mirroring the perf-gate pattern above. The WARM
+remote-cache-assisted path is the per-PR default; the fully COLD worst case + the committed budget
+table are the nightly `build-time-budget` floor. WASM-AOT + JS-VM bytecode-precompile are v2-with-iOS
+(tracked, not budgeted). The normative allocation lives in
+[`build-time-budget-table.md`](build-time-budget-table.md); the machine-readable copy is
+`bench/build-time-budget.json`.
 
 ## How CI consumes it (the R-QA-012 tie)
 

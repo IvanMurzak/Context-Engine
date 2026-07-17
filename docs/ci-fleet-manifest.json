@@ -770,6 +770,36 @@
       "red_x_policy": "advisory",
       "ci_job_id": "bench-100k-nightly",
       "description": "N-daemons-on-one-box composed watcher/fd/index-memory/cache budget scenario (the harness `daemons` scenario: N real `context daemon` processes + N `context attach --reconcile` clients over the real wire). Runs nightly as concurrent boot/attach/reconcile trend on gh-ubuntu-shared; the composed watch-handle/fd budgets gain fidelity when the native watcher lands and this runner class is provisioned. Advisory until then."
+    },
+    {
+      "id": "build-time-proxy-measure",
+      "requirement": "R-BUILD-006",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build-time-bench",
+      "description": "R-BUILD-006 committed build-time budgets, per-PR benchmark MEASURE step (M8 a12): bench/build_time.py measure runs the WARM remote-cache-assisted build path (the R-BUILD-006 default — hermetic CI seeds a trusted warm cache so cold-CI is not the default) under the R-QA-009 methodology (median-of-5, dispersion recorded, results archived as a time series). Times the a05/a06 build pipeline in three separately-budgeted lines: the from-source C++ compile (amortized by the L-28 / sccache cache) vs the RECURRING per-build cache-exempt costs — the a03 per-platform transcode and the a05 LTO/DCE final link (the lto-link phase rm's the runtime binary before each timed run to isolate the real relink). The MEASURE step is BLOCKING: the harness must run green end to end + archive the series. The floor NUMBERS are enforced by the sibling advisory gate — a shared runner is not the named perf-isolated perf-linux-bare-metal proxy device (docs/build-time-budget-table.md)."
+    },
+    {
+      "id": "build-time-proxy-gate",
+      "requirement": "R-BUILD-006",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "advisory",
+      "ci_job_id": "build-time-bench",
+      "description": "R-BUILD-006 build-time budget ENFORCEMENT on the per-PR proxy (bench/build_time.py gate, +/-10% band vs bench/build-time-budget.json): continue-on-error until perf-linux-bare-metal is provisioned (ops1, an open owner hardware gate) — reported + archived, never silently green, never blocking on a number a shared GH runner cannot honestly measure (R-QA-012 advisory-until-provisioned; docs/perf-gate-methodology.md rule 1). The blocking flip is a FUTURE step: set the runner class provisioned + drop continue-on-error."
+    },
+    {
+      "id": "build-time-budget",
+      "requirement": "R-BUILD-006",
+      "runner_class": "perf-linux-bare-metal",
+      "build_flavor": "dev",
+      "tier": "nightly",
+      "red_x_policy": "advisory",
+      "ci_job_id": null,
+      "description": "The committed R-BUILD-006 build-time budget table (bench/build-time-budget.json: from-source-compile warm+cold, a03 transcode, a05 lto-link; WASM-AOT + JS-VM bytecode-precompile are v2-with-iOS, tracked but not budgeted). The fully COLD from-source build is the tracked worst case; the WARM path is the per-PR proxy default. Becomes a real blocking nightly floor when its named perf-isolated runner class (perf-linux-bare-metal) is provisioned; until then the per-PR proxy pair above keeps the harness + numbers visible (advisory-until-provisioned). Normative allocation + rationale: docs/build-time-budget-table.md."
     }
   ]
 }

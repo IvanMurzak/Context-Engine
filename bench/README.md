@@ -18,11 +18,19 @@ The durable scale instrument behind **R-FILE-011** (100k-file envelope), **R-FIL
   `docs/latency-budget-table.md`.
 - **`perf_gate.py`** — the R-QA-009 rolling-baseline ± band gate (advisory until the
   perf box is provisioned).
+- **`build_time.py`** — the **R-BUILD-006 build-time budget** harness (M8 a12):
+  `measure` times the a05/a06 build pipeline (median-of-5, dispersion) and `gate`
+  classifies each median against `bench/build-time-budget.json` within a ±10% band
+  (advisory until the perf box is provisioned), archiving a time series. Budgets the
+  from-source C++ compile (amortized by the L-28 cache; warm default / cold worst case)
+  SEPARATELY from the recurring per-build cache-exempt costs — the a03 transcode and the
+  a05 LTO/DCE link. Normative allocation: `docs/build-time-budget-table.md`.
 
 Corpora and results are **generated, never committed** (`bench/corpora/`,
 `bench/results/` are gitignored). CI archives results as workflow artifacts: the
-`bench-baseline` (M0 file-format baseline) and `bench-attach-10k` (REAL-pipeline per-PR
-proxy, blocking job / advisory numbers) jobs in `.github/workflows/ci.yml`, and the
+`bench-baseline` (M0 file-format baseline), `bench-attach-10k` (REAL-pipeline per-PR
+proxy, blocking job / advisory numbers), and `build-time-bench` (R-BUILD-006 build-time
+budgets, blocking measure / advisory gate) jobs in `.github/workflows/ci.yml`, and the
 nightly 100k + scenario sweep in `.github/workflows/bench-nightly.yml` (advisory trend
 — see `docs/ci-fleet-manifest.json` for the runner-class honesty contract).
 
