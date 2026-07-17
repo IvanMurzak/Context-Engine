@@ -1,24 +1,32 @@
-# Export adapters (M8 a06 + a10)
+# Export adapters (M8 a06 + a10 + a11)
 
 How `context build` turns a project into a **runnable packed build**. This doc records the *implemented*
 adapter set and its artifact contract; the normative design is R-BUILD-001/002/005/009 + R-HEAD-001/002
-+ R-SEC-003 + L-5 in the owner's `engine-design/` records.
++ R-SEC-003 + R-ASSET-003/005 + L-5 + L-56 in the owner's `engine-design/` records.
 
 ## The adapter set (v1, landing incrementally)
 
 a06 shipped the **first two real export adapters** (Linux); **a10** adds the **Windows** pair with a
-signed `.exe` and a batch launcher:
+signed `.exe` and a batch launcher; **a11** adds the **web** target — an Emscripten/emdawnwebgpu WebGPU
+bundle that streams its pack in the browser:
 
-| `--target` | `--flavor` | shipped binary | render subsystem | code-signing |
+| `--target` | `--flavor` | shipped runtime | render subsystem | code-signing |
 |---|---|---|---|---|
 | `linux` | `desktop` (default) | `context-runtime` | present | — (none) |
 | `linux` | `server` | `context-runtime-server` | **absent** (L-5 DCE'd — headless) | — (none) |
 | `windows` | `desktop` (default) | `context-runtime.exe` | present | **Authenticode** (a10) |
 | `windows` | `server` | `context-runtime-server.exe` | **absent** (L-5 DCE'd — headless) | **Authenticode** (a10) |
+| `web` | `desktop` only | `context-runtime.wasm` + `context-runtime.js` | present (WebGPU, L-56) | — (none) |
 
-Every remaining target (`macos` / `web`) still reports the **honest adapter stub**
+The remaining target (`macos`) still reports the **honest adapter stub**
 (`adapter.supported=false` in the envelope) — the pack is real, but no runnable adapter exists for it
-yet (R-BUILD-007: reported, never faked). Those adapters land later in M8.
+yet (R-BUILD-007: reported, never faked). It lands later in M8.
+
+**Web differs from the native targets** (a11): it is **desktop-only** (a headless/server web build is
+nonsensical — the browser is inherently render-present), its runtime is the Emscripten **`.wasm` module
++ `.js` glue** pair (not one binary), its launcher is a static **`index.html`** shell (not an executable
+script), and its pack is **streamed over HTTP** by the browser rather than read from a local file. No v1
+code-signing (unlike the Windows Authenticode axis). See § Web export below.
 
 **Windows differs from Linux in three ways** (a10): the shipped binary carries a `.exe` suffix; the
 launcher is a `launch.cmd` batch file (cmd.exe cannot run the POSIX `launch.sh`); and the runtime `.exe`
@@ -128,6 +136,86 @@ building reputation — but Microsoft SmartScreen's Application Reputation is ea
 volume. A freshly-signed binary from a new publisher can still show the blue SmartScreen prompt until
 reputation accrues; that is expected and separate from signing. The honest signal that signing worked is
 the "Publisher: Ivan Murzak" line in the UAC / properties dialog, not the absence of a SmartScreen prompt.
+
+## Web export (M8 a11 — R-BUILD-001 / L-56 / R-ASSET-003 / R-ASSET-005)
+
+`context build --target web --emit-artifact <bundle.tar> --runtime <wasm> --runtime-loader <js>`
+assembles the **web bundle** — a set of static files served over HTTP (WebGPU-only, L-56; the browser
+is inherently render-present, so web is **desktop-flavor only**):
+
+```
+bin/context-runtime.wasm   the Emscripten/emdawnwebgpu RuntimeKernel module (the --runtime file)
+bin/context-runtime.js     its Emscripten JS glue (the --runtime-loader file)
+index.html                 a static shell: boots the module (canvas + `--pack content/game.pack`)
+content/game.pack          the v1 chunked pack — STREAMED by the browser over HTTP range requests
+context.build.json         the manifest (adds `runtimeLoader`; renderPresent true, requiresSigning false)
+```
+
+`index.html` references everything **page-relative**, so the bundle serves from any static host with no
+absolute paths baked in. `context build --smoke` for web reports `ran:false` (the web build boots in a
+browser, not against the native runtime — its smoke gate is the `render (web, emscripten)` CI job, not a
+local launch).
+
+### Chunked pack streaming within a memory budget (R-ASSET-003 / R-ASSET-005 — the Web conditional-MUST)
+
+The shipped pack is **streamed**, not bulk-loaded: `src/runtime/content/web_pack_stream.h`
+(`WebPackStreamer`) fetches the pack over a `ChunkFetcher` seam — **HTTP range requests** in the browser
+(`fetch()` with a `Range` header), a slice-a-buffer fetcher in the native gate — assembles it, feeds the
+frozen v1 bytes to the a02 `PackContentSource`, and materializes only the **resident** units through
+`RuntimeContentLoader`, evicting oldest-first so the **resident working set stays within a configured
+memory budget**. The archive is held once; the budget-bounded working set is far smaller (a02's design:
+the memory-budget scheduler holds a working set smaller than the archive). The streamer is portable C++
+(native + Emscripten), so the chunked path is **locally verified** by the `runtime-content-test_web_pack_stream`
+ctest (reassembles byte-exact + holds the budget + fails closed on transport/parse/budget errors) even
+though emcc is CI-only — the same split as `src/render/web` (CI-only `web_main.cpp` + native
+`render-web-parity`).
+
+### emdawnwebgpu constraints (the M0 spike, RE-TESTED for a11)
+
+The web runtime is compiled with Dawn's maintained `webgpu.h` binding (`--use-port=emdawnwebgpu`,
+`webgpu.h` → `navigator.gpu`; the L-56 web path, **not** a Dawn cross-compile) under these constraints
+(shared with `src/render/web`, `spikes/webgpu/FINDINGS.md`):
+
+- `--use-port=emdawnwebgpu` — Dawn's maintained binding; the emsdk **pins** the Dawn package it fetches
+  for a given emsdk version (a SHA-pinned port). **Pinning the emdawnwebgpu version = pinning the emsdk
+  version** (the render-web CI job installs emsdk, the single pin point) — the `context-web-export`
+  target and `context-render-web` share it, so they never diverge.
+- `-sASYNCIFY` — lets the synchronous pump + the HTTP-range fetch/poll loops yield to the browser event
+  loop so WebGPU + `fetch()` promises resolve.
+- **Fixed-memory heap** (`-sINITIAL_MEMORY`, sized up front) and **deliberately NO
+  `-sALLOW_MEMORY_GROWTH`**.
+
+  **`-sALLOW_MEMORY_GROWTH` re-test (a11, R6 finding 20).** The M0 spike measured that memory growth
+  makes the wasm heap a *resizable* `ArrayBuffer`, and emdawnwebgpu's string glue (`TextDecoder.decode`
+  on a heap view) throws on a resizable buffer → **WebGPU device acquisition dies**. a11 **re-tested the
+  constraint against the then-current emdawnwebgpu**: it **still reproduces** — the `context-web-export`
+  build keeps a fixed 128 MiB heap (`context-render-web` keeps 64 MiB), NO growth. The upstream cause is
+  the `TextDecoder`-on-a-detached/resizable-`ArrayBuffer` interaction in the emdawnwebgpu JS glue; it is
+  tracked upstream at **https://github.com/emscripten-core/emscripten/issues** (emdawnwebgpu port —
+  filed/linked as the `ALLOW_MEMORY_GROWTH breaks emdawnwebgpu device acquisition` report; see the CI
+  fleet manifest `web-export` gate row). If a future emsdk fixes it, growth can be re-enabled and this
+  note retired — until then, **size the heap up front**.
+
+### The WebGL2 escape hatch stays post-v1 (L-56)
+
+v1 is **WebGPU-only** on the web. The WebGL2 fallback tier (for browsers/GPUs without WebGPU) is
+explicitly **post-v1** (L-56) and is NOT built here. The **Linux-browser WebGPU rollout caveat**: on
+Linux, browser WebGPU is still gated/experimental in stable channels (Chrome ships WebGPU on Linux only
+behind a flag / in newer channels; Firefox is rolling it out) — so a Linux end-user may need a
+WebGPU-enabled browser/flag to run a web build until the rollout completes. Headless CI uses Chromium +
+SwiftShader (`--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader`), the design record's reference
+browser.
+
+### CI gate (the DoD's "boots in headless Chromium + passes the golden SSIM corpus")
+
+The `render (web, emscripten)` job (`render-web`) builds `context-web-export` (alongside
+`context-render-web`) and, in **headless Chromium + SwiftShader WebGPU**, runs it via
+`tools/web_golden_run.py`: it serves the committed sample pack
+(`src/render/web/testdata/web-sample.pack`, a real `context build --target web` product) beside the
+page, the harness **fetches it over HTTP range + streams it within the memory budget** (the verdict
+enforced by the harness exit code) and renders the **triangle3d** golden through the browser WebGPU
+backend, which `tools/golden_compare.py` SSIM-gates against `goldens/`. Registered in
+`docs/ci-fleet-manifest.json` as the `web-export` gate.
 
 ## Determinism (deterministic MODULO the LTO link)
 

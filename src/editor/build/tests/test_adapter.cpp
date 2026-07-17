@@ -1,9 +1,11 @@
-// build-test_adapter (M8 tasks a06 + a10) — the pure export-adapter plan + launcher + manifest
+// build-test_adapter (M8 tasks a06 + a10 + a11) — the pure export-adapter plan + launcher + manifest
 // generators. Coverage (R-QA-013 happy + edge): the Linux flavors (desktop render-present / server
-// render-absent) AND the a10 Windows flavors (`.exe` binary, launch.cmd batch launcher, requires_signing)
-// plan a correct tarball layout; unsupported targets/flavors plan the honest stub; the launcher boots
-// relative to its own dir + forwards args (posix launch.sh / windows launch.cmd); the manifest is
-// deterministic machine-readable JSON carrying requiresSigning.
+// render-absent), the a10 Windows flavors (`.exe` binary, launch.cmd batch launcher, requires_signing),
+// AND the a11 web bundle (wasm+js runtime, index.html shell, runtimeLoader, desktop-only) plan a correct
+// artifact layout; unsupported targets/flavors (macos, web+server) plan the honest stub; the launcher
+// boots relative to its own dir + forwards args (posix launch.sh / windows launch.cmd) or, for web, is
+// the static index.html shell; the manifest is deterministic machine-readable JSON carrying
+// requiresSigning + (web only) runtimeLoader.
 
 #include "context/editor/build/adapter.h"
 
@@ -92,6 +94,66 @@ int main()
         CHECK(p.launcher_kind == build::LauncherKind::PosixSh);
     }
 
+    // --- Web DESKTOP (a11): Emscripten wasm+js bundle, index.html shell, no signing, render present ---
+    {
+        const build::AdapterPlan p = build::plan_adapter("web", "desktop", "game.pack");
+        CHECK(p.supported);
+        CHECK(p.target == "web");
+        CHECK(p.flavor == "desktop");
+        CHECK(p.render_present);      // WebGPU-only — the browser build is inherently render-present
+        CHECK(!p.requires_signing);   // no v1 web code-signing
+        CHECK(p.runtime_binary == "context-runtime.wasm");
+        CHECK(p.runtime_loader == "context-runtime.js"); // the Emscripten JS glue
+        CHECK(p.launcher_kind == build::LauncherKind::WebHtml);
+        CHECK(p.launcher_name == "index.html");
+        CHECK(p.pack_name == "game.pack");
+        // The web bundle layout: bin/<wasm>, bin/<js>, index.html, content/<pack>, manifest (5 entries).
+        CHECK(p.layout.size() == 5);
+        CHECK(p.layout[0].archive_path == "bin/context-runtime.wasm");
+        CHECK(p.layout[0].role == "runtime");
+        CHECK(p.layout[1].archive_path == "bin/context-runtime.js");
+        CHECK(p.layout[1].role == "runtime-loader");
+        CHECK(p.layout[2].archive_path == "index.html");
+        CHECK(p.layout[2].role == "launcher");
+        CHECK(p.layout[3].archive_path == "content/game.pack");
+        CHECK(p.layout[3].role == "pack");
+        CHECK(p.layout[4].archive_path == "context.build.json");
+        CHECK(p.layout[4].role == "manifest");
+    }
+
+    // --- Web launcher: an index.html shell that boots the JS glue with the page-relative pack arg -----
+    {
+        const build::AdapterPlan p = build::plan_adapter("web", "desktop", "game.pack");
+        const std::string html = build::render_launcher(p);
+        CHECK(contains(html, "<!doctype html>"));
+        CHECK(contains(html, "<canvas id=\"context-canvas\""));
+        CHECK(contains(html, "arguments: ['--pack', 'content/game.pack']"));
+        CHECK(contains(html, "<script src=\"bin/context-runtime.js\"></script>"));
+        CHECK(html.find('\r') == std::string::npos); // LF-only (deterministic)
+        // Deterministic: same inputs render byte-identical HTML.
+        CHECK(html == build::render_launcher(p));
+    }
+
+    // --- Web manifest: renderPresent true, requiresSigning false, carries the runtimeLoader field -----
+    {
+        const build::AdapterPlan p = build::plan_adapter("web", "desktop", "game.pack");
+        const std::string m = build::render_manifest(p, 3, 4, 5);
+        CHECK(contains(m, "\"target\": \"web\""));
+        CHECK(contains(m, "\"renderPresent\": true"));
+        CHECK(contains(m, "\"requiresSigning\": false"));
+        CHECK(contains(m, "\"runtimeBinary\": \"bin/context-runtime.wasm\""));
+        CHECK(contains(m, "\"runtimeLoader\": \"bin/context-runtime.js\""));
+        CHECK(contains(m, "\"launcher\": \"index.html\""));
+    }
+
+    // --- Web + server flavor: the honest stub (a headless web build is nonsensical) -------------------
+    {
+        const build::AdapterPlan web_server = build::plan_adapter("web", "server", "game.pack");
+        CHECK(!web_server.supported);
+        CHECK(web_server.layout.empty());
+        CHECK(build::render_launcher(web_server).empty());
+    }
+
     // --- unsupported target / flavor: the honest stub (R-BUILD-007) ----------------------------------
     {
         const build::AdapterPlan mac = build::plan_adapter("macos", "desktop", "game.pack");
@@ -99,9 +161,9 @@ int main()
         CHECK(mac.layout.empty());
         CHECK(build::render_launcher(mac).empty());
         CHECK(build::render_manifest(mac, 1, 2, 3).empty());
-
-        const build::AdapterPlan web = build::plan_adapter("web", "desktop", "game.pack");
-        CHECK(!web.supported);
+        // The native linux/windows manifests carry NO runtimeLoader field (web-only).
+        const build::AdapterPlan lin = build::plan_adapter("linux", "desktop", "game.pack");
+        CHECK(!contains(build::render_manifest(lin, 1, 2, 3), "runtimeLoader"));
 
         const build::AdapterPlan bad_flavor = build::plan_adapter("windows", "console", "game.pack");
         CHECK(!bad_flavor.supported);
