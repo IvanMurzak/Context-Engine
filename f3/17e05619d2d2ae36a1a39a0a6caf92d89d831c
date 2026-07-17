@@ -1,0 +1,95 @@
+docs/ci-fleet-manifest.json
+  s_9284ad4c8de2f4::t_a0bce8631dd7c8 575-583
+  s_9284ad4c8de2f4::t_d021eba6bce342 574
+src/editor/build/tests/test_adapter.cpp
+  s_9284ad4c8de2f4::t_c82f4f5be1c5de 211-216,222-223
+  s_9284ad4c8de2f4::t_09b667c2b8a7a4 91,98-147
+  s_b4196fe63a3a2b::t_9a4804d53e7eca 1-9,148
+src/editor/build/include/context/editor/build/adapter.h
+  s_9284ad4c8de2f4::t_5628496870ccda 1,11-14
+  s_9284ad4c8de2f4::t_bd60f6d46c951d 67-69
+  s_9284ad4c8de2f4::t_53b35887ab09b4 85,88
+  s_9284ad4c8de2f4::t_851e6456570789 122-124
+  s_9284ad4c8de2f4::t_940d5000b1eeb8 57-60
+.github/workflows/ci.yml
+  s_9284ad4c8de2f4::t_c90577223a9037 913-985
+src/editor/build/src/build_orchestrator.cpp
+  s_9284ad4c8de2f4::t_10cc72482349ca 185,189-190
+src/editor/build/README.md
+  s_9284ad4c8de2f4::t_450c5c1c85be0a 22
+  s_9284ad4c8de2f4::t_d1764a82d72eff 24,27,29-35
+src/editor/build/tests/test_build_orchestrator.cpp
+  s_9284ad4c8de2f4::t_b770a7ab053ed5 155,159,162-165,168,170-172,178
+src/editor/build/include/context/editor/build/signing.h
+  s_9284ad4c8de2f4::t_8101dca7dfe867 106
+  s_9284ad4c8de2f4::t_9b831bfff99802 62-64,69-74
+  s_9284ad4c8de2f4::t_0ecf603a9aff5b 1-6,8-20,27-31
+  s_9284ad4c8de2f4::t_bf744e4b53699c 81-83
+  s_9284ad4c8de2f4::t_1d286085532f42 125-136
+  s_0437b8a8fbb7aa::t_a6083f092a6d7d 41,47-55
+src/editor/build/CMakeLists.txt
+  s_9284ad4c8de2f4::t_026f5e184dfdc5 49-52
+  s_9284ad4c8de2f4::t_77c756e644ec98 58-62
+src/cli/src/build_command.cpp
+  s_9284ad4c8de2f4::t_7795bf8b763792 563,565-568
+  s_9284ad4c8de2f4::t_165c91ec66f91c 182-188,201-202,204-205,215-218,230-233
+  s_9284ad4c8de2f4::t_e500759af7077c 164-165
+docs/export-adapters.md
+  s_9284ad4c8de2f4::t_a83fb1959afae2 149-198
+  s_9284ad4c8de2f4::t_dc9907fcaed652 1,7,11-13,21-22,25-32
+src/editor/build/src/adapter.cpp
+  s_9284ad4c8de2f4::t_891c8bc380a170 220-222
+  s_9284ad4c8de2f4::t_f238d45d62ae2e 93-95,98-99,107-110,113,115-116
+src/editor/build/tests/test_signing.cpp
+  s_9284ad4c8de2f4::t_22312672bdb3cd 102,112-113,115-130,135
+  s_9284ad4c8de2f4::t_484bcfa1473924 274-300
+  s_9284ad4c8de2f4::t_2808722202a48f 1-8
+  s_9284ad4c8de2f4::t_7cdf3d23ef2c54 34-74
+  s_9284ad4c8de2f4::t_1b4ca36ec00216 203-246
+src/cli/tests/test_build_command.cpp
+  s_9284ad4c8de2f4::t_ed86dbe9d05f6c 327-372
+  s_9284ad4c8de2f4::t_f25d9e1023f530 192-209
+  s_9284ad4c8de2f4::t_27bda7d842dd85 105-124
+src/cli/tests/test_doctor_command.cpp
+  s_9284ad4c8de2f4::t_1909165d787d28 125-143
+src/editor/build/src/signing.cpp
+  s_9284ad4c8de2f4::t_25925244fa7a8f 270,292-302,306-308,312-314,318-322
+  s_9284ad4c8de2f4::t_711d58bb9ba28f 101-223,244,256
+  s_0437b8a8fbb7aa::t_74064a3f469db1 228-232,243,245-255
+.github/workflows/release-sign.yml
+  s_9284ad4c8de2f4::t_a440829c1b6578 203-362
+src/cli/src/doctor_command.cpp
+  s_b4196fe63a3a2b::t_f7f5df6fa5efaf 408-416,427-433
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "f317e05619d2d2ae36a1a39a0a6caf92d89d831c",
+  "prompts": {},
+  "sessions": {
+    "s_0437b8a8fbb7aa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aca23227-fb01-4357-947a-d2d68329d5df",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_9284ad4c8de2f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "64f4c13c-1681-4443-9cc9-81bbde69cd56",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_b4196fe63a3a2b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "08f6580f-deaa-43e0-90c6-887d1d5f3376",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
