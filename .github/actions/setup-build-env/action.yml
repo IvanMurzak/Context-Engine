@@ -1,20 +1,81 @@
 # Shared per-job build environment for the CI build legs (sibling of pinned-toolchain).
-#   non-Windows — sets up sccache with the GitHub-Actions cache backend and exports the
+#   non-Windows — RESTORES the sccache LOCAL-disk object cache via actions/cache (warm cross-run
+#                 compiler caching) BEFORE starting sccache, installs sccache, and exports the
 #                 shared CMake configure environment: CMAKE_GENERATOR=Ninja plus
-#                 CMAKE_{C,CXX}_COMPILER_LAUNCHER=sccache.
-#   Windows     — deliberately a no-op: the legs use the default Visual Studio generator
-#                 (no MSVC env setup needed), which ignores CMAKE_<LANG>_COMPILER_LAUNCHER;
-#                 sccache+MSVC is not worth fighting until the clang-cl follow-up lands.
-# The per-job "sccache stats" step stays inline in ci.yml — composite actions have no
-# post-steps. Requires the repo to be checked out first.
+#                 CMAKE_{C,CXX}_COMPILER_LAUNCHER=sccache. The cache is RESTORED on every ref; the
+#                 sibling save-build-env writes it back ONLY on refs/heads/main, so PR legs never
+#                 create branch-scoped copies (the cache-budget invariant). The churny GHA backend
+#                 stays OFF (SCCACHE_GHA_ENABLED=false in ci.yml env) — sccache uses the local disk
+#                 dir SCCACHE_DIR, which this action persists.
+#   Windows     — deliberately a no-op: the self-hosted legs run Ninja + cl via VsDevCmd (set up
+#                 in-job) and skip sccache for now; a persistent on-disk sccache there is a
+#                 separate follow-up. No cache key is computed on Windows, so save-build-env
+#                 (also Windows-guarded) is a matching no-op.
+# ORDER MATTERS: restore the cache dir BEFORE the sccache server starts. sccache's local-disk
+# backend indexes SCCACHE_DIR when the server first starts; objects added afterward would be
+# missed — so the restore step precedes the sccache install/start.
+# The per-job "sccache stats" step stays inline in ci.yml — composite actions have no post-steps.
+# Requires the repo to be checked out first.
 
 name: Build environment (sccache + CMake env)
-description: Set up sccache (GHA cache backend) and export the shared CMake configure environment (non-Windows only)
+description: Set up sccache (local-disk backend + actions/cache restore) and export the shared CMake configure environment (non-Windows only)
+
+inputs:
+  preset:
+    description: >
+      The CMake preset this job builds (dev / sanitize / tsan / deterministic). Selects the sccache
+      cache NAMESPACE so each compile flavor keeps its own cross-run object cache. The sibling
+      save-build-env (which writes only on main) reuses the exact key this action exports, so the
+      SAVER job for a namespace must call setup-build-env with the SAME preset.
+    required: false
+    default: dev
 
 runs:
   using: composite
   steps:
-    - name: Set up sccache (GHA cache backend)
+    # Compute the sccache cache key FIRST and export it (plus the restore-key prefix) via
+    # $GITHUB_ENV, so the sibling save-build-env composite re-saves under the IDENTICAL primary key.
+    # Key dimensions:
+    #   preset    — the compile flavor (composite input); one namespace each (dev/sanitize/tsan).
+    #   runner.os — Linux / macOS keep separate object caches.
+    #   IMG       — the runner IMAGE version. ImageVersion is a runner-injected env var that is
+    #               ABSENT from the ${{ env }} expression context, so it MUST be resolved in a shell
+    #               step (mirrors the vcpkg cache) — a stale image rolls the compiler ABI, so it has
+    #               to roll the key too. `selfhosted` fallback keeps the key deterministic off-hosted.
+    #   WEEK      — an ISO week salt (date -u +%GW%V, e.g. 2026W29) so the cache refreshes weekly and
+    #               never keeps more than ~2 generations (bounded growth; NO run_id/sha/branch — the
+    #               single-prefix restore-key warm-restores last week's entry on the week boundary).
+    - name: Resolve sccache cache dir + key
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        # SCCACHE_DIR is exported HERE, not in ci.yml's workflow-level env: block: the runner
+        # context is UNAVAILABLE in a workflow-level (or job-level) env: block, so
+        # ${{ runner.temp }} there resolves to "" — a bare "/sccache" that diverges from the
+        # step-level actions/cache path below and silently defeats the cache. In this shell step
+        # $RUNNER_TEMP is populated, so it matches ${{ runner.temp }}/sccache exactly.
+        echo "SCCACHE_DIR=${RUNNER_TEMP}/sccache" >> "$GITHUB_ENV"
+        IMG="${ImageVersion:-selfhosted}"
+        WEEK="$(date -u +%GW%V)"
+        PREFIX="sccache-${{ inputs.preset }}-${{ runner.os }}-${IMG}-"
+        echo "SCCACHE_CACHE_KEY=${PREFIX}${WEEK}" >> "$GITHUB_ENV"
+        echo "SCCACHE_CACHE_RESTORE_PREFIX=${PREFIX}" >> "$GITHUB_ENV"
+
+    # Restore on ALL refs (a PR warm-restores main's latest entry via the prefix restore-key); the
+    # guarded save-build-env writes ONLY on main, so PRs never create a branch-scoped copy. Path is
+    # ${{ runner.temp }}/sccache — identical to the SCCACHE_DIR exported in the previous step
+    # (runner.temp is constant per job), so the restored dir is exactly what sccache reads/writes.
+    # MUST run before the sccache server starts (see the ORDER note above).
+    - name: Restore sccache dir
+      if: runner.os != 'Windows'
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ runner.temp }}/sccache
+        key: ${{ env.SCCACHE_CACHE_KEY }}
+        restore-keys: |
+          ${{ env.SCCACHE_CACHE_RESTORE_PREFIX }}
+
+    - name: Set up sccache
       if: runner.os != 'Windows'
       uses: mozilla-actions/sccache-action@v0.0.10
 
