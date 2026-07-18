@@ -121,13 +121,17 @@ license check + CycloneDX SBOM artifact, `tools/check_licenses.py`) and `python-
 - **`spike-wasm` / `spike-webgpu` / `spike-webgpu-web`, `wasm-runner`, `cef-substrate`,
   `editor-cef-smoke`** — the opt-in-toggle dependency paths, each blocking on its matrix (the
   a11y enforcement gate inside `editor-cef-smoke` blocks on Linux).
-- **`bench-baseline` / `bench-attach-10k` / `build-time-bench`** — the JOBS are blocking (harness
-  must run green end-to-end); the perf NUMBERS are advisory (`continue-on-error`) until the
-  perf-isolated runner class named in `docs/ci-fleet-manifest.json` is provisioned
+- **`bench-baseline` / `bench-attach-10k` / `build-time-bench` / `density-bench`** — the JOBS are
+  blocking (harness must run green end-to-end); the perf NUMBERS are advisory (`continue-on-error`)
+  until the perf-isolated runner class named in `docs/ci-fleet-manifest.json` is provisioned
   (`docs/perf-gate-methodology.md`). `build-time-bench` is the R-BUILD-006 build-time budget bench
   (M8 a12, `bench/build_time.py` + `bench/build-time-budget.json` + `docs/build-time-budget-table.md`):
   the from-source compile (cache-amortized) budgeted separately from the a03 transcode + a05 LTO/DCE
-  link (cache-exempt, per-build).
+  link (cache-exempt, per-build). `density-bench` is the R-FILE-011 orchestration-density bench
+  (M8.5 a21, `bench/density.py` + `bench/density-targets.json` + `docs/density-targets.md`): N packed
+  `context_runtime_server` instances stepped/seeded/hashed in parallel from one controller —
+  committed ticks/sec/instance + instances-per-box floors, advisory until the perf box (ops1)
+  provisions; the full ladder runs nightly (`density-nightly` in `bench-nightly.yml`).
 
 Windows legs of the heavy jobs ride a self-hosted MSVC runner (Ninja + `cl` via VsDevCmd) for
 same-repo PRs. A separate `bench-nightly.yml` (schedule-only, advisory) runs the 100k corpus — it

@@ -1692,3 +1692,80 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: ${SCCACHE_PATH} --show-stats
+
+  # ------------------------------------------------------------------------------------------------
+  # M8.5 a21 — R-FILE-011 orchestration-density bench (ticks/sec/instance + instances-per-box).
+  # The wedge-pillar-1 demo shape (ARCHITECTURE §1.1): N headless PACKED instances (the a06
+  # context_runtime_server over a `context build` v1 pack) stepped/seeded/hashed in parallel from ONE
+  # controller (bench/density.py) over the R-QA-005 session surface. Per-PR proxy ladder (1,2,4 on the
+  # 4-vCPU shared runner); the FULL ladder runs nightly in bench-nightly.yml (`density-nightly`).
+  # The JOB is BLOCKING (the controller + instances must run green end-to-end: boot ok, simTick
+  # exact, same-seed determinism pair bit-identical); the numeric GATE vs the committed floors in
+  # bench/density-targets.json is ADVISORY (continue-on-error) — a shared GH runner is NOT the
+  # perf-isolated `perf-linux-bare-metal` runner class the fleet manifest names (ops1 deferred,
+  # owner ruling 2026-07-18; R-QA-012 advisory-until-provisioned; docs/density-targets.md). The
+  # blocking flip is a FUTURE step gated on ops1.
+  density-bench:
+    name: density bench (packed instances, ubuntu)
+    needs: [license-gate, python-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      - name: Configure (dev preset)
+        run: cmake -S src --preset dev
+
+      - name: Build the CLI + shipped server runtime host
+        run: cmake --build --preset dev --target context context_runtime_server
+        working-directory: src
+
+      # The bench subject: a real v1 pack over the minimal buildable project (the same printf
+      # pattern the build-time-bench / linux-export jobs use; L-33 hex ids on every entity).
+      - name: Build a v1 pack for the density subject
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJ="$(mktemp -d)"
+          mkdir -p "$PROJ/scenes"
+          printf '%s' '{"$schema":"ctx:project","scene":"scenes/main.scene.json","version":1}' > "$PROJ/project.json"
+          printf '%s' '{"$schema":"ctx:scene","version":1,"entities":[{"id":"aaaa0000aaaa0001","name":"Camera","components":{"camera":{"fov":1.0}}},{"id":"aaaa0000aaaa0002","name":"Player","components":{"transform":{}}}]}' > "$PROJ/scenes/main.scene.json"
+          src/build/dev/cli/context build --target linux --flavor server --project "$PROJ" \
+            --out "$PROJ/server.pack" --runtime "$PWD/src/build/dev/runtime/host/context-runtime-server"
+          echo "DENSITY_PACK=$PROJ/server.pack" >> "$GITHUB_ENV"
+
+      - name: Run the density controller (median-of-5, R-QA-009 discipline; per-PR proxy ladder)
+        run: >
+          python3 bench/density.py measure
+          --server ./src/build/dev/runtime/host/context-runtime-server
+          --pack "$DENSITY_PACK"
+          --ticks 600000 --ladder 1,2,4 --runs 5
+          --label ci-ubuntu-density-proxy --runner-class gh-ubuntu-shared
+          --out bench/results/density-ci-proxy
+
+      # Advisory numbers gate (same contract as the bench-baseline / bench-attach / build-time
+      # gates): archives the time series + emits the density table; never red-Xs the rollup here.
+      - name: Density gate (R-FILE-011, advisory until the perf box is provisioned)
+        continue-on-error: true
+        run: >
+          python3 bench/density.py gate
+          --result bench/results/density-ci-proxy.json
+          --targets bench/density-targets.json
+          --archive bench/results/archive
+          --out bench/results/density-table
+
+      - name: sccache stats
+        run: ${SCCACHE_PATH} --show-stats
+
+      - name: Upload density results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: density-results
+          path: bench/results/
+          if-no-files-found: error

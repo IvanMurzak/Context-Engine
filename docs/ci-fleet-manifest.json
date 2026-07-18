@@ -870,6 +870,36 @@
       "red_x_policy": "advisory",
       "ci_job_id": null,
       "description": "The committed R-BUILD-006 build-time budget table (bench/build-time-budget.json: from-source-compile warm+cold, a03 transcode, a05 lto-link; WASM-AOT + JS-VM bytecode-precompile are v2-with-iOS, tracked but not budgeted). The fully COLD from-source build is the tracked worst case; the WARM path is the per-PR proxy default. Becomes a real blocking nightly floor when its named perf-isolated runner class (perf-linux-bare-metal) is provisioned; until then the per-PR proxy pair above keeps the harness + numbers visible (advisory-until-provisioned). Normative allocation + rationale: docs/build-time-budget-table.md."
+    },
+    {
+      "id": "density-proxy-measure",
+      "requirement": "R-FILE-011",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "density-bench",
+      "description": "R-FILE-011 orchestration-density targets, per-PR benchmark MEASURE step (M8.5 a21; the sim-throughput / orchestration-density commitment re-anchored 2026-07-15 to the M8.5 exit): bench/density.py measure runs the wedge-pillar-1 demo shape (ARCHITECTURE 1.1) — N headless PACKED instances (the a06 context_runtime_server over a `context build` v1 pack) stepped/seeded/hashed in parallel from ONE controller over the R-QA-005 session surface — on the short proxy ladder (1,2,4) under the R-QA-009 methodology (median-of-5, dispersion recorded, results archived as a time series). The MEASURE step is BLOCKING: every instance must boot ok + step exactly N ticks, and the same-seed determinism pre-flight pair must report bit-identical state hashes. The committed floor NUMBERS are enforced by the sibling advisory gate — a shared runner is not the named perf-isolated perf-linux-bare-metal class (docs/density-targets.md)."
+    },
+    {
+      "id": "density-proxy-gate",
+      "requirement": "R-FILE-011",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "advisory",
+      "ci_job_id": "density-bench",
+      "description": "R-FILE-011 orchestration-density ENFORCEMENT on the per-PR proxy (bench/density.py gate, +/-10% band vs the committed floors in bench/density-targets.json — ticks/sec/instance >= 100k single-instance, instances-per-box >= 16 at the 60 ticks/s sustain floor; floors are LOWER bounds, only slower/fewer breaches): continue-on-error until perf-linux-bare-metal is provisioned (ops1 DEFERRED, owner ruling 2026-07-18) — reported + archived, never silently green, never blocking on a number a shared GH runner cannot honestly measure (R-QA-012 advisory-until-provisioned; docs/perf-gate-methodology.md rule 1). The blocking flip is a FUTURE step: set the runner class provisioned + drop continue-on-error."
+    },
+    {
+      "id": "density-targets",
+      "requirement": "R-FILE-011",
+      "runner_class": "perf-linux-bare-metal",
+      "build_flavor": "dev",
+      "tier": "nightly",
+      "red_x_policy": "advisory",
+      "ci_job_id": "density-nightly",
+      "description": "The committed R-FILE-011 orchestration-density targets (bench/density-targets.json: ticks/sec/instance >= 100k single-instance on the packed demo-scenario subject, instances-per-box >= 16 with EVERY instance sustaining the 60 ticks/s R-SIM-002 floor) — the wedge-pillar-1 numbers ARCHITECTURE 1.1 commits, honestly stated as a METHODOLOGY subject (minimal packed scene, demo scenario; not a game-workload claim) with the acknowledged-gaps honesty note vs GPU-vectorized simulators (Isaac/Brax/Madrona-class). The nightly density-nightly job (bench-nightly.yml) measures the FULL ladder (1..32) as an advisory trend on gh-ubuntu-shared until the named perf-isolated runner class is provisioned (ops1 deferred); provisioning ratifies the floors and flips the gates blocking. Normative definitions + rationale: docs/density-targets.md."
     }
   ]
 }
