@@ -63,3 +63,39 @@ across every present state.
 - `tests/test_viewport_panel.cpp` — the headless projection, the L-41 seam reaching the panel, the
   R-HUX-011 loop event firing, and observer-only command discipline.
 - `tests/test_a11y.cpp` — the per-panel a11y + keyboard-nav gate across present states.
+
+## In-context override editing (M8.5 a19 — `context_gui_viewport_edit`)
+
+The M5 observer above renders the world but does **not** write it; **a19** adds the R-HUX-006 MUST
+core — the **GUI face of scene composition (L-35)**: manipulate a **composed scene-instance entity**
+directly in the viewport, and the edit lands as the correct **override write with visible provenance**.
+It is a **separate library** (`context_gui_viewport_edit`) in this directory so the read-only observer
+(`context_gui_viewport`) stays light and free of the compose write-path / inspector dependency.
+
+- **One composed write path (never a parallel one).** The `ViewportEditModel` gizmo gesture
+  (move/rotate/scale) or property edit becomes an override through the SAME `compose::plan_write` that
+  `context set` runs (via the SHARED `context_compose_project` `ProjectSceneResolver`) — default in the
+  **OUTERMOST** instancing scene, retargetable to the defining template (`--edit-template`) or a
+  mid-level instancing scene (`--at-instance`) as GUI affordances (R-CLI-006). The gesture-end commit
+  routes through **`inspector::commit_override_write`** — the ONE **L-30** rebase-or-drop engine the
+  inspector commit and the session undo/redo replay also use.
+- **L-20 gesture semantics.** Session state (selection, write target, the in-flight gesture) lives in
+  the model in memory; the gesture COMMITS at gesture end (no Save button). On a concurrent-writer CAS
+  mismatch it REBASES onto the new state when this field path was untouched, or DROPS loudly when the
+  same field collided — never a silent overwrite.
+- **Provenance at the point of edit (R-CLI-006).** `ViewportEditPanel` renders the winning-value-first
+  provenance chain for the edited field (which template supplied the value, which instancing level
+  overrode it) via `compose::provenance_for` / `provenance_json` — the SAME emitter `context query`
+  serializes through.
+- **The real write path is `ProjectOverrideWriteGateway`** — the headless, disk-backed
+  `inspector::OverrideWriteGateway` (plan_write + canonical serialize + `--if-match` CAS + R-FILE-004
+  atomic write) the CEF host and the parity gate both use.
+- **a11y (register-with-the-panel).** Registered as `builtin.viewport-edit`
+  (`a11y/registry.cpp` + `coverage.manifest.jsonl`, a11y `CMakeLists.txt` link) — a11y-clean by
+  construction across no-selection / per-gizmo / per-target states.
+
+Tests (R-QA-013, same PR): `tests/test_viewport_edit_model.cpp` (selection, provenance, the gizmo
+gesture, the three write targets, the L-30 drop/rebase paths over an in-memory gateway),
+`tests/test_viewport_edit_panel.cpp` (a11y + keyboard-nav + rendered provenance), and the integration
+gate **`viewport-override-parity`** (`src/tests/integration/`) — the GUI gesture-commit is BYTE-IDENTICAL
+to `context set` across all three write targets, plus provenance-display parity.

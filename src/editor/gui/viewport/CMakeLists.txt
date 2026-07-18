@@ -51,3 +51,49 @@ foreach(_t IN LISTS _context_gui_viewport_tests)
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     add_test(NAME gui-viewport-${_t} COMMAND context_gui_viewport_${_t})
 endforeach()
+
+# =================================================================================================
+# M8.5 a19 — in-context viewport OVERRIDE editing (context_gui_viewport_edit, R-HUX-006 MUST core;
+# R-CLI-006 / L-35 / L-20 / L-30 / R-A11Y-001, issue authored by the a19 task). The GUI face of scene
+# composition (L-35): a transform gizmo / property edit on a COMPOSED scene-instance entity commits an
+# L-35 OVERRIDE through the SAME composed write path `context set` runs (compose::plan_write via the
+# shared context_compose_project resolver), routed through inspector::commit_override_write (the ONE
+# L-30 rebase-or-drop engine), with the R-CLI-006 provenance chain rendered at the point of edit.
+# A SEPARATE library from the observer (context_gui_viewport) so the read-only observer stays light +
+# free of the compose write-path / inspector dependency; both live in this directory.
+add_library(context_gui_viewport_edit STATIC
+    src/viewport_edit_model.cpp
+    src/viewport_edit_panel.cpp
+    src/project_override_gateway.cpp)
+
+target_include_directories(context_gui_viewport_edit PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+# PUBLIC deps expose types in the public headers:
+#   context_gui_uitree         -> uitree::Panel                      (viewport_edit_panel.h)
+#   context_compose            -> compose::WriteTarget/ProvenanceEntry/SceneResolver (viewport_edit_model.h)
+#   context_gui_panel_inspector-> inspector::OverrideWriteGateway/CommitResult + commit_override_write
+#                                 (viewport_edit_model.h + project_override_gateway.h — the ONE L-30 engine)
+#   context_serializer         -> serializer::JsonValue              (viewport_edit_model.h)
+# PRIVATE: the disk-backed gateway's plan_write resolver + atomic write (impl-only), + warnings.
+target_link_libraries(context_gui_viewport_edit
+    PUBLIC context_gui_uitree context_compose context_gui_panel_inspector context_serializer
+    PRIVATE context_compose_project context_filesync context_warnings)
+
+# --- tests (R-QA-013: behavior ships WITH its tests in the same PR) ------------------------------
+# context_filesync (via the gateway) pulls std::filesystem transitively, so static-link the GCC
+# runtime (gated to GNU) to keep the local ctest gate deterministic against a PATH-shadowed
+# libstdc++-6.dll (setup.md § Preconditions), mirroring the observer tests above.
+set(_context_gui_viewport_edit_tests
+    test_viewport_edit_model
+    test_viewport_edit_panel)
+
+foreach(_t IN LISTS _context_gui_viewport_edit_tests)
+    add_executable(context_gui_viewport_${_t} tests/${_t}.cpp)
+    target_link_libraries(context_gui_viewport_${_t}
+        PRIVATE context_gui_viewport_edit context_warnings)
+    target_link_options(context_gui_viewport_${_t}
+        PRIVATE ${_context_gui_viewport_static_runtime})
+    target_include_directories(context_gui_viewport_${_t}
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    add_test(NAME gui-viewport-${_t} COMMAND context_gui_viewport_${_t})
+endforeach()

@@ -207,6 +207,25 @@ add_test(NAME tilemap-paint-parity COMMAND context_test_tilemap_paint_parity)
 set_tests_properties(tilemap-paint-parity PROPERTIES TIMEOUT 120)
 
 # ===================================================================================================
+# The a19 GUI<->CLI in-context OVERRIDE-editing PARITY gate (M8.5 a19: R-HUX-006 MUST core / R-CLI-006 /
+# L-35 / L-20) — ctest `viewport-override-parity`, a plain (non-gate-family) test the `build` job's
+# general ctest step auto-runs on every OS leg (no ci.yml edit needed, the a18 precedent). Drives the
+# SAME override edits through the viewport override-editing GUI model's L-20 gesture lifecycle over the
+# REAL disk-backed override gateway AND the real `context set` verb (in-process cli::run), across all
+# three R-CLI-006 write targets — outermost (committed platformer-2d sample) + edit-template +
+# at-instance (a staged three-level composition) — asserting BYTE-IDENTICAL authored output plus the
+# provenance-display == `context query` provenance parity (the shared emitter).
+add_executable(context_test_viewport_override_parity test_viewport_override_parity.cpp)
+target_link_libraries(context_test_viewport_override_parity
+    PRIVATE context_cli context_gui_viewport_edit context_compose context_compose_project
+            context_serializer context_warnings)
+target_link_options(context_test_viewport_override_parity PRIVATE ${_m2_exit_static_runtime})
+target_compile_definitions(context_test_viewport_override_parity PRIVATE
+    CONTEXT_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/../samples")
+add_test(NAME viewport-override-parity COMMAND context_test_viewport_override_parity)
+set_tests_properties(viewport-override-parity PROPERTIES TIMEOUT 120)
+
+# ===================================================================================================
 # The M6 EXIT-A SAMPLE-GAME SMOKE GATES (issue #194; R-QA-005 / R-QA-013 / R-HEAD-002) — one per
 # sample game. Each game's runtime mirror (games/) registers as a session SCENARIO (session.h §
 # scenario registry) and PARSES its authored samples/<game>/ scene for the entity layout, so the
@@ -333,6 +352,7 @@ if(CONTEXT_SANITIZE)
         ${_m2_exit_names}
         samples-corpus
         tilemap-paint-parity
+        viewport-override-parity
         PROPERTIES ENVIRONMENT
         "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
 endif()

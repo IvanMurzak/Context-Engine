@@ -11,6 +11,7 @@
 #include "context/editor/gui/playbar/playbar_panel.h"
 #include "context/editor/gui/uitree/builtin.h"
 #include "context/editor/gui/uitree/panel.h"
+#include "context/editor/gui/viewport/viewport_edit_panel.h"
 #include "context/editor/gui/viewport/viewport_panel.h"
 
 namespace context::editor::gui::a11y
@@ -84,6 +85,17 @@ std::vector<RegisteredPanel> registered_panels()
     panels.push_back(RegisteredPanel{
         panels::tilemap::TilemapPaintPanel::kContributionId,
         []() { return panels::tilemap::TilemapPaintPanel{}.build_panel(); }});
+
+    // M8.5 a19 — the in-context viewport override-editing panel (gui/viewport/, R-HUX-006 MUST core).
+    // The harness scans its default (no-selection) rendered state, exactly as it scans the other
+    // panels' defaults; the panel's own gui-viewport-test_viewport_edit_panel ctest additionally covers
+    // its selected / per-gizmo / per-target / provenance states. Registered per the register-with-the-
+    // panel rule (coverage.manifest.jsonl carries the matching builtin.viewport-edit line). The second
+    // AUTHORING surface (after the a18 tilemap painter): its gesture-end commit runs the SAME L-35
+    // composed override write path `context set` runs, routed through the ONE L-30 engine (L-20/L-30).
+    panels.push_back(RegisteredPanel{
+        viewport::ViewportEditPanel::kContributionId,
+        []() { return viewport::ViewportEditPanel{}.build_panel(); }});
 
     return panels;
 }

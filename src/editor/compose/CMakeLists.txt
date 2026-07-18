@@ -26,6 +26,18 @@ target_link_libraries(context_compose PUBLIC context_serializer context_schema)
 # Every Context target links the warnings-as-errors baseline (conventions.md).
 target_link_libraries(context_compose PRIVATE context_warnings)
 
+# The disk-backed composed-write resolver (project_resolver.h): a filesync-aware WriteResolver shared
+# by the CLI `context set` (src/cli/set_command.cpp) AND the GUI in-context viewport override editor
+# (src/editor/gui/viewport/, R-HUX-006) so both drive the SAME plan_write over the SAME on-disk read.
+# Kept in a SEPARATE target so context_compose itself stays filesync-free (pure serializer/schema).
+add_library(context_compose_project STATIC src/project_resolver.cpp)
+target_include_directories(context_compose_project PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+# PUBLIC context_compose (the WriteResolver interface + scene model) + context_filesync (the
+# NativeFileStore + path jail) appear in the public header; context_serializer for canonicalize.
+target_link_libraries(context_compose_project
+    PUBLIC context_compose context_filesync context_serializer
+    PRIVATE context_warnings)
+
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) -----------------------------
 # The repo has no C++ test framework (adding one would pull a vcpkg dep + a license-allowlist
 # entry); each test is a plain assertion-bearing executable registered with ctest. Coverage spans
