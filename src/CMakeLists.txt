@@ -363,6 +363,16 @@ add_subdirectory(editor/assetdb)
 # target, which CMake resolves at generate time regardless of add_subdirectory order).
 add_subdirectory(editor/kinds)
 
+# M8.5 a18: the tilemap authoring WRITE path (src/editor/tilemap/, R-2D-003 GUI half / R-CLI-001 /
+# L-20 / L-33) — the ONE cell-edit core both the tile-painting GUI (gesture-end commit) and the
+# `context tilemap paint|fill` CLI verbs call, so GUI == CLI parity holds by construction. Builds ON
+# filesync's L-33 sidecar family planner + the canonical serializer; the ctx:tilemap SCHEMA stays in
+# editor/schema/ and the content rules in editor/kinds/ (the M2 format is untouched). Wired here right
+# after kinds — deliberately apart from the GUI cluster — so concurrent sibling tasks touching
+# src/editor/ and this file merge cleanly (consumers name the `context_tilemap_edit` target, resolved
+# at generate time regardless of add_subdirectory order).
+add_subdirectory(editor/tilemap)
+
 # M2 wave 3: the scene-composition READ path (src/editor/compose/, L-35/R-DATA-002, issue #51) —
 # id-path overrides with innermost-out precedence, stable intra-file ids (L-33), the scene-root
 # entity, the R-FILE-011(e) depth-cap/fan-in/cycle diagnostics, deterministic composed identity

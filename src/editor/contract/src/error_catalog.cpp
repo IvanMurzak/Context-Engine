@@ -964,6 +964,25 @@ const std::vector<ErrorCode>& catalog()
          "the artifact must be Authenticode-signed (Azure Trusted Signing, or the developer-certificate "
          "fallback, with a mandatory RFC-3161 timestamp) before shipping. Deterministic.",
          false, kExitValidation, "R-SEC-003"},
+
+        // --- M8.5 a18: the tilemap cell-authoring surface (append-only tail; R-2D-003 GUI half /
+        // R-CLI-001 / L-33). The `tilemap.*` AUTHORING refusals minted by the editor/tilemap
+        // write-path core (src/editor/tilemap/tilemap_edit.h owns the strings — the
+        // promote-a-local-string pattern) and served by `context tilemap paint|fill` AND the
+        // tile-painting GUI's gesture-end commit (the one shared write path). All deterministic,
+        // all-or-nothing: any one bad cell/tile refuses the whole batch and nothing is staged.
+        {"tilemap.layer_not_found",
+         "The addressed tilemap layer id exists in no `layers` entry of the document (layers are "
+         "addressed by their L-33 stable id, never by index or name).",
+         false, kExitNotFound, "R-2D-003"},
+        {"tilemap.cell_out_of_bounds",
+         "A cell edit lies inside no chunk `region` of the addressed layer — v1 authoring rewrites "
+         "EXISTING chunks and never invents new ones (the chunk topology is the M2 kind's).",
+         false, kExitValidation, "R-2D-003"},
+        {"tilemap.tile_unknown",
+         "A tile id falls in no tile-set's [firstTileId, firstTileId + tileCount) global range "
+         "(tile 0 = empty is always valid — an erase is a paint with 0).",
+         false, kExitValidation, "R-2D-003"},
     };
     return the_catalog;
 }

@@ -6,6 +6,7 @@
 #include "context/editor/gui/panels/inspector/inspector_panel.h"
 #include "context/editor/gui/panels/problems/problems_panel.h"
 #include "context/editor/gui/panels/scenetree/scene_tree_panel.h"
+#include "context/editor/gui/panels/tilemap/tilemap_paint_panel.h"
 #include "context/editor/gui/playbar/playbar_model.h"
 #include "context/editor/gui/playbar/playbar_panel.h"
 #include "context/editor/gui/uitree/builtin.h"
@@ -73,6 +74,16 @@ std::vector<RegisteredPanel> registered_panels()
     panels.push_back(RegisteredPanel{
         panels::problems::ProblemsPanel::kContributionId,
         []() { return panels::problems::ProblemsPanel{}.build_panel(); }});
+
+    // M8.5 a18 — the tilemap-painter authoring panel (gui/panels/tilemap/, R-2D-003 GUI half). The
+    // harness scans its default (no-document) rendered state, exactly as it scans the other panels'
+    // defaults; the panel's own gui-panel-tilemap-test_a11y ctest additionally covers its loaded /
+    // per-tool / mid-gesture / keyboard-authoring states. Registered per the register-with-the-panel
+    // rule (coverage.manifest.jsonl carries the matching builtin.tilemap-painter line). First
+    // AUTHORING panel: its gesture-end commit runs the shared editor/tilemap write path (L-20).
+    panels.push_back(RegisteredPanel{
+        panels::tilemap::TilemapPaintPanel::kContributionId,
+        []() { return panels::tilemap::TilemapPaintPanel{}.build_panel(); }});
 
     return panels;
 }

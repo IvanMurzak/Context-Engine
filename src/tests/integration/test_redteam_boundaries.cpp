@@ -101,7 +101,8 @@ int main()
         // contract.unimplemented backing.
         for (const char* method : {"package.add", "build", "install", "set", "new", "edit",
                                    "edit-batch", "migrate", "merge-file", "resolve-conflict", "re-key",
-                                   "asset.move", "asset.rename", "session.new", "session.step",
+                                   "asset.move", "asset.rename", "tilemap.paint", "tilemap.fill",
+                                   "session.new", "session.step",
                                    "session.seed", "session.inject", "session.record", "replay",
                                    "ui.send", "shutdown"})
         {
@@ -165,6 +166,7 @@ int main()
             {"migrate", Scope::file_write},         {"merge-file", Scope::file_write},
             {"resolve-conflict", Scope::file_write},{"re-key", Scope::file_write},
             {"asset.move", Scope::file_write},      {"asset.rename", Scope::file_write},
+            {"tilemap.paint", Scope::file_write},   {"tilemap.fill", Scope::file_write},
             // build_install — install / build (code execution)
             {"package.add", Scope::build_install},  {"install", Scope::build_install},
             {"build", Scope::build_install},

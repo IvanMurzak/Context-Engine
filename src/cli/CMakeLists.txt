@@ -23,6 +23,7 @@ add_library(context_cli STATIC
     src/scaffold.cpp
     src/session_command.cpp
     src/set_command.cpp
+    src/tilemap_command.cpp
     src/ui_command.cpp
     src/wire_client.cpp)
 
@@ -78,6 +79,12 @@ target_link_libraries(context_cli PRIVATE context_js context_profile)
 # appears in the CLI's public headers; only ui_command.cpp touches the pure-stdlib context_ui
 # package (UiTree + the a5 introspection shims).
 target_link_libraries(context_cli PRIVATE context_ui)
+
+# M8.5 a18: `context tilemap paint|fill` — the tilemap cell-authoring verbs (src/editor/tilemap/,
+# R-2D-003 GUI half / R-CLI-001 / L-33). PRIVATE — tilemap_command.h exposes only the contract
+# Envelope, so no tilemap type appears in the CLI's public headers; only tilemap_command.cpp drives
+# the shared write-path core (the SAME path the tile-painting GUI's gesture-end commit runs).
+target_link_libraries(context_cli PRIVATE context_tilemap_edit)
 
 # M8 task a05 (issue #257): `context build --target <t>` — the headless per-agent build orchestration
 # (src/editor/build/). PRIVATE — build_command.h exposes only the contract Envelope, so no build type

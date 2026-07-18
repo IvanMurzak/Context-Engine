@@ -322,6 +322,38 @@ int main()
                  {"ui", "assert", ui_scene, "health-bar", "--value", "100"});
     }
 
+    // --- M8.5 a18 (R-2D-003 GUI half / R-CLI-001): the tilemap cell-authoring verbs over the
+    //     staged platformer tilemap — a batch paint then a rect fill, both through the ONE
+    //     editor/tilemap write path the tile-painting GUI's gesture-end commit also runs. The
+    //     staged file must remain a canonical FIXPOINT after authoring (the maintained-corpus
+    //     discipline holds THROUGH the write path), proven by the migrate --dry-run re-check. -----
+    {
+        const std::string tilemap_rel = "tilemaps/level-1.tilemap.json";
+        const Envelope painted =
+            exercise("tilemap", "paint",
+                     {"tilemap", "paint", tilemap_rel, "[[0, 0, 1], [1, 0, 2]]", "--layer",
+                      "8888888888888801", "--project", platformer.string()});
+        if (painted.ok())
+        {
+            CHECK(painted.data().at("applied").as_bool());
+            CHECK(painted.data().at("cellsChanged").as_number() == 2.0);
+        }
+        const Envelope filled =
+            exercise("tilemap", "fill",
+                     {"tilemap", "fill", tilemap_rel, "3", "--layer", "8888888888888801",
+                      "--rect", "2,2,3,3", "--project", platformer.string()});
+        if (filled.ok())
+            CHECK(filled.data().at("cellsChanged").as_number() == 9.0);
+        const Envelope remigrated =
+            exercise("", "migrate",
+                     {"migrate", (platformer / "tilemaps").string(), "--dry-run"});
+        if (remigrated.ok())
+        {
+            CHECK(remigrated.data().at("canonicalized").as_number() == 0.0);
+            CHECK(remigrated.data().at("failed").as_number() == 0.0);
+        }
+    }
+
     // --- new: the R-QA-006 MUST-half runnable default template, authored into a fresh dir and then
     //     validated clean (the corpus builds ON this M1 surface — issue #106 Context) --------------
     {

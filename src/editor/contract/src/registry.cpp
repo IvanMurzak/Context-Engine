@@ -670,6 +670,45 @@ Registry::Registry()
           false}},
         /*implemented=*/true));
 
+    // --- M8.5 task a18: the tilemap cell-authoring verbs (R-2D-003 GUI half / R-CLI-001 / L-33) ----
+    // Noun-scoped one-shot STABLE verbs served by the CLI (src/cli/tilemap_command.cpp) over the ONE
+    // editor/tilemap write-path core the tile-painting GUI's gesture-end commit also runs — R-CLI-001:
+    // painting is expressible as verbs, the GUI is sugar over the SAME path (tilemap-paint-parity
+    // ctest proves byte-identical output). The owner rewrite is canonical; sidecars go first (L-33
+    // family plan) through the R-FILE-004 atomic path. Additive-only registration (protocolMajor
+    // stays 1); the bare `tilemap` noun follows the first-party bare-noun precedent (`session`, `ui`).
+    verbs_.push_back(make_verb(
+        "", "tilemap", "paint",
+        "Write a batch of tilemap cell edits (R-2D-003 / L-33): <cells> is a JSON array of "
+        "[x, y, tileId] triples in cell coordinates (tileId 0 = empty, so an erase is a paint with "
+        "0), applied to --layer's chunks. All-or-nothing: an out-of-bounds cell or unknown tile "
+        "refuses the whole batch. The canonical owner rewrite + its re-encoded cell sidecars are "
+        "committed sidecar-first through the R-FILE-004 atomic write path; absent (dangling) chunk "
+        "sidecars across the document are healed with empty grids so the family lands coherent.",
+        /*params=*/
+        {{"path", "path", true, "The tilemap file to paint (project-relative)."},
+         {"cells", "json", true,
+          "JSON array of [x, y, tileId] integer triples (tileId in u32 range; 0 = empty)."}},
+        /*flags=*/
+        {{"layer", "string", "Stable id of the tilemap layer to paint (required).", false}},
+        /*implemented=*/true));
+
+    verbs_.push_back(make_verb(
+        "", "tilemap", "fill",
+        "Fill a rectangle of tilemap cells with one tile (R-2D-003 / L-33): --rect x,y,width,height "
+        "in cell coordinates, <tile> the u32 global tile id (0 = empty). Exactly a batch paint — the "
+        "rect expands through the same cell-edit core as `tilemap paint` (and the GUI fill tool), "
+        "with the same all-or-nothing, canonical, sidecar-first commit.",
+        /*params=*/
+        {{"path", "path", true, "The tilemap file to fill (project-relative)."},
+         {"tile", "string", true, "The u32 global tile id to fill with (0 = empty/erase)."}},
+        /*flags=*/
+        {{"layer", "string", "Stable id of the tilemap layer to fill (required).", false},
+         {"rect", "string", "The fill rectangle, x,y,width,height in cell coordinates (positive "
+                            "extent; required).",
+          false}},
+        /*implemented=*/true));
+
     // --- M8 task a05: the build orchestration core verb (issue #257, R-BUILD-002 / R-BUILD-007) -----
     // A global, one-shot STABLE verb (served by the CLI like `install`/`set`/`migrate`, NOT the daemon):
     // `context build --target <t>` drives the headless per-agent build pipeline (verify → toolchain →
