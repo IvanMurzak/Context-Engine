@@ -612,6 +612,96 @@
       "description": "M8 exit criterion 5 (ROADMAP §1-M8 exit / a14-m8-exit): the M8 build-pipeline SEAM CHECKLIST as an executable audit (the milestone-closing mirror of m2-exit-6 / m5-exit-3 / m6-exit-5 / m7-exit-5) — one assertion per M8 seam so a regression that quietly drops one turns the gate red: (1) per-agent build orchestration (a05 — run_build deterministic re-build + fail-closed with a build.* code on a malformed request, never throws); (2) the full v1 export adapter set (a06/a10/a11/a13 — linux/windows/macos desktop+server + web-desktop supported, unknown target/flavor the honest stub); (3) desktop code-signing MUST split (a10 Authenticode + a13 Developer-ID/notarization, each never-silent on an unsigned required target; linux/web not-required); (4) verify-before-use fails CLOSED under the a08 pinned Ed25519 trust root (R-SEC-009 / L-58); (5) pack format v1 frozen (R-ASSET-005 — the orchestrator's pack reads back as a valid v1 pack, GUID-addressed units); (6) the R-BUILD-009 headless-smoke inputs are complete (the runnable-artifact layout = shipped runtime binary + content pack + launcher + manifest, and the boot launcher renders); (7) wedge determinism (L-54 — the shipped Session is bit-reproducible from seed+scenario; the packed-vs-shipped hash + L-48/R-NET-001 replication are the m8-exit-4 siblings); (8) OPS1 HONESTY (R-BUILD-006 / R-QA-012 — the committed build-time budget is declared advisory-until-provisioned, never a blocking number the unprovisioned perf-isolated runner cannot enforce) (ctest m8-exit-5-seam-checklist; blocking 'M8 exit gate' named step, all three build-matrix legs)."
     },
     {
+      "id": "m85-exit-coedit",
+      "requirement": "R-FILE-012",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8.5 exit criterion 1a (ROADMAP §1-M8.5 exit / a23-m85-exit; L-50 / R-FILE-012 / R-QA-010/011): 'an operator-scoped agent and a human co-edit and merge across worktrees with no lost updates' — the co-edit half, as the milestone ALIAS over the a16 L-50 concurrency-validation executable (context_test_coedit_concurrency, issue #284/#285). The L-30 rebase-or-drop gesture engine under a concurrent second client + CAS --if-match + the R-QA-010 fault-seam composition check + a 10k-round seeded no-lost-update property (R-QA-011): both writers' field-path edits survive, a stale-expectation write is refused, nothing is silently overwritten. ctest m85-exit-1a-coedit re-registers the a16 executable under the m85-exit- family (the m6-exit-3 alias precedent — same executable, a milestone ctest name), so the milestone exit formally blocks on the no-lost-update law WITHOUT a new build target or a --target list change (the build job builds it via --preset dev regardless; it also keeps running as concurrency-coedit in the general step). Blocking 'M8.5 exit gate' named step, all three build-matrix legs."
+    },
+    {
+      "id": "m85-exit-worktree-merge",
+      "requirement": "R-FILE-012",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8.5 exit criterion 1b (ROADMAP §1-M8.5 exit / a23-m85-exit; L-50 / R-FILE-012 / R-QA-005): 'co-edit and MERGE across worktrees with no lost updates' — the worktree-merge half, as the milestone ALIAS over the a16 L-50 concurrency-validation executable (context_test_worktree_merge, issue #284/#285). Every documented R-FILE-012 conflict class exercised across the committed corpus (R-QA-011), parallel-worktree divergence -> merge -> resolve-conflict, the post-merge `context validate` convergence gate (dup-id caught + re-key remedy via the REAL merge-file/validate/re-key verbs, cli::run), and the R-QA-005 sim-level pass over the merged tree. ctest m85-exit-1b-worktree-merge re-registers the a16 executable under the m85-exit- family (the m6-exit-3 alias precedent), formally blocking the milestone exit WITHOUT a new build target or --target change (also runs as concurrency-worktree-merge in the general step). Blocking 'M8.5 exit gate' named step, all three build-matrix legs."
+    },
+    {
+      "id": "m85-exit-sandbox-caps",
+      "requirement": "R-SEC-001",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8.5 exit criterion 2a (ROADMAP §1-M8.5 exit / a23-m85-exit; R-SEC-001/002/007/010/011(a)): 'a sandboxed package cannot exceed its granted capabilities' — the capability-boundary half, as the milestone ALIAS over the a17 trust-tier red-team executable (context_test_redteam_boundaries, issue #283/#286). The in-process cross-cutting adversarial audit over the composed EditorKernel (bridge dispatcher scope gate — a launch-time operator-provisioned scoped token cannot drive an over-scope verb, R-SEC-007/011(a)), the contract registry, the filesync path jail, the importer isolation slice, and the JS host constrained ABI (real V8 on the 3-OS build legs; the honest stub locally) — every adversarial vector is refused fail-closed. ctest m85-exit-2a-sandbox-caps re-registers the a17 executable under the m85-exit- family (the m6-exit-3 alias precedent), formally blocking the milestone exit WITHOUT a new build target or --target change (also runs as security-redteam-boundaries in the general step). Blocking 'M8.5 exit gate' named step, all three build-matrix legs."
+    },
+    {
+      "id": "m85-exit-tamper-fail-closed",
+      "requirement": "R-SEC-009",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8.5 exit criterion 2b (ROADMAP §1-M8.5 exit / a23-m85-exit; R-SEC-009 / L-58): 'signed-artifact verification fails closed on a tampered artifact' — the fail-closed half, as the milestone ALIAS over the a17/a08 tamper e2e executable (context_test_redteam_tamper_e2e, issue #283/#286). Driven through the REAL `context` binary's a08 verify-before-execute fetch path against the pinned PRODUCTION Ed25519 trust root: an artifact whose bytes were TAMPERED after signing is refused fail-closed (never executed), a missing/absent signature is refused, and the fail-closed exit taxonomy never maps a non-zero verifier result to Ok on either host shell. ctest m85-exit-2b-tamper-fail-closed re-registers the a17 executable under the m85-exit- family (the m6-exit-3 alias precedent), formally blocking the milestone exit WITHOUT a new build target or --target change (also runs as security-redteam-tamper-e2e in the general step). Blocking 'M8.5 exit gate' named step, all three build-matrix legs."
+    },
+    {
+      "id": "m85-exit-profiling-json",
+      "requirement": "R-OBS-002",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8.5 exit criterion 3 (ROADMAP §1-M8.5 exit / a23-m85-exit; L-47 / R-OBS-002/004): 'profiling data is JSON-queryable on a live session' as an executable gate riding the a15 L-47 profiling surface (issue #288). Drives the REAL shipped `context` binary's `profile session` verb across a TRUE process boundary (context_common subprocess runner + context_contract envelope DOM — the m7-exit-2 e2e pattern), steps a headless session N ticks, and QUERIES the returned R-CLI-008 envelope's JSON snapshot: the named channel + tick metadata, the per-system CPU spans (native lane — pure C++, present on EVERY toolchain so the gate is green even on a stub-JS build), the per-lane rollups, and the folded-in R-SIM-008 GC-pause channel (gc.available true on the V8 CI legs, honestly false on a stub — never a refusal). `--trace-out` additionally writes an importable Chrome trace-event file (L-47 deep-capture export, Tracy/Perfetto). A bad workload parameter fails closed (usage.invalid). NEW executable (context_test_m85exit3_profiling_json), built by the build job via --preset dev (never 'Not Run'). Blocking 'M8.5 exit gate' named step, all three build-matrix legs."
+    },
+    {
+      "id": "m85-exit-tilemap-paint",
+      "requirement": "R-2D-003",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8.5 exit criterion 4a (ROADMAP §1-M8.5 exit / a23-m85-exit; R-2D-003 GUI half / R-CLI-001 / L-20): 'the trailing-GUI surface is exercised: paint a tilemap in the 2D viewport-authoring mode' as the milestone ALIAS over the a18 tilemap-authoring PARITY executable (context_test_tilemap_paint_parity, issue a18/#294). Drives the SAME edits through the tile-painting GUI model's L-20 gesture lifecycle AND the real `context tilemap paint|fill` verbs (in-process cli::run) over two identical staged copies of the committed platformer-2d sample, asserting BYTE-IDENTICAL authored output plus canonical + hot-reload properties (fixpoint, watch-trigger hash move, sidecar-family coherence, fresh-session re-derive). ctest m85-exit-4a-tilemap-paint re-registers the a18 executable under the m85-exit- family (the m6-exit-3 alias precedent), formally blocking the milestone exit WITHOUT a new build target or --target change (also runs as tilemap-paint-parity in the general step). Blocking 'M8.5 exit gate' named step, all three build-matrix legs."
+    },
+    {
+      "id": "m85-exit-override-edit",
+      "requirement": "R-HUX-006",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8.5 exit criterion 4b (ROADMAP §1-M8.5 exit / a23-m85-exit; R-HUX-006 MUST core / R-CLI-006 / L-35 / L-20): 'the trailing-GUI surface is exercised: make an in-context instance/override edit in the viewport (the R-HUX-006 MUST core)' as the milestone ALIAS over the a19 viewport override-editing PARITY executable (context_test_viewport_override_parity, issue a19/#298). Drives the SAME override edits through the viewport override-editing GUI model's L-20 gesture lifecycle over the REAL disk-backed override gateway AND the real `context set` verb (in-process cli::run) across all three R-CLI-006 write targets — outermost + edit-template + at-instance — asserting BYTE-IDENTICAL authored output plus the provenance-display == `context query` provenance parity (the shared emitter). ctest m85-exit-4b-override-edit re-registers the a19 executable under the m85-exit- family (the m6-exit-3 alias precedent), formally blocking the milestone exit WITHOUT a new build target or --target change (also runs as viewport-override-parity in the general step). Blocking 'M8.5 exit gate' named step, all three build-matrix legs."
+    },
+    {
+      "id": "m85-exit-contextual-help",
+      "requirement": "R-HUX-010",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8.5 exit criterion 4c (ROADMAP §1-M8.5 exit / a23-m85-exit; R-HUX-010 / R-CLI-013 / R-HUX-004): 'the trailing-GUI surface is exercised: surface contextual help (R-HUX-010)' as the milestone ALIAS over the a20 in-editor contextual-help executable (context_gui_help_test_contextual, issue a20/#300). Cross-checks the per-panel contextual-help topic set (panel_topics()) against a11y::registered_panels() — the register-with-the-panel discipline applied to help — so a shipped panel without a help topic (or a topic naming a phantom panel) fails, and every related_command resolves to a real registered verb (the help a human reads is a pure projection of the ONE live contract registry — R-CLI-013 introspection — never a hand-written doc that rots; offline by construction, CEF-free). ctest m85-exit-4c-contextual-help re-registers the a20 executable under the m85-exit- family (the m6-exit-3 alias precedent), formally blocking the milestone exit WITHOUT a new build target or --target change (also runs as gui-help-contextual in the general step). Blocking 'M8.5 exit gate' named step, all three build-matrix legs."
+    },
+    {
+      "id": "m85-exit-density-commitment",
+      "requirement": "R-FILE-011",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8.5 exit criterion 5 (ROADMAP §1-M8.5 exit / a23-m85-exit; R-FILE-011 / R-QA-012): 'the R-FILE-011 ticks/sec/instance + instances-per-box orchestration-density targets are committed and benchmarked' — the COMMITTED-and-HONEST half as a permanent gate (the milestone-closing mirror of the m8-exit-5 seam-8 OPS1-honesty audit that reads bench/build-time-budget.json). Reads the committed bench/density-targets.json (a21, issue #292) and asserts: both R-FILE-011 density floors are committed (single-instance ticks/sec/instance + instances-per-box at the 60 Hz sustain floor) with the M8.5 a21 tag + R-QA-009 methodology + packed bench subject; the commitment is HONEST per the ops1 state — advisory_until_provisioned + names its unprovisioned perf-linux-bare-metal runner class (never a blocking number a shared GH runner cannot honestly measure, R-QA-012); and the benchmark harness/doc exist (bench/density.py + docs/density-targets.md). The 'benchmarked' half itself runs on every PR in the sibling BLOCKING density-bench job (the perf NUMBERS advisory until the runner is provisioned — density-proxy-measure/-gate rows). NEW executable (context_test_m85exit5_density_commitment), built by the build job via --preset dev. Blocking 'M8.5 exit gate' named step, all three build-matrix legs."
+    },
+    {
       "id": "linux-export-smoke",
       "requirement": "R-BUILD-009",
       "runner_class": "gh-ubuntu-shared",
