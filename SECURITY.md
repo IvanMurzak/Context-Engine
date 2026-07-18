@@ -13,10 +13,9 @@ line, and security fixes land there.
 
 | Version | Supported |
 |---|---|
-| `main` (pre-alpha; no releases yet) | ✅ |
+| `main` | ✅ |
 
-Once versioned releases exist (the M8 build pipeline onward), this table will enumerate the
-supported release lines; until then "latest `main`" is the supported version.
+Once versioned releases exist, this table will enumerate the supported release lines.
 
 ## Reporting a vulnerability
 
@@ -50,6 +49,10 @@ This is a solo-maintainer, pre-alpha project; these are the targets we commit to
 When a report is declined (not a vulnerability, out of scope, works as designed), we say so
 explicitly with the reasoning, and you are free to disclose after the default window.
 
+A fixed vulnerability is disclosed via a published GitHub security advisory that **credits you by
+name by default** — say so in your report (or any time before publication) if you prefer to remain
+anonymous.
+
 ## Scope
 
 - **In scope:** everything in this repository — EditorKernel, RuntimeKernel, the `context` CLI,
@@ -57,9 +60,8 @@ explicitly with the reasoning, and you are free to disclose after the default wi
   (`docs/security-boundaries-v1.md`).
 - **Out of scope:** the separate MCP plugin repositories (Unity-MCP, Godot-MCP, Unreal-MCP — their
   own repos/policies), the `ai-game.dev` online services (a separate product), and vulnerabilities
-  purely in third-party dependencies (report upstream — but do tell us as well so we can pin/bump;
-  the dependency surface is gated by `tools/license-allowlist.json` and the vendored-prebuilt
-  pins).
+  purely in third-party dependencies (report upstream — but do tell us as well so we can pin or
+  bump the dependency).
 
 ## Safe harbor
 

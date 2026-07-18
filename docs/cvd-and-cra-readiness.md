@@ -16,8 +16,12 @@ The engine's trust-boundary map — what is and is not a boundary — is
 3. **Triage.** Reproduce; classify against the documented trust boundaries
    (`security-boundaries-v1.md` — is a *designed* boundary violated, or is the finding within the
    accepted same-user threat model?); assess severity (CVSS 3.1 as a guide, not a gate); determine
-   affected versions. **Determine whether the vulnerability is being actively exploited** — that
-   determination starts the CRA reporting clock below once the reporting obligations apply.
+   affected versions. **Determine whether the vulnerability is being actively exploited** — and do
+   so immediately at intake when a report arrives with credible exploitation evidence: the CRA
+   reporting clock below runs from **awareness** (which can be intake, not the end of triage) once
+   the reporting obligations apply. A report classified here as *not a vulnerability / works as
+   designed / out of scope* exits the workflow at this step with the explicit reasoned decline
+   `SECURITY.md` promises; the remaining steps apply to confirmed vulnerabilities.
 4. **Fix.** Develop the fix in the advisory's private workspace when public visibility would put
    users at risk, otherwise on a normal branch. Tests ship in the same PR as the fix (R-QA-013) —
    ideally a regression test in the red-team suites
@@ -31,9 +35,9 @@ The engine's trust-boundary map — what is and is not a boundary — is
 7. **Record.** The published advisory history is the durable record of handled vulnerabilities; it
    doubles as the evidence trail for the CRA reporting readiness below.
 
-Timeline defaults are the ones in `SECURITY.md`: 90-day coordinated disclosure, accelerated when a
-vulnerability is actively exploited (where the CRA clock below is the binding floor once
-applicable).
+Timeline defaults are the ones in `SECURITY.md`. The CRA clock below, once applicable, binds the
+**confidential notifications to the authorities** (via the ENISA platform) — it does not compress
+the coordinated *public*-disclosure window, which stays governed by `SECURITY.md`.
 
 ## EU CRA reporting readiness
 
@@ -52,8 +56,8 @@ obligations on manufacturers of "products with digital elements" placed on the E
 **Who reports.** The manufacturer. For this repository that is the licensor named in
 [`LICENSE.md`](../LICENSE.md) — currently **Ivan Murzak, an individual**; if the licensor role
 succeeds to a legal entity (EULA §15(7)), the reporting role moves with it. Internally, the
-maintainer who triages a report (workflow step 3) is the person who starts and runs the reporting
-clock.
+maintainer who handles a report (workflow steps 1–3) is the person who starts and runs the
+reporting clock — from awareness, not from the completion of triage.
 
 **What triggers a report.** Two distinct triggers, each with its own track:
 
@@ -78,8 +82,9 @@ within **1 month** after the incident notification.
 
 **Internal readiness mapping (who does what, today):**
 
-- **Intake + awareness**: the CVD intake channels above are the awareness funnel; triage (step 3)
-  explicitly asks "actively exploited?" — a *yes* starts the 24h clock.
+- **Intake + awareness**: the CVD intake channels above are the awareness funnel; the 24h clock
+  runs from **awareness** (see workflow step 3 — that is why its "actively exploited?" check runs
+  at intake, not deferred to full triage).
 - **Reporter of record**: the maintainer/licensor (above). No delegation is currently in place.
 - **Evidence**: the draft/published GitHub security advisory carries the technical facts a
   notification needs (affected versions, impact, measures); the final report reuses it.
