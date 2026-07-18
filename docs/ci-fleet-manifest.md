@@ -67,6 +67,8 @@ Every gate carries exactly one written red-X policy:
 | `bench-attach-10k` | R-FILE-011 | gh-ubuntu-shared | per-PR | blocking | `bench-attach-10k` |
 | `build-time-proxy-measure` | R-BUILD-006 | gh-ubuntu-shared | per-PR | blocking | `build-time-bench` |
 | `build-time-proxy-gate` | R-BUILD-006 | gh-ubuntu-shared | per-PR | **advisory** | `build-time-bench` |
+| `density-proxy-measure` | R-FILE-011 | gh-ubuntu-shared | per-PR | blocking | `density-bench` |
+| `density-proxy-gate` | R-FILE-011 | gh-ubuntu-shared | per-PR | **advisory** | `density-bench` |
 | `spike-wasm-interpreters` | R-LANG-003 | gh-ubuntu-shared | per-PR | blocking | `spike-wasm` |
 | `spike-wasm-wamr-aot` | R-LANG-003 | gh-ubuntu-shared | per-PR | **quarantine** (#24) | `spike-wasm` |
 | `spike-webgpu-native` | R-REND-005 | gh-ubuntu-shared | per-PR | blocking | `spike-webgpu` |
@@ -90,6 +92,7 @@ Every gate carries exactly one written red-X policy:
 | `bench-query-p99` | R-BRIDGE-008 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
 | `bench-sustained-backpressure` | R-FILE-013 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
 | `build-time-budget` | R-BUILD-006 | perf-linux-bare-metal | nightly | **advisory** ⏳ | — |
+| `density-targets` | R-FILE-011 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `density-nightly` |
 | `bench-dense-reference` | R-FILE-011 | gh-ubuntu-shared | nightly | **advisory** | `bench-100k-nightly` |
 | `bench-multiworktree-contention` | R-FILE-010 | n-daemons-host | nightly | **advisory** ⏳ | `bench-100k-nightly` |
 | `determinism-state-hash` | R-QA-005 | determinism-matrix | per-PR | **advisory** ⏳ | — |
@@ -162,6 +165,23 @@ table are the nightly `build-time-budget` floor. WASM-AOT + JS-VM bytecode-preco
 (tracked, not budgeted). The normative allocation lives in
 [`build-time-budget-table.md`](build-time-budget-table.md); the machine-readable copy is
 `bench/build-time-budget.json`.
+
+**The R-FILE-011 orchestration-density targets (M8.5 a21):** the `density-bench` per-PR job
+(`density.py measure` → `gate`) runs the wedge-pillar-1 demo shape (ARCHITECTURE §1.1) — N headless
+PACKED instances (the a06 `context_runtime_server` over a `context build` v1 pack) stepped, seeded,
+and hashed in parallel from ONE controller over the R-QA-005 session surface — under the same
+R-QA-009 discipline (median-of-5, dispersion, a ±10% band, archived time series). Two committed
+floors fall out: **ticks/sec/instance** (single-instance rate, ≥ 100k on the packed demo-scenario
+subject) and **instances-per-box** (≥ 16 with EVERY instance sustaining the 60 ticks/s R-SIM-002
+floor). The MEASURE step blocks (every instance boots ok + steps exactly N ticks; the same-seed
+determinism pair must be bit-identical); the floors GATE is advisory (`continue-on-error`) until the
+perf-isolated `perf-linux-bare-metal` runner class is provisioned (ops1 deferred, owner ruling
+2026-07-18). The nightly `density-nightly` job (`bench-nightly.yml`) runs the FULL ladder (1…32) as
+the `density-targets` advisory trend row. Honesty: a METHODOLOGY subject (minimal packed scene, demo
+scenario — not a game-workload claim), and vs GPU-vectorized simulators (Isaac/Brax/Madrona-class)
+Context does NOT compete on raw samples/sec (the acknowledged-gaps row). The normative definitions
+live in [`density-targets.md`](density-targets.md); the machine-readable copy is
+`bench/density-targets.json`.
 
 ## How CI consumes it (the R-QA-012 tie)
 

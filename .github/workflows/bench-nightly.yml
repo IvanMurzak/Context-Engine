@@ -121,3 +121,74 @@ jobs:
           name: bench-nightly-results
           path: bench/results/
           if-no-files-found: error
+
+  # M8.5 a21 — R-FILE-011 orchestration-density FULL ladder (ticks/sec/instance +
+  # instances-per-box; wedge pillar 1, ARCHITECTURE §1.1): N headless PACKED instances (the a06
+  # context_runtime_server over a `context build` v1 pack) stepped/seeded/hashed in parallel from
+  # ONE controller (bench/density.py) over the R-QA-005 session surface. Nightly runs the deep
+  # ladder past the committed instances-per-box floor so drift stays visible before it breaches
+  # (R-QA-009 rule 4); the per-PR proxy in ci.yml (`density-bench`) runs the short ladder. Same
+  # runner-class honesty as the rest of this workflow: ADVISORY until the perf-isolated
+  # `perf-linux-bare-metal` class is provisioned (ops1 deferred, owner ruling 2026-07-18; committed
+  # floors + methodology in bench/density-targets.json + docs/density-targets.md).
+  density-nightly:
+    name: density nightly (packed instances, full ladder, ubuntu, advisory trend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      - name: Configure (dev preset)
+        run: cmake -S src --preset dev
+
+      - name: Build the CLI + shipped server runtime host
+        run: cmake --build --preset dev --target context context_runtime_server
+        working-directory: src
+
+      - name: Build a v1 pack for the density subject
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJ="$(mktemp -d)"
+          mkdir -p "$PROJ/scenes"
+          printf '%s' '{"$schema":"ctx:project","scene":"scenes/main.scene.json","version":1}' > "$PROJ/project.json"
+          printf '%s' '{"$schema":"ctx:scene","version":1,"entities":[{"id":"aaaa0000aaaa0001","name":"Camera","components":{"camera":{"fov":1.0}}},{"id":"aaaa0000aaaa0002","name":"Player","components":{"transform":{}}}]}' > "$PROJ/scenes/main.scene.json"
+          src/build/dev/cli/context build --target linux --flavor server --project "$PROJ" \
+            --out "$PROJ/server.pack" --runtime "$PWD/src/build/dev/runtime/host/context-runtime-server"
+          echo "DENSITY_PACK=$PROJ/server.pack" >> "$GITHUB_ENV"
+
+      - name: Run the density controller — full ladder (median-of-5, R-QA-009 discipline)
+        run: >
+          python3 bench/density.py measure
+          --server ./src/build/dev/runtime/host/context-runtime-server
+          --pack "$DENSITY_PACK"
+          --ticks 6000000 --ladder 1,2,4,8,16,32 --runs 5
+          --label nightly-density --runner-class gh-ubuntu-shared
+          --out bench/results/nightly-density
+
+      - name: Density gate (R-FILE-011, advisory trend)
+        continue-on-error: true
+        run: >
+          python3 bench/density.py gate
+          --result bench/results/nightly-density.json
+          --targets bench/density-targets.json
+          --archive bench/results/archive
+          --out bench/results/nightly-density-table
+
+      - name: sccache stats
+        shell: bash
+        run: ${SCCACHE_PATH} --show-stats
+
+      - name: Upload nightly density results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: density-nightly-results
+          path: bench/results/
+          if-no-files-found: error

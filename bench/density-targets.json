@@ -1,0 +1,23 @@
+{
+  "requirement": "R-FILE-011",
+  "milestone": "M8.5 a21",
+  "methodology": "R-QA-009: measured on a named perf-isolated runner class, median of >= 5 runs with dispersion recorded, a +/-band vs the committed floor (rates are LOWER bounds - only slower/fewer is a breach), results archived as a time series. Consumed by bench/density.py; normative definitions + rationale + competitor honesty in docs/density-targets.md.",
+  "runner_class": "perf-linux-bare-metal",
+  "advisory_until_provisioned": true,
+  "band_pct": 10.0,
+  "review_note": "Initial v1 orchestration-density commitments (M8.5 a21; the R-FILE-011 sim-throughput / orchestration-density targets re-anchored 2026-07-15 to no later than the M8.5 exit). ops1 DEFERRED (owner ruling 2026-07-18): the perf-isolated perf-linux-bare-metal runner class is NOT provisioned, so these numbers were set from ADVISORY measurements on existing hosts (local dev box + gh-ubuntu-shared; see docs/density-targets.md for the initial advisory snapshot) with deliberate headroom. ADVISORY until the runner class is provisioned - revise by reviewed PR and ratify (or tighten) when provisioning the perf box.",
+  "bench_subject": "The a06 packed server artifact (context_runtime_server) booting a `context build` v1 pack and stepping the shipped RuntimeKernel demo-scenario session (R-QA-005 surface: --pack/--ticks/--seed/--scenario), launched as N parallel instances from one controller (bench/density.py). Per-instance rate INCLUDES process boot + pack load (the honest orchestration cost of a fleet spawn). This is a METHODOLOGY subject (minimal packed scene, demo scenario) - not a game-workload claim; game-workload density rides the same harness once a representative packed game workload is committed.",
+  "sustain_floor_ticks_per_sec": 60.0,
+  "sustain_floor_note": "The real-time floor EVERY instance must sustain for a rung to count toward instances-per-box: 60 ticks/s - the same 60 Hz the R-SIM-002 fixed-timestep contract and the fleet manifest's linux-server minspec row commit.",
+  "targets": {
+    "ticks_per_sec_per_instance": {
+      "floor": 100000.0,
+      "rationale": "Committed SINGLE-instance simulation rate on the packed demo-scenario subject (rung N=1, median-of-runs, boot included). Initial advisory measurements: ~4.3e6 ticks/s (local 32-thread dev box), so the commitment carries >40x headroom while remaining ~1,666x the 60 Hz real-time floor - a real regression tripwire, not a vanity number."
+    },
+    "instances_per_box": {
+      "floor": 16,
+      "rationale": "Committed orchestration density: at least 16 parallel headless packed instances per commodity box with EVERY instance (the straggler, not the average) sustaining >= sustain_floor_ticks_per_sec. Initial advisory measurements sustained the full measured ladder (32 instances on a 32-thread dev box; straggler ~3.5e5 ticks/s >> 60). The nightly ladder measures beyond the committed floor so drift stays visible before it breaches."
+    }
+  },
+  "honesty_note": "vs GPU-vectorized simulators (Isaac/Brax/Madrona-class) Context does NOT compete on raw samples/sec - the wedge-pillar-1 pitch is agent-authored environments + CPU-parallel commodity orchestration: many cheap headless instances, no GPU (ARCHITECTURE 1.1; README acknowledged-gaps row)."
+}

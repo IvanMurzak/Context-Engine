@@ -25,13 +25,25 @@ The durable scale instrument behind **R-FILE-011** (100k-file envelope), **R-FIL
   from-source C++ compile (amortized by the L-28 cache; warm default / cold worst case)
   SEPARATELY from the recurring per-build cache-exempt costs — the a03 transcode and the
   a05 LTO/DCE link. Normative allocation: `docs/build-time-budget-table.md`.
+- **`density.py`** — the **R-FILE-011 orchestration-density** controller (M8.5 a21;
+  wedge pillar 1, ARCHITECTURE §1.1): `measure` launches N headless PACKED instances
+  (the a06 `context_runtime_server` over a `context build` v1 pack) in parallel from
+  one controller — seeded per instance, `simTick`/`simStateHash` collected and
+  cross-checked (a same-seed determinism pair pre-flight; every `(seed, ticks)` must
+  reproduce its hash) — across an instance ladder, median-of-5 with dispersion; `gate`
+  derives **instances-per-box** (largest rung where the straggler sustains the 60 t/s
+  floor) and classifies both committed floors in `bench/density-targets.json` within a
+  ±10% band (floors are LOWER bounds; advisory until the perf box is provisioned),
+  archiving a time series. Normative definitions: `docs/density-targets.md`.
 
 Corpora and results are **generated, never committed** (`bench/corpora/`,
 `bench/results/` are gitignored). CI archives results as workflow artifacts: the
 `bench-baseline` (M0 file-format baseline), `bench-attach-10k` (REAL-pipeline per-PR
-proxy, blocking job / advisory numbers), and `build-time-bench` (R-BUILD-006 build-time
-budgets, blocking measure / advisory gate) jobs in `.github/workflows/ci.yml`, and the
-nightly 100k + scenario sweep in `.github/workflows/bench-nightly.yml` (advisory trend
+proxy, blocking job / advisory numbers), `build-time-bench` (R-BUILD-006 build-time
+budgets, blocking measure / advisory gate), and `density-bench` (R-FILE-011
+orchestration-density proxy ladder, blocking measure / advisory gate) jobs in
+`.github/workflows/ci.yml`, and the nightly 100k + scenario sweep plus the
+`density-nightly` full ladder in `.github/workflows/bench-nightly.yml` (advisory trend
 — see `docs/ci-fleet-manifest.json` for the runner-class honesty contract).
 
 > **Corpus mutation caveat**: the `edit` / `bulk` / `sustained` scenarios MUTATE corpus
