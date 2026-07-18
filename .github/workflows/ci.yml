@@ -248,6 +248,21 @@ jobs:
         shell: bash
         run: ${SCCACHE_PATH} --show-stats
 
+      # Shared Docker Desktop daemon janitor (best-effort, self-hosted Windows only).
+      # ~21 self-hosted runners on this box share ONE Docker Desktop daemon. Context-Engine
+      # CI itself uses no Docker, so this only reclaims week-cold BUILD CACHE left behind by
+      # OTHER repos' jobs on the shared daemon. The unused-for=168h age filter guarantees no
+      # sibling runner's current or in-flight build cache is ever eligible (an active build's
+      # layers carry a recent last-used timestamp), so this can never disrupt a concurrent
+      # job. Deliberately NOT run: image / volume / container / system prune (a container
+      # prune would delete this machine's intentionally-stopped local-dev compose containers).
+      # continue-on-error keeps a green run green if docker is unreachable from the service.
+      - name: Reclaim week-stale shared Docker build cache (best-effort)
+        if: always() && runner.os == 'Windows' && runner.environment == 'self-hosted'
+        continue-on-error: true
+        shell: pwsh
+        run: docker builder prune -f --filter "unused-for=168h"
+
   # M6-F0a — the OPT-IN DETERMINISTIC BUILD FLAVOR (R-SIM-005 / L-54, issue #170). Proves the
   # `deterministic` preset CONFIGURES + BUILDS on the THREE compilers with the correct per-compiler
   # strict-FP spellings (clang / Apple clang: -ffp-contract=off; MSVC: /fp:strict) and that the build
