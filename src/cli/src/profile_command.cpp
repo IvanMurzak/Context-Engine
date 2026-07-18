@@ -368,8 +368,12 @@ Envelope profile_session(const std::map<std::string, std::string>& flags)
         gc_channel.clear();
 
         double churn_ms_this_tick = 0.0;
+        // `churn_fn` is captured BY VALUE (a trivial std::uint64_t handle) — it is declared inside
+        // this `if` block, but the observer lambda is stored on `sim` and invoked later, from
+        // `sim.step(ticks)` below, AFTER this block's scope (and a by-reference `churn_fn`) has
+        // ended. Capturing by reference here is a stack-use-after-scope (caught by ASan).
         sim.set_system_observer(
-            [&](std::uint64_t, std::size_t, const std::string&, const kernel::World&)
+            [&, churn_fn](std::uint64_t, std::size_t, const std::string&, const kernel::World&)
             {
                 if (!run_ok)
                     return;

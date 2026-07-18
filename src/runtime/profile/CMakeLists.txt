@@ -42,3 +42,19 @@ target_link_libraries(context_profile_test_trace_export PRIVATE context_profile 
 target_include_directories(context_profile_test_trace_export
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME profile-test_trace_export COMMAND context_profile_test_trace_export)
+
+# Sanitize preset only: context_profile links PUBLIC context_js, so on the V8-capable CI legs every
+# context_profile test executable (this one included) bakes in the uninstrumented rusty_v8 archive —
+# the SAME known tooling false-positive documented in docs/sanitizer-v8-false-positives.md (issue
+# #201) and already wired onto the cli-family tests (src/cli/CMakeLists.txt) and other V8-linking
+# families (editor/system, editor/schedule, runtime/ts, tests/integration): UBSan's vptr check
+# false-positives on this test's perfectly-valid std::ostringstream helpers (trace_export.cpp's
+# fmt_us/complete_event/thread_name_event), and printing those diagnostics drives the sanitizer's
+# demangler, whose scratch allocations LSan then reports as leaks — failing the test with no Context
+# defect. The narrow demangler/symbolizer suppressions file (runtime/ts/lsan-suppressions.txt — it
+# can never mask a real `context::` leak) is the operative fix; inert on the stub (non-V8) build, so
+# no _ctx_js_v8 gate is needed (same rationale as the cli-family wiring).
+if(CONTEXT_SANITIZE)
+    set_tests_properties(profile-test_trace_export PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../ts/lsan-suppressions.txt")
+endif()
