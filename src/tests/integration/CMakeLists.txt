@@ -556,3 +556,95 @@ if(CONTEXT_SANITIZE)
         PROPERTIES ENVIRONMENT
         "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
 endif()
+
+# The M8 EXIT GATE (ROADMAP §1-M8 exit / a14-m8-exit) — the build-pipeline milestone-closing mirror of
+# the M1/M2/M4/M5/M6/M7 gates: five blocking per-PR ctests on every OS leg (registered in
+# docs/ci-fleet-manifest.json as the m8-exit-* gates; run by the "M8 exit gate" step in
+# .github/workflows/ci.yml, AFTER the M7 step). They RIDE the landed M8 build-pipeline machinery — the
+# a05 build orchestrator (run_build), the a06/a10/a11/a13 export adapters, the a08 verify-before-use
+# trust chain + the a10/a13 signing hooks, and the a07 packed-wedge determinism + replication gates:
+#   m8-exit-1-platform-set        — the full v1 platform-set (linux desktop+server, windows, macos, web)
+#                                   builds HEADLESS per-agent, each a supported runnable-artifact plan
+#   m8-exit-2-desktop-signing     — a10 Authenticode + a13 Developer-ID/notarization hooks never-silent;
+#                                   verify-before-use fails closed under the a08 pinned trust root
+#   m8-exit-3-headless-smoke      — the R-BUILD-009 shipped-RuntimeKernel packed-boot smoke (a07 ALIAS)
+#   m8-exit-4a-determinism-wedge  — the L-54 packed-wedge state-hash gate (a07 ALIAS)
+#   m8-exit-4b-replication-wedge  — the L-48/R-NET-001 replication-against-packs gate (a07 ALIAS)
+#   m8-exit-5-seam-checklist      — the executable M8 seam audit (incl. OPS1-honest advisory budget)
+#
+# The build job builds EVERY target via `--preset dev`, so each gate's executable is always built
+# (never "Not Run") — NO `--target` list changes are needed (the M6/M7 precedent). The three -4/-3
+# aliases RE-USE the a07 executables (the m6-exit-3 alias precedent — same executable, a milestone
+# ctest name) so the milestone exit formally blocks on them WITHOUT registering a new determinism-*
+# name: the strict-FP `deterministic` job's hand-maintained --target list is deliberately UNCHANGED
+# (the aliases run only under the build job's "M8 exit gate" -R "^m8-exit-" step, which the
+# `deterministic` job never runs). Green here CLOSES M8.
+
+# Self-contained GCC runtime (mirrors m1/m2/m5/m6/m7-exit + src/cli): m8-exit-2/-5 use std::filesystem /
+# stream IO (scratch verify artifact + reading the trust root / budget table), whose newer-libstdc++
+# symbols a stale PATH libstdc++-6.dll could shadow (STATUS_ENTRYPOINT_NOT_FOUND). Gated to GNU so the
+# macOS/Clang + Windows/MSVC CI legs are untouched.
+set(_m8_exit_static_runtime
+    $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
+
+# The committed pinned production trust root (a08) + the R-BUILD-006 build-time budget table (a12) — read
+# by the signing + seam-checklist gates. CMAKE_SOURCE_DIR is the `-S src` root, so ../ is the repo root.
+set(_m8_trust_root "${CMAKE_SOURCE_DIR}/../tools/trust-root/allowed_signers")
+set(_m8_build_time_budget "${CMAKE_SOURCE_DIR}/../bench/build-time-budget.json")
+
+# --- m8-exit-1: the full v1 platform-set builds headless per-agent (a05 run_build + a06/a10/a11/a13
+#     adapters). Links context_build (the orchestrator + adapters; context_compose/pack/import come
+#     transitively via its PUBLIC link). No filesystem — but keep the static-runtime idiom for parity. --
+add_executable(context_test_m8exit1_platform_set test_m8exit1_platform_set.cpp)
+target_link_libraries(context_test_m8exit1_platform_set PRIVATE context_build context_warnings)
+target_link_options(context_test_m8exit1_platform_set PRIVATE ${_m8_exit_static_runtime})
+target_include_directories(context_test_m8exit1_platform_set PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME m8-exit-1-platform-set COMMAND context_test_m8exit1_platform_set)
+
+# --- m8-exit-2: the a10/a13 signing hooks + the a08 verify-before-use trust chain. Links context_build
+#     (signing.h + build_errors.h) + context_common (verify_signature.h + subprocess.h). Reads the
+#     pinned production trust root at test time. -------------------------------------------------------
+add_executable(context_test_m8exit2_desktop_signing test_m8exit2_desktop_signing.cpp)
+target_link_libraries(context_test_m8exit2_desktop_signing
+    PRIVATE context_build context_common context_warnings)
+target_link_options(context_test_m8exit2_desktop_signing PRIVATE ${_m8_exit_static_runtime})
+target_include_directories(context_test_m8exit2_desktop_signing PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(context_test_m8exit2_desktop_signing PRIVATE
+    CONTEXT_TRUST_ROOT="${_m8_trust_root}")
+add_test(NAME m8-exit-2-desktop-signing COMMAND context_test_m8exit2_desktop_signing)
+
+# --- m8-exit-3 / m8-exit-4a / m8-exit-4b: the a07 packed-wedge gates re-registered under the m8-exit-
+#     family (the m6-exit-3 ALIAS precedent — same executable, a milestone ctest name). No new build
+#     targets, no --target list changes: the build job builds these via `--preset dev` regardless. -----
+#   m8-exit-3  — R-BUILD-009 headless smoke: launch both SHIPPED wedge binaries over a real pack + step N.
+add_test(NAME m8-exit-3-headless-smoke COMMAND context_runtime_host_test_smoke)
+#   m8-exit-4a — L-54 packed-wedge determinism: the shipped RuntimeKernel's state hash == editor + golden.
+add_test(NAME m8-exit-4a-determinism-wedge COMMAND context_runtime_host_test_packed_determinism)
+#   m8-exit-4b — L-48/R-NET-001 replication metadata carried by the pack (M6 harness re-run vs packs).
+add_test(NAME m8-exit-4b-replication-wedge COMMAND context_netsync_test_packed_replication)
+
+# --- m8-exit-5: the executable M8 seam audit. Links context_build (orchestrator + adapters + signing) +
+#     context_common (verify-before-use) + context_session (the wedge determinism law). Reads the trust
+#     root + the build-time budget table. --------------------------------------------------------------
+add_executable(context_test_m8exit5_seam_checklist test_m8exit5_seam_checklist.cpp)
+target_link_libraries(context_test_m8exit5_seam_checklist
+    PRIVATE context_build context_common context_session context_warnings)
+target_link_options(context_test_m8exit5_seam_checklist PRIVATE ${_m8_exit_static_runtime})
+target_include_directories(context_test_m8exit5_seam_checklist PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(context_test_m8exit5_seam_checklist PRIVATE
+    CONTEXT_TRUST_ROOT="${_m8_trust_root}"
+    CONTEXT_BUILD_TIME_BUDGET="${_m8_build_time_budget}")
+add_test(NAME m8-exit-5-seam-checklist COMMAND context_test_m8exit5_seam_checklist)
+
+# m8-exit-3/-4a launch shipped child processes over a real pack; -4b runs a 150-tick physics convergence;
+# -1/-5 drive the orchestrator across the whole v1 target set. Cap each so a regression never hangs CI.
+set_tests_properties(
+    m8-exit-1-platform-set
+    m8-exit-2-desktop-signing
+    m8-exit-5-seam-checklist
+    PROPERTIES TIMEOUT 120)
+set_tests_properties(
+    m8-exit-3-headless-smoke
+    m8-exit-4a-determinism-wedge
+    m8-exit-4b-replication-wedge
+    PROPERTIES TIMEOUT 180)

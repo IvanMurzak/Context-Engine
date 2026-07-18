@@ -552,6 +552,66 @@
       "description": "M7 exit criterion 5 (design 2026-07-13-m7-runtime-ui / a12-m7-exit): the M7 runtime-UI SEAM CHECKLIST as an executable audit (the milestone-closing mirror of m2-exit-6 / m5-exit-3 / m6-exit-5) — one assertion per M7 seam so a regression that quietly drops one turns the gate red, additionally encoding the two RULED-scope seams the design's exit-gate section names (owner rulings c + d): (1) provider pluggability (R-UI-002 / D1 — null + engine-integrated both implement UiProvider; negotiate_repaint falls back to a full repaint without damage_repaint, incremental with it); (2) the headless authoring loop (R-UI-006 / D6 — build/layout/hit-test/dispatch a tree with no GPU); (3) RULING (c) shaped-text capability TRUTH — text_shaping + bidi TRUE on both providers AND the headless shaper actually works (a Latin ligature collapses; an Arabic run resolves RTL — the same measure() path the a8 ui-test_shaping gate proves); (4) RULING (d) curved-panel interaction presence — the a10 raycast->UV->panel-coords path is registered + green and the broad-phase-pruned raycaster equals the linear oracle; (5) single-sink input routing (R-SYS-007 / L-45 / D5); (6) determinism/presentation (D6 — no UI operation moves hash_world); (7) minter discipline (the ui.* fail-closed codes live in the reserved ui domain block) (ctest m7-exit-5-seam-checklist; blocking 'M7 exit gate' named step, all three build-matrix legs)."
     },
     {
+      "id": "m8-exit-platform-set",
+      "requirement": "R-BUILD-001",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8 exit criterion 1 (ROADMAP §1-M8 exit / a14-m8-exit): 'one Project -> the full v1 platform-set builds, each produced HEADLESS from the CLI per agent' as an executable gate riding the a05 build orchestrator (run_build — the pure deterministic per-agent spine) + the a06/a10/a11/a13 export adapters. Over ONE in-memory project the v1 MUST set — Linux desktop (render present) + Linux server/headless (render absent, L-5 DCE) + Windows (desktop+server) + macOS (desktop+server) + Web (desktop only) — each builds a REAL v1 pack headless (no filesystem, no GPU) and reports a SUPPORTED runnable-artifact adapter plan (the shipped runtime binary + pack + launcher + manifest; web adds the Emscripten .js loader), with the correct render-present + requires-signing (windows/macos) + runtime-binary name; the build is per-agent + deterministic (byte-identical re-build, R-FILE-010); and an unsupported target/flavor yields the HONEST stub (supported=false, empty layout), never a faked artifact (R-BUILD-007). Android is trailing-SHOULD and iOS is v2 per the platform rulings, so they are NOT in this exit set (ctest m8-exit-1-platform-set; blocking 'M8 exit gate' named step, all three build-matrix legs)."
+    },
+    {
+      "id": "m8-exit-desktop-signing",
+      "requirement": "R-SEC-009",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8 exit criterion 2 (ROADMAP §1-M8 exit / a14-m8-exit; R-SEC-003 / R-SEC-009 / L-58): 'the desktop artifacts are signed (macOS signed+notarized; Windows Authenticode-signed) with verify-before-use failing closed under the minted production key' as an executable gate riding the a10 Windows Authenticode hook + a13 macOS Developer-ID/notarization hook (signing.h) + the a08 verify-before-use trust chain (context_common/verify_signature.h) over pure in-memory surfaces (no signtool/codesign/ssh-keygen, no secrets). Asserts: the a10/a13 signing PLANS are method-tagged (windows->Authenticode w/ Azure primary + dev-cert fallback + RFC-3161 timestamp; macos->Developer-ID + Apple notary + notarization required); linux/web require no signing; UNSIGNED IS NEVER SILENT (a required target's unsigned produced binary reports state 'unsigned' + build.artifact_unsigned + a warning; a signed one reports 'signed'); verify-before-use FAILS CLOSED (the fail-closed exit taxonomy never maps a non-zero verifier result to Ok on either host shell, and a missing/absent-signature verify against the pinned root is refused); and the a08 PINNED PRODUCTION trust root pins ONE Ed25519 publisher key under the release identity + artifact namespace (no algorithm agility) (ctest m8-exit-2-desktop-signing; blocking 'M8 exit gate' named step, all three build-matrix legs)."
+    },
+    {
+      "id": "m8-exit-headless-smoke",
+      "requirement": "R-BUILD-009",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8 exit criterion 3 (ROADMAP §1-M8 exit / a14-m8-exit; R-BUILD-009): 'the headless smoke-run is green on every headless-capable target (packed artifact boots + steps N ticks on the shipped RuntimeKernel)' + the §6 blocking-per-PR wedge smoke, as the milestone ALIAS over the a07 R-BUILD-009 cross-process smoke (context_runtime_host_test_smoke). Builds a real v1 pack to a scratch file, then LAUNCHES each SHIPPED wedge binary (server + desktop) with `--pack <file> --ticks N` and asserts the R-BUILD-009 boot/state signal (ok + simTick==N + a named scene) via the hardened context_common subprocess runner. ctest m8-exit-3-headless-smoke re-registers the a07 executable under the m8-exit- family (the m6-exit-3 alias precedent), so the milestone exit formally blocks on it WITHOUT a new build target or a --target list change (the build job builds it via --preset dev regardless). Runs in the blocking 'M8 exit gate' named step on all three build-matrix legs."
+    },
+    {
+      "id": "m8-exit-determinism-wedge",
+      "requirement": "R-BUILD-009",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8 exit criterion 4a (ROADMAP §1-M8 exit / a14-m8-exit; R-BUILD-009 / R-QA-005 / L-54): 'the wedge-platform builds additionally pass the L-54 determinism gate against the SHIPPED RuntimeKernel' as the milestone ALIAS over the a07 packed-wedge determinism gate (context_runtime_host_test_packed_determinism). Launches the shipped server/headless host binary over a real v1 pack (fixed seed + N ticks), reads the SHIPPED kernel's post-step hierarchical sim state hash, and asserts it equals BOTH the in-process editor-embedded Session hash AND a committed cross-platform golden (portable — integer-only sim). ctest m8-exit-4a-determinism-wedge re-registers the a07 executable under the m8-exit- family (the m6-exit-3 alias precedent), formally blocking the milestone exit WITHOUT registering a new determinism-* ctest name — so the strict-FP `deterministic` job's hand-maintained --target list is unchanged (the alias runs only under the build job's 'M8 exit gate' -R \"^m8-exit-\" step, which the `deterministic` job never runs). The a07 gate itself remains in the `determinism-*` family under the 'Determinism gate' step. Blocking, all three build-matrix legs."
+    },
+    {
+      "id": "m8-exit-replication-wedge",
+      "requirement": "R-NET-001",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8 exit criterion 4b (ROADMAP §1-M8 exit / a14-m8-exit; R-NET-001 / L-48): 'the wedge builds carry the validated L-48/R-NET-001 replication metadata (the M6 harness re-run against packed builds)' as the milestone ALIAS over the a07 replication-against-packs gate (context_netsync_test_packed_replication). A real v1 pack is loaded through the shipped runtime content seam, each packed entity's composed identity (L-37) read out, and a real moving-body source->replica convergence is driven keyed by those pack-carried identities: the replica converges byte-identically with the dirty/delta culling, and every replication net-id is asserted to come from the pack. ctest m8-exit-4b-replication-wedge re-registers the a07 executable under the m8-exit- family (the m6-exit-3 alias precedent), formally blocking the milestone exit; it registers no determinism-* name (not a strict-FP scene), so the `deterministic` job's --target list is unchanged. The a07 gate itself remains as netsync-packed-replication in the build job's general ctest step. Blocking, all three build-matrix legs."
+    },
+    {
+      "id": "m8-exit-seam-checklist",
+      "requirement": "R-BUILD-002",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "build",
+      "description": "M8 exit criterion 5 (ROADMAP §1-M8 exit / a14-m8-exit): the M8 build-pipeline SEAM CHECKLIST as an executable audit (the milestone-closing mirror of m2-exit-6 / m5-exit-3 / m6-exit-5 / m7-exit-5) — one assertion per M8 seam so a regression that quietly drops one turns the gate red: (1) per-agent build orchestration (a05 — run_build deterministic re-build + fail-closed with a build.* code on a malformed request, never throws); (2) the full v1 export adapter set (a06/a10/a11/a13 — linux/windows/macos desktop+server + web-desktop supported, unknown target/flavor the honest stub); (3) desktop code-signing MUST split (a10 Authenticode + a13 Developer-ID/notarization, each never-silent on an unsigned required target; linux/web not-required); (4) verify-before-use fails CLOSED under the a08 pinned Ed25519 trust root (R-SEC-009 / L-58); (5) pack format v1 frozen (R-ASSET-005 — the orchestrator's pack reads back as a valid v1 pack, GUID-addressed units); (6) the R-BUILD-009 headless-smoke inputs are complete (the runnable-artifact layout = shipped runtime binary + content pack + launcher + manifest, and the boot launcher renders); (7) wedge determinism (L-54 — the shipped Session is bit-reproducible from seed+scenario; the packed-vs-shipped hash + L-48/R-NET-001 replication are the m8-exit-4 siblings); (8) OPS1 HONESTY (R-BUILD-006 / R-QA-012 — the committed build-time budget is declared advisory-until-provisioned, never a blocking number the unprovisioned perf-isolated runner cannot enforce) (ctest m8-exit-5-seam-checklist; blocking 'M8 exit gate' named step, all three build-matrix legs)."
+    },
+    {
       "id": "linux-export-smoke",
       "requirement": "R-BUILD-009",
       "runner_class": "gh-ubuntu-shared",

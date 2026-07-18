@@ -71,14 +71,16 @@ Tests are ctest registrations, named in families the CI steps select by prefix r
 `kernel-test_*`, `gui-*` / `gui-a11y-*`, `ui-*` (runtime UI package, `src/packages/ui/`),
 `render-ui-*` (M7 GPU UI backend, `src/render/ui/`), `render-wgpu-*`, `shader-*`, `wasm-runner-*`,
 `cef-substrate-*`, `editor-cef-smoke-*`, `game-smoke-*`, `determinism-*`, `samples-corpus*`, and the
-milestone exit gates `m1-exit-*`, `m2-exit-*`, `m4-exit-*`, `m5-exit-*`, `m6-exit-*`. The `ui-*` and
+milestone exit gates `m1-exit-*`, `m2-exit-*`, `m4-exit-*`, `m5-exit-*`, `m6-exit-*`, `m7-exit-*`,
+`m8-exit-*` (the M8 build-pipeline gate; -3/-4a/-4b are ALIASES of the a07 runtime-host / netsync
+packed-wedge executables, the m6-exit-3 alias precedent). The `ui-*` and
 `render-ui-*` families are plain package test families (not gates) — NOT in the general step's `-E`
 gate-exclusion regex, so they auto-run there, and the `build` job builds them via `--preset dev` (no
 `--target`/CI edits needed).
 
 - The `build` job's general ctest step **excludes the gate families**
-  (`-E "^m1-exit-|^m2-exit-|^m4-exit-|^m5-exit-|^m6-exit-|^determinism-|^samples-corpus"`); each
-  gate family runs exactly once in its own named blocking step so failures are legible per OS leg.
+  (`-E "^m1-exit-|^m2-exit-|^m4-exit-|^m5-exit-|^m6-exit-|^m7-exit-|^m8-exit-|^determinism-|^samples-corpus"`);
+  each gate family runs exactly once in its own named blocking step so failures are legible per OS leg.
 - **The "Not Run = RED" tripwire.** Several jobs build a hand-maintained explicit `--target` list
   instead of the whole tree: the `deterministic` job (`determinism-*` executables), the
   `wasm-runner` job (`wasm-runner-*` executables), and the `editor-cef-smoke` a11y step
@@ -103,7 +105,7 @@ license check + CycloneDX SBOM artifact, `tools/check_licenses.py`) and `python-
 `tools/tests` + `bench/tests` + fleet-manifest validation). Then, in one rollup (~34 checks):
 
 - **`build` (ubuntu / macos / windows)** — blocking. Dev-preset build + the general ctest step +
-  the named gate steps (M1/M2/M4/M5/M6 exit, determinism, samples-corpus) on every leg.
+  the named gate steps (M1/M2/M4/M5/M6/M7/M8 exit, determinism, samples-corpus) on every leg.
 - **`deterministic` (3 OS)** — blocking. Strict-FP flavor (clang `-ffp-contract=off`, MSVC
   `/fp:strict`) + the `determinism-*` family, including the cross-platform golden state-hash wedge
   (Linux-x64 / Win-x64 / macOS-ARM64 — any per-platform divergence reds that leg).
