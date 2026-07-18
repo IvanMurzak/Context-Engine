@@ -12,3 +12,4 @@
 {"id": "builtin.playbar", "title": "Play Bar", "owner": "M5-F5", "requires": ["semantic-scan", "keyboard-nav"]}
 {"id": "builtin.problems", "title": "Problems", "owner": "M5-EXIT-#168", "requires": ["semantic-scan", "keyboard-nav"]}
 {"id": "builtin.tilemap-painter", "title": "Tilemap Painter", "owner": "M8.5-a18", "requires": ["semantic-scan", "keyboard-nav"]}
+{"id": "builtin.viewport-edit", "title": "Viewport Edit", "owner": "M8.5-a19", "requires": ["semantic-scan", "keyboard-nav"]}

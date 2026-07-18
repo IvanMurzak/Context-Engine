@@ -44,7 +44,9 @@ target_link_libraries(context_cli
 # `context set` / `context query --overrides` (M2 composed write path, src/editor/compose/ +
 # src/editor/filesync/): PRIVATE — set_command.cpp is the only consumer, driving compose's IO-free
 # plan_write()/override_hygiene() and filesync's R-FILE-004 atomic_write + content_hash.
-target_link_libraries(context_cli PRIVATE context_compose context_filesync)
+# context_compose_project carries the disk-backed ProjectSceneResolver set_command shares with the
+# GUI viewport override editor (so both drive the SAME plan_write over the SAME on-disk read).
+target_link_libraries(context_cli PRIVATE context_compose context_compose_project context_filesync)
 
 # `context migrate` (M2 wave 3, src/editor/migrate/): PUBLIC — migrate_command.h names
 # migrate::MigrationSet in its test-seam signature, and the ctest executable that injects its own

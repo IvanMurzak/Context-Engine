@@ -4,7 +4,7 @@
 
 #include "context/cli/wire_client.h"
 #include "context/editor/compose/compose_write.h"
-#include "context/editor/compose/scene_model.h"
+#include "context/editor/compose/project_resolver.h"
 #include "context/editor/contract/json.h"
 #include "context/editor/filesync/atomic_io.h"
 #include "context/editor/filesync/content_hash.h"
@@ -14,7 +14,6 @@
 #include "context/editor/serializer/json_parse.h"
 
 #include <cstdint>
-#include <filesystem>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -28,7 +27,6 @@ using editor::contract::Json;
 namespace compose = editor::compose;
 namespace filesync = editor::filesync;
 namespace serializer = editor::serializer;
-namespace fs = std::filesystem;
 
 namespace
 {
@@ -61,69 +59,6 @@ namespace
         return std::nullopt;
     return it->second;
 }
-
-// The lazy project scene resolver: reads + canonicalizes + composition-parses scene files under the
-// project root on demand, caching the raw parsed tree (for the write splice) and the composition
-// view (for the id-path walk). The R-SEC-008 jail is enforced lexically here (a scene / instance
-// path escaping the project root simply does not resolve); the native FileStore re-enforces it
-// TOCTOU-safely on the actual write.
-class ProjectResolver final : public compose::WriteResolver
-{
-public:
-    explicit ProjectResolver(fs::path root) : store_(std::move(root)) {}
-
-    [[nodiscard]] const compose::SceneDoc* resolve(std::string_view path) const override
-    {
-        const Entry& e = load(std::string(path));
-        return e.has_doc ? &e.doc : nullptr;
-    }
-    [[nodiscard]] const serializer::JsonValue* tree(std::string_view path) const override
-    {
-        const Entry& e = load(std::string(path));
-        return e.has_tree ? &e.tree : nullptr;
-    }
-
-private:
-    struct Entry
-    {
-        bool has_tree = false;
-        serializer::JsonValue tree;
-        bool has_doc = false;
-        compose::SceneDoc doc;
-    };
-
-    [[nodiscard]] const Entry& load(const std::string& path) const
-    {
-        if (const auto it = cache_.find(path); it != cache_.end())
-            return it->second;
-        Entry entry;
-        // The path must stay within the project root (R-SEC-008); an escaping instance/scene path
-        // resolves to nothing (the write path then reports write_target_not_found / file.not_found).
-        if (filesync::is_inside_jail(".", path))
-        {
-            if (const std::optional<std::string> bytes = store_.read(path))
-            {
-                serializer::CanonicalizeResult canonical = serializer::canonicalize(*bytes);
-                if (canonical.is_json)
-                {
-                    if (std::optional<compose::SceneDoc> doc =
-                            compose::build_scene_doc(path, canonical.root))
-                    {
-                        entry.has_doc = true;
-                        entry.doc = std::move(*doc);
-                    }
-                    entry.has_tree = true;
-                    entry.tree = std::move(canonical.root);
-                }
-            }
-        }
-        const auto [inserted, _] = cache_.emplace(path, std::move(entry));
-        return inserted->second;
-    }
-
-    filesync::NativeFileStore store_;
-    mutable std::map<std::string, Entry, std::less<>> cache_;
-};
 
 [[nodiscard]] const char* target_name(compose::WriteTarget target)
 {
@@ -215,7 +150,7 @@ Envelope run_set(const std::vector<std::string>& positionals,
                                  "the scene path `" + scene + "` escapes the project root (R-SEC-008)");
 
     const std::string project = flag(flags, "project").value_or(".");
-    ProjectResolver resolver(project);
+    compose::ProjectSceneResolver resolver(project);
 
     const compose::WritePlan plan = compose::plan_write(request, resolver);
     if (!plan.ok)
@@ -302,7 +237,7 @@ Envelope run_override_query(const std::vector<std::string>& positionals,
                                  "the scene path `" + scene + "` escapes the project root (R-SEC-008)");
 
     const std::string project = flag(flags, "project").value_or(".");
-    ProjectResolver resolver(project);
+    compose::ProjectSceneResolver resolver(project);
     if (resolver.resolve(scene) == nullptr)
         return Envelope::failure("file.not_found",
                                  "the scene `" + scene +
