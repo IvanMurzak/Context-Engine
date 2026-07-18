@@ -43,6 +43,13 @@ add_subdirectory(playbar)
 # seam. CEF-free, so it is part of the default 3-OS gate.
 add_subdirectory(session)
 
+# M8.5 a20 (issue a20): in-editor contextual help (help/) — a headless library built ON uitree + the
+# ONE contract registry (context_contract), default-built + unit-tested on the 3-OS matrix WITHOUT CEF
+# (R-HUX-010). Generates per-verb help from live introspection (never parallel docs) + the R-QA-006
+# getting-started references. Added AFTER the panels it documents and BEFORE a11y, which links + scans
+# the registered Help panel (builtin.help). A thin help layer — no new content pipeline, no dependency.
+add_subdirectory(help)
+
 # M5-F6 (issue #154): the a11y enforcement harness (context_gui_a11y) — the headless per-panel
 # accessibility gate built ON uitree. Unconditional (CEF-free), so it builds + tests on the default
 # 3-OS matrix + local dev gate; the editor-cef-smoke CI job additionally runs tools/a11y_scan.py over
