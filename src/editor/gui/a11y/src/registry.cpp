@@ -3,6 +3,7 @@
 
 #include "context/editor/gui/a11y/registry.h"
 
+#include "context/editor/gui/help/help_panel.h"
 #include "context/editor/gui/panels/inspector/inspector_panel.h"
 #include "context/editor/gui/panels/problems/problems_panel.h"
 #include "context/editor/gui/panels/scenetree/scene_tree_panel.h"
@@ -96,6 +97,17 @@ std::vector<RegisteredPanel> registered_panels()
     panels.push_back(RegisteredPanel{
         viewport::ViewportEditPanel::kContributionId,
         []() { return viewport::ViewportEditPanel{}.build_panel(); }});
+
+    // M8.5 a20 — the in-editor contextual Help / getting-started panel (gui/help/, R-HUX-010). The
+    // harness scans its default (shipped registry + corpus) rendered state, exactly as it scans the
+    // other panels' defaults; the panel's own gui-help-test_a11y ctest additionally covers its
+    // keyboard-nav focus order, and gui-help-contextual asserts help documents EVERY registered panel.
+    // Registered per the register-with-the-panel rule (coverage.manifest.jsonl carries the matching
+    // builtin.help line). Read-only, offline: its help is a pure projection of the ONE contract
+    // registry (never parallel docs) + the R-QA-006 human-onboarding samples.
+    panels.push_back(RegisteredPanel{
+        help::HelpPanel::kContributionId,
+        []() { return help::HelpPanel{}.build_panel(); }});
 
     return panels;
 }
