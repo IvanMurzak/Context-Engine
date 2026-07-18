@@ -19,17 +19,20 @@ verify → toolchain → aot → transcode → pack → link → adapter
 | transcode | per-platform variant transcode of each binary sidecar (task a03) | `build.transcode_failed` (wraps `transcode.*`) |
 | pack | write the deterministic v1 target pack (task a01) | `internal.error` (defensive) |
 | link | generate the R-KERNEL-003 referenced-only registration TU + LTO/DCE | `build.link_failed` |
-| adapter | plan the runnable artifact — **a06: real Linux desktop + server/headless adapters** (`adapter.*`); other targets report the honest stub | — |
+| adapter | plan the runnable artifact — real Linux (a06) + Windows (a10) + macOS (a13) + web (a11) adapters (`adapter.*`); a target/flavor with no adapter reports the honest stub | — |
 
-## The a06 export adapter (`adapter.*`)
+## The export adapter (`adapter.*`, a06 + a10 + a13 + a11)
 
 The pure `plan_adapter(target, flavor)` describes the runnable artifact — the shipped RuntimeKernel
-binary + the v1 pack + a `launch.sh` + a `context.build.json` manifest, in a documented tarball layout
+binary + the v1 pack + a launcher + a `context.build.json` manifest, in a documented tarball layout
 (R-BUILD-005). It is IO-free: the CLI (`src/cli/build_command.cpp`) owns the on-disk tarball assembly
-(`pkg::tar_write`) and the R-BUILD-009 smoke launch. Two Linux flavors — `desktop` (render subsystem
-present) and `server`/headless (render absent, L-5 DCE) — differ only in the shipped host binary
-(`src/runtime/host/`). Any target with no real adapter yet reports `supported=false` (R-BUILD-007). The
-artifact is deterministic MODULO the LTO link of the runtime binary; full spec in `docs/export-adapters.md`.
+(`pkg::tar_write`) and the R-BUILD-009 smoke launch. Two flavors — `desktop` (render subsystem present)
+and `server`/headless (render absent, L-5 DCE) — differ only in the shipped host binary
+(`src/runtime/host/`). The v1 targets are Linux + Windows + macOS (native) and web (Emscripten);
+Windows (`.exe`, launch.cmd, Authenticode) and macOS (Mach-O, launch.sh, Developer ID + notarization —
+see `signing.*`) require code-signing. Any target/flavor with no real adapter reports `supported=false`
+(R-BUILD-007). The artifact is deterministic MODULO the LTO link of the runtime binary; full spec in
+`docs/export-adapters.md`.
 
 ## Honesty (R-BUILD-007)
 

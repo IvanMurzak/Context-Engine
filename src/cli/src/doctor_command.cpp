@@ -405,12 +405,15 @@ Envelope run_doctor(const std::map<std::string, std::string>& flags)
     probe.filesync.watch_limit = read_watch_limit();
     probe.filesync.fd_limit = -1; // v1: the open-fd cap is a documented probe gap (unknown)
 
-    // Signing prerequisites (R-BUILD-005 / R-BUILD-008, a10): a PRESENCE-ONLY probe per requested
-    // target's requirement. For Windows Authenticode, "configured" = a signing identity is present in the
-    // environment — the Azure Trusted Signing service principal (AZURE_CLIENT_ID, the primary path) OR a
-    // developer-supplied Authenticode identity (CONTEXT_SIGNING_IDENTITY, the fallback). PRESENCE ONLY:
-    // env_present reads no secret VALUE, so the doctor reports "configured"/"absent" without ever
-    // surfacing a credential. macOS notarization has no v1 probe here (a13 scope), so it stays "unknown".
+    // Signing prerequisites (R-BUILD-005 / R-BUILD-008, a10 + a13): a PRESENCE-ONLY probe per requested
+    // target's requirement. PRESENCE ONLY: env_present reads no secret VALUE, so the doctor reports
+    // "configured"/"absent" without ever surfacing a credential.
+    //   * Windows Authenticode: "configured" = the Azure Trusted Signing service principal
+    //     (AZURE_CLIENT_ID, the primary path) OR a developer-supplied Authenticode identity
+    //     (CONTEXT_SIGNING_IDENTITY, the fallback) is present.
+    //   * macOS Developer ID + notarization (a13): "configured" = BOTH a Developer ID signing identity
+    //     (MAC_CSC_LINK / MAC_SIGN_IDENTITY, the codesign half) AND an App-Store-Connect notary key
+    //     (APPLE_API_KEY_B64, the notarytool half) are present — a partial config is honestly "absent".
     for (const std::string& target : targets)
         for (const std::string& requirement : build::signing_requirements(target))
         {
@@ -419,6 +422,13 @@ Envelope run_doctor(const std::map<std::string, std::string>& flags)
                 const bool configured =
                     env_present("AZURE_CLIENT_ID") || env_present("CONTEXT_SIGNING_IDENTITY");
                 probe.signing.push_back(build::SigningProbe{target, requirement, configured,
+                                                            /*known=*/true});
+            }
+            else if (requirement == "developer-id-notarization")
+            {
+                const bool identity = env_present("MAC_CSC_LINK") || env_present("MAC_SIGN_IDENTITY");
+                const bool notary = env_present("APPLE_API_KEY_B64");
+                probe.signing.push_back(build::SigningProbe{target, requirement, identity && notary,
                                                             /*known=*/true});
             }
             // else: no v1 presence probe for this requirement — the core reports it "unknown".

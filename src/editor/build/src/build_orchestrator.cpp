@@ -182,12 +182,12 @@ BuildResult run_build(const BuildRequest& request)
         reg_tu += "    register_" + pkg + "(kernel);\n";
     reg_tu += "    (void)kernel;\n}\n";
 
-    // --- Phase 7: platform adapter (a06 Linux + a10 Windows + a11 web) + success summary --------------
+    // --- Phase 7: platform adapter (a06 Linux + a10 Windows + a13 macOS + a11 web) + success summary ---
     // The adapter plans the runnable artifact — the shipped RuntimeKernel binary (or the a11 web
     // wasm+js bundle) + this pack + a launcher + a manifest, in the R-BUILD-005 layout. plan_adapter is
     // pure + deterministic; the CLI (build_command.cpp) owns the on-disk artifact assembly + the
-    // R-BUILD-009 smoke launch. A target with no real adapter yet (macos) plans supported=false — the
-    // honest stub (R-BUILD-007), never a faked artifact.
+    // R-BUILD-009 smoke launch. A (target, flavor) with no real adapter (e.g. an unknown flavor, or
+    // web+server) plans supported=false — the honest stub (R-BUILD-007), never a faked artifact.
     BuildResult result;
     result.ok = true;
     result.pack_bytes = packed.bytes;

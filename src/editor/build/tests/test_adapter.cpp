@@ -1,11 +1,12 @@
-// build-test_adapter (M8 tasks a06 + a10 + a11) — the pure export-adapter plan + launcher + manifest
-// generators. Coverage (R-QA-013 happy + edge): the Linux flavors (desktop render-present / server
-// render-absent), the a10 Windows flavors (`.exe` binary, launch.cmd batch launcher, requires_signing),
-// AND the a11 web bundle (wasm+js runtime, index.html shell, runtimeLoader, desktop-only) plan a correct
-// artifact layout; unsupported targets/flavors (macos, web+server) plan the honest stub; the launcher
-// boots relative to its own dir + forwards args (posix launch.sh / windows launch.cmd) or, for web, is
-// the static index.html shell; the manifest is deterministic machine-readable JSON carrying
-// requiresSigning + (web only) runtimeLoader.
+// build-test_adapter (M8 tasks a06 + a10 + a11 + a13) — the pure export-adapter plan + launcher +
+// manifest generators. Coverage (R-QA-013 happy + edge): the Linux flavors (desktop render-present /
+// server render-absent), the a10 Windows flavors (`.exe` binary, launch.cmd batch launcher,
+// requires_signing), the a13 macOS flavors (POSIX launch.sh like Linux but requires_signing like
+// Windows), AND the a11 web bundle (wasm+js runtime, index.html shell, runtimeLoader, desktop-only) plan
+// a correct artifact layout; unsupported targets/flavors (playstation, web+server, bad flavors) plan the
+// honest stub; the launcher boots relative to its own dir + forwards args (posix launch.sh / windows
+// launch.cmd) or, for web, is the static index.html shell; the manifest is deterministic machine-readable
+// JSON carrying requiresSigning + (web only) runtimeLoader.
 
 #include "context/editor/build/adapter.h"
 
@@ -87,11 +88,62 @@ int main()
         CHECK(p.layout[0].archive_path == "bin/context-runtime-server.exe");
     }
 
-    // --- Linux requires NO signing (a06) — the signing axis is Windows-only here ----------------------
+    // --- Linux requires NO signing (a06) — the signing axis is Windows/macOS here ----------------------
     {
         const build::AdapterPlan p = build::plan_adapter("linux", "desktop", "game.pack");
         CHECK(!p.requires_signing);
         CHECK(p.launcher_kind == build::LauncherKind::PosixSh);
+    }
+
+    // --- macOS DESKTOP (a13): POSIX launch.sh, suffix-less Mach-O binary, requires_signing, render present
+    {
+        const build::AdapterPlan p = build::plan_adapter("macos", "desktop", "game.pack");
+        CHECK(p.supported);
+        CHECK(p.target == "macos");
+        CHECK(p.flavor == "desktop");
+        CHECK(p.render_present);
+        CHECK(p.requires_signing); // macOS ships a Developer-ID-signed + notarized binary (R-SEC-003)
+        CHECK(p.runtime_binary == "context-runtime"); // no `.exe` suffix — Mach-O, like Linux
+        CHECK(p.launcher_kind == build::LauncherKind::PosixSh); // POSIX, like Linux (NOT launch.cmd)
+        CHECK(p.launcher_name == "launch.sh");
+        CHECK(p.layout.size() == 4);
+        CHECK(p.layout[0].archive_path == "bin/context-runtime");
+        CHECK(p.layout[0].role == "runtime");
+        CHECK(p.layout[2].archive_path == "launch.sh");
+        CHECK(p.layout[3].archive_path == "context.build.json");
+    }
+
+    // --- macOS SERVER/headless (a13): render absent, suffix-less server binary, still signing-required ---
+    {
+        const build::AdapterPlan p = build::plan_adapter("macos", "server", "");
+        CHECK(p.supported);
+        CHECK(p.flavor == "server");
+        CHECK(!p.render_present);
+        CHECK(p.requires_signing);
+        CHECK(p.runtime_binary == "context-runtime-server"); // no `.exe` suffix
+        CHECK(p.pack_name == "game.pack"); // default when empty
+        CHECK(p.launcher_kind == build::LauncherKind::PosixSh);
+        CHECK(p.layout[0].archive_path == "bin/context-runtime-server");
+    }
+
+    // --- macOS launcher: the SAME POSIX launch.sh as Linux (cmd.exe/.exe are Windows-only) ------------
+    {
+        const build::AdapterPlan p = build::plan_adapter("macos", "desktop", "game.pack");
+        const std::string sh = build::render_launcher(p);
+        CHECK(contains(sh, "#!/bin/sh"));
+        CHECK(contains(sh, "exec \"$here/bin/context-runtime\" --pack \"$here/content/game.pack\" \"$@\""));
+        CHECK(sh.find('\r') == std::string::npos); // LF-only (deterministic)
+    }
+
+    // --- macOS manifest: requiresSigning true; no runtimeLoader (native, not web) ---------------------
+    {
+        const build::AdapterPlan p = build::plan_adapter("macos", "desktop", "game.pack");
+        const std::string m = build::render_manifest(p, 1, 2, 3);
+        CHECK(contains(m, "\"target\": \"macos\""));
+        CHECK(contains(m, "\"runtimeBinary\": \"bin/context-runtime\""));
+        CHECK(contains(m, "\"launcher\": \"launch.sh\""));
+        CHECK(contains(m, "\"requiresSigning\": true"));
+        CHECK(!contains(m, "runtimeLoader"));
     }
 
     // --- Web DESKTOP (a11): Emscripten wasm+js bundle, index.html shell, no signing, render present ---
@@ -156,17 +208,19 @@ int main()
 
     // --- unsupported target / flavor: the honest stub (R-BUILD-007) ----------------------------------
     {
-        const build::AdapterPlan mac = build::plan_adapter("macos", "desktop", "game.pack");
-        CHECK(!mac.supported);
-        CHECK(mac.layout.empty());
-        CHECK(build::render_launcher(mac).empty());
-        CHECK(build::render_manifest(mac, 1, 2, 3).empty());
-        // The native linux/windows manifests carry NO runtimeLoader field (web-only).
+        const build::AdapterPlan ps = build::plan_adapter("playstation", "desktop", "game.pack");
+        CHECK(!ps.supported);
+        CHECK(ps.layout.empty());
+        CHECK(build::render_launcher(ps).empty());
+        CHECK(build::render_manifest(ps, 1, 2, 3).empty());
+        // The native linux/windows/macos manifests carry NO runtimeLoader field (web-only).
         const build::AdapterPlan lin = build::plan_adapter("linux", "desktop", "game.pack");
         CHECK(!contains(build::render_manifest(lin, 1, 2, 3), "runtimeLoader"));
 
         const build::AdapterPlan bad_flavor = build::plan_adapter("windows", "console", "game.pack");
         CHECK(!bad_flavor.supported);
+        const build::AdapterPlan mac_bad_flavor = build::plan_adapter("macos", "console", "game.pack");
+        CHECK(!mac_bad_flavor.supported);
     }
 
     // --- Windows launcher: a launch.cmd batch that boots relative to %~dp0 + forwards args ------------

@@ -46,19 +46,20 @@ target_link_options(context_build_test_build_orchestrator PRIVATE
     $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
 add_test(NAME build-test_build_orchestrator COMMAND context_build_test_build_orchestrator)
 
-# a06/a10 export-adapter (adapter.*): the pure plan + launcher + manifest generators — the Linux + the
-# a10 Windows flavors (desktop/server), the honest stub for uncovered targets, and the deterministic
-# launcher (posix launch.sh / windows launch.cmd) + manifest text. No filesystem, so no static-runtime
-# link needed (unlike the orchestrator drift guard).
+# a06/a10/a13 export-adapter (adapter.*): the pure plan + launcher + manifest generators — the Linux, the
+# a10 Windows, and the a13 macOS flavors (desktop/server), the honest stub for uncovered targets, and the
+# deterministic launcher (posix launch.sh / windows launch.cmd) + manifest text. No filesystem, so no
+# static-runtime link needed (unlike the orchestrator drift guard).
 add_executable(context_build_test_adapter tests/test_adapter.cpp)
 target_link_libraries(context_build_test_adapter PRIVATE context_build context_warnings)
 target_include_directories(context_build_test_adapter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME build-test_adapter COMMAND context_build_test_adapter)
 
-# a10 Authenticode signing hook (signing.*): the pure signing plan + report + PE-signature-presence
-# parser. Covers the windows required plan, the not-required plan for other targets, the signed /
-# unsigned (never-silent WARNING) states, and pe_has_authenticode_signature over synthetic PE fixtures
-# (a signed vs unsigned Certificate Table, and malformed/non-PE inputs). No filesystem/subprocess.
+# a10 + a13 OS code-signing hook (signing.*): the pure signing plan + report + the two presence parsers.
+# Covers the windows Authenticode + macOS Developer-ID-notarization required plans, the not-required plan
+# for other targets, the signed / unsigned (never-silent WARNING) states with method-aware phrasing, and
+# pe_has_authenticode_signature / macho_has_code_signature over synthetic PE + Mach-O fixtures (signed vs
+# unsigned, fat/universal, and malformed/non-image inputs). No filesystem/subprocess.
 add_executable(context_build_test_signing tests/test_signing.cpp)
 target_link_libraries(context_build_test_signing PRIVATE context_build context_warnings)
 target_include_directories(context_build_test_signing PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
