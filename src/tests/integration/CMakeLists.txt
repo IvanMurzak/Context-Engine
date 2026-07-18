@@ -648,3 +648,43 @@ set_tests_properties(
     m8-exit-4a-determinism-wedge
     m8-exit-4b-replication-wedge
     PROPERTIES TIMEOUT 180)
+
+# ===================================================================================================
+# The TRUST-TIER RED-TEAM SUITE (M8.5 Wave-1 a17, issue #283) — adversarial validation of the v1 trust
+# posture as permanent regression tests. Deliberately a PLAIN `security-redteam-*` ctest family, NOT a
+# milestone gate: it is NOT in the general step's gate-exclusion regex, so the `build` job's
+# `ctest --preset dev` runs it automatically on every OS leg, and `--preset dev` builds these targets
+# with no `.github/workflows/ci.yml` `--target`/`-R` change (unlike the m*-exit / determinism / wasm-
+# runner gate families). Residual v1 boundaries are catalogued in docs/security-boundaries-v1.md.
+set(_redteam_static_runtime $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
+
+# --- security-redteam-boundaries: the in-process cross-cutting adversarial audit. Links the composed
+#     EditorKernel (bridge scope gate + contract registry + filesync path jail), the importer isolation
+#     slice (context_import), and the JS host (context_js — real V8 on the 3-OS build legs, the honest
+#     stub on the local Strawberry-GCC dev host). GPU-free, no daemon. ------------------------------
+add_executable(context_test_redteam_boundaries test_redteam_boundaries.cpp)
+target_link_libraries(context_test_redteam_boundaries
+    PRIVATE context_editorkernel context_import context_js context_warnings)
+target_link_options(context_test_redteam_boundaries PRIVATE ${_redteam_static_runtime})
+target_include_directories(context_test_redteam_boundaries PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME security-redteam-boundaries COMMAND context_test_redteam_boundaries)
+
+# --- security-redteam-tamper-e2e: the M8.5 fail-closed exit clause, driven through the REAL `context`
+#     binary's a08 verify-before-execute fetch path (context_cli) + the verify-before-use gate
+#     (context_common). Threads the built binary in as CONTEXT_BINARY (the m1-exit e2e pattern) and the
+#     pinned PRODUCTION trust root as CONTEXT_TRUST_ROOT (the m8-exit-2 pattern). --------------------
+add_executable(context_test_redteam_tamper_e2e test_redteam_tamper_e2e.cpp)
+target_link_libraries(context_test_redteam_tamper_e2e
+    PRIVATE context_cli context_common context_warnings)
+target_link_options(context_test_redteam_tamper_e2e PRIVATE ${_redteam_static_runtime})
+target_include_directories(context_test_redteam_tamper_e2e PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(context_test_redteam_tamper_e2e PRIVATE
+    CONTEXT_BINARY="$<TARGET_FILE:context>"
+    CONTEXT_TRUST_ROOT="${_m8_trust_root}")
+add_dependencies(context_test_redteam_tamper_e2e context)
+add_test(NAME security-redteam-tamper-e2e COMMAND context_test_redteam_tamper_e2e)
+
+# boundaries is in-process + fast; tamper-e2e mints an ephemeral key + spawns `context build` several
+# times over a real process boundary — cap both so a regression never hangs CI.
+set_tests_properties(security-redteam-boundaries PROPERTIES TIMEOUT 120)
+set_tests_properties(security-redteam-tamper-e2e PROPERTIES TIMEOUT 240)
