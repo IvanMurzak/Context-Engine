@@ -704,3 +704,10 @@ add_subdirectory(runtime/host)
 # testing — and spawns the real `context` binary, so all of their targets must already exist.
 # ---------------------------------------------------------------------------
 add_subdirectory(tests/integration)
+
+# The L-50 multi-client concurrency VALIDATION suite (issue #284, a16-l50): two deterministic
+# integration tests red-teaming the shipped M1 concurrency + M2 structural-merge machinery, registered
+# under the non-gate `concurrency-` ctest prefix (auto-run in the build job's general step on all 3 OS
+# legs; no ci.yml change). Added LAST like the exit gates — it composes the inspector (L-30 engine),
+# testing (fault harness), merge, cli, and session targets, so all must already exist above.
+add_subdirectory(tests/concurrency)
