@@ -120,6 +120,23 @@ public:
         return static_cast<bool>(system_observer_);
     }
 
+    // --- per-system span sink (L-47 / R-OBS-004 profiler spans) --------------------------------
+    // An optional hook that turns the scheduler into a per-system span emitter (R-OBS-004: "the
+    // scheduler emits per-system trace spans regardless of authoring language"). When set, the step
+    // loop wall-times each system's run() and reports the (tick, system index, name, duration_ms) —
+    // the substrate the L-47 profiler's SpanChannel records. Purely observational and OFF the state
+    // path, exactly like the SystemObserver above: a duration never touches the World or its hash,
+    // so a session steps bit-identically whether or not the sink is installed (test proven). Zero
+    // cost when unset — the step loop skips the clock reads entirely (one branch per system).
+    using SystemSpanSink = std::function<void(std::uint64_t tick, std::size_t system_index,
+                                              const std::string& system, double duration_ms)>;
+    void set_system_span_sink(SystemSpanSink sink) { system_span_sink_ = std::move(sink); }
+    void clear_system_span_sink() noexcept { system_span_sink_ = nullptr; }
+    [[nodiscard]] bool has_system_span_sink() const noexcept
+    {
+        return static_cast<bool>(system_span_sink_);
+    }
+
     // --- inter-tick hook (R-SIM-008 / R-HEAD-002 tick-boundary service point) ------------------
     // An optional hook invoked AFTER each fixed tick completes — in the gap BETWEEN ticks, never
     // mid-tick. This is the bounded per-tick service point R-HEAD-002 names: the JS-tier scheduled
@@ -176,6 +193,7 @@ private:
     bool trace_enabled_ = false;
     HashTrace trace_;
     SystemObserver system_observer_;
+    SystemSpanSink system_span_sink_;
     InterTickHook inter_tick_hook_;
 };
 

@@ -155,7 +155,8 @@ int main()
             {"resource.read", Scope::read_query},   {"validate", Scope::read_query},
             {"doctor", Scope::read_query},          {"reconcile", Scope::read_query},
             {"session.hash", Scope::read_query},    {"determinism.diff", Scope::read_query},
-            {"profile.gc", Scope::read_query},      {"debug.attach", Scope::read_query},
+            {"profile.gc", Scope::read_query},      {"profile.session", Scope::read_query},
+            {"debug.attach", Scope::read_query},
             {"ui.dump", Scope::read_query},         {"ui.query", Scope::read_query},
             {"ui.assert", Scope::read_query},
             // file_write — authored-file mutations

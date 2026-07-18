@@ -25,14 +25,40 @@ Incremental-marking brackets (V8 `kGCTypeIncrementalMarking`) span a whole incre
 not a stop-the-world pause — so they are recorded as kind-tagged samples but **excluded from the
 pause aggregates** (counting one would misreport a multi-tick cycle as a giant pause).
 
+## The per-system span channel (`span_channel.h`) — R-OBS-004 (a15)
+
+`SpanChannel` is the second channel: one attributed span per system per tick (`{tick, system,
+duration_ms}`) plus exact per-system aggregates, each tagged with an authoring **`Lane`** (`native`
+C++ / `script` TS / `wasm`) so the polyglot per-system cost is legible (R-OBS-004: "the scheduler
+emits per-system trace spans regardless of authoring language"). The **scheduler** feeds it —
+`Session::set_system_span_sink` wall-times each system `run()` — and the timing is OFF the state
+path, so a session steps bit-identically with or without a sink installed. `snapshot.h`
+(`build_snapshot`) flattens the spans into a JS-seam-free `ProfileSnapshot` (counters + per-system +
+per-lane rollup + a `GcSummary`), the value the CLI serializes, the HUD renders, and the trace
+export reads.
+
+## Tracy/Perfetto export (`trace_export.h`) — a15
+
+`write_chrome_trace` emits the spans (+ the folded-in GC pauses) as the **Chrome Trace Event Format**
+— importable into Tracy (`tracy-import-chrome`), Perfetto, and `chrome://tracing`. No Tracy
+dependency is linked. See `docs/profiling.md`.
+
 ## Surfacing (the session/CLI surface)
 
-`context profile gc` (src/cli/profile_command.cpp) runs a synthetic churn workload over a real
-headless session with the inter-tick window active and emits this channel as an R-CLI-008 JSON
-envelope — the v1 of L-47's "CLI-queryable as JSON". Programmatic consumers (the m6-exit gates)
-use the channel directly.
+- `context profile gc` (src/cli/profile_command.cpp) runs a synthetic churn workload over a real
+  headless session with the inter-tick window active and emits the GC channel as an R-CLI-008 JSON
+  envelope. Programmatic consumers (the m6-exit gates) use the channel directly.
+- `context profile session` (a15) steps a headless session and emits ONE snapshot — per-system spans
+  + per-lane rollups + counters + the **folded-in** GC-pause channel (R-SIM-008 — reused, not
+  duplicated) — and, with `--trace-out`, the Tracy/Perfetto capture. Spans + counters answer on
+  every toolchain; the GC block reports `available:false` on a stub-JS build rather than refusing.
+
+The HUD (a render-module overlay) and the RenderDoc (GPU) capture hook live in `src/render/`
+(`profile_hud.h` / `renderdoc_capture.h`) so this module stays GPU-free; they consume the flattened
+snapshot. See `docs/profiling.md` for the full L-47 surface.
 
 ## Deliberately out of scope (later L-47 slices)
 
-Per-system spans across C++/TS/WASM (powered by the L-38 declarations), Tracy/RenderDoc export,
-the HUD, daemon/RPC queries of a live session's channels. They accrete around this substrate.
+Daemon/RPC queries of a LIVE (already-running) session's channels — today `profile session` runs its
+own synthetic headless session per query. Wiring the channels into the long-running daemon's method
+surface (so `attach`-ing to a live game reads its in-flight spans) accretes around this substrate.

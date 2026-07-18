@@ -364,6 +364,10 @@ int main()
     //                             refuse with sim.gc.unavailable) and reports wall-clock GC timings,
     //                             not file-authoring output; covered by cli test test_profile_command
     //                             (both backend branches) + js-test_gc_discipline / _gc_state_hash.
+    //   profile/session         — the a15 unified profiling surface: steps a synthetic headless
+    //                             session and reports per-system spans + counters + folded-in GC
+    //                             attribution (wall-clock timings, not file-authoring output — it
+    //                             consumes no project file); covered by cli test test_profile_command.
     //   /build                  — the M8 a05 build verb: needs a whole project + the per-target toolchain
     //                             manifest fixture, drives the derive→transcode→pack chain, and emits a
     //                             BINARY pack artifact (not file-authoring output the corpus asserts on);
@@ -378,8 +382,8 @@ int main()
     // Operational (daemon-served) verbs are stability!="stable" and reserved verbs are
     // implemented==false, so both are excluded by the predicate without needing an exemption entry.
     // =============================================================================================
-    const std::set<std::string> exempt = {"resource/read", "/install", "/re-key", "profile/gc",
-                                           "/build",        "/doctor"};
+    const std::set<std::string> exempt = {"resource/read",   "/install", "/re-key", "profile/gc",
+                                           "profile/session", "/build",   "/doctor"};
 
     // Guard: an exemption must name a verb that still exists (so the list cannot rot silently).
     for (const std::string& key : exempt)

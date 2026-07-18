@@ -13,6 +13,7 @@
 
 #include "context/runtime/session/hash.h"
 
+#include <chrono>
 #include <unordered_map>
 #include <utility>
 
@@ -229,7 +230,23 @@ StepResult Session::step(std::uint64_t ticks)
         for (const System& sys : systems_)
         {
             SystemContext ctx{world_, rng_, tick, inputs, *registry_};
-            sys.run(ctx);
+            if (system_span_sink_)
+            {
+                // The L-47 profiler span: wall-time this system's run (R-OBS-004). Timing is OFF the
+                // logical state path — the clock reads and the sink call never touch the World, so
+                // the tick's hash is identical with or without the sink. Only paid when a profiler
+                // installed a sink.
+                const auto span_start = std::chrono::steady_clock::now();
+                sys.run(ctx);
+                const auto span_end = std::chrono::steady_clock::now();
+                const double duration_ms =
+                    std::chrono::duration<double, std::milli>(span_end - span_start).count();
+                system_span_sink_(tick, system_index, sys.name, duration_ms);
+            }
+            else
+            {
+                sys.run(ctx);
+            }
             // The per-system observer sees the world right after this system ran — the same instant
             // the trace hashes it — so the determinism triage can snapshot a divergent system's exact
             // post-run state (R-QA-005). Read-only: it must not touch the world.
