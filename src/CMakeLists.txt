@@ -706,18 +706,22 @@ add_subdirectory(runtime/netsync)
 # regardless of add_subdirectory order).
 add_subdirectory(runtime/host)
 
+# The L-50 multi-client concurrency VALIDATION suite (issue #284, a16-l50): two deterministic
+# integration tests red-teaming the shipped M1 concurrency + M2 structural-merge machinery, registered
+# under the non-gate `concurrency-` ctest prefix (auto-run in the build job's general step on all 3 OS
+# legs; no ci.yml change). Added here — before tests/integration — because it composes the inspector
+# (L-30 engine), testing (fault harness), merge, cli, and session targets (all defined above), AND the
+# M8.5 exit gate (tests/integration) registers ctest ALIASES of its two executables (m85-exit-1a/-1b),
+# so those targets must exist when tests/integration is processed.
+add_subdirectory(tests/concurrency)
+
 # ---------------------------------------------------------------------------
 # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36): five integration tests, one per exit
 # criterion, registered as the `m1-exit-*` ctest family and CI-gated per the §6 tiering (blocking
 # per-PR on the 3-OS build matrix — see the dedicated ci.yml step). Added LAST: the gate composes
 # every M1 component above — kernel, filesync, derivation, contract, bridge, editorkernel, cli,
-# testing — and spawns the real `context` binary, so all of their targets must already exist.
+# testing — and spawns the real `context` binary, so all of their targets must already exist. This
+# directory also hosts the M2/M4/M5/M6/M7/M8 and (a23) M8.5 exit gates; the M8.5 gates ALIAS the
+# a16 concurrency executables (added just above) + the a20 contextual-help executable (editor/gui).
 # ---------------------------------------------------------------------------
 add_subdirectory(tests/integration)
-
-# The L-50 multi-client concurrency VALIDATION suite (issue #284, a16-l50): two deterministic
-# integration tests red-teaming the shipped M1 concurrency + M2 structural-merge machinery, registered
-# under the non-gate `concurrency-` ctest prefix (auto-run in the build job's general step on all 3 OS
-# legs; no ci.yml change). Added LAST like the exit gates — it composes the inspector (L-30 engine),
-# testing (fault harness), merge, cli, and session targets, so all must already exist above.
-add_subdirectory(tests/concurrency)

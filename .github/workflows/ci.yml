@@ -144,11 +144,11 @@ jobs:
         run: cmake --build --preset dev
         working-directory: src
 
-      # Every registered suite EXCEPT the M1 + M2 + M4 + M5 + M6 + M7 + M8 exit gates, the M3
+      # Every registered suite EXCEPT the M1 + M2 + M4 + M5 + M6 + M7 + M8 + M8.5 exit gates, the M3
       # determinism gate, and the samples-corpus gate — those families run in their own named steps
       # below so each milestone/QA gate is legible per OS leg (same tests, each runs exactly once).
       - name: Run test suites (ctest)
-        run: ctest --preset dev --verbose -E "^m1-exit-|^m2-exit-|^m4-exit-|^m5-exit-|^m6-exit-|^m7-exit-|^m8-exit-|^determinism-|^samples-corpus"
+        run: ctest --preset dev --verbose -E "^m1-exit-|^m2-exit-|^m4-exit-|^m5-exit-|^m6-exit-|^m7-exit-|^m8-exit-|^m85-exit-|^determinism-|^samples-corpus"
         working-directory: src
 
       # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36) — the five exit criteria as a BLOCKING
@@ -280,6 +280,27 @@ jobs:
       # in docs/ci-fleet-manifest.json as the m8-exit-* gates. Green here CLOSES M8.
       - name: M8 exit gate (platform-set + desktop-signing + headless-smoke + determinism/replication wedge + seam checklist, blocking)
         run: ctest --preset dev --output-on-failure -R "^m8-exit-"
+        working-directory: src
+
+      # The M8.5 EXIT GATE (ROADMAP §1-M8.5 exit / a23-m85-exit) — the wedge-hardening (= v1) milestone-
+      # closing mirror of the M1..M8 gates: the blocking per-PR m85-exit-* ctests on every OS leg, RIDING
+      # the landed a15-a21 machinery. One gate per M8.5 exit clause: an operator-scoped agent + a human
+      # co-edit and MERGE across worktrees with NO lost updates (m85-exit-1a/-1b, aliases of the a16 L-50
+      # concurrency validation); a sandboxed package cannot exceed its granted capabilities + a TAMPERED
+      # signed artifact is refused fail-closed under the a08 trust chain (m85-exit-2a/-2b, aliases of the
+      # a17 security-redteam suite); profiling data is JSON-queryable on a live session via the REAL
+      # `context profile session` verb + a Chrome-trace export, L-47 (m85-exit-3); the trailing-GUI
+      # surface is exercised — tilemap paint (a18), in-context viewport override edit (a19 R-HUX-006 core),
+      # contextual help (a20 R-HUX-010) (m85-exit-4a/-4b/-4c, aliases of the landed GUI parity/help
+      # tests); and the R-FILE-011 orchestration-density targets are committed + honestly advisory per the
+      # ops1 state, the numbers benchmarked by the sibling density-bench job (m85-exit-5). This job builds
+      # EVERY target via `--preset dev`, so each gate's executable is always built (never "Not Run") — NO
+      # `--target` list changes are needed (the M6/M7/M8 precedent); the aliases register NO new
+      # determinism-* ctest name, so the strict-FP `deterministic` job's hand-maintained --target list is
+      # deliberately UNCHANGED. Registered in docs/ci-fleet-manifest.json as the m85-exit-* gates. Green
+      # here CLOSES M8.5 (= the v1 wedge).
+      - name: M8.5 exit gate (co-edit/merge + sandbox/tamper + profiling-json + trailing-GUI + density, blocking)
+        run: ctest --preset dev --output-on-failure -R "^m85-exit-"
         working-directory: src
 
       - name: sccache stats

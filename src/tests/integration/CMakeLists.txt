@@ -753,3 +753,144 @@ if(CONTEXT_TSAN)
         PROPERTIES ENVIRONMENT
         "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/js/tsan-suppressions.txt")
 endif()
+
+# ===================================================================================================
+# The M8.5 EXIT GATE (ROADMAP §1-M8.5 exit / a23-m85-exit) — the wedge-hardening (= v1) milestone-closing
+# mirror of the M1/M2/M4/M5/M6/M7/M8 gates: blocking per-PR m85-exit-* ctests on every OS leg (registered
+# in docs/ci-fleet-manifest.json as the m85-exit-* gates; run by the "M8.5 exit gate" step in
+# .github/workflows/ci.yml, AFTER the M8 step). One gate per ROADMAP M8.5 exit clause; each RIDES the
+# landed a15-a21 machinery rather than rebuilding it. Four clauses ride landed executables via ctest
+# ALIASES (the m8-exit-3/-4a/-4b alias precedent — same executable, a milestone ctest name), and two
+# (a15 profiling + a21 density) get NEW focused executables:
+#   m85-exit-1a-coedit          ─┐ a16 / L-50: an operator-scoped agent + a human co-edit and MERGE
+#   m85-exit-1b-worktree-merge  ─┘ across worktrees with NO lost updates (aliases of the concurrency-*)
+#   m85-exit-2a-sandbox-caps    ─┐ a17 + a08: a sandboxed package cannot exceed its granted capabilities
+#   m85-exit-2b-tamper-fail-closed ┘ + a TAMPERED signed artifact is refused fail-closed (aliases of the
+#                                    security-redteam-* suite)
+#   m85-exit-3-profiling-json     a15 / L-47: profiling data is JSON-queryable on a live session (NEW —
+#                                 spawns the REAL `context` binary's `profile session` verb)
+#   m85-exit-4a-tilemap-paint   ─┐ a18/a19/a20: the trailing-GUI surface is exercised — paint a tilemap
+#   m85-exit-4b-override-edit    │ (a18 R-2D-003), an in-context viewport override edit (a19 R-HUX-006
+#   m85-exit-4c-contextual-help ─┘ MUST core), and surface contextual help (a20 R-HUX-010) (aliases of
+#                                  tilemap-paint-parity / viewport-override-parity / gui-help-contextual)
+#   m85-exit-5-density-commitment a21 / R-FILE-011: the orchestration-density targets are committed +
+#                                 benchmarked, honestly advisory per the ops1 state (NEW — reads the
+#                                 committed bench/density-targets.json; the density-bench CI job runs the
+#                                 benchmark itself)
+#
+# The build job builds EVERY target via `--preset dev`, so each gate's executable is always built (never
+# "Not Run") — NO `--target` list changes are needed (the M6/M7/M8 precedent). The four alias groups
+# re-use landed executables, registering NO new determinism-* ctest name, so the strict-FP `deterministic`
+# job's hand-maintained --target list is deliberately UNCHANGED. Green here CLOSES M8.5 (= v1 wedge).
+
+# Self-contained GCC runtime (mirrors m1/m2/m5/m6/m7/m8-exit + src/cli): the two NEW executables use
+# std::filesystem / stream IO (+ m85-exit-3 spawns the real binary), whose newer-libstdc++ symbols a
+# stale PATH libstdc++-6.dll could shadow (STATUS_ENTRYPOINT_NOT_FOUND). Gated to GNU so the macOS/Clang
+# + Windows/MSVC CI legs are untouched.
+set(_m85_exit_static_runtime
+    $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
+
+# The committed R-FILE-011 orchestration-density artifacts (a21) read by m85-exit-5. CMAKE_SOURCE_DIR is
+# the `-S src` root, so ../ is the repo root.
+set(_m85_density_targets "${CMAKE_SOURCE_DIR}/../bench/density-targets.json")
+set(_m85_density_script "${CMAKE_SOURCE_DIR}/../bench/density.py")
+set(_m85_density_doc "${CMAKE_SOURCE_DIR}/../docs/density-targets.md")
+
+# --- m85-exit-1a / m85-exit-1b: the a16 L-50 co-edit + worktree-merge validation (issue #284, #285).
+#     ALIASES of the landed concurrency-* executables (defined in src/tests/concurrency, wired before
+#     this directory in src/CMakeLists.txt). No new build targets; the build job builds them via
+#     `--preset dev` regardless. The exit formally blocks on the "no lost updates across worktrees" law. -
+add_test(NAME m85-exit-1a-coedit COMMAND context_test_coedit_concurrency)
+add_test(NAME m85-exit-1b-worktree-merge COMMAND context_test_worktree_merge)
+
+# --- m85-exit-2a / m85-exit-2b: the a17 trust-tier red-team (issue #283/#286) + the a08 fetch path.
+#     ALIASES of the landed security-redteam-* executables (defined above in this file). 2a = a sandboxed
+#     package cannot exceed its granted capabilities (the in-process cross-cutting boundary audit); 2b =
+#     a TAMPERED signed artifact is refused fail-closed through the REAL `context` binary's a08
+#     verify-before-execute fetch path. --------------------------------------------------------------
+add_test(NAME m85-exit-2a-sandbox-caps COMMAND context_test_redteam_boundaries)
+add_test(NAME m85-exit-2b-tamper-fail-closed COMMAND context_test_redteam_tamper_e2e)
+
+# --- m85-exit-3: the a15 L-47 profiling surface is JSON-queryable on a live session (NEW). Drives the
+#     REAL `context` binary's `profile session` verb across a process boundary (context_common subprocess
+#     runner + context_contract envelope DOM — the m7-exit-2 pattern) and queries the returned snapshot
+#     (spans + lanes + gc) + the Chrome-trace export. Spawns the built `context` binary (CONTEXT_BINARY). -
+add_executable(context_test_m85exit3_profiling_json test_m85exit3_profiling_json.cpp)
+target_link_libraries(context_test_m85exit3_profiling_json
+    PRIVATE context_common context_contract context_warnings)
+target_link_options(context_test_m85exit3_profiling_json PRIVATE ${_m85_exit_static_runtime})
+target_include_directories(context_test_m85exit3_profiling_json PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(context_test_m85exit3_profiling_json PRIVATE
+    CONTEXT_BINARY="$<TARGET_FILE:context>")
+add_dependencies(context_test_m85exit3_profiling_json context)
+add_test(NAME m85-exit-3-profiling-json COMMAND context_test_m85exit3_profiling_json)
+
+# --- m85-exit-4a / m85-exit-4b / m85-exit-4c: the a18/a19/a20 trailing-GUI surface. ALIASES of the
+#     landed tilemap-paint-parity (a18, defined above), viewport-override-parity (a19, defined above),
+#     and gui-help-contextual (a20, context_gui_help_test_contextual, defined in editor/gui/help — wired
+#     before this directory). The exit formally blocks on the trailing-GUI surface being exercised. -----
+add_test(NAME m85-exit-4a-tilemap-paint COMMAND context_test_tilemap_paint_parity)
+add_test(NAME m85-exit-4b-override-edit COMMAND context_test_viewport_override_parity)
+add_test(NAME m85-exit-4c-contextual-help COMMAND context_gui_help_test_contextual)
+
+# --- m85-exit-5: the a21 R-FILE-011 orchestration-density commitment is committed + honestly advisory
+#     (NEW). Reads the committed bench/density-targets.json + asserts the harness/doc exist (the sibling
+#     blocking density-bench CI job runs the benchmark itself). No V8, no GPU — pure file reads. ---------
+add_executable(context_test_m85exit5_density_commitment test_m85exit5_density_commitment.cpp)
+target_link_libraries(context_test_m85exit5_density_commitment
+    PRIVATE context_common context_warnings)
+target_link_options(context_test_m85exit5_density_commitment PRIVATE ${_m85_exit_static_runtime})
+target_include_directories(context_test_m85exit5_density_commitment PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(context_test_m85exit5_density_commitment PRIVATE
+    CONTEXT_DENSITY_TARGETS="${_m85_density_targets}"
+    CONTEXT_DENSITY_SCRIPT="${_m85_density_script}"
+    CONTEXT_DENSITY_DOC="${_m85_density_doc}")
+add_test(NAME m85-exit-5-density-commitment COMMAND context_test_m85exit5_density_commitment)
+
+# m85-exit-2b/-3 spawn the real binary several times over a process boundary; -1b runs a 10k-round seeded
+# property + the R-FILE-012 conflict corpus. Cap each so a regression never hangs the CI job (the alias
+# timeouts are independent of the source tests' own timeouts — a ctest NAME carries its own properties).
+set_tests_properties(
+    m85-exit-1a-coedit
+    m85-exit-4a-tilemap-paint
+    m85-exit-4b-override-edit
+    m85-exit-4c-contextual-help
+    m85-exit-5-density-commitment
+    PROPERTIES TIMEOUT 120)
+set_tests_properties(
+    m85-exit-1b-worktree-merge
+    m85-exit-2a-sandbox-caps
+    m85-exit-3-profiling-json
+    PROPERTIES TIMEOUT 180)
+set_tests_properties(m85-exit-2b-tamper-fail-closed PROPERTIES TIMEOUT 240)
+
+# Sanitizer-preset wiring for the m85-exit gates that reach the uninstrumented rusty_v8 archive (the same
+# docs/sanitizer-v8-false-positives.md pattern the SOURCE tests wire — the alias/new-test NAMES need their
+# OWN ENVIRONMENT since the sanitize job runs every registered ctest): m85-exit-1b links context_cli,
+# m85-exit-2a links context_js, m85-exit-2b links context_cli, m85-exit-3 SPAWNS the real `context` binary
+# (which links context_js — the child inherits the env), and m85-exit-4a/-4b link context_cli. The narrow
+# LSan demangler/symbolizer suppressions can never mask a `context::` leak; inert on the stub (non-V8)
+# build. m85-exit-1a (no CLI/V8), m85-exit-4c (help = contract-only), and m85-exit-5 (file reads) carry
+# no such block, exactly like their source tests.
+if(CONTEXT_SANITIZE)
+    set_tests_properties(
+        m85-exit-1b-worktree-merge
+        m85-exit-2a-sandbox-caps
+        m85-exit-2b-tamper-fail-closed
+        m85-exit-3-profiling-json
+        m85-exit-4a-tilemap-paint
+        m85-exit-4b-override-edit
+        PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
+endif()
+# Under TSan the same uninstrumented V8 worker-thread pool produces benign internal races; the a17 source
+# tests wire this on both redteam executables, so their m85-exit-2 aliases do too (the other V8-reaching
+# aliases' source tests carry no TSan block, mirroring them here).
+if(CONTEXT_TSAN)
+    set_tests_properties(
+        m85-exit-2a-sandbox-caps
+        m85-exit-2b-tamper-fail-closed
+        m85-exit-3-profiling-json
+        PROPERTIES ENVIRONMENT
+        "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/js/tsan-suppressions.txt")
+endif()
