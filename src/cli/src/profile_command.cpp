@@ -341,12 +341,24 @@ Envelope profile_session(const std::map<std::string, std::string>& flags)
     std::string run_err;
     bool run_ok = true;
 
+    // The observer + inter-tick-hook lambdas set up below are stored on `sim` and invoked later,
+    // from `sim.step(ticks)`, AFTER the `if (engine != nullptr)` block below has exited — so every
+    // local a lambda captures BY REFERENCE must live at THIS (function) scope, never nested inside
+    // that block, or the captured reference dangles once the block's scope ends (an ASan-caught
+    // stack-use-after-scope: churn_fn first, then churn_ms_this_tick/js_system/window_options hit the
+    // SAME bug on the next CI round). Declared here unconditionally and populated only when
+    // engine != nullptr below; harmless-unused on a stub (non-V8) build.
+    std::uint32_t js_system = 0;
+    cjs::FunctionHandle churn_fn = cjs::kInvalidFunction;
+    cjs::GcWindowOptions window_options;
+    double churn_ms_this_tick = 0.0;
+
     if (engine != nullptr)
     {
         // A Script-lane system representing the per-tick TS gameplay churn (R-OBS-004: the script
         // lane is legible next to the native systems). Registered AFTER the native systems, so the
         // native span sink's session indices stay aligned.
-        const std::uint32_t js_system = spans.register_system("js.gameplay", profile::Lane::Script);
+        js_system = spans.register_system("js.gameplay", profile::Lane::Script);
 
         char code[192];
         std::snprintf(code, sizeof(code),
@@ -355,11 +367,10 @@ Envelope profile_session(const std::map<std::string, std::string>& flags)
                       static_cast<unsigned long long>(churn));
         if (!engine->eval(code, nullptr, boot_err))
             return Envelope::failure(cjs::kGcWindowFailedCode, "workload eval failed: " + boot_err);
-        const cjs::FunctionHandle churn_fn = engine->getFunction("__profile_churn");
+        churn_fn = engine->getFunction("__profile_churn");
         if (churn_fn == cjs::kInvalidFunction)
             return Envelope::failure(cjs::kGcWindowFailedCode, "workload function did not resolve");
 
-        cjs::GcWindowOptions window_options;
         window_options.budget_ms = budget_ms;
         window_options.force_collect = true; // collect every window (the sustained-profile default)
 
@@ -367,13 +378,8 @@ Envelope profile_session(const std::map<std::string, std::string>& flags)
         gc_channel.drain(*engine, 0);
         gc_channel.clear();
 
-        double churn_ms_this_tick = 0.0;
-        // `churn_fn` is captured BY VALUE (a trivial std::uint64_t handle) — it is declared inside
-        // this `if` block, but the observer lambda is stored on `sim` and invoked later, from
-        // `sim.step(ticks)` below, AFTER this block's scope (and a by-reference `churn_fn`) has
-        // ended. Capturing by reference here is a stack-use-after-scope (caught by ASan).
         sim.set_system_observer(
-            [&, churn_fn](std::uint64_t, std::size_t, const std::string&, const kernel::World&)
+            [&](std::uint64_t, std::size_t, const std::string&, const kernel::World&)
             {
                 if (!run_ok)
                     return;
