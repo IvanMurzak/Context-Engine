@@ -890,6 +890,7 @@ if(CONTEXT_TSAN)
     set_tests_properties(
         m85-exit-2a-sandbox-caps
         m85-exit-2b-tamper-fail-closed
+        m85-exit-3-profiling-json
         PROPERTIES ENVIRONMENT
         "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/js/tsan-suppressions.txt")
 endif()
