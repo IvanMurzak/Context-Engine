@@ -25,7 +25,9 @@
 # ---------------------------------------------------------------------------------------------
 add_library(context_render STATIC
     src/extract.cpp
-    src/renderer.cpp)
+    src/renderer.cpp
+    src/profile_hud.cpp        # a15: the L-47 GPU-free profiler HUD overlay (R-OBS-002)
+    src/renderdoc_capture.cpp) # a15: the L-47 RenderDoc in-app capture hook (R-OBS-002)
 
 target_include_directories(context_render PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -34,6 +36,9 @@ target_include_directories(context_render PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inc
 # the kernel links nothing render-related, so a headless build never pulls a GPU backend.
 target_link_libraries(context_render PUBLIC context_kernel)
 target_link_libraries(context_render PRIVATE context_warnings)
+# The RenderDoc hook resolves an already-injected module via dlopen on POSIX (GetModuleHandle on
+# Windows needs no extra lib); CMAKE_DL_LIBS is empty on Windows, `dl` on Linux.
+target_link_libraries(context_render PRIVATE ${CMAKE_DL_LIBS})
 
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) -----------------------------
 # Plain assertion-bearing executables registered with ctest (the sibling module pattern; the repo
@@ -43,7 +48,9 @@ set(_context_render_tests
     test_headless       # R-HEAD-002: probe creates no device; no-adapter is headless; engine runs absent
     test_rhi            # RHI object model driven end-to-end (offscreen readback) via the fake backend
     test_light_extract  # R-REND-004: light/material extraction incl. the malformed/absent edges
-    test_ui_panel_extract) # M7 a9 (D4/L-39): world-space UiPanel extract incl. the no-Transform edge
+    test_ui_panel_extract # M7 a9 (D4/L-39): world-space UiPanel extract incl. the no-Transform edge
+    test_profile_hud      # a15: L-47 HUD overlay rows + the zero-cost-when-disabled contract
+    test_renderdoc_capture) # a15: L-47 RenderDoc hook — the not-attached no-op path (GPU-free)
 foreach(_t IN LISTS _context_render_tests)
     add_executable(context_render_${_t} tests/${_t}.cpp)
     target_link_libraries(context_render_${_t} PRIVATE context_render context_warnings)

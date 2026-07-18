@@ -7,7 +7,10 @@
 # shape (per-system spans, Tracy/RenderDoc export, the HUD, `context profile` growth) accretes here.
 
 add_library(context_profile STATIC
-    src/gc_channel.cpp)
+    src/gc_channel.cpp
+    src/span_channel.cpp
+    src/snapshot.cpp
+    src/trace_export.cpp)
 
 target_include_directories(context_profile PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -25,3 +28,17 @@ target_link_libraries(context_profile_test_gc_channel PRIVATE context_profile co
 target_include_directories(context_profile_test_gc_channel
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME profile-test_gc_channel COMMAND context_profile_test_gc_channel)
+
+# The a15 span-channel + snapshot + trace-export tests are engine-free (spans recorded directly, the
+# GC channel driven with synthetic samples), so they are LOCAL gates on every toolchain.
+add_executable(context_profile_test_span_channel tests/test_span_channel.cpp)
+target_link_libraries(context_profile_test_span_channel PRIVATE context_profile context_warnings)
+target_include_directories(context_profile_test_span_channel
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME profile-test_span_channel COMMAND context_profile_test_span_channel)
+
+add_executable(context_profile_test_trace_export tests/test_trace_export.cpp)
+target_link_libraries(context_profile_test_trace_export PRIVATE context_profile context_warnings)
+target_include_directories(context_profile_test_trace_export
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME profile-test_trace_export COMMAND context_profile_test_trace_export)

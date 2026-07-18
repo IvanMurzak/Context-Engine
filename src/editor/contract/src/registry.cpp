@@ -554,6 +554,36 @@ Registry::Registry()
           false}},
         /*implemented=*/true));
 
+    // --- M8.5 a15: the L-47 unified profiling surface (R-OBS-002/004, R-SIM-008) ------------------
+    // A global, one-shot STABLE verb: step a headless session N fixed ticks and report ONE
+    // profiling snapshot — the scheduler's per-system CPU spans tagged by authoring lane
+    // (native / script / wasm, R-OBS-004), the per-lane rollups, the counters, and the M6 X1
+    // GC-pause channel FOLDED into the same surface (R-SIM-008 — extend, don't duplicate). Unlike
+    // `profile gc` this verb does NOT need the JS VM: spans + counters are pure C++ and answer
+    // headless on every toolchain; the `gc` block reports `available:false` on a stub build.
+    // `--trace-out` additionally writes a Chrome-trace file importable into Tracy/Perfetto (L-47
+    // deep-capture export). Inserted at the END of the stable block (before the operational surface)
+    // so a future sibling insertion merges cleanly. Additive-only — protocolMajor stays 0.
+    verbs_.push_back(make_verb(
+        "", "profile", "session",
+        "Profile a headless session (L-47 / R-OBS-002/004): step N fixed ticks and report one JSON "
+        "snapshot — the scheduler's per-system CPU spans tagged by authoring lane (native/script/"
+        "wasm), the per-lane rollups, the counters, and the folded-in GC-pause channel (available "
+        "only when the in-process JS VM is built). --trace-out writes a Chrome-trace file for Tracy/"
+        "Perfetto import.",
+        /*params=*/{},
+        /*flags=*/
+        {{"ticks", "string", "Fixed ticks to run (positive integer); defaults to 60.", false},
+         {"churn", "string",
+          "Short-lived JS objects allocated per system per tick to drive the script lane + GC "
+          "(unsigned integer, VM builds only); defaults to 2000.",
+          false},
+         {"trace-out", "path",
+          "Write a Chrome Trace Event Format capture (importable into Tracy via tracy-import-chrome, "
+          "or opened directly by Perfetto / chrome://tracing) to this path.",
+          false}},
+        /*implemented=*/true));
+
     // --- M7 T5: the runtime-UI headless drive/assert verbs (issue #223, R-UI-006 / R-CLI-008) ----
     // The "driven/asserted headless via CLI" exit leg: one-shot verbs over a headless UI-scene file
     // (the ctx:ui-hud few-shot form authored through the M7 T4 context.ui surface) that dump the

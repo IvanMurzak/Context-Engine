@@ -54,6 +54,7 @@ set(_context_session_tests
     test_replay
     test_triage
     test_inter_tick_hook
+    test_system_span_sink
     test_scenario_registry)
 
 foreach(_t IN LISTS _context_session_tests)

@@ -1,15 +1,20 @@
-// `context profile <verb>` — the L-47 profiler query CLI backend (M6 X1, R-SIM-008 / R-OBS-002).
+// `context profile <verb>` — the L-47 profiler query CLI backend (M6 X1 + a15; R-SIM-008 /
+// R-OBS-002/004).
 //
-// v1 carries ONE verb: `profile gc` — measure the JS-tier GC-pause profiler channel. It runs a
-// self-contained synthetic workload in-process: a deterministic headless session (the demo
-// scenario) stepped N fixed ticks, with per-system JS allocation churn injected through the
-// read-only system observer (mid-tick, where gameplay JS would allocate) and the R-SIM-008
-// scheduled inter-tick GC window run at every tick boundary. The envelope reports the GC-pause
-// channel: per-tick attributed samples (in-window vs mid-tick), aggregates, the JS-heap gauge,
-// and the R-LANG-012 budget verdict — L-47's "all profiling data CLI-queryable as JSON", v1.
-//
-// Needs the in-process JS VM: a stub-backend build (the local GCC gate) refuses fail-closed with
-// sim.gc.unavailable (runtime/js gc_errors.h; registered in the catalog's sim.gc.* block).
+// Verbs:
+//   `profile gc`      — measure the JS-tier GC-pause profiler channel (M6 X1). Runs a synthetic
+//                       churn workload over a headless session with the R-SIM-008 scheduled
+//                       inter-tick GC window and reports per-tick attributed pauses + aggregates +
+//                       heap gauge + the R-LANG-012 budget verdict. NEEDS the in-process JS VM: a
+//                       stub-backend build refuses fail-closed with sim.gc.unavailable.
+//   `profile session` — the a15 unified profiling surface. Steps a headless session N ticks and
+//                       reports ONE snapshot: the scheduler's per-system CPU spans (native lane),
+//                       the JS churn lane (script — VM-only), the GC-pause channel FOLDED in
+//                       (R-SIM-008, reused not reimplemented), per-lane rollups, and counters.
+//                       Spans + counters answer headless on EVERY toolchain (pure C++); the `gc`
+//                       block reports `available:false` on a stub build rather than refusing.
+//                       `--trace-out <path>` also writes a Chrome-trace file (Tracy/Perfetto
+//                       export) — L-47's "deep capture via export to world-class tools".
 
 #pragma once
 
@@ -21,8 +26,8 @@
 namespace context::cli
 {
 
-// Dispatch `context profile <verb> [--flags]`. `verb` is `gc`; `flags` the parsed flags
-// (--ticks / --budget-ms / --trigger-bytes / --churn).
+// Dispatch `context profile <verb> [--flags]`. `verb` is `gc` (--ticks / --budget-ms /
+// --trigger-bytes / --churn) or `session` (--ticks / --churn / --trace-out).
 [[nodiscard]] editor::contract::Envelope run_profile(const std::string& verb,
                                                      const std::map<std::string, std::string>& bound,
                                                      const std::map<std::string, std::string>& flags);
