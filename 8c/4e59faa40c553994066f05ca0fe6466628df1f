@@ -1,0 +1,19 @@
+src/tests/integration/CMakeLists.txt
+  s_512e2a897ec921::t_4453420421ea98 326-329,335
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "8c4e59faa40c553994066f05ca0fe6466628df1f",
+  "prompts": {},
+  "sessions": {
+    "s_512e2a897ec921": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_512e2a897ec921",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
