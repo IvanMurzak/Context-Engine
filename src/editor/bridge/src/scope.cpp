@@ -116,21 +116,42 @@ std::vector<std::string> ScopeSet::names() const
 
 Scope required_scope_for(const std::string& rpc_method)
 {
-    // Install/build family — "file-write is effectively code execution" (R-SEC-007).
-    if (rpc_method == "package.add" || rpc_method == "build")
+    // Install/build family — "file-write is effectively code execution" (R-SEC-007). `install` (the
+    // R-SEC-005 engine-driven package install) is the same install privilege as `package.add`: gating
+    // it here — even though its bridge backing is still reserved (contract.unimplemented today) — is
+    // fail-SAFE, so a read/query token can never trigger a package install the day the backing lands.
+    if (rpc_method == "package.add" || rpc_method == "build" || rpc_method == "install")
         return Scope::build_install;
     // File-rewriter family (R-ARCH-002 authored-file writes). `edit` is the daemon's operational
     // cross-process file-write method (the composed-loop backing behind the bridge), so it is gated
     // as a write exactly like the reserved `set` verb; `edit-batch` is its multi-file sibling
     // (the R-FILE-004 intent-logged batch) and MUST sit in the same family — an unknown method
-    // defaults to read_query, which would let a read-only token write files.
+    // defaults to read_query, which would let a read-only token write files. The rest of the family
+    // are authored-file mutations that are RESERVED on the bridge today (contract.unimplemented): the
+    // bulk schema rewrite (`migrate`), the merge writers (`merge-file`, `resolve-conflict`), the id
+    // rewriter (`re-key`), and the asset movers (`asset.move`, `asset.rename`) all REWRITE authored
+    // files. Gating them defense-in-depth means a read/query token is denied fail-closed the moment
+    // any of their backings is wired, instead of silently inheriting the read baseline (R-SEC-007).
     if (rpc_method == "set" || rpc_method == "new" || rpc_method == "edit" ||
-        rpc_method == "edit-batch")
+        rpc_method == "edit-batch" || rpc_method == "migrate" || rpc_method == "merge-file" ||
+        rpc_method == "resolve-conflict" || rpc_method == "re-key" || rpc_method == "asset.move" ||
+        rpc_method == "asset.rename")
         return Scope::file_write;
     // Session lifecycle family (reserved verb-ids; gated now so activation is non-breaking). The
-    // daemon's operational `shutdown` control method is a session-lifecycle action.
+    // daemon's operational `shutdown` control method is a session-lifecycle action. `session.new`,
+    // `session.seed`, `session.inject`, `session.record`, `replay`, and `ui.send` all CREATE or DRIVE
+    // a running session (start a session, seed its RNG, inject input, drive a recording/replay, feed a
+    // UI input event) — session-control, not read/query. Gating them fail-closed keeps a read-only
+    // reviewer agent from driving a live session the moment those backings land (R-SEC-007). Their
+    // read-only siblings stay on the baseline: `session.hash` / `determinism.diff` read state,
+    // `ui.dump` / `ui.query` / `ui.assert` read the UI tree, and `reconcile` refreshes the derived
+    // index from on-disk truth (the watcher's manual pull — no authored mutation), so those remain
+    // read/query.
     if (rpc_method == "session.play" || rpc_method == "session.pause" ||
-        rpc_method == "session.step" || rpc_method == "shutdown")
+        rpc_method == "session.step" || rpc_method == "session.new" ||
+        rpc_method == "session.seed" || rpc_method == "session.inject" ||
+        rpc_method == "session.record" || rpc_method == "replay" || rpc_method == "ui.send" ||
+        rpc_method == "shutdown")
         return Scope::session_control;
     // describe, the operational `query` read, and everything else is a read/query read.
     return Scope::read_query;
