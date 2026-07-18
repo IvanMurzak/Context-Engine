@@ -1,0 +1,27 @@
+src/CMakeLists.txt
+  s_b3f099d97a1688::t_674c4830520a8a 707-713
+src/tests/concurrency/CMakeLists.txt
+  s_b3f099d97a1688::t_cf9b1cc408a557 1-47
+src/tests/concurrency/concurrency_test.h
+  s_b3f099d97a1688::t_c53e3bf65a9f66 1-133
+src/tests/concurrency/test_coedit_concurrency.cpp
+  s_b3f099d97a1688::t_8dbfcddb4b756c 1-347
+src/tests/concurrency/test_worktree_merge.cpp
+  s_b3f099d97a1688::t_717a2a953990a7 1-295
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "b462eedb59199f6db0630c0b1aa9397c46267858",
+  "prompts": {},
+  "sessions": {
+    "s_b3f099d97a1688": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_b3f099d97a1688",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
