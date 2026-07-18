@@ -1,0 +1,31 @@
+docs/security-boundaries-v1.md
+  s_362847edc2f3c4::t_2202376035b2ea 1-93
+src/common/src/verify_signature.cpp
+  s_362847edc2f3c4::t_968a9e06a37e18 73-80,89
+src/editor/bridge/include/context/editor/bridge/scope.h
+  s_362847edc2f3c4::t_b0db06d73fdf0e 63-70
+src/editor/bridge/src/scope.cpp
+  s_362847edc2f3c4::t_b289866b54eef2 119-123,129-134,136-138,141-149,151-154
+src/tests/integration/CMakeLists.txt
+  s_362847edc2f3c4::t_13e26a2ccf3569 651-690
+src/tests/integration/test_redteam_boundaries.cpp
+  s_362847edc2f3c4::t_16c97ec15aa8f2 1-390
+src/tests/integration/test_redteam_tamper_e2e.cpp
+  s_362847edc2f3c4::t_37454ed4eb50c8 1-333
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "876148781b4b6c7982dfa199bbe13f0be9b8442f",
+  "prompts": {},
+  "sessions": {
+    "s_362847edc2f3c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_362847edc2f3c4",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
