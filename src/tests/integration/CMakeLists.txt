@@ -323,13 +323,16 @@ set_tests_properties(
 # scratch that LSan then reports as a leak — failing the gate with no Context defect (sanitize
 # (ASan+UBSan, ubuntu) leg, CI run 29197875018). Same fix as src/cli: wire the narrow
 # demangler/symbolizer suppressions (runtime/ts/lsan-suppressions.txt — they can never mask a
-# `context::` leak); spawned children inherit the env. Inert on the stub (non-V8) build. The
-# m5-exit gates link only the gui libraries (no context_cli, no V8), so they are not wired.
+# `context::` leak); spawned children inherit the env. Inert on the stub (non-V8) build. The a18
+# tilemap-paint-parity test likewise links context_cli (its `context tilemap paint|fill` in-process
+# verbs), so it carries the same archive and is wired here too. The m5-exit gates link only the gui
+# libraries (no context_cli, no V8), so they are not wired.
 if(CONTEXT_SANITIZE)
     set_tests_properties(
         ${_m1_exit_names}
         ${_m2_exit_names}
         samples-corpus
+        tilemap-paint-parity
         PROPERTIES ENVIRONMENT
         "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
 endif()
