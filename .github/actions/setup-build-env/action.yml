@@ -45,10 +45,16 @@ runs:
     #   WEEK      — an ISO week salt (date -u +%GW%V, e.g. 2026W29) so the cache refreshes weekly and
     #               never keeps more than ~2 generations (bounded growth; NO run_id/sha/branch — the
     #               single-prefix restore-key warm-restores last week's entry on the week boundary).
-    - name: Resolve sccache cache key
+    - name: Resolve sccache cache dir + key
       if: runner.os != 'Windows'
       shell: bash
       run: |
+        # SCCACHE_DIR is exported HERE, not in ci.yml's workflow-level env: block: the runner
+        # context is UNAVAILABLE in a workflow-level (or job-level) env: block, so
+        # ${{ runner.temp }} there resolves to "" — a bare "/sccache" that diverges from the
+        # step-level actions/cache path below and silently defeats the cache. In this shell step
+        # $RUNNER_TEMP is populated, so it matches ${{ runner.temp }}/sccache exactly.
+        echo "SCCACHE_DIR=${RUNNER_TEMP}/sccache" >> "$GITHUB_ENV"
         IMG="${ImageVersion:-selfhosted}"
         WEEK="$(date -u +%GW%V)"
         PREFIX="sccache-${{ inputs.preset }}-${{ runner.os }}-${IMG}-"
@@ -57,9 +63,9 @@ runs:
 
     # Restore on ALL refs (a PR warm-restores main's latest entry via the prefix restore-key); the
     # guarded save-build-env writes ONLY on main, so PRs never create a branch-scoped copy. Path is
-    # ${{ runner.temp }}/sccache — identical to SCCACHE_DIR in ci.yml's env (runner.temp is constant
-    # per job), so the restored dir is exactly what sccache reads/writes. MUST run before the sccache
-    # server starts (see the ORDER note above).
+    # ${{ runner.temp }}/sccache — identical to the SCCACHE_DIR exported in the previous step
+    # (runner.temp is constant per job), so the restored dir is exactly what sccache reads/writes.
+    # MUST run before the sccache server starts (see the ORDER note above).
     - name: Restore sccache dir
       if: runner.os != 'Windows'
       uses: actions/cache/restore@v6

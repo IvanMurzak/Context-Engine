@@ -11,11 +11,14 @@
 # reality); Windows stays on documented MSVC — clang-cl adoption is a staged follow-up recorded
 # in the manifest.
 #
-# Compiler caching: sccache with the GitHub-Actions cache backend on the ubuntu/macos legs,
-# applied by the setup-build-env composite action (.github/actions/setup-build-env), which also
-# exports the shared CMake configure environment (Ninja on non-Windows). The Windows/MSVC legs
-# skip it deliberately: the Visual Studio generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER,
-# and sccache+MSVC is not worth fighting until the clang-cl follow-up lands.
+# Compiler caching: sccache on the ubuntu/macos legs via a LOCAL-disk cache dir — the churny
+# GitHub-Actions cache backend stays OFF (SCCACHE_GHA_ENABLED=false; see the env: block). The
+# setup-build-env composite action (.github/actions/setup-build-env) restores the dir via
+# actions/cache and exports the shared CMake configure environment (Ninja on non-Windows); the
+# sibling save-build-env composite writes the dir back on refs/heads/main only, so PR legs never
+# create branch-scoped cache copies. The Windows/MSVC legs skip it deliberately: the Visual Studio
+# generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER, and sccache+MSVC is not worth fighting until
+# the clang-cl follow-up lands.
 #
 # Fail-fast gating: the two ~10-second gates (license-gate, python-tests) front the heavyweight
 # build/spike/bench jobs via `needs:` — a red gate stops ~12 heavy legs before they start, at
@@ -40,9 +43,13 @@ env:
   SCCACHE_GHA_ENABLED: "false"
   # Local-disk sccache backend (active because no cloud backend is configured above): sccache writes
   # compiled objects under SCCACHE_DIR; actions/cache persists that dir keyed per preset/os/image/week.
-  # SCCACHE_CACHE_SIZE caps the dir so a namespace can never silently grow the cached tarball (a
-  # cache-budget guardrail — keeps the repo well under the 10 GB Actions-cache limit).
-  SCCACHE_DIR: ${{ runner.temp }}/sccache
+  # SCCACHE_DIR itself is NOT set here: it is ${RUNNER_TEMP}/sccache, but the runner context is
+  # unavailable in a workflow-level env: block, so `${{ runner.temp }}` here would resolve to "" — a
+  # bare "/sccache" that diverges from the step-level actions/cache path and silently defeats the
+  # cache. The setup-build-env composite exports SCCACHE_DIR per-job in a shell step (where
+  # $RUNNER_TEMP is populated). SCCACHE_CACHE_SIZE is a literal, so it stays here — it caps the dir so
+  # a namespace can never silently grow the cached tarball (a cache-budget guardrail — keeps the repo
+  # well under the 10 GB Actions-cache limit).
   SCCACHE_CACHE_SIZE: "800M"
   # Self-hosted-runner safety (2026-07-08): the three Windows CI jobs run as LocalSystem services
   # on ONE machine and share `C:\WINDOWS\system32\config\systemprofile\.gitconfig`. A per-job
