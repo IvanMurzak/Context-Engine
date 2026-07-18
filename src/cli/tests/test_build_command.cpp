@@ -103,15 +103,26 @@ void write_pe(const fs::path& path, bool signed_)
     write_file(path, b);
 }
 
-// Build a minimal thin 64-bit little-endian Mach-O whose single LC_CODE_SIGNATURE datasize is non-zero
-// iff `signed_` — the exact bit the a13 signing hook (macho_has_code_signature) keys off. Written to
-// `path` so a CLI `--sign --target macos` run can inspect it as the shipped runtime binary.
-void write_macho(const fs::path& path, bool signed_)
+// Build a minimal thin 64-bit little-endian Mach-O for the a13 signing hook (macho_has_code_signature).
+// When `signed_`, the referenced `__LINKEDIT` blob is a WELL-FORMED code-signature SuperBlob → CodeDirectory
+// whose flags carry CS_ADHOC iff `adhoc` — so the hook reports a real Developer-ID signature (adhoc=false)
+// as "signed" and the arm64 auto-embedded ad-hoc signature (adhoc=true) as "unsigned". When !signed_ the
+// LC_CODE_SIGNATURE datasize is 0. Signature-blob fields are big-endian regardless of the header's
+// little-endian. Written to `path` so a CLI `--sign --target macos` run can inspect it as the runtime.
+void write_macho(const fs::path& path, bool signed_, bool adhoc = false)
 {
-    std::string b(0x40, '\0');
-    const auto put_le = [&b](std::size_t off, unsigned long value, std::size_t n) {
+    const std::size_t sig_off = 0x30;             // right after the 32-byte header + 16-byte load command
+    const std::size_t cd_off = 20;                // CodeDirectory offset within the blob (12 hdr + 8 idx)
+    const std::size_t cd_len = 32;                // covers magic(0)+length(4)+version(8)+flags(12)
+    const std::size_t sig_len = cd_off + cd_len;  // SuperBlob(12) + one BlobIndex(8) + CodeDirectory
+    std::string b(signed_ ? sig_off + sig_len : 0x40, '\0');
+    const auto put_le = [&b](std::size_t off, std::size_t value, std::size_t n) {
         for (std::size_t i = 0; i < n; ++i)
             b[off + i] = static_cast<char>((value >> (8 * i)) & 0xFF);
+    };
+    const auto put_be = [&b](std::size_t off, std::size_t value, std::size_t n) {
+        for (std::size_t i = 0; i < n; ++i)
+            b[off + i] = static_cast<char>((value >> (8 * (n - 1 - i))) & 0xFF);
     };
     put_le(0, 0xFEEDFACFul, 4); // MH_MAGIC_64 stored little-endian (file bytes CF FA ED FE)
     put_le(16, 1, 4);           // ncmds = 1
@@ -119,7 +130,23 @@ void write_macho(const fs::path& path, bool signed_)
     const std::size_t lc = 32;  // load commands begin after the 64-bit mach_header
     put_le(lc, 0x1Dul, 4);      // cmd = LC_CODE_SIGNATURE
     put_le(lc + 4, 16, 4);      // cmdsize = 16
-    put_le(lc + 12, signed_ ? 0x120ul : 0ul, 4); // datasize — non-zero ⇒ signature blob present
+    put_le(lc + 8, signed_ ? sig_off : 0, 4);  // dataoff
+    put_le(lc + 12, signed_ ? sig_len : 0, 4); // datasize — non-zero ⇒ signature blob present
+    if (signed_)
+    {
+        // CS_SuperBlob (big-endian): magic, length, count, then one CS_BlobIndex {type, offset}.
+        put_be(sig_off + 0, 0xFADE0CC0ul, 4);   // CSMAGIC_EMBEDDED_SIGNATURE
+        put_be(sig_off + 4, sig_len, 4);        // length
+        put_be(sig_off + 8, 1, 4);              // count = 1
+        put_be(sig_off + 12, 0, 4);             // index[0].type = CSSLOT_CODEDIRECTORY
+        put_be(sig_off + 16, cd_off, 4);        // index[0].offset (within blob)
+        // CS_CodeDirectory (big-endian): magic, length, version, flags (only magic + flags are parsed).
+        const std::size_t cd = sig_off + cd_off;
+        put_be(cd + 0, 0xFADE0C02ul, 4);                    // CSMAGIC_CODEDIRECTORY
+        put_be(cd + 4, cd_len, 4);                          // length
+        put_be(cd + 8, 0x00020400ul, 4);                    // version (cosmetic)
+        put_be(cd + 12, adhoc ? 0x00000002ul : 0ul, 4);     // flags: CS_ADHOC iff adhoc
+    }
     write_file(path, b);
 }
 } // namespace
@@ -367,6 +394,30 @@ int main()
         CHECK(signing.at("signed").as_bool());
         CHECK(!signing.contains("code"));
         CHECK(e.warnings().empty());
+        remove_quiet(dir);
+    }
+
+    // --- a13 signing hook (--sign): an AD-HOC-only macOS runtime is UNSIGNED (arm64 CI parity) ---------
+    // Apple Silicon (arm64) linkers auto-embed an ad-hoc signature (CS_ADHOC, no signing identity) into
+    // every Mach-O at link time — the exact per-PR macos-export CI scenario. A mere-presence check
+    // mis-reported it "signed"; parsing the CodeDirectory CS_ADHOC flag keeps the report "unsigned".
+    {
+        const fs::path dir = make_project("mac-sign-adhoc");
+        const fs::path out = dir / "build" / "game.pack";
+        const fs::path rt = dir / "context-runtime";
+        write_macho(rt, /*signed_=*/true, /*adhoc=*/true); // a Mach-O carrying ONLY an ad-hoc signature
+        const Envelope e = run_build({{"target", "macos"},
+                                      {"project", dir.string()},
+                                      {"out", out.generic_string()},
+                                      {"runtime", rt.string()},
+                                      {"sign", ""}});
+        CHECK(e.ok()); // an unsigned/ad-hoc artifact is a WARNING, not a build failure
+        const Json& signing = e.data().at("signing");
+        CHECK(signing.at("state").as_string() == "unsigned");
+        CHECK(!signing.at("signed").as_bool());
+        CHECK(signing.at("code").as_string() == "build.artifact_unsigned");
+        CHECK(!signing.at("warning").as_string().empty()); // NEVER silent
+        CHECK(!e.warnings().empty());
         remove_quiet(dir);
     }
 

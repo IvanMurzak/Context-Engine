@@ -156,18 +156,24 @@ Gatekeeper removed the control-click bypass, so an un-notarized build is effecti
 | `data.signing.state` | meaning |
 |---|---|
 | `not-required` | the target has no code-signing prerequisite (linux / web) |
-| `signed` | the shipped `--runtime` Mach-O carries a code signature (an `LC_CODE_SIGNATURE` blob) |
-| `unsigned` | **required but NO signature** — an explicit WARNING (`code: build.artifact_unsigned` + a top-level envelope warning), e.g. a fork PR with no signing secrets |
+| `signed` | the shipped `--runtime` Mach-O carries a distributable code signature (a non-ad-hoc `LC_CODE_SIGNATURE` blob) |
+| `unsigned` | **required but NO distributable signature** — an explicit WARNING (`code: build.artifact_unsigned` + a top-level envelope warning), e.g. a fork PR with no signing secrets, OR an arm64 build carrying only the linker's auto-embedded ad-hoc signature |
 
 The report echoes the plan machine-readably: `method: developer-id-notarization`, `tool: codesign`,
 `primary: apple-notary` (the App-Store-Connect-API notary path — there is no v1 fallback),
 `timestampRequired: true` (codesign secure timestamp), and the macOS-only `notarizationRequired: true`
-(notarization + stapling is a *further* ship requirement beyond code-signing). The presence check is a
+(notarization + stapling is a *further* ship requirement beyond code-signing). The signature check is a
 pure, cross-platform **Mach-O parse** (`signing.h` / `macho_has_code_signature`): a signed Mach-O carries
 an `LC_CODE_SIGNATURE` load command with a non-empty `__LINKEDIT` signature blob (thin 32/64-bit + fat
-universal handled). No `codesign`, no macOS API, no secret — so the local GCC gate exercises the exact
-code the Apple-clang CI leg does. Detecting **notarization** (a stapled ticket / Apple's notary service)
-is NOT part of this pure presence check — the CI job asserts it (`notarytool ... status == Accepted`).
+universal handled) **whose primary CodeDirectory is not flagged `CS_ADHOC`**. The ad-hoc carve-out is
+essential: Apple Silicon (arm64) linkers auto-embed an *ad-hoc* signature (no signing identity) into every
+Mach-O at link time so it can execute, so a mere-presence check would mis-report every unsigned per-PR
+arm64 build as `signed`; parsing the CodeDirectory flags (`CSMAGIC_EMBEDDED_SIGNATURE` →
+`CSSLOT_CODEDIRECTORY` → `CSMAGIC_CODEDIRECTORY` → `flags & CS_ADHOC`) distinguishes it from a real
+Developer-ID signature (fail-closed: a malformed blob reads as unsigned). No `codesign`, no macOS API, no
+secret — so the local GCC gate exercises the exact code the Apple-clang CI leg does. Detecting
+**notarization** (a stapled ticket / Apple's notary service) is NOT part of this pure signature check —
+the CI job asserts it (`notarytool ... status == Accepted`).
 
 **Where the actual signing + notarization runs.** `context build` never holds a signing secret. The
 signing + notarization is a CI action:

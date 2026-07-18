@@ -114,6 +114,19 @@ constexpr std::uint32_t kFatCigam = 0xBEBAFECAu;     // fat header, fields littl
 constexpr std::uint32_t kLcCodeSignature = 0x1Du;    // LC_CODE_SIGNATURE load command
 constexpr std::uint32_t kFatArchLimit = 64;          // sane cap on nfat_arch (guards a crafted header)
 
+// The __LINKEDIT code-signature blob format (referenced by LC_CODE_SIGNATURE's dataoff/datasize). ALL of
+// its fields are big-endian regardless of the Mach-O's own endianness. A CS_SuperBlob (magic + length +
+// count + `count` {type,offset} index entries) wraps one-or-more sub-blobs; the primary CodeDirectory
+// lives in the CSSLOT_CODEDIRECTORY slot and carries the setup/mode flags. CS_ADHOC marks an AD-HOC
+// signature — one with NO signing identity — which Apple Silicon (arm64) linkers auto-embed at LINK time
+// so the binary can execute; it is NOT a distributable / Developer-ID signature, so an ad-hoc-only
+// signature must read as UNSIGNED (else every unsigned per-PR arm64 build would look "signed").
+constexpr std::uint32_t kCsMagicEmbeddedSignature = 0xFADE0CC0u; // CS_SuperBlob magic
+constexpr std::uint32_t kCsMagicCodeDirectory = 0xFADE0C02u;     // CS_CodeDirectory magic
+constexpr std::uint32_t kCsSlotCodeDirectory = 0x0u;             // the primary CodeDirectory index slot
+constexpr std::uint32_t kCsAdhoc = 0x00000002u;                  // CS_ADHOC bit in CodeDirectory.flags
+constexpr std::uint32_t kCsSuperBlobIndexLimit = 64;             // sane cap on the SuperBlob index count
+
 // Read a 4-byte unsigned int at `off` in the given endianness. false (out=0) if the read runs past end —
 // every field access is bounds-checked, so a truncated/malformed image is simply "no signature".
 [[nodiscard]] bool read_u32(std::string_view bytes, std::size_t off, bool big_endian, std::uint32_t& out)
@@ -127,6 +140,61 @@ constexpr std::uint32_t kFatArchLimit = 64;          // sane cap on nfat_arch (g
         out |= big_endian ? (b << (8 * (3 - i))) : (b << (8 * i));
     }
     return true;
+}
+
+// Is the __LINKEDIT code-signature blob `sig` (a CS_SuperBlob, or rarely a bare CS_CodeDirectory) a REAL
+// distributable signature — i.e. is its primary CodeDirectory present, parseable, and NOT flagged
+// CS_ADHOC? Apple Silicon linkers auto-embed an AD-HOC signature into every Mach-O at link time with no
+// Developer-ID identity; that must read as UNSIGNED here, else an unsigned per-PR arm64 build looks
+// "signed". Every signature-blob field is big-endian (network order), independent of the Mach-O's own
+// endianness. Fail-closed: an ad-hoc, malformed, or unparseable blob ⇒ false (never report a
+// distributable signature we cannot affirmatively confirm).
+[[nodiscard]] bool codesig_is_real_signature(std::string_view sig)
+{
+    std::uint32_t magic = 0;
+    if (!read_u32(sig, 0, /*big_endian=*/true, magic))
+        return false;
+
+    // Locate the primary CodeDirectory: usually a SuperBlob whose index points at the CSSLOT_CODEDIRECTORY
+    // entry; a bare CodeDirectory (no SuperBlob wrapper) is also accepted (cd_off stays 0).
+    std::size_t cd_off = 0;
+    if (magic == kCsMagicEmbeddedSignature)
+    {
+        std::uint32_t count = 0;
+        if (!read_u32(sig, 8, /*big_endian=*/true, count) || count == 0 ||
+            count > kCsSuperBlobIndexLimit)
+            return false;
+        bool found = false;
+        for (std::uint32_t i = 0; i < count && !found; ++i)
+        {
+            const std::size_t entry = 12 + static_cast<std::size_t>(i) * 8; // CS_BlobIndex is 8 bytes
+            std::uint32_t type = 0;
+            std::uint32_t off = 0;
+            if (!read_u32(sig, entry, /*big_endian=*/true, type) ||
+                !read_u32(sig, entry + 4, /*big_endian=*/true, off))
+                return false;
+            if (type == kCsSlotCodeDirectory)
+            {
+                cd_off = off; // offset is relative to the SuperBlob (== `sig`) start
+                found = true;
+            }
+        }
+        if (!found)
+            return false;
+    }
+    else if (magic != kCsMagicCodeDirectory)
+    {
+        return false; // not a recognized code-signature blob
+    }
+
+    // CS_CodeDirectory: magic(0) length(4) version(8) flags(12) … — only magic + flags are inspected.
+    std::uint32_t cd_magic = 0;
+    if (!read_u32(sig, cd_off, /*big_endian=*/true, cd_magic) || cd_magic != kCsMagicCodeDirectory)
+        return false;
+    std::uint32_t flags = 0;
+    if (!read_u32(sig, cd_off + 12, /*big_endian=*/true, flags))
+        return false;
+    return (flags & kCsAdhoc) == 0; // an ad-hoc signature is NOT a distributable signature
 }
 
 // Does ONE thin Mach-O slice (starting at offset 0 of `slice`) carry an LC_CODE_SIGNATURE with a
@@ -151,12 +219,26 @@ constexpr std::uint32_t kFatArchLimit = 64;          // sane cap on nfat_arch (g
         if (cmd == kLcCodeSignature)
         {
             // linkedit_data_command: cmd(4) cmdsize(4) dataoff(4) datasize(4). A non-zero datasize ⇒ an
-            // embedded __LINKEDIT signature blob is present (the bit the presence check keys off).
+            // embedded __LINKEDIT signature blob is present; it counts as a signature only when its
+            // primary CodeDirectory is NOT ad-hoc (arm64 auto-embeds an ad-hoc signature at link time —
+            // parse the blob rather than trusting mere presence). There is one LC_CODE_SIGNATURE per
+            // image, so this command's verdict is final.
+            std::uint32_t dataoff = 0;
             std::uint32_t datasize = 0;
-            if (!read_u32(slice, cmd_off + 12, big_endian, datasize))
+            if (!read_u32(slice, cmd_off + 8, big_endian, dataoff) ||
+                !read_u32(slice, cmd_off + 12, big_endian, datasize))
                 return false;
             if (datasize != 0)
-                return true;
+            {
+                // The blob spans [dataoff, dataoff+datasize) — reject an overrun (or the 32-bit-size_t
+                // overflow, `end < dataoff`, mirroring this file's `cmd_off + cmdsize < cmd_off` idiom)
+                // before viewing it. datasize != 0 here, so `end > dataoff`, making a separate
+                // `dataoff > slice.size()` test redundant.
+                const std::size_t end = static_cast<std::size_t>(dataoff) + datasize;
+                if (end < dataoff || end > slice.size())
+                    return false; // the signature blob overruns the slice — fail-closed (unsigned)
+                return codesig_is_real_signature(slice.substr(dataoff, datasize));
+            }
         }
         if (cmd_off + cmdsize < cmd_off) // overflow guard on a file-controlled cmdsize
             return false;

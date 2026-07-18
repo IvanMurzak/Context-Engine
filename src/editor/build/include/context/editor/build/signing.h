@@ -28,7 +28,8 @@
 // no OS API, no platform #if, so the local GCC gate exercises the exact same code the MSVC / Apple-clang
 // CI legs do: pe_has_authenticode_signature (a signed PE/COFF carries a non-empty Certificate Table in
 // the optional-header Security data directory) and macho_has_code_signature (a signed Mach-O carries an
-// LC_CODE_SIGNATURE load command with a non-empty __LINKEDIT signature blob).
+// LC_CODE_SIGNATURE load command with a non-empty, NON-ad-hoc __LINKEDIT code-signature blob — an arm64
+// auto-embedded ad-hoc signature reads as unsigned).
 
 #pragma once
 
@@ -121,16 +122,24 @@ struct SigningReport
 // PRESENCE, which is exactly what the never-silent unsigned-warning state keys off.
 [[nodiscard]] bool pe_has_authenticode_signature(std::string_view pe_bytes);
 
-// Does this Mach-O image (the raw bytes of a shipped macOS binary) carry an embedded code signature?
-// Pure, cross-platform byte parse: a code-signed Mach-O has an LC_CODE_SIGNATURE (0x1D) load command
-// whose linkedit_data_command references a NON-EMPTY __LINKEDIT signature blob (datasize != 0). Handles
-// thin Mach-O (32/64-bit, either endianness) AND fat/universal binaries (FAT_MAGIC — signed iff any arch
-// slice carries a signature; `codesign` signs every slice). Returns false for a non-Mach-O input, a
-// truncated header, or an unsigned image. Like the PE parser it detects PRESENCE only — it does NOT
-// cryptographically verify the signature (codesign at sign time / Gatekeeper at run time do that) and it
-// does NOT prove NOTARIZATION (a stapled ticket / Apple's notary service — asserted by the CI job). No
-// codesign, no macOS API, no platform #if — the local GCC gate exercises the exact code the Apple-clang
-// CI leg does.
+// Does this Mach-O image (the raw bytes of a shipped macOS binary) carry an embedded DISTRIBUTABLE
+// (Developer-ID-eligible) code signature? Pure, cross-platform byte parse: a code-signed Mach-O has an
+// LC_CODE_SIGNATURE (0x1D) load command whose linkedit_data_command references a NON-EMPTY __LINKEDIT
+// signature blob AND that blob's primary CodeDirectory is NOT flagged CS_ADHOC. Handles thin Mach-O
+// (32/64-bit, either endianness) AND fat/universal binaries (FAT_MAGIC — signed iff any arch slice carries
+// a real signature; `codesign` signs every slice). Returns false for a non-Mach-O input, a truncated
+// header, an unsigned image, OR an AD-HOC-only signature.
+//
+// The ad-hoc carve-out is load-bearing: Apple Silicon (arm64) linkers auto-embed an AD-HOC code signature
+// into every Mach-O at LINK time (required to execute on arm64) with NO signing identity — a presence-only
+// check would then mis-report every unsigned per-PR arm64 build as "signed". Parsing the CodeDirectory
+// flags for CS_ADHOC distinguishes that from a real Developer-ID signature; fail-closed (a malformed or
+// unparseable signature blob reads as unsigned).
+//
+// Like the PE parser it detects the SIGNATURE, not its cryptographic validity (codesign at sign time /
+// Gatekeeper at run time do that), and it does NOT prove NOTARIZATION (a stapled ticket / Apple's notary
+// service — asserted by the CI job). No codesign, no macOS API, no platform #if — the local GCC gate
+// exercises the exact code the Apple-clang CI leg does.
 [[nodiscard]] bool macho_has_code_signature(std::string_view macho_bytes);
 
 } // namespace context::editor::build
