@@ -648,3 +648,27 @@ set_tests_properties(
     m8-exit-4a-determinism-wedge
     m8-exit-4b-replication-wedge
     PROPERTIES TIMEOUT 180)
+
+# ===================================================================================================
+# The a17 TRUST-TIER ADVERSARIAL RED-TEAM (M8.5 wedge-hardening; issue #283) — an attacker-framed
+# regression suite over the LANDED v1 trust primitives (it rebuilds nothing): the bridge dispatcher
+# scope gate (R-SEC-007), the filesync path jail (R-SEC-008), the importer isolation policy
+# (R-SEC-006/008/010), and the verify-before-use trust chain (R-SEC-009 / a08). ONE blocking per-PR
+# ctest on every OS leg — named `redteam-trust-tier`, NOT a milestone-gate prefix, so the build job's
+# general `ctest --preset dev` step auto-picks it with NO ci.yml change (the samples-corpus/game-smoke
+# precedent). context_editorkernel PUBLICly carries bridge + filesync + contract; context_import is the
+# isolation policy; context_common is verify_signature. Self-contained GCC runtime (std::filesystem),
+# gated to GNU so the macOS/Clang + Windows/MSVC legs are untouched (mirrors m1..m8-exit).
+add_executable(context_test_a17_trust_redteam test_a17_trust_redteam.cpp)
+target_link_libraries(context_test_a17_trust_redteam
+    PRIVATE context_editorkernel context_import context_common context_warnings Threads::Threads)
+target_link_options(context_test_a17_trust_redteam PRIVATE
+    $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
+target_include_directories(context_test_a17_trust_redteam PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# The pinned PRODUCTION trust root (a08) + the committed TEST-ONLY signer fixtures the verify-before-use
+# fail-closed probe reads. CMAKE_SOURCE_DIR is the `-S src` root, so ../ is the repo root.
+target_compile_definitions(context_test_a17_trust_redteam PRIVATE
+    CONTEXT_TRUST_ROOT="${CMAKE_SOURCE_DIR}/../tools/trust-root/allowed_signers"
+    CONTEXT_VERIFY_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/../tools/tests/fixtures")
+add_test(NAME redteam-trust-tier COMMAND context_test_a17_trust_redteam)
+set_tests_properties(redteam-trust-tier PROPERTIES TIMEOUT 120)

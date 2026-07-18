@@ -252,3 +252,24 @@ if(_ctx_js_v8 AND CONTEXT_TSAN)
     set_tests_properties(js-test_gc_state_hash PROPERTIES
         ENVIRONMENT "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tsan-suppressions.txt")
 endif()
+
+# --- a17 TRUST-TIER RED-TEAM (M8.5; issue #283): the JS host exposes only INJECTED bindings --------
+# R-SEC-001/002 (L-49): gameplay TS reaches only what the host injects — no ambient fs/net/process.
+# Same V8-gated split as js-test_js_engine: on the V8 CI legs the probe evals from inside a guest that
+# require/process/fetch/XHR/WebSocket/Deno/globalThis.fs are all undefined AND that an injected host
+# binding IS reachable (the sole door in); on the stub toolchain it asserts the honest no-JS state.
+# Named `redteam-js-ambient` — NOT a milestone-gate prefix, so the build job's general ctest step
+# auto-picks it. Same rusty_v8 UBSan-vptr / TSan carve-outs as the sibling V8-linking test TUs.
+add_executable(context_js_test_ambient_redteam tests/test_ambient_redteam.cpp)
+target_link_libraries(context_js_test_ambient_redteam PRIVATE context_js context_warnings)
+if(_ctx_js_v8)
+    target_compile_definitions(context_js_test_ambient_redteam PRIVATE CONTEXT_JS_HAS_V8)
+endif()
+if(_ctx_js_v8 AND CONTEXT_SANITIZE AND NOT MSVC)
+    target_compile_options(context_js_test_ambient_redteam PRIVATE -fno-sanitize=vptr)
+endif()
+add_test(NAME redteam-js-ambient COMMAND context_js_test_ambient_redteam)
+if(_ctx_js_v8 AND CONTEXT_TSAN)
+    set_tests_properties(redteam-js-ambient PROPERTIES
+        ENVIRONMENT "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tsan-suppressions.txt")
+endif()
