@@ -44,28 +44,22 @@ const std::vector<HudLine>& ProfileHud::update(const ProfileHudModel& model)
         lines_.push_back(HudLine{row.str(), HudTint::Normal});
     }
 
-    // Per-lane cost — only lanes that ran (a zero-cost lane is omitted, not shown as 0).
+    // Per-lane cost — only lanes that ran (a zero-cost lane is omitted, not shown as 0), in the
+    // fixed native/script/wasm order.
     {
+        const char* const lane_labels[] = {"native", "script", "wasm"};
+        const double lane_ms[] = {model.native_ms, model.script_ms, model.wasm_ms};
         std::ostringstream row;
         bool any = false;
-        if (model.native_ms > 0.0)
+        for (int i = 0; i < 3; ++i)
         {
-            row << "native " << ms(model.native_ms) << " ms";
-            any = true;
-        }
-        if (model.script_ms > 0.0)
-        {
-            if (any)
-                row << " | ";
-            row << "script " << ms(model.script_ms) << " ms";
-            any = true;
-        }
-        if (model.wasm_ms > 0.0)
-        {
-            if (any)
-                row << " | ";
-            row << "wasm " << ms(model.wasm_ms) << " ms";
-            any = true;
+            if (lane_ms[i] > 0.0)
+            {
+                if (any)
+                    row << " | ";
+                row << lane_labels[i] << " " << ms(lane_ms[i]) << " ms";
+                any = true;
+            }
         }
         if (any)
             lines_.push_back(HudLine{row.str(), HudTint::Normal});

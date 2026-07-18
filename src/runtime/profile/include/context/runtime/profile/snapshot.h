@@ -16,8 +16,6 @@
 namespace context::runtime::profile
 {
 
-class SpanChannel; // forward (build_snapshot reads it)
-
 // Per-lane rollup: how much wall time C++ / TS / WASM systems consumed over the run.
 struct LaneCounters
 {

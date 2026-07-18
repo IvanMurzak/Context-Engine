@@ -6,9 +6,9 @@
 
 #include <array>
 #include <iomanip>
-#include <map>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace context::runtime::profile
@@ -114,8 +114,9 @@ std::uint64_t write_chrome_trace(const SpanChannel& spans, const GcPauseChannel*
                                                  lane_name(static_cast<Lane>(li))));
 
     // Per-(tick, lane) cursor: within a tick each lane lays its spans end-to-end from the tick base.
-    // Index 0..2 = lanes, index 3 = the GC track.
-    std::map<std::uint64_t, std::array<double, 4>> cursor;
+    // Index 0..2 = lanes, index 3 = the GC track. Keyed lookup only (never iterated in key order),
+    // so an unordered map is the right container.
+    std::unordered_map<std::uint64_t, std::array<double, 4>> cursor;
 
     std::uint64_t event_count = 0;
     for (const SystemSpan& s : spans.samples())
