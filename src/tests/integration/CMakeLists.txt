@@ -688,3 +688,28 @@ add_test(NAME security-redteam-tamper-e2e COMMAND context_test_redteam_tamper_e2
 # times over a real process boundary — cap both so a regression never hangs CI.
 set_tests_properties(security-redteam-boundaries PROPERTIES TIMEOUT 120)
 set_tests_properties(security-redteam-tamper-e2e PROPERTIES TIMEOUT 240)
+
+# Sanitizer-preset wiring (same docs/sanitizer-v8-false-positives.md pattern already wired onto
+# m1/m2/samples-corpus above and m6-exit-2 below): security-redteam-boundaries links context_js
+# directly and security-redteam-tamper-e2e links context_cli, which transitively links context_js
+# on the V8-capable legs (context_cli -> context_js) — both therefore carry the uninstrumented
+# rusty_v8 archive whose duplicate C++-runtime typeinfo trips UBSan's vptr check on valid iostream
+# code, and demangling those diagnostics makes LSan flag the sanitizer's own scratch as a leak
+# (sanitize (ASan+UBSan, ubuntu) run 29632946675: security-redteam-tamper-e2e failed on this).
+# Under TSan the same V8 worker-thread pool produces benign internal races (same run:
+# security-redteam-boundaries failed on this). Narrow, sanitizer-internal-only suppressions —
+# they can never mask a real `context::` bug — inert on the stub (non-V8) build.
+if(CONTEXT_SANITIZE)
+    set_tests_properties(
+        security-redteam-boundaries
+        security-redteam-tamper-e2e
+        PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
+endif()
+if(CONTEXT_TSAN)
+    set_tests_properties(
+        security-redteam-boundaries
+        security-redteam-tamper-e2e
+        PROPERTIES ENVIRONMENT
+        "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/js/tsan-suppressions.txt")
+endif()
