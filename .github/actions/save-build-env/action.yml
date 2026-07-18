@@ -1,0 +1,24 @@
+# Persist the warmed sccache LOCAL-disk object cache — the SAVE half of the P1 compile-cache pair
+# (setup-build-env is the RESTORE half). Added as the FINAL step of the four critical-path SAVER
+# jobs ONLY: build (ubuntu + macOS legs) and sanitize (ASan+UBSan + TSan legs). Restore-only jobs
+# (the ~8 other dev-preset consumers) call setup-build-env WITHOUT this action, so a namespace has
+# exactly one saver.
+#
+# The save is guarded `github.ref == 'refs/heads/main'`, so PR legs NEVER write cache — the single
+# most important cache-budget invariant (this is what stops per-branch cache multiplication). It
+# reuses SCCACHE_CACHE_KEY, exported by setup-build-env earlier in the same job, so the saved key
+# is byte-identical to the restored primary key → main keeps ~1 authoritative entry per
+# (preset, os, image, week). Windows is a no-op (setup-build-env computed no key there).
+
+name: Save build environment (sccache dir, main only)
+description: Persist the sccache local-disk dir via actions/cache — save only on refs/heads/main (non-Windows); the key is the one setup-build-env exported.
+
+runs:
+  using: composite
+  steps:
+    - name: Save sccache dir (main only)
+      if: runner.os != 'Windows' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ runner.temp }}/sccache
+        key: ${{ env.SCCACHE_CACHE_KEY }}

@@ -29,12 +29,21 @@ on:
   pull_request:
 
 env:
-  # Disabled (cost cut, 2026-07-05): the GHA cache backend was spawning ~44 cache entries per
-  # run (611 MB / 7,460 entries observed — the repo's dominant Actions-storage cost). sccache
-  # still runs via CMAKE_<LANG>_COMPILER_LAUNCHER (set by .github/actions/setup-build-env) but
-  # falls back to passthrough/no-cache mode with no backend configured — builds stay green,
-  # just without cross-run compiler-object caching.
+  # Compile caching (P1, 2026-07-18): the churny GHA backend stays OFF — it was spawning ~44 cache
+  # entries per run (611 MB / 7,460 entries observed — the repo's dominant Actions-storage cost;
+  # disabled 2026-07-05). Instead sccache uses a LOCAL-disk cache dir (SCCACHE_DIR) that the
+  # setup-build-env / save-build-env composites persist across runs via actions/cache (RESTORE on
+  # every ref, SAVE only on refs/heads/main). That restores cross-run compiler-object caching on
+  # the 4 critical-path ubuntu/macOS jobs (build ×2, sanitize ×2) WITHOUT the per-branch cache
+  # multiplication the GHA backend caused. Windows legs still skip sccache (a persistent on-disk
+  # cache there is a separate follow-up).
   SCCACHE_GHA_ENABLED: "false"
+  # Local-disk sccache backend (active because no cloud backend is configured above): sccache writes
+  # compiled objects under SCCACHE_DIR; actions/cache persists that dir keyed per preset/os/image/week.
+  # SCCACHE_CACHE_SIZE caps the dir so a namespace can never silently grow the cached tarball (a
+  # cache-budget guardrail — keeps the repo well under the 10 GB Actions-cache limit).
+  SCCACHE_DIR: ${{ runner.temp }}/sccache
+  SCCACHE_CACHE_SIZE: "800M"
   # Self-hosted-runner safety (2026-07-08): the three Windows CI jobs run as LocalSystem services
   # on ONE machine and share `C:\WINDOWS\system32\config\systemprofile\.gitconfig`. A per-job
   # `git config --global --add safe.directory '*'` step raced on `.gitconfig.lock` when >1 runner
@@ -116,6 +125,8 @@ jobs:
 
       - name: Build environment (sccache + CMake env)
         uses: ./.github/actions/setup-build-env
+        with:
+          preset: dev   # sccache namespace this job SAVES on main (sccache-dev-<os>)
 
       # Build files live in src/ (root stays minimal): configure with -S src; build/test
       # presets resolve CMakePresets.json from the working directory, so those run in src/.
@@ -269,6 +280,11 @@ jobs:
         shell: bash
         run: ${SCCACHE_PATH} --show-stats
 
+      # Persist the warmed sccache-dev-<os> object cache (main only; PR legs never write) — the ONE
+      # saver for the dev namespace that ~8 ubuntu/macOS dev-preset jobs restore.
+      - name: Save build environment (sccache dir, main only)
+        uses: ./.github/actions/save-build-env
+
       # Shared Docker Desktop daemon janitor (best-effort, self-hosted Windows only).
       # ~21 self-hosted runners on this box share ONE Docker Desktop daemon. Context-Engine
       # CI itself uses no Docker, so this only reclaims week-cold BUILD CACHE left behind by
@@ -367,6 +383,8 @@ jobs:
 
       - name: Build environment (sccache + CMake env)
         uses: ./.github/actions/setup-build-env
+        with:
+          preset: ${{ matrix.preset }}   # per-leg sccache namespace (sccache-sanitize-Linux / sccache-tsan-Linux)
 
       - name: Configure (${{ matrix.preset }} preset)
         run: cmake -S src --preset ${{ matrix.preset }}
@@ -383,6 +401,11 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: ${SCCACHE_PATH} --show-stats
+
+      # Persist the warmed sanitizer object cache (main only; PR legs never write). Each matrix leg
+      # saves its own namespace — ASan+UBSan → sccache-sanitize-Linux, TSan → sccache-tsan-Linux.
+      - name: Save build environment (sccache dir, main only)
+        uses: ./.github/actions/save-build-env
 
   # R-FILE-011 benchmark baseline on a SMALL corpus (10k files). GH-hosted runners are
   # NOT the R-QA-009 perf-isolated runner class — this job is a trend gauge + harness
@@ -423,8 +446,12 @@ jobs:
         shell: bash
         run: echo "VCPKG_CACHE_IMAGE_TAG=${ImageVersion:-selfhosted}" >> "$GITHUB_ENV"
 
-      - name: vcpkg binary cache
-        uses: actions/cache@v6
+      # RESTORE on every ref (PRs warm-restore main's archive via the restore-key prefix); the
+      # guarded SAVE below writes ONLY on main, so a PR never creates a branch-scoped ~500 MB copy
+      # (the cache-budget reclaim — P3). A PR that edits the vcpkg manifest cache-misses and rebuilds
+      # from source that once; on merge, main re-saves.
+      - name: vcpkg binary cache (restore)
+        uses: actions/cache/restore@v6
         with:
           path: .vcpkg-bincache
           key: vcpkg-bin-${{ runner.os }}-${{ env.VCPKG_CACHE_IMAGE_TAG }}-${{ hashFiles('src/vcpkg.json', 'src/vcpkg-configuration.json') }}
@@ -497,6 +524,15 @@ jobs:
           name: bench-results
           path: bench/results/
           if-no-files-found: error
+
+      # SAVE the vcpkg archive ONLY on main (P3): the dir is now populated by the spikes configure
+      # above. Same primary key as the restore; PR legs skip this, so no per-branch duplicate.
+      - name: vcpkg binary cache (save, main only)
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6
+        with:
+          path: .vcpkg-bincache
+          key: vcpkg-bin-${{ runner.os }}-${{ env.VCPKG_CACHE_IMAGE_TAG }}-${{ hashFiles('src/vcpkg.json', 'src/vcpkg-configuration.json') }}
 
   # R-FILE-011 per-PR proxy on the REAL attach pipeline (issue #38; §6 tiering: the 10k-file
   # variant is the blocking per-PR stand-in for the 100k gate until M3). The JOB is BLOCKING — the
@@ -1082,9 +1118,11 @@ jobs:
         shell: bash
         run: echo "VCPKG_CACHE_IMAGE_TAG=${ImageVersion:-selfhosted}" >> "$GITHUB_ENV"
 
-      - name: vcpkg binary cache
+      # RESTORE on every ref (shares main's archive via the restore-key prefix); the guarded SAVE at
+      # the job end writes ONLY on main, so PR legs never create a branch-scoped copy (P3 reclaim).
+      - name: vcpkg binary cache (restore)
         if: runner.os == 'Linux'
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: .vcpkg-bincache
           key: vcpkg-bin-${{ runner.os }}-${{ env.VCPKG_CACHE_IMAGE_TAG }}-${{ hashFiles('src/vcpkg.json', 'src/vcpkg-configuration.json') }}
@@ -1108,6 +1146,15 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: ${SCCACHE_PATH} --show-stats
+
+      # SAVE the vcpkg archive ONLY on main (P3), Linux-only like the restore; the dir is populated
+      # by the integration configure above. PR legs skip this — no per-branch duplicate.
+      - name: vcpkg binary cache (save, main only)
+        if: runner.os == 'Linux' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6
+        with:
+          path: .vcpkg-bincache
+          key: vcpkg-bin-${{ runner.os }}-${{ env.VCPKG_CACHE_IMAGE_TAG }}-${{ hashFiles('src/vcpkg.json', 'src/vcpkg-configuration.json') }}
 
   # WebGPU spike, web leg: Emscripten + the emdawnwebgpu port binding the BROWSER's WebGPU (the
   # locked web path — NOT a Dawn cross-compile). Proves the same spike source compiles to
@@ -1422,8 +1469,11 @@ jobs:
         shell: bash
         run: echo "VCPKG_CACHE_IMAGE_TAG=${ImageVersion:-selfhosted}" >> "$GITHUB_ENV"
 
-      - name: vcpkg binary cache
-        uses: actions/cache@v6
+      # RESTORE on every ref (shares main's shadercc archive via the restore-key prefix); the guarded
+      # SAVE at the job end writes ONLY on main, so PR legs never create a branch-scoped ~500-800 MB
+      # copy — this is the dominant budget reclaim (P3), the shadercc vcpkg cache being the largest.
+      - name: vcpkg binary cache (restore)
+        uses: actions/cache/restore@v6
         with:
           path: .vcpkg-bincache
           key: vcpkg-bin-shadercc-${{ runner.os }}-${{ env.VCPKG_CACHE_IMAGE_TAG }}-${{ hashFiles('src/vcpkg.json', 'src/vcpkg-configuration.json') }}
@@ -1438,14 +1488,17 @@ jobs:
       # the pin in tools/naga-toolchain.json). Both caches are keyed on their pin manifest, so a pin
       # bump rebuilds exactly once per OS; on a cache hit the fetch scripts are no-ops needing
       # neither cargo nor a compiler. No restore-keys: a stale tool must never satisfy a new pin.
-      - name: WGSL tool cache (tint)
-        uses: actions/cache@v6
+      # RESTORE both tool caches on every ref; the guarded SAVEs at the job end write ONLY on main
+      # (P3 — uniform with the vcpkg caches). No restore-keys (a stale tool must never satisfy a new
+      # pin — a pin bump is an exact-key miss that rebuilds once, then main re-saves).
+      - name: WGSL tool cache (tint, restore)
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/tint-tool
           key: tint-tool-${{ runner.os }}-${{ hashFiles('tools/tint-toolchain.json') }}
 
-      - name: WGSL tool cache (naga)
-        uses: actions/cache@v6
+      - name: WGSL tool cache (naga, restore)
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/naga-tool
           key: naga-tool-${{ runner.os }}-${{ hashFiles('tools/naga-toolchain.json') }}
@@ -1488,6 +1541,29 @@ jobs:
       - name: Run the shader-crosscompile ctests (smoke + author->SPIR-V->{HLSL,MSL,GLSL,WGSL} roundtrip)
         run: ctest --preset shader-crosscompile --output-on-failure -R "^shader-"
         working-directory: src
+
+      # SAVE the shadercc vcpkg + WGSL tool archives ONLY on main (P3); the dirs are populated by the
+      # configure + tool-staging steps above. PR legs skip these — no per-branch duplicates.
+      - name: vcpkg binary cache (save, main only)
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6
+        with:
+          path: .vcpkg-bincache
+          key: vcpkg-bin-shadercc-${{ runner.os }}-${{ env.VCPKG_CACHE_IMAGE_TAG }}-${{ hashFiles('src/vcpkg.json', 'src/vcpkg-configuration.json') }}
+
+      - name: WGSL tool cache (tint, save, main only)
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/tint-tool
+          key: tint-tool-${{ runner.os }}-${{ hashFiles('tools/tint-toolchain.json') }}
+
+      - name: WGSL tool cache (naga, save, main only)
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/naga-tool
+          key: naga-tool-${{ runner.os }}-${{ hashFiles('tools/naga-toolchain.json') }}
 
   # M5-F0a CEF build substrate (src/editor/cef/, issue #150; L-15 / L-41 / R-UI-007 / R-SEC-009): fetch
   # + SHA-256-verify the pinned CEF prebuilt (tools/fetch_cef.py, verify-before-use fail-closed), build
