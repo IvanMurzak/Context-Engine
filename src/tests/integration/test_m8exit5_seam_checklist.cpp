@@ -36,10 +36,9 @@
 #include "context/runtime/session/session.h"
 #include "context/runtime/session/state_hash.h"
 
-#include <fstream>
+#include <cstdint>
 #include <map>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
 
@@ -84,16 +83,6 @@ const char* kProject = R"({
     {"id": "aaaa0000aaaa0001", "name": "Camera", "components": {"camera": {"fov": 1.0}}},
     {"id": "aaaa0000aaaa0002", "name": "Player", "components": {"transform": {}}}
   ]})";
-
-[[nodiscard]] std::string read_file_text(const char* path)
-{
-    std::ifstream in(path, std::ios::binary);
-    if (!in.good())
-        return {};
-    std::ostringstream buf;
-    buf << in.rdbuf();
-    return buf.str();
-}
 
 [[nodiscard]] bool contains(const std::string& haystack, const std::string& needle)
 {
@@ -172,7 +161,7 @@ int main()
         CHECK(common::classify_verify_exit_code(255, sp::Shell::Posix) != common::VerifyStatus::Ok);
         CHECK(common::classify_verify_exit_code(-1, sp::Shell::Cmd) != common::VerifyStatus::Ok);
         // The pinned production root pins ONE Ed25519 publisher under the release identity + namespace.
-        const std::string root = read_file_text(CONTEXT_TRUST_ROOT);
+        const std::string root = sp::read_file(CONTEXT_TRUST_ROOT);
         CHECK(!root.empty());
         CHECK(contains(root, std::string(common::kReleaseSignerIdentity)));
         CHECK(contains(root, std::string(common::kArtifactNamespace)));
@@ -230,7 +219,7 @@ int main()
         // provisioned (ops1, an open owner hardware gate). The M8 exit RECORDS that honestly: the
         // committed budget declares itself advisory + names its unprovisioned runner — it does NOT assert
         // a blocking build-time number the runner cannot yet enforce.
-        const std::string budget = read_file_text(CONTEXT_BUILD_TIME_BUDGET);
+        const std::string budget = sp::read_file(CONTEXT_BUILD_TIME_BUDGET);
         CHECK(!budget.empty());
         CHECK(contains(budget, "\"advisory_until_provisioned\": true"));
         CHECK(contains(budget, "perf-linux-bare-metal"));

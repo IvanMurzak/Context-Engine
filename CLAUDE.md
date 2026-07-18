@@ -105,7 +105,7 @@ license check + CycloneDX SBOM artifact, `tools/check_licenses.py`) and `python-
 `tools/tests` + `bench/tests` + fleet-manifest validation). Then, in one rollup (~34 checks):
 
 - **`build` (ubuntu / macos / windows)** — blocking. Dev-preset build + the general ctest step +
-  the named gate steps (M1/M2/M4/M5/M6 exit, determinism, samples-corpus) on every leg.
+  the named gate steps (M1/M2/M4/M5/M6/M7/M8 exit, determinism, samples-corpus) on every leg.
 - **`deterministic` (3 OS)** — blocking. Strict-FP flavor (clang `-ffp-contract=off`, MSVC
   `/fp:strict`) + the `determinism-*` family, including the cross-platform golden state-hash wedge
   (Linux-x64 / Win-x64 / macOS-ARM64 — any per-platform divergence reds that leg).

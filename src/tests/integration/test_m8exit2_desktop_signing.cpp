@@ -27,8 +27,6 @@
 #include "context/editor/build/build_errors.h"
 #include "context/editor/build/signing.h"
 
-#include <fstream>
-#include <sstream>
 #include <string>
 
 namespace build = context::editor::build;
@@ -39,16 +37,6 @@ using context::tests::m8::report;
 
 namespace
 {
-
-[[nodiscard]] std::string read_file_text(const char* path)
-{
-    std::ifstream in(path, std::ios::binary);
-    if (!in.good())
-        return {};
-    std::ostringstream buf;
-    buf << in.rdbuf();
-    return buf.str();
-}
 
 [[nodiscard]] bool contains(const std::string& haystack, const std::string& needle)
 {
@@ -156,7 +144,7 @@ int main()
 
     // === Seam 4 — the a08 PINNED PRODUCTION trust root: ONE Ed25519 publisher key, identity + namespace =
     {
-        const std::string root = read_file_text(CONTEXT_TRUST_ROOT);
+        const std::string root = sp::read_file(CONTEXT_TRUST_ROOT);
         CHECK(!root.empty());
         // The release signer identity + the artifact namespace are pinned (domain-separated signatures).
         CHECK(contains(root, std::string(common::kReleaseSignerIdentity)));  // context-engine-release
