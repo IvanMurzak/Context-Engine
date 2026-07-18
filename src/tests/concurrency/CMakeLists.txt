@@ -45,3 +45,12 @@ target_compile_definitions(context_test_worktree_merge
     PRIVATE CONTEXT_MERGE_CORPUS_DIR="${CMAKE_SOURCE_DIR}/editor/merge/tests/corpus")
 add_test(NAME concurrency-worktree-merge COMMAND context_test_worktree_merge)
 set_tests_properties(concurrency-worktree-merge PROPERTIES TIMEOUT 180)
+# Under the sanitize leg (unfiltered `ctest --preset sanitize` runs this non-gate family too), this test
+# drives context_cli in-process, which links the uninstrumented rusty_v8 prebuilt — suppress its
+# documented LSan false-positive exactly as the sibling CLI-driving suites do (merge-test_git_driver in
+# src/editor/merge/CMakeLists.txt; m1/m2/m7-exit + samples-corpus in src/tests/integration/CMakeLists.txt).
+# The concurrency-coedit target links no CLI/V8, so it deliberately carries no such block.
+if(CONTEXT_SANITIZE)
+    set_tests_properties(concurrency-worktree-merge PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
+endif()

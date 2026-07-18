@@ -54,14 +54,12 @@ class CoeditGateway final : public inspector::OverrideWriteGateway
 public:
     mutable std::uint64_t file_hash = 1;
     mutable std::map<std::string, JsonValue> fields;
-    mutable int attempts = 0;
     std::function<void()> on_first_attempt;
     mutable bool fired = false;
 
     inspector::WriteAttempt attempt(const compose::WriteRequest& request,
                                     std::uint64_t expected_raw_hash) const override
     {
-        ++attempts;
         if (on_first_attempt && !fired)
         {
             fired = true;
@@ -170,7 +168,6 @@ PropStats run_coedit_property(std::uint64_t seed, std::uint64_t rounds)
         }
 
         gw.fired = false;
-        gw.attempts = 0;
         if (mode == 2)
             gw.on_first_attempt = nullptr;
         else

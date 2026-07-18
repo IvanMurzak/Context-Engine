@@ -29,6 +29,7 @@
 #include "context/runtime/session/session.h"
 #include "context/runtime/session/state_hash.h"
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -123,6 +124,15 @@ bool has_diagnostic(const Envelope& e, const std::string& code)
 
 int main()
 {
+    // A unique per-process temp token: two concurrent runs of this executable (e.g. two PRs' `build`
+    // legs sharing a self-hosted runner's %TEMP%) must never collide on the same temp dir/file — the
+    // merge module's own sibling test_git_driver uses the same per-run uniqueness for exactly this.
+    // Cast the clock rep to a concrete integer before std::to_string: the rep is implementation-defined
+    // and `std::to_string` on a chrono rep is AMBIGUOUS under Apple libc++ (compiles under GCC/MSVC) —
+    // the sibling test_git_driver casts for exactly this reason (see the profile's macOS-libc++ note).
+    const std::string uniq = std::to_string(
+        static_cast<long long>(std::chrono::steady_clock::now().time_since_epoch().count()));
+
     // ============================================================================================
     // Part A — EVERY documented conflict class in the R-FILE-012 corpus is exercised (the DoD gate)
     // ============================================================================================
@@ -163,7 +173,7 @@ int main()
     // drive the committed .bin fixtures through the real `context merge-file` CLI path.
     {
         const fs::path bin = corpus / "binary-sidecar";
-        const fs::path out = fs::temp_directory_path() / "ctx-a16-binmerge.bin";
+        const fs::path out = fs::temp_directory_path() / ("ctx-a16-binmerge-" + uniq + ".bin");
         const Envelope e = cli::run({"merge-file", (bin / "base.bin").string(),
                                      (bin / "ours.bin").string(), (bin / "theirs.bin").string(),
                                      "--output", out.string()});
@@ -229,7 +239,7 @@ int main()
     // Part C — the post-merge `context validate` convergence gate (structural health)
     // ============================================================================================
     {
-        const fs::path dir = fs::temp_directory_path() / "ctx-a16-validate";
+        const fs::path dir = fs::temp_directory_path() / ("ctx-a16-validate-" + uniq);
         std::error_code ec;
         fs::remove_all(dir, ec);
         fs::create_directories(dir, ec);
