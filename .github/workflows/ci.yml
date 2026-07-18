@@ -126,11 +126,11 @@ jobs:
         run: cmake --build --preset dev
         working-directory: src
 
-      # Every registered suite EXCEPT the M1 + M2 + M4 + M5 + M6 + M7 exit gates, the M3 determinism
-      # gate, and the samples-corpus gate — those families run in their own named steps below so
-      # each milestone/QA gate is legible per OS leg (same tests, each runs exactly once).
+      # Every registered suite EXCEPT the M1 + M2 + M4 + M5 + M6 + M7 + M8 exit gates, the M3
+      # determinism gate, and the samples-corpus gate — those families run in their own named steps
+      # below so each milestone/QA gate is legible per OS leg (same tests, each runs exactly once).
       - name: Run test suites (ctest)
-        run: ctest --preset dev --verbose -E "^m1-exit-|^m2-exit-|^m4-exit-|^m5-exit-|^m6-exit-|^m7-exit-|^determinism-|^samples-corpus"
+        run: ctest --preset dev --verbose -E "^m1-exit-|^m2-exit-|^m4-exit-|^m5-exit-|^m6-exit-|^m7-exit-|^m8-exit-|^determinism-|^samples-corpus"
         working-directory: src
 
       # The M1 EXIT GATE (ROADMAP §1 M1 Exit / issue #36) — the five exit criteria as a BLOCKING
@@ -241,6 +241,27 @@ jobs:
       # docs/ci-fleet-manifest.json as the m7-exit-* gates. Green here CLOSES M7.
       - name: M7 exit gate (hud-headless + cli-drive + worldpanel + determinism-presentation + seam checklist, blocking)
         run: ctest --preset dev --output-on-failure -R "^m7-exit-"
+        working-directory: src
+
+      # The M8 EXIT GATE (ROADMAP §1-M8 exit / a14-m8-exit) — the build-pipeline milestone-closing mirror
+      # of the M1/M2/M4/M5/M6/M7 gates: the blocking per-PR m8-exit-* ctests on every OS leg, RIDING the
+      # landed M8 build-pipeline machinery. The full v1 platform-set (linux desktop+server, windows, macos,
+      # web) builds HEADLESS per-agent through the a05 orchestrator + a06/a10/a11/a13 export adapters, each
+      # a supported runnable-artifact plan (m8-exit-1); the a10 Authenticode + a13 Developer-ID/notarization
+      # signing hooks are never-silent on an unsigned artifact and verify-before-use fails closed under the
+      # a08 pinned Ed25519 production trust root, R-SEC-009 (m8-exit-2); the R-BUILD-009 headless smoke boots
+      # BOTH shipped wedge binaries over a real pack + steps N ticks (m8-exit-3, the a07 alias); the packed
+      # wedge build passes the L-54 state-hash gate against the SHIPPED RuntimeKernel (m8-exit-4a, the a07
+      # alias) AND carries the validated L-48/R-NET-001 replication metadata (m8-exit-4b, the a07 alias);
+      # and the executable M8 seam checklist audits one assertion per seam, incl. the OPS1-honest
+      # advisory-until-provisioned build-time budget, R-BUILD-006/R-QA-012 (m8-exit-5). This job builds
+      # EVERY target via `--preset dev`, so each gate's executable is always built (never "Not Run") — NO
+      # `--target` list changes are needed (the M6/M7 precedent); the -3/-4a/-4b aliases re-use the a07
+      # executables (the m6-exit-3 alias precedent), registering NO new determinism-* ctest name, so the
+      # strict-FP `deterministic` job's hand-maintained --target list is deliberately UNCHANGED. Registered
+      # in docs/ci-fleet-manifest.json as the m8-exit-* gates. Green here CLOSES M8.
+      - name: M8 exit gate (platform-set + desktop-signing + headless-smoke + determinism/replication wedge + seam checklist, blocking)
+        run: ctest --preset dev --output-on-failure -R "^m8-exit-"
         working-directory: src
 
       - name: sccache stats
