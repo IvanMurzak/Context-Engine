@@ -18,6 +18,7 @@
 #include "context/cli/scaffold.h"
 #include "context/cli/session_command.h"
 #include "context/cli/set_command.h"
+#include "context/cli/tilemap_command.h"
 #include "context/cli/ui_command.h"
 #include "context/editor/contract/json.h"
 #include "context/editor/contract/registry.h"
@@ -165,6 +166,13 @@ Envelope dispatch(const VerbSpec& verb, const std::vector<std::string>& position
     // headless layout pass, applies the verb, reports the envelope; never mutates the scene file.
     if (verb.noun == "ui")
         return run_ui(verb.verb, bound, flags);
+
+    // M8.5 a18: `context tilemap paint|fill` — the tilemap cell-authoring verbs (R-2D-003 GUI half /
+    // R-CLI-001 / L-33). Backed by src/cli/tilemap_command.cpp over the ONE editor/tilemap write-path
+    // core the tile-painting GUI's gesture-end commit also runs; canonical owner rewrite + L-33
+    // sidecar-first family commit through the R-FILE-004 atomic path (--dry-run / --if-match honored).
+    if (verb.noun == "tilemap")
+        return run_tilemap(verb.verb, bound, flags);
 
     // M3 task 5 (issue #100): `context install` — the R-SEC-005 engine-driven install. Backed by
     // src/editor/pkg/. --dry-run (core flag) is honored INSIDE the command (validate the plan +

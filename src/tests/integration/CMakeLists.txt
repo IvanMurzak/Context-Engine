@@ -190,6 +190,23 @@ add_test(NAME samples-corpus COMMAND context_test_samples_corpus)
 set_tests_properties(samples-corpus PROPERTIES TIMEOUT 180)
 
 # ===================================================================================================
+# The a18 GUI<->CLI tilemap-authoring PARITY gate (M8.5 a18: R-2D-003 GUI half / R-CLI-001 / L-20) —
+# ctest `tilemap-paint-parity`, a plain (non-gate-family) test the `build` job's general ctest step
+# auto-runs on every OS leg (no ci.yml edit needed). Drives the SAME edits through the tile-painting
+# GUI model's gesture lifecycle AND the real `context tilemap paint|fill` verbs (in-process cli::run)
+# over two identical staged copies of the committed platformer-2d sample, asserting BYTE-IDENTICAL
+# authored output plus the DoD's canonical + hot-reload properties (fixpoint, watch-trigger hash
+# move, sidecar-family coherence, fresh-session re-derive).
+add_executable(context_test_tilemap_paint_parity test_tilemap_paint_parity.cpp)
+target_link_libraries(context_test_tilemap_paint_parity
+    PRIVATE context_cli context_gui_panel_tilemap context_warnings)
+target_link_options(context_test_tilemap_paint_parity PRIVATE ${_m2_exit_static_runtime})
+target_compile_definitions(context_test_tilemap_paint_parity PRIVATE
+    CONTEXT_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/../samples")
+add_test(NAME tilemap-paint-parity COMMAND context_test_tilemap_paint_parity)
+set_tests_properties(tilemap-paint-parity PROPERTIES TIMEOUT 120)
+
+# ===================================================================================================
 # The M6 EXIT-A SAMPLE-GAME SMOKE GATES (issue #194; R-QA-005 / R-QA-013 / R-HEAD-002) — one per
 # sample game. Each game's runtime mirror (games/) registers as a session SCENARIO (session.h §
 # scenario registry) and PARSES its authored samples/<game>/ scene for the entity layout, so the
