@@ -353,9 +353,10 @@ int main()
                                             "XMLHttpRequest", "fetch", "WebAssembly", "eval",
                                             "Function"})
                 {
-                    // NB: `eval`/`Function` ARE standard ECMAScript globals; asserting they are absent
-                    // would be wrong. We only assert the CAPABILITY escapes (process/require/fs/net) are
-                    // undefined — the language builtins are not a host capability. Skip the two builtins.
+                    // NB: `eval`/`Function`/`WebAssembly` ARE standard ECMAScript globals; asserting
+                    // they are absent would be wrong. We only assert the CAPABILITY escapes
+                    // (process/require/fs/net) are undefined — the language builtins are not a host
+                    // capability. Skip these three builtins.
                     const std::string name(ambient);
                     if (name == "eval" || name == "Function" || name == "WebAssembly")
                         continue;

@@ -29,7 +29,6 @@
 #include "context/common/verify_signature.h"
 #include "context/editor/contract/json.h"
 
-#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -57,14 +56,6 @@ namespace
 constexpr const char* kIdentity = "context-engine-release";
 constexpr const char* kNamespace = "context-engine-artifact";
 
-std::string read_bytes(const fs::path& p)
-{
-    std::ifstream in(p, std::ios::binary);
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    return ss.str();
-}
-
 void write_bytes(const fs::path& p, const std::string& bytes)
 {
     std::error_code ec;
@@ -72,13 +63,6 @@ void write_bytes(const fs::path& p, const std::string& bytes)
         fs::create_directories(p.parent_path(), ec);
     std::ofstream out(p, std::ios::binary | std::ios::trunc);
     out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-}
-
-// Run one shell command, swallowing a MetacharacterError (a temp path with a shell metacharacter — not
-// this test's concern) as a non-fatal failure. Returns the exit code, or -999 if it could not build.
-int run(const std::string& command)
-{
-    return sp::run_command(command);
 }
 
 // Author a minimal BUILDABLE Linux project (mirrors src/cli/tests/test_build_command.cpp): a valid
@@ -107,7 +91,7 @@ Json run_context_build(const std::vector<std::string>& args)
         for (const std::string& a : args)
             cmd += " " + sp::quote_argument(a);
         cmd += " > " + sp::quote_argument(out.string());
-        (void)run(cmd);
+        (void)sp::run_command(cmd);
     }
     catch (const sp::MetacharacterError&)
     {
@@ -145,7 +129,7 @@ bool mint_key(const fs::path& dir, fs::path& key_out)
     {
         const std::string cmd = sp::quote_argument("ssh-keygen") + " -t ed25519 -f " +
                                 sp::quote_argument(key.string()) + " -N \"\" -C ephemeral-redteam";
-        if (run(cmd) != 0)
+        if (sp::run_command(cmd) != 0)
             return false;
     }
     catch (const sp::MetacharacterError&)
@@ -168,7 +152,7 @@ bool sign(const fs::path& key, const fs::path& artifact, fs::path& sig_out)
                                 sp::quote_argument(key.string()) + " -n " +
                                 sp::quote_argument(kNamespace) + " " +
                                 sp::quote_argument(artifact.string());
-        if (run(cmd) != 0)
+        if (sp::run_command(cmd) != 0)
             return false;
     }
     catch (const sp::MetacharacterError&)
@@ -187,7 +171,7 @@ bool sign(const fs::path& key, const fs::path& artifact, fs::path& sig_out)
 // namespace (so the real CLI gate, which uses those, accepts an authentic ephemeral signature).
 bool write_trust_root(const fs::path& key, const fs::path& dest)
 {
-    const std::string pub = read_bytes(fs::path(key.string() + ".pub"));
+    const std::string pub = sp::read_file(fs::path(key.string() + ".pub"));
     // Keep the first two whitespace-separated fields (key-type + base64 blob).
     std::istringstream ss(pub);
     std::string type, blob;
@@ -232,7 +216,6 @@ int main()
     {
         // === 1. In-process REAL crypto: authentic verifies; a same-length byte-flip is REFUSED ========
         // The tamper keeps the filename valid-looking AND the length identical — only the CONTENT moves.
-        const fs::path tampered = base / archive_name; // same valid-looking basename, different dir
         const fs::path tampered_dir = base / "tampered";
         fs::create_directories(tampered_dir, ec);
         const fs::path tampered_path = tampered_dir / archive_name;
@@ -241,7 +224,7 @@ int main()
         write_bytes(tampered_path, tampered_bytes);
 
         // Length is UNCHANGED and the name is still a valid version-archive name.
-        CHECK(read_bytes(tampered_path).size() == bytes.size());
+        CHECK(sp::read_file(tampered_path).size() == bytes.size());
         CHECK(tampered_path.filename().string() == archive_name);
 
         const common::VerifyOutcome authentic =
@@ -285,7 +268,7 @@ int main()
             std::string rt = bytes;
             rt[3] = static_cast<char>(rt[3] ^ 0x40); // same-length byte flip
             write_bytes(tampered_runtime, rt);
-            CHECK(read_bytes(tampered_runtime).size() == bytes.size());
+            CHECK(sp::read_file(tampered_runtime).size() == bytes.size());
 
             const Json rt_ok = run_context_build(
                 {"--target", "linux", "--project", project.string(), "--dry-run", "--runtime",
