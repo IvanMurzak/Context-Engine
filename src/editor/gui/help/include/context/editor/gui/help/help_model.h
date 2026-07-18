@@ -83,8 +83,8 @@ struct PanelHelp
 // shipped panels"). EXTENSION POINT: append a PanelHelp here when a new panel lands — the
 // register-with-the-panel discipline extends to help. The gui-help-contextual ctest cross-checks this
 // set against a11y::registered_panels(), so a panel added without a help topic (or a topic naming a
-// phantom panel) fails the CEF-free default build, and gui-help-verbs asserts every related_command
-// resolves to a real registered verb.
+// phantom panel) fails the CEF-free default build, and gui-help-test_help_model asserts every
+// related_command resolves to a real registered verb.
 [[nodiscard]] std::vector<PanelHelp> panel_topics();
 
 // Look one panel's contextual help up by id. nullopt when the panel has no registered topic.

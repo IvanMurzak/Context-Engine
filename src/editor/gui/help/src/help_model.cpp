@@ -155,8 +155,9 @@ std::vector<VerbHelp> all_verb_help()
 std::vector<PanelHelp> panel_topics()
 {
     // One topic per shipped editor panel (id + title match a11y::registered_panels() /
-    // coverage.manifest.jsonl). `related_commands` are live registry commands — the gui-help-verbs
-    // ctest asserts each resolves, and gui-help-contextual asserts this set == the registered panels.
+    // coverage.manifest.jsonl). `related_commands` are live registry commands — the
+    // gui-help-test_help_model ctest asserts each resolves, and gui-help-contextual asserts this set
+    // == the registered panels.
     return {
         {"placeholder", "Context Editor",
          "The editor host. Start here — scaffold a runnable project, then inspect the contract.",
