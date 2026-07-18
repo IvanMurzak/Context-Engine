@@ -60,9 +60,14 @@ private:
 };
 
 // The scope a given RPC method-id (the registry's rpc_method) requires. Unknown / read-only methods
-// map to read_query. The install/build family (package.add, build) requires build_install; the
-// file-writer family (set, new, edit, edit-batch) requires file_write. Session verbs (and the
-// daemon's operational shutdown) require session_control.
+// map to read_query. The install/build family (package.add, build, install) requires build_install;
+// the file-writer family (set, new, edit, edit-batch, migrate, merge-file, resolve-conflict, re-key,
+// asset.move, asset.rename) requires file_write; the session family (session.new/seed/step/inject/
+// record, replay, ui.send, shutdown) requires session_control. Verbs still RESERVED on the bridge are
+// gated by SEMANTIC CLASS regardless (defense-in-depth): a mutating verb is denied fail-closed under
+// a read/query token the day its backing is wired, never silently exposed by the read baseline
+// (R-SEC-007). Read-only siblings (session.hash, determinism.diff, ui.dump/query/assert, reconcile,
+// validate, doctor, resource.read, snapshot, describe, query, subscribe/unsubscribe/ack) stay baseline.
 [[nodiscard]] Scope required_scope_for(const std::string& rpc_method);
 
 // Does `granted` satisfy the requirement for `rpc_method`? read/query-required methods are always

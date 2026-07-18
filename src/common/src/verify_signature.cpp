@@ -70,6 +70,14 @@ VerifyOutcome verify_signature(const std::filesystem::path& artifact,
     // exact argv tools/verify_artifact.py uses. The artifact is streamed as stdin via a shell
     // redirection (the same `<`/`>` redirection the a06 smoke path uses through this runner), so a
     // large protected artifact is not buffered into memory.
+    //
+    // The trailing `1>&2` routes ssh-keygen's OWN chatter to STDERR: on success it prints a
+    // `Good "<ns>" signature for <identity> ...` line to STDOUT, which — since run_command inherits
+    // the caller's stdout — would otherwise CORRUPT a machine-readable envelope a caller emits on
+    // stdout (e.g. `context build --toolchain-sig` prints the R-CLI-008 JSON envelope). The verdict
+    // travels via the EXIT CODE (classify_verify_exit_code), never ssh-keygen's stdout text, so
+    // diverting it to stderr is loss-free and keeps the fetch-verify refusal cleanly machine-readable
+    // (R-SEC-009 fail-closed, R-CLI-008). Portable across cmd.exe and POSIX sh.
     std::string command;
     try
     {
@@ -78,7 +86,7 @@ VerifyOutcome verify_signature(const std::filesystem::path& artifact,
                   subprocess::quote_argument(std::string(identity)) + " -n " +
                   subprocess::quote_argument(std::string(namespace_)) + " -s " +
                   subprocess::quote_argument(signature.string()) + " < " +
-                  subprocess::quote_argument(artifact.string());
+                  subprocess::quote_argument(artifact.string()) + " 1>&2";
     }
     catch (const subprocess::MetacharacterError& ex)
     {
