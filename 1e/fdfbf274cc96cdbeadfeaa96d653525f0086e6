@@ -1,0 +1,51 @@
+.github/CONTRIBUTING.md
+  s_98a52884e6b42a::t_00f2026ef6fcf2 38
+docs/build-time-budget-table.md
+  s_98a52884e6b42a::t_1b84f935e27173 3
+docs/ci-fleet-manifest.md
+  s_98a52884e6b42a::t_dcb8d39f6be97d 3
+docs/density-targets.md
+  s_98a52884e6b42a::t_dfa82740d4dc46 3
+docs/export-adapters.md
+  s_98a52884e6b42a::t_30c9f3e10f307d 5
+docs/human-latency-budget.md
+  s_98a52884e6b42a::t_1df2baf3160e2f 3
+docs/latency-budget-table.md
+  s_98a52884e6b42a::t_2b1ccd39b9f437 4
+docs/perf-gate-methodology.md
+  s_98a52884e6b42a::t_22edc2678d6bd4 3
+docs/physics-determinism-decision.md
+  s_98a52884e6b42a::t_5aa3a29a496736 96
+docs/sim-render-timing-contract.md
+  s_98a52884e6b42a::t_547b20403cbb98 5
+docs/test-vector-corpus.md
+  s_98a52884e6b42a::t_ed7bb1a6cf95b3 3
+spikes/ecs/FINDINGS.md
+  s_98a52884e6b42a::t_5445a58f4fd85f 156
+src/kernel/registration/README.md
+  s_98a52884e6b42a::t_dbffa64a27f5da 4
+src/packages/physics2d/README.md
+  s_98a52884e6b42a::t_14661070a31dae 64
+src/packages/physics3d/README.md
+  s_98a52884e6b42a::t_83b4dee156edaf 58
+src/packages/simmath/README.md
+  s_98a52884e6b42a::t_d575f72da96c10 59
+src/packages/spatial/README.md
+  s_98a52884e6b42a::t_9c2cc801851f4e 49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "1efdfbf274cc96cdbeadfeaa96d653525f0086e6",
+  "prompts": {},
+  "sessions": {
+    "s_98a52884e6b42a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_98a52884e6b42a",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
