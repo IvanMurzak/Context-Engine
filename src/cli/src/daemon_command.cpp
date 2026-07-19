@@ -13,6 +13,7 @@
 #include "context/editor/filesync/native_watcher.h"
 #include "context/kernel/platform.h"
 
+#include <cstddef>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -187,6 +188,31 @@ int run_daemon(const std::vector<std::string>& args)
                             "'");
     }
 
+    // D20 attach-token enforcement (default OFF — the C-F1 sequencing: e02 flips it ON once the CLI
+    // migrates onto the client SDK). With --require-attach-token the daemon refuses any attach whose
+    // token does not match instance.json's (attach.denied); without it the token is carried but not
+    // gated on (the M1 ambient-OS-guard trust model — POSIX 0600 socket + Windows owner-SID DACL).
+    const bool require_auth = has_flag(args, "require-attach-token");
+
+    // D19 multi-client fan-in bounds (config with sane defaults; absent keeps KernelServer's defaults
+    // of 16 clients / 256 queued event frames). Strict positive parse (0 / junk is a usage error).
+    std::optional<std::uint64_t> max_clients;
+    if (const std::optional<std::string> raw = flag_value(args, "max-clients"); raw.has_value())
+    {
+        max_clients = parse_u64(*raw);
+        if (!max_clients.has_value() || *max_clients == 0)
+            return fail("usage.invalid",
+                        "--max-clients expects a positive integer, got '" + *raw + "'");
+    }
+    std::optional<std::uint64_t> max_frame_budget;
+    if (const std::optional<std::string> raw = flag_value(args, "max-frame-budget"); raw.has_value())
+    {
+        max_frame_budget = parse_u64(*raw);
+        if (!max_frame_budget.has_value() || *max_frame_budget == 0)
+            return fail("usage.invalid",
+                        "--max-frame-budget expects a positive integer, got '" + *raw + "'");
+    }
+
     // Compose the real-disk EditorKernel. filesync_root is a subdir ("proj") so the `.editor/` control
     // dir (lock, instance file, reconcile index) stays OUTSIDE the reconcile crawl root — the proven
     // native composition (test_editor_kernel_native.cpp).
@@ -213,6 +239,10 @@ int run_daemon(const std::vector<std::string>& args)
     KernelServer server(kernel); // registers itself as the method backend BEFORE start()
     if (large_result_threshold.has_value())
         server.set_large_result_threshold(*large_result_threshold);
+    if (max_clients.has_value())
+        server.set_max_connections(static_cast<std::size_t>(*max_clients));
+    if (max_frame_budget.has_value())
+        server.set_max_outbound_frames(static_cast<std::size_t>(*max_frame_budget));
 
     const StartOutcome outcome = kernel.start(launch_scopes);
 
@@ -257,6 +287,11 @@ int run_daemon(const std::vector<std::string>& args)
         kernel.stop();
         return env.exit_code();
     }
+
+    // D20: now that the per-instance token is known and written, configure attach-token enforcement on
+    // the composed dispatcher — AFTER start() (the dispatcher exists) and BEFORE serve() spawns the
+    // per-connection threads (the thread-creation happens-before publishes it to those threads).
+    kernel.set_attach_auth(token, require_auth);
 
     // The appearance of instance.json is the "ready" signal a launcher/test waits on; also announce it.
     {

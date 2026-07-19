@@ -41,6 +41,12 @@ struct ClientHandshake
 {
     std::uint32_t protocol_major = kProtocolMajor;
     std::vector<std::string> capabilities; // capabilities the client understands
+    // OPTIONAL attach token (D20, R-SEC-002). Additive under the frozen protocolMajor=1: a client
+    // that omits it is byte-identical on the wire to a pre-D20 client. The daemon compares it against
+    // `.editor/instance.json`'s token when attach-token enforcement is ON (default OFF for e01 — the
+    // C-F1 sequencing: e02 migrates the CLI onto the client SDK, THEN enforcement defaults ON). When
+    // enforcement is OFF the field is carried but never gated on (the M1 ambient-OS-guard trust model).
+    std::string token;
 };
 
 // A successful negotiation result: the agreed protocol major and the intersected capability subset.

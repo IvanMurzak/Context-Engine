@@ -7,9 +7,15 @@
 #include "context/editor/contract/resource_handle.h"
 #include "context/editor/derivation/derivation_graph.h"
 
+#include <cstddef>
+#include <deque>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
+#include <vector>
 
 namespace context::editor::editorkernel
 {
@@ -31,6 +37,156 @@ std::optional<std::string> string_param(const Json& params, const std::string& k
     if (params.contains(key) && params.at(key).is_string())
         return params.at(key).as_string();
     return std::nullopt;
+}
+
+// ---- D19 multi-client fan-in support --------------------------------------------------------------
+
+// The connection thread's poll interval. On POSIX a request incurs NO added latency (poll() wakes the
+// instant data arrives); this only bounds pushed-event delivery + shutdown-notice latency. On Windows
+// it is the idle re-poll cadence. Small so an editor feels live; a handful of connections × this
+// cadence is negligible CPU.
+constexpr int kPollIntervalMs = 5;
+
+// One frame queued for a connection's own thread to flush. `is_event` frames count against the
+// per-connection event budget (droppable under backpressure); response frames never drop.
+struct OutFrame
+{
+    std::string data;
+    bool is_event = false;
+};
+
+// Per-connection serve state. ONE thread per connection owns `conn` for BOTH reads and writes (a
+// timed read interleaved with flushing the outbound queue) — no duplicated handle, so there is never
+// a concurrent read + write on the same OS handle (which deadlocks a synchronous Windows pipe file
+// object). `session` + `live` + `id` are touched ONLY under the serve loop's dispatch mutex; the
+// outbound queue has its own lock; another dispatch thread's fan-out enqueues onto it, this
+// connection's thread flushes it.
+struct Conn
+{
+    Conn(bridge::TransportConnection c, std::uint64_t cid, std::size_t budget)
+        : conn(std::move(c)), id(cid), out_budget(budget)
+    {
+    }
+
+    bridge::TransportConnection conn; // this connection's thread only (reads AND writes)
+    bridge::Session session;          // dispatch-mutex only
+    std::uint64_t id = 0;             // per-daemon client id (the `clients` topic)
+    bool live = true;                 // dispatch-mutex: receives fan-out while true
+    bool reject = false;              // over-cap connection: reply daemon.busy then close
+    bool gap_owed = false;            // dispatch-mutex: an event was dropped -> owe a gap marker
+    std::atomic<bool> finished{false}; // set LAST by the thread; reap may then join it
+
+    std::mutex out_mu;             // guards the outbound queue (producers = fan-out on any thread)
+    std::deque<OutFrame> out;      // pending frames (responses + events), flushed by THIS conn's thread
+    std::size_t queued_events = 0; // count of is_event frames currently in `out`
+    std::size_t out_budget = 256;  // max queued event frames before dropping + owing a gap
+
+    std::thread thread;
+};
+
+// A JSON-RPC 2.0 notification carrying one pushed event (server->client). `subId` routes it to the
+// originating subscription so a client with several subscriptions can demux.
+std::string event_frame(const std::string& sub_id, const contract::Json& event)
+{
+    contract::Json params = contract::Json::object();
+    params.set("subId", contract::Json(sub_id));
+    params.set("event", event);
+    contract::Json out = contract::Json::object();
+    out.set("jsonrpc", contract::Json(std::string("2.0")));
+    out.set("method", contract::Json(std::string("event")));
+    out.set("params", std::move(params));
+    return out.dump(0);
+}
+
+// A connection-level gap marker: the client missed events (its outbound budget overflowed or a
+// subscription queue gapped) and must re-snapshot every subscription (R-BRIDGE-008).
+std::string gap_frame()
+{
+    contract::Json out = contract::Json::object();
+    out.set("jsonrpc", contract::Json(std::string("2.0")));
+    out.set("method", contract::Json(std::string("event.gap")));
+    out.set("params", contract::Json::object());
+    return out.dump(0);
+}
+
+// The daemon.busy JSON-RPC error reply for an over-cap connection's attach (mirrors the dispatcher's
+// error-response shape: same catalog `code` in error.data.code). The request id is echoed when present.
+std::string busy_response(const std::string& request_json)
+{
+    contract::Json id;
+    try
+    {
+        const contract::Json req = contract::Json::parse(request_json);
+        if (req.is_object() && req.contains("id"))
+            id = req.at("id");
+    }
+    catch (const std::exception&)
+    {
+        // A malformed first frame from an over-cap client: reply with a null id (still daemon.busy).
+    }
+    const Envelope env = Envelope::failure(kDaemonBusyCode);
+    contract::Json data = contract::Json::object();
+    if (env.error().has_value())
+    {
+        data.set("code", contract::Json(env.error()->code));
+        data.set("message", contract::Json(env.error()->message));
+        data.set("retriable", contract::Json(env.error()->retriable));
+    }
+    contract::Json err = contract::Json::object();
+    err.set("code", contract::Json(-32000)); // the JSON-RPC server-error band (mirrors dispatcher.cpp)
+    err.set("message",
+            contract::Json(env.error().has_value() ? env.error()->message : std::string("busy")));
+    err.set("data", std::move(data));
+    contract::Json out = contract::Json::object();
+    out.set("jsonrpc", contract::Json(std::string("2.0")));
+    out.set("id", id);
+    out.set("error", std::move(err));
+    return out.dump(0);
+}
+
+// Enqueue a RESPONSE frame (never dropped) for the connection's thread to flush.
+void enqueue_response(Conn& c, std::string data)
+{
+    std::lock_guard<std::mutex> lk(c.out_mu);
+    c.out.push_back(OutFrame{std::move(data), false});
+}
+
+// Enqueue an EVENT frame under the per-connection budget; false (dropped) when the budget is full.
+bool enqueue_event(Conn& c, std::string data)
+{
+    std::lock_guard<std::mutex> lk(c.out_mu);
+    if (c.queued_events >= c.out_budget)
+        return false;
+    c.out.push_back(OutFrame{std::move(data), true});
+    ++c.queued_events;
+    return true;
+}
+
+// Flush every queued outbound frame to the socket. Called by the connection's OWN thread (which also
+// owns reads), so reads and writes never overlap on the handle. The blocking write happens WITHOUT
+// the out lock held (the lock only guards the queue, briefly), so a producer's fan-out never blocks on
+// a slow client. false on a write failure (peer gone) -> the caller tears the connection down.
+bool flush_outbound(Conn& c)
+{
+    std::deque<OutFrame> pending;
+    {
+        std::lock_guard<std::mutex> lk(c.out_mu);
+        pending.swap(c.out);
+        c.queued_events = 0; // everything currently queued is now being flushed
+    }
+    for (const OutFrame& f : pending)
+        if (!c.conn.write_frame(f.data))
+            return false; // peer gone
+    return true;
+}
+
+// Best-effort: a throwaway connection unblocks a serve-thread accept() parked waiting for a client so
+// the accept loop can observe stop_ and exit. The acceptor closes the straggler immediately.
+void wake_endpoint(const std::string& endpoint)
+{
+    bridge::TransportClient waker(endpoint);
+    (void)waker.connect(500);
+    waker.close();
 }
 } // namespace
 
@@ -329,43 +485,210 @@ std::string KernelServer::finalize_response(std::string response) const
 
 int KernelServer::serve(bridge::TransportServer& server)
 {
+    const std::string endpoint = server.endpoint();
+
+    // ONE dispatch mutex serializes every handle() + finalize_response() + fan-out (L-50: the mutation
+    // model stays single-threaded — concurrency lives at the transport, not the write queue). It also
+    // guards the connection registry + per-connection `session`/`live`. It is a serve()-local, so it
+    // outlives every reader/writer thread (all joined before serve() returns).
+    std::mutex dispatch_mu;
+    std::vector<std::shared_ptr<Conn>> conns; // all connections (guarded by dispatch_mu)
+    std::uint64_t next_client_id = 0;
+
+    // Fan every event a dispatch just published out to each subscribed, live connection's outbound
+    // queue. Runs UNDER dispatch_mu (serialized with dispatch; sees a consistent event stream). A conn
+    // that cannot take an event (budget full) or whose subscription queue gapped is owed a re-snapshot
+    // gap marker, delivered as soon as its outbound queue drains — the daemon never blocks on it.
+    auto fan_out = [this, &conns]() {
+        for (const std::shared_ptr<Conn>& c : conns)
+        {
+            if (!c->live || !c->session.attached || c->session.subscriptions.empty())
+                continue;
+            if (c->gap_owed) // deliver an owed gap marker first, once the budget allows
+            {
+                if (enqueue_event(*c, gap_frame()))
+                    c->gap_owed = false;
+                else
+                    continue; // still no room — keep the gap owed, skip events this pass
+            }
+            for (const std::string& sub_id : c->session.subscriptions)
+            {
+                for (const bridge::Event& ev : kernel_.events().poll(sub_id))
+                {
+                    if (!enqueue_event(*c, event_frame(sub_id, ev.to_json())))
+                    {
+                        c->gap_owed = true; // outbound budget full -> the client will re-snapshot
+                        break;
+                    }
+                }
+                if (kernel_.events().sub_gapped(sub_id))
+                {
+                    c->gap_owed = true; // the subscription's own bounded queue overflowed
+                    kernel_.events().reset_sub_gap(sub_id);
+                }
+            }
+        }
+    };
+
+    // Reap finished connections (join their threads) so thread objects don't accumulate over a
+    // long-lived daemon's connect/disconnect churn. Joins OUTSIDE the lock.
+    auto reap = [&conns, &dispatch_mu]() {
+        std::vector<std::shared_ptr<Conn>> done;
+        {
+            std::lock_guard<std::mutex> lk(dispatch_mu);
+            for (auto it = conns.begin(); it != conns.end();)
+            {
+                if ((*it)->finished.load())
+                {
+                    done.push_back(*it);
+                    it = conns.erase(it);
+                }
+                else
+                    ++it;
+            }
+        }
+        for (const std::shared_ptr<Conn>& c : done)
+            if (c->thread.joinable())
+                c->thread.join();
+    };
+
+    // ONE thread per connection owns the handle for BOTH reads and writes: flush any queued outbound
+    // frames (responses + pushed events), then a bounded timed read; dispatch a received request under
+    // the ONE dispatch mutex (+ fan out its events), enqueue the response, repeat to disconnect. Reads
+    // and writes never overlap on the handle (so a synchronous Windows pipe never deadlocks), and a
+    // slow client can never stall the daemon — the outbound queue is bounded (gap marker on overflow).
+    auto conn_body = [this, &dispatch_mu, &fan_out, &endpoint](std::shared_ptr<Conn> c) {
+        if (c->reject)
+        {
+            // Over-cap (D19 bound): read the attach frame (bounded), reply daemon.busy, flush, close.
+            for (int i = 0; i < 600 && !stop_.load(); ++i)
+            {
+                bool timed_out = false;
+                const std::optional<std::string> req = c->conn.read_frame_timed(kPollIntervalMs, timed_out);
+                if (timed_out)
+                    continue;
+                if (req.has_value())
+                    enqueue_response(*c, busy_response(*req));
+                break;
+            }
+            (void)flush_outbound(*c);
+        }
+        else
+        {
+            for (;;)
+            {
+                if (!flush_outbound(*c))
+                    break; // peer gone while flushing responses/events
+                if (stop_.load())
+                {
+                    // A `shutdown` verb was served (its reply was just flushed above); wake the parked
+                    // acceptor so the whole daemon winds down.
+                    wake_endpoint(endpoint);
+                    break;
+                }
+                bool timed_out = false;
+                const std::optional<std::string> request =
+                    c->conn.read_frame_timed(kPollIntervalMs, timed_out);
+                if (timed_out)
+                    continue; // no request pending -> loop to flush pushed events + re-poll
+                if (!request.has_value())
+                    break; // client disconnected (or a framing error)
+
+                std::string response;
+                {
+                    std::lock_guard<std::mutex> lk(dispatch_mu);
+                    // Dispatch, then the R-CLI-017 oversized-response gate, then fan out any events
+                    // this dispatch published to every subscribed connection — all serialized (L-50).
+                    response = finalize_response(
+                        kernel_.daemon().dispatcher().handle(*request, c->session));
+                    fan_out();
+                }
+                if (!response.empty())
+                    enqueue_response(*c, response); // flushed at the top of the next loop iteration
+            }
+        }
+
+        // --- teardown: leave the fan-out set, announce detach to the remaining subscribers ---------
+        {
+            std::lock_guard<std::mutex> lk(dispatch_mu);
+            c->live = false; // stop receiving fan-out
+            for (const std::string& sub_id : c->session.subscriptions)
+                kernel_.events().unsubscribe(sub_id);
+            c->session.subscriptions.clear();
+            if (!c->reject && c->session.attached)
+            {
+                // The `clients` topic fires on detach (mirrors the attach event the dispatcher emits).
+                Json ev = Json::object();
+                ev.set("event", Json(std::string("detached")));
+                ev.set("clientId", Json(c->id));
+                kernel_.events().publish("clients", std::move(ev));
+                fan_out();
+            }
+        }
+        c->finished.store(true); // reap (or the shutdown join) may now join this connection's thread
+    };
+
+    int rc = 0;
     while (!stop_.load())
     {
-        std::optional<bridge::TransportConnection> conn = server.accept();
-        if (!conn.has_value())
-        {
-            // A null accept() is EITHER a clean stop()/shutdown OR a genuine listener error — only the
-            // latter sets server.error(). Surface an error as a non-zero exit instead of letting a
-            // transient IPC failure masquerade as a graceful daemon shutdown.
-            if (!server.error().empty())
-                return 1;
-            break; // clean stop / listener closed
-        }
+        reap();
 
-        // One fresh session per connection: the dispatcher establishes it on the attach handshake and
-        // reads its scopes on every subsequent method (R-SEC-007).
-        bridge::Session session;
-        while (true)
-        {
-            const std::optional<std::string> request = conn->read_frame();
-            if (!request.has_value())
-                break; // client disconnected (or a framing error)
-
-            // Dispatch, then apply the R-CLI-017 oversized-response gate (spool + largeResult
-            // replacement) so no legitimate result ever has to fight the transport frame cap.
-            const std::string response =
-                finalize_response(kernel_.daemon().dispatcher().handle(*request, session));
-            if (!response.empty() && !conn->write_frame(response))
-                break; // peer gone
-
-            if (stop_.load())
-                break; // a `shutdown` verb was served on this message; reply already sent
-        }
-
+        std::optional<bridge::TransportConnection> accepted = server.accept();
         if (stop_.load())
+        {
+            // Either a genuine `shutdown` (the wake connection) or an external stop() — wind down.
             break;
+        }
+        if (!accepted.has_value())
+        {
+            // A null accept() is EITHER a clean stop()/listener-closed OR a genuine listener error —
+            // only the latter sets server.error(). Surface an error as a non-zero exit.
+            if (!server.error().empty())
+                rc = 1;
+            break;
+        }
+
+        // D19 bound: is the daemon already serving its max concurrent clients?
+        bool at_capacity = false;
+        {
+            std::lock_guard<std::mutex> lk(dispatch_mu);
+            std::size_t serving = 0;
+            for (const std::shared_ptr<Conn>& c : conns)
+                if (c->live && !c->reject)
+                    ++serving;
+            at_capacity = serving >= max_connections_;
+        }
+
+        auto c = std::make_shared<Conn>(std::move(*accepted), ++next_client_id, max_outbound_frames_);
+        c->reject = at_capacity;
+        {
+            std::lock_guard<std::mutex> lk(dispatch_mu);
+            conns.push_back(c);
+        }
+        c->thread = std::thread(conn_body, c);
     }
-    return 0;
+
+    // --- shutdown: nudge any connection stalled mid-frame, then join every connection's thread. Each
+    // connection's thread notices stop_ within one poll interval on its own; unblock() only covers a
+    // client stalled mid-frame. Snapshot + release the lock first — a thread's teardown needs
+    // dispatch_mu, so joining under it would deadlock.
+    std::vector<std::shared_ptr<Conn>> remaining;
+    {
+        std::lock_guard<std::mutex> lk(dispatch_mu);
+        remaining = conns;
+    }
+    for (const std::shared_ptr<Conn>& c : remaining)
+        c->conn.unblock(); // read-only on the handle -> race-free with the thread's in-flight read
+    for (const std::shared_ptr<Conn>& c : remaining)
+        if (c->thread.joinable())
+        {
+            c->thread.join();
+        }
+    {
+        std::lock_guard<std::mutex> lk(dispatch_mu);
+        conns.clear();
+    }
+    return rc;
 }
 
 } // namespace context::editor::editorkernel

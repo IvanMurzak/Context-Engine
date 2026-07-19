@@ -52,6 +52,12 @@ void Daemon::stop()
     lock_.release();
 }
 
+void Daemon::set_attach_auth(std::string expected, bool required)
+{
+    if (running_)
+        dispatcher_->configure_attach_auth(std::move(expected), required);
+}
+
 Dispatcher::AttachResult Daemon::attach_client(const contract::ClientHandshake& client,
                                                ScopeSet requested) const
 {

@@ -63,6 +63,13 @@ public:
     [[nodiscard]] EventStream& events() { return *events_; }
     [[nodiscard]] const Dispatcher& dispatcher() const { return *dispatcher_; }
 
+    // Configure D20 attach-token enforcement on the composed dispatcher (R-SEC-002). `expected` is
+    // this daemon's per-instance token (the one written to `.editor/instance.json`); `required` is the
+    // compat flag (DEFAULT OFF for e01 — the C-F1 sequencing). MUST be called after start() (the
+    // dispatcher is constructed there) and BEFORE the serve loop spawns per-connection threads. Valid
+    // only while running(); a no-op otherwise.
+    void set_attach_auth(std::string expected, bool required);
+
     // Attach a client, clamping its requested scopes to the launch-time operator ceiling (R-SEC-007
     // least privilege). Valid only while running().
     [[nodiscard]] Dispatcher::AttachResult attach_client(const contract::ClientHandshake& client,

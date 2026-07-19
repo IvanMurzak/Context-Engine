@@ -607,5 +607,28 @@ int main()
         CHECK(unsigned_code->origin == "R-SEC-003");
     }
 
+    // --- M9 e01 attach.denied + daemon.busy (D19/D20, R-SEC-002 / R-BRIDGE-001) -------------------
+    // Additive-only new rows at the catalog tail (NOT on the frozen v0 baseline — the additive-only
+    // check above still holds). attach.denied is a deterministic permission-class refusal (a wrong or
+    // absent attach token when enforcement is ON — a bare retry with the same token re-fails).
+    // daemon.busy is the RETRIABLE usage-class connection-bound refusal (a slot frees when a client
+    // detaches). The strings are the source-of-truth in bridge::kAttachDeniedCode /
+    // editorkernel::kDaemonBusyCode.
+    {
+        const ErrorCode* denied = find_code("attach.denied");
+        CHECK(denied != nullptr);
+        CHECK(denied->exit_code == 6);     // permission class
+        CHECK(denied->retriable == false); // deterministic — a bad/absent token re-fails
+        CHECK(denied->origin == "R-SEC-002");
+
+        const ErrorCode* busy = find_code("daemon.busy");
+        CHECK(busy != nullptr);
+        CHECK(busy->exit_code == 2);    // usage class
+        CHECK(busy->retriable == true); // transient — a slot frees on a client detach
+        CHECK(busy->origin == "R-BRIDGE-001");
+
+        CHECK(exit_code_for("attach.denied") == 6);
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

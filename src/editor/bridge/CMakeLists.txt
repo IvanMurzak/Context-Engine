@@ -22,7 +22,10 @@ target_include_directories(context_bridge PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inc
 # warnings-as-errors baseline (conventions.md).
 target_link_libraries(context_bridge
     PUBLIC context_contract context_kernel Threads::Threads
-    PRIVATE context_warnings)
+    PRIVATE context_warnings
+    # advapi32: the Win32 security primitives transport.cpp uses for the D20 owner-SID named-pipe DACL
+    # (SetEntriesInAclW / GetTokenInformation / the ACE walk). PRIVATE — only transport.cpp needs it.
+    $<$<BOOL:${WIN32}>:advapi32>)
 
 # Self-contained GCC runtime for the bridge ctest executables. The lock + daemon use std::filesystem
 # (and thus newer libstdc++ symbols); on a MinGW host a stale libstdc++-6.dll elsewhere on PATH can

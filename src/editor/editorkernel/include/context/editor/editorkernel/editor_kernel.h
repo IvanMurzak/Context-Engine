@@ -265,6 +265,15 @@ public:
     [[nodiscard]] const bridge::Daemon& daemon() const noexcept { return daemon_; }
     [[nodiscard]] const EditorKernelConfig& config() const noexcept { return config_; }
 
+    // D20: configure attach-token enforcement on the composed daemon's dispatcher (forwards to
+    // bridge::Daemon::set_attach_auth). Mutator, so it is exposed here rather than via the const
+    // daemon() view. Call after start() (the dispatcher exists) and BEFORE serve() spawns the
+    // per-connection threads. Default OFF — see Daemon::set_attach_auth (the C-F1 sequencing).
+    void set_attach_auth(std::string expected, bool required)
+    {
+        daemon_.set_attach_auth(std::move(expected), required);
+    }
+
 private:
     void ingest_change(const filesync::ReconcileChange& change);
     [[nodiscard]] std::string editor_dir() const;
