@@ -1,0 +1,23 @@
+spikes/dockview-cef/src/main.cpp
+  s_5d819e2638821c::t_cca7fee3474fb7 26,70,101-104,239,281
+spikes/dockview-cef/tools/run_probes.py
+  s_5d819e2638821c::t_ee0bef2b951d86 62,89-91
+spikes/dockview-cef/web/probes.js
+  s_5d819e2638821c::t_06b42528a6cf63 94-95,97-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "4a66acc5590b4374f55070e5ff5e48967df5d01a",
+  "prompts": {},
+  "sessions": {
+    "s_5d819e2638821c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_5d819e2638821c",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
