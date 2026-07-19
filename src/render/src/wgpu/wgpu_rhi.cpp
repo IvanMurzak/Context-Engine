@@ -18,6 +18,14 @@
 
 #include "context/render/wgpu/wgpu_rhi.h"
 
+// The macOS accelerated OSR path needs BOTH conditions: Apple (Metal + IOSurface exist) and
+// wgpu-native's extras header, which is where the STOCK native Metal accessors added upstream in
+// PR #557 are declared. Anywhere else the accelerated import fails closed with a reason.
+#if defined(__APPLE__) && !defined(__EMSCRIPTEN__) && defined(CTX_RENDER_HAS_WGPU_EXTRAS)
+#define CTX_RENDER_HAS_METAL_INTEROP 1
+#include "metal_interop.h" // IOSurface -> Metal blit (Objective-C++, metal_interop.mm)
+#endif
+
 #include <webgpu/webgpu.h>
 
 #if defined(CTX_RENDER_HAS_WGPU_EXTRAS)
@@ -151,6 +159,96 @@ WGPUAddressMode to_wgpu_address(AddressMode m)
 {
     return m == AddressMode::Repeat ? WGPUAddressMode_Repeat : WGPUAddressMode_ClampToEdge;
 }
+
+WGPUBlendFactor to_wgpu_blend_factor(BlendFactor f)
+{
+    switch (f)
+    {
+    case BlendFactor::Zero:
+        return WGPUBlendFactor_Zero;
+    case BlendFactor::SrcAlpha:
+        return WGPUBlendFactor_SrcAlpha;
+    case BlendFactor::OneMinusSrcAlpha:
+        return WGPUBlendFactor_OneMinusSrcAlpha;
+    case BlendFactor::One:
+    default:
+        return WGPUBlendFactor_One;
+    }
+}
+
+WGPUBlendComponent to_wgpu_blend_component(const BlendComponent& c)
+{
+    WGPUBlendComponent out{};
+    out.operation = WGPUBlendOperation_Add; // BlendOperation::Add is the only T1 operation
+    out.srcFactor = to_wgpu_blend_factor(c.src);
+    out.dstFactor = to_wgpu_blend_factor(c.dst);
+    return out;
+}
+
+// The present-path conversions are used ONLY by WgpuSurface/WgpuSwapchain, which are compiled out on
+// the web (no native window there — see create_surface). They must carry the SAME guard: an
+// anonymous-namespace function with no callers is an unused static, which -Wall -Werror rejects, and
+// that break would appear on the `render (web, emscripten)` CI leg alone.
+#if !defined(__EMSCRIPTEN__)
+
+WGPUPresentMode to_wgpu_present_mode(PresentMode mode)
+{
+    switch (mode)
+    {
+    case PresentMode::FifoRelaxed:
+        return WGPUPresentMode_FifoRelaxed;
+    case PresentMode::Immediate:
+        return WGPUPresentMode_Immediate;
+    case PresentMode::Mailbox:
+        return WGPUPresentMode_Mailbox;
+    case PresentMode::Fifo:
+    default:
+        return WGPUPresentMode_Fifo;
+    }
+}
+
+// The reverse mappings translate what a surface REPORTS. Anything outside the T1 set is dropped
+// rather than guessed at: a capability we cannot name is a capability we must not offer.
+bool from_wgpu_format(WGPUTextureFormat format, TextureFormat& out)
+{
+    switch (format)
+    {
+    case WGPUTextureFormat_BGRA8Unorm:
+        out = TextureFormat::BGRA8Unorm;
+        return true;
+    case WGPUTextureFormat_RGBA8Unorm:
+        out = TextureFormat::RGBA8Unorm;
+        return true;
+    case WGPUTextureFormat_Depth32Float:
+        out = TextureFormat::Depth32Float;
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool from_wgpu_present_mode(WGPUPresentMode mode, PresentMode& out)
+{
+    switch (mode)
+    {
+    case WGPUPresentMode_Fifo:
+        out = PresentMode::Fifo;
+        return true;
+    case WGPUPresentMode_FifoRelaxed:
+        out = PresentMode::FifoRelaxed;
+        return true;
+    case WGPUPresentMode_Immediate:
+        out = PresentMode::Immediate;
+        return true;
+    case WGPUPresentMode_Mailbox:
+        out = PresentMode::Mailbox;
+        return true;
+    default:
+        return false;
+    }
+}
+
+#endif // !__EMSCRIPTEN__
 
 // -------------------------------------------------------------------- async request wrappers
 
@@ -552,17 +650,23 @@ public:
         wgpuQueueWriteBuffer(queue_, static_cast<WgpuBuffer&>(buffer).raw(), offset, data, size);
     }
 
-    void write_texture(ITexture& texture, const void* data, std::size_t size,
-                       const TexelCopyBufferLayout& layout, Extent2D extent) override
+    void write_texture_region(ITexture& texture, Origin2D origin, const void* data,
+                              std::size_t size, const TexelCopyBufferLayout& layout,
+                              Extent2D extent) override
     {
         WGPUTexelCopyTextureInfo dst{};
         dst.texture = static_cast<WgpuTexture&>(texture).raw();
+        // The destination sub-rect — what makes an OSR dirty rect land where the producer damaged
+        // it instead of at the texture's top-left corner.
+        dst.origin = {origin.x, origin.y, 0};
         WGPUTexelCopyBufferLayout src_layout{};
         src_layout.bytesPerRow = layout.bytes_per_row;
         src_layout.rowsPerImage = layout.rows_per_image;
         WGPUExtent3D write_size = {extent.width, extent.height, 1};
         wgpuQueueWriteTexture(queue_, &dst, data, size, &src_layout, &write_size);
     }
+
+    [[nodiscard]] WGPUQueue raw() const { return queue_; }
 
 private:
     WGPUQueue queue_;
@@ -714,6 +818,16 @@ public:
         target.format = to_wgpu_format(desc.color_format);
         target.writeMask = WGPUColorWriteMask_All; // zero-init means "write nothing" — be explicit
 
+        // Blending is OPT-IN: an absent BlendState leaves target.blend null, which is WebGPU's
+        // "replace" default and exactly what every pre-e03 pipeline in this repo was built with.
+        WGPUBlendState blend{};
+        if (desc.blend.has_value())
+        {
+            blend.color = to_wgpu_blend_component(desc.blend->color);
+            blend.alpha = to_wgpu_blend_component(desc.blend->alpha);
+            target.blend = &blend;
+        }
+
         WGPUFragmentState fragment{};
         fragment.module = shader;
         fragment.entryPoint = sv(desc.fragment_entry.c_str());
@@ -758,12 +872,310 @@ public:
             wgpuDeviceCreateCommandEncoder(device_, nullptr));
     }
 
+    // The OSR interop seam (rhi.h). See the per-platform notes there and in
+    // context/render/present/osr_import.h: the DECISION of which source to ask for is made one
+    // layer up; this only honours it or fails closed.
+    ExternalTexture import_external_texture(const ExternalTextureDesc& desc) override
+    {
+        ExternalTexture out;
+        out.source_used = desc.source;
+        if (desc.coded_size.width == 0 || desc.coded_size.height == 0)
+        {
+            out.diagnostic = "external-texture import: coded_size is empty";
+            return out;
+        }
+
+        switch (desc.source)
+        {
+        case ExternalTextureSource::CpuBgra:
+            break; // handled below — the always-available path
+        case ExternalTextureSource::IOSurface:
+#if defined(CTX_RENDER_HAS_METAL_INTEROP)
+            break; // the destination texture is allocated below, then blitted into by refresh
+#else
+            out.diagnostic = "IOSurface import needs macOS + wgpu-native's native Metal accessors";
+            return out;
+#endif
+        case ExternalTextureSource::D3D12SharedHandle:
+            // Not a "not yet wired" stub: stock wgpu-native's C API exposes NO external-texture
+            // import at all, and the owner rejected carrying a patched fork (2026-07-19). The
+            // policy layer never asks for this today; if it ever does, say exactly why it cannot
+            // be honoured rather than degrading silently.
+            out.diagnostic = "wgpu-native's C API exposes no D3D12 shared-handle import; the "
+                             "Windows accelerated path is deferred pending gfx-rs/wgpu-native#621";
+            return out;
+        case ExternalTextureSource::DmaBuf:
+            out.diagnostic = "dmabuf import is not implemented (research-grade, ships OFF)";
+            return out;
+        }
+
+        // Both remaining paths need a BGRA8 texture the composite pass can sample: the CPU path
+        // uploads into it, the IOSurface path blits into it.
+        TextureDesc td;
+        td.size = desc.coded_size;
+        td.format = TextureFormat::BGRA8Unorm;
+        td.copy_dst = true;
+        td.texture_binding = true;
+        std::unique_ptr<ITexture> texture = create_texture(td);
+        if (texture == nullptr)
+        {
+            out.diagnostic = "external-texture import: the destination texture could not be created";
+            return out;
+        }
+        out.texture = std::move(texture);
+        out.accelerated = desc.source != ExternalTextureSource::CpuBgra;
+        return out;
+    }
+
+    std::string refresh_external_texture(ITexture& texture,
+                                         const ExternalTextureDesc& desc) override
+    {
+        if (desc.source != ExternalTextureSource::IOSurface)
+        {
+            return "no accelerated refresh exists for this external-texture source";
+        }
+#if defined(CTX_RENDER_HAS_METAL_INTEROP)
+        // wgpu-native's STOCK native accessors (upstream PR #557) — no fork involved. Each returns
+        // a BORROWED pointer valid only while its wgpu object lives, so nothing here is released.
+        void* mtl_device = wgpuDeviceGetNativeMetalDevice(device_);
+        void* mtl_queue = wgpuQueueGetNativeMetalCommandQueue(queue_.raw());
+        void* mtl_texture = wgpuTextureGetNativeMetalTexture(static_cast<WgpuTexture&>(texture).raw());
+        return detail::blit_iosurface(mtl_device, mtl_queue, desc.handle, mtl_texture,
+                                      desc.coded_size.width, desc.coded_size.height);
+#else
+        (void)texture;
+        return "IOSurface refresh needs macOS + wgpu-native's native Metal accessors";
+#endif
+    }
+
+    [[nodiscard]] WGPUDevice raw() const { return device_; }
+
 private:
     WGPUInstance instance_;
     WGPUAdapter adapter_;
     WGPUDevice device_;
     WgpuQueue queue_;
 };
+
+// ------------------------------------------------------------------------ present path (native)
+#if !defined(__EMSCRIPTEN__)
+
+// A configured presentation chain over one surface. The current backbuffer is OWNED per frame:
+// wgpuSurfaceGetCurrentTexture returns it with ownership, so it is released at the next acquire or
+// at teardown — retaining it across frames deadlocks the swapchain.
+class WgpuSwapchain final : public ISwapchain
+{
+public:
+    WgpuSwapchain(WGPUSurface surface, WGPUDevice device, const SurfaceConfig& config)
+        : surface_(surface), device_(device), config_(config)
+    {
+        apply_configuration();
+    }
+
+    ~WgpuSwapchain() override { release_frame(); }
+
+    [[nodiscard]] Extent2D size() const override { return config_.size; }
+    [[nodiscard]] TextureFormat format() const override { return config_.format; }
+    [[nodiscard]] PresentMode present_mode() const override { return config_.present_mode; }
+    [[nodiscard]] bool is_configured() const override { return configured_; }
+
+    AcquiredFrame acquire() override
+    {
+        AcquiredFrame frame;
+        if (!configured_)
+        {
+            return frame; // status stays Error
+        }
+        release_frame(); // drop the previous frame's texture/view before asking for the next
+
+        WGPUSurfaceTexture current{};
+        wgpuSurfaceGetCurrentTexture(surface_, &current);
+        switch (current.status)
+        {
+        case WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal:
+            frame.status = AcquireStatus::Ok;
+            break;
+        case WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal:
+            // Presentable, just no longer ideally configured (a pending resize): present it, then
+            // reconfigure. Treating this as Outdated would drop a perfectly good frame.
+            frame.status = AcquireStatus::Ok;
+            frame.suboptimal = true;
+            break;
+        case WGPUSurfaceGetCurrentTextureStatus_Timeout:
+            frame.status = AcquireStatus::Timeout;
+            break;
+        case WGPUSurfaceGetCurrentTextureStatus_Outdated:
+            frame.status = AcquireStatus::Outdated;
+            break;
+        case WGPUSurfaceGetCurrentTextureStatus_Lost:
+            frame.status = AcquireStatus::Lost;
+            break;
+        default:
+            frame.status = AcquireStatus::Error;
+            break;
+        }
+
+        if (frame.status != AcquireStatus::Ok)
+        {
+            // A non-Ok status can still hand back a texture; release it so it is not leaked.
+            if (current.texture != nullptr)
+            {
+                wgpuTextureRelease(current.texture);
+            }
+            return frame;
+        }
+
+        current_texture_ = current.texture;
+        view_ = std::make_unique<WgpuTextureView>(wgpuTextureCreateView(current_texture_, nullptr));
+        frame.view = view_.get();
+        acquired_ = true;
+        return frame;
+    }
+
+    void present() override
+    {
+        if (!acquired_)
+        {
+            return;
+        }
+        acquired_ = false;
+        wgpuSurfacePresent(surface_);
+    }
+
+    void resize(Extent2D size) override
+    {
+        if (size.width == 0 || size.height == 0)
+        {
+            return; // a minimized window keeps its last valid configuration
+        }
+        release_frame();
+        config_.size = size;
+        apply_configuration();
+    }
+
+    void unconfigure() override
+    {
+        release_frame();
+        if (configured_)
+        {
+            wgpuSurfaceUnconfigure(surface_);
+            configured_ = false;
+        }
+    }
+
+private:
+    void apply_configuration()
+    {
+        WGPUSurfaceConfiguration cfg{};
+        cfg.device = device_;
+        cfg.format = to_wgpu_format(config_.format);
+        cfg.usage = WGPUTextureUsage_RenderAttachment;
+        cfg.width = config_.size.width;
+        cfg.height = config_.size.height;
+        cfg.alphaMode = WGPUCompositeAlphaMode_Auto;
+        cfg.presentMode = to_wgpu_present_mode(config_.present_mode);
+        wgpuSurfaceConfigure(surface_, &cfg);
+        configured_ = true;
+    }
+
+    void release_frame()
+    {
+        view_.reset();
+        if (current_texture_ != nullptr)
+        {
+            wgpuTextureRelease(current_texture_);
+            current_texture_ = nullptr;
+        }
+        acquired_ = false;
+    }
+
+    WGPUSurface surface_;
+    WGPUDevice device_;
+    SurfaceConfig config_;
+    WGPUTexture current_texture_ = nullptr;
+    std::unique_ptr<WgpuTextureView> view_;
+    bool configured_ = false;
+    bool acquired_ = false;
+};
+
+class WgpuSurface final : public ISurface
+{
+public:
+    WgpuSurface(WGPUSurface surface, WGPUAdapter adapter) : surface_(surface), adapter_(adapter) {}
+
+    ~WgpuSurface() override
+    {
+        if (surface_ != nullptr)
+        {
+            wgpuSurfaceRelease(surface_);
+        }
+        if (adapter_ != nullptr)
+        {
+            wgpuAdapterRelease(adapter_);
+        }
+    }
+
+    SurfaceCaps capabilities() override
+    {
+        SurfaceCaps caps;
+        if (adapter_ == nullptr)
+        {
+            return caps; // supported stays false — a clean "cannot present here" report
+        }
+        WGPUSurfaceCapabilities raw{};
+        if (wgpuSurfaceGetCapabilities(surface_, adapter_, &raw) != WGPUStatus_Success)
+        {
+            return caps;
+        }
+        for (std::size_t i = 0; i < raw.formatCount; ++i)
+        {
+            TextureFormat format{};
+            if (from_wgpu_format(raw.formats[i], format))
+            {
+                caps.formats.push_back(format);
+            }
+        }
+        for (std::size_t i = 0; i < raw.presentModeCount; ++i)
+        {
+            PresentMode mode{};
+            if (from_wgpu_present_mode(raw.presentModes[i], mode))
+            {
+                caps.present_modes.push_back(mode);
+            }
+        }
+        wgpuSurfaceCapabilitiesFreeMembers(raw);
+        // "Supported" means there is at least one format AND one present mode we can actually name;
+        // an adapter that reports only formats outside the T1 set cannot present for our purposes.
+        caps.supported = !caps.formats.empty() && !caps.present_modes.empty();
+        return caps;
+    }
+
+    std::unique_ptr<ISwapchain> configure(IDevice& device, const SurfaceConfig& config) override
+    {
+        if (config.size.width == 0 || config.size.height == 0)
+        {
+            return nullptr;
+        }
+        // Capability-check BEFORE configuring (the spike's proven order, main.cpp:546-560): a
+        // configure with an unsupported format/mode is a validation error, not a graceful refusal.
+        const SurfaceCaps caps = capabilities();
+        if (!caps.supported || !caps.supports_format(config.format) ||
+            !caps.supports_present_mode(config.present_mode))
+        {
+            return nullptr;
+        }
+        return std::make_unique<WgpuSwapchain>(surface_, static_cast<WgpuDevice&>(device).raw(),
+                                               config);
+    }
+
+    [[nodiscard]] WGPUSurface raw() const { return surface_; }
+
+private:
+    WGPUSurface surface_;
+    WGPUAdapter adapter_; // the adapter capabilities are reported against (owned)
+};
+
+#endif // !__EMSCRIPTEN__
 
 class WgpuRhi final : public IRhi
 {
@@ -841,7 +1253,107 @@ public:
         return std::make_unique<WgpuDevice>(instance_, adapter, device);
     }
 
+    std::unique_ptr<ISurface> create_surface(const NativeWindowDesc& window) override
+    {
+#if defined(__EMSCRIPTEN__)
+        // The web path presents to a canvas, not a native window; that surface source is a later
+        // wave. Reporting a clean absence keeps the web build honest instead of half-wired.
+        (void)window;
+        return nullptr;
+#else
+        if (window.kind == NativeWindowKind::None || window.handle == nullptr)
+        {
+            return nullptr;
+        }
+
+        WGPUSurfaceDescriptor sd{};
+        sd.label = sv("context-render-surface");
+
+        // Exactly one per-OS source struct is chained, selected by the descriptor's kind. Each is
+        // declared in the widest scope so its address stays valid through the create call.
+        WGPUSurfaceSourceWindowsHWND hwnd_source{};
+        WGPUSurfaceSourceXlibWindow xlib_source{};
+        WGPUSurfaceSourceWaylandSurface wayland_source{};
+        WGPUSurfaceSourceMetalLayer metal_source{};
+
+        switch (window.kind)
+        {
+        case NativeWindowKind::Win32Hwnd:
+            hwnd_source.chain.sType = WGPUSType_SurfaceSourceWindowsHWND;
+            hwnd_source.hinstance = window.display;
+            hwnd_source.hwnd = window.handle;
+            sd.nextInChain = &hwnd_source.chain;
+            break;
+        case NativeWindowKind::XlibWindow:
+            xlib_source.chain.sType = WGPUSType_SurfaceSourceXlibWindow;
+            xlib_source.display = window.display;
+            // An X11 Window is an XID, carried through the void* handle slot.
+            xlib_source.window = static_cast<std::uint64_t>(
+                reinterpret_cast<std::uintptr_t>(window.handle));
+            sd.nextInChain = &xlib_source.chain;
+            break;
+        case NativeWindowKind::WaylandSurface:
+            wayland_source.chain.sType = WGPUSType_SurfaceSourceWaylandSurface;
+            wayland_source.display = window.display;
+            wayland_source.surface = window.handle;
+            sd.nextInChain = &wayland_source.chain;
+            break;
+        case NativeWindowKind::MetalLayer:
+            metal_source.chain.sType = WGPUSType_SurfaceSourceMetalLayer;
+            metal_source.layer = window.handle;
+            sd.nextInChain = &metal_source.chain;
+            break;
+        case NativeWindowKind::None:
+        default:
+            return nullptr;
+        }
+
+        WGPUSurface surface = wgpuInstanceCreateSurface(instance_, &sd);
+        if (surface == nullptr)
+        {
+            return nullptr;
+        }
+        // Capabilities are reported for a (surface, adapter) PAIR, so the surface holds the adapter
+        // it was probed against — requested WITH compatibleSurface set, which is what makes the
+        // answer meaningful on a multi-GPU box.
+        return std::make_unique<WgpuSurface>(surface, request_compatible_adapter(surface));
+#endif
+    }
+
+    AdapterProbe probe_surface(ISurface& surface) override
+    {
+        AdapterProbe result = probe();
+#if defined(__EMSCRIPTEN__)
+        (void)surface;
+#else
+        // Still device-free (R-HEAD-002): presentability is answered from the surface capabilities.
+        result.can_present = result.has_adapter && surface.capabilities().supported;
+#endif
+        return result;
+    }
+
 private:
+#if !defined(__EMSCRIPTEN__)
+    // Request an adapter that can present to `surface` (WGPURequestAdapterOptions::compatibleSurface).
+    // Returns null when none exists — a GPU-less or unpresentable box, reported, never fatal.
+    WGPUAdapter request_compatible_adapter(WGPUSurface surface)
+    {
+        WGPURequestAdapterOptions opts{};
+        opts.compatibleSurface = surface;
+        AdapterResult result;
+        WGPURequestAdapterCallbackInfo cb{};
+        cb.mode = WGPUCallbackMode_AllowProcessEvents;
+        cb.callback = on_adapter;
+        cb.userdata1 = &result;
+        wgpuInstanceRequestAdapter(instance_, &opts, cb);
+        while (!result.done)
+        {
+            pump(instance_);
+        }
+        return result.adapter;
+    }
+#endif
+
     WGPUInstance instance_;
 };
 

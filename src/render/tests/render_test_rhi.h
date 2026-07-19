@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -321,17 +322,25 @@ public:
         }
     }
 
-    void write_texture(ITexture& texture, const void* data, std::size_t size,
-                       const TexelCopyBufferLayout& layout, Extent2D extent) override
+    void write_texture_region(ITexture& texture, Origin2D origin, const void* data,
+                              std::size_t size, const TexelCopyBufferLayout& layout,
+                              Extent2D extent) override
     {
         auto& fake = static_cast<FakeTexture&>(texture);
         const auto* src = static_cast<const std::uint8_t*>(data);
+        const std::uint32_t dst_row_bytes = fake.size().width * 4u;
         const std::uint32_t row_bytes = extent.width * 4u;
+        ++region_writes_;
+        written_texels_ += static_cast<std::uint64_t>(extent.width) * extent.height;
         for (std::uint32_t row = 0; row < extent.height; ++row)
         {
             const std::size_t src_off = static_cast<std::size_t>(row) * layout.bytes_per_row;
-            const std::size_t dst_off = static_cast<std::size_t>(row) * row_bytes;
-            if (src_off + row_bytes <= size && dst_off + row_bytes <= fake.pixels().size())
+            // The destination row is offset by the sub-rect's origin — this is what makes a dirty
+            // rect land where it belongs instead of at the texture's top-left corner.
+            const std::size_t dst_off =
+                (static_cast<std::size_t>(origin.y + row) * fake.size().width + origin.x) * 4u;
+            if (src_off + row_bytes <= size && dst_off + row_bytes <= fake.pixels().size() &&
+                origin.x * 4u + row_bytes <= dst_row_bytes)
             {
                 std::memcpy(fake.pixels().data() + dst_off, src + src_off, row_bytes);
             }
@@ -339,9 +348,15 @@ public:
     }
 
     [[nodiscard]] int submit_count() const { return submit_count_; }
+    // How many sub-rect uploads were issued, and how many texels they moved in total — the
+    // dirty-rect path's whole point is that both stay far below a full-frame re-upload.
+    [[nodiscard]] int region_writes() const { return region_writes_; }
+    [[nodiscard]] std::uint64_t written_texels() const { return written_texels_; }
 
 private:
     int submit_count_ = 0;
+    int region_writes_ = 0;
+    std::uint64_t written_texels_ = 0;
 };
 
 class FakeDevice : public IDevice
@@ -381,16 +396,217 @@ public:
         return std::make_unique<FakeCommandEncoder>();
     }
 
+    // Mirrors the real backend's import policy WITHOUT a GPU: CpuBgra always succeeds (it is just an
+    // upload-destination texture); an accelerated source succeeds only when the test declared it
+    // available, and otherwise FAILS CLOSED exactly as wgpu_rhi.cpp does — which is what lets the
+    // import-policy tests drive the Windows (no accelerated path) and macOS (accelerated) branches
+    // on every OS, including this GPU-less one.
+    ExternalTexture import_external_texture(const ExternalTextureDesc& desc) override
+    {
+        ExternalTexture out;
+        out.source_used = desc.source;
+        if (desc.source == ExternalTextureSource::CpuBgra)
+        {
+            out.texture = std::make_unique<FakeTexture>(desc.coded_size, TextureFormat::BGRA8Unorm);
+            out.accelerated = false;
+            return out;
+        }
+        if (available_accelerated_.count(static_cast<int>(desc.source)) == 0)
+        {
+            out.diagnostic = "fake backend: accelerated external-texture source unavailable";
+            return out; // texture stays null — fail closed
+        }
+        out.texture = std::make_unique<FakeTexture>(desc.coded_size, TextureFormat::BGRA8Unorm);
+        out.accelerated = true;
+        return out;
+    }
+
+    std::string refresh_external_texture(ITexture& /*texture*/,
+                                         const ExternalTextureDesc& desc) override
+    {
+        if (desc.source == ExternalTextureSource::CpuBgra)
+        {
+            return "the CPU upload path refreshes through write_texture_region, not refresh";
+        }
+        if (available_accelerated_.count(static_cast<int>(desc.source)) == 0)
+        {
+            return "fake backend: accelerated external-texture source unavailable";
+        }
+        if (desc.handle == nullptr)
+        {
+            return "fake backend: the accelerated refresh needs the producer's frame handle";
+        }
+        ++refresh_count_;
+        return {};
+    }
+
+    // Declare an accelerated source as available on this fake device (test scaffolding).
+    void set_accelerated_available(ExternalTextureSource source)
+    {
+        available_accelerated_.insert(static_cast<int>(source));
+    }
+    [[nodiscard]] int refresh_count() const { return refresh_count_; }
+
 private:
     FakeQueue queue_;
+    std::set<int> available_accelerated_;
+    int refresh_count_ = 0;
 };
+
+// ------------------------------------------------------------------------- fake present path
+// A GPU-free ISwapchain that models the real acquire/present/resize/unconfigure STATE MACHINE, so
+// the compositor's frame loop — including the Outdated/Lost reconfigure branches, which a real
+// adapter produces only under a racing resize or a device loss — is driven deterministically here
+// instead of being hoped for on a CI GPU leg.
+class FakeSwapchain : public ISwapchain
+{
+public:
+    FakeSwapchain(Extent2D size, TextureFormat format, PresentMode mode)
+        : size_(size), format_(format), mode_(mode),
+          backbuffer_(std::make_unique<FakeTexture>(size, format)),
+          view_(backbuffer_->create_view())
+    {
+    }
+
+    [[nodiscard]] Extent2D size() const override { return size_; }
+    [[nodiscard]] TextureFormat format() const override { return format_; }
+    [[nodiscard]] PresentMode present_mode() const override { return mode_; }
+    [[nodiscard]] bool is_configured() const override { return configured_; }
+
+    AcquiredFrame acquire() override
+    {
+        ++acquire_count_;
+        AcquiredFrame frame;
+        if (!configured_)
+        {
+            frame.status = AcquireStatus::Error;
+            return frame;
+        }
+        if (!scripted_.empty())
+        {
+            frame.status = scripted_.front();
+            scripted_.erase(scripted_.begin());
+            if (frame.status != AcquireStatus::Ok)
+            {
+                return frame; // no view on a non-Ok acquire — exactly the real contract
+            }
+        }
+        else
+        {
+            frame.status = AcquireStatus::Ok;
+        }
+        frame.view = view_.get();
+        frame.suboptimal = suboptimal_;
+        acquired_ = true;
+        return frame;
+    }
+
+    void present() override
+    {
+        if (!acquired_)
+        {
+            return; // presenting without a live acquire is a no-op, never a crash
+        }
+        acquired_ = false;
+        ++present_count_;
+    }
+
+    void resize(Extent2D size) override
+    {
+        if (size.width == 0 || size.height == 0)
+        {
+            return; // a minimized window keeps its last valid configuration
+        }
+        size_ = size;
+        backbuffer_ = std::make_unique<FakeTexture>(size, format_);
+        view_ = backbuffer_->create_view();
+        configured_ = true;
+        suboptimal_ = false;
+        acquired_ = false;
+        ++resize_count_;
+    }
+
+    void unconfigure() override
+    {
+        configured_ = false;
+        acquired_ = false;
+        ++unconfigure_count_;
+    }
+
+    // --- test scaffolding ---
+    void script_acquire(AcquireStatus status) { scripted_.push_back(status); }
+    void set_suboptimal(bool suboptimal) { suboptimal_ = suboptimal; }
+    [[nodiscard]] int acquire_count() const { return acquire_count_; }
+    [[nodiscard]] int present_count() const { return present_count_; }
+    [[nodiscard]] int resize_count() const { return resize_count_; }
+    [[nodiscard]] int unconfigure_count() const { return unconfigure_count_; }
+    [[nodiscard]] FakeTexture& backbuffer() { return *backbuffer_; }
+
+private:
+    Extent2D size_;
+    TextureFormat format_;
+    PresentMode mode_;
+    std::unique_ptr<FakeTexture> backbuffer_;
+    std::unique_ptr<ITextureView> view_;
+    std::vector<AcquireStatus> scripted_;
+    bool configured_ = true;
+    bool acquired_ = false;
+    bool suboptimal_ = false;
+    int acquire_count_ = 0;
+    int present_count_ = 0;
+    int resize_count_ = 0;
+    int unconfigure_count_ = 0;
+};
+
+class FakeSurface : public ISurface
+{
+public:
+    explicit FakeSurface(SurfaceCaps caps) : caps_(std::move(caps)) {}
+
+    SurfaceCaps capabilities() override { return caps_; }
+
+    std::unique_ptr<ISwapchain> configure(IDevice& /*device*/, const SurfaceConfig& config) override
+    {
+        // The real backend refuses an unsupported (format, present mode) pair rather than silently
+        // substituting one, so the fake does too — that refusal is what the capability check exists
+        // to prevent, and a test must be able to observe it.
+        if (!caps_.supported || !caps_.supports_format(config.format) ||
+            !caps_.supports_present_mode(config.present_mode) || config.size.width == 0 ||
+            config.size.height == 0)
+        {
+            return nullptr;
+        }
+        ++configure_count_;
+        return std::make_unique<FakeSwapchain>(config.size, config.format, config.present_mode);
+    }
+
+    [[nodiscard]] int configure_count() const { return configure_count_; }
+
+private:
+    SurfaceCaps caps_;
+    int configure_count_ = 0;
+};
+
+// The default capability set a healthy desktop surface reports: BGRA8Unorm + the WebGPU-guaranteed
+// Fifo, plus Immediate as the opportunistic extra.
+inline SurfaceCaps fake_default_surface_caps()
+{
+    SurfaceCaps caps;
+    caps.supported = true;
+    caps.formats = {TextureFormat::BGRA8Unorm, TextureFormat::RGBA8Unorm};
+    caps.present_modes = {PresentMode::Fifo, PresentMode::Immediate};
+    return caps;
+}
 
 // The fake factory. adapter_count controls the probe result; device_creations counts how many
 // devices were made — a test asserts probe() creates NONE (R-HEAD-002).
 class FakeRhi : public IRhi
 {
 public:
-    explicit FakeRhi(std::size_t adapter_count) : adapter_count_(adapter_count) {}
+    explicit FakeRhi(std::size_t adapter_count)
+        : adapter_count_(adapter_count), surface_caps_(fake_default_surface_caps())
+    {
+    }
 
     [[nodiscard]] RhiTier tier() const override { return RhiTier::T1_WebGPU; }
     [[nodiscard]] const char* backend_name() const override { return "fake"; }
@@ -401,7 +617,7 @@ public:
         result.adapter_count = adapter_count_;
         result.has_adapter = adapter_count_ > 0;
         result.primary_name = result.has_adapter ? "fake-adapter" : "";
-        return result;
+        return result; // can_present stays false: no surface was asked about
     }
 
     std::unique_ptr<IDevice> create_device() override
@@ -414,11 +630,33 @@ public:
         return std::make_unique<FakeDevice>();
     }
 
+    std::unique_ptr<ISurface> create_surface(const NativeWindowDesc& window) override
+    {
+        if (window.kind == NativeWindowKind::None || window.handle == nullptr)
+        {
+            return nullptr;
+        }
+        ++surface_creations_;
+        return std::make_unique<FakeSurface>(surface_caps_);
+    }
+
+    AdapterProbe probe_surface(ISurface& surface) override
+    {
+        AdapterProbe result = probe();
+        // Still device-free (R-HEAD-002) — presentability is answered from the surface's caps.
+        result.can_present = result.has_adapter && surface.capabilities().supported;
+        return result;
+    }
+
     [[nodiscard]] int device_creations() const { return device_creations_; }
+    [[nodiscard]] int surface_creations() const { return surface_creations_; }
+    void set_surface_caps(SurfaceCaps caps) { surface_caps_ = std::move(caps); }
 
 private:
     std::size_t adapter_count_;
+    SurfaceCaps surface_caps_;
     int device_creations_ = 0;
+    int surface_creations_ = 0;
 };
 
 } // namespace rendertest

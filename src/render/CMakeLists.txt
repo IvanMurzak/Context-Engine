@@ -71,6 +71,7 @@ add_subdirectory(material)
 add_subdirectory(sprite)   # R-2D-001 / L-55 — the 2D sprite path (issue #122)
 add_subdirectory(lit)      # R-REND-004/006 — PBR + lighting/shadows + lightmap hooks (issue #135)
 add_subdirectory(ui)       # R-UI-005 — M7 a6 engine-integrated GPU UI backend (context_render_ui)
+add_subdirectory(present)  # M9 e03 — OSR import policy + composite pass + CPU present fallback
 
 # --- WEB backend local parity guard (M4 T6, issue #137; R-QA-013) --------------------------------
 # The emdawnwebgpu web backend (src/render/web/, a CI-only emscripten build) renders the SAME
@@ -169,7 +170,19 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
         file(ARCHIVE_EXTRACT INPUT "${_wgpu_root}/${_wgpu_asset}" DESTINATION "${_wgpu_pkg}")
     endif()
 
-    add_library(context_render_wgpu STATIC src/wgpu/wgpu_rhi.cpp)
+    # metal_interop.mm (Objective-C++) is the M9 e03 macOS ACCELERATED OSR path: raw IOSurface ->
+    # MTLTexture -> blit into the wgpu texture, driven entirely through wgpu-native's STOCK native
+    # Metal accessors (upstream PR #557) — no fork of wgpu-native, which the owner rejected on
+    # 2026-07-19. Apple-only; every other platform compiles wgpu_rhi.cpp with the interop macro off
+    # and fails that import closed with a reason. OBJCXX is enabled at TOP-LEVEL scope in
+    # src/CMakeLists.txt (enabling a language mid-tree leaves earlier directories with a stale
+    # no-compiler snapshot — the same hazard documented there for C).
+    set(_context_render_wgpu_sources src/wgpu/wgpu_rhi.cpp)
+    if(APPLE)
+        list(APPEND _context_render_wgpu_sources src/wgpu/metal_interop.mm)
+    endif()
+
+    add_library(context_render_wgpu STATIC ${_context_render_wgpu_sources})
     target_include_directories(context_render_wgpu PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
     # wgpu-native headers are third-party: SYSTEM include so their own warnings never trip -Werror.
     target_include_directories(context_render_wgpu SYSTEM PRIVATE "${_wgpu_pkg}/include")
@@ -182,6 +195,13 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
         target_link_libraries(context_render_wgpu PUBLIC "${_wgpu_pkg}/lib/wgpu_native.dll.lib")
     elseif(APPLE)
         target_link_libraries(context_render_wgpu PUBLIC "${_wgpu_pkg}/lib/libwgpu_native.dylib")
+        # The e03 accelerated OSR blit: Metal for the encoder, IOSurface for the producer's frame.
+        target_link_libraries(context_render_wgpu PUBLIC "-framework Metal" "-framework IOSurface"
+                                                         "-framework Foundation")
+        # ARC for the .mm TU: it hands out only BORROWED wgpu-owned objects, and __bridge casts plus
+        # ARC lifetime are what keep the Metal side from over-releasing them.
+        set_source_files_properties(src/wgpu/metal_interop.mm PROPERTIES
+            COMPILE_OPTIONS "-fobjc-arc")
     else()
         target_link_libraries(context_render_wgpu PUBLIC "${_wgpu_pkg}/lib/libwgpu_native.so")
     endif()
@@ -199,10 +219,14 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
     # backend (hud_scene.h) through the SAME wgpu backend — reusing the ONE prebuilt, not forking it.
     # context_ui_text (M7 a8): hud_scene.h now draws a shaped-text label (measure -> FreeType glyph atlas
     # -> textured-glyph cutout draw), so the golden dump exe links the text package.
+    # context_render_present (M9 e03): the offscreen exe's `osr` mode runs the premultiplied-alpha
+    # OSR composite proof (present/osr_scene.h) through the SAME wgpu backend — reusing the ONE
+    # prebuilt, not forking it. This is the offscreen exe (the Shell's own present path), so linking
+    # presentation here is correct and the headless-invariant gate does not audit it.
     add_executable(context_render_wgpu_offscreen src/wgpu/offscreen_main.cpp)
     target_link_libraries(context_render_wgpu_offscreen
         PRIVATE context_render_wgpu context_render_sprite context_render_lit context_render_ui
-                context_ui_text context_warnings)
+                context_render_present context_ui_text context_warnings)
     if(WIN32)
         # Stage wgpu_native.dll next to the exe so the dynamic import resolves at run time.
         add_custom_command(TARGET context_render_wgpu_offscreen POST_BUILD
@@ -298,6 +322,18 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
         # (no ci.yml --target edit).
         add_test(NAME render-wgpu-curvedpanel COMMAND context_render_wgpu_offscreen curvedpanel)
         set_tests_properties(render-wgpu-curvedpanel PROPERTIES
+            SKIP_RETURN_CODE 77
+            WORKING_DIRECTORY $<TARGET_FILE_DIR:context_render_wgpu_offscreen>)
+
+        # M9 e03 (design 03 §4): the OSR composite proof — a synthetic premultiplied CEF frame
+        # imported through the e03 seam, composited over a clear backdrop with ONE/INV_SRC_ALPHA and
+        # visible_rect/coded_size UVs, read back and asserted PER PIXEL against the CPU oracle that
+        # `render-present-test_osr_composite` independently pins. This is the DoD's "composite output
+        # pixel-asserted offscreen". Same adapter requirement, SKIP convention, and Windows carve-out
+        # as the sibling proofs; auto-picked by the render CI job's `^render-wgpu-` regex, and it adds
+        # no new executable, so ci.yml's --target list is unchanged.
+        add_test(NAME render-wgpu-osr-composite COMMAND context_render_wgpu_offscreen osr)
+        set_tests_properties(render-wgpu-osr-composite PROPERTIES
             SKIP_RETURN_CODE 77
             WORKING_DIRECTORY $<TARGET_FILE_DIR:context_render_wgpu_offscreen>)
     endif()

@@ -40,6 +40,7 @@
 #include "context/render/lit/golden_lit.h"
 #include "context/render/lit/lit_offscreen.h"
 #include "context/render/offscreen_scene.h"
+#include "context/render/present/osr_scene.h"
 #include "context/render/sprite/sprite_offscreen.h"
 #include "context/render/ui/curvedpanel_scene.h"
 #include "context/render/ui/hud_scene.h"
@@ -128,7 +129,7 @@ int main(int argc, char** argv)
     }
 
     if (mode == "render" || mode == "sprite" || mode == "lit" || mode == "viewport" ||
-        mode == "ui" || mode == "worldpanel" || mode == "curvedpanel")
+        mode == "ui" || mode == "worldpanel" || mode == "curvedpanel" || mode == "osr")
     {
         int exit_code = 0;
         std::unique_ptr<IDevice> device = acquire_device(*rhi, exit_code);
@@ -161,6 +162,11 @@ int main(int argc, char** argv)
         else if (mode == "curvedpanel")
         {
             pass = context::render::ui::render_offscreen_curvedpanel(*device); // M7 a10: curved RTT
+        }
+        else if (mode == "osr")
+        {
+            // M9 e03: the premultiplied-alpha OSR composite, pixel-asserted against the CPU oracle.
+            pass = context::render::present::render_offscreen_osr_composite(*device);
         }
         else
         {
