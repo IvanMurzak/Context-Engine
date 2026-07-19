@@ -59,7 +59,7 @@ PATH_CANDIDATES = ["google-chrome", "google-chrome-stable", "chromium-browser", 
 
 
 def find_browser(explicit: str | None) -> str | None:
-    for c in ([explicit] if explicit else []) + [os.environ.get("CONTEXT_SPIKE_BROWSER")]:
+    for c in (explicit, os.environ.get("CONTEXT_SPIKE_BROWSER")):
         if c and (shutil.which(c) or Path(c).exists()):
             return c
     for p in WINDOWS_CANDIDATES:
@@ -86,8 +86,9 @@ class ProbeCollector:
             def do_POST(self):  # noqa: N802
                 length = int(self.headers.get("Content-Length", "0"))
                 body = self.rfile.read(length) if length > 0 else b""
-                if urlparse(self.path).path == "/done":
-                    q = parse_qs(urlparse(self.path).query)
+                parsed = urlparse(self.path)
+                if parsed.path == "/done":
+                    q = parse_qs(parsed.query)
                     try:
                         collector.exit_code = int(q.get("exit", ["1"])[0])
                     except ValueError:

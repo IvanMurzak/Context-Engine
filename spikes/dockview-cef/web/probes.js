@@ -91,10 +91,11 @@
       if (!iframe) { record(2, 'sandboxed-iframe-panel', false, 'iframe element not mounted in panel'); return; }
       // wait for iframe document load
       await new Promise(function (res) {
-        var done = false; var to = setTimeout(function () { if (!done) { done = true; res(); } }, 4000);
-        iframe.addEventListener('load', function () { if (!done) { done = true; clearTimeout(to); res(); } });
+        var to = setTimeout(res, 4000);
+        iframe.addEventListener('load', function () { clearTimeout(to); res(); });
       });
-      var laidOut = iframe.getBoundingClientRect().width > 0 && iframe.getBoundingClientRect().height > 0;
+      var rect = iframe.getBoundingClientRect();
+      var laidOut = rect.width > 0 && rect.height > 0;
       // Bridge via MessageChannel port — opaque-origin frames can't be authed by origin string.
       var channel = new MessageChannel();
       var firstMsg = new Promise(function (res) {

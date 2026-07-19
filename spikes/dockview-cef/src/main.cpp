@@ -23,7 +23,7 @@
 // bench job configure-exercises the CMake early-return only:
 //   cmake -S src -B src/build/dvspike -DCONTEXT_BUILD_SPIKE_DOCKVIEW=ON
 //   cmake --build src/build/dvspike --config Release --target dockview-cef-spike
-//   src/build/dvspike/spikes/dockview-cef/Release/dockview-cef-spike.exe --autotest
+//   src/build/dvspike/spikes/dockview-cef/Release/dockview-cef-spike.exe
 
 #include <windows.h>
 #include <tlhelp32.h>
@@ -67,10 +67,7 @@ std::wstring exeDir() {
 }
 
 std::string webDirUtf8() {
-    wchar_t buf[MAX_PATH]{};
-    GetModuleFileNameW(nullptr, buf, MAX_PATH);
-    std::wstring dir = std::wstring(buf);
-    dir = dir.substr(0, dir.find_last_of(L"\\/")) + L"\\web";
+    std::wstring dir = exeDir() + L"\\web";
     char utf8[MAX_PATH * 3]{};
     WideCharToMultiByte(CP_UTF8, 0, dir.c_str(), -1, utf8, sizeof(utf8) - 1, nullptr, nullptr);
     return std::string(utf8);
@@ -101,10 +98,10 @@ int childProcessCount() {
 }
 
 std::string mimeFor(const std::string& path) {
-    if (path.size() >= 5 && path.substr(path.size() - 5) == ".html") return "text/html";
-    if (path.size() >= 3 && path.substr(path.size() - 3) == ".js") return "text/javascript";
-    if (path.size() >= 4 && path.substr(path.size() - 4) == ".css") return "text/css";
-    if (path.size() >= 5 && path.substr(path.size() - 5) == ".json") return "application/json";
+    if (path.ends_with(".html")) return "text/html";
+    if (path.ends_with(".js")) return "text/javascript";
+    if (path.ends_with(".css")) return "text/css";
+    if (path.ends_with(".json")) return "application/json";
     return "application/octet-stream";
 }
 
@@ -239,7 +236,7 @@ public:
 
 } // namespace
 
-int main(int argc, char** argv) {
+int main(int, char**) {
     CefMainArgs mainArgs(GetModuleHandleW(nullptr));
     CefRefPtr<SpikeApp> app(new SpikeApp());
 
@@ -277,12 +274,11 @@ int main(int argc, char** argv) {
 
     // Pump until the harness reports (g_exit set) or a hard 45s safety stop.
     ULONGLONG t0 = GetTickCount64();
-    int childrenAtVerdict = -1;
     while (g_exit.load() < 0 && !g_loadError && (GetTickCount64() - t0) < 45000ULL) {
         CefDoMessageLoopWork();
         Sleep(4);
     }
-    childrenAtVerdict = childProcessCount(); // probe 5 observable at verdict time
+    int childrenAtVerdict = childProcessCount(); // probe 5 observable at verdict time
 
     // Persist the verdict + process-count evidence next to the exe for FINDINGS.
     {
