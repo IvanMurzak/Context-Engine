@@ -135,9 +135,9 @@ int main()
         const std::optional<std::string> r = c2.request("hi");
         CHECK(r.has_value());
         CHECK(*r == "echo:hi"); // a timed read read the frame + the same thread wrote the response
-        const std::optional<std::string> r2 = c2.request("again");
-        CHECK(r2.has_value());
-        CHECK(*r2 == "echo:again");
+        const std::optional<std::string> r4 = c2.request("again");
+        CHECK(r4.has_value());
+        CHECK(*r4 == "echo:again");
         c2.close();
         server_thread.join();
         srv2.stop();
