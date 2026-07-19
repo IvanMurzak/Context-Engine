@@ -6,7 +6,12 @@ into a real, tested subsystem. Design records: **R-REND-001/002** (WebGPU baseli
 detachable), **L-11/L-56** (WebGPU baseline, WebGPU-only web in v1), **L-39** (extract into a
 double-buffered render world), **R-SEC-009** (SHA-pinned signed-prebuilt exception).
 
-## Two libraries by design
+## The libraries
+
+Feature sub-packages (`material/`, `sprite/`, `lit/`, `ui/`, `present/`, `shadercc/`) each have their
+own README; `present/` is the M9 e03 presentation path (OSR import policy, composite pass, CPU
+present fallback) and is GPU-backend-free like `context_render` itself — full write-up in
+[`docs/present-path.md`](../../docs/present-path.md).
 
 ### `context_render` — RHI abstraction + extract + detachable renderer (backend-free)
 
@@ -16,8 +21,9 @@ gate. Pulls in NO GPU backend, so a headless build never links one.
 - **`rhi.h`** — the tiered **Render Hardware Interface** (R-REND-002). WebGPU T1 semantics as
   abstract interfaces: `IRhi` (probe / create device), `IDevice`, `IQueue`, `IBuffer`, `ITexture`,
   `ITextureView`, `ISampler`, `IRenderPipeline`, `IBindGroupLayout`/`IBindGroup`,
-  `ICommandEncoder`, `IRenderPassEncoder`, `ICommandBuffer`, plus the `ISurface`/`ISwapchain` seam
-  for the later windowed-present path. Depth textures/attachments, depth-only pipelines,
+  `ICommandEncoder`, `IRenderPassEncoder`, `ICommandBuffer`, plus — since M9 e03 — the WINDOWED
+  present half: `ISurface`/`ISwapchain` (`NativeWindowDesc`, `SurfaceCaps`, `AcquiredFrame`), the
+  external-texture (OSR) import seam, sub-rect texture uploads, and colour blending. Depth textures/attachments, depth-only pipelines,
   comparison samplers (the shadow-PCF primitive), uniform buffers + queue writes, and REFLECTED
   ("auto") bind-group layouts landed with the lit path (issue #135) — reflection is deliberately
   the ONLY layout source, which keeps the seam stable under Tint's combined-sampler binding
@@ -46,7 +52,12 @@ dependency path (`src/runtime/js/`) — the local Strawberry-GCC dev gate cannot
 **CI-gated dependency path**, built + tested by the dedicated `render` CI job.
 
 - **`wgpu/wgpu_rhi.cpp`** — implements every `rhi.h` interface over `webgpu.h`, reusing the wgpu calls
-  proven by the `spikes/webgpu` spike. The **only** TU that includes `webgpu.h`.
+  proven by the `spikes/webgpu` spike. The **only** TU that includes `webgpu.h`. Since M9 e03 this
+  includes the surface/swapchain chain (per-OS source structs, capability-checked configure,
+  acquire/present/resize/unconfigure) and external-texture import.
+- **`wgpu/metal_interop.mm`** — Objective-C++, Apple-only: the IOSurface → Metal blit behind the
+  macOS accelerated OSR import, driven through wgpu-native's STOCK native Metal accessors (upstream
+  PR #557). No fork of wgpu-native is involved — see `docs/present-path.md`.
 - **`offscreen_scene.h`** — the offscreen render + pixel-readback proof, written entirely against the
   RHI abstraction (`render_offscreen_triangle`). The **same** code runs on the fake backend (local
   ctest) and the wgpu backend (CI), so a green fake test means the abstraction is coherent and the

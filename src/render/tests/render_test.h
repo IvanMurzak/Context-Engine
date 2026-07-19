@@ -5,10 +5,19 @@
 #pragma once
 
 #include <cstdio>
+#include <string>
 
 namespace rendertest
 {
 inline int g_failures = 0;
+
+// Substring assertion for diagnostic strings — the one thing several present-path tests each had
+// their own private copy of. Lives here so a test asserting "the report names the reason" reads the
+// same way in every file.
+[[nodiscard]] inline bool mentions(const std::string& haystack, const char* needle)
+{
+    return haystack.find(needle) != std::string::npos;
+}
 
 inline void fail(const char* file, int line, const char* expr)
 {

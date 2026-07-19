@@ -10,6 +10,12 @@
 // it; a mappable buffer is read back on the CPU. The concrete T1 native backend (wgpu-native) lives
 // in context/render/wgpu/; a header-only fake backend in the tests drives this exact surface with no
 // GPU, which is what lets the abstraction carry real local test coverage.
+//
+// M9 e03 added the WINDOWED half — ISurface/ISwapchain, the external-texture (OSR) import seam, and
+// colour blending — so the object model now covers presentation as well as offscreen rendering. It
+// stays dependency-free: native window handles arrive as an opaque void* plus a kind tag, so no
+// <windows.h>/X11/Cocoa type reaches this header and a headless TU can still include it. The policy
+// and passes built on these seams live in context/render/present/; see docs/present-path.md.
 
 #pragma once
 
@@ -99,6 +105,29 @@ struct Extent2D
     std::uint32_t height = 0;
 };
 
+// "Nothing to draw / nothing to copy". Lives with the type because every layer asks it — the import
+// policy, the composite, the present blit, the backend and the test fake were each open-coding the
+// same two comparisons.
+[[nodiscard]] inline bool is_empty(Extent2D size)
+{
+    return size.width == 0 || size.height == 0;
+}
+
+// The top-left texel of a texture sub-rect (WebGPU TexelCopyTextureInfo::origin). Used by the
+// sub-rect upload path (IQueue::write_texture_region) — the OSR dirty-rect blit.
+struct Origin2D
+{
+    std::uint32_t x = 0;
+    std::uint32_t y = 0;
+};
+
+// An axis-aligned texel rect (origin + extent) — the OSR dirty rect and the CEF `visible_rect`.
+struct Rect2D
+{
+    Origin2D origin;
+    Extent2D size;
+};
+
 struct TextureDesc
 {
     Extent2D size;
@@ -133,6 +162,47 @@ struct SamplerDesc
     CompareFunction compare = CompareFunction::Undefined;
 };
 
+// Colour-blend factors (the WebGPU subset the T1 paths need). The premultiplied-alpha composite the
+// window compositor draws the OSR layer with is exactly One / OneMinusSrcAlpha (03 §4).
+enum class BlendFactor
+{
+    Zero,
+    One,
+    SrcAlpha,
+    OneMinusSrcAlpha,
+};
+
+// Deliberately NO blend-operation field: the T1 baseline is Add-only, so a settable one-value enum
+// would be a public knob that silently does nothing (set Subtract, get Add, no diagnostic). The
+// backend pins Add explicitly. Add the field WITH its second operation, not before it.
+struct BlendComponent
+{
+    BlendFactor src = BlendFactor::One;
+    BlendFactor dst = BlendFactor::Zero;
+};
+
+// Per-target blend state. ABSENT (RenderPipelineDesc::blend == nullopt) means "replace" — the
+// WebGPU default and what every pre-existing pipeline in this repo relies on, so adding this field
+// changes no existing behavior.
+struct BlendState
+{
+    BlendComponent color;
+    BlendComponent alpha;
+};
+
+// The premultiplied-alpha "source-over" state: blend ONE / INV_SRC_ALPHA on both colour and alpha,
+// for a source whose colour channels are already scaled by its own alpha. (Why the OSR composite
+// needs exactly this is present/osr_composite.h's story, one layer up — the RHI stays generic.)
+[[nodiscard]] inline BlendState premultiplied_alpha_blend()
+{
+    BlendState state;
+    state.color.src = BlendFactor::One;
+    state.color.dst = BlendFactor::OneMinusSrcAlpha;
+    state.alpha.src = BlendFactor::One;
+    state.alpha.dst = BlendFactor::OneMinusSrcAlpha;
+    return state;
+}
+
 // The depth half of a render pipeline (no stencil in the T1 baseline — Depth32Float only).
 struct DepthState
 {
@@ -153,6 +223,8 @@ struct RenderPipelineDesc
     PrimitiveTopology topology = PrimitiveTopology::TriangleList;
     // Depth testing/writing against the pass's depth attachment; nullopt = no depth (the 2D paths).
     std::optional<DepthState> depth;
+    // Colour-target blending; nullopt = replace (the WebGPU default every earlier pipeline uses).
+    std::optional<BlendState> blend;
 };
 
 class ITextureView;
@@ -311,11 +383,76 @@ public:
 
     // CPU->GPU uploads (WebGPU queue-write semantics). write_buffer feeds uniform data (per-frame
     // scene/light/material state extracted from the sim snapshot — R-REND-003: render consumes the
-    // copy, never the sim); write_texture uploads texel data (e.g. a lightmap INPUT, R-REND-006).
+    // copy, never the sim).
     virtual void write_buffer(IBuffer& buffer, std::uint64_t offset, const void* data,
                               std::size_t size) = 0;
-    virtual void write_texture(ITexture& texture, const void* data, std::size_t size,
-                               const TexelCopyBufferLayout& layout, Extent2D extent) = 0;
+
+    // Upload texel data into the sub-rect at `origin` (WebGPU TexelCopyTextureInfo::origin). This is
+    // the GENERAL texture-upload form and the one the OSR dirty-rect path drives: a CEF `OnPaint`
+    // reports N damaged rects, and re-uploading only those is what keeps the software OSR path
+    // affordable (03 §3). `data` points at the sub-rect's OWN first texel; `layout.bytes_per_row` is
+    // that sub-image's stride, which for a dirty rect carved out of a larger frame is the SOURCE
+    // frame's stride, not the rect's width.
+    virtual void write_texture_region(ITexture& texture, Origin2D origin, const void* data,
+                                      std::size_t size, const TexelCopyBufferLayout& layout,
+                                      Extent2D extent) = 0;
+
+    // Whole-texture upload (origin 0,0) — e.g. a lightmap INPUT (R-REND-006). A non-virtual
+    // convenience over write_texture_region so a backend implements the sub-rect form ONCE.
+    void write_texture(ITexture& texture, const void* data, std::size_t size,
+                       const TexelCopyBufferLayout& layout, Extent2D extent)
+    {
+        write_texture_region(texture, Origin2D{}, data, size, layout, extent);
+    }
+};
+
+// ---------------------------------------------------------------------------------------------
+// External-texture import — the OSR (off-screen rendering) interop seam (03 §3). A browser/compositor
+// produces each UI frame OUTSIDE this device; import_external_texture adopts that frame as an ITexture
+// the composite pass can sample.
+//
+// Two tiers, and which one a platform gets is a POLICY decision made one layer up
+// (context/render/present/osr_import.h) — never silently here:
+//   * ACCELERATED (zero-copy): the producer's GPU allocation is adopted directly. Available on macOS
+//     via wgpu-native's STOCK native Metal accessors (raw IOSurface -> MTLTexture -> blit).
+//   * CPU UPLOAD (always works): the producer's BGRA8 pixels are uploaded with write_texture_region,
+//     dirty-rect by dirty-rect. This is the SHIPPING path on Windows and the Linux default.
+//
+// Windows note (owner ruling 2026-07-19): DXGI shared-handle import is NOT reachable — stock
+// wgpu-native's C API exposes no external-texture import, and carrying a patched fork was rejected as
+// an unbounded maintenance cost. The upstream ask is gfx-rs/wgpu-native#621; when the C API gains
+// import, D3D12SharedHandle becomes implementable with NO change to this seam. Until then a backend
+// asked for it FAILS CLOSED (null texture + a diagnostic), never a silent degrade.
+// ---------------------------------------------------------------------------------------------
+enum class ExternalTextureSource
+{
+    CpuBgra,           // CPU BGRA8 pixels uploaded per dirty rect — always available
+    D3D12SharedHandle, // Windows DXGI NT shared handle (zero-copy) — see wgpu-native#621
+    IOSurface,         // macOS raw IOSurface (zero-copy) via the stock native Metal accessors
+    DmaBuf,            // Linux dmabuf (zero-copy) — behind the accel gate, ships OFF
+};
+
+struct ExternalTextureDesc
+{
+    ExternalTextureSource source = ExternalTextureSource::CpuBgra;
+    // The producer's FULL allocation size. CEF's `coded_size` — usually >= the visible rect, which is
+    // why the composite pass scales UVs by visible_rect/coded_size rather than sampling [0,1].
+    Extent2D coded_size;
+    // The platform handle for an accelerated source (HANDLE / IOSurfaceRef / dmabuf fd). Ignored — and
+    // expected null — for CpuBgra, whose pixels arrive later through IQueue::write_texture_region.
+    void* handle = nullptr;
+};
+
+// The RESULT of an import: what the backend actually did, so a caller never has to guess whether it
+// got the zero-copy path. `texture == nullptr` means the import FAILED and `diagnostic` says why.
+struct ExternalTexture
+{
+    std::unique_ptr<ITexture> texture;
+    // No `source_used` field: because the seam FAILS CLOSED (below) the backend never substitutes a
+    // different source, so the requested ExternalTextureDesc::source plus this flag already say
+    // everything a caller can learn. A third, redundant channel would only be a way to disagree.
+    bool accelerated = false;
+    std::string diagnostic;
 };
 
 // A live GPU device — created ONLY when rendering is attached (never in a headless build; R-HEAD-002).
@@ -335,6 +472,166 @@ public:
     [[nodiscard]] virtual std::unique_ptr<IBindGroup>
     create_bind_group(IBindGroupLayout& layout, const std::vector<BindGroupEntry>& entries) = 0;
     [[nodiscard]] virtual std::unique_ptr<ICommandEncoder> create_command_encoder() = 0;
+
+    // Adopt an externally-produced frame as a sampleable texture (the OSR interop seam above).
+    // FAILS CLOSED — a source this backend cannot honour returns a null texture plus a diagnostic,
+    // never a quietly-substituted slower path; choosing the path is the caller's job.
+    [[nodiscard]] virtual ExternalTexture
+    import_external_texture(const ExternalTextureDesc& desc) = 0;
+
+    // Refresh an ACCELERATED import from the producer's newest frame, returning an empty string on
+    // success or the reason it failed. Needed because not every accelerated path is a one-shot
+    // adoption: macOS delivers a NEW IOSurface per paint, which is blitted GPU-side into the
+    // imported texture, so an import that ran only once would freeze the UI on its first frame.
+    // The CpuBgra path does not use this — it refreshes through write_texture_region.
+    [[nodiscard]] virtual std::string
+    refresh_external_texture(ITexture& texture, const ExternalTextureDesc& desc) = 0;
+};
+
+// ---------------------------------------------------------------------------------------------
+// Surface / swapchain — the WINDOWED present path (R-HEAD-004; design 03 §2). Offscreen rendering
+// needs NO surface, and the headless invariant is that nothing in the daemon/runtime reaches this
+// path at all: only the Shell creates a surface, so a headless build links no presentation code
+// (asserted structurally — cmake/ContextPresentIsolation.cmake).
+//
+// The object model is WebGPU's: the instance wraps a native window as an ISurface; the surface is
+// CONFIGURED against a device to produce an ISwapchain; each frame acquires the current backbuffer
+// view, renders into it, and presents. A resize reconfigures in place.
+// ---------------------------------------------------------------------------------------------
+
+// Frame pacing (WebGPU present modes). Fifo is the DEFAULT and the only mode WebGPU guarantees to
+// exist on every surface — the others are opportunistic and must be capability-checked first.
+enum class PresentMode
+{
+    Fifo,
+    FifoRelaxed,
+    Immediate,
+    Mailbox,
+};
+
+// Which flavour of native window handle a NativeWindowDesc carries. Deliberately an OPAQUE void*
+// model: rhi.h stays free of <windows.h> / X11 / Cocoa so it remains includable from headless code.
+enum class NativeWindowKind
+{
+    None,
+    Win32Hwnd,      // handle = HWND, display = HINSTANCE
+    XlibWindow,     // handle = Window (an XID widened to a pointer), display = Display*
+    WaylandSurface, // handle = wl_surface*, display = wl_display*
+    MetalLayer,     // handle = CAMetalLayer* (the layer backing the NSView)
+};
+
+struct NativeWindowDesc
+{
+    NativeWindowKind kind = NativeWindowKind::None;
+    void* handle = nullptr;
+    void* display = nullptr;
+};
+
+struct SurfaceConfig
+{
+    Extent2D size;
+    // BGRA8Unorm is the usual swapchain format (and what the spike proved); viewport render targets
+    // stay RGBA8Unorm. Capability-check before configuring — see SurfaceCaps.
+    TextureFormat format = TextureFormat::BGRA8Unorm;
+    PresentMode present_mode = PresentMode::Fifo;
+};
+
+// What a (surface, adapter) pair actually supports — the input to the capability check the spike
+// performs before configuring (spikes/webgpu/src/main.cpp:546-560).
+struct SurfaceCaps
+{
+    // False = this adapter cannot present to this surface at all (drives the CPU present fallback).
+    bool supported = false;
+    std::vector<TextureFormat> formats;
+    std::vector<PresentMode> present_modes;
+
+    [[nodiscard]] bool supports_format(TextureFormat format) const
+    {
+        for (TextureFormat f : formats)
+        {
+            if (f == format)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    [[nodiscard]] bool supports_present_mode(PresentMode mode) const
+    {
+        for (PresentMode m : present_modes)
+        {
+            if (m == mode)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+// The outcome of acquiring a backbuffer. Only Ok yields a usable view. Outdated/Lost are NORMAL,
+// expected events (a resize raced the frame; the device went away) that the compositor handles by
+// reconfiguring — they are not errors and must not be reported as such.
+enum class AcquireStatus
+{
+    Ok,
+    Outdated,
+    Lost,
+    Timeout,
+    Error,
+};
+
+struct AcquiredFrame
+{
+    ITextureView* view = nullptr;
+    AcquireStatus status = AcquireStatus::Error;
+    // True when the frame is presentable but no longer optimally configured (a pending resize) —
+    // present it, then reconfigure. Distinct from Outdated, which yields NO frame at all.
+    bool suboptimal = false;
+};
+
+// A configured presentation chain over one surface. Not thread-safe: one compositor owns it.
+class ISwapchain
+{
+public:
+    virtual ~ISwapchain() = default;
+
+    [[nodiscard]] virtual Extent2D size() const = 0;
+    [[nodiscard]] virtual TextureFormat format() const = 0;
+    [[nodiscard]] virtual PresentMode present_mode() const = 0;
+    [[nodiscard]] virtual bool is_configured() const = 0;
+
+    // Acquire the current backbuffer view. The view is owned by the swapchain and is valid ONLY
+    // until the matching present() — never retain it across frames.
+    [[nodiscard]] virtual AcquiredFrame acquire() = 0;
+
+    // Show the acquired frame. A no-op when the last acquire() did not return Ok.
+    virtual void present() = 0;
+
+    // Reconfigure for a new window size (the resize protocol, 03 §4). A zero extent is ignored —
+    // a minimized window keeps its last valid configuration rather than tearing the chain down.
+    virtual void resize(Extent2D size) = 0;
+
+    // Release the presentation chain (teardown, or before the window is destroyed). Idempotent.
+    virtual void unconfigure() = 0;
+};
+
+// A presentable native window. Created by IRhi::create_surface; configured against a device to get
+// the swapchain.
+class ISurface
+{
+public:
+    virtual ~ISurface() = default;
+
+    // What this surface supports on the backend's default adapter. `supported == false` is a clean
+    // report (the CPU present fallback takes over), not an error.
+    [[nodiscard]] virtual SurfaceCaps capabilities() = 0;
+
+    // Configure the surface against `device` and return its swapchain, or nullptr when `config` is
+    // unsupported (check capabilities() first) or the surface is unusable.
+    [[nodiscard]] virtual std::unique_ptr<ISwapchain> configure(IDevice& device,
+                                                                const SurfaceConfig& config) = 0;
 };
 
 // The result of enumerating adapters WITHOUT creating a device — the R-HEAD-002 headless probe.
@@ -344,11 +641,18 @@ struct AdapterProbe
     std::size_t adapter_count = 0;
     bool has_adapter = false;
     std::string primary_name;
+    // The editor's GPU gate (03 §2): can the probed adapter actually PRESENT to a given surface?
+    // Only IRhi::probe_surface() sets this — the surface-less probe() always reports false, because
+    // "no surface was asked about" is not "cannot present". A false here with has_adapter true is
+    // the honest signal that drives the CPU present fallback (C-F2) rather than a hard failure.
+    bool can_present = false;
 };
 
 // The backend factory. probe() creates no device (R-HEAD-002); create_device() returns nullptr when
-// no adapter is available, so the caller can stay headless without a hard failure. Surface/swapchain
-// (the windowed present path) are a later wave — see ISurface below.
+// no adapter is available, so the caller can stay headless without a hard failure. create_surface()
+// is the entry to the WINDOWED present path (see ISurface below) — it is the Shell's alone; nothing
+// in the daemon/runtime ever calls it (the headless invariant, structurally asserted by
+// cmake/ContextPresentIsolation.cmake).
 class IRhi
 {
 public:
@@ -362,25 +666,16 @@ public:
 
     // Create a device on the default adapter, or nullptr when no adapter exists.
     [[nodiscard]] virtual std::unique_ptr<IDevice> create_device() = 0;
-};
 
-// ---------------------------------------------------------------------------------------------
-// Surface / swapchain — the WINDOWED present path (R-HEAD-004 SHOULD; the T1 object model names it
-// for completeness). Offscreen rendering (this foundation's proof) needs NO surface, so these are
-// declared here as the seam and implemented when the windowed/web-canvas present path lands in a
-// later wave. Keeping them in the object model now means the renderer's present path is an additive
-// change against a stable interface rather than a reshaping of it.
-// ---------------------------------------------------------------------------------------------
-class ISurface
-{
-public:
-    virtual ~ISurface() = default;
-};
+    // Wrap a native window as a presentable surface. Returns nullptr when the descriptor names no
+    // window, or names a window kind this backend/platform cannot wrap — a clean, reportable
+    // absence (the caller degrades to the CPU present path), never a crash.
+    [[nodiscard]] virtual std::unique_ptr<ISurface>
+    create_surface(const NativeWindowDesc& window) = 0;
 
-class ISwapchain
-{
-public:
-    virtual ~ISwapchain() = default;
+    // The surface-aware probe (03 §2): enumerate adapters AND report whether one can present to
+    // `surface`, still WITHOUT creating a device. This is the editor's GPU gate.
+    [[nodiscard]] virtual AdapterProbe probe_surface(ISurface& surface) = 0;
 };
 
 } // namespace context::render
