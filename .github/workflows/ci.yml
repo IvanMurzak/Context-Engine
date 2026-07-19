@@ -1780,6 +1780,25 @@ jobs:
         run: cmake --build --preset dev --target context_gui_host
         working-directory: src
 
+      # M9 e04: the Shell's windowed-OSR CEF binding. Built on ALL THREE legs — that compile IS the
+      # "mac/Linux compile-guarded until e12" coverage for the binding.
+      - name: Build the Shell's windowed-OSR CEF binding (M9 e04)
+        run: cmake --build --preset dev --target context_editor_cef
+        working-directory: src
+
+      # The LIVE CEF boot smoke (`editor-cef-smoke-shell`): a real windowless browser driven by the
+      # real integrated pump, its OnPaint frames composited by the real compositor and presented.
+      # Windows/Linux only — those use CEF's self-re-exec subprocess model; the macOS .app + helper
+      # bundles are e12's.
+      #
+      # ⚠ "Not Run = RED" TRIPWIRE: the ctest step below selects the whole `editor-cef-smoke-` family
+      # by regex, but this job builds a hand-maintained --target list. Without this step the regex
+      # would find the test and no executable, reporting "Not Run" -> red.
+      - name: Build the Shell's live CEF boot smoke (Windows/Linux)
+        if: runner.os != 'macOS'
+        run: cmake --build --preset dev --target context_editor_shell_cef_smoke
+        working-directory: src
+
       # Boot the CEF editor host headless and assert exit 0. Linux runs under xvfb; macOS + Windows run
       # the bundled/staged binary directly (GPU disabled — no adapter required anywhere).
       - name: Editor-host boot smoke ctest (Linux, headless under xvfb)
@@ -1887,6 +1906,17 @@ jobs:
           cmp "$schema" src/editor/client/schema/context-client-schema.json \
             || { echo "the SHIPPED client schema differs from the committed one"; exit 1; }
           python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['rpcMethods'], 'no rpcMethods'; assert d['eventTopics'], 'no eventTopics'; print('client schema OK:', len(d['rpcMethods']), 'rpc methods,', len(d['eventTopics']), 'topics')" "$schema"
+
+      # M9 e04: the editor SHELL is the SDK's first real consumer, so this is where it is proven to
+      # build as one. The configure-time D10 gate (context_assert_shell_boundary, src/CMakeLists.txt)
+      # has already walked context_editor's transitive link closure and refused any EditorKernel
+      # module; `editor-shell-boundary` re-reads that audit so a gate silently covering nothing after
+      # a rename is caught too. Building the binary here is what makes both non-vacuous.
+      - name: Build the editor Shell + assert the D10 shell boundary (M9 e04)
+        run: |
+          cmake --build --preset dev --target context_editor_shell context_editor
+          ctest --preset dev -R "^editor-shell-boundary$" --output-on-failure
+        working-directory: src
 
       - name: sccache stats
         run: ${SCCACHE_PATH} --show-stats

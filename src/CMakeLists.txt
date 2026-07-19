@@ -789,6 +789,20 @@ add_subdirectory(editor/cef)
 # regardless of add_subdirectory order).
 add_subdirectory(editor/gui)
 
+# M9 e04: the native SHELL (src/editor/shell/, task e04; design 03; R-HEAD-004 / R-UI-007 / R-HUX-011
+# / L-41) — `context_editor`: a real OS window with the single-threaded owner loop, a windowed-OSR
+# browser composited through the e03 present path, the per-window compositor (incl. the PET_POPUP
+# second OSR layer), the OS input pump with region arbitration, real per-monitor DPI, and the C-F2
+# CPU present fallback. The Shell is the ONLY target that may link presentation (the headless
+# invariant below), and an ORDINARY CLIENT of the published context_client SDK (D10).
+#
+# Added AFTER editor/client (it links context_client), AFTER render (context_render_present), and
+# AFTER editor/cef + editor/gui so the shared CEF acquisition has already run when
+# CONTEXT_BUILD_GUI_CEF is on and the shell's CEF binding reuses it. OWN stanza — deliberately apart
+# from the editor/runtime clusters and the exit-gate block below — so concurrent sibling tasks
+# inserting into this file merge cleanly.
+add_subdirectory(editor/shell)
+
 # M6 X2: the replication state-sync harness (src/runtime/netsync/, R-NET-001 / L-48, issue X2) — the
 # layer that DRIVES the F0b in-storage L-48 replication metadata hooks (the kernel World's per-entity
 # network identity == the L-37 composed id, authority, and dirty/delta versioning; F0b shipped the
@@ -879,6 +893,55 @@ context_assert_no_present_linkage(
 add_test(NAME render-present-headless-isolation
     COMMAND ${CMAKE_COMMAND}
         -DREPORT=${_context_present_isolation_report}
+        "-DGATE=headless-invariant gate"
         "-DEXPECT_AUDITED=context_runtime_server;context_runtime_desktop;context;context_client"
         -DEXPECT_FORBIDDEN=context_render_present
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/present_isolation_check.cmake)
+
+# ---------------------------------------------------------------------------
+# M9 e04 — the D10 SHELL BOUNDARY gate (design 02 §1 / 03 §1).
+#
+# "The editor is an ORDINARY CLIENT: it talks the public contract and never links kernel internals."
+# The `editor-boundary` CI job proves one half — that the SDK's installed headers are self-contained
+# and an out-of-tree consumer can build against them. This proves the other half, on the real target
+# graph: that the SHELL does not simply reach around the SDK and link the EditorKernel's own modules,
+# which would build perfectly and quietly make the editor un-shippable apart from the engine.
+#
+# Same position + rationale as the headless gate above: LAST, because every audited target must exist
+# before its link closure can be walked.
+#
+# The forbidden set is the EditorKernel's internal modules — the ones an editor is most tempted to
+# reach for (read a file, resolve a composition, run a migration) and exactly the ones the client
+# contract exists to mediate. context_contract and context_bridge are deliberately NOT forbidden:
+# context_client links them itself (contract publicly, bridge as private link payload), so forbidding
+# them would forbid the SDK.
+# ---------------------------------------------------------------------------
+set(_context_shell_boundary_report "${CMAKE_BINARY_DIR}/shell-boundary-report.txt")
+
+context_assert_shell_boundary(
+    REPORT "${_context_shell_boundary_report}"
+    FORBIDDEN
+        context_editorkernel  # the EditorKernel itself
+        context_filesync      # authored-file IO
+        context_derivation    # the derived index
+        context_compose       # composition/plan_write
+        context_merge
+        context_migrate
+        context_assetdb
+        context_import
+        context_pkg
+    TARGETS context_editor_shell context_editor)
+
+# The companion ctest, for the same vacuous-pass failure mode the headless one guards (see its note).
+# Registered in the non-gate `editor-shell-` family, so the build job's general ctest step runs it on
+# all three OS legs with no ci.yml --target bookkeeping. The expected sets are spelled out LITERALLY
+# rather than reusing the variables above — an expectation derived from the same list that drives the
+# audit shrinks with it.
+add_test(NAME editor-shell-boundary
+    COMMAND ${CMAKE_COMMAND}
+        -DREPORT=${_context_shell_boundary_report}
+        "-DGATE=D10 shell-boundary gate"
+        "-DSOURCE_HINT=src/CMakeLists.txt (context_assert_shell_boundary)"
+        "-DEXPECT_AUDITED=context_editor_shell;context_editor"
+        "-DEXPECT_FORBIDDEN=context_editorkernel;context_filesync;context_derivation;context_compose"
         -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/present_isolation_check.cmake)

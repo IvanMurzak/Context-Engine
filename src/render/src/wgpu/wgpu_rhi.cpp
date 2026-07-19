@@ -533,6 +533,10 @@ public:
         wgpuRenderPassEncoderSetBindGroup(pass_, index, static_cast<WgpuBindGroup&>(group).raw(), 0,
                                           nullptr);
     }
+    void set_scissor_rect(Origin2D origin, Extent2D size) override
+    {
+        wgpuRenderPassEncoderSetScissorRect(pass_, origin.x, origin.y, size.width, size.height);
+    }
     void draw(std::uint32_t vertex_count, std::uint32_t instance_count) override
     {
         wgpuRenderPassEncoderDraw(pass_, vertex_count, instance_count, 0, 0);

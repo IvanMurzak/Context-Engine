@@ -202,12 +202,29 @@ class FakeCommandBuffer : public ICommandBuffer
 {
 };
 
+// A DEVICE-LIFETIME record of what the render passes did. A pass encoder is created and destroyed
+// inside one frame, so per-encoder counters are unreachable by the time a test asserts; the multi-pass
+// compositor (e04: a viewport pass, the full-window CEF pass, then the scissored PET_POPUP pass) is
+// exactly the caller that needs the aggregate. Owned by FakeDevice and threaded down.
+struct FakePassLog
+{
+    int passes = 0;
+    int draws = 0;
+    int scissor_sets = 0;
+    // Every scissor rect in call order — the popup layer's confinement is asserted from this.
+    std::vector<Rect2D> scissors;
+};
+
 class FakeRenderPassEncoder : public IRenderPassEncoder
 {
 public:
-    FakeRenderPassEncoder(FakeTexture* target, Color clear, LoadOp load)
-        : target_(target), clear_(clear), load_(load)
+    FakeRenderPassEncoder(FakeTexture* target, Color clear, LoadOp load, FakePassLog* log = nullptr)
+        : target_(target), clear_(clear), load_(load), log_(log)
     {
+        if (log_ != nullptr)
+        {
+            ++log_->passes;
+        }
     }
 
     void set_pipeline(IRenderPipeline& /*pipeline*/) override { pipeline_set_ = true; }
@@ -217,13 +234,36 @@ public:
         ++bind_group_sets_;
     }
 
+    // The scissor is RECORDED rather than applied: the fake only rasterizes the reference triangle,
+    // and the pass a scissor actually matters for (the e04 PET_POPUP composite layer) is proven
+    // per-pixel against a real adapter by `render-wgpu-osr-composite`. What a headless test can
+    // honestly assert is that the compositor CONFINED the popup draw — i.e. the rect it passed.
+    void set_scissor_rect(Origin2D origin, Extent2D size) override
+    {
+        ++scissor_sets_;
+        last_scissor_ = Rect2D{origin, size};
+        if (log_ != nullptr)
+        {
+            ++log_->scissor_sets;
+            log_->scissors.push_back(last_scissor_);
+        }
+    }
+
     void draw(std::uint32_t vertex_count, std::uint32_t instance_count) override
     {
         draw_vertices_ = vertex_count;
         draw_instances_ = instance_count;
+        ++draw_count_;
+        if (log_ != nullptr)
+        {
+            ++log_->draws;
+        }
     }
 
     [[nodiscard]] int bind_group_sets() const { return bind_group_sets_; }
+    [[nodiscard]] int draw_count() const { return draw_count_; }
+    [[nodiscard]] int scissor_sets() const { return scissor_sets_; }
+    [[nodiscard]] const Rect2D& last_scissor() const { return last_scissor_; }
 
     void end() override
     {
@@ -258,8 +298,12 @@ private:
     FakeTexture* target_;
     Color clear_;
     LoadOp load_;
+    FakePassLog* log_ = nullptr;
     bool pipeline_set_ = false;
     int bind_group_sets_ = 0;
+    int draw_count_ = 0;
+    int scissor_sets_ = 0;
+    Rect2D last_scissor_{};
     std::uint32_t draw_vertices_ = 0;
     std::uint32_t draw_instances_ = 0;
 };
@@ -267,6 +311,8 @@ private:
 class FakeCommandEncoder : public ICommandEncoder
 {
 public:
+    explicit FakeCommandEncoder(FakePassLog* log = nullptr) : log_(log) {}
+
     std::unique_ptr<IRenderPassEncoder> begin_render_pass(const RenderPassDesc& desc) override
     {
         FakeTexture* target = nullptr;
@@ -279,7 +325,7 @@ public:
             clear = desc.color[0].clear;
             load = desc.color[0].load;
         }
-        return std::make_unique<FakeRenderPassEncoder>(target, clear, load);
+        return std::make_unique<FakeRenderPassEncoder>(target, clear, load, log_);
     }
 
     void copy_texture_to_buffer(ITexture& src, IBuffer& dst, const TexelCopyBufferLayout& layout,
@@ -305,6 +351,9 @@ public:
     {
         return std::make_unique<FakeCommandBuffer>();
     }
+
+private:
+    FakePassLog* log_ = nullptr;
 };
 
 class FakeQueue : public IQueue
@@ -390,8 +439,11 @@ public:
 
     std::unique_ptr<ICommandEncoder> create_command_encoder() override
     {
-        return std::make_unique<FakeCommandEncoder>();
+        return std::make_unique<FakeCommandEncoder>(&pass_log_);
     }
+
+    // What every render pass this device recorded actually did — see FakePassLog.
+    [[nodiscard]] const FakePassLog& pass_log() const { return pass_log_; }
 
     // Mirrors the real backend's import policy WITHOUT a GPU: CpuBgra always succeeds (it is just an
     // upload-destination texture); an accelerated source succeeds only when the test declared it
@@ -456,6 +508,7 @@ public:
 
 private:
     FakeQueue queue_;
+    FakePassLog pass_log_;
     std::set<int> available_accelerated_;
     int refresh_count_ = 0;
     bool import_always_fails_ = false;
@@ -585,13 +638,23 @@ public:
             return nullptr;
         }
         ++configure_count_;
-        return std::make_unique<FakeSwapchain>(config.size, config.format, config.present_mode);
+        auto swapchain = std::make_unique<FakeSwapchain>(config.size, config.format,
+                                                         config.present_mode);
+        last_swapchain_ = swapchain.get();
+        return swapchain;
     }
 
     [[nodiscard]] int configure_count() const { return configure_count_; }
 
+    // The most recently configured swapchain, so a test that does not OWN it — a compositor took
+    // the unique_ptr — can still script its acquire statuses and read its counters. A non-owning
+    // back-pointer: valid only while the caller that took the unique_ptr is alive, which for a test
+    // driving that caller is exactly the window it needs.
+    [[nodiscard]] FakeSwapchain* last_swapchain() const { return last_swapchain_; }
+
 private:
     SurfaceCaps caps_;
+    FakeSwapchain* last_swapchain_ = nullptr;
     int configure_count_ = 0;
 };
 
