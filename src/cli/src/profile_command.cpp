@@ -2,7 +2,7 @@
 
 #include "context/cli/profile_command.h"
 
-#include "context/cli/wire_client.h" // the exported strict-u64 parser (context::cli::parse_u64)
+#include "context/cli/args.h" // the exported strict-u64 parser (context::cli::parse_u64)
 #include "context/runtime/js/gc_errors.h"
 #include "context/runtime/js/js_host.h"
 #include "context/runtime/profile/gc_channel.h"
@@ -38,7 +38,7 @@ const std::string* flag(const std::map<std::string, std::string>& flags, const c
     return it != flags.end() ? &it->second : nullptr;
 }
 
-// Unsigned flag values go through the exported context::cli::parse_u64 (wire_client.h) — the
+// Unsigned flag values go through the exported context::cli::parse_u64 (args.h) — the
 // digit-only, overflow-safe parser test_cli.cpp pins — rather than a third file-local copy of the
 // session_command.cpp stoull variant. parse_ms stays local: no shared double parser exists yet.
 std::optional<double> parse_ms(const std::string& s)

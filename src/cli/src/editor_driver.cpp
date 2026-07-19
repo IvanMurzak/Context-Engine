@@ -2,7 +2,7 @@
 
 #include "context/cli/editor_driver.h"
 
-#include "context/cli/wire_client.h" // shared flag_value (single-sourced with attach/fetch)
+#include "context/cli/args.h" // shared flag_value (single-sourced with attach/fetch)
 #include "context/editor/contract/handshake.h"
 #include "context/editor/contract/json.h"
 #include "context/editor/editorkernel/editor_kernel.h"

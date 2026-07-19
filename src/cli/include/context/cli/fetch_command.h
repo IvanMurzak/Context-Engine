@@ -7,7 +7,7 @@
 // `<handle>` is the `data.largeResult.handle` URI a prior oversized response returned; the optional
 // second positional is the registry's `range` param in CLI form (there is no `--range` flag — the
 // parser rejects flags the registry does not declare). Discovery, connect, and the attach handshake
-// reuse the shared wire plumbing (wire_client.h). Without a range, every chunk is fetched and
+// reuse the shared client SDK (context_client). Without a range, every chunk is fetched and
 // reassembled: the result envelope's data is the ORIGINAL (previously spooled) result — exactly
 // what the daemon would have returned inline. With a range, exactly one resource.read is issued and
 // the raw read result (offset/length/total/eof + chunkHex) is returned instead. This is the

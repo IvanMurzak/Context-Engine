@@ -7,6 +7,7 @@
 # The CLI logic as a library so the ctest executables can link it without pulling in main().
 add_library(context_cli STATIC
     src/app.cpp
+    src/args.cpp
     src/attach_command.cpp
     src/bench_command.cpp
     src/build_command.cpp
@@ -24,14 +25,13 @@ add_library(context_cli STATIC
     src/session_command.cpp
     src/set_command.cpp
     src/tilemap_command.cpp
-    src/ui_command.cpp
-    src/wire_client.cpp)
+    src/ui_command.cpp)
 
 target_include_directories(context_cli PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # context_contract and context_bridge are PUBLIC (their headers appear in the CLI's public
-# headers — contract types everywhere; wire_client.h exposes bridge::TransportClient for the
-# operational wire commands); context_kernel, context_editorkernel, context_schema, and
+# headers — contract types everywhere; the bridge's transport/resource types reach the operational
+# wire commands); context_kernel, context_editorkernel, context_schema, and
 # context_serializer are PRIVATE (only scaffold.cpp's runnable-template proof touches
 # context_kernel; only editor_driver.cpp's `context editor smoke` in-process driver touches
 # context_editorkernel; only scaffold.cpp touches context_schema — the L-32 `$schema` template
@@ -40,6 +40,16 @@ target_include_directories(context_cli PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/includ
 target_link_libraries(context_cli
     PUBLIC context_contract context_bridge
     PRIVATE context_kernel context_editorkernel context_schema context_serializer context_warnings)
+
+# M9 e02 (issue TBD): the client SDK (src/editor/client/). PRIVATE — attach_command.cpp and
+# fetch_command.cpp are the only consumers and no client type appears in the CLI's public headers.
+# This is the CLI's migration onto the ONE client-side wire implementation: the duplicated plumbing
+# that used to live in src/cli/wire_client.cpp is GONE, so the CLI and every out-of-tree consumer
+# (the editor shell, e05's JS client host) exercise the same code path — which is what makes the
+# CLI a meaningful proving ground for the SDK. context_client is defined by a LATER
+# add_subdirectory(editor/client) in src/CMakeLists.txt (it must follow this one so its e2e test can
+# depend on the `context` binary); CMake resolves the target name at generate time regardless.
+target_link_libraries(context_cli PRIVATE context_client)
 
 # `context set` / `context query --overrides` (M2 composed write path, src/editor/compose/ +
 # src/editor/filesync/): PRIVATE — set_command.cpp is the only consumer, driving compose's IO-free
@@ -228,6 +238,10 @@ target_compile_definitions(context_cli_test_fetch_e2e
 add_dependencies(context_cli_test_fetch_e2e context)
 add_test(NAME cli-test_fetch_e2e COMMAND context_cli_test_fetch_e2e)
 set_tests_properties(cli-test_fetch_e2e PROPERTIES TIMEOUT 60)
+# test_fetch_e2e drives the daemon through the client SDK (the same path `context fetch` takes since
+# the M9 e02 migration), so it links context_client directly — PRIVATE in context_cli, so its include
+# path does not propagate through it (the same pattern as test_pkg_command / test_build_command).
+target_link_libraries(context_cli_test_fetch_e2e PRIVATE context_client)
 
 # Sanitize preset only (mutually exclusive with the TSan block above): linking context_js on the
 # V8-capable legs bakes the uninstrumented rusty_v8 archive — and with it a SECOND, hidden-

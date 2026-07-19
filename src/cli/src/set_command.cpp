@@ -2,7 +2,7 @@
 
 #include "context/cli/set_command.h"
 
-#include "context/cli/wire_client.h"
+#include "context/cli/args.h"
 #include "context/editor/compose/compose_write.h"
 #include "context/editor/compose/project_resolver.h"
 #include "context/editor/contract/json.h"

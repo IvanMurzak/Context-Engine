@@ -822,6 +822,16 @@
       "description": "M5-F0a CEF build substrate (src/editor/cef/, issue #150; L-15 / L-41 / R-UI-007 / R-SEC-009): fetch + SHA-256-verify the pinned CEF prebuilt (tools/fetch_cef.py + tools/cef-prebuilt.json, verify-before-use fail-closed), build libcef_dll_wrapper, link a minimal headless boot substrate, and BOOT a CEF browser subprocess headless (`cef-substrate-boot` ctest -> exit 0). A CI-gated dependency path like render (behind default-OFF CONTEXT_BUILD_GUI_CEF): the MSVC/Clang-ABI CEF prebuilt cannot link under the local Strawberry-GCC dev gate, so the main build matrix + local dev gate never fetch CEF (the subdir early-returns when OFF). 3-OS matrix — Linux boots headless under xvfb (GPU disabled), Windows rides the self-hosted MSVC runner, macOS boots the bundled app. Build-SUBSTRATE smoke only (fetch/verify/link/boot), NOT the editor host boot smoke (M5-F0b). The pinned CEF archive is fetched once and version-keyed cached to bound CI cost."
     },
     {
+      "id": "editor-boundary",
+      "requirement": "R-ARCH-005",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "dev",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "editor-boundary",
+      "description": "M9 e02 D10 client-boundary gate (src/editor/client/, task e02): proves the editor is an ORDINARY client that links only the published contract surface and never kernel internals (02 target-architecture §1). Two blocking halves. (1) OUT-OF-TREE CONSUMER: `cmake --install` the exported closure (context_client + bridge/contract/kernel headers, plus the schema/component/serializer archives a static link needs) to a staging prefix, then configure src/editor/client/consumer STANDALONE against it via find_package(ContextClient) with NO path into the engine source tree, build it under the consumer's own -Wall -Wextra -Werror, and RUN it — so a missing installed header, an incomplete static-link closure, or a public header that is not warning-clean for a stranger fails here rather than inside e04/e05. (2) INCLUDE-GRAPH CHECK (tools/check_include_graph.py): walks the INSTALLED headers transitively and rejects any include reaching a kernel-internal module (editorkernel/filesync/derivation/gui/runtime/…) or resolving to a header we did not ship. Also asserts the build-generated client schema (projected from the contract registry's `describe`) installed with the package — the artifact e05's JS client generates from instead of hand-written typings. ubuntu-only: the boundary is a source/CMake property, not a platform one, and the 3-OS `build` matrix already compiles the SDK everywhere. The `client-*` ctests are deliberately NOT re-run here (a plain test family auto-run by `ctest --preset dev` on all three build legs). The consumer target grows as e04/e05 land; e17 asserts its final shape."
+    },
+    {
       "id": "fleet-manifest-validation",
       "requirement": "R-QA-012",
       "runner_class": "gh-ubuntu-shared",

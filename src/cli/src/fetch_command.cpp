@@ -2,16 +2,15 @@
 
 #include "context/cli/fetch_command.h"
 
-#include "context/cli/wire_client.h"
 #include "context/editor/bridge/resource_store.h" // hex_decode (the chunk codec)
-#include "context/editor/bridge/transport.h"
-#include "context/editor/contract/handshake.h"
+#include "context/editor/client/client.h"
 #include "context/editor/contract/resource_handle.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -20,7 +19,8 @@ namespace context::cli
 {
 
 namespace fs = std::filesystem;
-using editor::bridge::TransportClient;
+using editor::client::AttachOptions;
+using editor::client::Client;
 using editor::contract::Envelope;
 using editor::contract::Json;
 using editor::contract::ResourceHandle;
@@ -108,27 +108,17 @@ Envelope run_fetch(const std::string& handle_uri, const std::map<std::string, st
     }
 
     // --- discover + connect + attach (read/query baseline suffices for resource.read) ------------
-    const std::optional<std::string> endpoint = discover_endpoint(project, 3000);
-    if (!endpoint.has_value())
-        return finish(Envelope::failure(
-            "internal.error", "no running daemon found for project '" + project.string() +
-                                  "' (no .editor/instance.json). Start one with `context daemon`."));
-
-    TransportClient client(*endpoint);
-    if (!client.connect(3000))
-        return finish(Envelope::failure("internal.error",
-                                        "could not connect to the daemon endpoint '" + *endpoint +
-                                            "': " + client.error()));
-
-    std::int64_t id = 0;
+    // connect_to_project() seeds the D20 attach token from `.editor/instance.json` — required since
+    // e02 flipped enforcement ON.
+    AttachOptions attach_options; // scope defaults to "read"
     std::string err;
+    const std::unique_ptr<Client> client =
+        Client::connect_to_project(project, 3000, attach_options, err);
+    if (!client)
+        return finish(Envelope::failure("internal.error", err));
 
-    Json attach_params = Json::object();
-    attach_params.set("protocolMajor",
-                      Json(static_cast<std::uint64_t>(editor::contract::kProtocolMajor)));
-    attach_params.set("scope", Json(std::string("read")));
     bool attach_rejected = false;
-    if (!call(client, ++id, "attach", std::move(attach_params), err, &attach_rejected).has_value())
+    if (!client->attach(attach_options, err, &attach_rejected))
         return finish(Envelope::failure(
             attach_rejected ? "handshake.incompatible_protocol" : "internal.error", err));
 
@@ -139,9 +129,8 @@ Envelope run_fetch(const std::string& handle_uri, const std::map<std::string, st
     if (range.has_value())
     {
         bool rejected = false;
-        const std::optional<Json> res =
-            call(client, ++id, "resource.read", range_params(handle_uri, range->first, range->second),
-                 err, &rejected);
+        const std::optional<Json> res = client->call(
+            "resource.read", range_params(handle_uri, range->first, range->second), err, &rejected);
         if (!res.has_value())
             return finish(Envelope::failure(
                 rejected ? "resource.unknown_handle" : "internal.error", err));
@@ -162,7 +151,7 @@ Envelope run_fetch(const std::string& handle_uri, const std::map<std::string, st
     {
         bool rejected = false; // fresh per call: call() sets it on rejection, never clears it
         const std::optional<Json> res =
-            call(client, ++id, "resource.read", range_params(handle_uri, offset, 0), err, &rejected);
+            client->call("resource.read", range_params(handle_uri, offset, 0), err, &rejected);
         if (!res.has_value())
             return finish(Envelope::failure(
                 rejected ? "resource.unknown_handle" : "internal.error", err));

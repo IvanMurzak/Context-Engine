@@ -1798,6 +1798,88 @@ jobs:
         run: ${SCCACHE_PATH} --show-stats
 
   # ------------------------------------------------------------------------------------------------
+  # M9 e02 — D10 client-boundary gate (src/editor/client/, task e02).
+  #
+  # The M9 architecture rests on the editor being an ORDINARY client: it talks the public contract and
+  # never links kernel internals (02 §1). Nothing in a monorepo enforces that by itself — an in-tree
+  # target can reach any header it likes and still build. So this job builds a REAL out-of-tree
+  # consumer the only honest way: `cmake --install` the exported artifacts to a staging prefix, then
+  # configure a standalone project against that prefix with find_package(ContextClient) and NO access
+  # to the source tree. If the SDK's public headers need something we do not install, or the package's
+  # static-link closure is incomplete, this fails here — on the PR that broke it — instead of inside
+  # e04/e05 months later.
+  #
+  # The include-graph check is the second half and is BLOCKING: it walks the INSTALLED headers
+  # transitively and rejects any include that reaches a kernel-internal module or resolves to a header
+  # we did not ship. Both halves run on ubuntu — the boundary is a source/CMake property, not a
+  # platform one, and the 3-OS `build` matrix already compiles the SDK everywhere.
+  #
+  # Deliberately does NOT run the `client-*` ctests: they are a plain test family auto-run by
+  # `ctest --preset dev` on all three `build` legs, so duplicating them here would add a
+  # hand-maintained `--target` list to keep in sync for no extra signal (the "Not Run = RED" tripwire
+  # this job is careful to avoid). The consumer target grows as e04/e05 land; e17 asserts its final shape.
+  editor-boundary:
+    name: editor-boundary (out-of-tree consumer + include-graph)
+    needs: [license-gate, python-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      - name: Configure (dev preset)
+        run: cmake -S src --preset dev
+
+      # Exactly the install set (src/CMakeLists.txt) + the generated client schema. `cmake --install`
+      # fails on a target whose artifact was never built, so this list and the install() call move
+      # together — if you add a library to the exported closure, add it here.
+      - name: Build the exported closure + the generated client schema
+        run: >
+          cmake --build --preset dev --target
+          context-hello context_client context_bridge context_contract context_kernel
+          context_schema context_component context_serializer context_client_schema
+        working-directory: src
+
+      - name: Install the exported artifacts to a staging prefix
+        run: cmake --install build/dev --prefix "$PWD/build/boundary-install"
+        working-directory: src
+
+      - name: Include-graph gate (D10 — no kernel internals on the published surface)
+        run: >
+          python3 tools/check_include_graph.py
+          --install-prefix src/build/boundary-install
+          --consumer src/editor/client/consumer
+
+      - name: Build + run the OUT-OF-TREE consumer against the INSTALLED package
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Resolve the R-VER-004 versions/<semver>/ dir without hardcoding the version.
+          prefix="$(echo "$PWD"/src/build/boundary-install/versions/*)"
+          test -d "$prefix" || { echo "no installed version dir under versions/"; exit 1; }
+          echo "consuming installed prefix: $prefix"
+          # A stranger's build: only CMAKE_PREFIX_PATH, never a path into the engine source tree.
+          cmake -S src/editor/client/consumer -B src/build/boundary-consumer \
+            -DCMAKE_PREFIX_PATH="$prefix"
+          cmake --build src/build/boundary-consumer
+          ./src/build/boundary-consumer/context_client_consumer_smoke
+
+      - name: Assert the generated client schema shipped with the package
+        shell: bash
+        run: |
+          set -euo pipefail
+          schema="$(echo "$PWD"/src/build/boundary-install/versions/*/share/context/context-client-schema.json)"
+          test -f "$schema" || { echo "the client schema was not installed"; exit 1; }
+          python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['rpcMethods'], 'no rpcMethods'; assert d['eventTopics'], 'no eventTopics'; print('client schema OK:', len(d['rpcMethods']), 'rpc methods,', len(d['eventTopics']), 'topics')" "$schema"
+
+      - name: sccache stats
+        run: ${SCCACHE_PATH} --show-stats
+
+  # ------------------------------------------------------------------------------------------------
   # M8.5 a21 — R-FILE-011 orchestration-density bench (ticks/sec/instance + instances-per-box).
   # The wedge-pillar-1 demo shape (ARCHITECTURE §1.1): N headless PACKED instances (the a06
   # context_runtime_server over a `context build` v1 pack) stepped/seeded/hashed in parallel from ONE

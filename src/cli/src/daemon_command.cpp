@@ -2,7 +2,7 @@
 
 #include "context/cli/daemon_command.h"
 
-#include "context/cli/wire_client.h" // shared flag_value (single-sourced with attach/fetch)
+#include "context/cli/args.h" // shared flag_value (single-sourced with attach/fetch)
 #include "context/editor/bridge/transport.h"
 #include "context/editor/contract/envelope.h"
 #include "context/editor/contract/handshake.h"
@@ -90,9 +90,11 @@ void emit(const Envelope& env, const std::optional<std::string>& out)
 }
 
 // Write the R-ARCH-005 discovery hint: `<project>/.editor/instance.json` carrying the bound endpoint
-// + pid + protocol major + a per-instance token (R-BRIDGE-007 shape — the token is CARRIED for v1;
-// token-gated mutual auth arrives with the remote door, so v1 relies on the ambient OS guard: the
-// socket file / pipe DACL). 0600 on POSIX; the Windows owner-SID DACL is a documented follow-up.
+// + pid + protocol major + a per-instance token (R-BRIDGE-007 shape). Since M9 e02 the token is
+// ENFORCED, not merely carried: a client reads it from here and presents it on attach, and the
+// daemon refuses any attach that does not (see run_daemon's require_auth). The file's own
+// confidentiality is therefore load-bearing — 0600 on POSIX, and the endpoint it names is itself
+// owner-restricted (POSIX socket mode / Windows owner-SID pipe DACL, D20).
 bool write_instance_file(const fs::path& project, const std::string& endpoint,
                          const std::string& token, std::string& error)
 {
@@ -188,11 +190,19 @@ int run_daemon(const std::vector<std::string>& args)
                             "'");
     }
 
-    // D20 attach-token enforcement (default OFF — the C-F1 sequencing: e02 flips it ON once the CLI
-    // migrates onto the client SDK). With --require-attach-token the daemon refuses any attach whose
-    // token does not match instance.json's (attach.denied); without it the token is carried but not
-    // gated on (the M1 ambient-OS-guard trust model — POSIX 0600 socket + Windows owner-SID DACL).
-    const bool require_auth = has_flag(args, "require-attach-token");
+    // D20 attach-token enforcement — DEFAULT ON since M9 e02 (C-F1 step 3). The daemon refuses any
+    // attach whose token does not match the one it published in `.editor/instance.json`
+    // (attach.denied). The flip is safe precisely because e02 also migrated the only existing client
+    // — the `context` CLI — onto context_client, which discovers and presents that token on every
+    // attach; a client that does not is, by construction, not one of ours.
+    //
+    // ESCAPE HATCH: `--no-require-attach-token` restores the pre-e02 M1 posture, where the token is
+    // carried but never gated on and the ambient OS guard (POSIX 0600 socket / Windows owner-SID
+    // pipe DACL) is the only boundary. It exists for bisecting an auth-suspected regression and for
+    // an out-of-tree client not yet migrated onto the SDK — NOT as a supported deployment mode. The
+    // legacy `--require-attach-token` is still accepted (now a no-op affirmation of the default) so
+    // existing scripts keep working. Explicit opt-out wins if both are passed.
+    const bool require_auth = !has_flag(args, "no-require-attach-token");
 
     // D19 multi-client fan-in bounds (config with sane defaults; absent keeps KernelServer's defaults
     // of 16 clients / 256 queued event frames). Strict positive parse (0 / junk is a usage error).

@@ -1,0 +1,74 @@
+# ContextClientConfig.cmake — the package an OUT-OF-TREE consumer finds (M9 e02, D10/A-F1).
+#
+#   find_package(ContextClient REQUIRED)
+#   target_link_libraries(my_editor PRIVATE Context::context_client)
+#
+# That is the whole supported surface: the client SDK plus the contract/transport types its public
+# headers name. A consumer that reaches past it — into editorkernel, filesync, derivation, compose,
+# the GUI … — is off the published boundary by construction: those headers are not installed and
+# those targets are not importable. The `editor-boundary` CI job proves it on every PR by building a
+# real consumer against this package with an include-graph check.
+#
+# The imported targets are declared by hand (not via install(EXPORT)) so the PUBLIC surface is
+# exactly one target. context_client's static-link closure — bridge, contract, kernel, schema,
+# component, serializer — is installed and chained below as PRIVATE link payload: a static archive
+# carries none of its dependencies' objects, so all of them must reach the final link, but only the
+# four whose headers are installed are includable.
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+# context_bridge's transport uses <thread>; Threads is PUBLIC on it, so the consumer needs the same
+# imported target.
+find_dependency(Threads)
+
+set_and_check(ContextClient_INCLUDE_DIR "@PACKAGE_CONTEXT_CLIENT_INSTALL_INCLUDEDIR@")
+set_and_check(ContextClient_LIB_DIR "@PACKAGE_CONTEXT_CLIENT_INSTALL_LIBDIR@")
+
+# The generated client schema (projected from the contract registry's `describe`) — what a downstream
+# client-binding generator consumes instead of hand-writing typings (R-CLI-009 spirit).
+set(ContextClient_SCHEMA "@PACKAGE_CONTEXT_CLIENT_INSTALL_DATADIR@/context-client-schema.json")
+
+# Declare one installed static archive as an imported target.
+function(_context_client_add_imported _name)
+    if(TARGET Context::${_name})
+        return()
+    endif()
+    set(_lib "${ContextClient_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${_name}${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    if(NOT EXISTS "${_lib}")
+        message(FATAL_ERROR "ContextClient: expected installed archive not found: ${_lib}")
+    endif()
+    add_library(Context::${_name} STATIC IMPORTED)
+    set_target_properties(Context::${_name} PROPERTIES
+        IMPORTED_LOCATION "${_lib}"
+        INTERFACE_INCLUDE_DIRECTORIES "${ContextClient_INCLUDE_DIR}")
+endfunction()
+
+foreach(_context_client_component
+        context_client context_bridge context_contract context_kernel
+        context_schema context_component context_serializer)
+    _context_client_add_imported(${_context_client_component})
+endforeach()
+
+# The static-link chain. Order matters for single-pass linkers (GNU ld): every archive must appear
+# after the one that references it. context_client -> bridge -> contract -> {schema, component} ->
+# serializer, with kernel required by both bridge (LogEvent forwarding) and component.
+set_target_properties(Context::context_client PROPERTIES
+    INTERFACE_LINK_LIBRARIES
+    "Context::context_bridge;Context::context_contract;Context::context_component;Context::context_schema;Context::context_serializer;Context::context_kernel;Threads::Threads")
+set_target_properties(Context::context_bridge PROPERTIES
+    INTERFACE_LINK_LIBRARIES "Context::context_contract;Context::context_kernel;Threads::Threads")
+set_target_properties(Context::context_contract PROPERTIES
+    INTERFACE_LINK_LIBRARIES "Context::context_component;Context::context_schema;Context::context_serializer")
+set_target_properties(Context::context_component PROPERTIES
+    INTERFACE_LINK_LIBRARIES "Context::context_schema;Context::context_serializer;Context::context_kernel")
+set_target_properties(Context::context_schema PROPERTIES
+    INTERFACE_LINK_LIBRARIES "Context::context_serializer")
+
+if(WIN32)
+    # advapi32: the Win32 security primitives the transport uses for the D20 owner-SID named-pipe
+    # DACL (SetEntriesInAclW / GetTokenInformation / the ACE walk).
+    set_property(TARGET Context::context_bridge APPEND PROPERTY INTERFACE_LINK_LIBRARIES advapi32)
+endif()
+
+check_required_components(ContextClient)

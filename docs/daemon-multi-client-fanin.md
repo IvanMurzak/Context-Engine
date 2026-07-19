@@ -56,25 +56,35 @@ with **`attach.denied`** (permission class) via the uniform error catalog. Enfor
 **dispatcher** (`Dispatcher::configure_attach_auth` → checked in `attach()`, BEFORE protocol
 negotiation so an unauthenticated caller learns nothing about the surface), never an adapter.
 
-### The compat flag is DEFAULT OFF in e01 — and the e02 flip plan
+### The C-F1 sequencing — and its completion in e02 (enforcement is now DEFAULT ON)
 
 Attach-token enforcement is a **behavioral tightening** (not additive for a tokenless client), so it
-is sequenced honestly per **C-F1**:
+was sequenced honestly per **C-F1** rather than flipped in one step:
 
-- **e01 (this task): enforcement DEFAULT OFF.** `context daemon` runs with verification **off** unless
-  `--require-attach-token` is passed. With it off, the token is carried on the wire but never gated
-  on — the v1 ambient-OS-guard trust model (POSIX 0600 socket + instance file; Windows owner-SID pipe
-  DACL) is the boundary, exactly as M1. This keeps e01 non-breaking for the existing tokenless CLI
-  (the only client today; no external releases exist).
-- **e02: the CLI migrates onto the client SDK** (`context_client`), which reads
-  `.editor/instance.json` and sends the token on attach. **Once every first-party client sends a
-  token, enforcement defaults ON** (drop the `--require-attach-token` opt-in; the daemon requires a
-  valid token, and `--allow-anonymous`-style escape hatches, if any, become the opt-*out*). At that
-  point a rogue local process that cannot read the 0600/DACL-protected `instance.json` cannot attach.
+- **e01: enforcement DEFAULT OFF.** `context daemon` verified nothing unless `--require-attach-token`
+  was passed; the token rode the wire but was never gated on, leaving the M1 ambient-OS-guard trust
+  model (POSIX 0600 socket + instance file; Windows owner-SID pipe DACL) as the boundary. That kept
+  e01 non-breaking for the then-tokenless CLI.
+- **e02: the CLI migrated onto the client SDK** (`context_client`), which discovers
+  `.editor/instance.json` and presents the token on every attach — and, in the SAME task, the
+  **enforcement default flipped ON**. This is why the flip is safe rather than a flag day: the CLI was
+  the only existing client, no external releases exist, and it migrated in the same change that
+  tightened the daemon.
 
-Until e02 flips it, operators who want the tightened posture early can pass `--require-attach-token`
-today; every first-party client must then send `token` from `instance.json` or be refused
-`attach.denied`.
+**Current behavior (since e02).** `context daemon` refuses any attach whose `token` is absent or does
+not match the one it published, with `attach.denied`. A rogue local process that cannot read the
+0600/DACL-protected `instance.json` therefore cannot attach at all — the file's confidentiality is now
+load-bearing, not merely advisory.
+
+**Escape hatch: `--no-require-attach-token`.** It restores the pre-e02 posture (token carried, never
+gated; ambient OS guard only). It exists for bisecting an auth-suspected regression and for an
+out-of-tree client not yet on the SDK — **not** as a supported deployment mode. The legacy
+`--require-attach-token` is still accepted as a no-op affirmation of the default so existing scripts
+keep working; if both are passed, the explicit opt-out wins.
+
+The live assertion is `client-test_client_e2e` (`src/editor/client/tests/test_client_e2e.cpp`): against
+a REAL daemon it proves a tokenless attach and a wrong-token attach are both refused as daemon-side
+rejections, while the discovered token attaches cleanly.
 
 ### Windows named-pipe owner-SID DACL (closing the documented gap)
 

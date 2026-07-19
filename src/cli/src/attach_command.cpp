@@ -1,16 +1,19 @@
-// `context attach` implementation (see attach_command.h). The wire plumbing (flag parsing, endpoint
-// discovery, one-shot JSON-RPC calls) lives in wire_client.h — shared with `context fetch`.
+// `context attach` implementation (see attach_command.h). The WIRE — endpoint discovery, the attach
+// handshake (token + scopes + protocol negotiate), and the JSON-RPC calls — is context_client
+// (src/editor/client/), the one client-side implementation shared with `context fetch`, the editor
+// shell, and every out-of-tree consumer. This file keeps only what is CLI-specific: argv parsing and
+// the R-CLI-008 envelope it prints.
 
 #include "context/cli/attach_command.h"
 
-#include "context/cli/wire_client.h"
-#include "context/editor/bridge/transport.h"
-#include "context/editor/contract/handshake.h"
+#include "context/cli/args.h"
+#include "context/editor/client/client.h"
 #include "context/editor/contract/json.h"
 
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -19,9 +22,10 @@ namespace context::cli
 {
 
 namespace fs = std::filesystem;
+using editor::client::AttachOptions;
+using editor::client::Client;
 using editor::contract::Envelope;
 using editor::contract::Json;
-using editor::bridge::TransportClient;
 
 Envelope run_attach(const std::vector<std::string>& args)
 {
@@ -55,38 +59,21 @@ Envelope run_attach(const std::vector<std::string>& args)
     const bool do_shutdown = has_flag(args, "shutdown");
     const bool do_reconcile = has_flag(args, "reconcile");
 
-    // --- discover + connect ---------------------------------------------------------------------
-    const std::optional<std::string> endpoint = discover_endpoint(project, 3000);
-    if (!endpoint.has_value())
-        return finish(Envelope::failure(
-            "internal.error", "no running daemon found for project '" + project.string() +
-                                  "' (no .editor/instance.json). Start one with `context daemon`."));
-
-    TransportClient client(*endpoint);
-    if (!client.connect(3000))
-        return finish(Envelope::failure("internal.error",
-                                        "could not connect to the daemon endpoint '" + *endpoint +
-                                            "': " + client.error()));
-
-    std::int64_t id = 0;
-    std::string err;
-
-    // --- attach: the capability handshake (requesting the file_write scope) ----------------------
-    Json attach_params = Json::object();
-    attach_params.set("protocolMajor",
-                      Json(static_cast<std::uint64_t>(editor::contract::kProtocolMajor)));
-    Json caps = Json::array();
-    caps.push_back(Json(std::string("describe")));
-    attach_params.set("capabilities", std::move(caps));
+    // --- discover + connect + attach --------------------------------------------------------------
     // Request write (for `edit`) + session (for the optional `shutdown`); the daemon's launch-time
-    // operator ceiling clamps this to least privilege (R-SEC-007).
-    attach_params.set("scope", Json(std::string("write,session")));
+    // operator ceiling clamps this to least privilege (R-SEC-007). connect_to_project() seeds the
+    // D20 attach token from `.editor/instance.json` — required since e02 flipped enforcement ON.
+    AttachOptions attach_options;
+    attach_options.scope = "write,session";
+    std::string err;
+    const std::unique_ptr<Client> client = Client::connect_to_project(project, 3000, attach_options, err);
+    if (!client)
+        return finish(Envelope::failure("internal.error", err));
+
     bool attach_rejected = false;
-    const std::optional<Json> attach_res =
-        call(client, ++id, "attach", std::move(attach_params), err, &attach_rejected);
-    if (!attach_res.has_value())
-        // Only a daemon-side rejection of the handshake is a genuine protocol/version mismatch; a
-        // transport hiccup or malformed reply is internal (matching the edit/query call sites below).
+    if (!client->attach(attach_options, err, &attach_rejected))
+        // Only a daemon-side rejection of the handshake is a genuine protocol/version/auth refusal;
+        // a transport hiccup or malformed reply is internal (matching the edit/query call sites).
         return finish(Envelope::failure(
             attach_rejected ? "handshake.incompatible_protocol" : "internal.error", err));
 
@@ -98,7 +85,7 @@ Envelope run_attach(const std::vector<std::string>& args)
     Json reconcile_data;
     if (do_reconcile)
     {
-        const std::optional<Json> rec_res = call(client, ++id, "reconcile", Json::object(), err);
+        const std::optional<Json> rec_res = client->call("reconcile", Json::object(), err);
         if (!rec_res.has_value())
             return finish(Envelope::failure("internal.error", err));
         reconcile_ok = rec_res->contains("ok") && rec_res->at("ok").as_bool();
@@ -110,7 +97,7 @@ Envelope run_attach(const std::vector<std::string>& args)
     Json edit_params = Json::object();
     edit_params.set("path", Json(set_path));
     edit_params.set("content", Json(set_content));
-    const std::optional<Json> edit_res = call(client, ++id, "edit", std::move(edit_params), err);
+    const std::optional<Json> edit_res = client->call("edit", std::move(edit_params), err);
     if (!edit_res.has_value())
         return finish(Envelope::failure("internal.error", err));
     const bool edit_ok = edit_res->contains("ok") && edit_res->at("ok").as_bool();
@@ -120,7 +107,7 @@ Envelope run_attach(const std::vector<std::string>& args)
     // --- query the derived world over the wire (read-your-writes) --------------------------------
     Json query_params = Json::object();
     query_params.set("path", Json(set_path));
-    const std::optional<Json> query_res = call(client, ++id, "query", std::move(query_params), err);
+    const std::optional<Json> query_res = client->call("query", std::move(query_params), err);
     if (!query_res.has_value())
         return finish(Envelope::failure("internal.error", err));
     const bool query_ok = query_res->contains("ok") && query_res->at("ok").as_bool();
@@ -136,15 +123,20 @@ Envelope run_attach(const std::vector<std::string>& args)
 
     // --- optional clean shutdown ----------------------------------------------------------------
     bool shutdown_ack = false;
+    std::string shutdown_error;
     if (do_shutdown)
     {
-        const std::optional<Json> stop_res = call(client, ++id, "shutdown", Json::object(), err);
+        const std::optional<Json> stop_res = client->call("shutdown", Json::object(), err);
         shutdown_ack = stop_res.has_value();
+        // A bare `false` says nothing about WHY the daemon did not ack (refused? wire dropped before
+        // the reply?), which is exactly the diagnosis someone needs when this fails. Carry the reason.
+        if (!shutdown_ack)
+            shutdown_error = err;
     }
 
     // --- summarize ------------------------------------------------------------------------------
     Json data = Json::object();
-    data.set("endpoint", Json(*endpoint));
+    data.set("endpoint", Json(client->instance().endpoint));
     data.set("attached", Json(true));
     data.set("edit", edit_data);
     data.set("query", query_data);
@@ -152,7 +144,11 @@ Envelope run_attach(const std::vector<std::string>& args)
     if (do_reconcile)
         data.set("reconcile", reconcile_data);
     if (do_shutdown)
+    {
         data.set("shutdownAck", Json(shutdown_ack));
+        if (!shutdown_error.empty())
+            data.set("shutdownError", Json(shutdown_error));
+    }
 
     const bool all_ok = edit_ok && reflected && query_ok && present && hashes_match && reconcile_ok;
     Envelope env = Envelope::success(std::move(data));

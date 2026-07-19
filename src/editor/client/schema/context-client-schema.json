@@ -1,0 +1,4216 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "contract::Registry::describe",
+  "protocolMajor": 1,
+  "protocol": {
+    "protocolMajor": 1,
+    "stable": true,
+    "minClientProtocol": 1,
+    "capabilities": [
+      "describe",
+      "result-envelope",
+      "verb-grammar",
+      "dry-run",
+      "if-match"
+    ],
+    "note": "FROZEN at protocolMajor=1 (M3 contract freeze, R-CLI-004) — the surface is stable and changes only through the R-CLI-010 deprecation lifecycle."
+  },
+  "rpcMethods": [
+    {
+      "method": "describe",
+      "ns": "",
+      "noun": "",
+      "verb": "describe",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "new",
+      "ns": "",
+      "noun": "",
+      "verb": "new",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "directory",
+        "template"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "set",
+      "ns": "",
+      "noun": "",
+      "verb": "set",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "path",
+        "value"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "pointer",
+        "id-path",
+        "edit-template",
+        "at-instance"
+      ]
+    },
+    {
+      "method": "migrate",
+      "ns": "",
+      "noun": "",
+      "verb": "migrate",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "path"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "package.add",
+      "ns": "",
+      "noun": "package",
+      "verb": "add",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "name"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "resource.read",
+      "ns": "",
+      "noun": "resource",
+      "verb": "read",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "handle",
+        "range"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "out"
+      ]
+    },
+    {
+      "method": "asset.move",
+      "ns": "",
+      "noun": "asset",
+      "verb": "move",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "from",
+        "to"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "asset.rename",
+      "ns": "",
+      "noun": "asset",
+      "verb": "rename",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "from",
+        "to"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "merge-file",
+      "ns": "",
+      "noun": "",
+      "verb": "merge-file",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "base",
+        "ours",
+        "theirs",
+        "pathname"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "output",
+        "driver"
+      ]
+    },
+    {
+      "method": "resolve-conflict",
+      "ns": "",
+      "noun": "",
+      "verb": "resolve-conflict",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "file"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "path",
+        "take",
+        "value"
+      ]
+    },
+    {
+      "method": "re-key",
+      "ns": "",
+      "noun": "",
+      "verb": "re-key",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "file"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "at",
+        "id"
+      ]
+    },
+    {
+      "method": "validate",
+      "ns": "",
+      "noun": "",
+      "verb": "validate",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "path"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "session.new",
+      "ns": "",
+      "noun": "session",
+      "verb": "new",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "state"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "seed",
+        "scenario"
+      ]
+    },
+    {
+      "method": "session.step",
+      "ns": "",
+      "noun": "session",
+      "verb": "step",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "state"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "ticks",
+        "trace"
+      ]
+    },
+    {
+      "method": "session.seed",
+      "ns": "",
+      "noun": "session",
+      "verb": "seed",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "state"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "set"
+      ]
+    },
+    {
+      "method": "session.inject",
+      "ns": "",
+      "noun": "session",
+      "verb": "inject",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "state"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "action",
+        "event",
+        "code",
+        "phase",
+        "value",
+        "at"
+      ]
+    },
+    {
+      "method": "session.hash",
+      "ns": "",
+      "noun": "session",
+      "verb": "hash",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "state"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "session.record",
+      "ns": "",
+      "noun": "session",
+      "verb": "record",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "state"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "out",
+        "manifest",
+        "non-deterministic"
+      ]
+    },
+    {
+      "method": "replay",
+      "ns": "",
+      "noun": "",
+      "verb": "replay",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "artifact"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "determinism.diff",
+      "ns": "",
+      "noun": "determinism",
+      "verb": "diff",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "left",
+        "right"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "install",
+      "ns": "",
+      "noun": "",
+      "verb": "install",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "source",
+        "production"
+      ]
+    },
+    {
+      "method": "profile.gc",
+      "ns": "",
+      "noun": "profile",
+      "verb": "gc",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "ticks",
+        "budget-ms",
+        "trigger-bytes",
+        "churn"
+      ]
+    },
+    {
+      "method": "profile.session",
+      "ns": "",
+      "noun": "profile",
+      "verb": "session",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "ticks",
+        "churn",
+        "trace-out"
+      ]
+    },
+    {
+      "method": "ui.dump",
+      "ns": "",
+      "noun": "ui",
+      "verb": "dump",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "scene"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "width",
+        "height"
+      ]
+    },
+    {
+      "method": "ui.query",
+      "ns": "",
+      "noun": "ui",
+      "verb": "query",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "scene",
+        "node"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "width",
+        "height"
+      ]
+    },
+    {
+      "method": "ui.send",
+      "ns": "",
+      "noun": "ui",
+      "verb": "send",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "scene",
+        "event"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "target",
+        "code",
+        "text",
+        "width",
+        "height"
+      ]
+    },
+    {
+      "method": "ui.assert",
+      "ns": "",
+      "noun": "ui",
+      "verb": "assert",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "scene",
+        "node"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "exists",
+        "role",
+        "text",
+        "value",
+        "visible",
+        "hidden",
+        "child-count"
+      ]
+    },
+    {
+      "method": "tilemap.paint",
+      "ns": "",
+      "noun": "tilemap",
+      "verb": "paint",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "path",
+        "cells"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "layer"
+      ]
+    },
+    {
+      "method": "tilemap.fill",
+      "ns": "",
+      "noun": "tilemap",
+      "verb": "fill",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [
+        "path",
+        "tile"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "layer",
+        "rect"
+      ]
+    },
+    {
+      "method": "build",
+      "ns": "",
+      "noun": "",
+      "verb": "build",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "target",
+        "out",
+        "flavor",
+        "runtime",
+        "runtime-loader",
+        "emit-artifact",
+        "smoke",
+        "smoke-ticks",
+        "sign",
+        "trust-root",
+        "runtime-sig",
+        "toolchain-artifact",
+        "toolchain-sig"
+      ]
+    },
+    {
+      "method": "doctor",
+      "ns": "",
+      "noun": "",
+      "verb": "doctor",
+      "stability": "stable",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "target",
+        "fetch"
+      ]
+    },
+    {
+      "method": "edit",
+      "ns": "",
+      "noun": "",
+      "verb": "edit",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [
+        "path",
+        "content"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "edit-batch",
+      "ns": "",
+      "noun": "",
+      "verb": "edit-batch",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [
+        "files"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "query",
+      "ns": "",
+      "noun": "",
+      "verb": "query",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [
+        "path"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "overrides"
+      ]
+    },
+    {
+      "method": "snapshot",
+      "ns": "",
+      "noun": "",
+      "verb": "snapshot",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "subscribe",
+      "ns": "",
+      "noun": "",
+      "verb": "subscribe",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [
+        "topics",
+        "pathScope",
+        "sinceSeq"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "unsubscribe",
+      "ns": "",
+      "noun": "",
+      "verb": "unsubscribe",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [
+        "subId"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "ack",
+      "ns": "",
+      "noun": "",
+      "verb": "ack",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [
+        "subId",
+        "seq"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "reconcile",
+      "ns": "",
+      "noun": "",
+      "verb": "reconcile",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "shutdown",
+      "ns": "",
+      "noun": "",
+      "verb": "shutdown",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "debug.attach",
+      "ns": "",
+      "noun": "debug",
+      "verb": "attach",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "endpoint"
+      ]
+    }
+  ],
+  "eventTopics": [
+    {
+      "name": "files",
+      "description": "Post-derivation file change facts (never raw filesystem noise).",
+      "payloadSchema": {
+        "fields": [
+          {
+            "name": "path",
+            "type": "path",
+            "description": "The project-relative file the fact is about."
+          },
+          {
+            "name": "change",
+            "type": "string",
+            "description": "The change class: added | modified | removed."
+          }
+        ]
+      }
+    },
+    {
+      "name": "derivation",
+      "description": "Derived-world updates, each stamped with the input content-hash.",
+      "payloadSchema": {
+        "fields": [
+          {
+            "name": "event",
+            "type": "string",
+            "description": "The derivation event, e.g. derivation.settled."
+          },
+          {
+            "name": "generation",
+            "type": "generation",
+            "description": "The derived-world generation this update reflects."
+          },
+          {
+            "name": "inputHash",
+            "type": "hash",
+            "description": "The content-hash of the input file version derived from (the write-acknowledgement)."
+          }
+        ]
+      }
+    },
+    {
+      "name": "diagnostics",
+      "description": "Machine-readable diagnostics through the R-CLI-008 error schema.",
+      "payloadSchema": {
+        "fields": [
+          {
+            "name": "code",
+            "type": "string",
+            "description": "The R-CLI-008 catalog error code."
+          },
+          {
+            "name": "message",
+            "type": "string",
+            "description": "The human-readable diagnostic message."
+          },
+          {
+            "name": "stability",
+            "type": "string",
+            "description": "provisional while the generation churns; promoted to stable once it settles (R-BRIDGE-008)."
+          },
+          {
+            "name": "pointer",
+            "type": "string",
+            "description": "Optional RFC 6901 JSON-pointer / location the diagnostic is about."
+          }
+        ]
+      }
+    },
+    {
+      "name": "session",
+      "description": "Session lifecycle + restart-class reload announcements.",
+      "payloadSchema": {
+        "fields": [
+          {
+            "name": "event",
+            "type": "string",
+            "description": "The lifecycle event, e.g. started | reloaded | stopped."
+          }
+        ]
+      }
+    },
+    {
+      "name": "clients",
+      "description": "Client attach/detach on the daemon.",
+      "payloadSchema": {
+        "fields": [
+          {
+            "name": "event",
+            "type": "string",
+            "description": "attached | detached."
+          },
+          {
+            "name": "protocolMajor",
+            "type": "generation",
+            "description": "The negotiated protocol major (on attach)."
+          },
+          {
+            "name": "scopes",
+            "type": "json",
+            "description": "The granted scope names (on attach)."
+          }
+        ]
+      }
+    },
+    {
+      "name": "log",
+      "description": "Structured log entries (severity, source, tick, session).",
+      "payloadSchema": {
+        "fields": [
+          {
+            "name": "level",
+            "type": "string",
+            "description": "The severity: trace | debug | info | warn | error."
+          },
+          {
+            "name": "message",
+            "type": "string",
+            "description": "The log message text."
+          },
+          {
+            "name": "source",
+            "type": "string",
+            "description": "The origin: ts | native | module (R-BRIDGE-008)."
+          },
+          {
+            "name": "tick",
+            "type": "generation",
+            "description": "The sim tick, when the entry is session-scoped."
+          },
+          {
+            "name": "session",
+            "type": "string",
+            "description": "The session id, when session-scoped."
+          }
+        ]
+      }
+    }
+  ],
+  "eventEnvelope": {
+    "fields": [
+      {
+        "name": "seq",
+        "type": "generation",
+        "description": "The monotonic, totally-ordered event seq within the incarnation (R-BRIDGE-008)."
+      },
+      {
+        "name": "incarnationId",
+        "type": "string",
+        "description": "The daemon incarnation epoch; a restart forces a fresh snapshot rather than a stale since-seq resume."
+      },
+      {
+        "name": "generation",
+        "type": "generation",
+        "description": "The derived-world generation the event reflects."
+      },
+      {
+        "name": "topic",
+        "type": "string",
+        "description": "The event topic name."
+      },
+      {
+        "name": "payload",
+        "type": "json",
+        "description": "The topic-specific payload (see eventTopics)."
+      }
+    ]
+  },
+  "subscription": {
+    "requirement": "R-CLI-015",
+    "methods": [
+      "subscribe",
+      "unsubscribe",
+      "ack"
+    ],
+    "snapshotThenDelta": true,
+    "retention": "slowest-acked-cursor",
+    "gapMarkerOnOverflow": true,
+    "neverBlocksOnSlowClient": true,
+    "cursor": {
+      "unifiedWith": "R-BRIDGE-008",
+      "uriScheme": "context-cur",
+      "resumeField": "sinceSeq"
+    }
+  },
+  "errorCatalog": [
+    {
+      "code": "usage.invalid",
+      "message": "The command could not be parsed against the verb grammar.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-CLI-007"
+    },
+    {
+      "code": "usage.unknown_verb",
+      "message": "No such verb in the contract surface.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-CLI-007"
+    },
+    {
+      "code": "usage.unknown_flag",
+      "message": "Unknown flag for this verb.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-CLI-007"
+    },
+    {
+      "code": "usage.missing_argument",
+      "message": "A required argument was not supplied.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-CLI-007"
+    },
+    {
+      "code": "namespace.collision",
+      "message": "A package's reserved namespace collides with an already-registered one.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-CLI-007"
+    },
+    {
+      "code": "file.not_found",
+      "message": "The referenced file does not exist.",
+      "retriable": false,
+      "exitCode": 3,
+      "origin": "R-FILE-003"
+    },
+    {
+      "code": "file.parse_error",
+      "message": "The file is not well-formed and could not be parsed.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-FILE-003"
+    },
+    {
+      "code": "file.validation_failed",
+      "message": "The payload failed schema validation for its kind.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-FILE-003"
+    },
+    {
+      "code": "cas.mismatch",
+      "message": "The --if-match hash did not match the file's current bytes.",
+      "retriable": true,
+      "exitCode": 4,
+      "origin": "R-CLI-006"
+    },
+    {
+      "code": "path.jail_violation",
+      "message": "The path escapes the project root and was refused.",
+      "retriable": false,
+      "exitCode": 6,
+      "origin": "R-SEC-008"
+    },
+    {
+      "code": "handshake.incompatible_protocol",
+      "message": "The client protocol major is outside the daemon's compatibility window.",
+      "retriable": false,
+      "exitCode": 7,
+      "origin": "R-CLI-010"
+    },
+    {
+      "code": "version.mismatch",
+      "message": "Engine/protocol versions are incompatible; attach refused.",
+      "retriable": false,
+      "exitCode": 7,
+      "origin": "R-BRIDGE-006"
+    },
+    {
+      "code": "package.engine_incompatible",
+      "message": "The package declares an engine-compat range the running engine does not satisfy.",
+      "retriable": false,
+      "exitCode": 7,
+      "origin": "R-PKG-005"
+    },
+    {
+      "code": "schema.newer_than_engine",
+      "message": "The payload is stamped for a newer engine schema; last-good state retained.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-PKG-005"
+    },
+    {
+      "code": "schema.newer_than_package",
+      "message": "The payload is stamped for a newer package schema; last-good state retained.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-PKG-005"
+    },
+    {
+      "code": "contract.unimplemented",
+      "message": "The verb surface is reserved in the contract but its backing is not wired in this version.",
+      "retriable": false,
+      "exitCode": 8,
+      "origin": "R-CLI-009"
+    },
+    {
+      "code": "internal.error",
+      "message": "An unexpected internal error occurred.",
+      "retriable": false,
+      "exitCode": 1,
+      "origin": "R-CLI-008"
+    },
+    {
+      "code": "scope.denied",
+      "message": "The attach token's scope does not permit this method (least privilege, R-SEC-007).",
+      "retriable": false,
+      "exitCode": 6,
+      "origin": "R-SEC-007"
+    },
+    {
+      "code": "merge.conflict",
+      "message": "A structural three-way merge left an unresolved field conflict; see the conflict envelope.",
+      "retriable": false,
+      "exitCode": 4,
+      "origin": "R-FILE-012"
+    },
+    {
+      "code": "merge.id_conflict",
+      "message": "The same intra-file id was added on both sides relative to base — a structural conflict, never silently unified (L-33).",
+      "retriable": false,
+      "exitCode": 4,
+      "origin": "R-FILE-012"
+    },
+    {
+      "code": "merge.binary_sidecar",
+      "message": "A binary sidecar differs on both sides; binaries are never content-merged — resolve whole-file ours/theirs (L-33).",
+      "retriable": false,
+      "exitCode": 4,
+      "origin": "R-FILE-012"
+    },
+    {
+      "code": "merge.meta_guid",
+      "message": "Both sides minted a different GUID for the same asset meta; GUID identity is never field-blended — resolve whole-asset ours/theirs (L-36).",
+      "retriable": false,
+      "exitCode": 4,
+      "origin": "R-FILE-012"
+    },
+    {
+      "code": "merge.newer_stamped",
+      "message": "A merge input carries payloads stamped newer than the installed schemas; a whole-file conflict class, never a parse error (L-37).",
+      "retriable": false,
+      "exitCode": 4,
+      "origin": "R-FILE-012"
+    },
+    {
+      "code": "merge.duplicate_id",
+      "message": "Two objects in one file share an intra-file id (an id add/add or a raw copy); re-key one via `context re-key`. The post-merge convergence gate.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-FILE-012"
+    },
+    {
+      "code": "merge.no_conflict_at_path",
+      "message": "`context resolve-conflict` named a --path with no open conflict in the merge sidecar.",
+      "retriable": false,
+      "exitCode": 3,
+      "origin": "R-FILE-012"
+    },
+    {
+      "code": "merge.rekey_target_invalid",
+      "message": "The re-key target does not resolve to an object carrying a stable intra-file id (or the requested id is invalid).",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-FILE-012"
+    },
+    {
+      "code": "scope.insufficient",
+      "message": "The attach token holds a lower scope than this method requires; re-attach with the needed scope.",
+      "retriable": false,
+      "exitCode": 6,
+      "origin": "R-SEC-007"
+    },
+    {
+      "code": "contract.operational_only",
+      "message": "This verb is operational: it is served by a live daemon over RPC (attach to a running 'context daemon'), not as a one-shot CLI verb.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-CLI-009"
+    },
+    {
+      "code": "resource.unknown_handle",
+      "message": "The resource handle is unknown to this daemon instance (expired, foreign, or malformed).",
+      "retriable": false,
+      "exitCode": 3,
+      "origin": "R-CLI-017"
+    },
+    {
+      "code": "migration.step_missing",
+      "message": "No registered migration step covers a version in the payload's chain (a gap).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-DATA-004"
+    },
+    {
+      "code": "migration.step_failed",
+      "message": "A migration step reported failure; the document rolled back.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-DATA-004"
+    },
+    {
+      "code": "migration.budget_exceeded",
+      "message": "A payload exceeded the per-invocation migration budget (L-37); the document rolled back.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-DATA-004"
+    },
+    {
+      "code": "migration.id_mutated",
+      "message": "A migration step altered, moved, added, or removed an id/guid — identity is immutable (L-37); the document rolled back.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-DATA-004"
+    },
+    {
+      "code": "migration.runner_unavailable",
+      "message": "Package-shipped migrations execute only in the sandboxed WASM tier; the VM component is not stood up yet (L-37 contract; execution deliberately stubbed).",
+      "retriable": false,
+      "exitCode": 8,
+      "origin": "R-DATA-004"
+    },
+    {
+      "code": "migration.orphan_override",
+      "message": "An override path has no destination after migration; the entry is preserved but excluded from flatten (L-37 orphan override).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-DATA-004"
+    },
+    {
+      "code": "sidecar.bad_magic",
+      "message": "The file does not begin with the sidecar magic.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-FILE-001"
+    },
+    {
+      "code": "sidecar.truncated",
+      "message": "The sidecar file is shorter than its fixed header.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-FILE-001"
+    },
+    {
+      "code": "sidecar.unsupported_version",
+      "message": "The sidecar header carries a format version this engine cannot read; last-good state retained.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-FILE-001"
+    },
+    {
+      "code": "sidecar.ref_malformed",
+      "message": "A $sidecar reference is not the canonical {\"$sidecar\": \"<relpath>\", \"hash\": \"<decimal>\"} shape.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-FILE-003"
+    },
+    {
+      "code": "sidecar.dangling_ref",
+      "message": "A $sidecar reference names a sidecar file that does not exist.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-FILE-003"
+    },
+    {
+      "code": "sidecar.orphaned",
+      "message": "A sidecar file exists with no referencing owner.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-FILE-003"
+    },
+    {
+      "code": "sidecar.hash_mismatch",
+      "message": "The sidecar's whole-file raw bytes do not hash to the referencing \"hash\" value.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-FILE-001"
+    },
+    {
+      "code": "asset.guid_duplicate",
+      "message": "Two live assets claim the same GUID (raw copy?); the lexicographically-first path keeps it — re-key the duplicate via `context validate --fix`.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-ASSET-002"
+    },
+    {
+      "code": "asset.meta_orphaned",
+      "message": "A meta sidecar's asset file is missing (raw move or delete); healing pairs unique moves, `context validate --fix` cleans deliberate deletes.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-ASSET-002"
+    },
+    {
+      "code": "asset.meta_invalid",
+      "message": "A meta sidecar is malformed (not well-formed JSON, root not an object, or no valid \"guid\"); non-canonical formatting alone is tolerated.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-ASSET-002"
+    },
+    {
+      "code": "asset.heal_ambiguous",
+      "message": "Raw-move healing found no UNIQUE orphan/newcomer pairing; nothing was written — re-run the move via `context asset move` or resolve by hand.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-ASSET-002"
+    },
+    {
+      "code": "asset.ref_dangling",
+      "message": "A reference resolves to no indexed asset (unknown $ref GUID, or a path that names nothing).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-ASSET-002"
+    },
+    {
+      "code": "asset.ref_path_only",
+      "message": "A path-only reference (accepted, L-34); `context validate --fix` or the next tool save resolves the authoritative $ref GUID.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-ASSET-002"
+    },
+    {
+      "code": "asset.ref_hint_stale",
+      "message": "A dual-form reference's path hint no longer matches the asset's location; healed on tool save (L-34).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-ASSET-002"
+    },
+    {
+      "code": "asset.move_source_missing",
+      "message": "The move/rename source asset does not exist.",
+      "retriable": false,
+      "exitCode": 3,
+      "origin": "R-FILE-004"
+    },
+    {
+      "code": "asset.move_destination_exists",
+      "message": "The move/rename destination is occupied by a different asset (or an orphaned sidecar holding one's identity); move never overwrites.",
+      "retriable": false,
+      "exitCode": 4,
+      "origin": "R-FILE-004"
+    },
+    {
+      "code": "asset.move_invalid",
+      "message": "The move/rename request is malformed (a sidecar, temp-residue, or dot-tree path, or an empty path).",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-FILE-004"
+    },
+    {
+      "code": "import.source_malformed",
+      "message": "The source asset is not the format its extension claims, or its container is truncated / structurally invalid; nothing was imported.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-ASSET-001"
+    },
+    {
+      "code": "import.decode_failed",
+      "message": "The source asset's container parsed but its contents could not be decoded (e.g. a chunk CRC mismatch or an unreadable payload).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-ASSET-001"
+    },
+    {
+      "code": "import.unsupported_format",
+      "message": "The source asset uses a format variant this importer does not support in v1 (e.g. a non-PCM WAV or a non-2.0 glTF); it is refused, never silently mis-imported.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-ASSET-001"
+    },
+    {
+      "code": "import.jail_escape",
+      "message": "An importer run attempted to read or write outside its TOCTOU-safe path jail, or requested the denied network capability; the run was refused (R-SEC-006/008/010).",
+      "retriable": false,
+      "exitCode": 6,
+      "origin": "R-SEC-008"
+    },
+    {
+      "code": "import.subprocess_failed",
+      "message": "The isolated importer subprocess failed to spawn, was killed by its per-OS sandbox primitive (seccomp-bpf and friends), or exited without returning a result; nothing was imported and the run fails closed (R-SEC-006).",
+      "retriable": false,
+      "exitCode": 1,
+      "origin": "R-SEC-006"
+    },
+    {
+      "code": "import.non_deterministic",
+      "message": "An importer produced different bytes across the CI double-run byte-compare; the shared cache is only sound for run-deterministic importers, so this fails the gate.",
+      "retriable": false,
+      "exitCode": 1,
+      "origin": "R-ASSET-001"
+    },
+    {
+      "code": "import.cache_corrupt",
+      "message": "A shared-cache entry failed its content-hash self-verification on read (corruption); the entry is rejected and the artifact re-derived (R-FILE-010).",
+      "retriable": true,
+      "exitCode": 5,
+      "origin": "R-FILE-010"
+    },
+    {
+      "code": "compose.write_target_not_found",
+      "message": "The composed-write target does not resolve — the id-path names no composed entity, or an --at-instance prefix names no instancing scene.",
+      "retriable": false,
+      "exitCode": 3,
+      "origin": "R-CLI-006"
+    },
+    {
+      "code": "compose.immutable_pointer",
+      "message": "The field pointer addresses an identity field (/id, /$schema, /version) that is immutable under composition (L-37).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-CLI-006"
+    },
+    {
+      "code": "tilemap.chunk_oversize",
+      "message": "A tilemap chunk's packed cell payload exceeds the ~1 MB split-nudge ceiling; split the region (L-33 advisory).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-2D-003"
+    },
+    {
+      "code": "tilemap.region_invalid",
+      "message": "A tilemap chunk region has a non-positive width or height.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-2D-003"
+    },
+    {
+      "code": "tilemap.id_duplicate",
+      "message": "Two tilemap tile-sets or two layers share a stable id (L-33 ids are unique within a collection).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-2D-003"
+    },
+    {
+      "code": "stringtable.locale_duplicate",
+      "message": "Two string-table locales declare the same tag.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-I18N-001"
+    },
+    {
+      "code": "stringtable.key_duplicate",
+      "message": "Two string-table entries declare the same key.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-I18N-001"
+    },
+    {
+      "code": "stringtable.fallback_unknown",
+      "message": "A locale's fallback names a locale not declared in the table's `locales`.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-I18N-001"
+    },
+    {
+      "code": "stringtable.fallback_cycle",
+      "message": "A locale's fallback chain contains a cycle.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-I18N-001"
+    },
+    {
+      "code": "stringtable.value_invalid",
+      "message": "A string-table translation is not EXACTLY ONE of `text` or `plural`.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-I18N-001"
+    },
+    {
+      "code": "stringtable.plural_incomplete",
+      "message": "A plural set omits the required CLDR `other` category.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-I18N-001"
+    },
+    {
+      "code": "stringtable.value_locale_duplicate",
+      "message": "Two translations for one string-table key declare the same locale.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-I18N-001"
+    },
+    {
+      "code": "save.malformed",
+      "message": "The save document shape is invalid (not a save envelope, a bad composed identity, or a component payload the save header does not stamp).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-DATA-005"
+    },
+    {
+      "code": "save.unknown_component",
+      "message": "The save carries a component this build's compiled component set does not include; a save migration runner embeds migrations for exactly the compiled set (R-DATA-005).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-DATA-005"
+    },
+    {
+      "code": "save.back_compat_exceeded",
+      "message": "A saved component payload is stamped more schema versions behind than the declared save back-compat scope (N versions) covers; refused, never best-effort read (R-DATA-005).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-DATA-005"
+    },
+    {
+      "code": "save.format_unsupported",
+      "message": "The save envelope's format version is newer than this build reads; last-good retained, never a best-effort parse (R-DATA-005).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-DATA-005"
+    },
+    {
+      "code": "session.state_invalid",
+      "message": "The session-state document is malformed, an unsupported version, or names ids that are not restorable.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-QA-005"
+    },
+    {
+      "code": "session.state_not_found",
+      "message": "The named session-state file does not exist.",
+      "retriable": false,
+      "exitCode": 3,
+      "origin": "R-QA-005"
+    },
+    {
+      "code": "session.input_invalid",
+      "message": "A synthetic input event / action activation injection was malformed (unknown kind or a missing field).",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-QA-005"
+    },
+    {
+      "code": "replay.artifact_invalid",
+      "message": "The replay artifact is malformed or an unsupported version.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-QA-005"
+    },
+    {
+      "code": "replay.manifest_drift",
+      "message": "The project inputs drifted from the replay artifact's content manifest; reported as drift BEFORE running, never a silent divergence.",
+      "retriable": false,
+      "exitCode": 4,
+      "origin": "R-QA-005"
+    },
+    {
+      "code": "replay.divergence",
+      "message": "A deterministic replay diverged from its expected per-tick hash trace; the first divergent tick is reported.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-QA-005"
+    },
+    {
+      "code": "query.syntax_error",
+      "message": "The query expression could not be parsed against the R-CLI-012 grammar; see the byte offset in the diagnostic pointer.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-CLI-012"
+    },
+    {
+      "code": "query.unknown_operator",
+      "message": "The query used an operator or predicate function not in the enumerated R-CLI-012 operator set (equality / range / existence / string-match).",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-CLI-012"
+    },
+    {
+      "code": "query.invalid_cursor",
+      "message": "The pagination cursor is malformed, from a foreign daemon incarnation, or not the unified R-CLI-012 / R-BRIDGE-008 cursor shape; re-issue the query without a cursor.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-CLI-012"
+    },
+    {
+      "code": "query.unsupported_surface",
+      "message": "The query named a surface other than the derived world, live-sim state, or schema introspection — the one language spans exactly those three.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-CLI-012"
+    },
+    {
+      "code": "ts.transpile_failed",
+      "message": "TypeScript could not be transpiled to JavaScript (a syntax or transform error); see the diagnostic text.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-LANG-002"
+    },
+    {
+      "code": "ts.bundle_failed",
+      "message": "The TypeScript entrypoint could not be bundled (an unresolved import or transform error); see the diagnostic text.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-LANG-002"
+    },
+    {
+      "code": "ts.type_error",
+      "message": "TypeScript failed a semantic typecheck (a --noEmit type error); the diagnostic carries the tsc code (TSxxxx) and the authored .ts line:column.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-LANG-002"
+    },
+    {
+      "code": "ts.runtime_error",
+      "message": "Authored TypeScript threw at runtime; the diagnostic carries a TS-source-mapped stack trace (authored .ts position, not the transpiled JS position).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-OBS-005"
+    },
+    {
+      "code": "subscription.unknown_sub",
+      "message": "The subscription id is not a live subscription on this daemon incarnation (never subscribed, already unsubscribed, or from a prior incarnation); re-subscribe.",
+      "retriable": false,
+      "exitCode": 3,
+      "origin": "R-CLI-015"
+    },
+    {
+      "code": "install.version_unpinned",
+      "message": "An engine-driven install requires an exact pinned version; a dependency spec is a range, dist-tag, or url (R-SEC-005). The install is refused, never floated.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SEC-005"
+    },
+    {
+      "code": "install.integrity_mismatch",
+      "message": "A fetched package artifact's bytes did not match its lockfile integrity (SRI) hash, or the SRI named no verifiable algorithm; the artifact is refused, never used with a warning (verify-before-use, fail-closed — R-SEC-009).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SEC-005"
+    },
+    {
+      "code": "install.lockfile_incomplete",
+      "message": "A dependency is missing from the lockfile, or a lock entry lacks an exact version / integrity — the dependency graph is not fully pinned (incl. transitive), so the install is refused fail-closed.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SEC-005"
+    },
+    {
+      "code": "install.scripts_required",
+      "message": "The package declares an install lifecycle script, classifying it native-tier; engine-driven installs never run lifecycle scripts (--ignore-scripts, all tiers), so it is refused pending the L-49 consent gate (see consent_required).",
+      "retriable": false,
+      "exitCode": 6,
+      "origin": "R-SEC-005"
+    },
+    {
+      "code": "install.fetch_failed",
+      "message": "The package source could not supply a pinned artifact's bytes (e.g. the offline --source cache lacks the tarball) — a source/cache miss, distinct from a lockfile-completeness or integrity defect. The install is refused fail-closed.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SEC-005"
+    },
+    {
+      "code": "consent_required",
+      "message": "A native-tier / build+install action was requested without the needed grant; it returns this machine-readable code (carrying the requested scope + an approval ref) and resumes the same idempotency-keyed op once granted out-of-band (R-SEC-011).",
+      "retriable": false,
+      "exitCode": 6,
+      "origin": "R-SEC-011"
+    },
+    {
+      "code": "debug.attach_failed",
+      "message": "Attaching the V8 in-box CDP inspector session failed (the inspector could not be created or connected through EditorKernel); no debug session was established.",
+      "retriable": false,
+      "exitCode": 1,
+      "origin": "R-OBS-005"
+    },
+    {
+      "code": "debug.unsupported",
+      "message": "This build has no V8 backend, so no CDP inspector can be attached; the debug attach is available only where the V8 host is linked (the CI/MSVC-tier builds).",
+      "retriable": false,
+      "exitCode": 8,
+      "origin": "R-OBS-005"
+    },
+    {
+      "code": "merge.invalid_stable_id",
+      "message": "A stable intra-file id is not the L-33 form (16..32 lowercase hex chars); re-key it via `context re-key`. The `context validate` FORMAT gate, sibling to merge.duplicate_id.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-FILE-012"
+    },
+    {
+      "code": "viewport.adapter_absent",
+      "message": "No GPU adapter is available to render the observer viewport; absence is reported, never a fabricated frame (R-HEAD-002).",
+      "retriable": false,
+      "exitCode": 8,
+      "origin": "R-HEAD-002"
+    },
+    {
+      "code": "viewport.surface_unavailable",
+      "message": "The L-41 CEF compositing surface for the observer viewport could not be acquired (e.g. the selected mode needs a GPU shared-texture surface but no GPU compositor is present).",
+      "retriable": false,
+      "exitCode": 1,
+      "origin": "R-UI-007"
+    },
+    {
+      "code": "viewport.render_failed",
+      "message": "The observer viewport's scene render or pixel readback failed (R-REND-002).",
+      "retriable": false,
+      "exitCode": 1,
+      "origin": "R-REND-002"
+    },
+    {
+      "code": "play.not_running",
+      "message": "A play control (pause / step / hot-reload) was issued with no live play session; start play first (L-51 edit state).",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-PLAY-001"
+    },
+    {
+      "code": "play.session_failed",
+      "message": "The play session could not be started over the edit state; nothing was played and no authored file was written (L-51 fail-closed).",
+      "retriable": false,
+      "exitCode": 1,
+      "origin": "R-PLAY-001"
+    },
+    {
+      "code": "play.step_failed",
+      "message": "Advancing the running play session by a fixed tick failed; the session state is unchanged (R-SIM-002 fail-closed).",
+      "retriable": false,
+      "exitCode": 1,
+      "origin": "R-PLAY-002"
+    },
+    {
+      "code": "play.hot_reload_failed",
+      "message": "A live authored edit could not be reflected into the running play session (L-22 hot reload); the running session is unchanged.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-PLAY-003"
+    },
+    {
+      "code": "determinism.attestation_fastmath_forbidden",
+      "message": "A forbidden relaxed-FP flag (fast-math) reached the sim path of a deterministic build; deterministic:true is refused, never forged (R-SIM-005).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SIM-005"
+    },
+    {
+      "code": "determinism.attestation_strict_fp_missing",
+      "message": "A deterministic build did not have the strict floating-point model in effect (MSVC /fp:strict); the produced attestation fails closed rather than claim unverified determinism.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SIM-005"
+    },
+    {
+      "code": "determinism.attestation_flags_unverified",
+      "message": "A deterministic build was requested but recorded no applied strict-FP flags to attest over; the attestation cannot be PRODUCED from verified flags, so it is refused (R-SEC-009 fail-closed).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SIM-005"
+    },
+    {
+      "code": "physics3d.invalid_entity",
+      "message": "A dead or null entity handle was passed to a physics operation; nothing was simulated or modified (fail-closed).",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-SYS-001"
+    },
+    {
+      "code": "physics3d.missing_component",
+      "message": "A physics operation targeted an entity that lacks the full physics component set (transform + velocity + body + collider); the world is unchanged.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-SYS-001"
+    },
+    {
+      "code": "physics3d.invalid_shape",
+      "message": "A collider was rejected: a sphere radius or box half-extent was not positive; no physics components were added (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SYS-001"
+    },
+    {
+      "code": "physics3d.invalid_mass",
+      "message": "A dynamic body was rejected: its mass was not positive; no physics components were added (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SYS-001"
+    },
+    {
+      "code": "physics3d.invalid_step",
+      "message": "A physics simulation step was refused: the fixed tick duration was not positive; the world is unchanged.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SYS-001"
+    },
+    {
+      "code": "physics2d.invalid_entity",
+      "message": "A dead or null entity handle was passed to a physics operation; nothing was simulated or modified (fail-closed).",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-2D-002"
+    },
+    {
+      "code": "physics2d.missing_component",
+      "message": "A physics operation targeted an entity that lacks the full physics component set (transform + velocity + body + collider); the world is unchanged.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-2D-002"
+    },
+    {
+      "code": "physics2d.invalid_shape",
+      "message": "A collider was rejected: a circle radius or box half-extent was not positive; no physics components were added (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-2D-002"
+    },
+    {
+      "code": "physics2d.invalid_mass",
+      "message": "A dynamic body was rejected: its mass was not positive; no physics components were added (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-2D-002"
+    },
+    {
+      "code": "physics2d.invalid_step",
+      "message": "A physics simulation step was refused: the fixed tick duration was not positive; the world is unchanged.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-2D-002"
+    },
+    {
+      "code": "anim.invalid_entity",
+      "message": "A dead or null entity handle was passed to an animation operation; nothing was simulated or modified (fail-closed).",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-SYS-002"
+    },
+    {
+      "code": "anim.missing_component",
+      "message": "An animation operation targeted an entity that lacks the animator component; the world is unchanged.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-SYS-002"
+    },
+    {
+      "code": "anim.invalid_rig",
+      "message": "A rig was rejected: it has no clips or graph states, an out-of-range initial state, a non-positive clip duration, or a graph state / transition naming a non-existent clip or state; the AnimationWorld keeps its previous rig (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SYS-008"
+    },
+    {
+      "code": "anim.duplicate_component",
+      "message": "An animator could not be attached: the entity already carries one; nothing was overwritten (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SYS-002"
+    },
+    {
+      "code": "anim.invalid_step",
+      "message": "An animation simulation step was refused: the fixed tick duration was not positive; the world is unchanged.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SYS-002"
+    },
+    {
+      "code": "particle.invalid_entity",
+      "message": "A dead or null entity handle was passed to a particle operation; nothing was simulated or modified (fail-closed).",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-SYS-003"
+    },
+    {
+      "code": "particle.missing_component",
+      "message": "A particle operation targeted an entity that lacks the emitter component; the world is unchanged.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-SYS-003"
+    },
+    {
+      "code": "particle.invalid_config",
+      "message": "An emitter description was rejected: a negative emission rate, a non-positive particle lifetime, or a negative velocity spread; no component was added (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SYS-003"
+    },
+    {
+      "code": "particle.invalid_step",
+      "message": "A particle simulation step was refused: the fixed tick duration was not positive; the world is unchanged.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SYS-003"
+    },
+    {
+      "code": "spline.invalid_entity",
+      "message": "A dead or null entity handle was passed to a spline operation; nothing was simulated or modified (fail-closed).",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-SYS-004"
+    },
+    {
+      "code": "spline.missing_component",
+      "message": "A spline operation targeted an entity that lacks the path-follower component; the world is unchanged.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-SYS-004"
+    },
+    {
+      "code": "spline.invalid_path",
+      "message": "A path selection was rejected: the installed curve set is empty or malformed, or a follower named an out-of-range path index; no follower is attached and the world keeps its prior paths (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SYS-004"
+    },
+    {
+      "code": "spline.duplicate_component",
+      "message": "A path follower could not be attached: the entity already carries one; nothing was overwritten (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SYS-004"
+    },
+    {
+      "code": "spline.invalid_step",
+      "message": "A spline simulation step was refused: the fixed tick duration was not positive; the world is unchanged.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SYS-004"
+    },
+    {
+      "code": "audio.invalid_entity",
+      "message": "A dead or null entity handle was passed to an audio observe/spatialize operation; nothing was read or triggered (fail-closed).",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-SYS-006"
+    },
+    {
+      "code": "audio.invalid_bus",
+      "message": "An audio mixing-bus graph was rejected: it is empty, has a duplicate bus id, or a bus names a non-existent or cyclic parent; no bus graph is installed (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SYS-006"
+    },
+    {
+      "code": "audio.invalid_event",
+      "message": "An audio event was rejected: a negative gain, an inverted/degenerate spatialization range, or a reference to an out-of-range bus; nothing was triggered (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SYS-006"
+    },
+    {
+      "code": "audio.device_unavailable",
+      "message": "The audio device could not be initialized; audio playback is disabled. The simulation is unaffected — audio is a presentation observer off the sim path (fail-closed for audio only).",
+      "retriable": false,
+      "exitCode": 1,
+      "origin": "R-SYS-006"
+    },
+    {
+      "code": "input.invalid_context",
+      "message": "An input context was rejected: an empty context id, or a binding with an empty device/code/action or an unrecognized device source; no context was installed (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SYS-007"
+    },
+    {
+      "code": "input.duplicate_context",
+      "message": "An input context could not be installed: its id is already installed; nothing was overwritten (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SYS-007"
+    },
+    {
+      "code": "input.unknown_context",
+      "message": "An input operation named a context id that is not installed (or popped an empty active stack); the active stack is unchanged.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-SYS-007"
+    },
+    {
+      "code": "input.unknown_action",
+      "message": "A rebind named an action that has no binding in the target context; nothing was repointed (fail-closed).",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-SYS-007"
+    },
+    {
+      "code": "sim.gc.unavailable",
+      "message": "A JS-tier GC-discipline or GC-profiler operation needs the in-process JS VM, but this build carries the stub backend; nothing ran (fail-closed — the simulation is unaffected).",
+      "retriable": false,
+      "exitCode": 1,
+      "origin": "R-SIM-008"
+    },
+    {
+      "code": "sim.gc.invalid_budget",
+      "message": "A scheduled inter-tick GC window was refused: the requested pause budget is not a finite positive duration; nothing was collected (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SIM-008"
+    },
+    {
+      "code": "sim.gc.window_failed",
+      "message": "The JS VM reported a failure while running a scheduled inter-tick GC window or a GC-profiler query; the simulation state is unaffected (GC touches the JS heap only).",
+      "retriable": false,
+      "exitCode": 1,
+      "origin": "R-SIM-008"
+    },
+    {
+      "code": "net.invalid_net_id",
+      "message": "A replication registration used the unassigned network identity (net id 0); nothing was registered (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-NET-001"
+    },
+    {
+      "code": "net.duplicate_net_id",
+      "message": "Two entities were registered for replication with the same network identity; the second was refused so the composed-id keyed mapping stays 1:1 (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-NET-001"
+    },
+    {
+      "code": "net.snapshot_component_mismatch",
+      "message": "A state-sync snapshot carried a component payload whose byte length disagrees with the replicated component set's declared size for that component; nothing was applied and the replica is unchanged (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-NET-001"
+    },
+    {
+      "code": "net.authority_conflict",
+      "message": "A state-sync delta targeted an entity the replica itself holds authority over; the authoritative peer's local state wins, so the delta is refused and the replica is unchanged.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-NET-001"
+    },
+    {
+      "code": "ui.scene_not_found",
+      "message": "The named UI-scene file does not exist.",
+      "retriable": false,
+      "exitCode": 3,
+      "origin": "R-UI-006"
+    },
+    {
+      "code": "ui.scene_invalid",
+      "message": "The UI-scene document is malformed, an unsupported version, or names an unknown role or event kind; nothing was built (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-UI-006"
+    },
+    {
+      "code": "ui.node_not_found",
+      "message": "A UI drive/assert verb named a node (by author name) that is not present in the tree.",
+      "retriable": false,
+      "exitCode": 3,
+      "origin": "R-UI-006"
+    },
+    {
+      "code": "ui.invalid_event",
+      "message": "A `ui send` request was malformed: an unknown event kind, or a required field for it (target node, key code, or text) was missing; nothing was dispatched (fail-closed).",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-UI-006"
+    },
+    {
+      "code": "ui.assertion_failed",
+      "message": "A `ui assert` expectation did not hold over the loaded tree; the diagnostic reports the asserted fact, the expected value, and the actual value (the headless-CLI assert verdict).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-UI-006"
+    },
+    {
+      "code": "transcode.no_target",
+      "message": "The per-platform transcode table has no row for this (artifact kind, platform); the variant is surfaced as unavailable, never guessed (R-BUILD-003).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-BUILD-003"
+    },
+    {
+      "code": "transcode.unsupported_format",
+      "message": "The transcode table named a target engine format this encoder cannot produce (e.g. an uncompressed row); a table gap, not a malformed source asset.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-BUILD-003"
+    },
+    {
+      "code": "transcode.bad_descriptor",
+      "message": "A described-kind artifact could not be transcoded because its bytes are not a well-formed descriptor; nothing was produced (fail-closed).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-BUILD-003"
+    },
+    {
+      "code": "build.template_unverified",
+      "message": "The runnable project/template failed pre-build verification (a missing, malformed, or empty root scene, or a blocking composition diagnostic); OR the R-BUILD-004 export template (the shipped --runtime host binary) failed verify-before-use against the pinned trust root (R-SEC-009 / L-58 — a tampered, unsigned, or untrusted-key signature). Nothing was built/packaged (fail-closed validation).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-BUILD-002"
+    },
+    {
+      "code": "build.toolchain_fetch_failed",
+      "message": "The per-target toolchain manifest (R-PKG-002 / L-42) could not supply the requested target's toolchain (no manifest entry for the target); OR an engine-fetched toolchain artifact failed verify-before-use against the pinned trust root (R-SEC-009 — an unverifiable fetch is a failed fetch). The toolchain cannot be fetched/trusted. Transient — a re-fetch against a repaired manifest or a correctly-signed artifact can succeed.",
+      "retriable": true,
+      "exitCode": 1,
+      "origin": "R-PKG-002"
+    },
+    {
+      "code": "build.aot_failed",
+      "message": "The authored-script (TypeScript) AOT tier could not be produced for the target — a malformed or unresolvable script entrypoint; the build is refused fail-closed (deterministic).",
+      "retriable": false,
+      "exitCode": 1,
+      "origin": "R-BUILD-002"
+    },
+    {
+      "code": "build.transcode_failed",
+      "message": "A per-platform asset transcode node failed while producing the target's variant (the diagnostic carries the a03 transcode.* detail code); nothing was packed (fail-closed, deterministic).",
+      "retriable": false,
+      "exitCode": 1,
+      "origin": "R-BUILD-003"
+    },
+    {
+      "code": "build.link_failed",
+      "message": "The final-link path failed: the R-KERNEL-003 generated-registration TU references a package with no registrable module (an undefined register_<pkg> — the link's undefined-symbol failure). Deterministic — a bare retry cannot conjure the missing module.",
+      "retriable": false,
+      "exitCode": 1,
+      "origin": "R-KERNEL-003"
+    },
+    {
+      "code": "doctor.environment_incomplete",
+      "message": "One or more required toolchain components for a requested target are missing or the wrong version; `context doctor` refuses (the environment cannot build the requested target(s)). The report enumerates each finding with its fetchable-vs-preinstalled remediation (fail-closed).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-BUILD-008"
+    },
+    {
+      "code": "doctor.toolchain_missing",
+      "message": "A required toolchain component is absent for a requested target; the finding's `fetchable` flag says whether the fix is an engine-fetch (via the a08-verified path, R-SEC-009) or a dev-preinstalled prerequisite. Deterministic — a bare re-run cannot conjure the component.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-BUILD-008"
+    },
+    {
+      "code": "doctor.toolchain_version_mismatch",
+      "message": "A required toolchain component is present but its version does not satisfy the L-42 manifest pin; blocking only when the pin's enforcement is `strict` (an advisory/documented drift is a non-blocking warning — the drift-alarm, not a build blocker).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-BUILD-008"
+    },
+    {
+      "code": "doctor.filesync_budget_low",
+      "message": "The per-user file-sync watch budget is below the project file count × worktree-daemon count (the up-front R-FILE-002 check). ADVISORY: raise the limit, or expect the watcher.degraded background-crawl fallback. Pairs with the R-FILE-011 N-daemons-on-one-box scenario.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-FILE-002"
+    },
+    {
+      "code": "doctor.signing_prereq_absent",
+      "message": "A code-signing prerequisite for a requested target (Windows Authenticode identity, macOS signing identity + notary creds) is not configured/reachable. ADVISORY (a ship-time prereq, never a build blocker). Presence only — the doctor never surfaces a secret/key value.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-BUILD-005"
+    },
+    {
+      "code": "doctor.unknown_target",
+      "message": "`context doctor --target <t>` named a value that is not a known build target (windows | linux | macos | web).",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-BUILD-008"
+    },
+    {
+      "code": "build.artifact_unsigned",
+      "message": "A produced artifact for a target that REQUIRES code-signing (Windows Authenticode, R-SEC-003) carries no signature — an advisory, never-silent WARNING folded into the build SUCCESS envelope's data.signing (e.g. a fork PR with no signing secrets). The build still succeeded; the artifact must be Authenticode-signed (Azure Trusted Signing, or the developer-certificate fallback, with a mandatory RFC-3161 timestamp) before shipping. Deterministic.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-SEC-003"
+    },
+    {
+      "code": "tilemap.layer_not_found",
+      "message": "The addressed tilemap layer id exists in no `layers` entry of the document (layers are addressed by their L-33 stable id, never by index or name).",
+      "retriable": false,
+      "exitCode": 3,
+      "origin": "R-2D-003"
+    },
+    {
+      "code": "tilemap.cell_out_of_bounds",
+      "message": "A cell edit lies inside no chunk `region` of the addressed layer — v1 authoring rewrites EXISTING chunks and never invents new ones (the chunk topology is the M2 kind's).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-2D-003"
+    },
+    {
+      "code": "tilemap.tile_unknown",
+      "message": "A tile id falls in no tile-set's [firstTileId, firstTileId + tileCount) global range (tile 0 = empty is always valid — an erase is a paint with 0).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-2D-003"
+    },
+    {
+      "code": "attach.denied",
+      "message": "The attach token is missing or does not match the daemon's instance token; the attach is refused (attach-token enforcement, D20 / R-SEC-002).",
+      "retriable": false,
+      "exitCode": 6,
+      "origin": "R-SEC-002"
+    },
+    {
+      "code": "daemon.busy",
+      "message": "The daemon is already serving its maximum number of concurrent clients; the attach is refused. Transient — a slot frees when a client detaches, so a later retry can succeed.",
+      "retriable": true,
+      "exitCode": 2,
+      "origin": "R-BRIDGE-001"
+    }
+  ],
+  "largeResult": {
+    "uriScheme": "context-res",
+    "rpcMethod": "resource.read",
+    "cliCommand": "context fetch",
+    "chunkEncoding": "hex",
+    "envelopeField": "an oversized success result is replaced by data.largeResult carrying the handle shape",
+    "handleShape": {
+      "handle": "string — the opaque resource URI; treat as opaque and feed back to resource.read verbatim",
+      "sizeBytes": "number — total payload size in bytes",
+      "localPath": "string? — same-filesystem fast-path hint (optional; an optimization, never the sole mechanism)"
+    },
+    "readParams": "{ handle: string, range?: { offsetBytes: number, lengthBytes: number } }",
+    "readResultShape": {
+      "handle": "string — the URI that was read",
+      "offsetBytes": "number — where this chunk starts",
+      "lengthBytes": "number — decoded bytes in this chunk",
+      "totalBytes": "number — total payload size",
+      "eof": "bool — true when offset+length == total",
+      "chunkHex": "string — the chunk bytes, lowercase hex-encoded (binary-clean inside the JSON envelope)"
+    }
+  },
+  "queryLanguage": {
+    "requirement": "R-CLI-012",
+    "stable": true,
+    "ebnf": "query        = disjunction ;\ndisjunction  = conjunction , { \"or\" , conjunction } ;\nconjunction  = negation , { \"and\" , negation } ;\nnegation     = [ \"not\" ] , primary ;\nprimary      = \"(\" , disjunction , \")\" | predicate ;\npredicate    = existence | string-match | comparison ;\nexistence    = \"has\" , \"(\" , field , \")\" ;\nstring-match = str-fn , \"(\" , field , \",\" , string , \")\" ;\nstr-fn       = \"contains\" | \"startswith\" | \"endswith\" | \"matches\"\n             | \"icontains\" | \"istartswith\" | \"iendswith\" | \"imatches\" ;\ncomparison   = field , cmp-op , literal ;\ncmp-op       = \"==\" | \"!=\" | \"<=\" | \">=\" | \"<\" | \">\" ;\nfield        = ident , { (\".\" , ident) | (\"[\" , index , \"]\") } ;\nliteral      = number | string | \"true\" | \"false\" | \"null\" ;\nident        = ( letter | \"_\" ) , { letter | digit | \"_\" | \"-\" } ;\nstring       = '\"' , { char | escape } , '\"' ;\nescape       = \"\\\\\" , ( '\"' | \"\\\\\" | \"n\" | \"t\" ) ;\nnumber       = [ \"-\" ] , digit , { digit } , [ \".\" , { digit } ] ;\nindex        = digit , { digit } ;\norder-by     = order-term , { \",\" , order-term } ;\norder-term   = ( field | \"@id\" ) , [ \"asc\" | \"desc\" ] ;\n",
+    "operators": [
+      {
+        "token": "==",
+        "class": "equality"
+      },
+      {
+        "token": "!=",
+        "class": "equality"
+      },
+      {
+        "token": "<",
+        "class": "range"
+      },
+      {
+        "token": "<=",
+        "class": "range"
+      },
+      {
+        "token": ">",
+        "class": "range"
+      },
+      {
+        "token": ">=",
+        "class": "range"
+      },
+      {
+        "token": "has",
+        "class": "existence"
+      },
+      {
+        "token": "contains",
+        "class": "string-match",
+        "caseInsensitiveForm": "icontains"
+      },
+      {
+        "token": "startswith",
+        "class": "string-match",
+        "caseInsensitiveForm": "istartswith"
+      },
+      {
+        "token": "endswith",
+        "class": "string-match",
+        "caseInsensitiveForm": "iendswith"
+      },
+      {
+        "token": "matches",
+        "class": "string-match",
+        "caseInsensitiveForm": "imatches"
+      }
+    ],
+    "booleanOperators": [
+      "and",
+      "or",
+      "not"
+    ],
+    "ordering": {
+      "defaultKey": "@id",
+      "total": true,
+      "rule": "results carry a mandatory TOTAL order; the sort always ends with an '@id asc' tiebreaker (the entity id is unique), so paginated results never reorder across pages. Missing keys sort last."
+    },
+    "cursor": {
+      "uriScheme": "context-cur",
+      "tokenForm": "context-cur://v0/<incarnationId>/<generation>/<seq>?after=<hex(entityId)>",
+      "shape": {
+        "incarnationId": "string — the daemon incarnation; a restart invalidates the cursor (forces a fresh snapshot), shared with R-BRIDGE-008",
+        "seq": "number — the R-BRIDGE-008 monotonic, totally-ordered event seq (event catch-up position)",
+        "generation": "number — the derived-world generation this page is consistent to (every page of one paged query reads one generation)",
+        "after": "string — keyset position: the last entity id returned under the total order; empty for an event cursor"
+      },
+      "reconciliation": "ONE cursor model, not two: {incarnationId, seq} is the R-BRIDGE-008 event cursor verbatim; an event cursor is a query cursor with an empty 'after'. Query paging adds generation + after for mutation-stable keyset paging (R-CLI-017: a handle carries one oversized payload, a cursor a paged sequence)."
+    },
+    "stringSemantics": {
+      "normalization": "NFC",
+      "caseHandling": "explicit per-operator: comparisons are case-SENSITIVE by default; the i-prefixed string-match forms (icontains/istartswith/iendswith/imatches) are case-INSENSITIVE",
+      "v1Scope": "strict UTF-8 validation on every literal; ASCII is invariant under NFC and passes through; ASCII case-folding backs the i-forms. The full Unicode canonical decomposition+composition table and non-ASCII case-folding are the tracked follow-up — the SEMANTICS are contract now, so activating the full table is non-breaking."
+    },
+    "surfaces": [
+      "derived-world",
+      "live-sim-state",
+      "schema-introspection"
+    ],
+    "composesWith": "mutation verbs: `context query … | context set …` (the query result's entity ids + provenance feed a following mutation), R-CLI-006"
+  },
+  "fileKinds": [
+    {
+      "fields": [
+        {
+          "description": "The M1 placeholder kind marker; the $schema header is authoritative.",
+          "pointer": "/kind",
+          "type": "string"
+        },
+        {
+          "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments).",
+          "pointer": "/notes",
+          "type": "notes"
+        },
+        {
+          "description": "Scene composition (L-35): each entry instances another scene under a stable intra-file id; per-instance state lives in `overrides`.",
+          "pointer": "/instances",
+          "type": "array"
+        },
+        {
+          "description": "Stable intra-file id of this instance — the first segment of override id-paths addressing into its subtree (L-33/L-35).",
+          "pointer": "/instances/[]/id",
+          "type": "string"
+        },
+        {
+          "description": "Project-root-relative path of the instanced scene (becomes a typed x-ctx-ref when the asset database lands, L-34/L-36).",
+          "pointer": "/instances/[]/scene",
+          "type": "string"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/instances/[]/notes",
+          "type": "notes"
+        },
+        {
+          "description": "Id-path-addressed override entries ([instanceId, ..., entityId] — L-35), innermost-out precedence (the OUTERMOST instancing scene wins). Exactly one kind per entry: `pointer`+`value` (per-field), `add` (structural add), or `remove: true` (structural remove) — enforced by the composition model.",
+          "pointer": "/overrides",
+          "type": "array"
+        },
+        {
+          "description": "The id-path, from an instance id of THIS scene inward ($root addresses a composable sub-scene root).",
+          "pointer": "/overrides/[]/path",
+          "type": "array"
+        },
+        {
+          "description": "JSON pointer into the addressed entity (field override; paired with `value`). /id, /$schema and /version are immutable under composition (L-37).",
+          "pointer": "/overrides/[]/pointer",
+          "type": "string"
+        },
+        {
+          "description": "The overriding value — any JSON (paired with `pointer`).",
+          "pointer": "/overrides/[]/value"
+        },
+        {
+          "description": "Optional divergence snapshot `context set` records with a field override (R-CLI-006 / L-35): the template value at write time. `context query --overrides diverged` flags an override whose `base` no longer matches the current template value (advisory; never auto-pruned).",
+          "pointer": "/overrides/[]/base"
+        },
+        {
+          "description": "Structural override: an entity object (with its own stable id) composed under the instance subtree `path` addresses.",
+          "pointer": "/overrides/[]/add",
+          "type": "object"
+        },
+        {
+          "description": "Structural override: remove the entity (or whole instance subtree) `path` addresses.",
+          "pointer": "/overrides/[]/remove",
+          "type": "boolean"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/overrides/[]/notes",
+          "type": "notes"
+        },
+        {
+          "description": "The scene-root entity (L-35): scene-level state as singleton components. Inert by default when this scene is instanced as a sub-scene; `composable: true` opts it into the parent flatten. Bakes are derived artifacts, never authored.",
+          "pointer": "/root",
+          "type": "object"
+        },
+        {
+          "description": "Optional stable intra-file id; when absent the root is addressable in override paths as `$root`.",
+          "pointer": "/root/id",
+          "type": "string"
+        },
+        {
+          "description": "Opt-in: compose this root's components when the scene is instanced as a sub-scene (default false = inert).",
+          "pointer": "/root/composable",
+          "type": "boolean"
+        },
+        {
+          "description": "Singleton scene-level components.",
+          "pointer": "/root/components",
+          "type": "object"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/root/notes",
+          "type": "notes"
+        },
+        {
+          "description": "The scene's entities — an id-keyed stable collection: an array of objects each carrying a stable intra-file `id` (L-33; the map-keyed form is forbidden, R-FILE-001).",
+          "pointer": "/entities",
+          "type": "array"
+        },
+        {
+          "description": "Stable intra-file id: collision-resistant random lowercase hex, >= 64-bit, file-scoped, never sequential (L-33). Required for composition — an id-less entity cannot carry composed identity.",
+          "pointer": "/entities/[]/id",
+          "type": "string"
+        },
+        {
+          "pointer": "/entities/[]/name",
+          "type": "string"
+        },
+        {
+          "description": "Schema-blessed annotations at the entity level.",
+          "pointer": "/entities/[]/notes",
+          "type": "notes"
+        },
+        {
+          "pointer": "/entities/[]/components",
+          "type": "object"
+        },
+        {
+          "description": "Schema-blessed annotations at the component-map level.",
+          "pointer": "/entities/[]/components/notes",
+          "type": "notes"
+        },
+        {
+          "pointer": "/entities/[]/components/transform",
+          "type": "object"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/entities/[]/components/transform/notes",
+          "type": "notes"
+        },
+        {
+          "description": "World position, meters (SI units law).",
+          "pointer": "/entities/[]/components/transform/position",
+          "storage": "f32x3",
+          "type": "array",
+          "units": "m"
+        },
+        {
+          "pointer": "/entities/[]/components/camera",
+          "type": "object"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/entities/[]/components/camera/notes",
+          "type": "notes"
+        },
+        {
+          "description": "Vertical field of view, RADIANS (the units law: no degrees in authored data).",
+          "pointer": "/entities/[]/components/camera/fov",
+          "storage": "f32",
+          "type": "number",
+          "units": "rad"
+        },
+        {
+          "pointer": "/entities/[]/components/camera/near",
+          "storage": "f32",
+          "type": "number",
+          "units": "m"
+        },
+        {
+          "pointer": "/entities/[]/components/camera/far",
+          "storage": "f32",
+          "type": "number",
+          "units": "m"
+        }
+      ],
+      "id": "ctx:scene",
+      "schema": {
+        "$id": "ctx:scene",
+        "additionalProperties": false,
+        "description": "An authored scene (L-32 canonical JSON; L-33 one scene per file).",
+        "properties": {
+          "entities": {
+            "description": "The scene's entities — an id-keyed stable collection: an array of objects each carrying a stable intra-file `id` (L-33; the map-keyed form is forbidden, R-FILE-001).",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "components": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "camera": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "far": {
+                          "type": "number",
+                          "x-ctx-storage": "f32",
+                          "x-ctx-units": "m"
+                        },
+                        "fov": {
+                          "description": "Vertical field of view, RADIANS (the units law: no degrees in authored data).",
+                          "type": "number",
+                          "x-ctx-storage": "f32",
+                          "x-ctx-units": "rad"
+                        },
+                        "near": {
+                          "type": "number",
+                          "x-ctx-storage": "f32",
+                          "x-ctx-units": "m"
+                        },
+                        "notes": {
+                          "description": "Schema-blessed annotations."
+                        }
+                      },
+                      "required": [
+                        "fov",
+                        "near",
+                        "far"
+                      ],
+                      "type": "object"
+                    },
+                    "notes": {
+                      "description": "Schema-blessed annotations at the component-map level."
+                    },
+                    "transform": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "notes": {
+                          "description": "Schema-blessed annotations."
+                        },
+                        "position": {
+                          "description": "World position, meters (SI units law).",
+                          "items": {
+                            "type": "number"
+                          },
+                          "type": "array",
+                          "x-ctx-storage": "f32x3",
+                          "x-ctx-units": "m"
+                        }
+                      },
+                      "required": [
+                        "position"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                },
+                "id": {
+                  "description": "Stable intra-file id: collision-resistant random lowercase hex, >= 64-bit, file-scoped, never sequential (L-33). Required for composition — an id-less entity cannot carry composed identity.",
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "notes": {
+                  "description": "Schema-blessed annotations at the entity level."
+                }
+              },
+              "required": [
+                "name",
+                "components"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "instances": {
+            "description": "Scene composition (L-35): each entry instances another scene under a stable intra-file id; per-instance state lives in `overrides`.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "description": "Stable intra-file id of this instance — the first segment of override id-paths addressing into its subtree (L-33/L-35).",
+                  "type": "string"
+                },
+                "notes": {
+                  "description": "Schema-blessed annotations."
+                },
+                "scene": {
+                  "description": "Project-root-relative path of the instanced scene (becomes a typed x-ctx-ref when the asset database lands, L-34/L-36).",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "scene"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "description": "The M1 placeholder kind marker; the $schema header is authoritative.",
+            "enum": [
+              "scene"
+            ],
+            "type": "string"
+          },
+          "notes": {
+            "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."
+          },
+          "overrides": {
+            "description": "Id-path-addressed override entries ([instanceId, ..., entityId] — L-35), innermost-out precedence (the OUTERMOST instancing scene wins). Exactly one kind per entry: `pointer`+`value` (per-field), `add` (structural add), or `remove: true` (structural remove) — enforced by the composition model.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "add": {
+                  "description": "Structural override: an entity object (with its own stable id) composed under the instance subtree `path` addresses.",
+                  "type": "object"
+                },
+                "base": {
+                  "description": "Optional divergence snapshot `context set` records with a field override (R-CLI-006 / L-35): the template value at write time. `context query --overrides diverged` flags an override whose `base` no longer matches the current template value (advisory; never auto-pruned)."
+                },
+                "notes": {
+                  "description": "Schema-blessed annotations."
+                },
+                "path": {
+                  "description": "The id-path, from an instance id of THIS scene inward ($root addresses a composable sub-scene root).",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "pointer": {
+                  "description": "JSON pointer into the addressed entity (field override; paired with `value`). /id, /$schema and /version are immutable under composition (L-37).",
+                  "type": "string"
+                },
+                "remove": {
+                  "description": "Structural override: remove the entity (or whole instance subtree) `path` addresses.",
+                  "type": "boolean"
+                },
+                "value": {
+                  "description": "The overriding value — any JSON (paired with `pointer`)."
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "root": {
+            "additionalProperties": false,
+            "description": "The scene-root entity (L-35): scene-level state as singleton components. Inert by default when this scene is instanced as a sub-scene; `composable: true` opts it into the parent flatten. Bakes are derived artifacts, never authored.",
+            "properties": {
+              "components": {
+                "description": "Singleton scene-level components.",
+                "type": "object"
+              },
+              "composable": {
+                "description": "Opt-in: compose this root's components when the scene is instanced as a sub-scene (default false = inert).",
+                "type": "boolean"
+              },
+              "id": {
+                "description": "Optional stable intra-file id; when absent the root is addressable in override paths as `$root`.",
+                "type": "string"
+              },
+              "notes": {
+                "description": "Schema-blessed annotations."
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "entities"
+        ],
+        "type": "object",
+        "version": 1
+      },
+      "version": 1
+    },
+    {
+      "fields": [
+        {
+          "pointer": "/engine",
+          "type": "string"
+        },
+        {
+          "pointer": "/name",
+          "type": "string"
+        },
+        {
+          "description": "Project-relative path of the startup scene (becomes a typed x-ctx-ref when the asset database lands, L-34/L-36).",
+          "pointer": "/scene",
+          "type": "string"
+        },
+        {
+          "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments).",
+          "pointer": "/notes",
+          "type": "notes"
+        }
+      ],
+      "id": "ctx:project",
+      "schema": {
+        "$id": "ctx:project",
+        "additionalProperties": false,
+        "description": "The project manifest `context new` scaffolds (R-QA-006 runnable template).",
+        "properties": {
+          "engine": {
+            "enum": [
+              "context"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "notes": {
+            "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."
+          },
+          "scene": {
+            "description": "Project-relative path of the startup scene (becomes a typed x-ctx-ref when the asset database lands, L-34/L-36).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "engine",
+          "name",
+          "scene"
+        ],
+        "type": "object",
+        "version": 1
+      },
+      "version": 1
+    },
+    {
+      "fields": [
+        {
+          "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments).",
+          "pointer": "/notes",
+          "type": "notes"
+        },
+        {
+          "description": "World size of one cell, meters (SI units law): [width, height].",
+          "pointer": "/tileSize",
+          "storage": "f32x2",
+          "type": "array",
+          "units": "m"
+        },
+        {
+          "description": "Optional overall grid extent, in CELLS (dimensionless counts).",
+          "pointer": "/grid",
+          "type": "object"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/grid/notes",
+          "type": "notes"
+        },
+        {
+          "description": "Grid width in cells.",
+          "pointer": "/grid/width",
+          "storage": "u32",
+          "type": "integer",
+          "units": "1"
+        },
+        {
+          "description": "Grid height in cells.",
+          "pointer": "/grid/height",
+          "storage": "u32",
+          "type": "integer",
+          "units": "1"
+        },
+        {
+          "description": "The atlases tiles are painted from — an id-keyed stable collection (L-33 / R-FILE-001: array of objects, never a map).",
+          "pointer": "/tileSets",
+          "type": "array"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/tileSets/[]/notes",
+          "type": "notes"
+        },
+        {
+          "description": "Stable intra-file id: collision-resistant random lowercase hex, >= 64-bit, file-scoped, never sequential (L-33).",
+          "pointer": "/tileSets/[]/id",
+          "type": "string"
+        },
+        {
+          "description": "Human-readable tile-set name.",
+          "pointer": "/tileSets/[]/name",
+          "type": "string"
+        },
+        {
+          "description": "Typed reference to the atlas asset (L-34 dual form); target-kind enforced through the asset-db meta lookup once an atlas kind lands (L-36 / R-DATA-006).",
+          "pointer": "/tileSets/[]/atlas",
+          "ref": "ctx:atlas"
+        },
+        {
+          "description": "Global tile-id of this set's first tile; per-set id ranges never overlap (Tiled-style offset).",
+          "pointer": "/tileSets/[]/firstTileId",
+          "storage": "u32",
+          "type": "integer",
+          "units": "1"
+        },
+        {
+          "description": "Tiles in the atlas; the set spans global ids [firstTileId, firstTileId + tileCount).",
+          "pointer": "/tileSets/[]/tileCount",
+          "storage": "u32",
+          "type": "integer",
+          "units": "1"
+        },
+        {
+          "description": "Draw layers, back-to-front — an id-keyed stable collection (L-33 / R-FILE-001). Each layer's cells are chunked; each chunk's packed tile-id grid lives in a binary sidecar.",
+          "pointer": "/layers",
+          "type": "array"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/layers/[]/notes",
+          "type": "notes"
+        },
+        {
+          "description": "Stable intra-file id (L-33).",
+          "pointer": "/layers/[]/id",
+          "type": "string"
+        },
+        {
+          "pointer": "/layers/[]/name",
+          "type": "string"
+        },
+        {
+          "description": "Layer opacity in [0, 1] (dimensionless).",
+          "pointer": "/layers/[]/opacity",
+          "storage": "f32",
+          "type": "number",
+          "units": "1"
+        },
+        {
+          "description": "Whether the layer is drawn (default true).",
+          "pointer": "/layers/[]/visible",
+          "type": "boolean"
+        },
+        {
+          "description": "Cell-grid regions. The heavy per-cell tile-id data lives OUT of the JSON in a binary sidecar (L-33), sized under the ~1 MB split-nudge ceiling.",
+          "pointer": "/layers/[]/chunks",
+          "type": "array"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/layers/[]/chunks/[]/notes",
+          "type": "notes"
+        },
+        {
+          "description": "Chunk bounds in CELL coordinates: [x, y, width, height] (dimensionless).",
+          "pointer": "/layers/[]/chunks/[]/region",
+          "storage": "i32x4",
+          "type": "array",
+          "units": "1"
+        },
+        {
+          "description": "Binary sidecar of the packed per-cell tile ids (width*height u32 values), sized under the split-nudge ceiling (L-33).",
+          "pointer": "/layers/[]/chunks/[]/cells",
+          "sidecar": "tilemap-cells"
+        }
+      ],
+      "id": "ctx:tilemap",
+      "schema": {
+        "$id": "ctx:tilemap",
+        "additionalProperties": false,
+        "description": "A 2D tilemap (R-2D-003, L-32/L-33): back-to-front layers of chunked cell regions whose heavy per-cell tile-id grids live in binary sidecars, painted from atlas tile-sets.",
+        "properties": {
+          "grid": {
+            "additionalProperties": false,
+            "description": "Optional overall grid extent, in CELLS (dimensionless counts).",
+            "properties": {
+              "height": {
+                "description": "Grid height in cells.",
+                "type": "integer",
+                "x-ctx-storage": "u32",
+                "x-ctx-units": "1"
+              },
+              "notes": {
+                "description": "Schema-blessed annotations."
+              },
+              "width": {
+                "description": "Grid width in cells.",
+                "type": "integer",
+                "x-ctx-storage": "u32",
+                "x-ctx-units": "1"
+              }
+            },
+            "type": "object"
+          },
+          "layers": {
+            "description": "Draw layers, back-to-front — an id-keyed stable collection (L-33 / R-FILE-001). Each layer's cells are chunked; each chunk's packed tile-id grid lives in a binary sidecar.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "chunks": {
+                  "description": "Cell-grid regions. The heavy per-cell tile-id data lives OUT of the JSON in a binary sidecar (L-33), sized under the ~1 MB split-nudge ceiling.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "cells": {
+                        "description": "Binary sidecar of the packed per-cell tile ids (width*height u32 values), sized under the split-nudge ceiling (L-33).",
+                        "x-ctx-sidecar": "tilemap-cells"
+                      },
+                      "notes": {
+                        "description": "Schema-blessed annotations."
+                      },
+                      "region": {
+                        "description": "Chunk bounds in CELL coordinates: [x, y, width, height] (dimensionless).",
+                        "items": {
+                          "type": "integer"
+                        },
+                        "type": "array",
+                        "x-ctx-storage": "i32x4",
+                        "x-ctx-units": "1"
+                      }
+                    },
+                    "required": [
+                      "region",
+                      "cells"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "id": {
+                  "description": "Stable intra-file id (L-33).",
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "notes": {
+                  "description": "Schema-blessed annotations."
+                },
+                "opacity": {
+                  "description": "Layer opacity in [0, 1] (dimensionless).",
+                  "type": "number",
+                  "x-ctx-storage": "f32",
+                  "x-ctx-units": "1"
+                },
+                "visible": {
+                  "description": "Whether the layer is drawn (default true).",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "chunks"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "notes": {
+            "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."
+          },
+          "tileSets": {
+            "description": "The atlases tiles are painted from — an id-keyed stable collection (L-33 / R-FILE-001: array of objects, never a map).",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "atlas": {
+                  "description": "Typed reference to the atlas asset (L-34 dual form); target-kind enforced through the asset-db meta lookup once an atlas kind lands (L-36 / R-DATA-006).",
+                  "x-ctx-ref": "ctx:atlas"
+                },
+                "firstTileId": {
+                  "description": "Global tile-id of this set's first tile; per-set id ranges never overlap (Tiled-style offset).",
+                  "type": "integer",
+                  "x-ctx-storage": "u32",
+                  "x-ctx-units": "1"
+                },
+                "id": {
+                  "description": "Stable intra-file id: collision-resistant random lowercase hex, >= 64-bit, file-scoped, never sequential (L-33).",
+                  "type": "string"
+                },
+                "name": {
+                  "description": "Human-readable tile-set name.",
+                  "type": "string"
+                },
+                "notes": {
+                  "description": "Schema-blessed annotations."
+                },
+                "tileCount": {
+                  "description": "Tiles in the atlas; the set spans global ids [firstTileId, firstTileId + tileCount).",
+                  "type": "integer",
+                  "x-ctx-storage": "u32",
+                  "x-ctx-units": "1"
+                }
+              },
+              "required": [
+                "id",
+                "atlas",
+                "firstTileId"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "tileSize": {
+            "description": "World size of one cell, meters (SI units law): [width, height].",
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "x-ctx-storage": "f32x2",
+            "x-ctx-units": "m"
+          }
+        },
+        "required": [
+          "tileSize",
+          "tileSets",
+          "layers"
+        ],
+        "type": "object",
+        "version": 1
+      },
+      "version": 1
+    },
+    {
+      "fields": [
+        {
+          "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments).",
+          "pointer": "/notes",
+          "type": "notes"
+        },
+        {
+          "description": "BCP-47 tag of the authoritative source locale (the implicit final fallback for every key).",
+          "pointer": "/sourceLocale",
+          "type": "string"
+        },
+        {
+          "description": "Declared locales + their fallback chains — an id-keyed stable collection (L-33 / R-FILE-001: array keyed by `locale`, never a map).",
+          "pointer": "/locales",
+          "type": "array"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/locales/[]/notes",
+          "type": "notes"
+        },
+        {
+          "description": "BCP-47 locale tag (e.g. \"en\", \"pt-BR\") — the stable key.",
+          "pointer": "/locales/[]/locale",
+          "type": "string"
+        },
+        {
+          "description": "Human-readable locale name.",
+          "pointer": "/locales/[]/name",
+          "type": "string"
+        },
+        {
+          "description": "Ordered fallback chain: locale tags tried, in order, when a key has no value for this locale.",
+          "pointer": "/locales/[]/fallback",
+          "type": "array"
+        },
+        {
+          "description": "The string entries — an id-keyed stable collection (L-33 / R-FILE-001: array keyed by `key`). Downstream systems bind these keys.",
+          "pointer": "/keys",
+          "type": "array"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/keys/[]/notes",
+          "type": "notes"
+        },
+        {
+          "description": "The stable string key downstream systems bind (the message id).",
+          "pointer": "/keys/[]/key",
+          "type": "string"
+        },
+        {
+          "description": "Per-locale translations — an id-keyed stable collection keyed by `locale`. A value is EXACTLY ONE of `text` (simple) or `plural` (CLDR categories).",
+          "pointer": "/keys/[]/values",
+          "type": "array"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/keys/[]/values/[]/notes",
+          "type": "notes"
+        },
+        {
+          "description": "The locale this translation targets.",
+          "pointer": "/keys/[]/values/[]/locale",
+          "type": "string"
+        },
+        {
+          "description": "The simple (non-plural) translation.",
+          "pointer": "/keys/[]/values/[]/text",
+          "type": "string"
+        },
+        {
+          "description": "CLDR plural forms; `other` is the required catch-all. The engine selects a category by locale + count (R-I18N-001 ICU-style rules).",
+          "pointer": "/keys/[]/values/[]/plural",
+          "type": "object"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/keys/[]/values/[]/plural/notes",
+          "type": "notes"
+        },
+        {
+          "pointer": "/keys/[]/values/[]/plural/zero",
+          "type": "string"
+        },
+        {
+          "pointer": "/keys/[]/values/[]/plural/one",
+          "type": "string"
+        },
+        {
+          "pointer": "/keys/[]/values/[]/plural/two",
+          "type": "string"
+        },
+        {
+          "pointer": "/keys/[]/values/[]/plural/few",
+          "type": "string"
+        },
+        {
+          "pointer": "/keys/[]/values/[]/plural/many",
+          "type": "string"
+        },
+        {
+          "pointer": "/keys/[]/values/[]/plural/other",
+          "type": "string"
+        }
+      ],
+      "id": "ctx:string-table",
+      "schema": {
+        "$id": "ctx:string-table",
+        "additionalProperties": false,
+        "description": "A localization string table (R-I18N-001, L-32): locale variants, fallback chains, and ICU/CLDR plural rules. Downstream systems bind string KEYS from day one.",
+        "properties": {
+          "keys": {
+            "description": "The string entries — an id-keyed stable collection (L-33 / R-FILE-001: array keyed by `key`). Downstream systems bind these keys.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "description": "The stable string key downstream systems bind (the message id).",
+                  "type": "string"
+                },
+                "notes": {
+                  "description": "Schema-blessed annotations."
+                },
+                "values": {
+                  "description": "Per-locale translations — an id-keyed stable collection keyed by `locale`. A value is EXACTLY ONE of `text` (simple) or `plural` (CLDR categories).",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "locale": {
+                        "description": "The locale this translation targets.",
+                        "type": "string"
+                      },
+                      "notes": {
+                        "description": "Schema-blessed annotations."
+                      },
+                      "plural": {
+                        "additionalProperties": false,
+                        "description": "CLDR plural forms; `other` is the required catch-all. The engine selects a category by locale + count (R-I18N-001 ICU-style rules).",
+                        "properties": {
+                          "few": {
+                            "type": "string"
+                          },
+                          "many": {
+                            "type": "string"
+                          },
+                          "notes": {
+                            "description": "Schema-blessed annotations."
+                          },
+                          "one": {
+                            "type": "string"
+                          },
+                          "other": {
+                            "type": "string"
+                          },
+                          "two": {
+                            "type": "string"
+                          },
+                          "zero": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "text": {
+                        "description": "The simple (non-plural) translation.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "locale"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "key",
+                "values"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "locales": {
+            "description": "Declared locales + their fallback chains — an id-keyed stable collection (L-33 / R-FILE-001: array keyed by `locale`, never a map).",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "fallback": {
+                  "description": "Ordered fallback chain: locale tags tried, in order, when a key has no value for this locale.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "locale": {
+                  "description": "BCP-47 locale tag (e.g. \"en\", \"pt-BR\") — the stable key.",
+                  "type": "string"
+                },
+                "name": {
+                  "description": "Human-readable locale name.",
+                  "type": "string"
+                },
+                "notes": {
+                  "description": "Schema-blessed annotations."
+                }
+              },
+              "required": [
+                "locale"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "notes": {
+            "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."
+          },
+          "sourceLocale": {
+            "description": "BCP-47 tag of the authoritative source locale (the implicit final fallback for every key).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sourceLocale",
+          "locales",
+          "keys"
+        ],
+        "type": "object",
+        "version": 1
+      },
+      "version": 1
+    },
+    {
+      "fields": [
+        {
+          "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments).",
+          "pointer": "/notes",
+          "type": "notes"
+        },
+        {
+          "description": "The deterministic PRNG seed the run started from (splitmix64).",
+          "pointer": "/seed",
+          "type": "integer"
+        },
+        {
+          "description": "The number of fixed ticks the run advanced (R-SIM-002).",
+          "pointer": "/tickCount",
+          "type": "integer"
+        },
+        {
+          "description": "The named headless scenario the session ran (the built-in default is `demo`).",
+          "pointer": "/scenario",
+          "type": "string"
+        },
+        {
+          "description": "The engine version that recorded the artifact (semver).",
+          "pointer": "/engineVersion",
+          "type": "string"
+        },
+        {
+          "description": "The contract protocol major the artifact was recorded under (frozen at 1 by the M3 contract freeze, R-CLI-004).",
+          "pointer": "/protocolMajor",
+          "type": "integer"
+        },
+        {
+          "description": "Whether the run is deterministically reproducible; a non-deterministic artifact carries no expected trace and replays best-effort.",
+          "pointer": "/deterministic",
+          "type": "boolean"
+        },
+        {
+          "description": "The project inputs the run ran against + their canonical content hashes at record time. Replay verifies these BEFORE running so a replay against drifted content is reported as drift, never a silent divergence.",
+          "pointer": "/contentManifest",
+          "type": "array"
+        },
+        {
+          "description": "Project-root-relative path of the input file.",
+          "pointer": "/contentManifest/[]/path",
+          "type": "string"
+        },
+        {
+          "description": "The serializer canonical-content hash (R-FILE-001) of the file's bytes at record time.",
+          "pointer": "/contentManifest/[]/hash",
+          "type": "integer"
+        },
+        {
+          "description": "The recorded per-tick input: synthetic input events + mapped action activations, timestamped to the tick they applied at. Replay feeds these back at the same ticks (R-QA-005 record/replay).",
+          "pointer": "/inputStream",
+          "type": "array"
+        },
+        {
+          "description": "The sim tick this input applied at.",
+          "pointer": "/inputStream/[]/tick",
+          "type": "integer"
+        },
+        {
+          "description": "Raw synthetic input events (the low-level layer).",
+          "pointer": "/inputStream/[]/events",
+          "type": "array"
+        },
+        {
+          "description": "The input device (e.g. `key`, `mouse`).",
+          "pointer": "/inputStream/[]/events/[]/device",
+          "type": "string"
+        },
+        {
+          "description": "The code on the device (e.g. `W`).",
+          "pointer": "/inputStream/[]/events/[]/code",
+          "type": "string"
+        },
+        {
+          "description": "The integer value of the event.",
+          "pointer": "/inputStream/[]/events/[]/value",
+          "type": "integer"
+        },
+        {
+          "description": "Mapped action activations (the gameplay/UI layer).",
+          "pointer": "/inputStream/[]/actions",
+          "type": "array"
+        },
+        {
+          "description": "The mapped action name (e.g. `move_x`, `ui_submit`).",
+          "pointer": "/inputStream/[]/actions/[]/action",
+          "type": "string"
+        },
+        {
+          "description": "The action lifecycle phase.",
+          "pointer": "/inputStream/[]/actions/[]/phase",
+          "type": "string"
+        },
+        {
+          "description": "The integer value of the activation.",
+          "pointer": "/inputStream/[]/actions/[]/value",
+          "type": "integer"
+        },
+        {
+          "description": "The expected per-tick canonical root-hash trace (index i == tick i), present only in deterministic mode. Replay compares each tick's actual root against this and reports the first divergent tick.",
+          "pointer": "/expectedHashTrace",
+          "type": "array"
+        }
+      ],
+      "id": "ctx:replay",
+      "schema": {
+        "$id": "ctx:replay",
+        "additionalProperties": false,
+        "description": "A versioned, recorded headless run (R-QA-005, L-54): seed + input stream + tick count + engine/protocol versions + a content-hash manifest of the project inputs + (deterministic mode) the expected per-tick root-hash trace. Replay verifies the manifest before running (drift is reported, never silent divergence) and reports the first-divergence tick; non-deterministic replay is labeled best-effort.",
+        "properties": {
+          "contentManifest": {
+            "description": "The project inputs the run ran against + their canonical content hashes at record time. Replay verifies these BEFORE running so a replay against drifted content is reported as drift, never a silent divergence.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "hash": {
+                  "description": "The serializer canonical-content hash (R-FILE-001) of the file's bytes at record time.",
+                  "type": "integer"
+                },
+                "path": {
+                  "description": "Project-root-relative path of the input file.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "hash"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "deterministic": {
+            "description": "Whether the run is deterministically reproducible; a non-deterministic artifact carries no expected trace and replays best-effort.",
+            "type": "boolean"
+          },
+          "engineVersion": {
+            "description": "The engine version that recorded the artifact (semver).",
+            "type": "string"
+          },
+          "expectedHashTrace": {
+            "description": "The expected per-tick canonical root-hash trace (index i == tick i), present only in deterministic mode. Replay compares each tick's actual root against this and reports the first divergent tick.",
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "inputStream": {
+            "description": "The recorded per-tick input: synthetic input events + mapped action activations, timestamped to the tick they applied at. Replay feeds these back at the same ticks (R-QA-005 record/replay).",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "actions": {
+                  "description": "Mapped action activations (the gameplay/UI layer).",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "action": {
+                        "description": "The mapped action name (e.g. `move_x`, `ui_submit`).",
+                        "type": "string"
+                      },
+                      "phase": {
+                        "description": "The action lifecycle phase.",
+                        "enum": [
+                          "started",
+                          "performed",
+                          "canceled"
+                        ],
+                        "type": "string"
+                      },
+                      "value": {
+                        "description": "The integer value of the activation.",
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "phase",
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "events": {
+                  "description": "Raw synthetic input events (the low-level layer).",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "code": {
+                        "description": "The code on the device (e.g. `W`).",
+                        "type": "string"
+                      },
+                      "device": {
+                        "description": "The input device (e.g. `key`, `mouse`).",
+                        "type": "string"
+                      },
+                      "value": {
+                        "description": "The integer value of the event.",
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "device",
+                      "code",
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "tick": {
+                  "description": "The sim tick this input applied at.",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "tick"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "notes": {
+            "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."
+          },
+          "protocolMajor": {
+            "description": "The contract protocol major the artifact was recorded under (frozen at 1 by the M3 contract freeze, R-CLI-004).",
+            "type": "integer"
+          },
+          "scenario": {
+            "description": "The named headless scenario the session ran (the built-in default is `demo`).",
+            "type": "string"
+          },
+          "seed": {
+            "description": "The deterministic PRNG seed the run started from (splitmix64).",
+            "type": "integer"
+          },
+          "tickCount": {
+            "description": "The number of fixed ticks the run advanced (R-SIM-002).",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "seed",
+          "tickCount",
+          "deterministic",
+          "inputStream"
+        ],
+        "type": "object",
+        "version": 1
+      },
+      "version": 1
+    },
+    {
+      "fields": [
+        {
+          "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments).",
+          "pointer": "/notes",
+          "type": "notes"
+        },
+        {
+          "description": "The id of the state the graph starts in (must name a declared state).",
+          "pointer": "/initial",
+          "type": "string"
+        },
+        {
+          "description": "The graph's states. Each plays one clip and lists its outgoing parameter-gated transitions, checked in order (first satisfied wins).",
+          "pointer": "/states",
+          "type": "array"
+        },
+        {
+          "description": "Stable state id, unique within the graph.",
+          "pointer": "/states/[]/id",
+          "type": "string"
+        },
+        {
+          "description": "The DCC-imported clip this state plays.",
+          "pointer": "/states/[]/clip",
+          "type": "string"
+        },
+        {
+          "description": "Outgoing transitions, evaluated in authored order; the first whose condition holds fires.",
+          "pointer": "/states/[]/transitions",
+          "type": "array"
+        },
+        {
+          "description": "Target state id (must name a declared state).",
+          "pointer": "/states/[]/transitions/[]/to",
+          "type": "string"
+        },
+        {
+          "description": "The control-parameter comparison: >=, >, <=, <.",
+          "pointer": "/states/[]/transitions/[]/op",
+          "type": "string"
+        },
+        {
+          "description": "The control-parameter threshold the comparison is against.",
+          "pointer": "/states/[]/transitions/[]/threshold",
+          "type": "number"
+        },
+        {
+          "description": "The cross-fade duration in seconds when this transition fires (>= 0; 0 is instant).",
+          "pointer": "/states/[]/transitions/[]/duration",
+          "type": "number"
+        }
+      ],
+      "id": "ctx:anim-graph",
+      "schema": {
+        "$id": "ctx:anim-graph",
+        "additionalProperties": false,
+        "description": "An authored animation state-machine / transition graph (R-SYS-008): named states, each playing one DCC-imported clip, connected by transitions gated on an integer control parameter. Canonical JSON (L-32) evaluated deterministically by the animation package (src/packages/animation/) — no in-engine clip authoring (R-ASSET-001). Referential integrity (the initial state + every transition target + parameter references resolve) is checked by the kind's semantic analyzer beyond this shape.",
+        "properties": {
+          "initial": {
+            "description": "The id of the state the graph starts in (must name a declared state).",
+            "type": "string"
+          },
+          "notes": {
+            "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."
+          },
+          "states": {
+            "description": "The graph's states. Each plays one clip and lists its outgoing parameter-gated transitions, checked in order (first satisfied wins).",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "clip": {
+                  "description": "The DCC-imported clip this state plays.",
+                  "type": "string"
+                },
+                "id": {
+                  "description": "Stable state id, unique within the graph.",
+                  "type": "string"
+                },
+                "transitions": {
+                  "description": "Outgoing transitions, evaluated in authored order; the first whose condition holds fires.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "duration": {
+                        "description": "The cross-fade duration in seconds when this transition fires (>= 0; 0 is instant).",
+                        "type": "number"
+                      },
+                      "op": {
+                        "description": "The control-parameter comparison: >=, >, <=, <.",
+                        "enum": [
+                          "ge",
+                          "gt",
+                          "le",
+                          "lt"
+                        ],
+                        "type": "string"
+                      },
+                      "threshold": {
+                        "description": "The control-parameter threshold the comparison is against.",
+                        "type": "number"
+                      },
+                      "to": {
+                        "description": "Target state id (must name a declared state).",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "to",
+                      "op",
+                      "threshold"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "id",
+                "clip"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "initial",
+          "states"
+        ],
+        "type": "object",
+        "version": 1
+      },
+      "version": 1
+    },
+    {
+      "fields": [
+        {
+          "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments).",
+          "pointer": "/notes",
+          "type": "notes"
+        },
+        {
+          "description": "The mixing buses — an id-keyed stable collection (L-33 / R-FILE-001: array keyed by `id`, never a map). Each bus scales the sound routed to it and folds into its parent bus.",
+          "pointer": "/buses",
+          "type": "array"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/buses/[]/notes",
+          "type": "notes"
+        },
+        {
+          "description": "Stable intra-file bus id, unique within the graph (the routing key audio events name).",
+          "pointer": "/buses/[]/id",
+          "type": "string"
+        },
+        {
+          "description": "Human-readable bus name.",
+          "pointer": "/buses/[]/name",
+          "type": "string"
+        },
+        {
+          "description": "Linear gain multiplier applied to this bus (dimensionless; >= 0, 1.0 is unity).",
+          "pointer": "/buses/[]/gain",
+          "storage": "f32",
+          "type": "number",
+          "units": "1"
+        },
+        {
+          "description": "Optional id of the bus this bus folds into; absent means a top-level (master) bus. Must name a declared bus and form no cycle (checked by the kind semantics).",
+          "pointer": "/buses/[]/parent",
+          "type": "string"
+        }
+      ],
+      "id": "ctx:audio-bus",
+      "schema": {
+        "$id": "ctx:audio-bus",
+        "additionalProperties": false,
+        "description": "An authored audio mixing-bus graph (R-SYS-006, L-32/L-46): named buses with a linear gain and an optional parent bus, forming the mix tree the presentation-observer audio package routes sound events through. Bus-id uniqueness, parent resolution, and parent-acyclicity are checked by the kind's semantic analyzer beyond this shape.",
+        "properties": {
+          "buses": {
+            "description": "The mixing buses — an id-keyed stable collection (L-33 / R-FILE-001: array keyed by `id`, never a map). Each bus scales the sound routed to it and folds into its parent bus.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "gain": {
+                  "description": "Linear gain multiplier applied to this bus (dimensionless; >= 0, 1.0 is unity).",
+                  "type": "number",
+                  "x-ctx-storage": "f32",
+                  "x-ctx-units": "1"
+                },
+                "id": {
+                  "description": "Stable intra-file bus id, unique within the graph (the routing key audio events name).",
+                  "type": "string"
+                },
+                "name": {
+                  "description": "Human-readable bus name.",
+                  "type": "string"
+                },
+                "notes": {
+                  "description": "Schema-blessed annotations."
+                },
+                "parent": {
+                  "description": "Optional id of the bus this bus folds into; absent means a top-level (master) bus. Must name a declared bus and form no cycle (checked by the kind semantics).",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "gain"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "notes": {
+            "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."
+          }
+        },
+        "required": [
+          "buses"
+        ],
+        "type": "object",
+        "version": 1
+      },
+      "version": 1
+    },
+    {
+      "fields": [
+        {
+          "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments).",
+          "pointer": "/notes",
+          "type": "notes"
+        },
+        {
+          "description": "The DCC-imported audio clip this event plays (R-ASSET-001 — no in-engine audio authoring).",
+          "pointer": "/clip",
+          "type": "string"
+        },
+        {
+          "description": "The id of the mixing bus (in an authored ctx:audio-bus graph) this event routes to.",
+          "pointer": "/bus",
+          "type": "string"
+        },
+        {
+          "description": "Linear gain applied when this event plays (dimensionless; >= 0, 1.0 is unity).",
+          "pointer": "/gain",
+          "storage": "f32",
+          "type": "number",
+          "units": "1"
+        },
+        {
+          "description": "Whether the event loops until explicitly stopped (default false).",
+          "pointer": "/loop",
+          "type": "boolean"
+        },
+        {
+          "description": "Optional 3D spatialization: when present the event is positioned in the world and attenuated by listener distance. Absent means a non-spatial (2D/UI) sound at full gain.",
+          "pointer": "/spatial",
+          "type": "object"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/spatial/notes",
+          "type": "notes"
+        },
+        {
+          "description": "Distance, meters (SI units law), within which the event plays at full `gain` (no attenuation).",
+          "pointer": "/spatial/minDistance",
+          "storage": "f32",
+          "type": "number",
+          "units": "m"
+        },
+        {
+          "description": "Distance, meters (SI units law), beyond which the event is fully attenuated to silence; must exceed minDistance (checked by the kind semantics).",
+          "pointer": "/spatial/maxDistance",
+          "storage": "f32",
+          "type": "number",
+          "units": "m"
+        }
+      ],
+      "id": "ctx:audio-event",
+      "schema": {
+        "$id": "ctx:audio-event",
+        "additionalProperties": false,
+        "description": "An authored sound event (R-SYS-006, L-32/L-46): a DCC-imported clip routed to a mixing bus with a linear gain and an optional 3D spatialization block. Triggered by the presentation-observer audio package (src/packages/audio/) off the deterministic sim path (R-SIM-001). The attenuation-range consistency is checked by the kind's semantic analyzer beyond this shape.",
+        "properties": {
+          "bus": {
+            "description": "The id of the mixing bus (in an authored ctx:audio-bus graph) this event routes to.",
+            "type": "string"
+          },
+          "clip": {
+            "description": "The DCC-imported audio clip this event plays (R-ASSET-001 — no in-engine audio authoring).",
+            "type": "string"
+          },
+          "gain": {
+            "description": "Linear gain applied when this event plays (dimensionless; >= 0, 1.0 is unity).",
+            "type": "number",
+            "x-ctx-storage": "f32",
+            "x-ctx-units": "1"
+          },
+          "loop": {
+            "description": "Whether the event loops until explicitly stopped (default false).",
+            "type": "boolean"
+          },
+          "notes": {
+            "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."
+          },
+          "spatial": {
+            "additionalProperties": false,
+            "description": "Optional 3D spatialization: when present the event is positioned in the world and attenuated by listener distance. Absent means a non-spatial (2D/UI) sound at full gain.",
+            "properties": {
+              "maxDistance": {
+                "description": "Distance, meters (SI units law), beyond which the event is fully attenuated to silence; must exceed minDistance (checked by the kind semantics).",
+                "type": "number",
+                "x-ctx-storage": "f32",
+                "x-ctx-units": "m"
+              },
+              "minDistance": {
+                "description": "Distance, meters (SI units law), within which the event plays at full `gain` (no attenuation).",
+                "type": "number",
+                "x-ctx-storage": "f32",
+                "x-ctx-units": "m"
+              },
+              "notes": {
+                "description": "Schema-blessed annotations."
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "clip",
+          "bus"
+        ],
+        "type": "object",
+        "version": 1
+      },
+      "version": 1
+    },
+    {
+      "fields": [
+        {
+          "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments).",
+          "pointer": "/notes",
+          "type": "notes"
+        },
+        {
+          "description": "The named input actions bindings map to — an id-keyed stable collection (L-33 / R-FILE-001: array keyed by `id`, never a map). Gameplay actions (e.g. move_x, fire) feed InputState's gameplay channels; ui_* actions feed its UI channel.",
+          "pointer": "/actions",
+          "type": "array"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/actions/[]/notes",
+          "type": "notes"
+        },
+        {
+          "description": "Stable action id, unique within the document (the name bindings target and the sim InputState sink understands).",
+          "pointer": "/actions/[]/id",
+          "type": "string"
+        },
+        {
+          "description": "The routing layer this action belongs to: gameplay (sim-affecting) or ui (arbitrated above gameplay). Advisory; defaults to gameplay.",
+          "pointer": "/actions/[]/layer",
+          "type": "string"
+        },
+        {
+          "description": "The stackable input contexts (the L-45 layered UI-capture stack). Higher contexts take priority; a capturing UI context blocks unbound input from reaching gameplay contexts below it (R-SYS-007 focus arbitration).",
+          "pointer": "/contexts",
+          "type": "array"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/contexts/[]/notes",
+          "type": "notes"
+        },
+        {
+          "description": "Stable context id, unique within the document (the key the router pushes/pops).",
+          "pointer": "/contexts/[]/id",
+          "type": "string"
+        },
+        {
+          "description": "The context's routing layer: gameplay or ui.",
+          "pointer": "/contexts/[]/layer",
+          "type": "string"
+        },
+        {
+          "description": "When true (a modal UI context), the context swallows any input it does not itself bind so gameplay contexts below never receive it (default false — a non-capturing overlay lets unbound input fall through).",
+          "pointer": "/contexts/[]/capture",
+          "type": "boolean"
+        },
+        {
+          "description": "The device->action bindings this context contributes.",
+          "pointer": "/contexts/[]/bindings",
+          "type": "array"
+        },
+        {
+          "description": "Schema-blessed annotations.",
+          "pointer": "/contexts/[]/bindings/[]/notes",
+          "type": "notes"
+        },
+        {
+          "description": "The raw device source: keyboard | mouse | gamepad | touch | vr (VR-controller).",
+          "pointer": "/contexts/[]/bindings/[]/device",
+          "type": "string"
+        },
+        {
+          "description": "The device-specific code (e.g. keyboard \"W\", mouse \"MouseLeft\", gamepad \"ButtonSouth\").",
+          "pointer": "/contexts/[]/bindings/[]/code",
+          "type": "string"
+        },
+        {
+          "description": "The action this source maps to (must name a declared action — checked by the kind semantics).",
+          "pointer": "/contexts/[]/bindings/[]/action",
+          "type": "string"
+        }
+      ],
+      "id": "ctx:input-bindings",
+      "schema": {
+        "$id": "ctx:input-bindings",
+        "additionalProperties": false,
+        "description": "An authored input-bindings configuration (R-SYS-007, L-32/L-45): the named input actions plus the stackable input contexts (each on a gameplay/ui layer, optionally capturing) that map raw device sources to those actions. The routing front-end (src/packages/input/) applies the layered UI-capture arbitration and feeds the mapped actions to the sim InputState sink. Action-id / context-id uniqueness and every binding resolving to a declared action are checked by the kind's semantic analyzer beyond this shape.",
+        "properties": {
+          "actions": {
+            "description": "The named input actions bindings map to — an id-keyed stable collection (L-33 / R-FILE-001: array keyed by `id`, never a map). Gameplay actions (e.g. move_x, fire) feed InputState's gameplay channels; ui_* actions feed its UI channel.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "description": "Stable action id, unique within the document (the name bindings target and the sim InputState sink understands).",
+                  "type": "string"
+                },
+                "layer": {
+                  "description": "The routing layer this action belongs to: gameplay (sim-affecting) or ui (arbitrated above gameplay). Advisory; defaults to gameplay.",
+                  "enum": [
+                    "gameplay",
+                    "ui"
+                  ],
+                  "type": "string"
+                },
+                "notes": {
+                  "description": "Schema-blessed annotations."
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "contexts": {
+            "description": "The stackable input contexts (the L-45 layered UI-capture stack). Higher contexts take priority; a capturing UI context blocks unbound input from reaching gameplay contexts below it (R-SYS-007 focus arbitration).",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "bindings": {
+                  "description": "The device->action bindings this context contributes.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "action": {
+                        "description": "The action this source maps to (must name a declared action — checked by the kind semantics).",
+                        "type": "string"
+                      },
+                      "code": {
+                        "description": "The device-specific code (e.g. keyboard \"W\", mouse \"MouseLeft\", gamepad \"ButtonSouth\").",
+                        "type": "string"
+                      },
+                      "device": {
+                        "description": "The raw device source: keyboard | mouse | gamepad | touch | vr (VR-controller).",
+                        "enum": [
+                          "keyboard",
+                          "mouse",
+                          "gamepad",
+                          "touch",
+                          "vr"
+                        ],
+                        "type": "string"
+                      },
+                      "notes": {
+                        "description": "Schema-blessed annotations."
+                      }
+                    },
+                    "required": [
+                      "device",
+                      "code",
+                      "action"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "capture": {
+                  "description": "When true (a modal UI context), the context swallows any input it does not itself bind so gameplay contexts below never receive it (default false — a non-capturing overlay lets unbound input fall through).",
+                  "type": "boolean"
+                },
+                "id": {
+                  "description": "Stable context id, unique within the document (the key the router pushes/pops).",
+                  "type": "string"
+                },
+                "layer": {
+                  "description": "The context's routing layer: gameplay or ui.",
+                  "enum": [
+                    "gameplay",
+                    "ui"
+                  ],
+                  "type": "string"
+                },
+                "notes": {
+                  "description": "Schema-blessed annotations."
+                }
+              },
+              "required": [
+                "id",
+                "layer"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "notes": {
+            "description": "Schema-blessed human/AI annotations — string or array of strings (L-32 bans JSON comments)."
+          }
+        },
+        "required": [
+          "actions",
+          "contexts"
+        ],
+        "type": "object",
+        "version": 1
+      },
+      "version": 1
+    }
+  ],
+  "componentTypes": [],
+  "deprecationPolicy": {
+    "requirement": "R-CLI-010",
+    "active": true,
+    "minMinorsBeforeRemoval": 2,
+    "methodIdStability": "stable-across-lifecycle",
+    "perEntryFields": [
+      "deprecated",
+      "removedIn"
+    ],
+    "appliesTo": [
+      "verb",
+      "rpcMethod",
+      "mcpTool",
+      "flag",
+      "capability"
+    ],
+    "compatibilityWindow": "negotiated capability subset; hard-fail outside the window; the negotiation/degradation behavior activates at the 2nd released protocol version (v1 is hard-fail-on-mismatch).",
+    "note": "Active at protocolMajor=1 (M3 contract freeze) — the frozen surface changes only through this deprecation lifecycle; a breaking change without a cycle is rejected (R-CLI-004)."
+  }
+}

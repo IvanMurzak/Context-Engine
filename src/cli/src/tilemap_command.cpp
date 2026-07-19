@@ -2,7 +2,7 @@
 
 #include "context/cli/tilemap_command.h"
 
-#include "context/cli/wire_client.h" // parse_u64 (the canonical decimal-u64 flag parse)
+#include "context/cli/args.h" // parse_u64 (the canonical decimal-u64 flag parse)
 #include "context/editor/filesync/content_hash.h"
 #include "context/editor/filesync/native_file_store.h"
 #include "context/editor/filesync/path_jail.h"

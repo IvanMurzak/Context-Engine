@@ -135,6 +135,29 @@ inline bool wait_for_instance(const fs::path& project, int timeout_ms,
     }
 }
 
+// Read the daemon's D20 per-instance attach token from the discovery hint. Best-effort: an empty
+// string when the file is absent/torn/tokenless — the caller then attaches without one, which since
+// M9 e02 the daemon refuses (`attach.denied`), so a missing token surfaces as a refusal rather than
+// as silently-unauthenticated access. Called only AFTER instance_endpoint() has already waited out
+// the boot race, so it needs no retry loop of its own.
+inline std::string instance_token(const fs::path& project)
+{
+    const std::string text = read_file(project / ".editor" / "instance.json");
+    if (text.empty())
+        return std::string();
+    try
+    {
+        const Json doc = Json::parse(text);
+        if (doc.contains("token") && doc.at("token").is_string())
+            return doc.at("token").as_string();
+    }
+    catch (const std::exception&)
+    {
+        // torn read — treat as tokenless
+    }
+    return std::string();
+}
+
 // Read the daemon's endpoint from the discovery hint (retrying through the boot race).
 inline std::optional<std::string> instance_endpoint(const fs::path& project, int timeout_ms)
 {
@@ -181,6 +204,12 @@ public:
             error_ = "no discovery hint (instance.json) appeared";
             return false;
         }
+        // D20 (enforcement DEFAULT ON since M9 e02): remember the daemon's per-instance attach
+        // token so attach() can present it. This harness deliberately keeps its own RAW wire (it
+        // must send malformed/edge-case handshakes the context_client SDK will not emit — a wrong
+        // protocolMajor, an over-broad scope — to assert the daemon's refusals), so it carries the
+        // token itself rather than riding the SDK.
+        token_ = instance_token(project);
         client_.emplace(*endpoint);
         if (!client_->connect(timeout_ms))
         {
@@ -189,6 +218,10 @@ public:
         }
         return true;
     }
+
+    // The token this connection discovered (empty when the daemon published none). A test that wants
+    // to prove the D20 refusal path attaches with attach_with_token("") or a wrong value.
+    [[nodiscard]] const std::string& token() const noexcept { return token_; }
 
     std::optional<Json> call(const std::string& method, Json params)
     {
@@ -224,6 +257,15 @@ public:
     std::optional<Json> attach(std::uint64_t protocol_major, const std::vector<std::string>& caps,
                                const std::string& scope_spec)
     {
+        return attach_with_token(protocol_major, caps, scope_spec, token_);
+    }
+
+    // attach(), with an EXPLICIT token — the seam for asserting the D20 refusal path (pass "" for a
+    // tokenless attach, or a wrong value for an impostor).
+    std::optional<Json> attach_with_token(std::uint64_t protocol_major,
+                                          const std::vector<std::string>& caps,
+                                          const std::string& scope_spec, const std::string& token)
+    {
         Json params = Json::object();
         params.set("protocolMajor", Json(protocol_major));
         Json c = Json::array();
@@ -232,6 +274,8 @@ public:
         params.set("capabilities", std::move(c));
         if (!scope_spec.empty())
             params.set("scope", Json(scope_spec));
+        if (!token.empty())
+            params.set("token", Json(token));
         return call("attach", std::move(params));
     }
 
@@ -246,6 +290,7 @@ public:
 private:
     std::optional<TransportClient> client_;
     std::string error_;
+    std::string token_;
     std::int64_t id_ = 0;
 };
 

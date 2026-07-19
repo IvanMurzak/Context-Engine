@@ -431,8 +431,18 @@ std::optional<std::string> TransportConnection::read_frame_timed(int timeout_ms,
     {
         const DWORD e = ::GetLastError();
         if (e != ERROR_BROKEN_PIPE && e != ERROR_PIPE_NOT_CONNECTED)
+        {
             error_ = "PeekNamedPipe failed (" + std::to_string(e) + ")";
-        return std::nullopt; // EOF / error (timed_out stays false)
+            return std::nullopt; // a real error (timed_out stays false)
+        }
+        // The peer closed — but bytes it wrote BEFORE closing may still be buffered on our side, and
+        // PeekNamedPipe reports the broken pipe rather than those bytes. Dropping them here would
+        // discard an already-delivered frame: exactly what a request/response client sees as "the
+        // daemon never answered" when the daemon replies and immediately exits (`shutdown`). ReadFile
+        // still drains the buffer first and only then fails, so let read_frame() decide — it returns
+        // the frame if one is pending and reports EOF only when there is genuinely nothing left.
+        // POSIX needs no equivalent: poll() reports POLLIN for buffered data after a peer close.
+        return read_frame();
     }
     if (avail == 0)
     {
@@ -797,6 +807,15 @@ std::optional<std::string> TransportClient::receive()
 {
     std::optional<std::string> frame = conn_.read_frame();
     if (!frame.has_value())
+        error_ = conn_.error().empty() ? "peer disconnected" : conn_.error();
+    return frame;
+}
+
+std::optional<std::string> TransportClient::receive_timed(int timeout_ms, bool& timed_out)
+{
+    timed_out = false;
+    std::optional<std::string> frame = conn_.read_frame_timed(timeout_ms, timed_out);
+    if (!frame.has_value() && !timed_out)
         error_ = conn_.error().empty() ? "peer disconnected" : conn_.error();
     return frame;
 }
