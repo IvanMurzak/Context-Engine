@@ -58,8 +58,20 @@ long current_pid()
 #endif
 }
 
-// A plain 16-hex per-instance token (NOT a cryptographic secret — see write_instance_file for the v1
-// trust model). Freshly derived each boot; needs no cross-run stability.
+// A plain 16-hex per-instance token. Freshly derived each boot; needs no cross-run stability.
+//
+// NOT a cryptographic secret, and since e02 gates on it that distinction MATTERS: every input to the
+// seed below (canonical key, endpoint, pid) is reconstructible by any local process without reading
+// the 0600/DACL-protected instance file, and std::hash is unseeded, so the published token is
+// PREDICTABLE. D20 therefore closes the "attached without ever looking at instance.json" case; it is
+// not authentication against a determined local attacker, and the ambient OS guard (POSIX 0600
+// socket + instance file, Windows owner-SID pipe DACL) remains the real boundary.
+//
+// FOLLOW-UP: mint this from a CSPRNG (BCryptGenRandom / /dev/urandom) instead of deriving it —
+// nothing needs the value to be reproducible, since every client reads it from the file. That is
+// what would make `instance.json`'s confidentiality genuinely load-bearing. Kept as a separate,
+// reviewable change because it introduces a platform-specific entropy path.
+// See docs/daemon-multi-client-fanin.md § "What the token is NOT (yet)".
 std::string make_token(const std::string& seed)
 {
     const std::size_t h = std::hash<std::string>{}(seed);
@@ -284,8 +296,9 @@ int run_daemon(const std::vector<std::string>& args)
         return env.exit_code();
     }
 
-    // A per-instance token derived from the canonical key + endpoint + pid (carried per R-BRIDGE-007;
-    // NOT gated on in v1 — see write_instance_file for the trust model).
+    // A per-instance token derived from the canonical key + endpoint + pid (carried per
+    // R-BRIDGE-007). Since e02 this IS gated on by default — see make_token() for what that does and
+    // does not buy, and `--no-require-attach-token` for the escape hatch.
     const std::string token = make_token(kernel.daemon().lock().canonical_key() + "|" + endpoint +
                                          "|" + std::to_string(current_pid()));
     std::string write_err;

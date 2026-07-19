@@ -219,10 +219,6 @@ public:
         return true;
     }
 
-    // The token this connection discovered (empty when the daemon published none). A test that wants
-    // to prove the D20 refusal path attaches with attach_with_token("") or a wrong value.
-    [[nodiscard]] const std::string& token() const noexcept { return token_; }
-
     std::optional<Json> call(const std::string& method, Json params)
     {
         if (!client_.has_value())
@@ -253,18 +249,15 @@ public:
     }
 
     // The attach handshake (R-CLI-010): carry {protocolMajor, capabilities[]} + the requested scope
-    // spec. Returns the full response (success carries result.{protocolMajor, capabilities, scopes}).
+    // spec, plus the D20 token this connection discovered. Returns the full response (success
+    // carries result.{protocolMajor, capabilities, scopes}).
+    //
+    // The D20 REFUSAL path (tokenless / impostor) is asserted at the SDK level against a live daemon
+    // in src/editor/client/tests/test_client_e2e.cpp. This harness keeps its own raw wire for the
+    // malformed handshakes the SDK will not emit (a wrong protocolMajor, an over-broad scope); if a
+    // raw-wire auth case is ever needed, take the token as a parameter here then.
     std::optional<Json> attach(std::uint64_t protocol_major, const std::vector<std::string>& caps,
                                const std::string& scope_spec)
-    {
-        return attach_with_token(protocol_major, caps, scope_spec, token_);
-    }
-
-    // attach(), with an EXPLICIT token — the seam for asserting the D20 refusal path (pass "" for a
-    // tokenless attach, or a wrong value for an impostor).
-    std::optional<Json> attach_with_token(std::uint64_t protocol_major,
-                                          const std::vector<std::string>& caps,
-                                          const std::string& scope_spec, const std::string& token)
     {
         Json params = Json::object();
         params.set("protocolMajor", Json(protocol_major));
@@ -274,8 +267,8 @@ public:
         params.set("capabilities", std::move(c));
         if (!scope_spec.empty())
             params.set("scope", Json(scope_spec));
-        if (!token.empty())
-            params.set("token", Json(token));
+        if (!token_.empty())
+            params.set("token", Json(token_));
         return call("attach", std::move(params));
     }
 

@@ -1866,7 +1866,9 @@ jobs:
           cmake -S src/editor/client/consumer -B src/build/boundary-consumer \
             -DCMAKE_PREFIX_PATH="$prefix"
           cmake --build src/build/boundary-consumer
-          ./src/build/boundary-consumer/context_client_consumer_smoke
+          # Drive it through ctest so the consumer's own add_test() registration is the thing under
+          # test — a registered-but-never-invoked test advertises coverage no job provides.
+          ctest --test-dir src/build/boundary-consumer --output-on-failure
 
       - name: Assert the generated client schema shipped with the package
         shell: bash
@@ -1874,6 +1876,16 @@ jobs:
           set -euo pipefail
           schema="$(echo "$PWD"/src/build/boundary-install/versions/*/share/context/context-client-schema.json)"
           test -f "$schema" || { echo "the client schema was not installed"; exit 1; }
+          # Byte-compare the INSTALLED artifact against the committed one. client-test_schema only
+          # proves that the in-process projection matches the committed file; it never reads what the
+          # generator actually wrote or what install() actually shipped. Without this compare, a
+          # truncated generator write, a stale artifact surviving an incremental build, or an
+          # install(FILES) pointing at the wrong path all ship a schema that differs from the
+          # reviewed one while both gates stay green — and the installed copy is the authoritative
+          # one for out-of-tree consumers (e05 generates its JS client from it).
+          # .gitattributes forces eol=lf, so the compare is stable on this ubuntu leg.
+          cmp "$schema" src/editor/client/schema/context-client-schema.json \
+            || { echo "the SHIPPED client schema differs from the committed one"; exit 1; }
           python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['rpcMethods'], 'no rpcMethods'; assert d['eventTopics'], 'no eventTopics'; print('client schema OK:', len(d['rpcMethods']), 'rpc methods,', len(d['eventTopics']), 'topics')" "$schema"
 
       - name: sccache stats

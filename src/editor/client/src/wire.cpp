@@ -71,6 +71,14 @@ std::optional<InboundFrame> parse_frame(const std::string& text)
                                    err.at("message").is_string())
                                       ? err.at("message").as_string()
                                       : std::string("(no message)");
+            // The dispatcher mirrors the R-CLI-008 envelope error into `error.data` (see
+            // envelope_error_data): `data.code` is the catalog id the caller should re-emit.
+            if (err.is_object() && err.contains("data") && err.at("data").is_object())
+            {
+                const Json& data = err.at("data");
+                if (data.contains("code") && data.at("code").is_string())
+                    frame.error_code = data.at("code").as_string();
+            }
             return frame;
         }
         if (doc.contains("result"))

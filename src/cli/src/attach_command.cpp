@@ -10,7 +10,6 @@
 #include "context/editor/client/client.h"
 #include "context/editor/contract/json.h"
 
-#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -61,21 +60,22 @@ Envelope run_attach(const std::vector<std::string>& args)
 
     // --- discover + connect + attach --------------------------------------------------------------
     // Request write (for `edit`) + session (for the optional `shutdown`); the daemon's launch-time
-    // operator ceiling clamps this to least privilege (R-SEC-007). connect_to_project() seeds the
-    // D20 attach token from `.editor/instance.json` — required since e02 flipped enforcement ON.
+    // operator ceiling clamps this to least privilege (R-SEC-007). connect_to_project() retains the
+    // D20 attach token from `.editor/instance.json` — required since e02 flipped enforcement ON —
+    // and attach() presents it.
     AttachOptions attach_options;
     attach_options.scope = "write,session";
     std::string err;
-    const std::unique_ptr<Client> client = Client::connect_to_project(project, 3000, attach_options, err);
+    const std::unique_ptr<Client> client = Client::connect_to_project(project, 3000, err);
     if (!client)
         return finish(Envelope::failure("internal.error", err));
 
-    bool attach_rejected = false;
-    if (!client->attach(attach_options, err, &attach_rejected))
-        // Only a daemon-side rejection of the handshake is a genuine protocol/version/auth refusal;
-        // a transport hiccup or malformed reply is internal (matching the edit/query call sites).
-        return finish(Envelope::failure(
-            attach_rejected ? "handshake.incompatible_protocol" : "internal.error", err));
+    if (!client->attach(attach_options, err))
+        // Report the daemon's OWN refusal code (Client::failure_code): since e02 enforces the token,
+        // a refusal here is usually `attach.denied` — a PERMISSION exit class, not the protocol
+        // mismatch a single hardcoded code would claim.
+        return finish(
+            Envelope::failure(client->failure_code("handshake.incompatible_protocol"), err));
 
     // --- optional: fold on-disk truth into the derived world over the wire (R-FILE-002) ----------
     // `--reconcile` drives the daemon's `reconcile` verb before the edit/query pair, so a project

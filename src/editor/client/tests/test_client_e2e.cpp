@@ -53,12 +53,6 @@ fs::path make_temp_project(const char* tag)
     return dir;
 }
 
-// Poll until the daemon publishes a usable discovery hint (proving it booted + bound the transport).
-std::optional<InstanceInfo> wait_for_daemon(const fs::path& project, int timeout_ms)
-{
-    return discover_instance(project, timeout_ms);
-}
-
 // Ask a live daemon to stop, then reap the child (kill it if it will not go quietly, so CI never
 // inherits a stray process).
 void shutdown_daemon(ctest_proc::Process& child, const InstanceInfo& instance)
@@ -96,7 +90,7 @@ void test_live_subscription_receives_real_events()
         ctest_proc::spawn(CONTEXT_BINARY, {"daemon", "--project", project.string()});
     CHECK(ctest_proc::valid(daemon));
 
-    const std::optional<InstanceInfo> instance = wait_for_daemon(project, 15000);
+    const std::optional<InstanceInfo> instance = discover_instance(project, 15000);
     CHECK(instance.has_value());
     if (!instance.has_value())
     {
@@ -179,7 +173,7 @@ void test_tokenless_attach_is_denied()
         ctest_proc::spawn(CONTEXT_BINARY, {"daemon", "--project", project.string()});
     CHECK(ctest_proc::valid(daemon));
 
-    const std::optional<InstanceInfo> instance = wait_for_daemon(project, 15000);
+    const std::optional<InstanceInfo> instance = discover_instance(project, 15000);
     CHECK(instance.has_value());
     if (!instance.has_value())
     {
@@ -247,7 +241,7 @@ void test_connect_to_project_seeds_the_token()
         ctest_proc::spawn(CONTEXT_BINARY, {"daemon", "--project", project.string()});
     CHECK(ctest_proc::valid(daemon));
 
-    const std::optional<InstanceInfo> instance = wait_for_daemon(project, 15000);
+    const std::optional<InstanceInfo> instance = discover_instance(project, 15000);
     CHECK(instance.has_value());
     if (!instance.has_value())
     {
@@ -258,13 +252,15 @@ void test_connect_to_project_seeds_the_token()
     AttachOptions options;
     options.scope = "write,session";
     std::string error;
-    std::unique_ptr<Client> client = Client::connect_to_project(project, 5000, options, error);
+    std::unique_ptr<Client> client = Client::connect_to_project(project, 5000, error);
     CHECK(client != nullptr);
-    // The discovered token was seeded into the attach options — a consumer never reads the instance
-    // file itself.
-    CHECK(options.token == instance->token);
     if (client)
     {
+        // The discovered token rides on the Client — a consumer never reads the instance file, and
+        // never plumbs the token through its own attach options.
+        CHECK(client->instance().token == instance->token);
+        CHECK(client->connected());
+        CHECK(options.token.empty()); // still unset: attach() falls back to the discovered one
         CHECK(client->attach(options, error));
         CHECK(client->attached());
     }

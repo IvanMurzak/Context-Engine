@@ -44,6 +44,11 @@ struct InboundFrame
     std::int64_t id = 0;
     bool has_error = false;
     std::string error_message;
+    // The R-CLI-008 catalog code the daemon put in `error.data.code` (`attach.denied`,
+    // `subscription.unknown_sub`, …). Empty when the peer sent no structured code. Carried so a
+    // client can re-emit the daemon's OWN classification instead of inferring one from context —
+    // the refusals differ in exit class, so a guess is a wrong exit code.
+    std::string error_code;
     contract::Json result;
 
     // event

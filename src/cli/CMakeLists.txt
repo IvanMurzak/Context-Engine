@@ -41,7 +41,7 @@ target_link_libraries(context_cli
     PUBLIC context_contract context_bridge
     PRIVATE context_kernel context_editorkernel context_schema context_serializer context_warnings)
 
-# M9 e02 (issue TBD): the client SDK (src/editor/client/). PRIVATE — attach_command.cpp and
+# M9 e02 (issue #307): the client SDK (src/editor/client/). PRIVATE — attach_command.cpp and
 # fetch_command.cpp are the only consumers and no client type appears in the CLI's public headers.
 # This is the CLI's migration onto the ONE client-side wire implementation: the duplicated plumbing
 # that used to live in src/cli/wire_client.cpp is GONE, so the CLI and every out-of-tree consumer

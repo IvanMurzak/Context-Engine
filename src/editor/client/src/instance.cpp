@@ -79,11 +79,4 @@ std::optional<InstanceInfo> discover_instance(const fs::path& project, int timeo
     }
 }
 
-std::optional<std::string> discover_endpoint(const fs::path& project, int timeout_ms)
-{
-    if (std::optional<InstanceInfo> info = discover_instance(project, timeout_ms))
-        return info->endpoint;
-    return std::nullopt;
-}
-
 } // namespace context::editor::client

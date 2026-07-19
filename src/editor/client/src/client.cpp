@@ -73,7 +73,6 @@ std::unique_ptr<WireChannel> make_transport_channel(std::string endpoint, int co
 Client::Client(std::unique_ptr<WireChannel> channel) : channel_(std::move(channel)) {}
 
 std::unique_ptr<Client> Client::connect_to_project(const fs::path& project, int timeout_ms,
-                                                   AttachOptions& attach_options,
                                                    std::string& error)
 {
     const std::optional<InstanceInfo> info = discover_instance(project, timeout_ms);
@@ -83,9 +82,6 @@ std::unique_ptr<Client> Client::connect_to_project(const fs::path& project, int 
                 "' (no .editor/instance.json). Start one with `context daemon`.";
         return nullptr;
     }
-    // Carry the discovered D20 token unless the caller pinned one explicitly.
-    if (attach_options.token.empty())
-        attach_options.token = info->token;
 
     std::unique_ptr<WireChannel> channel = make_transport_channel(info->endpoint, timeout_ms);
     if (!channel)
@@ -108,9 +104,11 @@ bool Client::attach(const AttachOptions& options, std::string& error, bool* reje
     params.set("capabilities", std::move(caps));
     params.set("scope", Json(options.scope));
     // D20: the token is always carried. A daemon with enforcement OFF ignores it; one with
-    // enforcement ON (the default since e02) refuses an attach without it.
-    if (!options.token.empty())
-        params.set("token", Json(options.token));
+    // enforcement ON (the default since e02) refuses an attach without it. An unset options.token
+    // falls back to the one connect_to_project() discovered, so the common path needs no plumbing.
+    const std::string& token = options.token.empty() ? instance_.token : options.token;
+    if (!token.empty())
+        params.set("token", Json(token));
 
     const std::optional<Json> result = call("attach", std::move(params), error, rejected_by_daemon);
     if (!result.has_value())
@@ -137,6 +135,8 @@ std::optional<Json> Client::call(const std::string& method, Json params, std::st
         error = "client has no wire channel";
         return std::nullopt;
     }
+    last_error_code_.clear();
+    last_rejected_by_daemon_ = false;
     const std::int64_t id = ++next_id_;
     if (!channel_->send(build_request(id, method, std::move(params))))
     {
@@ -156,7 +156,10 @@ std::optional<Json> Client::call(const std::string& method, Json params, std::st
             error = "transport error on '" + method + "': " + channel_->error();
             return std::nullopt;
         }
-        const std::optional<InboundFrame> frame = parse_frame(*raw);
+        // Non-const: every exit below MOVES out of this frame rather than deep-copying it. Json is a
+        // recursive value type, so a copy here reallocates the whole response tree — on `fetch` that
+        // is a multi-megabyte chunk payload, once per chunk.
+        std::optional<InboundFrame> frame = parse_frame(*raw);
         if (!frame.has_value())
         {
             error = "malformed response to '" + method + "'";
@@ -164,7 +167,7 @@ std::optional<Json> Client::call(const std::string& method, Json params, std::st
         }
         if (frame->kind == FrameKind::event || frame->kind == FrameKind::gap)
         {
-            pending_events_.push_back(*frame);
+            pending_events_.push_back(std::move(*frame));
             continue;
         }
         if (frame->kind != FrameKind::response || frame->id != id)
@@ -172,12 +175,21 @@ std::optional<Json> Client::call(const std::string& method, Json params, std::st
         if (frame->has_error)
         {
             error = "daemon rejected '" + method + "': " + frame->error_message;
+            last_error_code_ = std::move(frame->error_code);
+            last_rejected_by_daemon_ = true;
             if (rejected_by_daemon != nullptr)
                 *rejected_by_daemon = true;
             return std::nullopt;
         }
-        return frame->result;
+        return std::move(frame->result);
     }
+}
+
+std::string Client::failure_code(std::string_view fallback) const
+{
+    if (!last_rejected_by_daemon_)
+        return "internal.error";
+    return last_error_code_.empty() ? std::string(fallback) : last_error_code_;
 }
 
 std::optional<InboundFrame> Client::poll_event(int timeout_ms, bool& disconnected)
@@ -185,7 +197,7 @@ std::optional<InboundFrame> Client::poll_event(int timeout_ms, bool& disconnecte
     disconnected = false;
     if (!pending_events_.empty())
     {
-        InboundFrame frame = pending_events_.front();
+        InboundFrame frame = std::move(pending_events_.front());
         pending_events_.pop_front();
         return frame;
     }
@@ -201,7 +213,8 @@ std::optional<InboundFrame> Client::poll_event(int timeout_ms, bool& disconnecte
         disconnected = !timed_out;
         return std::nullopt;
     }
-    const std::optional<InboundFrame> frame = parse_frame(*raw);
+    // Non-const so the return moves: this is the SDK's hottest path (once per pump()).
+    std::optional<InboundFrame> frame = parse_frame(*raw);
     if (!frame.has_value())
         return std::nullopt; // a malformed frame is dropped, not fatal to the subscription
     if (frame->kind == FrameKind::response)

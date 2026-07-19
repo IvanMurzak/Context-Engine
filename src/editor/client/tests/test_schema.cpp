@@ -64,9 +64,13 @@ void test_schema_has_the_client_sections()
 // flap and the artifact would be unreviewable.
 void test_schema_text_is_deterministic()
 {
-    CHECK(client_schema_text() == client_schema_text());
-    CHECK(!client_schema_text().empty());
-    CHECK(client_schema_text().back() == '\n');
+    // Two INDEPENDENT projections must agree — that comparison is the assertion, so it genuinely
+    // needs both calls. The remaining checks reuse the first result rather than re-projecting the
+    // whole registry (and re-dumping ~4200 lines) two more times to inspect the same string.
+    const std::string text = client_schema_text();
+    CHECK(text == client_schema_text());
+    CHECK(!text.empty());
+    CHECK(text.back() == '\n');
 }
 
 void test_committed_artifact_matches_the_generated_one()

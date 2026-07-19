@@ -6,9 +6,9 @@
 # client host — which is what makes the D10 boundary real: the editor is an ORDINARY client that
 # links the PUBLISHED surface, never kernel internals.
 #
-# Link surface is deliberately narrow (02 §3): context_bridge (transport types) + context_contract
-# (envelope/json/handshake/registry). NOTHING from editorkernel, filesync, derivation, compose, … —
-# the include-graph gate in the `editor-boundary` CI job enforces exactly this.
+# Link surface is deliberately narrow (02 §3): context_contract (envelope/json/handshake/registry)
+# publicly, context_bridge (transport) privately. NOTHING from editorkernel, filesync, derivation,
+# compose, … — the include-graph gate in the `editor-boundary` CI job enforces exactly this.
 
 add_library(context_client STATIC
     src/instance.cpp
@@ -21,12 +21,16 @@ target_include_directories(context_client PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
 
-# context_bridge + context_contract are PUBLIC: their types appear in the SDK's public headers
-# (client.h names contract::Json / kProtocolMajor; the transport channel is built over
-# bridge::TransportClient). Every Context target links the warnings-as-errors baseline.
+# context_contract is PUBLIC: its types appear in the SDK's public headers (client.h names
+# contract::Json and contract::kProtocolMajor). context_bridge is PRIVATE: the transport channel is
+# built over bridge::TransportClient, but ONLY inside client.cpp — no installed header names a bridge
+# type, so bridge is link payload, not surface (see the install() rationale in src/CMakeLists.txt).
+# For a STATIC library CMake records a PRIVATE dep as $<LINK_ONLY:...>, so consumers still link the
+# archive transitively while getting none of its include paths — which is exactly the boundary.
+# Every Context target links the warnings-as-errors baseline.
 target_link_libraries(context_client
-    PUBLIC context_bridge context_contract
-    PRIVATE context_warnings)
+    PUBLIC context_contract
+    PRIVATE context_bridge context_warnings)
 
 # Self-contained GCC runtime for the client test/tool executables — they use std::filesystem +
 # stream IO, whose libstdc++ symbols live in a NEWER libstdc++-6.dll; on a MinGW host a stale

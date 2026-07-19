@@ -79,8 +79,6 @@ public:
     void set_failed_reconnects(int n) { failed_reconnects_ = n; }
     [[nodiscard]] int reconnect_attempts() const { return reconnect_attempts_; }
 
-    [[nodiscard]] const std::vector<Request>& requests() const { return requests_; }
-
     // Every request recorded for `method`, in order.
     [[nodiscard]] std::vector<Request> requests_for(const std::string& method) const
     {

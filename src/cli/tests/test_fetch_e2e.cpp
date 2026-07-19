@@ -10,7 +10,7 @@
 
 #include "context/editor/client/client.h"
 #include "context/editor/bridge/resource_store.h" // hex codec
-#include "context/editor/contract/handshake.h" // kProtocolMajor (the frozen major the daemon accepts)
+#include "context/editor/client/instance.h" // discover_instance (the daemon-publish race)
 #include "context/editor/contract/json.h"
 
 #include "cli_test.h"
@@ -25,7 +25,6 @@
 #include <sstream>
 #include <string>
 #include <system_error>
-#include <thread>
 
 namespace fs = std::filesystem;
 using context::editor::client::AttachOptions;
@@ -58,21 +57,6 @@ std::string read_file(const fs::path& path)
     return ss.str();
 }
 
-bool wait_for_instance(const fs::path& project, int timeout_ms)
-{
-    const fs::path instance = project / ".editor" / "instance.json";
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-    for (;;)
-    {
-        std::error_code ec;
-        if (fs::exists(instance, ec) && !read_file(instance).empty())
-            return true;
-        if (std::chrono::steady_clock::now() >= deadline)
-            return false;
-        std::this_thread::sleep_for(std::chrono::milliseconds(25));
-    }
-}
-
 // Parse defensively: a failed child leaves an empty/garbage --out file, and an uncaught parse throw
 // would skip the daemon reap below (leaking the child past the test). nullopt -> CHECK + skip.
 std::optional<Json> safe_parse(const std::string& text)
@@ -100,7 +84,9 @@ int main()
     ctest_proc::Process daemon = ctest_proc::spawn(
         bin, {"daemon", "--project", project.string(), "--large-result-threshold", "600"});
     CHECK(ctest_proc::valid(daemon));
-    CHECK(wait_for_instance(project, 15000));
+    // The SDK owns the publish race (retry until the document is readable) — riding it here keeps
+    // this test on the same discovery path the product uses instead of a private re-implementation.
+    CHECK(context::editor::client::discover_instance(project, 15000).has_value());
 
     // --- wire client: describe MUST come back as a largeResult handle, not inline ----------------
     std::string handle_uri;
@@ -108,8 +94,7 @@ int main()
     {
         AttachOptions attach_options; // scope defaults to "read"
         std::string err;
-        const std::unique_ptr<Client> client_ptr =
-            Client::connect_to_project(project, 5000, attach_options, err);
+        const std::unique_ptr<Client> client_ptr = Client::connect_to_project(project, 5000, err);
         CHECK(client_ptr != nullptr);
         // No early return: the daemon child below must still be reaped even if the connect failed.
         std::optional<Json> described;
@@ -129,7 +114,6 @@ int main()
             CHECK(!handle_uri.empty());
             CHECK(total_bytes > 600);
         }
-
     }
 
     // --- a SEPARATE `context fetch` process retrieves + reassembles the original result ----------
@@ -210,8 +194,7 @@ int main()
         AttachOptions attach_options;
         attach_options.scope = "session";
         std::string err;
-        if (const std::unique_ptr<Client> client =
-                Client::connect_to_project(project, 2000, attach_options, err))
+        if (const std::unique_ptr<Client> client = Client::connect_to_project(project, 2000, err))
         {
             if (client->attach(attach_options, err))
                 (void)client->call("shutdown", Json::object(), err);

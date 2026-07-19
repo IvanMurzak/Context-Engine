@@ -15,7 +15,10 @@ This gate makes the claim enforceable. It checks two things against a REAL `cmak
 
 Rule 1 is what makes the gate strong: it is transitive. A public header cannot quietly reach an
 internal one via a chain of intermediate headers, because every hop must itself be installed, and
-the installed set is the allowlist.
+the installed set is the allowlist. For that to hold, EVERY hop must be visible to the check — so an
+installed header may not use a relative quoted include (`"../../editorkernel/foo.h"`) either: such a
+path names no `context/` module, so it would otherwise slip past both the forbidden-prefix test and
+the installed-resolution test, which is the one way a leak could hide from rule 1.
 
 Exit codes: 0 = the boundary holds, 1 = a violation, 2 = a usage/config error (nothing to check).
 """
@@ -33,10 +36,14 @@ from pathlib import Path
 # in src/CMakeLists.txt's install(DIRECTORY) loop.
 ALLOWED_MODULES = (
     "context/editor/client",   # the SDK itself
-    "context/editor/bridge",   # transport + event-stream types its headers name
-    "context/editor/contract", # envelope / json / handshake / registry
-    "context/kernel",          # event_bus.h — bridge forwards kernel::LogEvent
+    "context/editor/contract", # envelope / json / handshake — the only module its headers name
 )
+# NOT allowed, and deliberately so: context/editor/bridge and context/kernel. context_client is BUILT
+# over bridge's transport, but only inside client.cpp — an implementation detail, which is what a
+# boundary hides. Publishing them would put bridge::Daemon and the whole microkernel (World,
+# scheduler, entity, command_buffer) on the supported client surface, letting a "client" host a
+# daemon in-process: the exact inversion this gate exists to prevent. They stay installed as
+# link-only archives; only their headers are withheld.
 
 # Defense in depth. Rule 1 already rejects anything not installed, but naming the internals makes a
 # violation legible ("you reached into editorkernel") instead of merely "unresolved include", and it
@@ -70,7 +77,7 @@ FORBIDDEN_PREFIXES = (
     "context/testing/",
 )
 
-_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.MULTILINE)
+_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*(?P<quote>[<"])(?P<path>[^>"]+)[>"]', re.MULTILINE)
 
 SOURCE_SUFFIXES = (".h", ".hpp", ".cpp", ".cc", ".cxx")
 
@@ -91,7 +98,22 @@ def find_include_root(install_prefix: Path) -> Path | None:
 
 def project_includes(text: str) -> list[str]:
     """Every `context/...` include in one file (system/stdlib includes are not our business)."""
-    return [inc for inc in _INCLUDE_RE.findall(text) if inc.startswith("context/")]
+    return [m.group("path") for m in _INCLUDE_RE.finditer(text)
+            if m.group("path").startswith("context/")]
+
+
+def relative_includes(text: str) -> list[str]:
+    """Quoted includes that are NOT fully-qualified `context/...` paths — i.e. relative reach-arounds.
+
+    Without this, the gate has a hole big enough to drive the whole boundary through: an installed
+    header containing `#include "../../editorkernel/editor_kernel.h"` names no `context/` path, so it
+    was previously filtered out before ANY check ran — no forbidden-prefix test, no installed-
+    resolution test. The transitive guarantee in rule 1 only holds if every hop is visible to it.
+    Inside the installed tree such an include is always a defect: the install layout is flat and
+    fully qualified, so a relative path either escapes it or is unresolvable for a consumer.
+    """
+    return [m.group("path") for m in _INCLUDE_RE.finditer(text)
+            if m.group("quote") == '"' and not m.group("path").startswith("context/")]
 
 
 def is_allowed_module(include: str) -> bool:
@@ -105,13 +127,31 @@ def forbidden_prefix(include: str) -> str | None:
     return None
 
 
-def check_file(path: Path, rel: str, include_root: Path, violations: list[dict]) -> int:
-    """Check one file's includes. Returns the number of `context/...` includes examined."""
+def check_file(path: Path, rel: str, include_root: Path, violations: list[dict],
+               reject_relative: bool = False) -> int:
+    """Check one file's includes. Returns the number of `context/...` includes examined.
+
+    `reject_relative` additionally forbids quoted non-`context/` includes. It is ON for the installed
+    tree (where a relative include is always a leak or a broken package) and OFF for consumer
+    sources, whose own local headers are legitimately quoted and relative.
+    """
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:  # pragma: no cover - unreadable file is a config error, not a boundary bug
         violations.append({"file": rel, "include": "", "reason": f"unreadable: {exc}"})
         return 0
+
+    if reject_relative:
+        for include in relative_includes(text):
+            violations.append(
+                {
+                    "file": rel,
+                    "include": include,
+                    "reason": "relative include in an installed header — it escapes the transitive "
+                              "boundary check and cannot resolve from the install root; use a "
+                              "fully-qualified context/... path",
+                }
+            )
 
     includes = project_includes(text)
     for include in includes:
@@ -181,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
                 }
             )
         headers_checked += 1
-        includes_checked += check_file(header, rel, include_root, violations)
+        includes_checked += check_file(header, rel, include_root, violations, reject_relative=True)
 
     # 2. The out-of-tree consumer(s).
     consumers_checked = 0

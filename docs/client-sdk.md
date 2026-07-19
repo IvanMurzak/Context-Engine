@@ -13,8 +13,9 @@ A boundary that is only described is a boundary that erodes.
 ## What ships
 
 `src/editor/client/` → **`context_client`** (C++20 static library, the first installed/exported
-artifact). It links `context_bridge` (transport types) and `context_contract`
-(envelope/json/handshake/registry) — and nothing else.
+artifact). It links `context_contract` (envelope/json/handshake/registry) PUBLICLY — the only module
+its public headers name — and `context_bridge` (the transport it is built over) PRIVATELY, since no
+installed header names a bridge type. Nothing else.
 
 | Header | Role |
 |---|---|
@@ -87,18 +88,26 @@ target_link_libraries(my_editor PRIVATE Context::context_client)
 
 `Context::context_client` is the entire public surface. The package config is hand-authored rather
 than produced by `install(EXPORT)` on purpose: a static library records even its PRIVATE deps in its
-interface, so `install(EXPORT)` would publish `context_schema` / `context_component` /
-`context_warnings` as part of the package — exactly what D10 forbids. Those archives ARE installed
-(a static library carries none of its dependencies' objects, so the whole link closure must reach the
-final link) but their **headers are not**, so they are invisible to a consumer's include graph. That
-asymmetry is the boundary: link what the implementation needs, expose only what the contract publishes.
+interface, so `install(EXPORT)` would publish `context_bridge` / `context_kernel` / `context_schema` /
+`context_component` / `context_serializer` / `context_warnings` as part of the package — exactly what
+D10 forbids. Those archives ARE installed (a static library carries none of its dependencies'
+objects, so the whole link closure must reach the final link) but their **headers are not**, so they
+are invisible to a consumer's include graph. That asymmetry is the boundary: link what the
+implementation needs, expose only what the contract publishes.
 
 Installed header modules — the published surface, in full:
 
 - `context/editor/client/` — the SDK
-- `context/editor/bridge/` — transport + event-stream types its headers name
-- `context/editor/contract/` — envelope / json / handshake / registry
-- `context/kernel/` — `event_bus.h` (the bridge forwards `kernel::LogEvent`)
+- `context/editor/contract/` — the only module the SDK's public headers name (`json.h`, `handshake.h`)
+
+That is deliberately just two. `context_bridge` and `context_kernel` are in the installed **link
+closure** but their headers are withheld: no installed header names a bridge or kernel type, because
+`bridge::TransportClient` appears only inside `client.cpp` — an implementation detail, which is what
+a boundary is for. Publishing them would put `bridge::Daemon` (`start()`, the `.editor` lock,
+`set_method_backend`) and the whole microkernel (`World`, scheduler, entity, component,
+`command_buffer`) on the supported client surface, so a "client" could host a daemon in-process —
+the exact inversion D10 exists to prevent. Widening the set later is free; narrowing it after e04/e05
+build against it is a breaking change, so it starts as small as it can be.
 
 ## How the boundary is enforced (the `editor-boundary` CI job)
 

@@ -70,13 +70,14 @@ A local GCC-green `dev` run is **not** proof of CI green. Recurring CI-only brea
 Tests are ctest registrations, named in families the CI steps select by prefix regex:
 `kernel-test_*`, `gui-*` / `gui-a11y-*`, `ui-*` (runtime UI package, `src/packages/ui/`),
 `render-ui-*` (M7 GPU UI backend, `src/render/ui/`), `render-wgpu-*`, `shader-*`, `wasm-runner-*`,
-`cef-substrate-*`, `editor-cef-smoke-*`, `game-smoke-*`, `determinism-*`, `samples-corpus*`, and the
+`cef-substrate-*`, `editor-cef-smoke-*`, `client-*` (the M9 client SDK, `src/editor/client/`),
+`game-smoke-*`, `determinism-*`, `samples-corpus*`, and the
 milestone exit gates `m1-exit-*`, `m2-exit-*`, `m4-exit-*`, `m5-exit-*`, `m6-exit-*`, `m7-exit-*`,
 `m8-exit-*` (the M8 build-pipeline gate; -3/-4a/-4b are ALIASES of the a07 runtime-host / netsync
-packed-wedge executables, the m6-exit-3 alias precedent). The `ui-*` and
-`render-ui-*` families are plain package test families (not gates) — NOT in the general step's `-E`
-gate-exclusion regex, so they auto-run there, and the `build` job builds them via `--preset dev` (no
-`--target`/CI edits needed).
+packed-wedge executables, the m6-exit-3 alias precedent). The `ui-*`,
+`render-ui-*`, and `client-*` families are plain package test families (not gates) — NOT in the
+general step's `-E` gate-exclusion regex, so they auto-run there, and the `build` job builds them via
+`--preset dev` (no `--target`/CI edits needed). Note `^cli-` does NOT match `client-`.
 
 - The `build` job's general ctest step **excludes the gate families**
   (`-E "^m1-exit-|^m2-exit-|^m4-exit-|^m5-exit-|^m6-exit-|^m7-exit-|^m8-exit-|^determinism-|^samples-corpus"`);

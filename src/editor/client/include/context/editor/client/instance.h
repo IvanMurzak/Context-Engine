@@ -37,8 +37,4 @@ struct InstanceInfo
 [[nodiscard]] std::optional<InstanceInfo> discover_instance(const std::filesystem::path& project,
                                                             int timeout_ms);
 
-// Endpoint-only convenience for a caller that needs no token (the pre-D20 shape).
-[[nodiscard]] std::optional<std::string> discover_endpoint(const std::filesystem::path& project,
-                                                           int timeout_ms);
-
 } // namespace context::editor::client

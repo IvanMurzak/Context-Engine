@@ -72,9 +72,19 @@ was sequenced honestly per **C-F1** rather than flipped in one step:
   tightened the daemon.
 
 **Current behavior (since e02).** `context daemon` refuses any attach whose `token` is absent or does
-not match the one it published, with `attach.denied`. A rogue local process that cannot read the
-0600/DACL-protected `instance.json` therefore cannot attach at all — the file's confidentiality is now
-load-bearing, not merely advisory.
+not match the one it published, with `attach.denied`. Every client must now present a token it got
+from `.editor/instance.json`, so a process that never reads that file no longer attaches by accident.
+
+**What the token is NOT (yet): an unguessable secret.** The published token is *derived*, not random —
+`make_token()` hashes `canonical_key | endpoint | pid` with `std::hash`, all three of which a local
+process can reconstruct without ever opening `instance.json` (the project path implies the canonical
+key and the endpoint; the pid is in the process table). So the file's confidentiality is **not**
+load-bearing today, and the ambient OS guard (POSIX 0600 socket + instance file, Windows owner-SID
+pipe DACL) remains the real boundary — D20 raises the bar and closes the "attached without ever
+looking" case, but it is not an authentication secret against a determined local attacker. Minting
+the token from a CSPRNG instead would make the confidentiality claim true; nothing depends on the
+value being reproducible, since every client reads it from the file. Tracked as follow-up work rather
+than assumed — see the note on `make_token()` in `src/cli/src/daemon_command.cpp`.
 
 **Escape hatch: `--no-require-attach-token`.** It restores the pre-e02 posture (token carried, never
 gated; ambient OS guard only). It exists for bisecting an auth-suspected regression and for an

@@ -57,6 +57,9 @@ struct BackoffPolicy
     int max_attempts = 6;
 
     // The delay before attempt `attempt` (0-based): initial * multiplier^attempt, clamped to max_ms.
+    // A `multiplier` of 1 or less is a FIXED-delay policy (every attempt waits initial_ms, clamped)
+    // rather than a degenerate 0 / never-growing one — stated here because it is a legitimate
+    // configuration, not a misuse.
     [[nodiscard]] int delay_for_attempt(int attempt) const;
 };
 
@@ -121,8 +124,10 @@ public:
     void on_snapshot(SnapshotHandler handler) { on_snapshot_ = std::move(handler); }
 
     // Register a subscription. Before start() it is merely recorded; after, it is established
-    // immediately. Returns its index into states().
-    std::size_t add(SubscriptionSpec spec);
+    // immediately — and that subscribe CAN fail, so pass `error` if you care: on failure the
+    // returned index's states()[i].live is false and `*error` says why. Returns its index into
+    // states() either way.
+    std::size_t add(SubscriptionSpec spec, std::string* error = nullptr);
 
     // Establish every registered subscription with a FRESH snapshot. false (+ `error`) if any
     // subscribe call fails.
@@ -130,8 +135,18 @@ public:
 
     // One pump: apply whatever arrived (deltas / gap markers), ack on cadence, and reconnect +
     // re-subscribe if the wire dropped. Returns false (+ `error`) only on an unrecoverable failure
-    // (reconnect backoff exhausted, or a re-subscribe the daemon refused). A quiet window is a
-    // successful, no-op pump.
+    // (reconnect backoff exhausted, or a re-subscribe/ack the daemon REFUSED). A transport failure
+    // on any path — the poll, an ack, a re-subscribe — is recoverable and routes into the
+    // reconnect-with-backoff ladder instead. A quiet window is a successful, no-op pump.
+    //
+    // BLOCKING BOUND: normally bounded by options.poll_timeout_ms (50 ms by default). But when the
+    // wire dropped, this call ALSO runs the reconnect ladder inline, so its worst case is
+    // sum(backoff delays) + max_attempts * reconnect_timeout_ms — with the defaults, ~21 s. Drive
+    // pump() off a thread that can afford that (never a UI thread that must stay responsive during
+    // a daemon restart).
+    //
+    // THREAD SAFETY: neither SubscriptionConsumer nor the Client it rides is thread-safe. Confine
+    // both to one thread, or serialize every call yourself.
     [[nodiscard]] bool pump(std::string& error);
 
     // Ack every subscription's current cursor now (flushing the cadence). Cheap and idempotent — a
@@ -147,18 +162,32 @@ public:
 
 private:
     // Establish/re-establish ONE subscription. `since` empty => a fresh snapshot; set => a resume
-    // that falls back to a fresh snapshot when the daemon reports `gapped`.
+    // that falls back to a fresh snapshot when the daemon reports `gapped`. When `state` is still
+    // LIVE it is unsubscribed first (see unsubscribe_one) so re-subscribing never leaks the old
+    // subId. `rejected_by_daemon`, when non-null, distinguishes a daemon refusal from a transport
+    // failure — the caller reconnects on the latter.
     [[nodiscard]] bool subscribe_one(SubscriptionState& state, std::optional<std::uint64_t> since,
-                                     std::string& error);
+                                     std::string& error, bool* rejected_by_daemon = nullptr);
+    // Drop `state`'s CURRENT daemon-side subscription, best-effort. Re-subscribing without this
+    // leaks it: the daemon holds every minted subId until an explicit `unsubscribe`, fans each
+    // inbound event out once PER subId, and pins its ring retention to the slowest acked cursor
+    // across them — so a leaked subscription both multiplies wire traffic and defeats R-CLI-015
+    // retention, feeding the very gaps that triggered the re-subscribe.
+    void unsubscribe_one(SubscriptionState& state);
     // Re-snapshot EVERY subscription (the gap + incarnation-change recovery).
-    [[nodiscard]] bool resnapshot_all(std::string& error);
+    [[nodiscard]] bool resnapshot_all(std::string& error, bool* rejected_by_daemon = nullptr);
     // Reconnect with backoff, then resume every subscription from its cursor.
     [[nodiscard]] bool reconnect_and_resume(std::string& error);
+    // The consumer's central recovery policy, named once: a refusal the daemon actually sent is
+    // unrecoverable (retrying cannot talk it out of saying no), while a transport failure is an
+    // ordinary disconnect that belongs in the reconnect ladder.
+    [[nodiscard]] bool recover_or_fail(bool rejected_by_daemon, std::string& error);
     // Apply one delivered event to its subscription's cursor + the handler.
     void apply_event(const std::string& sub_id, const ClientEvent& event);
     // Note the incarnation carried by an inbound snapshot/event; true when it CHANGED (a restart).
     bool note_incarnation(const std::string& incarnation_id);
-    [[nodiscard]] bool ack_if_due(SubscriptionState& state, std::string& error, bool force);
+    [[nodiscard]] bool ack_if_due(SubscriptionState& state, std::string& error, bool force,
+                                  bool* rejected_by_daemon = nullptr);
     [[nodiscard]] SubscriptionState* find_state(const std::string& sub_id);
 
     Client& client_;

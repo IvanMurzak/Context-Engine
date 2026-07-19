@@ -217,6 +217,54 @@ void test_gap_triggers_resnapshot_of_every_subscription()
     CHECK(!subs.back().params.contains("sinceSeq"));
 }
 
+// The re-snapshot happens on a STILL-LIVE connection, so it must RELEASE each old subscription
+// before minting its replacement. Counting subscribes alone cannot see the difference: the daemon
+// retains every minted subId until an explicit unsubscribe, fans each event out once per subId, and
+// pins ring retention to the slowest cursor across them — so a leak here multiplies wire traffic and
+// manufactures the next gap. Assert the release explicitly, by id.
+void test_gap_resnapshot_releases_the_old_subscriptions()
+{
+    Harness h;
+    h.snapshot_last_seq = 5;
+    h.consumer->add(SubscriptionSpec{{"files"}, ""});
+    h.consumer->add(SubscriptionSpec{{"diagnostics"}, ""});
+    std::string error;
+    CHECK(h.consumer->start(error));
+    const std::string first_sub = h.sub_id(0);
+    const std::string second_sub = h.sub_id(1);
+    CHECK(h.mock->requests_for("unsubscribe").empty());
+
+    h.mock->push_gap();
+    CHECK(h.consumer->pump(error));
+
+    // Exactly one release per subscription, each naming the id it retired.
+    const std::vector<clientmock::Request> drops = h.mock->requests_for("unsubscribe");
+    CHECK(drops.size() == 2);
+    CHECK(drops[0].params.at("subId").as_string() == first_sub);
+    CHECK(drops[1].params.at("subId").as_string() == second_sub);
+    // And the consumer moved onto the freshly minted ids, not the retired ones.
+    CHECK(h.sub_id(0) != first_sub);
+    CHECK(h.sub_id(1) != second_sub);
+}
+
+// A reconnect resumes against a connection whose session (and every subscription in it) already died
+// with the old wire, so it must NOT spend an unsubscribe round-trip on ids the daemon has forgotten.
+void test_reconnect_does_not_unsubscribe_dead_subscriptions()
+{
+    SubscriptionConsumer::Options options;
+    options.backoff.initial_ms = 1;
+    Harness h(options);
+    h.consumer->add(SubscriptionSpec{{"files"}, ""});
+    std::string error;
+    CHECK(h.consumer->start(error));
+
+    h.mock->break_connection();
+    CHECK(h.consumer->pump(error));
+
+    CHECK(h.consumer->stats().reconnects == 1);
+    CHECK(h.mock->requests_for("unsubscribe").empty());
+}
+
 // --- 5. resume + gapped fallback -------------------------------------------------------------------
 void test_resume_applies_catchup()
 {
@@ -279,6 +327,27 @@ void test_backoff_policy_is_bounded_and_exponential()
     CHECK(policy.delay_for_attempt(3) == 80);
     CHECK(policy.delay_for_attempt(4) == 100); // clamped
     CHECK(policy.delay_for_attempt(50) == 100);
+}
+
+// A multiplier of 1 is a legitimate FIXED-delay policy, not a misconfiguration — it must answer
+// initial_ms at every attempt (and stay clamped by max_ms) rather than degenerate.
+void test_fixed_delay_backoff_policy()
+{
+    BackoffPolicy fixed;
+    fixed.initial_ms = 25;
+    fixed.multiplier = 1;
+    fixed.max_ms = 100;
+    CHECK(fixed.delay_for_attempt(0) == 25);
+    CHECK(fixed.delay_for_attempt(1) == 25);
+    CHECK(fixed.delay_for_attempt(1000000) == 25); // and answers in O(1), not O(attempt)
+
+    // max_ms is the ceiling even when initial_ms is above it.
+    BackoffPolicy clamped;
+    clamped.initial_ms = 500;
+    clamped.multiplier = 1;
+    clamped.max_ms = 100;
+    CHECK(clamped.delay_for_attempt(0) == 100);
+    CHECK(clamped.delay_for_attempt(7) == 100);
 }
 
 void test_reconnect_retries_then_succeeds()
@@ -382,6 +451,64 @@ void test_refused_subscribe_surfaces_error()
     CHECK(!error.empty());
 }
 
+// A daemon-side refusal IS unrecoverable — reconnecting cannot talk it out of saying no.
+void test_refused_ack_is_unrecoverable()
+{
+    SubscriptionConsumer::Options options;
+    options.ack_interval = 1;
+    options.backoff.initial_ms = 1;
+    Harness h(options);
+    h.consumer->add(SubscriptionSpec{{"files"}, ""});
+    std::string error;
+    CHECK(h.consumer->start(error));
+
+    h.mock->fail_method("ack", "subscription.unknown_sub");
+    h.mock->push_event(h.sub_id(0), make_event(1, kIncarnationA, "files"));
+    CHECK(!h.consumer->pump(error));
+    CHECK(!error.empty());
+    CHECK(h.consumer->stats().reconnects == 0); // NOT retried — the daemon answered
+}
+
+// ...but a TRANSPORT failure on the ack is an ordinary disconnect and must route into the reconnect
+// ladder. poll_event() reports `disconnected` only when IT touched the wire — a pump that consumed a
+// frame the peer had already queued sees a healthy poll and then dies on the ack, so the ack path is
+// genuinely where the death surfaces.
+void test_transport_failure_on_ack_reconnects()
+{
+    SubscriptionConsumer::Options options;
+    options.ack_interval = 1;
+    options.backoff.initial_ms = 1;
+    Harness h(options);
+    h.consumer->add(SubscriptionSpec{{"files"}, ""});
+    std::string error;
+    CHECK(h.consumer->start(error));
+
+    // The event is already buffered, so the poll succeeds; the wire dies before the ack goes out.
+    h.mock->push_event(h.sub_id(0), make_event(1, kIncarnationA, "files"));
+    h.mock->break_connection();
+
+    CHECK(h.consumer->pump(error));
+    CHECK(h.consumer->stats().events_applied == 1);
+    CHECK(h.consumer->stats().reconnects == 1);
+    CHECK(h.mock->reconnect_attempts() == 1);
+}
+
+// add() after start() establishes immediately — and that subscribe can be refused. The failure must
+// reach the caller instead of leaving a silently dead subscription in states().
+void test_add_after_start_reports_a_refused_subscribe()
+{
+    Harness h;
+    h.consumer->add(SubscriptionSpec{{"files"}, ""});
+    std::string error;
+    CHECK(h.consumer->start(error));
+
+    h.mock->fail_method("subscribe", "daemon refused");
+    std::string add_error;
+    const std::size_t index = h.consumer->add(SubscriptionSpec{{"log"}, ""}, &add_error);
+    CHECK(!add_error.empty());
+    CHECK(!h.consumer->states()[index].live);
+}
+
 // --- unsubscribe on stop ---------------------------------------------------------------------------
 void test_stop_unsubscribes_every_subscription()
 {
@@ -401,14 +528,20 @@ int main()
     test_replay_below_cursor_is_dropped();
     test_ack_cadence_and_flush();
     test_gap_triggers_resnapshot_of_every_subscription();
+    test_gap_resnapshot_releases_the_old_subscriptions();
+    test_reconnect_does_not_unsubscribe_dead_subscriptions();
     test_resume_applies_catchup();
     test_gapped_resume_falls_back_to_snapshot();
     test_backoff_policy_is_bounded_and_exponential();
+    test_fixed_delay_backoff_policy();
     test_reconnect_retries_then_succeeds();
     test_reconnect_exhaustion_is_an_error();
     test_incarnation_change_forces_fresh_snapshot();
     test_incarnation_change_across_reconnect_resnapshots();
     test_refused_subscribe_surfaces_error();
+    test_refused_ack_is_unrecoverable();
+    test_transport_failure_on_ack_reconnects();
+    test_add_after_start_reports_a_refused_subscribe();
     test_stop_unsubscribes_every_subscription();
     CLIENT_TEST_MAIN_END();
 }

@@ -12,8 +12,10 @@
 # The imported targets are declared by hand (not via install(EXPORT)) so the PUBLIC surface is
 # exactly one target. context_client's static-link closure — bridge, contract, kernel, schema,
 # component, serializer — is installed and chained below as PRIVATE link payload: a static archive
-# carries none of its dependencies' objects, so all of them must reach the final link, but only the
-# four whose headers are installed are includable.
+# carries none of its dependencies' objects, so all of them must reach the final link, but only
+# context_client and context_contract have their headers installed, so only those two are includable.
+# bridge and kernel are link payload BY DESIGN — see src/CMakeLists.txt for why publishing them would
+# hand a "client" the daemon and the microkernel.
 
 @PACKAGE_INIT@
 

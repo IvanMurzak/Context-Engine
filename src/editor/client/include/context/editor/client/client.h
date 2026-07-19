@@ -23,6 +23,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace context::editor::client
@@ -56,16 +57,18 @@ public:
     Client(Client&&) = default;
     Client& operator=(Client&&) = default;
 
-    // Discover + connect in one step: read `<project>/.editor/instance.json`, connect to the endpoint
-    // it names, and seed `attach_options.token` from the document. nullptr (+ `error`) when no daemon
-    // is discoverable or the endpoint refuses the connection.
+    // Discover + connect in one step: read `<project>/.editor/instance.json` and connect to the
+    // endpoint it names. nullptr (+ `error`) when no daemon is discoverable or the endpoint refuses
+    // the connection. The discovered D20 token is retained on the Client (see instance()), so a
+    // subsequent attach() authenticates with no token plumbing by the caller.
     [[nodiscard]] static std::unique_ptr<Client> connect_to_project(
-        const std::filesystem::path& project, int timeout_ms, AttachOptions& attach_options,
-        std::string& error);
+        const std::filesystem::path& project, int timeout_ms, std::string& error);
 
     // The R-CLI-010 capability handshake. false (+ `error`) on refusal or transport failure; when
     // `rejected_by_daemon` is non-null it distinguishes a daemon-side rejection (protocol mismatch,
-    // `attach.denied`, `daemon.busy`) from a mere transport hiccup.
+    // `attach.denied`, `daemon.busy`) from a mere transport hiccup — pair it with last_error_code()
+    // to learn WHICH refusal. An empty `options.token` falls back to the token discovered by
+    // connect_to_project(); set it only to pin a token explicitly.
     [[nodiscard]] bool attach(const AttachOptions& options, std::string& error,
                               bool* rejected_by_daemon = nullptr);
 
@@ -89,23 +92,52 @@ public:
     [[nodiscard]] bool attached() const noexcept { return attached_; }
     [[nodiscard]] bool connected() const { return channel_ && channel_->connected(); }
 
+    // The catalog code (`attach.denied`, `subscription.unknown_sub`, …) the daemon returned with the
+    // most recent REFUSED call. Empty otherwise, and reset at the start of every call. Re-emit it
+    // verbatim rather than guessing a code: the refusals a caller must distinguish (auth vs protocol
+    // vs busy) carry different exit classes.
+    [[nodiscard]] const std::string& last_error_code() const noexcept { return last_error_code_; }
+
+    // The R-CLI-008 code to report for the most recent FAILED call — the whole rule in one place,
+    // because getting it wrong is invisible in review: every code maps to an EXIT CLASS, so a
+    // plausible guess reports the wrong exit status to a script.
+    //
+    //   * the call failed on the WIRE (or the reply was malformed) -> `internal.error`: a transport
+    //     fault says nothing about what the caller asked for;
+    //   * the DAEMON refused -> its own catalog code, verbatim;
+    //   * it refused without a structured code (an older daemon) -> `fallback`, the one refusal that
+    //     call site could otherwise expect.
+    //
+    // Callers pass the fallback that fits their verb — `handshake.incompatible_protocol` for attach,
+    // `resource.unknown_handle` for resource.read. Do NOT collapse every refusal into the fallback:
+    // since e02 enforces the attach token, and since the dispatcher can refuse any verb with
+    // `scope.denied` / `usage.invalid`, the fallback is the exception, not the rule.
+    [[nodiscard]] std::string failure_code(std::string_view fallback) const;
+
     // The discovery hint this client was built from — populated by connect_to_project(), empty for a
     // Client constructed directly over a channel. Lets a caller report the endpoint it actually
-    // reached without re-reading (and re-racing) the instance file.
+    // reached without re-reading (and re-racing) the instance file, and carries the D20 token
+    // attach() falls back to.
     [[nodiscard]] const InstanceInfo& instance() const noexcept { return instance_; }
-    void set_instance(InstanceInfo info) { instance_ = std::move(info); }
     [[nodiscard]] const std::vector<std::string>& granted_scopes() const noexcept
     {
         return granted_scopes_;
     }
-    [[nodiscard]] WireChannel& channel() noexcept { return *channel_; }
 
 private:
+    // Only connect_to_project() (a static member, so it has access) seeds this. Deliberately NOT
+    // public: the instance document is discovery output, not something a consumer overrides.
+    void set_instance(InstanceInfo info) { instance_ = std::move(info); }
+
     std::unique_ptr<WireChannel> channel_;
     InstanceInfo instance_;
     std::deque<InboundFrame> pending_events_;
+    std::string last_error_code_;
     std::int64_t next_id_ = 0;
     bool attached_ = false;
+    // Whether the most recent failed call was a daemon REFUSAL rather than a transport fault.
+    // Latched here so failure_code() answers without every caller threading a bool out of call().
+    bool last_rejected_by_daemon_ = false;
     std::vector<std::string> granted_scopes_;
 };
 

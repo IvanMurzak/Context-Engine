@@ -4212,5 +4212,10 @@
     ],
     "compatibilityWindow": "negotiated capability subset; hard-fail outside the window; the negotiation/degradation behavior activates at the 2nd released protocol version (v1 is hard-fail-on-mismatch).",
     "note": "Active at protocolMajor=1 (M3 contract freeze) — the frozen surface changes only through this deprecation lifecycle; a breaking change without a cycle is rejected (R-CLI-004)."
-  }
+  },
+  "excludedSections": [
+    "coreFlags",
+    "verbs",
+    "mcpTools"
+  ]
 }
