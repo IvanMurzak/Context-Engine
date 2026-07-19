@@ -28,6 +28,7 @@ option(CONTEXT_DETERMINISTIC "Build the OPT-IN deterministic flavor (M6-F0a, R-S
 option(CONTEXT_BUILD_SPIKES "Build the M0 de-risking spike targets under spikes/ (opt-in; the default CI matrix stays spike-free; some spikes require the vcpkg toolchain with VCPKG_MANIFEST_FEATURES=spikes)" OFF)
 option(CONTEXT_BUILD_SPIKE_WASM "Build ONLY spikes/wasm (subset of CONTEXT_BUILD_SPIKES; acquires its own runtimes — needs no vcpkg toolchain), so CI can exercise the WASM spike without configuring the vcpkg-dependent spikes" OFF)
 option(CONTEXT_BUILD_SPIKE_CEF "Build the CEF accelerated-OSR compositing spike (L-41) — downloads the pinned ~162 MB CEF binary distribution; Windows/MSVC-only, local runs only, NEVER enabled in CI" OFF)
+option(CONTEXT_BUILD_SPIKE_DOCKVIEW "Build the M9 s1 Dockview-in-CEF ratification spike (spikes/dockview-cef) — registers the CEF-free headless-Chromium probe self-check and, on Windows/MSVC only, the CEF-149 host (the same pinned ~162 MB CEF download as CONTEXT_BUILD_SPIKE_CEF). Local runs only, NEVER enabled in CI" OFF)
 option(CONTEXT_BUILD_GUI_CEF "Build the M5 editor-GUI CEF build substrate (src/editor/cef/, issue #150) — fetches + SHA-verifies the pinned CEF prebuilt and boots it headless. A CI-only dependency path like V8 / wgpu-native (the MSVC/Clang-ABI prebuilt cannot link under the local Strawberry-GCC dev gate); default OFF so the default matrix + local dev gate never fetch CEF. The dedicated cef-substrate CI job sets it ON." OFF)
 
 # spikes/wasm builds WAMR (a C library), and the CEF editor-GUI substrate's own bundled cmake
@@ -201,6 +202,14 @@ endif()
 # in the vcpkg-dependent spikes above.
 if(CONTEXT_BUILD_SPIKES OR CONTEXT_BUILD_SPIKE_CEF)
     add_spike(cef-compositing)
+endif()
+
+# spikes/dockview-cef (M9 s1) is gated the same way as cef-compositing: with CONTEXT_BUILD_SPIKES=ON
+# but the dockview switch OFF (the CI bench job) the directory is entered and returns early
+# (configure-only, no download, nothing registered — CI untouched). CONTEXT_BUILD_SPIKE_DOCKVIEW=ON
+# registers the CEF-free python probe self-check and, on Windows/MSVC only, builds the CEF-149 host.
+if(CONTEXT_BUILD_SPIKES OR CONTEXT_BUILD_SPIKE_DOCKVIEW)
+    add_spike(dockview-cef)
 endif()
 
 # M2 wave 2: the engine schema vocabulary + units law + per-kind versioned schemas (R-DATA-006,
