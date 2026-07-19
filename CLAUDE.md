@@ -70,13 +70,14 @@ A local GCC-green `dev` run is **not** proof of CI green. Recurring CI-only brea
 Tests are ctest registrations, named in families the CI steps select by prefix regex:
 `kernel-test_*`, `gui-*` / `gui-a11y-*`, `ui-*` (runtime UI package, `src/packages/ui/`),
 `render-ui-*` (M7 GPU UI backend, `src/render/ui/`), `render-wgpu-*`, `shader-*`, `wasm-runner-*`,
-`cef-substrate-*`, `editor-cef-smoke-*`, `game-smoke-*`, `determinism-*`, `samples-corpus*`, and the
+`cef-substrate-*`, `editor-cef-smoke-*`, `client-*` (the M9 client SDK, `src/editor/client/`),
+`game-smoke-*`, `determinism-*`, `samples-corpus*`, and the
 milestone exit gates `m1-exit-*`, `m2-exit-*`, `m4-exit-*`, `m5-exit-*`, `m6-exit-*`, `m7-exit-*`,
 `m8-exit-*` (the M8 build-pipeline gate; -3/-4a/-4b are ALIASES of the a07 runtime-host / netsync
-packed-wedge executables, the m6-exit-3 alias precedent). The `ui-*` and
-`render-ui-*` families are plain package test families (not gates) — NOT in the general step's `-E`
-gate-exclusion regex, so they auto-run there, and the `build` job builds them via `--preset dev` (no
-`--target`/CI edits needed).
+packed-wedge executables, the m6-exit-3 alias precedent). The `ui-*`,
+`render-ui-*`, and `client-*` families are plain package test families (not gates) — NOT in the
+general step's `-E` gate-exclusion regex, so they auto-run there, and the `build` job builds them via
+`--preset dev` (no `--target`/CI edits needed). Note `^cli-` does NOT match `client-`.
 
 - The `build` job's general ctest step **excludes the gate families**
   (`-E "^m1-exit-|^m2-exit-|^m4-exit-|^m5-exit-|^m6-exit-|^m7-exit-|^m8-exit-|^determinism-|^samples-corpus"`);
@@ -121,6 +122,13 @@ license check + CycloneDX SBOM artifact, `tools/check_licenses.py`) and `python-
 - **`spike-wasm` / `spike-webgpu` / `spike-webgpu-web`, `wasm-runner`, `cef-substrate`,
   `editor-cef-smoke`** — the opt-in-toggle dependency paths, each blocking on its matrix (the
   a11y enforcement gate inside `editor-cef-smoke` blocks on Linux).
+- **`editor-boundary`** — blocking, ubuntu. The D10 client-boundary gate (M9 e02): `cmake --install`
+  the exported `context_client` closure to a staging prefix, build + run the standalone out-of-tree
+  consumer (`src/editor/client/consumer/`) against it via `find_package(ContextClient)`, and run the
+  transitive include-graph check (`tools/check_include_graph.py`) that forbids kernel-internal
+  headers on the published surface. See `docs/client-sdk.md`. **Adding a library to the exported
+  install set means adding it to this job's `--target` list too** — `cmake --install` fails on a
+  target whose artifact was never built.
 - **`bench-baseline` / `bench-attach-10k` / `build-time-bench` / `density-bench`** — the JOBS are
   blocking (harness must run green end-to-end); the perf NUMBERS are advisory (`continue-on-error`)
   until the perf-isolated runner class named in `docs/ci-fleet-manifest.json` is provisioned
@@ -165,7 +173,7 @@ every gate; CI validates it against the live workflows on every run, so gate cha
 | `src/` | Engine source + **all build/lint files** (`CMakeLists.txt`, `CMakePresets.json`, `vcpkg.json`, `.clang-format`, `.clang-tidy`) |
 | `src/kernel/` | The microkernel — ~6 stable interfaces (World/ECS, scheduler, module registry, event bus, resources, platform seam) |
 | `src/common/` | Shared cross-cutting infra (hardened subprocess/temp-file runner) |
-| `src/editor/` | **EditorKernel** — serializer, filesync, derivation, schema, compose, merge, migrate, assetdb, import, contract, bridge, pkg, GUI (CEF host + headless panels) |
+| `src/editor/` | **EditorKernel** — serializer, filesync, derivation, schema, compose, merge, migrate, assetdb, import, contract, bridge, **client** (the installed/exported client SDK), pkg, GUI (CEF host + headless panels) |
 | `src/runtime/` | **RuntimeKernel** — session/determinism hashing, save, V8 JS host, TS toolchain, WASM migration runner, profiler, netsync |
 | `src/render/` | Tiered RHI (WebGPU T1) + extract/double-buffer + opt-in wgpu-native and Emscripten web backends |
 | `src/packages/` | First-party feature packages: spatial, simmath, physics3d/2d, particles, animation, spline, audio, input |
@@ -186,6 +194,7 @@ a perf number may gate) · `physics-determinism-decision.md` (fixed-point Q16 si
 sim-vs-presentation-observer split) · `sim-render-timing-contract.md` (fixed timestep +
 interpolation) · `query-language.md` (the one query grammar) · `deprecation-policy.md` (the frozen
 `protocolMajor 1` contract lifecycle) · `wgsl-tool-decision.md` (Tint, measured) ·
+`client-sdk.md` (the `context_client` SDK, the subscription consumer, and the D10 boundary gate) ·
 `signing.md` (Ed25519 trust root, verify-before-use) · `toolchain-bootstrap.md` (the R-BUILD-008
 fetchable-vs-preinstalled split per v1 target — what `context doctor` validates) ·
 `versioned-install.md` (side-by-side

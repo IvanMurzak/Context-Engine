@@ -177,6 +177,14 @@ public:
     [[nodiscard]] bool send(std::string_view request_json);
     [[nodiscard]] std::optional<std::string> receive();
 
+    // receive() with a bounded wait — the primitive an event-driven push consumer needs so it can
+    // interleave "wait for a pushed event" with its own periodic work (ack cadence, reconnect
+    // backoff) instead of parking forever in a blocking read. Returns the frame on success; nullopt
+    // with `timed_out=true` when the wait elapsed with nothing inbound (NOT an error — the caller
+    // loops), or nullopt with `timed_out=false` on a clean EOF / I/O error (error() carries the
+    // reason). Same one-thread-owns-the-connection discipline as the serve loop's read_frame_timed.
+    [[nodiscard]] std::optional<std::string> receive_timed(int timeout_ms, bool& timed_out);
+
     void close() noexcept;
 
     [[nodiscard]] bool connected() const noexcept { return conn_.valid(); }

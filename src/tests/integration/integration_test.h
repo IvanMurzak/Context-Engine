@@ -135,6 +135,29 @@ inline bool wait_for_instance(const fs::path& project, int timeout_ms,
     }
 }
 
+// Read the daemon's D20 per-instance attach token from the discovery hint. Best-effort: an empty
+// string when the file is absent/torn/tokenless — the caller then attaches without one, which since
+// M9 e02 the daemon refuses (`attach.denied`), so a missing token surfaces as a refusal rather than
+// as silently-unauthenticated access. Called only AFTER instance_endpoint() has already waited out
+// the boot race, so it needs no retry loop of its own.
+inline std::string instance_token(const fs::path& project)
+{
+    const std::string text = read_file(project / ".editor" / "instance.json");
+    if (text.empty())
+        return std::string();
+    try
+    {
+        const Json doc = Json::parse(text);
+        if (doc.contains("token") && doc.at("token").is_string())
+            return doc.at("token").as_string();
+    }
+    catch (const std::exception&)
+    {
+        // torn read — treat as tokenless
+    }
+    return std::string();
+}
+
 // Read the daemon's endpoint from the discovery hint (retrying through the boot race).
 inline std::optional<std::string> instance_endpoint(const fs::path& project, int timeout_ms)
 {
@@ -181,6 +204,12 @@ public:
             error_ = "no discovery hint (instance.json) appeared";
             return false;
         }
+        // D20 (enforcement DEFAULT ON since M9 e02): remember the daemon's per-instance attach
+        // token so attach() can present it. This harness deliberately keeps its own RAW wire (it
+        // must send malformed/edge-case handshakes the context_client SDK will not emit — a wrong
+        // protocolMajor, an over-broad scope — to assert the daemon's refusals), so it carries the
+        // token itself rather than riding the SDK.
+        token_ = instance_token(project);
         client_.emplace(*endpoint);
         if (!client_->connect(timeout_ms))
         {
@@ -220,7 +249,13 @@ public:
     }
 
     // The attach handshake (R-CLI-010): carry {protocolMajor, capabilities[]} + the requested scope
-    // spec. Returns the full response (success carries result.{protocolMajor, capabilities, scopes}).
+    // spec, plus the D20 token this connection discovered. Returns the full response (success
+    // carries result.{protocolMajor, capabilities, scopes}).
+    //
+    // The D20 REFUSAL path (tokenless / impostor) is asserted at the SDK level against a live daemon
+    // in src/editor/client/tests/test_client_e2e.cpp. This harness keeps its own raw wire for the
+    // malformed handshakes the SDK will not emit (a wrong protocolMajor, an over-broad scope); if a
+    // raw-wire auth case is ever needed, take the token as a parameter here then.
     std::optional<Json> attach(std::uint64_t protocol_major, const std::vector<std::string>& caps,
                                const std::string& scope_spec)
     {
@@ -232,6 +267,8 @@ public:
         params.set("capabilities", std::move(c));
         if (!scope_spec.empty())
             params.set("scope", Json(scope_spec));
+        if (!token_.empty())
+            params.set("token", Json(token_));
         return call("attach", std::move(params));
     }
 
@@ -246,6 +283,7 @@ public:
 private:
     std::optional<TransportClient> client_;
     std::string error_;
+    std::string token_;
     std::int64_t id_ = 0;
 };
 

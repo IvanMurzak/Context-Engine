@@ -3,7 +3,7 @@
 // R-CLI-008 envelope (R-CLI-007/008/009; happy + failure paths, R-QA-013).
 
 #include "context/cli/app.h"
-#include "context/cli/wire_client.h"
+#include "context/cli/args.h"
 #include "context/editor/contract/json.h"
 #include "cli_test.h"
 
@@ -176,7 +176,7 @@ int main()
         CHECK(err_code(build) == "usage.missing_argument");
     }
 
-    // --- wire_client parse_u64: strict operational-flag value parsing. Deliberately NOT stoull,
+    // --- args parse_u64: strict operational-flag value parsing. Deliberately NOT stoull,
     // --- which wraps "-1" to ~2^64 (silently turning e.g. the --crawl-interval-ms safety net off)
     // --- and ignores trailing junk ("600abc" -> 600).
     {

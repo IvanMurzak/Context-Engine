@@ -253,6 +253,15 @@ add_subdirectory(editor/editorkernel)
 # AFTER contract + editorkernel so its link deps exist.
 add_subdirectory(cli)
 
+# M9 e02 — context_client (src/editor/client/): the client SDK the CLI rides and the FIRST
+# installed/exported library (D10 / A-F1). Added AFTER cli deliberately: its cross-process e2e test
+# add_dependencies() on the `context` binary, which must therefore already exist. The CLI's own
+# `target_link_libraries(context_cli PRIVATE context_client)` above names the target, which CMake
+# resolves at generate time regardless of add_subdirectory order (the convention used throughout
+# this file). PRIVATE matters: no client type appears in the CLI's own public headers, so the CLI
+# does not re-export the SDK.
+add_subdirectory(editor/client)
+
 # M1 test-system foundations (R-QA-010): the deterministic fault-injection harness (src/testing/) —
 # a reusable context_testing support lib + scenario tests driving the injectable kernel + file-sync +
 # bridge seams under a seeded fault schedule. Wired here — apart from add_subdirectory(kernel) above —
@@ -290,11 +299,84 @@ file(WRITE "${_context_version_marker}"
 # layout is proven by a real file landing under versions/<semver>/bin/. Engine components
 # (kernel/editor/runtime/packages) join this install set as they gain targets from M1 — the
 # microkernel library (context_kernel) is the first to do so.
-install(TARGETS context-hello context_kernel
+#
+# M9 e02 (A-F1 / D10) adds the first EXPORTED CONSUMER SURFACE: context_client, plus the ONE other
+# module its public headers actually name — context_contract (json / handshake / envelope). An
+# out-of-tree consumer — the editor shell, e05's JS client host, any third-party client — builds
+# against THOSE headers and nothing else; the `editor-boundary` CI job proves it by compiling a real
+# consumer against the installed tree with a transitive include-graph check.
+#
+# A STATIC library carries none of its dependencies' objects, so the install set must be the whole
+# static-link CLOSURE or a consumer link fails on undefined symbols: context_client -> bridge,
+# contract; bridge -> contract, kernel; contract -> schema, component; schema/component ->
+# serializer. The other FIVE (bridge, kernel, schema, component, serializer) are LINK-only payload —
+# their headers are deliberately NOT installed (see below), so they are invisible to a consumer's
+# include graph. That asymmetry IS the boundary: link what the implementation needs, expose only what
+# the contract publishes.
+#
+# bridge and kernel are in that link-only group ON PURPOSE, and it is worth saying why since the SDK
+# is built over them: NO installed header names a bridge or kernel type. `client.cpp` includes
+# bridge/transport.h, but that is an IMPLEMENTATION include, which is exactly the kind of dependency
+# a published boundary is supposed to hide. Publishing them would put bridge::Daemon (start(), the
+# .editor lock, set_method_backend) and the whole microkernel — World, scheduler, entity, component,
+# command_buffer — on the supported surface, so a "client" could instantiate a daemon in-process:
+# precisely the inversion D10 exists to prevent. Widening this later is free; narrowing it after
+# e04/e05 build against it is a breaking change.
+install(TARGETS context-hello
+                context_client context_bridge context_contract context_kernel
+                context_schema context_component context_serializer
     RUNTIME DESTINATION "${CONTEXT_INSTALL_SUBDIR}/bin"
     LIBRARY DESTINATION "${CONTEXT_INSTALL_SUBDIR}/lib"
     ARCHIVE DESTINATION "${CONTEXT_INSTALL_SUBDIR}/lib")
 install(FILES "${_context_version_marker}" DESTINATION "${CONTEXT_INSTALL_SUBDIR}")
+
+# The PUBLIC header surface — exactly these two modules, nothing else. Adding a directory here
+# widens the published boundary, so it is a deliberate, reviewable act (D10). Keep this list and
+# ALLOWED_MODULES in tools/check_include_graph.py in lockstep: the gate is what makes the narrowness
+# enforceable rather than aspirational.
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/editor/client/include/"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/editor/contract/include/"
+    DESTINATION "${CONTEXT_INSTALL_SUBDIR}/include"
+    FILES_MATCHING PATTERN "*.h")
+
+# The GENERATED client schema (built by the context_client_schema target): the artifact downstream
+# client generators consume — e05's JS client above all — so it ships WITH the SDK rather than being
+# re-derived (or worse, hand-transcribed) by each consumer.
+install(FILES "${CONTEXT_CLIENT_SCHEMA_GENERATED}"
+    DESTINATION "${CONTEXT_INSTALL_SUBDIR}/share/context")
+
+# The CMake package an out-of-tree consumer finds: `find_package(ContextClient REQUIRED)` then
+# `target_link_libraries(<t> PRIVATE Context::context_client)`.
+#
+# The config declares its IMPORTED targets by hand rather than via install(EXPORT). That is
+# deliberate, not a shortcut: install(EXPORT) exports a static library's PRIVATE deps too (recorded
+# as $<LINK_ONLY:…>), which would drag context_schema / context_component / context_warnings into
+# the exported set and force every one of them to be export-ready — including reworking four sibling
+# CMakeLists to $<BUILD_INTERFACE:>/$<INSTALL_INTERFACE:> include dirs. Worse, it would publish
+# internal targets as part of the package's public surface, which is exactly what D10 forbids.
+# Hand-authoring keeps the consumer-visible surface EXACTLY `Context::context_client`.
+
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/ContextClientConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}"
+    COMPATIBILITY SameMajorVersion)
+# PACKAGE_* variables the config resolves relative to its own installed location, so the whole
+# versions/<semver>/ tree stays relocatable (R-VER-004: side-by-side installs, no absolute paths
+# baked into a shipped package).
+set(CONTEXT_CLIENT_INSTALL_INCLUDEDIR "${CONTEXT_INSTALL_SUBDIR}/include")
+set(CONTEXT_CLIENT_INSTALL_LIBDIR "${CONTEXT_INSTALL_SUBDIR}/lib")
+set(CONTEXT_CLIENT_INSTALL_DATADIR "${CONTEXT_INSTALL_SUBDIR}/share/context")
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextClientConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/ContextClientConfig.cmake"
+    INSTALL_DESTINATION "${CONTEXT_INSTALL_SUBDIR}/lib/cmake/ContextClient"
+    PATH_VARS CONTEXT_CLIENT_INSTALL_INCLUDEDIR CONTEXT_CLIENT_INSTALL_LIBDIR
+              CONTEXT_CLIENT_INSTALL_DATADIR)
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/ContextClientConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/ContextClientConfigVersion.cmake"
+    DESTINATION "${CONTEXT_INSTALL_SUBDIR}/lib/cmake/ContextClient")
 
 # CPack packaging: the produced archive carries the SAME versions/<semver>/ internal layout
 # (it consumes the install() rules above), so `cpack -G ZIP` and `cmake --install` agree by

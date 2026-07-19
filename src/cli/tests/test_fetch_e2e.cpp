@@ -8,10 +8,9 @@
 //   * a bogus handle fails with resource.unknown_handle (exit-code table respected).
 // The daemon child is reaped (wire shutdown, else killed) so the test never hangs / leaks.
 
-#include "context/cli/wire_client.h"
+#include "context/editor/client/client.h"
 #include "context/editor/bridge/resource_store.h" // hex codec
-#include "context/editor/bridge/transport.h"
-#include "context/editor/contract/handshake.h" // kProtocolMajor (the frozen major the daemon accepts)
+#include "context/editor/client/instance.h" // discover_instance (the daemon-publish race)
 #include "context/editor/contract/json.h"
 
 #include "cli_test.h"
@@ -21,16 +20,15 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <system_error>
-#include <thread>
 
 namespace fs = std::filesystem;
-using context::cli::call;
-using context::cli::discover_endpoint;
-using context::editor::bridge::TransportClient;
+using context::editor::client::AttachOptions;
+using context::editor::client::Client;
 using context::editor::contract::Json;
 
 #ifndef CONTEXT_BINARY
@@ -57,21 +55,6 @@ std::string read_file(const fs::path& path)
     std::ostringstream ss;
     ss << f.rdbuf();
     return ss.str();
-}
-
-bool wait_for_instance(const fs::path& project, int timeout_ms)
-{
-    const fs::path instance = project / ".editor" / "instance.json";
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-    for (;;)
-    {
-        std::error_code ec;
-        if (fs::exists(instance, ec) && !read_file(instance).empty())
-            return true;
-        if (std::chrono::steady_clock::now() >= deadline)
-            return false;
-        std::this_thread::sleep_for(std::chrono::milliseconds(25));
-    }
 }
 
 // Parse defensively: a failed child leaves an empty/garbage --out file, and an uncaught parse throw
@@ -101,26 +84,25 @@ int main()
     ctest_proc::Process daemon = ctest_proc::spawn(
         bin, {"daemon", "--project", project.string(), "--large-result-threshold", "600"});
     CHECK(ctest_proc::valid(daemon));
-    CHECK(wait_for_instance(project, 15000));
+    // The SDK owns the publish race (retry until the document is readable) — riding it here keeps
+    // this test on the same discovery path the product uses instead of a private re-implementation.
+    CHECK(context::editor::client::discover_instance(project, 15000).has_value());
 
     // --- wire client: describe MUST come back as a largeResult handle, not inline ----------------
     std::string handle_uri;
     std::uint64_t total_bytes = 0;
     {
-        const std::optional<std::string> endpoint = discover_endpoint(project, 5000);
-        CHECK(endpoint.has_value());
-        TransportClient client(*endpoint);
-        CHECK(client.connect(5000));
-
-        std::int64_t id = 0;
+        AttachOptions attach_options; // scope defaults to "read"
         std::string err;
-        Json attach_params = Json::object();
-        attach_params.set("protocolMajor", Json(static_cast<std::uint64_t>(
-                                               context::editor::contract::kProtocolMajor)));
-        attach_params.set("scope", Json(std::string("read")));
-        CHECK(call(client, ++id, "attach", std::move(attach_params), err).has_value());
-
-        const std::optional<Json> described = call(client, ++id, "describe", Json::object(), err);
+        const std::unique_ptr<Client> client_ptr = Client::connect_to_project(project, 5000, err);
+        CHECK(client_ptr != nullptr);
+        // No early return: the daemon child below must still be reaped even if the connect failed.
+        std::optional<Json> described;
+        if (client_ptr)
+        {
+            CHECK(client_ptr->attach(attach_options, err));
+            described = client_ptr->call("describe", Json::object(), err);
+        }
         CHECK(described.has_value());
         if (described.has_value())
         {
@@ -132,7 +114,6 @@ int main()
             CHECK(!handle_uri.empty());
             CHECK(total_bytes > 600);
         }
-        client.close();
     }
 
     // --- a SEPARATE `context fetch` process retrieves + reassembles the original result ----------
@@ -210,22 +191,13 @@ int main()
 
     // --- reap: ask the daemon to stop over the wire; kill only if it ignores us ------------------
     {
-        const std::optional<std::string> endpoint = discover_endpoint(project, 2000);
-        if (endpoint.has_value())
+        AttachOptions attach_options;
+        attach_options.scope = "session";
+        std::string err;
+        if (const std::unique_ptr<Client> client = Client::connect_to_project(project, 2000, err))
         {
-            TransportClient client(*endpoint);
-            if (client.connect(2000))
-            {
-                std::int64_t id = 0;
-                std::string err;
-                Json attach_params = Json::object();
-                attach_params.set("protocolMajor", Json(static_cast<std::uint64_t>(
-                                                       context::editor::contract::kProtocolMajor)));
-                attach_params.set("scope", Json(std::string("session")));
-                (void)call(client, ++id, "attach", std::move(attach_params), err);
-                (void)call(client, ++id, "shutdown", Json::object(), err);
-                client.close();
-            }
+            if (client->attach(attach_options, err))
+                (void)client->call("shutdown", Json::object(), err);
         }
         int code = -1;
         if (!ctest_proc::wait_for(daemon, 10000, code))
