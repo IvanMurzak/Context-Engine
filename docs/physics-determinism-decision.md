@@ -93,7 +93,7 @@ the `deterministic` presets; the arm64 leg is the authoritative signal.
 
 ## Follow-up (owner, outside this pipeline)
 
-The normative design authority `engine-design/DESIGN-DECISIONS.md` (L-1…L-62) is owner-authored and is
+The normative design authority `.claude/design/context-engine/core/DESIGN-DECISIONS.md` (L-1…L-62) is owner-authored and is
 **not edited from the implement-task pipeline**. This decision — *fixed-point physics core as the M6
 determinism route under L-54* — should be promoted into a locked L-decision there by the owner; this
 doc is the engineering record + evidence it references.

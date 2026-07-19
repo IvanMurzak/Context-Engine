@@ -1,6 +1,6 @@
 # Orchestration-density targets (R-FILE-011 — M8.5 a21)
 
-> Design authority: `engine-design/REQUIREMENTS.md` **R-FILE-011** (sim-throughput /
+> Design authority: `.claude/design/context-engine/core/REQUIREMENTS.md` **R-FILE-011** (sim-throughput /
 > orchestration-density targets, re-anchored 2026-07-15 to no later than the M8.5 exit),
 > **R-QA-005** (headless session surface), **R-QA-009** (perf-gate methodology), **R-QA-012**
 > (fleet-manifest advisory-until-provisioned), **R-SIM-002** (fixed-timestep contract),

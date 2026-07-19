@@ -153,6 +153,6 @@ pipeline sync-point derivation) and the fallback if M1 uncovers a blocking custo
   gap; flecs `ecs_bulk_init` would narrow creation; flecs random access can be mitigated by
   cached records. None of these change (b)/(e), which are structural.
 - **Decision authority**: this spike supplies M0 evidence; the lock itself belongs to the
-  design authority (`engine-design/`). No design collisions were encountered — R-SIM-003 +
+  design authority (`.claude/design/context-engine/core/`). No design collisions were encountered — R-SIM-003 +
   R-LANG-010 are jointly satisfiable (flecs and the sketch both prove it); they do
   structurally exclude EnTT, which is a consistent outcome, not a contradiction.

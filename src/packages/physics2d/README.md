@@ -61,7 +61,7 @@ siblings (`physics3d`, `spatial`, `simmath`) and the kernel gains no dependency 
 R-2D-002 (Box2D-class 2D physics package), R-KERNEL-004 (the package contract), L-55 (2D first-class
 in v1), R-SIM-005 / L-54 (the determinism contract + wedge matrix), R-SIM-008 (composes on the
 `simmath` no-alloc math half), R-KERNEL-001 / L-60 (why it is a package), R-QA-005 (hash folding),
-R-QA-013 (tests ship with the feature). See `engine-design/REQUIREMENTS.md`, `DESIGN-DECISIONS.md`,
+R-QA-013 (tests ship with the feature). See `.claude/design/context-engine/core/REQUIREMENTS.md`, `DESIGN-DECISIONS.md`,
 `docs/physics-determinism-decision.md`, and
 `.claude/plans/designs/2026-07-11-m6-core-systems-decomposition.md` §P2. Mirrors `packages/physics3d`
 (M6 P1, R-SYS-001).

@@ -2,7 +2,7 @@
 
 This document records how this repository implements the fixed-timestep simulation loop and its
 presentation contract. The normative source is the owner's design authority
-(`engine-design/REQUIREMENTS.md` **R-SIM-002**, `engine-design/DESIGN-DECISIONS.md` **L-39**); this
+(`.claude/design/context-engine/core/REQUIREMENTS.md` **R-SIM-002**, `.claude/design/context-engine/core/DESIGN-DECISIONS.md` **L-39**); this
 file describes the kernel code that realizes it (`src/kernel/include/context/kernel/scheduler.h`,
 `src/kernel/src/scheduler.cpp`). The M1 microkernel lands the *types + the documented contract*; the
 double-buffered render world that consumes the interpolation alpha arrives with the render module

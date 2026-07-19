@@ -1,6 +1,6 @@
 # Build-time budget table (R-BUILD-006 — M8 a12)
 
-> Design authority: `engine-design/REQUIREMENTS.md` **R-BUILD-006** (committed build-time budgets),
+> Design authority: `.claude/design/context-engine/core/REQUIREMENTS.md` **R-BUILD-006** (committed build-time budgets),
 > **R-QA-009** (perf-gate methodology), **R-QA-012** (fleet-manifest advisory-until-provisioned),
 > **L-28** (hybrid derivation cache / cache-exempt LTO-link + per-build costs), **L-42** (from-source
 > vcpkg), ROADMAP §1-M8 a12. This document is the **normative allocation + justification** of the

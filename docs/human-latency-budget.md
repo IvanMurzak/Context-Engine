@@ -1,6 +1,6 @@
 # Human-interaction latency budget — R-HUX-011 (M5 exit criterion, SHOULD)
 
-The **human-interaction latency budget** is an M5 exit criterion of **R-HUX-011** (engine-design
+The **human-interaction latency budget** is an M5 exit criterion of **R-HUX-011** (.claude/design/context-engine/core
 `REQUIREMENTS.md` § R-HUX-011; ROADMAP §1 M5). It is the human-loop counterpart of the M1
 per-stage **agent/scale** budget table (`docs/latency-budget-table.md`, R-FILE-011): a human notices
 interaction latency at a different (perceptual) threshold than the agent-throughput targets, so the

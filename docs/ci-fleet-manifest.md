@@ -1,6 +1,6 @@
 # CI fleet manifest (R-QA-012)
 
-> Design authority: `engine-design/REQUIREMENTS.md` **R-QA-012** (normative), `ROADMAP.md` §6 CI
+> Design authority: `.claude/design/context-engine/core/REQUIREMENTS.md` **R-QA-012** (normative), `ROADMAP.md` §6 CI
 > tiering. The machine-readable manifest is `docs/ci-fleet-manifest.json`; **CI consumes it** via
 > `tools/check_fleet_manifest.py` (run in the `python-tests` job every PR). This document is the
 > human-readable companion.

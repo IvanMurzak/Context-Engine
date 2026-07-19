@@ -2,7 +2,7 @@
 
 How `context build` turns a project into a **runnable packed build**. This doc records the *implemented*
 adapter set and its artifact contract; the normative design is R-BUILD-001/002/005/009 + R-HEAD-001/002
-+ R-SEC-003 + R-ASSET-003/005 + L-5 + L-56 in the owner's `engine-design/` records.
++ R-SEC-003 + R-ASSET-003/005 + L-5 + L-56 in the owner's `.claude/design/context-engine/core/` records.
 
 ## The adapter set (v1)
 

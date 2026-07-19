@@ -46,5 +46,5 @@ auto hits = index.query_radius({px, py, pz}, r);  // O(result + log N)
 ## Design records
 
 `R-SIM-007` (this structure), `R-KERNEL-001` (why it's a package, not kernel), `L-39` /
-`R-CLI-006` / `R-ASSET-003` (its three consumers). See `engine-design/REQUIREMENTS.md` and
+`R-CLI-006` / `R-ASSET-003` (its three consumers). See `.claude/design/context-engine/core/REQUIREMENTS.md` and
 `DESIGN-DECISIONS.md`.

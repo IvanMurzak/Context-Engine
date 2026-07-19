@@ -56,5 +56,5 @@ const Fixed s = fixed_sin(kHalfPi);              // ~1.0, computed without libm
 ## Design records
 
 `R-SIM-008` (pooled/no-alloc sim APIs — math half), `R-KERNEL-001` / `L-60` (why it's a package, not
-kernel), `R-SIM-005` / `L-54` (the determinism contract it upholds). See `engine-design/REQUIREMENTS.md`
+kernel), `R-SIM-005` / `L-54` (the determinism contract it upholds). See `.claude/design/context-engine/core/REQUIREMENTS.md`
 and `DESIGN-DECISIONS.md`, and `.claude/plans/designs/2026-07-11-m6-core-systems-decomposition.md` §F0b.

@@ -1,7 +1,7 @@
 # `src/kernel/registration/` — generated-registration DCE proof (R-KERNEL-003)
 
 This directory de-risks the microkernel's **dead-code-elimination** promise (R-KERNEL-003, an M1
-de-risk item on `engine-design/ROADMAP.md` §1 M1): **a package a build does not reference leaves
+de-risk item on `.claude/design/context-engine/core/ROADMAP.md` §1 M1): **a package a build does not reference leaves
 zero footprint in the final binary.** It validates the "everything is a package, DCE'd builds"
 pillar before real packages proliferate.
 

@@ -1,7 +1,7 @@
 # Per-stage latency budget table — R-FILE-011 (M1 exit criterion)
 
 The **per-stage latency budget table** (`watch → hash → parse → validate → compose →
-instantiate → fan-out`) is an explicit M1 exit criterion of R-FILE-011 (engine-design
+instantiate → fan-out`) is an explicit M1 exit criterion of R-FILE-011 (.claude/design/context-engine/core
 `REQUIREMENTS.md`; ROADMAP §1 M1). This document is the **normative budget allocation +
 methodology**; the measured table for a given run is produced by
 `bench/budget_table.py` from a `bench/harness.py` result driving the real subject

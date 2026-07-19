@@ -1,6 +1,6 @@
 # Cross-implementation canonical-serialization test-vector corpus — RESERVATION (R-FILE-001)
 
-> Design authority: `engine-design/REQUIREMENTS.md` **R-FILE-001** (canonical serialization) +
+> Design authority: `.claude/design/context-engine/core/REQUIREMENTS.md` **R-FILE-001** (canonical serialization) +
 > **R-QA-011** (test corpora as versioned deliverables). This document **reserves the format and
 > location** of the corpus so the M2 canonical serializer lands its vectors into a pre-agreed home.
 > **No vectors exist yet** — this is a reservation, not the corpus. Populating it is an M2 deliverable

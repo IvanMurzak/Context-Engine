@@ -1,6 +1,6 @@
 # Performance-gate methodology (R-QA-009)
 
-> Design authority: `engine-design/REQUIREMENTS.md` **R-QA-009** (normative), `ROADMAP.md` §6 CI
+> Design authority: `.claude/design/context-engine/core/REQUIREMENTS.md` **R-QA-009** (normative), `ROADMAP.md` §6 CI
 > tiering. This document is the **published methodology** every CI-enforced performance target runs
 > under. It is the M1 stand-up of the gate discipline; the numeric floors it governs (R-FILE-011,
 > R-LANG-012, R-QA-007, R-BUILD-006, the R-BRIDGE-008 session-query p99) attach to it as they land.

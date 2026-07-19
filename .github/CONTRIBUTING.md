@@ -35,7 +35,7 @@ Once the CLA is in place, contributions will additionally need to pass the stand
 
 ## Tests are part of the feature (R-QA-013)
 
-Test delivery is **PR-granular** (engine-design requirement R-QA-013, owner-ruled
+Test delivery is **PR-granular** (.claude/design/context-engine/core requirement R-QA-013, owner-ruled
 2026-07-02): a behavior change merges only together with the tests that pin it down —
 happy path, edge cases, **and** failure paths — never in a later "hardening pass".
 Concretely:
