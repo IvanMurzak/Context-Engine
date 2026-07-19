@@ -179,7 +179,7 @@ WGPUBlendFactor to_wgpu_blend_factor(BlendFactor f)
 WGPUBlendComponent to_wgpu_blend_component(const BlendComponent& c)
 {
     WGPUBlendComponent out{};
-    out.operation = WGPUBlendOperation_Add; // BlendOperation::Add is the only T1 operation
+    out.operation = WGPUBlendOperation_Add; // Add is the only T1 operation; rhi.h stores no other
     out.srcFactor = to_wgpu_blend_factor(c.src);
     out.dstFactor = to_wgpu_blend_factor(c.dst);
     return out;
@@ -268,9 +268,14 @@ void on_adapter(WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUString
     out->done = true;
 }
 
-WGPUAdapter request_adapter(WGPUInstance instance, std::string* failure)
+// The ONE blocking adapter request. `compatible_surface` non-null asks for an adapter that can
+// PRESENT to that surface; null asks for any adapter (the offscreen/headless probe). Both callers
+// share the pump loop so a future change to it cannot land on only one of them.
+WGPUAdapter request_adapter(WGPUInstance instance, std::string* failure,
+                            WGPUSurface compatible_surface = nullptr)
 {
     WGPURequestAdapterOptions opts{};
+    opts.compatibleSurface = compatible_surface;
     AdapterResult result;
     WGPURequestAdapterCallbackInfo cb{};
     cb.mode = WGPUCallbackMode_AllowProcessEvents;
@@ -878,7 +883,6 @@ public:
     ExternalTexture import_external_texture(const ExternalTextureDesc& desc) override
     {
         ExternalTexture out;
-        out.source_used = desc.source;
         if (desc.coded_size.width == 0 || desc.coded_size.height == 0)
         {
             out.diagnostic = "external-texture import: coded_size is empty";
@@ -940,8 +944,7 @@ public:
         void* mtl_device = wgpuDeviceGetNativeMetalDevice(device_);
         void* mtl_queue = wgpuQueueGetNativeMetalCommandQueue(queue_.raw());
         void* mtl_texture = wgpuTextureGetNativeMetalTexture(static_cast<WgpuTexture&>(texture).raw());
-        return detail::blit_iosurface(mtl_device, mtl_queue, desc.handle, mtl_texture,
-                                      desc.coded_size.width, desc.coded_size.height);
+        return detail::blit_iosurface(mtl_device, mtl_queue, desc.handle, mtl_texture);
 #else
         (void)texture;
         return "IOSurface refresh needs macOS + wgpu-native's native Metal accessors";
@@ -969,10 +972,25 @@ public:
     WgpuSwapchain(WGPUSurface surface, WGPUDevice device, const SurfaceConfig& config)
         : surface_(surface), device_(device), config_(config)
     {
+        // RETAIN both. ISurface::configure hands back an independently-owned ISwapchain, and nothing
+        // in the rhi.h contract obliges a caller to outlive it with the surface or device — so
+        // borrowing raw handles here would let a legal `surface.reset(); chain->present();` call
+        // into freed memory. Ref-counting is what wgpu-native's model is for, and it matches every
+        // other wrapper in this file.
+        wgpuSurfaceAddRef(surface_);
+        wgpuDeviceAddRef(device_);
         apply_configuration();
     }
 
-    ~WgpuSwapchain() override { release_frame(); }
+    WgpuSwapchain(const WgpuSwapchain&) = delete;
+    WgpuSwapchain& operator=(const WgpuSwapchain&) = delete;
+
+    ~WgpuSwapchain() override
+    {
+        release_frame();
+        wgpuDeviceRelease(device_);
+        wgpuSurfaceRelease(surface_);
+    }
 
     [[nodiscard]] Extent2D size() const override { return config_.size; }
     [[nodiscard]] TextureFormat format() const override { return config_.format; }
@@ -1025,8 +1043,19 @@ public:
             return frame;
         }
 
+        WGPUTextureView raw_view = wgpuTextureCreateView(current.texture, nullptr);
+        if (raw_view == nullptr)
+        {
+            // Reporting Ok with a null view would defer the failure into the render pass, where it
+            // reads as a driver bug rather than a failed acquire.
+            wgpuTextureRelease(current.texture);
+            frame.status = AcquireStatus::Error;
+            frame.view = nullptr;
+            return frame;
+        }
+
         current_texture_ = current.texture;
-        view_ = std::make_unique<WgpuTextureView>(wgpuTextureCreateView(current_texture_, nullptr));
+        view_ = std::make_unique<WgpuTextureView>(raw_view);
         frame.view = view_.get();
         acquired_ = true;
         return frame;
@@ -1167,8 +1196,6 @@ public:
         return std::make_unique<WgpuSwapchain>(surface_, static_cast<WgpuDevice&>(device).raw(),
                                                config);
     }
-
-    [[nodiscard]] WGPUSurface raw() const { return surface_; }
 
 private:
     WGPUSurface surface_;
@@ -1316,7 +1343,9 @@ public:
         // Capabilities are reported for a (surface, adapter) PAIR, so the surface holds the adapter
         // it was probed against — requested WITH compatibleSurface set, which is what makes the
         // answer meaningful on a multi-GPU box.
-        return std::make_unique<WgpuSurface>(surface, request_compatible_adapter(surface));
+        // A null adapter here is a GPU-less or unpresentable box: reported by WgpuSurface's
+        // capability report, never fatal.
+        return std::make_unique<WgpuSurface>(surface, request_adapter(instance_, nullptr, surface));
 #endif
     }
 
@@ -1333,27 +1362,6 @@ public:
     }
 
 private:
-#if !defined(__EMSCRIPTEN__)
-    // Request an adapter that can present to `surface` (WGPURequestAdapterOptions::compatibleSurface).
-    // Returns null when none exists — a GPU-less or unpresentable box, reported, never fatal.
-    WGPUAdapter request_compatible_adapter(WGPUSurface surface)
-    {
-        WGPURequestAdapterOptions opts{};
-        opts.compatibleSurface = surface;
-        AdapterResult result;
-        WGPURequestAdapterCallbackInfo cb{};
-        cb.mode = WGPUCallbackMode_AllowProcessEvents;
-        cb.callback = on_adapter;
-        cb.userdata1 = &result;
-        wgpuInstanceRequestAdapter(instance_, &opts, cb);
-        while (!result.done)
-        {
-            pump(instance_);
-        }
-        return result.adapter;
-    }
-#endif
-
     WGPUInstance instance_;
 };
 

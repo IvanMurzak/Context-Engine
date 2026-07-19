@@ -28,7 +28,9 @@
 namespace context::render::present
 {
 
-// The sampled sub-rect in normalized texture coordinates.
+// The sampled sub-rect in normalized texture coordinates. This IS the uniform block the composite
+// shader reads — four consecutive floats matching `struct Uv { rect : vec4<f32> }` in
+// composite_wgsl(), so it is uploaded directly with no repacking step to keep in sync.
 struct CompositeUv
 {
     float u0 = 0.0f;
@@ -37,21 +39,20 @@ struct CompositeUv
     float v1 = 1.0f;
 };
 
-// visible_rect / coded_size, clipped to the allocation. An empty visible rect (a producer that has
-// not reported one yet) yields the full [0,1] range, which is the right default for the common
-// visible == coded case.
+// The shader-layout invariant, asserted rather than commented: a WGSL vec4<f32> is 16 bytes, and a
+// mismatch here would upload silently-misaligned UVs.
+static_assert(sizeof(CompositeUv) == 16u,
+              "CompositeUv must match WGSL `struct Uv { rect : vec4<f32> }`");
+
+// visible_rect / coded_size, clipped to the allocation. Every DEGENERATE input — an empty coded
+// size, an unreported (empty) visible rect, or an origin that a concurrent resize has left outside
+// the allocation — yields the full [0,1] range, which is the right default for the common
+// visible == coded case and shows the whole allocation rather than a black window.
+//
+// Note this deliberately differs from clip_rect() in osr_import.h, which returns an EMPTY rect for
+// its own out-of-bounds case. The asymmetry is intended: skipping an UPLOAD of a stale rect is
+// free, whereas compositing nothing would blank the editor's UI for that frame.
 [[nodiscard]] CompositeUv compute_composite_uv(const Rect2D& visible_rect, Extent2D coded_size);
-
-// The uniform block the composite shader reads — MUST match `struct Uv` in composite_wgsl().
-struct CompositeUniforms
-{
-    float u0 = 0.0f;
-    float v0 = 0.0f;
-    float u1 = 1.0f;
-    float v1 = 1.0f;
-};
-
-[[nodiscard]] CompositeUniforms make_composite_uniforms(const CompositeUv& uv);
 
 // The WGSL for the fullscreen-triangle composite (bindings: 0 = uv uniform, 1 = texture, 2 = sampler).
 [[nodiscard]] const char* composite_wgsl();

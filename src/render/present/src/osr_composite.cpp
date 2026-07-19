@@ -2,6 +2,8 @@
 
 #include "context/render/present/osr_composite.h"
 
+#include "context/render/present/osr_import.h" // clip_rect — one clip, shared with the upload driver
+
 #include <algorithm>
 
 namespace context::render::present
@@ -70,19 +72,12 @@ CompositeUv compute_composite_uv(const Rect2D& visible_rect, Extent2D coded_size
     {
         return uv; // no visible rect reported yet — the whole allocation is the frame
     }
-    const Rect2D clipped = [&]
+    if (visible_rect.origin.x >= coded_size.width || visible_rect.origin.y >= coded_size.height)
     {
-        Rect2D r;
-        if (visible_rect.origin.x >= coded_size.width || visible_rect.origin.y >= coded_size.height)
-        {
-            r.size = coded_size;
-            return r;
-        }
-        r.origin = visible_rect.origin;
-        r.size.width = std::min(visible_rect.size.width, coded_size.width - visible_rect.origin.x);
-        r.size.height = std::min(visible_rect.size.height, coded_size.height - visible_rect.origin.y);
-        return r;
-    }();
+        return uv; // stale rect from a concurrent resize — fall back to the whole allocation
+    }
+    // The same clip the upload driver applies, reused rather than restated so the two cannot drift.
+    const Rect2D clipped = clip_rect(visible_rect, coded_size);
 
     const float coded_w = static_cast<float>(coded_size.width);
     const float coded_h = static_cast<float>(coded_size.height);
@@ -91,16 +86,6 @@ CompositeUv compute_composite_uv(const Rect2D& visible_rect, Extent2D coded_size
     uv.u1 = static_cast<float>(clipped.origin.x + clipped.size.width) / coded_w;
     uv.v1 = static_cast<float>(clipped.origin.y + clipped.size.height) / coded_h;
     return uv;
-}
-
-CompositeUniforms make_composite_uniforms(const CompositeUv& uv)
-{
-    CompositeUniforms out;
-    out.u0 = uv.u0;
-    out.v0 = uv.v0;
-    out.u1 = uv.u1;
-    out.v1 = uv.v1;
-    return out;
 }
 
 const char* composite_wgsl()

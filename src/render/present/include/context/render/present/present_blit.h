@@ -18,7 +18,9 @@
 
 #pragma once
 
-#include "context/render/present/osr_import.h"
+// present_common.h, NOT osr_import.h: the CPU present fallback needs the platform enum and the
+// buffer-bounds rule, and nothing whatsoever from the OSR import policy.
+#include "context/render/present/present_common.h"
 #include "context/render/rhi.h"
 
 #include <cstdint>
@@ -33,9 +35,29 @@ namespace context::render::present
 struct BlitImage
 {
     const void* pixels = nullptr;
+    // How many bytes `pixels` actually points at. Carried for the same reason OsrFrame::byte_size
+    // is: a blitter reads height*bytes_per_row bytes on trust, so without it a truncated buffer is
+    // an out-of-bounds read instead of a refusal.
+    std::size_t byte_size = 0;
     Extent2D size;
     std::uint32_t bytes_per_row = 0;
 };
+
+// True when `src` describes a fully readable BGRA8 image: a real buffer, a stride at least as wide
+// as its own pixels, and a byte_size covering through the last row. The ONE validation both
+// blitters share, so neither can drift into trusting a malformed frame.
+[[nodiscard]] bool is_blit_source_readable(const BlitImage& src);
+
+// Copy `src` into a tightly-packed (bytes_per_row == width*4) BGRA8 buffer. A padded stride cannot
+// be expressed in a Windows BITMAPINFO, so the GDI path repacks first — and because this is pure
+// memory arithmetic rather than an OS call, it is asserted on all three OSes instead of only where
+// GDI exists.
+//
+// `_into` is the form the per-frame path uses: it reuses `out`'s capacity, so a repacking blitter
+// allocates once rather than once per paint. Returns false (and clears `out`) when `src` is not
+// readable. The by-value overload is the convenience form for tests and one-shot callers.
+bool repack_tight_into(const BlitImage& src, std::vector<std::uint8_t>& out);
+[[nodiscard]] std::vector<std::uint8_t> repack_tight(const BlitImage& src);
 
 // Where the source lands inside the destination surface: aspect-preserving and centred, so a window
 // whose aspect differs from the UI buffer's gets symmetric bars rather than a stretched image.

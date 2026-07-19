@@ -76,6 +76,19 @@ function(context_assert_no_present_linkage)
 
     set(_report "# Headless-invariant audit (M9 e03, design 03 §2)\n")
     string(APPEND _report "# Forbidden (presentation) targets: ${_arg_FORBIDDEN}\n")
+
+    # Record whether each FORBIDDEN name is a real target. Without this the gate has a second
+    # vacuous-pass mode, symmetric with the audited-side one the companion ctest already catches:
+    # rename context_render_present and every closure check below silently matches nothing, so the
+    # audit reports "isolated" while forbidding a target that no longer exists.
+    foreach(_forbidden IN LISTS _arg_FORBIDDEN)
+        if(TARGET ${_forbidden})
+            string(APPEND _report "FORBIDDEN-PRESENT ${_forbidden}\n")
+        else()
+            string(APPEND _report "FORBIDDEN-ABSENT ${_forbidden} (not a target in this configuration)\n")
+        endif()
+    endforeach()
+
     set(_violations "")
 
     foreach(_target IN LISTS _arg_TARGETS)

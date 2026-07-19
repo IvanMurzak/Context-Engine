@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include "context/render/offscreen_scene.h" // detail::pixel_near — the shared proof-pixel compare
 #include "context/render/present/osr_composite.h"
 #include "context/render/present/osr_import.h"
 #include "context/render/rhi.h"
@@ -46,21 +47,26 @@ struct ReferenceOsrFrame
 {
     ReferenceOsrFrame frame;
     frame.coded_size = {128, 64};
-    frame.visible_rect.origin = {0, 0};
-    frame.visible_rect.size = {64, 32};
+    // Every one of the four UV components is DISTINCT (u0=.125 v0=.0625 u1=.625 v1=.4375), and the
+    // origin is non-zero. That is deliberate and load-bearing: with a {0,0} origin and a rect whose
+    // width/coded_width happens to equal its height/coded_height, a shader that dropped the origin
+    // or swapped u with v would sample the identical region and the proof would pass anyway.
+    frame.visible_rect.origin = {16, 4};
+    frame.visible_rect.size = {64, 24};
     frame.target_size = frame.visible_rect.size; // 64 * 4 = 256 == the readback row alignment
     frame.bytes_per_row = frame.coded_size.width * 4u;
     frame.clear = Color{0.0, 0.0, 1.0, 1.0}; // opaque blue backdrop
 
     frame.pixels.assign(static_cast<std::size_t>(frame.bytes_per_row) * frame.coded_size.height, 0u);
+    const Rect2D& vis = frame.visible_rect;
     for (std::uint32_t y = 0; y < frame.coded_size.height; ++y)
     {
         for (std::uint32_t x = 0; x < frame.coded_size.width; ++x)
         {
             std::uint8_t* p =
                 frame.pixels.data() + static_cast<std::size_t>(y) * frame.bytes_per_row + x * 4u;
-            const bool visible =
-                x < frame.visible_rect.size.width && y < frame.visible_rect.size.height;
+            const bool visible = x >= vis.origin.x && x < vis.origin.x + vis.size.width &&
+                                 y >= vis.origin.y && y < vis.origin.y + vis.size.height;
             if (!visible)
             {
                 // Opaque magenta: appears in the expected output NOWHERE, so a wrong UV sub-rect
@@ -69,21 +75,43 @@ struct ReferenceOsrFrame
                 p[1] = 0x00; // G
                 p[2] = 0xFF; // R
                 p[3] = 0xFF; // A
+                continue;
             }
-            else if (x < frame.visible_rect.size.width / 2u)
+            // FOUR quadrants, so the pattern varies on BOTH axes. A vertical flip (the one thing
+            // the vertex stage does to the UV) swaps the top pair with the bottom pair, which is
+            // invisible to any fixture whose rows are all alike.
+            const bool left = (x - vis.origin.x) < vis.size.width / 2u;
+            const bool top = (y - vis.origin.y) < vis.size.height / 2u;
+            if (top && left)
             {
                 p[0] = 0x00; // opaque green
                 p[1] = 0xFF;
                 p[2] = 0x00;
                 p[3] = 0xFF;
             }
-            else
+            else if (top)
             {
                 // 50% white, PREMULTIPLIED: colour channels are 128, not 255.
                 p[0] = 0x80;
                 p[1] = 0x80;
                 p[2] = 0x80;
                 p[3] = 0x80;
+            }
+            else if (left)
+            {
+                p[0] = 0x00; // opaque red
+                p[1] = 0x00;
+                p[2] = 0xFF;
+                p[3] = 0xFF;
+            }
+            else
+            {
+                // Fully transparent, premultiplied: every channel zero, so this quadrant must come
+                // out as the pure backdrop — the alpha=0 end of the ONE/INV_SRC_ALPHA fold.
+                p[0] = 0x00;
+                p[1] = 0x00;
+                p[2] = 0x00;
+                p[3] = 0x00;
             }
         }
     }
@@ -146,10 +174,9 @@ struct ReferenceOsrFrame
     SamplerDesc sampler_desc; // Nearest: the target matches visible_rect 1:1, so no filtering blur
     std::unique_ptr<ISampler> sampler = device.create_sampler(sampler_desc);
 
-    const CompositeUniforms uniforms =
-        make_composite_uniforms(compute_composite_uv(frame.visible_rect, frame.coded_size));
+    const CompositeUv uniforms = compute_composite_uv(frame.visible_rect, frame.coded_size);
     BufferDesc uniform_desc;
-    uniform_desc.size = sizeof(CompositeUniforms);
+    uniform_desc.size = sizeof(CompositeUv);
     uniform_desc.uniform = true;
     uniform_desc.copy_dst = true;
     std::unique_ptr<IBuffer> uniform_buffer = device.create_buffer(uniform_desc);
@@ -161,7 +188,7 @@ struct ReferenceOsrFrame
     std::vector<BindGroupEntry> entries(3);
     entries[0].binding = 0;
     entries[0].buffer = uniform_buffer.get();
-    entries[0].buffer_size = sizeof(CompositeUniforms);
+    entries[0].buffer_size = sizeof(CompositeUv);
     entries[1].binding = 1;
     entries[1].texture = osr_view.get();
     entries[2].binding = 2;
@@ -216,22 +243,29 @@ struct ReferenceOsrFrame
             const std::uint8_t* got = pixels + static_cast<std::size_t>(y) * bytes_per_row + x * 4u;
             const std::uint8_t* want =
                 expected.data() + (static_cast<std::size_t>(y) * frame.target_size.width + x) * 4u;
-            for (int c = 0; c < 4; ++c)
+            // The verdict comes from the ONE shared per-channel tolerance compare every sibling GPU
+            // proof uses (lit / sprite / viewport); only the per-channel REPORT is local, because
+            // the shared helper returns a bool and "which channel" is what makes a failure legible.
+            if (detail::pixel_near(got, want[0], want[1], want[2], want[3], kTolerance))
             {
-                const int delta = static_cast<int>(got[c]) - static_cast<int>(want[c]);
-                if (delta > kTolerance || delta < -kTolerance)
+                continue;
+            }
+            if (mismatches < 8)
+            {
+                for (int c = 0; c < 4; ++c)
                 {
-                    if (mismatches < 8)
+                    const int delta = static_cast<int>(got[c]) - static_cast<int>(want[c]);
+                    if (delta > kTolerance || delta < -kTolerance)
                     {
                         std::fprintf(stderr,
                                      "[render-wgpu] FAIL: OSR composite (%u,%u) channel %d: got %d, "
                                      "want %d\n",
                                      x, y, c, static_cast<int>(got[c]), static_cast<int>(want[c]));
+                        break;
                     }
-                    ++mismatches;
-                    break;
                 }
             }
+            ++mismatches;
         }
     }
     readback->unmap();

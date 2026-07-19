@@ -61,47 +61,95 @@ BlitPlan compute_blit_plan(Extent2D src, Extent2D dst)
     return plan;
 }
 
+bool is_blit_source_readable(const BlitImage& src)
+{
+    // rows_fit carries the "trailing padding on the LAST row is optional" rule, shared with the
+    // dirty-rect upload driver so the two cannot drift apart.
+    return src.pixels != nullptr && rows_fit(src.size, src.bytes_per_row, src.byte_size);
+}
+
+bool repack_tight_into(const BlitImage& src, std::vector<std::uint8_t>& out)
+{
+    if (!is_blit_source_readable(src))
+    {
+        out.clear();
+        return false;
+    }
+    const std::size_t tight_row = static_cast<std::size_t>(src.size.width) * 4u;
+    // resize, not assign: every byte is overwritten by the copy below, so zero-filling first is
+    // pure waste — and resize keeps the retained capacity across frames.
+    out.resize(tight_row * src.size.height);
+    const auto* base = static_cast<const std::uint8_t*>(src.pixels);
+    for (std::uint32_t y = 0; y < src.size.height; ++y)
+    {
+        std::copy_n(base + static_cast<std::size_t>(y) * src.bytes_per_row, tight_row,
+                    out.data() + static_cast<std::size_t>(y) * tight_row);
+    }
+    return true;
+}
+
+std::vector<std::uint8_t> repack_tight(const BlitImage& src)
+{
+    std::vector<std::uint8_t> packed;
+    repack_tight_into(src, packed);
+    return packed;
+}
+
 bool MemoryBlitter::blit(const BlitImage& src, Extent2D dst)
 {
     const BlitPlan plan = compute_blit_plan(src.size, dst);
     last_plan_ = plan;
-    if (plan.empty || src.pixels == nullptr || src.bytes_per_row < src.size.width * 4u)
+    if (plan.empty || !is_blit_source_readable(src))
     {
+        // Drop the previous frame on a refusal. Keeping it would leave target() holding stale
+        // pixels under a target_size() the caller believes is current — a silently wrong present.
+        target_.clear();
+        target_size_ = Extent2D{};
         return false;
     }
 
     target_size_ = dst;
-    target_.assign(static_cast<std::size_t>(dst.width) * dst.height * 4u, 0u);
+    target_.resize(static_cast<std::size_t>(dst.width) * dst.height * 4u);
+    if (plan.letterboxed)
+    {
+        // Only a letterboxed present leaves pixels the loop below does not write — the bars. An
+        // unconditional zero-fill would memset the entire target every frame and then overwrite all
+        // of it, which at 2560x1440 is ~15 MB of dead writes per paint.
+        std::fill(target_.begin(), target_.end(), std::uint8_t{0});
+    }
     const auto* base = static_cast<const std::uint8_t*>(src.pixels);
 
     for (std::uint32_t y = 0; y < plan.height; ++y)
     {
-        // Nearest-neighbour: map the destination pixel centre back into the source.
+        // Nearest-neighbour, top-left convention: floor(dst * src / plan). (The composite oracle
+        // samples pixel CENTRES instead — the two need not agree, since this path never validates
+        // that one, but do not read one as evidence for the other.)
         const std::uint32_t sy = std::min(
             src.size.height - 1u,
             static_cast<std::uint32_t>((static_cast<std::uint64_t>(y) * src.size.height) /
                                        plan.height));
+        const std::uint8_t* src_row = base + static_cast<std::size_t>(sy) * src.bytes_per_row;
+        // Both bases are loop-invariant in x. No per-pixel bounds check: compute_blit_plan
+        // guarantees plan.{x,y} + plan.{width,height} <= dst, and target_ is exactly
+        // dst.width * dst.height * 4, so the last index written is target_.size() - 4.
+        std::uint8_t* dst_row =
+            target_.data() + (static_cast<std::size_t>(static_cast<std::uint32_t>(plan.y) + y) *
+                                  dst.width +
+                              static_cast<std::uint32_t>(plan.x)) *
+                                 4u;
         for (std::uint32_t x = 0; x < plan.width; ++x)
         {
             const std::uint32_t sx = std::min(
                 src.size.width - 1u,
                 static_cast<std::uint32_t>((static_cast<std::uint64_t>(x) * src.size.width) /
                                            plan.width));
-            const std::uint8_t* s =
-                base + static_cast<std::size_t>(sy) * src.bytes_per_row + sx * 4u;
-            const std::size_t dst_index =
-                (static_cast<std::size_t>(static_cast<std::uint32_t>(plan.y) + y) * dst.width +
-                 static_cast<std::uint32_t>(plan.x) + x) *
-                4u;
-            if (dst_index + 3u >= target_.size())
-            {
-                continue;
-            }
+            const std::uint8_t* s = src_row + static_cast<std::size_t>(sx) * 4u;
+            std::uint8_t* d = dst_row + static_cast<std::size_t>(x) * 4u;
             // Source is BGRA, target is RGBA — the same swizzle the sampler does on the GPU path.
-            target_[dst_index + 0] = s[2];
-            target_[dst_index + 1] = s[1];
-            target_[dst_index + 2] = s[0];
-            target_[dst_index + 3] = s[3];
+            d[0] = s[2];
+            d[1] = s[1];
+            d[2] = s[0];
+            d[3] = s[3];
         }
     }
     ++blit_count_;
@@ -124,9 +172,25 @@ public:
     bool blit(const BlitImage& src, Extent2D dst) override
     {
         const BlitPlan plan = compute_blit_plan(src.size, dst);
-        if (plan.empty || src.pixels == nullptr || src.bytes_per_row < src.size.width * 4u)
+        if (plan.empty || !is_blit_source_readable(src))
         {
             return false;
+        }
+
+        // Repack BEFORE acquiring the DC. A padded source stride cannot be expressed in a
+        // BITMAPINFO, so a padded frame is repacked tightly rather than presented with skewed rows
+        // — and doing it first means the allocation cannot throw while we are holding a DC that
+        // only the single ReleaseDC below would free.
+        const void* pixels = src.pixels;
+        if (src.bytes_per_row != src.size.width * 4u)
+        {
+            // Into the RETAINED member buffer, not a fresh vector: repacking a 2560x1440 frame
+            // through a by-value return would malloc + free ~15 MB every paint.
+            if (!repack_tight_into(src, repack_))
+            {
+                return false;
+            }
+            pixels = repack_.data();
         }
 
         HDC dc = ::GetDC(hwnd_);
@@ -145,22 +209,6 @@ public:
         info.bmiHeader.biBitCount = 32;
         info.bmiHeader.biCompression = BI_RGB;
 
-        // A padded source stride cannot be expressed in BITMAPINFO, so a padded frame is repacked
-        // tightly first rather than presented with skewed rows.
-        const std::uint32_t tight_row = src.size.width * 4u;
-        const void* pixels = src.pixels;
-        if (src.bytes_per_row != tight_row)
-        {
-            repack_.assign(static_cast<std::size_t>(tight_row) * src.size.height, 0u);
-            const auto* base = static_cast<const std::uint8_t*>(src.pixels);
-            for (std::uint32_t y = 0; y < src.size.height; ++y)
-            {
-                std::copy_n(base + static_cast<std::size_t>(y) * src.bytes_per_row, tight_row,
-                            repack_.data() + static_cast<std::size_t>(y) * tight_row);
-            }
-            pixels = repack_.data();
-        }
-
         // Bars first, so a letterboxed present does not leave the previous frame's edges on screen.
         if (plan.letterboxed)
         {
@@ -169,6 +217,9 @@ public:
         }
 
         ::SetStretchBltMode(dc, HALFTONE);
+        // MSDN: after selecting HALFTONE the brush origin must be re-set, or the halftone pattern
+        // misaligns against the DC's brush.
+        ::SetBrushOrgEx(dc, 0, 0, nullptr);
         const int written = ::StretchDIBits(
             dc, plan.x, plan.y, static_cast<int>(plan.width), static_cast<int>(plan.height), 0, 0,
             static_cast<int>(src.size.width), static_cast<int>(src.size.height), pixels, &info,

@@ -13,11 +13,6 @@ namespace
 // software path is one search away instead of tribal knowledge.
 constexpr const char* kWindowsImportIssue = "gfx-rs/wgpu-native#621";
 
-bool is_empty(Extent2D size)
-{
-    return size.width == 0 || size.height == 0;
-}
-
 } // namespace
 
 PresentPlatform current_present_platform()
@@ -65,7 +60,6 @@ OsrImportDecision select_osr_import(PresentPlatform platform, const OsrImportOpt
 {
     OsrImportDecision decision;
     decision.source = ExternalTextureSource::CpuBgra;
-    decision.accelerated = false;
 
     // The single L-41 override, checked FIRST so it is unconditional: whatever the platform could
     // do, an explicit force_software wins.
@@ -82,7 +76,6 @@ OsrImportDecision select_osr_import(PresentPlatform platform, const OsrImportOpt
             if (options.windows_shared_handle_import_available)
             {
                 decision.source = ExternalTextureSource::D3D12SharedHandle;
-                decision.accelerated = true;
                 decision.rationale = "accelerated: DXGI shared-handle import is available";
             }
             else
@@ -95,7 +88,6 @@ OsrImportDecision select_osr_import(PresentPlatform platform, const OsrImportOpt
             break;
         case PresentPlatform::macos:
             decision.source = ExternalTextureSource::IOSurface;
-            decision.accelerated = true;
             decision.rationale =
                 "accelerated: raw IOSurface via wgpu-native's stock native Metal accessors";
             break;
@@ -103,7 +95,6 @@ OsrImportDecision select_osr_import(PresentPlatform platform, const OsrImportOpt
             if (options.linux_dmabuf_gate)
             {
                 decision.source = ExternalTextureSource::DmaBuf;
-                decision.accelerated = true;
                 decision.rationale = "accelerated: the dmabuf capability gate is open";
             }
             else
@@ -134,6 +125,20 @@ OsrTextureImporter::OsrTextureImporter(PresentPlatform platform, const OsrImport
 {
 }
 
+void OsrTextureImporter::degrade_to_cpu_upload(std::string reason)
+{
+    // One degrade path for BOTH failure moments (a refused import and a failed refresh), because
+    // the recovery is identical: forget the accelerated choice for good, drop the texture so the
+    // next ensure_texture re-imports as CpuBgra, and say so. Rewriting decision_ is what stops a
+    // degraded importer from re-attempting — and re-failing — the accelerated import on every
+    // subsequent resize.
+    decision_.source = ExternalTextureSource::CpuBgra;
+    accelerated_ = false;
+    texture_.reset();
+    degrade_reason_ = std::move(reason) + " — degraded to the CPU upload path";
+    diagnostic_ = degrade_reason_;
+}
+
 bool OsrTextureImporter::ensure_texture(IDevice& device, Extent2D coded_size)
 {
     if (texture_ != nullptr && coded_size_.width == coded_size.width &&
@@ -148,15 +153,14 @@ bool OsrTextureImporter::ensure_texture(IDevice& device, Extent2D coded_size)
 
     ++import_count_;
     ExternalTexture imported = device.import_external_texture(desc);
-    if (imported.texture == nullptr && decision_.accelerated)
+    if (imported.texture == nullptr && decision_.accelerated())
     {
         // The accelerated path was chosen but the backend refused it. Degrade to the always-works
         // upload path and SAY SO — a silent degrade here is exactly the ~4x per-paint cost
         // regression nobody would notice until a user reports a sluggish editor.
-        degraded_ = true;
-        diagnostic_ = std::string("accelerated import (") + to_string(decision_.source) +
-                      ") refused by the backend: " + imported.diagnostic +
-                      " — degraded to the CPU upload path";
+        degrade_to_cpu_upload(std::string("accelerated import (") + to_string(decision_.source) +
+                              " on " + to_string(platform_) +
+                              ") refused by the backend: " + imported.diagnostic);
         ExternalTextureDesc fallback;
         fallback.source = ExternalTextureSource::CpuBgra;
         fallback.coded_size = coded_size;
@@ -181,6 +185,12 @@ bool OsrTextureImporter::ensure_texture(IDevice& device, Extent2D coded_size)
 
 bool OsrTextureImporter::update(IDevice& device, const OsrFrame& frame)
 {
+    // Reset to the sticky part. A per-frame diagnostic must not outlive the frame that produced it
+    // (one malformed paint would otherwise make every later support report read as if the importer
+    // were still broken), but the DEGRADE reason genuinely is a standing condition — and rebuilding
+    // from it each call is also what stops a repeated failure from appending without bound.
+    diagnostic_ = degrade_reason_;
+
     if (is_empty(frame.coded_size))
     {
         diagnostic_ = "malformed OSR frame: coded_size is empty";
@@ -197,30 +207,93 @@ bool OsrTextureImporter::update(IDevice& device, const OsrFrame& frame)
 
     ++frame_count_;
 
-    // The accelerated path moves no texels over the bus — but it is not necessarily a one-shot
-    // adoption either: macOS hands over a NEW IOSurface per paint, blitted GPU-side into the
-    // imported texture. Skipping this refresh would freeze the UI on its first frame.
     if (accelerated_)
     {
-        ExternalTextureDesc desc;
-        desc.source = decision_.source;
-        desc.coded_size = coded_size_;
-        desc.handle = frame.shared_handle;
-        const std::string error = device.refresh_external_texture(*texture_, desc);
-        if (!error.empty())
+        if (refresh_accelerated(device, frame))
         {
-            diagnostic_ = "accelerated refresh failed: " + error;
+            return true;
+        }
+        // The refresh failed and degraded, which DROPPED the accelerated texture. Re-import as
+        // CpuBgra before this frame's pixels can go anywhere.
+        if (!ensure_texture(device, frame.coded_size))
+        {
             return false;
         }
+    }
+    return upload_frame(device, frame);
+}
+
+// The accelerated path moves no texels over the bus — but it is not necessarily a one-shot adoption
+// either: macOS hands over a NEW IOSurface per paint, blitted GPU-side into the imported texture.
+// Skipping this refresh would freeze the UI on its first frame.
+//
+// Returns true when the frame is DONE. False means "degraded, carry on down the CPU path" — and the
+// degrade is why: on macOS the import itself only allocates, so every genuine IOSurface/Metal
+// problem surfaces here. Without it the importer would take this same branch and fail identically
+// on every later frame, freezing the UI on the last good composite forever.
+bool OsrTextureImporter::refresh_accelerated(IDevice& device, const OsrFrame& frame)
+{
+    ExternalTextureDesc desc;
+    desc.source = decision_.source;
+    desc.coded_size = coded_size_;
+    desc.handle = frame.shared_handle;
+
+    const std::string error = device.refresh_external_texture(*texture_, desc);
+    if (error.empty())
+    {
         ++refresh_count_;
         return true;
     }
 
+    degrade_to_cpu_upload(std::string("accelerated refresh (") + to_string(decision_.source) +
+                          " on " + to_string(platform_) + ") failed: " + error);
+    return false;
+}
+
+// Upload ONE damaged sub-rect. Returns false only on a malformed frame (a rect that runs off the
+// end of the producer's buffer); a rect that clips away to nothing is skipped, not an error.
+bool OsrTextureImporter::upload_rect(IDevice& device, const OsrFrame& frame, const Rect2D& raw)
+{
+    const Rect2D rect = clip_rect(raw, frame.coded_size);
+    if (is_empty(rect.size))
+    {
+        return true;
+    }
+    const std::size_t offset = static_cast<std::size_t>(rect.origin.y) * frame.bytes_per_row +
+                               static_cast<std::size_t>(rect.origin.x) * 4u;
+    // The rect's rows must lie inside the buffer the producer handed us — the same rule the present
+    // blitters apply to a whole image, which is why it is one shared predicate.
+    if (frame.byte_size < offset || !rows_fit(rect.size, frame.bytes_per_row, frame.byte_size - offset))
+    {
+        diagnostic_ = "malformed OSR frame: a dirty rect runs past the end of the pixel buffer";
+        return false;
+    }
+    TexelCopyBufferLayout layout;
+    // The SOURCE stride, not the rect width: the rect is a window onto the producer's frame.
+    layout.bytes_per_row = frame.bytes_per_row;
+    layout.rows_per_image = rect.size.height;
+    device.queue().write_texture_region(*texture_, rect.origin,
+                                        static_cast<const std::uint8_t*>(frame.pixels) + offset,
+                                        frame.byte_size - offset, layout, rect.size);
+    ++upload_count_;
+    return true;
+}
+
+bool OsrTextureImporter::upload_frame(IDevice& device, const OsrFrame& frame)
+{
     if (frame.pixels == nullptr)
     {
-        diagnostic_ = degraded_ ? "external-texture import degraded to CPU upload but the frame "
-                                  "carries no pixels — resend this frame with its BGRA buffer"
-                                : "malformed OSR frame: the CPU upload path needs pixels";
+        if (degraded())
+        {
+            // Keep WHY we are on the CPU path (diagnostic_ already holds it) and add what to do
+            // about it — a degraded producer still sending accelerated-shaped frames is the whole
+            // reason this branch exists.
+            diagnostic_ += "; this frame carries no pixels — resend it with its BGRA buffer";
+        }
+        else
+        {
+            diagnostic_ = "malformed OSR frame: the CPU upload path needs pixels";
+        }
         return false;
     }
     if (frame.bytes_per_row < frame.coded_size.width * 4u)
@@ -229,51 +302,27 @@ bool OsrTextureImporter::update(IDevice& device, const OsrFrame& frame)
         return false;
     }
 
-    // Which rects to upload: the reported damage, else the visible rect, else the whole frame.
-    std::vector<Rect2D> rects;
+    // Which rects to upload: the reported damage, else the visible rect, else the whole frame. Fed
+    // to upload_rect directly rather than gathered into a vector first — the two fallbacks are a
+    // single rect each, so the container would be a per-paint allocation carrying one element.
     if (!frame.dirty.empty())
     {
-        rects = frame.dirty;
-    }
-    else if (!is_empty(frame.visible_rect.size))
-    {
-        rects.push_back(frame.visible_rect);
-    }
-    else
-    {
-        Rect2D whole;
-        whole.size = frame.coded_size;
-        rects.push_back(whole);
-    }
-
-    const auto* base = static_cast<const std::uint8_t*>(frame.pixels);
-    for (const Rect2D& raw : rects)
-    {
-        const Rect2D rect = clip_rect(raw, frame.coded_size);
-        if (is_empty(rect.size))
+        for (const Rect2D& raw : frame.dirty)
         {
-            continue;
+            if (!upload_rect(device, frame, raw))
+            {
+                return false;
+            }
         }
-        const std::size_t offset = static_cast<std::size_t>(rect.origin.y) * frame.bytes_per_row +
-                                   static_cast<std::size_t>(rect.origin.x) * 4u;
-        // The last row of the rect must lie inside the buffer the producer handed us.
-        const std::size_t needed =
-            static_cast<std::size_t>(rect.size.height - 1) * frame.bytes_per_row +
-            static_cast<std::size_t>(rect.size.width) * 4u;
-        if (frame.byte_size < offset + needed)
-        {
-            diagnostic_ = "malformed OSR frame: a dirty rect runs past the end of the pixel buffer";
-            return false;
-        }
-        TexelCopyBufferLayout layout;
-        // The SOURCE stride, not the rect width: the rect is a window onto the producer's frame.
-        layout.bytes_per_row = frame.bytes_per_row;
-        layout.rows_per_image = rect.size.height;
-        device.queue().write_texture_region(*texture_, rect.origin, base + offset,
-                                            frame.byte_size - offset, layout, rect.size);
-        ++upload_count_;
+        return true;
     }
-    return true;
+    if (!is_empty(frame.visible_rect.size))
+    {
+        return upload_rect(device, frame, frame.visible_rect);
+    }
+    Rect2D whole;
+    whole.size = frame.coded_size;
+    return upload_rect(device, frame, whole);
 }
 
 } // namespace context::render::present

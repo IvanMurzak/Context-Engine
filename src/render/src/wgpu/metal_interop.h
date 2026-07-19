@@ -14,7 +14,6 @@
 
 #pragma once
 
-#include <cstdint>
 #include <string>
 
 namespace context::render::detail
@@ -24,10 +23,13 @@ namespace context::render::detail
 // the wgpu native accessors return (`mtl_device` = id<MTLDevice>, `mtl_queue` = id<MTLCommandQueue>,
 // `dst_mtl_texture` = id<MTLTexture>); `iosurface` is an IOSurfaceRef.
 //
+// The blit EXTENT is taken from the IOSurface itself, not from the caller: newTextureWithDescriptor:
+// iosurface: requires the descriptor to match the surface, so a paint that raced a resize would
+// otherwise trip the Metal validation layer. The copy is then clamped to the destination.
+//
 // Returns an EMPTY string on success, otherwise the reason it failed — the caller turns that into a
 // fail-closed ExternalTexture rather than presenting a stale or blank frame.
 [[nodiscard]] std::string blit_iosurface(void* mtl_device, void* mtl_queue, void* iosurface,
-                                         void* dst_mtl_texture, std::uint32_t width,
-                                         std::uint32_t height);
+                                         void* dst_mtl_texture);
 
 } // namespace context::render::detail

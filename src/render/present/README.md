@@ -1,8 +1,9 @@
 # `src/render/present/` — the presentation path (M9 e03)
 
 `context_render_present`: everything only a WINDOWED shell needs — OSR import policy, the composite
-pass, and the GPU-less present fallback. GPU-backend-free (it links `context_render` and nothing
-else), so it builds and is fully unit-tested under the local dev gate and on all three CI `build`
+pass, and the GPU-less present fallback. GPU-backend-free — it links `context_render` (the `rhi.h`
+abstraction), no GPU backend and nothing from the editor tree, plus `gdi32` for the Windows GDI
+fallback — so it builds and is fully unit-tested under the local dev gate and on all three CI `build`
 legs. The wgpu-native `ISurface`/`ISwapchain` implementation lives in the CI-gated
 `context_render_wgpu`, not here.
 

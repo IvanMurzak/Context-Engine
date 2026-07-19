@@ -105,6 +105,14 @@ struct Extent2D
     std::uint32_t height = 0;
 };
 
+// "Nothing to draw / nothing to copy". Lives with the type because every layer asks it — the import
+// policy, the composite, the present blit, the backend and the test fake were each open-coding the
+// same two comparisons.
+[[nodiscard]] inline bool is_empty(Extent2D size)
+{
+    return size.width == 0 || size.height == 0;
+}
+
 // The top-left texel of a texture sub-rect (WebGPU TexelCopyTextureInfo::origin). Used by the
 // sub-rect upload path (IQueue::write_texture_region) — the OSR dirty-rect blit.
 struct Origin2D
@@ -164,16 +172,13 @@ enum class BlendFactor
     OneMinusSrcAlpha,
 };
 
-enum class BlendOperation
-{
-    Add,
-};
-
+// Deliberately NO blend-operation field: the T1 baseline is Add-only, so a settable one-value enum
+// would be a public knob that silently does nothing (set Subtract, get Add, no diagnostic). The
+// backend pins Add explicitly. Add the field WITH its second operation, not before it.
 struct BlendComponent
 {
     BlendFactor src = BlendFactor::One;
     BlendFactor dst = BlendFactor::Zero;
-    BlendOperation op = BlendOperation::Add;
 };
 
 // Per-target blend state. ABSENT (RenderPipelineDesc::blend == nullopt) means "replace" — the
@@ -185,8 +190,9 @@ struct BlendState
     BlendComponent alpha;
 };
 
-// The premultiplied-alpha "source-over" state (blend ONE / INV_SRC_ALPHA on both channels) — the
-// one the CEF OSR layer is composited with (03 §4, renderer_d3d11.cpp:152-161 reference).
+// The premultiplied-alpha "source-over" state: blend ONE / INV_SRC_ALPHA on both colour and alpha,
+// for a source whose colour channels are already scaled by its own alpha. (Why the OSR composite
+// needs exactly this is present/osr_composite.h's story, one layer up — the RHI stays generic.)
 [[nodiscard]] inline BlendState premultiplied_alpha_blend()
 {
     BlendState state;
@@ -442,7 +448,9 @@ struct ExternalTextureDesc
 struct ExternalTexture
 {
     std::unique_ptr<ITexture> texture;
-    ExternalTextureSource source_used = ExternalTextureSource::CpuBgra;
+    // No `source_used` field: because the seam FAILS CLOSED (below) the backend never substitutes a
+    // different source, so the requested ExternalTextureDesc::source plus this flag already say
+    // everything a caller can learn. A third, redundant channel would only be a way to disagree.
     bool accelerated = false;
     std::string diagnostic;
 };
@@ -529,7 +537,7 @@ struct SurfaceConfig
 };
 
 // What a (surface, adapter) pair actually supports — the input to the capability check the spike
-// performs before configuring (spikes/webgpu/main.cpp:546-560).
+// performs before configuring (spikes/webgpu/src/main.cpp:546-560).
 struct SurfaceCaps
 {
     // False = this adapter cannot present to this surface at all (drives the CPU present fallback).

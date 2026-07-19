@@ -74,6 +74,19 @@ editor.
 calls `IDevice::refresh_external_texture` every frame (a GPU-side blit, no CPU roundtrip). An import
 that ran only once would freeze the UI on its first frame while still reporting success.
 
+**The degrade covers the REFRESH too, not just the import.** On macOS the import merely allocates —
+every genuine IOSurface/Metal failure surfaces on the per-frame refresh. So a failed refresh degrades
+exactly as a refused import does: `degraded()` latches, the accelerated choice is abandoned for the
+importer's lifetime (a later resize does not re-attempt it), the texture is dropped so the next frame
+re-imports as `CpuBgra`, and the frame carrying pixels goes through on the CPU path. Without that,
+the importer would take the same failing branch forever and freeze the UI on the last good
+composite — the exact failure the import-time degrade exists to prevent, one layer down.
+
+**`diagnostic()` describes the LAST call, except when degraded.** A one-off malformed paint must not
+make every later healthy frame read as broken, so the per-call text is rebuilt each `update()`. The
+degrade reason is the deliberate exception — that condition really is standing — and rebuilding from
+it is also what stops a repeated failure from appending without bound.
+
 **Dirty rects.** On the CPU path only the damaged sub-rects are uploaded, via
 `IQueue::write_texture_region`. Two things this depends on: the destination `Origin2D` (without it
 the damage lands at the texture's top-left corner and still "succeeds"), and using the SOURCE
@@ -116,6 +129,29 @@ caller degrades loudly instead of quietly presenting nothing.
 which is what lets the geometry be pixel-asserted on all three OSes via `MemoryBlitter` — a portable
 blitter running the identical plan into a buffer.
 
+The same split is applied to the GDI path's **other** pure piece: `repack_tight` (a padded stride
+cannot be expressed in a `BITMAPINFO`) is a free function, asserted on all three OSes, rather than a
+private step buried inside the one OS-specific class. Hoisting it also means the allocation happens
+BEFORE the DC is acquired, so it cannot throw while holding a handle only one `ReleaseDC` would free.
+What remains inside `Win32GdiBlitter::blit` is the OS calls themselves — genuinely Windows-only and
+honestly untested off-Windows.
+
+**Known follow-up for e12 — `make_present_blitter` is keyed on the wrong axis.** It selects on
+`PresentPlatform` plus a single `void*`. That is right for the IMPORT tier, which genuinely is
+OS-granular (DXGI / IOSurface / dmabuf), but a 2D present primitive is WINDOW-SYSTEM-granular: X11
+SHM needs `(Display*, Window)` and Wayland is a different mechanism on the same `PresentPlatform`.
+`rhi.h` already carries the right shape — `NativeWindowDesc` (`kind` + `handle` + `display`, with
+X11 and Wayland as distinct kinds). e12 should re-key the selection on that before adding the Linux
+blitter, rather than bolting a second parameter onto the current signature. Recorded here rather
+than changed now: it is an API decision for the milestone that lands the second implementation.
+
+Both blitters share one input validation, `is_blit_source_readable`: a real buffer, a stride at least
+as wide as its own pixels, and a `BlitImage::byte_size` covering through the last row. A blitter
+reads `height × bytes_per_row` bytes on trust, so without the size a truncated frame is an
+out-of-bounds read rather than a refusal — the same rule, and the same arithmetic, the dirty-rect
+upload driver applies to `OsrFrame::byte_size`. A refused blit clears the target rather than leaving
+the previous frame readable under a size the caller believes is current.
+
 ## 5. Headless invariant
 
 `cmake/ContextPresentIsolation.cmake` walks the **transitive** link closure of
@@ -132,15 +168,23 @@ The companion ctest `render-present-headless-isolation` re-reads the audit repor
 failure mode a `FATAL_ERROR` structurally cannot catch: the gate silently covering NOTHING after a
 target rename. A gate that checks nothing reads exactly like a gate that passed.
 
+That vacuous pass has **two** sides, and the ctest checks both. The AUDITED side: a headless target
+that was renamed or dropped is no longer walked, so the report must name every target the test was
+told to expect. The FORBIDDEN side: a renamed `context_render_present` makes every closure check
+match nothing while the audit still reports `isolated`, so the report records `FORBIDDEN-PRESENT` /
+`FORBIDDEN-ABSENT` per entry and the test requires the unconditionally-built one to be present.
+`context_render_wgpu` is deliberately NOT required — it is legitimately absent unless
+`CONTEXT_BUILD_RENDER_WGPU` is ON.
+
 ## 6. Test map
 
 | Test | Covers |
 |---|---|
-| `render-present-test_osr_import` | All three platform policies, `force_software`, clipping, dirty-rect uploads (incl. the origin and padded-stride traps), reimport on resize, malformed frames, the loud degrade, the per-frame accelerated refresh |
-| `render-present-test_osr_composite` | UV math, pipeline blend state, the premultiplied oracle (opaque / transparent / half-alpha), sub-image selection, top-down orientation, the GPU fixture's adversarial properties |
-| `render-present-test_present_blit` | Letterbox/pillarbox geometry incl. degenerate sizes, the memory blitter's pixels + swizzle + bars, the never-silent platform selection |
-| `render-present-test_swapchain` | Surface creation, the `can_present` gate, capability-gated configure, the frame loop, Outdated/Lost/Timeout/Suboptimal, resize + idempotent teardown |
-| `render-present-headless-isolation` | The audit actually ran and covered every expected target |
+| `render-present-test_osr_import` | All three platform policies, `force_software`, clipping, dirty-rect uploads (incl. the origin and padded-stride traps), reimport on resize, malformed frames, the loud degrade on a refused import AND on a failed refresh (with recovery on the next CPU frame), an outright import failure reported without a false degrade, the per-frame accelerated refresh, and `diagnostic()` not outliving its frame |
+| `render-present-test_osr_composite` | UV math (incl. a clipped overhang and a fully-outside origin), pipeline blend state, the premultiplied oracle (opaque / transparent / half-alpha), sub-image selection, top-down orientation, the GPU fixture's adversarial properties — non-zero visible origin and four DISTINCT UV components, so a dropped origin or a u/v swap cannot pass |
+| `render-present-test_present_blit` | Letterbox/pillarbox geometry incl. degenerate sizes, the memory blitter's pixels + swizzle + bars + padded stride, `repack_tight`, refusal of a truncated buffer, a refusal dropping the previous frame, the never-silent platform selection. **Not covered:** the GDI `blit()` body's OS calls — Windows-only and untestable without a real window |
+| `render-present-test_swapchain` | Surface creation, the `can_present` gate, capability-gated configure (present mode AND format, asserted separately), the frame loop incl. its render half (submits + a drawn backbuffer), Outdated/Lost/Timeout/Suboptimal **asserted by status, not merely by a null view**, recovery after a loss, resize + idempotent teardown |
+| `render-present-headless-isolation` | The audit actually ran, covered every expected target, and forbade a target that really exists |
 | `render-wgpu-osr-composite` | The REAL backend's composite output, per-pixel against the CPU oracle (`render` CI job, lavapipe) |
 
 All `render-present-*` tests are a plain (non-gate) family: the `build` job's general ctest step runs

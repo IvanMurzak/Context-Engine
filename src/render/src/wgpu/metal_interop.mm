@@ -10,11 +10,13 @@
 #import <IOSurface/IOSurface.h>
 #import <Metal/Metal.h>
 
+#include <algorithm>
+
 namespace context::render::detail
 {
 
 std::string blit_iosurface(void* mtl_device, void* mtl_queue, void* iosurface,
-                           void* dst_mtl_texture, std::uint32_t width, std::uint32_t height)
+                           void* dst_mtl_texture)
 {
     if (mtl_device == nullptr)
     {
@@ -32,10 +34,6 @@ std::string blit_iosurface(void* mtl_device, void* mtl_queue, void* iosurface,
     {
         return "the producer supplied no IOSurface for this frame";
     }
-    if (width == 0 || height == 0)
-    {
-        return "the producer supplied an empty IOSurface extent";
-    }
 
     @autoreleasepool
     {
@@ -47,10 +45,22 @@ std::string blit_iosurface(void* mtl_device, void* mtl_queue, void* iosurface,
         // Wrap the producer's IOSurface as a Metal texture. CEF delivers BGRA8 with premultiplied
         // alpha, which is what the composite pass expects, so the format matches the wgpu-side
         // BGRA8Unorm texture exactly and the blit is a straight copy — no conversion pass.
+        //
+        // The descriptor is sized from the IOSurface ITSELF, not from the caller's coded_size:
+        // newTextureWithDescriptor:iosurface: requires them to agree, so a paint that raced a
+        // resize (surface smaller or larger than the texture we imported) would otherwise trip the
+        // Metal validation layer. Taking the real extent here is also what gives the clamp below
+        // something to do — clamping two values derived from the same number never clamps.
+        const NSUInteger source_width = static_cast<NSUInteger>(IOSurfaceGetWidth(surface));
+        const NSUInteger source_height = static_cast<NSUInteger>(IOSurfaceGetHeight(surface));
+        if (source_width == 0 || source_height == 0)
+        {
+            return "the producer's IOSurface reports an empty extent";
+        }
         MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
             texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
-                                         width:width
-                                        height:height
+                                         width:source_width
+                                        height:source_height
                                      mipmapped:NO];
         descriptor.usage = MTLTextureUsageShaderRead;
         descriptor.storageMode = MTLStorageModeManaged;
@@ -64,10 +74,12 @@ std::string blit_iosurface(void* mtl_device, void* mtl_queue, void* iosurface,
         }
 
         // Copy only the overlap: a paint can race a resize, so the producer's surface and our
-        // imported texture may disagree on size for one frame. Clamping keeps that frame correct
-        // instead of trapping in the Metal validation layer.
-        const NSUInteger copy_width = MIN(source.width, destination.width);
-        const NSUInteger copy_height = MIN(source.height, destination.height);
+        // imported texture may genuinely disagree on size for one frame. Clamping keeps that frame
+        // correct instead of trapping in the Metal validation layer.
+        // std::min, not Foundation's MIN: MIN expands to a GNU statement expression, which is a
+        // -Wpedantic diagnostic under this repo's -Werror baseline.
+        const NSUInteger copy_width = std::min<NSUInteger>(source.width, destination.width);
+        const NSUInteger copy_height = std::min<NSUInteger>(source.height, destination.height);
         if (copy_width == 0 || copy_height == 0)
         {
             return "the IOSurface and the imported texture do not overlap";

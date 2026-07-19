@@ -2,8 +2,9 @@
 #
 # context_render_present holds everything that only a WINDOWED shell needs: the OSR import policy +
 # dirty-rect upload driver, the premultiplied-alpha composite pass, and the C-F2 CPU present
-# fallback. It is GPU-BACKEND-FREE — it links context_render (the rhi.h abstraction) and nothing
-# else, so it builds and is fully unit-tested under the local Ninja+Strawberry-GCC dev gate and on
+# fallback. It is GPU-BACKEND-FREE — it links context_render (the rhi.h abstraction), no GPU backend
+# and nothing from the editor tree (plus context_warnings, and gdi32 for the Windows GDI fallback
+# below) — so it builds and is fully unit-tested under the local Ninja+Strawberry-GCC dev gate and on
 # all three CI `build` legs, exactly like context_render itself. The wgpu-native ISurface/ISwapchain
 # implementation lives in the CI-gated context_render_wgpu, not here.
 #

@@ -6,10 +6,14 @@
 # and the configure-time gate happily reports "isolated" over an empty set — a gate that checks
 # nothing reads exactly like a gate that passed.
 #
-# So this asserts the report exists, reached a verdict, and actually AUDITED every target it was told
-# to expect.
+# So this asserts the report exists, reached a verdict, actually AUDITED every target it was told to
+# expect, and that every target it was told to FORBID is a real target. That last half matters for
+# the same reason: renaming context_render_present makes every closure check match nothing, and the
+# audit then reports "isolated" while forbidding a name that no longer exists.
 #
-# Inputs: -DREPORT=<path> -DEXPECT_AUDITED=<semicolon-separated target names>
+# Inputs: -DREPORT=<path> -DEXPECT_AUDITED=<names> [-DEXPECT_FORBIDDEN=<names>]
+# EXPECT_FORBIDDEN lists only the forbidden targets that exist UNCONDITIONALLY — a target behind an
+# off-by-default option (context_render_wgpu) is legitimately absent from a default configure.
 
 if(NOT DEFINED REPORT)
     message(FATAL_ERROR "present_isolation_check: -DREPORT=<path> is required")
@@ -38,6 +42,16 @@ foreach(_target IN LISTS EXPECT_AUDITED)
         message(FATAL_ERROR
             "present_isolation_check: '${_target}' exists in the expected set but was SKIPPED as "
             "'not a target in this configuration' — the invariant is unproven for it.\n${_report}")
+    endif()
+endforeach()
+
+foreach(_forbidden IN LISTS EXPECT_FORBIDDEN)
+    if(NOT _report MATCHES "FORBIDDEN-PRESENT ${_forbidden}[ \n]")
+        message(FATAL_ERROR
+            "present_isolation_check: '${_forbidden}' is on the forbidden list but is not a target "
+            "in this configuration, so the gate forbade nothing. Either it was renamed (update the "
+            "FORBIDDEN list in src/CMakeLists.txt) or it stopped being built unconditionally."
+            "\n${_report}")
     endif()
 endforeach()
 

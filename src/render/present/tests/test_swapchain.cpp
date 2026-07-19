@@ -16,7 +16,9 @@
 
 using namespace context::render;
 using namespace context::render::present;
+using rendertest::FakeQueue;
 using rendertest::FakeRhi;
+using rendertest::FakeSurface;
 using rendertest::FakeSwapchain;
 
 namespace
@@ -135,9 +137,19 @@ void test_capabilities_gate_the_configure()
     unsupported.present_mode = PresentMode::Mailbox;
     CHECK(surface->configure(*device, unsupported) == nullptr);
 
+    // The FORMAT half of the same gate. Asserted separately because the two are independent checks
+    // in the backend: dropping either one leaves the other's test green.
+    SurfaceConfig wrong_format = config;
+    wrong_format.format = TextureFormat::Depth32Float; // not in the surface's reported formats
+    CHECK(!caps.supports_format(TextureFormat::Depth32Float));
+    CHECK(surface->configure(*device, wrong_format) == nullptr);
+
     SurfaceConfig zero = config;
     zero.size = {0, 0};
     CHECK(surface->configure(*device, zero) == nullptr);
+
+    // Exactly ONE configure got through: a refusal must not have half-configured the surface.
+    CHECK(static_cast<FakeSurface&>(*surface).configure_count() == 1);
 }
 
 // -------------------------------------------------------------------------------- frame loop
@@ -187,6 +199,23 @@ void test_frame_loop_acquire_render_present()
     auto& fake = static_cast<FakeSwapchain&>(*chain);
     CHECK(fake.acquire_count() == 3);
     CHECK(fake.present_count() == 3);
+
+    // The RENDER half, asserted rather than merely executed: counting acquires and presents alone
+    // would stay green with the whole pass encoding gutted.
+    CHECK(static_cast<FakeQueue&>(device->queue()).submit_count() == 3);
+    // The fake rasterizes a reference triangle on a 3-vertex draw, so the backbuffer must no longer
+    // be the clear colour — proof the pipeline + draw actually reached it.
+    const std::vector<std::uint8_t>& backbuffer = fake.backbuffer().pixels();
+    bool any_drawn = false;
+    for (std::size_t i = 0; i + 3 < backbuffer.size(); i += 4)
+    {
+        if (backbuffer[i] != 0 || backbuffer[i + 1] != 0 || backbuffer[i + 2] != 0)
+        {
+            any_drawn = true;
+            break;
+        }
+    }
+    CHECK(any_drawn);
 }
 
 void test_outdated_and_lost_are_recoverable_not_errors()
@@ -222,11 +251,25 @@ void test_outdated_and_lost_are_recoverable_not_errors()
     chain->present();
     CHECK(fake.present_count() == 1);
 
-    // Device loss: same shape — no view, recoverable by rebuilding (03 §7).
+    // Device loss and timeout: same shape — no view, recoverable by rebuilding (03 §7). The STATUS
+    // is asserted, not just the null view: reporting either of these as a generic Error is exactly
+    // the mis-classification rhi.h warns against, and a view-only check cannot see it.
     fake.script_acquire(AcquireStatus::Lost);
-    CHECK(chain->acquire().view == nullptr);
+    const AcquiredFrame lost = chain->acquire();
+    CHECK(lost.status == AcquireStatus::Lost);
+    CHECK(lost.view == nullptr);
+
     fake.script_acquire(AcquireStatus::Timeout);
-    CHECK(chain->acquire().view == nullptr);
+    const AcquiredFrame timed_out = chain->acquire();
+    CHECK(timed_out.status == AcquireStatus::Timeout);
+    CHECK(timed_out.view == nullptr);
+
+    // Recovery after a loss works the same way it does after Outdated — the chain is not poisoned.
+    const AcquiredFrame after_loss = chain->acquire();
+    CHECK(after_loss.status == AcquireStatus::Ok);
+    CHECK(after_loss.view != nullptr);
+    chain->present();
+    CHECK(fake.present_count() == 2);
 }
 
 void test_suboptimal_frame_is_still_presentable()

@@ -45,8 +45,19 @@ endif()
 # so the OBJCXX language must be enabled for the wgpu render backend on Apple. Enabled HERE for the
 # same reason C is above — turning a language on mid-tree (inside src/render/) leaves every
 # already-processed directory holding a stale "no such compiler" snapshot and generation fails.
-if(APPLE AND CONTEXT_BUILD_RENDER_WGPU)
+#
+# Deliberately NOT gated on CONTEXT_BUILD_RENDER_WGPU: that option is declared 700 lines below in
+# src/render/CMakeLists.txt, so reading it here sees a value only when the CI job happens to pass
+# -D on the command line. A default-ON flip (or a preset cacheVariable) would silently skip the
+# enable and fail generation on macOS with "no OBJCXX compiler". Enabling a language is cheap.
+if(APPLE)
     enable_language(OBJCXX)
+    # The engine's language contract (C++20, extensions OFF) applies to Objective-C++ too. Without
+    # these, CMake emits NO -std= flag for a .mm and Apple clang falls back to its default gnu++17 —
+    # a different standard WITH GNU extensions, on the one CI leg that compiles this file.
+    set(CMAKE_OBJCXX_STANDARD 20)
+    set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+    set(CMAKE_OBJCXX_EXTENSIONS OFF)
 endif()
 
 # Warnings-as-errors baseline: the `context_warnings` interface target (../cmake/ContextWarnings.cmake).
@@ -851,12 +862,23 @@ context_assert_no_present_linkage(
     FORBIDDEN context_render_present context_render_wgpu
     TARGETS ${_context_headless_targets})
 
+# The ctest's expectation is spelled out LITERALLY below rather than reusing
+# ${_context_headless_targets}. That independence is the whole point: an expectation derived from
+# the same variable that drives the audit shrinks with it, so dropping a target would remove it from
+# BOTH the audit and the check and the gate would stay green over a smaller and smaller set.
+
 # The companion ctest. It cannot observe a violation (the configure above already failed on one) —
-# it exists to catch the gate silently covering NOTHING, e.g. after a target rename. Registered in
-# the non-gate `render-present-` family, so the build job's general ctest step runs it on all three
-# OS legs with no ci.yml --target bookkeeping.
+# it exists to catch the gate silently covering NOTHING, e.g. after a target rename, on EITHER side:
+# an audited target that vanished, or a forbidden name that is no longer a target (whose closure
+# checks then match nothing while still reporting "isolated"). Registered in the non-gate
+# `render-present-` family, so the build job's general ctest step runs it on all three OS legs with
+# no ci.yml --target bookkeeping.
+#
+# EXPECT_FORBIDDEN names only context_render_present: it is built unconditionally, whereas
+# context_render_wgpu is legitimately absent unless CONTEXT_BUILD_RENDER_WGPU is ON.
 add_test(NAME render-present-headless-isolation
     COMMAND ${CMAKE_COMMAND}
         -DREPORT=${_context_present_isolation_report}
-        "-DEXPECT_AUDITED=${_context_headless_targets}"
+        "-DEXPECT_AUDITED=context_runtime_server;context_runtime_desktop;context;context_client"
+        -DEXPECT_FORBIDDEN=context_render_present
         -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/present_isolation_check.cmake)

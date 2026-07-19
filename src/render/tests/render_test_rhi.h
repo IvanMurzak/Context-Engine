@@ -330,7 +330,6 @@ public:
         const auto* src = static_cast<const std::uint8_t*>(data);
         const std::uint32_t dst_row_bytes = fake.size().width * 4u;
         const std::uint32_t row_bytes = extent.width * 4u;
-        ++region_writes_;
         written_texels_ += static_cast<std::uint64_t>(extent.width) * extent.height;
         for (std::uint32_t row = 0; row < extent.height; ++row)
         {
@@ -350,12 +349,10 @@ public:
     [[nodiscard]] int submit_count() const { return submit_count_; }
     // How many sub-rect uploads were issued, and how many texels they moved in total — the
     // dirty-rect path's whole point is that both stay far below a full-frame re-upload.
-    [[nodiscard]] int region_writes() const { return region_writes_; }
     [[nodiscard]] std::uint64_t written_texels() const { return written_texels_; }
 
 private:
     int submit_count_ = 0;
-    int region_writes_ = 0;
     std::uint64_t written_texels_ = 0;
 };
 
@@ -404,7 +401,14 @@ public:
     ExternalTexture import_external_texture(const ExternalTextureDesc& desc) override
     {
         ExternalTexture out;
-        out.source_used = desc.source;
+        if (import_always_fails_)
+        {
+            // Even the CpuBgra path can fail on a real backend (an exhausted device, a lost
+            // device). Without this knob the importer's outright-failure branch is unreachable,
+            // leaving the seam's primary fail-closed contract untested.
+            out.diagnostic = "fake backend: texture allocation refused";
+            return out;
+        }
         if (desc.source == ExternalTextureSource::CpuBgra)
         {
             out.texture = std::make_unique<FakeTexture>(desc.coded_size, TextureFormat::BGRA8Unorm);
@@ -445,12 +449,16 @@ public:
     {
         available_accelerated_.insert(static_cast<int>(source));
     }
+    // Make EVERY import fail, including CpuBgra — the "no texture at all" case (device exhausted or
+    // lost) that no source-specific knob can produce.
+    void set_import_always_fails(bool fails) { import_always_fails_ = fails; }
     [[nodiscard]] int refresh_count() const { return refresh_count_; }
 
 private:
     FakeQueue queue_;
     std::set<int> available_accelerated_;
     int refresh_count_ = 0;
+    bool import_always_fails_ = false;
 };
 
 // ------------------------------------------------------------------------- fake present path

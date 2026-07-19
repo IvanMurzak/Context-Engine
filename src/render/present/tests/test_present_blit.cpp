@@ -14,14 +14,10 @@
 
 using namespace context::render;
 using namespace context::render::present;
+using rendertest::mentions;
 
 namespace
 {
-
-bool mentions(const std::string& haystack, const char* needle)
-{
-    return haystack.find(needle) != std::string::npos;
-}
 
 // A BGRA image whose every pixel encodes its own coordinates, so a mis-scaled or mis-offset blit is
 // identifiable rather than merely wrong.
@@ -40,6 +36,19 @@ std::vector<std::uint8_t> coordinate_image(Extent2D size, std::uint32_t bytes_pe
         }
     }
     return px;
+}
+
+// Describe `px` as a blit source. byte_size comes from the buffer itself, so a test cannot
+// accidentally claim more bytes than it allocated.
+BlitImage blit_image(const std::vector<std::uint8_t>& px, Extent2D size,
+                     std::uint32_t bytes_per_row)
+{
+    BlitImage image;
+    image.pixels = px.data();
+    image.byte_size = px.size();
+    image.size = size;
+    image.bytes_per_row = bytes_per_row;
+    return image;
 }
 
 // ------------------------------------------------------------------------------------ geometry
@@ -117,10 +126,7 @@ void test_memory_blit_is_1_to_1_and_swizzled()
     const Extent2D size{4, 4};
     const std::vector<std::uint8_t> src = coordinate_image(size, size.width * 4u);
 
-    BlitImage image;
-    image.pixels = src.data();
-    image.size = size;
-    image.bytes_per_row = size.width * 4u;
+    const BlitImage image = blit_image(src, size, size.width * 4u);
 
     MemoryBlitter blitter;
     CHECK(blitter.blit(image, size));
@@ -145,10 +151,7 @@ void test_memory_blit_centres_and_leaves_bars_clear()
     const Extent2D dst_size{4, 4};
     const std::vector<std::uint8_t> src = coordinate_image(src_size, src_size.width * 4u);
 
-    BlitImage image;
-    image.pixels = src.data();
-    image.size = src_size;
-    image.bytes_per_row = src_size.width * 4u;
+    const BlitImage image = blit_image(src, src_size, src_size.width * 4u);
 
     MemoryBlitter blitter;
     CHECK(blitter.blit(image, dst_size));
@@ -171,10 +174,7 @@ void test_memory_blit_scales()
     const Extent2D dst_size{4, 4};
     const std::vector<std::uint8_t> src = coordinate_image(src_size, src_size.width * 4u);
 
-    BlitImage image;
-    image.pixels = src.data();
-    image.size = src_size;
-    image.bytes_per_row = src_size.width * 4u;
+    const BlitImage image = blit_image(src, src_size, src_size.width * 4u);
 
     MemoryBlitter blitter;
     CHECK(blitter.blit(image, dst_size));
@@ -182,6 +182,23 @@ void test_memory_blit_scales()
     const std::size_t at = (static_cast<std::size_t>(3) * dst_size.width + 3) * 4u;
     CHECK(blitter.target()[at + 1] == 1); // G carries the source row
     CHECK(blitter.target()[at + 2] == 1); // B carries the source column
+}
+
+// A padded stride is the NORMAL producer case (CEF pads rows), so a blitter that indexed by width
+// instead of bytes_per_row would skew every row — and every tight-stride fixture would miss it.
+void test_memory_blit_honours_a_padded_stride()
+{
+    const Extent2D size{4, 4};
+    const std::uint32_t padded = size.width * 4u + 16u;
+    const std::vector<std::uint8_t> src = coordinate_image(size, padded);
+
+    MemoryBlitter blitter;
+    CHECK(blitter.blit(blit_image(src, size, padded), size));
+    // Source (2,3) must still land at (2,3): indexing by width*4 would have read row 3 of a
+    // narrower image and produced a different G.
+    const std::size_t at = (static_cast<std::size_t>(3) * size.width + 2) * 4u;
+    CHECK(blitter.target()[at + 1] == 3); // G carries the source row
+    CHECK(blitter.target()[at + 2] == 2); // B carries the source column
 }
 
 void test_memory_blit_refuses_malformed_input()
@@ -192,12 +209,68 @@ void test_memory_blit_refuses_malformed_input()
 
     const Extent2D size{4, 4};
     const std::vector<std::uint8_t> src = coordinate_image(size, size.width * 4u);
-    BlitImage narrow;
-    narrow.pixels = src.data();
-    narrow.size = size;
-    narrow.bytes_per_row = 4u; // narrower than one row
+    BlitImage narrow = blit_image(src, size, 4u); // stride narrower than one row
     CHECK(!blitter.blit(narrow, size));
+
+    // A buffer that stops short of its own last row is refused rather than read past the end.
+    BlitImage truncated = blit_image(src, size, size.width * 4u);
+    truncated.byte_size = src.size() - 1u;
+    CHECK(!blitter.blit(truncated, size));
+
     CHECK(blitter.blit_count() == 0);
+}
+
+// A refusal must not leave the PREVIOUS frame's pixels readable under a target_size() the caller
+// believes is current — that would present a stale image and report it as fresh.
+void test_refused_blit_drops_the_previous_frame()
+{
+    const Extent2D size{4, 4};
+    const std::vector<std::uint8_t> src = coordinate_image(size, size.width * 4u);
+
+    MemoryBlitter blitter;
+    CHECK(blitter.blit(blit_image(src, size, size.width * 4u), size));
+    CHECK(!blitter.target().empty());
+
+    BlitImage none;
+    CHECK(!blitter.blit(none, size));
+    CHECK(blitter.target().empty());
+    CHECK(blitter.target_size().width == 0);
+    CHECK(blitter.target_size().height == 0);
+    CHECK(blitter.blit_count() == 1); // the refusal is not counted as a blit
+}
+
+// repack_tight is the pure half of the Windows GDI path (a BITMAPINFO cannot express a padded
+// stride). Hoisting it out of the OS call is what lets it be asserted on all three OSes rather than
+// only where GDI exists — the GDI body itself has no portable test.
+void test_repack_tight_removes_row_padding()
+{
+    const Extent2D size{4, 3};
+    const std::uint32_t padded = size.width * 4u + 12u;
+    const std::vector<std::uint8_t> src = coordinate_image(size, padded);
+
+    const std::vector<std::uint8_t> packed = repack_tight(blit_image(src, size, padded));
+    CHECK(packed.size() == static_cast<std::size_t>(size.width) * size.height * 4u);
+    for (std::uint32_t y = 0; y < size.height; ++y)
+    {
+        for (std::uint32_t x = 0; x < size.width; ++x)
+        {
+            const std::uint8_t* p =
+                packed.data() + (static_cast<std::size_t>(y) * size.width + x) * 4u;
+            CHECK(p[0] == static_cast<std::uint8_t>(x)); // B — the source column
+            CHECK(p[1] == static_cast<std::uint8_t>(y)); // G — the source row
+            CHECK(p[3] == 0xFF);
+        }
+    }
+
+    // An already-tight image round-trips byte-for-byte.
+    const std::vector<std::uint8_t> tight = coordinate_image(size, size.width * 4u);
+    CHECK(repack_tight(blit_image(tight, size, size.width * 4u)) == tight);
+
+    // And a malformed source yields nothing rather than a partly-filled buffer.
+    CHECK(repack_tight(BlitImage{}).empty());
+    BlitImage truncated = blit_image(src, size, padded);
+    truncated.byte_size = 4u;
+    CHECK(repack_tight(truncated).empty());
 }
 
 // ------------------------------------------------------------------------- platform selection
@@ -246,7 +319,10 @@ int main()
     test_memory_blit_is_1_to_1_and_swizzled();
     test_memory_blit_centres_and_leaves_bars_clear();
     test_memory_blit_scales();
+    test_memory_blit_honours_a_padded_stride();
     test_memory_blit_refuses_malformed_input();
+    test_refused_blit_drops_the_previous_frame();
+    test_repack_tight_removes_row_padding();
     test_platform_selection_is_never_silent();
     RENDER_TEST_MAIN_END();
 }

@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include "context/render/present/present_common.h" // PresentPlatform, rows_fit
 #include "context/render/rhi.h"
 
 #include <cstdint>
@@ -32,22 +33,6 @@
 namespace context::render::present
 {
 
-// The host platform of the present path. A LOCAL enum on purpose: src/render/ must not depend on the
-// editor tree, so this deliberately does not reuse editor::gui::compositor::HostPlatform. The two are
-// kept in correspondence by the Shell, which owns both. `linux_` carries a trailing underscore
-// because a GNU-dialect compiler predefines `linux` to 1 and would mangle the enumerator.
-enum class PresentPlatform
-{
-    windows,
-    macos,
-    linux_,
-};
-
-// The compile-time host — the ONLY `#if` in this seam, and trivial. Every policy function takes the
-// platform EXPLICITLY so all three branches run in the tests on every OS.
-[[nodiscard]] PresentPlatform current_present_platform();
-
-[[nodiscard]] const char* to_string(PresentPlatform platform);
 [[nodiscard]] const char* to_string(ExternalTextureSource source);
 
 struct OsrImportOptions
@@ -72,8 +57,13 @@ struct OsrImportOptions
 struct OsrImportDecision
 {
     ExternalTextureSource source = ExternalTextureSource::CpuBgra;
-    bool accelerated = false;
     std::string rationale;
+
+    // DERIVED, not stored: "accelerated" is exactly "the chosen source is not the CPU upload".
+    // Storing it too would be a second field five write sites had to keep in lockstep — and the
+    // Windows branch is designed to be switched on later, so an edit that set `source` and forgot
+    // the flag would produce a decision that lies about itself, with nothing able to catch it.
+    [[nodiscard]] bool accelerated() const { return source != ExternalTextureSource::CpuBgra; }
 };
 
 // Choose the import path for `platform`. Deterministic and total — never asserts, always yields a
@@ -111,8 +101,12 @@ public:
     OsrTextureImporter(PresentPlatform platform, const OsrImportOptions& options);
 
     // Adopt `frame`. Returns false and sets diagnostic() when the frame is malformed or the import
-    // failed outright. An ACCELERATED import that the backend cannot honour degrades to the CPU
-    // upload path and is recorded in diagnostic() + degraded() — the degrade is always visible.
+    // failed outright. An ACCELERATED path the backend cannot honour — a refused import OR a failed
+    // per-frame refresh — degrades to the CPU upload path and is recorded in diagnostic() +
+    // degraded(); the degrade is always visible, and permanent for this importer.
+    //
+    // diagnostic() describes the LAST call only, except on a degraded importer, where the degrade
+    // note is sticky (the condition is).
     bool update(IDevice& device, const OsrFrame& frame);
 
     [[nodiscard]] ITexture* texture() const { return texture_.get(); }
@@ -121,8 +115,13 @@ public:
     // particular box took a particular path.
     [[nodiscard]] PresentPlatform platform() const { return platform_; }
     [[nodiscard]] const OsrImportOptions& options() const { return options_; }
+    // What the BACKEND actually reported for the live import — deliberately not derived from
+    // decision_. Under the fail-closed contract the two always agree, and keeping the backend's own
+    // answer is the only place a backend that broke that contract could ever be noticed.
     [[nodiscard]] bool accelerated() const { return accelerated_; }
-    [[nodiscard]] bool degraded() const { return degraded_; }
+    // Derived: the degrade reason IS the degraded state. A separate bool would be a flag duplicating
+    // a string's nullness — the classic pair that drifts the first time a second degrade site lands.
+    [[nodiscard]] bool degraded() const { return !degrade_reason_.empty(); }
     [[nodiscard]] const std::string& diagnostic() const { return diagnostic_; }
     [[nodiscard]] Extent2D coded_size() const { return coded_size_; }
     // How many frames were adopted and how many sub-rect uploads they cost — the numbers that make
@@ -135,6 +134,14 @@ public:
 
 private:
     bool ensure_texture(IDevice& device, Extent2D coded_size);
+    // Give up on the accelerated path permanently and record why. Shared by the refused-import and
+    // failed-refresh callers so both degrade identically.
+    void degrade_to_cpu_upload(std::string reason);
+    // The two halves of update(), split so each has ONE exit contract: the per-frame accelerated
+    // blit (which may degrade and fall through), and the CPU dirty-rect upload loop.
+    bool refresh_accelerated(IDevice& device, const OsrFrame& frame);
+    bool upload_rect(IDevice& device, const OsrFrame& frame, const Rect2D& raw);
+    bool upload_frame(IDevice& device, const OsrFrame& frame);
 
     PresentPlatform platform_;
     OsrImportOptions options_;
@@ -142,8 +149,10 @@ private:
     std::unique_ptr<ITexture> texture_;
     Extent2D coded_size_;
     std::string diagnostic_;
+    // The sticky half of diagnostic_: empty until the accelerated path is given up on, and then
+    // the standing reason every later report is rebuilt from.
+    std::string degrade_reason_;
     bool accelerated_ = false;
-    bool degraded_ = false;
     int frame_count_ = 0;
     int upload_count_ = 0;
     int import_count_ = 0;

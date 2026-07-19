@@ -14,17 +14,13 @@
 
 using namespace context::render;
 using namespace context::render::present;
+using rendertest::mentions;
 using rendertest::FakeDevice;
 using rendertest::FakeQueue;
 using rendertest::FakeTexture;
 
 namespace
 {
-
-bool mentions(const std::string& haystack, const char* needle)
-{
-    return haystack.find(needle) != std::string::npos;
-}
 
 OsrImportOptions accelerated_offer()
 {
@@ -52,6 +48,18 @@ std::vector<std::uint8_t> make_frame(Extent2D coded, std::uint32_t bytes_per_row
     return pixels;
 }
 
+// Describe `px` as a CPU-path producer frame. byte_size comes from the buffer itself, so a test
+// cannot accidentally claim more bytes than it allocated.
+OsrFrame cpu_frame(const std::vector<std::uint8_t>& px, Extent2D coded, std::uint32_t stride)
+{
+    OsrFrame frame;
+    frame.pixels = px.data();
+    frame.byte_size = px.size();
+    frame.bytes_per_row = stride;
+    frame.coded_size = coded;
+    return frame;
+}
+
 // ---------------------------------------------------------------------- policy: the 3 platforms
 
 void test_windows_policy_is_cpu_upload()
@@ -60,7 +68,7 @@ void test_windows_policy_is_cpu_upload()
     // import and the Editor runs the CPU-upload path there.
     const OsrImportDecision d = select_osr_import(PresentPlatform::windows, accelerated_offer());
     CHECK(d.source == ExternalTextureSource::CpuBgra);
-    CHECK(!d.accelerated);
+    CHECK(!d.accelerated());
     // The refusal names the upstream ask, so "why is Windows slow?" is answerable from the artifact.
     CHECK(mentions(d.rationale, "wgpu-native#621"));
 
@@ -70,14 +78,14 @@ void test_windows_policy_is_cpu_upload()
     upstream_landed.windows_shared_handle_import_available = true;
     const OsrImportDecision restored = select_osr_import(PresentPlatform::windows, upstream_landed);
     CHECK(restored.source == ExternalTextureSource::D3D12SharedHandle);
-    CHECK(restored.accelerated);
+    CHECK(restored.accelerated());
 }
 
 void test_macos_policy_is_accelerated()
 {
     const OsrImportDecision d = select_osr_import(PresentPlatform::macos, accelerated_offer());
     CHECK(d.source == ExternalTextureSource::IOSurface);
-    CHECK(d.accelerated);
+    CHECK(d.accelerated());
     CHECK(mentions(d.rationale, "IOSurface"));
 }
 
@@ -86,13 +94,13 @@ void test_linux_policy_is_gated()
     // Ships OFF.
     const OsrImportDecision closed = select_osr_import(PresentPlatform::linux_, accelerated_offer());
     CHECK(closed.source == ExternalTextureSource::CpuBgra);
-    CHECK(!closed.accelerated);
+    CHECK(!closed.accelerated());
 
     OsrImportOptions gated = accelerated_offer();
     gated.linux_dmabuf_gate = true;
     const OsrImportDecision open = select_osr_import(PresentPlatform::linux_, gated);
     CHECK(open.source == ExternalTextureSource::DmaBuf);
-    CHECK(open.accelerated);
+    CHECK(open.accelerated());
 }
 
 void test_force_software_beats_every_platform()
@@ -105,7 +113,7 @@ void test_force_software_beats_every_platform()
     {
         const OsrImportDecision d = select_osr_import(platform, forced);
         CHECK(d.source == ExternalTextureSource::CpuBgra);
-        CHECK(!d.accelerated);
+        CHECK(!d.accelerated());
     }
 }
 
@@ -116,7 +124,7 @@ void test_software_osr_producer_never_accelerates()
     for (PresentPlatform platform :
          {PresentPlatform::windows, PresentPlatform::macos, PresentPlatform::linux_})
     {
-        CHECK(!select_osr_import(platform, software).accelerated);
+        CHECK(!select_osr_import(platform, software).accelerated());
     }
 }
 
@@ -157,11 +165,7 @@ void test_dirty_rects_upload_only_the_damage()
     const std::uint32_t stride = coded.width * 4u;
     const std::vector<std::uint8_t> pixels = make_frame(coded, stride);
 
-    OsrFrame frame;
-    frame.pixels = pixels.data();
-    frame.byte_size = pixels.size();
-    frame.bytes_per_row = stride;
-    frame.coded_size = coded;
+    OsrFrame frame = cpu_frame(pixels, coded, stride);
     frame.visible_rect.size = coded;
 
     // First paint: no damage reported => the whole visible rect.
@@ -204,11 +208,7 @@ void test_dirty_rect_lands_at_its_origin()
     const std::uint32_t stride = coded.width * 4u;
     const std::vector<std::uint8_t> pixels = make_frame(coded, stride);
 
-    OsrFrame frame;
-    frame.pixels = pixels.data();
-    frame.byte_size = pixels.size();
-    frame.bytes_per_row = stride;
-    frame.coded_size = coded;
+    OsrFrame frame = cpu_frame(pixels, coded, stride);
     Rect2D damage;
     damage.origin = {8, 4};
     damage.size = {4, 2};
@@ -238,11 +238,7 @@ void test_resize_reimports()
     Extent2D coded{16, 16};
     std::uint32_t stride = coded.width * 4u;
     std::vector<std::uint8_t> pixels = make_frame(coded, stride);
-    OsrFrame frame;
-    frame.pixels = pixels.data();
-    frame.byte_size = pixels.size();
-    frame.bytes_per_row = stride;
-    frame.coded_size = coded;
+    OsrFrame frame = cpu_frame(pixels, coded, stride);
     CHECK(importer.update(device, frame));
     CHECK(importer.import_count() == 1);
     CHECK(importer.coded_size().width == 16);
@@ -269,11 +265,7 @@ void test_padded_stride_is_honoured()
     const std::uint32_t stride = coded.width * 4u + 16u; // padded
     const std::vector<std::uint8_t> pixels = make_frame(coded, stride);
 
-    OsrFrame frame;
-    frame.pixels = pixels.data();
-    frame.byte_size = pixels.size();
-    frame.bytes_per_row = stride;
-    frame.coded_size = coded;
+    OsrFrame frame = cpu_frame(pixels, coded, stride);
     CHECK(importer.update(device, frame));
 
     auto* texture = static_cast<FakeTexture*>(importer.texture());
@@ -330,15 +322,11 @@ void test_accelerated_import_degrades_loudly()
     // report it — a silent degrade is the ~4x-per-paint regression nobody notices.
     FakeDevice device; // no accelerated source declared available
     OsrTextureImporter importer(PresentPlatform::macos, accelerated_offer());
-    CHECK(importer.decision().accelerated);
+    CHECK(importer.decision().accelerated());
 
     const Extent2D coded{8, 8};
     const std::vector<std::uint8_t> pixels = make_frame(coded, coded.width * 4u);
-    OsrFrame frame;
-    frame.pixels = pixels.data();
-    frame.byte_size = pixels.size();
-    frame.bytes_per_row = coded.width * 4u;
-    frame.coded_size = coded;
+    OsrFrame frame = cpu_frame(pixels, coded, coded.width * 4u);
 
     CHECK(importer.update(device, frame));
     CHECK(importer.degraded());
@@ -376,19 +364,99 @@ void test_accelerated_import_uploads_nothing()
     CHECK(device.refresh_count() == 3);
 }
 
-void test_accelerated_refresh_failure_is_reported()
+void test_accelerated_refresh_failure_degrades_and_recovers()
 {
-    // A producer frame with no handle cannot be blitted; the importer must say so rather than
-    // silently present the previous frame forever.
+    // On macOS the IMPORT only allocates — every genuine IOSurface/Metal failure surfaces on the
+    // per-frame REFRESH. So the refresh is where the degrade has to happen too: without it the
+    // importer would take the same failing branch on every later frame and freeze the UI on the
+    // last good composite forever, which is precisely what the import-time degrade exists to stop.
     FakeDevice device;
     device.set_accelerated_available(ExternalTextureSource::IOSurface);
     OsrTextureImporter importer(PresentPlatform::macos, accelerated_offer());
 
-    OsrFrame frame;
-    frame.coded_size = {8, 8};
-    frame.shared_handle = nullptr;
+    const Extent2D coded{8, 8};
+    OsrFrame accelerated;
+    accelerated.coded_size = coded;
+    accelerated.shared_handle = &device;
+    CHECK(importer.update(device, accelerated)); // a healthy accelerated frame first
+    CHECK(importer.accelerated());
+
+    // Now the producer hands over a frame the backend cannot blit.
+    OsrFrame handleless;
+    handleless.coded_size = coded;
+    handleless.shared_handle = nullptr;
+    CHECK(!importer.update(device, handleless));
+    CHECK(importer.degraded());
+    CHECK(!importer.accelerated());
+    // The report names the failure AND the standing consequence, then says what to send instead.
+    CHECK(mentions(importer.diagnostic(), "refresh"));
+    CHECK(mentions(importer.diagnostic(), "degraded"));
+    CHECK(mentions(importer.diagnostic(), "resend"));
+
+    // THE POINT: the very next frame that carries pixels goes through on the CPU path. A reported
+    // failure that never recovers would be no better than a silent one.
+    const std::vector<std::uint8_t> pixels = make_frame(coded, coded.width * 4u);
+    OsrFrame software = cpu_frame(pixels, coded, coded.width * 4u);
+    CHECK(importer.update(device, software));
+    CHECK(importer.upload_count() == 1);
+    CHECK(device.refresh_count() == 1); // the failed refresh was never retried
+
+    // A resize must NOT re-attempt the abandoned accelerated import (two wasted calls per resize).
+    const int imports_before = importer.import_count();
+    OsrFrame bigger = software;
+    bigger.coded_size = {16, 16};
+    const std::vector<std::uint8_t> bigger_pixels = make_frame(bigger.coded_size, 16u * 4u);
+    bigger.pixels = bigger_pixels.data();
+    bigger.byte_size = bigger_pixels.size();
+    bigger.bytes_per_row = 16u * 4u;
+    CHECK(importer.update(device, bigger));
+    CHECK(importer.import_count() == imports_before + 1); // exactly one, not one-plus-a-retry
+    CHECK(importer.degraded());                           // and the degrade is permanent
+}
+
+void test_import_failure_is_reported_without_a_false_degrade()
+{
+    // The seam's PRIMARY contract: an import that fails outright yields no texture and says why.
+    // Distinct from a degrade — nothing was downgraded here, the device simply refused.
+    FakeDevice device;
+    device.set_import_always_fails(true);
+    OsrTextureImporter importer(PresentPlatform::windows, OsrImportOptions{});
+
+    const Extent2D coded{8, 8};
+    const std::vector<std::uint8_t> pixels = make_frame(coded, coded.width * 4u);
+    OsrFrame frame = cpu_frame(pixels, coded, coded.width * 4u);
+
     CHECK(!importer.update(device, frame));
-    CHECK(mentions(importer.diagnostic(), "refresh failed"));
+    CHECK(importer.texture() == nullptr);
+    CHECK(!importer.degraded()); // a refusal is not a degrade
+    CHECK(mentions(importer.diagnostic(), "import failed"));
+    CHECK(importer.upload_count() == 0);
+
+    // Once the device recovers, so does the importer — and the stale failure text goes with it.
+    device.set_import_always_fails(false);
+    CHECK(importer.update(device, frame));
+    CHECK(importer.texture() != nullptr);
+    CHECK(importer.diagnostic().empty());
+}
+
+void test_diagnostic_does_not_outlive_its_frame()
+{
+    // diagnostic() is the support-report channel, so a one-off malformed paint must not make every
+    // later healthy frame read as broken.
+    FakeDevice device;
+    OsrTextureImporter importer(PresentPlatform::windows, OsrImportOptions{});
+
+    OsrFrame malformed; // zero coded_size
+    CHECK(!importer.update(device, malformed));
+    CHECK(!importer.diagnostic().empty());
+
+    const Extent2D coded{8, 8};
+    const std::vector<std::uint8_t> pixels = make_frame(coded, coded.width * 4u);
+    OsrFrame healthy = cpu_frame(pixels, coded, coded.width * 4u);
+
+    CHECK(importer.update(device, healthy));
+    CHECK(!importer.degraded());
+    CHECK(importer.diagnostic().empty());
 }
 
 } // namespace
@@ -408,6 +476,8 @@ int main()
     test_malformed_frames_are_refused();
     test_accelerated_import_degrades_loudly();
     test_accelerated_import_uploads_nothing();
-    test_accelerated_refresh_failure_is_reported();
+    test_accelerated_refresh_failure_degrades_and_recovers();
+    test_import_failure_is_reported_without_a_false_degrade();
+    test_diagnostic_does_not_outlive_its_frame();
     RENDER_TEST_MAIN_END();
 }

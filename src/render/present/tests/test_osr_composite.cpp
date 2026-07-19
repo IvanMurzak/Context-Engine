@@ -96,9 +96,22 @@ void test_uv_edge_cases()
     CHECK(near_enough(none.v1, 1.0f));
 
     // A stale visible rect that overhangs the allocation is CLIPPED, never sampled out of range.
+    // The ORIGIN is asserted too: `u1 <= 1` alone would also hold for a regression that discarded
+    // the origin and returned the whole [0,1] range.
     const CompositeUv overhang = compute_composite_uv(rect(200, 200, 400, 400), Extent2D{256, 256});
-    CHECK(overhang.u1 <= 1.0f);
-    CHECK(overhang.v1 <= 1.0f);
+    CHECK(near_enough(overhang.u0, 200.0f / 256.0f));
+    CHECK(near_enough(overhang.v0, 200.0f / 256.0f));
+    CHECK(near_enough(overhang.u1, 1.0f));
+    CHECK(near_enough(overhang.v1, 1.0f));
+
+    // An origin fully OUTSIDE the allocation (a rect a concurrent resize already invalidated) falls
+    // back to the whole allocation. Deliberately NOT clip_rect's empty-rect answer: skipping an
+    // upload is free, but compositing nothing would blank the editor's UI for that frame.
+    const CompositeUv outside = compute_composite_uv(rect(300, 300, 10, 10), Extent2D{256, 256});
+    CHECK(near_enough(outside.u0, 0.0f));
+    CHECK(near_enough(outside.v0, 0.0f));
+    CHECK(near_enough(outside.u1, 1.0f));
+    CHECK(near_enough(outside.v1, 1.0f));
 
     // Degenerate allocation: the default range, not a divide by zero.
     const CompositeUv zero = compute_composite_uv(rect(0, 0, 10, 10), Extent2D{0, 0});
@@ -134,9 +147,13 @@ void test_pipeline_uses_premultiplied_blend()
     CHECK(make_composite_pipeline_desc(TextureFormat::RGBA8Unorm).color_format ==
           TextureFormat::RGBA8Unorm);
 
-    const CompositeUniforms u = make_composite_uniforms(compute_composite_uv(rect(0, 0, 2, 2), {4, 4}));
+    // CompositeUv IS the uniform block: four consecutive floats matching WGSL's vec4<f32>, uploaded
+    // with no repacking step that could drift out of sync with the shader.
+    const CompositeUv u = compute_composite_uv(rect(0, 0, 2, 2), {4, 4});
     CHECK(near_enough(u.u1, 0.5f));
     CHECK(near_enough(u.v1, 0.5f));
+    CHECK(sizeof(CompositeUv) == 16u);
+    CHECK(wgsl.find("vec4<f32>") != std::string::npos);
 }
 
 // --------------------------------------------------------------------------- the blend oracle
@@ -273,32 +290,66 @@ void test_reference_frame_is_adversarial()
     // 2. The readback row is 256-byte aligned (a WebGPU copy requirement).
     CHECK(frame.target_size.width * 4u % 256u == 0);
 
-    // 3. The margin outside the visible rect is magenta — a colour absent from the expectation, so
-    //    a wrong UV sub-rect is loud rather than plausible.
-    const std::size_t margin =
-        static_cast<std::size_t>(frame.visible_rect.size.height) * frame.bytes_per_row +
-        static_cast<std::size_t>(frame.visible_rect.size.width) * 4u;
-    CHECK(frame.pixels[margin + 0] == 0xFF); // B
-    CHECK(frame.pixels[margin + 1] == 0x00); // G
-    CHECK(frame.pixels[margin + 2] == 0xFF); // R
+    // 3. The visible ORIGIN is non-zero and all four UV components DIFFER. Without both, a shader
+    //    that dropped the origin, or swapped u with v, would sample the identical region and the
+    //    GPU proof would pass while broken.
+    CHECK(frame.visible_rect.origin.x > 0);
+    CHECK(frame.visible_rect.origin.y > 0);
+    const CompositeUv fixture_uv =
+        compute_composite_uv(frame.visible_rect, frame.coded_size);
+    CHECK(!near_enough(fixture_uv.u0, fixture_uv.v0));
+    CHECK(!near_enough(fixture_uv.u1, fixture_uv.v1));
+    CHECK(fixture_uv.u0 > 0.0f);
+    CHECK(fixture_uv.v0 > 0.0f);
+
+    // 4. The margin outside the visible rect is magenta — a colour absent from the expectation, so
+    //    a wrong UV sub-rect is loud rather than plausible. (0,0) is margin now that the visible
+    //    rect is offset; so is the column just past its right edge.
+    CHECK(frame.pixels[0] == 0xFF); // B
+    CHECK(frame.pixels[1] == 0x00); // G
+    CHECK(frame.pixels[2] == 0xFF); // R
+    const std::size_t past_right =
+        static_cast<std::size_t>(frame.visible_rect.origin.y) * frame.bytes_per_row +
+        static_cast<std::size_t>(frame.visible_rect.origin.x + frame.visible_rect.size.width) * 4u;
+    CHECK(frame.pixels[past_right + 0] == 0xFF);
+    CHECK(frame.pixels[past_right + 2] == 0xFF);
 
     const std::vector<std::uint8_t> expected = expected_osr_composite(frame);
     CHECK(expected.size() ==
           static_cast<std::size_t>(frame.target_size.width) * frame.target_size.height * 4u);
 
-    // Left half: opaque green replaces the blue backdrop.
-    CHECK(expected[0] == 0x00);
-    CHECK(expected[1] == 0xFF);
-    CHECK(expected[2] == 0x00);
+    const auto at = [&frame](std::uint32_t x, std::uint32_t y)
+    { return (static_cast<std::size_t>(y) * frame.target_size.width + x) * 4u; };
+    const std::uint32_t last_row = frame.target_size.height - 1u;
+    const std::uint32_t last_col = frame.target_size.width - 1u;
 
-    // Right half: 50% premultiplied white over opaque blue => (128, 128, 255). An un-premultiplied
+    // Top-left quadrant: opaque green replaces the blue backdrop.
+    CHECK(expected[at(0, 0) + 0] == 0x00);
+    CHECK(expected[at(0, 0) + 1] == 0xFF);
+    CHECK(expected[at(0, 0) + 2] == 0x00);
+
+    // Top-right: 50% premultiplied white over opaque blue => (128, 128, 255). An un-premultiplied
     // SrcAlpha blend would land near (64, 64, 191) — far outside the GPU proof's tolerance, which
     // is exactly what makes that mistake detectable.
-    const std::size_t right = static_cast<std::size_t>(frame.target_size.width / 2u + 1u) * 4u;
+    const std::size_t right = at(frame.target_size.width / 2u + 1u, 0);
     CHECK(expected[right + 0] == 0x80);
     CHECK(expected[right + 1] == 0x80);
     CHECK(expected[right + 2] == 0xFF);
     CHECK(expected[right + 3] == 0xFF);
+
+    // Bottom-left: opaque red. This is what makes a VERTICAL FLIP detectable — the one transform
+    // the vertex stage applies to the UV, and one no fixture with uniform rows can catch.
+    CHECK(expected[at(0, last_row) + 0] == 0xFF);
+    CHECK(expected[at(0, last_row) + 1] == 0x00);
+    CHECK(expected[at(0, last_row) + 2] == 0x00);
+    CHECK(expected[at(0, last_row) + 0] != expected[at(0, 0) + 0]); // top and bottom really differ
+
+    // Bottom-right: a fully transparent (all-zero premultiplied) source leaves the pure backdrop,
+    // pinning the alpha=0 end of the ONE/INV_SRC_ALPHA fold.
+    CHECK(expected[at(last_col, last_row) + 0] == 0x00);
+    CHECK(expected[at(last_col, last_row) + 1] == 0x00);
+    CHECK(expected[at(last_col, last_row) + 2] == 0xFF);
+    CHECK(expected[at(last_col, last_row) + 3] == 0xFF);
 
     // And magenta appears nowhere in the expectation.
     bool magenta_present = false;
