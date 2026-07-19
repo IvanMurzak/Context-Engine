@@ -28,7 +28,7 @@
 
 #include <chrono>
 #include <cstdio>
-#include <cstring>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -92,7 +92,19 @@ bool parse_options(int argc, char** argv, Options& out, bool& asked_for_help)
         }
         else if (arg == "--frames" && has_value)
         {
-            out.max_frames = std::atoi(argv[++i]);
+            // strtol, not atoi: atoi cannot distinguish "0" from unparseable input, so
+            // `--frames garbage` would silently mean "run zero frames" instead of being rejected.
+            const char* text = argv[++i];
+            char* end = nullptr;
+            const long frames = std::strtol(text, &end, 10);
+            if (end == text || *end != '\0' || frames < 0)
+            {
+                std::fprintf(stderr, "context_editor: --frames expects a non-negative integer, got "
+                                     "'%s'\n",
+                             text);
+                return false;
+            }
+            out.max_frames = static_cast<int>(frames);
         }
         else
         {
@@ -180,6 +192,9 @@ int main(int argc, char** argv)
         if (browser == nullptr)
         {
             std::fprintf(stderr, "context_editor: the browser did not start: %s\n", error.c_str());
+            // CEF is already initialized by this point, so returning straight out would leave it
+            // initialized and its subprocesses orphaned.
+            shell::cef::shutdown();
             return 1;
         }
     }

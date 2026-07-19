@@ -55,6 +55,12 @@ render::Extent2D to_physical(render::Extent2D logical, DpiScale scale)
                             scale_extent(logical.height, factor)};
 }
 
+render::Extent2D osr_screen_extent(render::Extent2D logical, DpiScale scale,
+                                   bool screen_rect_is_dip)
+{
+    return screen_rect_is_dip ? logical : to_physical(logical, scale);
+}
+
 render::Extent2D to_logical(render::Extent2D physical, DpiScale scale)
 {
     const float inverse = 1.0f / scale.factor();

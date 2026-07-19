@@ -4,7 +4,9 @@
 #include "context/editor/shell/editor_state.h"
 
 #include <fstream>
+#include <random>
 #include <sstream>
+#include <string>
 #include <system_error>
 #include <utility>
 
@@ -14,6 +16,21 @@ namespace
 {
 
 using contract::Json;
+
+// Drawn ONCE per process. Used to make the atomic write's staging file process-unique — see the
+// call site for the cross-process corruption window a fixed `.tmp` name leaves open. random_device
+// rather than a pid: this file is portable core, and a pid would need the one platform #ifdef the
+// module deliberately confines to win32_window.cpp.
+[[nodiscard]] const std::string& staging_token()
+{
+    static const std::string token = [] {
+        std::random_device source;
+        std::ostringstream out;
+        out << std::hex << source() << source();
+        return out.str();
+    }();
+    return token;
+}
 
 [[nodiscard]] std::int32_t read_i32(const Json& obj, const char* key, std::int32_t fallback)
 {
@@ -79,8 +96,13 @@ using contract::Json;
         return false;
     }
 
+    // The staging name carries a PROCESS-UNIQUE token. A fixed `<target>.tmp` is a shared name, so
+    // two context_editor processes opened on one project root truncate the SAME staging file and one
+    // can rename the other's half-written bytes over the target — turning the atomic write into a
+    // corruption window. The single-writer invariant this file documents holds per process; it does
+    // not make a fixed staging name safe.
     std::filesystem::path temp = target;
-    temp += ".tmp";
+    temp += ".tmp." + staging_token();
     {
         // std::ios::binary so the bytes on disk are exactly what was serialized: without it the
         // Windows CRT translates every '\n' into "\r\n", and the file a POSIX box wrote and the

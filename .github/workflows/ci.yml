@@ -1799,6 +1799,17 @@ jobs:
         run: cmake --build --preset dev --target context_editor_shell_cef_smoke
         working-directory: src
 
+      # The SHIPPING editor binary, in its CEF-linked configuration. Every other job that builds
+      # `context_editor` configures with CEF OFF (the `build` matrix via --preset dev, and
+      # `editor-boundary`), so without this step the binary's CEF wiring — execute_subprocess,
+      # make_cef_browser_host, the shutdown paths — plus the CMake link/staging block that only
+      # exists under CONTEXT_BUILD_GUI_CEF have NO automated build coverage on any leg. docs/shell.md
+      # §9 records that the interactive RUN is deferred; the compile/link must not be deferred too.
+      - name: Build the CEF-linked editor Shell binary (M9 e04)
+        if: runner.os != 'macOS'
+        run: cmake --build --preset dev --target context_editor
+        working-directory: src
+
       # Boot the CEF editor host headless and assert exit 0. Linux runs under xvfb; macOS + Windows run
       # the bundled/staged binary directly (GPU disabled — no adapter required anywhere).
       - name: Editor-host boot smoke ctest (Linux, headless under xvfb)

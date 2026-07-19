@@ -3,8 +3,6 @@
 
 #include "context/editor/shell/window.h"
 
-#include <utility>
-
 namespace context::editor::shell
 {
 namespace
@@ -54,24 +52,35 @@ inline constexpr std::uint64_t kMkMButton = 0x0010;
 }
 
 // The keyboard messages carry no button bits, so a button state is not inferable from wParam there.
+// Kept as a named function rather than inlined at each call: the NAME is the reason a zero wparam is
+// correct here, and it stops a reader wondering whether the button bits were simply forgotten.
 [[nodiscard]] Modifiers make_key_modifiers(const Win32ModifierState& keys)
 {
-    Modifiers modifiers;
-    modifiers.shift = keys.shift;
-    modifiers.control = keys.control;
-    modifiers.alt = keys.alt;
-    modifiers.meta = keys.meta;
-    return modifiers;
+    return make_modifiers(0, keys);
+}
+
+[[nodiscard]] ShellEvent make_key_event(KeyAction action, const Win32Message& message,
+                                        const Win32ModifierState& keys, bool is_system_key)
+{
+    ShellEvent event;
+    event.kind = ShellEventKind::key;
+    event.key.action = action;
+    event.key.windows_key_code = static_cast<std::int32_t>(low_word(message.wparam));
+    event.key.native_key_code = static_cast<std::int32_t>(message.lparam & 0xFFFFFFFF);
+    event.key.modifiers = make_key_modifiers(keys);
+    event.key.is_system_key = is_system_key;
+    return event;
 }
 
 [[nodiscard]] ShellEvent make_pointer_event(PointerAction action, MouseButton button,
                                             const Win32Message& message,
-                                            const Win32ModifierState& keys)
+                                            const Win32ModifierState& keys, int click_count = 1)
 {
     ShellEvent event;
     event.kind = ShellEventKind::pointer;
     event.pointer.action = action;
     event.pointer.button = button;
+    event.pointer.click_count = click_count;
     event.pointer.position =
         PointI{signed_low_word(message.lparam), signed_high_word(message.lparam)};
     event.pointer.modifiers = make_modifiers(message.wparam, keys);
@@ -217,14 +226,24 @@ std::optional<ShellEvent> translate_win32_message(const Win32Message& message,
         return make_pointer_event(PointerAction::down, MouseButton::left, message, keys);
     case kWmLButtonUp:
         return make_pointer_event(PointerAction::up, MouseButton::left, message, keys);
+    // A double click arrives as its own message (the window class sets CS_DBLCLKS), NOT as a second
+    // WM_*BUTTONDOWN. Decoding it as a press carrying click_count=2 is what makes Chromium's
+    // double-click-to-select-word work: CEF derives that behaviour SOLELY from click_count, so a
+    // shell that never reports 2 leaves it dead in every text field.
+    case kWmLButtonDblClk:
+        return make_pointer_event(PointerAction::down, MouseButton::left, message, keys, 2);
     case kWmRButtonDown:
         return make_pointer_event(PointerAction::down, MouseButton::right, message, keys);
     case kWmRButtonUp:
         return make_pointer_event(PointerAction::up, MouseButton::right, message, keys);
+    case kWmRButtonDblClk:
+        return make_pointer_event(PointerAction::down, MouseButton::right, message, keys, 2);
     case kWmMButtonDown:
         return make_pointer_event(PointerAction::down, MouseButton::middle, message, keys);
     case kWmMButtonUp:
         return make_pointer_event(PointerAction::up, MouseButton::middle, message, keys);
+    case kWmMButtonDblClk:
+        return make_pointer_event(PointerAction::down, MouseButton::middle, message, keys, 2);
     case kWmMouseLeave:
     {
         ShellEvent event;
@@ -234,52 +253,43 @@ std::optional<ShellEvent> translate_win32_message(const Win32Message& message,
         return event;
     }
     case kWmMouseWheel:
+    case kWmMouseHWheel:
     {
         ShellEvent event;
         event.kind = ShellEventKind::pointer;
         event.pointer.action = PointerAction::wheel;
         // NO position: WM_MOUSEWHEEL's lParam is SCREEN-relative (see the header note). The backend
         // fills in the last known CLIENT position, which is the coordinate space every other
-        // pointer message — and the region map — is expressed in.
-        event.pointer.wheel_delta_y = signed_high_word(static_cast<std::int64_t>(message.wparam));
+        // pointer message — and the region map — is expressed in. WM_MOUSEHWHEEL is the same shape
+        // on the other axis; without it a horizontal wheel or a tilt-wheel scrolls nothing, while
+        // wheel_delta_x is forwarded to CEF as a permanent 0.
+        const std::int32_t delta = signed_high_word(static_cast<std::int64_t>(message.wparam));
+        if (message.message == kWmMouseHWheel)
+        {
+            event.pointer.wheel_delta_x = delta;
+        }
+        else
+        {
+            event.pointer.wheel_delta_y = delta;
+        }
         event.pointer.modifiers = make_modifiers(message.wparam, keys);
         return event;
     }
     case kWmKeyDown:
     case kWmSysKeyDown:
-    {
-        ShellEvent event;
-        event.kind = ShellEventKind::key;
-        event.key.action = KeyAction::raw_key_down;
-        event.key.windows_key_code = static_cast<std::int32_t>(low_word(message.wparam));
-        event.key.native_key_code = static_cast<std::int32_t>(message.lparam & 0xFFFFFFFF);
-        event.key.modifiers = make_key_modifiers(keys);
-        event.key.is_system_key = message.message == kWmSysKeyDown;
-        return event;
-    }
+        return make_key_event(KeyAction::raw_key_down, message, keys,
+                              message.message == kWmSysKeyDown);
     case kWmKeyUp:
     case kWmSysKeyUp:
-    {
-        ShellEvent event;
-        event.kind = ShellEventKind::key;
-        event.key.action = KeyAction::key_up;
-        event.key.windows_key_code = static_cast<std::int32_t>(low_word(message.wparam));
-        event.key.native_key_code = static_cast<std::int32_t>(message.lparam & 0xFFFFFFFF);
-        event.key.modifiers = make_key_modifiers(keys);
-        event.key.is_system_key = message.message == kWmSysKeyUp;
-        return event;
-    }
+        return make_key_event(KeyAction::key_up, message, keys, message.message == kWmSysKeyUp);
     case kWmChar:
     case kWmSysChar:
     {
-        ShellEvent event;
-        event.kind = ShellEventKind::key;
-        event.key.action = KeyAction::character;
-        event.key.windows_key_code = static_cast<std::int32_t>(low_word(message.wparam));
+        ShellEvent event =
+            make_key_event(KeyAction::character, message, keys, message.message == kWmSysChar);
+        // The one field the other arms have no analogue for: WM_CHAR's wParam IS the character (a
+        // UTF-16 code unit on Windows, which is what CEF wants), not a virtual-key code.
         event.key.character = static_cast<char32_t>(low_word(message.wparam));
-        event.key.native_key_code = static_cast<std::int32_t>(message.lparam & 0xFFFFFFFF);
-        event.key.modifiers = make_key_modifiers(keys);
-        event.key.is_system_key = message.message == kWmSysChar;
         return event;
     }
     default:

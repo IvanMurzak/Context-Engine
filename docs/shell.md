@@ -38,7 +38,7 @@ decouples engine frame rate from CEF's paint rate, which was the only thing the 
 lifecycle — resize, DPI change, focus, input round-trip, popup, placement persistence, teardown — a
 deterministic ctest instead of something only a human at a real window can observe.
 
-**Per-OS backends.** v1 ships Windows (`RegisterClassW`/`CreateWindowExW` + WndProc, per-monitor-v2
+**Per-OS backends.** v1 ships Windows (`RegisterClassExW`/`CreateWindowExW` + WndProc, per-monitor-v2
 DPI). macOS (NSWindow/NSView) and Linux (X11/XWayland, D21) are **e12's**, and that gap is REPORTED,
 not silent: `make_window_backend` returns a selection carrying a diagnostic naming e12, mirroring how
 e03's `make_present_blitter` reports its own missing platforms. A shell that quietly opened no window
@@ -309,4 +309,15 @@ Named so the gaps are visible rather than assumed:
 - **No multi-window UI.** `WindowManager` owns N windows and the state file indexes them, but nothing
   yet creates a second one (tear-out is 04's).
 - **No Windows accelerated OSR** — deferred by owner ruling pending gfx-rs/wgpu-native#621.
+- **No app scheme.** The DoD line says "a placeholder page over the app scheme", but no custom scheme
+  is registered anywhere in `src/editor/` — the placeholder loads over a `data:` URL (the live CEF
+  smoke says so explicitly) and `context_editor` defaults to `about:blank`. The scheme + its handler
+  land with **e05**.
+- **No triple-click.** Double-click works (the window class sets `CS_DBLCLKS` and the decoder reports
+  `click_count = 2`), but nothing tracks a click RUN, so `click_count` never reaches 3 and
+  triple-click-to-select-line is inert in the browser.
+- **No real-adapter proof of the scissor.** `IRenderPassEncoder::set_scissor_rect` is exercised only
+  through the fake RHI, which records the rect rather than applying it; `render-wgpu-osr-composite`
+  is e03's full-window composite gate and never scissors. The PET_POPUP confinement is asserted as
+  "the compositor passed this rect", not per-pixel against a GPU.
 - **The interactive windowed pass is manual** — § 9.

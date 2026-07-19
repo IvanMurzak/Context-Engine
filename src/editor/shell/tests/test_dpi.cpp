@@ -110,8 +110,35 @@ void test_scale_equality_is_by_dpi()
 
 } // namespace
 
+// Both conventions of the OSR screen rect, on every leg. The macOS branch of this choice is the one
+// piece of the CEF binding that no CI job EXECUTES (the live smoke is Windows/Linux only) and that
+// the local gate cannot even compile, so the arithmetic lives in dpi.h to be pinned here instead.
+void test_osr_screen_extent_follows_the_platform_convention()
+{
+    const render::Extent2D logical{800, 500};
+    const DpiScale two_x = DpiScale{192};
+
+    // Windows/Linux: CEF wants DEVICE pixels, so the view size scales by the monitor factor.
+    const render::Extent2D device = osr_screen_extent(logical, two_x, /*screen_rect_is_dip*/ false);
+    CHECK(device.width == 1600u);
+    CHECK(device.height == 1000u);
+    CHECK(shelltest::extent_eq(device, to_physical(logical, two_x)));
+
+    // macOS: CEF wants DIP, so the logical size passes through UNSCALED. Returning the device size
+    // here would report a screen twice the real one and mis-place every popup and screen-point.
+    const render::Extent2D dip = osr_screen_extent(logical, two_x, /*screen_rect_is_dip*/ true);
+    CHECK(shelltest::extent_eq(dip, logical));
+
+    // At 1x the two conventions coincide — which is exactly why a wrong choice stays invisible until
+    // someone runs the editor on a scaled monitor.
+    const DpiScale one_x = DpiScale{96};
+    CHECK(shelltest::extent_eq(osr_screen_extent(logical, one_x, false),
+                               osr_screen_extent(logical, one_x, true)));
+}
+
 int main()
 {
+    test_osr_screen_extent_follows_the_platform_convention();
     test_scale_is_derived_from_dpi();
     test_clamp_rejects_os_nonsense();
     test_extent_round_trips();

@@ -25,6 +25,8 @@
 #include "context/editor/shell/shell.h"
 
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -32,6 +34,7 @@
 #include <string>
 #include <system_error>
 #include <thread>
+#include <vector>
 
 namespace shell = context::editor::shell;
 namespace render = context::render;
@@ -179,9 +182,49 @@ int main(int argc, char** argv)
     SMOKE_CHECK(blitter_raw->blit_count() > 0, "the composited frame reached the present blitter");
     SMOKE_CHECK(!editor->compositor().cpu_surface().empty(), "the composed surface is non-empty");
 
-    // Input round-trip into the LIVE browser: this is the assertion that the event translation
-    // (DIP positions, modifier flags, CEF event types) is accepted by CEF rather than merely
-    // well-formed on our side — a malformed event trips CEF's own checks.
+    // The document's background, PER PIXEL. Counting frames is not enough: cpu_surface_ is zero-
+    // filled before the compose, so deleting the row copy in render_cpu_frame leaves it non-empty
+    // and correctly sized while presenting solid black, and every counter above still passes. This
+    // is the assertion that the LIVE browser's pixels actually reached the present path — and it is
+    // why placeholder_url() paints a known colour instead of an arbitrary one.
+    {
+        const std::vector<std::uint8_t>& surface = editor->compositor().cpu_surface();
+        const render::Extent2D size = editor->compositor().size();
+        // A few interior texels rather than one: a single sample could land on whatever the page
+        // happens to render at the origin.
+        int background_texels = 0;
+        int sampled = 0;
+        const std::uint32_t xs[] = {size.width / 4u, size.width / 2u, (size.width * 3u) / 4u};
+        const std::uint32_t ys[] = {size.height / 4u, size.height / 2u, (size.height * 3u) / 4u};
+        for (std::uint32_t y : ys)
+        {
+            for (std::uint32_t x : xs)
+            {
+                const std::size_t offset = (static_cast<std::size_t>(y) * size.width + x) * 4u;
+                if (offset + 3u >= surface.size())
+                {
+                    continue;
+                }
+                ++sampled;
+                // BGRA8, so #102040 is b=0x40, g=0x20, r=0x10.
+                if (surface[offset + 0] == 0x40 && surface[offset + 1] == 0x20 &&
+                    surface[offset + 2] == 0x10)
+                {
+                    ++background_texels;
+                }
+            }
+        }
+        SMOKE_CHECK(sampled > 0, "the composed surface was large enough to sample");
+        SMOKE_CHECK(background_texels == sampled,
+                    "every sampled texel carries the placeholder document's #102040 background — "
+                    "the LIVE browser's pixels reached the present path");
+    }
+
+    // Input round-trip into the LIVE browser. NOTE what this does and does NOT prove: the counters
+    // asserted below are OUR InputArbiter's, incremented before the browser is called, so they pin
+    // the arbitration half only. What makes this a LIVE-browser assertion is that CEF accepts the
+    // translated events at all — a malformed CefMouseEvent/CefKeyEvent trips CEF's own checks — and
+    // that the browser is still painting afterwards, which the post-resize repaint below asserts.
     shell::ShellEvent move;
     move.kind = shell::ShellEventKind::pointer;
     move.pointer.action = shell::PointerAction::move;

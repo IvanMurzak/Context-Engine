@@ -239,6 +239,51 @@ void test_modal_capture_swallows_a_miss_while_an_overlay_falls_through()
     CHECK(fell_through.region_id == "scene");
 }
 
+// The click-outside-to-dismiss case, and the one the modal capture exists FOR — a PRESS, not a move.
+//
+// Regression: the implicit button capture used to be established BEFORE the modal was consulted, and
+// active_capture() prefers the implicit capture over the explicit stack, so the press shadowed the
+// modal entry and routed to whatever sat under the backdrop. Clicking the backdrop of an open
+// dropdown started a viewport camera orbit instead of being swallowed. A move outside the modal was
+// swallowed correctly the whole time, which is why the sibling test above never caught it.
+void test_a_press_outside_a_modal_capture_is_swallowed_not_routed_underneath()
+{
+    InputArbiter arbiter;
+    arbiter.regions().publish(
+        {ShellRegion{"dropdown", shelltest::rect(100, 100, 80, 120), RegionKind::native},
+         ShellRegion{"scene", shelltest::rect(0, 0, 400, 300), RegionKind::viewport}});
+
+    Capture modal;
+    modal.region_id = "dropdown";
+    modal.target = InputTarget::native;
+    modal.modal = true;
+    arbiter.push_capture(modal);
+
+    // (10,10) is inside the "scene" viewport — the region the press must NOT reach.
+    const PointerDispatch press =
+        arbiter.route_pointer(pointer_at(PointerAction::down, 10, 10, MouseButton::left), 1);
+    CHECK(press.target == InputTarget::swallowed);
+    CHECK(arbiter.swallowed() == 1);
+    CHECK(arbiter.pointer_dispatches() == 0);
+
+    // ...and it established NO implicit capture, so the whole gesture stays swallowed rather than
+    // the drag being handed to the region the press was denied.
+    const PointerDispatch drag = arbiter.route_pointer(pointer_at(PointerAction::move, 20, 20), 2);
+    CHECK(drag.target == InputTarget::swallowed);
+    const PointerDispatch release =
+        arbiter.route_pointer(pointer_at(PointerAction::up, 20, 20, MouseButton::left), 3);
+    CHECK(release.target == InputTarget::swallowed);
+    CHECK(arbiter.swallowed() == 3);
+    CHECK(arbiter.pointer_dispatches() == 0);
+
+    // A press INSIDE the modal region still routes normally and still captures the drag.
+    const PointerDispatch inside =
+        arbiter.route_pointer(pointer_at(PointerAction::down, 120, 140, MouseButton::left), 4);
+    CHECK(inside.target == InputTarget::native);
+    CHECK(inside.region_id == "dropdown");
+    CHECK(arbiter.pointer_dispatches() == 1);
+}
+
 void test_key_routing_follows_the_focus_class()
 {
     InputArbiter arbiter;
@@ -299,6 +344,7 @@ int main()
     test_a_press_on_browser_chrome_captures_to_the_browser();
     test_a_second_button_does_not_retarget_a_live_drag();
     test_modal_capture_swallows_a_miss_while_an_overlay_falls_through();
+    test_a_press_outside_a_modal_capture_is_swallowed_not_routed_underneath();
     test_key_routing_follows_the_focus_class();
     test_dispatch_counters_make_a_round_trip_assertable();
     SHELL_TEST_MAIN_END();

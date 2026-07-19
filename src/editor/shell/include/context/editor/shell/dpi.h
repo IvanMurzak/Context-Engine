@@ -69,6 +69,17 @@ struct PointI
     [[nodiscard]] bool operator==(const PointI& other) const { return x == other.x && y == other.y; }
 };
 
+// The screen extent an OSR browser should be told about, for a view of `logical` size.
+//
+// CEF reports its screen rect in DEVICE pixels on Windows/Linux but in DIP on macOS — the same split
+// it documents for GetScreenPoint. That is portable arithmetic over two plain values, so it lives
+// here, compiled and tested on all three legs, rather than behind an `#if defined(__APPLE__)` inside
+// the CEF binding: that branch is the ONE the local gate cannot build AND that no CI job executes
+// (the live CEF smoke is Windows/Linux only), so a wrong choice there would surface as a whole-UI
+// mis-scale found by a human on a Mac. The caller passes which convention its platform uses.
+[[nodiscard]] render::Extent2D osr_screen_extent(render::Extent2D logical, DpiScale scale,
+                                                 bool screen_rect_is_dip);
+
 [[nodiscard]] PointI to_logical_point(PointI physical, DpiScale scale);
 [[nodiscard]] PointI to_physical_point(PointI logical, DpiScale scale);
 

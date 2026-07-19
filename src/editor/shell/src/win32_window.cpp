@@ -1,4 +1,4 @@
-// The Windows window backend (design 03 §1) — RegisterClassW / CreateWindowExW / WndProc, the
+// The Windows window backend (design 03 §1) — RegisterClassExW / CreateWindowExW / WndProc, the
 // integrated pump, and REAL per-monitor-v2 DPI (the spike pinned DPI to 1.0; this replaces that).
 //
 // This file is the OS-call half of the seam. All of the message DECODING lives in window.cpp as a
@@ -57,9 +57,23 @@ static_assert(context::editor::shell::kWmRButtonDown == WM_RBUTTONDOWN, "WM_RBUT
 static_assert(context::editor::shell::kWmRButtonUp == WM_RBUTTONUP, "WM_RBUTTONUP drifted");
 static_assert(context::editor::shell::kWmMButtonDown == WM_MBUTTONDOWN, "WM_MBUTTONDOWN drifted");
 static_assert(context::editor::shell::kWmMButtonUp == WM_MBUTTONUP, "WM_MBUTTONUP drifted");
+static_assert(context::editor::shell::kWmLButtonDblClk == WM_LBUTTONDBLCLK,
+              "WM_LBUTTONDBLCLK drifted");
+static_assert(context::editor::shell::kWmRButtonDblClk == WM_RBUTTONDBLCLK,
+              "WM_RBUTTONDBLCLK drifted");
+static_assert(context::editor::shell::kWmMButtonDblClk == WM_MBUTTONDBLCLK,
+              "WM_MBUTTONDBLCLK drifted");
 static_assert(context::editor::shell::kWmMouseWheel == WM_MOUSEWHEEL, "WM_MOUSEWHEEL drifted");
+static_assert(context::editor::shell::kWmMouseHWheel == WM_MOUSEHWHEEL, "WM_MOUSEHWHEEL drifted");
 static_assert(context::editor::shell::kWmMouseLeave == WM_MOUSELEAVE, "WM_MOUSELEAVE drifted");
+// Guarded because WM_DPICHANGED only exists in an SDK new enough to declare it; comparing against
+// the literal instead (as this line first did) is a tautology that pins nothing — it would pass no
+// matter what the SDK defines, which is exactly the drift every sibling assert here exists to catch.
+#if defined(WM_DPICHANGED)
+static_assert(context::editor::shell::kWmDpiChanged == WM_DPICHANGED, "WM_DPICHANGED drifted");
+#else
 static_assert(context::editor::shell::kWmDpiChanged == 0x02E0, "WM_DPICHANGED drifted");
+#endif
 static_assert(kSizeMinimized == SIZE_MINIMIZED, "SIZE_MINIMIZED drifted");
 static_assert(kWheelDelta == WHEEL_DELTA, "WHEEL_DELTA drifted");
 } // namespace
@@ -75,6 +89,17 @@ namespace
 {
 
 constexpr const wchar_t* kWindowClassName = L"ContextEditorShellWindow";
+
+// Process-scoped window bookkeeping. Both exist because the pump uses a NULL hwnd filter, so every
+// backend drains the WHOLE thread queue and therefore sees messages that belong to its siblings.
+//
+// `g_live_windows` gates PostQuitMessage: posting it from every WM_DESTROY means closing ONE window
+// of a multi-window shell tears down all of them (WindowManager is explicitly built for N windows).
+// `g_quit_requested` replaces the old "whoever peeks WM_QUIT declares ITSELF dead" handling, which
+// killed an arbitrary window rather than the one that was actually closed — and, because PM_REMOVE
+// consumed the message, left the remaining windows never learning about the quit at all.
+int g_live_windows = 0;
+bool g_quit_requested = false;
 
 // Dynamically-resolved per-monitor-v2 entry points — see the header comment on why.
 using SetProcessDpiAwarenessContextFn = BOOL(WINAPI*)(HANDLE);
@@ -203,7 +228,7 @@ public:
 
     [[nodiscard]] render::Extent2D client_size() const override { return size_; }
     [[nodiscard]] DpiScale dpi() const override { return dpi_; }
-    [[nodiscard]] bool alive() const override { return hwnd_ != nullptr; }
+    [[nodiscard]] bool alive() const override { return hwnd_ != nullptr && !g_quit_requested; }
 
     bool pump(std::vector<ShellEvent>& out) override;
     void request_redraw() override
@@ -233,7 +258,7 @@ public:
 
 private:
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
-    LRESULT handle(UINT message, WPARAM wparam, LPARAM lparam);
+    LRESULT handle(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 
     HWND hwnd_ = nullptr;
     std::vector<ShellEvent> pending_;
@@ -262,10 +287,10 @@ LRESULT CALLBACK Win32WindowBackend::wnd_proc(HWND hwnd, UINT message, WPARAM wp
     {
         return ::DefWindowProcW(hwnd, message, wparam, lparam);
     }
-    return self->handle(message, wparam, lparam);
+    return self->handle(hwnd, message, wparam, lparam);
 }
 
-LRESULT Win32WindowBackend::handle(UINT message, WPARAM wparam, LPARAM lparam)
+LRESULT Win32WindowBackend::handle(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
 {
     const Win32Message raw{static_cast<std::uint32_t>(message), static_cast<std::uint64_t>(wparam),
                            static_cast<std::int64_t>(lparam)};
@@ -300,7 +325,7 @@ LRESULT Win32WindowBackend::handle(UINT message, WPARAM wparam, LPARAM lparam)
                     TRACKMOUSEEVENT track{};
                     track.cbSize = sizeof(track);
                     track.dwFlags = TME_LEAVE;
-                    track.hwndTrack = hwnd_;
+                    track.hwndTrack = hwnd;
                     tracking_mouse_leave_ = ::TrackMouseEvent(&track) != FALSE;
                 }
             }
@@ -325,7 +350,7 @@ LRESULT Win32WindowBackend::handle(UINT message, WPARAM wparam, LPARAM lparam)
         const auto* suggested = reinterpret_cast<const RECT*>(lparam);
         if (suggested != nullptr)
         {
-            ::SetWindowPos(hwnd_, nullptr, suggested->left, suggested->top,
+            ::SetWindowPos(hwnd, nullptr, suggested->left, suggested->top,
                            suggested->right - suggested->left, suggested->bottom - suggested->top,
                            SWP_NOZORDER | SWP_NOACTIVATE);
         }
@@ -336,26 +361,38 @@ LRESULT Win32WindowBackend::handle(UINT message, WPARAM wparam, LPARAM lparam)
         // The compositor owns the pixels; validating the region here stops Windows re-posting
         // WM_PAINT forever. The decoded paint_requested event is what actually schedules a frame.
         PAINTSTRUCT ps;
-        ::BeginPaint(hwnd_, &ps);
-        ::EndPaint(hwnd_, &ps);
+        ::BeginPaint(hwnd, &ps);
+        ::EndPaint(hwnd, &ps);
         return 0;
     }
     case WM_ERASEBKGND:
         // Claim the erase so Windows does not flash the class background between frames.
         return 1;
     case WM_CLOSE:
-        ::DestroyWindow(hwnd_);
+        ::DestroyWindow(hwnd);
         return 0;
     case WM_DESTROY:
-        ::SetWindowLongPtrW(hwnd_, GWLP_USERDATA, 0);
+        ::SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
         hwnd_ = nullptr;
-        ::PostQuitMessage(0);
+        if (g_live_windows > 0)
+        {
+            --g_live_windows;
+        }
+        // Only the LAST window ends the loop; otherwise closing one window of a multi-window shell
+        // quits the whole editor.
+        if (g_live_windows == 0)
+        {
+            ::PostQuitMessage(0);
+        }
         return 0;
     default:
         break;
     }
-    return ::DefWindowProcW(hwnd_ != nullptr ? hwnd_ : ::GetActiveWindow(), message, wparam,
-                            lparam);
+    // The message's OWN hwnd, never a re-derived one: WM_DESTROY nulls hwnd_, and the WM_NCDESTROY
+    // that follows would otherwise be dispatched to whatever window happened to be active — or to
+    // NULL in Session 0, where none is — so the window being torn down never gets its own default
+    // WM_NCDESTROY handling.
+    return ::DefWindowProcW(hwnd, message, wparam, lparam);
 }
 
 bool Win32WindowBackend::create(const WindowDesc& desc, std::string& error)
@@ -374,7 +411,10 @@ bool Win32WindowBackend::create(const WindowDesc& desc, std::string& error)
     wc.cbSize = sizeof(wc);
     // CS_OWNDC: the CPU present fallback blits through the window's DC (e03's Win32GdiBlitter), and
     // a shared class DC would have its state reset between GetDC calls.
-    wc.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
+    // CS_DBLCLKS: without it Windows NEVER synthesizes WM_*BUTTONDBLCLK, so the decoder's
+    // double-click cases would be unreachable and CEF would only ever see click_count == 1 —
+    // silently disabling double-click-to-select-word in every text field of the editor UI.
+    wc.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC | CS_DBLCLKS;
     wc.lpfnWndProc = &Win32WindowBackend::wnd_proc;
     wc.hInstance = instance;
     // IDC_ARROW is an integer ATOM, not a string — the ANSI/Unicode macro pair differ only in the
@@ -444,6 +484,7 @@ bool Win32WindowBackend::create(const WindowDesc& desc, std::string& error)
                                  static_cast<std::uint32_t>(client.bottom - client.top)};
     }
     error.clear();
+    ++g_live_windows;
     return true;
 }
 
@@ -456,7 +497,10 @@ bool Win32WindowBackend::pump(std::vector<ShellEvent>& out)
     {
         if (msg.message == WM_QUIT)
         {
-            hwnd_ = nullptr;
+            // Process-scoped, NOT "this window died": with a NULL hwnd filter the backend that
+            // happens to peek WM_QUIT is arbitrary, so claiming it for this one killed a window
+            // that was never closed and hid the quit from its siblings.
+            g_quit_requested = true;
             break;
         }
         // TranslateMessage is what turns a WM_KEYDOWN into the WM_CHAR the browser needs for text.
@@ -465,7 +509,7 @@ bool Win32WindowBackend::pump(std::vector<ShellEvent>& out)
     }
     out.insert(out.end(), pending_.begin(), pending_.end());
     pending_.clear();
-    return hwnd_ != nullptr;
+    return hwnd_ != nullptr && !g_quit_requested;
 }
 
 WindowPlacement Win32WindowBackend::placement() const

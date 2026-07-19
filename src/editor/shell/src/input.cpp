@@ -129,7 +129,19 @@ PointerDispatch InputArbiter::route_pointer(const PointerEvent& event, std::uint
     // A press starts an implicit capture so a drag keeps reaching where it began, even once the
     // pointer has left that region. Resolved BEFORE the capture lookup below, so the press itself is
     // already routed by the capture it establishes.
-    if (event.action == PointerAction::down && !button_capture_.has_value())
+    // A modal capture governs the WHOLE gesture, so no implicit capture is established while one is
+    // active: the explicit entry below already routes a press inside it to the modal target and
+    // swallows one outside it, and it stays on the stack for the drag and release too.
+    //
+    // Establishing an implicit capture here regardless is what used to break BOTH directions.
+    // active_capture() prefers the implicit capture over the explicit stack, so the fresh hit-test
+    // shadowed the modal entry: a press on the backdrop routed to whatever sat underneath (clicking
+    // outside an open dropdown started a viewport camera orbit instead of dismissing it), and a
+    // press INSIDE the modal region routed to whichever region the hit-test happened to return
+    // rather than to the modal's own target.
+    const bool modal_active = !captures_.empty() && captures_.back().modal;
+
+    if (event.action == PointerAction::down && !button_capture_.has_value() && !modal_active)
     {
         const ShellRegion* hit = regions_.hit_test(event.position);
         Capture capture;
@@ -161,6 +173,7 @@ PointerDispatch InputArbiter::route_pointer(const PointerEvent& event, std::uint
         if (!inside && capture->modal)
         {
             dispatch.target = InputTarget::swallowed;
+            fill_positions(dispatch, event, region);
             ++swallowed_;
             return dispatch;
         }

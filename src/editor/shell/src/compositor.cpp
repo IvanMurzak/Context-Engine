@@ -12,21 +12,27 @@ namespace context::editor::shell
 namespace
 {
 
+using render::present::clip_rect;
 using render::present::CompositeUv;
 
-// Clip a rect to a target of `bounds`, returning an empty extent when it falls fully outside.
-[[nodiscard]] render::Rect2D clip_to(const render::Rect2D& rect, render::Extent2D bounds)
+// A producer frame's visible area inside its OWN allocation, clipped to that allocation.
+//
+// The OSR contract allows a coded allocation LARGER than the visible rect — that is the shape UV and
+// stride bugs hide in, and the reason both present paths must consult it. CEF's OnPaint happens to
+// report the two as equal today, so honouring this is what keeps the CPU fallback honest for any
+// other producer (and for the smoke, which drives a genuinely padded allocation).
+//
+// An empty visible rect means the producer did not report one; the whole allocation is then visible.
+[[nodiscard]] render::Rect2D visible_within(const render::Rect2D& visible_rect,
+                                            render::Extent2D coded_size)
 {
-    render::Rect2D clipped;
-    if (render::is_empty(rect.size) || render::is_empty(bounds) || rect.origin.x >= bounds.width ||
-        rect.origin.y >= bounds.height)
+    if (render::is_empty(visible_rect.size))
     {
-        return clipped;
+        render::Rect2D whole;
+        whole.size = coded_size;
+        return whole;
     }
-    clipped.origin = rect.origin;
-    clipped.size.width = std::min(rect.size.width, bounds.width - rect.origin.x);
-    clipped.size.height = std::min(rect.size.height, bounds.height - rect.origin.y);
-    return clipped;
+    return clip_rect(visible_rect, coded_size);
 }
 
 // Premultiplied "source over destination" on one 8-bit channel: dst = src + dst * (1 - a).
@@ -126,6 +132,8 @@ bool WindowCompositor::attach_gpu(render::IDevice& device, render::ISurface& sur
     {
         path_ = PresentPath::none;
         diagnostic_ = "the surface reports no presentable adapter; take the CPU present path";
+        device_ = nullptr;
+        surface_ = nullptr;
         return false;
     }
 
@@ -140,6 +148,8 @@ bool WindowCompositor::attach_gpu(render::IDevice& device, render::ISurface& sur
     {
         path_ = PresentPath::none;
         diagnostic_ = "the surface supports neither BGRA8Unorm nor Fifo; take the CPU present path";
+        device_ = nullptr;
+        surface_ = nullptr;
         return false;
     }
 
@@ -148,6 +158,8 @@ bool WindowCompositor::attach_gpu(render::IDevice& device, render::ISurface& sur
     {
         path_ = PresentPath::none;
         diagnostic_ = "the surface refused the BGRA8Unorm/Fifo configuration";
+        device_ = nullptr;
+        surface_ = nullptr;
         return false;
     }
     path_ = PresentPath::gpu_swapchain;
@@ -155,7 +167,20 @@ bool WindowCompositor::attach_gpu(render::IDevice& device, render::ISurface& sur
     // A freshly attached window has never drawn; without this the first frame waits for a paint that
     // may not come until the user moves the mouse.
     damage_.external = true;
-    return ensure_gpu_resources();
+    if (!ensure_gpu_resources())
+    {
+        // A resource failure AFTER configure() leaves this compositor owning a live swapchain (plus
+        // whatever pipeline/layout/sampler did get built) carved out of `device`. The caller's
+        // contract on a false return is to drop the device and fall back to the CPU path, so
+        // holding them would destroy GPU objects into an already-dead device. detach() is the one
+        // place that releases the whole set in the right order; it also clears the diagnostic, so
+        // carry the reason across it — that string is the caller's only account of what failed.
+        std::string why = std::move(diagnostic_);
+        detach();
+        diagnostic_ = std::move(why);
+        return false;
+    }
+    return true;
 }
 
 void WindowCompositor::attach_cpu(std::unique_ptr<render::present::IPresentBlitter> blitter,
@@ -339,12 +364,17 @@ bool WindowCompositor::draw_layer(render::IRenderPassEncoder& pass, const render
                                   render::ITextureView& view, const render::Rect2D& visible_rect,
                                   render::Extent2D coded_size, std::size_t slot)
 {
-    const render::Rect2D clipped = clip_to(dst_rect, size_);
+    const render::Rect2D clipped = clip_rect(dst_rect, size_);
     if (render::is_empty(clipped.size))
     {
         return false;
     }
-    const CompositeUv uv = compute_layer_uv(clipped, size_, visible_rect, coded_size);
+    // The UV is derived from the layer's FULL destination rect, not the clipped one, and the scissor
+    // below does the cropping. Deriving it from `clipped` instead maps the whole source across the
+    // narrowed span, so a layer straddling a window edge is SQUEEZED rather than cropped (a 160-wide
+    // dropdown at x=700 in an 800-wide window would render at 62.5% width). That extrapolation
+    // outside [0,1] is exactly what compute_layer_uv exists to produce.
+    const CompositeUv uv = compute_layer_uv(dst_rect, size_, visible_rect, coded_size);
 
     // One uniform buffer + bind group PER SLOT — see the member declaration for why they cannot be
     // shared across draws inside one pass.
@@ -510,14 +540,29 @@ bool WindowCompositor::render_cpu_frame()
         return false;
     }
 
-    // Compose into a tightly-packed copy of the view frame, then blit. The popup is composited HERE
-    // rather than skipped, so the GPU-less fallback is not silently popup-less.
-    const std::uint32_t stride = cpu_view_.coded_size.width * 4u;
-    cpu_surface_.assign(static_cast<std::size_t>(stride) * cpu_view_.coded_size.height, 0u);
-    for (std::uint32_t y = 0; y < cpu_view_.coded_size.height; ++y)
+    // Compose in WINDOW space: the view frame's VISIBLE area only, tightly packed, then blit.
+    //
+    // Composing the whole coded allocation instead would present the allocation's unused margin
+    // stretched across the window, and would offset the popup — whose rect is in WINDOW
+    // coordinates — by the visible rect's origin. This mirrors the GPU path, which samples exactly
+    // visible_rect via compute_layer_uv. The popup is composited HERE rather than skipped, so the
+    // GPU-less fallback is not silently popup-less.
+    const render::Rect2D view_visible = visible_within(cpu_view_.visible_rect, cpu_view_.coded_size);
+    if (render::is_empty(view_visible.size))
     {
-        const std::uint8_t* src =
-            cpu_view_.pixels.data() + static_cast<std::size_t>(y) * cpu_view_.bytes_per_row;
+        return false;
+    }
+    const std::uint32_t stride = view_visible.size.width * 4u;
+    // resize, not assign: the loop below writes every byte, so zero-filling first is a full-surface
+    // memset of dead writes per presented frame (~8 MB at 1080p). Same rule present_blit.cpp states
+    // for its own repack.
+    cpu_surface_.resize(static_cast<std::size_t>(stride) * view_visible.size.height);
+    for (std::uint32_t y = 0; y < view_visible.size.height; ++y)
+    {
+        const std::uint8_t* src = cpu_view_.pixels.data() +
+                                  static_cast<std::size_t>(view_visible.origin.y + y) *
+                                      cpu_view_.bytes_per_row +
+                                  static_cast<std::size_t>(view_visible.origin.x) * 4u;
         std::uint8_t* dst = cpu_surface_.data() + static_cast<std::size_t>(y) * stride;
         std::memcpy(dst, src, stride);
     }
@@ -526,19 +571,23 @@ bool WindowCompositor::render_cpu_frame()
         !render::is_empty(popup_rect_.size))
     {
         // The popup's VISIBLE rect inside its own allocation is what gets drawn, at the popup rect's
-        // origin in the view. Using the coded size here would composite the allocation's unused
-        // margin as if it were content.
+        // origin in the window. Reading from the allocation's top-left (or sizing by the coded size)
+        // would composite the unused margin as if it were content.
+        const render::Rect2D popup_visible =
+            visible_within(cpu_popup_.visible_rect, cpu_popup_.coded_size);
         const render::Extent2D popup_size{
-            std::min(popup_rect_.size.width, cpu_popup_.visible_rect.size.width == 0
-                                                 ? cpu_popup_.coded_size.width
-                                                 : cpu_popup_.visible_rect.size.width),
-            std::min(popup_rect_.size.height, cpu_popup_.visible_rect.size.height == 0
-                                                  ? cpu_popup_.coded_size.height
-                                                  : cpu_popup_.visible_rect.size.height)};
-        blend_premultiplied_bgra(cpu_surface_.data(), cpu_view_.coded_size, stride,
-                                 cpu_popup_.pixels.data(), popup_size, cpu_popup_.bytes_per_row,
-                                 popup_rect_.origin);
-        ++stats_.popup_draws;
+            std::min(popup_rect_.size.width, popup_visible.size.width),
+            std::min(popup_rect_.size.height, popup_visible.size.height)};
+        if (!render::is_empty(popup_size))
+        {
+            const std::uint8_t* popup_src =
+                cpu_popup_.pixels.data() +
+                static_cast<std::size_t>(popup_visible.origin.y) * cpu_popup_.bytes_per_row +
+                static_cast<std::size_t>(popup_visible.origin.x) * 4u;
+            blend_premultiplied_bgra(cpu_surface_.data(), view_visible.size, stride, popup_src,
+                                     popup_size, cpu_popup_.bytes_per_row, popup_rect_.origin);
+            ++stats_.popup_draws;
+        }
     }
 
     if (blitter_ == nullptr)
@@ -548,7 +597,7 @@ bool WindowCompositor::render_cpu_frame()
     render::present::BlitImage image;
     image.pixels = cpu_surface_.data();
     image.byte_size = cpu_surface_.size();
-    image.size = cpu_view_.coded_size;
+    image.size = view_visible.size;
     image.bytes_per_row = stride;
     return blitter_->blit(image, size_);
 }

@@ -15,7 +15,7 @@
 //     OSes. This is where the bit-twiddling that actually goes wrong lives (which half of LPARAM is
 //     x, that WM_MOUSEWHEEL's coordinates are SCREEN-relative while every other mouse message's are
 //     client-relative, that a wheel delta is signed and packed in the high word).
-//   * `win32_window.cpp` — the OS calls: RegisterClassW, CreateWindowExW, the pump, per-monitor-v2
+//   * `win32_window.cpp` — the OS calls: RegisterClassExW, CreateWindowExW, the pump, per-monitor-v2
 //     DPI. Windows-only and honestly untested off-Windows, exactly as e03 left the GDI blit body.
 //
 // The WM_* values below are declared locally so the decoder needs no <windows.h>. They are
@@ -97,8 +97,11 @@ public:
     // the owner loop's termination condition.
     virtual bool pump(std::vector<ShellEvent>& out) = 0;
 
-    // Ask the OS to repaint. Damage-driven redraw (03 §4) means the compositor draws when something
-    // changed; this is how a change originating OUTSIDE the pump (a browser paint) gets a frame.
+    // Ask the OS to repaint. NOT currently on the redraw path: the owner loop calls
+    // WindowCompositor::render_frame() every iteration and that is damage-gated internally, so a
+    // browser paint already gets its frame without one. This is the seam an event-driven loop needs
+    // (wait on the OS queue instead of polling — see docs/shell.md §10), and it is implemented by
+    // both backends so that loop can land without touching the interface. Nothing calls it yet.
     virtual void request_redraw() = 0;
 
     virtual void set_title(std::string_view title) = 0;
@@ -177,11 +180,15 @@ inline constexpr std::uint32_t kWmSysChar = 0x0106;
 inline constexpr std::uint32_t kWmMouseMove = 0x0200;
 inline constexpr std::uint32_t kWmLButtonDown = 0x0201;
 inline constexpr std::uint32_t kWmLButtonUp = 0x0202;
+inline constexpr std::uint32_t kWmLButtonDblClk = 0x0203;
 inline constexpr std::uint32_t kWmRButtonDown = 0x0204;
 inline constexpr std::uint32_t kWmRButtonUp = 0x0205;
+inline constexpr std::uint32_t kWmRButtonDblClk = 0x0206;
 inline constexpr std::uint32_t kWmMButtonDown = 0x0207;
 inline constexpr std::uint32_t kWmMButtonUp = 0x0208;
+inline constexpr std::uint32_t kWmMButtonDblClk = 0x0209;
 inline constexpr std::uint32_t kWmMouseWheel = 0x020A;
+inline constexpr std::uint32_t kWmMouseHWheel = 0x020E;
 inline constexpr std::uint32_t kWmMouseLeave = 0x02A3;
 inline constexpr std::uint32_t kWmDpiChanged = 0x02E0;
 

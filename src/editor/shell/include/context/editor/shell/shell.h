@@ -130,6 +130,10 @@ private:
     std::unique_ptr<render::IDevice> device_;
     std::unique_ptr<render::ISurface> surface_;
     WindowPlacement last_placement_;
+    // Reused across pumps rather than constructed per frame: this is drained every loop iteration,
+    // so a local would malloc/free once per frame with input. The Win32 backend keeps its own
+    // pending_ buffer for the same reason.
+    std::vector<ShellEvent> events_;
     std::uint64_t last_placement_poll_us_ = 0;
     std::string diagnostic_;
     bool placement_dirty_ = false;

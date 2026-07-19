@@ -12,6 +12,7 @@
 #include "shell_test.h"
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <vector>
 
@@ -339,6 +340,64 @@ void test_a_layer_clipped_to_nothing_is_skipped_without_disturbing_the_others()
     CHECK(shelltest::rect_eq(device.pass_log().scissors[0], shelltest::rect(0, 0, 400, 300)));
 }
 
+// The PARTIALLY clipped layer — the case between "fully visible" and "fully off-window", and the one
+// that was wrong.
+//
+// Regression: draw_layer derived the UV from the CLIPPED destination rect instead of the full one,
+// which maps the whole source across the narrowed span — so a layer straddling a window edge was
+// SQUEEZED to fit rather than cropped. The scissor is what crops; the UV must be extrapolated from
+// the layer's true rect or the two disagree. Nothing caught it because the sibling test only covers
+// a rect that clips to NOTHING (skipped entirely, no UV computed).
+void test_a_partially_clipped_layer_is_cropped_not_squeezed()
+{
+    rendertest::FakeDevice device;
+    rendertest::FakeSurface surface(rendertest::fake_default_surface_caps());
+    WindowCompositor compositor(software_config());
+    const render::Extent2D window{400, 300};
+    CHECK(compositor.attach_gpu(device, surface, window));
+
+    render::TextureDesc rt_desc;
+    rt_desc.size = render::Extent2D{200, 100};
+    rt_desc.render_attachment = true;
+    std::unique_ptr<render::ITexture> rt = device.create_texture(rt_desc);
+    std::unique_ptr<render::ITextureView> rt_view = rt->create_view();
+
+    // 200 wide at x=300 in a 400-wide window: the right HALF hangs off the edge.
+    ViewportLayer straddling;
+    straddling.id = "straddling";
+    straddling.content_rect = shelltest::rect(300, 0, 200, 100);
+    straddling.content = rt_view.get();
+    straddling.content_size = rt_desc.size;
+    compositor.publish_viewports({straddling});
+
+    std::vector<std::uint8_t> storage;
+    compositor.on_browser_frame(
+        make_view_frame(storage, window, shelltest::rect(0, 0, 400, 300), 7, 7, 7, 255));
+    CHECK(compositor.render_frame());
+    CHECK(compositor.stats().viewport_draws == 1);
+
+    // The SCISSOR is clipped to what is on-window — that is what crops the layer.
+    CHECK(shelltest::rect_eq(device.pass_log().scissors[0], shelltest::rect(300, 0, 100, 100)));
+
+    // ...and the UV is extrapolated from the layer's FULL 200-wide rect, so the visible left half
+    // samples the source's left half at its native scale. The uniform payload the compositor
+    // uploaded is the only place this is observable.
+    CHECK(!device.pass_log().buffer_writes.empty());
+    present::CompositeUv uv{};
+    const std::vector<std::uint8_t>& payload = device.pass_log().buffer_writes.front();
+    CHECK(payload.size() == sizeof(uv));
+    if (payload.size() == sizeof(uv))
+    {
+        std::memcpy(&uv, payload.data(), sizeof(uv));
+    }
+    // u spans the full source across 200 destination pixels, i.e. 1/200 per pixel. Extrapolated back
+    // to screen x=0 that is u0 = -300/200 = -1.5, and forward to x=400, u1 = u0 + 400/200 = 0.5.
+    // The BUG produced du = 1/100 (the clipped width), giving u0 = -3.0 and u1 = 1.0 — the source
+    // compressed into the surviving 100 pixels.
+    CHECK(shelltest::near_eq(uv.u0, -1.5f));
+    CHECK(shelltest::near_eq(uv.u1, 0.5f));
+}
+
 void test_resize_protocol()
 {
     rendertest::FakeDevice device;
@@ -562,6 +621,7 @@ int main()
     test_layer_order_and_the_popup_scissor();
     test_a_hidden_popup_drops_its_layer();
     test_a_layer_clipped_to_nothing_is_skipped_without_disturbing_the_others();
+    test_a_partially_clipped_layer_is_cropped_not_squeezed();
     test_resize_protocol();
     test_outdated_and_lost_reconfigure_and_keep_the_damage();
     test_suboptimal_presents_first_then_reconfigures();

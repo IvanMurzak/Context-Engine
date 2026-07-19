@@ -11,8 +11,12 @@
 //
 //   * the REAL owner loop (WindowManager -> EditorWindow::pump_once), over the honest offscreen
 //     window backend;
-//   * REAL software-OSR frames — premultiplied BGRA8 with an allocation larger than the visible
-//     rect, the shape a real CEF OnPaint delivers;
+//   * REAL software-OSR frames — premultiplied BGRA8 at a PADDED row stride, with an allocation
+//     LARGER than the visible rect and the visible area at a non-zero origin inside it, and with
+//     the padding filled in a contrasting colour so any compose path that presents the allocation
+//     instead of the visible rect is caught per-pixel. CEF's own OnPaint happens to report
+//     coded == visible, so this deliberately drives the WIDER shape the OSR contract permits —
+//     that is where the UV, stride and origin bugs hide;
 //   * the REAL compositor: damage-driven redraw, the resize protocol, the full-window CEF layer and
 //     the PET_POPUP second layer;
 //   * the REAL C-F2 CPU present path, presenting through e03's MemoryBlitter — which present_blit.h
@@ -85,6 +89,59 @@ Texel sample(const std::vector<std::uint8_t>& surface, render::Extent2D size, st
     return texel;
 }
 
+// A genuinely honest software-OSR producer frame: an allocation LARGER than the visible rect, at a
+// PADDED row stride, with the visible area at a NON-ZERO origin inside it — and with the margin in a
+// DIFFERENT colour from the content.
+//
+// The contrasting margin is the whole point. A uniformly-filled padded allocation catches nothing:
+// its margin is byte-identical to its content, so a compose path that ignored visible_rect, walked
+// the wrong stride, or copied the entire allocation would still yield exactly the expected pixels.
+// With a distinct margin each of those bugs lands margin colour in the presented surface, and the
+// per-pixel assertions below fail. (The first version of this smoke filled the allocation solid and
+// set coded == visible, so its "allocation larger than the visible rect" claim asserted nothing.)
+std::vector<std::uint8_t> padded_frame(render::Extent2D coded, std::uint32_t bytes_per_row,
+                                       const render::Rect2D& visible, Texel content, Texel margin)
+{
+    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(bytes_per_row) * coded.height, 0u);
+    for (std::uint32_t y = 0; y < coded.height; ++y)
+    {
+        for (std::uint32_t x = 0; x < coded.width; ++x)
+        {
+            const bool inside = x >= visible.origin.x && y >= visible.origin.y &&
+                                x < visible.origin.x + visible.size.width &&
+                                y < visible.origin.y + visible.size.height;
+            const Texel& source = inside ? content : margin;
+            std::uint8_t* texel = pixels.data() + static_cast<std::size_t>(y) * bytes_per_row +
+                                  static_cast<std::size_t>(x) * 4u;
+            texel[0] = source.b;
+            texel[1] = source.g;
+            texel[2] = source.r;
+            texel[3] = source.a;
+        }
+    }
+    return pixels;
+}
+
+// True when NO texel of the composed surface carries the producer's margin colour. The margin is
+// allocation padding that must never reach the window: seeing it means the compose path presented
+// the allocation instead of the visible rect.
+[[nodiscard]] bool free_of(const std::vector<std::uint8_t>& surface, render::Extent2D size,
+                           Texel margin)
+{
+    for (std::uint32_t y = 0; y < size.height; ++y)
+    {
+        for (std::uint32_t x = 0; x < size.width; ++x)
+        {
+            const Texel texel = sample(surface, size, x, y);
+            if (texel.b == margin.b && texel.g == margin.g && texel.r == margin.r)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 shell::ShellEvent pointer_event(shell::PointerAction action, std::int32_t x, std::int32_t y,
                                 shell::MouseButton button = shell::MouseButton::none)
 {
@@ -153,19 +210,33 @@ int main()
                             shell::RegionKind::viewport}});
 
     // ------------------------------------------------- 2. a software-OSR frame is composited
-    // An allocation LARGER than the visible rect — the shape that catches the UV/stride bugs.
-    const render::Extent2D coded{kWindowSize.width, kWindowSize.height};
-    browser->queue_solid_frame(shell::BrowserLayer::view, coded,
-                               render::Rect2D{render::Origin2D{}, kWindowSize},
-                               /*b*/ 20, /*g*/ 40, /*r*/ 60, /*a*/ 255);
+    // An allocation LARGER than the visible rect, at a PADDED stride, with the visible area at a
+    // NON-ZERO origin inside it — the shape that catches the UV/stride/origin bugs. See padded_frame.
+    const render::Extent2D coded{kWindowSize.width + 24, kWindowSize.height + 16};
+    const std::uint32_t kPaddedStride = coded.width * 4u + 64u;
+    const render::Rect2D kViewVisible{render::Origin2D{8, 6}, kWindowSize};
+    const Texel kViewColor{20, 40, 60, 255};
+    // Distinct from every content colour asserted below, so a stray margin texel is unambiguous.
+    const Texel kMarginColor{7, 7, 7, 255};
+
+    browser->queue_frame(shell::BrowserLayer::view, coded, kViewVisible,
+                         padded_frame(coded, kPaddedStride, kViewVisible, kViewColor, kMarginColor),
+                         kPaddedStride);
     SMOKE_CHECK(manager.pump_once(1'000), "the owner loop ran");
     SMOKE_CHECK(blitter->blit_count() == 1, "the first composited frame was presented");
     SMOKE_CHECK(editor->compositor().stats().view_frames == 1, "the view frame was adopted");
 
     {
-        const Texel texel = sample(editor->compositor().cpu_surface(), coded, 5, 5);
+        // The composed surface is WINDOW-sized (the visible rect), not allocation-sized.
+        const std::vector<std::uint8_t>& surface = editor->compositor().cpu_surface();
+        SMOKE_CHECK(surface.size() == static_cast<std::size_t>(kWindowSize.width) *
+                                          kWindowSize.height * 4u,
+                    "the composed surface is the VISIBLE extent, not the coded allocation");
+        const Texel texel = sample(surface, kWindowSize, 5, 5);
         SMOKE_CHECK(texel.b == 20 && texel.g == 40 && texel.r == 60 && texel.a == 255,
                     "the composed surface carries the browser's premultiplied BGRA pixels");
+        SMOKE_CHECK(free_of(surface, kWindowSize, kMarginColor),
+                    "no allocation-margin texel reached the presented surface");
     }
 
     // ------------------------------------------------- 3. damage-driven redraw skips an idle frame
@@ -177,9 +248,17 @@ int main()
     // ------------------------------------------------- 4. PET_POPUP composites as a second layer
     // CEF reports the rect and the visibility separately, and the rect commonly lands first.
     browser->queue_popup_state(true, kPopupRect);
-    browser->queue_solid_frame(shell::BrowserLayer::popup, kPopupRect.size,
-                               render::Rect2D{render::Origin2D{}, kPopupRect.size},
-                               /*b*/ 240, /*g*/ 200, /*r*/ 160, /*a*/ 255);
+    // The popup allocation is padded too, and its visible area sits at a non-zero origin inside it:
+    // the popup source offset is a SECOND place the visible rect must be honoured, and reading from
+    // the allocation's top-left would composite margin into the dropdown.
+    const render::Extent2D kPopupCoded{kPopupRect.size.width + 12, kPopupRect.size.height + 8};
+    const std::uint32_t kPopupStride = kPopupCoded.width * 4u + 32u;
+    const render::Rect2D kPopupVisible{render::Origin2D{5, 3}, kPopupRect.size};
+    const Texel kPopupColor{240, 200, 160, 255};
+    browser->queue_frame(
+        shell::BrowserLayer::popup, kPopupCoded, kPopupVisible,
+        padded_frame(kPopupCoded, kPopupStride, kPopupVisible, kPopupColor, kMarginColor),
+        kPopupStride);
     SMOKE_CHECK(manager.pump_once(3'000), "the loop ran with a popup");
     SMOKE_CHECK(editor->compositor().popup_visible(), "the popup is visible");
     SMOKE_CHECK(editor->compositor().stats().popup_draws == 1, "the popup layer was composited");
@@ -188,26 +267,30 @@ int main()
     {
         const std::vector<std::uint8_t>& surface = editor->compositor().cpu_surface();
         // INSIDE the popup rect: the popup's pixels.
-        const Texel inside = sample(surface, coded, kPopupRect.origin.x + 2, kPopupRect.origin.y + 2);
+        const Texel inside =
+            sample(surface, kWindowSize, kPopupRect.origin.x + 2, kPopupRect.origin.y + 2);
         SMOKE_CHECK(inside.b == 240 && inside.g == 200 && inside.r == 160,
                     "the popup's pixels are composited at the popup rect");
         // OUTSIDE it: still the view's. Asserting BOTH is what distinguishes a real second layer
         // from a popup that was dropped (which would leave the view everywhere) or one drawn
         // full-window (which would leave the popup everywhere).
-        const Texel outside = sample(surface, coded, 5, 5);
+        const Texel outside = sample(surface, kWindowSize, 5, 5);
         SMOKE_CHECK(outside.b == 20 && outside.g == 40 && outside.r == 60,
                     "the view's pixels survive outside the popup rect");
+        SMOKE_CHECK(free_of(surface, kWindowSize, kMarginColor),
+                    "neither the view nor the popup leaked allocation margin into the present");
     }
 
     // The popup hiding DROPS the layer — CEF reuses that texture for the next dropdown.
     browser->queue_popup_state(false, render::Rect2D{});
-    browser->queue_solid_frame(shell::BrowserLayer::view, coded,
-                               render::Rect2D{render::Origin2D{}, kWindowSize}, 20, 40, 60, 255);
+    browser->queue_frame(shell::BrowserLayer::view, coded, kViewVisible,
+                         padded_frame(coded, kPaddedStride, kViewVisible, kViewColor, kMarginColor),
+                         kPaddedStride);
     SMOKE_CHECK(manager.pump_once(4'000), "the loop ran after the popup closed");
     SMOKE_CHECK(!editor->compositor().popup_visible(), "the popup is hidden");
     SMOKE_CHECK(editor->compositor().stats().popup_draws == 1, "no stale popup layer was drawn");
     {
-        const Texel where_popup_was = sample(editor->compositor().cpu_surface(), coded,
+        const Texel where_popup_was = sample(editor->compositor().cpu_surface(), kWindowSize,
                                              kPopupRect.origin.x + 2, kPopupRect.origin.y + 2);
         SMOKE_CHECK(where_popup_was.b == 20 && where_popup_was.g == 40 && where_popup_was.r == 60,
                     "the view repainted over where the popup was");

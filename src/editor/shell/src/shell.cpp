@@ -3,6 +3,7 @@
 
 #include "context/editor/shell/shell.h"
 
+#include <cstddef>
 #include <utility>
 
 namespace context::editor::shell
@@ -257,7 +258,8 @@ bool EditorWindow::pump_once(std::uint64_t now_us)
         sync_browser_size();
     }
 
-    std::vector<ShellEvent> events;
+    events_.clear();
+    std::vector<ShellEvent>& events = events_;
     const bool window_alive = backend_->pump(events);
     for (const ShellEvent& event : events)
     {
@@ -346,8 +348,11 @@ bool WindowManager::pump_once(std::uint64_t now_us)
         }
         ++i;
     }
-    // Debounced: a window drag marks the store dirty on every move and this writes once the drag
-    // has been still for the quiet period (see editor_state.h).
+    // Debounced from the FIRST dirtying change, not from the last: a window drag marks the store
+    // dirty on every move, and this writes once `debounce_us` has elapsed since the move that
+    // started the dirty run — then re-arms. A long drag therefore checkpoints every window rather
+    // than writing only after the user stops. Deliberate: a crash mid-drag keeps recent placement,
+    // and shutdown() flushes unconditionally anyway (see editor_state.h).
     (void)store_.flush_if_due(now_us);
     return !windows_.empty();
 }

@@ -45,13 +45,18 @@
 namespace context::editor::shell
 {
 
-// Why the next frame is being drawn. Kept as separate flags rather than one bool because the resize
-// flag additionally drives the reconfigure + WasResized() protocol, and because "what damaged this
-// frame" is the first question when a shell is redrawing more than it should.
+// Why the next frame is being drawn. Kept as separate flags rather than one bool because "what
+// damaged this frame" is the first question when a shell is redrawing more than it should — the
+// flags are a diagnostic record, and only any() gates the redraw. (They do NOT drive the resize
+// protocol: on_resize reconfigures the swapchain directly and EditorWindow drives WasResized() off
+// the resize event, so neither consults damage_.resize.)
 struct Damage
 {
     bool browser_paint = false;
     bool popup = false;
+    // e11's seam: set when a viewport's CONTENT changes without its rect changing. Nothing calls
+    // mark_viewport_content() yet — the native viewport consumer lands with e11 — so this is
+    // currently always false and `layout` covers a viewport republish.
     bool viewport_content = false;
     bool layout = false;
     bool resize = false;

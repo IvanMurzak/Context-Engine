@@ -8,6 +8,41 @@
 namespace context::editor::shell
 {
 
+// ------------------------------------------------------------------------------- PumpSchedule
+
+void PumpSchedule::schedule(std::int64_t delay_ms, std::int64_t now_ms)
+{
+    const std::int64_t clamped = delay_ms < 0 ? 0 : delay_ms;
+    // Store the deadline BEFORE publishing the flag: the owner thread reads the flag first, so this
+    // order is what guarantees it never observes `scheduled` true against a stale deadline.
+    due_ms_.store(now_ms + clamped, std::memory_order_relaxed);
+    scheduled_.store(true, std::memory_order_release);
+}
+
+bool PumpSchedule::should_pump(std::int64_t now_ms)
+{
+    if (!scheduled_.load(std::memory_order_acquire))
+    {
+        return true; // the floor
+    }
+    if (now_ms < due_ms_.load(std::memory_order_relaxed))
+    {
+        return false;
+    }
+    scheduled_.store(false, std::memory_order_relaxed);
+    return true;
+}
+
+bool PumpSchedule::has_scheduled_work() const
+{
+    return scheduled_.load(std::memory_order_acquire);
+}
+
+std::int64_t PumpSchedule::due_ms() const
+{
+    return due_ms_.load(std::memory_order_relaxed);
+}
+
 std::vector<std::uint8_t> make_premultiplied_bgra(render::Extent2D coded_size,
                                                   std::uint32_t bytes_per_row, std::uint8_t b,
                                                   std::uint8_t g, std::uint8_t r, std::uint8_t a)
@@ -68,9 +103,10 @@ bool ScriptedBrowserHost::pump(IBrowserFrameSink& sink)
         }
         BrowserFrame out;
         out.layer = step.layer;
+        const std::uint32_t tight = step.coded_size.width * 4u;
         out.frame.pixels = step.pixels.data();
         out.frame.byte_size = step.pixels.size();
-        out.frame.bytes_per_row = step.coded_size.width * 4u;
+        out.frame.bytes_per_row = step.bytes_per_row < tight ? tight : step.bytes_per_row;
         out.frame.coded_size = step.coded_size;
         out.frame.visible_rect = step.visible_rect;
         out.frame.dirty = step.dirty;
@@ -81,13 +117,14 @@ bool ScriptedBrowserHost::pump(IBrowserFrameSink& sink)
 
 void ScriptedBrowserHost::queue_frame(BrowserLayer layer, render::Extent2D coded_size,
                                       const render::Rect2D& visible_rect,
-                                      std::vector<std::uint8_t> pixels,
+                                      std::vector<std::uint8_t> pixels, std::uint32_t bytes_per_row,
                                       std::vector<render::Rect2D> dirty)
 {
     Step step;
     step.layer = layer;
     step.coded_size = coded_size;
     step.visible_rect = visible_rect;
+    step.bytes_per_row = bytes_per_row;
     step.pixels = std::move(pixels);
     step.dirty = std::move(dirty);
     steps_.push_back(std::move(step));
@@ -95,10 +132,11 @@ void ScriptedBrowserHost::queue_frame(BrowserLayer layer, render::Extent2D coded
 
 void ScriptedBrowserHost::queue_solid_frame(BrowserLayer layer, render::Extent2D coded_size,
                                             const render::Rect2D& visible_rect, std::uint8_t b,
-                                            std::uint8_t g, std::uint8_t r, std::uint8_t a)
+                                            std::uint8_t g, std::uint8_t r, std::uint8_t a,
+                                            std::uint32_t bytes_per_row)
 {
     queue_frame(layer, coded_size, visible_rect,
-                make_premultiplied_bgra(coded_size, coded_size.width * 4u, b, g, r, a));
+                make_premultiplied_bgra(coded_size, bytes_per_row, b, g, r, a), bytes_per_row);
 }
 
 void ScriptedBrowserHost::queue_popup_state(bool visible, const render::Rect2D& rect)

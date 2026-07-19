@@ -387,8 +387,56 @@ void test_shutdown_flushes_pending_state_and_is_idempotent()
 
 } // namespace
 
+// ------------------------------------------------------------------------------- PumpSchedule
+//
+// The integrated pump's policy (03 §1) — the design's central rejection of the spike's
+// multi-threaded+mutex model. It lives in the portable core precisely so it can be asserted here:
+// its real caller is the CEF binding, the one translation unit the local gate cannot build, where
+// nothing would have exercised it. A fake clock, so nothing here is wall-clock dependent.
+void test_pump_schedule_runs_when_work_is_due()
+{
+    PumpSchedule schedule;
+
+    // Nothing scheduled yet: the FLOOR pumps anyway. This is what keeps the browser live if CEF's
+    // schedule callback is never delivered — without it a missed schedule parks the browser forever.
+    CHECK(!schedule.has_scheduled_work());
+    CHECK(schedule.should_pump(1'000));
+
+    // Scheduled and NOT yet due: skip. (Pumping regardless would make the schedule meaningless and
+    // burn the owner thread on every loop iteration.)
+    schedule.schedule(/*delay_ms*/ 50, /*now_ms*/ 1'000);
+    CHECK(schedule.has_scheduled_work());
+    CHECK(schedule.due_ms() == 1'050);
+    CHECK(!schedule.should_pump(1'000));
+    CHECK(!schedule.should_pump(1'049));
+
+    // Due: pump, and CONSUME the schedule — so the next call falls through to the floor rather than
+    // re-firing the same deadline forever.
+    CHECK(schedule.should_pump(1'050));
+    CHECK(!schedule.has_scheduled_work());
+    CHECK(schedule.should_pump(1'051));
+
+    // Exactly-due and past-due both fire; a later schedule replaces the earlier deadline.
+    schedule.schedule(10, 2'000);
+    CHECK(schedule.should_pump(9'999));
+    CHECK(!schedule.has_scheduled_work());
+
+    // A negative delay means "as soon as possible", not a deadline in the past that never arrives.
+    schedule.schedule(-5, 3'000);
+    CHECK(schedule.due_ms() == 3'000);
+    CHECK(schedule.should_pump(3'000));
+
+    // Re-scheduling while one is pending moves the deadline rather than stacking.
+    schedule.schedule(100, 4'000);
+    schedule.schedule(10, 4'000);
+    CHECK(schedule.due_ms() == 4'010);
+    CHECK(!schedule.should_pump(4'005));
+    CHECK(schedule.should_pump(4'010));
+}
+
 int main()
 {
+    test_pump_schedule_runs_when_work_is_due();
     test_attach_guard_refuses_an_unauthenticated_attach();
     test_shell_attach_options_ask_for_the_shell_scope();
     test_attach_to_a_project_with_no_daemon_is_reported_not_fatal();

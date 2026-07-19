@@ -13,7 +13,7 @@
 # incompatible with the CEF headers + IMPLEMENT_REFCOUNTING macros. context_editor_shell, which this
 # links, DOES link it, so the Shell's own code stays warnings-as-errors gated on the default matrix.
 #
-# The local pre-flight for this file is the `-fsyntax-only` gate `setup.md` § Preconditions describes
+# The local pre-flight for this file is the `-fsyntax-only` gate the sibling README describes
 # for a CI-only dependency path: compile cef_shell.cpp against the pinned CEF HEADERS (fetched +
 # SHA-verified by tools/fetch_cef.py) with no prebuilt library. That catches every signature/type
 # break locally instead of one CI round-trip at a time.

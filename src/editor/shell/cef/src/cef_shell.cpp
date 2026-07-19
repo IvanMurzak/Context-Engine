@@ -44,7 +44,6 @@ namespace context::editor::shell::cef
 namespace
 {
 
-namespace present = ::context::render::present;
 
 bool g_initialized = false;
 
@@ -150,14 +149,15 @@ public:
         // The other half of real DPI: the scale CEF multiplies the DIP view rect by to decide how
         // many PHYSICAL pixels to paint. Without it a 2x monitor gets a 1x-resolution UI.
         screen_info.device_scale_factor = dpi_.factor();
-        // CefScreenInfo::rect is a RAW cef_rect_t (unlike CefRect it carries no Set()). The screen
-        // rect is in screen DEVICE pixels on Windows/Linux and DIP on macOS — the same split CEF
-        // documents for GetScreenPoint — so it is derived from the view size accordingly.
+        // CefScreenInfo::rect is a RAW cef_rect_t (unlike CefRect it carries no Set()). Which
+        // convention it wants is a per-platform choice; the ARITHMETIC lives in dpi.h so both
+        // branches are compiled and tested on all three legs (see osr_screen_extent).
 #if defined(__APPLE__)
-        const render::Extent2D screen = logical_size_;
+        constexpr bool kScreenRectIsDip = true;
 #else
-        const render::Extent2D screen = to_physical(logical_size_, dpi_);
+        constexpr bool kScreenRectIsDip = false;
 #endif
+        const render::Extent2D screen = osr_screen_extent(logical_size_, dpi_, kScreenRectIsDip);
         screen_info.rect.x = 0;
         screen_info.rect.y = 0;
         screen_info.rect.width = static_cast<int>(screen.width);
@@ -214,7 +214,6 @@ public:
         // pump(), so the sink is live and the buffer is valid — no copy needed. CEF explicitly
         // documents the buffer as valid only for the duration of this call.
         sink_->on_browser_frame(frame);
-        ++paint_count_;
     }
 
     // OnAcceleratedPaint is deliberately NOT overridden: the accelerated path is unreachable by
@@ -230,7 +229,6 @@ public:
         // SUPPRESS every stray window.open (03 §1). Tear-out does NOT ride window.open — it is a
         // PanelHost/Shell mechanism (04 §2) — so a popup reaching here is an accident, and letting
         // CEF create a default popup window would put an un-composited native window on screen.
-        ++suppressed_popups_;
         return true;
     }
 
@@ -251,16 +249,22 @@ public:
         }
     }
 
-    void OnLoadError(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, ErrorCode, const CefString&,
-                     const CefString&) override
+    void OnLoadError(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, ErrorCode error_code,
+                     const CefString& error_text, const CefString& failed_url) override
     {
-        if (frame->IsMain())
+        if (!frame->IsMain())
         {
-            // A failed load still ENDS the load: a smoke waiting on load_ended would otherwise hang
-            // until its timeout on a bad URL rather than reporting it.
-            load_ended_ = true;
-            load_failed_ = true;
+            return;
         }
+        // A failed main-frame load still ENDS the load, and it is REPORTED here rather than only
+        // recorded: the live CEF smoke waits on a composited frame, so a page that never loaded
+        // presents as an undiagnosable 30-second stall unless the cause reaches stderr. The state
+        // is not reachable from the smoke (this class is TU-local), so the log is the channel.
+        load_ended_ = true;
+        load_failed_ = true;
+        std::fprintf(stderr, "[shell-cef] main-frame load FAILED (%d): %s <%s>\n",
+                     static_cast<int>(error_code), error_text.ToString().c_str(),
+                     failed_url.ToString().c_str());
     }
 
     // --- driving it ---------------------------------------------------------------------------
@@ -273,10 +277,6 @@ public:
 
     [[nodiscard]] CefRefPtr<CefBrowser> browser() const { return browser_; }
     [[nodiscard]] bool closed() const { return closed_; }
-    [[nodiscard]] bool load_ended() const { return load_ended_; }
-    [[nodiscard]] bool load_failed() const { return load_failed_; }
-    [[nodiscard]] int paint_count() const { return paint_count_; }
-    [[nodiscard]] int suppressed_popups() const { return suppressed_popups_; }
 
 private:
     static render::Rect2D to_rect(const CefRect& rect)
@@ -308,8 +308,6 @@ private:
     bool closed_ = false;
     bool load_ended_ = false;
     bool load_failed_ = false;
-    int paint_count_ = 0;
-    int suppressed_popups_ = 0;
 
     IMPLEMENT_REFCOUNTING(ShellCefClient);
 };
@@ -339,30 +337,14 @@ public:
     {
         // CEF is asking to be pumped in `delay_ms`. Recorded rather than acted on: the shell's own
         // thread owns the loop, and calling CefDoMessageLoopWork() from here would re-enter it from
-        // whatever thread scheduled the work.
-        const std::int64_t now = now_ms();
-        const std::int64_t clamped = delay_ms < 0 ? 0 : delay_ms;
-        due_ms_ = now + clamped;
-        scheduled_ = true;
+        // whatever thread scheduled the work. CEF may call this from ANY thread, which is why the
+        // policy + state live in the portable, atomic, unit-tested PumpSchedule rather than here.
+        schedule_.schedule(delay_ms, now_ms());
     }
 
-    // True when CEF's scheduled work is due (or none is pending — see the pump-floor note in
-    // CefBrowserHostImpl below).
-    [[nodiscard]] bool work_is_due()
-    {
-        if (!scheduled_)
-        {
-            return false;
-        }
-        if (now_ms() >= due_ms_)
-        {
-            scheduled_ = false;
-            return true;
-        }
-        return false;
-    }
-
-    [[nodiscard]] bool has_scheduled_work() const { return scheduled_; }
+    // Should the owner thread pump now? Delegates to the portable policy (due, or the unconditional
+    // floor when nothing is scheduled) — see PumpSchedule in browser.h.
+    [[nodiscard]] bool should_pump() { return schedule_.should_pump(now_ms()); }
 
 private:
     static std::int64_t now_ms()
@@ -372,8 +354,7 @@ private:
             .count();
     }
 
-    std::int64_t due_ms_ = 0;
-    bool scheduled_ = false;
+    PumpSchedule schedule_;
 
     IMPLEMENT_REFCOUNTING(ShellCefApp);
 };
@@ -480,11 +461,11 @@ public:
         // The sink is live only for the duration of this call, which is what lets OnPaint deliver
         // CEF's buffer straight through with no copy.
         client_->set_sink(&sink);
-        // The integrated pump. CefDoMessageLoopWork runs when CEF's scheduled work is due; the
-        // UNCONDITIONAL floor below runs it anyway when nothing is scheduled, which keeps the
-        // browser live if a schedule is ever missed. Both are cheap: DoMessageLoopWork with no work
-        // pending returns immediately.
-        if (app_ == nullptr || app_->work_is_due() || !app_->has_scheduled_work())
+        // The integrated pump. PumpSchedule::should_pump carries the whole policy — run when CEF's
+        // scheduled work is due, and run anyway on the UNCONDITIONAL floor when nothing is
+        // scheduled, which keeps the browser live if a schedule is ever missed. Both are cheap:
+        // DoMessageLoopWork with no work pending returns immediately.
+        if (app_ == nullptr || app_->should_pump())
         {
             CefDoMessageLoopWork();
         }

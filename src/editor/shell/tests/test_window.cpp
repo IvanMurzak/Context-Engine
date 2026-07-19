@@ -127,6 +127,53 @@ void test_wheel_carries_a_signed_delta_and_deliberately_no_position()
     CHECK(up->pointer.position == (PointI{0, 0}));
 }
 
+// The HORIZONTAL wheel (tilt wheel / precision touchpad). Same wParam shape, the other axis.
+// Without this case wheel_delta_x is forwarded to CEF as a permanent 0 and horizontal scrolling is
+// silently dead, while the field's presence advertises that it works.
+void test_horizontal_wheel_decodes_onto_the_x_axis()
+{
+    const std::uint64_t right_notch =
+        static_cast<std::uint64_t>(static_cast<std::uint32_t>(kWheelDelta) << 16);
+    const std::optional<ShellEvent> right = decode(kWmMouseHWheel, right_notch, lparam(900, 900));
+    CHECK(right.has_value());
+    CHECK(right->pointer.action == PointerAction::wheel);
+    CHECK(right->pointer.wheel_delta_x == kWheelDelta);
+    CHECK(right->pointer.wheel_delta_y == 0); // the axes must not bleed into each other
+
+    const std::uint64_t left_notch = static_cast<std::uint64_t>(
+        (static_cast<std::uint32_t>(static_cast<std::uint16_t>(-kWheelDelta)) << 16));
+    const std::optional<ShellEvent> left = decode(kWmMouseHWheel, left_notch, lparam(900, 900));
+    CHECK(left->pointer.wheel_delta_x == -kWheelDelta);
+    CHECK(left->pointer.wheel_delta_y == 0);
+    // Screen-relative lParam here too, so the decoder reports no position.
+    CHECK(left->pointer.position == (PointI{0, 0}));
+}
+
+// A double click arrives as WM_*BUTTONDBLCLK, not a second WM_*BUTTONDOWN, and must reach CEF as a
+// press carrying click_count == 2 — Chromium derives double-click-to-select-word from that field
+// alone, so a shell that always reports 1 disables it everywhere.
+void test_double_click_messages_decode_as_a_press_with_click_count_two()
+{
+    const std::optional<ShellEvent> left = decode(kWmLButtonDblClk, 0, lparam(40, 50));
+    CHECK(left.has_value());
+    CHECK(left->pointer.action == PointerAction::down);
+    CHECK(left->pointer.button == MouseButton::left);
+    CHECK(left->pointer.click_count == 2);
+    CHECK(left->pointer.position == (PointI{40, 50})); // client-relative, unlike the wheel
+
+    const std::optional<ShellEvent> right = decode(kWmRButtonDblClk, 0, lparam(1, 2));
+    CHECK(right->pointer.button == MouseButton::right);
+    CHECK(right->pointer.click_count == 2);
+
+    const std::optional<ShellEvent> middle = decode(kWmMButtonDblClk, 0, lparam(3, 4));
+    CHECK(middle->pointer.button == MouseButton::middle);
+    CHECK(middle->pointer.click_count == 2);
+
+    // A plain press is still a SINGLE click — the default must not drift to 2.
+    const std::optional<ShellEvent> single = decode(kWmLButtonDown, 0, lparam(40, 50));
+    CHECK(single->pointer.click_count == 1);
+}
+
 void test_key_and_char_decoding()
 {
     const std::optional<ShellEvent> down = decode(kWmKeyDown, 'S', 0x001F0001);
@@ -292,6 +339,8 @@ int main()
     test_button_messages_map_to_actions_and_buttons();
     test_mouse_button_state_comes_from_wparam_and_modifier_keys_from_the_os();
     test_wheel_carries_a_signed_delta_and_deliberately_no_position();
+    test_horizontal_wheel_decodes_onto_the_x_axis();
+    test_double_click_messages_decode_as_a_press_with_click_count_two();
     test_key_and_char_decoding();
     test_dpi_change_reads_the_low_word();
     test_lifecycle_and_focus_messages();

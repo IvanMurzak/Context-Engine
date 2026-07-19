@@ -25,7 +25,7 @@ This file is the directory map.
 | `include/.../input.h`, `src/input.cpp` | Region map + arbitration + the capture stack + focus-class key routing (03 §6). |
 | `include/.../editor_state.h`, `src/editor_state.cpp` | `.editor/editor-state.json` — the Shell is its SINGLE writer (03 §1). Debounced, crash-safe. |
 | `include/.../window.h`, `src/window.cpp` | The `IWindowBackend` seam, the headless backend, and the PURE Win32 message decoder. |
-| `src/win32_window.cpp` | The Windows OS calls only (`RegisterClassW`/`CreateWindowExW`/WndProc/per-monitor-v2 DPI). Reports an honest gap on macOS/Linux (e12). |
+| `src/win32_window.cpp` | The Windows OS calls only (`RegisterClassExW`/`CreateWindowExW`/WndProc/per-monitor-v2 DPI). Reports an honest gap on macOS/Linux (e12). |
 | `include/.../browser.h`, `src/browser.cpp` | The CEF-free browser seam + the scripted host the smoke and tests drive. |
 | `include/.../compositor.h`, `src/compositor.cpp` | The layer stack, damage, the resize protocol, `PET_POPUP`, and both present paths (03 §4). |
 | `include/.../shell.h`, `src/shell.cpp` | `WindowManager` / `EditorWindow` / the owner loop, and the D10 authenticated attach. |

@@ -213,6 +213,11 @@ struct FakePassLog
     int scissor_sets = 0;
     // Every scissor rect in call order — the popup layer's confinement is asserted from this.
     std::vector<Rect2D> scissors;
+    // Every uniform-buffer payload written, in call order. The per-layer composite UV is otherwise
+    // UNOBSERVABLE: the compositor uploads it to a uniform buffer it owns privately, and a wrong UV
+    // renders a layer squeezed or offset rather than tripping any counter here. Recording the bytes
+    // is what lets a headless test assert the UV arithmetic the GPU would have sampled with.
+    std::vector<std::vector<std::uint8_t>> buffer_writes;
 };
 
 class FakeRenderPassEncoder : public IRenderPassEncoder
@@ -234,13 +239,17 @@ public:
         ++bind_group_sets_;
     }
 
-    // The scissor is RECORDED rather than applied: the fake only rasterizes the reference triangle,
-    // and the pass a scissor actually matters for (the e04 PET_POPUP composite layer) is proven
-    // per-pixel against a real adapter by `render-wgpu-osr-composite`. What a headless test can
-    // honestly assert is that the compositor CONFINED the popup draw — i.e. the rect it passed.
+    // The scissor is RECORDED rather than applied: the fake only rasterizes the reference triangle.
+    // What a headless test can honestly assert is that the compositor CONFINED the popup draw —
+    // i.e. the rect it passed — and, via FakePassLog::buffer_writes, the UV it paired with it.
+    //
+    // NO real-adapter proof of the scissor exists yet. `render-wgpu-osr-composite` is e03's
+    // full-window OSR composite gate; it predates set_scissor_rect and never scissors, so the wgpu
+    // implementation (wgpuRenderPassEncoderSetScissorRect) is currently executed by no CI leg. The
+    // per-pixel proof belongs in the wgpu offscreen harness — a scissored sub-rect draw asserting
+    // that pixels outside the rect are untouched — and lands with the first task that needs it.
     void set_scissor_rect(Origin2D origin, Extent2D size) override
     {
-        ++scissor_sets_;
         last_scissor_ = Rect2D{origin, size};
         if (log_ != nullptr)
         {
@@ -253,7 +262,6 @@ public:
     {
         draw_vertices_ = vertex_count;
         draw_instances_ = instance_count;
-        ++draw_count_;
         if (log_ != nullptr)
         {
             ++log_->draws;
@@ -261,9 +269,6 @@ public:
     }
 
     [[nodiscard]] int bind_group_sets() const { return bind_group_sets_; }
-    [[nodiscard]] int draw_count() const { return draw_count_; }
-    [[nodiscard]] int scissor_sets() const { return scissor_sets_; }
-    [[nodiscard]] const Rect2D& last_scissor() const { return last_scissor_; }
 
     void end() override
     {
@@ -301,8 +306,6 @@ private:
     FakePassLog* log_ = nullptr;
     bool pipeline_set_ = false;
     int bind_group_sets_ = 0;
-    int draw_count_ = 0;
-    int scissor_sets_ = 0;
     Rect2D last_scissor_{};
     std::uint32_t draw_vertices_ = 0;
     std::uint32_t draw_instances_ = 0;
@@ -361,6 +364,8 @@ class FakeQueue : public IQueue
 public:
     void submit(ICommandBuffer& /*commands*/) override { ++submit_count_; }
 
+    void set_log(FakePassLog* log) { log_ = log; }
+
     void write_buffer(IBuffer& buffer, std::uint64_t offset, const void* data,
                       std::size_t size) override
     {
@@ -368,6 +373,11 @@ public:
         if (offset + size <= fake.bytes().size())
         {
             std::memcpy(fake.bytes().data() + offset, data, size);
+        }
+        if (log_ != nullptr && data != nullptr)
+        {
+            const auto* bytes = static_cast<const std::uint8_t*>(data);
+            log_->buffer_writes.emplace_back(bytes, bytes + size);
         }
     }
 
@@ -403,11 +413,21 @@ public:
 private:
     int submit_count_ = 0;
     std::uint64_t written_texels_ = 0;
+    FakePassLog* log_ = nullptr;
 };
 
 class FakeDevice : public IDevice
 {
 public:
+    // The queue shares the device-lifetime pass log, so a uniform upload and the draw it feeds are
+    // recorded against the same timeline and can be correlated by index.
+    FakeDevice() { queue_.set_log(&pass_log_); }
+
+    // Non-copyable BECAUSE of that self-reference: a copy's queue would keep logging into the
+    // DONOR's pass log, and the bug would surface as a test asserting against another test's draws.
+    FakeDevice(const FakeDevice&) = delete;
+    FakeDevice& operator=(const FakeDevice&) = delete;
+
     IQueue& queue() override { return queue_; }
 
     std::unique_ptr<ITexture> create_texture(const TextureDesc& desc) override

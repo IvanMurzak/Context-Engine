@@ -20,6 +20,7 @@
 #include "context/render/present/osr_import.h"
 #include "context/render/rhi.h"
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -87,6 +88,50 @@ public:
     virtual void close() = 0;
 };
 
+// ------------------------------------------------------------------- the integrated pump schedule
+
+// When to run a pump slice (03 §1) — the portable half of the integrated message pump.
+//
+// With external_message_pump on, CEF does not own a loop: it calls OnScheduleMessagePumpWork("pump
+// me in delay_ms") and expects the embedder's own thread to comply. Two things make that policy
+// belong HERE rather than inside the CEF binding:
+//
+//  - It is a pure function of (scheduled, due, now). The binding is the one translation unit the
+//    local gate cannot build, so a scheduler living there is exercised by nothing that runs locally
+//    — yet this is precisely the mechanism the design cites when it rejects the spike's
+//    multi-threaded+mutex model, so it is the last thing that should go unverified.
+//  - CEF documents OnScheduleMessagePumpWork as callable from ANY thread, while the owner thread
+//    concurrently asks whether to pump. That is a real cross-thread handoff of these two scalars,
+//    so they are atomic — plain members would be a data race (UB), and a torn `due` could park the
+//    browser until the floor below happened to fire.
+class PumpSchedule
+{
+public:
+    // CEF asked to be pumped `delay_ms` from `now_ms`. A negative delay means "as soon as possible".
+    // Callable from any thread.
+    void schedule(std::int64_t delay_ms, std::int64_t now_ms);
+
+    // Should the owner thread run a pump slice at `now_ms`? True when scheduled work has come due,
+    // and — the unconditional FLOOR — also when nothing is scheduled at all, so a schedule callback
+    // that never arrives (or one dropped by the benign race below) cannot stall the browser. A due
+    // schedule is consumed. Call only from the owner thread.
+    //
+    // The race is deliberately left benign rather than locked: a schedule() landing between the due
+    // check and the consume can be dropped, after which `scheduled` reads false and the very next
+    // call pumps via the floor. Pumping early or extra is always safe — CefDoMessageLoopWork with
+    // nothing pending returns immediately — so the floor is what makes lock-free acceptable here.
+    [[nodiscard]] bool should_pump(std::int64_t now_ms);
+
+    [[nodiscard]] bool has_scheduled_work() const;
+
+    // The absolute deadline of the pending schedule; meaningless when none is pending.
+    [[nodiscard]] std::int64_t due_ms() const;
+
+private:
+    std::atomic<std::int64_t> due_ms_{0};
+    std::atomic<bool> scheduled_{false};
+};
+
 // ------------------------------------------------------------------- the portable scripted host
 
 // A browser host with no browser: scripted OSR frames in, recorded input out. It is what lets the
@@ -94,8 +139,10 @@ public:
 // no interactive desktop and no CEF, and what lets the layer/damage/popup logic be asserted on all
 // three OSes.
 //
-// The frames it emits are honest software-OSR frames — premultiplied BGRA8 with a coded_size larger
-// than the visible rect, which is the shape that catches the UV bug e03 documents.
+// The frames it emits are premultiplied BGRA8, and the CALLER chooses the shape: the coded size,
+// the visible rect inside it, and the row stride are all scripted, so a caller can drive the honest
+// wide shape — an allocation larger than the visible rect at a padded stride — which is what
+// catches the UV/stride bugs e03 documents. The Session-0 smoke does exactly that.
 class ScriptedBrowserHost final : public IBrowserHost
 {
 public:
@@ -111,14 +158,19 @@ public:
     // --- scripting -------------------------------------------------------------------------------
     // Queue a frame the next pump() delivers. The pixel storage is COPIED and owned here, so a
     // caller cannot hand over a buffer that dies before the frame is consumed.
+    //
+    // `bytes_per_row` of 0 means a tight stride (coded_size.width * 4). A LARGER value is the real
+    // OSR shape — a padded row stride — and is expressible here on purpose: hardcoding a tight
+    // stride would make the padded producer shape unrepresentable through this host, so every
+    // stride bug would be invisible to the smoke and the tests that drive the compositor through it.
     void queue_frame(BrowserLayer layer, render::Extent2D coded_size,
                      const render::Rect2D& visible_rect, std::vector<std::uint8_t> pixels,
-                     std::vector<render::Rect2D> dirty = {});
+                     std::uint32_t bytes_per_row = 0, std::vector<render::Rect2D> dirty = {});
     // Queue a solid premultiplied-BGRA frame — the common case for a smoke that cares about the
     // composite arithmetic rather than the picture.
     void queue_solid_frame(BrowserLayer layer, render::Extent2D coded_size,
                            const render::Rect2D& visible_rect, std::uint8_t b, std::uint8_t g,
-                           std::uint8_t r, std::uint8_t a);
+                           std::uint8_t r, std::uint8_t a, std::uint32_t bytes_per_row = 0);
     // Queue a popup visibility change (delivered in order with the frames).
     void queue_popup_state(bool visible, const render::Rect2D& rect);
 
@@ -142,6 +194,7 @@ private:
         BrowserLayer layer = BrowserLayer::view;
         render::Extent2D coded_size;
         render::Rect2D visible_rect;
+        std::uint32_t bytes_per_row = 0; // 0 = tight
         std::vector<std::uint8_t> pixels;
         std::vector<render::Rect2D> dirty;
     };

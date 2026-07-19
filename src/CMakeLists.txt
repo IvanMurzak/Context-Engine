@@ -892,10 +892,10 @@ context_assert_no_present_linkage(
 # context_render_wgpu is legitimately absent unless CONTEXT_BUILD_RENDER_WGPU is ON.
 add_test(NAME render-present-headless-isolation
     COMMAND ${CMAKE_COMMAND}
-        -DREPORT=${_context_present_isolation_report}
+        "-DREPORT=${_context_present_isolation_report}"
         "-DGATE=headless-invariant gate"
         "-DEXPECT_AUDITED=context_runtime_server;context_runtime_desktop;context;context_client"
-        -DEXPECT_FORBIDDEN=context_render_present
+        "-DEXPECT_FORBIDDEN=context_render_present"
         -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/present_isolation_check.cmake)
 
 # ---------------------------------------------------------------------------
@@ -929,7 +929,7 @@ context_assert_shell_boundary(
         context_migrate
         context_assetdb
         context_import
-        context_pkg
+        context_editor_pkg    # the packaging module (NOT context_pkg — no such target)
     TARGETS context_editor_shell context_editor)
 
 # The companion ctest, for the same vacuous-pass failure mode the headless one guards (see its note).
@@ -937,11 +937,17 @@ context_assert_shell_boundary(
 # all three OS legs with no ci.yml --target bookkeeping. The expected sets are spelled out LITERALLY
 # rather than reusing the variables above — an expectation derived from the same list that drives the
 # audit shrinks with it.
+#
+# EXPECT_FORBIDDEN names ALL NINE forbidden targets, not a sample of them: every one is built
+# unconditionally, and a name this list omits is a name whose closure check can silently degrade to
+# forbidding nothing (a typo'd or renamed target reports FORBIDDEN-ABSENT and the verdict stays
+# "isolated"). Landing this gate cost exactly that — `context_pkg` was audited against a target that
+# has never existed under that name. Keep this list in lockstep with the FORBIDDEN block above.
 add_test(NAME editor-shell-boundary
     COMMAND ${CMAKE_COMMAND}
-        -DREPORT=${_context_shell_boundary_report}
+        "-DREPORT=${_context_shell_boundary_report}"
         "-DGATE=D10 shell-boundary gate"
         "-DSOURCE_HINT=src/CMakeLists.txt (context_assert_shell_boundary)"
         "-DEXPECT_AUDITED=context_editor_shell;context_editor"
-        "-DEXPECT_FORBIDDEN=context_editorkernel;context_filesync;context_derivation;context_compose"
+        "-DEXPECT_FORBIDDEN=context_editorkernel;context_filesync;context_derivation;context_compose;context_merge;context_migrate;context_assetdb;context_import;context_editor_pkg"
         -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/present_isolation_check.cmake)

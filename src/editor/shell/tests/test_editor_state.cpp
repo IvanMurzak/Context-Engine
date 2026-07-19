@@ -158,7 +158,8 @@ void test_writes_are_debounced()
     store.load();
 
     // A window drag emits a placement change per mouse-move. Each marks the store dirty; none of
-    // them writes until the drag has been still for the quiet period.
+    // them writes until `debounce_us` has elapsed since the FIRST of them (leading-edge, not a
+    // quiet period — the next assertion pins which of the two this is).
     store.set_placement(0, placement(0, 0, 1280, 800), 1'000);
     CHECK(store.dirty());
     CHECK(!store.flush_if_due(1'000));
@@ -231,10 +232,20 @@ void test_the_write_is_atomic_and_leaves_no_temp_behind()
     const fs::path path = editor_state_path(root);
     CHECK(fs::exists(path));
     // The staging file is renamed OVER the target, so it must not survive the write — a leftover
-    // temp is a half-written document waiting to be renamed by a later attempt.
-    fs::path temp = path;
-    temp += ".tmp";
-    CHECK(!fs::exists(temp));
+    // temp is a half-written document waiting to be renamed by a later attempt. Scan for ANY
+    // sibling staging file rather than one hardcoded name: the staging name carries a
+    // process-unique token, so asserting `<target>.tmp` alone would assert a path that can never
+    // exist and would pass no matter how many temps were left behind.
+    const std::string stem = path.filename().string() + ".tmp";
+    int leftover_temps = 0;
+    for (const fs::directory_entry& entry : fs::directory_iterator(path.parent_path()))
+    {
+        if (entry.path().filename().string().rfind(stem, 0) == 0)
+        {
+            ++leftover_temps;
+        }
+    }
+    CHECK(leftover_temps == 0);
 
     // The bytes on disk parse and carry what was set.
     const EditorState reloaded = EditorState::from_json(Json::parse(read_file(path)));
