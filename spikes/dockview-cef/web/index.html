@@ -1,0 +1,35 @@
+<!doctype html>
+<!-- M9 spike s1 — Dockview-in-CEF probe harness (THROWAWAY). Loads the vendored, pinned
+     dockview-core@7.0.2 under a strict no-inline-SCRIPT CSP and runs the 6-probe matrix.
+     Served identically by (a) tools/run_probes.py over http:// (headless Chromium measurement)
+     and (b) the src/ CEF host over context-editor:// (custom-scheme / CEF-149 residual probes).
+     The security-critical directive is script-src 'self' (no unsafe-inline, no unsafe-eval);
+     probes.js records every securitypolicyviolation so probe 1 reports the real CSP posture. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'none';
+    script-src 'self';
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data:;
+    font-src 'self';
+    connect-src 'self';
+    frame-src 'self';
+    child-src 'self';
+    base-uri 'none';
+    form-action 'none'
+  " />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dockview-cef spike</title>
+  <link rel="stylesheet" href="vendor/dockview-core/dockview.css" />
+  <link rel="stylesheet" href="harness.css" />
+</head>
+<body class="dockview-theme-dark">
+  <header id="banner">dockview-cef probe harness — dockview-core 7.0.2</header>
+  <div id="dock" class="dock-host"></div>
+  <!-- No inline script anywhere: the strict CSP forbids it. Both files are same-origin 'self'. -->
+  <script src="vendor/dockview-core/dockview-core.min.js"></script>
+  <script src="probes.js"></script>
+</body>
+</html>

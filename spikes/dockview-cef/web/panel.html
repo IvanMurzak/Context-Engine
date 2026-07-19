@@ -1,0 +1,17 @@
+<!doctype html>
+<!-- Sandboxed third-party panel content (probe 2). Hosted in <iframe sandbox="allow-scripts">
+     WITHOUT allow-same-origin => opaque origin (window.origin === "null"). It runs its own
+     script (allow-scripts) but cannot touch the parent DOM; the bridge is a MessageChannel port
+     the parent hands it at creation (design 04 §5 / 08: opaque-origin frames authenticate via
+     ports, never origin strings). Its own strict CSP mirrors the host. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'" />
+  <title>sandboxed panel</title>
+</head>
+<body style="margin:0;font:13px system-ui,sans-serif;color:#0f0;background:#101418">
+  <div id="out" style="padding:8px">sandboxed panel booting…</div>
+  <script src="panel.js"></script>
+</body>
+</html>

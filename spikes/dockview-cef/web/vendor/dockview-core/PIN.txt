@@ -1,0 +1,29 @@
+# Vendored dependency pin — dockview-core (M9 spike s1, THROWAWAY)
+#
+# These two files are the pre-built distribution assets copied verbatim out of the npm
+# tarball. They are vendored (not npm-installed) so the spike is offline, deterministic, and
+# adds NO package.json to the repo — the deny-by-default license-gate (tools/check_licenses.py)
+# scans every package.json outside node_modules/, and this spike must leave CI untouched and
+# must not pre-empt the owner's s1 npm-allowlist ratification gate (design 08 §3). The
+# allowlist recommendation lives in ../../supply-chain-review.md instead.
+
+package        dockview-core
+version        7.0.2
+license        MIT
+published      2026-06-22T20:21:57Z
+registry       https://registry.npmjs.org/dockview-core/-/dockview-core-7.0.2.tgz
+npm integrity  sha512-i666ndkUdT4U+Bo2Yu3d6KwCJNqe21VJ0oschdgcXucZ5TquzBFX94zcUBEfg4IewTv2BuiPJ7r/2JTGLLv6ig==
+tarball sha256 e75f201ed9a59346274a333cfcebc56cccf5b11a576b008910cb063ed0ecf5eb
+
+# verify-before-use SHA-256 over the exact vendored files:
+dockview-core.min.js  ac39da12d4280a2c61a55b98c66faa110ed3c2c93457e57f30d6e0e369e33eff
+dockview.css          4cc8d24e797c4a8505a11060094b01cbc27af685d3fdef9b04c7d8d5716468ac
+
+# Re-vendor (from a POSIX shell with curl + tar):
+#   curl -sSL -o dc.tgz https://registry.npmjs.org/dockview-core/-/dockview-core-7.0.2.tgz
+#   tar -xzf dc.tgz
+#   cp package/dist/dockview-core.min.js package/dist/styles/dockview.css .
+#   sha256sum -c against the two hashes above
+#
+# UMD global exposed by dockview-core.min.js: window["dockview-core"]  (framework-agnostic).
+# Entry the harness uses: window["dockview-core"].createDockview(element, options).
