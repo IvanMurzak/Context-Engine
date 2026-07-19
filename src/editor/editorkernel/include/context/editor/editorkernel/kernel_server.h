@@ -35,8 +35,10 @@
 // client fetches the payload over the SAME channel via resource.read (CLI: `context fetch`).
 //
 // Multi-client concurrent fan-in (M9 D19): serve() accepts N concurrent connections up to a bound;
-// each connection gets a reader thread + a writer thread (over a duplicated handle, so the two never
-// share one TransportConnection's mutable state). ALL request dispatch is serialized through ONE
+// each connection is served by ONE thread that owns its handle for BOTH reads and writes — a bounded
+// timed read interleaved with flushing an outbound queue, deliberately NOT a reader/writer split on a
+// duplicated handle (a concurrent read + write on one synchronous Windows pipe file object
+// deadlocks). ALL request dispatch is serialized through ONE
 // mutex, so the mutation model stays single-threaded (L-50 preserved — concurrency lives at the
 // TRANSPORT, never the write queue). After every dispatch, newly-published events are fanned out to
 // each subscribed connection's bounded outbound queue; a stuck client's queue fills and it gets a
@@ -84,8 +86,9 @@ public:
            const bridge::Session& session) const override;
 
     // Accept + serve clients over `server` until a `shutdown` message (or stop()) breaks the loop.
-    // Accepts up to max_connections() concurrent clients (D19); each gets a fresh Session + a
-    // reader/writer thread pair, and every framed request funnels through ONE serialized dispatch
+    // Accepts up to max_connections() concurrent clients (D19); each gets a fresh Session + a single
+    // connection thread (a timed read interleaved with an outbound-queue flush, one handle, no dup),
+    // and every framed request funnels through ONE serialized dispatch
     // (L-50) then finalize_response() (the R-CLI-017 large-result spool). Events published by any
     // client's dispatch are fanned out to every subscribed client. Returns 0 on a clean stop,
     // non-zero if the listener fails (server.error() set). Blocking — runs on the calling thread.

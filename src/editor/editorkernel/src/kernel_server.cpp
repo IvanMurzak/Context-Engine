@@ -84,29 +84,31 @@ struct Conn
     std::thread thread;
 };
 
+// A JSON-RPC 2.0 notification frame (server->client): {jsonrpc:"2.0", method, params}, no id.
+std::string notification_frame(std::string method, contract::Json params)
+{
+    contract::Json out = contract::Json::object();
+    out.set("jsonrpc", contract::Json(std::string("2.0")));
+    out.set("method", contract::Json(std::move(method)));
+    out.set("params", std::move(params));
+    return out.dump(0);
+}
+
 // A JSON-RPC 2.0 notification carrying one pushed event (server->client). `subId` routes it to the
 // originating subscription so a client with several subscriptions can demux.
-std::string event_frame(const std::string& sub_id, const contract::Json& event)
+std::string event_frame(const std::string& sub_id, contract::Json event)
 {
     contract::Json params = contract::Json::object();
     params.set("subId", contract::Json(sub_id));
-    params.set("event", event);
-    contract::Json out = contract::Json::object();
-    out.set("jsonrpc", contract::Json(std::string("2.0")));
-    out.set("method", contract::Json(std::string("event")));
-    out.set("params", std::move(params));
-    return out.dump(0);
+    params.set("event", std::move(event));
+    return notification_frame("event", std::move(params));
 }
 
 // A connection-level gap marker: the client missed events (its outbound budget overflowed or a
 // subscription queue gapped) and must re-snapshot every subscription (R-BRIDGE-008).
 std::string gap_frame()
 {
-    contract::Json out = contract::Json::object();
-    out.set("jsonrpc", contract::Json(std::string("2.0")));
-    out.set("method", contract::Json(std::string("event.gap")));
-    out.set("params", contract::Json::object());
-    return out.dump(0);
+    return notification_frame("event.gap", contract::Json::object());
 }
 
 // The daemon.busy JSON-RPC error reply for an over-cap connection's attach (mirrors the dispatcher's
@@ -604,7 +606,7 @@ int KernelServer::serve(bridge::TransportServer& server)
                     fan_out();
                 }
                 if (!response.empty())
-                    enqueue_response(*c, response); // flushed at the top of the next loop iteration
+                    enqueue_response(*c, std::move(response)); // flushed at the top of the next loop iteration
             }
         }
 
