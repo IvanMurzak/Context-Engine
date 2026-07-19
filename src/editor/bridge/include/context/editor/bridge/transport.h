@@ -60,6 +60,25 @@ public:
     // Write exactly one framed message. false on any I/O error (peer gone, etc.).
     [[nodiscard]] bool write_frame(std::string_view payload);
 
+    // Wait up to `timeout_ms` for a readable frame, then read it. Returns the frame on success;
+    // nullopt with `timed_out=true` when the wait elapsed with no data (the caller loops to flush any
+    // queued push frames + re-poll), or nullopt with `timed_out=false` on a clean EOF / I/O error
+    // (error() then carries the reason for a real error; empty for a disconnect). Lets ONE thread own
+    // a connection for BOTH reads and writes by interleaving a bounded read with queued writes —
+    // required on Windows, where a blocked synchronous read on a duplicated handle serializes with a
+    // concurrent write on the SAME pipe file object. POSIX: poll(POLLIN) (event-driven — wakes the
+    // instant data arrives, so a request incurs no added latency; the perf-critical bench runs here).
+    // Windows: PeekNamedPipe + a short sleep (a bounded poll).
+    [[nodiscard]] std::optional<std::string> read_frame_timed(int timeout_ms, bool& timed_out);
+
+    // Unblock a peer thread blocked in THIS connection's read_frame()/read_frame_timed(), from a
+    // DIFFERENT thread, WITHOUT racing on the handle: POSIX shutdown(SHUT_RDWR) / Windows
+    // DisconnectNamedPipe — both only READ the native handle value, never mutate the member, so this
+    // is data-race-free against the owning thread's in-flight read (that thread then observes
+    // EOF/error and close()s the handle itself, single-threaded). Best-effort + idempotent; the D19
+    // serve loop uses it to tear down a client stalled mid-frame on daemon shutdown.
+    void unblock() noexcept;
+
     void close() noexcept;
 
     [[nodiscard]] const std::string& error() const noexcept { return error_; }
@@ -112,13 +131,23 @@ public:
     [[nodiscard]] const std::string& endpoint() const noexcept { return endpoint_; }
     [[nodiscard]] const std::string& error() const noexcept { return error_; }
 
+    // D20 / R-SEC-002 ambient-guard assertion: is the bound endpoint restricted to the owner? Windows
+    // — the named-pipe DACL grants ONLY the current-user SID (no Everyone/Authenticated-Users ACE, no
+    // NULL "everyone" DACL); POSIX — the socket file mode is exactly 0600. False when not listening,
+    // when the endpoint is world-reachable, or on a query error. This is what closes the documented
+    // Windows named-pipe DACL gap (POSIX already 0600). Must be called while listening (it inspects
+    // the live endpoint).
+    [[nodiscard]] bool endpoint_owner_restricted() const;
+
 private:
     std::string endpoint_;
     std::string error_;
     bool listening_ = false;
     bool stopped_ = false;
 #if defined(_WIN32)
-    void* pending_ = nullptr; // the current unconnected named-pipe instance HANDLE
+    void* pending_ = nullptr;  // the current unconnected named-pipe instance HANDLE
+    void* security_ = nullptr; // owner-only SECURITY_ATTRIBUTES holder (PipeSecurity*), applied to
+                               // every pipe instance; built lazily in listen(), freed in stop()/dtor
 #else
     int listen_fd_ = -1;
 #endif
@@ -135,8 +164,18 @@ public:
     [[nodiscard]] bool connect(int timeout_ms = 3000);
 
     // Send one framed request and block for one framed response. nullopt on any transport failure OR
-    // a peer disconnect before a response arrived.
+    // a peer disconnect before a response arrived. NB: request() assumes the very next inbound frame
+    // IS the response — correct for a NON-subscribing client, but a client that has subscribed also
+    // receives async server-pushed `event` frames interleaved; such a client must use send()+receive()
+    // and demux by frame shape (the D19 push consumer / e02's context_client model).
     [[nodiscard]] std::optional<std::string> request(std::string_view request_json);
+
+    // Async-client primitives (the D19 push consumer needs raw framed I/O, not just request()):
+    // send() writes one framed request WITHOUT waiting for a reply; receive() reads one framed message
+    // — a response OR a server-pushed `event` / `event.gap` notification. false/nullopt on a transport
+    // failure or peer disconnect (error() carries the reason).
+    [[nodiscard]] bool send(std::string_view request_json);
+    [[nodiscard]] std::optional<std::string> receive();
 
     void close() noexcept;
 

@@ -983,6 +983,26 @@ const std::vector<ErrorCode>& catalog()
          "A tile id falls in no tile-set's [firstTileId, firstTileId + tileCount) global range "
          "(tile 0 = empty is always valid — an erase is a paint with 0).",
          false, kExitValidation, "R-2D-003"},
+        // --- M9 e01: daemon multi-client fan-in + attach-token auth (D19/D20, R-SEC-002) -------------
+        // The attach-time refusals the multi-client daemon mints (append-only tail). attach.denied is
+        // the D20 attach-token verification failure: a wrong/missing token when enforcement is ON (the
+        // rogue-local-process control of 08 § threat table) — a permission-class refusal, deterministic
+        // (a bare retry with the same wrong/absent token re-fails). daemon.busy is the D19 connection
+        // BOUND: the daemon is already serving its max concurrent clients, so a further attach is
+        // refused — usage-class and RETRIABLE (a slot frees when a client detaches, so a later retry
+        // can succeed, like cas.mismatch / build.toolchain_fetch_failed). The strings are the
+        // source-of-truth in src/editor/bridge/dispatcher.cpp / kernel_server.cpp as
+        // bridge::kAttachDeniedCode / editorkernel::kDaemonBusyCode (the promote-a-local-string pattern —
+        // the bridge references the one catalog entry by value). Additive-only (protocolMajor stays 1):
+        // NEW rows at the END, no existing row reordered/renamed.
+        {"attach.denied",
+         "The attach token is missing or does not match the daemon's instance token; the attach is "
+         "refused (attach-token enforcement, D20 / R-SEC-002).",
+         false, kExitPermission, "R-SEC-002"},
+        {"daemon.busy",
+         "The daemon is already serving its maximum number of concurrent clients; the attach is "
+         "refused. Transient — a slot frees when a client detaches, so a later retry can succeed.",
+         true, kExitUsage, "R-BRIDGE-001"},
     };
     return the_catalog;
 }

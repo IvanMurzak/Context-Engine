@@ -342,4 +342,14 @@ bool EventStream::sub_gapped(const std::string& sub_id) const
     return false;
 }
 
+void EventStream::reset_sub_gap(const std::string& sub_id)
+{
+    for (Subscription& s : subscriptions_)
+        if (s.id == sub_id)
+        {
+            s.sub->reset_gap();
+            return;
+        }
+}
+
 } // namespace context::editor::bridge

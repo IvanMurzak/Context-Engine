@@ -34,7 +34,18 @@
 // ResourceStore and replaces it with a small `largeResult` envelope carrying the opaque handle; the
 // client fetches the payload over the SAME channel via resource.read (CLI: `context fetch`).
 //
-// Serial single-connection model (M1): one client at a time, served to disconnect. See transport.h.
+// Multi-client concurrent fan-in (M9 D19): serve() accepts N concurrent connections up to a bound;
+// each connection is served by ONE thread that owns its handle for BOTH reads and writes — a bounded
+// timed read interleaved with flushing an outbound queue, deliberately NOT a reader/writer split on a
+// duplicated handle (a concurrent read + write on one synchronous Windows pipe file object
+// deadlocks). ALL request dispatch is serialized through ONE
+// mutex, so the mutation model stays single-threaded (L-50 preserved — concurrency lives at the
+// TRANSPORT, never the write queue). After every dispatch, newly-published events are fanned out to
+// each subscribed connection's bounded outbound queue; a stuck client's queue fills and it gets a
+// re-snapshot gap marker instead of ever stalling the daemon (R-BRIDGE-008). Bounds — max concurrent
+// connections + a per-connection outbound event-frame budget — are configurable with sane defaults.
+// Attach-token enforcement (D20) lives in the dispatcher (see Daemon::set_attach_auth); this loop is
+// auth-agnostic.
 
 #pragma once
 
@@ -44,12 +55,19 @@
 #include "context/editor/editorkernel/editor_kernel.h"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
 
 namespace context::editor::editorkernel
 {
+
+// The D19 connection-bound refusal (promote-a-local-string into the versioned error-code catalog,
+// like bridge::kScopeDeniedCode): the (N+1)th attach over max_connections() is refused with this
+// catalog code (transient — a slot frees when a client detaches). Grep-stable, identical to the
+// catalog entry, so the serve loop references the one catalog row by value.
+inline constexpr const char* kDaemonBusyCode = "daemon.busy";
 
 class KernelServer final : public bridge::MethodBackend
 {
@@ -68,11 +86,24 @@ public:
            const bridge::Session& session) const override;
 
     // Accept + serve clients over `server` until a `shutdown` message (or stop()) breaks the loop.
-    // Each connection gets a fresh Session; every framed request goes through the composed kernel's
-    // dispatcher, then through finalize_response() (the R-CLI-017 large-result spool). Returns 0 on
-    // a clean stop, non-zero if the listener fails (server.error() set). Blocking — runs on the
-    // calling thread.
+    // Accepts up to max_connections() concurrent clients (D19); each gets a fresh Session + a single
+    // connection thread (a timed read interleaved with an outbound-queue flush, one handle, no dup),
+    // and every framed request funnels through ONE serialized dispatch
+    // (L-50) then finalize_response() (the R-CLI-017 large-result spool). Events published by any
+    // client's dispatch are fanned out to every subscribed client. Returns 0 on a clean stop,
+    // non-zero if the listener fails (server.error() set). Blocking — runs on the calling thread.
     int serve(bridge::TransportServer& server);
+
+    // D19 bounds (config with sane defaults). max_connections: the cap on concurrently-served
+    // clients; the (N+1)th attach is refused `daemon.busy` (transient) rather than served. Default 16.
+    // max_outbound_frames: the per-connection outbound EVENT-frame budget — once this many undelivered
+    // event frames are queued for a slow client, further events are dropped and the client is sent a
+    // re-snapshot gap marker (never stalling the daemon). Responses are never dropped. Default 256.
+    // Both clamp to >= 1. Set BEFORE serve() (they are read on the serve/connection threads).
+    void set_max_connections(std::size_t n) noexcept { max_connections_ = (n == 0 ? 1 : n); }
+    void set_max_outbound_frames(std::size_t n) noexcept { max_outbound_frames_ = (n == 0 ? 1 : n); }
+    [[nodiscard]] std::size_t max_connections() const noexcept { return max_connections_; }
+    [[nodiscard]] std::size_t max_outbound_frames() const noexcept { return max_outbound_frames_; }
 
     // The R-CLI-017 oversized-response gate: a JSON-RPC response whose serialized size exceeds the
     // threshold has its success `result` spooled into the ResourceStore and replaced by a small
@@ -107,6 +138,9 @@ private:
     std::uint64_t large_result_threshold_ = bridge::kLargeResultThresholdBytes;
     // Mutable so the `shutdown` verb can flip it from the const invoke() path; the serve loop reads it.
     mutable std::atomic<bool> stop_{false};
+    // D19 bounds (see set_max_connections / set_max_outbound_frames).
+    std::size_t max_connections_ = 16;
+    std::size_t max_outbound_frames_ = 256;
 };
 
 } // namespace context::editor::editorkernel

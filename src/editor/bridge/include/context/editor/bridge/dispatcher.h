@@ -26,6 +26,12 @@ namespace context::editor::bridge
 
 class EventStream;
 
+// The D20 attach-token refusal (missing/wrong token when enforcement is ON). Promoted into the
+// versioned error-code catalog (error_catalog.{h,cpp}) as a permission-class code, grep-stable and
+// identical to the catalog entry — so the bridge references the one catalog entry by value (the same
+// promote-a-local-string pattern as kScopeDeniedCode).
+inline constexpr const char* kAttachDeniedCode = "attach.denied";
+
 // A per-connection session. The transport owns one Session per attached client; the dispatcher
 // establishes it on a successful attach and reads its scopes on every subsequent method.
 struct Session
@@ -34,6 +40,11 @@ struct Session
     std::uint32_t protocol_major = contract::kProtocolMajor;
     std::vector<std::string> capabilities; // the negotiated capability subset
     ScopeSet scopes;                       // granted scopes (read/query baseline by default)
+    // The R-CLI-015 subscription ids this connection minted (D19 fan-out bookkeeping): the serve
+    // loop drains + pushes each of these on every fan-out pass and unsubscribes them all on
+    // disconnect. Populated by handle() on a successful subscribe, pruned on unsubscribe. Only ever
+    // read/written on the daemon's single dispatch thread (serialized), so it needs no own lock.
+    std::vector<std::string> subscriptions;
 };
 
 // The seam that lets a COMPOSING layer (the EditorKernel, which sits ABOVE the bridge and therefore
@@ -66,6 +77,23 @@ public:
     {
     }
 
+    // D20 attach-token enforcement (R-SEC-002). `expected` is the daemon's per-instance token (the
+    // one it writes to `.editor/instance.json`); `required` is the compat flag. Enforcement is
+    // DEFAULT OFF (e01, C-F1 sequencing): with `required == false` the client's token is carried but
+    // NEVER gated on (the M1 ambient-OS-guard trust model preserved). With `required == true` an
+    // attach whose token is absent or does not match `expected` is refused with `attach.denied`.
+    //
+    // MUST be called BEFORE the serve loop spawns per-connection threads (the thread-creation
+    // happens-before edge publishes these values to the reader threads that call attach()); it is not
+    // safe to reconfigure once clients are being served.
+    void configure_attach_auth(std::string expected, bool required)
+    {
+        expected_token_ = std::move(expected);
+        auth_required_ = required;
+    }
+
+    [[nodiscard]] bool attach_auth_required() const noexcept { return auth_required_; }
+
     using AttachResult = std::variant<Session, contract::Envelope>;
 
     // The capability-negotiation attach (R-CLI-010). Reuses contract::negotiate: on success an
@@ -91,6 +119,10 @@ private:
     EventStream* stream_;
     const MethodBackend* backend_;
     ScopeSet ceiling_;
+    // D20 attach-token enforcement (default OFF — see configure_attach_auth). Set-once before the
+    // serve loop spawns connection threads; read on the attach path of every connection thereafter.
+    std::string expected_token_;
+    bool auth_required_ = false;
 };
 
 } // namespace context::editor::bridge

@@ -167,6 +167,10 @@ public:
     // True once a subscription's bounded queue overflowed — the client must re-snapshot and resume
     // "since" its last delivered seq (R-BRIDGE-008). False for an unknown subId.
     [[nodiscard]] bool sub_gapped(const std::string& sub_id) const;
+    // Clear a subscription's overflow gap flag. The D19 push serve loop calls this once it has
+    // enqueued the re-snapshot gap marker frame for the client, so the same overflow is not signaled
+    // on every subsequent fan-out pass. No-op for an unknown subId.
+    void reset_sub_gap(const std::string& sub_id);
     // The retention floor: the slowest acked cursor across live subscriptions (0 when none). Events
     // with seq <= this have been acked by EVERY live subscriber and may age out (R-CLI-015).
     [[nodiscard]] std::uint64_t slowest_acked_seq() const;

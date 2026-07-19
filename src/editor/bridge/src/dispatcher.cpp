@@ -5,6 +5,7 @@
 #include "context/editor/bridge/event_stream.h"
 #include "context/editor/contract/registry.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 
@@ -167,6 +168,19 @@ Json envelope_to_response(const Json& id, const Envelope& env)
 
 Dispatcher::AttachResult Dispatcher::attach(const ClientHandshake& client, ScopeSet requested) const
 {
+    // D20 attach-token enforcement (checked BEFORE protocol negotiation so an unauthenticated caller
+    // learns nothing about the negotiation surface — least privilege). DEFAULT OFF (e01): with
+    // auth_required_ == false the token is ignored entirely (the M1 ambient-OS-guard trust model). A
+    // constant-time-ish equality is unnecessary here (the token gates a same-host loopback attach, not
+    // a network secret), but a mismatch or absence is a uniform attach.denied — never a distinct
+    // "wrong" vs "missing" oracle.
+    if (auth_required_ && client.token != expected_token_)
+    {
+        return Envelope::failure(kAttachDeniedCode,
+                                 "The attach token is missing or does not match the daemon's "
+                                 "instance token; the attach is refused (D20 / R-SEC-002).");
+    }
+
     contract::HandshakeResult result = contract::negotiate(client);
     if (const Envelope* fail = std::get_if<Envelope>(&result))
         return *fail;
@@ -292,6 +306,10 @@ std::string Dispatcher::handle(const std::string& request_json, Session& session
             for (std::size_t i = 0; i < caps.size(); ++i)
                 client.capabilities.push_back(caps.at(i).as_string());
         }
+        // D20: the OPTIONAL attach token (additive under protocolMajor=1). Absent => empty string,
+        // which the enforcement path (Dispatcher::attach) treats as "no token supplied".
+        if (params.contains("token") && params.at("token").is_string())
+            client.token = params.at("token").as_string();
         ScopeSet requested = params.contains("scope")
                                  ? ScopeSet::parse(params.at("scope").as_string())
                                  : ScopeSet::read_query();
@@ -332,6 +350,23 @@ std::string Dispatcher::handle(const std::string& request_json, Session& session
     }
 
     const Envelope env = dispatch(method, params, session);
+
+    // D19 fan-out bookkeeping: record which subscription ids belong to THIS connection so the serve
+    // loop pushes their events and tears them down on disconnect. subscribe mints a subId (carried in
+    // the success `data`); unsubscribe drops it. Both run on the single dispatch thread, so the
+    // session's subscription list is mutated race-free.
+    if (env.ok() && env.data().is_object() && env.data().contains("subId") &&
+        env.data().at("subId").is_string())
+    {
+        const std::string sub_id = env.data().at("subId").as_string();
+        if (method == "subscribe")
+            session.subscriptions.push_back(sub_id);
+        else if (method == "unsubscribe")
+            session.subscriptions.erase(
+                std::remove(session.subscriptions.begin(), session.subscriptions.end(), sub_id),
+                session.subscriptions.end());
+    }
+
     if (is_notification)
         return std::string();
     return envelope_to_response(id, env).dump(0);

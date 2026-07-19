@@ -260,5 +260,106 @@ int main()
         CHECK(!parsed.at("result").at("data").at("subId").as_string().empty());
     }
 
+    // --- attach(): D20 attach-token enforcement — DEFAULT OFF, then ON (accept + deny) -----------
+    {
+        // DEFAULT OFF (e01, C-F1): the token is carried but never gated on — a client attaches with
+        // any token or none. This is what keeps e01 additive for the tokenless CLI.
+        Dispatcher off;
+        CHECK(!off.attach_auth_required());
+        ClientHandshake anon; // no token
+        CHECK(std::holds_alternative<Session>(off.attach(anon, ScopeSet::read_query())));
+        ClientHandshake stray;
+        stray.token = "whatever";
+        CHECK(std::holds_alternative<Session>(off.attach(stray, ScopeSet::read_query())));
+
+        // ENFORCEMENT ON: the correct token attaches; a wrong OR missing one is attach.denied.
+        Dispatcher on;
+        on.configure_attach_auth("s3cr3t-token", true);
+        CHECK(on.attach_auth_required());
+
+        ClientHandshake good;
+        good.token = "s3cr3t-token";
+        CHECK(std::holds_alternative<Session>(on.attach(good, ScopeSet::read_query())));
+
+        ClientHandshake wrong;
+        wrong.token = "nope";
+        const auto denied = on.attach(wrong, ScopeSet::read_query());
+        CHECK(std::holds_alternative<Envelope>(denied));
+        CHECK(std::get<Envelope>(denied).error()->code == kAttachDeniedCode);
+        CHECK(std::get<Envelope>(denied).exit_code() == 6); // permission class
+
+        ClientHandshake missing; // empty token == "no token supplied"
+        const auto denied2 = on.attach(missing, ScopeSet::read_query());
+        CHECK(std::holds_alternative<Envelope>(denied2));
+        CHECK(std::get<Envelope>(denied2).error()->code == kAttachDeniedCode);
+
+        // The auth check PRECEDES protocol negotiation: an out-of-window client with a wrong token is
+        // attach.denied (never leaking the protocol-window failure to an unauthenticated caller).
+        ClientHandshake bad_proto;
+        bad_proto.protocol_major = kProtocolMajor + 1;
+        bad_proto.token = "nope";
+        const auto denied3 = on.attach(bad_proto, ScopeSet::read_query());
+        CHECK(std::holds_alternative<Envelope>(denied3));
+        CHECK(std::get<Envelope>(denied3).error()->code == kAttachDeniedCode);
+    }
+
+    // --- handle(): D20 token over the JSON-RPC 2.0 wire (flag ON) --------------------------------
+    {
+        Dispatcher d;
+        d.configure_attach_auth("tok-abc", true);
+
+        Session denied_sess;
+        const std::string denied =
+            d.handle(R"({"jsonrpc":"2.0","id":1,"method":"attach","params":{"protocolMajor":1,)"
+                     R"("capabilities":[],"token":"wrong"}})",
+                     denied_sess);
+        const Json dp = Json::parse(denied);
+        CHECK(dp.contains("error"));
+        CHECK(dp.at("error").at("data").at("code").as_string() == kAttachDeniedCode);
+        CHECK(!denied_sess.attached);
+
+        Session ok_sess;
+        const std::string ok =
+            d.handle(R"({"jsonrpc":"2.0","id":2,"method":"attach","params":{"protocolMajor":1,)"
+                     R"("capabilities":[],"token":"tok-abc"}})",
+                     ok_sess);
+        CHECK(Json::parse(ok).contains("result"));
+        CHECK(ok_sess.attached);
+    }
+
+    // --- handle(): D19 per-connection subscription tracking on the session ----------------------
+    // The serve loop's fan-out + disconnect cleanup key off session.subscriptions, so handle() must
+    // record a subId on subscribe and drop it on unsubscribe.
+    {
+        EventStream stream("inc-subtrack");
+        Dispatcher d(&stream);
+        Session session;
+        (void)d.handle(R"({"jsonrpc":"2.0","id":1,"method":"attach","params":{"protocolMajor":1,)"
+                       R"("capabilities":[],"scope":"read"}})",
+                       session);
+        CHECK(session.subscriptions.empty());
+
+        const std::string s1 = d.handle(
+            R"({"jsonrpc":"2.0","id":2,"method":"subscribe","params":{"topics":["files"]}})",
+            session);
+        const std::string sub_id = Json::parse(s1).at("result").at("data").at("subId").as_string();
+        CHECK(session.subscriptions.size() == 1);
+        CHECK(session.subscriptions[0] == sub_id);
+
+        // A second subscribe tracks a second id.
+        (void)d.handle(
+            R"({"jsonrpc":"2.0","id":3,"method":"subscribe","params":{"topics":["derivation"]}})",
+            session);
+        CHECK(session.subscriptions.size() == 2);
+
+        // unsubscribe removes exactly that id from the session's tracked set.
+        const std::string ureq =
+            std::string(R"({"jsonrpc":"2.0","id":4,"method":"unsubscribe","params":{"subId":")") +
+            sub_id + R"("}})";
+        (void)d.handle(ureq, session);
+        CHECK(session.subscriptions.size() == 1);
+        CHECK(session.subscriptions[0] != sub_id);
+    }
+
     BRIDGE_TEST_MAIN_END();
 }
