@@ -39,6 +39,7 @@
 
 #include "context/editor/shell/app_scheme.h"
 #include "context/editor/shell/cef/cef_shell.h"
+#include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
@@ -283,6 +284,30 @@ int main(int argc, char** argv)
         return finish(1);
     }
 
+    // --- the editor-state + region-map surface (e05d2) ----------------------------------------
+    // editor-core's LayoutPersistence calls `editor.state.get` on boot (the restore read) and
+    // `editor.state.publish` / `editor.regions.publish` on every layout change. Those methods ride
+    // the SAME privileged bridge as `panel.*`; unless the REAL EditorStateBridge is installed here,
+    // the live boot handshake hits the router's deny-by-default `unknown_method` REFUSAL and the "no
+    // envelope refusals" assertion below fails. Wire it exactly as `editor_main.cpp` does — the Shell
+    // is the single writer of `.editor/editor-state.json` (03 §1), reached through the manager's
+    // store; a published region map routes into this window's InputArbiter (03 §6). `manager` is
+    // declared above this bridge so it OUTLIVES the handlers this install captures, and teardown is
+    // ordered (`manager.shutdown()` runs before any local unwinds), so no handler is invoked after
+    // these locals die — the same lifetime rationale `panel_host` above relies on.
+    shell::EditorStateBridge editor_state_bridge;
+    editor_state_bridge.bind_store(&manager.state_store(), now_us);
+    editor_state_bridge.bind_regions(
+        [&manager](std::vector<shell::ShellRegion> regions)
+        {
+            if (shell::EditorWindow* target_window = manager.window(0))
+            {
+                target_window->input().regions().publish(std::move(regions));
+            }
+        });
+    SMOKE_CHECK(editor_state_bridge.install(bridge),
+                "the editor.state.*/editor.regions.* bridge surface installed");
+
     // Drive the integrated pump until the browser has painted, the bridge handshake completed,
     // every hostable panel has hydrated, AND the composed surface has ACTUALLY REPAINTED with the
     // mounted UI. All of them, not any: the composite proves the scheme served a renderable
@@ -303,6 +328,16 @@ int main(int argc, char** argv)
     // still break early.) The 30s deadline is unchanged and still bounds the wait, so a genuine
     // no-paint regression never turns the surface non-uniform, the loop runs out the clock, and the
     // assertion below fails as it should — the wait is not vacuous and cannot loop forever.
+    //
+    // ⚠ e05d2 WIDENED THIS SAME RACE: once the smoke installs the real EditorStateBridge (above),
+    // editor-core's boot-time `editor.state.get` restore actually SUCCEEDS instead of being refused,
+    // so LayoutPersistence applies a restored (non-default) arrangement asynchronously after the
+    // FIRST non-uniform paint the loop above would have broken on — intermittently red on ubuntu with
+    // the SAME "app.css's #132a44 background covers a substantial part" assertion the loop does not
+    // yet wait for. Require the loop's OWN scan to clear the same background-coverage floor that
+    // assertion checks (not merely non-uniform), exactly the CE #319 fix's own reasoning applied to
+    // the second per-pixel property: the loop waits for EXACTLY what the assertion will check, so it
+    // cannot break on a frame the still-in-flight layout restore has only partially painted.
     const std::size_t expected_renders = shell::panels::hostable_panel_ids().size();
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     bool presented = false;
@@ -319,10 +354,15 @@ int main(int argc, char** argv)
         }
         const bool hydrated =
             presented && handshake.complete() && panel_host.renders_served() >= expected_renders;
-        if (hydrated &&
-            !scan_surface(editor->compositor().cpu_surface(), editor->compositor().size()).uniform)
+        if (hydrated)
         {
-            break;
+            const SurfaceScan poll_scan =
+                scan_surface(editor->compositor().cpu_surface(), editor->compositor().size());
+            if (!poll_scan.uniform && poll_scan.scanned > 0 &&
+                poll_scan.background_texels > poll_scan.scanned / 10u)
+            {
+                break;
+            }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }

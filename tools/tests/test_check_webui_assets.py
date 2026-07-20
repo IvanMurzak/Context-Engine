@@ -433,6 +433,12 @@ PANEL_BUNDLE = (
     'var STATE_SCHEMA_VERSION_KEY = "schemaVersion";\n'
     'var STATE_DATA_KEY = "data";\n'
     'var GESTURE_VERBS = ["begin", "extend", "commit", "cancel"];\n'
+    # e05d2 editor-state + region-map vocabulary (editorstate.ts).
+    'var EDITOR_STATE_GET_METHOD = "editor.state.get";\n'
+    'var EDITOR_STATE_PUBLISH_METHOD = "editor.state.publish";\n'
+    'var EDITOR_REGIONS_PUBLISH_METHOD = "editor.regions.publish";\n'
+    'var REGION_KIND_VIEWPORT = "viewport";\n'
+    'var REGION_KIND_NATIVE = "native";\n'
 )
 
 # MIRRORS THE REAL HEADER'S SHAPE. The real `panel_host.h` declares the enum and the token
@@ -474,6 +480,17 @@ PANEL_CPP_STATE = (
     'inline constexpr const char* kStateDataKey = "data";\n'
 )
 
+# The e05d2 editor-state + region-map vocabulary lives in editor_state_bridge.h as plain string
+# constants (unlike the gesture verbs, which live in a switch), so the gate reads it the same way it
+# reads the panel method names.
+PANEL_CPP_EDITOR_STATE = (
+    'inline constexpr const char* kEditorStateGetMethod = "editor.state.get";\n'
+    'inline constexpr const char* kEditorStatePublishMethod = "editor.state.publish";\n'
+    'inline constexpr const char* kEditorRegionsPublishMethod = "editor.regions.publish";\n'
+    'inline constexpr const char* kRegionKindViewport = "viewport";\n'
+    'inline constexpr const char* kRegionKindNative = "native";\n'
+)
+
 PANEL_DOCUMENT = (
     "<!DOCTYPE html>\n"
     '<html lang="en">\n'
@@ -490,7 +507,8 @@ PANEL_PACKAGE = {"name": "@context-engine/editor-core", "dependencies": {"dockvi
 
 def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str = PANEL_DOCUMENT,
                    header: str = PANEL_CPP_HEADER, state: str = PANEL_CPP_STATE,
-                   source: str = PANEL_CPP_SOURCE, package: dict | None = None,
+                   source: str = PANEL_CPP_SOURCE, editor_state: str = PANEL_CPP_EDITOR_STATE,
+                   package: dict | None = None,
                    stage_dockview: bool = True) -> tuple[Path, Path, Path, Path, Path]:
     asset_dir = tmp_path / "app"
     asset_dir.mkdir(parents=True, exist_ok=True)
@@ -503,6 +521,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
     include_dir = tmp_path / "shellinclude"
     include_dir.mkdir(parents=True, exist_ok=True)
     (include_dir / "panel_host.h").write_text(header, encoding="utf-8")
+    (include_dir / "editor_state_bridge.h").write_text(editor_state, encoding="utf-8")
 
     contract_dir = tmp_path / "contractinclude"
     contract_dir.mkdir(parents=True, exist_ok=True)
@@ -545,6 +564,31 @@ def test_bundle_missing_a_panel_method_fails(tmp_path: Path) -> None:
     stripped = "\n".join(
         line for line in PANEL_BUNDLE.splitlines() if "PANEL_RENDER_METHOD" not in line)
     assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+@pytest.mark.parametrize("ts_name", [
+    "EDITOR_STATE_GET_METHOD", "EDITOR_STATE_PUBLISH_METHOD", "EDITOR_REGIONS_PUBLISH_METHOD",
+    "REGION_KIND_VIEWPORT", "REGION_KIND_NATIVE",
+])
+def test_editor_state_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> None:
+    """The e05d2 methods + region kinds, each one: a drift here breaks layout persistence silently."""
+    drifted = re.sub(rf'({ts_name} = ")[^"]*(")', r"\1editor.drifted\2", PANEL_BUNDLE)
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+def test_bundle_missing_an_editor_state_constant_fails(tmp_path: Path) -> None:
+    """An ABSENT editor-state constant means editor-core cannot be calling the method the Shell routes."""
+    stripped = "\n".join(
+        line for line in PANEL_BUNDLE.splitlines() if "EDITOR_REGIONS_PUBLISH_METHOD" not in line)
+    assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+def test_a_renamed_editor_state_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
+    """Rot-into-a-no-op guard: rename the C++ constant and the gate can verify NOTHING → exit 2."""
+    renamed = PANEL_CPP_EDITOR_STATE.replace("kEditorStateGetMethod", "kEditorStateFetchMethod")
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, editor_state=renamed)
 
 
 @pytest.mark.parametrize("ts_name", ["STATE_SCHEMA_VERSION_KEY", "STATE_DATA_KEY"])

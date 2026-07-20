@@ -27,6 +27,7 @@
 // broken" diagnosis into a pile of unexplained panel failures.
 
 import { BridgeError, ShellBridge, isRecord } from "./bridge.js";
+import { EditorStateClient, LayoutPersistence } from "./editorstate.js";
 import { editorCoreInfo } from "./info.js";
 import { PanelClient } from "./panels.js";
 import { PanelHost } from "./panelhost.js";
@@ -164,8 +165,33 @@ async function startPanels(bridge: ShellBridge): Promise<PanelBringUp> {
         return { mounted: 0, unavailable: [], error: `no #${EDITOR_ROOT_ID} element in the document` };
     }
     try {
-        const host = new PanelHost({ container, client: new PanelClient(bridge) });
+        const client = new PanelClient(bridge);
+        const host = new PanelHost({ container, client });
         const report = await host.start();
+
+        // --- layout persistence + region maps (e05d2) --------------------------------------------
+        // The panels are up; now make the ARRANGEMENT durable. Restore the persisted layout + per-
+        // panel D6 state OVER the defaults `start` just opened (a fresh project restores nothing and
+        // the defaults stand), then start persisting future changes and publishing region maps on
+        // every layout change. NEVER fatal: a persistence failure — a stale blob, a full disk — must
+        // leave a working editor, so `ready` does NOT depend on it. `restore` and `attach` are called
+        // only once the docking root is up (`report.started`); the LayoutPersistence stays reachable
+        // through the Dockview + `pagehide` listeners `attach` registers, the same way `host` stays
+        // reachable through the mounted DOM.
+        if (report.started) {
+            try {
+                const persistence = new LayoutPersistence({
+                    panelHost: host,
+                    panelClient: client,
+                    stateClient: new EditorStateClient(bridge),
+                });
+                await persistence.restore();
+                persistence.attach();
+            } catch {
+                // Reported by absence of persistence, never fatal — the editor is up and usable.
+            }
+        }
+
         return { mounted: report.mounted, unavailable: report.unavailable, error: report.error };
     } catch (error) {
         return {

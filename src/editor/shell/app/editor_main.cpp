@@ -12,6 +12,7 @@
 #include "context/editor/client/subscription.h"
 #include "context/editor/shell/app_scheme.h"
 #include "context/editor/shell/browser.h"
+#include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
@@ -39,6 +40,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace shell = context::editor::shell;
 namespace render = context::render;
@@ -235,6 +237,15 @@ int main(int argc, char** argv)
     // `ShellHandshake::install` binds handlers that capture `this`, so the handshake must OUTLIVE
     // the router that holds them. Declaration order here is destruction order reversed, so
     // handshake-then-bridge gives bridge-destroyed-first, which is the required order.
+    // --- the window/session manager (03 §1) -------------------------------------------------------
+    //
+    // Declared HERE, ahead of the bridge, so it OUTLIVES every handler the bridge captures: the
+    // editor-state bridge below holds a pointer to this manager's store, and the region sink reaches
+    // this manager's window, so the manager must be the longest-lived composition object. Its
+    // constructor loads `.editor/editor-state.json` (the Shell is that file's SINGLE writer, 03 §1);
+    // the window itself is adopted later, once the browser + present path exist.
+    shell::WindowManager manager(options.project);
+
     shell::ShellHandshake handshake(shell::make_handshake_nonce());
     shell::BridgeRouter bridge;
     if (daemon.client != nullptr)
@@ -290,6 +301,38 @@ int main(int argc, char** argv)
     if (!panel_host.install(bridge))
     {
         std::fprintf(stderr, "context_editor: could not install the panel bridge surface\n");
+        return 1;
+    }
+
+    // --- the editor-state + region-map surface (e05d2, design 03 §1 / §6) --------------------------
+    //
+    // editor-core publishes its Dockview arrangement + per-panel D6 blobs, and its viewport/native
+    // region rects, over the SAME privileged bridge. The Shell records the former into the
+    // editor-state store — of which it is the SINGLE writer (03 §1) — and routes the latter into the
+    // window's input arbiter (03 §6). On boot editor-core reads the persisted blob back through
+    // `editor.state.get` and rebuilds the arrangement itself; this bridge never opens that file.
+    //
+    // The store is bound now (it exists); the region SINK reaches the window through the manager at
+    // call time, because the window is adopted a few lines below. A publish that somehow arrived
+    // before the window existed would find `manager.window(0) == nullptr` and be dropped rather than
+    // crash — but the renderer boots only after all of this is wired.
+    shell::EditorStateBridge editor_state_bridge;
+    editor_state_bridge.bind_store(&manager.state_store(), now_us);
+    editor_state_bridge.bind_regions(
+        [&manager](std::vector<shell::ShellRegion> regions)
+        {
+            // `target_window`, not `window`: the owner loop declares its own `window` local further
+            // down, and the CEF-ON `context_editor` leg compiles under CEF's /W4 /WX whose C4456
+            // (declaration shadows a local) is invisible to the local GCC gate — a distinct name
+            // keeps that diagnostic out of reach entirely.
+            if (shell::EditorWindow* target_window = manager.window(0))
+            {
+                target_window->input().regions().publish(std::move(regions));
+            }
+        });
+    if (!editor_state_bridge.install(bridge))
+    {
+        std::fprintf(stderr, "context_editor: could not install the editor-state bridge surface\n");
         return 1;
     }
 
@@ -421,7 +464,9 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "context_editor: %s\n", window->diagnostic().c_str());
     }
 
-    shell::WindowManager manager(options.project);
+    // The window is adopted now that its browser + present path exist; the manager applies any
+    // remembered placement before the first frame (it was constructed far above so it could outlive
+    // the bridge handlers — see there).
     manager.add(std::move(window));
 
     // --- the owner loop ----------------------------------------------------------------------------
