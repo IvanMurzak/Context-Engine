@@ -1,0 +1,19 @@
+src/editor/shell/cef/src/cef_shell_smoke.cpp
+  s_e70383bb4cb548::t_cebfb961444ec0 331-340,357,359-365
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f372dfb304fb747a57f69eb53e8ae3d9925d983a",
+  "prompts": {},
+  "sessions": {
+    "s_e70383bb4cb548": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "96b28b90-eda7-4907-9bb9-08e5da0e87d6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
