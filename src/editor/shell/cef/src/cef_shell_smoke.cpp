@@ -120,9 +120,7 @@ bool mentions(const std::string& haystack, const std::string& needle)
 // one struct keeps the loop's "has the UI actually painted yet?" test byte-for-byte identical to
 // the final assertion's "is the frame non-uniform?" — the loop waits for EXACTLY the property the
 // assertion will check, so it can neither break one poll too early (the CE #319 race) nor pass
-// vacuously. `composed` is the compositor's own size (NOT named `size`: that would shadow the outer
-// window extent, and MSVC's C4456 is not on CEF's /wd suppression list, so under /W4 /WX this file
-// would fail to compile).
+// vacuously. `composed` is the compositor's own surface extent.
 struct SurfaceScan
 {
     std::size_t scanned = 0;
