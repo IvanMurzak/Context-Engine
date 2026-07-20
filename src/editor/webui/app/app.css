@@ -1,0 +1,40 @@
+/*
+ * editor-core's base stylesheet (M9 e05c).
+ *
+ * A SEPARATE FILE rather than a <style> block, because the response carries `style-src 'self'` with
+ * no `unsafe-inline` — an inline block would be blocked by the browser. It is also the second asset
+ * the live smoke pulls over the scheme, which is what proves the resource handler serves more than
+ * one path and gets the media type right (a `text/css` served as anything else is ignored, and the
+ * smoke's per-pixel background assertion would fail).
+ *
+ * The design tokens + the real theme engine are e06's. Nothing here anticipates them: this is the
+ * minimum that makes the window legible and the composite assertable.
+ */
+
+:root {
+    /* The composited background the `editor-cef-smoke-shell` ctest asserts PER PIXEL. It is a
+     * known, distinctive value on purpose — counting frames proves nothing about whether the
+     * browser's pixels actually reached the present path, and reusing e04's placeholder colour
+     * would make "the app scheme served the bundle" indistinguishable from "the old data: URL
+     * placeholder still loads". Keep this in lockstep with kAppBackground* in
+     * src/editor/shell/cef/src/cef_shell_smoke.cpp. */
+    --editor-bg: #132a44;
+    --editor-fg: #e6edf5;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: var(--editor-bg);
+    color: var(--editor-fg);
+    font-family: system-ui, sans-serif;
+    /* The editor is a window, not a page: a scrollbar here would fight the docking layout. */
+    overflow: hidden;
+}
+
+#editor-root {
+    width: 100%;
+    height: 100%;
+}

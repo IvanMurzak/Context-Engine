@@ -309,10 +309,18 @@ Named so the gaps are visible rather than assumed:
 - **No multi-window UI.** `WindowManager` owns N windows and the state file indexes them, but nothing
   yet creates a second one (tear-out is 04's).
 - **No Windows accelerated OSR** — deferred by owner ruling pending gfx-rs/wgpu-native#621.
-- **No app scheme.** The DoD line says "a placeholder page over the app scheme", but no custom scheme
-  is registered anywhere in `src/editor/` — the placeholder loads over a `data:` URL (the live CEF
-  smoke says so explicitly) and `context_editor` defaults to `about:blank`. The scheme + its handler
-  land with **e05**.
+- ~~**No app scheme.**~~ ✅ **LANDED with e05c.** `context-editor` is registered in every process
+  (`STANDARD|SECURE|CORS_ENABLED|FETCH_ENABLED`), `context-editor://app/…` serves editor-core's built
+  asset set through a resource handler under a strict no-inline-script CSP, and `context_editor` now
+  defaults to `context-editor://app/index.html` (`--app-root` overrides the asset root, `--url` the
+  document). There is deliberately **no `file://` fallback** — the `webui-scheme-contract` gate
+  asserts none reached the asset set. URL→asset resolution, the media-type allowlist and the CSP live
+  in the CEF-free `app_scheme.h`/`.cpp` (ctest `editor-shell-test_app_scheme`, all three `build`
+  legs); the CEF binding is a thin translator. The privileged native↔JS IPC bridge landed alongside
+  it (`ipc_bridge.h`/`.cpp`, ctest `editor-shell-test_ipc_bridge`), and the live
+  `editor-cef-smoke-shell` now boots the real bundle over the real scheme and round-trips a handshake
+  through it. **Packaging** the asset root install-relative is still **e15**'s: the default is a
+  build-tree path compiled in by CMake.
 - **No triple-click.** Double-click works (the window class sets `CS_DBLCLKS` and the decoder reports
   `click_count = 2`), but nothing tracks a click RUN, so `click_count` never reaches 3 and
   triple-click-to-select-line is inert in the browser.

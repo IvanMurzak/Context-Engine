@@ -17,6 +17,8 @@
 
 #include "context/editor/shell/cef/cef_shell.h"
 
+#include "context/editor/shell/app_scheme.h"
+
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
@@ -24,13 +26,21 @@
 #include "include/cef_life_span_handler.h"
 #include "include/cef_load_handler.h"
 #include "include/cef_render_handler.h"
+#include "include/cef_render_process_handler.h"
+#include "include/cef_request_handler.h"
+#include "include/cef_resource_handler.h"
+#include "include/cef_scheme.h"
+#include "include/wrapper/cef_message_router.h"
 
 #if defined(__APPLE__)
 #include "include/wrapper/cef_library_loader.h"
 #endif
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
+#include <fstream>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -44,6 +54,20 @@ namespace context::editor::shell::cef
 namespace
 {
 
+// The names the message router injects onto `window` in editor-core's frames.
+//
+// DELIBERATELY NOT CEF's default `cefQuery`: that name is what every CEF sample and every piece of
+// drive-by injection probes for, and a distinctive one makes "is this the Context Shell" answerable
+// rather than guessable. MUST match BRIDGE_QUERY_FUNCTION in src/editor/webui/core/src/bridge.ts —
+// the `webui-scheme-contract` ctest re-checks that from the BUILT bundle, so a rename on either
+// side reds CI instead of producing a bridge editor-core cannot find.
+constexpr const char* kBridgeQueryFunction = "contextEditorQuery";
+constexpr const char* kBridgeCancelFunction = "contextEditorQueryCancel";
+
+// Read by the scheme handler factory on the IO thread. Set ONCE before the first browser exists and
+// never mutated afterwards, which is what makes it safe without a lock; `AppAssetResolver::resolve`
+// is const and holds no mutable state, so concurrent resolves are fine.
+const AppAssetResolver* g_asset_resolver = nullptr;
 
 bool g_initialized = false;
 
@@ -116,6 +140,258 @@ cef_key_event_type_t to_cef_key_type(KeyAction action)
     }
 }
 
+// --------------------------------------------------------------- the app-scheme resource handler
+
+// Serves ONE `context-editor://app/…` request from the built asset set.
+//
+// Every decision worth making — which URLs are in bounds, what a path may contain, which media
+// types exist, what the CSP says — lives in the CEF-free `AppAssetResolver` next door, where it is
+// adversarially unit-tested on all three default `build` legs. This class does exactly three
+// things: ask the resolver, read the bytes, hand them to CEF. Keeping it that thin is the point,
+// because this file is the one the local dev gate cannot build.
+class AppSchemeResourceHandler final : public CefResourceHandler
+{
+public:
+    bool Open(CefRefPtr<CefRequest> request, bool& handle_request,
+              CefRefPtr<CefCallback>) override
+    {
+        // Synchronous: the response is fully decided inside this call, so CEF never has to wait on
+        // a continuation. `handle_request = true` is what says so.
+        handle_request = true;
+
+        const std::string url = request->GetURL().ToString();
+        if (g_asset_resolver == nullptr)
+        {
+            // No asset root was configured. 404 rather than a file:// fallback — see cef_shell.h.
+            resolution_.status = AssetStatus::not_found;
+            return true;
+        }
+
+        resolution_ = g_asset_resolver->resolve(url);
+        if (!resolution_.ok())
+        {
+            // The REASON is logged, never sent: a refusal reason is a probe oracle for anything
+            // that got script running in the renderer.
+            std::fprintf(stderr, "[shell-cef] app scheme refused <%s>: %s\n", url.c_str(),
+                         resolution_.reason.c_str());
+            return true;
+        }
+
+        // Read the whole asset up front. These are the editor's own bundled assets (hundreds of KB,
+        // not media), so streaming would buy nothing and would leave the file handle open across
+        // callbacks for no reason.
+        std::ifstream file(resolution_.file, std::ios::binary);
+        if (!file)
+        {
+            resolution_.status = AssetStatus::not_found;
+            return true;
+        }
+        body_.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+        // A read that failed PART WAY would otherwise serve a truncated bundle, which presents as a
+        // baffling syntax error in the renderer rather than as an IO failure.
+        if (file.bad())
+        {
+            body_.clear();
+            resolution_.status = AssetStatus::not_found;
+        }
+        return true;
+    }
+
+    void GetResponseHeaders(CefRefPtr<CefResponse> response, int64_t& response_length,
+                            CefString& redirectUrl) override
+    {
+        redirectUrl.clear();
+        response->SetStatus(resolution_.http_status());
+
+        if (!resolution_.ok())
+        {
+            // An error response still carries the CSP: an error page is a document too, and one
+            // served without a policy is a hole that only shows up on the unhappy path.
+            response->SetMimeType("text/plain");
+            CefResponse::HeaderMap headers;
+            headers.insert({"Content-Security-Policy", app_csp_header()});
+            headers.insert({"X-Content-Type-Options", "nosniff"});
+            response->SetHeaderMap(headers);
+            response_length = 0;
+            return;
+        }
+
+        // MIME ESSENCE AND CHARSET ARE TWO SEPARATE FIELDS — see split_media_type() in
+        // app_scheme.h for the full trap. Passing the resolver's `text/css; charset=utf-8` straight
+        // into SetMimeType() makes Chromium's by-essence comparison fail, and with the
+        // `X-Content-Type-Options: nosniff` this response also sets, the stylesheet and the ES
+        // module are then silently refused and the document is not parsed as HTML.
+        const MediaType media = split_media_type(resolution_.mime_type);
+        response->SetMimeType(media.essence);
+        if (!media.charset.empty())
+        {
+            response->SetCharset(media.charset);
+        }
+        CefResponse::HeaderMap headers;
+        for (const auto& [name, value] : app_response_headers(resolution_.mime_type))
+        {
+            // CEF derives the Content-Type from the mime type + charset set above; setting it in
+            // the map as well makes the response carry it twice, which some parsers treat as a
+            // conflict.
+            if (name == "Content-Type")
+            {
+                continue;
+            }
+            headers.insert({name, value});
+        }
+        response->SetHeaderMap(headers);
+        response_length = static_cast<int64_t>(body_.size());
+    }
+
+    bool Read(void* data_out, int bytes_to_read, int& bytes_read,
+              CefRefPtr<CefResourceReadCallback>) override
+    {
+        bytes_read = 0;
+        if (data_out == nullptr || bytes_to_read <= 0 || offset_ >= body_.size())
+        {
+            // false with bytes_read == 0 is CEF's "complete", not an error.
+            return false;
+        }
+        const std::size_t remaining = body_.size() - offset_;
+        const std::size_t count =
+            std::min(remaining, static_cast<std::size_t>(bytes_to_read));
+        std::memcpy(data_out, body_.data() + offset_, count);
+        offset_ += count;
+        bytes_read = static_cast<int>(count);
+        return true;
+    }
+
+    // CEF's default Skip() reports -2 (ERR_FAILED), which turns any RANGE request into a load
+    // failure. Chromium issues none for the current html/css/js set, so this is latent — but the
+    // day a font, <audio> or <video> asset lands it would present as an unexplainable 404. The body
+    // is already fully buffered and `offset_` already exists, so honouring it is free.
+    bool Skip(int64_t bytes_to_skip, int64_t& bytes_skipped,
+              CefRefPtr<CefResourceSkipCallback>) override
+    {
+        if (bytes_to_skip < 0 || offset_ >= body_.size())
+        {
+            bytes_skipped = -2; // ERR_FAILED: nothing left to skip over.
+            return false;
+        }
+        const std::size_t remaining = body_.size() - offset_;
+        const std::size_t count =
+            std::min(remaining, static_cast<std::size_t>(bytes_to_skip));
+        offset_ += count;
+        bytes_skipped = static_cast<int64_t>(count);
+        return true;
+    }
+
+    void Cancel() override {}
+
+private:
+    AssetResolution resolution_;
+    std::string body_;
+    std::size_t offset_ = 0;
+
+    IMPLEMENT_REFCOUNTING(AppSchemeResourceHandler);
+};
+
+class AppSchemeFactory final : public CefSchemeHandlerFactory
+{
+public:
+    CefRefPtr<CefResourceHandler> Create(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+                                         const CefString&, CefRefPtr<CefRequest>) override
+    {
+        return new AppSchemeResourceHandler();
+    }
+
+private:
+    IMPLEMENT_REFCOUNTING(AppSchemeFactory);
+};
+
+// ------------------------------------------------------------------------- the IPC bridge handler
+
+// Translates one CefMessageRouter query into one `BridgeRouter::dispatch` call.
+//
+// TWO gates before the router is even asked, both of which the router cannot apply itself because
+// they are facts about the FRAME rather than about the message:
+//
+//   1. ORIGIN. The query must come from editor-core's own origin. A sandboxed third-party panel
+//      (04 §5) lives on a different `context-ext://` origin and reaches the daemon through the
+//      SCOPED panel bridge; this privileged channel is not for it. `Failure` rather than a JSON
+//      error envelope, because a caller that is not editor-core is not owed a protocol reply.
+//   2. NO PERSISTENT QUERIES. A persistent query is a subscription the renderer can open without
+//      bound; the request/response bridge has no use for one, and refusing it keeps the channel's
+//      lifetime model trivial (every query completes inside OnQuery).
+//
+// THREADING: OnQuery runs on the CEF UI thread, which — with external_message_pump and
+// multi_threaded_message_loop=false (03 §1) — IS the shell's owner thread, inside
+// CefDoMessageLoopWork() inside pump(). So the BridgeRouter is touched from exactly one thread,
+// the same discipline OnPaint follows, and needs no locking.
+class BridgeQueryHandler final : public CefMessageRouterBrowserSide::Handler
+{
+public:
+    explicit BridgeQueryHandler(BridgeRouter* router) : router_(router) {}
+
+    bool OnQuery(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, int64_t /*query_id*/,
+                 const CefString& request, bool persistent,
+                 CefRefPtr<Callback> callback) override
+    {
+        return dispatch_query(frame, request.ToString(), persistent, callback);
+    }
+
+    // THE BINARY OVERLOAD IS NOT OPTIONAL. CefMessageRouter switches transports at
+    // `CefMessageRouterConfig::message_size_threshold` — 16 KiB by default, which this Shell does
+    // not override — and hands anything at or above it to THIS overload instead of the CefString
+    // one. Leaving it to the base class (which returns false) means every request >= 16 KiB is
+    // silently cancelled as unhandled: the router is never reached, so served()/refused() do not
+    // move and the smoke stays green while real payloads — a document patch, a batch entity update,
+    // a scene-tree listing — fail with a generic transport error. `kMaxBridgeMessageBytes`
+    // advertises 1 MiB, so without this the live channel delivers 1/64th of its own contract.
+    bool OnQuery(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, int64_t /*query_id*/,
+                 CefRefPtr<const CefBinaryBuffer> request, bool persistent,
+                 CefRefPtr<Callback> callback) override
+    {
+        std::string payload;
+        if (request != nullptr && request->GetData() != nullptr)
+        {
+            payload.assign(static_cast<const char*>(request->GetData()), request->GetSize());
+        }
+        return dispatch_query(frame, payload, persistent, callback);
+    }
+
+private:
+    bool dispatch_query(CefRefPtr<CefFrame> frame, const std::string& request, bool persistent,
+                        const CefRefPtr<Callback>& callback)
+    {
+        if (router_ == nullptr)
+        {
+            return false;
+        }
+        if (persistent)
+        {
+            callback->Failure(-1, "the context bridge does not accept persistent queries");
+            return true;
+        }
+        const std::string frame_url = frame != nullptr ? frame->GetURL().ToString() : std::string();
+        if (!is_trusted_bridge_origin(frame_url))
+        {
+            std::fprintf(stderr, "[shell-cef] bridge query REFUSED from untrusted origin <%s>\n",
+                         frame_url.c_str());
+            callback->Failure(-1, "this origin may not use the privileged bridge");
+            return true;
+        }
+
+        // Everything past here is the CEF-free router's job: parse, validate, route, scan the
+        // response for protected secrets, and produce an envelope. It never throws, so there is no
+        // exception to contain at this boundary.
+        const BridgeDispatch dispatch = router_->dispatch(request);
+        // A refusal is still a well-formed JSON-RPC error envelope, so it goes back through
+        // Success(): the QUERY succeeded, and what it carries is the protocol-level answer. Using
+        // Failure() here would collapse "your message was malformed" into the same channel as "you
+        // are not allowed to talk to me", which the JS client reports differently on purpose.
+        callback->Success(dispatch.response);
+        return true;
+    }
+
+    BridgeRouter* router_ = nullptr;
+};
+
 // ------------------------------------------------------------------------------- the CEF client
 
 // The browser-side client: render handler (OSR frames + the popup), life-span (popup suppression),
@@ -123,17 +399,101 @@ cef_key_event_type_t to_cef_key_type(KeyAction action)
 class ShellCefClient : public CefClient,
                        public CefRenderHandler,
                        public CefLifeSpanHandler,
-                       public CefLoadHandler
+                       public CefLoadHandler,
+                       public CefDisplayHandler,
+                       public CefRequestHandler
 {
 public:
-    ShellCefClient(render::Extent2D logical_size, DpiScale dpi)
+    ShellCefClient(render::Extent2D logical_size, DpiScale dpi, BridgeRouter* bridge)
         : logical_size_(logical_size), dpi_(dpi)
     {
+        if (bridge == nullptr)
+        {
+            // No bridge configured: the router is never created, so CEF injects NO query function
+            // and editor-core reports itself detached. That is the honest state — injecting a
+            // function that always fails would look like a broken bridge instead of an absent one.
+            return;
+        }
+        CefMessageRouterConfig config;
+        config.js_query_function = kBridgeQueryFunction;
+        config.js_cancel_function = kBridgeCancelFunction;
+        router_ = CefMessageRouterBrowserSide::Create(config);
+        bridge_handler_ = std::make_unique<BridgeQueryHandler>(bridge);
+        router_->AddHandler(bridge_handler_.get(), /*first*/ false);
+    }
+
+    ~ShellCefClient() override
+    {
+        // The router holds a raw Handler pointer, so it must let go BEFORE bridge_handler_ is
+        // destroyed. Member destruction order alone does not guarantee that (router_ is a refcounted
+        // handle CEF may still hold), so the removal is explicit.
+        if (router_ != nullptr && bridge_handler_ != nullptr)
+        {
+            router_->RemoveHandler(bridge_handler_.get());
+        }
     }
 
     CefRefPtr<CefRenderHandler> GetRenderHandler() override { return this; }
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
     CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+    CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
+    CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+
+    // --- the message router's browser-side hooks ------------------------------------------------
+    // All four are REQUIRED by CefMessageRouterBrowserSide; omitting any of them leaks pending
+    // queries across a navigation, a renderer crash, or a browser close, and the router's own
+    // documentation is explicit that the embedder must forward them.
+    bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                  CefProcessId source_process,
+                                  CefRefPtr<CefProcessMessage> message) override
+    {
+        if (router_ != nullptr &&
+            router_->OnProcessMessageReceived(browser, frame, source_process, message))
+        {
+            return true;
+        }
+        return false;
+    }
+
+    bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                        CefRefPtr<CefRequest> request, bool, bool) override
+    {
+        if (router_ != nullptr)
+        {
+            router_->OnBeforeBrowse(browser, frame);
+        }
+        // The MAIN frame may only ever be on the app origin. The CSP constrains what the document
+        // may LOAD, but it has no `navigate-to`, so nothing else stops a compromised renderer from
+        // navigating the top-level frame off `context-editor://app/` — after which the window is
+        // showing content the Shell never served. Token isolation still held (the bridge refuses any
+        // other origin), so this closes a broken-editor hole rather than a leak; it is cheap, and
+        // `kAppUrlPrefix` is already the vocabulary this file routes on.
+        //
+        // Sub-frame navigations are not gated here: `frame-src 'none'` already denies them, and the
+        // Shell creates no sub-frames of its own.
+        if (frame != nullptr && frame->IsMain() && request != nullptr)
+        {
+            const std::string url = request->GetURL().ToString();
+            if (url.rfind(kAppUrlPrefix, 0) != 0)
+            {
+                std::fprintf(stderr,
+                             "[shell-cef] main-frame navigation BLOCKED to <%s>: the editor window "
+                             "may only be on %s\n",
+                             url.c_str(), kAppUrlPrefix);
+                return true; // true == cancel the navigation.
+            }
+        }
+        return false;
+    }
+
+    void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus, int,
+                                   const CefString&) override
+    {
+        if (router_ != nullptr)
+        {
+            router_->OnRenderProcessTerminated(browser);
+        }
+    }
 
     // --- CefRenderHandler --------------------------------------------------------------------
     void GetViewRect(CefRefPtr<CefBrowser>, CefRect& rect) override
@@ -221,10 +581,17 @@ public:
     // CEF never calls it. Overriding it to do nothing would advertise a path that does not exist.
 
     // --- CefLifeSpanHandler ------------------------------------------------------------------
+    // `CefLifeSpanHandler::` on the disposition is REQUIRED, not decoration: e05c added
+    // CefRequestHandler to this class's bases (the message router needs OnBeforeBrowse /
+    // OnRenderProcessTerminated), and BOTH bases typedef `WindowOpenDisposition`. Unqualified, the
+    // name is ambiguous, the signature does not match, and `override` fails — which is a compile
+    // error ONLY on the CEF legs the local dev gate cannot build. It is the sole name these bases
+    // collide on (TerminationStatus, ErrorCode and the render typedefs are each unique to one).
     bool OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int /*popup_id*/,
-                       const CefString&, const CefString&, WindowOpenDisposition, bool,
-                       const CefPopupFeatures&, CefWindowInfo&, CefRefPtr<CefClient>&,
-                       CefBrowserSettings&, CefRefPtr<CefDictionaryValue>&, bool*) override
+                       const CefString&, const CefString&,
+                       CefLifeSpanHandler::WindowOpenDisposition, bool, const CefPopupFeatures&,
+                       CefWindowInfo&, CefRefPtr<CefClient>&, CefBrowserSettings&,
+                       CefRefPtr<CefDictionaryValue>&, bool*) override
     {
         // SUPPRESS every stray window.open (03 §1). Tear-out does NOT ride window.open — it is a
         // PanelHost/Shell mechanism (04 §2) — so a popup reaching here is an accident, and letting
@@ -234,8 +601,15 @@ public:
 
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override { browser_ = browser; }
 
-    void OnBeforeClose(CefRefPtr<CefBrowser>) override
+    void OnBeforeClose(CefRefPtr<CefBrowser> browser) override
     {
+        // Cancel any query still in flight BEFORE the browser reference is dropped: the router
+        // needs the browser to match its pending set, and a query left pending past close is a
+        // callback into a destroyed context.
+        if (router_ != nullptr)
+        {
+            router_->OnBeforeClose(browser);
+        }
         browser_ = nullptr;
         closed_ = true;
     }
@@ -265,6 +639,22 @@ public:
         std::fprintf(stderr, "[shell-cef] main-frame load FAILED (%d): %s <%s>\n",
                      static_cast<int>(error_code), error_text.ToString().c_str(),
                      failed_url.ToString().c_str());
+    }
+
+    // --- CefDisplayHandler ---------------------------------------------------------------------
+    bool OnConsoleMessage(CefRefPtr<CefBrowser>, cef_log_severity_t level, const CefString& message,
+                          const CefString& source, int line) override
+    {
+        // THE RENDERER'S SIDE OF THE STORY, which nothing else in this Shell can see. A CSP refusal
+        // ("Refused to apply stylesheet…"), a blocked ES module, a module that threw before it could
+        // reach the bridge — all of them are console messages and NONE of them fail a load, so
+        // without this the live smoke reports only that its assertions did not come true, with no
+        // cause. Diagnosing one such failure from CI logs alone cost a full round-trip; a page that
+        // cannot boot should say why.
+        std::fprintf(stderr, "[shell-cef] console(%d) %s <%s:%d>\n", static_cast<int>(level),
+                     message.ToString().c_str(), source.ToString().c_str(), line);
+        // false = let CEF log it too; we are observing, not suppressing.
+        return false;
     }
 
     // --- driving it ---------------------------------------------------------------------------
@@ -304,6 +694,10 @@ private:
     render::Extent2D logical_size_;
     DpiScale dpi_;
     render::Rect2D popup_rect_{};
+    // The browser-side message router + the handler bridging it to the CEF-free BridgeRouter. Both
+    // null when no bridge was configured, which is what keeps the query function uninjected.
+    CefRefPtr<CefMessageRouterBrowserSide> router_;
+    std::unique_ptr<BridgeQueryHandler> bridge_handler_;
     bool popup_visible_ = false;
     bool closed_ = false;
     bool load_ended_ = false;
@@ -317,10 +711,67 @@ private:
 // The browser-process app. Its one real job beyond command-line flags is the INTEGRATED PUMP hook:
 // with external_message_pump on, CEF asks to be driven via OnScheduleMessagePumpWork instead of
 // owning a loop, which is what lets the shell's single thread own frame pacing (03 §1).
-class ShellCefApp : public CefApp, public CefBrowserProcessHandler
+class ShellCefApp : public CefApp, public CefBrowserProcessHandler, public CefRenderProcessHandler
 {
 public:
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
+    CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override { return this; }
+
+    // --- the custom scheme, registered in EVERY process ------------------------------------------
+    //
+    // CefApp::OnRegisterCustomSchemes runs in the browser process AND in every subprocess, and it
+    // MUST agree everywhere: the renderer is where origin comparisons, CSP evaluation and module
+    // loading actually happen, so a scheme registered only browser-side would leave editor-core's
+    // documents on an opaque origin with subtly different security semantics — the classic
+    // "works until you load a module" failure. `g_app` is the same object on both paths
+    // (execute_subprocess creates it too), which is what makes that automatic here.
+    void OnRegisterCustomSchemes(CefRawPtr<CefSchemeRegistrar> registrar) override
+    {
+        // The pinned flag set (design 04 §5 / 08 §2):
+        //   STANDARD      — ordinary origin semantics. Without it Chromium treats the scheme as
+        //                   opaque, and CSP, module scripts and same-origin checks all misbehave.
+        //   SECURE        — a trustworthy origin, so the document is not treated as insecure
+        //                   content and downgraded or blocked.
+        //   CORS_ENABLED  — CORS requests are meaningful for the scheme (required for module
+        //                   script loading to resolve the way a normal origin's does).
+        //   FETCH_ENABLED — the Fetch API may target it. NOTE this does NOT widen the network
+        //                   surface: the CSP sends `connect-src 'none'`, so nothing can actually
+        //                   fetch anything. It is here so the scheme behaves like a real origin
+        //                   rather than a special case.
+        // NOT set, deliberately: CSP_BYPASSING (the whole point is that the CSP APPLIES) and
+        // LOCAL (which would grant file-like privileges — the opposite of what this scheme is for).
+        registrar->AddCustomScheme(kAppScheme, CEF_SCHEME_OPTION_STANDARD |
+                                                   CEF_SCHEME_OPTION_SECURE |
+                                                   CEF_SCHEME_OPTION_CORS_ENABLED |
+                                                   CEF_SCHEME_OPTION_FETCH_ENABLED);
+    }
+
+    // --- the renderer side of the message router --------------------------------------------------
+    // This is what actually injects the query function into editor-core's frames. Without these
+    // three forwards the browser side is wired to nothing and `contextEditorQuery` is undefined.
+    void OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                          CefRefPtr<CefV8Context> context) override
+    {
+        ensure_renderer_router();
+        renderer_router_->OnContextCreated(browser, frame, context);
+    }
+
+    void OnContextReleased(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                           CefRefPtr<CefV8Context> context) override
+    {
+        if (renderer_router_ != nullptr)
+        {
+            renderer_router_->OnContextReleased(browser, frame, context);
+        }
+    }
+
+    bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                  CefProcessId source_process,
+                                  CefRefPtr<CefProcessMessage> message) override
+    {
+        ensure_renderer_router();
+        return renderer_router_->OnProcessMessageReceived(browser, frame, source_process, message);
+    }
 
     void OnBeforeCommandLineProcessing(const CefString&,
                                        CefRefPtr<CefCommandLine> command_line) override
@@ -354,7 +805,23 @@ private:
             .count();
     }
 
+    // Created lazily, in the RENDERER process only. The config MUST be byte-identical to the
+    // browser side's or the two halves talk past each other (the router derives its internal
+    // message names from the function names), which is why both read the same two constants.
+    void ensure_renderer_router()
+    {
+        if (renderer_router_ != nullptr)
+        {
+            return;
+        }
+        CefMessageRouterConfig config;
+        config.js_query_function = kBridgeQueryFunction;
+        config.js_cancel_function = kBridgeCancelFunction;
+        renderer_router_ = CefMessageRouterRendererSide::Create(config);
+    }
+
     PumpSchedule schedule_;
+    CefRefPtr<CefMessageRouterRendererSide> renderer_router_;
 
     IMPLEMENT_REFCOUNTING(ShellCefApp);
 };
@@ -594,7 +1061,37 @@ std::unique_ptr<IBrowserHost> make_cef_browser_host(const CefShellOptions& optio
         g_initialized = true;
     }
 
-    CefRefPtr<ShellCefClient> client(new ShellCefClient(options.logical_size, options.dpi));
+    // --- the app scheme (e05c) --------------------------------------------------------------------
+    // Registered AFTER CefInitialize (CefRegisterSchemeHandlerFactory requires an initialized
+    // browser process) and only once. The SCHEME itself was already declared in every process by
+    // ShellCefApp::OnRegisterCustomSchemes; this attaches the handler that answers for it.
+    if (!options.app_asset_root.empty() && g_asset_resolver == nullptr)
+    {
+        // Leaked ON PURPOSE, to a TU-local pointer: the factory CEF holds may answer a request on
+        // the IO thread at any point up to CefShutdown, so the resolver must outlive every browser.
+        // A function-local static would be destroyed at exit, and a member of the host would die
+        // with the first window closed. shutdown() clears the pointer.
+        auto* resolver = new AppAssetResolver(options.app_asset_root);
+        if (!resolver->root_exists())
+        {
+            // REPORTED, not fatal: the editor still boots, the scheme still answers (404), and the
+            // operator gets told exactly which directory was missing rather than watching a blank
+            // window and guessing.
+            std::fprintf(stderr,
+                         "[shell-cef] app asset root does not exist: %s — context-editor://app/ "
+                         "will serve 404 (no file:// fallback exists by design)\n",
+                         options.app_asset_root.string().c_str());
+        }
+        g_asset_resolver = resolver;
+        if (!CefRegisterSchemeHandlerFactory(kAppScheme, kAppHost, new AppSchemeFactory()))
+        {
+            error = "CefRegisterSchemeHandlerFactory failed for context-editor://app";
+            return nullptr;
+        }
+    }
+
+    CefRefPtr<ShellCefClient> client(
+        new ShellCefClient(options.logical_size, options.dpi, options.bridge));
 
     CefWindowInfo window_info;
 #if defined(_WIN32)
@@ -634,7 +1131,13 @@ void shutdown()
     }
     g_initialized = false;
     g_app = nullptr;
+    // Clear the factories BEFORE CefShutdown: a factory that answered after teardown would reach a
+    // resolver this function is about to abandon.
+    CefClearSchemeHandlerFactories();
     CefShutdown();
+    // Freed only now — every browser is gone and no IO-thread request can still be in flight.
+    delete g_asset_resolver;
+    g_asset_resolver = nullptr;
 }
 
 } // namespace context::editor::shell::cef

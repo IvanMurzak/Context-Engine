@@ -20,10 +20,18 @@
 //
 // NEVER `SendExternalBeginFrame` (L-41 / cef#4033): CEF-internal pacing only.
 
+// M9 e05c ADDS TWO THINGS HERE, both still CEF-type-free in this header: the `context-editor://`
+// app scheme (assets served from `app_asset_root`, never `file://`) and the privileged IPC bridge
+// (`bridge`, whose routing + validation live in the CEF-free `BridgeRouter`). The binding is a thin
+// translator on both — a CefRequest becomes an `AppAssetResolver::resolve` call, and a
+// CefMessageRouter query becomes a `BridgeRouter::dispatch` call. That is deliberate: this TU is
+// the one the local dev gate cannot build, so it holds as little judgement as possible.
+
 #pragma once
 
 #include "context/editor/shell/browser.h"
 #include "context/editor/shell/dpi.h"
+#include "context/editor/shell/ipc_bridge.h"
 #include "context/render/rhi.h"
 
 #include <filesystem>
@@ -62,6 +70,25 @@ struct CefShellOptions
     // Frames per second CEF paints at when windowless. 60 is CEF's own default; the compositor
     // decouples the engine's present rate from it (measured in the spike).
     int windowless_frame_rate = 60;
+
+    // --- e05c: the app scheme + the privileged bridge --------------------------------------------
+
+    // editor-core's built asset root, served over `context-editor://app/…` (design 04 §1). Empty
+    // disables the scheme entirely — the browser then has no app to load, which is the honest state
+    // of a build whose web assets were not produced, NOT a reason to fall back to `file://`. There
+    // is deliberately no file-URL path anywhere in this binding.
+    std::filesystem::path app_asset_root;
+
+    // The privileged native<->JS channel (design 04 §1 / 08 §1). Null disables the bridge: the
+    // query function is not injected and editor-core reports itself detached.
+    //
+    // NON-OWNING, and the router must OUTLIVE every browser created from these options — the CEF
+    // message-router handler holds this pointer for the browser's whole life. `BridgeRouter` is
+    // non-copyable AND non-movable precisely so a caller cannot relocate one out from under it.
+    //
+    // The Shell registers its handlers and calls `protect_secret()` with the attach token BEFORE
+    // handing the router over; the token never appears in these options and never reaches CEF.
+    BridgeRouter* bridge = nullptr;
 };
 
 // Initialize CEF (once per process) and create the windowed-OSR browser. Returns nullptr plus

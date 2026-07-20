@@ -10,10 +10,11 @@
 #                                            checking them, so this is the only type gate
 #   dockview-core (tools/dockview-toolchain.json) — the docking engine, staged beside the bundle
 #
-# e05a deliberately stops at the SUBSTRATE: the workspace type-checks and bundles, and the docking
-# engine is acquired + verified, but nothing consumes dockview's API yet. Wrapping it in a PanelHost
-# is e05c's job (design 04 section 2), the app scheme + IPC bridge are e05c, and the hydration
-# runtime is e05d. Keep this directory's growth on that seam.
+# e05a stopped at the SUBSTRATE: the workspace type-checked and bundled, and the docking engine was
+# acquired + verified, but nothing consumed it and nothing SERVED it. e05c adds the served document
+# set (index.html + app.css) and publishes the asset root the Shell's context-editor:// resource
+# handler reads. Wrapping dockview in a PanelHost and the hydration runtime are still e05d's — keep
+# this directory's growth on that seam.
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
@@ -149,10 +150,38 @@ foreach(_member IN LISTS _ctx_dockview_members)
     list(APPEND _ctx_dockview_staged "${_ctx_webui_assets}/${_member}")
 endforeach()
 
+# --- 4) stage the served document set (e05c) -----------------------------------------------------
+# index.html + app.css are SOURCE files, not generated ones: they are hand-authored, CSP-constrained
+# documents (no inline script, no inline style — see the comment blocks inside them), so they are
+# copied rather than emitted. They live beside the bundle because the resource handler serves ONE
+# flat asset root over `context-editor://app/`.
+set(_ctx_webui_documents index.html app.css)
+set(_ctx_webui_staged_documents "")
+foreach(_doc IN LISTS _ctx_webui_documents)
+    add_custom_command(
+        OUTPUT "${_ctx_webui_assets}/${_doc}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ctx_webui_assets}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/app/${_doc}" "${_ctx_webui_assets}/${_doc}"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/app/${_doc}"
+        COMMENT "context_editor_webui: staging ${_doc}"
+        VERBATIM)
+    list(APPEND _ctx_webui_staged_documents "${_ctx_webui_assets}/${_doc}")
+endforeach()
+
 # ALL so a plain `cmake --build` produces the asset set — the bundle is a build output on every leg,
 # exactly like editor/client's generated schema.
 add_custom_target(context_editor_webui ALL
-    DEPENDS "${_ctx_webui_bundle}" ${_ctx_dockview_staged})
+    DEPENDS "${_ctx_webui_bundle}" ${_ctx_dockview_staged} ${_ctx_webui_staged_documents})
+
+# --- publish the asset root for the Shell (e05c) --------------------------------------------------
+# CACHE INTERNAL, not a plain variable: a plain `set()` is scoped to this directory and would read
+# EMPTY in src/editor/shell/, exactly the toolchain-seam trap CONTEXT_ESBUILD_BIN documents at the
+# top of this file. src/CMakeLists.txt already adds editor/webui BEFORE editor/shell, so the cache
+# entry is populated by the time the Shell reads it; the Shell FATAL_ERRORs on an empty value rather
+# than silently compiling in an empty asset root.
+set(CONTEXT_WEBUI_ASSET_DIR "${_ctx_webui_assets}" CACHE INTERNAL
+    "editor-core's built asset root, served by the Shell over context-editor://app/ (e05c)")
 
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) ------------------------------
 # The `webui-*` family is a plain package test family: it is NOT in the build job's gate-exclusion
@@ -165,6 +194,23 @@ add_test(NAME webui-assets
             --asset-dir "${_ctx_webui_assets}"
             --manifest "${_ctx_dockview_manifest}"
             --bundle-name "${_ctx_webui_bundle_name}")
+
+# 1b) The e05c SCHEME CONTRACT gate. Three facts that live in two languages and would otherwise
+# drift silently:
+#   * the served document carries NO inline script and NO inline style — the CSP the Shell sends
+#     would BLOCK them, so an edit that adds one produces a blank editor rather than a build error;
+#   * the scheme vocabulary the TS bundle compiled in (scheme, origin, endpoint, query-function
+#     name) is byte-identical to the C++ constants the Shell serves and routes with;
+#   * no `file://` URL reached the asset set (a DoD line: "no file:// fallback exists").
+# Checked against the BUILT asset, not the source, so it sees what the renderer will actually get.
+add_test(NAME webui-scheme-contract
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_webui_assets.py"
+            --asset-dir "${_ctx_webui_assets}"
+            --manifest "${_ctx_dockview_manifest}"
+            --bundle-name "${_ctx_webui_bundle_name}"
+            --scheme-contract
+            --shell-include-dir "${CMAKE_CURRENT_SOURCE_DIR}/../shell/include/context/editor/shell"
+            --shell-cef-dir "${CMAKE_CURRENT_SOURCE_DIR}/../shell/cef/src")
 
 # 2) The DRIFT gate (e05a DoD: "generated from e02's schema; drift-checked in CI"). Re-projects the
 # BUILD-GENERATED schema — the live registry's output, not the committed copy — and refuses any byte
