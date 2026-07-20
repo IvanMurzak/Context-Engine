@@ -1,4 +1,13 @@
-# The HEADLESS INVARIANT gate (M9 e03; design 03 §2, R-HEAD-002/004).
+# LINK-CLOSURE BOUNDARY GATES. Two of them now share this module:
+#
+#   * the HEADLESS INVARIANT (M9 e03; design 03 §2, R-HEAD-002/004) — nothing in the daemon/runtime
+#     links the presentation path;
+#   * the D10 SHELL BOUNDARY (M9 e04; design 02 §1 / 03 §1) — the editor Shell links the published
+#     client SDK, never the EditorKernel's own modules.
+#
+# They differ only in which targets and what a violation MEANS, so the walk, the report format and
+# the vacuous-pass protections are shared (context_assert_no_linkage) and only the wording is
+# per-gate. The original e03 gate is described below and its behaviour is unchanged.
 #
 # The claim: "nothing in the daemon/runtime links the present path; only the Shell does." That claim
 # is cheap to state, easy to erode — one convenient target_link_libraries and a headless server binary
@@ -64,18 +73,26 @@ function(context_collect_link_closure target out_var)
     set(${out_var} "${_seen}" PARENT_SCOPE)
 endfunction()
 
-# context_assert_no_present_linkage(REPORT <path> FORBIDDEN <t>... TARGETS <t>...)
+# context_assert_no_linkage(REPORT <path> TITLE <text> KIND <word> REMEDY <text>
+#                           FORBIDDEN <t>... TARGETS <t>...)
 #
-# FATAL_ERRORs when any FORBIDDEN target is transitively reachable from any TARGETS entry, and always
-# writes the audit report to REPORT.
-function(context_assert_no_present_linkage)
-    cmake_parse_arguments(_arg "" "REPORT" "FORBIDDEN;TARGETS" ${ARGN})
+# The GENERIC gate: FATAL_ERRORs when any FORBIDDEN target is transitively reachable from any TARGETS
+# entry, and always writes an audit report to REPORT in the shared format the companion ctest reads.
+#
+# Parameterized rather than copied because there are now TWO link-closure boundaries in the tree —
+# e03's headless invariant (no daemon/runtime target links presentation) and e04's D10 shell boundary
+# (the editor Shell reaches the daemon over the published client SDK, never by linking the kernel's
+# own modules). They differ only in WHICH targets and WHAT the failure means, so the walk, the report
+# format and the vacuous-pass protections are shared and only the wording is per-gate. TITLE/KIND
+# appear in the report, REMEDY in the FATAL_ERROR.
+function(context_assert_no_linkage)
+    cmake_parse_arguments(_arg "" "REPORT;TITLE;KIND;REMEDY" "FORBIDDEN;TARGETS" ${ARGN})
     if(NOT _arg_REPORT)
-        message(FATAL_ERROR "context_assert_no_present_linkage: REPORT is required")
+        message(FATAL_ERROR "context_assert_no_linkage: REPORT is required")
     endif()
 
-    set(_report "# Headless-invariant audit (M9 e03, design 03 §2)\n")
-    string(APPEND _report "# Forbidden (presentation) targets: ${_arg_FORBIDDEN}\n")
+    set(_report "# ${_arg_TITLE}\n")
+    string(APPEND _report "# Forbidden (${_arg_KIND}) targets: ${_arg_FORBIDDEN}\n")
 
     # Record whether each FORBIDDEN name is a real target. Without this the gate has a second
     # vacuous-pass mode, symmetric with the audited-side one the companion ctest already catches:
@@ -118,14 +135,49 @@ function(context_assert_no_present_linkage)
     if(_violations)
         string(APPEND _report "VERDICT: violated\n")
         file(WRITE "${_arg_REPORT}" "${_report}")
-        message(FATAL_ERROR
-            "Headless invariant violated (design 03 §2): a daemon/runtime target links the "
-            "presentation path.\n  ${_violations}\n"
-            "Only the Shell may link presentation. If a headless target genuinely needs render "
-            "code, it needs the GPU-free context_render abstraction — not context_render_present "
-            "(windows/swapchain/OS blit) and not context_render_wgpu (the GPU backend).")
+        message(FATAL_ERROR "${_arg_TITLE} VIOLATED.\n  ${_violations}\n${_arg_REMEDY}")
     endif()
 
     string(APPEND _report "VERDICT: isolated\n")
     file(WRITE "${_arg_REPORT}" "${_report}")
+endfunction()
+
+# context_assert_no_present_linkage(REPORT <path> FORBIDDEN <t>... TARGETS <t>...)
+#
+# The e03 HEADLESS INVARIANT: nothing in the daemon/runtime/CLI links the presentation path.
+function(context_assert_no_present_linkage)
+    cmake_parse_arguments(_arg "" "REPORT" "FORBIDDEN;TARGETS" ${ARGN})
+    context_assert_no_linkage(
+        REPORT "${_arg_REPORT}"
+        TITLE "Headless-invariant audit (M9 e03, design 03 §2)"
+        KIND "presentation"
+        REMEDY
+            "Only the Shell may link presentation. If a headless target genuinely needs render \
+code, it needs the GPU-free context_render abstraction — not context_render_present \
+(windows/swapchain/OS blit) and not context_render_wgpu (the GPU backend)."
+        FORBIDDEN ${_arg_FORBIDDEN}
+        TARGETS ${_arg_TARGETS})
+endfunction()
+
+# context_assert_shell_boundary(REPORT <path> FORBIDDEN <t>... TARGETS <t>...)
+#
+# The e04 D10 SHELL BOUNDARY: the editor Shell is an ORDINARY CLIENT. It talks the published contract
+# through context_client and never links the kernel's own modules (02 §1). Nothing in a monorepo
+# enforces that by itself — an in-tree target can link whatever it likes and still build — and the
+# `editor-boundary` CI job's include-graph check covers only the INSTALLED client headers, not what
+# the Shell links. This is the other half.
+function(context_assert_shell_boundary)
+    cmake_parse_arguments(_arg "" "REPORT" "FORBIDDEN;TARGETS" ${ARGN})
+    context_assert_no_linkage(
+        REPORT "${_arg_REPORT}"
+        TITLE "D10 shell-boundary audit (M9 e04, design 02 §1 / 03 §1)"
+        KIND "kernel-internal"
+        REMEDY
+            "The editor Shell is an ORDINARY CLIENT: it reaches the daemon over the published \
+context_client SDK, never by linking the EditorKernel's own modules. If the Shell needs something \
+those modules provide, it belongs on the client contract (a verb, a topic, or an addition to the \
+exported SDK) — not on a direct link edge, which would make the editor un-shippable apart from the \
+engine's internals and would silently un-test the boundary e02 built."
+        FORBIDDEN ${_arg_FORBIDDEN}
+        TARGETS ${_arg_TARGETS})
 endfunction()

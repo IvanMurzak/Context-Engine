@@ -202,12 +202,34 @@ class FakeCommandBuffer : public ICommandBuffer
 {
 };
 
+// A DEVICE-LIFETIME record of what the render passes did. A pass encoder is created and destroyed
+// inside one frame, so per-encoder counters are unreachable by the time a test asserts; the multi-pass
+// compositor (e04: a viewport pass, the full-window CEF pass, then the scissored PET_POPUP pass) is
+// exactly the caller that needs the aggregate. Owned by FakeDevice and threaded down.
+struct FakePassLog
+{
+    int passes = 0;
+    int draws = 0;
+    int scissor_sets = 0;
+    // Every scissor rect in call order — the popup layer's confinement is asserted from this.
+    std::vector<Rect2D> scissors;
+    // Every uniform-buffer payload written, in call order. The per-layer composite UV is otherwise
+    // UNOBSERVABLE: the compositor uploads it to a uniform buffer it owns privately, and a wrong UV
+    // renders a layer squeezed or offset rather than tripping any counter here. Recording the bytes
+    // is what lets a headless test assert the UV arithmetic the GPU would have sampled with.
+    std::vector<std::vector<std::uint8_t>> buffer_writes;
+};
+
 class FakeRenderPassEncoder : public IRenderPassEncoder
 {
 public:
-    FakeRenderPassEncoder(FakeTexture* target, Color clear, LoadOp load)
-        : target_(target), clear_(clear), load_(load)
+    FakeRenderPassEncoder(FakeTexture* target, Color clear, LoadOp load, FakePassLog* log = nullptr)
+        : target_(target), clear_(clear), load_(load), log_(log)
     {
+        if (log_ != nullptr)
+        {
+            ++log_->passes;
+        }
     }
 
     void set_pipeline(IRenderPipeline& /*pipeline*/) override { pipeline_set_ = true; }
@@ -217,10 +239,32 @@ public:
         ++bind_group_sets_;
     }
 
+    // The scissor is RECORDED rather than applied: the fake only rasterizes the reference triangle.
+    // What a headless test can honestly assert is that the compositor CONFINED the popup draw —
+    // i.e. the rect it passed — and, via FakePassLog::buffer_writes, the UV it paired with it.
+    //
+    // NO real-adapter proof of the scissor exists yet. `render-wgpu-osr-composite` is e03's
+    // full-window OSR composite gate; it predates set_scissor_rect and never scissors, so the wgpu
+    // implementation (wgpuRenderPassEncoderSetScissorRect) is currently executed by no CI leg. The
+    // per-pixel proof belongs in the wgpu offscreen harness — a scissored sub-rect draw asserting
+    // that pixels outside the rect are untouched — and lands with the first task that needs it.
+    void set_scissor_rect(Origin2D origin, Extent2D size) override
+    {
+        if (log_ != nullptr)
+        {
+            ++log_->scissor_sets;
+            log_->scissors.push_back(Rect2D{origin, size});
+        }
+    }
+
     void draw(std::uint32_t vertex_count, std::uint32_t instance_count) override
     {
         draw_vertices_ = vertex_count;
         draw_instances_ = instance_count;
+        if (log_ != nullptr)
+        {
+            ++log_->draws;
+        }
     }
 
     [[nodiscard]] int bind_group_sets() const { return bind_group_sets_; }
@@ -258,6 +302,7 @@ private:
     FakeTexture* target_;
     Color clear_;
     LoadOp load_;
+    FakePassLog* log_ = nullptr;
     bool pipeline_set_ = false;
     int bind_group_sets_ = 0;
     std::uint32_t draw_vertices_ = 0;
@@ -267,6 +312,8 @@ private:
 class FakeCommandEncoder : public ICommandEncoder
 {
 public:
+    explicit FakeCommandEncoder(FakePassLog* log = nullptr) : log_(log) {}
+
     std::unique_ptr<IRenderPassEncoder> begin_render_pass(const RenderPassDesc& desc) override
     {
         FakeTexture* target = nullptr;
@@ -279,7 +326,7 @@ public:
             clear = desc.color[0].clear;
             load = desc.color[0].load;
         }
-        return std::make_unique<FakeRenderPassEncoder>(target, clear, load);
+        return std::make_unique<FakeRenderPassEncoder>(target, clear, load, log_);
     }
 
     void copy_texture_to_buffer(ITexture& src, IBuffer& dst, const TexelCopyBufferLayout& layout,
@@ -305,12 +352,17 @@ public:
     {
         return std::make_unique<FakeCommandBuffer>();
     }
+
+private:
+    FakePassLog* log_ = nullptr;
 };
 
 class FakeQueue : public IQueue
 {
 public:
     void submit(ICommandBuffer& /*commands*/) override { ++submit_count_; }
+
+    void set_log(FakePassLog* log) { log_ = log; }
 
     void write_buffer(IBuffer& buffer, std::uint64_t offset, const void* data,
                       std::size_t size) override
@@ -319,6 +371,11 @@ public:
         if (offset + size <= fake.bytes().size())
         {
             std::memcpy(fake.bytes().data() + offset, data, size);
+        }
+        if (log_ != nullptr && data != nullptr)
+        {
+            const auto* bytes = static_cast<const std::uint8_t*>(data);
+            log_->buffer_writes.emplace_back(bytes, bytes + size);
         }
     }
 
@@ -354,11 +411,21 @@ public:
 private:
     int submit_count_ = 0;
     std::uint64_t written_texels_ = 0;
+    FakePassLog* log_ = nullptr;
 };
 
 class FakeDevice : public IDevice
 {
 public:
+    // The queue shares the device-lifetime pass log, so a uniform upload and the draw it feeds are
+    // recorded against the same timeline and can be correlated by index.
+    FakeDevice() { queue_.set_log(&pass_log_); }
+
+    // Non-copyable BECAUSE of that self-reference: a copy's queue would keep logging into the
+    // DONOR's pass log, and the bug would surface as a test asserting against another test's draws.
+    FakeDevice(const FakeDevice&) = delete;
+    FakeDevice& operator=(const FakeDevice&) = delete;
+
     IQueue& queue() override { return queue_; }
 
     std::unique_ptr<ITexture> create_texture(const TextureDesc& desc) override
@@ -390,8 +457,11 @@ public:
 
     std::unique_ptr<ICommandEncoder> create_command_encoder() override
     {
-        return std::make_unique<FakeCommandEncoder>();
+        return std::make_unique<FakeCommandEncoder>(&pass_log_);
     }
+
+    // What every render pass this device recorded actually did — see FakePassLog.
+    [[nodiscard]] const FakePassLog& pass_log() const { return pass_log_; }
 
     // Mirrors the real backend's import policy WITHOUT a GPU: CpuBgra always succeeds (it is just an
     // upload-destination texture); an accelerated source succeeds only when the test declared it
@@ -456,6 +526,7 @@ public:
 
 private:
     FakeQueue queue_;
+    FakePassLog pass_log_;
     std::set<int> available_accelerated_;
     int refresh_count_ = 0;
     bool import_always_fails_ = false;
@@ -469,10 +540,16 @@ private:
 class FakeSwapchain : public ISwapchain
 {
 public:
-    FakeSwapchain(Extent2D size, TextureFormat format, PresentMode mode)
+    // `unconfigure_sink` is an OPTIONAL counter owned by whoever outlives this swapchain (the
+    // FakeSurface that handed it out). A teardown path that unconfigures and then DESTROYS the
+    // swapchain — WindowCompositor::detach() does exactly that — leaves no object to read the
+    // per-swapchain counter off, so the observation has to survive somewhere else. See
+    // FakeSurface::unconfigure_count().
+    FakeSwapchain(Extent2D size, TextureFormat format, PresentMode mode,
+                  int* unconfigure_sink = nullptr)
         : size_(size), format_(format), mode_(mode),
           backbuffer_(std::make_unique<FakeTexture>(size, format)),
-          view_(backbuffer_->create_view())
+          view_(backbuffer_->create_view()), unconfigure_sink_(unconfigure_sink)
     {
     }
 
@@ -539,6 +616,10 @@ public:
         configured_ = false;
         acquired_ = false;
         ++unconfigure_count_;
+        if (unconfigure_sink_ != nullptr)
+        {
+            ++*unconfigure_sink_;
+        }
     }
 
     // --- test scaffolding ---
@@ -564,12 +645,19 @@ private:
     int present_count_ = 0;
     int resize_count_ = 0;
     int unconfigure_count_ = 0;
+    int* unconfigure_sink_ = nullptr;
 };
 
 class FakeSurface : public ISurface
 {
 public:
     explicit FakeSurface(SurfaceCaps caps) : caps_(std::move(caps)) {}
+
+    // Non-copyable for the same reason FakeDevice is: configure() hands every swapchain a raw
+    // pointer to this surface's own unconfigure_count_, so a copy would own swapchains still
+    // counting into the DONOR's tally.
+    FakeSurface(const FakeSurface&) = delete;
+    FakeSurface& operator=(const FakeSurface&) = delete;
 
     SurfaceCaps capabilities() override { return caps_; }
 
@@ -585,14 +673,35 @@ public:
             return nullptr;
         }
         ++configure_count_;
-        return std::make_unique<FakeSwapchain>(config.size, config.format, config.present_mode);
+        auto swapchain = std::make_unique<FakeSwapchain>(config.size, config.format,
+                                                         config.present_mode, &unconfigure_count_);
+        last_swapchain_ = swapchain.get();
+        return swapchain;
     }
 
     [[nodiscard]] int configure_count() const { return configure_count_; }
 
+    // The most recently configured swapchain, so a test that does not OWN it — a compositor took
+    // the unique_ptr — can still script its acquire statuses and read its counters.
+    //
+    // ⚠ A non-owning back-pointer, valid only while the caller that took the unique_ptr still
+    // HOLDS it — which is narrower than "while that caller is alive". A teardown call that
+    // releases the swapchain (WindowCompositor::detach() → swapchain_.reset()) leaves this
+    // DANGLING even though the compositor and this surface are both still alive, so reading a
+    // counter through it AFTER such a call is a use-after-free. Assert post-teardown facts through
+    // unconfigure_count() below, which lives on the surface and outlives every swapchain it hands out.
+    [[nodiscard]] FakeSwapchain* last_swapchain() const { return last_swapchain_; }
+
+    // Total unconfigure() calls across every swapchain this surface handed out. Survives the
+    // swapchain's destruction, so it is the safe way to assert that a teardown path really
+    // unconfigured rather than merely dropping the pointer.
+    [[nodiscard]] int unconfigure_count() const { return unconfigure_count_; }
+
 private:
     SurfaceCaps caps_;
+    FakeSwapchain* last_swapchain_ = nullptr;
     int configure_count_ = 0;
+    int unconfigure_count_ = 0;
 };
 
 // The default capability set a healthy desktop surface reports: BGRA8Unorm + the WebGPU-guaranteed

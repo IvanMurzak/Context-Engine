@@ -194,11 +194,14 @@ either; the `render` job's `^render-wgpu-` regex picks it up.
 
 ## 7. What this does NOT yet do
 
-Named so the gaps are visible rather than assumed:
+Named so the gaps are visible rather than assumed. The first two were **closed by M9 e04** — see
+`docs/shell.md`:
 
-- **No window manager.** Creating and pumping an OS window is e04's; e03 lands the path a window
-  will drive.
-- **No `PET_POPUP` second OSR layer.** Required for production dropdown/select widgets (03 §4).
+- ~~**No window manager.**~~ Landed by e04 (`src/editor/shell/`): the OS window, the single-threaded
+  owner loop, and the per-window compositor that drives this path.
+- ~~**No `PET_POPUP` second OSR layer.**~~ Landed by e04, which also added
+  `IRenderPassEncoder::set_scissor_rect` to confine a layer's fullscreen-triangle draw to the popup
+  rect (and `compute_layer_uv` to extrapolate the UV so the interpolation is correct inside it).
 - **No X11 / macOS CPU present blitter** — e12.
 - **The macOS accelerated path has no runtime CI proof.** It compiles on the `render (macos-latest)`
   leg, but exercising it needs a live IOSurface from a real CEF host, which arrives with the Shell.

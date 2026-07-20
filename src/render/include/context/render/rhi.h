@@ -348,6 +348,18 @@ public:
 
     virtual void set_pipeline(IRenderPipeline& pipeline) = 0;
     virtual void set_bind_group(std::uint32_t index, IBindGroup& group) = 0;
+
+    // Confine subsequent draws to a sub-rect of the attachment (WebGPU setScissorRect). Added by
+    // M9 e04 for the PET_POPUP layer: the OSR composite is a FULLSCREEN triangle, so drawing a
+    // dropdown as the design's "second OSR layer" (03 §4) means scissoring that draw to the popup
+    // rect — without it the popup's composite would cover the whole window.
+    //
+    // A pure virtual rather than a defaulted no-op ON PURPOSE: a silently-ignored scissor does not
+    // fail, it draws the popup over the entire editor. There are exactly two implementations of this
+    // interface in the tree, so the cost of the pure virtual is two lines and the benefit is that a
+    // third one cannot forget.
+    virtual void set_scissor_rect(Origin2D origin, Extent2D size) = 0;
+
     virtual void draw(std::uint32_t vertex_count, std::uint32_t instance_count) = 0;
     virtual void end() = 0;
 };

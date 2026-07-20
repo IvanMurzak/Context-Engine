@@ -72,12 +72,13 @@ Tests are ctest registrations, named in families the CI steps select by prefix r
 `render-ui-*` (M7 GPU UI backend, `src/render/ui/`), `render-present-*` (M9 e03 presentation path,
 `src/render/present/`), `render-wgpu-*`, `shader-*`, `wasm-runner-*`,
 `cef-substrate-*`, `editor-cef-smoke-*`, `client-*` (the M9 client SDK, `src/editor/client/`),
+`editor-shell-*` (the M9 e04 native Shell, `src/editor/shell/`),
 `game-smoke-*`, `determinism-*`, `samples-corpus*`, and the
 milestone exit gates `m1-exit-*`, `m2-exit-*`, `m4-exit-*`, `m5-exit-*`, `m6-exit-*`, `m7-exit-*`,
 `m8-exit-*` (the M8 build-pipeline gate; -3/-4a/-4b are ALIASES of the a07 runtime-host / netsync
 packed-wedge executables, the m6-exit-3 alias precedent). The `ui-*`,
-`render-ui-*`, `render-present-*`, and `client-*` families are plain package test families (not
-gates) — NOT in the
+`render-ui-*`, `render-present-*`, `editor-shell-*`, and `client-*` families are plain package test
+families (not gates) — NOT in the
 general step's `-E` gate-exclusion regex, so they auto-run there, and the `build` job builds them via
 `--preset dev` (no `--target`/CI edits needed). Note `^cli-` does NOT match `client-`.
 
@@ -86,8 +87,8 @@ general step's `-E` gate-exclusion regex, so they auto-run there, and the `build
   each gate family runs exactly once in its own named blocking step so failures are legible per OS leg.
 - **The "Not Run = RED" tripwire.** Several jobs build a hand-maintained explicit `--target` list
   instead of the whole tree: the `deterministic` job (`determinism-*` executables), the
-  `wasm-runner` job (`wasm-runner-*` executables), and the `editor-cef-smoke` a11y step
-  (`gui-a11y-*` executables). Registering a NEW ctest in any gate family means (1) its executable
+  `wasm-runner` job (`wasm-runner-*` executables), and the `editor-cef-smoke` job (the `gui-a11y-*`
+  a11y-step executables plus the M9 e04 `context_editor_shell_cef_smoke`). Registering a NEW ctest in any gate family means (1) its executable
   is built by that job's `--target` list in `ci.yml` AND (2) the named `ctest -R` step matches it —
   otherwise the regex finds the test but no executable exists and it reports "Not Run" → red.
   The golden-scene list in the `render`/`render-web` jobs is likewise hardcoded (dump + compare
@@ -128,7 +129,9 @@ license check + CycloneDX SBOM artifact, `tools/check_licenses.py`) and `python-
   the exported `context_client` closure to a staging prefix, build + run the standalone out-of-tree
   consumer (`src/editor/client/consumer/`) against it via `find_package(ContextClient)`, and run the
   transitive include-graph check (`tools/check_include_graph.py`) that forbids kernel-internal
-  headers on the published surface. See `docs/client-sdk.md`. **Adding a library to the exported
+  headers on the published surface. Since M9 e04 it also builds `context_editor` (the Shell — the
+  SDK's first real consumer) and runs the `editor-shell-boundary` ctest over the configure-time D10
+  link-closure audit. See `docs/client-sdk.md` + `docs/shell.md`. **Adding a library to the exported
   install set means adding it to this job's `--target` list too** — `cmake --install` fails on a
   target whose artifact was never built.
 - **`bench-baseline` / `bench-attach-10k` / `build-time-bench` / `density-bench`** — the JOBS are
@@ -175,7 +178,7 @@ every gate; CI validates it against the live workflows on every run, so gate cha
 | `src/` | Engine source + **all build/lint files** (`CMakeLists.txt`, `CMakePresets.json`, `vcpkg.json`, `.clang-format`, `.clang-tidy`) |
 | `src/kernel/` | The microkernel — ~6 stable interfaces (World/ECS, scheduler, module registry, event bus, resources, platform seam) |
 | `src/common/` | Shared cross-cutting infra (hardened subprocess/temp-file runner) |
-| `src/editor/` | **EditorKernel** — serializer, filesync, derivation, schema, compose, merge, migrate, assetdb, import, contract, bridge, **client** (the installed/exported client SDK), pkg, GUI (CEF host + headless panels) |
+| `src/editor/` | **EditorKernel** — serializer, filesync, derivation, schema, compose, merge, migrate, assetdb, import, contract, bridge, **client** (the installed/exported client SDK), **shell** (the M9 native Shell — `context_editor`), pkg, GUI (CEF host + headless panels) |
 | `src/runtime/` | **RuntimeKernel** — session/determinism hashing, save, V8 JS host, TS toolchain, WASM migration runner, profiler, netsync |
 | `src/render/` | Tiered RHI (WebGPU T1) + extract/double-buffer + the M9 present path (`present/`: surface/swapchain seam, OSR import, composite, CPU fallback) + opt-in wgpu-native and Emscripten web backends |
 | `src/packages/` | First-party feature packages: spatial, simmath, physics3d/2d, particles, animation, spline, audio, input |
@@ -198,7 +201,9 @@ interpolation) · `query-language.md` (the one query grammar) · `deprecation-po
 `protocolMajor 1` contract lifecycle) · `wgsl-tool-decision.md` (Tint, measured) ·
 `client-sdk.md` (the `context_client` SDK, the subscription consumer, and the D10 boundary gate) ·
 `present-path.md` (surface/swapchain, OSR import + composite, the CPU present fallback, and the
-headless-invariant gate) ·
+headless-invariant gate) · `shell.md` (the native Shell: windows, the single-threaded owner loop, the
+per-window compositor + `PET_POPUP`, input arbitration, DPI, the D10 shell boundary, and the deferred
+interactive-Windows verification) ·
 `signing.md` (Ed25519 trust root, verify-before-use) · `toolchain-bootstrap.md` (the R-BUILD-008
 fetchable-vs-preinstalled split per v1 target — what `context doctor` validates) ·
 `versioned-install.md` (side-by-side
@@ -213,8 +218,9 @@ fetchable-vs-preinstalled split per v1 target — what `context doctor` validate
   style either way.
 - **Warnings-as-errors** via the `context_warnings` INTERFACE target (`cmake/ContextWarnings.cmake`:
   MSVC `/W4 /WX`, otherwise `-Wall -Wextra -Wpedantic -Werror`). Every new target links it
-  `PRIVATE`. **Exemption: CEF-linking targets** (`src/editor/cef/`, `src/editor/gui/host/`) do not
-  link it — CEF ships its own warning set; their headless dependencies still do.
+  `PRIVATE`. **Exemption: CEF-linking targets** (`src/editor/cef/`, `src/editor/gui/host/`,
+  `src/editor/shell/cef/` + the CEF-linked `context_editor`) do not link it — CEF ships its own
+  warning set; their headless dependencies still do.
 - **Every feature is a package; the microkernel stays minimal.** Packages are STATIC libraries
   named `context_<name>` under `src/packages/`, composing on `context_kernel` (and `context_session`
   for sim components) — the kernel never links back. New engine features belong in a package, not
