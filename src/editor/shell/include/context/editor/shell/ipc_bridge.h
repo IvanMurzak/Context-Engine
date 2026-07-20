@@ -35,9 +35,14 @@
 //   3. EVERY OUTBOUND RESPONSE IS SCANNED FOR THE REGISTERED SECRETS, and a hit is replaced with an
 //      internal error rather than sent. This is the backstop that does not depend on anyone
 //      reasoning correctly about (1) and (2): the Shell calls `protect_secret(token)` at boot, and
-//      from then on the token cannot leave through this channel no matter which handler produced
-//      it or how deeply nested it is in the payload. `secrets_blocked()` counts the saves, so a
-//      leak that IS attempted is observable rather than silent.
+//      from then on the token cannot leave through this channel VERBATIM — in either its raw or its
+//      JSON-serialized form — no matter which handler produced it or how deeply nested it is in the
+//      payload. Those two forms are exhaustive for a CONTIGUOUS appearance, because `encoded` is
+//      derived with the SAME serializer that writes the response. What this control does NOT reach:
+//      a secret split across two fields, partially echoed, or re-encoded by a handler (base64,
+//      case-folded, separator-flipped) — a substring scan cannot see those, and that is precisely
+//      what controls (1) and (2) are for. `secrets_blocked()` counts the saves, so a leak that IS
+//      attempted is observable rather than silent.
 //
 // =========================================================================================
 
@@ -59,6 +64,21 @@ namespace context::editor::shell
 // The largest inbound message the bridge will even parse. A renderer can send an arbitrarily large
 // string; without a cap, parsing one is an unbounded allocation driven by untrusted input.
 inline constexpr std::size_t kMaxBridgeMessageBytes = 1u << 20; // 1 MiB
+
+// Maximum structural nesting the bridge will hand to the parser.
+//
+// THE SIZE CAP ALONE DOES NOT BOUND THE PARSE. `contract::Json::parse` is recursive descent with no
+// depth limit of its own (parse_value -> parse_array/parse_object -> parse_value), so a message that
+// is comfortably UNDER kMaxBridgeMessageBytes — a 60-byte envelope prefix followed by ~1e6 `[` — is
+// ~1e6 recursion levels deep and overflows the stack during descent. A stack overflow is a SIGSEGV /
+// EXCEPTION_STACK_OVERFLOW, NOT a C++ exception, so neither `catch (const std::exception&)` nor
+// `catch (...)` around the parse can contain it: the renderer would kill the Shell, defeating the
+// e05c DoD line "malformed/hostile inbound bridge messages rejected without crashing the Shell".
+// The depth is therefore measured LEXICALLY, before the parser is ever called.
+//
+// 64 is far above anything the daemon's envelopes reach (JSON-RPC params nest a handful deep) and far
+// below any platform's stack limit.
+inline constexpr std::size_t kMaxBridgeMessageDepth = 64;
 
 // Methods that may NEVER be routed from editor-core, whatever anyone later registers (control 2
 // above). These are the credential-bearing / credential-adjacent surfaces: attaching is the Shell's
@@ -95,6 +115,7 @@ enum class BridgeReject
 {
     none,
     too_large,        // over kMaxBridgeMessageBytes
+    too_deep,         // nesting over kMaxBridgeMessageDepth — refused BEFORE the parse, see above
     not_json,         // unparseable
     not_object,       // valid JSON, but not an object (an array, a bare string, null, …)
     bad_jsonrpc,      // missing/wrong "jsonrpc"
@@ -144,10 +165,16 @@ public:
     [[nodiscard]] bool register_method(std::string method, BridgeHandler handler);
 
     // Register a value that must never appear in an outbound response (control 3). Called by the
-    // Shell with the attach token and the daemon endpoint. Empty and very short values are ignored:
+    // Shell with the attach token and the daemon endpoint. Empty and very short values are REFUSED:
     // scanning for a 1-2 character "secret" would match ordinary payload text and turn every
     // response into a blocked one.
-    void protect_secret(std::string secret);
+    //
+    // Returns false when the value was NOT taken under protection (empty / shorter than
+    // kMinProtectedSecretLength), true when it is protected — including when it already was. The
+    // caller MUST check: control 3 is the backstop for the other two, so a credential that silently
+    // failed to register disarms it with nothing to notice by. Nothing upstream guarantees a minimum
+    // token length, so this is reachable rather than theoretical.
+    [[nodiscard]] bool protect_secret(std::string secret);
 
     // Parse, validate, route, and serialize one message. NEVER throws: every failure path — invalid
     // JSON, a hostile shape, a handler that throws — produces a refusal envelope.

@@ -74,10 +74,14 @@ SCHEME_CONSTANTS = (
     ("ipc endpoint", "app_scheme.h", "kIpcEndpoint", "BRIDGE_ENDPOINT"),
 )
 
-# The query-function name lives in the CEF binding (it is a CEF message-router config value), not in
-# a header — so it is read from there.
-QUERY_FUNCTION_CONSTANT = ("query function", "cef_shell.cpp", "kBridgeQueryFunction",
-                           "BRIDGE_QUERY_FUNCTION")
+# The message-router function names live in the CEF binding (they are CEF message-router config
+# values), not in a header — so they are read from there. BOTH names must be covered: CEF requires
+# the browser-side and renderer-side configs to agree, and a rename of either one desyncs the channel
+# exactly as a scheme rename would.
+CEF_CONSTANTS = (
+    ("query function", "cef_shell.cpp", "kBridgeQueryFunction", "BRIDGE_QUERY_FUNCTION"),
+    ("cancel function", "cef_shell.cpp", "kBridgeCancelFunction", "BRIDGE_CANCEL_FUNCTION"),
+)
 
 _CHUNK = 1 << 20
 
@@ -197,6 +201,13 @@ def check_csp_clean_document(document: Path) -> list[str]:
     if re.search(r"<[^>]*\sstyle\s*=", text, re.IGNORECASE):
         failures.append(
             f"{document.name} contains an inline style= attribute — style-src 'self' blocks it")
+    # An inline event handler is inline SCRIPT by another spelling: script-src 'self' with no
+    # unsafe-inline blocks `onclick="..."` exactly as it blocks an inline <script> body. Checking
+    # `javascript:` but not `on*=` left the more common of the two uncovered.
+    if re.search(r"<[^>]*\son[a-z]+\s*=", text, re.IGNORECASE):
+        failures.append(
+            f"{document.name} contains an inline event handler (on...=) — script-src 'self' with "
+            f"no unsafe-inline blocks it; bind the listener from the bundle instead")
     if "javascript:" in text.lower():
         failures.append(f"{document.name} contains a javascript: URL — blocked by the CSP")
     return failures
@@ -212,8 +223,7 @@ def check_scheme_contract(asset_dir: Path, bundle_name: str, shell_include_dir: 
         return [f"bundle missing: {bundle}"]
     bundle_text = bundle.read_text(encoding="utf-8", errors="replace")
 
-    checks = list(SCHEME_CONSTANTS)
-    for human, cpp_file, cpp_name, ts_name in checks:
+    for human, cpp_file, cpp_name, ts_name in SCHEME_CONSTANTS:
         cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
         ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
         if ts_value is None:
@@ -226,16 +236,16 @@ def check_scheme_contract(asset_dir: Path, bundle_name: str, shell_include_dir: 
                 f"Shell and editor-core would disagree about the channel and the bridge would be "
                 f"silently unreachable.")
 
-    human, cef_file, cpp_name, ts_name = QUERY_FUNCTION_CONSTANT
-    cpp_value = _read_cpp_string_constant(shell_cef_dir / cef_file, cpp_name)
-    ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
-    if ts_value is None:
-        failures.append(f"{human}: the bundle does not declare {ts_name}")
-    elif ts_value != cpp_value:
-        failures.append(
-            f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r} — the "
-            f"Shell would inject one function name and editor-core would look for another, so "
-            f"every bridge call would fail with 'not a function'.")
+    for human, cef_file, cpp_name, ts_name in CEF_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(shell_cef_dir / cef_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(f"{human}: the bundle does not declare {ts_name}")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r} — the "
+                f"Shell would inject one function name and editor-core would look for another, so "
+                f"every bridge call would fail with 'not a function'.")
 
     # Check 6 — the DoD's "no file:// fallback exists", asserted over every served text asset rather
     # than only the document (a fallback smuggled into the bundle is the same defect).

@@ -223,6 +223,12 @@ int main(int argc, char** argv)
     //
     // Declared before the browser and destroyed after it: the CEF handler holds a raw pointer to
     // this router for the browser's whole life.
+    //
+    // `handshake` is declared BEFORE `bridge` on purpose, even though it is installed after it:
+    // `ShellHandshake::install` binds handlers that capture `this`, so the handshake must OUTLIVE
+    // the router that holds them. Declaration order here is destruction order reversed, so
+    // handshake-then-bridge gives bridge-destroyed-first, which is the required order.
+    shell::ShellHandshake handshake(shell::make_handshake_nonce());
     shell::BridgeRouter bridge;
     if (daemon.client != nullptr)
     {
@@ -230,10 +236,19 @@ int main(int argc, char** argv)
         // discovery output rather than re-read from disk, so the guard protects exactly what this
         // process is actually holding. (A later reconnect that mints a new token must re-protect it
         // — that path arrives with e05d's client layer.)
-        bridge.protect_secret(daemon.client->instance().token);
-        bridge.protect_secret(daemon.client->instance().endpoint);
+        //
+        // CHECKED, not fire-and-forget: control 3 is the backstop for the other two, so booting a
+        // renderer with an unprotected credential is strictly worse than not booting at all.
+        if (!bridge.protect_secret(daemon.client->instance().token) ||
+            !bridge.protect_secret(daemon.client->instance().endpoint))
+        {
+            std::fprintf(stderr,
+                         "context_editor: the egress guard refused a daemon credential (empty or "
+                         "shorter than the minimum protected length) — refusing to start a "
+                         "renderer that could echo it back\n");
+            return 1;
+        }
     }
-    shell::ShellHandshake handshake(shell::make_handshake_nonce());
     if (!handshake.install(bridge))
     {
         std::fprintf(stderr, "context_editor: could not install the bridge handshake\n");

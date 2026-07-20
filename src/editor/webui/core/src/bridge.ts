@@ -76,7 +76,7 @@ export class BridgeError extends Error {
     }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -182,13 +182,12 @@ export class ShellBridge {
                 reason: "bridge.client_shape",
             });
         }
-        if (parsed["id"] !== expectedId) {
-            throw new BridgeError({
-                code: -32600,
-                message: `response id ${String(parsed["id"])} does not match request ${expectedId}`,
-                reason: "bridge.client_id_mismatch",
-            });
-        }
+        // THE ERROR IS READ BEFORE THE ID, deliberately. The Shell cannot correlate a message it
+        // could not parse, so `BridgeRouter::dispatch` answers `refuse(0, ...)` for its pre-id
+        // refusal classes — `too_large` above all, which a well-formed caller reaches simply by
+        // sending more than kMaxBridgeMessageBytes of params. Checking the id first turned every one
+        // of those into `bridge.client_id_mismatch`, discarding the real code and the real reason:
+        // exactly the diagnostic BridgeError exists to carry.
         const error = parsed["error"];
         if (isRecord(error)) {
             const data = error["data"];
@@ -199,6 +198,32 @@ export class ShellBridge {
                     isRecord(data) && typeof data["reason"] === "string"
                         ? data["reason"]
                         : "bridge.unknown",
+            });
+        }
+        // A present-but-malformed `error` is a refusal too, and must never fall through to the
+        // success path below — that would turn a refusal into `resolve(undefined)`.
+        if (error !== undefined) {
+            throw new BridgeError({
+                code: -32603,
+                message: "the Shell returned a malformed error member",
+                reason: "bridge.client_shape",
+            });
+        }
+        if (parsed["id"] !== expectedId) {
+            throw new BridgeError({
+                code: -32600,
+                message: `response id ${String(parsed["id"])} does not match request ${expectedId}`,
+                reason: "bridge.client_id_mismatch",
+            });
+        }
+        // JSON-RPC 2.0 requires exactly one of `result` / `error`. Without this, a response carrying
+        // neither resolves successfully with `undefined`, and the caller discovers the problem as a
+        // missing field far from the cause — the very failure this method exists to prevent.
+        if (!Object.prototype.hasOwnProperty.call(parsed, "result")) {
+            throw new BridgeError({
+                code: -32603,
+                message: "the Shell returned neither a result nor an error",
+                reason: "bridge.client_shape",
             });
         }
         return parsed["result"];

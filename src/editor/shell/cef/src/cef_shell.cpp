@@ -216,12 +216,23 @@ public:
             return;
         }
 
-        response->SetMimeType(resolution_.mime_type);
+        // MIME ESSENCE AND CHARSET ARE TWO SEPARATE FIELDS — see split_media_type() in
+        // app_scheme.h for the full trap. Passing the resolver's `text/css; charset=utf-8` straight
+        // into SetMimeType() makes Chromium's by-essence comparison fail, and with the
+        // `X-Content-Type-Options: nosniff` this response also sets, the stylesheet and the ES
+        // module are then silently refused and the document is not parsed as HTML.
+        const MediaType media = split_media_type(resolution_.mime_type);
+        response->SetMimeType(media.essence);
+        if (!media.charset.empty())
+        {
+            response->SetCharset(media.charset);
+        }
         CefResponse::HeaderMap headers;
         for (const auto& [name, value] : app_response_headers(resolution_.mime_type))
         {
-            // CEF derives the Content-Type from SetMimeType; setting it in the map as well makes
-            // the response carry it twice, which some parsers treat as a conflict.
+            // CEF derives the Content-Type from the mime type + charset set above; setting it in
+            // the map as well makes the response carry it twice, which some parsers treat as a
+            // conflict.
             if (name == "Content-Type")
             {
                 continue;
@@ -247,6 +258,26 @@ public:
         std::memcpy(data_out, body_.data() + offset_, count);
         offset_ += count;
         bytes_read = static_cast<int>(count);
+        return true;
+    }
+
+    // CEF's default Skip() reports -2 (ERR_FAILED), which turns any RANGE request into a load
+    // failure. Chromium issues none for the current html/css/js set, so this is latent — but the
+    // day a font, <audio> or <video> asset lands it would present as an unexplainable 404. The body
+    // is already fully buffered and `offset_` already exists, so honouring it is free.
+    bool Skip(int64_t bytes_to_skip, int64_t& bytes_skipped,
+              CefRefPtr<CefResourceSkipCallback>) override
+    {
+        if (bytes_to_skip < 0 || offset_ >= body_.size())
+        {
+            bytes_skipped = -2; // ERR_FAILED: nothing left to skip over.
+            return false;
+        }
+        const std::size_t remaining = body_.size() - offset_;
+        const std::size_t count =
+            std::min(remaining, static_cast<std::size_t>(bytes_to_skip));
+        offset_ += count;
+        bytes_skipped = static_cast<int64_t>(count);
         return true;
     }
 
@@ -301,6 +332,33 @@ public:
                  const CefString& request, bool persistent,
                  CefRefPtr<Callback> callback) override
     {
+        return dispatch_query(frame, request.ToString(), persistent, callback);
+    }
+
+    // THE BINARY OVERLOAD IS NOT OPTIONAL. CefMessageRouter switches transports at
+    // `CefMessageRouterConfig::message_size_threshold` — 16 KiB by default, which this Shell does
+    // not override — and hands anything at or above it to THIS overload instead of the CefString
+    // one. Leaving it to the base class (which returns false) means every request >= 16 KiB is
+    // silently cancelled as unhandled: the router is never reached, so served()/refused() do not
+    // move and the smoke stays green while real payloads — a document patch, a batch entity update,
+    // a scene-tree listing — fail with a generic transport error. `kMaxBridgeMessageBytes`
+    // advertises 1 MiB, so without this the live channel delivers 1/64th of its own contract.
+    bool OnQuery(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, int64_t /*query_id*/,
+                 CefRefPtr<const CefBinaryBuffer> request, bool persistent,
+                 CefRefPtr<Callback> callback) override
+    {
+        std::string payload;
+        if (request != nullptr && request->GetData() != nullptr)
+        {
+            payload.assign(static_cast<const char*>(request->GetData()), request->GetSize());
+        }
+        return dispatch_query(frame, payload, persistent, callback);
+    }
+
+private:
+    bool dispatch_query(CefRefPtr<CefFrame> frame, const std::string& request, bool persistent,
+                        const CefRefPtr<Callback>& callback)
+    {
         if (router_ == nullptr)
         {
             return false;
@@ -322,7 +380,7 @@ public:
         // Everything past here is the CEF-free router's job: parse, validate, route, scan the
         // response for protected secrets, and produce an envelope. It never throws, so there is no
         // exception to contain at this boundary.
-        const BridgeDispatch dispatch = router_->dispatch(request.ToString());
+        const BridgeDispatch dispatch = router_->dispatch(request);
         // A refusal is still a well-formed JSON-RPC error envelope, so it goes back through
         // Success(): the QUERY succeeded, and what it carries is the protocol-level answer. Using
         // Failure() here would collapse "your message was malformed" into the same channel as "you
@@ -331,7 +389,6 @@ public:
         return true;
     }
 
-private:
     BridgeRouter* router_ = nullptr;
 };
 
@@ -343,6 +400,7 @@ class ShellCefClient : public CefClient,
                        public CefRenderHandler,
                        public CefLifeSpanHandler,
                        public CefLoadHandler,
+                       public CefDisplayHandler,
                        public CefRequestHandler
 {
 public:
@@ -378,6 +436,7 @@ public:
     CefRefPtr<CefRenderHandler> GetRenderHandler() override { return this; }
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
     CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+    CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
     CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
 
     // --- the message router's browser-side hooks ------------------------------------------------
@@ -397,14 +456,33 @@ public:
     }
 
     bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
-                        CefRefPtr<CefRequest>, bool, bool) override
+                        CefRefPtr<CefRequest> request, bool, bool) override
     {
         if (router_ != nullptr)
         {
             router_->OnBeforeBrowse(browser, frame);
         }
-        // false == allow the navigation. This hook is here to notify the router, not to gate
-        // navigation: the app scheme's own handler decides what is servable.
+        // The MAIN frame may only ever be on the app origin. The CSP constrains what the document
+        // may LOAD, but it has no `navigate-to`, so nothing else stops a compromised renderer from
+        // navigating the top-level frame off `context-editor://app/` — after which the window is
+        // showing content the Shell never served. Token isolation still held (the bridge refuses any
+        // other origin), so this closes a broken-editor hole rather than a leak; it is cheap, and
+        // `kAppUrlPrefix` is already the vocabulary this file routes on.
+        //
+        // Sub-frame navigations are not gated here: `frame-src 'none'` already denies them, and the
+        // Shell creates no sub-frames of its own.
+        if (frame != nullptr && frame->IsMain() && request != nullptr)
+        {
+            const std::string url = request->GetURL().ToString();
+            if (url.rfind(kAppUrlPrefix, 0) != 0)
+            {
+                std::fprintf(stderr,
+                             "[shell-cef] main-frame navigation BLOCKED to <%s>: the editor window "
+                             "may only be on %s\n",
+                             url.c_str(), kAppUrlPrefix);
+                return true; // true == cancel the navigation.
+            }
+        }
         return false;
     }
 
@@ -561,6 +639,22 @@ public:
         std::fprintf(stderr, "[shell-cef] main-frame load FAILED (%d): %s <%s>\n",
                      static_cast<int>(error_code), error_text.ToString().c_str(),
                      failed_url.ToString().c_str());
+    }
+
+    // --- CefDisplayHandler ---------------------------------------------------------------------
+    bool OnConsoleMessage(CefRefPtr<CefBrowser>, cef_log_severity_t level, const CefString& message,
+                          const CefString& source, int line) override
+    {
+        // THE RENDERER'S SIDE OF THE STORY, which nothing else in this Shell can see. A CSP refusal
+        // ("Refused to apply stylesheet…"), a blocked ES module, a module that threw before it could
+        // reach the bridge — all of them are console messages and NONE of them fail a load, so
+        // without this the live smoke reports only that its assertions did not come true, with no
+        // cause. Diagnosing one such failure from CI logs alone cost a full round-trip; a page that
+        // cannot boot should say why.
+        std::fprintf(stderr, "[shell-cef] console(%d) %s <%s:%d>\n", static_cast<int>(level),
+                     message.ToString().c_str(), source.ToString().c_str(), line);
+        // false = let CEF log it too; we are observing, not suppressing.
+        return false;
     }
 
     // --- driving it ---------------------------------------------------------------------------

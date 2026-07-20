@@ -33,10 +33,13 @@ namespace context::editor::shell
 
 // ------------------------------------------------------------------------------ scheme vocabulary
 
-// The scheme itself. Registered as STANDARD|SECURE|CORS_ENABLED in EVERY process (08 §2): standard
-// so it gets ordinary origin semantics (without it Chromium treats it as opaque and CSP, module
-// scripts and `fetch` all behave differently), secure so it counts as a trustworthy origin and is
-// not downgraded/blocked as mixed content.
+// The scheme itself. Registered as STANDARD|SECURE|CORS_ENABLED|FETCH_ENABLED in EVERY process
+// (08 §2): standard so it gets ordinary origin semantics (without it Chromium treats it as opaque
+// and CSP, module scripts and `fetch` all behave differently), secure so it counts as a trustworthy
+// origin and is not downgraded/blocked as mixed content, CORS/FETCH enabled so the module graph and
+// same-origin `fetch` resolve normally. FETCH_ENABLED widens nothing in practice: the served CSP
+// carries `connect-src 'none'`, so there is no network for a fetch to reach — it only lets
+// same-origin asset requests take the ordinary path instead of a special-cased one.
 inline constexpr const char* kAppScheme = "context-editor";
 
 // The two hosts under the scheme. They are deliberately DIFFERENT hosts rather than paths: the
@@ -149,5 +152,30 @@ private:
 // blob so the CEF binding can hand CEF a map without re-parsing a string it just built.
 [[nodiscard]] std::vector<std::pair<std::string, std::string>>
 app_response_headers(const std::string& mime_type);
+
+// A media type split into the two fields a response actually carries SEPARATELY.
+struct MediaType
+{
+    std::string essence; // "text/css"  — type/subtype, no parameters
+    std::string charset; // "utf-8"     — the charset parameter's value, empty when absent
+};
+
+// Splits `text/css; charset=utf-8` into {"text/css", "utf-8"}.
+//
+// WHY THIS EXISTS (a CI-only trap that costs a full round-trip): a response's mime type and its
+// charset are two DIFFERENT fields, not one string. CEF says so in its own API — `CefResponse` has
+// separate `SetMimeType()` and `SetCharset()` accessors — and CEF's own reference resource server
+// (`CefResourceManager`) fills the first from `CefGetMimeType(extension)`, which returns the
+// ESSENCE only. Chromium then compares that field BY ESSENCE, so handing it the full
+// `text/css; charset=utf-8` makes the comparison fail: with this response's own
+// `X-Content-Type-Options: nosniff`, the stylesheet and the ES module are refused and the document
+// is not treated as HTML. Nothing local catches it — it compiles clean, the CEF-free unit suites
+// assert the resolver's own convention, and pre-push audit check 9 is `-fsyntax-only`. Only the live
+// `editor-cef-smoke-shell` boot sees it.
+//
+// Lives HERE, not in the CEF binding, for the reason the whole layering exists: the binding is a
+// translator with no judgement, and this is a rule about our own response policy that is testable on
+// all three default `build` legs.
+[[nodiscard]] MediaType split_media_type(std::string_view media_type);
 
 } // namespace context::editor::shell

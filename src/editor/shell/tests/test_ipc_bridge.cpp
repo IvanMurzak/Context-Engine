@@ -210,30 +210,77 @@ void test_size_cap()
     CHECK(out.refused());
     CHECK(out.reject == shell::BridgeReject::too_large);
 
-    // Just under the cap is parsed normally (so the cap is a cap, not a coincidence).
-    CHECK(router.dispatch(request("shell.ping", "{\"text\":\"small\"}")).refused() == false);
+    // The BOUNDARY itself, both sides — the refusal is `size() > cap`, so exactly-at-cap must be
+    // accepted and cap+1 refused. A "small message is fine" check does not test a cap at all.
+    const std::string prefix =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"shell.ping\",\"params\":{\"t\":\"";
+    const std::string suffix = "\"}}";
+    const std::size_t envelope = prefix.size() + suffix.size();
+
+    std::string at_cap = prefix;
+    at_cap.append(shell::kMaxBridgeMessageBytes - envelope, 'A');
+    at_cap += suffix;
+    CHECK(at_cap.size() == shell::kMaxBridgeMessageBytes);
+    CHECK(!router.dispatch(at_cap).refused());
+
+    std::string over_cap = prefix;
+    over_cap.append(shell::kMaxBridgeMessageBytes - envelope + 1, 'A');
+    over_cap += suffix;
+    CHECK(over_cap.size() == shell::kMaxBridgeMessageBytes + 1);
+    CHECK(router.dispatch(over_cap).reject == shell::BridgeReject::too_large);
 }
 
 void test_deep_nesting_is_contained()
 {
     shell::BridgeRouter router;
     configure_router(router);
-    // A deeply nested payload is the classic parser-recursion attack. Whatever the parser does with
-    // it — accept or throw — the bridge must not propagate an exception to its caller.
-    std::string nested = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"shell.ping\",\"params\":{\"a\":";
-    const int depth = 2000;
-    for (int i = 0; i < depth; ++i)
-    {
-        nested += "[";
-    }
-    for (int i = 0; i < depth; ++i)
-    {
-        nested += "]";
-    }
-    nested += "}}";
-    const shell::BridgeDispatch out = router.dispatch(nested);
-    // Either outcome is acceptable; NOT crashing is the assertion.
-    CHECK(out.refused() || !out.response.empty());
+    // A deeply nested payload is the classic parser-recursion attack, and the SIZE CAP DOES NOT
+    // BOUND IT: the contract parser is recursive descent with no depth limit, so nesting sized to
+    // fit inside kMaxBridgeMessageBytes is ~1e6 stack frames — a SIGSEGV, which no catch block can
+    // contain. The depth must therefore be refused BEFORE the parse.
+    //
+    // The old version of this test used depth = 2000 and asserted
+    // `out.refused() || !out.response.empty()`. Both halves were wrong: 2000 is under every
+    // platform's stack limit so it never reproduced, and every dispatch() path sets a non-empty
+    // response, so the second disjunct is unconditionally true — the CHECK passed no matter what
+    // the bridge did, including with the control removed entirely.
+    const auto nested_message = [](std::size_t depth) {
+        std::string nested =
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"shell.ping\",\"params\":{\"a\":";
+        nested.append(depth, '[');
+        nested.append(depth, ']');
+        nested += "}}";
+        return nested;
+    };
+
+    // Deep enough to overflow the stack if it ever reached the parser, and still far under the size
+    // cap — which is precisely why the size cap alone is not a defence.
+    const std::string overflowing = nested_message(200000);
+    CHECK(overflowing.size() < shell::kMaxBridgeMessageBytes);
+    const shell::BridgeDispatch out = router.dispatch(overflowing);
+    CHECK(out.reject == shell::BridgeReject::too_deep);
+
+    // The boundary, both sides. The envelope itself contributes two levels (the outer object and
+    // `params`), so the payload budget is the limit minus those — stated explicitly rather than
+    // left as an off-by-two waiting to be rediscovered.
+    const std::size_t envelope_depth = 2;
+    const std::size_t payload_budget = shell::kMaxBridgeMessageDepth - envelope_depth;
+    CHECK(router.dispatch(nested_message(payload_budget + 1)).reject ==
+          shell::BridgeReject::too_deep);
+    // Exactly AT the limit is accepted (the check is `>`, not `>=`), so the message is well-formed
+    // and merely deep: it reaches the router and is refused for a DIFFERENT reason (the handler
+    // gets params it does not understand). The point is only that it is NOT rejected as too_deep.
+    CHECK(router.dispatch(nested_message(payload_budget)).reject !=
+          shell::BridgeReject::too_deep);
+
+    // Brackets inside STRING literals are not structure and must not count toward the depth.
+    std::string bracket_text = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"shell.ping\",";
+    bracket_text += "\"params\":{\"t\":\"";
+    bracket_text.append(shell::kMaxBridgeMessageDepth * 4, '[');
+    bracket_text += "\"}}";
+    CHECK(router.dispatch(bracket_text).reject != shell::BridgeReject::too_deep);
+
+    // Still alive afterwards — the process survived, which is the whole point.
     CHECK(!router.dispatch(request("shell.ping", "{\"text\":\"alive\"}")).refused());
 }
 
@@ -283,8 +330,8 @@ void test_control_2_forbidden_methods_cannot_be_registered()
 void test_control_3_secrets_never_leave()
 {
     shell::BridgeRouter router;
-    router.protect_secret(kFakeToken);
-    router.protect_secret(kFakeEndpoint);
+    CHECK(router.protect_secret(kFakeToken));
+    CHECK(router.protect_secret(kFakeEndpoint));
     CHECK(router.secret_count() == 2);
 
     // Four handlers that each try to leak the credential a DIFFERENT way. The scan is over the
@@ -345,17 +392,53 @@ void test_control_3_secrets_never_leave()
     CHECK(!safe.refused());
     CHECK(router.secrets_blocked() == 5);
 
-    // Degenerate "secrets" are ignored: scanning for a 1-2 character string would block every
-    // response and make the control useless in practice.
+    // Degenerate "secrets" are REFUSED, and say so: scanning for a 1-2 character string would block
+    // every response and make the control useless in practice. The refusal must be visible, because
+    // control 3 is the backstop for the other two — a credential that silently failed to register
+    // would disarm it with nothing to notice by.
     shell::BridgeRouter tiny;
-    tiny.protect_secret("");
-    tiny.protect_secret("ab");
+    CHECK(!tiny.protect_secret(""));
+    CHECK(!tiny.protect_secret("ab"));
     CHECK(tiny.secret_count() == 0);
-    // ...and the same secret twice is stored once.
+    // ...and the same secret twice is stored once, but still reports success: the postcondition the
+    // caller checks (this value cannot leave through the bridge) holds either way.
     shell::BridgeRouter deduped;
-    deduped.protect_secret(kFakeToken);
-    deduped.protect_secret(kFakeToken);
+    CHECK(deduped.protect_secret(kFakeToken));
+    CHECK(deduped.protect_secret(kFakeToken));
     CHECK(deduped.secret_count() == 1);
+}
+
+void test_control_2_name_variants_are_denied()
+{
+    // Control 2 exists to catch the MAINTAINER who wires a credential verb through by accident, so
+    // an exact-byte comparison misses exactly the cases it is meant to catch: a capitalized name, a
+    // stray space, or a dotted sub-verb of a forbidden root. Routing is allowlist-only, so none of
+    // these was a live leak — but each one registered SUCCESSFULLY and became fully routable.
+    shell::BridgeRouter router;
+    const shell::BridgeHandler handler = [](const shell::BridgeRequest&) {
+        return shell::BridgeResult::ok(contract::Json("x"));
+    };
+    CHECK(!router.register_method("Attach", handler));
+    CHECK(!router.register_method("ATTACH", handler));
+    CHECK(!router.register_method("  attach  ", handler));
+    CHECK(!router.register_method("Instance.Read", handler));
+    // A dotted sub-verb of a forbidden root is denied even when the exact string is not listed.
+    CHECK(!router.register_method("instance.anything", handler));
+    CHECK(!router.register_method("daemon.endpoint.path", handler));
+    CHECK(router.method_count() == 0);
+
+    // ...but a DIFFERENT verb that merely starts with the same letters stays routable: the rule is
+    // a dotted-prefix match, not a substring match.
+    CHECK(router.register_method("instanced.list", handler));
+    CHECK(router.register_method("attachment.info", handler));
+    CHECK(router.method_count() == 2);
+
+    // The runtime half agrees with the registration half — otherwise a name could be unregisterable
+    // yet routable, or vice versa.
+    CHECK(router.dispatch(request("Attach")).reject == shell::BridgeReject::forbidden_method);
+    CHECK(router.dispatch(request("instance.anything")).reject ==
+          shell::BridgeReject::forbidden_method);
+    CHECK(!router.dispatch(request("instanced.list")).refused());
 }
 
 void test_control_1_router_carries_no_credential()
@@ -520,6 +603,7 @@ int main()
     test_deep_nesting_is_contained();
     test_control_1_router_carries_no_credential();
     test_control_2_forbidden_methods_cannot_be_registered();
+    test_control_2_name_variants_are_denied();
     test_control_3_secrets_never_leave();
     test_only_editor_core_origin_is_trusted();
     test_boot_handshake();

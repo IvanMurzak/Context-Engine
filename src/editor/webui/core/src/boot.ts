@@ -16,7 +16,7 @@
 // the one it just minted, so the sequence cannot pass unless a value made the FULL round trip
 // through the renderer. A one-way "JS called us" ping would pass with a broken response path.
 
-import { BridgeError, ShellBridge } from "./bridge.js";
+import { BridgeError, ShellBridge, isRecord } from "./bridge.js";
 import { editorCoreInfo } from "./info.js";
 
 /** What `bootEditorCore` did — returned so a caller (and a test) can assert on it. */
@@ -54,6 +54,12 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         return { attached: false, ready: false, error: "" };
     }
 
+    // Marked BEFORE the first await. `index.html` ships the literal `data-editor-core="loading"`, so
+    // without this a bundle that never executed and a handshake that hung present the SAME document
+    // state — in a renderer whose only diagnostic channel is this attribute. "booting" means the
+    // module ran and the bridge was found.
+    markDocument("booting", "");
+
     try {
         const info = editorCoreInfo();
         const hello = await bridge.call("shell.hello", {
@@ -64,10 +70,7 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
 
         // The Shell's reply carries a nonce. Echoing it back is what proves the response path, so a
         // missing one is a hard failure rather than something to paper over with a default.
-        const nonce =
-            typeof hello === "object" && hello !== null
-                ? (hello as Record<string, unknown>)["nonce"]
-                : undefined;
+        const nonce = isRecord(hello) ? hello["nonce"] : undefined;
         if (typeof nonce !== "string" || nonce === "") {
             markDocument("error", "shell.hello returned no nonce");
             return { attached: true, ready: false, error: "shell.hello returned no nonce" };

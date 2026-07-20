@@ -366,4 +366,61 @@ app_response_headers(const std::string& mime_type)
     };
 }
 
+MediaType split_media_type(std::string_view media_type)
+{
+    const auto trim = [](std::string_view text) {
+        const auto is_space = [](unsigned char c) { return c == ' ' || (c >= 0x09 && c <= 0x0d); };
+        std::size_t begin = 0;
+        std::size_t end = text.size();
+        while (begin < end && is_space(static_cast<unsigned char>(text[begin])))
+        {
+            ++begin;
+        }
+        while (end > begin && is_space(static_cast<unsigned char>(text[end - 1])))
+        {
+            --end;
+        }
+        return text.substr(begin, end - begin);
+    };
+
+    MediaType out;
+    const std::size_t semicolon = media_type.find(';');
+    out.essence = std::string(trim(media_type.substr(0, semicolon)));
+    if (semicolon == std::string_view::npos)
+    {
+        return out;
+    }
+
+    // Walk the parameters rather than assuming charset is the first (or only) one.
+    std::string_view rest = media_type.substr(semicolon + 1);
+    while (!rest.empty())
+    {
+        const std::size_t next = rest.find(';');
+        const std::string_view parameter = trim(rest.substr(0, next));
+        const std::size_t equals = parameter.find('=');
+        if (equals != std::string_view::npos)
+        {
+            const std::string_view name = trim(parameter.substr(0, equals));
+            if (name.size() == 7 && ascii_lower(name) == "charset")
+            {
+                std::string_view value = trim(parameter.substr(equals + 1));
+                // A quoted parameter value is legal per RFC 9110; unwrap it so the charset field
+                // carries the value, not the quotes.
+                if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
+                {
+                    value = value.substr(1, value.size() - 2);
+                }
+                out.charset = std::string(value);
+                return out;
+            }
+        }
+        if (next == std::string_view::npos)
+        {
+            break;
+        }
+        rest = rest.substr(next + 1);
+    }
+    return out;
+}
+
 } // namespace context::editor::shell

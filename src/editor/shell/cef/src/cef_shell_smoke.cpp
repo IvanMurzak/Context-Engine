@@ -157,6 +157,10 @@ int main(int argc, char** argv)
     shell::HeadlessWindowBackend* backend_raw = backend.get();
 
     // --- the privileged bridge (e05c) --------------------------------------------------------
+    // `handshake` is declared BEFORE `bridge` (and installed after it) so that it OUTLIVES the
+    // router holding the handlers that capture it — the lifetime invariant ShellHandshake::install
+    // documents. Declaration order is destruction order reversed.
+    shell::ShellHandshake handshake(shell::make_handshake_nonce());
     // Declared BEFORE the browser and outliving it: the CEF handler holds a raw pointer to this
     // router for the browser's whole life (BridgeRouter is non-movable so it cannot be relocated).
     shell::BridgeRouter bridge;
@@ -164,8 +168,8 @@ int main(int argc, char** argv)
     // Its job here is to prove the egress guard is WIRED in the live binding, not just unit-tested:
     // the assertion after the handshake is that it never appears in anything the renderer received.
     const std::string fake_token = "smoke-token-4a91c7e0d25b8f36a1c9e4f70b2d6853";
-    bridge.protect_secret(fake_token);
-    shell::ShellHandshake handshake(shell::make_handshake_nonce());
+    SMOKE_CHECK(bridge.protect_secret(fake_token),
+                "the egress guard accepted the smoke credential");
     SMOKE_CHECK(handshake.install(bridge), "the bridge handshake installed");
 
     shell::cef::CefShellOptions cef_options;

@@ -48,7 +48,9 @@ cmake -S src --preset dev && cd src && cmake --build --preset dev && ctest --pre
 ```
 
 Outputs land in `<build>/editor-webui/app/`: `editor-core.js` plus the staged, verified
-`dockview-core.min.js` + `dockview.css`.
+`dockview-core.min.js` + `dockview.css`, plus the served document set `index.html` + `app.css`.
+That directory IS the asset root the Shell serves over `context-editor://app/` — it is published to
+the Shell as the `CONTEXT_WEBUI_ASSET_DIR` cache entry.
 
 **A type error is a build failure**, not a test failure: the bundle's custom command depends on the
 typecheck stamp, so a bad type stops the build before esbuild ever runs.
@@ -106,6 +108,13 @@ gate-exclusion regex and runs automatically in the general ctest step on all thr
 - `webui-assets` — the bundle is real, non-empty, exports the entry symbols, and references no Node
   builtin; every staged dockview file is re-hashed against its pin (verify-**at**-use, one step
   beyond fetch-time verification).
+- `webui-scheme-contract` — three facts that live in two languages and would otherwise drift
+  silently: the served document carries no inline script, inline style or inline event handler (the
+  CSP would BLOCK them, so the failure mode is a blank editor rather than a build error); the scheme
+  vocabulary the **built** bundle compiled in is byte-identical to the C++ constants the Shell serves
+  and routes with (scheme, origin, endpoint, query + cancel function names); and no `file://` URL
+  reached the asset set (a DoD line). Checked against the BUILT asset, so it sees what the renderer
+  will actually get, and fails closed when the bundle is missing.
 - `webui-client-typings-drift` — re-projects the build-generated schema and refuses any byte
   difference.
 
@@ -115,8 +124,9 @@ Python-side unit tests live in `tools/tests/test_gen_client_typings.py`,
 ## Scope boundary (after e05c)
 
 e05a made this the **toolchain substrate**; e05c added the **served document set** (`app/`) and the
-**JS half of the privileged bridge**. dockview is acquired and verified but nothing consumes its API
-yet. Deliberately **not** here:
+**JS half of the privileged bridge**. dockview is acquired, verified and STAGED — its stylesheet is
+linked by `index.html` — but nothing consumes its docking **API** yet; wrapping it in a PanelHost is
+e05d's. Deliberately **not** here:
 
 - ~~the `context-editor://` app scheme and the privileged IPC bridge~~ → ✅ **e05c**. The scheme's
   NATIVE half (registration, resource handler, message router) lives in `src/editor/shell/`, not

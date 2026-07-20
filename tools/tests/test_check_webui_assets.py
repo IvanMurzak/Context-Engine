@@ -220,12 +220,13 @@ GOOD_DOCUMENT = (
 
 GOOD_STYLESHEET = ":root { --editor-bg: #132a44; }\n"
 
-# The four constants the bundle must agree with the Shell about.
+# The five constants the bundle must agree with the Shell about.
 SCHEME_BUNDLE = (
     'var BRIDGE_SCHEME = "context-editor";\n'
     'var BRIDGE_ORIGIN = "context-editor://app";\n'
     'var BRIDGE_ENDPOINT = "context-editor://ipc";\n'
     'var BRIDGE_QUERY_FUNCTION = "contextEditorQuery";\n'
+    'var BRIDGE_CANCEL_FUNCTION = "contextEditorQueryCancel";\n'
 )
 
 CPP_HEADER = (
@@ -234,7 +235,10 @@ CPP_HEADER = (
     'inline constexpr const char* kIpcEndpoint = "context-editor://ipc";\n'
 )
 
-CPP_CEF = 'constexpr const char* kBridgeQueryFunction = "contextEditorQuery";\n'
+CPP_CEF = (
+    'constexpr const char* kBridgeQueryFunction = "contextEditorQuery";\n'
+    'constexpr const char* kBridgeCancelFunction = "contextEditorQueryCancel";\n'
+)
 
 
 def _scheme_fixture(tmp_path: Path, *, document: str = GOOD_DOCUMENT,
@@ -294,6 +298,11 @@ def test_documentation_comments_do_not_trip_the_gate(tmp_path: Path) -> None:
     # A javascript: URL.
     GOOD_DOCUMENT.replace('<main id="editor-root">',
                           '<a href="javascript:alert(1)">x</a><main id="editor-root">'),
+    # An inline event handler — inline script by another spelling, blocked by script-src 'self'
+    # with no unsafe-inline exactly as an inline <script> body is.
+    GOOD_DOCUMENT.replace('<main id="editor-root">', '<main id="editor-root" onclick="x()">'),
+    GOOD_DOCUMENT.replace('<main id="editor-root">',
+                          '<img src="./x.png" onerror="steal()"><main id="editor-root">'),
 ])
 def test_csp_violating_document_fails(tmp_path: Path, bad_document: str) -> None:
     """Each of these is BLOCKED by the served CSP at runtime, so it must fail at BUILD time."""
@@ -311,11 +320,26 @@ def test_missing_document_fails(tmp_path: Path) -> None:
         asset_dir, "editor-core.js", include_dir, cef_dir) == 1
 
 
+def test_missing_bundle_fails_the_scheme_gate(tmp_path: Path) -> None:
+    """The gate reads the BUILT bundle, so a missing one must fail closed rather than pass vacuously.
+
+    Without this, a build that produced no bundle would sail through the cross-language drift half
+    with nothing to compare — the exact shape of a gate that reports green while checking nothing.
+    """
+    asset_dir, include_dir, cef_dir = _scheme_fixture(tmp_path)
+    (asset_dir / "editor-core.js").unlink()
+    assert check_webui_assets.run_scheme_contract(
+        asset_dir, "editor-core.js", include_dir, cef_dir) == 1
+
+
 @pytest.mark.parametrize("ts_name,drifted", [
     ("BRIDGE_SCHEME", "context-edit"),
     ("BRIDGE_ORIGIN", "context-editor://application"),
     ("BRIDGE_ENDPOINT", "context-editor://bridge"),
     ("BRIDGE_QUERY_FUNCTION", "cefQuery"),
+    # CEF requires the browser-side and renderer-side router configs to agree, so a cancel-function
+    # rename desyncs the channel exactly as a query-function rename does.
+    ("BRIDGE_CANCEL_FUNCTION", "cefQueryCancel"),
 ])
 def test_scheme_vocabulary_drift_fails(tmp_path: Path, ts_name: str, drifted: str) -> None:
     """A rename on either side must RED, not produce a silently unreachable bridge."""
@@ -381,6 +405,6 @@ def test_the_real_repo_sources_agree_across_languages() -> None:
     for _human, cpp_file, cpp_name, ts_name in check_webui_assets.SCHEME_CONSTANTS:
         cpp_value = check_webui_assets._read_cpp_string_constant(header / cpp_file, cpp_name)
         assert f'{ts_name} = "{cpp_value}"' in ts, f"{ts_name} drifted from C++ {cpp_name}"
-    _human, cef_file, cpp_name, ts_name = check_webui_assets.QUERY_FUNCTION_CONSTANT
-    cpp_value = check_webui_assets._read_cpp_string_constant(cef / cef_file, cpp_name)
-    assert f'{ts_name} = "{cpp_value}"' in ts
+    for _human, cef_file, cpp_name, ts_name in check_webui_assets.CEF_CONSTANTS:
+        cpp_value = check_webui_assets._read_cpp_string_constant(cef / cef_file, cpp_name)
+        assert f'{ts_name} = "{cpp_value}"' in ts, f"{ts_name} drifted from C++ {cpp_name}"

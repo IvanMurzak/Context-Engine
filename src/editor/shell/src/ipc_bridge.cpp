@@ -38,6 +38,85 @@ constexpr std::size_t kMinProtectedSecretLength = 8;
 
 } // namespace
 
+// ASCII-only lowercase + outer-whitespace trim, so control 2's forbidden-name comparison is not
+// defeated by a spelling variant ("Attach", "attach "). Deliberately ASCII-only: these names are
+// ASCII by construction, and a locale-aware fold would be a different (and less predictable) rule.
+std::string normalize_method_name(std::string_view method)
+{
+    std::size_t begin = 0;
+    std::size_t end = method.size();
+    const auto is_space = [](unsigned char c) { return c == ' ' || (c >= 0x09 && c <= 0x0d); };
+    while (begin < end && is_space(static_cast<unsigned char>(method[begin])))
+    {
+        ++begin;
+    }
+    while (end > begin && is_space(static_cast<unsigned char>(method[end - 1])))
+    {
+        --end;
+    }
+    std::string out(method.substr(begin, end - begin));
+    for (char& c : out)
+    {
+        const auto uc = static_cast<unsigned char>(c);
+        if (uc >= 'A' && uc <= 'Z')
+        {
+            c = static_cast<char>(uc - 'A' + 'a');
+        }
+    }
+    return out;
+}
+
+// Structural nesting depth of a JSON text, measured LEXICALLY — brackets inside string literals do
+// not count, and an escaped quote does not end a string. Used to refuse a message BEFORE handing it
+// to the recursive-descent parser (see kMaxBridgeMessageDepth); a post-parse walk would be too late,
+// because the overflow happens DURING the parse.
+std::size_t max_structural_depth(std::string_view text)
+{
+    std::size_t depth = 0;
+    std::size_t deepest = 0;
+    bool in_string = false;
+    bool escaped = false;
+    for (const char c : text)
+    {
+        if (in_string)
+        {
+            if (escaped)
+            {
+                escaped = false;
+            }
+            else if (c == '\\')
+            {
+                escaped = true;
+            }
+            else if (c == '"')
+            {
+                in_string = false;
+            }
+            continue;
+        }
+        if (c == '"')
+        {
+            in_string = true;
+        }
+        else if (c == '{' || c == '[')
+        {
+            ++depth;
+            deepest = std::max(deepest, depth);
+        }
+        else if ((c == '}' || c == ']') && depth > 0)
+        {
+            --depth;
+        }
+    }
+    return deepest;
+}
+
+// Control 2's predicate, shared by `register_method` and `dispatch` so the two can never disagree
+// about what "forbidden" means. Matches the normalized name exactly OR as a DOTTED PREFIX, so
+// `instance` also denies `instance.read`, `instance.token`, … — a credential verb is not made
+// routable by appending a segment.
+bool is_forbidden_bridge_method(std::string_view method);
+
 const std::vector<std::string>& forbidden_bridge_methods()
 {
     static const std::vector<std::string> kForbidden = {
@@ -58,6 +137,24 @@ const std::vector<std::string>& forbidden_bridge_methods()
         "shell.attach_options",
     };
     return kForbidden;
+}
+
+bool is_forbidden_bridge_method(std::string_view method)
+{
+    const std::string key = normalize_method_name(method);
+    return std::any_of(forbidden_bridge_methods().begin(), forbidden_bridge_methods().end(),
+                       [&](const std::string& forbidden) {
+                           if (key == forbidden)
+                           {
+                               return true;
+                           }
+                           // Dotted-prefix: `instance` denies `instance.anything`, but NOT a
+                           // different verb that merely starts with the same letters
+                           // (`instanced.list` stays routable).
+                           return key.size() > forbidden.size() &&
+                                  key.compare(0, forbidden.size(), forbidden) == 0 &&
+                                  key[forbidden.size()] == '.';
+                       });
 }
 
 BridgeResult BridgeResult::ok(contract::Json value)
@@ -85,6 +182,8 @@ const char* to_string(BridgeReject reject)
         return "none";
     case BridgeReject::too_large:
         return "bridge.too_large";
+    case BridgeReject::too_deep:
+        return "bridge.too_deep";
     case BridgeReject::not_json:
         return "bridge.not_json";
     case BridgeReject::not_object:
@@ -161,8 +260,7 @@ bool BridgeRouter::register_method(std::string method, BridgeHandler handler)
     }
     // CONTROL 2 (see the header): the credential-bearing methods are refused outright, so wiring
     // one through is a build-visible `false` rather than a working leak.
-    const std::vector<std::string>& forbidden = forbidden_bridge_methods();
-    if (std::find(forbidden.begin(), forbidden.end(), method) != forbidden.end())
+    if (is_forbidden_bridge_method(method))
     {
         return false;
     }
@@ -174,17 +272,25 @@ bool BridgeRouter::register_method(std::string method, BridgeHandler handler)
     return true;
 }
 
-void BridgeRouter::protect_secret(std::string secret)
+bool BridgeRouter::protect_secret(std::string secret)
 {
+    // REPORTED, not silent. Control 3 is the backstop that does not depend on anyone reasoning
+    // correctly about controls 1 and 2, so a credential that silently failed to register would
+    // disarm it with no counter and no log to notice by. Nothing upstream enforces a minimum token
+    // length (`guard_shell_attach` rejects only an EMPTY token, and `parse_instance_document`
+    // accepts any non-empty string), so a daemon publishing a short token is reachable, not
+    // hypothetical — the caller is told and decides.
     if (secret.size() < kMinProtectedSecretLength)
     {
-        return;
+        return false;
     }
     const bool already = std::any_of(secrets_.begin(), secrets_.end(),
                                      [&](const ProtectedSecret& s) { return s.raw == secret; });
     if (already)
     {
-        return;
+        // Already protected: the postcondition the caller cares about (this value cannot leave
+        // through the bridge) holds, so this is success, not a refusal.
+        return true;
     }
 
     ProtectedSecret entry;
@@ -199,6 +305,7 @@ void BridgeRouter::protect_secret(std::string secret)
         entry.encoded = dumped.substr(1, dumped.size() - 2);
     }
     secrets_.push_back(std::move(entry));
+    return true;
 }
 
 bool BridgeRouter::has_method(const std::string& method) const
@@ -237,6 +344,16 @@ BridgeDispatch BridgeRouter::dispatch(std::string_view message)
     {
         return refuse(0, BridgeReject::too_large, kJsonRpcInvalidRequest,
                       "message exceeds the bridge size limit");
+    }
+
+    // Depth SECOND, and still before the parse. The size cap does not bound the parse: the contract
+    // parser is recursive descent with no depth limit, so ~1e6 `[` inside a 1 MiB message overflows
+    // the stack DURING descent — a SIGSEGV, which the try/catch below cannot contain. Measuring the
+    // nesting lexically first is what makes "rejected without crashing the Shell" true.
+    if (max_structural_depth(message) > kMaxBridgeMessageDepth)
+    {
+        return refuse(0, BridgeReject::too_deep, kJsonRpcInvalidRequest,
+                      "message nesting exceeds the bridge depth limit");
     }
 
     contract::Json request;
@@ -299,8 +416,7 @@ BridgeDispatch BridgeRouter::dispatch(std::string_view message)
     // two are reported DIFFERENTLY on purpose: "you asked for something that is permanently denied"
     // is a distinct fact from "you asked for something that does not exist", and only the first is
     // worth alerting on.
-    const std::vector<std::string>& forbidden = forbidden_bridge_methods();
-    if (std::find(forbidden.begin(), forbidden.end(), method) != forbidden.end())
+    if (is_forbidden_bridge_method(method))
     {
         return refuse(id, BridgeReject::forbidden_method, kJsonRpcMethodNotFound,
                       "method is not reachable from editor-core");
@@ -335,10 +451,17 @@ BridgeDispatch BridgeRouter::dispatch(std::string_view message)
                       "no such bridge method");
     }
 
+    // COPIED, not called through the iterator: a handler is free to call `register_method`, whose
+    // `handlers_.emplace_back` can reallocate the vector and destroy the very callable that is
+    // executing. Only Shell-authored handlers can register, so this is a footgun rather than a
+    // renderer-reachable hole — but a std::function copy is nothing against a dispatch, and it
+    // makes the call reentrancy-safe by construction rather than by convention.
+    const BridgeHandler handler = entry->second;
+
     BridgeResult result;
     try
     {
-        result = entry->second(call);
+        result = handler(call);
     }
     catch (const std::exception&)
     {
@@ -364,9 +487,20 @@ BridgeDispatch BridgeRouter::dispatch(std::string_view message)
     // recursive walk to get wrong.
     if (carries_secret(response))
     {
+        // The CLASSIFICATION stays internal. Telling the renderer "that call produced a protected
+        // credential" is a map of which methods to attack next — the same probe-oracle reasoning the
+        // sibling asset resolver states explicitly ("the REASON is logged, never sent"). Outwardly
+        // this is indistinguishable from any other handler failure; `secrets_blocked()` remains the
+        // operator's channel, and `last_reject_` the test's.
         ++secrets_blocked_;
-        return refuse(id, BridgeReject::secret_blocked, kJsonRpcInternalError,
-                      "the response was withheld");
+        ++refused_;
+        last_reject_ = BridgeReject::secret_blocked;
+        BridgeDispatch out;
+        out.reject = BridgeReject::secret_blocked;
+        out.response = build_bridge_error(id, kJsonRpcInternalError,
+                                          to_string(BridgeReject::handler_threw),
+                                          "the bridge handler failed");
+        return out;
     }
 
     ++served_;

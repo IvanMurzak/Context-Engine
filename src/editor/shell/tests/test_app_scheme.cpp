@@ -259,6 +259,57 @@ void test_scheme_constants()
     CHECK(!shelltest::mentions(std::string(shell::kAppEntryUrl), "file:"));
 }
 
+void test_split_media_type()
+{
+    // The CEF response carries the essence and the charset in SEPARATE fields (CefResponse has
+    // distinct SetMimeType/SetCharset accessors, and CEF's own resource manager fills the first from
+    // CefGetMimeType(), which returns an essence). Handing the full value to the essence field makes
+    // Chromium's by-essence comparison fail, and under this response's own nosniff that silently
+    // refuses the stylesheet and the ES module. Only the live CEF smoke can see it, so the SPLIT is
+    // pinned here, where all three default build legs run it.
+    const shell::MediaType html = shell::split_media_type("text/html; charset=utf-8");
+    CHECK(html.essence == "text/html");
+    CHECK(html.charset == "utf-8");
+
+    // EVERY type the allowlist can return must split to a bare essence — this is the assertion that
+    // would have caught the original break, because it walks the real table rather than one example.
+    struct ExpectedEssence
+    {
+        const char* extension;
+        const char* essence;
+    };
+    static const ExpectedEssence kExpected[] = {
+        {".html", "text/html"},       {".js", "text/javascript"},
+        {".mjs", "text/javascript"},  {".css", "text/css"},
+        {".json", "application/json"},
+    };
+    for (const ExpectedEssence& expected : kExpected)
+    {
+        const shell::MediaType split =
+            shell::split_media_type(shell::media_type_for_extension(expected.extension));
+        CHECK(split.essence == expected.essence);
+        CHECK(split.charset == "utf-8");
+        // The essence must never carry a parameter — that is the whole failure mode.
+        CHECK(!shelltest::mentions(split.essence, ";"));
+        CHECK(!shelltest::mentions(split.essence, "charset"));
+    }
+
+    // Shapes the splitter must survive.
+    CHECK(shell::split_media_type("text/plain").essence == "text/plain");
+    CHECK(shell::split_media_type("text/plain").charset.empty());
+    CHECK(shell::split_media_type("  text/css  ;  charset = utf-8  ").essence == "text/css");
+    CHECK(shell::split_media_type("  text/css  ;  charset = utf-8  ").charset == "utf-8");
+    // Case-insensitive parameter NAME (the value is passed through as written).
+    CHECK(shell::split_media_type("text/css; CHARSET=UTF-8").charset == "UTF-8");
+    // A quoted value is legal per RFC 9110 and must arrive unquoted.
+    CHECK(shell::split_media_type("text/css; charset=\"utf-8\"").charset == "utf-8");
+    // charset need not be the first parameter.
+    CHECK(shell::split_media_type("text/css; boundary=x; charset=utf-8").charset == "utf-8");
+    // A parameter that is not charset must not be mistaken for one.
+    CHECK(shell::split_media_type("text/css; boundary=charsetish").charset.empty());
+    CHECK(shell::split_media_type("").essence.empty());
+}
+
 } // namespace
 
 int main()
@@ -269,5 +320,6 @@ int main()
     test_missing_root_degrades();
     test_csp_and_headers();
     test_scheme_constants();
+    test_split_media_type();
     SHELL_TEST_MAIN_END();
 }
