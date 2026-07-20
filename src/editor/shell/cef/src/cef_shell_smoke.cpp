@@ -328,6 +328,16 @@ int main(int argc, char** argv)
     // still break early.) The 30s deadline is unchanged and still bounds the wait, so a genuine
     // no-paint regression never turns the surface non-uniform, the loop runs out the clock, and the
     // assertion below fails as it should — the wait is not vacuous and cannot loop forever.
+    //
+    // ⚠ e05d2 WIDENED THIS SAME RACE: once the smoke installs the real EditorStateBridge (above),
+    // editor-core's boot-time `editor.state.get` restore actually SUCCEEDS instead of being refused,
+    // so LayoutPersistence applies a restored (non-default) arrangement asynchronously after the
+    // FIRST non-uniform paint the loop above would have broken on — intermittently red on ubuntu with
+    // the SAME "app.css's #132a44 background covers a substantial part" assertion the loop does not
+    // yet wait for. Require the loop's OWN scan to clear the same background-coverage floor that
+    // assertion checks (not merely non-uniform), exactly the CE #319 fix's own reasoning applied to
+    // the second per-pixel property: the loop waits for EXACTLY what the assertion will check, so it
+    // cannot break on a frame the still-in-flight layout restore has only partially painted.
     const std::size_t expected_renders = shell::panels::hostable_panel_ids().size();
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     bool presented = false;
@@ -344,10 +354,15 @@ int main(int argc, char** argv)
         }
         const bool hydrated =
             presented && handshake.complete() && panel_host.renders_served() >= expected_renders;
-        if (hydrated &&
-            !scan_surface(editor->compositor().cpu_surface(), editor->compositor().size()).uniform)
+        if (hydrated)
         {
-            break;
+            const SurfaceScan poll_scan =
+                scan_surface(editor->compositor().cpu_surface(), editor->compositor().size());
+            if (!poll_scan.uniform && poll_scan.scanned > 0 &&
+                poll_scan.background_texels > poll_scan.scanned / 10u)
+            {
+                break;
+            }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
