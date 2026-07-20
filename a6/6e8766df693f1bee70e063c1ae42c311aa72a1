@@ -1,0 +1,34 @@
+tools/tests/test_check_webui_assets.py
+  s_e70383bb4cb548::t_ea11d552987785 569-593
+src/editor/shell/app/editor_main.cpp
+  s_e70383bb4cb548::t_8b269293ce9012 15,43,240-248,307-325,327-331,336
+  s_6cf58c5cb49953::t_4510487134608f 326,332-335,337-338,467-469
+docs/shell.md
+  s_e70383bb4cb548::t_950d47e788f8f2 294
+  s_e70383bb4cb548::t_ac9a393edf5798 110-119
+  s_e70383bb4cb548::t_8d73a8f01aaff8 70-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a66e8766df693f1bee70e063c1ae42c311aa72a1",
+  "prompts": {},
+  "sessions": {
+    "s_6cf58c5cb49953": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c4c91a88-d26a-49a1-8abc-83b38188ae8d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e70383bb4cb548": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "96b28b90-eda7-4907-9bb9-08e5da0e87d6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
