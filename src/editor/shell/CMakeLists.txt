@@ -24,9 +24,19 @@
 #       the windowed-OSR CEF binding — the ONE piece that cannot build locally.
 #
 # D10: the Shell is an ORDINARY CLIENT. It links the published context_client SDK and the present
-# path, and NOTHING from the editor kernel (editorkernel / filesync / derivation / compose / merge /
-# assetdb / import / migrate / gui). That is enforced, not documented — see the configure-time gate
-# in src/CMakeLists.txt (`context_assert_no_linkage`) and its companion ctest.
+# path, and NOTHING from the EditorKernel's internal modules (editorkernel / filesync / derivation /
+# compose / merge / assetdb / import / migrate / editor_pkg). That is enforced, not documented — see
+# the configure-time gate in src/CMakeLists.txt (`context_assert_shell_boundary`) and its companion
+# `editor-shell-boundary` ctest.
+#
+# ⚠ CORRECTED BY e05d1: this note previously said "and nothing from ... gui", which was never what
+# the gate checked and is no longer what the Shell does. Design 04 §4 (D17) makes the C++ panel
+# models the logic + a11y authority and has the Shell render them over the bridge, so hosting panels
+# REQUIRES reaching the headless GUI libraries. The two the Shell links — `context_gui_uitree` and
+# `context_gui_contract` — are D10-clean (their closures contain nothing forbidden), which is why the
+# FORBIDDEN list needed no change. What stays out is any `context_gui_panel_*` library: those go on
+# `context_editor_panels` (panels/) and reach only the EXECUTABLE, because two of them link the
+# forbidden `context_compose`. The gate is the authority on this boundary; the prose above had drifted.
 
 add_library(context_editor_shell STATIC
     src/dpi.cpp           # per-monitor DPI (replaces the spike's DPI-1.0 pin)
@@ -38,6 +48,7 @@ add_library(context_editor_shell STATIC
     src/compositor.cpp    # the layer stack, damage, resize protocol, both present paths (03 §4)
     src/app_scheme.cpp    # e05c: context-editor://app/ resolution + the strict CSP (04 §1)
     src/ipc_bridge.cpp    # e05c: the privileged bridge envelope + token isolation (04 §1 / 08 §1)
+    src/panel_host.cpp    # e05d1: the panel-agnostic panel.* surface over the e05b roster (04 §3-§4)
     src/shell.cpp)        # WindowManager / EditorWindow / the single-threaded owner loop
 
 target_include_directories(context_editor_shell PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -45,8 +56,21 @@ target_include_directories(context_editor_shell PUBLIC ${CMAKE_CURRENT_SOURCE_DI
 # PUBLIC context_client: the Shell IS a client, and client types appear in its public headers
 # (shell.h names client::AttachOptions). PUBLIC context_render_present: the compositor's public
 # surface names OsrFrame / IPresentBlitter / CompositeUv.
+#
+# PUBLIC context_gui_uitree + context_gui_contract (e05d1): panel_host.h names uitree::Panel /
+# uitree::Command and contract::Contribution in its public surface. BOTH ARE D10-CLEAN — neither is
+# on the shell-boundary gate's FORBIDDEN list, and their own closures stay inside it
+# (context_gui_uitree links nothing but context_warnings; context_gui_contract links context_bridge,
+# which the gate deliberately does NOT forbid because context_client links it too). This is what lets
+# the Shell host panels while the gate's FORBIDDEN list stays byte-identical.
+#
+# NOTE WHAT IS *NOT* HERE: no `context_gui_panel_*` library. The host is panel-agnostic (see
+# panel_host.h), so panel libraries are linked by the EXECUTABLE that binds their providers —
+# src/editor/shell/panels/ below. That layering is load-bearing rather than tidy: two of today's
+# panels (scenetree, inspector) link `context_compose`, which IS forbidden, so a panel library on
+# THIS target's closure would break the gate the moment e05d3 tried to host them.
 target_link_libraries(context_editor_shell
-    PUBLIC context_client context_render_present
+    PUBLIC context_client context_render_present context_gui_uitree context_gui_contract
     PRIVATE context_warnings)
 
 # MSVC exception semantics (/EHsc), restored for the Shell family.
@@ -108,6 +132,7 @@ set(_context_shell_tests
     test_compositor    # layer order, damage, resize protocol, PET_POPUP, both present paths
     test_app_scheme    # e05c: URL->asset resolution, traversal refusal, the strict CSP
     test_ipc_bridge    # e05c: the T1 adversarial envelope suite + the 3 token-isolation controls
+    test_panel_host    # e05d1: the panel-agnostic roster/render/command/gesture/D6-state surface
     test_shell)        # the owner loop end to end + the authenticated-attach guard
 
 foreach(_t IN LISTS _context_shell_tests)
@@ -119,6 +144,13 @@ foreach(_t IN LISTS _context_shell_tests)
         ${CMAKE_CURRENT_SOURCE_DIR}/../../render/tests)
     add_test(NAME editor-shell-${_t} COMMAND context_editor_shell_${_t})
 endforeach()
+
+# --- the panel composition root (e05d1) ----------------------------------------------------------
+# Added AFTER context_editor_shell (it links it) and BEFORE context_editor + the CEF smoke (they link
+# it). Deliberately NOT inside the CONTEXT_BUILD_GUI_CEF branch: the panel host and its providers are
+# CEF-free, so they build + unit-test on the local dev gate and all three default `build` legs — the
+# same discipline the rest of the Shell follows.
+add_subdirectory(panels)
 
 # --- the Session-0-safe smoke (the BLOCKING CI requirement of e04) -------------------------------
 # The self-hosted Windows CI runner has no interactive desktop and native-GPU windowed teardown
@@ -154,7 +186,11 @@ endif()
 # scripted host; with CEF off the editor still boots, runs the owner loop, and presents — it simply
 # has no web content, which is the honest state of a build that has no browser in it.
 add_executable(context_editor app/editor_main.cpp)
-target_link_libraries(context_editor PRIVATE context_editor_shell)
+# context_editor_panels (e05d1) brings the panel providers — and with them the panel libraries
+# this build can link. It carries context_editor_shell transitively (PUBLIC), so naming both
+# would be redundant; the panels library is the one that must be here, because it is what makes
+# the executable's D10-audited closure include the hosted panels.
+target_link_libraries(context_editor PRIVATE context_editor_panels)
 target_link_options(context_editor PRIVATE ${_context_shell_static_runtime})
 
 # The e05c default asset root, compiled in so a dev build of `context_editor` finds editor-core with

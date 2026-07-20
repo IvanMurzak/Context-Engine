@@ -61,8 +61,14 @@ if(OS_WINDOWS OR OS_LINUX)
     # cef_string_utf16_clear`). The sibling CEF exes (src/editor/cef/, src/editor/gui/host/) list
     # their libs in the opposite order and link fine only because THEIR CEF-calling code is a direct
     # object file of the executable, not an archive member — do not "harmonize" this line to match.
+    #
+    # context_editor_panels (e05d1) joins the line for the same archive-ordering reason and in the
+    # same half: the smoke binds the real panel providers so the live renderer has something to
+    # hydrate. It carries context_editor_shell transitively, and it introduces NO CEF references of
+    # its own (every panel library is CEF-free), so its position relative to the CEF libs is not
+    # load-bearing — but keeping it left of them costs nothing and matches the rule above.
     target_link_libraries(context_editor_shell_cef_smoke
-        context_editor_cef libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+        context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
     target_include_directories(context_editor_shell_cef_smoke PRIVATE "${CEF_ROOT}")
 
     # Stage the libcef binary payload + resources next to the exe so it boots from the build tree.

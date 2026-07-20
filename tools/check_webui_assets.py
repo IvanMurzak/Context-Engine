@@ -83,6 +83,48 @@ CEF_CONSTANTS = (
     ("cancel function", "cef_shell.cpp", "kBridgeCancelFunction", "BRIDGE_CANCEL_FUNCTION"),
 )
 
+# --- the M9 e05d1 PANEL contract (check 7) --------------------------------------------------------
+# The `panel.*` method names and the D6 state member names, in the two languages that must agree
+# about them. Same authority direction as SCHEME_CONSTANTS: the C++ side is what actually ROUTES, so
+# its value is read and the bundle is compared against it.
+#
+# WHY THIS GATE EXISTS. A rename on either side unbinds the panel surface SILENTLY — the renderer
+# calls a method the Shell no longer routes, `panel.list` refuses with `unknown_method`, PanelHost
+# reports "no readable roster", and the editor comes up with no panels and NO build error anywhere.
+# That is precisely the class of failure e05c's nosniff break taught: a deterministic break with no
+# local signal. Here it is mechanised instead.
+PANEL_CONSTANTS = (
+    ("panel.list", "panel_host.h", "kPanelListMethod", "PANEL_LIST_METHOD"),
+    ("panel.render", "panel_host.h", "kPanelRenderMethod", "PANEL_RENDER_METHOD"),
+    ("panel.command", "panel_host.h", "kPanelCommandMethod", "PANEL_COMMAND_METHOD"),
+    ("panel.gesture", "panel_host.h", "kPanelGestureMethod", "PANEL_GESTURE_METHOD"),
+    ("panel.state.get", "panel_host.h", "kPanelStateGetMethod", "PANEL_STATE_GET_METHOD"),
+    ("panel.state.set", "panel_host.h", "kPanelStateSetMethod", "PANEL_STATE_SET_METHOD"),
+)
+
+# The D6 persisted-blob member names, which live in the GUI contract library rather than the Shell.
+PANEL_STATE_CONSTANTS = (
+    ("state schemaVersion key", "kStateSchemaVersionKey", "STATE_SCHEMA_VERSION_KEY"),
+    ("state data key", "kStateDataKey", "STATE_DATA_KEY"),
+)
+
+# The closed gesture vocabulary (04 §4). Read from the C++ `gesture_verb_token` switch and compared
+# against the bundle's GESTURE_VERBS array, so a verb added on one side without the other — which
+# would be refused at runtime with no build error — fails here instead.
+GESTURE_VERBS = ("begin", "extend", "commit", "cancel")
+
+# The pinned docking engine must be LOADED BY THE DOCUMENT, not bundled. Asserting the script tag is
+# what keeps `webui-assets`' SHA re-hash of the staged file meaningful: if the engine were ever
+# folded into editor-core.js, the verified artifact would stop being the shipped one while the pin
+# check kept passing over a file nothing loads.
+DOCKVIEW_SCRIPT = "dockview-core.min.js"
+
+# The editor-core npm dependency allowlist (the s1-approved set, 04 §2 / 08 §3). Owner-ratified and
+# VERSION-PINNED: a bump past 7.0.2, or any additional dockview-* package, re-triggers the standing
+# consent gate. Checked from `package.json` so a dependency added there — the one place the license
+# gate also reads — cannot slip in without tripping this.
+EDITOR_CORE_DEPENDENCIES = {"dockview-core": "7.0.2"}
+
 _CHUNK = 1 << 20
 
 
@@ -264,6 +306,108 @@ def check_scheme_contract(asset_dir: Path, bundle_name: str, shell_include_dir: 
     return failures
 
 
+def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: Path,
+                         contract_include_dir: Path, package_json: Path) -> list[str]:
+    """Check 7 — the M9 e05d1 panel surface: cross-language vocabulary, engine loading, deps."""
+    failures: list[str] = []
+
+    bundle = asset_dir / bundle_name
+    if not bundle.is_file():
+        return [f"bundle missing: {bundle}"]
+    bundle_text = bundle.read_text(encoding="utf-8", errors="replace")
+
+    # 7a — the `panel.*` method names agree across the two languages.
+    for human, cpp_file, cpp_name, ts_name in PANEL_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(
+                f"{human}: the bundle does not declare {ts_name} — the hydration runtime cannot be "
+                f"calling the method the Shell routes")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
+                f"Shell would route one name and editor-core would call another, so the panel would "
+                f"never mount and NOTHING would report an error.")
+
+    # 7b — the D6 persisted-blob member names agree (gui/contract/panel_state.h is their authority).
+    for human, cpp_name, ts_name in PANEL_STATE_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(contract_include_dir / "panel_state.h", cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(f"{human}: the bundle does not declare {ts_name}")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r} — a "
+                f"persisted panel state would be written under one key and read under another, so "
+                f"every restore would degrade to the D6 null-state path.")
+
+    # 7c — the closed gesture vocabulary. Read from the C++ token function so the two cannot diverge.
+    panel_host_text = (shell_include_dir / "panel_host.h").read_text(encoding="utf-8")
+    for verb in GESTURE_VERBS:
+        if f'"{verb}"' not in bundle_text:
+            failures.append(
+                f"gesture verb {verb!r} is missing from the bundle — the hydration runtime cannot "
+                f"emit a verb it does not name, so that half of the gesture contract is dead")
+        if verb not in panel_host_text:
+            raise CheckError(
+                f"gesture verb {verb!r} is not named in panel_host.h — the closed vocabulary moved, "
+                f"so this check can no longer verify anything. Update GESTURE_VERBS.")
+
+    # 7d — the pinned engine is LOADED by the document rather than bundled (see DOCKVIEW_SCRIPT).
+    document = asset_dir / APP_DOCUMENT
+    if not document.is_file():
+        failures.append(f"served document missing: {document}")
+    else:
+        markup = _strip_html_comments(document.read_text(encoding="utf-8", errors="replace"))
+        if not re.search(rf"<script\b[^>]*\bsrc\s*=\s*[\"'][^\"']*{re.escape(DOCKVIEW_SCRIPT)}",
+                         markup, re.IGNORECASE):
+            failures.append(
+                f"{APP_DOCUMENT} does not load {DOCKVIEW_SCRIPT} — PanelHost reads the docking "
+                f"engine off the UMD global that script publishes, so no panel can mount")
+        if not (asset_dir / DOCKVIEW_SCRIPT).is_file():
+            failures.append(f"the pinned docking engine is not staged: {asset_dir / DOCKVIEW_SCRIPT}")
+
+    # 7e — the editor-core dependency allowlist (the s1-approved set, owner-ratified + version-pinned).
+    try:
+        package = json.loads(package_json.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CheckError(f"cannot read {package_json}: {exc}") from exc
+    declared = package.get("dependencies", {})
+    if not isinstance(declared, dict):
+        raise CheckError(f"{package_json}: 'dependencies' is not an object")
+    if declared != EDITOR_CORE_DEPENDENCIES:
+        failures.append(
+            f"editor-core dependencies DRIFTED from the s1-approved set: expected "
+            f"{EDITOR_CORE_DEPENDENCIES}, found {declared}. A bump past the pinned version, or any "
+            f"additional package, re-triggers the standing owner-consent gate (design 08 section 3) "
+            f"— it is not a code change to make on the way past.")
+    return failures
+
+
+def run_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: Path,
+                       contract_include_dir: Path, package_json: Path) -> int:
+    """The M9 e05d1 gate (check 7). Separate entry point so a failure names the right gate."""
+    if not asset_dir.is_dir():
+        raise CheckError(f"asset dir does not exist: {asset_dir}")
+    if not shell_include_dir.is_dir():
+        raise CheckError(f"shell include dir does not exist: {shell_include_dir}")
+    if not contract_include_dir.is_dir():
+        raise CheckError(f"gui contract include dir does not exist: {contract_include_dir}")
+
+    failures = check_panel_contract(asset_dir, bundle_name, shell_include_dir, contract_include_dir,
+                                    package_json)
+    if failures:
+        for failure in failures:
+            print(f"[check_webui_assets] FAIL: {failure}", file=sys.stderr)
+        return 1
+
+    print(f"[check_webui_assets] OK: the panel.* vocabulary, the D6 state keys and the gesture verbs "
+          f"match the Shell's C++ constants; {DOCKVIEW_SCRIPT} is loaded by the document and the "
+          f"editor-core dependency set is the s1-approved one")
+    return 0
+
+
 def run(asset_dir: Path, manifest_path: Path, bundle_name: str) -> int:
     if not asset_dir.is_dir():
         raise CheckError(f"asset dir does not exist: {asset_dir}")
@@ -330,12 +474,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--shell-cef-dir", type=Path,
                         default=REPO_ROOT / "src" / "editor" / "shell" / "cef" / "src",
                         help="dir holding cef_shell.cpp (--scheme-contract only)")
+    parser.add_argument("--panel-contract", action="store_true",
+                        help="run the M9 e05d1 gate (cross-language panel.* vocabulary + D6 state "
+                             "keys + gesture verbs + docking-engine loading + the editor-core "
+                             "dependency allowlist) instead of the asset checks")
+    parser.add_argument("--contract-include-dir", type=Path,
+                        default=REPO_ROOT / "src" / "editor" / "gui" / "contract" / "include" /
+                        "context" / "editor" / "gui" / "contract",
+                        help="dir holding panel_state.h (--panel-contract only)")
+    parser.add_argument("--package-json", type=Path,
+                        default=REPO_ROOT / "src" / "editor" / "webui" / "core" / "package.json",
+                        help="editor-core's package.json (--panel-contract only)")
     args = parser.parse_args(argv)
 
     try:
         if args.scheme_contract:
             return run_scheme_contract(args.asset_dir, args.bundle_name, args.shell_include_dir,
                                        args.shell_cef_dir)
+        if args.panel_contract:
+            return run_panel_contract(args.asset_dir, args.bundle_name, args.shell_include_dir,
+                                      args.contract_include_dir, args.package_json)
         return run(args.asset_dir, args.manifest, args.bundle_name)
     except CheckError as exc:
         print(f"[check_webui_assets] ERROR: {exc}", file=sys.stderr)

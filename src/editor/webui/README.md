@@ -115,25 +115,45 @@ gate-exclusion regex and runs automatically in the general ctest step on all thr
   and routes with (scheme, origin, endpoint, query + cancel function names); and no `file://` URL
   reached the asset set (a DoD line). Checked against the BUILT asset, so it sees what the renderer
   will actually get, and fails closed when the bundle is missing.
+- `webui-panel-contract` — the e05d1 gate over the WIDEST cross-language seam in the editor: the six
+  `panel.*` method names, the two D6 state member names and the four gesture verbs, each read out of
+  the BUILT bundle and compared to the C++ constants. A rename on either side unbinds the panel layer
+  SILENTLY (the editor comes up with no panels and nothing reports an error), which is the same
+  no-local-signal failure class e05c's `nosniff` break taught. It also asserts the two facts that
+  would make the panel layer non-functional in a way no unit test can see: that `index.html` LOADS the
+  pinned docking engine (PanelHost reads it off the UMD global that script publishes) rather than
+  bundling it — bundling would void `webui-assets`' SHA re-hash of the shipped artifact — and that
+  editor-core's declared dependency set is still exactly the owner-ratified, version-pinned s1 set.
 - `webui-client-typings-drift` — re-projects the build-generated schema and refuses any byte
   difference.
 
 Python-side unit tests live in `tools/tests/test_gen_client_typings.py`,
 `tools/tests/test_check_webui_assets.py`, and `tools/tests/test_fetch_dockview.py`.
 
-## Scope boundary (after e05c)
+## Scope boundary (after e05d1)
 
 e05a made this the **toolchain substrate**; e05c added the **served document set** (`app/`) and the
-**JS half of the privileged bridge**. dockview is acquired, verified and STAGED — its stylesheet is
-linked by `index.html` — but nothing consumes its docking **API** yet; wrapping it in a PanelHost is
-e05d's. Deliberately **not** here:
+**JS half of the privileged bridge**; e05d1 added the **app**: `PanelHost` over Dockview and the
+hydration runtime. The docking engine is now consumed through its API (loaded as the pinned UMD
+script by `index.html`, typed structurally in `dockview.ts`), and every Shell-hostable panel mounts
+and hydrates. Deliberately **not** here:
 
 - ~~the `context-editor://` app scheme and the privileged IPC bridge~~ → ✅ **e05c**. The scheme's
   NATIVE half (registration, resource handler, message router) lives in `src/editor/shell/`, not
   here; this directory owns only what is served and what runs in the renderer.
-- `PanelHost` (the dockview wrapper that owns panel lifecycle, design 04 §2) → **e05d**
-- the panel hydration runtime → **e05d**
-- layout persistence → **e05d**
+- ~~`PanelHost` (the dockview wrapper that owns panel lifecycle, design 04 §2)~~ → ✅ **e05d1**
+- ~~the panel hydration runtime~~ → ✅ **e05d1**
+- layout persistence + region maps → **e05d2**. `PanelHost.captureLayout()` / `restoreLayout()` exist
+  because they are geometry operations this layer owns, but NOTHING here writes them anywhere: the
+  Shell is the single writer of `.editor/editor-state.json` (C-F3), and publishing layout to it over
+  the bridge is e05d2's. A direct write from editor-core is a defect even if it works.
+- live Scene tree + Inspector → **e05d3**. Both are LISTED by `panel.list` and report
+  `hosted: false` today, because their C++ libraries link `context_compose` and the D10 shell-boundary
+  gate forbids it. Nothing in this directory special-cases that — the runtime renders whatever the
+  roster says is hosted, which is exactly what lets e05d3 land them with no change here.
+- OS-window tear-out → **e10**. Dockview's popout API is deliberately UNUSED (B-F2): v7 rejects
+  non-http(s) popout URLs, and its popout is opener-owned DOM transfer, which cannot produce the
+  independent per-window editor-core instances design 04 §1 requires.
 
 Grow the app along those seams. `index.ts` is the entry (re-export + boot) and should stay that
 thin — put new surface in its own module and re-export it.
