@@ -22,6 +22,7 @@
 #include "shell_test.h"
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -129,6 +130,28 @@ void parse_shell_region_reads_a_well_formed_element_and_clamps_negatives()
     CHECK(parse_shell_region(region("view.neg", "native", -50, -10, 200, 100), clamped));
     CHECK(clamped.rect.origin.x == 0u);
     CHECK(clamped.rect.origin.y == 0u);
+
+    // An OUT-OF-RANGE double — a hostile `1e300` beyond int64 (whose direct `as_int()` cast is
+    // float-cast-overflow UNDEFINED BEHAVIOUR the blocking ASan+UBSan leg traps), a value above uint32
+    // but inside int64 (`9e18`, which would silently WRAP through a raw uint32 cast), and a NaN — all
+    // clamp to 0, read on the double before any cast. Only the in-range `height` survives. This pins
+    // the untrusted-wire guard read_pixel carries; `Json::parse` accepts every one of these off the
+    // renderer.
+    Json hostile_rect = Json::object();
+    hostile_rect.set("x", Json(1e300));
+    hostile_rect.set("y", Json(9e18));
+    hostile_rect.set("width", Json(std::numeric_limits<double>::quiet_NaN()));
+    hostile_rect.set("height", Json(64.0));
+    Json hostile = Json::object();
+    hostile.set("id", Json("view.hostile"));
+    hostile.set("kind", Json("viewport"));
+    hostile.set("rect", hostile_rect);
+    ShellRegion overflow;
+    CHECK(parse_shell_region(hostile, overflow));
+    CHECK(overflow.rect.origin.x == 0u);
+    CHECK(overflow.rect.origin.y == 0u);
+    CHECK(overflow.rect.size.width == 0u);
+    CHECK(overflow.rect.size.height == 64u);
 }
 
 void parse_shell_region_rejects_malformed_elements()

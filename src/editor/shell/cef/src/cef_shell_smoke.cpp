@@ -39,6 +39,7 @@
 
 #include "context/editor/shell/app_scheme.h"
 #include "context/editor/shell/cef/cef_shell.h"
+#include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
@@ -282,6 +283,30 @@ int main(int argc, char** argv)
     {
         return finish(1);
     }
+
+    // --- the editor-state + region-map surface (e05d2) ----------------------------------------
+    // editor-core's LayoutPersistence calls `editor.state.get` on boot (the restore read) and
+    // `editor.state.publish` / `editor.regions.publish` on every layout change. Those methods ride
+    // the SAME privileged bridge as `panel.*`; unless the REAL EditorStateBridge is installed here,
+    // the live boot handshake hits the router's deny-by-default `unknown_method` REFUSAL and the "no
+    // envelope refusals" assertion below fails. Wire it exactly as `editor_main.cpp` does — the Shell
+    // is the single writer of `.editor/editor-state.json` (03 §1), reached through the manager's
+    // store; a published region map routes into this window's InputArbiter (03 §6). `manager` is
+    // declared above this bridge so it OUTLIVES the handlers this install captures, and teardown is
+    // ordered (`manager.shutdown()` runs before any local unwinds), so no handler is invoked after
+    // these locals die — the same lifetime rationale `panel_host` above relies on.
+    shell::EditorStateBridge editor_state_bridge;
+    editor_state_bridge.bind_store(&manager.state_store(), now_us);
+    editor_state_bridge.bind_regions(
+        [&manager](std::vector<shell::ShellRegion> regions)
+        {
+            if (shell::EditorWindow* target_window = manager.window(0))
+            {
+                target_window->input().regions().publish(std::move(regions));
+            }
+        });
+    SMOKE_CHECK(editor_state_bridge.install(bridge),
+                "the editor.state.*/editor.regions.* bridge surface installed");
 
     // Drive the integrated pump until the browser has painted, the bridge handshake completed,
     // every hostable panel has hydrated, AND the composed surface has ACTUALLY REPAINTED with the

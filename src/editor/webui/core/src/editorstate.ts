@@ -103,32 +103,35 @@ export class EditorStateClient {
 
     /** Publish the current arrangement + per-panel blobs. `false` when the Shell refused to store it. */
     async publish(layout: unknown, panels: Readonly<Record<string, unknown>>): Promise<boolean> {
-        try {
-            await this.#bridge.call(EDITOR_STATE_PUBLISH_METHOD, { layout, panels });
-            return true;
-        } catch (error) {
-            if (error instanceof BridgeError) {
-                return false;
-            }
-            throw error;
-        }
+        return this.#callTolerant(EDITOR_STATE_PUBLISH_METHOD, { layout, panels });
     }
 
     /** Publish the window's region map (03 §6). `false` when the Shell refused it. */
     async publishRegions(regions: readonly ShellRegion[]): Promise<boolean> {
+        return this.#callTolerant(EDITOR_REGIONS_PUBLISH_METHOD, {
+            regions: regions.map((region) => ({
+                id: region.id,
+                kind: region.kind,
+                rect: {
+                    x: region.rect.x,
+                    y: region.rect.y,
+                    width: region.rect.width,
+                    height: region.rect.height,
+                },
+            })),
+        });
+    }
+
+    /**
+     * Call a persistence method, tolerating a Shell REFUSAL. A `BridgeError` (a full disk, a
+     * read-only project) resolves to `false` so a persistence failure never takes down a working
+     * editor; any other error is a real bug and propagates. This is the single home of that
+     * `false`-on-refusal policy — every publish path shares it, so the contract cannot drift between
+     * them.
+     */
+    async #callTolerant(method: string, params: Record<string, unknown>): Promise<boolean> {
         try {
-            await this.#bridge.call(EDITOR_REGIONS_PUBLISH_METHOD, {
-                regions: regions.map((region) => ({
-                    id: region.id,
-                    kind: region.kind,
-                    rect: {
-                        x: region.rect.x,
-                        y: region.rect.y,
-                        width: region.rect.width,
-                        height: region.rect.height,
-                    },
-                })),
-            });
+            await this.#bridge.call(method, params);
             return true;
         } catch (error) {
             if (error instanceof BridgeError) {
@@ -208,7 +211,18 @@ export class LayoutPersistence {
         const persisted = await this.#stateClient.get();
         let layoutRestored = false;
         if (isRecord(persisted.layout)) {
-            layoutRestored = this.#panelHost.restoreLayout(persisted.layout);
+            try {
+                layoutRestored = this.#panelHost.restoreLayout(persisted.layout);
+            } catch {
+                // A CORRUPT layout blob (Dockview's `fromJSON` throws on an invalid grid — a downgrade,
+                // a hand-edit, a schema change) degrades to the defaults `start` already opened, exactly
+                // like the per-panel degrade below. It must NOT abort the whole restore: an abort here
+                // propagates to boot's catch, `attach` never runs, and persistence is dead for the
+                // session with the bad blob never overwritten. Degrading instead lets `attach` run and
+                // the next publish replace the blob — self-healing, per this module's failure-tolerant
+                // contract.
+                layoutRestored = false;
+            }
         }
         let panelsRestored = 0;
         const degraded: string[] = [];
@@ -288,18 +302,28 @@ export class LayoutPersistence {
         if (layout === null || layout === undefined) {
             return; // no docking root up: nothing to persist
         }
+        // Gather every mounted panel's D6 blob CONCURRENTLY: each getState is an independent bridge
+        // round-trip and the results land in an order-independent map, so N sequential round-trip
+        // latencies collapse to ~1 — which matters most on the `pagehide` flush, where a serialized
+        // chain is the likeliest to be cut short before the last panel is read.
         const panels: Record<string, unknown> = {};
-        for (const id of this.#panelHost.mounted) {
-            const state = await this.#panelClient.getState(id);
-            if (state !== null && state !== undefined) {
-                panels[id] = state;
-            }
-        }
-        await this.#stateClient.publish(layout, panels);
-        // Region maps ride the SAME layout-change signal (03 §6): the Shell replaces its per-window
-        // map wholesale, so a removed viewport's rect never outlives it. Empty today (no viewport
-        // panels — those are e11); publishing the PATH is what e05d2 delivers.
-        await this.#stateClient.publishRegions(this.#regionProvider());
+        await Promise.all(
+            [...this.#panelHost.mounted].map(async (id): Promise<void> => {
+                const state = await this.#panelClient.getState(id);
+                if (state !== null && state !== undefined) {
+                    panels[id] = state;
+                }
+            }),
+        );
+        // The layout blob and the region map ride the SAME layout-change signal (03 §6) but are two
+        // independent publishes, so send both at once rather than one after the other. The Shell
+        // replaces its per-window region map wholesale, so a removed viewport's rect never outlives
+        // it. Empty today (no viewport panels — those are e11); publishing the PATH is what e05d2
+        // delivers.
+        await Promise.all([
+            this.#stateClient.publish(layout, panels),
+            this.#stateClient.publishRegions(this.#regionProvider()),
+        ]);
     }
 
     /** Stop persisting and release every listener. Idempotent. */
