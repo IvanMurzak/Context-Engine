@@ -1,0 +1,29 @@
+src/editor/webui/core/src/editorstate.ts
+  s_e70383bb4cb548::t_f9337412f333f6 214-225
+  s_e70383bb4cb548::t_37776b27847750 305-308,310-326
+  s_e70383bb4cb548::t_e24b49da2ebef0 106,111-132,134
+src/editor/shell/tests/test_editor_state_bridge.cpp
+  s_e70383bb4cb548::t_ac16f84e87b9a7 133-154
+  s_e70383bb4cb548::t_ef9ee4281d11bc 25
+src/editor/shell/cef/src/cef_shell_smoke.cpp
+  s_e70383bb4cb548::t_808f34a27569c0 42
+  s_e70383bb4cb548::t_bacedf59ab2340 287-310
+src/editor/shell/src/editor_state_bridge.cpp
+  s_e70383bb4cb548::t_10f6bb19ef04b2 17-20,32-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "fc36877e30e3ad23872473f25918b15653f32426",
+  "prompts": {},
+  "sessions": {
+    "s_e70383bb4cb548": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "96b28b90-eda7-4907-9bb9-08e5da0e87d6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
