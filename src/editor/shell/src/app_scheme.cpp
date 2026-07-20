@@ -334,15 +334,23 @@ const char* app_csp_header()
     // One string, spelled once — see the header for why each directive is what it is.
     return "default-src 'none'; "
            "script-src 'self'; "
-           "style-src 'self'; "
-           // The ONE inline relaxation, scoped to the style ATTRIBUTE alone: the pinned,
-           // SHA-verified dockview-core engine positions panels by writing `style=` attributes at
-           // runtime, which `style-src 'self'` refuses outright (so the docking layout never
-           // manifests). `style-src-attr` governs ONLY that attribute path, so `style-src` — and
-           // the `style-src-elem` fallback it feeds, which governs <style>/<link> — stays 'self',
-           // and `script-src 'self'` is untouched: the C-F6 script backstop is unaffected and an
-           // injected <style> or stylesheet is still refused. See the header for the full rationale.
-           "style-src-attr 'unsafe-inline'; "
+           // The ONE inline relaxation, and it is confined to STYLE. The pinned, SHA-verified
+           // dockview-core engine needs inline CSS two ways at runtime: it INJECTS a <style> element
+           // for its base rules (the webpack style-loader `.dv-scrollable{...}` insert) AND it
+           // POSITIONS panels/sashes by writing inline style through the CSSOM
+           // (`element.style.setProperty(...)`). The first is governed by style-src-elem, the second
+           // by style-src-attr — and BOTH fall back to style-src. The narrower
+           // `style-src-attr 'unsafe-inline'` split was TRIED and does NOT hold on this pinned
+           // CEF/Chromium build: it could never cover the <style>-element path (that is
+           // style-src-elem, not -attr), AND the build did not honour -attr as a distinct directive,
+           // so it enforced `style-src 'self'` on the CSSOM writes too — the docking layout never
+           // manifested (editor-cef-smoke-shell stayed red on ubuntu + windows). `'unsafe-inline'`
+           // on style-src is the directive this build actually enforces for both paths. It stays
+           // DEFENSIBLY strict: `script-src 'self'` is untouched (no inline/`eval` script — the
+           // C-F6 backstop holds), and with `connect-src 'none'`, `img-src 'self' data:` and
+           // `font-src 'self'` an inline style has nowhere to exfiltrate to (no external `url()`,
+           // font or fetch). See the header for the full rationale.
+           "style-src 'self' 'unsafe-inline'; "
            "img-src 'self' data:; "
            "font-src 'self'; "
            "connect-src 'none'; "

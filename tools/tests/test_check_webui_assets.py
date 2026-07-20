@@ -305,11 +305,11 @@ def test_documentation_comments_do_not_trip_the_gate(tmp_path: Path) -> None:
                           '<img src="./x.png" onerror="steal()"><main id="editor-root">'),
 ])
 def test_csp_violating_document_fails(tmp_path: Path, bad_document: str) -> None:
-    """Each of these must fail the gate at BUILD time. Five are BLOCKED by the served CSP at runtime
-    (inline <script> body, inline <style> element, javascript: URL, two inline event handlers). The
-    inline `style=` attribute is the one exception: `style-src-attr 'unsafe-inline'` now tolerates it
-    at runtime for the vendored dockview-core engine, but the authored document is kept free of it as
-    defense-in-depth — so the gate rejects it either way."""
+    """Each of these must fail the gate at BUILD time. Four are BLOCKED by the served CSP at runtime
+    (inline <script> body, javascript: URL, two inline event handlers). The inline <style> element
+    and the inline `style=` attribute are NOT blocked at runtime — `style-src 'self' 'unsafe-inline'`
+    tolerates inline CSS for the vendored dockview-core engine — but the AUTHORED document is kept
+    free of both as defense-in-depth, so the gate rejects them either way."""
     assert _run_scheme(tmp_path, document=bad_document) == 1
 
 

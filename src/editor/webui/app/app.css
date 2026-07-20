@@ -1,11 +1,12 @@
 /*
  * editor-core's base stylesheet (M9 e05c).
  *
- * A SEPARATE FILE rather than a <style> block, because `style-src 'self'` (the fallback governing
- * <style>/<link>) carries no `unsafe-inline` — an inline <style> block would be blocked by the
- * browser. The lone relaxation in the response, `style-src-attr 'unsafe-inline'`, is attribute-only
- * and exists for the vendored dockview-core engine's runtime `style=` positioning, not for stylesheets or
- * inline blocks. It is also the second asset
+ * A SEPARATE FILE rather than a <style> block, kept so as defense-in-depth. The response's
+ * `style-src 'self' 'unsafe-inline'` DOES admit inline CSS — it must, because the vendored
+ * dockview-core engine injects a <style> element and writes CSSOM inline styles at runtime, and this
+ * pinned CEF/Chromium build enforces `style-src` for both — but editor-core's OWN authored documents
+ * stay inline-style-free anyway, which the `webui-scheme-contract` gate enforces mechanically so the
+ * relaxation's blast radius stays the vendored engine. This file is also the second asset
  * the live smoke pulls over the scheme, which is what proves the resource handler serves more than
  * one path and gets the media type right (a `text/css` served as anything else is ignored, and the
  * smoke's per-pixel background assertion would fail).

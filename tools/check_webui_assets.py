@@ -24,14 +24,14 @@ proves on its own:
 With ``--scheme-contract`` it additionally runs the M9 e05c gate over the SERVED DOCUMENT SET:
 
   4. **The document is CSP-clean.** ``index.html`` carries no inline ``<script>`` body and no
-     ``style=`` attribute. The Shell serves ``script-src 'self'`` and ``style-src 'self'`` with no
-     ``unsafe-inline`` for either — an inline ``<script>``, event handler or ``<style>`` element is
-     BLOCKED by the browser at runtime, so the failure mode of forgetting THAT rule is a blank editor
-     with a console message; this turns it into a build error. The one runtime relaxation,
-     ``style-src-attr 'unsafe-inline'`` (``app_csp_header()``), exists only for the vendored
-     dockview-core engine's runtime ``style=`` positioning: the AUTHORED document is still kept free
-     of inline styles here, as defense-in-depth, so the relaxation's blast radius stays the vendored
-     engine and never authored markup.
+     inline ``<style>``/``style=``. The Shell serves ``script-src 'self'`` with no ``unsafe-inline``
+     — an inline ``<script>`` or event handler is BLOCKED by the browser at runtime, so the failure
+     mode of forgetting THAT rule is a blank editor with a console message; this turns it into a
+     build error. ``style-src`` DOES carry ``'unsafe-inline'`` (``app_csp_header()`` — the vendored
+     dockview-core engine injects a ``<style>`` element and writes CSSOM inline styles at runtime,
+     which the pinned CEF/Chromium build enforces through ``style-src``), but the AUTHORED document
+     is still kept free of inline styles here as defense-in-depth, so the relaxation's blast radius
+     stays the vendored engine and never authored markup.
   5. **The scheme vocabulary does not drift across languages.** The scheme, editor-core's origin,
      the IPC endpoint and the injected query-function name are each declared in C++ (the Shell
      serves and routes with them) AND compiled into the TS bundle (editor-core calls with them).
@@ -293,14 +293,15 @@ def check_csp_clean_document(document: Path) -> list[str]:
                 f"editor will load blank (design 04 section 1 / 08 section 2)")
     if re.search(r"<style\b", text, re.IGNORECASE):
         failures.append(
-            f"{document.name} contains an inline <style> element — style-src 'self' blocks it "
-            f"(style-src-attr relaxes only the style= ATTRIBUTE, never <style> elements); put the "
-            f"rules in {APP_STYLESHEET} instead")
+            f"{document.name} contains an inline <style> element — editor-core's authored documents "
+            f"are kept inline-style-free as defense-in-depth (the response's style-src 'unsafe-inline' "
+            f"exists only for the vendored dockview-core engine's runtime DOM, not authored markup); "
+            f"put the rules in {APP_STYLESHEET} instead")
     if re.search(r"<[^>]*\sstyle\s*=", text, re.IGNORECASE):
         failures.append(
             f"{document.name} contains an inline style= attribute — the authored document is kept "
-            f"free of inline styles as defense-in-depth; style-src-attr 'unsafe-inline' is relaxed "
-            f"only for the vendored dockview-core engine, not for authored markup")
+            f"free of inline styles as defense-in-depth; the response's style-src 'unsafe-inline' is "
+            f"relaxed only for the vendored dockview-core engine, not for authored markup")
     # An inline event handler is inline SCRIPT by another spelling: script-src 'self' with no
     # unsafe-inline blocks `onclick="..."` exactly as it blocks an inline <script> body. Checking
     # `javascript:` but not `on*=` left the more common of the two uncovered.

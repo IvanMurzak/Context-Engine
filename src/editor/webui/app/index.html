@@ -13,10 +13,13 @@
   event handler would be BLOCKED by the browser rather than merely frowned upon — which is the point:
   it is the backstop that keeps hostile authored project content, rendered through the hydration
   runtime, from executing in the trusted zone even if the escaping contract springs a leak (C-F6).
-  The style side is nearly as strict: `style-src 'self'` still refuses an inline `<style>` element
-  and a cross-origin sheet; only `style-src-attr 'unsafe-inline'` is widened, and solely for the
-  vendored dockview-core engine's runtime `style=` positioning — NOT for authored markup. This
-  document is therefore ALSO kept free of any `style="..."` attribute, which the `webui-scheme-contract`
+  The style side is widened only as far as the vendored engine needs: `style-src 'self' 'unsafe-inline'`
+  admits inline CSS, because dockview-core injects a `<style>` element AND writes CSSOM inline styles to
+  position panels at runtime, and the pinned CEF/Chromium build enforces `style-src` for BOTH (the
+  narrower `style-src-attr` split does not hold on it). It stays strict where it counts —
+  `script-src 'self'` carries no `unsafe-inline`, and connect-src 'none' + img-src + font-src leave
+  inline CSS nowhere to exfiltrate to. This document is therefore STILL kept free of any inline
+  `<style>` element or `style="..."` attribute as defense-in-depth, which the `webui-scheme-contract`
   gate re-asserts mechanically on the BUILT asset so the rule survives an edit that forgets it.
 
   The CSP is delivered as a RESPONSE HEADER, not a <meta> tag: a header cannot be stripped by

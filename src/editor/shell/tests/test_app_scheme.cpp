@@ -213,15 +213,19 @@ void test_csp_and_headers()
     // script-src carries no widening, and there is NO 'unsafe-eval' anywhere.
     CHECK(!shelltest::mentions(csp, "script-src 'self' 'unsafe-inline'"));
     CHECK(!shelltest::mentions(csp, "unsafe-eval"));
-    // The ONE deliberate inline relaxation, scoped to the style ATTRIBUTE only (the pinned
-    // dockview-core engine writes `style=` attributes at runtime). `style-src` itself — and the
-    // `style-src-elem` fallback it feeds, governing <style>/<link> — stays strict 'self', so an
-    // inline <style> or an injected stylesheet is still refused.
-    CHECK(shelltest::mentions(csp, "style-src 'self'"));
-    CHECK(!shelltest::mentions(csp, "style-src 'self' 'unsafe-inline'"));
-    CHECK(shelltest::mentions(csp, "style-src-attr 'unsafe-inline'"));
-    // And 'unsafe-inline' appears EXACTLY ONCE — the style-attr relaxation above and nowhere else.
-    // Counted, not eyeballed, so a future widening of any other directive trips this.
+    // The ONE deliberate inline relaxation, confined to STYLE. The pinned dockview-core engine
+    // needs inline CSS two ways at runtime — an injected <style> element (style-src-elem) for its
+    // base rules AND CSSOM inline-style writes (style-src-attr) to position panels — and BOTH fall
+    // back to style-src. The narrower `style-src-attr 'unsafe-inline'` split does NOT hold on the
+    // pinned CEF/Chromium build (it never covered the <style> element, and the build enforced
+    // `style-src 'self'` on the CSSOM writes regardless), so the relaxation lives on style-src
+    // itself. It is asserted GONE from style-src-attr so a future edit cannot re-introduce the
+    // ineffective split.
+    CHECK(shelltest::mentions(csp, "style-src 'self' 'unsafe-inline'"));
+    CHECK(!shelltest::mentions(csp, "style-src-attr"));
+    // And 'unsafe-inline' appears EXACTLY ONCE — the style relaxation above and nowhere else (in
+    // particular NOT on script-src). Counted, not eyeballed, so a future widening of any other
+    // directive trips this.
     std::size_t unsafe_inline_count = 0;
     for (std::size_t at = csp.find("unsafe-inline"); at != std::string::npos;
          at = csp.find("unsafe-inline", at + 1))
