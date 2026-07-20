@@ -2,6 +2,7 @@
 
 #include "context/editor/shell/dpi.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace context::editor::shell
@@ -32,20 +33,7 @@ namespace
 
 DpiScale make_dpi_scale(std::uint32_t raw_dpi)
 {
-    DpiScale scale;
-    if (raw_dpi < kMinDpi)
-    {
-        scale.dpi = kMinDpi;
-    }
-    else if (raw_dpi > kMaxDpi)
-    {
-        scale.dpi = kMaxDpi;
-    }
-    else
-    {
-        scale.dpi = raw_dpi;
-    }
-    return scale;
+    return DpiScale{std::clamp(raw_dpi, kMinDpi, kMaxDpi)};
 }
 
 render::Extent2D to_physical(render::Extent2D logical, DpiScale scale)

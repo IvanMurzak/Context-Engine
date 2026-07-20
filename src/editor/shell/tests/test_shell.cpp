@@ -24,25 +24,6 @@ namespace fs = std::filesystem;
 namespace
 {
 
-fs::path make_temp_project(const char* tag)
-{
-    static int counter = 0;
-    std::error_code ec;
-    fs::path root = fs::temp_directory_path(ec) /
-                    ("context-shell-loop-" + std::string(tag) + "-" + std::to_string(++counter));
-    fs::remove_all(root, ec);
-    fs::create_directories(root, ec);
-    return root;
-}
-
-// Named cleanup(), not remove_all(): the latter is found by ADL on fs::path and collides with
-// std::filesystem::remove_all.
-void cleanup(const fs::path& path)
-{
-    std::error_code ec;
-    fs::remove_all(path, ec);
-}
-
 // A window over the headless backend + the scripted browser, presenting into a MemoryBlitter — the
 // honest offscreen shell (see window.h / present_blit.h), and the same wiring the Session-0-safe
 // smoke uses.
@@ -116,7 +97,7 @@ void test_shell_attach_options_ask_for_the_shell_scope()
 
 void test_attach_to_a_project_with_no_daemon_is_reported_not_fatal()
 {
-    const fs::path root = make_temp_project("nodaemon");
+    const fs::path root = shelltest::make_temp_project("context-shell-loop", "nodaemon");
     // No .editor/instance.json: discovery finds nothing. The editor opens read-only (03 §7) rather
     // than refusing to start — a shell that would not start without a daemon could not be used to
     // diagnose why the daemon would not start.
@@ -124,7 +105,7 @@ void test_attach_to_a_project_with_no_daemon_is_reported_not_fatal()
     CHECK(!attach.attached);
     CHECK(attach.client == nullptr);
     CHECK(!attach.error.empty());
-    cleanup(root);
+    shelltest::cleanup(root);
 }
 
 // ---------------------------------------------------------------------------- the owner loop
@@ -307,7 +288,7 @@ void test_close_ends_the_loop()
 
 void test_manager_persists_placement_and_restores_it()
 {
-    const fs::path root = make_temp_project("placement");
+    const fs::path root = shelltest::make_temp_project("context-shell-loop", "placement");
     {
         WindowManager manager(root);
         Harness harness;
@@ -344,12 +325,12 @@ void test_manager_persists_placement_and_restores_it()
         CHECK(shelltest::extent_eq(backend->client_size(), render::Extent2D{900, 700}));
     }
 
-    cleanup(root);
+    shelltest::cleanup(root);
 }
 
 void test_manager_drops_a_closed_window_and_ends_when_none_are_left()
 {
-    const fs::path root = make_temp_project("drop");
+    const fs::path root = shelltest::make_temp_project("context-shell-loop", "drop");
     WindowManager manager(root);
     Harness harness;
     HeadlessWindowBackend* backend = harness.backend;
@@ -362,12 +343,12 @@ void test_manager_drops_a_closed_window_and_ends_when_none_are_left()
     // The last window closing is the loop's termination condition.
     CHECK(!manager.pump_once(1000));
     CHECK(manager.window_count() == 0u);
-    cleanup(root);
+    shelltest::cleanup(root);
 }
 
 void test_shutdown_flushes_pending_state_and_is_idempotent()
 {
-    const fs::path root = make_temp_project("shutdown");
+    const fs::path root = shelltest::make_temp_project("context-shell-loop", "shutdown");
     WindowManager manager(root);
     Harness harness;
     HeadlessWindowBackend* backend = harness.backend;
@@ -382,7 +363,7 @@ void test_shutdown_flushes_pending_state_and_is_idempotent()
     CHECK(fs::exists(editor_state_path(root)));
     manager.shutdown(); // idempotent
     CHECK(manager.state_store().write_count() == 1);
-    cleanup(root);
+    shelltest::cleanup(root);
 }
 
 } // namespace

@@ -224,6 +224,15 @@ const EditorState& EditorStateStore::load(bool* loaded_existing)
     return state_;
 }
 
+void EditorStateStore::mark_dirty(std::uint64_t now_us)
+{
+    if (!dirty_)
+    {
+        dirty_ = true;
+        dirty_since_us_ = now_us;
+    }
+}
+
 void EditorStateStore::set_placement(std::size_t index, const WindowPlacement& placement,
                                      std::uint64_t now_us)
 {
@@ -236,11 +245,7 @@ void EditorStateStore::set_placement(std::size_t index, const WindowPlacement& p
         state_.windows.resize(index + 1);
     }
     state_.windows[index] = placement;
-    if (!dirty_)
-    {
-        dirty_ = true;
-        dirty_since_us_ = now_us;
-    }
+    mark_dirty(now_us);
 }
 
 void EditorStateStore::set_layout(Json layout, std::uint64_t now_us)
@@ -250,11 +255,7 @@ void EditorStateStore::set_layout(Json layout, std::uint64_t now_us)
         return;
     }
     state_.layout = std::move(layout);
-    if (!dirty_)
-    {
-        dirty_ = true;
-        dirty_since_us_ = now_us;
-    }
+    mark_dirty(now_us);
 }
 
 void EditorStateStore::set_panels(Json panels, std::uint64_t now_us)
@@ -264,11 +265,7 @@ void EditorStateStore::set_panels(Json panels, std::uint64_t now_us)
         return;
     }
     state_.panels = std::move(panels);
-    if (!dirty_)
-    {
-        dirty_ = true;
-        dirty_since_us_ = now_us;
-    }
+    mark_dirty(now_us);
 }
 
 bool EditorStateStore::flush_if_due(std::uint64_t now_us)

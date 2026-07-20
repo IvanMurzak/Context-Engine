@@ -250,11 +250,10 @@ public:
     // that pixels outside the rect are untouched — and lands with the first task that needs it.
     void set_scissor_rect(Origin2D origin, Extent2D size) override
     {
-        last_scissor_ = Rect2D{origin, size};
         if (log_ != nullptr)
         {
             ++log_->scissor_sets;
-            log_->scissors.push_back(last_scissor_);
+            log_->scissors.push_back(Rect2D{origin, size});
         }
     }
 
@@ -306,7 +305,6 @@ private:
     FakePassLog* log_ = nullptr;
     bool pipeline_set_ = false;
     int bind_group_sets_ = 0;
-    Rect2D last_scissor_{};
     std::uint32_t draw_vertices_ = 0;
     std::uint32_t draw_instances_ = 0;
 };
@@ -542,10 +540,16 @@ private:
 class FakeSwapchain : public ISwapchain
 {
 public:
-    FakeSwapchain(Extent2D size, TextureFormat format, PresentMode mode)
+    // `unconfigure_sink` is an OPTIONAL counter owned by whoever outlives this swapchain (the
+    // FakeSurface that handed it out). A teardown path that unconfigures and then DESTROYS the
+    // swapchain — WindowCompositor::detach() does exactly that — leaves no object to read the
+    // per-swapchain counter off, so the observation has to survive somewhere else. See
+    // FakeSurface::unconfigure_count().
+    FakeSwapchain(Extent2D size, TextureFormat format, PresentMode mode,
+                  int* unconfigure_sink = nullptr)
         : size_(size), format_(format), mode_(mode),
           backbuffer_(std::make_unique<FakeTexture>(size, format)),
-          view_(backbuffer_->create_view())
+          view_(backbuffer_->create_view()), unconfigure_sink_(unconfigure_sink)
     {
     }
 
@@ -612,6 +616,10 @@ public:
         configured_ = false;
         acquired_ = false;
         ++unconfigure_count_;
+        if (unconfigure_sink_ != nullptr)
+        {
+            ++*unconfigure_sink_;
+        }
     }
 
     // --- test scaffolding ---
@@ -637,12 +645,19 @@ private:
     int present_count_ = 0;
     int resize_count_ = 0;
     int unconfigure_count_ = 0;
+    int* unconfigure_sink_ = nullptr;
 };
 
 class FakeSurface : public ISurface
 {
 public:
     explicit FakeSurface(SurfaceCaps caps) : caps_(std::move(caps)) {}
+
+    // Non-copyable for the same reason FakeDevice is: configure() hands every swapchain a raw
+    // pointer to this surface's own unconfigure_count_, so a copy would own swapchains still
+    // counting into the DONOR's tally.
+    FakeSurface(const FakeSurface&) = delete;
+    FakeSurface& operator=(const FakeSurface&) = delete;
 
     SurfaceCaps capabilities() override { return caps_; }
 
@@ -659,7 +674,7 @@ public:
         }
         ++configure_count_;
         auto swapchain = std::make_unique<FakeSwapchain>(config.size, config.format,
-                                                         config.present_mode);
+                                                         config.present_mode, &unconfigure_count_);
         last_swapchain_ = swapchain.get();
         return swapchain;
     }
@@ -667,15 +682,26 @@ public:
     [[nodiscard]] int configure_count() const { return configure_count_; }
 
     // The most recently configured swapchain, so a test that does not OWN it — a compositor took
-    // the unique_ptr — can still script its acquire statuses and read its counters. A non-owning
-    // back-pointer: valid only while the caller that took the unique_ptr is alive, which for a test
-    // driving that caller is exactly the window it needs.
+    // the unique_ptr — can still script its acquire statuses and read its counters.
+    //
+    // ⚠ A non-owning back-pointer, valid only while the caller that took the unique_ptr still
+    // HOLDS it — which is narrower than "while that caller is alive". A teardown call that
+    // releases the swapchain (WindowCompositor::detach() → swapchain_.reset()) leaves this
+    // DANGLING even though the compositor and this surface are both still alive, so reading a
+    // counter through it AFTER such a call is a use-after-free. Assert post-teardown facts through
+    // unconfigure_count() below, which lives on the surface and outlives every swapchain it hands out.
     [[nodiscard]] FakeSwapchain* last_swapchain() const { return last_swapchain_; }
+
+    // Total unconfigure() calls across every swapchain this surface handed out. Survives the
+    // swapchain's destruction, so it is the safe way to assert that a teardown path really
+    // unconfigured rather than merely dropping the pointer.
+    [[nodiscard]] int unconfigure_count() const { return unconfigure_count_; }
 
 private:
     SurfaceCaps caps_;
     FakeSwapchain* last_swapchain_ = nullptr;
     int configure_count_ = 0;
+    int unconfigure_count_ = 0;
 };
 
 // The default capability set a healthy desktop surface reports: BGRA8Unorm + the WebGPU-guaranteed

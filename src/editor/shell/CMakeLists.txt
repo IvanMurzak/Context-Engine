@@ -47,6 +47,33 @@ target_link_libraries(context_editor_shell
     PUBLIC context_client context_render_present
     PRIVATE context_warnings)
 
+# MSVC exception semantics (/EHsc), restored for the Shell family.
+#
+# CMake's MSVC defaults put /EHsc in CMAKE_CXX_FLAGS. With CONTEXT_BUILD_GUI_CEF=ON the CEF
+# acquisition below (context_acquire_cef -> find_package(CEF) -> cef_variables.cmake) CLEARS
+# CMAKE_CXX_FLAGS wholesale under the Ninja generator ("clear the CMake defaults to avoid excessive
+# console warnings", CEF issue #2120) — and Ninja + cl IS the editor-cef-smoke Windows leg. Without
+# /EHsc the unwinding paths in <chrono> / <filesystem> raise C4530, which context_warnings' /WX
+# promotes to C2220. The default `build (windows-latest)` leg never sees this: CEF is OFF there, so
+# CMake's defaults survive.
+#
+# SCOPE OF THE DAMAGE: the wipe is DIRECTORY-scoped, not configure-wide — it hits the directories
+# that CALL the macro (this one, plus src/editor/cef/ and src/editor/gui/host/) and any subdirectory
+# added after the call, such as cef/. It is retroactive within the directory: CMAKE_CXX_FLAGS is read
+# at generate time, so a target declared above the call still loses the flag. Targets in OTHER
+# directories (context_client, context_render_present, the kernel) keep their flags, which is why
+# they compile fine on the CEF legs and why only this family needs repair.
+#
+# PUBLIC, so every target the wipe exposes inherits it through the link graph: the test + smoke
+# executables, context_editor_cef (cef_shell.cpp pulls <chrono> and <filesystem> too) and
+# context_editor. Left UNCONDITIONAL rather than gated on CONTEXT_BUILD_GUI_CEF so this family never
+# silently depends on a CMake default that something else may wipe; a duplicate /EHsc in a CEF-OFF
+# build is a no-op. Deliberately NOT project-wide and NOT on context_warnings — the pre-existing CEF
+# targets (src/editor/cef/, src/editor/gui/host/) are green under CEF's own curated flags and stay
+# untouched. CEF's MSVC set (/MP /Gy /GF /GR- /utf-8 /W4 /WX /wd... ) specifies no /EH flag at all,
+# so this conflicts with nothing.
+target_compile_options(context_editor_shell PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/EHsc>)
+
 if(WIN32)
     # RegisterClassExW / CreateWindowExW / TrackMouseEvent / the DPI entry points. CMake's default
     # Windows library set already includes user32, but naming it keeps the dependency visible in the
@@ -150,8 +177,11 @@ if(CONTEXT_BUILD_GUI_CEF AND (OS_WINDOWS OR OS_LINUX))
     # links context_warnings PRIVATE, so the Shell's own code stays gated.
     SET_EXECUTABLE_TARGET_PROPERTIES(context_editor)
     add_dependencies(context_editor libcef_dll_wrapper)
+    # context_editor_cef FIRST, before the CEF libs — the single-pass-ld archive-ordering rule
+    # documented at the matching line in cef/CMakeLists.txt. Same archive, same CEF references, so
+    # the same order is required here.
     target_link_libraries(context_editor PRIVATE
-        libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS} context_editor_cef)
+        context_editor_cef libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
     target_include_directories(context_editor PRIVATE "${CEF_ROOT}")
     target_compile_definitions(context_editor PRIVATE CONTEXT_EDITOR_HAS_CEF=1)
 

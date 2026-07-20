@@ -71,8 +71,10 @@ public:
 
 private:
     std::vector<ShellRegion> regions_;
-    // Bumped on every publish. The compositor damages the window on a layout change, and comparing
-    // a generation is how it notices one without diffing rect vectors every frame.
+    // Bumped on every publish, so a layout change is detectable by comparing one integer rather
+    // than diffing rect vectors every frame. NOTE: nothing consumes it yet — the compositor damages
+    // itself directly from publish_viewports() today. This is the seam e11's viewport-content
+    // damage path is expected to read; until then its only readers are the RegionMap tests.
     std::uint64_t generation_ = 0;
 };
 

@@ -189,18 +189,22 @@ int main(int argc, char** argv)
     // why placeholder_url() paints a known colour instead of an arbitrary one.
     {
         const std::vector<std::uint8_t>& surface = editor->compositor().cpu_surface();
-        const render::Extent2D size = editor->compositor().size();
+        // NOT named `size`: that would shadow the outer window extent, and MSVC's C4456 is not on
+        // CEF's /wd suppression list, so under its /W4 /WX this file would fail to compile.
+        const render::Extent2D composed = editor->compositor().size();
         // A few interior texels rather than one: a single sample could land on whatever the page
         // happens to render at the origin.
         int background_texels = 0;
         int sampled = 0;
-        const std::uint32_t xs[] = {size.width / 4u, size.width / 2u, (size.width * 3u) / 4u};
-        const std::uint32_t ys[] = {size.height / 4u, size.height / 2u, (size.height * 3u) / 4u};
+        const std::uint32_t xs[] = {composed.width / 4u, composed.width / 2u,
+                                    (composed.width * 3u) / 4u};
+        const std::uint32_t ys[] = {composed.height / 4u, composed.height / 2u,
+                                    (composed.height * 3u) / 4u};
         for (std::uint32_t y : ys)
         {
             for (std::uint32_t x : xs)
             {
-                const std::size_t offset = (static_cast<std::size_t>(y) * size.width + x) * 4u;
+                const std::size_t offset = (static_cast<std::size_t>(y) * composed.width + x) * 4u;
                 if (offset + 3u >= surface.size())
                 {
                     continue;
@@ -274,6 +278,14 @@ int main(int argc, char** argv)
     SMOKE_CHECK(repainted, "the browser repainted after a live resize (WasResized)");
     SMOKE_CHECK(editor->compositor().size().width == 800u, "the compositor took the new size");
 
+    // Read the presented-frame count BEFORE shutdown: the blitter is owned by the compositor
+    // (attach_cpu took the unique_ptr), and shutdown() -> EditorWindow::close() ->
+    // WindowCompositor::detach() destroys it (blitter_.reset()). `blitter_raw` dangles from here
+    // on, so the closing report below prints a value captured while it was still alive. Nothing is
+    // presented during teardown, so this count is final. (Same defect, same fix, as the
+    // Session-0 smoke in ../../smoke/shell_smoke_main.cpp.)
+    const int presented_frames = blitter_raw->blit_count();
+
     manager.shutdown();
     shell::cef::shutdown();
     std::filesystem::remove_all(project, ec);
@@ -286,6 +298,6 @@ int main(int argc, char** argv)
     }
     std::printf("[editor-cef-smoke-shell] PASS: live CEF windowed-OSR composited + presented "
                 "(%d frames), input round-tripped, live resize repainted\n",
-                blitter_raw->blit_count());
+                presented_frames);
     return finish(0);
 }

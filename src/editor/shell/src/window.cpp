@@ -59,6 +59,16 @@ inline constexpr std::uint64_t kMkMButton = 0x0010;
     return make_modifiers(0, keys);
 }
 
+// The messages that carry NOTHING but their kind — no pointer position, no key, no DPI. Named for
+// the same reason as the make_* helpers below, so the decoder's switch reads uniformly instead of
+// alternating between one-line arms and four-line blocks that all say the same thing.
+[[nodiscard]] ShellEvent simple_event(ShellEventKind kind)
+{
+    ShellEvent event;
+    event.kind = kind;
+    return event;
+}
+
 [[nodiscard]] ShellEvent make_key_event(KeyAction action, const Win32Message& message,
                                         const Win32ModifierState& keys, bool is_system_key)
 {
@@ -196,30 +206,14 @@ std::optional<ShellEvent> translate_win32_message(const Win32Message& message,
         return event;
     }
     case kWmPaint:
-    {
-        ShellEvent event;
-        event.kind = ShellEventKind::paint_requested;
-        return event;
-    }
+        return simple_event(ShellEventKind::paint_requested);
     case kWmSetFocus:
-    {
-        ShellEvent event;
-        event.kind = ShellEventKind::focus_gained;
-        return event;
-    }
+        return simple_event(ShellEventKind::focus_gained);
     case kWmKillFocus:
-    {
-        ShellEvent event;
-        event.kind = ShellEventKind::focus_lost;
-        return event;
-    }
+        return simple_event(ShellEventKind::focus_lost);
     case kWmClose:
     case kWmDestroy:
-    {
-        ShellEvent event;
-        event.kind = ShellEventKind::close_requested;
-        return event;
-    }
+        return simple_event(ShellEventKind::close_requested);
     case kWmMouseMove:
         return make_pointer_event(PointerAction::move, MouseButton::none, message, keys);
     case kWmLButtonDown:

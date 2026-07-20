@@ -53,8 +53,16 @@ if(OS_WINDOWS OR OS_LINUX)
     add_executable(context_editor_shell_cef_smoke src/cef_shell_smoke.cpp)
     SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_cef_smoke)
     add_dependencies(context_editor_shell_cef_smoke libcef_dll_wrapper)
+    # context_editor_cef comes FIRST, BEFORE the CEF libs. GNU ld resolves a static archive in ONE
+    # left-to-right pass: it pulls an archive member only to satisfy an already-undefined symbol,
+    # and any NEW undefined symbol that member introduces can only be resolved by something LATER
+    # on the line. cef_shell.cpp lives inside this archive and calls into libcef, so listing the
+    # archive after libcef leaves its CEF references unresolvable (`undefined reference to
+    # cef_string_utf16_clear`). The sibling CEF exes (src/editor/cef/, src/editor/gui/host/) list
+    # their libs in the opposite order and link fine only because THEIR CEF-calling code is a direct
+    # object file of the executable, not an archive member — do not "harmonize" this line to match.
     target_link_libraries(context_editor_shell_cef_smoke
-        libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS} context_editor_cef)
+        context_editor_cef libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
     target_include_directories(context_editor_shell_cef_smoke PRIVATE "${CEF_ROOT}")
 
     # Stage the libcef binary payload + resources next to the exe so it boots from the build tree.

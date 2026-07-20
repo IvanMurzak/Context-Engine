@@ -259,9 +259,8 @@ bool EditorWindow::pump_once(std::uint64_t now_us)
     }
 
     events_.clear();
-    std::vector<ShellEvent>& events = events_;
-    const bool window_alive = backend_->pump(events);
-    for (const ShellEvent& event : events)
+    const bool window_alive = backend_->pump(events_);
+    for (const ShellEvent& event : events_)
     {
         handle_event(event, now_us);
     }

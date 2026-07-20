@@ -352,6 +352,14 @@ int main()
     // ------------------------------------------------- 7. placement persists (the Shell's own file)
     backend->apply_placement(shell::WindowPlacement{"smoke-monitor", 64, 48, 400, 240, false});
     SMOKE_CHECK(manager.pump_once(8'000), "the loop ran after a window move");
+
+    // Read the presented-frame count BEFORE shutdown: the blitter is owned by the compositor
+    // (attach_cpu took the unique_ptr), and shutdown() -> EditorWindow::close() ->
+    // WindowCompositor::detach() destroys it (blitter_.reset()). `blitter` dangles from here on, so
+    // the closing report below has to print a value captured while it was still alive. No frame is
+    // presented during teardown, so this count is final.
+    const int presented_frames = blitter->blit_count();
+
     manager.shutdown();
     SMOKE_CHECK(manager.state_store().write_count() >= 1,
                 "the shutdown flushed the pending session state");
@@ -382,6 +390,6 @@ int main()
     std::printf("[editor-shell-smoke] PASS: software-OSR composited + presented (%d frames), "
                 "PET_POPUP layer composited, input round-tripped, resize + DPI handled live, "
                 "window placement persisted\n",
-                blitter->blit_count());
+                presented_frames);
     return 0;
 }

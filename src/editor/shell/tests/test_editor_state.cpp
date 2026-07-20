@@ -19,27 +19,6 @@ using context::editor::contract::Json;
 namespace
 {
 
-// A unique temp project dir per run. A stale directory from a previous failed run otherwise makes
-// the "fresh project" assertions read as a bug in the code under test.
-fs::path make_temp_project(const char* tag)
-{
-    static int counter = 0;
-    std::error_code ec;
-    fs::path root = fs::temp_directory_path(ec) /
-                    ("context-shell-state-" + std::string(tag) + "-" + std::to_string(++counter));
-    fs::remove_all(root, ec);
-    fs::create_directories(root, ec);
-    return root;
-}
-
-// Named cleanup(), not remove_all(): the latter is found by ADL on fs::path and collides with
-// std::filesystem::remove_all.
-void cleanup(const fs::path& path)
-{
-    std::error_code ec;
-    fs::remove_all(path, ec);
-}
-
 std::string read_file(const fs::path& path)
 {
     std::ifstream in(path, std::ios::binary);
@@ -106,7 +85,7 @@ void test_a_maximized_window_still_records_its_restore_rect()
 
 void test_malformed_and_missing_documents_degrade_rather_than_refuse()
 {
-    const fs::path root = make_temp_project("malformed");
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "malformed");
 
     {
         // MISSING: a fresh project.
@@ -148,12 +127,12 @@ void test_malformed_and_missing_documents_degrade_rather_than_refuse()
         CHECK(store.state().windows[0].height == 600u);
     }
 
-    cleanup(root);
+    shelltest::cleanup(root);
 }
 
 void test_writes_are_debounced()
 {
-    const fs::path root = make_temp_project("debounce");
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "debounce");
     EditorStateStore store(root, 500'000);
     store.load();
 
@@ -177,12 +156,12 @@ void test_writes_are_debounced()
     CHECK(!store.flush_if_due(2'000'000));
     CHECK(store.write_count() == 1);
 
-    cleanup(root);
+    shelltest::cleanup(root);
 }
 
 void test_an_identical_placement_does_not_dirty_the_store()
 {
-    const fs::path root = make_temp_project("identical");
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "identical");
     EditorStateStore store(root, 1'000);
     store.load();
 
@@ -204,12 +183,12 @@ void test_an_identical_placement_does_not_dirty_the_store()
     CHECK(store.flush_if_due(300'000));
     CHECK(store.write_count() == 2);
 
-    cleanup(root);
+    shelltest::cleanup(root);
 }
 
 void test_flush_now_ignores_the_debounce()
 {
-    const fs::path root = make_temp_project("shutdown");
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "shutdown");
     EditorStateStore store(root, 10'000'000); // a long quiet period
     store.load();
     store.set_placement(0, placement(1, 2, 640, 480), 0);
@@ -218,12 +197,12 @@ void test_flush_now_ignores_the_debounce()
     CHECK(store.flush_now());
     CHECK(store.write_count() == 1);
     CHECK(!store.flush_now()); // nothing pending
-    cleanup(root);
+    shelltest::cleanup(root);
 }
 
 void test_the_write_is_atomic_and_leaves_no_temp_behind()
 {
-    const fs::path root = make_temp_project("atomic");
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "atomic");
     EditorStateStore store(root, 0);
     store.load();
     store.set_placement(0, placement(7, 8, 900, 700), 0);
@@ -261,14 +240,14 @@ void test_the_write_is_atomic_and_leaves_no_temp_behind()
     CHECK(reopened.state().windows.size() == 1u);
     CHECK(reopened.state().windows[0].height == 700u);
 
-    cleanup(root);
+    shelltest::cleanup(root);
 }
 
 void test_a_failed_write_stays_dirty_so_the_next_flush_retries()
 {
     // A path whose parent cannot be created: the write fails, is REPORTED, and the store stays
     // dirty. A transient full disk must not silently drop the layout for the rest of the session.
-    const fs::path root = make_temp_project("failing");
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "failing");
     const fs::path blocker = root / "blocked";
     {
         std::ofstream out(blocker, std::ios::binary);
@@ -282,12 +261,12 @@ void test_a_failed_write_stays_dirty_so_the_next_flush_retries()
     CHECK(store.write_count() == 0);
     CHECK(!store.last_error().empty());
 
-    cleanup(root);
+    shelltest::cleanup(root);
 }
 
 void test_placement_index_grows_the_vector()
 {
-    const fs::path root = make_temp_project("index");
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "index");
     EditorStateStore store(root, 0);
     store.load();
     // Window 2 recorded before 0 and 1 exist — index 0 is the D13 menu/welcome window, so the
@@ -301,7 +280,7 @@ void test_placement_index_grows_the_vector()
     reopened.load();
     CHECK(reopened.state().windows.size() == 3u);
     CHECK(reopened.state().windows[2].x == 3);
-    cleanup(root);
+    shelltest::cleanup(root);
 }
 
 } // namespace

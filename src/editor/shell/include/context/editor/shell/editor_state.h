@@ -121,6 +121,10 @@ public:
 
 private:
     bool write();
+    // Start the debounce clock on the FIRST change of a dirty run — a later change inside the same
+    // run must not push the deadline out, or a stream of edits would defer the write forever.
+    // Every setter routes through here so that rule lives in exactly one place.
+    void mark_dirty(std::uint64_t now_us);
 
     std::filesystem::path project_root_;
     std::filesystem::path path_;

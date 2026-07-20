@@ -469,20 +469,20 @@ bool Win32WindowBackend::create(const WindowDesc& desc, std::string& error)
     }
     dpi_ = make_dpi_scale(initial_dpi);
 
-    RECT client{};
-    ::GetClientRect(hwnd_, &client);
-    size_ = render::Extent2D{static_cast<std::uint32_t>(client.right - client.left),
-                             static_cast<std::uint32_t>(client.bottom - client.top)};
-
     if (desc.visible)
     {
         const bool maximized = desc.placement.has_value() && desc.placement->maximized;
         ::ShowWindow(hwnd_, maximized ? SW_SHOWMAXIMIZED : SW_SHOW);
         ::UpdateWindow(hwnd_);
-        ::GetClientRect(hwnd_, &client);
-        size_ = render::Extent2D{static_cast<std::uint32_t>(client.right - client.left),
-                                 static_cast<std::uint32_t>(client.bottom - client.top)};
     }
+
+    // Read the client rect ONCE, after any show: showing (especially maximized) changes it, and
+    // nothing between window creation and here reads size_.
+    RECT client{};
+    ::GetClientRect(hwnd_, &client);
+    size_ = render::Extent2D{static_cast<std::uint32_t>(client.right - client.left),
+                             static_cast<std::uint32_t>(client.bottom - client.top)};
+
     error.clear();
     ++g_live_windows;
     return true;

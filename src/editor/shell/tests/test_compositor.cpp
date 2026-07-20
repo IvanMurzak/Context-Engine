@@ -599,11 +599,18 @@ void test_detach_is_safe_and_idempotent()
     rendertest::FakeSurface surface(rendertest::fake_default_surface_caps());
     WindowCompositor compositor(software_config());
     CHECK(compositor.attach_gpu(device, surface, render::Extent2D{800, 600}));
-    rendertest::FakeSwapchain* swapchain = surface.last_swapchain();
+    CHECK(surface.last_swapchain() != nullptr);
     compositor.detach();
     CHECK(compositor.path() == PresentPath::none);
-    CHECK(swapchain->unconfigure_count() == 1);
+    // Read the count off the SURFACE, never off a swapchain pointer captured before detach():
+    // detach() unconfigures AND destroys the swapchain (compositor.cpp — swapchain_.reset()), so
+    // such a pointer dangles here. The surface outlives every swapchain it hands out, which is what
+    // keeps "detach() really unconfigured, it did not merely drop the pointer" observable.
+    CHECK(surface.unconfigure_count() == 1);
     compositor.detach(); // idempotent
+    // Idempotent means the SECOND detach unconfigured nothing — there was no swapchain left to
+    // unconfigure — rather than running the teardown twice.
+    CHECK(surface.unconfigure_count() == 1);
     CHECK(!compositor.render_frame());
 }
 
