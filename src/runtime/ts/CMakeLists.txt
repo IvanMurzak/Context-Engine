@@ -368,3 +368,20 @@ endif()
 # samples/platformer-2d/scripts/movement.ts through the same pinned toolchain) reuse the one
 # fetched + SHA-verified binary instead of re-staging their own.
 set(CONTEXT_ESBUILD_BIN "${_ctx_esbuild_bin}" PARENT_SCOPE)
+
+# ...and ALSO publish both staged tool paths as CACHE INTERNAL (M9 e05a). PARENT_SCOPE reaches only
+# src/ scope, which subdirectories added AFTER this one inherit — invisible to any directory
+# configured BEFORE it, and silently EMPTY rather than an error (a `--bundle` invocation with an
+# empty program then fails with a confusing message far from the cause). src/editor/webui/ consumes
+# both, and src/editor/ is configured well before src/runtime/ts, so the ordering constraint is real
+# — this is the same CACHE INTERNAL treatment src/editor/client/CMakeLists.txt already gives
+# CONTEXT_CLIENT_SCHEMA_GENERATED. Consumers MUST still assert the value is non-empty before use
+# (webui does): a cache variable is only populated once THIS directory has been configured.
+# ⚠ A cache entry SURVIVES a reconfigure, so both names are also cleared at the top of
+# src/CMakeLists.txt before the first add_subdirectory — otherwise a warm build dir would hand a
+# mis-ordered consumer the PREVIOUS configure's value and its ordering guard would silently pass.
+# Adding another cross-directory CACHE INTERNAL handoff means adding it to that clear list too.
+set(CONTEXT_ESBUILD_BIN "${_ctx_esbuild_bin}" CACHE INTERNAL
+    "The staged, SHA-verified esbuild binary (tools/ts-toolchain.json)")
+set(CONTEXT_TSGO_BIN "${_ctx_tsgo_bin}" CACHE INTERNAL
+    "The staged, SHA-verified tsgo typechecker binary (tools/tsc-toolchain.json)")

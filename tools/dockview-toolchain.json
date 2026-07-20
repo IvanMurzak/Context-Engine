@@ -1,0 +1,22 @@
+{
+    "$comment": "Pinned, SHA-verified dockview-core npm channel for the M9 editor-core docking engine (src/editor/webui/, design D2 / 04 §2 / 08 §3). SINGLE source of truth for the pins — parsed by tools/fetch_dockview.py (download + verify-before-use + extract the prebuilt dist assets). src/editor/webui/CMakeLists.txt forwards this file's PATH to fetch_dockview.py, and reads back only the member NAMES from it (to declare the staging build rules); the sha256 PINS are parsed nowhere but fetch_dockview.py, so they are never duplicated. Channel = the publisher's OWN npm tarball, the canonical publisher artifact — the SAME SHA-pinned third-party build-tool precedent as tools/ts-toolchain.json (esbuild) / tools/tsc-toolchain.json (tsgo) / tools/v8-prebuilt.json / wgpu-native / CEF codified in docs/signing.md: third-party build inputs are authenticated by their OWN publisher via TLS + SHA-pin + verify-before-use, and are explicitly OUT of scope for the engine R-SEC-009 first-party trust root (do NOT route these through tools/verify_artifact.py). UNLIKE esbuild/tsgo (native Go binaries invoked as a subprocess) dockview-core is JavaScript SOURCE that esbuild BUNDLES into the shipped editor-core asset — so it is a runtime dependency of the web layer and is license-gated: tools/license-allowlist.json records dockview-core -> MIT. PLATFORM-INDEPENDENT (one tarball, no per-platform matrix) — hence no version-coherence matrix like the esbuild manifest; the invariant asserted instead is that every member's sha256 is pinned individually, so a tarball that verifies but whose INNER layout changed is still refused. VERSION-PINNED BY OWNER CONSENT (08 §3, ratified at s1 2026-07-19): a bump past 7.0.2, or adding ANY further dockview-* package, re-triggers the standing consent gate — this is not blanket Dockview approval. Evidence: spikes/dockview-cef/FINDINGS.md + supply-chain-review.md.",
+    "package": "dockview-core",
+    "version": "7.0.2",
+    "license": "MIT",
+    "published": "2026-06-22T20:21:57Z",
+    "npm_integrity": "sha512-i666ndkUdT4U+Bo2Yu3d6KwCJNqe21VJ0oschdgcXucZ5TquzBFX94zcUBEfg4IewTv2BuiPJ7r/2JTGLLv6ig==",
+    "tarball_url_template": "https://registry.npmjs.org/{package}/-/{package}-{version}.tgz",
+    "tarball_file": "dockview-core-7.0.2.tgz",
+    "tarball_sha256": "e75f201ed9a59346274a333cfcebc56cccf5b11a576b008910cb063ed0ecf5eb",
+    "members": {
+        "dockview-core.min.js": {
+            "member": "package/dist/dockview-core.min.js",
+            "sha256": "ac39da12d4280a2c61a55b98c66faa110ed3c2c93457e57f30d6e0e369e33eff"
+        },
+        "dockview.css": {
+            "member": "package/dist/styles/dockview.css",
+            "sha256": "4cc8d24e797c4a8505a11060094b01cbc27af685d3fdef9b04c7d8d5716468ac"
+        }
+    },
+    "umd_global": "dockview-core"
+}

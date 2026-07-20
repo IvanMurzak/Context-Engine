@@ -74,8 +74,11 @@ truth. `context_client_schema_gen` runs as a **build step** and emits
 MCP tool surface are deliberately **excluded**: they describe other doors onto the same registry, and
 carrying them would make every unrelated CLI change look like client-contract drift.
 
-The artifact installs to `<prefix>/versions/<semver>/share/context/`, which is what e05's JS client
-generates from. A committed copy lives at `src/editor/client/schema/context-client-schema.json` and
+The artifact installs to `<prefix>/versions/<semver>/share/context/` for out-of-tree consumers. The
+in-tree JS client generator (`tools/gen_client_typings.py`, M9 e05a) reads it from the BUILD tree,
+not the install prefix — the `webui-client-typings-drift` ctest projects the build-generated copy and
+the `python-tests` job projects the committed one, so neither leg needs a `cmake --install` first.
+A committed copy lives at `src/editor/client/schema/context-client-schema.json` and
 the `client-test_schema` ctest fails on any byte difference — **change the contract, rebuild, commit
 the regenerated file**. That gate is the whole reason a generated artifact beats a transcribed one.
 

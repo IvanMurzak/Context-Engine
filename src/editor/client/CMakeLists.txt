@@ -42,12 +42,18 @@ set(_context_client_static_runtime
 
 # --- the GENERATED client schema (R-CLI-009 spirit) ---------------------------------------------
 # Hand-written client typings are prohibited: the registry is the single source of truth, so the
-# client-facing schema is EMITTED BY THE BUILD from `describe`. e05's JS client generator consumes
-# the installed artifact. The committed copy under schema/ is what the drift gate compares against.
+# client-facing schema is EMITTED BY THE BUILD from `describe`. e05a's JS client generator
+# (tools/gen_client_typings.py) consumes the BUILD-generated artifact below — published as
+# CONTEXT_CLIENT_SCHEMA_GENERATED and projected into the editor-core TypeScript typings by
+# src/editor/webui — not the installed copy. The committed copy under schema/ is what the drift gate
+# compares against.
 add_executable(context_client_schema_gen tools/schema_gen_main.cpp)
 target_link_libraries(context_client_schema_gen PRIVATE context_client context_warnings)
 target_link_options(context_client_schema_gen PRIVATE ${_context_client_static_runtime})
 
+# ⚠ Cleared at the top of src/CMakeLists.txt before the first add_subdirectory (a cache entry
+# survives a reconfigure, which would defeat a consumer's ordering guard in a warm build dir) —
+# adding another cross-directory CACHE INTERNAL handoff means adding it to that clear list too.
 set(CONTEXT_CLIENT_SCHEMA_GENERATED "${CMAKE_CURRENT_BINARY_DIR}/context-client-schema.json"
     CACHE INTERNAL "The build-generated client schema artifact")
 set(_context_client_schema_committed "${CMAKE_CURRENT_SOURCE_DIR}/schema/context-client-schema.json")

@@ -1,0 +1,30 @@
+{
+    "$comment": "Typecheck config for @context-engine/editor-core, run by the pinned tsgo (--noEmit) from ../CMakeLists.txt as a BUILD step — a type error is a build failure, not merely a test failure (e05a DoD). esbuild strips types without checking them, so this is the only semantic gate over the workspace. Kept strict from day one: editor-core is a trusted zone that renders authored project strings (design 04 section 4), so type sloppiness here has a security dimension.",
+    "compilerOptions": {
+        "target": "ES2022",
+        "lib": [
+            "ES2022",
+            "DOM",
+            "DOM.Iterable"
+        ],
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "moduleDetection": "force",
+        "noEmit": true,
+        "strict": true,
+        "exactOptionalPropertyTypes": true,
+        "noImplicitOverride": true,
+        "noImplicitReturns": true,
+        "noFallthroughCasesInSwitch": true,
+        "noUncheckedIndexedAccess": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "isolatedModules": true,
+        "verbatimModuleSyntax": true,
+        "forceConsistentCasingInFileNames": true,
+        "skipLibCheck": true
+    },
+    "include": [
+        "src/**/*"
+    ]
+}
