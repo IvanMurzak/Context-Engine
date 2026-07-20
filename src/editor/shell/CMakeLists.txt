@@ -36,6 +36,8 @@ add_library(context_editor_shell STATIC
     src/win32_window.cpp  # the Windows OS calls (early-returns to an honest gap elsewhere)
     src/browser.cpp       # the CEF-free browser seam + the scripted host
     src/compositor.cpp    # the layer stack, damage, resize protocol, both present paths (03 §4)
+    src/app_scheme.cpp    # e05c: context-editor://app/ resolution + the strict CSP (04 §1)
+    src/ipc_bridge.cpp    # e05c: the privileged bridge envelope + token isolation (04 §1 / 08 §1)
     src/shell.cpp)        # WindowManager / EditorWindow / the single-threaded owner loop
 
 target_include_directories(context_editor_shell PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -104,6 +106,8 @@ set(_context_shell_tests
     test_editor_state  # the single-writer document: debounce, atomic replace, malformed degrade
     test_window        # the headless backend + the PURE Win32 message decoder (all 3 OSes)
     test_compositor    # layer order, damage, resize protocol, PET_POPUP, both present paths
+    test_app_scheme    # e05c: URL->asset resolution, traversal refusal, the strict CSP
+    test_ipc_bridge    # e05c: the T1 adversarial envelope suite + the 3 token-isolation controls
     test_shell)        # the owner loop end to end + the authenticated-attach guard
 
 foreach(_t IN LISTS _context_shell_tests)
@@ -152,6 +156,23 @@ endif()
 add_executable(context_editor app/editor_main.cpp)
 target_link_libraries(context_editor PRIVATE context_editor_shell)
 target_link_options(context_editor PRIVATE ${_context_shell_static_runtime})
+
+# The e05c default asset root, compiled in so a dev build of `context_editor` finds editor-core with
+# no arguments; `--app-root` overrides it, and PACKAGING (e15) will replace the default with an
+# install-relative path. Deliberately a define and NOT an add_dependencies(context_editor
+# context_editor_webui): the assets are a RUNTIME input, `context_editor_webui` is an ALL target so
+# any ordinary `cmake --build` produces them anyway, and the D10 `editor-boundary` job — which
+# builds context_editor from a hand-maintained `--target` list but never RUNS it — therefore needs
+# no ci.yml change. The live CEF smoke, which does run and does load the assets, takes the real
+# dependency instead (see cef/CMakeLists.txt).
+if(NOT CONTEXT_WEBUI_ASSET_DIR)
+    message(FATAL_ERROR
+        "context_editor: CONTEXT_WEBUI_ASSET_DIR is empty — src/editor/webui must be added BEFORE "
+        "src/editor/shell (src/CMakeLists.txt orders it so); it publishes the asset root as CACHE "
+        "INTERNAL.")
+endif()
+target_compile_definitions(context_editor PRIVATE
+    "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
 
 # The GPU backend is opt-in (CONTEXT_BUILD_RENDER_WGPU, default OFF). With it the editor presents
 # through the e03 swapchain; without it there is no way to create an adapter at all and the C-F2 CPU

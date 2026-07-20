@@ -1,10 +1,26 @@
-// The LIVE CEF windowed-OSR boot smoke (M9 e04) — ctest `editor-cef-smoke-shell`.
+// The LIVE CEF windowed-OSR boot smoke (M9 e04, extended by e05c) — ctest `editor-cef-smoke-shell`.
 //
 // The Session-0-safe smoke (src/editor/shell/smoke/) proves the Shell's own machinery against
 // scripted software-OSR frames on every OS leg. This one proves the other half: that a REAL CEF
 // browser, driven by the REAL integrated pump, produces frames the REAL compositor composites and
 // presents. It is the only place the two meet, and it can only run where CEF links — the per-OS
 // `editor-cef-smoke` CI job.
+//
+// e05c ADDS THE TWO DoD LINES THAT CANNOT BE PROVEN LOCALLY AT ALL:
+//
+//   * `context-editor://app/…` serves the e05a bundle under the strict CSP. Asserted two ways: the
+//     composited pixels carry the background from the SERVED `app.css` (so the scheme delivered a
+//     second asset with a correct media type — a stylesheet served as the wrong type is ignored),
+//     and the handshake below can only happen if `editor-core.js` was served AND executed under a
+//     CSP that permits it. There is no `file://` anywhere in the path.
+//   * The IPC bridge round-trips native<->JS inside the e04 shell window. The handshake is
+//     deliberately THREE legs (JS -> native -> JS -> native, the last echoing a nonce only the
+//     Shell knows), so it cannot pass unless a value made the full round trip. A one-way "the
+//     bundle called us" ping would pass with a completely broken response path.
+//
+// The adversarial half of the bridge's DoD ("malformed/hostile messages rejected without crashing
+// the Shell") lives in the CEF-FREE `editor-shell-test_ipc_bridge` suite, which runs on all three
+// default `build` legs instead of only here — the same layering rationale as the rest of the Shell.
 //
 // It is deliberately HEADLESS (a windowless browser, no native window) and presents through e03's
 // MemoryBlitter, so it is safe on the Session-0 self-hosted Windows runner: no visible window, no
@@ -21,7 +37,9 @@
 #include <windows.h>
 #endif
 
+#include "context/editor/shell/app_scheme.h"
 #include "context/editor/shell/cef/cef_shell.h"
+#include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/shell.h"
 
 #include <chrono>
@@ -65,16 +83,35 @@ std::uint64_t now_us()
             .count());
 }
 
-// A self-contained placeholder document over a data: URL — no temp file, no scheme handler, and no
-// network. It paints a solid, KNOWN colour so the composited output can be asserted rather than
-// merely counted.
-const char* placeholder_url()
+// editor-core's built asset root, compiled in by CMake (cef/CMakeLists.txt), which also makes this
+// target depend on `context_editor_webui` so the assets exist when the test runs.
+//
+// The fallback is EMPTY rather than an `#error`, on purpose: the pre-push audit's check 9 compiles
+// this TU STANDALONE against the pinned CEF headers, with none of CMake's
+// target_compile_definitions, so an `#error` here makes the only local signal for the whole CEF
+// path permanently red — for this task and every future one that touches this file. The guard is
+// not lost, it moves to two better places: cef/CMakeLists.txt FATAL_ERRORs at CONFIGURE time when
+// CONTEXT_WEBUI_ASSET_DIR is empty, and the runtime assertion below fails the smoke loudly if an
+// empty root ever reaches it.
+#if !defined(CONTEXT_WEBUI_ASSET_DIR)
+#define CONTEXT_WEBUI_ASSET_DIR ""
+#endif
+
+// The background `src/editor/webui/app/app.css` sets, in BGRA8 (the composite's format). Keep in
+// lockstep with `--editor-bg: #132a44` there; the stylesheet's own comment says so too.
+//
+// Deliberately NOT e04's `#102040`: reusing the old data:-URL placeholder's colour would make "the
+// app scheme served our stylesheet" indistinguishable from "the old placeholder still loads",
+// which is precisely the regression this assertion exists to catch.
+constexpr std::uint8_t kAppBackgroundB = 0x44;
+constexpr std::uint8_t kAppBackgroundG = 0x2a;
+constexpr std::uint8_t kAppBackgroundR = 0x13;
+
+// Local rather than reused from tests/shell_test.h: that header pulls the render test fixtures,
+// which this CEF-linking target does not (and should not) build against.
+bool mentions(const std::string& haystack, const std::string& needle)
 {
-    return "data:text/html,<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
-           "<title>Context Editor</title></head>"
-           "<body style=\"margin:0;background:%23102040\">"
-           "<main role=\"main\" aria-label=\"Context Editor placeholder\"></main>"
-           "</body></html>";
+    return haystack.find(needle) != std::string::npos;
 }
 
 int finish(int code)
@@ -119,13 +156,36 @@ int main(int argc, char** argv)
     auto backend = std::make_unique<shell::HeadlessWindowBackend>(desc);
     shell::HeadlessWindowBackend* backend_raw = backend.get();
 
+    // --- the privileged bridge (e05c) --------------------------------------------------------
+    // Declared BEFORE the browser and outliving it: the CEF handler holds a raw pointer to this
+    // router for the browser's whole life (BridgeRouter is non-movable so it cannot be relocated).
+    shell::BridgeRouter bridge;
+    // A stand-in credential, registered exactly as `context_editor` registers the real D20 token.
+    // Its job here is to prove the egress guard is WIRED in the live binding, not just unit-tested:
+    // the assertion after the handshake is that it never appears in anything the renderer received.
+    const std::string fake_token = "smoke-token-4a91c7e0d25b8f36a1c9e4f70b2d6853";
+    bridge.protect_secret(fake_token);
+    shell::ShellHandshake handshake(shell::make_handshake_nonce());
+    SMOKE_CHECK(handshake.install(bridge), "the bridge handshake installed");
+
     shell::cef::CefShellOptions cef_options;
     cef_options.native_window = nullptr; // windowless: no native window on a Session-0 runner
     cef_options.logical_size = size;
     cef_options.dpi = shell::DpiScale{};
-    cef_options.url = placeholder_url();
+    // THE app scheme, not a data: URL and emphatically not a file:// path (04 §1).
+    cef_options.url = shell::kAppEntryUrl;
+    cef_options.app_asset_root = CONTEXT_WEBUI_ASSET_DIR;
+    cef_options.bridge = &bridge;
     // Keep the paint rate low: this smoke wants a FRAME, not a frame rate.
     cef_options.windowless_frame_rate = 10;
+
+    // The runtime half of the guard the header comment describes: an empty asset root would make
+    // every scheme request 404 and the handshake time out 30 seconds later, which reads as a bridge
+    // bug rather than as the build-wiring mistake it is.
+    SMOKE_CHECK(!cef_options.app_asset_root.empty(),
+                "CONTEXT_WEBUI_ASSET_DIR was compiled in (the webui asset root is wired)");
+    std::printf("[editor-cef-smoke-shell] serving %s from %s\n", cef_options.url.c_str(),
+                cef_options.app_asset_root.string().c_str());
 
     std::string error;
     std::unique_ptr<shell::IBrowserHost> browser =
@@ -158,8 +218,10 @@ int main(int argc, char** argv)
         return finish(1);
     }
 
-    // Drive the integrated pump until the browser has painted and the compositor has presented at
-    // least one composited frame. 30s is the same budget editor_host.cpp allows for a headless load.
+    // Drive the integrated pump until the browser has painted AND the bridge handshake completed.
+    // Both conditions, not either: the composite proves the scheme served a renderable document,
+    // and the handshake proves the bundle inside it executed and round-tripped. 30s is the same
+    // budget editor_host.cpp allows for a headless load.
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     bool presented = false;
     while (std::chrono::steady_clock::now() < deadline)
@@ -168,9 +230,13 @@ int main(int argc, char** argv)
         {
             break;
         }
-        if (editor->compositor().stats().view_frames > 0 && blitter_raw->blit_count() > 0)
+        if (!presented && editor->compositor().stats().view_frames > 0 &&
+            blitter_raw->blit_count() > 0)
         {
             presented = true;
+        }
+        if (presented && handshake.complete())
+        {
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -210,9 +276,9 @@ int main(int argc, char** argv)
                     continue;
                 }
                 ++sampled;
-                // BGRA8, so #102040 is b=0x40, g=0x20, r=0x10.
-                if (surface[offset + 0] == 0x40 && surface[offset + 1] == 0x20 &&
-                    surface[offset + 2] == 0x10)
+                if (surface[offset + 0] == kAppBackgroundB &&
+                    surface[offset + 1] == kAppBackgroundG &&
+                    surface[offset + 2] == kAppBackgroundR)
                 {
                     ++background_texels;
                 }
@@ -220,8 +286,34 @@ int main(int argc, char** argv)
         }
         SMOKE_CHECK(sampled > 0, "the composed surface was large enough to sample");
         SMOKE_CHECK(background_texels == sampled,
-                    "every sampled texel carries the placeholder document's #102040 background — "
-                    "the LIVE browser's pixels reached the present path");
+                    "every sampled texel carries app.css's #132a44 background — the app scheme "
+                    "served the STYLESHEET with a usable media type and the LIVE browser's pixels "
+                    "reached the present path");
+    }
+
+    // --- the e05c DoD assertions ------------------------------------------------------------------
+    {
+        // The bundle executed and reached the Shell. This can only be true if
+        // `context-editor://app/index.html` AND `context-editor://app/editor-core.js` were both
+        // served, and if the CSP permitted the module script to run.
+        SMOKE_CHECK(handshake.hello_received(),
+                    "editor-core called shell.hello over context-editor://ipc — the bundle was "
+                    "served by the app scheme and executed under the strict CSP");
+        // THE round-trip assertion: shell.ready only completes when the renderer echoed back a
+        // nonce the Shell minted, so both directions of the channel are proven.
+        SMOKE_CHECK(handshake.complete(),
+                    "the IPC bridge round-tripped native<->JS: editor-core echoed the handshake "
+                    "nonce back through shell.ready");
+        SMOKE_CHECK(handshake.nonce_mismatches() == 0, "no nonce mismatch during the handshake");
+        SMOKE_CHECK(bridge.served() >= 2, "both handshake legs were served by the router");
+        SMOKE_CHECK(bridge.refused() == 0, "the live handshake produced no envelope refusals");
+        // The egress guard is WIRED in the live binding, not merely unit-tested: nothing the
+        // renderer asked for caused a protected value to be withheld, because nothing tried to
+        // send one.
+        SMOKE_CHECK(bridge.secrets_blocked() == 0,
+                    "no handler attempted to return a protected credential");
+        SMOKE_CHECK(!mentions(handshake.client_summary(), fake_token),
+                    "the protected token never appeared in what editor-core sent us");
     }
 
     // Input round-trip into the LIVE browser. NOTE what this does and does NOT prove: the counters

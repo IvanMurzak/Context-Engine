@@ -71,6 +71,23 @@ if(OS_WINDOWS OR OS_LINUX)
     COPY_FILES(context_editor_shell_cef_smoke "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}"
                "${CEF_TARGET_OUT_DIR}")
 
+    # --- the e05c asset root (and why this is a DEPENDENCY, not just a define) --------------------
+    # The smoke now loads `context-editor://app/index.html`, so it needs editor-core's built asset
+    # set to EXIST when it runs. The `editor-cef-smoke` CI job builds a hand-maintained `--target`
+    # list, so nothing would otherwise build the assets there and the smoke would fail on a 404
+    # that looks like a scheme bug. Expressing it as add_dependencies() makes the asset set travel
+    # with this target automatically — which is exactly what keeps ci.yml's `--target` list (and
+    # the profile's test.md § CI mirror of it) UNCHANGED by this task.
+    add_dependencies(context_editor_shell_cef_smoke context_editor_webui)
+    if(NOT CONTEXT_WEBUI_ASSET_DIR)
+        message(FATAL_ERROR
+            "context_editor_shell_cef_smoke: CONTEXT_WEBUI_ASSET_DIR is empty — src/editor/webui "
+            "must be added BEFORE src/editor/shell (src/CMakeLists.txt orders it so); it publishes "
+            "the asset root as CACHE INTERNAL.")
+    endif()
+    target_compile_definitions(context_editor_shell_cef_smoke PRIVATE
+        "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
+
     add_test(NAME editor-cef-smoke-shell COMMAND context_editor_shell_cef_smoke)
     set_tests_properties(editor-cef-smoke-shell PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_cef_smoke>"

@@ -16,9 +16,14 @@ dependency), *not* an install manifest — nothing reads it to resolve packages.
 | Path | What it is |
 |---|---|
 | `core/` | `@context-engine/editor-core` — the app package |
-| `core/src/index.ts` | The bundle entry point |
+| `core/src/index.ts` | The bundle entry point: re-exports the whole surface, then boots the bridge |
+| `core/src/info.ts` | The contract-surface projection (was `index.ts` through e05b) |
+| `core/src/bridge.ts` | The privileged Shell bridge, JS side (e05c) |
+| `core/src/boot.ts` | The boot handshake the live CEF smoke asserts natively (e05c) |
 | `core/src/generated/client-schema.ts` | **Generated** client typings — never hand-edit |
 | `core/tsconfig.json` | The typecheck config (strict; `--noEmit`) |
+| `app/index.html` | The document served at `context-editor://app/index.html` (e05c) |
+| `app/app.css` | The served stylesheet — a FILE, not a `<style>` block (the CSP blocks inline) |
 | `CMakeLists.txt` | The build wiring: fetch → typecheck → bundle → stage |
 
 ## The three pinned tools
@@ -107,13 +112,18 @@ gate-exclusion regex and runs automatically in the general ctest step on all thr
 Python-side unit tests live in `tools/tests/test_gen_client_typings.py`,
 `tools/tests/test_check_webui_assets.py`, and `tools/tests/test_fetch_dockview.py`.
 
-## Scope boundary (e05a)
+## Scope boundary (after e05c)
 
-This directory is the **toolchain substrate only**. dockview is acquired and verified but nothing
-consumes its API yet. Deliberately **not** here:
+e05a made this the **toolchain substrate**; e05c added the **served document set** (`app/`) and the
+**JS half of the privileged bridge**. dockview is acquired and verified but nothing consumes its API
+yet. Deliberately **not** here:
 
-- the `context-editor://` app scheme and the privileged IPC bridge → **e05c**
-- `PanelHost` (the dockview wrapper that owns panel lifecycle, design 04 §2) → **e05c**
+- ~~the `context-editor://` app scheme and the privileged IPC bridge~~ → ✅ **e05c**. The scheme's
+  NATIVE half (registration, resource handler, message router) lives in `src/editor/shell/`, not
+  here; this directory owns only what is served and what runs in the renderer.
+- `PanelHost` (the dockview wrapper that owns panel lifecycle, design 04 §2) → **e05d**
 - the panel hydration runtime → **e05d**
+- layout persistence → **e05d**
 
-Grow the app along those seams, not by widening `index.ts`.
+Grow the app along those seams. `index.ts` is the entry (re-export + boot) and should stay that
+thin — put new surface in its own module and re-export it.

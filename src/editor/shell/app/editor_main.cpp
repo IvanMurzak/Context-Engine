@@ -9,7 +9,9 @@
 // "this build contains no browser" rather than a target that only exists on one CI job. That is also
 // what lets the D10 `editor-boundary` job BUILD this binary against the installed client artifacts.
 
+#include "context/editor/shell/app_scheme.h"
 #include "context/editor/shell/browser.h"
+#include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/shell.h"
 #include "context/editor/shell/window.h"
 #include "context/render/rhi.h"
@@ -41,10 +43,20 @@ namespace render = context::render;
 namespace
 {
 
+// editor-core's built asset root, compiled in by CMake (see the note at the target). Always defined
+// for a real build; the fallback keeps this file compilable on its own.
+#if !defined(CONTEXT_WEBUI_ASSET_DIR)
+#define CONTEXT_WEBUI_ASSET_DIR ""
+#endif
+
 struct Options
 {
     std::filesystem::path project = std::filesystem::current_path();
-    std::string url = "about:blank";
+    // e05c: the editor now boots editor-core over its OWN scheme by default rather than a blank
+    // page. `--url` still overrides it (a diagnostic escape hatch), but there is deliberately no
+    // `file://` path anywhere: assets ship in-app and are served over context-editor:// (04 §1).
+    std::string url = shell::kAppEntryUrl;
+    std::filesystem::path app_root = CONTEXT_WEBUI_ASSET_DIR;
     bool headless = false;   // never open an OS window (CI / Session 0 / a remote box)
     bool devtools = false;   // dev-loop only (review B-F11)
     int max_frames = 0;      // 0 == run until the window closes; >0 caps the loop (smoke runs)
@@ -55,11 +67,13 @@ void print_usage()
     std::printf("context_editor — the Context Engine editor shell\n"
                 "\n"
                 "  --project <dir>   project root (default: the current directory)\n"
-                "  --url <url>       the document to load (default: about:blank)\n"
+                "  --url <url>       the document to load (default: %s)\n"
+                "  --app-root <dir>  editor-core's asset root, served over context-editor://app/\n"
                 "  --headless        do not open an OS window; run the shell offscreen\n"
                 "  --devtools        enable DevTools (dev loop only)\n"
                 "  --frames <n>      run at most n loop iterations, then exit\n"
-                "  --help            this message\n");
+                "  --help            this message\n",
+                shell::kAppEntryUrl);
 }
 
 // Returns false when the arguments are malformed (the caller exits non-zero).
@@ -90,6 +104,10 @@ bool parse_options(int argc, char** argv, Options& out, bool& asked_for_help)
         else if (arg == "--url" && has_value)
         {
             out.url = argv[++i];
+        }
+        else if (arg == "--app-root" && has_value)
+        {
+            out.app_root = argv[++i];
         }
         else if (arg == "--frames" && has_value)
         {
@@ -178,35 +196,12 @@ int main(int argc, char** argv)
         }
     }
 
-    // --- the browser ------------------------------------------------------------------------------
-    std::unique_ptr<shell::IBrowserHost> browser;
-#if defined(CONTEXT_EDITOR_HAS_CEF)
-    {
-        shell::cef::CefShellOptions cef_options;
-        cef_options.native_window = backend->native_window().handle;
-        cef_options.logical_size = shell::to_logical(backend->client_size(), backend->dpi());
-        cef_options.dpi = backend->dpi();
-        cef_options.url = options.url;
-        cef_options.devtools_enabled = options.devtools;
-        std::string error;
-        browser = shell::cef::make_cef_browser_host(cef_options, error);
-        if (browser == nullptr)
-        {
-            std::fprintf(stderr, "context_editor: the browser did not start: %s\n", error.c_str());
-            // CEF is already initialized by this point, so returning straight out would leave it
-            // initialized and its subprocesses orphaned.
-            shell::cef::shutdown();
-            return 1;
-        }
-    }
-#else
-    // No browser in this build. The shell still boots and composites — see the file header.
-    std::fprintf(stderr, "context_editor: built without CEF (CONTEXT_BUILD_GUI_CEF=OFF); running "
-                         "the shell with no web content\n");
-    browser = std::make_unique<shell::ScriptedBrowserHost>();
-#endif
-
     // --- the daemon (D10: an ordinary AUTHENTICATED client) ---------------------------------------
+    //
+    // MOVED AHEAD OF THE BROWSER by e05c, and the order is load-bearing: the attach is where the
+    // Shell learns the D20 token and the daemon endpoint, and BOTH must be registered with the
+    // bridge's egress guard BEFORE a renderer exists that could ask for them. Attaching after the
+    // browser was created would leave a window — however short — in which the guard knew no secrets.
     shell::DaemonAttach daemon = shell::attach_to_project(options.project);
     if (!daemon.attached)
     {
@@ -218,6 +213,64 @@ int main(int argc, char** argv)
                      daemon.error.c_str(), daemon.error_code.empty() ? "" : "; code=",
                      daemon.error_code.c_str());
     }
+
+    // --- the privileged bridge (e05c, design 04 §1 / 08 §1) ---------------------------------------
+    //
+    // THE TOKEN-ISOLATION BOUNDARY IS HERE. editor-core gets a router; it does NOT get the client,
+    // the socket or the token. The three controls (ipc_bridge.h) are: the router holds no
+    // credential by construction, the credential-bearing method names cannot be registered at all,
+    // and every outbound response is scanned for the values registered just below.
+    //
+    // Declared before the browser and destroyed after it: the CEF handler holds a raw pointer to
+    // this router for the browser's whole life.
+    shell::BridgeRouter bridge;
+    if (daemon.client != nullptr)
+    {
+        // The two values that must never cross into the renderer. Read from the client's own
+        // discovery output rather than re-read from disk, so the guard protects exactly what this
+        // process is actually holding. (A later reconnect that mints a new token must re-protect it
+        // — that path arrives with e05d's client layer.)
+        bridge.protect_secret(daemon.client->instance().token);
+        bridge.protect_secret(daemon.client->instance().endpoint);
+    }
+    shell::ShellHandshake handshake(shell::make_handshake_nonce());
+    if (!handshake.install(bridge))
+    {
+        std::fprintf(stderr, "context_editor: could not install the bridge handshake\n");
+        return 1;
+    }
+
+    // --- the browser ------------------------------------------------------------------------------
+    std::unique_ptr<shell::IBrowserHost> browser;
+#if defined(CONTEXT_EDITOR_HAS_CEF)
+    {
+        shell::cef::CefShellOptions cef_options;
+        cef_options.native_window = backend->native_window().handle;
+        cef_options.logical_size = shell::to_logical(backend->client_size(), backend->dpi());
+        cef_options.dpi = backend->dpi();
+        cef_options.url = options.url;
+        cef_options.devtools_enabled = options.devtools;
+        cef_options.app_asset_root = options.app_root;
+        cef_options.bridge = &bridge;
+        std::string error;
+        browser = shell::cef::make_cef_browser_host(cef_options, error);
+        if (browser == nullptr)
+        {
+            std::fprintf(stderr, "context_editor: the browser did not start: %s\n", error.c_str());
+            // CEF is already initialized by this point, so returning straight out would leave it
+            // initialized and its subprocesses orphaned.
+            shell::cef::shutdown();
+            return 1;
+        }
+        std::printf("context_editor: serving editor-core from %s over %s\n",
+                    options.app_root.string().c_str(), shell::kAppUrlPrefix);
+    }
+#else
+    // No browser in this build. The shell still boots and composites — see the file header.
+    std::fprintf(stderr, "context_editor: built without CEF (CONTEXT_BUILD_GUI_CEF=OFF); running "
+                         "the shell with no web content\n");
+    browser = std::make_unique<shell::ScriptedBrowserHost>();
+#endif
 
     // --- the window binding + the present path ----------------------------------------------------
     shell::EditorWindowConfig config;

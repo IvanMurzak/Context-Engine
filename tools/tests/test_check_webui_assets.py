@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -197,3 +198,189 @@ def test_real_manifest_members_are_checkable() -> None:
     assert set(manifest["members"]) == {"dockview-core.min.js", "dockview.css"}
     for spec in manifest["members"].values():
         assert len(spec["sha256"]) == 64
+
+
+# --- the M9 e05c scheme-contract gate (--scheme-contract) ----------------------------------------
+#
+# Three properties that live in two languages (the C++ Shell + the TS bundle) plus one hand-authored
+# HTML document, none of which any compiler cross-checks. The gate's own FAILURE mode matters as
+# much as its success here: the served document carries a comment block that describes these rules
+# in prose (it names `<script>`, a style attribute and `file://`), and the first implementation
+# reported all three from inside that comment. That regression is pinned below.
+
+GOOD_DOCUMENT = (
+    "<!DOCTYPE html>\n"
+    '<html lang="en">\n'
+    '<head><meta charset="utf-8"><link rel="stylesheet" href="./app.css"></head>\n'
+    '<body><main id="editor-root"></main>\n'
+    '<script type="module" src="./editor-core.js"></script>\n'
+    "</body>\n"
+    "</html>\n"
+)
+
+GOOD_STYLESHEET = ":root { --editor-bg: #132a44; }\n"
+
+# The four constants the bundle must agree with the Shell about.
+SCHEME_BUNDLE = (
+    'var BRIDGE_SCHEME = "context-editor";\n'
+    'var BRIDGE_ORIGIN = "context-editor://app";\n'
+    'var BRIDGE_ENDPOINT = "context-editor://ipc";\n'
+    'var BRIDGE_QUERY_FUNCTION = "contextEditorQuery";\n'
+)
+
+CPP_HEADER = (
+    'inline constexpr const char* kAppScheme = "context-editor";\n'
+    'inline constexpr const char* kAppOrigin = "context-editor://app";\n'
+    'inline constexpr const char* kIpcEndpoint = "context-editor://ipc";\n'
+)
+
+CPP_CEF = 'constexpr const char* kBridgeQueryFunction = "contextEditorQuery";\n'
+
+
+def _scheme_fixture(tmp_path: Path, *, document: str = GOOD_DOCUMENT,
+                    stylesheet: str | None = GOOD_STYLESHEET, bundle: str = SCHEME_BUNDLE,
+                    header: str = CPP_HEADER, cef: str = CPP_CEF) -> tuple[Path, Path, Path]:
+    asset_dir = tmp_path / "app"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    (asset_dir / "editor-core.js").write_text(bundle, encoding="utf-8")
+    (asset_dir / "index.html").write_text(document, encoding="utf-8")
+    if stylesheet is not None:
+        (asset_dir / "app.css").write_text(stylesheet, encoding="utf-8")
+
+    include_dir = tmp_path / "include"
+    include_dir.mkdir(parents=True, exist_ok=True)
+    (include_dir / "app_scheme.h").write_text(header, encoding="utf-8")
+
+    cef_dir = tmp_path / "cefsrc"
+    cef_dir.mkdir(parents=True, exist_ok=True)
+    (cef_dir / "cef_shell.cpp").write_text(cef, encoding="utf-8")
+    return asset_dir, include_dir, cef_dir
+
+
+def _run_scheme(tmp_path: Path, **kwargs) -> int:
+    asset_dir, include_dir, cef_dir = _scheme_fixture(tmp_path, **kwargs)
+    return check_webui_assets.run_scheme_contract(asset_dir, "editor-core.js", include_dir, cef_dir)
+
+
+def test_scheme_contract_happy_path(tmp_path: Path, capsys) -> None:
+    assert _run_scheme(tmp_path) == 0
+    assert "OK" in capsys.readouterr().out
+
+
+def test_documentation_comments_do_not_trip_the_gate(tmp_path: Path) -> None:
+    """The served document DOCUMENTS these rules in prose; a comment is not a violation.
+
+    Regression guard. The first implementation matched the `<script>` mentioned inside the comment
+    and then ran its lazy `(.*?)</script>` all the way to the REAL closing tag, reporting a huge
+    inline body that did not exist — and flagged the comment's `file://` too. Both were false
+    positives on a correct document, and both would have blocked a correct build.
+    """
+    documented = GOOD_DOCUMENT.replace(
+        "<head>",
+        "<!--\n  NO INLINE SCRIPT: an inline <script> or a style= attribute is BLOCKED by the CSP,\n"
+        "  and assets never load from a file:// temp file.\n-->\n<head>",
+        1)
+    assert _run_scheme(tmp_path, document=documented) == 0
+
+
+@pytest.mark.parametrize("bad_document", [
+    # An inline <script> BODY (the tag WITH a src= and no body is the correct shape).
+    GOOD_DOCUMENT.replace('<script type="module" src="./editor-core.js"></script>',
+                          "<script>window.x = 1;</script>"),
+    # An inline <style> element.
+    GOOD_DOCUMENT.replace("<body>", "<style>body{color:red}</style><body>"),
+    # An inline style= attribute.
+    GOOD_DOCUMENT.replace('<main id="editor-root">', '<main id="editor-root" style="color:red">'),
+    # A javascript: URL.
+    GOOD_DOCUMENT.replace('<main id="editor-root">',
+                          '<a href="javascript:alert(1)">x</a><main id="editor-root">'),
+])
+def test_csp_violating_document_fails(tmp_path: Path, bad_document: str) -> None:
+    """Each of these is BLOCKED by the served CSP at runtime, so it must fail at BUILD time."""
+    assert _run_scheme(tmp_path, document=bad_document) == 1
+
+
+def test_missing_stylesheet_fails(tmp_path: Path) -> None:
+    assert _run_scheme(tmp_path, stylesheet=None) == 1
+
+
+def test_missing_document_fails(tmp_path: Path) -> None:
+    asset_dir, include_dir, cef_dir = _scheme_fixture(tmp_path)
+    (asset_dir / "index.html").unlink()
+    assert check_webui_assets.run_scheme_contract(
+        asset_dir, "editor-core.js", include_dir, cef_dir) == 1
+
+
+@pytest.mark.parametrize("ts_name,drifted", [
+    ("BRIDGE_SCHEME", "context-edit"),
+    ("BRIDGE_ORIGIN", "context-editor://application"),
+    ("BRIDGE_ENDPOINT", "context-editor://bridge"),
+    ("BRIDGE_QUERY_FUNCTION", "cefQuery"),
+])
+def test_scheme_vocabulary_drift_fails(tmp_path: Path, ts_name: str, drifted: str) -> None:
+    """A rename on either side must RED, not produce a silently unreachable bridge."""
+    bundle = re.sub(rf'{ts_name} = "[^"]*"', f'{ts_name} = "{drifted}"', SCHEME_BUNDLE)
+    assert _run_scheme(tmp_path, bundle=bundle) == 1
+
+
+def test_bundle_missing_a_scheme_constant_fails(tmp_path: Path) -> None:
+    bundle = "".join(line + "\n" for line in SCHEME_BUNDLE.splitlines()
+                     if "BRIDGE_ENDPOINT" not in line)
+    assert _run_scheme(tmp_path, bundle=bundle) == 1
+
+
+@pytest.mark.parametrize("asset,content", [
+    ("index.html", GOOD_DOCUMENT.replace("./editor-core.js", "file:///c:/tmp/editor-core.js")),
+    ("editor-core.js", SCHEME_BUNDLE + 'var fallback = "file:///c:/tmp/app";\n'),
+    ("app.css", GOOD_STYLESHEET + '@import url("file:///c:/tmp/x.css");\n'),
+])
+def test_file_url_anywhere_in_the_asset_set_fails(tmp_path: Path, asset: str, content: str) -> None:
+    """The DoD line "no file:// fallback exists", over EVERY served text asset, not just the doc."""
+    asset_dir, include_dir, cef_dir = _scheme_fixture(tmp_path)
+    (asset_dir / asset).write_text(content, encoding="utf-8")
+    assert check_webui_assets.run_scheme_contract(
+        asset_dir, "editor-core.js", include_dir, cef_dir) == 1
+
+
+def test_renamed_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
+    """A vanished C++ constant means the gate can verify NOTHING — say so loudly (exit 2).
+
+    The dangerous failure mode is the opposite: a regex that silently matches nothing while the
+    gate still reports success, which is how a cross-language check rots into a no-op.
+    """
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_scheme(tmp_path, header=CPP_HEADER.replace("kIpcEndpoint", "kIpcEndpointRenamed"))
+
+
+def test_missing_asset_dir_is_a_scheme_config_error(tmp_path: Path) -> None:
+    _, include_dir, cef_dir = _scheme_fixture(tmp_path)
+    with pytest.raises(check_webui_assets.CheckError):
+        check_webui_assets.run_scheme_contract(
+            tmp_path / "nope", "editor-core.js", include_dir, cef_dir)
+
+
+def test_main_routes_the_scheme_contract_flag(tmp_path: Path) -> None:
+    asset_dir, include_dir, cef_dir = _scheme_fixture(tmp_path)
+    assert check_webui_assets.main([
+        "--asset-dir", str(asset_dir), "--bundle-name", "editor-core.js",
+        "--scheme-contract",
+        "--shell-include-dir", str(include_dir), "--shell-cef-dir", str(cef_dir),
+    ]) == 0
+
+
+def test_the_real_repo_sources_agree_across_languages() -> None:
+    """Cross-check the COMMITTED sources against each other, independent of any build.
+
+    The `webui-scheme-contract` ctest runs this over the BUILT asset dir; this runs it over the
+    repo, so a drift introduced without building still reds pytest.
+    """
+    header = REPO_ROOT / "src" / "editor" / "shell" / "include" / "context" / "editor" / "shell"
+    cef = REPO_ROOT / "src" / "editor" / "shell" / "cef" / "src"
+    ts = (REPO_ROOT / "src" / "editor" / "webui" / "core" / "src" / "bridge.ts").read_text(
+        encoding="utf-8")
+    for _human, cpp_file, cpp_name, ts_name in check_webui_assets.SCHEME_CONSTANTS:
+        cpp_value = check_webui_assets._read_cpp_string_constant(header / cpp_file, cpp_name)
+        assert f'{ts_name} = "{cpp_value}"' in ts, f"{ts_name} drifted from C++ {cpp_name}"
+    _human, cef_file, cpp_name, ts_name = check_webui_assets.QUERY_FUNCTION_CONSTANT
+    cpp_value = check_webui_assets._read_cpp_string_constant(cef / cef_file, cpp_name)
+    assert f'{ts_name} = "{cpp_value}"' in ts
