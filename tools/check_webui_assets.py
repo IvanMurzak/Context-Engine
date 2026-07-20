@@ -112,6 +112,22 @@ PANEL_STATE_CONSTANTS = (
     ("state data key", "kStateDataKey", "STATE_DATA_KEY"),
 )
 
+# The M9 e05d2 editor-state + region-map surface (design 03 §1 / §6), whose vocabulary lives in
+# editor_state_bridge.h. SAME silent-drift hazard as the panel surface above: a method renamed on one
+# side unbinds persistence with no build error — layout stops saving and NOTHING reports it — and a
+# region-kind token renamed on one side mis-routes input. Cross-checked identically, from the header
+# constants and the built bundle.
+EDITOR_STATE_CONSTANTS = (
+    ("editor.state.get", "editor_state_bridge.h", "kEditorStateGetMethod",
+     "EDITOR_STATE_GET_METHOD"),
+    ("editor.state.publish", "editor_state_bridge.h", "kEditorStatePublishMethod",
+     "EDITOR_STATE_PUBLISH_METHOD"),
+    ("editor.regions.publish", "editor_state_bridge.h", "kEditorRegionsPublishMethod",
+     "EDITOR_REGIONS_PUBLISH_METHOD"),
+    ("region kind viewport", "editor_state_bridge.h", "kRegionKindViewport", "REGION_KIND_VIEWPORT"),
+    ("region kind native", "editor_state_bridge.h", "kRegionKindNative", "REGION_KIND_NATIVE"),
+)
+
 # The closed gesture vocabulary (04 §4), compared SET vs SET between the C++ wire tokens and the
 # bundle's own GESTURE_VERBS array, so a verb added on one side without the other — which would be
 # refused at runtime with no build error — fails here instead.
@@ -389,6 +405,21 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
                 f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
                 f"Shell would route one name and editor-core would call another, so the panel would "
                 f"never mount and NOTHING would report an error.")
+
+    # 7a2 — the e05d2 editor-state + region-map vocabulary agrees across the two languages. Same
+    # mechanism as 7a; a rename here unbinds persistence (layout stops saving) or mis-routes input.
+    for human, cpp_file, cpp_name, ts_name in EDITOR_STATE_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(
+                f"{human}: the bundle does not declare {ts_name} — editor-core cannot be calling the "
+                f"method / emitting the token the Shell routes")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
+                f"Shell would route/parse one value and editor-core would send another, so layout "
+                f"persistence (or region-map input routing) would break with NO error anywhere.")
 
     # 7b — the D6 persisted-blob member names agree (gui/contract/panel_state.h is their authority).
     for human, cpp_name, ts_name in PANEL_STATE_CONSTANTS:

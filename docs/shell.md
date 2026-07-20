@@ -67,13 +67,24 @@ Three decoding traps, each pinned by a test:
 - **A minimized window reports a 0×0 client size** on every `WM_SIZE`. Forwarding that as a resize
   asks the swapchain to reconfigure to nothing, every frame, for as long as it stays minimized.
 
-**Placement persistence.** Window placement is persisted, debounced and crash-safe, to
-`.editor/editor-state.json`. The Shell is that file's **single writer**; the daemon is the single
-writer of `.editor/session.json` (03 §1, review C-F3). One writer per file is what removes torn
-writes without any cross-process coordination. The write stages into a sibling temp file and renames
-it over the target, so a crash leaves either the old complete document or the new one. A malformed
-document degrades to defaults rather than refusing to boot — a session file that will not load is a
-user losing their layout.
+**Placement + layout persistence.** Window placement, the dock **arrangement** (Dockview's `toJSON`),
+and each panel's D6 state blob are persisted, debounced and crash-safe, to `.editor/editor-state.json`.
+The Shell is that file's **single writer**; the daemon is the single writer of `.editor/session.json`
+(03 §1, review C-F3). One writer per file is what removes torn writes without any cross-process
+coordination. The write stages into a sibling temp file and renames it over the target, so a crash
+leaves either the old complete document or the new one. A malformed document degrades to defaults
+rather than refusing to boot — a session file that will not load is a user losing their layout.
+
+editor-core owns the arrangement and the panel blobs, so it PUBLISHES them over the e05c bridge
+(`editor.state.publish`, M9 e05d2) and the Shell records them through the store — editor-core never
+opens, writes, or locks the file, which is what keeps it an ordinary wire client (D18). On boot it
+reads the persisted blob back through `editor.state.get` and rebuilds the arrangement itself; a stale
+per-panel blob (a schemaVersion mismatch) degrades that ONE panel to its defaults and never discards
+the rest of the layout (the D6 contract, e05b). The three write triggers design 04 §2 requires are all
+live: debounced during interaction, a final publish on `pagehide`, and — because the debounced writes
+are complete atomic files — the last one is a last-known-good a non-graceful exit leaves intact. The
+`editor.state.*` surface is `context_editor_shell/editor_state_bridge.{h,cpp}`, CEF-free and bound to
+the store in `editor_main.cpp` ahead of the browser.
 
 ## 2. DPI
 
@@ -96,12 +107,16 @@ reconfigured every frame.
 Five decisions, in order: region arbitration → capture → DPI → focus class → R-HUX-011 timestamps.
 
 **Region arbitration.** Editor-core publishes the window's region map — viewport content rects plus
-native-interaction regions — on every layout change. A pointer inside one takes the native path;
-everywhere else is the browser's. The map is replaced **wholesale, never patched**: a layout change
-that added a panel and moved two others is ONE consistent state, and an incremental update is how a
-stale rect outlives the panel it belonged to. Hit-testing is back-to-front (the last match wins),
-mirroring the UI package's own `hit_test`, so stacking is expressed by order alone rather than by a z
-field the two sides could disagree about.
+native-interaction regions — on every layout change, over the e05c bridge (`editor.regions.publish`,
+M9 e05d2: the `editor_state_bridge` parses the array into `ShellRegion`s and forwards them into this
+window's `InputArbiter`). A pointer inside one takes the native path; everywhere else is the browser's.
+The map is replaced **wholesale, never patched**: a layout change that added a panel and moved two
+others is ONE consistent state, and an incremental update is how a stale rect outlives the panel it
+belonged to (an empty publish therefore CLEARS a removed viewport's rect). Hit-testing is back-to-front
+(the last match wins), mirroring the UI package's own `hit_test`, so stacking is expressed by order
+alone rather than by a z field the two sides could disagree about. Today editor-core has no viewport
+panels — those are **e11** — so the published set is typically empty; e05d2 delivers the wired,
+tested PATH, and e11 fills the region list with no Shell change.
 
 **Capture** reuses the `InputRouter`/`UiInputRouter` shape rather than re-inventing arbitration: a
 capture is either MODAL (a miss is swallowed — the dropdown backdrop) or an OVERLAY (a miss falls
@@ -276,6 +291,7 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
 | `editor-shell-smoke-session0` | **The blocking CI requirement**: the whole shell loop over software-OSR frames with the composited present asserted PER-PIXEL — see § 9 |
 | `editor-shell-boundary` | The D10 link-closure audit actually ran and covered a real forbidden target |
 | `editor-shell-test_panel_host` | The panel-agnostic surface over SYNTHETIC panels: roster projection (hosted vs listed-but-unhosted), render payload, command dispatch + the stale-command refusal, the four gesture verbs and the refusal of a fifth, the D6 round-trip and all three degrade paths, every `panel.*` binding, and hostile params on every method |
+| `editor-shell-test_editor_state_bridge` | e05d2: the layout/panels publish→store→get round-trip (incl. a restart), all three persistence triggers (debounce, `flush_now`, crash-restore), region parsing (kind tokens, negative-pixel clamp, malformed-element skip) reaching a live `InputArbiter` and routing a pointer, the empty-publish clear, the `not_ready`/`bad_params` degrade paths, and the full `editor.*` JSON-RPC binding over a real router |
 | `editor-shell-test_problems_feed` | The LIVE `diagnostics` projection without a daemon: severity/stability tokens, all three snapshot shapes, every publisher shape the topic carries, hostile/degenerate payloads, R-BRIDGE-008 promotion + settle, and the node-id -> diagnostic-identity mapping |
 | `editor-shell-test_builtin_panels` | The composition root: what binds, that Scene tree + Inspector stay listed-but-unhosted until e05d3, and a daemon event reaching a rendered panel end to end |
 | `editor-cef-smoke-shell` | The LIVE CEF half: a real windowless browser through the real integrated pump, its `OnPaint` frames composited + presented, input round-tripped, a live resize repainted (`editor-cef-smoke` job, Windows/Linux) |
