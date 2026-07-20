@@ -224,6 +224,15 @@ public:
     // `editor-cef-smoke-shell` asserts these are non-zero after the real renderer boots, which is the
     // end-to-end proof that the LIVE hydration runtime actually called this host — a claim no local
     // test can make and no counter-free design can support.
+    //
+    // WHAT EACH ONE COUNTS, precisely, so a reader does not over-read them. `lists_served` and
+    // `renders_served` are incremented by their bridge HANDLERS, so they count wire calls only —
+    // and those two are the ones `editor-cef-smoke-shell` actually asserts.
+    // `commands_dispatched` is incremented in `invoke`, so it counts every command that REACHED a
+    // provider — over the wire or by a direct call — including one the provider then DECLINED. It
+    // is a reachability signal, NOT a count of commands the model acted on; `Entry::revision`,
+    // which moves only on an accepted command, is the signal for that. Its reader is the unit test
+    // (`test_panel_host.cpp`), not the smoke.
     [[nodiscard]] std::size_t lists_served() const { return lists_served_; }
     [[nodiscard]] std::size_t renders_served() const { return renders_served_; }
     [[nodiscard]] std::size_t commands_dispatched() const { return commands_dispatched_; }

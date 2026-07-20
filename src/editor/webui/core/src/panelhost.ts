@@ -190,6 +190,19 @@ export class PanelHost {
                 unavailable.push(manifest.id);
                 continue;
             }
+            if (manifest.contentType !== "uitree") {
+                // THE SECURITY BOUNDARY, ENFORCED RATHER THAN ASSUMED. `UitreePanelRenderer` mounts
+                // its payload through `innerHTML`, which is safe ONLY because a `uitree` payload
+                // came from `render_html`'s escaping contract. The contract already carries a
+                // second content type (`iframe` — a third-party web panel, 04 §5), whose content is
+                // NOT ours and belongs in a sandboxed iframe on a different origin. Nothing
+                // registers an iframe provider today, which is exactly why the guard must exist
+                // now: the first one to appear would otherwise be routed straight into that sink.
+                // `parsePanelManifest` fails closed to `unknown` for an unrecognised token, so a
+                // drifted or malformed manifest lands here too rather than defaulting into it.
+                unavailable.push(manifest.id);
+                continue;
+            }
             if (this.open(manifest)) {
                 mounted += 1;
             }
@@ -245,7 +258,17 @@ export class PanelHost {
         return this.#panels.delete(panelId);
     }
 
-    /** Re-render every mounted, non-suspended panel. The host's poll tick. */
+    /**
+     * Re-render every mounted, non-suspended panel.
+     *
+     * NOTHING CALLS THIS YET — stated plainly rather than described as "the host's poll tick",
+     * which would claim a driver that does not exist. Re-renders today are event-driven per panel:
+     * `onDispatched` after a local command, and `onShow` when a panel becomes visible. So a change
+     * arriving from the daemon (a diagnostic landing in the live feed) reaches the C++ model and
+     * moves its revision, but no DOM update follows until the user next interacts. Wiring a driver
+     * — a tick, or a bridge-side change event — is a later task; this method is the seam it will
+     * call, and it is already correct for that use.
+     */
     async refreshAll(): Promise<void> {
         await Promise.all(
             Array.from(this.#panels.values())

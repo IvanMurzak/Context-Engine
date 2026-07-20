@@ -240,7 +240,8 @@ add_test(NAME webui-panel-contract
             --shell-include-dir "${CMAKE_CURRENT_SOURCE_DIR}/../shell/include/context/editor/shell"
             --contract-include-dir
                 "${CMAKE_CURRENT_SOURCE_DIR}/../gui/contract/include/context/editor/gui/contract"
-            --package-json "${_ctx_webui_core}/package.json")
+            --package-json "${_ctx_webui_core}/package.json"
+            --shell-src-dir "${CMAKE_CURRENT_SOURCE_DIR}/../shell/src")
 
 # 2) The DRIFT gate (e05a DoD: "generated from e02's schema; drift-checked in CI"). Re-projects the
 # BUILD-GENERATED schema — the live registry's output, not the committed copy — and refuses any byte

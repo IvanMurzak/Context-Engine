@@ -71,10 +71,49 @@ export const NODE_ID_ATTRIBUTE = "data-node-id";
 /** The attribute `uitree::render_html` emits for a node's bound command. */
 export const COMMAND_ATTRIBUTE = "data-command";
 
-/** Attributes the patcher synchronises on a reused element. Everything else is structural. */
-const SYNCED_ATTRIBUTES = ["role", "aria-label", "tabindex", COMMAND_ATTRIBUTE] as const;
+/**
+ * Attributes the patcher synchronises on a reused element. Everything else is structural.
+ *
+ * `class` is in the list because the WIDGET CLASS MUST FOLLOW THE ROLE on a reused element.
+ * `render_html` never emits `class` (see `uitree::render_into` — it writes only id / role /
+ * aria-label / tabindex / data-command), so the sole class an incoming element carries is the one
+ * `#normalise` derives from its role. Syncing it therefore replaces a stale class automatically:
+ * three role pairs share an HTML tag and so survive the reuse test — tree/list (`ul`),
+ * treeitem/listitem (`li`), textbox/checkbox (`input`) — and without this an element whose role
+ * changed within a pair would keep the previous class forever.
+ */
+const SYNCED_ATTRIBUTES = ["role", "aria-label", "tabindex", "class", COMMAND_ATTRIBUTE] as const;
 
-/** What a hydrated panel reports about itself — the surface a test or a diagnostic reads. */
+/**
+ * Is this event target a text-entry control?
+ *
+ * Used to keep panel-level keyboard navigation from swallowing keys that belong to the caret. Only
+ * the genuinely text-like `<input>` types qualify — a checkbox or a button `<input>` is an ordinary
+ * activatable affordance and must keep its Space/Enter handling.
+ */
+function isTextEntry(target: EventTarget | null): boolean {
+    if (target instanceof HTMLTextAreaElement) {
+        return true;
+    }
+    if (target instanceof HTMLElement && target.isContentEditable) {
+        return true;
+    }
+    if (!(target instanceof HTMLInputElement)) {
+        return false;
+    }
+    return !["checkbox", "radio", "button", "submit", "reset"].includes(target.type);
+}
+
+/**
+ * What a hydrated panel reports about itself.
+ *
+ * NO READER EXISTS YET — there is no TypeScript test tier in this workspace, and the live smoke
+ * asserts the C++-side counters (`PanelHost::lists_served` / `renders_served`) instead. Recorded
+ * honestly rather than described as "the surface a test reads", because the distinction matters:
+ * these counters are the read surface a TS test harness WOULD use, and `reused` in particular is
+ * the only way to observe that the patcher patched incrementally rather than full-replacing —
+ * something no pixel assertion can distinguish.
+ */
 export interface HydrationStats {
     /** Full mounts (a first render, or a re-render the patcher could not reuse anything from). */
     readonly mounts: number;
@@ -114,6 +153,16 @@ export class HydrationRuntime {
     #revision = -1;
     #gestureActive = false;
     #disposed = false;
+    /** Monotonic refresh ticket — see `refresh`'s out-of-order guard. */
+    #generation = 0;
+    /**
+     * The node a gesture STARTED on, held for its whole lifetime.
+     *
+     * Every verb after `begin` reports this node rather than whatever is under the pointer now: a
+     * drag that crosses onto a sibling must not silently re-target the gesture mid-stroke, and a
+     * release outside the container must still be able to name the node it began on.
+     */
+    #gestureNode: Element | null = null;
 
     #mounts = 0;
     #patches = 0;
@@ -189,8 +238,15 @@ export class HydrationRuntime {
         if (this.#disposed) {
             return false;
         }
+        // GENERATION GUARD against an out-of-order response. Refreshes are concurrent by
+        // construction — a dispatch-triggered refresh can overlap an onShow or a start-time one —
+        // and the bridge does not promise completion order. Without this, an older response
+        // resolving last would patch the DOM BACKWARDS and rewind `#revision`, which then makes the
+        // newer revision look already-applied so nothing heals it until the next user action.
+        // Revision comparison alone cannot substitute: `apply` is also called directly.
+        const generation = ++this.#generation;
         const render = await this.#client.render(this.#panelId);
-        if (render === null) {
+        if (render === null || generation !== this.#generation || this.#disposed) {
             return false;
         }
         this.apply(render);
@@ -276,6 +332,14 @@ export class HydrationRuntime {
         // is what makes every command-bound affordance reachable without a pointer — R-CLI-001
         // CLI-completeness as a structural accessibility property, which `uitree::audit_a11y`
         // already asserts on the model side.
+        // TEXT ENTRY IS NEVER HIJACKED. `role_html_tag` maps the `textbox` role onto a real
+        // `<input>`, so text-entry nodes are ordinary focusables inside this container. Without
+        // this bail-out, Home/End/Arrow would move PANEL focus and `preventDefault()` the caret,
+        // and Space would dispatch a bound command instead of typing a space.
+        if (isTextEntry(event.target)) {
+            return;
+        }
+
         if (event.key === "Enter" || event.key === " ") {
             const node = this.#nodeFrom(event.target);
             if (node !== null && node.hasAttribute(COMMAND_ATTRIBUTE)) {
@@ -290,8 +354,18 @@ export class HydrationRuntime {
         if (this.#gestureActive && event.key === "Escape") {
             // Escape cancels an in-flight gesture — the keyboard half of `pointercancel`, and the
             // reason a drag cannot be left permanently open by a user who changes their mind.
+            //
+            // Cancelled against the GESTURE'S OWN node, not the focused one: a pointer-initiated
+            // drag usually leaves focus untouched, so keying off focus meant the common case
+            // resolved to "" — which cleared the local flag WITHOUT ever telling the Shell, leaving
+            // it holding an open gesture the renderer believed it had cancelled.
+            const nodeId = this.#gestureNode?.getAttribute(NODE_ID_ATTRIBUTE)
+                ?? this.#focusedNodeId()
+                ?? "";
+            this.#gestureActive = false;
+            this.#gestureNode = null;
             event.preventDefault();
-            void this.#sendGesture("cancel", this.#focusedNodeId() ?? "", 0, 0);
+            void this.#sendGesture("cancel", nodeId, 0, 0);
             return;
         }
 
@@ -319,9 +393,17 @@ export class HydrationRuntime {
             // did not ask for, and screen-reader users lose their place in the list.
             next = Math.min(Math.max(index + delta, 0), this.#focusOrder.length - 1);
         }
-        const target = this.#focusOrder[next];
-        if (target !== undefined && this.focusNode(target)) {
-            event.preventDefault();
+        // ADVANCE PAST UNREACHABLE ENTRIES. `focus_order` may name an id that `render_html` did not
+        // mark focusable, or that a patch removed. Stopping at the first failure would strand the
+        // user pressing an arrow key that never moves focus (and, un-prevented, scrolls the panel
+        // instead), so keep walking in the direction of travel until one lands.
+        const step = event.key === "End" ? -1 : event.key === "Home" ? 1 : delta;
+        for (let i = next; i >= 0 && i < this.#focusOrder.length; i += step) {
+            const target = this.#focusOrder[i];
+            if (target !== undefined && this.focusNode(target)) {
+                event.preventDefault();
+                return;
+            }
         }
     }
 
@@ -345,32 +427,65 @@ export class HydrationRuntime {
         if (!this.#commands.has(commandId)) {
             return;
         }
-        const result = await this.#client.command(this.#panelId, commandId, nodeId);
-        this.#dispatches += 1;
-        if (result !== null && result.dispatched) {
-            this.#onDispatched?.(result.revision);
+        // CAUGHT HERE because every caller reaches this through `void` (a DOM event handler cannot
+        // await). `PanelClient` swallows only `BridgeError` and RETHROWS anything else, so without
+        // this an unexpected transport throw becomes an unhandled promise rejection in a renderer
+        // that has no console to report it — the runtime would go quiet with no diagnosis.
+        try {
+            const result = await this.#client.command(this.#panelId, commandId, nodeId);
+            // Counted only when the command ACTUALLY dispatched: a refusal or a transport failure
+            // is not a dispatch, and inflating the counter would misreport what the panel did.
+            if (result !== null && result.dispatched) {
+                this.#dispatches += 1;
+                this.#onDispatched?.(result.revision);
+            }
+        } catch {
+            // A failed dispatch is not fatal to the panel: the next render reconciles it.
         }
     }
 
     // ------------------------------------------------------------------------------ gestures
 
     #handlePointer(event: PointerEvent, verb: GestureVerb): void {
-        const node = this.#nodeFrom(event.target);
-        if (node === null) {
-            return;
-        }
-        const nodeId = node.getAttribute(NODE_ID_ATTRIBUTE) ?? "";
-        if (nodeId === "") {
-            return;
-        }
+        // THE ORIGIN NODE OWNS THE WHOLE GESTURE. Only `begin` resolves a node from the event
+        // target; `extend`/`commit`/`cancel` reuse it. Re-deriving per event had two failure modes:
+        // a drag onto a sibling silently re-targeted the gesture (and reported coordinates relative
+        // to the WRONG node), and a pointer released where `#nodeFrom` yields null returned early —
+        // before `#gestureActive` was cleared — wedging the flag `true` forever, so `commit` never
+        // reached the Shell and every later `begin` was swallowed.
+        let node: Element | null;
         if (verb === "begin") {
             if (this.#gestureActive) {
                 return;
             }
+            node = this.#nodeFrom(event.target);
+            if (node === null || (node.getAttribute(NODE_ID_ATTRIBUTE) ?? "") === "") {
+                return;
+            }
             this.#gestureActive = true;
-        } else if (verb === "commit" || verb === "cancel") {
-            this.#gestureActive = false;
+            this.#gestureNode = node;
+            // Capture routes every later pointer event here even once the pointer leaves the
+            // container, so a release outside it still commits instead of stranding the gesture.
+            try {
+                node.setPointerCapture(event.pointerId);
+            } catch {
+                // A capture refusal (a stale pointer id) is not a reason to drop the gesture.
+            }
+        } else {
+            node = this.#gestureNode;
+            if (node === null) {
+                // No gesture in flight — a stray move/up. Keep the flag honest and drop it.
+                this.#gestureActive = false;
+                return;
+            }
+            if (verb === "commit" || verb === "cancel") {
+                this.#gestureActive = false;
+                this.#gestureNode = null;
+            }
         }
+        // Non-empty on both paths by construction: `begin` rejected an empty id above, and the
+        // continuation path reads it off the node `begin` accepted (nothing strips `data-node-id`).
+        const nodeId = node.getAttribute(NODE_ID_ATTRIBUTE) ?? "";
         // Coordinates are node-RELATIVE, so a model reasoning about a paint stroke or a drag never
         // has to know where the panel sits in the window — the property that makes a gesture survive
         // a dock, a split or a resize unchanged.
@@ -386,12 +501,22 @@ export class HydrationRuntime {
     async #sendGesture(verb: GestureVerb, nodeId: string, x: number, y: number): Promise<void> {
         if (nodeId === "") {
             this.#gestureActive = false;
+            this.#gestureNode = null;
             return;
         }
-        const result = await this.#client.gesture(this.#panelId, verb, { nodeId, x, y });
-        this.#gestures += 1;
-        if (result !== null && result.dispatched) {
-            this.#onDispatched?.(result.revision);
+        // Caught for the same reason as `#activate` — every caller reaches this through `void`.
+        try {
+            const result = await this.#client.gesture(this.#panelId, verb, { nodeId, x, y });
+            this.#gestures += 1;
+            if (result !== null && result.dispatched) {
+                this.#onDispatched?.(result.revision);
+            }
+        } catch {
+            // A gesture that could not be delivered must not leave the local flag stuck true.
+            if (verb === "begin") {
+                this.#gestureActive = false;
+                this.#gestureNode = null;
+            }
         }
     }
 
@@ -450,7 +575,8 @@ export class HydrationRuntime {
      * a full replace loses all four, which in a live editor reads as the panel "flickering" every
      * time an unrelated diagnostic arrives.
      */
-    #patchElement(target: Element | DocumentFragment, source: ParentNode): void {
+    #patchElement(target: Element | DocumentFragment, source: ParentNode,
+                  claimed: Set<Element> = new Set()): void {
         const sourceChildren = Array.from(source.children);
         for (let index = 0; index < sourceChildren.length; index += 1) {
             const incoming = sourceChildren[index];
@@ -458,13 +584,35 @@ export class HydrationRuntime {
                 continue;
             }
             const nodeId = incoming.getAttribute(NODE_ID_ATTRIBUTE) ?? "";
-            const existing = nodeId === "" ? null : this.#element(nodeId);
+            const candidate = nodeId === "" ? null : this.#element(nodeId);
             const anchor = target.children[index] ?? null;
 
+            // TWO REUSE HAZARDS, both from `#element` being a container-wide lookup:
+            //
+            //  * DUPLICATE IDS. `#element` returns the FIRST match, so a model that emitted the
+            //    same id twice (an `audit_a11y` violation, but `render` does not run the audit —
+            //    a buggy provider ships it) would have the second node reuse the element the
+            //    first just inserted, MOVING it instead of adding a sibling. The tree then holds
+            //    one element where the model declared two, and the trailing trim cannot see it.
+            //    `claimed` makes each element reusable at most once per pass.
+            //  * ANCESTOR REUSE. The match may be an ANCESTOR of `target`, and re-parenting a node
+            //    under its own descendant throws `HierarchyRequestError` — which escapes `apply`
+            //    mid-patch, leaves the DOM half-updated with `#revision` unadvanced, and replays on
+            //    every later refresh. A re-parent with stable ids (a scene tree — e05d3's shape) is
+            //    exactly how that arises.
+            //
+            // Either way we fall through to `importNode`, which is always correct, just not reusing.
+            const existing = candidate !== null
+                && !claimed.has(candidate)
+                && !candidate.contains(target instanceof Element ? target : null)
+                ? candidate
+                : null;
+
             if (existing !== null && existing.tagName === incoming.tagName) {
+                claimed.add(existing);
                 this.#syncAttributes(existing, incoming);
                 this.#syncOwnText(existing, incoming);
-                this.#patchElement(existing, incoming);
+                this.#patchElement(existing, incoming, claimed);
                 this.#reused += 1;
                 if (anchor !== existing) {
                     target.insertBefore(existing, anchor);

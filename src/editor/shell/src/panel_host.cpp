@@ -527,8 +527,11 @@ bool PanelHost::install(BridgeRouter& router)
                  std::string error_code;
                  if (!gesture(panel_id, *verb, request.params, dispatched, error_code))
                  {
-                     return BridgeResult::error(error_code, "panel '" + panel_id +
-                                                                "' does not accept gestures");
+                     // Same rule as panel.state.get below: this path also carries `panel.unknown`
+                     // and `panel.not_hosted`, for which "does not accept gestures" is simply
+                     // false. Report the code, not a guessed cause.
+                     return BridgeResult::error(error_code, "panel.gesture refused for '" +
+                                                                panel_id + "': " + error_code);
                  }
                  contract::Json out = contract::Json::object();
                  out.set("dispatched", contract::Json(dispatched));
@@ -551,8 +554,13 @@ bool PanelHost::install(BridgeRouter& router)
                  const std::optional<contract::Json> state = get_state(panel_id, error_code);
                  if (!state.has_value())
                  {
+                     // The MESSAGE must not assert a cause the CODE contradicts. This path is
+                     // reached for `panel.unknown` and `panel.not_hosted` as well as
+                     // `panel.no_state`, so name the code instead of claiming the panel persists
+                     // no state — a refusal that misreports its own reason costs a debugging round.
                      return BridgeResult::error(error_code,
-                                                "panel '" + panel_id + "' persists no state");
+                                                "panel.state.get refused for '" + panel_id +
+                                                    "': " + error_code);
                  }
                  contract::Json out = contract::Json::object();
                  out.set("panelId", contract::Json(panel_id));

@@ -108,9 +108,17 @@ PANEL_STATE_CONSTANTS = (
     ("state data key", "kStateDataKey", "STATE_DATA_KEY"),
 )
 
-# The closed gesture vocabulary (04 §4). Read from the C++ `gesture_verb_token` switch and compared
-# against the bundle's GESTURE_VERBS array, so a verb added on one side without the other — which
-# would be refused at runtime with no build error — fails here instead.
+# The closed gesture vocabulary (04 §4), compared SET vs SET between the C++ wire tokens and the
+# bundle's own GESTURE_VERBS array, so a verb added on one side without the other — which would be
+# refused at runtime with no build error — fails here instead.
+#
+# READ FROM `panel_host.cpp`, NOT THE HEADER. The header holds only the ENUMERATOR names (`begin,`
+# `extend,` ...) and prose; a substring probe against it is satisfied unconditionally and can never
+# fail, so it would report OK on a genuine drift. The tokens that actually go on the wire are the
+# `return "<tok>";` literals in `gesture_verb_token`'s switch — those are the authority.
+#
+# This tuple is this script's own PIN of the vocabulary: when the C++ set stops matching it, that is
+# an anti-rot CheckError (exit 2), not a drift failure — the check can no longer judge either side.
 GESTURE_VERBS = ("begin", "extend", "commit", "cancel")
 
 # The pinned docking engine must be LOADED BY THE DOCUMENT, not bundled. Asserting the script tag is
@@ -201,6 +209,49 @@ def _read_cpp_string_constant(source: Path, name: str) -> str:
             f"constant '{name}' not found in {source} — it was renamed or removed, so the "
             f"cross-language scheme check can no longer verify anything. Update SCHEME_CONSTANTS.")
     return match.group(1)
+
+
+def _read_cpp_gesture_verbs(source: Path) -> tuple[str, ...]:
+    """Read the WIRE TOKENS out of the C++ `gesture_verb_token` switch body.
+
+    Deliberately reads the `.cpp`, not the header. The header carries only the ENUMERATOR names
+    (`begin,` `extend,` ...) and prose; a bare substring check against it can never fail, because
+    the enumerators guarantee every verb's substring unconditionally. The tokens that actually go
+    on the wire are the `return "<tok>";` literals in this switch, so those are what must be
+    compared against the bundle. Anchored on the function name so a neighbouring function's
+    returns cannot leak in, and a rename fails LOUDLY (exit 2) rather than matching nothing.
+    """
+    try:
+        text = source.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise CheckError(f"cannot read {source}: {exc}") from exc
+    body = re.search(r"gesture_verb_token\s*\([^)]*\)\s*\{(.*?)\n\}", text, re.DOTALL)
+    if body is None:
+        raise CheckError(
+            f"`gesture_verb_token` not found in {source} — the closed gesture vocabulary moved, so "
+            f"this check can no longer verify anything. Update the check to its new home.")
+    verbs = tuple(dict.fromkeys(re.findall(r"return\s+\"([^\"]*)\"", body.group(1))))
+    if not verbs:
+        raise CheckError(
+            f"`gesture_verb_token` in {source} returns no string literals — the vocabulary is no "
+            f"longer expressed as returned tokens, so this check would pass vacuously.")
+    return verbs
+
+
+def _read_ts_string_array_from_bundle(bundle_text: str, name: str) -> tuple[str, ...] | None:
+    """Read a `name = ["a", "b"]` TS string array out of the BUILT bundle.
+
+    Anchored on the array so the comparison is set-vs-set. A bare `'"commit"' in bundle_text`
+    substring probe would be satisfied by the verb appearing anywhere at all — including in an
+    unrelated string or a comment the minifier kept — which is not evidence that the runtime's
+    gesture vocabulary contains it.
+    """
+    match = re.search(rf"\b{re.escape(name)}\s*=\s*\[([^\]]*)\]", bundle_text)
+    if match is None:
+        return None
+    # Either quoting style survives bundling, so accept both and keep declaration order.
+    return tuple(double or single
+                 for double, single in re.findall(r"\"([^\"]*)\"|'([^']*)'", match.group(1)))
 
 
 def _read_ts_constant_from_bundle(bundle_text: str, name: str) -> str | None:
@@ -307,7 +358,8 @@ def check_scheme_contract(asset_dir: Path, bundle_name: str, shell_include_dir: 
 
 
 def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: Path,
-                         contract_include_dir: Path, package_json: Path) -> list[str]:
+                         contract_include_dir: Path, package_json: Path,
+                         shell_src_dir: Path) -> list[str]:
     """Check 7 — the M9 e05d1 panel surface: cross-language vocabulary, engine loading, deps."""
     failures: list[str] = []
 
@@ -342,17 +394,32 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
                 f"persisted panel state would be written under one key and read under another, so "
                 f"every restore would degrade to the D6 null-state path.")
 
-    # 7c — the closed gesture vocabulary. Read from the C++ token function so the two cannot diverge.
-    panel_host_text = (shell_include_dir / "panel_host.h").read_text(encoding="utf-8")
-    for verb in GESTURE_VERBS:
-        if f'"{verb}"' not in bundle_text:
-            failures.append(
-                f"gesture verb {verb!r} is missing from the bundle — the hydration runtime cannot "
-                f"emit a verb it does not name, so that half of the gesture contract is dead")
-        if verb not in panel_host_text:
-            raise CheckError(
-                f"gesture verb {verb!r} is not named in panel_host.h — the closed vocabulary moved, "
-                f"so this check can no longer verify anything. Update GESTURE_VERBS.")
+    # 7c — the closed gesture vocabulary, compared SET vs SET between the C++ wire tokens and the
+    # bundle's own array. Both sides are read from where the values actually live: the tokens from
+    # `gesture_verb_token`'s returns in panel_host.cpp, the array from the BUILT bundle.
+    cpp_verbs = _read_cpp_gesture_verbs(shell_src_dir / "panel_host.cpp")
+    if set(cpp_verbs) != set(GESTURE_VERBS):
+        # An anti-rot assertion, not a drift failure: this script's own pinned vocabulary is stale,
+        # so it can no longer be trusted to judge either side. Loud (exit 2), never a quiet pass.
+        raise CheckError(
+            f"the C++ gesture vocabulary is {sorted(cpp_verbs)} but this check pins "
+            f"{sorted(GESTURE_VERBS)} — the closed vocabulary changed, so update GESTURE_VERBS "
+            f"(and the hydration runtime) deliberately.")
+    ts_verbs = _read_ts_string_array_from_bundle(bundle_text, "GESTURE_VERBS")
+    if ts_verbs is None:
+        failures.append(
+            "the bundle does not declare a GESTURE_VERBS array — the hydration runtime cannot emit "
+            "a verb vocabulary it does not name, so that half of the gesture contract is dead")
+    elif set(ts_verbs) != set(cpp_verbs):
+        missing = sorted(set(cpp_verbs) - set(ts_verbs))
+        extra = sorted(set(ts_verbs) - set(cpp_verbs))
+        failures.append(
+            f"gesture vocabulary DRIFTED: C++ `gesture_verb_token` emits {sorted(cpp_verbs)} but "
+            f"the bundle's GESTURE_VERBS is {sorted(ts_verbs)}"
+            + (f" (missing from TS: {missing})" if missing else "")
+            + (f" (unknown to C++: {extra})" if extra else "")
+            + " — a verb one side sends and the other does not accept is refused at runtime with "
+              "no build error, which is exactly what this gate exists to catch.")
 
     # 7d — the pinned engine is LOADED by the document rather than bundled (see DOCKVIEW_SCRIPT).
     document = asset_dir / APP_DOCUMENT
@@ -386,7 +453,8 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
 
 
 def run_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: Path,
-                       contract_include_dir: Path, package_json: Path) -> int:
+                       contract_include_dir: Path, package_json: Path,
+                       shell_src_dir: Path) -> int:
     """The M9 e05d1 gate (check 7). Separate entry point so a failure names the right gate."""
     if not asset_dir.is_dir():
         raise CheckError(f"asset dir does not exist: {asset_dir}")
@@ -395,8 +463,11 @@ def run_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: Pat
     if not contract_include_dir.is_dir():
         raise CheckError(f"gui contract include dir does not exist: {contract_include_dir}")
 
+    if not shell_src_dir.is_dir():
+        raise CheckError(f"shell src dir does not exist: {shell_src_dir}")
+
     failures = check_panel_contract(asset_dir, bundle_name, shell_include_dir, contract_include_dir,
-                                    package_json)
+                                    package_json, shell_src_dir)
     if failures:
         for failure in failures:
             print(f"[check_webui_assets] FAIL: {failure}", file=sys.stderr)
@@ -485,6 +556,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--package-json", type=Path,
                         default=REPO_ROOT / "src" / "editor" / "webui" / "core" / "package.json",
                         help="editor-core's package.json (--panel-contract only)")
+    parser.add_argument("--shell-src-dir", type=Path,
+                        default=REPO_ROOT / "src" / "editor" / "shell" / "src",
+                        help="dir holding panel_host.cpp, whose `gesture_verb_token` switch is the "
+                             "authority on the wire verbs (--panel-contract only)")
     args = parser.parse_args(argv)
 
     try:
@@ -493,7 +568,8 @@ def main(argv: list[str] | None = None) -> int:
                                        args.shell_cef_dir)
         if args.panel_contract:
             return run_panel_contract(args.asset_dir, args.bundle_name, args.shell_include_dir,
-                                      args.contract_include_dir, args.package_json)
+                                      args.contract_include_dir, args.package_json,
+                                      args.shell_src_dir)
         return run(args.asset_dir, args.manifest, args.bundle_name)
     except CheckError as exc:
         print(f"[check_webui_assets] ERROR: {exc}", file=sys.stderr)

@@ -36,12 +36,43 @@ namespace
     {
         return 0;
     }
-    const std::int64_t raw = value.as_int();
-    if (raw <= 0 || raw > 0xFFFFFFFF)
+    // Range-check on the DOUBLE, before any integral cast. `as_int()` is a `static_cast<int64_t>`
+    // of the stored double, and casting a double outside int64's range is UNDEFINED BEHAVIOUR —
+    // which the blocking `sanitize (ASan+UBSan, ubuntu)` leg reports as `float-cast-overflow`.
+    // The wire is untrusted (`Json::parse` accepts `1e300` happily), so guarding after the cast
+    // would be guarding after the UB had already happened.
+    const double raw = value.as_number();
+    if (!(raw >= 1.0 && raw <= 4294967295.0))
     {
         return 0;
     }
     return static_cast<std::uint32_t>(raw);
+}
+
+// Read a `generation` stamp, falling back to the caller's when absent, unreadable, or out of range.
+//
+// Range-checked on the DOUBLE for the same reason as `read_u32`: `as_int()` casts the stored double
+// and an out-of-range cast is UB (UBSan `float-cast-overflow`). The NEGATIVE case matters
+// independently of the UB — a `-1` cast straight to `std::uint64_t` becomes ~1.8e19, and a
+// diagnostic stamped with that could never satisfy `generation < settled_generation`, leaving a
+// stale provisional row that `on_derivation_settled` can never discard.
+[[nodiscard]] std::uint64_t read_generation(const contract::Json& object, std::uint64_t fallback)
+{
+    if (!object.is_object() || !object.contains("generation"))
+    {
+        return fallback;
+    }
+    const contract::Json& value = object.at("generation");
+    if (!value.is_number())
+    {
+        return fallback;
+    }
+    const double raw = value.as_number();
+    if (!(raw >= 0.0 && raw <= 9007199254740992.0))
+    {
+        return fallback;
+    }
+    return static_cast<std::uint64_t>(raw);
 }
 
 // The location members, wherever the publisher put them. Checked in order: a nested `nav`, then a
@@ -129,11 +160,16 @@ std::optional<problems::ProblemDiagnostic> parse_diagnostic(const contract::Json
     // `key` is the publisher's own stable identity when it supplies one; without it the panel
     // derives a composite identity from code + nav + message, which is what makes the
     // provisional->stable promotion collapse a re-emission instead of duplicating it.
+    // DELIBERATELY no `opId` fallback. `opId` names an OPERATION, not a diagnostic: a single
+    // crashed op publishes one diagnostic PER PLANNED WRITE (`filesync/src/intent_log.cpp` pushes
+    // `filesync.intent.jail` / `.resume` / `.cas` inside the per-write loop, every one carrying the
+    // same `entry->op_id`). Adopting it as the identity would make all of them collapse onto one
+    // last-wins row — `ProblemDiagnostic::identity()` returns `key` verbatim when non-empty, and
+    // both `ingest` and the model's dedup key off that. The composite fallback identity
+    // (code + file + pointer + line + column + message) keeps those rows DISTINCT while still
+    // collapsing a genuine re-emission, which is exactly what R-FILE-004's "reported, never
+    // silently dropped" requires at the panel.
     diagnostic.key = read_string(payload, "key");
-    if (diagnostic.key.empty())
-    {
-        diagnostic.key = read_string(payload, "opId");
-    }
     diagnostic.severity = parse_severity(read_string(payload, "severity"));
     diagnostic.stability = parse_stability(read_string(payload, "stability"));
     diagnostic.nav = read_nav(payload);
@@ -141,7 +177,7 @@ std::optional<problems::ProblemDiagnostic> parse_diagnostic(const contract::Json
     return diagnostic;
 }
 
-std::vector<problems::ProblemDiagnostic>
+std::optional<std::vector<problems::ProblemDiagnostic>>
 parse_diagnostics_snapshot(const contract::Json& snapshot, std::uint64_t generation)
 {
     std::vector<problems::ProblemDiagnostic> out;
@@ -168,7 +204,15 @@ parse_diagnostics_snapshot(const contract::Json& snapshot, std::uint64_t generat
     }
     if (items == nullptr)
     {
-        return out;
+        // NO RECOGNIZED CONTAINER = NO INFORMATION, which is NOT the same as "no diagnostics".
+        // The subscription snapshot the daemon actually sends is a CURSOR
+        // (`EventStream::snapshot()` -> `{incarnationId, generation, lastSeq}`), carrying no
+        // diagnostic container at all. Returning an empty SET here would make the caller clear
+        // the panel — wiping every diagnostic precisely at the resnapshot that follows a wire gap
+        // or a daemon restart, i.e. at the recovery point the panel exists to survive. nullopt
+        // says "this snapshot told us nothing about the diagnostic set"; an ENGAGED but empty
+        // vector still means "the set is genuinely empty" and still clears.
+        return std::nullopt;
     }
 
     for (std::size_t i = 0; i < items->size(); ++i)
@@ -187,10 +231,7 @@ parse_diagnostics_snapshot(const contract::Json& snapshot, std::uint64_t generat
         {
             continue;
         }
-        const std::uint64_t stamp =
-            item.contains("generation") && item.at("generation").is_number()
-                ? static_cast<std::uint64_t>(item.at("generation").as_int())
-                : generation;
+        const std::uint64_t stamp = read_generation(item, generation);
         if (std::optional<problems::ProblemDiagnostic> parsed =
                 parse_diagnostic(item.at("payload"), stamp))
         {
@@ -260,12 +301,24 @@ ProblemsFeed::ProblemsFeed(PanelHost& host, std::string panel_id)
 
 void ProblemsFeed::apply_snapshot(const contract::Json& snapshot, std::uint64_t generation)
 {
-    panel_.set_diagnostics(parse_diagnostics_snapshot(snapshot, generation));
+    // The snapshot's OWN generation wins when it carries one. The real subscription snapshot is a
+    // cursor that always does (`EventStream::snapshot()` sets it), and stamping the diagnostics it
+    // recovers with a caller-guessed 0 would mark every one of them stale-by-construction: the
+    // stream never settles below generation 1, so the first `derivation.settled` would discard
+    // every provisional row the snapshot had just restored.
+    const std::uint64_t stamp = read_generation(snapshot, generation);
+    if (std::optional<std::vector<problems::ProblemDiagnostic>> parsed =
+            parse_diagnostics_snapshot(snapshot, stamp))
+    {
+        panel_.set_diagnostics(std::move(*parsed));
+        // Touched only when the snapshot actually SPOKE about the diagnostic set — including when
+        // it spoke to say the set is empty: "the diagnostics all cleared" is a change the renderer
+        // must see, and a revision that only moved on non-empty snapshots would leave a stale list
+        // mounted after the last problem was fixed. A snapshot carrying no diagnostic container
+        // (the cursor shape) changes nothing, so it moves no revision either.
+        host_.touch(panel_id_);
+    }
     ++snapshots_applied_;
-    // ALWAYS touched, even for an empty snapshot: "the diagnostics all cleared" is a change the
-    // renderer must see, and a revision that only moved on non-empty snapshots would leave a stale
-    // list mounted after the last problem was fixed.
-    host_.touch(panel_id_);
 }
 
 bool ProblemsFeed::apply_event(const std::string& topic, const contract::Json& payload,

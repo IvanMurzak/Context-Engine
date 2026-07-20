@@ -127,9 +127,34 @@ void tolerates_every_shape_the_topic_legitimately_carries()
     {
         CHECK(parsed_recovery->severity == problems::Severity::error);
         CHECK(!parsed_recovery->nav.navigable()); // a project-wide diagnostic, not a file one
-        // `opId` becomes the stable identity, so a re-emission promotes in place.
-        CHECK(parsed_recovery->key == "op-17");
+        // `opId` must NOT become the identity: one crashed op publishes one diagnostic PER PLANNED
+        // WRITE, all carrying the same op id, and adopting it would collapse them onto one row.
+        CHECK(parsed_recovery->key.empty());
     }
+
+    // The identity of two diagnostics from the SAME crashed op stays DISTINCT (R-FILE-004:
+    // reported, never silently dropped). Same `opId`, different code/message — the composite
+    // fallback identity must keep them apart.
+    Json sibling = Json::object();
+    sibling.set("code", Json("filesync.intent.cas"));
+    sibling.set("opId", Json("op-17"));
+    sibling.set("message", Json("target changed under the write"));
+    const std::optional<problems::ProblemDiagnostic> parsed_sibling =
+        panels::parse_diagnostic(sibling, 3);
+    CHECK(parsed_sibling.has_value());
+    if (parsed_recovery.has_value() && parsed_sibling.has_value())
+    {
+        CHECK(parsed_recovery->identity() != parsed_sibling->identity());
+    }
+    // A publisher that DOES supply its own `key` still gets it honoured verbatim, so a genuine
+    // re-emission still collapses in place.
+    Json keyed = Json::object();
+    keyed.set("code", Json("schema.invalid"));
+    keyed.set("message", Json("bad kind"));
+    keyed.set("key", Json("stable-key-1"));
+    const std::optional<problems::ProblemDiagnostic> parsed_keyed =
+        panels::parse_diagnostic(keyed, 3);
+    CHECK(parsed_keyed.has_value() && parsed_keyed->key == "stable-key-1");
 
     // A NESTED location container.
     Json nested = Json::object();
@@ -190,14 +215,16 @@ void parses_all_three_snapshot_shapes()
     Json bare = Json::array();
     bare.push_back(a);
     bare.push_back(b);
-    CHECK(panels::parse_diagnostics_snapshot(bare, 9).size() == 2);
+    const auto bare_parsed = panels::parse_diagnostics_snapshot(bare, 9);
+    CHECK(bare_parsed.has_value() && bare_parsed->size() == 2);
 
     // Shape 2: {"diagnostics": [...]}.
     Json wrapped = Json::object();
     Json list = Json::array();
     list.push_back(a);
     wrapped.set("diagnostics", list);
-    CHECK(panels::parse_diagnostics_snapshot(wrapped, 9).size() == 1);
+    const auto wrapped_parsed = panels::parse_diagnostics_snapshot(wrapped, 9);
+    CHECK(wrapped_parsed.has_value() && wrapped_parsed->size() == 1);
 
     // Shape 3: {"events": [envelope, ...]} — the topic is filtered and each envelope's OWN
     // generation wins.
@@ -213,20 +240,46 @@ void parses_all_three_snapshot_shapes()
     other_event.set("payload", b);
     events.push_back(other_event);
     enveloped.set("events", events);
-    const std::vector<problems::ProblemDiagnostic> parsed =
+    const std::optional<std::vector<problems::ProblemDiagnostic>> parsed =
         panels::parse_diagnostics_snapshot(enveloped, 9);
-    CHECK(parsed.size() == 1); // the `files` envelope is not a diagnostic
-    CHECK(!parsed.empty() && parsed.front().generation == 77);
+    CHECK(parsed.has_value());
+    CHECK(parsed.has_value() && parsed->size() == 1); // the `files` envelope is not a diagnostic
+    CHECK(parsed.has_value() && !parsed->empty() && parsed->front().generation == 77);
 
-    // An unrecognized container yields nothing rather than throwing.
-    CHECK(panels::parse_diagnostics_snapshot(Json("nope"), 1).empty());
-    CHECK(panels::parse_diagnostics_snapshot(Json::object(), 1).empty());
+    // A NEGATIVE envelope generation falls back to the caller's stamp rather than wrapping to
+    // ~1.8e19, which would leave the row permanently un-discardable by `on_derivation_settled`.
+    Json negative_gen = Json::object();
+    Json neg_events = Json::array();
+    Json neg_event = Json::object();
+    neg_event.set("topic", Json("diagnostics"));
+    neg_event.set("generation", Json(-1));
+    neg_event.set("payload", a);
+    neg_events.push_back(neg_event);
+    negative_gen.set("events", neg_events);
+    const std::optional<std::vector<problems::ProblemDiagnostic>> neg_parsed =
+        panels::parse_diagnostics_snapshot(negative_gen, 9);
+    CHECK(neg_parsed.has_value() && !neg_parsed->empty() && neg_parsed->front().generation == 9);
+
+    // An unrecognized container yields NULLOPT — "this snapshot said nothing about the diagnostic
+    // set" — which is what stops the caller clearing the panel on a cursor-shaped snapshot.
+    CHECK(!panels::parse_diagnostics_snapshot(Json("nope"), 1).has_value());
+    CHECK(!panels::parse_diagnostics_snapshot(Json::object(), 1).has_value());
+    // The REAL subscription snapshot shape (`EventStream::snapshot()`) is exactly that cursor.
+    Json cursor = Json::object();
+    cursor.set("incarnationId", Json("inc-1"));
+    cursor.set("generation", Json(4));
+    cursor.set("lastSeq", Json(12));
+    CHECK(!panels::parse_diagnostics_snapshot(cursor, 0).has_value());
+    // An engaged-but-EMPTY container is the distinct "the set is genuinely empty" answer.
+    CHECK(panels::parse_diagnostics_snapshot(Json::array(), 1).has_value());
+    CHECK(panels::parse_diagnostics_snapshot(Json::array(), 1)->empty());
     // A container with unparseable members SKIPS them instead of failing the whole snapshot.
     Json mixed = Json::array();
     mixed.push_back(a);
     mixed.push_back(Json("garbage"));
     mixed.push_back(Json::object());
-    CHECK(panels::parse_diagnostics_snapshot(mixed, 1).size() == 1);
+    const auto mixed_parsed = panels::parse_diagnostics_snapshot(mixed, 1);
+    CHECK(mixed_parsed.has_value() && mixed_parsed->size() == 1);
 }
 
 void drives_the_panel_and_touches_the_host()
@@ -259,7 +312,22 @@ void drives_the_panel_and_touches_the_host()
         CHECK(!rendered->focus_order.empty());
     }
 
-    // AN EMPTY SNAPSHOT STILL TOUCHES: "everything cleared" is a change the renderer must see.
+    // A CURSOR-SHAPED SNAPSHOT PRESERVES THE SET. This is the shape the daemon actually sends
+    // (`EventStream::snapshot()` -> {incarnationId, generation, lastSeq}); a resnapshot after a
+    // wire gap or a daemon restart must NOT wipe the panel at exactly the recovery point the panel
+    // exists to survive. It says nothing about the set, so it moves no revision either.
+    const std::uint64_t before_cursor = host.revision(kPanelId);
+    Json cursor = Json::object();
+    cursor.set("incarnationId", Json("inc-1"));
+    cursor.set("generation", Json(6));
+    cursor.set("lastSeq", Json(12));
+    feed.apply_snapshot(cursor, 0);
+    CHECK(feed.snapshots_applied() == 2);
+    CHECK(feed.panel().diagnostics().size() == 2); // preserved, NOT cleared
+    CHECK(host.revision(kPanelId) == before_cursor);
+
+    // AN EMPTY *CONTAINER* STILL TOUCHES: "everything cleared" is a change the renderer must see.
+    // This is the distinction the nullopt return exists to draw — engaged-but-empty still clears.
     const std::uint64_t before_clear = host.revision(kPanelId);
     feed.apply_snapshot(Json::array(), 6);
     CHECK(feed.panel().diagnostics().empty());

@@ -431,6 +431,10 @@ PANEL_BUNDLE = (
     'var GESTURE_VERBS = ["begin", "extend", "commit", "cancel"];\n'
 )
 
+# MIRRORS THE REAL HEADER'S SHAPE. The real `panel_host.h` declares the enum and the token
+# function; it holds NO wire-token string literals. A fixture that inlined the switch here would be
+# MORE CAPABLE THAN THE REAL SOURCE — the defect class that lets a gate pass its own tests while
+# being vacuous against the repo (a mutation of a literal the real file does not contain is a no-op).
 PANEL_CPP_HEADER = (
     'inline constexpr const char* kPanelListMethod = "panel.list";\n'
     'inline constexpr const char* kPanelRenderMethod = "panel.render";\n'
@@ -438,7 +442,27 @@ PANEL_CPP_HEADER = (
     'inline constexpr const char* kPanelGestureMethod = "panel.gesture";\n'
     'inline constexpr const char* kPanelStateGetMethod = "panel.state.get";\n'
     'inline constexpr const char* kPanelStateSetMethod = "panel.state.set";\n'
-    'const char* gesture_verb_token(GestureVerb v) { return "begin" "extend" "commit" "cancel"; }\n'
+    "enum class GestureVerb { begin, extend, commit, cancel };\n"
+    "const char* gesture_verb_token(GestureVerb verb);\n"
+)
+
+# The wire tokens live in the .cpp switch, which is what the gate must read.
+PANEL_CPP_SOURCE = (
+    "const char* gesture_verb_token(GestureVerb verb)\n"
+    "{\n"
+    "    switch (verb)\n"
+    "    {\n"
+    "    case GestureVerb::begin:\n"
+    '        return "begin";\n'
+    "    case GestureVerb::extend:\n"
+    '        return "extend";\n'
+    "    case GestureVerb::commit:\n"
+    '        return "commit";\n'
+    "    case GestureVerb::cancel:\n"
+    '        return "cancel";\n'
+    "    }\n"
+    '    return "cancel";\n'
+    "}\n"
 )
 
 PANEL_CPP_STATE = (
@@ -462,8 +486,8 @@ PANEL_PACKAGE = {"name": "@context-engine/editor-core", "dependencies": {"dockvi
 
 def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str = PANEL_DOCUMENT,
                    header: str = PANEL_CPP_HEADER, state: str = PANEL_CPP_STATE,
-                   package: dict | None = None,
-                   stage_dockview: bool = True) -> tuple[Path, Path, Path, Path]:
+                   source: str = PANEL_CPP_SOURCE, package: dict | None = None,
+                   stage_dockview: bool = True) -> tuple[Path, Path, Path, Path, Path]:
     asset_dir = tmp_path / "app"
     asset_dir.mkdir(parents=True, exist_ok=True)
     (asset_dir / "editor-core.js").write_text(bundle, encoding="utf-8")
@@ -480,16 +504,20 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
     contract_dir.mkdir(parents=True, exist_ok=True)
     (contract_dir / "panel_state.h").write_text(state, encoding="utf-8")
 
+    src_dir = tmp_path / "shellsrc"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    (src_dir / "panel_host.cpp").write_text(source, encoding="utf-8")
+
     package_json = tmp_path / "package.json"
     package_json.write_text(
         json.dumps(PANEL_PACKAGE if package is None else package), encoding="utf-8")
-    return asset_dir, include_dir, contract_dir, package_json
+    return asset_dir, include_dir, contract_dir, package_json, src_dir
 
 
 def _run_panel(tmp_path: Path, **kwargs) -> int:
-    asset_dir, include_dir, contract_dir, package_json = _panel_fixture(tmp_path, **kwargs)
+    asset_dir, include_dir, contract_dir, package_json, src_dir = _panel_fixture(tmp_path, **kwargs)
     return check_webui_assets.run_panel_contract(
-        asset_dir, "editor-core.js", include_dir, contract_dir, package_json)
+        asset_dir, "editor-core.js", include_dir, contract_dir, package_json, src_dir)
 
 
 def test_panel_contract_happy_path(tmp_path: Path, capsys) -> None:
@@ -534,10 +562,46 @@ def test_a_gesture_verb_vanishing_from_cpp_is_a_config_error(tmp_path: Path) -> 
     """The dangerous direction: if the C++ vocabulary moved, the gate can verify NOTHING.
 
     Exit 2 (a config error), never a quiet pass — the same rot-into-a-no-op failure mode
-    test_renamed_cpp_constant_is_a_config_error pins for the scheme gate.
+    test_renamed_cpp_constant_is_a_config_error pins for the scheme gate. Mutating the SOURCE, not
+    the header: the header carries no wire literals, so a header mutation is a no-op (which is
+    exactly the vacuity this pair of tests exists to prevent).
     """
     with pytest.raises(check_webui_assets.CheckError):
-        _run_panel(tmp_path, header=PANEL_CPP_HEADER.replace('"commit"', '"confirm"'))
+        _run_panel(tmp_path, source=PANEL_CPP_SOURCE.replace('return "commit"', 'return "confirm"'))
+
+
+def test_a_cpp_token_renamed_under_a_stale_ts_array_is_caught(tmp_path: Path) -> None:
+    """THE REGRESSION THIS GATE EXISTS FOR — and the one the header-substring form could not see.
+
+    C++ renames the wire token while the bundle keeps the old one. Both sides still "contain" the
+    string somewhere, so a substring probe passes; a set comparison does not. The pinned vocabulary
+    is checked FIRST, so this surfaces as the anti-rot CheckError rather than a silent OK.
+    """
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, source=PANEL_CPP_SOURCE.replace('return "extend"', 'return "drag"'))
+
+
+def test_a_verb_missing_from_the_bundle_array_is_a_drift_failure(tmp_path: Path) -> None:
+    """The TS half: the C++ vocabulary is intact but the bundle's array lost a verb → exit 1."""
+    stripped = PANEL_BUNDLE.replace(
+        'var GESTURE_VERBS = ["begin", "extend", "commit", "cancel"];',
+        'var GESTURE_VERBS = ["begin", "extend", "commit"];')
+    assert _run_panel(tmp_path, bundle=stripped) == 1
+
+
+def test_a_bundle_with_no_gesture_array_at_all_fails(tmp_path: Path) -> None:
+    """Fail-closed: an absent array is a dead contract half, never a vacuous pass."""
+    stripped = PANEL_BUNDLE.replace(
+        'var GESTURE_VERBS = ["begin", "extend", "commit", "cancel"];', "")
+    assert _run_panel(tmp_path, bundle=stripped) == 1
+
+
+def test_missing_bundle_fails_the_panel_gate(tmp_path: Path) -> None:
+    """Fail-closed on an absent build artifact (the scheme gate's sibling assertion)."""
+    asset_dir, include_dir, contract_dir, package_json, src_dir = _panel_fixture(tmp_path)
+    (asset_dir / "editor-core.js").unlink()
+    assert check_webui_assets.run_panel_contract(
+        asset_dir, "editor-core.js", include_dir, contract_dir, package_json, src_dir) == 1
 
 
 def test_renamed_panel_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
@@ -575,21 +639,22 @@ def test_dependency_drift_from_the_s1_approved_set_fails(tmp_path: Path, depende
 
 
 def test_main_routes_the_panel_contract_flag(tmp_path: Path) -> None:
-    asset_dir, include_dir, contract_dir, package_json = _panel_fixture(tmp_path)
+    asset_dir, include_dir, contract_dir, package_json, src_dir = _panel_fixture(tmp_path)
     assert check_webui_assets.main([
         "--asset-dir", str(asset_dir), "--bundle-name", "editor-core.js",
         "--panel-contract",
         "--shell-include-dir", str(include_dir),
         "--contract-include-dir", str(contract_dir),
         "--package-json", str(package_json),
+        "--shell-src-dir", str(src_dir),
     ]) == 0
 
 
 def test_missing_asset_dir_is_a_panel_config_error(tmp_path: Path) -> None:
-    _, include_dir, contract_dir, package_json = _panel_fixture(tmp_path)
+    _, include_dir, contract_dir, package_json, src_dir = _panel_fixture(tmp_path)
     with pytest.raises(check_webui_assets.CheckError):
         check_webui_assets.run_panel_contract(
-            tmp_path / "nope", "editor-core.js", include_dir, contract_dir, package_json)
+            tmp_path / "nope", "editor-core.js", include_dir, contract_dir, package_json, src_dir)
 
 
 def test_the_real_repo_panel_sources_agree_across_languages() -> None:
@@ -610,8 +675,19 @@ def test_the_real_repo_panel_sources_agree_across_languages() -> None:
         cpp_value = check_webui_assets._read_cpp_string_constant(
             contract_include / "panel_state.h", cpp_name)
         assert f'{ts_name} = "{cpp_value}"' in ts, f"{ts_name} drifted from C++ {cpp_name}"
-    for verb in check_webui_assets.GESTURE_VERBS:
-        assert f'"{verb}"' in ts, f"gesture verb {verb} is missing from panels.ts"
+    # The gesture vocabulary, read from BOTH real sources as SETS — the C++ wire tokens out of the
+    # actual switch, the TS array out of the actual module. Asserting only `verb in ts` (the old
+    # form) could not catch a .cpp token rename at all, because it never opened the .cpp.
+    shell_src = REPO_ROOT / "src" / "editor" / "shell" / "src"
+    cpp_verbs = check_webui_assets._read_cpp_gesture_verbs(shell_src / "panel_host.cpp")
+    assert set(cpp_verbs) == set(check_webui_assets.GESTURE_VERBS), (
+        f"the real C++ gesture vocabulary {sorted(cpp_verbs)} drifted from the pinned "
+        f"{sorted(check_webui_assets.GESTURE_VERBS)}")
+    ts_verbs = check_webui_assets._read_ts_string_array_from_bundle(ts, "GESTURE_VERBS")
+    assert ts_verbs is not None, "panels.ts declares no GESTURE_VERBS array"
+    assert set(ts_verbs) == set(cpp_verbs), (
+        f"panels.ts GESTURE_VERBS {sorted(ts_verbs)} drifted from the C++ wire tokens "
+        f"{sorted(cpp_verbs)}")
 
 
 def test_the_real_editor_core_dependencies_are_the_approved_set() -> None:

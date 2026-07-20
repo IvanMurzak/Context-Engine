@@ -48,6 +48,18 @@ export const STATE_DATA_KEY = "data";
 /** Where a panel docks by default (`contract::DockZone`'s token vocabulary). */
 export type DockZone = "left" | "right" | "top" | "bottom" | "center";
 
+/**
+ * How a panel's content is delivered (`contract::PanelContentType`'s closed vocabulary).
+ *
+ * Modelled as a closed union — like `DockZone` — rather than a bare string BECAUSE IT GATES AN
+ * HTML SINK. A `uitree` payload is mounted through `innerHTML`, which is safe only because it came
+ * from `render_html`'s escaping contract; an `iframe` panel's content is third-party (04 §5) and
+ * belongs in a sandboxed iframe on a different origin. `unknown` is the honest parse of a token
+ * this build does not recognise, and it is NOT hostable — an unrecognised content type must fail
+ * closed rather than defaulting into the sink.
+ */
+export type PanelContentType = "uitree" | "iframe" | "unknown";
+
 export interface PanelDock {
     readonly zone: DockZone;
     readonly singleton: boolean;
@@ -71,7 +83,7 @@ export interface PanelManifest {
     readonly icon: string;
     readonly contractVersion: number;
     readonly dock: PanelDock;
-    readonly contentType: string;
+    readonly contentType: PanelContentType;
     readonly schemaVersion: number;
     readonly capabilities: readonly string[];
     readonly hosted: boolean;
@@ -166,6 +178,21 @@ function readDock(source: Record<string, unknown>): PanelDock {
     };
 }
 
+const CONTENT_TYPES: readonly PanelContentType[] = ["uitree", "iframe"];
+
+/**
+ * Parse a panel's content type, FAILING CLOSED.
+ *
+ * Deliberately NOT defaulted to `uitree`. Every other reader here defaults to the permissive value
+ * because the cost of a wrong default is a cosmetic one; here the cost is routing content of an
+ * unknown provenance into an `innerHTML` sink. A manifest with a missing, non-string, or
+ * unrecognised `content.type` therefore reads as `unknown`, which `PanelHost` refuses to mount.
+ */
+function readContentType(content: Record<string, unknown>): PanelContentType {
+    const token = readString(content, "type");
+    return CONTENT_TYPES.find((candidate) => candidate === token) ?? "unknown";
+}
+
 /** Parse one roster entry. `null` when it carries no usable id. */
 export function parsePanelManifest(value: unknown): PanelManifest | null {
     if (!isRecord(value)) {
@@ -184,7 +211,7 @@ export function parsePanelManifest(value: unknown): PanelManifest | null {
         icon: readString(value, "icon"),
         contractVersion: readNumber(value, "contractVersion"),
         dock: readDock(value),
-        contentType: readString(content, "type", "uitree"),
+        contentType: readContentType(content),
         schemaVersion: readNumber(state, STATE_SCHEMA_VERSION_KEY, 1),
         capabilities: readStringArray(value, "capabilities"),
         hosted: readBoolean(value, "hosted"),

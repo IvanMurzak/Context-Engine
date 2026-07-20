@@ -326,6 +326,10 @@ int main(int argc, char** argv)
             *daemon.client, shell::make_shell_attach_options(), subscription_options);
 
         shell::panels::ProblemsFeed* feed = builtin.problems.get();
+        // 0 is only the FALLBACK stamp for a snapshot that carries no `generation` of its own; the
+        // real cursor snapshot always does, and `apply_snapshot` prefers it. Passing 0 as the
+        // authoritative stamp would mark every recovered provisional diagnostic stale-by-
+        // construction, since the stream never settles below generation 1.
         diagnostics->on_snapshot(
             [feed](const std::string&, const contract::Json& snapshot)
             { feed->apply_snapshot(snapshot, 0); });

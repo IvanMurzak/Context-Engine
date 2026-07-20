@@ -26,6 +26,8 @@
 // OS-window tear-out is a PanelHost/Shell mechanism arriving in e10. Nothing below names `popout`,
 // and nothing should start to.
 
+import { isRecord } from "./bridge.js";
+
 /** The theme descriptor Dockview v7 takes as an option (`{name, className, colorScheme}`). */
 export interface DockviewTheme {
     readonly name: string;
@@ -121,10 +123,6 @@ export const DOCKVIEW_GLOBAL = "dockview-core";
 
 /** The staged script member, relative to the asset root. Mirrors the manifest's `members` key. */
 export const DOCKVIEW_SCRIPT = "dockview-core.min.js";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /**
  * Read the docking engine off a global object.

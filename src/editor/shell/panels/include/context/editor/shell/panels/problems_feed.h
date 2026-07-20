@@ -11,8 +11,10 @@
 // WHY THE PARSERS ARE FREE FUNCTIONS. Everything below `parse_*` is pure: JSON in, model out, no
 // daemon, no socket, no clock. That is what makes the live path testable at T1 on all three default
 // `build` legs — a feed whose only test needs a running daemon is a feed nobody tests. The daemon
-// wiring itself (a `SubscriptionConsumer` pumped on a thread) lives at the composition root in
-// `builtin_panels.h`, where it can be replaced without touching this projection.
+// wiring itself (a `SubscriptionConsumer` pumped NON-BLOCKINGLY from the owner loop —
+// `poll_timeout_ms = 0`, single-threaded by design because this projection mutates the very models
+// the bridge handlers render on that same thread) lives in `src/editor/shell/app/editor_main.cpp`,
+// where it can be replaced without touching this projection.
 //
 // TOLERANCE IS A DESIGN CHOICE, NOT LAZINESS. The `diagnostics` topic carries payloads from several
 // publishers (crash-recovery diagnostics from `EditorKernel::start`, derivation diagnostics, future
@@ -74,7 +76,13 @@ parse_diagnostic(const contract::Json& payload, std::uint64_t generation);
 // object with an `events` array of full envelopes — because the snapshot shape is the daemon's to
 // choose and hardcoding one would make the panel silently empty if it chose another. Anything
 // unparseable within an accepted container is SKIPPED, never fatal.
-[[nodiscard]] std::vector<problems::ProblemDiagnostic>
+//
+// nullopt when the snapshot carries NO recognized container — which is a different answer from an
+// engaged-but-empty vector. Today's `SubscriptionConsumer` snapshot is a CURSOR
+// (`{incarnationId, generation, lastSeq}`) with no diagnostic container at all, so conflating the
+// two would have the caller CLEAR the panel on every resnapshot. Engaged-and-empty means "the set
+// is genuinely empty" and does clear; nullopt means "this snapshot said nothing about the set".
+[[nodiscard]] std::optional<std::vector<problems::ProblemDiagnostic>>
 parse_diagnostics_snapshot(const contract::Json& snapshot, std::uint64_t generation);
 
 // ------------------------------------------------------------- the node-id -> diagnostic mapping
