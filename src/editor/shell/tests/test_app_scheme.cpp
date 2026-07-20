@@ -10,6 +10,7 @@
 
 #include "shell_test.h"
 
+#include <cstddef>
 #include <fstream>
 #include <string>
 
@@ -209,8 +210,25 @@ void test_csp_and_headers()
     CHECK(shelltest::mentions(csp, "default-src 'none'"));
     CHECK(shelltest::mentions(csp, "script-src 'self'"));
     // NO INLINE SCRIPT and NO eval: the backstop behind the render_html escaping contract (C-F6).
-    CHECK(!shelltest::mentions(csp, "unsafe-inline"));
+    // script-src carries no widening, and there is NO 'unsafe-eval' anywhere.
+    CHECK(!shelltest::mentions(csp, "script-src 'self' 'unsafe-inline'"));
     CHECK(!shelltest::mentions(csp, "unsafe-eval"));
+    // The ONE deliberate inline relaxation, scoped to the style ATTRIBUTE only (the pinned
+    // dockview-core engine writes `style=` attributes at runtime). `style-src` itself — and the
+    // `style-src-elem` fallback it feeds, governing <style>/<link> — stays strict 'self', so an
+    // inline <style> or an injected stylesheet is still refused.
+    CHECK(shelltest::mentions(csp, "style-src 'self'"));
+    CHECK(!shelltest::mentions(csp, "style-src 'self' 'unsafe-inline'"));
+    CHECK(shelltest::mentions(csp, "style-src-attr 'unsafe-inline'"));
+    // And 'unsafe-inline' appears EXACTLY ONCE — the style-attr relaxation above and nowhere else.
+    // Counted, not eyeballed, so a future widening of any other directive trips this.
+    std::size_t unsafe_inline_count = 0;
+    for (std::size_t at = csp.find("unsafe-inline"); at != std::string::npos;
+         at = csp.find("unsafe-inline", at + 1))
+    {
+        ++unsafe_inline_count;
+    }
+    CHECK(unsafe_inline_count == 1);
     // NO NETWORK — the 08 §2 "token leakage via the web layer" control.
     CHECK(shelltest::mentions(csp, "connect-src 'none'"));
     CHECK(shelltest::mentions(csp, "object-src 'none'"));

@@ -136,7 +136,23 @@ private:
 //                         makes hostile PROJECT content (entity names, `notes`) rendered through
 //                         the hydration runtime unable to execute even if an escaping bug lands
 //                         (C-F6 — the escaping contract is the primary control, this is the net).
-//   style-src  'self'   — the stylesheet only; no inline <style> and no style="" in markup.
+//   style-src  'self'   — stylesheets only, from the origin: no inline <style> element and no
+//                         cross-origin sheet. Because this directive is the fallback for
+//                         style-src-elem (which governs <style>/<link>), an injected stylesheet is
+//                         still refused; only the style ATTRIBUTE path is relaxed, immediately below.
+//   style-src-attr 'unsafe-inline'
+//                       — the ONE inline relaxation, and the narrowest possible one. The pinned,
+//                         SHA-verified dockview-core engine positions panels by writing `style=`
+//                         attributes at runtime, which `style-src 'self'` refuses outright — so the
+//                         docking layout never manifests (this is what reddens editor-cef-smoke-shell
+//                         when the directive is absent). style-src-attr governs ONLY the attribute
+//                         path, so script, <style> elements and stylesheet loads stay strict, and
+//                         connect-src 'none' + img-src leave a style-attribute injection nowhere to
+//                         exfiltrate to. Hashes are no alternative: dockview's inline values vary by
+//                         panel count and window size, so the hash set is not practically bounded.
+//                         Editor-core's own authored index.html still carries NO style="" (the
+//                         webui-assets gate enforces that); this widening exists for the vendored
+//                         engine's runtime DOM, not for authored markup.
 //   connect-src 'none'  — NO NETWORK. This is what makes the 08 §2 "token leakage via the web
 //                         layer" row hold end to end: even a fully compromised renderer that got
 //                         hold of a secret has nowhere to send it. The bridge is not `fetch`, so

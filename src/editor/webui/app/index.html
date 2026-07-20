@@ -8,13 +8,16 @@
   disk by anything running as the user.
 
   NO INLINE SCRIPT AND NO INLINE STYLE ANYWHERE IN THIS FILE. The response carries
-  `script-src 'self'; style-src 'self'` with no `unsafe-inline` (see `app_csp_header()` in
-  src/editor/shell/include/context/editor/shell/app_scheme.h), so an inline `<script>` or a
-  `style="..."` attribute would be BLOCKED by the browser rather than merely frowned upon — which is
-  the point: it is the backstop that keeps hostile authored project content, rendered through the
-  hydration runtime, from executing in the trusted zone even if the escaping contract springs a leak
-  (C-F6). The `webui-scheme-contract` gate re-asserts this mechanically on the BUILT asset, so the
-  rule survives an edit that forgets it.
+  `script-src 'self'` with no `unsafe-inline` (see `app_csp_header()` in
+  src/editor/shell/include/context/editor/shell/app_scheme.h), so an inline `<script>` or an inline
+  event handler would be BLOCKED by the browser rather than merely frowned upon — which is the point:
+  it is the backstop that keeps hostile authored project content, rendered through the hydration
+  runtime, from executing in the trusted zone even if the escaping contract springs a leak (C-F6).
+  The style side is nearly as strict: `style-src 'self'` still refuses an inline `<style>` element
+  and a cross-origin sheet; only `style-src-attr 'unsafe-inline'` is widened, and solely for the
+  vendored dockview-core engine's runtime `style=` positioning — NOT for authored markup. This
+  document is therefore ALSO kept free of any `style="..."` attribute, which the `webui-scheme-contract`
+  gate re-asserts mechanically on the BUILT asset so the rule survives an edit that forgets it.
 
   The CSP is delivered as a RESPONSE HEADER, not a <meta> tag: a header cannot be stripped by
   anything that can rewrite this markup, and it applies to the document before a single byte of it

@@ -335,6 +335,14 @@ const char* app_csp_header()
     return "default-src 'none'; "
            "script-src 'self'; "
            "style-src 'self'; "
+           // The ONE inline relaxation, scoped to the style ATTRIBUTE alone: the pinned,
+           // SHA-verified dockview-core engine positions panels by writing `style=` attributes at
+           // runtime, which `style-src 'self'` refuses outright (so the docking layout never
+           // manifests). `style-src-attr` governs ONLY that attribute path, so `style-src` — and
+           // the `style-src-elem` fallback it feeds, which governs <style>/<link> — stays 'self',
+           // and `script-src 'self'` is untouched: the C-F6 script backstop is unaffected and an
+           // injected <style> or stylesheet is still refused. See the header for the full rationale.
+           "style-src-attr 'unsafe-inline'; "
            "img-src 'self' data:; "
            "font-src 'self'; "
            "connect-src 'none'; "
