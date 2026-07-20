@@ -3,6 +3,8 @@
 
 #include "context/editor/shell/panels/problems_feed.h"
 
+#include "context/editor/shell/panels/builtin_panels.h" // kDiagnosticsTopic / kDerivationTopic
+
 #include <utility>
 
 namespace context::editor::shell::panels

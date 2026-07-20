@@ -13,6 +13,9 @@
 #include "context/editor/gui/panels/problems/problems_panel.h"
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/panel_host.h"
+#include "context/editor/shell/panels/problems_feed.h" // ProblemsFeed complete type: builtin_panels.h
+                                                        // only forward-declares it now, and this file
+                                                        // calls ProblemsFeed methods on `bound.problems`.
 
 #include "panels_test.h"
 

@@ -24,15 +24,48 @@
 #pragma once
 
 #include "context/editor/shell/panel_host.h"
-#include "context/editor/shell/panels/problems_feed.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
 namespace context::editor::shell::panels
 {
+
+// Forward-declared, NOT included: `problems_feed.h` drags in the daemon-facing bridge/kernel headers
+// (`event_stream.h` -> `event_bus.h`), whose templated `EventBus::subscribe`/`publish` use `typeid`.
+// Those headers compile fine ANYWHERE this library links (context_editor_panels has no CEF/RTTI
+// constraint), but this header is also transitively pulled into the Shell's live CEF boot smoke
+// (`cef_shell_smoke.cpp`), which CEF mandates be compiled `-fno-rtti` — and Clang/GCC diagnose an
+// in-header `typeid` use at PARSE time (it does not depend on the template parameter), so merely
+// INCLUDING the full chain from an `-fno-rtti` TU fails to compile even though nothing here ever
+// instantiates `subscribe`/`publish`. `BuiltinPanels` only needs `ProblemsFeed` behind a
+// `unique_ptr`, so a forward declaration is enough here; the complete type is pulled in only by
+// `builtin_panels.cpp` (which links normally, no RTTI constraint) and by whichever TU actually calls
+// a `ProblemsFeed` method (a runtime `#include "context/editor/shell/panels/problems_feed.h"` at the
+// call site — see `test_builtin_panels.cpp`).
+class ProblemsFeed;
+
+// The event topics the Problems live feed consumes. Declared HERE rather than in `problems_feed.h`
+// (which fully defines `ProblemsFeed` and is NOT safe to include from an `-fno-rtti` CEF TU — see
+// above): `editor_main.cpp` subscribes to these same two strings to drive the feed, and it — like
+// `cef_shell_smoke.cpp` — only ever sees the forward declaration above, never `problems_feed.h`
+// itself. Keeping both topic strings in the ONE header every caller already includes is what stops
+// the subscription (editor_main.cpp) and the dispatch (problems_feed.cpp) from silently disagreeing;
+// `problems_feed.cpp` includes this header for them.
+inline constexpr const char* kDiagnosticsTopic = "diagnostics";
+inline constexpr const char* kDerivationTopic = "derivation";
+
+// Thin free-function wrappers over `ProblemsFeed::apply_snapshot` / `apply_event`, for exactly the
+// same reason: a caller holding only the forward-declared `ProblemsFeed` above cannot call a member
+// function on it (that needs the complete type), so these non-member seams do it on the caller's
+// behalf. Defined in builtin_panels.cpp, where `problems_feed.h` IS included.
+void apply_problems_snapshot(ProblemsFeed& feed, const contract::Json& snapshot,
+                             std::uint64_t generation);
+bool apply_problems_event(ProblemsFeed& feed, const std::string& topic, const contract::Json& payload,
+                          std::uint64_t generation);
 
 // The roster ids this build can render. Exposed so a caller (and the T1 suite) can assert what was
 // bound WITHOUT restating the list — the one enumeration lives in `install_builtin_panels`.
@@ -44,8 +77,20 @@ namespace context::editor::shell::panels
 // PanelHost holds them for as long as it routes. Returning the owners in one bag makes "these must
 // outlive the host" a thing the type system participates in, rather than a comment someone violates
 // by letting a local ProblemsFeed go out of scope and leaving the host with dangling captures.
+//
+// Special members are declared here and DEFINED (as `= default`) in builtin_panels.cpp, not inlined:
+// `std::unique_ptr<ProblemsFeed>` needs the complete type at the point its destructor/move ops are
+// generated, and `ProblemsFeed` is only forward-declared above (the RTTI/CEF seam this struct exists
+// to keep clean of).
 struct BuiltinPanels
 {
+    BuiltinPanels();
+    ~BuiltinPanels();
+    BuiltinPanels(BuiltinPanels&&) noexcept;
+    BuiltinPanels& operator=(BuiltinPanels&&) noexcept;
+    BuiltinPanels(const BuiltinPanels&) = delete;
+    BuiltinPanels& operator=(const BuiltinPanels&) = delete;
+
     std::unique_ptr<ProblemsFeed> problems;
 
     // How many providers actually bound. Checked by the caller: a silently dropped binding presents

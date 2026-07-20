@@ -4,6 +4,7 @@
 
 #include "context/editor/gui/panels/problems/problems_panel.h"
 #include "context/editor/gui/uitree/builtin.h"
+#include "context/editor/shell/panels/problems_feed.h" // ProblemsFeed complete type (see builtin_panels.h)
 
 #include <utility>
 
@@ -19,6 +20,27 @@ namespace
 constexpr const char* kPlaceholderPanelId = "placeholder";
 
 } // namespace
+
+// Out-of-line so `ProblemsFeed` is complete here (builtin_panels.h forward-declares it to keep the
+// header's include chain RTTI/CEF-clean — see that header's comment).
+BuiltinPanels::BuiltinPanels() = default;
+BuiltinPanels::~BuiltinPanels() = default;
+BuiltinPanels::BuiltinPanels(BuiltinPanels&&) noexcept = default;
+BuiltinPanels& BuiltinPanels::operator=(BuiltinPanels&&) noexcept = default;
+
+// Same seam, non-member form (see builtin_panels.h): the complete `ProblemsFeed` type is available
+// here because this TU includes `problems_feed.h` above.
+void apply_problems_snapshot(ProblemsFeed& feed, const contract::Json& snapshot,
+                             std::uint64_t generation)
+{
+    feed.apply_snapshot(snapshot, generation);
+}
+
+bool apply_problems_event(ProblemsFeed& feed, const std::string& topic, const contract::Json& payload,
+                          std::uint64_t generation)
+{
+    return feed.apply_event(topic, payload, generation);
+}
 
 const std::vector<std::string>& hostable_panel_ids()
 {

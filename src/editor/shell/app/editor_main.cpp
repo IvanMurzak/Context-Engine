@@ -325,6 +325,12 @@ int main(int argc, char** argv)
         diagnostics = std::make_unique<client::SubscriptionConsumer>(
             *daemon.client, shell::make_shell_attach_options(), subscription_options);
 
+        // `feed` stays a POINTER TO THE FORWARD-DECLARED type — this TU never sees `ProblemsFeed`'s
+        // complete definition (builtin_panels.h's comment on the forward declare explains why: this
+        // executable is compiled `-fno-rtti` when CEF is on, and `problems_feed.h`'s full include
+        // chain reaches a kernel header whose templated methods use `typeid`). The lambdas below
+        // drive it through `apply_problems_snapshot`/`apply_problems_event`, the non-member seams
+        // builtin_panels.h/.cpp expose for exactly this caller.
         shell::panels::ProblemsFeed* feed = builtin.problems.get();
         // 0 is only the FALLBACK stamp for a snapshot that carries no `generation` of its own; the
         // real cursor snapshot always does, and `apply_snapshot` prefers it. Passing 0 as the
@@ -332,10 +338,11 @@ int main(int argc, char** argv)
         // construction, since the stream never settles below generation 1.
         diagnostics->on_snapshot(
             [feed](const std::string&, const contract::Json& snapshot)
-            { feed->apply_snapshot(snapshot, 0); });
+            { shell::panels::apply_problems_snapshot(*feed, snapshot, 0); });
         diagnostics->on_event(
             [feed](const std::string&, const client::ClientEvent& event)
-            { (void)feed->apply_event(event.topic, event.payload, event.generation); });
+            { (void)shell::panels::apply_problems_event(*feed, event.topic, event.payload,
+                                                        event.generation); });
 
         client::SubscriptionSpec spec;
         spec.topics = {shell::panels::kDiagnosticsTopic, shell::panels::kDerivationTopic};

@@ -42,11 +42,11 @@ namespace context::editor::shell::panels
 
 namespace problems = gui::panels::problems;
 
-// The event topics this feed consumes. Both are published names on the daemon's stream (the
-// generated client schema lists them), mirrored here so the subscription and the dispatch below
-// cannot disagree about which strings they mean.
-inline constexpr const char* kDiagnosticsTopic = "diagnostics";
-inline constexpr const char* kDerivationTopic = "derivation";
+// The event topics this feed consumes (`kDiagnosticsTopic` / `kDerivationTopic`) now live in
+// `builtin_panels.h`, NOT here — `editor_main.cpp`'s subscription needs them but, like
+// `cef_shell_smoke.cpp`, must never include this header directly (see builtin_panels.h's
+// ProblemsFeed forward-declare comment for why). This TU (problems_feed.cpp) includes
+// builtin_panels.h for them, keeping the subscription and the dispatch below unable to disagree.
 
 // The `derivation` event that settles the panel's provisional markers (R-BRIDGE-008).
 inline constexpr const char* kDerivationSettledEvent = "derivation.settled";
