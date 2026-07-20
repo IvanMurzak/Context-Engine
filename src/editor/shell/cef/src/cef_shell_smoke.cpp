@@ -116,6 +116,48 @@ bool mentions(const std::string& haystack, const std::string& needle)
     return haystack.find(needle) != std::string::npos;
 }
 
+// The composed-surface scan the e05d1 pixel assertions share with the wait loop below. Returning
+// one struct keeps the loop's "has the UI actually painted yet?" test byte-for-byte identical to
+// the final assertion's "is the frame non-uniform?" — the loop waits for EXACTLY the property the
+// assertion will check, so it can neither break one poll too early (the CE #319 race) nor pass
+// vacuously. `composed` is the compositor's own size (NOT named `size`: that would shadow the outer
+// window extent, and MSVC's C4456 is not on CEF's /wd suppression list, so under /W4 /WX this file
+// would fail to compile).
+struct SurfaceScan
+{
+    std::size_t scanned = 0;
+    std::size_t background_texels = 0;
+    bool uniform = true;
+};
+
+SurfaceScan scan_surface(const std::vector<std::uint8_t>& surface, render::Extent2D composed)
+{
+    SurfaceScan scan;
+    const std::size_t texels =
+        static_cast<std::size_t>(composed.width) * static_cast<std::size_t>(composed.height);
+    for (std::size_t i = 0; i < texels; ++i)
+    {
+        const std::size_t offset = i * 4u;
+        if (offset + 3u >= surface.size())
+        {
+            break;
+        }
+        ++scan.scanned;
+        const bool is_background = surface[offset + 0] == kAppBackgroundB &&
+                                   surface[offset + 1] == kAppBackgroundG &&
+                                   surface[offset + 2] == kAppBackgroundR;
+        if (is_background)
+        {
+            ++scan.background_texels;
+        }
+        else
+        {
+            scan.uniform = false;
+        }
+    }
+    return scan;
+}
+
 int finish(int code)
 {
 #if defined(_WIN32)
@@ -243,16 +285,26 @@ int main(int argc, char** argv)
         return finish(1);
     }
 
-    // Drive the integrated pump until the browser has painted, the bridge handshake completed, AND
-    // (e05d1) every hostable panel has been hydrated. All three, not any: the composite proves the
-    // scheme served a renderable document, the handshake proves the bundle executed and
-    // round-tripped, and the render count proves the app layer on top of that channel actually ran.
+    // Drive the integrated pump until the browser has painted, the bridge handshake completed,
+    // every hostable panel has hydrated, AND the composed surface has ACTUALLY REPAINTED with the
+    // mounted UI. All of them, not any: the composite proves the scheme served a renderable
+    // document, the handshake proves the bundle executed and round-tripped, the render count proves
+    // the app layer ran, and the non-uniform surface proves the hydrated DOM's pixels reached the
+    // present target — the very thing the per-pixel assertion below checks.
     //
-    // ⚠ THE PANEL CONDITION IS WHY THIS LOOP CHANGED. Panels are brought up AFTER `shell.ready`
-    // (boot.ts orders it so deliberately), so a loop that exited the moment the handshake completed
-    // would routinely race past the hydration it is now asserting — and the resulting failure would
-    // read as "the renderer never called panel.render" rather than "the smoke stopped waiting too
-    // early". 30s remains the budget editor_host.cpp allows for a headless load.
+    // ⚠ WHY THE SURFACE CONDITION WAS ADDED (CE #319 — the race this test kept losing). Panels are
+    // brought up AFTER `shell.ready` (boot.ts orders it so deliberately), and `renders_served()`
+    // counts the render REQUEST served synchronously on the C++ side (hydration.ts:249) — which
+    // climbs BEFORE the mounted DOM's apply() (hydration.ts:253) repaints into the CEF OSR frame, a
+    // gap a05b42e's init()+onShow() startup double-refresh only widens. A loop that broke on
+    // `renders_served >= expected` alone therefore sampled cpu_surface() while it was still the
+    // uniform #132a44 background, and the "NOT a uniform fill" assertion failed on a frame that had
+    // simply not painted yet. So also require the surface to be NON-UNIFORM — the exact property
+    // that assertion checks. (A raw OnPaint / `view_frames` counter is a weaker proxy: it cannot
+    // tell a re-paint of the background apart from the UI's first paint, so waiting on it could
+    // still break early.) The 30s deadline is unchanged and still bounds the wait, so a genuine
+    // no-paint regression never turns the surface non-uniform, the loop runs out the clock, and the
+    // assertion below fails as it should — the wait is not vacuous and cannot loop forever.
     const std::size_t expected_renders = shell::panels::hostable_panel_ids().size();
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     bool presented = false;
@@ -267,7 +319,10 @@ int main(int argc, char** argv)
         {
             presented = true;
         }
-        if (presented && handshake.complete() && panel_host.renders_served() >= expected_renders)
+        const bool hydrated =
+            presented && handshake.complete() && panel_host.renders_served() >= expected_renders;
+        if (hydrated &&
+            !scan_surface(editor->compositor().cpu_surface(), editor->compositor().size()).uniform)
         {
             break;
         }
@@ -305,46 +360,20 @@ int main(int argc, char** argv)
     // stylesheet now also re-points Dockview's own surface colours at that variable so the editor's
     // background is genuinely present behind the UI rather than painted over by a theme.
     {
-        const std::vector<std::uint8_t>& surface = editor->compositor().cpu_surface();
-        // NOT named `size`: that would shadow the outer window extent, and MSVC's C4456 is not on
-        // CEF's /wd suppression list, so under its /W4 /WX this file would fail to compile.
-        const render::Extent2D composed = editor->compositor().size();
-        const std::size_t texels =
-            static_cast<std::size_t>(composed.width) * static_cast<std::size_t>(composed.height);
+        // The SAME scan the wait loop polled, re-run once on the frame the loop settled on (no pump
+        // runs between the break and here, so this observes exactly the surface the loop broke on).
+        const SurfaceScan scan =
+            scan_surface(editor->compositor().cpu_surface(), editor->compositor().size());
 
-        std::size_t background_texels = 0;
-        std::size_t scanned = 0;
-        bool uniform = true;
-        for (std::size_t i = 0; i < texels; ++i)
-        {
-            const std::size_t offset = i * 4u;
-            if (offset + 3u >= surface.size())
-            {
-                break;
-            }
-            ++scanned;
-            const bool is_background = surface[offset + 0] == kAppBackgroundB &&
-                                       surface[offset + 1] == kAppBackgroundG &&
-                                       surface[offset + 2] == kAppBackgroundR;
-            if (is_background)
-            {
-                ++background_texels;
-            }
-            else
-            {
-                uniform = false;
-            }
-        }
-
-        SMOKE_CHECK(scanned > 0, "the composed surface was large enough to scan");
+        SMOKE_CHECK(scan.scanned > 0, "the composed surface was large enough to scan");
         // A tenth of the frame, not "at least one texel": a single stray pixel of the right colour
         // could be coincidence, while a tenth of the window can only be the served stylesheet
         // painting the editor's background.
-        SMOKE_CHECK(scanned > 0 && background_texels > scanned / 10u,
+        SMOKE_CHECK(scan.scanned > 0 && scan.background_texels > scan.scanned / 10u,
                     "app.css's #132a44 background covers a substantial part of the composited "
                     "frame — the app scheme served the STYLESHEET with a usable media type and the "
                     "LIVE browser's pixels reached the present path");
-        SMOKE_CHECK(!uniform,
+        SMOKE_CHECK(!scan.uniform,
                     "the composited frame is NOT a uniform fill — a real docking UI was painted on "
                     "top of the background, which a solid-colour surface would have faked");
     }
