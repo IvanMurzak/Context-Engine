@@ -6,51 +6,34 @@
 // behaviour yet — the app scheme and IPC bridge land in e05c, and PanelHost/dockview wiring plus
 // the hydration runtime land in e05c/e05d. Do not grow this file into the app; grow it into those.
 
+// Imported for use in THIS module's own helpers below; the whole generated surface is re-exported
+// wholesale further down, so this list is deliberately only what the function bodies need.
 import {
     CLIENT_SCHEMA_VERSION,
     ERROR_CATALOG,
+    ERROR_CODES,
     EVENT_TOPICS,
+    EVENT_TOPIC_NAMES,
     MIN_CLIENT_PROTOCOL,
-    PROTOCOL_CAPABILITIES,
     PROTOCOL_MAJOR,
     RPC_METHODS,
     RPC_METHOD_NAMES,
-    EVENT_TOPIC_NAMES,
-    ERROR_CODES,
 } from "./generated/client-schema.js";
 import type {
     ErrorCode,
-    ErrorDescriptor,
     EventTopic,
     EventTopicDescriptor,
-    ProtocolCapability,
     RpcMethod,
     RpcMethodDescriptor,
 } from "./generated/client-schema.js";
 
-// Re-export the generated surface so consumers (e05c's IPC bridge, e05d's panels) import the
-// contract from ONE place and can never hand-roll a divergent copy.
-export {
-    CLIENT_SCHEMA_VERSION,
-    ERROR_CATALOG,
-    ERROR_CODES,
-    EVENT_TOPICS,
-    EVENT_TOPIC_NAMES,
-    MIN_CLIENT_PROTOCOL,
-    PROTOCOL_CAPABILITIES,
-    PROTOCOL_MAJOR,
-    RPC_METHODS,
-    RPC_METHOD_NAMES,
-};
-export type {
-    ErrorCode,
-    ErrorDescriptor,
-    EventTopic,
-    EventTopicDescriptor,
-    ProtocolCapability,
-    RpcMethod,
-    RpcMethodDescriptor,
-};
+// Re-export the WHOLE generated surface so consumers (e05c's IPC bridge, e05d's panels) import the
+// contract from ONE place and can never hand-roll a divergent copy. `export *` makes that
+// exhaustiveness STRUCTURAL rather than a promise: a hand-listed re-export block is a mirror of a
+// DO-NOT-EDIT-BY-HAND generated file, so it falls behind the moment the generator emits a new
+// symbol, and the failure is SILENT — a consumer simply reaches past this barrel into
+// ./generated/client-schema.js, which is the divergent second import path the barrel exists to deny.
+export * from "./generated/client-schema.js";
 
 /** Build-time facts about this editor-core bundle and the contract surface it was generated against. */
 export interface EditorCoreInfo {

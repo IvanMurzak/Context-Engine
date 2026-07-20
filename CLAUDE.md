@@ -77,14 +77,16 @@ Tests are ctest registrations, named in families the CI steps select by prefix r
 `game-smoke-*`, `determinism-*`, `samples-corpus*`, and the
 milestone exit gates `m1-exit-*`, `m2-exit-*`, `m4-exit-*`, `m5-exit-*`, `m6-exit-*`, `m7-exit-*`,
 `m8-exit-*` (the M8 build-pipeline gate; -3/-4a/-4b are ALIASES of the a07 runtime-host / netsync
-packed-wedge executables, the m6-exit-3 alias precedent). The `ui-*`,
+packed-wedge executables, the m6-exit-3 alias precedent), and `m85-exit-*` (the M8.5
+wedge-hardening/v1 gate; -1a/-1b/-2a/-2b/-4a/-4b/-4c are likewise ALIASES of landed executables).
+The `ui-*`,
 `render-ui-*`, `render-present-*`, `editor-shell-*`, `client-*`, and `webui-*` families are plain
 package test families (not gates) — NOT in the
 general step's `-E` gate-exclusion regex, so they auto-run there, and the `build` job builds them via
 `--preset dev` (no `--target`/CI edits needed). Note `^cli-` does NOT match `client-`.
 
 - The `build` job's general ctest step **excludes the gate families**
-  (`-E "^m1-exit-|^m2-exit-|^m4-exit-|^m5-exit-|^m6-exit-|^m7-exit-|^m8-exit-|^determinism-|^samples-corpus"`);
+  (`-E "^m1-exit-|^m2-exit-|^m4-exit-|^m5-exit-|^m6-exit-|^m7-exit-|^m8-exit-|^m85-exit-|^determinism-|^samples-corpus"`);
   each gate family runs exactly once in its own named blocking step so failures are legible per OS leg.
 - **The "Not Run = RED" tripwire.** Several jobs build a hand-maintained explicit `--target` list
   instead of the whole tree: the `deterministic` job (`determinism-*` executables), the
@@ -227,8 +229,10 @@ fetchable-vs-preinstalled split per v1 target — what `context doctor` validate
   for sim components) — the kernel never links back. New engine features belong in a package, not
   the kernel. Deterministic sim state is integer/fixed-point only (`context_simmath` Q16);
   cosmetic/presentation state is an observer that folds into no state hash.
-- **Dependencies are deny-by-default.** A new third-party dependency goes into `src/vcpkg.json`
-  AND `tools/license-allowlist.json` (verified SPDX id — never guessed), or the license gate fails.
+- **Dependencies are deny-by-default.** A new third-party dependency goes into `src/vcpkg.json` —
+  or, for a web-layer npm dependency, into the editor-core `package.json` declaration
+  (`check_licenses.py` scans every non-`node_modules` `package.json`) — AND into
+  `tools/license-allowlist.json` (verified SPDX id — never guessed), or the license gate fails.
   Prefer the standard library; heavyweight prebuilts follow the SHA-pinned fetch + verify-before-use
   pattern (`cmake/ContextDownload.cmake`, `tools/fetch_*.py`).
 - **No Apache/ASCII-art file headers** — this is a proprietary-EULA repo. Source files carry a

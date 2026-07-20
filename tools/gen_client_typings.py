@@ -87,6 +87,32 @@ def _require(schema: dict, key: str, kind: type) -> object:
     return value
 
 
+def _require_int(container: dict, key: str, where: str) -> int:
+    """Require an integer scalar, refusing the silent ``null`` projection.
+
+    These scalars are emitted as bare TS literals, and `null as const` is LEGAL TypeScript — so a
+    missing key would sail through the `webui-typecheck` gate and ship `PROTOCOL_MAJOR = null`, i.e.
+    the frozen wire major (R-CLI-004) projected as "unknown" into the editor's client. That is
+    exactly the dishonesty this projection chain exists to prevent, so refuse it HERE, at the only
+    place that can still tell the difference. (`bool` is a subclass of `int` in Python; exclude it.)
+    """
+    value = container.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise GenError(f"{where} key '{key}' missing or not an integer")
+    return value
+
+
+def _payload_field(field: dict, indent: str) -> str:
+    """Emit one ``PayloadField`` object literal.
+
+    The SINGLE emitter for that TS interface — topic payloads and the event envelope both render it,
+    and two copy-pasted emitters would let a new field reach one table and not the other.
+    """
+    return (f"{indent}{{ name: {_lit(field.get('name', ''))}, "
+            f"type: {_lit(field.get('type', ''))}, "
+            f"description: {_lit(field.get('description', ''))} }},")
+
+
 def _names(entries: list, key: str, what: str) -> list[str]:
     out: list[str] = []
     for index, entry in enumerate(entries):
@@ -110,6 +136,17 @@ def render(schema: dict) -> str:
     error_catalog = _require(schema, "errorCatalog", list)
     envelope = _require(schema, "eventEnvelope", dict)
 
+    # The scalars below are projected as bare TS literals, so validate them here rather than letting
+    # a missing key become a legal-but-dishonest `null as const` (see _require_int).
+    protocol_major = _require_int(protocol, "protocolMajor", "schema key 'protocol'")
+    min_client_protocol = _require_int(protocol, "minClientProtocol", "schema key 'protocol'")
+    schema_version = _require_int(schema, "schemaVersion", "schema")
+    # An ABSENT capability list is honest (`[]` -> `ProtocolCapability = never`, i.e. "none
+    # advertised"), so it keeps its default; a present-but-wrong-typed one is not, so refuse that.
+    capabilities = protocol.get("capabilities", [])
+    if not isinstance(capabilities, list):
+        raise GenError("schema key 'protocol' key 'capabilities' is not a list")
+
     method_names = _names(rpc_methods, "method", "rpcMethods")
     topic_names = _names(event_topics, "name", "eventTopics")
     error_codes = _names(error_catalog, "code", "errorCatalog")
@@ -118,20 +155,17 @@ def render(schema: dict) -> str:
 
     # --- protocol constants ----------------------------------------------------------------
     parts.append("/** The frozen wire protocol major (R-CLI-004). */")
-    parts.append(f"export const PROTOCOL_MAJOR = {_lit(protocol.get('protocolMajor'))} as const;")
+    parts.append(f"export const PROTOCOL_MAJOR = {_lit(protocol_major)} as const;")
     parts.append("")
     parts.append("/** Oldest client protocol the daemon still accepts. */")
-    parts.append("export const MIN_CLIENT_PROTOCOL = "
-                 f"{_lit(protocol.get('minClientProtocol'))} as const;")
+    parts.append(f"export const MIN_CLIENT_PROTOCOL = {_lit(min_client_protocol)} as const;")
     parts.append("")
     parts.append("/** Negotiated protocol capabilities advertised by the daemon. */")
-    parts.append("export const PROTOCOL_CAPABILITIES = "
-                 f"{_lit(protocol.get('capabilities', []))} as const;")
+    parts.append(f"export const PROTOCOL_CAPABILITIES = {_lit(capabilities)} as const;")
     parts.append("export type ProtocolCapability = (typeof PROTOCOL_CAPABILITIES)[number];")
     parts.append("")
     parts.append(f"/** Schema version this module was projected from. */\n"
-                 f"export const CLIENT_SCHEMA_VERSION = "
-                 f"{_lit(schema.get('schemaVersion'))} as const;")
+                 f"export const CLIENT_SCHEMA_VERSION = {_lit(schema_version)} as const;")
     parts.append("")
 
     # --- RPC methods -----------------------------------------------------------------------
@@ -208,10 +242,7 @@ export interface EventTopicDescriptor {
         else:
             parts.append("        payloadFields: [")
             for field in fields:
-                parts.append(
-                    f"            {{ name: {_lit(field.get('name', ''))}, "
-                    f"type: {_lit(field.get('type', ''))}, "
-                    f"description: {_lit(field.get('description', ''))} }},")
+                parts.append(_payload_field(field, " " * 12))
             parts.append("        ],")
         parts.append("    },")
     parts.append("};")
@@ -226,10 +257,7 @@ export interface EventTopicDescriptor {
                  "describes them). */")
     parts.append("export const EVENT_ENVELOPE_FIELDS: readonly PayloadField[] = [")
     for field in envelope_fields:
-        parts.append(
-            f"    {{ name: {_lit(field.get('name', ''))}, "
-            f"type: {_lit(field.get('type', ''))}, "
-            f"description: {_lit(field.get('description', ''))} }},")
+        parts.append(_payload_field(field, " " * 4))
     parts.append("];")
     parts.append("")
 
@@ -285,7 +313,10 @@ def generate(schema_path: Path, out_path: Path, *, check: bool = False) -> int:
             # (open(...) rather than Path.read_text(newline=...), which is Python 3.13+ only.)
             with open(out_path, "r", encoding="utf-8", newline="") as fh:
                 current = fh.read()
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
+            # UnicodeDecodeError is NOT an OSError: a committed file mangled into non-UTF-8 (a bad
+            # editor round-trip) would otherwise escape as a traceback instead of the actionable
+            # DRIFT refusal below. Either way the gate fails closed; this keeps it legible.
             print(f"[gen_client_typings] DRIFT: cannot read {out_path}: {exc}", file=sys.stderr)
             return 1
         if current != rendered:

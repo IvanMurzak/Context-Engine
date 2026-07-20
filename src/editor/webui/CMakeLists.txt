@@ -45,7 +45,10 @@ set(_ctx_webui_tsconfig "${_ctx_webui_core}/tsconfig.json")
 set(_ctx_webui_entry "${_ctx_webui_core}/src/index.ts")
 # The asset root the Shell will serve over context-editor://app/ (e05c wires the scheme).
 set(_ctx_webui_assets "${CMAKE_BINARY_DIR}/editor-webui/app")
-set(_ctx_webui_bundle "${_ctx_webui_assets}/editor-core.js")
+# Declared once and composed forward, so the asset gate below names the same file the bundle step
+# writes without either side restating the literal.
+set(_ctx_webui_bundle_name "editor-core.js")
+set(_ctx_webui_bundle "${_ctx_webui_assets}/${_ctx_webui_bundle_name}")
 set(_ctx_webui_stamps "${CMAKE_CURRENT_BINARY_DIR}/stamps")
 
 # --- acquire + verify the pinned dockview-core distribution (verify-before-use, fail-closed) -----
@@ -72,13 +75,32 @@ endif()
 string(STRIP "${_ctx_dockview_out}" _ctx_dockview_out)
 message(STATUS "context_editor_webui: ${_ctx_dockview_out}")
 
-# The member names the manifest stages (kept in step with tools/dockview-toolchain.json § members).
-set(_ctx_dockview_members "dockview-core.min.js" "dockview.css")
+# The member names the manifest stages, READ FROM the manifest rather than mirrored here: the pins
+# already live in exactly one place (tools/dockview-toolchain.json), and a hand-kept copy of the
+# names would drift into a failure far from the edit that caused it.
+# (No empty-`members` guard needed here: the fetch above already ran check_manifest(), which refuses
+# a missing/empty member table, and a non-zero rc FATAL_ERRORs twenty lines up — so reaching this
+# point means `members` is a non-empty object.)
+file(READ "${_ctx_dockview_manifest}" _ctx_dockview_json)
+string(JSON _ctx_dockview_member_count LENGTH "${_ctx_dockview_json}" members)
+math(EXPR _ctx_dockview_last_member "${_ctx_dockview_member_count} - 1")
+set(_ctx_dockview_members "")
+foreach(_ctx_dockview_i RANGE ${_ctx_dockview_last_member})
+    string(JSON _ctx_dockview_member MEMBER "${_ctx_dockview_json}" members ${_ctx_dockview_i})
+    list(APPEND _ctx_dockview_members "${_ctx_dockview_member}")
+endforeach()
 
 # --- workspace sources ---------------------------------------------------------------------------
-# CONFIGURE_DEPENDS so adding a .ts file re-globs on the next build instead of silently not being
-# typechecked (a stale-glob trap that would make the type gate quietly incomplete).
-file(GLOB_RECURSE _ctx_webui_ts CONFIGURE_DEPENDS "${_ctx_webui_core}/src/*.ts")
+# CONFIGURE_DEPENDS so adding a source file re-globs on the next build instead of silently not being
+# typechecked (a stale-glob trap that would make the type gate quietly incomplete). Every extension
+# the typechecker accepts is globbed, not just `.ts`: a `.tsx` panel — e05c's most likely shape — that
+# neither this glob nor tsconfig's `include` covers would be silently exempt from the type gate AND
+# absent from the bundle's DEPENDS, narrowing the gate exactly when it starts mattering. tsconfig's
+# `include` is `src/**/*`, which TypeScript resolves to this same extension set, so the two lists
+# cannot drift apart.
+file(GLOB_RECURSE _ctx_webui_ts CONFIGURE_DEPENDS
+     "${_ctx_webui_core}/src/*.ts" "${_ctx_webui_core}/src/*.tsx"
+     "${_ctx_webui_core}/src/*.mts" "${_ctx_webui_core}/src/*.cts")
 set(_ctx_webui_inputs ${_ctx_webui_ts} "${_ctx_webui_tsconfig}" "${_ctx_webui_core}/package.json")
 
 # --- 1) SEMANTIC typecheck (a BUILD failure, per the e05a DoD) -----------------------------------
@@ -142,7 +164,7 @@ add_test(NAME webui-assets
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_webui_assets.py"
             --asset-dir "${_ctx_webui_assets}"
             --manifest "${_ctx_dockview_manifest}"
-            --bundle-name "editor-core.js")
+            --bundle-name "${_ctx_webui_bundle_name}")
 
 # 2) The DRIFT gate (e05a DoD: "generated from e02's schema; drift-checked in CI"). Re-projects the
 # BUILD-GENERATED schema — the live registry's output, not the committed copy — and refuses any byte

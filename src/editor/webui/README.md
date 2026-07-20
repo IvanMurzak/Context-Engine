@@ -104,8 +104,8 @@ gate-exclusion regex and runs automatically in the general ctest step on all thr
 - `webui-client-typings-drift` — re-projects the build-generated schema and refuses any byte
   difference.
 
-Python-side unit tests live in `tools/tests/test_gen_client_typings.py` and
-`tools/tests/test_check_webui_assets.py`.
+Python-side unit tests live in `tools/tests/test_gen_client_typings.py`,
+`tools/tests/test_check_webui_assets.py`, and `tools/tests/test_fetch_dockview.py`.
 
 ## Scope boundary (e05a)
 

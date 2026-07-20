@@ -207,6 +207,67 @@ def test_missing_required_section_is_a_config_error(tmp_path: Path, drop: str) -
         gen_client_typings.generate(_write(tmp_path, schema), tmp_path / "o.ts")
 
 
+@pytest.mark.parametrize("key", ["protocolMajor", "minClientProtocol"])
+@pytest.mark.parametrize("bad", [None, "1", 1.5, True, ...])
+def test_protocol_scalar_must_be_an_integer(tmp_path: Path, key: str, bad: object) -> None:
+    """A missing/non-integer protocol scalar must be a config error, NOT a ``null`` projection.
+
+    These are emitted as bare TS literals and ``null as const`` is legal TypeScript, so the
+    ``webui-typecheck`` gate cannot catch it — ``PROTOCOL_MAJOR = null`` would ship the frozen wire
+    major (R-CLI-004) as "unknown" into the editor's client. This generator is the only place that
+    can still tell the difference. (``True`` covers the Python ``bool``-is-an-``int`` trap.)
+    """
+    schema = _schema()
+    if bad is ...:
+        del schema["protocol"][key]
+    else:
+        schema["protocol"][key] = bad
+    with pytest.raises(gen_client_typings.GenError, match=key):
+        gen_client_typings.generate(_write(tmp_path, schema), tmp_path / "o.ts")
+
+
+@pytest.mark.parametrize("bad", [None, "1", 1.5, True, ...])
+def test_schema_version_must_be_an_integer(tmp_path: Path, bad: object) -> None:
+    """Same reasoning as the protocol scalars: CLIENT_SCHEMA_VERSION is a bare literal too."""
+    schema = _schema()
+    if bad is ...:
+        del schema["schemaVersion"]
+    else:
+        schema["schemaVersion"] = bad
+    with pytest.raises(gen_client_typings.GenError, match="schemaVersion"):
+        gen_client_typings.generate(_write(tmp_path, schema), tmp_path / "o.ts")
+
+
+def test_non_list_capabilities_is_refused(tmp_path: Path) -> None:
+    """An ABSENT capability list is honest (`[]` -> `never`); a wrong-typed one is not."""
+    schema = _schema()
+    schema["protocol"]["capabilities"] = "describe"
+    with pytest.raises(gen_client_typings.GenError, match="capabilities"):
+        gen_client_typings.generate(_write(tmp_path, schema), tmp_path / "o.ts")
+
+
+def test_absent_capabilities_projects_an_empty_list(tmp_path: Path) -> None:
+    schema = _schema()
+    del schema["protocol"]["capabilities"]
+    out = tmp_path / "o.ts"
+    assert gen_client_typings.generate(_write(tmp_path, schema), out) == 0
+    assert "export const PROTOCOL_CAPABILITIES = [] as const;" in out.read_text(encoding="utf-8")
+
+
+def test_check_reports_drift_on_a_non_utf8_committed_file(tmp_path: Path, capsys) -> None:
+    """A mangled committed file must report the actionable DRIFT line, not a traceback.
+
+    ``UnicodeDecodeError`` is not an ``OSError``, so it would otherwise escape both the read guard
+    and ``main``'s ``GenError`` handler.
+    """
+    schema_path = _write(tmp_path, _schema())
+    out = tmp_path / "client-schema.ts"
+    out.write_bytes(b"\xff\xfe not utf-8 \x00")
+
+    assert gen_client_typings.generate(schema_path, out, check=True) == 1
+    assert "DRIFT" in capsys.readouterr().err
+
+
 def test_duplicate_method_names_are_refused(tmp_path: Path) -> None:
     """A duplicate key would silently collapse an entry in the emitted mapped-type table."""
     schema = _schema()

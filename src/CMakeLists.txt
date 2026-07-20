@@ -133,6 +133,17 @@ endif()
 
 enable_testing()
 
+# Cross-directory CACHE INTERNAL handoffs are re-published by their owning directory on EVERY
+# configure, so clear them here — BEFORE any add_subdirectory — rather than inheriting the previous
+# configure's values. CMake loads CMakeCache.txt before the first directory is processed, so a stale
+# entry is otherwise visible from line 1 regardless of who publishes it, and the consumers' "you must
+# be added AFTER my publisher" FATAL_ERROR guards (src/editor/webui/CMakeLists.txt) silently pass in
+# any pre-existing build dir — the reorder they exist to catch would then build green locally and red
+# in CI, where the build dir is always fresh. Clearing makes the guards mean the same thing in both.
+unset(CONTEXT_ESBUILD_BIN CACHE)
+unset(CONTEXT_TSGO_BIN CACHE)
+unset(CONTEXT_CLIENT_SCHEMA_GENERATED CACHE)
+
 # spikes/ lives OUTSIDE the source dir (sibling of src/), so every spike is added with an
 # explicit binary dir; the ${CMAKE_BINARY_DIR}/spikes/<name> layout keeps output paths
 # identical to the pre-move tree (the CI bench job depends on <binaryDir>/spikes/parse-bench/...).

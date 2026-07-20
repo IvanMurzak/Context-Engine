@@ -103,10 +103,21 @@ def check_manifest(manifest: dict) -> tuple[str, str]:
         raise FetchError("manifest missing 'tarball_sha256'")
     if not manifest.get("tarball_file"):
         raise FetchError("manifest missing 'tarball_file'")
+    if not manifest.get("tarball_url_template"):
+        # Validated HERE so a typo'd manifest is reported as the config error it is (exit 2). Left
+        # to `fetch`, the unconditional dereference raises a bare KeyError that escapes main()'s
+        # handlers as exit 1 — the code this tool reserves for a fail-closed SHA REFUSAL.
+        raise FetchError("manifest missing 'tarball_url_template'")
     members = manifest.get("members")
     if not members:
         raise FetchError("manifest missing 'members'")
     for name, spec in members.items():
+        # The member KEY becomes a real filesystem write at <dest>/<name>, exactly like the
+        # in-tarball path guarded in _extract_member — so it gets the same containment check. The
+        # manifest is first-party today; a guard that covers only one of two sibling path fields is
+        # the kind of asymmetry that stops being true after a schema change.
+        if ".." in Path(name).parts or Path(name).is_absolute() or "/" in name or "\\" in name:
+            raise FetchError(f"refusing unsafe member name '{name}' — must be a plain file name")
         if not spec.get("member"):
             raise FetchError(f"member '{name}' missing its in-tarball 'member' path")
         if not spec.get("sha256"):
@@ -214,9 +225,21 @@ def fetch(manifest_path: Path, dest: Path, source: Path | None = None) -> dict:
         _verify(tarball, manifest["tarball_sha256"], f"{package} tarball ({version})")
         for name, spec in members.items():
             out_path = outputs[name]
-            _extract_member(tarball, spec["member"], out_path)
-            # Per-member verification: the tarball pin alone would not catch an inner-layout swap.
-            _verify(out_path, spec["sha256"], f"{package} member '{name}'")
+            # Stage through a sibling temp path and only move it into place AFTER its pin verifies:
+            # extracting straight to `out_path` would leave a REFUSED member's rejected bytes at the
+            # very path the build reads from. The stamp fast-path above re-checks only that the
+            # outputs EXIST, never their hashes, so a later run whose manifest matches the stamp
+            # would then report those rejected bytes as `cached` — a fail-closed refusal that
+            # silently becomes a pass. The sibling location (not the temp dir) keeps the move on one
+            # filesystem, so it is atomic.
+            staging = out_path.with_name(out_path.name + ".tmp")
+            try:
+                _extract_member(tarball, spec["member"], staging)
+                # Per-member verification: the tarball pin alone would not catch an inner-layout swap.
+                _verify(staging, spec["sha256"], f"{package} member '{name}'")
+                staging.replace(out_path)
+            finally:
+                staging.unlink(missing_ok=True)
 
     stamp_path.write_text(json.dumps(want_stamp, indent=2) + "\n", encoding="utf-8")
     return {"staged": {n: str(p) for n, p in outputs.items()},

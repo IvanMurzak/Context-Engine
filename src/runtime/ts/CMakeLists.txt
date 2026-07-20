@@ -377,6 +377,10 @@ set(CONTEXT_ESBUILD_BIN "${_ctx_esbuild_bin}" PARENT_SCOPE)
 # — this is the same CACHE INTERNAL treatment src/editor/client/CMakeLists.txt already gives
 # CONTEXT_CLIENT_SCHEMA_GENERATED. Consumers MUST still assert the value is non-empty before use
 # (webui does): a cache variable is only populated once THIS directory has been configured.
+# ⚠ A cache entry SURVIVES a reconfigure, so both names are also cleared at the top of
+# src/CMakeLists.txt before the first add_subdirectory — otherwise a warm build dir would hand a
+# mis-ordered consumer the PREVIOUS configure's value and its ordering guard would silently pass.
+# Adding another cross-directory CACHE INTERNAL handoff means adding it to that clear list too.
 set(CONTEXT_ESBUILD_BIN "${_ctx_esbuild_bin}" CACHE INTERNAL
     "The staged, SHA-verified esbuild binary (tools/ts-toolchain.json)")
 set(CONTEXT_TSGO_BIN "${_ctx_tsgo_bin}" CACHE INTERNAL
