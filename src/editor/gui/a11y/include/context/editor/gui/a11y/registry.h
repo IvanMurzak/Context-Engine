@@ -10,10 +10,11 @@
 // the default 3-OS build matrix instead of silently shipping an uncovered panel (the #168 failure
 // mode, where Problems landed before the harness and its coverage held only vacuously).
 //
-// EXTENSION POINT: a new built-in panel is a THREE-anchor edit — its Contribution in
+// EXTENSION POINT: a new built-in panel is a FOUR-anchor edit — its Contribution in
 // gui/contract/src/builtin_roster.cpp, its factory in registry.cpp (plus its library in this
-// directory's CMakeLists.txt), and its line in coverage.manifest.jsonl. Miss one and the ctest names
-// which.
+// directory's CMakeLists.txt), its line in coverage.manifest.jsonl, and its PanelHelp entry in
+// help::panel_topics() (gui/help/src/help_model.cpp). gui-a11y-coverage names the first three; the
+// help anchor is guarded separately by gui-help-contextual, so skipping it still reds the build.
 
 #pragma once
 

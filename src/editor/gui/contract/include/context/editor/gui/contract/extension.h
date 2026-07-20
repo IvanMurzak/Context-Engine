@@ -27,8 +27,9 @@ namespace context::editor::gui::contract
 // 1 -> 2 (M9 e05b): the panel manifest v2 (04 §3) added the icon / dock / content / state /
 // capabilities / commands / themes members below. Because the compatibility window is a SINGLE major,
 // this bump refuses every v1 contribution the moment it lands — deliberate, and safe only because the
-// registry has no out-of-repo clients yet (the M9 e05b enumeration found five in-repo consumers, all
-// of which reference this constant SYMBOLICALLY rather than hardcoding a literal).
+// registry has no out-of-repo clients yet (the M9 e05b enumeration walked EVERY in-repo consumer —
+// the four CMake targets that link context_gui_contract and their tests, harnesses and fixtures — and
+// each references this constant SYMBOLICALLY rather than hardcoding a literal).
 inline constexpr std::uint32_t kContractMajor = 2;
 
 // The kinds of editor UI a package may contribute.
@@ -100,11 +101,15 @@ struct CommandContribution
 };
 
 // --- capability vocabulary (04 §3 `capabilities`) -------------------------------------------------
-// A capability is the manifest-declared grant a contribution ASKS for. The first four mirror the
-// R-SEC-007 bridge scope vocabulary verbatim (bridge::Scope) so the manifest and the dispatcher speak
-// one language; `ui_events` is the additional editor.ui read grant the panel bridge requires for
-// bridge.ui.subscribe (04 §5, C-F18). Deny-by-default: a token outside this closed set is REFUSED
-// (an unknown capability must never be silently dropped into a weaker-than-declared grant).
+// A capability is the manifest-declared grant a contribution ASKS for. The first four correspond
+// one-to-one to the R-SEC-007 bridge scope vocabulary (bridge::Scope) so the manifest and the
+// dispatcher speak one language — note the SPELLING differs by design: manifest tokens are
+// underscored ("file_write") while the bridge's wire names are hyphenated ("file-write", see
+// ScopeSet::names()), so registry.cpp owns the one translation between them. `ui_events` is the
+// additional editor.ui read grant the panel bridge requires for bridge.ui.subscribe (04 §5, C-F18).
+// Deny-by-default: a token outside this closed set is REFUSED (an unknown capability must never be
+// silently dropped into a weaker-than-declared grant), and the registry additionally refuses a
+// contribution whose sandbox GRANT exceeds what its manifest declares.
 inline constexpr const char* kCapabilityReadQuery = "read_query";
 inline constexpr const char* kCapabilityFileWrite = "file_write";
 inline constexpr const char* kCapabilitySessionControl = "session_control";

@@ -15,8 +15,11 @@
 //
 // Deliberately DATA-ONLY (ids/titles/manifests, no panel headers, no factories): it lives in the
 // low-level contract library so the CEF host can consume it without linking every panel library into
-// the CEF-ON build. The id strings are cross-checked against each panel class's own kContributionId by
-// the a11y coverage ctest, so a rename cannot drift them either.
+// the CEF-ON build. That layering is also why the ids here are literals: this library cannot include
+// a panel header to reach its kContributionId. The a11y coverage ctest closes the gap — it compares
+// these ids against the factory table, which DOES bind each panel class's own kContributionId, so a
+// rename that misses this file fails that ctest ("placeholder" excepted; uitree/builtin.h declares no
+// id constant, so that one id is a literal on both sides).
 
 #pragma once
 

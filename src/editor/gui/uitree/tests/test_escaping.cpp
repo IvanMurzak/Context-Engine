@@ -15,6 +15,7 @@
 
 #include "uitree_test.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -51,15 +52,7 @@ std::vector<std::string> hostile_strings()
 
 std::size_t count(const std::string& haystack, char needle)
 {
-    std::size_t n = 0;
-    for (const char c : haystack)
-    {
-        if (c == needle)
-        {
-            ++n;
-        }
-    }
-    return n;
+    return static_cast<std::size_t>(std::count(haystack.begin(), haystack.end(), needle));
 }
 
 std::size_t count(const std::string& haystack, const std::string& needle)
@@ -121,8 +114,8 @@ int main()
         // output must contain exactly two '<' and two '>' bytes. Any third would be injected markup.
         CHECK(count(html, '<') == 2);
         CHECK(count(html, '>') == 2);
-        CHECK(count(html, std::string("<button")) == 1);
-        CHECK(count(html, std::string("</button>")) == 1);
+        CHECK(count(html, "<button") == 1);
+        CHECK(count(html, "</button>") == 1);
 
         // No payload became an ELEMENT: '<' is always escaped, so no tag can be injected.
         CHECK(html.find("<script") == std::string::npos);
@@ -139,12 +132,11 @@ int main()
         // attribute, a ninth an unterminated one.
         CHECK(count(html, '"') == 10);
         CHECK(count(html, '\'') == 0); // nor a single-quoted attribute (some parsers accept those)
-        CHECK(count(html, std::string(" id=\"")) == 1);
-        CHECK(count(html, std::string(" role=\"")) == 1);
-        CHECK(count(html, std::string(" aria-label=\"")) == 1);
-        CHECK(count(html, std::string(" data-command=\"")) == 1);
-        CHECK(count(html, std::string(" tabindex=\"0\"")) == 1);
-
+        CHECK(count(html, " id=\"") == 1);
+        CHECK(count(html, " role=\"") == 1);
+        CHECK(count(html, " aria-label=\"") == 1);
+        CHECK(count(html, " data-command=\"") == 1);
+        CHECK(count(html, " tabindex=\"0\"") == 1);
     }
 
     // --- the same guarantee through a whole PANEL tree, including nested children ------------------
@@ -174,10 +166,9 @@ int main()
         CHECK(count(doc, '"') % 2 == 0);
 
         // A REAL csp + title still compose to a sane document (the contract is not just paranoia).
-        Panel plain("builtin.placeholder", "Context Editor");
+        Panel plain("placeholder", "Context Editor");
         plain.set_root(UiNode(Role::region, "body").set_label("Context Editor"));
-        const std::string ok_doc = render_document(
-            plain, "default-src 'none'; script-src 'self'");
+        const std::string ok_doc = render_document(plain, "default-src 'none'; script-src 'self'");
         CHECK(ok_doc.find("<title>Context Editor</title>") != std::string::npos);
         // the CSP's own apostrophes are escaped but remain a valid CSP after HTML unescaping
         CHECK(ok_doc.find("content=\"default-src &#39;none&#39;; script-src &#39;self&#39;\"") !=

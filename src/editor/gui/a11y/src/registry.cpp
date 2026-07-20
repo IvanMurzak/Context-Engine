@@ -43,7 +43,9 @@ namespace undo = context::editor::gui::session::undo;
 // Every id here is taken from the panel class's OWN kContributionId constant (never a re-typed
 // literal), so a rename cannot drift this table from the panel; and the gui-a11y-coverage ctest
 // asserts this table matches the roster in both directions, so it cannot drift from the roster
-// either.
+// either. ONE exception: "placeholder" is a bare literal, because uitree/builtin.h exposes no id
+// constant for it — renaming that id means grepping the literal (here, the roster, the coverage
+// manifest, and help_model.cpp) rather than following a constant.
 std::vector<std::pair<std::string, PanelFactory>> panel_factories()
 {
     std::vector<std::pair<std::string, PanelFactory>> factories;

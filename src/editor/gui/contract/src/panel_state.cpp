@@ -3,6 +3,7 @@
 
 #include "context/editor/gui/contract/panel_state.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -10,6 +11,28 @@
 
 namespace context::editor::gui::contract
 {
+
+namespace
+{
+
+// A dump of `value` bounded for use INSIDE a diagnostic. A hostile blob is arbitrarily large and the
+// diagnostic travels in the StateRestore to a human/AI reader, so echoing the whole rejected payload
+// back at them is useless noise. This bounds what the diagnostic RETAINS, not the transient cost of
+// serializing it — Json has no dump(limit) overload, and a failure path is the wrong place to widen
+// that API for.
+std::string bounded_dump(const Json& value)
+{
+    constexpr std::size_t kMaxDiagnosticDump = 200;
+    std::string text = value.dump();
+    if (text.size() > kMaxDiagnosticDump)
+    {
+        text.resize(kMaxDiagnosticDump);
+        text += "... (truncated)";
+    }
+    return text;
+}
+
+} // namespace
 
 StateRestore StateRestore::accepted(PanelState state)
 {
@@ -38,13 +61,11 @@ Json persist_panel_state(const PanelState& state)
 
 StateRestore restore_panel_state(std::uint32_t expected_schema_version, const Json& persisted)
 {
-    const std::string expected = std::to_string(expected_schema_version);
-
     if (!persisted.is_object())
     {
         return StateRestore::rejected(kErrStateMalformed,
                                       "persisted panel state is not a JSON object (got " +
-                                          persisted.dump() + ")");
+                                          bounded_dump(persisted) + ")");
     }
     if (!persisted.contains(kStateSchemaVersionKey))
     {
@@ -58,20 +79,26 @@ StateRestore restore_panel_state(std::uint32_t expected_schema_version, const Js
     {
         return StateRestore::rejected(kErrStateMalformed,
                                       "persisted \"" + std::string(kStateSchemaVersionKey) +
-                                          "\" is not a number (got " + version.dump() + ")");
+                                          "\" is not a number (got " + bounded_dump(version) + ")");
     }
 
     // Reject a non-integral / negative / out-of-range version rather than silently truncating it into
     // a version that happens to match — a truncating cast is exactly how a corrupt blob would sneak
     // past the mismatch check below.
+    //
+    // The range test is written as a NEGATED in-range check on purpose: every relational operator is
+    // false for NaN, so the natural `raw < 0.0 || raw > max` form falls THROUGH to the int64 cast, and
+    // casting a NaN to an integer type is undefined behavior ([conv.fpint]/1) — trapped by the
+    // UBSan leg's float-cast-overflow check. `!(in range)` is true for NaN, so it short-circuits
+    // before the cast and a NaN version is refused like any other malformed one.
     const double raw = version.as_number();
-    if (raw < 0.0 || raw > static_cast<double>(std::numeric_limits<std::uint32_t>::max()) ||
+    if (!(raw >= 0.0 && raw <= static_cast<double>(std::numeric_limits<std::uint32_t>::max())) ||
         static_cast<double>(static_cast<std::int64_t>(raw)) != raw)
     {
         return StateRestore::rejected(
             kErrStateMalformed, "persisted \"" + std::string(kStateSchemaVersionKey) +
-                                    "\" is not a whole number in [0, 2^32) (got " + version.dump() +
-                                    ")");
+                                    "\" is not a whole number in [0, 2^32) (got " +
+                                    bounded_dump(version) + ")");
     }
 
     const std::uint32_t found = static_cast<std::uint32_t>(version.as_int());
@@ -81,7 +108,8 @@ StateRestore restore_panel_state(std::uint32_t expected_schema_version, const Js
         return StateRestore::rejected(kErrStateSchemaMismatch,
                                       "persisted panel state declares schemaVersion " +
                                           std::to_string(found) + " but the panel writes version " +
-                                          expected + "; the panel receives null state");
+                                          std::to_string(expected_schema_version) +
+                                          "; the panel receives null state");
     }
 
     PanelState state;

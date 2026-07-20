@@ -6,11 +6,15 @@
 #include "context/editor/gui/contract/builtin_roster.h"
 #include "context/editor/gui/contract/extension.h"
 #include "context/editor/gui/contract/registry.h"
+#include "context/editor/gui/contract/sandbox.h"
+
+#include "context/editor/bridge/scope.h"
 
 #include "contract_test.h"
 
 #include <set>
 #include <string>
+#include <vector>
 
 using namespace context::editor::gui::contract;
 
@@ -38,6 +42,22 @@ int main()
         // A default-constructed Contribution declares the CURRENT major, so every in-repo caller that
         // does not set contract_version explicitly moved with the bump.
         CHECK(Contribution{}.contract_version == kContractMajor);
+    }
+
+    // --- deny: the PRE-e05b major — the BREAKING half of the 1 -> 2 bump --------------------------
+    // The compatibility window is exactly {kContractMajor}, so a v1 contribution (anything written
+    // against the pre-e05b contract) is REFUSED, never leniently adopted. Written with the LITERAL 1
+    // on purpose: every other version case below mutates `kContractMajor + 1`, so relaxing the
+    // registry's `!=` into a `> kContractMajor` ("be lenient with older majors" — exactly the
+    // refactor a major bump invites) would keep all of them green while silently re-admitting v1.
+    {
+        ExtensionRegistry reg;
+        Contribution v1 = valid_panel("legacy.v1-panel");
+        v1.contract_version = 1;
+        const RegistrationResult r = reg.register_contribution(v1);
+        CHECK(!r.ok);
+        CHECK(r.error_code == kErrUnsupportedContractVersion);
+        CHECK(reg.size() == 0);
     }
 
     // --- the roster is non-empty, duplicate-free, and REGISTERS under deny-by-default -------------
@@ -83,8 +103,12 @@ int main()
 
     // --- the roster is a stable, shared instance (built once, same order every call) --------------
     {
-        CHECK(&builtin_contributions() == &builtin_contributions());
-        CHECK(builtin_contributions().front().id == "placeholder");
+        // Consumers walk this by reference (a11y registered_panels(), the CEF host) and the coverage
+        // ctest pins its ORDER, so assert real endpoints rather than that a reference equals itself.
+        const std::vector<Contribution>& roster = builtin_contributions();
+        CHECK(!roster.empty());
+        CHECK(roster.front().id == "placeholder");
+        CHECK(roster.back().id == "builtin.session.undo"); // the A-F2 promotion sits at the tail
     }
 
     // --- manifest v2 accepts a fully-populated iframe contribution --------------------------------
@@ -194,6 +218,56 @@ int main()
         CHECK(capability_supported(kCapabilitySessionControl));
         CHECK(capability_supported(kCapabilityBuildInstall));
         CHECK(capability_supported(kCapabilityUiEvents));
+    }
+
+    // --- deny: a bridge grant the manifest never declared (ambient privilege, R-SEC-007) -----------
+    // `capabilities` is what a contribution ASKS for; `sandbox.granted_scopes` is what it HOLDS on the
+    // bridge. A grant wider than the declaration fails OPEN — a reviewer reading the manifest would
+    // never see it — so the registry refuses it for every non-baseline scope.
+    {
+        struct GrantCase
+        {
+            context::editor::bridge::Scope scope;
+            const char* token;
+        };
+        const GrantCase cases[] = {
+            {context::editor::bridge::Scope::file_write, kCapabilityFileWrite},
+            {context::editor::bridge::Scope::session_control, kCapabilitySessionControl},
+            {context::editor::bridge::Scope::build_install, kCapabilityBuildInstall},
+        };
+
+        for (const GrantCase& tc : cases)
+        {
+            ExtensionRegistry reg;
+            Contribution c = valid_panel("bad.undeclared-grant");
+            c.sandbox.granted_scopes.grant(tc.scope); // granted on the bridge, absent from the manifest
+            const RegistrationResult r = reg.register_contribution(c);
+            CHECK(!r.ok);
+            CHECK(r.error_code == kErrInvalidManifest);
+            CHECK(reg.size() == 0); // registry unchanged on refusal
+
+            // Declaring the capability it is granted makes the SAME contribution legal.
+            c.capabilities = {kCapabilityReadQuery, tc.token};
+            CHECK(reg.register_contribution(c).ok);
+        }
+    }
+
+    // --- allow: a declaration WIDER than the grant (asking is not holding) -------------------------
+    {
+        ExtensionRegistry reg;
+        // Declares file_write + build_install but is granted neither: legal, and the shape every
+        // built-in in the roster actually ships (the operator extends the grant, the manifest asks).
+        Contribution asks_more = valid_panel("ext.asks-more");
+        asks_more.capabilities = {kCapabilityReadQuery, kCapabilityFileWrite,
+                                  kCapabilityBuildInstall};
+        CHECK(reg.register_contribution(asks_more).ok);
+
+        // read_query is the always-held R-SEC-007 baseline, so declaring NOTHING is still legal —
+        // the rule must not turn an empty capability list into a refusal.
+        Contribution silent = valid_panel("ext.declares-nothing");
+        CHECK(silent.capabilities.empty());
+        CHECK(silent.sandbox.granted_scopes.has(context::editor::bridge::Scope::read_query));
+        CHECK(reg.register_contribution(silent).ok);
     }
 
     // --- refusal precedence: the two ORIGINAL invariants still report first ------------------------

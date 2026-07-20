@@ -5,6 +5,7 @@
 #include "context/editor/gui/contract/extension.h"
 #include "context/editor/gui/contract/sandbox.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -14,6 +15,45 @@ namespace context::editor::gui::contract
 
 namespace
 {
+
+// The manifest capability token that authorizes a bridge scope, or nullptr for the always-held
+// R-SEC-007 baseline: read_query needs no declaration (ScopeSet::has reports it unconditionally), so
+// demanding one would refuse every contribution that declares no capabilities at all.
+//
+// A switch with NO default clause on purpose. The grant-vs-declaration check below is only as complete
+// as this mapping, so a new bridge::Scope enumerator must break THIS build (-Wswitch under -Werror /
+// MSVC C4062) rather than sail through as a scope no manifest is ever required to declare — a check
+// that silently fails open is worse than no check. Same grep-stable token-table idiom as
+// contribution_kind_token / dock_zone_token in extension.cpp.
+const char* manifest_capability_for(bridge::Scope scope)
+{
+    switch (scope)
+    {
+    case bridge::Scope::read_query:
+        return nullptr;
+    case bridge::Scope::file_write:
+        return kCapabilityFileWrite;
+    case bridge::Scope::session_control:
+        return kCapabilitySessionControl;
+    case bridge::Scope::build_install:
+        return kCapabilityBuildInstall;
+    }
+    return nullptr;
+}
+
+// Every scope the grant check walks, paired with the switch above: extending the vocabulary breaks
+// that switch, and the compiler error lands directly beside this list.
+constexpr bridge::Scope kGrantableScopes[] = {
+    bridge::Scope::read_query,
+    bridge::Scope::file_write,
+    bridge::Scope::session_control,
+    bridge::Scope::build_install,
+};
+
+bool declares_capability(const Contribution& c, const char* token)
+{
+    return std::find(c.capabilities.begin(), c.capabilities.end(), token) != c.capabilities.end();
+}
 
 // The manifest-v2 structural invariants (04 §3). Returns the reason a manifest is invalid, or an
 // empty string when it is well-formed. Deny-by-default: a manifest that cannot be rendered coherently
@@ -55,6 +95,27 @@ std::string manifest_defect(const Contribution& c)
             {
                 return "manifest command id \"" + c.commands[i].id + "\" is declared twice";
             }
+        }
+    }
+    // The manifest `capabilities` list is what a contribution ASKS for; `sandbox.granted_scopes` is
+    // what it actually HOLDS on the bridge (shim.cpp attaches the session with exactly that set). A
+    // grant the manifest never declared is precisely the AMBIENT privilege R-SEC-007 forbids — and it
+    // fails OPEN, since a reviewer reading the manifest would never see it. Refuse the mismatch here,
+    // at the one registration choke point, so the declaration is an upper bound on the grant rather
+    // than decoration. (Direction matters: declaring MORE than is granted stays legal — that is a
+    // contribution asking for a capability the operator has not yet extended.)
+    for (const bridge::Scope scope : kGrantableScopes)
+    {
+        const char* token = manifest_capability_for(scope);
+        if (token == nullptr)
+        {
+            continue; // the read/query baseline is held by every contribution, declared or not
+        }
+        if (c.sandbox.granted_scopes.has(scope) && !declares_capability(c, token))
+        {
+            return "the sandbox grants \"" + std::string(token) +
+                   "\" but the manifest capabilities do not declare it (a grant may never exceed the "
+                   "declared manifest)";
         }
     }
     return {};

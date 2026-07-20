@@ -32,6 +32,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -41,15 +42,42 @@ using namespace context::editor::gui;
 namespace
 {
 
-// Extract the `"id": "<value>"` field from every non-comment, non-blank line of the JSON-Lines
-// coverage manifest. Minimal parser (one flat JSON object per line) — enough to cross-check the
-// DECLARED panel set against the harness registry without pulling a JSON dependency into a11y.
-[[nodiscard]] std::set<std::string> manifest_ids(const std::string& path)
+// Extract the value of a flat `"<key>": "<value>"` field from one already-trimmed manifest line, or
+// an empty string when the line does not carry it. Minimal parser (one flat JSON object per line) —
+// enough to cross-check the manifest against the harness registry and the roster without pulling a
+// JSON dependency into a11y.
+[[nodiscard]] std::string line_field(const std::string& line, const std::string& key)
 {
-    std::set<std::string> ids;
+    const std::string quoted = "\"" + key + "\"";
+    const std::size_t kpos = line.find(quoted);
+    if (kpos == std::string::npos)
+    {
+        return {};
+    }
+    const std::size_t colon = line.find(':', kpos + quoted.size());
+    if (colon == std::string::npos)
+    {
+        return {};
+    }
+    const std::size_t open = line.find('"', colon);
+    if (open == std::string::npos)
+    {
+        return {};
+    }
+    const std::size_t close = line.find('"', open + 1);
+    if (close == std::string::npos)
+    {
+        return {};
+    }
+    return line.substr(open + 1, close - open - 1);
+}
+
+// id -> title for every non-comment, non-blank line of the JSON-Lines coverage manifest.
+[[nodiscard]] std::map<std::string, std::string> manifest_entries(const std::string& path)
+{
+    std::map<std::string, std::string> entries;
     std::ifstream f(path, std::ios::binary);
     std::string line;
-    const std::string key = "\"id\"";
     while (std::getline(f, line))
     {
         std::string trimmed = line;
@@ -58,27 +86,22 @@ namespace
         {
             continue;
         }
-        const std::size_t kpos = trimmed.find(key);
-        if (kpos == std::string::npos)
+        const std::string id = line_field(trimmed, "id");
+        if (id.empty())
         {
             continue;
         }
-        const std::size_t colon = trimmed.find(':', kpos + key.size());
-        if (colon == std::string::npos)
-        {
-            continue;
-        }
-        const std::size_t open = trimmed.find('"', colon);
-        if (open == std::string::npos)
-        {
-            continue;
-        }
-        const std::size_t close = trimmed.find('"', open + 1);
-        if (close == std::string::npos)
-        {
-            continue;
-        }
-        ids.insert(trimmed.substr(open + 1, close - open - 1));
+        entries.emplace(id, line_field(trimmed, "title"));
+    }
+    return entries;
+}
+
+[[nodiscard]] std::set<std::string> manifest_ids(const std::string& path)
+{
+    std::set<std::string> ids;
+    for (const std::pair<const std::string, std::string>& entry : manifest_entries(path))
+    {
+        ids.insert(entry.first);
     }
     return ids;
 }
@@ -195,6 +218,36 @@ int main()
 
     // --- and therefore all four anchors are the one set ------------------------------------------
     CHECK(roster_ids == declared);
+
+    // --- the manifest's TITLE column tracks the roster -------------------------------------------
+    // The anchors agree on IDs by construction, but `title` is hand-typed in each of them and nothing
+    // compared the copies — so a panel rename left the a11y report and the manifest disagreeing with
+    // no gate saying so (M9 e05b hit exactly this and had to hand-sync it). The roster is the source
+    // of truth; this ctest already holds both sides, so assert them here rather than adding an anchor.
+    {
+        const std::map<std::string, std::string> entries =
+            manifest_entries(CONTEXT_GUI_A11Y_MANIFEST);
+        bool titles_agree = true;
+        for (const contract::Contribution& c : contract::builtin_contributions())
+        {
+            const std::map<std::string, std::string>::const_iterator it = entries.find(c.id);
+            if (it == entries.end())
+            {
+                continue; // a missing line is already reported as an id mismatch above
+            }
+            if (it->second != c.title)
+            {
+                titles_agree = false;
+                std::fprintf(stderr,
+                             "gui-a11y-coverage: panel %s is titled \"%s\" on the built-in roster "
+                             "(gui/contract/src/builtin_roster.cpp) but \"%s\" in "
+                             "coverage.manifest.jsonl — the roster is the source of truth, update "
+                             "the manifest (and the panel's own build_panel() title) to match\n",
+                             c.id.c_str(), c.title.c_str(), it->second.c_str());
+            }
+        }
+        CHECK(titles_agree);
+    }
 
     A11Y_TEST_MAIN_END();
 }

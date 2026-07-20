@@ -50,9 +50,10 @@ target_link_options(context_gui_a11y_test_harness PRIVATE ${_context_gui_a11y_st
 target_include_directories(context_gui_a11y_test_harness PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME gui-a11y-test_harness COMMAND context_gui_a11y_test_harness)
 
-# The standing coverage-contract guard (gui-a11y-coverage ctest): registered_panels() and
-# coverage.manifest.jsonl must name the SAME panel set, so a panel added to one without the other
-# fails the CEF-free default 3-OS build matrix in its own PR (not just the CEF-gated a11y_scan.py leg).
+# The standing coverage-contract guard (gui-a11y-coverage ctest): the built-in roster,
+# registered_panels(), the scanned panels, and coverage.manifest.jsonl must all name the SAME panel
+# set (and the roster's ORDER), so a panel added to one anchor without the others fails the CEF-free
+# default 3-OS build matrix in its own PR (not just the CEF-gated a11y_scan.py leg).
 # It reads the manifest via std::ifstream, so static-link the GCC runtime like the harness above.
 # context_gui_contract is linked EXPLICITLY here (not just transitively): context_gui_a11y links it
 # PRIVATE, so on a static library CMake propagates the link but NOT the include directories — and this

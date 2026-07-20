@@ -8,6 +8,7 @@
 #include "contract_test.h"
 
 #include <cstdint>
+#include <limits>
 #include <string>
 
 using namespace context::editor::gui::contract;
@@ -101,14 +102,33 @@ int main()
 
         // a non-integral / negative / out-of-range schemaVersion is REFUSED, never truncated into a
         // version that happens to match (a truncating cast is how a corrupt blob would sneak past).
-        for (const double bad : {1.5, -1.0, -0.0001, 4294967296.0, 1e300})
+        //
+        // NaN and ±inf are in the corpus deliberately: EVERY relational operator is false for NaN, so
+        // a range guard spelled `raw < 0.0 || raw > max` short-circuits to neither branch and falls
+        // through to the int64 cast — undefined behavior ([conv.fpint]/1) that the UBSan leg traps as
+        // float-cast-overflow. These cases pin the negated in-range form that rejects NaN BEFORE the
+        // cast, keeping restore_panel_state total over every double a Json can carry.
+        for (const double bad : {1.5, -1.0, -0.0001, 4294967296.0, 1e300,
+                                 std::numeric_limits<double>::quiet_NaN(),
+                                 std::numeric_limits<double>::infinity(),
+                                 -std::numeric_limits<double>::infinity()})
         {
             Json blob = Json::object();
             blob.set(kStateSchemaVersionKey, Json(bad));
             const StateRestore r = restore_panel_state(1, blob);
             CHECK(!r.ok);
             CHECK(r.code == kErrStateMalformed);
+            CHECK(!r.state.has_value());
         }
+    }
+
+    // --- the on-disk member names are a WIRE contract, pinned to their literal bytes ---------------
+    {
+        // Every other assertion in this file reaches the blob THROUGH these constants, so renaming a
+        // constant's value would keep the whole suite green while silently breaking the cross-language
+        // agreement with the TS side (e05d). Pin the bytes themselves.
+        CHECK(std::string(kStateSchemaVersionKey) == "schemaVersion");
+        CHECK(std::string(kStateDataKey) == "data");
     }
 
     // --- version 0 parses cleanly but can never match a panel (the registry refuses a 0 declaration)

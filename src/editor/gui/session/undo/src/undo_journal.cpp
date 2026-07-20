@@ -431,18 +431,18 @@ uitree::Panel UndoJournal::build_panel() const
     using uitree::Role;
     using uitree::UiNode;
 
-    uitree::Panel panel("session.undo", "Session history");
+    uitree::Panel panel("session.undo", "Session History");
 
     UiNode root(Role::region, "session.undo.panel");
-    root.set_label("Session history");
+    root.set_label("Session History");
     root.add_child(UiNode(Role::heading, "session.undo.heading")
-                       .set_label("Session history")
-                       .set_text("Session history"));
+                       .set_label("Session History")
+                       .set_text("Session History"));
 
     std::ostringstream status;
     status << undo_.size() << " undoable, " << redo_.size() << " redoable";
     root.add_child(UiNode(Role::status, "session.undo.status")
-                       .set_label("Session history status")
+                       .set_label("Session History status")
                        .set_text(status.str()));
 
     // Expose a command ONLY when it is reachable (the action is available), so a widget always backs

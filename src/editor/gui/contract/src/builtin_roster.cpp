@@ -1,12 +1,15 @@
 // The built-in editor-UI roster (see builtin_roster.h) — the single source of truth for the panels
 // the editor ships, as panel-manifest-v2 Contributions.
 //
-// ADDING A BUILT-IN PANEL is now a three-anchor edit, all mechanically cross-checked by the standing
-// gui-a11y-coverage ctest:
+// ADDING A BUILT-IN PANEL is a FOUR-anchor edit, mechanically cross-checked by two standing ctests:
 //   1. append its Contribution HERE (the roster / listing order),
 //   2. bind its headless factory in gui/a11y/registry.cpp + link its library into context_gui_a11y,
-//   3. append its line to gui/a11y/coverage.manifest.jsonl.
-// Miss any one and that ctest fails on the default 3-OS build matrix, naming the anchor you missed.
+//   3. append its line to gui/a11y/coverage.manifest.jsonl,
+//   4. append its PanelHelp entry to help::panel_topics() (gui/help/src/help_model.cpp).
+// Anchors 1-3 are guarded by gui-a11y-coverage; anchor 4 by gui-help-contextual (and the
+// m85-exit-4c-contextual-help milestone gate) — a DIFFERENT ctest, which is why a roster addition that
+// skips the help topic passes the a11y guard and still reds the build. Both fail on the default 3-OS
+// build matrix AND the local dev gate, each naming the anchor you missed.
 
 #include "context/editor/gui/contract/builtin_roster.h"
 
@@ -78,8 +81,8 @@ std::vector<Contribution> build_roster()
                                    48, Caps{kCapabilityReadQuery, kCapabilitySessionControl}));
 
     // M5-F4 — the Problems observer panel (gui/panels/problems/).
-    roster.push_back(builtin_panel("builtin.problems", "Problems", "warning", DockZone::bottom, true,
-                                   320, 120, Caps{kCapabilityReadQuery}));
+    roster.push_back(builtin_panel("builtin.problems", "Problems", "warning", DockZone::bottom,
+                                   true, 320, 120, Caps{kCapabilityReadQuery}));
 
     // M8.5 a18 — the tilemap-painter authoring panel (gui/panels/tilemap/, R-2D-003).
     roster.push_back(builtin_panel("builtin.tilemap-painter", "Tilemap Painter", "brush",
