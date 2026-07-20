@@ -719,6 +719,21 @@ add_subdirectory(editor/pkg)
 # so context_js exists for the integration test's link.
 add_subdirectory(runtime/ts)
 
+# M9 e05a: the editor-core npm workspace + its build-time toolchain (src/editor/webui/, design 04
+# section 1 / 05 section 3). The repo's FIRST build-time BUNDLING target: the pinned esbuild bundles
+# `@context-engine/editor-core` into a static asset, the pinned tsgo typechecks it (a type error is a
+# BUILD failure), and the SHA-pinned dockview-core distribution is fetched + verified fail-closed and
+# staged beside the bundle. No Node at runtime; no npm install anywhere.
+#
+# ⚠ ORDERING IS LOAD-BEARING — this MUST follow add_subdirectory(runtime/ts), which stages the
+# pinned esbuild + tsgo and publishes their paths as CONTEXT_ESBUILD_BIN / CONTEXT_TSGO_BIN, and
+# add_subdirectory(editor/client) (far above), which publishes CONTEXT_CLIENT_SCHEMA_GENERATED — the
+# codegen input for the generated JS client typings. src/editor/ is otherwise configured LONG before
+# src/runtime/ts, so this deliberately does NOT live in the editor cluster; webui's CMakeLists
+# FATAL_ERRORs with the reason if any of the three is empty. OWN stanza — apart from the editor
+# cluster + the exit-gate block below — so it never collides at the file tail.
+add_subdirectory(editor/webui)
+
 # M6 X1: the L-47 profiler substrate (src/runtime/profile/, R-SIM-008 / R-OBS-002) — the FIRST
 # profiler channel in-tree: the GC-pause channel that makes JS-tier GC pauses observable and
 # attributable against the R-LANG-012 frame budget (fed from the JsEngine GC pull seam; the

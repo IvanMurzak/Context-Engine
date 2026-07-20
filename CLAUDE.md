@@ -73,12 +73,13 @@ Tests are ctest registrations, named in families the CI steps select by prefix r
 `src/render/present/`), `render-wgpu-*`, `shader-*`, `wasm-runner-*`,
 `cef-substrate-*`, `editor-cef-smoke-*`, `client-*` (the M9 client SDK, `src/editor/client/`),
 `editor-shell-*` (the M9 e04 native Shell, `src/editor/shell/`),
+`webui-*` (the M9 e05a editor-core web workspace, `src/editor/webui/`),
 `game-smoke-*`, `determinism-*`, `samples-corpus*`, and the
 milestone exit gates `m1-exit-*`, `m2-exit-*`, `m4-exit-*`, `m5-exit-*`, `m6-exit-*`, `m7-exit-*`,
 `m8-exit-*` (the M8 build-pipeline gate; -3/-4a/-4b are ALIASES of the a07 runtime-host / netsync
 packed-wedge executables, the m6-exit-3 alias precedent). The `ui-*`,
-`render-ui-*`, `render-present-*`, `editor-shell-*`, and `client-*` families are plain package test
-families (not gates) — NOT in the
+`render-ui-*`, `render-present-*`, `editor-shell-*`, `client-*`, and `webui-*` families are plain
+package test families (not gates) — NOT in the
 general step's `-E` gate-exclusion regex, so they auto-run there, and the `build` job builds them via
 `--preset dev` (no `--target`/CI edits needed). Note `^cli-` does NOT match `client-`.
 
@@ -178,7 +179,7 @@ every gate; CI validates it against the live workflows on every run, so gate cha
 | `src/` | Engine source + **all build/lint files** (`CMakeLists.txt`, `CMakePresets.json`, `vcpkg.json`, `.clang-format`, `.clang-tidy`) |
 | `src/kernel/` | The microkernel — ~6 stable interfaces (World/ECS, scheduler, module registry, event bus, resources, platform seam) |
 | `src/common/` | Shared cross-cutting infra (hardened subprocess/temp-file runner) |
-| `src/editor/` | **EditorKernel** — serializer, filesync, derivation, schema, compose, merge, migrate, assetdb, import, contract, bridge, **client** (the installed/exported client SDK), **shell** (the M9 native Shell — `context_editor`), pkg, GUI (CEF host + headless panels) |
+| `src/editor/` | **EditorKernel** — serializer, filesync, derivation, schema, compose, merge, migrate, assetdb, import, contract, bridge, **client** (the installed/exported client SDK), **shell** (the M9 native Shell — `context_editor`), **webui** (the M9 editor-core web workspace — build-time esbuild bundle, no Node at runtime), pkg, GUI (CEF host + headless panels) |
 | `src/runtime/` | **RuntimeKernel** — session/determinism hashing, save, V8 JS host, TS toolchain, WASM migration runner, profiler, netsync |
 | `src/render/` | Tiered RHI (WebGPU T1) + extract/double-buffer + the M9 present path (`present/`: surface/swapchain seam, OSR import, composite, CPU fallback) + opt-in wgpu-native and Emscripten web backends |
 | `src/packages/` | First-party feature packages: spatial, simmath, physics3d/2d, particles, animation, spline, audio, input |

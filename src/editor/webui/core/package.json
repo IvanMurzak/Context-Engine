@@ -1,0 +1,15 @@
+{
+    "name": "@context-engine/editor-core",
+    "version": "0.0.1",
+    "private": true,
+    "description": "The M9 editor-core web app (design 04 section 1). Bundled at BUILD time by the SHA-pinned esbuild into a static asset the Shell serves over the context-editor:// scheme; there is no Node at runtime and no npm install in CI. Dependencies are acquired ONLY through the pinned, SHA-verified, fail-closed fetch channels under tools/ (see ../README.md) — this manifest declares them so the deny-by-default license gate (tools/check_licenses.py) sees them, it is NOT an install manifest.",
+    "type": "module",
+    "main": "src/index.ts",
+    "license": "LicenseRef-Context-Engine-EULA",
+    "dependencies": {
+        "dockview-core": "7.0.2"
+    },
+    "scripts": {
+        "$comment": "There is deliberately no build/test script: the build is driven by CMake (../CMakeLists.txt) through the pinned esbuild + tsgo binaries, never by npm."
+    }
+}
