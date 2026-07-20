@@ -27,7 +27,8 @@ set(_context_gui_uitree_static_runtime
 set(_context_gui_uitree_tests
     test_node
     test_panel
-    test_a11y)
+    test_a11y
+    test_escaping)
 
 foreach(_t IN LISTS _context_gui_uitree_tests)
     add_executable(context_gui_uitree_${_t} tests/${_t}.cpp)

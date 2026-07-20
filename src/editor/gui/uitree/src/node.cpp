@@ -99,14 +99,47 @@ const char* role_html_tag(Role role)
 namespace
 {
 
-// Escape the five HTML-significant characters so a label/text value cannot break out of its
-// attribute or element. Deterministic — the rendered HTML is byte-assertable.
-std::string escape(const std::string& in)
+void render_into(const UiNode& node, std::ostringstream& out)
+{
+    const char* tag = role_html_tag(node.role());
+    // EVERY interpolation below is escaped — see the C-F6 escaping contract in node.h. `tag` and the
+    // role token are the only unescaped insertions, and both come from a CLOSED enum table above (not
+    // from project data), which is why they need none.
+    out << '<' << tag << " id=\"" << escape_html_text(node.id()) << "\" role=\""
+        << role_token(node.role()) << '"';
+    if (!node.label().empty())
+    {
+        out << " aria-label=\"" << escape_html_text(node.label()) << '"';
+    }
+    if (node.focusable())
+    {
+        out << " tabindex=\"0\"";
+    }
+    if (!node.command().empty())
+    {
+        out << " data-command=\"" << escape_html_text(node.command()) << '"';
+    }
+    out << '>';
+    if (!node.text().empty())
+    {
+        out << escape_html_text(node.text());
+    }
+    for (const UiNode& child : node.children())
+    {
+        render_into(child, out);
+    }
+    out << "</" << tag << '>';
+}
+
+} // namespace
+
+std::string escape_html_text(const std::string& text)
 {
     std::string out;
-    out.reserve(in.size());
-    for (char c : in)
+    out.reserve(text.size());
+    for (const char raw : text)
     {
+        const unsigned char c = static_cast<unsigned char>(raw);
         switch (c)
         {
         case '&':
@@ -125,43 +158,21 @@ std::string escape(const std::string& in)
             out += "&#39;";
             break;
         default:
-            out += c;
+            // A C0 control other than tab/LF/CR (and a bare DEL) has no HTML text representation; a
+            // conforming parser substitutes U+FFFD, so do it here to keep the output deterministic.
+            if ((c < 0x20 && c != '\t' && c != '\n' && c != '\r') || c == 0x7F)
+            {
+                out += "\xEF\xBF\xBD"; // U+FFFD REPLACEMENT CHARACTER, UTF-8
+            }
+            else
+            {
+                out += raw; // byte-preserving: UTF-8 sequences pass through untouched
+            }
             break;
         }
     }
     return out;
 }
-
-void render_into(const UiNode& node, std::ostringstream& out)
-{
-    const char* tag = role_html_tag(node.role());
-    out << '<' << tag << " id=\"" << escape(node.id()) << "\" role=\"" << role_token(node.role())
-        << '"';
-    if (!node.label().empty())
-    {
-        out << " aria-label=\"" << escape(node.label()) << '"';
-    }
-    if (node.focusable())
-    {
-        out << " tabindex=\"0\"";
-    }
-    if (!node.command().empty())
-    {
-        out << " data-command=\"" << escape(node.command()) << '"';
-    }
-    out << '>';
-    if (!node.text().empty())
-    {
-        out << escape(node.text());
-    }
-    for (const UiNode& child : node.children())
-    {
-        render_into(child, out);
-    }
-    out << "</" << tag << '>';
-}
-
-} // namespace
 
 std::string render_html(const UiNode& node)
 {

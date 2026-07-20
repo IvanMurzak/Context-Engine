@@ -1,7 +1,15 @@
-// The built-in editor-panel registry (see registry.h). Append-only: a new M5 panel adds one entry
-// here and one line to coverage.manifest.jsonl.
+// The built-in editor-panel registry the a11y harness scans (see registry.h).
+//
+// M9 e05b: registered_panels() is REGENERATED from the single built-in roster
+// (gui/contract/builtin_roster.h) rather than hand-maintained. This file now owns exactly ONE thing —
+// the binding from a roster id to the headless FACTORY that instantiates that panel — because a
+// factory needs the panel's C++ type, which the data-only roster deliberately does not link. Roster
+// order is the scan order.
 
 #include "context/editor/gui/a11y/registry.h"
+
+#include "context/editor/gui/contract/builtin_roster.h"
+#include "context/editor/gui/contract/extension.h"
 
 #include "context/editor/gui/help/help_panel.h"
 #include "context/editor/gui/panels/inspector/inspector_panel.h"
@@ -10,105 +18,115 @@
 #include "context/editor/gui/panels/tilemap/tilemap_paint_panel.h"
 #include "context/editor/gui/playbar/playbar_model.h"
 #include "context/editor/gui/playbar/playbar_panel.h"
+#include "context/editor/gui/session/undo/undo_journal.h"
 #include "context/editor/gui/uitree/builtin.h"
 #include "context/editor/gui/uitree/panel.h"
 #include "context/editor/gui/viewport/viewport_edit_panel.h"
 #include "context/editor/gui/viewport/viewport_panel.h"
 
+#include <string>
+#include <utility>
+#include <vector>
+
 namespace context::editor::gui::a11y
 {
 
-std::vector<RegisteredPanel> registered_panels()
+namespace
 {
-    std::vector<RegisteredPanel> panels;
+
+namespace guic = context::editor::gui::contract;
+namespace undo = context::editor::gui::session::undo;
+
+// One roster id bound to the headless factory that builds its DEFAULT (empty-state) panel — the state
+// the harness scans, exactly as each panel's own gui-*-test_a11y ctest covers its populated states.
+//
+// Every id here is taken from the panel class's OWN kContributionId constant (never a re-typed
+// literal), so a rename cannot drift this table from the panel; and the gui-a11y-coverage ctest
+// asserts this table matches the roster in both directions, so it cannot drift from the roster
+// either. ONE exception: "placeholder" is a bare literal, because uitree/builtin.h exposes no id
+// constant for it — renaming that id means grepping the literal (here, the roster, the coverage
+// manifest, and help_model.cpp) rather than following a constant.
+std::vector<std::pair<std::string, PanelFactory>> panel_factories()
+{
+    std::vector<std::pair<std::string, PanelFactory>> factories;
 
     // M5-F0b — the built-in placeholder panel the CEF editor host boots (gui/uitree/builtin.h).
-    panels.push_back(RegisteredPanel{"placeholder", &uitree::make_placeholder_panel});
+    factories.emplace_back("placeholder", &uitree::make_placeholder_panel);
 
-    // --- M5 fan-out panels append their RegisteredPanel BELOW (one entry each). Keep in lockstep
-    //     with coverage.manifest.jsonl — tools/a11y_scan.py cross-checks the two on every PR. ---
+    // M5-F2 — the scene-tree observer panel (gui/panels/scenetree/).
+    factories.emplace_back(panels::scenetree::SceneTreePanel::kContributionId,
+                           []() { return panels::scenetree::SceneTreePanel{}.build_panel(); });
 
-    // M5-F2 — the scene-tree observer panel (gui/panels/scenetree/). The harness scans its default
-    // (empty-world) rendered state, exactly as it scans the placeholder's default; the panel's own
-    // gui-panel-scenetree-test_a11y ctest additionally covers its populated / deep / overridden
-    // worlds. Registered here per issue #154's Coordination clause ("if F2 lands its panel first,
-    // this harness must scan it") now that M5-F2 (#156) has landed on main.
-    panels.push_back(RegisteredPanel{
-        panels::scenetree::SceneTreePanel::kContributionId,
-        []() { return panels::scenetree::SceneTreePanel{}.build_panel(); }});
+    // M5-F3 — the inspector panel (gui/panels/inspector/).
+    factories.emplace_back(panels::inspector::InspectorPanel::kContributionId,
+                           []() { return panels::inspector::InspectorPanel{}.build_panel(); });
 
-    // M5-F3 — the inspector panel (gui/panels/inspector/). The harness scans its default
-    // (no-selection) rendered state, exactly as it scans the placeholder / scene-tree defaults; the
-    // panel's own gui-panel-inspector-test_a11y ctest additionally covers its populated / overridden /
-    // all-readonly worlds. Registered per issue #160's Coordination clause + the M5-F6 harness contract
-    // (coverage.manifest.jsonl carries the matching builtin.inspector line).
-    panels.push_back(RegisteredPanel{
-        panels::inspector::InspectorPanel::kContributionId,
-        []() { return panels::inspector::InspectorPanel{}.build_panel(); }});
+    // M5-F1 — the native viewport observer panel (gui/viewport/).
+    factories.emplace_back(viewport::ViewportPanel::kContributionId,
+                           []() { return viewport::ViewportPanel{}.build_panel(); });
 
-    // M5-F1 — the native viewport observer panel (gui/viewport/). The harness scans its default
-    // (presentable, empty-scene) rendered state, exactly as it scans the placeholder / scene-tree /
-    // inspector defaults; the panel's own gui-viewport-test_a11y ctest additionally covers its
-    // adapter-absent / surface-unavailable / render-failed / populated states. Registered per issue
-    // #164 + the M5-F6 harness contract (coverage.manifest.jsonl carries the matching builtin.viewport
-    // line). Read-only observer — no new authoring surface (R-HUX-006 in-viewport editing is M8.5).
-    panels.push_back(RegisteredPanel{
-        viewport::ViewportPanel::kContributionId,
-        []() { return viewport::ViewportPanel{}.build_panel(); }});
+    // M5-F5 — the play-in-editor playbar panel (gui/playbar/).
+    factories.emplace_back(playbar::PlaybarModel::kContributionId,
+                           []() { return playbar::build_playbar_panel(playbar::PlaybarModel{}); });
 
-    // M5-F5 — the play-in-editor playbar panel (gui/playbar/). The harness scans its default (edit-mode,
-    // no live session) rendered state, exactly as it scans the placeholder / scene-tree / inspector /
-    // viewport defaults; the panel's own gui-playbar-test_a11y ctest additionally covers its playing /
-    // paused / error states. Registered per issue #166 + the M5-F6 harness contract (coverage.manifest.
-    // jsonl carries the matching builtin.playbar line). Completes the M5 observer fan-out (F1-F7).
-    panels.push_back(RegisteredPanel{
-        playbar::PlaybarModel::kContributionId,
-        []() { return playbar::build_playbar_panel(playbar::PlaybarModel{}); }});
+    // M5-F4 — the Problems observer panel (gui/panels/problems/).
+    factories.emplace_back(panels::problems::ProblemsPanel::kContributionId,
+                           []() { return panels::problems::ProblemsPanel{}.build_panel(); });
 
-    // M5-F4 — the Problems observer panel (gui/panels/problems/). The harness scans its default (empty
-    // diagnostic set) rendered state, exactly as it scans the other panels' defaults; the panel's own
-    // gui-panel-problems-test_a11y ctest additionally covers its navigable / provisional / grouped
-    // states. Registered by the M5 EXIT gate (issue #168): M5-F4 (#159) landed the panel but left it
-    // uncovered (it landed before the F6 harness), so the exit gate completed the coverage manifest by
-    // registering it HERE + adding the matching builtin.problems line to coverage.manifest.jsonl (the
-    // gui-a11y-coverage guard + tools/a11y_scan.py cross-check the two). The old defensive per-panel
-    // coverage/*.json fragments were removed once the monolithic manifest superseded them (issue #206).
-    panels.push_back(RegisteredPanel{
-        panels::problems::ProblemsPanel::kContributionId,
-        []() { return panels::problems::ProblemsPanel{}.build_panel(); }});
+    // M8.5 a18 — the tilemap-painter authoring panel (gui/panels/tilemap/).
+    factories.emplace_back(panels::tilemap::TilemapPaintPanel::kContributionId,
+                           []() { return panels::tilemap::TilemapPaintPanel{}.build_panel(); });
 
-    // M8.5 a18 — the tilemap-painter authoring panel (gui/panels/tilemap/, R-2D-003 GUI half). The
-    // harness scans its default (no-document) rendered state, exactly as it scans the other panels'
-    // defaults; the panel's own gui-panel-tilemap-test_a11y ctest additionally covers its loaded /
-    // per-tool / mid-gesture / keyboard-authoring states. Registered per the register-with-the-panel
-    // rule (coverage.manifest.jsonl carries the matching builtin.tilemap-painter line). First
-    // AUTHORING panel: its gesture-end commit runs the shared editor/tilemap write path (L-20).
-    panels.push_back(RegisteredPanel{
-        panels::tilemap::TilemapPaintPanel::kContributionId,
-        []() { return panels::tilemap::TilemapPaintPanel{}.build_panel(); }});
+    // M8.5 a19 — the in-context viewport override-editing panel (gui/viewport/).
+    factories.emplace_back(viewport::ViewportEditPanel::kContributionId,
+                           []() { return viewport::ViewportEditPanel{}.build_panel(); });
 
-    // M8.5 a19 — the in-context viewport override-editing panel (gui/viewport/, R-HUX-006 MUST core).
-    // The harness scans its default (no-selection) rendered state, exactly as it scans the other
-    // panels' defaults; the panel's own gui-viewport-test_viewport_edit_panel ctest additionally covers
-    // its selected / per-gizmo / per-target / provenance states. Registered per the register-with-the-
-    // panel rule (coverage.manifest.jsonl carries the matching builtin.viewport-edit line). The second
-    // AUTHORING surface (after the a18 tilemap painter): its gesture-end commit runs the SAME L-35
-    // composed override write path `context set` runs, routed through the ONE L-30 engine (L-20/L-30).
-    panels.push_back(RegisteredPanel{
-        viewport::ViewportEditPanel::kContributionId,
-        []() { return viewport::ViewportEditPanel{}.build_panel(); }});
+    // M8.5 a20 — the in-editor contextual Help panel (gui/help/).
+    factories.emplace_back(help::HelpPanel::kContributionId,
+                           []() { return help::HelpPanel{}.build_panel(); });
 
-    // M8.5 a20 — the in-editor contextual Help / getting-started panel (gui/help/, R-HUX-010). The
-    // harness scans its default (shipped registry + corpus) rendered state, exactly as it scans the
-    // other panels' defaults; the panel's own gui-help-test_a11y ctest additionally covers its
-    // keyboard-nav focus order, and gui-help-contextual asserts help documents EVERY registered panel.
-    // Registered per the register-with-the-panel rule (coverage.manifest.jsonl carries the matching
-    // builtin.help line). Read-only, offline: its help is a pure projection of the ONE contract
-    // registry (never parallel docs) + the R-QA-006 human-onboarding samples.
-    panels.push_back(RegisteredPanel{
-        help::HelpPanel::kContributionId,
-        []() { return help::HelpPanel{}.build_panel(); }});
+    // M5-F7 — the Ctrl+Z/Y session history surface (gui/session/undo/). ADDED BY M9 e05b (A-F2): the
+    // journal shipped an a11y-clean headless panel in M5 but was absent from both the host registry
+    // and this scan list, so its keyboard surface was never gated. Its DEFAULT (empty journal) state
+    // exposes no command and no focusable node — a11y-clean, and accepted by tools/a11y_scan.py, which
+    // only requires a focus order when a panel exposes commands.
+    factories.emplace_back(undo::UndoJournal::kContributionId,
+                           []() { return undo::UndoJournal{}.build_panel(); });
 
+    return factories;
+}
+
+} // namespace
+
+std::vector<std::string> panel_factory_ids()
+{
+    std::vector<std::string> ids;
+    for (const std::pair<std::string, PanelFactory>& f : panel_factories())
+    {
+        ids.push_back(f.first);
+    }
+    return ids;
+}
+
+std::vector<RegisteredPanel> registered_panels()
+{
+    const std::vector<std::pair<std::string, PanelFactory>> factories = panel_factories();
+
+    // Derived from the ROSTER, in roster order — this list cannot name a panel the roster does not
+    // declare. The reverse direction (a roster entry with no factory here) would silently drop out of
+    // the scan, so the gui-a11y-coverage ctest asserts it separately via panel_factory_ids().
+    std::vector<RegisteredPanel> panels;
+    for (const guic::Contribution& contribution : guic::builtin_contributions())
+    {
+        for (const std::pair<std::string, PanelFactory>& factory : factories)
+        {
+            if (factory.first == contribution.id)
+            {
+                panels.push_back(RegisteredPanel{contribution.id, factory.second});
+                break;
+            }
+        }
+    }
     return panels;
 }
 

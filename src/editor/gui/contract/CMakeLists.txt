@@ -9,6 +9,8 @@ add_library(context_gui_contract STATIC
     src/sandbox.cpp
     src/extension.cpp
     src/registry.cpp
+    src/builtin_roster.cpp
+    src/panel_state.cpp
     src/shim.cpp)
 
 target_include_directories(context_gui_contract PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -32,6 +34,8 @@ set(_context_gui_contract_static_runtime
 set(_context_gui_contract_tests
     test_sandbox
     test_registry
+    test_roster
+    test_panel_state
     test_shim)
 
 foreach(_t IN LISTS _context_gui_contract_tests)

@@ -88,4 +88,14 @@ struct A11yViolation
 // host loads this to paint the placeholder panel; headless callers assert it directly.
 [[nodiscard]] std::string render_html(const Panel& panel);
 
+// Compose the FULL HTML document a host loads for `panel`: the escaped panel title, the sandbox CSP
+// as a <meta http-equiv> header, and the panel body from render_html above.
+//
+// This exists so no host hand-concatenates a document around render_html's output: `title` and `csp`
+// are interpolated into HTML exactly like any other value, so both go through the C-F6
+// escape_html_text contract (node.h). A CSP string is not authored project data today, but it IS
+// per-contribution manifest data, and a document-composition site that escapes its body while
+// concatenating its head raw is precisely the gap the contract exists to close.
+[[nodiscard]] std::string render_document(const Panel& panel, const std::string& csp);
+
 } // namespace context::editor::gui::uitree

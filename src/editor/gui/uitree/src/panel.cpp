@@ -133,4 +133,14 @@ std::string render_html(const Panel& panel)
     return render_html(panel.root());
 }
 
+std::string render_document(const Panel& panel, const std::string& csp)
+{
+    // Every interpolated value is escaped (C-F6, node.h) — the CSP and the title included. Only the
+    // literal document scaffolding below is unescaped.
+    return "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+           "<meta http-equiv=\"Content-Security-Policy\" content=\"" +
+           escape_html_text(csp) + "\"><title>" + escape_html_text(panel.title()) +
+           "</title></head><body>" + render_html(panel) + "</body></html>";
+}
+
 } // namespace context::editor::gui::uitree

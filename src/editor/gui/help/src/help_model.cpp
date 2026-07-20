@@ -186,6 +186,9 @@ std::vector<PanelHelp> panel_topics()
         {"builtin.help", "Help",
          "This panel: getting-started pointers and per-panel help generated from the live contract.",
          {"context describe"}},
+        {"builtin.session.undo", "Session History",
+         "Session undo/redo (Ctrl+Z / Ctrl+Y) over this session's edits; durable history is git.",
+         {"context set"}},
     };
 }
 

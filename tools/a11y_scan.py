@@ -211,7 +211,10 @@ def main(argv: list[str] | None = None) -> int:
     cov = verdict["coverage"]
     if cov["missing"]:
         print(f"[a11y-scan] FAIL: panels declared in the manifest but not scanned: {cov['missing']} "
-              f"(register them in src/editor/gui/a11y/registry.cpp)", file=sys.stderr)
+              f"(append the Contribution to src/editor/gui/contract/src/builtin_roster.cpp AND bind "
+              f"a factory in panel_factories(), src/editor/gui/a11y/registry.cpp — since M9 e05b "
+              f"registered_panels() is DERIVED from the roster, so a factory alone is dropped)",
+              file=sys.stderr)
     if cov["undeclared"]:
         print(f"[a11y-scan] FAIL: panels scanned but not declared in the manifest: "
               f"{cov['undeclared']} (add them to coverage.manifest.jsonl)", file=sys.stderr)

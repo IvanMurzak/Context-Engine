@@ -29,22 +29,26 @@ OS on the default matrix, and is fully deterministic — strictly better than dr
 inside a booted CEF renderer for the observer-grade M5 surface. The task's "prefer the headless
 `context_gui_uitree` where possible" is taken to its conclusion: everything runs headless.
 
-## Coverage contract (two append-only shared anchors)
+## Coverage contract (three append-only shared anchors)
 
-A panel is **covered** only when it appears in **both**:
+A panel is **covered** only when it appears in **all three**:
 
-1. **`registered_panels()`** in `registry.cpp` — maps the panel id to a headless factory so the
-   harness can instantiate + audit it.
-2. **`coverage.manifest.jsonl`** — one JSON object per line declaring the panel must be scanned.
+1. **The built-in roster** — its `Contribution` in `gui/contract/src/builtin_roster.cpp`. Since
+   M9 e05b this is the single source of truth for *which panels exist*.
+2. **`panel_factories()`** in `registry.cpp` — binds the roster id to a headless factory so the
+   harness can instantiate + audit it. **`registered_panels()` is DERIVED** from the roster ∩ this
+   table and is not hand-edited: it can never name a panel the roster does not declare.
+3. **`coverage.manifest.jsonl`** — one JSON object per line declaring the panel must be scanned.
 
-Two guards fail CI if the two anchors disagree (a panel registered but undeclared, or declared but
-not registered/scanned):
+Two guards fail CI if the anchors disagree (a panel factory-bound but not rostered, rostered but
+unbound, or declared but not scanned):
 
-- **`gui-a11y-coverage`** — the STANDING C++ contract guard (`tests/test_coverage.cpp`). Reads
-  `coverage.manifest.jsonl` and `registered_panels()` and asserts they name the SAME set. Because it
-  is CEF-free it runs on the **default 3-OS `build` matrix** and the local dev gate, so the drift is
-  caught in the panel's OWN PR — not only on the CEF-gated `editor-cef-smoke` leg. It hardcodes no
-  panel names, so it never goes stale as panels land in later milestones.
+- **`gui-a11y-coverage`** — the STANDING C++ contract guard (`tests/test_coverage.cpp`). Asserts
+  roster == factories == scanned == `coverage.manifest.jsonl` in **both** directions, plus the
+  roster's ORDER. Because it is CEF-free it runs on the **default 3-OS `build` matrix** and the local
+  dev gate, so the drift is caught in the panel's OWN PR — not only on the CEF-gated
+  `editor-cef-smoke` leg. It hardcodes no panel names, so it never goes stale as panels land in later
+  milestones.
 - **`tools/a11y_scan.py`** — the CEF-side DOM re-scan gate; it additionally cross-checks the manifest
   against the *scanned* panels (blocking on the `editor-cef-smoke` Linux leg).
 
@@ -58,9 +62,18 @@ a11y registration is part of a panel's OWN landing wave, NOT a trailing harness 
 process fix for the M5-F4 gap, where the Problems panel landed before the harness and shipped
 uncovered. In the SAME PR that lands a panel:
 
-1. Append one `RegisteredPanel{"<id>", &<factory>}` line to `registered_panels()` in `registry.cpp`.
-2. Append one `{"id": "<id>", "title": "...", "owner": "<task>", "requires": ["semantic-scan", "keyboard-nav"]}`
+1. Append its `Contribution` to the built-in roster (`gui/contract/src/builtin_roster.cpp`) — the
+   manifest-v2 entry (id, title, icon, dock defaults, `state.schema_version` >= 1, capabilities).
+   **Do this first**: a factory with no roster entry is dropped by the derivation and fails the
+   coverage ctest.
+2. Append one `factories.emplace_back(<Panel>::kContributionId, <factory>)` line to
+   `panel_factories()` in `registry.cpp` (take the id from the panel class's own `kContributionId`
+   constant, never a re-typed literal), and link the panel's library into `context_gui_a11y`
+   (a11y `CMakeLists.txt`).
+3. Append one `{"id": "<id>", "title": "...", "owner": "<task>", "requires": ["semantic-scan", "keyboard-nav"]}`
    line to `coverage.manifest.jsonl`.
-3. Link the panel's library into `context_gui_a11y` (a11y `CMakeLists.txt`).
-4. Ship the panel's own tests in the same PR (R-QA-013). The `gui-a11y-scan` + `gui-a11y-coverage`
+4. Append its `PanelHelp` entry to `help::panel_topics()` (`gui/help/src/help_model.cpp`) — guarded
+   by a DIFFERENT ctest (`gui-help-contextual`), so skipping it passes the a11y guard and still reds
+   the build.
+5. Ship the panel's own tests in the same PR (R-QA-013). The `gui-a11y-scan` + `gui-a11y-coverage`
    ctests + the CI gate then enforce a11y on the new panel automatically — no CI-workflow edit needed.
