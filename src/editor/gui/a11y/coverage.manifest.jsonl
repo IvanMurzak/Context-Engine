@@ -14,3 +14,4 @@
 {"id": "builtin.tilemap-painter", "title": "Tilemap Painter", "owner": "M8.5-a18", "requires": ["semantic-scan", "keyboard-nav"]}
 {"id": "builtin.viewport-edit", "title": "Viewport Edit", "owner": "M8.5-a19", "requires": ["semantic-scan", "keyboard-nav"]}
 {"id": "builtin.help", "title": "Help", "owner": "M8.5-a20", "requires": ["semantic-scan", "keyboard-nav"]}
+{"id": "builtin.session.undo", "title": "Session History", "owner": "M9-e05b", "requires": ["semantic-scan", "keyboard-nav"]}

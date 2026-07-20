@@ -23,6 +23,10 @@ namespace context::editor::gui::contract
 inline constexpr const char* kErrDuplicateContribution = "gui.duplicate_contribution";
 inline constexpr const char* kErrUnsupportedContractVersion = "gui.unsupported_contract_version";
 inline constexpr const char* kErrSandboxNonconformant = "gui.sandbox_nonconformant";
+// M9 e05b (manifest v2): the v2 members carry their own deny-by-default invariants — a structurally
+// invalid manifest, or a capability outside the closed vocabulary (extension.h).
+inline constexpr const char* kErrInvalidManifest = "gui.invalid_manifest";
+inline constexpr const char* kErrUnknownCapability = "gui.unknown_capability";
 
 struct RegistrationResult
 {
@@ -42,7 +46,10 @@ class ExtensionRegistry
 public:
     // Register a contribution. Refuses (returns a failure result, leaving the registry unchanged) an
     // out-of-window contract_version (kErrUnsupportedContractVersion), a non-conformant sandbox
-    // policy (kErrSandboxNonconformant), or a duplicate id (kErrDuplicateContribution).
+    // policy (kErrSandboxNonconformant), a structurally invalid manifest (kErrInvalidManifest), an
+    // unknown capability token (kErrUnknownCapability), or a duplicate id
+    // (kErrDuplicateContribution). Refusal precedence is that order — the two original invariants are
+    // still reported first, so an existing caller's diagnostics are unchanged.
     RegistrationResult register_contribution(Contribution contribution);
 
     [[nodiscard]] bool contains(const std::string& id) const;

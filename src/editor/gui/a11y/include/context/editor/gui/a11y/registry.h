@@ -1,13 +1,19 @@
 // The editor-panel registry the a11y harness scans (R-A11Y-001). Maps a panel id to a headless
-// factory so the harness can instantiate + audit every built-in panel WITHOUT booting CEF. This is
-// the C++ half of the per-panel coverage contract; its DATA half is coverage.manifest.jsonl. A panel
-// is only "covered" when it appears in BOTH — tools/a11y_scan.py cross-checks the harness report
-// (driven by this registry) against the manifest, so adding a panel to one without the other fails CI.
+// factory so the harness can instantiate + audit every built-in panel WITHOUT booting CEF.
 //
-// EXTENSION POINT (M5 fan-out): a new built-in panel (scene tree / inspector / Problems / play bar /
-// viewport) appends ONE RegisteredPanel entry to registered_panels() in registry.cpp AND ONE line to
-// coverage.manifest.jsonl. Both are append-only shared anchors (union-merge — see .gitattributes) so
-// concurrent M5 waves stay conflict-free.
+// M9 e05b — THIS LIST IS NO LONGER HAND-MAINTAINED. registered_panels() is now REGENERATED from the
+// single built-in roster (gui/contract/builtin_roster.h): it walks contract::builtin_contributions()
+// in roster order and binds each id to its headless factory. The registry therefore cannot list a
+// panel the roster does not declare, and the standing gui-a11y-coverage ctest additionally asserts the
+// reverse — that every roster id HAS a factory, and that the roster, the factory table, and
+// coverage.manifest.jsonl name exactly the same set. A hand-edit to any one anchor fails that ctest on
+// the default 3-OS build matrix instead of silently shipping an uncovered panel (the #168 failure
+// mode, where Problems landed before the harness and its coverage held only vacuously).
+//
+// EXTENSION POINT: a new built-in panel is a THREE-anchor edit — its Contribution in
+// gui/contract/src/builtin_roster.cpp, its factory in registry.cpp (plus its library in this
+// directory's CMakeLists.txt), and its line in coverage.manifest.jsonl. Miss one and the ctest names
+// which.
 
 #pragma once
 
@@ -30,8 +36,15 @@ struct RegisteredPanel
     PanelFactory factory;
 };
 
-// Every built-in editor panel that must pass the R-A11Y-001 gate, in a stable order. The harness
-// scans each; the CI gate cross-checks this set against coverage.manifest.jsonl.
+// Every built-in editor panel that must pass the R-A11Y-001 gate, in ROSTER order (the order of
+// contract::builtin_contributions()). The harness scans each; the CI gate cross-checks this set
+// against coverage.manifest.jsonl. Derived, not hand-written — see the file header.
 [[nodiscard]] std::vector<RegisteredPanel> registered_panels();
+
+// The ids this translation unit can actually build a headless panel for — the FACTORY half of the
+// derivation. Exposed so the standing gui-a11y-coverage ctest can assert the roster and the factory
+// table agree in BOTH directions: a roster entry with no factory would be silently unscanned (it
+// would simply not appear in registered_panels()), and a factory with no roster entry is dead code.
+[[nodiscard]] std::vector<std::string> panel_factory_ids();
 
 } // namespace context::editor::gui::a11y

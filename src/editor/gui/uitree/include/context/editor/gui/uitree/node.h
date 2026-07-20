@@ -99,10 +99,28 @@ private:
     std::vector<UiNode> children_;
 };
 
+// --- the C-F6 escaping contract -----------------------------------------------------------------
+// THE THREAT: a uitree panel renders AUTHORED PROJECT STRINGS — entity names, the schema-blessed
+// `notes`, any string field — into the TRUSTED editor-core zone. A hostile project (an asset pack, a
+// cloned repo, an AI-generated scene) must never be able to execute script there. Escaping is the
+// CONTROL; the strict no-inline-script CSP is only the backstop (design 04 §4).
+//
+// THE CONTRACT: EVERY interpolation of a non-constant string into HTML — attribute value or element
+// text, in this file or in any caller composing a document around it — goes through escape_html_text.
+// It is exported (rather than living privately in node.cpp) precisely so document-composition sites
+// cannot hand-roll a weaker version; render_document() below is the composed-document entry point.
+//
+// It escapes the five HTML-significant characters (& < > " ') and replaces C0 control characters
+// other than tab/LF/CR with U+FFFD, since a raw control byte is not representable in HTML text and a
+// conforming parser would substitute it anyway (doing it here keeps the output deterministic and
+// byte-assertable). Output is otherwise byte-preserving, so UTF-8 passes through untouched.
+[[nodiscard]] std::string escape_html_text(const std::string& text);
+
 // Render one node (and its subtree) to semantic HTML with ARIA role + aria-label + a tabindex on
 // focusable nodes (R-A11Y-001). Headless — returns a string; the CEF host loads it to paint. The
-// output is deterministic (stable attribute order) so it is byte-assertable in a ctest. HTML text is
-// escaped so a label/text value cannot break out of its attribute/element.
+// output is deterministic (stable attribute order) so it is byte-assertable in a ctest. Every
+// interpolated value (id, label, command, text) is escaped per the contract above, so a label/text
+// value cannot break out of its attribute or element.
 [[nodiscard]] std::string render_html(const UiNode& node);
 
 } // namespace context::editor::gui::uitree

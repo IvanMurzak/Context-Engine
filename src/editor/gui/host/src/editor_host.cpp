@@ -51,6 +51,7 @@
 #endif
 
 #include "context/editor/gui/compositor/surface.h"
+#include "context/editor/gui/contract/builtin_roster.h"
 #include "context/editor/gui/contract/extension.h"
 #include "context/editor/gui/contract/registry.h"
 #include "context/editor/gui/contract/sandbox.h"
@@ -181,31 +182,41 @@ bool run_host_contract(std::string& panel_html)
         return false;
     }
 
-    guic::ExtensionRegistry registry;
-    guic::Contribution contribution;
-    contribution.id = "builtin.placeholder";
-    contribution.kind = guic::ContributionKind::panel;
-    contribution.title = panel.title();
-    // default sandbox = conformant + least privilege (read/query)
-    if (!guic::sandbox_conformant(contribution.sandbox))
+    // M9 e05b — the SINGLE GLOBAL ROSTER. This used to be a stack-local registry carrying one
+    // hand-built placeholder contribution, which could (and did) drift from the a11y scan list. The
+    // host now builds the roster from contract::builtin_contributions() — the one authoritative
+    // manifest-v2 list — so the panels the host knows about and the panels the a11y gate scans are the
+    // same set by construction. Deny-by-default is unchanged: every built-in goes through
+    // register_contribution(), so a built-in violating a contract invariant is REFUSED here.
+    bool roster_ok = false;
+    const guic::ExtensionRegistry registry = guic::make_builtin_registry(&roster_ok);
+    if (!roster_ok || registry.size() != guic::builtin_contributions().size())
+    {
+        std::fprintf(stderr, "[editor-host] built-in roster failed to register (%zu of %zu)\n",
+                     registry.size(), guic::builtin_contributions().size());
+        return false;
+    }
+    const guic::Contribution* contribution = registry.find("placeholder");
+    if (contribution == nullptr)
+    {
+        std::fprintf(stderr, "[editor-host] the placeholder panel is not on the built-in roster\n");
+        return false;
+    }
+    // The non-negotiable renderer trust boundary still holds for the panel this host renders.
+    if (!guic::sandbox_conformant(contribution->sandbox))
     {
         std::fprintf(stderr, "[editor-host] built-in sandbox policy is not conformant\n");
         return false;
     }
-    const guic::RegistrationResult reg = registry.register_contribution(contribution);
-    if (!reg.ok)
-    {
-        std::fprintf(stderr, "[editor-host] contribution registration failed: %s (%s)\n",
-                     reg.message.c_str(), reg.error_code.c_str());
-        return false;
-    }
+    std::fprintf(stderr, "[editor-host] built-in roster registered (%zu contributions)\n",
+                 registry.size());
 
     // 2. Attach the capability-scoped bridge shim at the read/query baseline and RUN ONE COMMAND.
     bridge::Dispatcher dispatcher;
     cli::ClientHandshake handshake;
     handshake.protocol_major = cli::kProtocolMajor;
     handshake.capabilities = {"describe"};
-    auto attached = guic::ExtensionBridge::attach(dispatcher, handshake, contribution.sandbox);
+    auto attached = guic::ExtensionBridge::attach(dispatcher, handshake, contribution->sandbox);
     if (!std::holds_alternative<guic::ExtensionBridge>(attached))
     {
         std::fprintf(stderr, "[editor-host] bridge attach hard-failed\n");
@@ -236,11 +247,10 @@ bool run_host_contract(std::string& panel_html)
                  mode_token(handoff.mode), static_cast<int>(handoff.external_begin_frame));
 
     // 4. Compose the render document: semantic-HTML panel body + the sandbox CSP as a <meta> header.
-    std::string body = uitree::render_html(panel);
-    panel_html = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-                 "<meta http-equiv=\"Content-Security-Policy\" content=\"" +
-                 contribution.sandbox.csp + "\"><title>Context Editor</title></head><body>" + body +
-                 "</body></html>";
+    // Composed through uitree::render_document so EVERY interpolation — the CSP and the title, not
+    // just the body — goes through the C-F6 escaping contract (this site used to concatenate the CSP
+    // raw). See node.h § the C-F6 escaping contract.
+    panel_html = uitree::render_document(panel, contribution->sandbox.csp);
     std::fprintf(stderr, "[editor-host] placeholder panel composed (%zu bytes of HTML)\n",
                  panel_html.size());
     return true;
