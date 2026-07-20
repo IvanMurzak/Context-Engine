@@ -82,6 +82,29 @@ class UitreePanelRenderer implements DockviewContentRenderer {
         return this.#suspended;
     }
 
+    /**
+     * Dockview's content-initialisation hook — and the panel-agnostic home of the FIRST hydration
+     * render.
+     *
+     * REQUIRED, not optional. Dockview-core@7 calls `content.init(params)` UNCONDITIONALLY from
+     * inside `addPanel` (the sole lifecycle method it invokes on a content renderer); a renderer
+     * without it throws `TypeError: this.content.init is not a function` SYNCHRONOUSLY, which aborts
+     * `PanelHost.start()` right after `panel.list` and before any `panel.render` — the editor then
+     * comes up docked-but-empty with no build error and no console throw the boot path surfaces. No
+     * local test can catch it: there is no TS/DOM test tier, and the C++ suites drive the Shell-side
+     * host, never this renderer against real Dockview — only the live CEF smoke does.
+     *
+     * Kicking the first `refresh()` HERE (rather than from a separate pass in `start`) makes the
+     * render fire exactly when Dockview has materialised the panel's DOM slot, so it is correct
+     * whether Dockview creates a panel eagerly or only when it becomes visible, and it needs no panel
+     * id — the property e05d3 depends on. Fire-and-forget on purpose: a slow render must not delay
+     * the arrangement appearing (the layout is up, the content fills in). `params` is unused — the
+     * manifest is looked up from the roster, never taken from Dockview.
+     */
+    init(): void {
+        void this.#runtime.refresh();
+    }
+
     /** Dockview's visibility hooks, mapped onto the SUSPEND half of the panel lifecycle. */
     onShow(): void {
         this.#suspended = false;
@@ -207,11 +230,11 @@ export class PanelHost {
                 mounted += 1;
             }
         }
-        // Mount and first render are separate passes so a slow panel cannot delay the arrangement
-        // appearing — the layout is up, then the content fills in.
-        await Promise.all(
-            Array.from(this.#panels.values()).map((panel) => panel.renderer.runtime.refresh()),
-        );
+        // The FIRST render is driven per panel by `UitreePanelRenderer.init` — Dockview's own
+        // lifecycle hook, fired as each `addPanel` above materialises the panel. Mount and
+        // first-render therefore stay separate passes (a slow render never delays the arrangement)
+        // without this method reaching into the panel set Dockview populates, and without depending
+        // on `createComponent` having run synchronously. See `UitreePanelRenderer.init`.
         return { started: true, mounted, unavailable, error: "" };
     }
 

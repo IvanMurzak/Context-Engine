@@ -45,7 +45,16 @@ export interface DockviewTheme {
  */
 export interface DockviewContentRenderer {
     readonly element: HTMLElement;
-    init?(params: DockviewPanelInitParameters): void;
+    /**
+     * REQUIRED, not optional. Dockview-core@7 calls `content.init(params)` UNCONDITIONALLY inside
+     * `addPanel` (verified against the pinned 7.0.2 bundle — it is the ONLY lifecycle method Dockview
+     * invokes on a content renderer; `layout`/`update`/`focus`/`dispose` are not). A renderer that
+     * omits it throws `TypeError: this.content.init is not a function` synchronously, aborting
+     * `PanelHost.start()` after `panel.list` but before any `panel.render`. Declaring it optional
+     * here is what let that ship: the type gate accepted a renderer with no `init`, and no local test
+     * exercises this against real Dockview. Keep it required so the compiler refuses the regression.
+     */
+    init(params: DockviewPanelInitParameters): void;
     onShow?(): void;
     onHide?(): void;
     dispose?(): void;
