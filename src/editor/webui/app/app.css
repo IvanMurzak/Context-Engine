@@ -1,8 +1,12 @@
 /*
  * editor-core's base stylesheet (M9 e05c).
  *
- * A SEPARATE FILE rather than a <style> block, because the response carries `style-src 'self'` with
- * no `unsafe-inline` — an inline block would be blocked by the browser. It is also the second asset
+ * A SEPARATE FILE rather than a <style> block, kept so as defense-in-depth. The response's
+ * `style-src 'self' 'unsafe-inline'` DOES admit inline CSS — it must, because the vendored
+ * dockview-core engine injects a <style> element and writes CSSOM inline styles at runtime, and this
+ * pinned CEF/Chromium build enforces `style-src` for both — but editor-core's OWN authored documents
+ * stay inline-style-free anyway, which the `webui-scheme-contract` gate enforces mechanically so the
+ * relaxation's blast radius stays the vendored engine. This file is also the second asset
  * the live smoke pulls over the scheme, which is what proves the resource handler serves more than
  * one path and gets the media type right (a `text/css` served as anything else is ignored, and the
  * smoke's per-pixel background assertion would fail).
@@ -37,4 +41,103 @@ body {
 #editor-root {
     width: 100%;
     height: 100%;
+    /* Dockview measures its container, so the docking root needs a definite box to lay out in. */
+    position: relative;
+}
+
+/* --- the docking surface (M9 e05d1) ---------------------------------------------------------- *
+ *
+ * `dockview.css` (the pinned, SHA-verified stylesheet staged beside this file) ships the docking
+ * engine's structure and its built-in themes. What follows re-points the ONE thing a theme must not
+ * decide for us — the surface colour — at the editor's own background.
+ *
+ * THIS IS ALSO WHAT KEEPS `editor-cef-smoke-shell`'s PIXEL ASSERTION MEANINGFUL. That smoke proves
+ * the app scheme served the STYLESHEET with a usable media type by finding `--editor-bg` in the
+ * composited surface. Before e05d1 the window was empty, so every sampled texel was that colour;
+ * now a real docking UI is mounted on top of it. Letting Dockview's theme paint its own greys would
+ * have made the editor's background invisible in the composite and turned a live, load-bearing
+ * assertion into a mystery failure. Inheriting instead is both the honest visual answer — the app's
+ * background IS the editor's background until e06's token/theme engine lands — and the thing that
+ * keeps the colour genuinely present in the frame.
+ *
+ * e06 replaces this block with the real token kit; it is deliberately the minimum until then. */
+.dockview-theme-dark {
+    --dv-group-view-background-color: var(--editor-bg);
+    --dv-tabs-and-actions-container-background-color: var(--editor-bg);
+    --dv-activegroup-visiblepanel-tab-background-color: var(--editor-bg);
+    --dv-inactivegroup-visiblepanel-tab-background-color: var(--editor-bg);
+    --dv-background-color: var(--editor-bg);
+    --dv-paneview-active-outline-color: var(--editor-fg);
+}
+
+/* The DOM slot the hydration runtime mounts a panel's uitree into (one per open panel). */
+.ctx-panel-body {
+    height: 100%;
+    overflow: auto;
+    padding: 8px;
+    box-sizing: border-box;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+/* --- widget classes, keyed by node ROLE (04 §4 step 4) ---------------------------------------- *
+ *
+ * PRESENTATION ONLY. The hydration runtime adds these from the node's `role` (see WIDGET_CLASSES in
+ * core/src/hydration.ts); the VALUE semantics stay in the C++ model and the write path. They are
+ * keyed by role rather than by anything panel-derived, which is what keeps a new panel from needing
+ * a new rule here. Kept minimal on purpose — the real component kit is e06's. */
+.ctx-widget-region,
+.ctx-widget-group {
+    display: block;
+}
+
+.ctx-widget-heading {
+    margin: 0 0 6px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.ctx-widget-status {
+    display: block;
+    margin-bottom: 8px;
+    opacity: 0.75;
+}
+
+.ctx-widget-list,
+.ctx-widget-tree {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ctx-widget-listitem,
+.ctx-widget-treeitem {
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: default;
+}
+
+/* A visible focus ring is not decoration — it is the R-A11Y-001 keyboard-navigation requirement made
+ * legible. `:focus-visible` so it appears for keyboard users without ringing every mouse click. */
+.ctx-widget-listitem:focus-visible,
+.ctx-widget-treeitem:focus-visible,
+.ctx-widget-button:focus-visible {
+    outline: 2px solid var(--editor-fg);
+    outline-offset: -2px;
+}
+
+.ctx-widget-listitem:hover,
+.ctx-widget-treeitem:hover {
+    background: rgba(230, 237, 245, 0.08);
+}
+
+.ctx-widget-button {
+    font: inherit;
+    color: inherit;
+    background: rgba(230, 237, 245, 0.1);
+    border: 1px solid rgba(230, 237, 245, 0.25);
+    border-radius: 3px;
+    padding: 2px 8px;
+    cursor: pointer;
 }

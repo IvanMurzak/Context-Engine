@@ -212,7 +212,58 @@ message instead of an `attach.denied` that reads like a wrong password. A failed
 not fatal — the editor opens read-only, because a shell that would not start without a daemon could
 not be used to diagnose why the daemon would not start.
 
-## 7. Test map
+### The panel libraries and the boundary (M9 e05d1)
+
+Design 04 §4 (D17) makes the **C++ panel models the logic + a11y authority** and has the Shell render
+them over the bridge, so hosting panels means reaching the headless GUI libraries. That is compatible
+with D10, but only because of where the links sit — and the split is load-bearing rather than tidy:
+
+| Target | Links | Why |
+|---|---|---|
+| `context_editor_shell` | `context_gui_uitree`, `context_gui_contract` | The panel-agnostic host: it renders *a* uitree panel and reads the roster. Both closures are D10-clean. |
+| `context_editor_panels` | the above + `context_gui_panel_problems` | The composition root — the only target that links a PANEL library. Reached only by the executables. |
+
+Two of today's panels (`context_gui_panel_scenetree`, `context_gui_panel_inspector`) link
+`context_compose`, which the gate FORBIDS. Keeping panel libraries off `context_editor_shell`'s
+closure is therefore what lets the panel layer exist at all without weakening the gate — and it is
+the seam **e05d3** plugs into when it splits those kernel-typed builders out. The gate's FORBIDDEN
+list is unchanged by e05d1 and still passes non-vacuously (all nine forbidden targets PRESENT in the
+build, both audited closures CLEAN).
+
+⚠ An earlier version of this section, and of `src/editor/shell/CMakeLists.txt`'s header, said the
+Shell links "nothing from ... gui". That was never what the gate checked and is no longer what the
+Shell does; the gate is the authority on this boundary.
+
+## 7. Panels — the host, the providers, and the live feed (M9 e05d1)
+
+`PanelHost` (`src/editor/shell/src/panel_host.cpp`) publishes six methods on the privileged bridge —
+`panel.list`, `panel.render`, `panel.command`, `panel.gesture`, `panel.state.get/set` — over the e05b
+roster. It is **panel-agnostic by construction**: no panel id appears in it, and the ability to render
+one comes from a `PanelProvider` (a bundle of `std::function`s) bound at the composition root. Adding
+a panel is a roster entry plus one provider binding, with no change to the host or to the TS hydration
+runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the host has never heard of.
+
+- **The roster is authoritative; the provider table is capability.** Every rostered panel is LISTED;
+  one with no provider reports `hosted: false`. That is how the editor shows its whole panel set while
+  Scene tree and Inspector are still boundary-blocked, and why `panel.unknown` and `panel.not_hosted`
+  are different refusals.
+- **Hostable today**: `placeholder` (from `context_gui_uitree`) and `builtin.problems`. Two rather than
+  one deliberately — a single panel would leave panel-agnosticism resting on a claim.
+- **The live read path**: the Shell subscribes to the daemon's `diagnostics` + `derivation` topics
+  through the SDK's `SubscriptionConsumer` and projects what arrives onto the `ProblemsPanel` model
+  (`src/editor/shell/panels/src/problems_feed.cpp`). The projection is pure and unit-tested on all
+  three build legs; only the wiring needs a daemon.
+- **Single-threaded, deliberately.** The subscription is pumped from the owner loop with
+  `poll_timeout_ms = 0` and a short reconnect ladder, NOT from a background thread. The feed mutates
+  the panel models and the bridge handlers that render them run on this same thread, so a background
+  pump would be a data race on every model, requiring a lock around the whole host. The cost of the
+  choice is a bounded (~1 s) stall on a daemon restart; revisit it when panels get heavier.
+- **D6 state** is round-tripped through `contract::persist_panel_state` / `restore_panel_state`, with
+  the schema version read from the MANIFEST, not the provider. A version mismatch is not an error: the
+  panel keeps its defaults and the caller gets a diagnostic — the degrade e05d2's layout restore needs
+  so one stale blob cannot discard a whole layout.
+
+## 8. Test map
 
 | Test | Covers |
 |---|---|
@@ -222,16 +273,22 @@ not be used to diagnose why the daemon would not start.
 | `editor-shell-test_window` | The pure Win32 decoder — signed LPARAM halves, the minimize carve-out, button mapping, MK_*/modifier split, the signed wheel delta and its deliberate absence of a position, key/char/sys-key, `WM_DPICHANGED`'s low word — plus the headless backend and the never-silent platform selection |
 | `editor-shell-test_compositor` | The extrapolated layer UV (incl. the full-window identity vs e03), the premultiplied blend + clipping, damage-driven skip, LAYER ORDER and the popup's scissor rect, a hidden popup dropping its layer, the resize protocol, Outdated/Lost keeping the damage, Suboptimal presenting first, a refused surface, both present paths, a malformed producer frame |
 | `editor-shell-test_shell` | The attach guard, the owner loop end to end (DIP browser sizing, input round-trip, viewport vs browser, focus dropping a live drag, idle skip, popup), placement persistence + restore, window drop, shutdown flush |
-| `editor-shell-smoke-session0` | **The blocking CI requirement**: the whole shell loop over software-OSR frames with the composited present asserted PER-PIXEL — see § 8 |
+| `editor-shell-smoke-session0` | **The blocking CI requirement**: the whole shell loop over software-OSR frames with the composited present asserted PER-PIXEL — see § 9 |
 | `editor-shell-boundary` | The D10 link-closure audit actually ran and covered a real forbidden target |
+| `editor-shell-test_panel_host` | The panel-agnostic surface over SYNTHETIC panels: roster projection (hosted vs listed-but-unhosted), render payload, command dispatch + the stale-command refusal, the four gesture verbs and the refusal of a fifth, the D6 round-trip and all three degrade paths, every `panel.*` binding, and hostile params on every method |
+| `editor-shell-test_problems_feed` | The LIVE `diagnostics` projection without a daemon: severity/stability tokens, all three snapshot shapes, every publisher shape the topic carries, hostile/degenerate payloads, R-BRIDGE-008 promotion + settle, and the node-id -> diagnostic-identity mapping |
+| `editor-shell-test_builtin_panels` | The composition root: what binds, that Scene tree + Inspector stay listed-but-unhosted until e05d3, and a daemon event reaching a rendered panel end to end |
 | `editor-cef-smoke-shell` | The LIVE CEF half: a real windowless browser through the real integrated pump, its `OnPaint` frames composited + presented, input round-tripped, a live resize repainted (`editor-cef-smoke` job, Windows/Linux) |
 
 All `editor-shell-*` tests are a plain (non-gate) family: the `build` job's general ctest step runs
 them on all three OS legs and `--preset dev` builds them, so **no `ci.yml` `--target` bookkeeping**.
+That covers `context_editor_panels`' tests too — they register in the same family, and the library
+itself is built transitively by the jobs that build `context_editor` / the CEF smoke, so e05d1 needed
+**no `ci.yml` change at all**.
 `editor-cef-smoke-shell` is the exception and IS on the `editor-cef-smoke` job's hand-maintained
 `--target` list — the "Not Run = RED" tripwire.
 
-## 8. Why the blocking smoke opens no window
+## 9. Why the blocking smoke opens no window
 
 The Windows CI legs run on a self-hosted runner installed as a LocalSystem service — Session 0. There
 is no interactive desktop, and native GPU windowed teardown crashes there; the repo has a standing
@@ -246,7 +303,7 @@ headless/offscreen shell". The composited output is asserted per-pixel, INSIDE a
 rect — asserting both is what distinguishes a real second layer from a popup that was dropped (view
 everywhere) or drawn full-window (popup everywhere).
 
-## 9. Deferred verification — the interactive Windows pass
+## 10. Deferred verification — the interactive Windows pass
 
 The task's DoD line *"full windowed pass verified on the interactive Windows box and recorded"* is
 **advisory and manual at this stage**: per the design's gate table the interactive-session Windows
@@ -295,7 +352,7 @@ cmake --build --preset dev --target context_editor    # from src/
 Automating this is **e12's** (with the mac/Linux backends) plus the interactive-runner provisioning
 the design's gate table tracks.
 
-## 10. What this does NOT yet do
+## 11. What this does NOT yet do
 
 Named so the gaps are visible rather than assumed:
 
@@ -328,4 +385,4 @@ Named so the gaps are visible rather than assumed:
   through the fake RHI, which records the rect rather than applying it; `render-wgpu-osr-composite`
   is e03's full-window composite gate and never scissors. The PET_POPUP confinement is asserted as
   "the compositor passed this rect", not per-pixel against a GPU.
-- **The interactive windowed pass is manual** — § 9.
+- **The interactive windowed pass is manual** — § 10.

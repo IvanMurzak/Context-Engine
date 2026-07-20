@@ -16,6 +16,7 @@ This file is the directory map.
 | `context_editor_shell` | The Shell proper — window seam + Win32 backend, DPI, input arbitration, compositor, editor-state persistence, the owner loop. CEF-free and GPU-backend-free. | Everywhere (local dev gate + all three `build` legs) |
 | `context_editor` | The app. Boots a window, binds a browser, attaches a present path, runs the owner loop. | Everywhere |
 | `context_editor_cef` | The windowed-OSR CEF binding — the ONE piece that cannot build locally. | `CONTEXT_BUILD_GUI_CEF` only (`editor-cef-smoke` job) |
+| `context_editor_panels` (`panels/`) | The panel COMPOSITION ROOT — the only target that links a `context_gui_panel_*` library, reached by the executables and never by `context_editor_shell` (D10; see `docs/shell.md` § 6). | Everywhere |
 
 ## Files
 
@@ -29,6 +30,8 @@ This file is the directory map.
 | `include/.../browser.h`, `src/browser.cpp` | The CEF-free browser seam + the scripted host the smoke and tests drive. |
 | `include/.../compositor.h`, `src/compositor.cpp` | The layer stack, damage, the resize protocol, `PET_POPUP`, and both present paths (03 §4). |
 | `include/.../shell.h`, `src/shell.cpp` | `WindowManager` / `EditorWindow` / the owner loop, and the D10 authenticated attach. |
+| `include/.../panel_host.h`, `src/panel_host.cpp` | e05d1: the PANEL-AGNOSTIC `panel.*` bridge surface over the e05b roster — render, command, gesture verbs, the D6 state pair (04 §3-§4). Knows no panel id. |
+| `panels/` | e05d1: the composition root. Binds a `PanelProvider` per hostable panel and projects the daemon's `diagnostics` topic onto the Problems model. |
 | `app/editor_main.cpp` | `context_editor`'s entry point. |
 | `smoke/shell_smoke_main.cpp` | The **Session-0-safe** smoke — e04's blocking CI requirement. |
 | `cef/` | The windowed-OSR CEF binding + its live boot smoke. |

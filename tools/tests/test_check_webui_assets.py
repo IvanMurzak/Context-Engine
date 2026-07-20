@@ -305,7 +305,11 @@ def test_documentation_comments_do_not_trip_the_gate(tmp_path: Path) -> None:
                           '<img src="./x.png" onerror="steal()"><main id="editor-root">'),
 ])
 def test_csp_violating_document_fails(tmp_path: Path, bad_document: str) -> None:
-    """Each of these is BLOCKED by the served CSP at runtime, so it must fail at BUILD time."""
+    """Each of these must fail the gate at BUILD time. Four are BLOCKED by the served CSP at runtime
+    (inline <script> body, javascript: URL, two inline event handlers). The inline <style> element
+    and the inline `style=` attribute are NOT blocked at runtime — `style-src 'self' 'unsafe-inline'`
+    tolerates inline CSS for the vendored dockview-core engine — but the AUTHORED document is kept
+    free of both as defense-in-depth, so the gate rejects them either way."""
     assert _run_scheme(tmp_path, document=bad_document) == 1
 
 
@@ -408,3 +412,291 @@ def test_the_real_repo_sources_agree_across_languages() -> None:
     for _human, cef_file, cpp_name, ts_name in check_webui_assets.CEF_CONSTANTS:
         cpp_value = check_webui_assets._read_cpp_string_constant(cef / cef_file, cpp_name)
         assert f'{ts_name} = "{cpp_value}"' in ts, f"{ts_name} drifted from C++ {cpp_name}"
+
+
+# --- the M9 e05d1 panel-contract gate (--panel-contract) -----------------------------------------
+#
+# The panel surface is the WIDEST cross-language seam in the editor: six `panel.*` method names, two
+# D6 state member names and four gesture verbs, each existing once in C++ and once in TS, with no
+# compiler on either side checking the other. A rename unbinds the whole panel layer SILENTLY — the
+# editor comes up with no panels and NOTHING reports an error. These cases pin that the gate catches
+# each class of drift, and — just as importantly — that it fails LOUDLY (exit 2) rather than
+# degrading into a no-op when the constants it reads are renamed out from under it.
+
+PANEL_BUNDLE = (
+    'var PANEL_LIST_METHOD = "panel.list";\n'
+    'var PANEL_RENDER_METHOD = "panel.render";\n'
+    'var PANEL_COMMAND_METHOD = "panel.command";\n'
+    'var PANEL_GESTURE_METHOD = "panel.gesture";\n'
+    'var PANEL_STATE_GET_METHOD = "panel.state.get";\n'
+    'var PANEL_STATE_SET_METHOD = "panel.state.set";\n'
+    'var STATE_SCHEMA_VERSION_KEY = "schemaVersion";\n'
+    'var STATE_DATA_KEY = "data";\n'
+    'var GESTURE_VERBS = ["begin", "extend", "commit", "cancel"];\n'
+)
+
+# MIRRORS THE REAL HEADER'S SHAPE. The real `panel_host.h` declares the enum and the token
+# function; it holds NO wire-token string literals. A fixture that inlined the switch here would be
+# MORE CAPABLE THAN THE REAL SOURCE — the defect class that lets a gate pass its own tests while
+# being vacuous against the repo (a mutation of a literal the real file does not contain is a no-op).
+PANEL_CPP_HEADER = (
+    'inline constexpr const char* kPanelListMethod = "panel.list";\n'
+    'inline constexpr const char* kPanelRenderMethod = "panel.render";\n'
+    'inline constexpr const char* kPanelCommandMethod = "panel.command";\n'
+    'inline constexpr const char* kPanelGestureMethod = "panel.gesture";\n'
+    'inline constexpr const char* kPanelStateGetMethod = "panel.state.get";\n'
+    'inline constexpr const char* kPanelStateSetMethod = "panel.state.set";\n'
+    "enum class GestureVerb { begin, extend, commit, cancel };\n"
+    "const char* gesture_verb_token(GestureVerb verb);\n"
+)
+
+# The wire tokens live in the .cpp switch, which is what the gate must read.
+PANEL_CPP_SOURCE = (
+    "const char* gesture_verb_token(GestureVerb verb)\n"
+    "{\n"
+    "    switch (verb)\n"
+    "    {\n"
+    "    case GestureVerb::begin:\n"
+    '        return "begin";\n'
+    "    case GestureVerb::extend:\n"
+    '        return "extend";\n'
+    "    case GestureVerb::commit:\n"
+    '        return "commit";\n'
+    "    case GestureVerb::cancel:\n"
+    '        return "cancel";\n'
+    "    }\n"
+    '    return "cancel";\n'
+    "}\n"
+)
+
+PANEL_CPP_STATE = (
+    'inline constexpr const char* kStateSchemaVersionKey = "schemaVersion";\n'
+    'inline constexpr const char* kStateDataKey = "data";\n'
+)
+
+PANEL_DOCUMENT = (
+    "<!DOCTYPE html>\n"
+    '<html lang="en">\n'
+    '<head><meta charset="utf-8"><link rel="stylesheet" href="./app.css"></head>\n'
+    '<body><main id="editor-root"></main>\n'
+    '<script src="./dockview-core.min.js"></script>\n'
+    '<script type="module" src="./editor-core.js"></script>\n'
+    "</body>\n"
+    "</html>\n"
+)
+
+PANEL_PACKAGE = {"name": "@context-engine/editor-core", "dependencies": {"dockview-core": "7.0.2"}}
+
+
+def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str = PANEL_DOCUMENT,
+                   header: str = PANEL_CPP_HEADER, state: str = PANEL_CPP_STATE,
+                   source: str = PANEL_CPP_SOURCE, package: dict | None = None,
+                   stage_dockview: bool = True) -> tuple[Path, Path, Path, Path, Path]:
+    asset_dir = tmp_path / "app"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    (asset_dir / "editor-core.js").write_text(bundle, encoding="utf-8")
+    (asset_dir / "index.html").write_text(document, encoding="utf-8")
+    (asset_dir / "app.css").write_text(GOOD_STYLESHEET, encoding="utf-8")
+    if stage_dockview:
+        (asset_dir / "dockview-core.min.js").write_text("/* engine */\n", encoding="utf-8")
+
+    include_dir = tmp_path / "shellinclude"
+    include_dir.mkdir(parents=True, exist_ok=True)
+    (include_dir / "panel_host.h").write_text(header, encoding="utf-8")
+
+    contract_dir = tmp_path / "contractinclude"
+    contract_dir.mkdir(parents=True, exist_ok=True)
+    (contract_dir / "panel_state.h").write_text(state, encoding="utf-8")
+
+    src_dir = tmp_path / "shellsrc"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    (src_dir / "panel_host.cpp").write_text(source, encoding="utf-8")
+
+    package_json = tmp_path / "package.json"
+    package_json.write_text(
+        json.dumps(PANEL_PACKAGE if package is None else package), encoding="utf-8")
+    return asset_dir, include_dir, contract_dir, package_json, src_dir
+
+
+def _run_panel(tmp_path: Path, **kwargs) -> int:
+    asset_dir, include_dir, contract_dir, package_json, src_dir = _panel_fixture(tmp_path, **kwargs)
+    return check_webui_assets.run_panel_contract(
+        asset_dir, "editor-core.js", include_dir, contract_dir, package_json, src_dir)
+
+
+def test_panel_contract_happy_path(tmp_path: Path, capsys) -> None:
+    assert _run_panel(tmp_path) == 0
+    assert "OK" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("ts_name", [
+    "PANEL_LIST_METHOD", "PANEL_RENDER_METHOD", "PANEL_COMMAND_METHOD",
+    "PANEL_GESTURE_METHOD", "PANEL_STATE_GET_METHOD", "PANEL_STATE_SET_METHOD",
+])
+def test_panel_method_drift_fails(tmp_path: Path, ts_name: str) -> None:
+    """Every one of the six methods, not a sample: a gate that covers five is a gate with a hole."""
+    drifted = re.sub(rf'({ts_name} = ")[^"]*(")', r"\1panel.drifted\2", PANEL_BUNDLE)
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+def test_bundle_missing_a_panel_method_fails(tmp_path: Path) -> None:
+    """An ABSENT constant is drift too — the runtime simply could not be calling that method."""
+    stripped = "\n".join(
+        line for line in PANEL_BUNDLE.splitlines() if "PANEL_RENDER_METHOD" not in line)
+    assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+@pytest.mark.parametrize("ts_name", ["STATE_SCHEMA_VERSION_KEY", "STATE_DATA_KEY"])
+def test_d6_state_key_drift_fails(tmp_path: Path, ts_name: str) -> None:
+    """A drifted state key writes under one name and reads under another — every restore degrades."""
+    drifted = re.sub(rf'({ts_name} = ")[^"]*(")', r"\1drifted\2", PANEL_BUNDLE)
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+@pytest.mark.parametrize("verb", ["begin", "extend", "commit", "cancel"])
+def test_missing_gesture_verb_in_the_bundle_fails(tmp_path: Path, verb: str) -> None:
+    """The closed vocabulary, both halves: a verb the runtime cannot name is a dead contract half."""
+    stripped = PANEL_BUNDLE.replace(f'"{verb}"', '"__removed__"')
+    assert _run_panel(tmp_path, bundle=stripped) == 1
+
+
+def test_a_gesture_verb_vanishing_from_cpp_is_a_config_error(tmp_path: Path) -> None:
+    """The dangerous direction: if the C++ vocabulary moved, the gate can verify NOTHING.
+
+    Exit 2 (a config error), never a quiet pass — the same rot-into-a-no-op failure mode
+    test_renamed_cpp_constant_is_a_config_error pins for the scheme gate. Mutating the SOURCE, not
+    the header: the header carries no wire literals, so a header mutation is a no-op (which is
+    exactly the vacuity this pair of tests exists to prevent).
+    """
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, source=PANEL_CPP_SOURCE.replace('return "commit"', 'return "confirm"'))
+
+
+def test_a_cpp_token_renamed_under_a_stale_ts_array_is_caught(tmp_path: Path) -> None:
+    """THE REGRESSION THIS GATE EXISTS FOR — and the one the header-substring form could not see.
+
+    C++ renames the wire token while the bundle keeps the old one. Both sides still "contain" the
+    string somewhere, so a substring probe passes; a set comparison does not. The pinned vocabulary
+    is checked FIRST, so this surfaces as the anti-rot CheckError rather than a silent OK.
+    """
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, source=PANEL_CPP_SOURCE.replace('return "extend"', 'return "drag"'))
+
+
+def test_a_verb_missing_from_the_bundle_array_is_a_drift_failure(tmp_path: Path) -> None:
+    """The TS half: the C++ vocabulary is intact but the bundle's array lost a verb → exit 1."""
+    stripped = PANEL_BUNDLE.replace(
+        'var GESTURE_VERBS = ["begin", "extend", "commit", "cancel"];',
+        'var GESTURE_VERBS = ["begin", "extend", "commit"];')
+    assert _run_panel(tmp_path, bundle=stripped) == 1
+
+
+def test_a_bundle_with_no_gesture_array_at_all_fails(tmp_path: Path) -> None:
+    """Fail-closed: an absent array is a dead contract half, never a vacuous pass."""
+    stripped = PANEL_BUNDLE.replace(
+        'var GESTURE_VERBS = ["begin", "extend", "commit", "cancel"];', "")
+    assert _run_panel(tmp_path, bundle=stripped) == 1
+
+
+def test_missing_bundle_fails_the_panel_gate(tmp_path: Path) -> None:
+    """Fail-closed on an absent build artifact (the scheme gate's sibling assertion)."""
+    asset_dir, include_dir, contract_dir, package_json, src_dir = _panel_fixture(tmp_path)
+    (asset_dir / "editor-core.js").unlink()
+    assert check_webui_assets.run_panel_contract(
+        asset_dir, "editor-core.js", include_dir, contract_dir, package_json, src_dir) == 1
+
+
+def test_renamed_panel_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path,
+                   header=PANEL_CPP_HEADER.replace("kPanelRenderMethod", "kPanelRenderMethodOld"))
+
+
+def test_document_not_loading_the_docking_engine_fails(tmp_path: Path) -> None:
+    """PanelHost reads the engine off the UMD global that script publishes — no tag, no panels."""
+    without = PANEL_DOCUMENT.replace('<script src="./dockview-core.min.js"></script>\n', "")
+    assert _run_panel(tmp_path, document=without) == 1
+
+
+def test_unstaged_docking_engine_fails(tmp_path: Path) -> None:
+    """A document that references the engine while the asset set does not carry it 404s at runtime."""
+    assert _run_panel(tmp_path, stage_dockview=False) == 1
+
+
+@pytest.mark.parametrize("dependencies", [
+    # A version bump past the owner-ratified pin.
+    {"dockview-core": "7.1.0"},
+    # An ADDITIONAL dockview package — exactly what the s1 finding retired.
+    {"dockview-core": "7.0.2", "dockview": "7.0.2"},
+    # An unrelated dependency smuggled in.
+    {"dockview-core": "7.0.2", "left-pad": "1.3.0"},
+    # The dependency dropped entirely.
+    {},
+])
+def test_dependency_drift_from_the_s1_approved_set_fails(tmp_path: Path, dependencies: dict) -> None:
+    """08 section 3: a bump or an addition re-triggers the standing owner-consent gate."""
+    package = dict(PANEL_PACKAGE)
+    package["dependencies"] = dependencies
+    assert _run_panel(tmp_path, package=package) == 1
+
+
+def test_main_routes_the_panel_contract_flag(tmp_path: Path) -> None:
+    asset_dir, include_dir, contract_dir, package_json, src_dir = _panel_fixture(tmp_path)
+    assert check_webui_assets.main([
+        "--asset-dir", str(asset_dir), "--bundle-name", "editor-core.js",
+        "--panel-contract",
+        "--shell-include-dir", str(include_dir),
+        "--contract-include-dir", str(contract_dir),
+        "--package-json", str(package_json),
+        "--shell-src-dir", str(src_dir),
+    ]) == 0
+
+
+def test_missing_asset_dir_is_a_panel_config_error(tmp_path: Path) -> None:
+    _, include_dir, contract_dir, package_json, src_dir = _panel_fixture(tmp_path)
+    with pytest.raises(check_webui_assets.CheckError):
+        check_webui_assets.run_panel_contract(
+            tmp_path / "nope", "editor-core.js", include_dir, contract_dir, package_json, src_dir)
+
+
+def test_the_real_repo_panel_sources_agree_across_languages() -> None:
+    """Cross-check the COMMITTED panel sources, independent of any build (the scheme test's sibling).
+
+    Catches a drift introduced without building — which is the common case during a refine pass.
+    """
+    shell_include = (REPO_ROOT / "src" / "editor" / "shell" / "include" / "context" / "editor" /
+                     "shell")
+    contract_include = (REPO_ROOT / "src" / "editor" / "gui" / "contract" / "include" / "context" /
+                        "editor" / "gui" / "contract")
+    ts = (REPO_ROOT / "src" / "editor" / "webui" / "core" / "src" / "panels.ts").read_text(
+        encoding="utf-8")
+    for _human, cpp_file, cpp_name, ts_name in check_webui_assets.PANEL_CONSTANTS:
+        cpp_value = check_webui_assets._read_cpp_string_constant(shell_include / cpp_file, cpp_name)
+        assert f'{ts_name} = "{cpp_value}"' in ts, f"{ts_name} drifted from C++ {cpp_name}"
+    for _human, cpp_name, ts_name in check_webui_assets.PANEL_STATE_CONSTANTS:
+        cpp_value = check_webui_assets._read_cpp_string_constant(
+            contract_include / "panel_state.h", cpp_name)
+        assert f'{ts_name} = "{cpp_value}"' in ts, f"{ts_name} drifted from C++ {cpp_name}"
+    # The gesture vocabulary, read from BOTH real sources as SETS — the C++ wire tokens out of the
+    # actual switch, the TS array out of the actual module. Asserting only `verb in ts` (the old
+    # form) could not catch a .cpp token rename at all, because it never opened the .cpp.
+    shell_src = REPO_ROOT / "src" / "editor" / "shell" / "src"
+    cpp_verbs = check_webui_assets._read_cpp_gesture_verbs(shell_src / "panel_host.cpp")
+    assert set(cpp_verbs) == set(check_webui_assets.GESTURE_VERBS), (
+        f"the real C++ gesture vocabulary {sorted(cpp_verbs)} drifted from the pinned "
+        f"{sorted(check_webui_assets.GESTURE_VERBS)}")
+    ts_verbs = check_webui_assets._read_ts_string_array_from_bundle(ts, "GESTURE_VERBS")
+    assert ts_verbs is not None, "panels.ts declares no GESTURE_VERBS array"
+    assert set(ts_verbs) == set(cpp_verbs), (
+        f"panels.ts GESTURE_VERBS {sorted(ts_verbs)} drifted from the C++ wire tokens "
+        f"{sorted(cpp_verbs)}")
+
+
+def test_the_real_editor_core_dependencies_are_the_approved_set() -> None:
+    """The committed manifest, not a fixture: the pin is an owner ratification, not a default."""
+    package = json.loads(
+        (REPO_ROOT / "src" / "editor" / "webui" / "core" / "package.json").read_text(
+            encoding="utf-8"))
+    assert package["dependencies"] == check_webui_assets.EDITOR_CORE_DEPENDENCIES

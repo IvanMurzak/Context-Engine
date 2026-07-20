@@ -11,10 +11,20 @@
 #   dockview-core (tools/dockview-toolchain.json) — the docking engine, staged beside the bundle
 #
 # e05a stopped at the SUBSTRATE: the workspace type-checked and bundled, and the docking engine was
-# acquired + verified, but nothing consumed it and nothing SERVED it. e05c adds the served document
-# set (index.html + app.css) and publishes the asset root the Shell's context-editor:// resource
-# handler reads. Wrapping dockview in a PanelHost and the hydration runtime are still e05d's — keep
-# this directory's growth on that seam.
+# acquired + verified, but nothing consumed it and nothing SERVED it. e05c added the served document
+# set (index.html + app.css) and published the asset root the Shell's context-editor:// resource
+# handler reads. e05d1 adds the APP — PanelHost over Dockview and the hydration runtime — so the
+# docking engine is now consumed through its API.
+#
+# NOTE ON HOW DOCKVIEW REACHES THE RENDERER, because it is NOT bundled: `dockview-core.min.js` is a
+# UMD artifact staged beside the bundle and loaded by `index.html` as a plain same-origin <script>,
+# which publishes `globalThis["dockview-core"]`. Keeping it out of the esbuild bundle is deliberate —
+# the shipped bytes stay byte-identical to the artifact fetch_dockview.py SHA-verified, which is what
+# the `webui-assets` re-hash below actually checks. Bundling it would quietly make that check verify
+# a file nothing loads.
+#
+# Layout persistence + region maps are e05d2's; the live Scene tree / Inspector are e05d3's — keep
+# this directory's growth on those seams.
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
@@ -211,6 +221,27 @@ add_test(NAME webui-scheme-contract
             --scheme-contract
             --shell-include-dir "${CMAKE_CURRENT_SOURCE_DIR}/../shell/include/context/editor/shell"
             --shell-cef-dir "${CMAKE_CURRENT_SOURCE_DIR}/../shell/cef/src")
+
+# 1c) The e05d1 PANEL CONTRACT gate. The panel surface is the widest cross-language seam in the
+# editor: six `panel.*` method names, two D6 state member names and four gesture verbs, each of which
+# exists once in C++ and once in TS. A rename on either side unbinds the surface SILENTLY — the
+# editor comes up with no panels and no build error anywhere. This re-reads all twelve out of the
+# BUILT bundle and compares them to the C++ constants, and additionally asserts the two facts that
+# would make the panel layer non-functional in a way no unit test can see: that the pinned docking
+# engine is LOADED by the served document (rather than bundled, which would void `webui-assets`'
+# SHA re-hash of the shipped artifact), and that editor-core's declared dependency set is still
+# exactly the owner-ratified, version-pinned s1 set.
+add_test(NAME webui-panel-contract
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_webui_assets.py"
+            --asset-dir "${_ctx_webui_assets}"
+            --manifest "${_ctx_dockview_manifest}"
+            --bundle-name "${_ctx_webui_bundle_name}"
+            --panel-contract
+            --shell-include-dir "${CMAKE_CURRENT_SOURCE_DIR}/../shell/include/context/editor/shell"
+            --contract-include-dir
+                "${CMAKE_CURRENT_SOURCE_DIR}/../gui/contract/include/context/editor/gui/contract"
+            --package-json "${_ctx_webui_core}/package.json"
+            --shell-src-dir "${CMAKE_CURRENT_SOURCE_DIR}/../shell/src")
 
 # 2) The DRIFT gate (e05a DoD: "generated from e02's schema; drift-checked in CI"). Re-projects the
 # BUILD-GENERATED schema — the live registry's output, not the committed copy — and refuses any byte

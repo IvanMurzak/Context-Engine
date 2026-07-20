@@ -40,6 +40,8 @@
 #include "context/editor/shell/app_scheme.h"
 #include "context/editor/shell/cef/cef_shell.h"
 #include "context/editor/shell/ipc_bridge.h"
+#include "context/editor/shell/panel_host.h"
+#include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
 
 #include <chrono>
@@ -114,6 +116,46 @@ bool mentions(const std::string& haystack, const std::string& needle)
     return haystack.find(needle) != std::string::npos;
 }
 
+// The composed-surface scan the e05d1 pixel assertions share with the wait loop below. Returning
+// one struct keeps the loop's "has the UI actually painted yet?" test byte-for-byte identical to
+// the final assertion's "is the frame non-uniform?" — the loop waits for EXACTLY the property the
+// assertion will check, so it can neither break one poll too early (the CE #319 race) nor pass
+// vacuously. `composed` is the compositor's own surface extent.
+struct SurfaceScan
+{
+    std::size_t scanned = 0;
+    std::size_t background_texels = 0;
+    bool uniform = true;
+};
+
+SurfaceScan scan_surface(const std::vector<std::uint8_t>& surface, render::Extent2D composed)
+{
+    SurfaceScan scan;
+    const std::size_t texels =
+        static_cast<std::size_t>(composed.width) * static_cast<std::size_t>(composed.height);
+    for (std::size_t i = 0; i < texels; ++i)
+    {
+        const std::size_t offset = i * 4u;
+        if (offset + 3u >= surface.size())
+        {
+            break;
+        }
+        ++scan.scanned;
+        const bool is_background = surface[offset + 0] == kAppBackgroundB &&
+                                   surface[offset + 1] == kAppBackgroundG &&
+                                   surface[offset + 2] == kAppBackgroundR;
+        if (is_background)
+        {
+            ++scan.background_texels;
+        }
+        else
+        {
+            scan.uniform = false;
+        }
+    }
+    return scan;
+}
+
 int finish(int code)
 {
 #if defined(_WIN32)
@@ -172,6 +214,25 @@ int main(int argc, char** argv)
                 "the egress guard accepted the smoke credential");
     SMOKE_CHECK(handshake.install(bridge), "the bridge handshake installed");
 
+    // --- the panel surface (e05d1) ------------------------------------------------------------
+    // The REAL PanelHost with the REAL providers, so the live renderer hydrates an actual C++ panel
+    // model rather than a stub. There is no daemon here, so Problems has no diagnostics — which is
+    // exactly the point: what this smoke proves is the CHANNEL and the HYDRATION, and an empty
+    // Problems panel still renders a real tree (heading + status + empty list). The diagnostic
+    // PROJECTION is proven headlessly by editor-shell-test_problems_feed on all three build legs.
+    //
+    // LIFETIME. `builtin` owns the panel models; `panel_host`'s providers capture them; the router
+    // holds handlers capturing `panel_host`. `builtin` must be declared after `panel_host` (it takes
+    // a reference to it), so it is also DESTROYED FIRST — the reverse of the ownership order. That is
+    // safe here, and only here, because teardown is ordered explicitly: `manager.shutdown()` and
+    // `shell::cef::shutdown()` run at the end of main, so the browser and every renderer are already
+    // gone before any of these locals unwind and no provider can be invoked during teardown.
+    shell::PanelHost panel_host;
+    shell::panels::BuiltinPanels builtin = shell::panels::install_builtin_panels(panel_host);
+    SMOKE_CHECK(builtin.bound == shell::panels::hostable_panel_ids().size(),
+                "every hostable built-in panel provider bound");
+    SMOKE_CHECK(panel_host.install(bridge), "the panel.* bridge surface installed");
+
     shell::cef::CefShellOptions cef_options;
     cef_options.native_window = nullptr; // windowless: no native window on a Session-0 runner
     cef_options.logical_size = size;
@@ -222,10 +283,27 @@ int main(int argc, char** argv)
         return finish(1);
     }
 
-    // Drive the integrated pump until the browser has painted AND the bridge handshake completed.
-    // Both conditions, not either: the composite proves the scheme served a renderable document,
-    // and the handshake proves the bundle inside it executed and round-tripped. 30s is the same
-    // budget editor_host.cpp allows for a headless load.
+    // Drive the integrated pump until the browser has painted, the bridge handshake completed,
+    // every hostable panel has hydrated, AND the composed surface has ACTUALLY REPAINTED with the
+    // mounted UI. All of them, not any: the composite proves the scheme served a renderable
+    // document, the handshake proves the bundle executed and round-tripped, the render count proves
+    // the app layer ran, and the non-uniform surface proves the hydrated DOM's pixels reached the
+    // present target — the very thing the per-pixel assertion below checks.
+    //
+    // ⚠ WHY THE SURFACE CONDITION WAS ADDED (CE #319 — the race this test kept losing). Panels are
+    // brought up AFTER `shell.ready` (boot.ts orders it so deliberately), and `renders_served()`
+    // counts the render REQUEST served synchronously on the C++ side (hydration.ts:249) — which
+    // climbs BEFORE the mounted DOM's apply() (hydration.ts:253) repaints into the CEF OSR frame, a
+    // gap a05b42e's init()+onShow() startup double-refresh only widens. A loop that broke on
+    // `renders_served >= expected` alone therefore sampled cpu_surface() while it was still the
+    // uniform #132a44 background, and the "NOT a uniform fill" assertion failed on a frame that had
+    // simply not painted yet. So also require the surface to be NON-UNIFORM — the exact property
+    // that assertion checks. (A raw OnPaint / `view_frames` counter is a weaker proxy: it cannot
+    // tell a re-paint of the background apart from the UI's first paint, so waiting on it could
+    // still break early.) The 30s deadline is unchanged and still bounds the wait, so a genuine
+    // no-paint regression never turns the surface non-uniform, the loop runs out the clock, and the
+    // assertion below fails as it should — the wait is not vacuous and cannot loop forever.
+    const std::size_t expected_renders = shell::panels::hostable_panel_ids().size();
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     bool presented = false;
     while (std::chrono::steady_clock::now() < deadline)
@@ -239,7 +317,10 @@ int main(int argc, char** argv)
         {
             presented = true;
         }
-        if (presented && handshake.complete())
+        const bool hydrated =
+            presented && handshake.complete() && panel_host.renders_served() >= expected_renders;
+        if (hydrated &&
+            !scan_surface(editor->compositor().cpu_surface(), editor->compositor().size()).uniform)
         {
             break;
         }
@@ -256,43 +337,43 @@ int main(int argc, char** argv)
     // filled before the compose, so deleting the row copy in render_cpu_frame leaves it non-empty
     // and correctly sized while presenting solid black, and every counter above still passes. This
     // is the assertion that the LIVE browser's pixels actually reached the present path — and it is
-    // why placeholder_url() paints a known colour instead of an arbitrary one.
+    // why app.css paints a known colour instead of an arbitrary one.
+    //
+    // ⚠ CHANGED BY e05d1, FROM NINE FIXED SAMPLES TO A FULL SCAN — and the change STRENGTHENS it.
+    // Before e05d1 the window was empty, so every texel was the background and nine samples could
+    // all be required to match. Now a real docking UI is mounted, and where any individual texel
+    // lands relative to a tab strip, a sash or a glyph is not a stable fact — nine fixed points
+    // would be exactly the brittleness that turns a real gate into a rerun-budget consumer (see
+    // CE #319, which is this very test). Scanning the WHOLE surface instead proves BOTH facts more
+    // strongly than sampling ever did:
+    //
+    //   * the stylesheet was served with a usable media type — the background colour is PRESENT in
+    //     the frame, and a scan cannot miss it the way a sample can (this is now unmissable rather
+    //     than probabilistic);
+    //   * the live browser's pixels reached the present path — the surface is NON-UNIFORM, which is
+    //     a fact the old assertion could not express at all: a solid fill of the right colour would
+    //     have passed every one of its nine samples.
+    //
+    // The `app.css` note keeping --editor-bg in lockstep with kAppBackground* still applies, and the
+    // stylesheet now also re-points Dockview's own surface colours at that variable so the editor's
+    // background is genuinely present behind the UI rather than painted over by a theme.
     {
-        const std::vector<std::uint8_t>& surface = editor->compositor().cpu_surface();
-        // NOT named `size`: that would shadow the outer window extent, and MSVC's C4456 is not on
-        // CEF's /wd suppression list, so under its /W4 /WX this file would fail to compile.
-        const render::Extent2D composed = editor->compositor().size();
-        // A few interior texels rather than one: a single sample could land on whatever the page
-        // happens to render at the origin.
-        int background_texels = 0;
-        int sampled = 0;
-        const std::uint32_t xs[] = {composed.width / 4u, composed.width / 2u,
-                                    (composed.width * 3u) / 4u};
-        const std::uint32_t ys[] = {composed.height / 4u, composed.height / 2u,
-                                    (composed.height * 3u) / 4u};
-        for (std::uint32_t y : ys)
-        {
-            for (std::uint32_t x : xs)
-            {
-                const std::size_t offset = (static_cast<std::size_t>(y) * composed.width + x) * 4u;
-                if (offset + 3u >= surface.size())
-                {
-                    continue;
-                }
-                ++sampled;
-                if (surface[offset + 0] == kAppBackgroundB &&
-                    surface[offset + 1] == kAppBackgroundG &&
-                    surface[offset + 2] == kAppBackgroundR)
-                {
-                    ++background_texels;
-                }
-            }
-        }
-        SMOKE_CHECK(sampled > 0, "the composed surface was large enough to sample");
-        SMOKE_CHECK(background_texels == sampled,
-                    "every sampled texel carries app.css's #132a44 background — the app scheme "
-                    "served the STYLESHEET with a usable media type and the LIVE browser's pixels "
-                    "reached the present path");
+        // The SAME scan the wait loop polled, re-run once on the frame the loop settled on (no pump
+        // runs between the break and here, so this observes exactly the surface the loop broke on).
+        const SurfaceScan scan =
+            scan_surface(editor->compositor().cpu_surface(), editor->compositor().size());
+
+        SMOKE_CHECK(scan.scanned > 0, "the composed surface was large enough to scan");
+        // A tenth of the frame, not "at least one texel": a single stray pixel of the right colour
+        // could be coincidence, while a tenth of the window can only be the served stylesheet
+        // painting the editor's background.
+        SMOKE_CHECK(scan.scanned > 0 && scan.background_texels > scan.scanned / 10u,
+                    "app.css's #132a44 background covers a substantial part of the composited "
+                    "frame — the app scheme served the STYLESHEET with a usable media type and the "
+                    "LIVE browser's pixels reached the present path");
+        SMOKE_CHECK(!scan.uniform,
+                    "the composited frame is NOT a uniform fill — a real docking UI was painted on "
+                    "top of the background, which a solid-colour surface would have faked");
     }
 
     // --- the e05c DoD assertions ------------------------------------------------------------------
@@ -318,6 +399,31 @@ int main(int argc, char** argv)
                     "no handler attempted to return a protected credential");
         SMOKE_CHECK(!mentions(handshake.client_summary(), fake_token),
                     "the protected token never appeared in what editor-core sent us");
+    }
+
+    // --- the e05d1 DoD assertions: the LIVE hydration runtime actually ran ------------------------
+    //
+    // THIS IS THE ONLY PLACE THE HYDRATION RUNTIME IS PROVEN END TO END, and it is why the counters
+    // exist on PanelHost at all. The local dev gate cannot link CEF, so it cannot run a browser; the
+    // TS type gate proves the runtime COMPILES; the C++ T1 suites prove the panel surface behaves.
+    // What none of them can show is that the bundle's PanelHost actually drove the Shell's — which
+    // is the whole claim of "PanelHost owns panel lifecycle" and "Problems hydrates via the bridge".
+    // These counters are incremented ONLY by a real `panel.*` call arriving over the router, so a
+    // non-zero value here cannot be produced by anything but the live renderer having done it.
+    {
+        SMOKE_CHECK(panel_host.lists_served() > 0,
+                    "the live renderer called panel.list — editor-core's PanelHost read the Shell's "
+                    "roster over the bridge");
+        SMOKE_CHECK(panel_host.renders_served() > 0,
+                    "the live renderer called panel.render — the hydration runtime pulled a real "
+                    "C++ panel's uitree and mounted it into the DOM");
+        // Both hostable panels mounted, not just one. A runtime that special-cased a single panel
+        // kind would render one and quietly skip the other, which this catches and a single-panel
+        // assertion would not.
+        SMOKE_CHECK(panel_host.renders_served() >= shell::panels::hostable_panel_ids().size(),
+                    "every hostable panel was rendered, not merely the first");
+        SMOKE_CHECK(bridge.secrets_blocked() == 0,
+                    "no panel handler attempted to return a protected credential");
     }
 
     // Input round-trip into the LIVE browser. NOTE what this does and does NOT prove: the counters

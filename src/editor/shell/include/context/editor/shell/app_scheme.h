@@ -136,7 +136,30 @@ private:
 //                         makes hostile PROJECT content (entity names, `notes`) rendered through
 //                         the hydration runtime unable to execute even if an escaping bug lands
 //                         (C-F6 — the escaping contract is the primary control, this is the net).
-//   style-src  'self'   — the stylesheet only; no inline <style> and no style="" in markup.
+//   style-src  'self' 'unsafe-inline'
+//                       — same-origin stylesheets, PLUS inline CSS. This is the ONE inline
+//                         relaxation, and it is confined to style. The pinned, SHA-verified
+//                         dockview-core engine needs inline CSS two ways at runtime: it INJECTS a
+//                         <style> element for its base rules (the webpack style-loader
+//                         `.dv-scrollable{...}` insert — governed by style-src-elem) AND it POSITIONS
+//                         panels/sashes by writing inline style through the CSSOM
+//                         (`element.style.setProperty` — governed by style-src-attr). Both fall back
+//                         to style-src. The narrower `style-src-attr 'unsafe-inline'` split was tried
+//                         and does NOT hold on this pinned CEF/Chromium build: it could never cover
+//                         the <style>-element path (that is style-src-elem, not -attr), and the build
+//                         did not honour -attr as a distinct directive, enforcing `style-src 'self'`
+//                         on the CSSOM writes too — so the docking layout never manifested and
+//                         editor-cef-smoke-shell stayed red on ubuntu + windows. `'unsafe-inline'` on
+//                         style-src is what this build actually enforces for both paths. It stays
+//                         DEFENSIBLY strict: script-src carries NO widening (the C-F6 backstop is
+//                         intact — no inline/`eval` script), and connect-src 'none' + img-src
+//                         'self' data: + font-src 'self' leave an inline style nowhere to exfiltrate
+//                         to (no external url(), font or fetch). Hashes/nonces are no alternative:
+//                         dockview's CSSOM positioning cannot carry a nonce at all, and its inline
+//                         values vary by panel count and window size, so the set is not bounded.
+//                         Editor-core's own authored index.html still carries NO inline <style> or
+//                         style="" (the webui-scheme-contract gate enforces that as defense-in-depth);
+//                         this widening exists for the vendored engine's runtime DOM, not authored markup.
 //   connect-src 'none'  — NO NETWORK. This is what makes the 08 §2 "token leakage via the web
 //                         layer" row hold end to end: even a fully compromised renderer that got
 //                         hold of a secret has nowhere to send it. The bridge is not `fetch`, so

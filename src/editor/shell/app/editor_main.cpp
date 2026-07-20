@@ -9,9 +9,12 @@
 // "this build contains no browser" rather than a target that only exists on one CI job. That is also
 // what lets the D10 `editor-boundary` job BUILD this binary against the installed client artifacts.
 
+#include "context/editor/client/subscription.h"
 #include "context/editor/shell/app_scheme.h"
 #include "context/editor/shell/browser.h"
 #include "context/editor/shell/ipc_bridge.h"
+#include "context/editor/shell/panel_host.h"
+#include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
 #include "context/editor/shell/window.h"
 #include "context/render/rhi.h"
@@ -39,6 +42,10 @@
 
 namespace shell = context::editor::shell;
 namespace render = context::render;
+// e05d1: the live diagnostics subscription rides the published client SDK, and its handlers receive
+// contract::Json payloads — both spelled often enough below to earn an alias.
+namespace client = context::editor::client;
+namespace contract = context::editor::contract;
 
 namespace
 {
@@ -255,6 +262,104 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // --- the panel surface (e05d1, design 04 §3-§4) -----------------------------------------------
+    //
+    // The Shell publishes `panel.*` over the SAME privileged bridge: the roster, one panel's uitree
+    // render, command + gesture dispatch, and the D6 state pair. editor-core's hydration runtime
+    // consumes exactly that and nothing else — it has no daemon socket and no panel knowledge.
+    //
+    // LIFETIME. The chain is `bridge` -> `panel_host` -> `builtin`: the router holds handlers
+    // capturing the host, and the host's providers capture the models `builtin` owns. `builtin` must
+    // be declared AFTER `panel_host` (it takes a reference to it), so it is also destroyed FIRST —
+    // the reverse of the ownership order. That is safe because teardown is ORDERED EXPLICITLY:
+    // `manager.shutdown()` and `shell::cef::shutdown()` run before any of these locals unwind, so
+    // the browser and every renderer are gone and no handler can be invoked during teardown. The
+    // implicit-destruction order is therefore never load-bearing here — unlike `handshake`/`bridge`
+    // above, where it is, because those two carry no such explicit shutdown between them.
+    shell::PanelHost panel_host;
+    shell::panels::BuiltinPanels builtin = shell::panels::install_builtin_panels(panel_host);
+    if (builtin.bound != shell::panels::hostable_panel_ids().size())
+    {
+        // REPORTED, not fatal: an editor that refused to start because one panel could not bind
+        // would be less useful than one that opens with the rest and says which is missing.
+        std::fprintf(stderr,
+                     "context_editor: only %zu of %zu built-in panels bound; the rest will report "
+                     "as unavailable\n",
+                     builtin.bound, shell::panels::hostable_panel_ids().size());
+    }
+    if (!panel_host.install(bridge))
+    {
+        std::fprintf(stderr, "context_editor: could not install the panel bridge surface\n");
+        return 1;
+    }
+
+    // --- the LIVE diagnostics subscription (the Problems read path) -------------------------------
+    //
+    // The Shell subscribes as an ordinary client (D10) and forwards what arrives into the panel
+    // models. Without a daemon there is simply no feed — the editor opens read-only and Problems is
+    // empty, which is the honest state rather than a failure.
+    //
+    // SINGLE-THREADED, DELIBERATELY, and this is the trade worth naming. `SubscriptionConsumer` is
+    // documented as blocking for up to `poll_timeout_ms` per pump and, on a dropped wire, for the
+    // whole reconnect ladder — its own header says not to drive it from a thread that must stay
+    // responsive. The alternative to a thread is what is done here: `poll_timeout_ms = 0` (a
+    // non-blocking poll) and a deliberately SHORT reconnect ladder, pumped from the owner loop.
+    //
+    // Why not a thread: the feed mutates the panel models, and the bridge handlers that RENDER those
+    // models run on this same owner/UI thread. A background pump would be a data race on every
+    // panel model, requiring a lock around the whole PanelHost — which is a real design (and may
+    // become the right one when panels get heavier), but it is strictly more machinery than e05d1
+    // needs and strictly more ways to be wrong. The cost of the choice made here is bounded: a
+    // daemon restart can stall the loop for the ladder's duration, which the tuning below caps at
+    // roughly a second rather than the ~21 s the defaults would allow.
+    std::unique_ptr<client::SubscriptionConsumer> diagnostics;
+    if (daemon.client != nullptr && builtin.problems != nullptr)
+    {
+        client::SubscriptionOptions subscription_options;
+        subscription_options.poll_timeout_ms = 0; // never block the owner loop on a quiet stream
+        subscription_options.reconnect_timeout_ms = 250;
+        subscription_options.backoff.initial_ms = 50;
+        subscription_options.backoff.max_ms = 250;
+        subscription_options.backoff.max_attempts = 3;
+
+        diagnostics = std::make_unique<client::SubscriptionConsumer>(
+            *daemon.client, shell::make_shell_attach_options(), subscription_options);
+
+        // `feed` stays a POINTER TO THE FORWARD-DECLARED type — this TU never sees `ProblemsFeed`'s
+        // complete definition (builtin_panels.h's comment on the forward declare explains why: this
+        // executable is compiled `-fno-rtti` when CEF is on, and `problems_feed.h`'s full include
+        // chain reaches a kernel header whose templated methods use `typeid`). The lambdas below
+        // drive it through `apply_problems_snapshot`/`apply_problems_event`, the non-member seams
+        // builtin_panels.h/.cpp expose for exactly this caller.
+        shell::panels::ProblemsFeed* feed = builtin.problems.get();
+        // 0 is only the FALLBACK stamp for a snapshot that carries no `generation` of its own; the
+        // real cursor snapshot always does, and `apply_snapshot` prefers it. Passing 0 as the
+        // authoritative stamp would mark every recovered provisional diagnostic stale-by-
+        // construction, since the stream never settles below generation 1.
+        diagnostics->on_snapshot(
+            [feed](const std::string&, const contract::Json& snapshot)
+            { shell::panels::apply_problems_snapshot(*feed, snapshot, 0); });
+        diagnostics->on_event(
+            [feed](const std::string&, const client::ClientEvent& event)
+            { (void)shell::panels::apply_problems_event(*feed, event.topic, event.payload,
+                                                        event.generation); });
+
+        client::SubscriptionSpec spec;
+        spec.topics = {shell::panels::kDiagnosticsTopic, shell::panels::kDerivationTopic};
+        (void)diagnostics->add(spec);
+
+        std::string subscribe_error;
+        if (!diagnostics->start(subscribe_error))
+        {
+            // Same posture as a failed attach: reported, non-fatal, and the editor still opens.
+            std::fprintf(stderr,
+                         "context_editor: could not subscribe to the diagnostics stream (%s); the "
+                         "Problems panel will stay empty\n",
+                         subscribe_error.c_str());
+            diagnostics.reset();
+        }
+    }
+
     // --- the browser ------------------------------------------------------------------------------
     std::unique_ptr<shell::IBrowserHost> browser;
 #if defined(CONTEXT_EDITOR_HAS_CEF)
@@ -324,6 +429,23 @@ int main(int argc, char** argv)
     while (manager.pump_once(now_us()))
     {
         ++frames;
+        if (diagnostics != nullptr)
+        {
+            // One non-blocking drain per frame. A pump failure here is UNRECOVERABLE by the
+            // consumer's own definition (the backoff ladder was exhausted, or the daemon REFUSED a
+            // re-subscribe), so the feed is dropped rather than retried forever: an editor silently
+            // burning a pump every frame against a daemon that will never answer is worse than one
+            // that stops and says so.
+            std::string pump_error;
+            if (!diagnostics->pump(pump_error))
+            {
+                std::fprintf(stderr,
+                             "context_editor: the diagnostics subscription stopped (%s); the "
+                             "Problems panel will no longer update\n",
+                             pump_error.c_str());
+                diagnostics.reset();
+            }
+        }
         if (options.max_frames > 0 && frames >= options.max_frames)
         {
             break;
