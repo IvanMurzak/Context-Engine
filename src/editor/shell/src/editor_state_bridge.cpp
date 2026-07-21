@@ -217,6 +217,28 @@ bool EditorStateBridge::publish_regions(const Json& params, std::string& error_c
     return true;
 }
 
+bool EditorStateBridge::record_restore(const Json& params, std::string& error_code)
+{
+    error_code.clear();
+    if (!params.is_object())
+    {
+        error_code = kErrEditorBadParams;
+        return false;
+    }
+    // TOTAL over arbitrary params: each field falls back to its safe default so a partial or older
+    // report is still RECORDED rather than refused — a report the Shell could not fully parse must
+    // not fail editor-core's boot (unlike a publish, which is a WRITE and refuses a malformed one).
+    // `as_bool()` reads false for an absent / non-boolean field, mirroring editor_state.cpp's
+    // placement reader; `panelsRestored` rides the same double-range guard the publish paths use, so
+    // a hand-forged `1e300` cannot become UB on the integral cast.
+    layout_restored_ = params.at("layoutRestored").as_bool();
+    const std::optional<double> panels =
+        detail::number_in_range(params, "panelsRestored", 0.0, 4294967295.0);
+    panels_restored_ = panels.has_value() ? static_cast<std::size_t>(*panels) : 0;
+    ++restore_reports_;
+    return true;
+}
+
 bool EditorStateBridge::install(BridgeRouter& router)
 {
     bool ok = true;
@@ -262,6 +284,22 @@ bool EditorStateBridge::install(BridgeRouter& router)
                  // one the Shell silently dropped elements out of — a stale rect otherwise routes
                  // input to a viewport that is no longer there.
                  out.set("regions", Json(static_cast<std::int64_t>(published.size())));
+                 return BridgeResult::ok(std::move(out));
+             }) &&
+         ok;
+
+    ok = router.register_method(
+             kEditorLayoutRestoredMethod,
+             [this](const BridgeRequest& request) -> BridgeResult
+             {
+                 std::string error_code;
+                 if (!record_restore(request.params, error_code))
+                 {
+                     return BridgeResult::error(error_code,
+                                                "editor.layout.restored refused: " + error_code);
+                 }
+                 Json out = Json::object();
+                 out.set("recorded", Json(true));
                  return BridgeResult::ok(std::move(out));
              }) &&
          ok;

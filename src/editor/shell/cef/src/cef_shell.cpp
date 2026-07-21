@@ -71,6 +71,12 @@ const AppAssetResolver* g_asset_resolver = nullptr;
 
 bool g_initialized = false;
 
+// Opt-in verbose Chromium logging (CefShellOptions::verbose_logging). Set ONCE in the browser
+// process before CefInitialize, read by OnBeforeCommandLineProcessing to append the logging
+// switches; CEF then propagates the switches onto the renderer/GPU/utility subprocess command lines
+// it builds from the browser process's, so the whole tree logs to stderr. Never mutated after boot.
+bool g_verbose_logging = false;
+
 // --------------------------------------------------------------------------- modifier translation
 
 std::uint32_t to_cef_modifiers(const Modifiers& modifiers)
@@ -782,6 +788,15 @@ public:
         command_line->AppendSwitch("no-sandbox");
         command_line->AppendSwitch("disable-gpu");
         command_line->AppendSwitch("disable-gpu-compositing");
+        // Opt-in full-tree diagnostics (CefShellOptions::verbose_logging). Runs in the browser
+        // process (g_verbose_logging set before CefInitialize) AND, via the switches CEF copies onto
+        // each subprocess command line, in every renderer/GPU/utility child — so a fault that lives
+        // in a subprocess names itself on stderr instead of surfacing only as the parent's exit code.
+        if (g_verbose_logging)
+        {
+            command_line->AppendSwitchWithValue("enable-logging", "stderr");
+            command_line->AppendSwitchWithValue("v", "1");
+        }
     }
 
     void OnScheduleMessagePumpWork(int64_t delay_ms) override
@@ -1023,7 +1038,11 @@ std::unique_ptr<IBrowserHost> make_cef_browser_host(const CefShellOptions& optio
         // caveat in favour of this.
         settings.multi_threaded_message_loop = false;
         settings.external_message_pump = true;
-        settings.log_severity = LOGSEVERITY_WARNING;
+        // Latch the opt-in BEFORE CefInitialize: OnBeforeCommandLineProcessing (which reads the flag)
+        // runs INSIDE this CefInitialize, and the browser-process log level is a CefSettings field.
+        g_verbose_logging = options.verbose_logging;
+        settings.log_severity =
+            options.verbose_logging ? LOGSEVERITY_VERBOSE : LOGSEVERITY_WARNING;
         if (options.devtools_enabled && options.remote_debugging_port > 0)
         {
             // Dev loop ONLY (review B-F11): a naive DevTools pass-through from an OSR browser does

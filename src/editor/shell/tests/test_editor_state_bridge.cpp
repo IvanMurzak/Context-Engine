@@ -411,6 +411,51 @@ void publish_regions_rejects_a_missing_array_and_an_unbound_sink()
     }
 }
 
+// --- the restore-report path (editor.layout.restored, M9 e05d4) ----------------------------------
+
+void a_restore_report_records_its_outcome_and_is_total_over_bad_input()
+{
+    EditorStateBridge bridge;
+    // Fresh state: nothing reported yet, so the smoke's "false half" default holds.
+    CHECK(!bridge.layout_restored());
+    CHECK(bridge.restore_reports() == 0u);
+
+    // A boot that reapplied an arrangement: layoutRestored:true is the load-bearing signal, and
+    // panelsRestored is recorded alongside it.
+    Json restored = Json::object();
+    restored.set("layoutRestored", Json(true));
+    restored.set("panelsRestored", Json(2));
+    std::string code;
+    CHECK(bridge.record_restore(restored, code));
+    CHECK(code.empty());
+    CHECK(bridge.layout_restored());
+    CHECK(bridge.panels_restored() == 2u);
+    CHECK(bridge.restore_reports() == 1u);
+
+    // A fresh-boot report (layoutRestored:false) is the FALSE half that distinguishes a restore from
+    // a fresh boot — it must be recorded as false, and the last report wins.
+    Json fresh = Json::object();
+    fresh.set("layoutRestored", Json(false));
+    CHECK(bridge.record_restore(fresh, code));
+    CHECK(!bridge.layout_restored());
+    CHECK(bridge.panels_restored() == 0u); // absent panelsRestored -> its 0 default
+    CHECK(bridge.restore_reports() == 2u);
+
+    // TOTAL over arbitrary params: a report missing every field, or with a hostile out-of-range
+    // panelsRestored, is still RECORDED (unlike a publish, which refuses a malformed one) — a report
+    // the Shell could not fully parse must not fail editor-core's boot. Only a non-object refuses.
+    Json hostile = Json::object();
+    hostile.set("panelsRestored", Json(1e300)); // beyond uint32/int64 -> clamps to 0, no UB
+    CHECK(bridge.record_restore(hostile, code));
+    CHECK(!bridge.layout_restored()); // absent layoutRestored -> false
+    CHECK(bridge.panels_restored() == 0u);
+    CHECK(bridge.restore_reports() == 3u);
+
+    CHECK(!bridge.record_restore(Json("not-an-object"), code));
+    CHECK(code == kErrEditorBadParams);
+    CHECK(bridge.restore_reports() == 3u); // the refused report did NOT count
+}
+
 // --- the full JSON-RPC binding over a real router ------------------------------------------------
 
 void the_methods_bind_and_answer_over_a_real_router()
@@ -430,6 +475,7 @@ void the_methods_bind_and_answer_over_a_real_router()
     CHECK(router.has_method("editor.state.get"));
     CHECK(router.has_method("editor.state.publish"));
     CHECK(router.has_method("editor.regions.publish"));
+    CHECK(router.has_method("editor.layout.restored"));
     // A second install is a name collision, and the method must SAY so rather than silently no-op.
     BridgeRouter clash;
     CHECK(bridge.install(clash));
@@ -465,6 +511,17 @@ void the_methods_bind_and_answer_over_a_real_router()
     CHECK(region_result.at("regions").as_int() == 1);
     CHECK(arbiter.regions().size() == 1u);
 
+    // the restore report, over the wire (e05d4).
+    Json restored_params = Json::object();
+    restored_params.set("layoutRestored", Json(true));
+    restored_params.set("panelsRestored", Json(1));
+    const Json restored_result = dispatch_result(router, "editor.layout.restored", restored_params,
+                                                 refused, reason);
+    CHECK(!refused);
+    CHECK(restored_result.at("recorded").as_bool());
+    CHECK(bridge.layout_restored());
+    CHECK(bridge.restore_reports() == 1u);
+
     // A malformed publish refuses with the right reason rather than crashing the router.
     (void)dispatch_result(router, "editor.state.publish", Json::object(), refused, reason);
     CHECK(refused);
@@ -488,6 +545,7 @@ int main()
     a_published_region_map_reaches_a_live_arbiter_and_routes_a_pointer();
     an_empty_publish_clears_the_map_and_a_bad_element_is_skipped_not_fatal();
     publish_regions_rejects_a_missing_array_and_an_unbound_sink();
+    a_restore_report_records_its_outcome_and_is_total_over_bad_input();
     the_methods_bind_and_answer_over_a_real_router();
     SHELL_TEST_MAIN_END();
 }

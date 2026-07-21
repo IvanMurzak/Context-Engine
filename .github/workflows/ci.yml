@@ -1794,9 +1794,9 @@ jobs:
       # ⚠ "Not Run = RED" TRIPWIRE: the ctest step below selects the whole `editor-cef-smoke-` family
       # by regex, but this job builds a hand-maintained --target list. Without this step the regex
       # would find the test and no executable, reporting "Not Run" -> red.
-      - name: Build the Shell's live CEF boot smoke (Windows/Linux)
+      - name: Build the Shell's live CEF boot + restart smokes (Windows/Linux)
         if: runner.os != 'macOS'
-        run: cmake --build --preset dev --target context_editor_shell_cef_smoke
+        run: cmake --build --preset dev --target context_editor_shell_cef_smoke context_editor_shell_restore_smoke
         working-directory: src
 
       # The SHIPPING editor binary, in its CEF-linked configuration. Every other job that builds

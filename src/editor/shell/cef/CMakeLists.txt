@@ -98,4 +98,56 @@ if(OS_WINDOWS OR OS_LINUX)
     set_tests_properties(editor-cef-smoke-shell PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_cef_smoke>"
         TIMEOUT 180)
+
+    # --- the LIVE boot -> dock -> restart -> restore smoke (ctest editor-cef-smoke-shell-restore) ---
+    # M9 e05d4: proves editor-core's arrangement survives a RESTART. The exe is a thin controller that
+    # runs ITSELF twice as two child processes (--ctx-restore-phase=1|2) against ONE project — phase 1
+    # persists a real docking arrangement then hard-exits, phase 2 (a fresh PROCESS + a fresh
+    # editor-state store LOADED from the file phase 1 wrote) reads it back and reapplies it. Two
+    # processes, not two browsers in one CefInitialize: a mid-process browser teardown SEGFAULTs on the
+    # Session-0 Windows runner AND ubuntu, and each single-browser phase is instead structurally
+    # identical to the proven-green boot smoke above (see the .cpp header). Same `editor-cef-smoke-`
+    # family + same link recipe as the boot smoke, so the per-OS `editor-cef-smoke` job's
+    # `ctest -R "^editor-cef-smoke-"` step picks it up with no regex change. TIMEOUT covers two full
+    # child-process boots run sequentially.
+    #
+    # ⚠ "Not Run = RED" TRIPWIRE: that job builds a hand-maintained --target list, so this executable
+    # is ALSO listed in ci.yml's editor-cef-smoke build step (and mirrored in the profile's test.md
+    # § CI). The regex would otherwise match a test whose executable was never built.
+    add_executable(context_editor_shell_restore_smoke src/cef_shell_restore_smoke.cpp)
+    SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_restore_smoke)
+    add_dependencies(context_editor_shell_restore_smoke libcef_dll_wrapper)
+    # Same archive-before-libcef link order as context_editor_shell_cef_smoke above, and for the same
+    # single-left-to-right-pass reason: context_editor_cef holds cef_shell.cpp's CEF references, so it
+    # must precede the CEF libs. context_editor_panels and context_common are CEF-free and join on the
+    # same side — context_common (the hardened std::system runner, issue #146) is what the controller
+    # re-launches its two phase children with, and introduces no CEF references of its own.
+    target_link_libraries(context_editor_shell_restore_smoke
+        context_editor_cef context_editor_panels context_common
+        libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+    target_include_directories(context_editor_shell_restore_smoke PRIVATE "${CEF_ROOT}")
+
+    COPY_FILES(context_editor_shell_restore_smoke "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}"
+               "${CEF_TARGET_OUT_DIR}")
+    COPY_FILES(context_editor_shell_restore_smoke "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}"
+               "${CEF_TARGET_OUT_DIR}")
+
+    # Same webui asset dependency + compiled-in root as the boot smoke: the restore smoke loads
+    # `context-editor://app/index.html`, so it needs editor-core's built asset set to exist when it
+    # runs. Expressed as add_dependencies() so the asset set travels with this target automatically,
+    # which keeps ci.yml's --target list from needing the webui target added alongside this one.
+    add_dependencies(context_editor_shell_restore_smoke context_editor_webui)
+    if(NOT CONTEXT_WEBUI_ASSET_DIR)
+        message(FATAL_ERROR
+            "context_editor_shell_restore_smoke: CONTEXT_WEBUI_ASSET_DIR is empty — src/editor/webui "
+            "must be added BEFORE src/editor/shell (src/CMakeLists.txt orders it so); it publishes "
+            "the asset root as CACHE INTERNAL.")
+    endif()
+    target_compile_definitions(context_editor_shell_restore_smoke PRIVATE
+        "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
+
+    add_test(NAME editor-cef-smoke-shell-restore COMMAND context_editor_shell_restore_smoke)
+    set_tests_properties(editor-cef-smoke-shell-restore PROPERTIES
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_restore_smoke>"
+        TIMEOUT 360)
 endif()

@@ -437,6 +437,7 @@ PANEL_BUNDLE = (
     'var EDITOR_STATE_GET_METHOD = "editor.state.get";\n'
     'var EDITOR_STATE_PUBLISH_METHOD = "editor.state.publish";\n'
     'var EDITOR_REGIONS_PUBLISH_METHOD = "editor.regions.publish";\n'
+    'var EDITOR_LAYOUT_RESTORED_METHOD = "editor.layout.restored";\n'
     'var REGION_KIND_VIEWPORT = "viewport";\n'
     'var REGION_KIND_NATIVE = "native";\n'
 )
@@ -487,6 +488,7 @@ PANEL_CPP_EDITOR_STATE = (
     'inline constexpr const char* kEditorStateGetMethod = "editor.state.get";\n'
     'inline constexpr const char* kEditorStatePublishMethod = "editor.state.publish";\n'
     'inline constexpr const char* kEditorRegionsPublishMethod = "editor.regions.publish";\n'
+    'inline constexpr const char* kEditorLayoutRestoredMethod = "editor.layout.restored";\n'
     'inline constexpr const char* kRegionKindViewport = "viewport";\n'
     'inline constexpr const char* kRegionKindNative = "native";\n'
 )
@@ -568,7 +570,7 @@ def test_bundle_missing_a_panel_method_fails(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("ts_name", [
     "EDITOR_STATE_GET_METHOD", "EDITOR_STATE_PUBLISH_METHOD", "EDITOR_REGIONS_PUBLISH_METHOD",
-    "REGION_KIND_VIEWPORT", "REGION_KIND_NATIVE",
+    "EDITOR_LAYOUT_RESTORED_METHOD", "REGION_KIND_VIEWPORT", "REGION_KIND_NATIVE",
 ])
 def test_editor_state_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> None:
     """The e05d2 methods + region kinds, each one: a drift here breaks layout persistence silently."""

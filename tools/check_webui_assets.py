@@ -124,6 +124,8 @@ EDITOR_STATE_CONSTANTS = (
      "EDITOR_STATE_PUBLISH_METHOD"),
     ("editor.regions.publish", "editor_state_bridge.h", "kEditorRegionsPublishMethod",
      "EDITOR_REGIONS_PUBLISH_METHOD"),
+    ("editor.layout.restored", "editor_state_bridge.h", "kEditorLayoutRestoredMethod",
+     "EDITOR_LAYOUT_RESTORED_METHOD"),
     ("region kind viewport", "editor_state_bridge.h", "kRegionKindViewport", "REGION_KIND_VIEWPORT"),
     ("region kind native", "editor_state_bridge.h", "kRegionKindNative", "REGION_KIND_NATIVE"),
 )

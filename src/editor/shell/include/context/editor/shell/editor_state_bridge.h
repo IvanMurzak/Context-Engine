@@ -68,6 +68,12 @@ inline constexpr const char* kEditorStateGetMethod = "editor.state.get";
 inline constexpr const char* kEditorStatePublishMethod = "editor.state.publish";
 // Region-map path: editor-core publishes the window's viewport / native rects (03 §6).
 inline constexpr const char* kEditorRegionsPublishMethod = "editor.regions.publish";
+// Restore-report path (M9 e05d4): editor-core tells the Shell the OUTCOME of its boot-time restore
+// (the design 04 §3 LayoutRestoreReport) — whether the persisted arrangement came back, how many
+// panel blobs were reapplied, how many degraded. This is NOT a persistence write; it is a one-way
+// report the restart smoke asserts on, so a boot that reapplied an arrangement is DISTINGUISHABLE
+// from a fresh one that had nothing to restore (which no counter on the persistence path can show).
+inline constexpr const char* kEditorLayoutRestoredMethod = "editor.layout.restored";
 
 // The RegionKind wire tokens (03 §6). A CLOSED vocabulary — the two native consumers the Shell knows
 // — so a third token invented in the renderer is REFUSED at parse rather than routed to a consumer
@@ -148,6 +154,14 @@ public:
     [[nodiscard]] bool publish_regions(const contract::Json& params, std::string& error_code,
                                        std::vector<ShellRegion>* out = nullptr);
 
+    // Record editor-core's boot-time restore OUTCOME (M9 e05d4). `layoutRestored` is the one
+    // load-bearing field — true only when the persisted Dockview arrangement was reapplied;
+    // `panelsRestored` is informational. TOTAL over arbitrary params: a missing/wrong field reads as
+    // its safe default (false / 0) rather than refusing, because a report the Shell could not fully
+    // parse must not fail editor-core's boot. Returns false + kErrEditorBadParams only when `params`
+    // is not an object at all.
+    [[nodiscard]] bool record_restore(const contract::Json& params, std::string& error_code);
+
     // Bind every `editor.*` method on `router`. False when ANY binding was refused (a name collision
     // with something already registered), which is a wiring bug the caller must not ignore.
     [[nodiscard]] bool install(BridgeRouter& router);
@@ -159,6 +173,13 @@ public:
     [[nodiscard]] std::size_t state_reads() const { return state_reads_; }
     [[nodiscard]] std::size_t states_published() const { return states_published_; }
     [[nodiscard]] std::size_t regions_published() const { return regions_published_; }
+    // The LAST restore report editor-core sent (M9 e05d4, the restart-smoke assertion surface).
+    // `layout_restored()` is false until a report with `layoutRestored:true` arrives — which, per
+    // boot.ts, happens only when a persisted arrangement was actually reapplied, so it is false on a
+    // fresh-project boot and true on a boot that restored. `restore_reports()` counts reports seen.
+    [[nodiscard]] bool layout_restored() const { return layout_restored_; }
+    [[nodiscard]] std::size_t panels_restored() const { return panels_restored_; }
+    [[nodiscard]] std::size_t restore_reports() const { return restore_reports_; }
 
 private:
     EditorStateStore* store_ = nullptr;
@@ -167,6 +188,9 @@ private:
     std::size_t state_reads_ = 0;
     std::size_t states_published_ = 0;
     std::size_t regions_published_ = 0;
+    bool layout_restored_ = false;
+    std::size_t panels_restored_ = 0;
+    std::size_t restore_reports_ = 0;
 };
 
 } // namespace context::editor::shell

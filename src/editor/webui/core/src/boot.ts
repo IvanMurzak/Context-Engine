@@ -180,13 +180,25 @@ async function startPanels(bridge: ShellBridge): Promise<PanelBringUp> {
         // reachable through the mounted DOM.
         if (report.started) {
             try {
+                const stateClient = new EditorStateClient(bridge);
                 const persistence = new LayoutPersistence({
                     panelHost: host,
                     panelClient: client,
-                    stateClient: new EditorStateClient(bridge),
+                    stateClient,
                 });
-                await persistence.restore();
+                const restoreReport = await persistence.restore();
+                // Report the restore OUTCOME to the Shell (e05d4). The restart smoke asserts this is
+                // `layoutRestored:false` on a fresh boot and `true` on a boot that reapplied a
+                // persisted arrangement — the end-to-end proof that the arrangement round-tripped
+                // through the Shell's editor-state store. Best-effort: `reportRestore` swallows a
+                // Shell refusal, so it can never keep `attach` from running below.
+                await stateClient.reportRestore(restoreReport);
                 persistence.attach();
+                // e05d4 restart-smoke seam: only when the boot URL carries `?ctx-smoke-arrange`,
+                // perform ONE deterministic docking change so the arrangement that gets persisted
+                // differs from the fresh-boot default — which is what makes the restart proof
+                // meaningful. A no-op with no flag, so nothing in the shipping editor is affected.
+                applySmokeArrangement(host);
             } catch {
                 // Reported by absence of persistence, never fatal — the editor is up and usable.
             }
@@ -199,5 +211,30 @@ async function startPanels(bridge: ShellBridge): Promise<PanelBringUp> {
             unavailable: [],
             error: error instanceof Error ? error.message : String(error),
         };
+    }
+}
+
+/**
+ * The M9 e05d4 restart-smoke seam — a NO-OP unless the boot URL carries `?ctx-smoke-arrange`.
+ *
+ * The restart smoke needs the FIRST boot to persist a REAL, non-default arrangement so its restart
+ * proof is not indistinguishable from a fresh boot. There is no command registry yet to drive a dock
+ * change from the Shell (design 09 §1 makes T2 command-driven; that arrives with e06), so a URL flag
+ * is the v1 seam. It closes the LAST docked panel — a deterministic dock-arrangement change Dockview
+ * serialises distinctly and restores cleanly — which fires `onDidLayoutChange`, so LayoutPersistence
+ * publishes the new arrangement (debounced) with no further prompting.
+ *
+ * Guarded three ways so it is inert in the shipping editor: it requires the explicit flag, it needs
+ * more than one panel (never empties the layout), and it is total — any failure just leaves the
+ * default arrangement, which the smoke would then catch as a missing non-default publish.
+ */
+function applySmokeArrangement(host: PanelHost): void {
+    if (typeof location === "undefined" || !location.search.includes("ctx-smoke-arrange")) {
+        return;
+    }
+    const mounted = host.mounted;
+    const last = mounted.length > 1 ? mounted[mounted.length - 1] : undefined;
+    if (last !== undefined) {
+        host.close(last);
     }
 }
