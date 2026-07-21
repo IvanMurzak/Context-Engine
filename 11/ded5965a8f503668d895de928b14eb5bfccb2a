@@ -1,0 +1,224 @@
+src/editor/gui/panels/builders/tests/builders_test.h
+  s_e70383bb4cb548::t_9e6af6933e8749 1-28
+src/editor/gui/panels/inspector/include/context/editor/gui/panels/inspector/inspector_panel.h
+  s_e70383bb4cb548::t_48c9e125c5554d 221
+  s_e70383bb4cb548::t_014ad094842d4f 33-60
+  s_e70383bb4cb548::t_f2864dd4da4329 84-89,98
+  s_e70383bb4cb548::t_aa5b4ab10d2d7d 8-14
+  s_adc1f643c631a0::t_743351681c11f5 61
+src/editor/contract/src/registry.cpp
+  s_e70383bb4cb548::t_ed3a8af8037b50 869-898
+src/editor/editorkernel/CMakeLists.txt
+  s_e70383bb4cb548::t_3ca5bda3c41871 31-38
+src/editor/shell/panels/include/context/editor/shell/panels/scenetree_feed.h
+  s_e70383bb4cb548::t_cb44be7d2100eb 1-120
+src/editor/gui/panels/builders/include/context/editor/gui/panels/builders/inspector_builder.h
+  s_e70383bb4cb548::t_c7283bba5a4502 1-46
+src/editor/gui/panels/problems/include/context/editor/gui/panels/problems/problems_panel.h
+  s_e70383bb4cb548::t_23c18c3db79659 63-83
+  s_e70383bb4cb548::t_960372863c0567 128-133
+  s_e70383bb4cb548::t_7e4721dbc75f25 16
+src/editor/shell/panels/tests/test_inspector_feed.cpp
+  s_e70383bb4cb548::t_03b7b7cbaf5ba3 1-353
+src/editor/gui/session/undo/tests/undo_test.h
+  s_e70383bb4cb548::t_4582663cf2f85b 74
+src/editor/shell/panels/tests/test_builtin_panels.cpp
+  s_e70383bb4cb548::t_2d21f69097d957 1-2,4-9,17-19,25,30,62-64,67-68,70,72-73,79-82,86,89-90,93,97,127-145,183-214,220,222
+src/tests/integration/CMakeLists.txt
+  s_e70383bb4cb548::t_6583da35fb9695 318
+src/editor/gui/panels/builders/tests/test_wire.cpp
+  s_e70383bb4cb548::t_3228a1a9ca6337 1-111
+src/editor/gui/panels/scenetree/src/scene_tree_model.cpp
+  s_e70383bb4cb548::t_a571bcc968c445 1-3
+src/editor/gui/panels/builders/CMakeLists.txt
+  s_e70383bb4cb548::t_c5e2e6d7548e8c 1-55
+src/editor/gui/panels/builders/src/wire.cpp
+  s_e70383bb4cb548::t_2d2dab267b83bd 1-128,130-144
+  s_e70383bb4cb548::t_951a55d923551e 129
+  s_e70383bb4cb548::t_fe54c40ce39219 145-147
+  s_324df1460f5070::t_4a2d0c702e7227 148-150
+src/editor/gui/viewport/include/context/editor/gui/viewport/project_override_gateway.h
+  s_e70383bb4cb548::t_c1243884c15627 32-36,38
+src/editor/shell/src/editor_state.cpp
+  s_e70383bb4cb548::t_e3171eda1e94f8 6-7
+  s_e70383bb4cb548::t_5eee8de540ba98 37-42,45-47,50-51,54-55
+src/editor/gui/panels/inspector/src/inspector_model.cpp
+  s_e70383bb4cb548::t_55bb23e9d920f9 1-4
+src/editor/gui/panels/scenetree/tests/test_scene_tree_model.cpp
+  s_e70383bb4cb548::t_c9e087b5452e8b 9
+  s_4bcfc9cc3d05e9::t_cdd0f8669b89df 21-23
+src/editor/gui/panels/inspector/src/inspector_panel.cpp
+  s_e70383bb4cb548::t_c8cec6fb72b140 231-239
+  s_e70383bb4cb548::t_c290b49eb68807 108
+src/editor/gui/panels/builders/src/scene_tree_builder.cpp
+  s_e70383bb4cb548::t_0bee424cdf191e 1-175
+src/editor/gui/session/undo/src/undo_journal.cpp
+  s_e70383bb4cb548::t_ae43730076a45f 303-305,310
+src/editor/gui/panels/scenetree/tests/test_a11y.cpp
+  s_e70383bb4cb548::t_b721dbdf07898e 12
+  s_e70383bb4cb548::t_5016bd2515de33 23-25
+src/editor/shell/src/json_number_read.h
+  s_e70383bb4cb548::t_ccbfeeff609217 1-49
+src/editor/gui/panels/scenetree/include/context/editor/gui/panels/scenetree/scene_tree_model.h
+  s_e70383bb4cb548::t_29d9843d1a767c 1-7
+src/editor/shell/tests/test_editor_state.cpp
+  s_e70383bb4cb548::t_49efabdde034e5 286-314,329
+src/editor/bridge/src/scope.cpp
+  s_e70383bb4cb548::t_a5fce8e96539b3 160-162
+src/editor/shell/panels/src/scenetree_feed.cpp
+  s_e70383bb4cb548::t_5a846d694c1c44 1-208
+src/editor/shell/panels/include/context/editor/shell/panels/inspector_feed.h
+  s_e70383bb4cb548::t_12c6a577e8527d 1-118
+src/editor/shell/panels/include/context/editor/shell/panels/builtin_panels.h
+  s_e70383bb4cb548::t_3d3c7f46f843a6 14,16-21,23-26,38-43
+  s_e70383bb4cb548::t_7a6b9eb30eb0f5 61-65
+  s_e70383bb4cb548::t_ab06d9d758aa49 117-122
+  s_e70383bb4cb548::t_d4bf236e2ccfa3 137-155
+  s_e70383bb4cb548::t_b194b05aba1a37 86-91
+  s_adc1f643c631a0::t_0c3ae9ce39a5ce 44
+src/editor/gui/panels/inspector/include/context/editor/gui/panels/inspector/inspector_model.h
+  s_e70383bb4cb548::t_0639554658cf74 1-8,10-11
+src/editor/gui/viewport/tests/viewport_edit_test.h
+  s_e70383bb4cb548::t_f70321ac9d3cf9 138
+  s_e70383bb4cb548::t_ce1859462fa802 134
+src/editor/editorkernel/tests/test_kernel_server.cpp
+  s_e70383bb4cb548::t_de80b31f3de7e2 276-363
+  s_e70383bb4cb548::t_d68c59f47029b1 35
+src/editor/shell/panels/src/inspector_feed.cpp
+  s_e70383bb4cb548::t_3d0c3213997fa6 1-7,9-253
+  s_e70383bb4cb548::t_76a3ad2e29f5b6 8
+src/editor/gui/viewport/src/project_override_gateway.cpp
+  s_e70383bb4cb548::t_b4fdcac6a9a746 34-35,39-41,43-44
+  s_e70383bb4cb548::t_c3f4200e51470b 15
+src/editor/gui/panels/scenetree/tests/test_scene_tree_panel.cpp
+  s_e70383bb4cb548::t_af76c7225b9771 22-24
+  s_e70383bb4cb548::t_484a8680e2a96d 12
+src/editor/shell/src/editor_state_bridge.cpp
+  s_e70383bb4cb548::t_2959925c13786d 7-8,23-24,27-28
+src/tests/integration/test_redteam_boundaries.cpp
+  s_e70383bb4cb548::t_1eac80926adfc3 163-165
+src/editor/shell/panels/src/builtin_panels.cpp
+  s_e70383bb4cb548::t_83921167f97c37 5,8,10,12,26-45,48-49,69-108,117-118,159-216
+  s_e70383bb4cb548::t_757da01df91fd1 217
+src/editor/editorkernel/src/kernel_server.cpp
+  s_e70383bb4cb548::t_1c95afca73974c 5-6,11-16
+  s_e70383bb4cb548::t_71b4a8e813e224 440-444
+  s_e70383bb4cb548::t_49e26df4fbc8c5 472
+  s_a0187f20d63fae::t_b226319eca8431 376-439,445-471,473-475
+src/editor/shell/panels/tests/test_scenetree_feed.cpp
+  s_e70383bb4cb548::t_43285e9031ecae 1-285
+src/editor/gui/panels/scenetree/CMakeLists.txt
+  s_e70383bb4cb548::t_83b928bdb875aa 20-23,27
+  s_e70383bb4cb548::t_cf432fdf2eefef 43-45,49
+src/editor/gui/viewport/CMakeLists.txt
+  s_e70383bb4cb548::t_1e8b901e0b90bc 78-79,82
+src/editor/webui/core/src/hydration.ts
+  s_e70383bb4cb548::t_9cfd094da426f3 284-291
+  s_e70383bb4cb548::t_a0474918c04144 79-88,90-91
+  s_e70383bb4cb548::t_caea4439aa2082 583-601,610-612,615,623,626,628-634,652
+  s_e70383bb4cb548::t_082602feed27ad 582
+src/editor/shell/panels/CMakeLists.txt
+  s_e70383bb4cb548::t_c89aa5c668c8eb 1,7-13,15-19,23-25,29-32,34-35
+  s_e70383bb4cb548::t_32cc4be24f58b4 51-52,55-57,61
+src/editor/gui/panels/problems/tests/test_problems_panel.cpp
+  s_e70383bb4cb548::t_ba21fc25edd624 202-234
+src/editor/gui/panels/inspector/CMakeLists.txt
+  s_e70383bb4cb548::t_a79f46d4fa467e 51-53,57
+  s_e70383bb4cb548::t_1e62a3d4dc9d89 22-30,33
+src/editor/gui/viewport/src/viewport_edit_model.cpp
+  s_e70383bb4cb548::t_188ce4f8573d74 291-293,301,304,307
+src/editor/gui/panels/builders/src/inspector_builder.cpp
+  s_e70383bb4cb548::t_a2bd565ecf28a2 1-268
+src/editor/gui/uitree/src/node.cpp
+  s_e70383bb4cb548::t_25b4a7976203af 105-113,119-122,135-158
+src/editor/gui/uitree/tests/test_node.cpp
+  s_e70383bb4cb548::t_b9c7689114511c 95-151
+src/editor/gui/panels/builders/include/context/editor/gui/panels/builders/scene_tree_builder.h
+  s_e70383bb4cb548::t_80fc09aed84362 1-23
+src/editor/client/schema/context-client-schema.json
+  s_e70383bb4cb548::t_6316a4e8569942 825-867
+src/editor/gui/panels/builders/include/context/editor/gui/panels/builders/wire.h
+  s_e70383bb4cb548::t_72d2bc82ff2459 1-41
+src/editor/gui/panels/builders/tests/test_write_request.cpp
+  s_adc1f643c631a0::t_39e4d42740f697 1-85
+src/editor/gui/panels/inspector/README.md
+  s_e70383bb4cb548::t_12b22688d2c676 16-20,29-31,50-51
+src/editor/gui/panels/inspector/tests/test_inspector_model.cpp
+  s_e70383bb4cb548::t_473798a81e3ab8 9-10,27-30
+src/editor/gui/panels/inspector/tests/test_inspector_panel.cpp
+  s_e70383bb4cb548::t_43a84cdd3f2cdd 94,277
+src/editor/gui/panels/problems/src/problems_panel.cpp
+  s_e70383bb4cb548::t_80777124750b7d 92,115,149,209
+src/editor/gui/panels/scenetree/README.md
+  s_e70383bb4cb548::t_42c40ed6a6014e 15-19
+src/editor/gui/viewport/tests/test_viewport_edit_model.cpp
+  s_e70383bb4cb548::t_f618298ee39142 108,127,144
+src/editor/shell/CMakeLists.txt
+  s_e70383bb4cb548::t_f05e00a6b4fec7 70-73
+src/editor/shell/app/editor_main.cpp
+  s_e70383bb4cb548::t_4c377490e3e16c 69-72,125-128,367,386-389,396-401,403-415,521-527
+src/editor/shell/include/context/editor/shell/panel_host.h
+  s_e70383bb4cb548::t_ae6b1b7a5a744b 10-11,16-20,22-24
+src/editor/shell/panels/src/problems_feed.cpp
+  s_e70383bb4cb548::t_358a845ac1d881 277
+src/editor/webui/core/src/generated/client-schema.ts
+  s_e70383bb4cb548::t_052621326f012e 64-65,440-459,523
+src/tests/concurrency/test_coedit_concurrency.cpp
+  s_e70383bb4cb548::t_7bb79a57cf2046 58,98-100,102
+src/tests/integration/m5_exit_test.h
+  s_e70383bb4cb548::t_d2d050721ca4aa 112
+src/tests/integration/test_m5exit1_walkthrough.cpp
+  s_e70383bb4cb548::t_516837609f0b19 26,58,199
+src/tests/integration/test_m5exit3_seam_checklist.cpp
+  s_e70383bb4cb548::t_66c7ff9597b375 27,61,207,222,357
+src/editor/gui/panels/CMakeLists.txt
+  s_324df1460f5070::t_55d131fa0dbb93 11-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "11ded5965a8f503668d895de928b14eb5bfccb2a",
+  "prompts": {},
+  "sessions": {
+    "s_324df1460f5070": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a343013926ffc5ea7",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_4bcfc9cc3d05e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "480e3fcd-19cf-405f-b23d-709a5f03a6d8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_a0187f20d63fae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "92a83b9b-471a-4dfb-a4d5-cc213d191839",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_adc1f643c631a0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d1052a8b-c122-46b7-bbcd-810a348ce13e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e70383bb4cb548": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "96b28b90-eda7-4907-9bb9-08e5da0e87d6",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
