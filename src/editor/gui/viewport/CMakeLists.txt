@@ -75,9 +75,11 @@ target_include_directories(context_gui_viewport_edit PUBLIC ${CMAKE_CURRENT_SOUR
 #                                 (viewport_edit_model.h + project_override_gateway.h — the ONE L-30 engine)
 #   context_serializer         -> serializer::JsonValue              (viewport_edit_model.h)
 # PRIVATE: the disk-backed gateway's plan_write resolver + atomic write (impl-only), + warnings.
+# context_gui_panel_builders (M9 e05d3): the disk-backed gateway converts the seam's boundary-clean
+# OverrideWriteRequest through builders::to_write_request. PRIVATE — only the .cpps reach it.
 target_link_libraries(context_gui_viewport_edit
     PUBLIC context_gui_uitree context_compose context_gui_panel_inspector context_serializer
-    PRIVATE context_compose_project context_filesync context_warnings)
+    PRIVATE context_compose_project context_filesync context_gui_panel_builders context_warnings)
 
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) ------------------------------
 # context_filesync (via the gateway) pulls std::filesystem transitively, so static-link the GCC

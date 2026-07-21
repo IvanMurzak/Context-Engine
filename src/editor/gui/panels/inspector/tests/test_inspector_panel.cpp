@@ -8,7 +8,6 @@
 #include "context/editor/gui/panels/inspector/inspector_model.h"
 #include "context/editor/gui/uitree/panel.h"
 
-#include "context/editor/compose/compose_write.h"
 #include "context/editor/serializer/json_tree.h"
 
 #include "inspector_test.h"
@@ -20,7 +19,6 @@
 #include <vector>
 
 using namespace context::editor::gui::panels::inspector;
-namespace compose = context::editor::compose;
 namespace serializer = context::editor::serializer;
 namespace uitree = context::editor::gui::uitree;
 using serializer::JsonValue;
@@ -93,7 +91,7 @@ public:
     std::function<void()> on_first_attempt;
     mutable bool fired = false;
 
-    WriteAttempt attempt(const compose::WriteRequest& request,
+    WriteAttempt attempt(const OverrideWriteRequest& request,
                          std::uint64_t expected_raw_hash) const override
     {
         ++attempts;
@@ -186,6 +184,21 @@ int main()
         CHECK(panel.staged_pointer() == "/name");
         panel.discard_edit();
         CHECK(!panel.has_staged_edit());
+
+        // A producer mistake — a readonly-KIND field claiming editable:true — is refused by the
+        // MODEL layer itself, not only by each producer's own clamp (fail-closed at the one layer
+        // every producer feeds; no real builder/parser emits this combination).
+        InspectorModel forged = make_model();
+        for (InspectorField& f : forged.fields)
+        {
+            if (f.kind == WidgetKind::readonly)
+            {
+                f.editable = true; // the forged producer claim
+            }
+        }
+        InspectorPanel forged_panel;
+        forged_panel.set_model(std::move(forged), 100);
+        CHECK(!forged_panel.stage_edit("/note", jstr("x"))); // still refused: readonly KIND wins
     }
 
     // --- commit with no gateway / no staged edit is a no-op -----------------------------------------
@@ -276,7 +289,7 @@ int main()
         // A gateway that refuses with a compose error on the first attempt (never applies).
         struct RefusingGateway final : public OverrideWriteGateway
         {
-            WriteAttempt attempt(const compose::WriteRequest&, std::uint64_t) const override
+            WriteAttempt attempt(const OverrideWriteRequest&, std::uint64_t) const override
             {
                 WriteAttempt a;
                 a.code = "compose.write_target_not_found";

@@ -61,6 +61,8 @@ export type RpcMethod =
     | "edit-batch"
     | "query"
     | "snapshot"
+    | "editor.scene-tree"
+    | "editor.inspect"
     | "subscribe"
     | "unsubscribe"
     | "ack"
@@ -435,6 +437,26 @@ export const RPC_METHODS: { readonly [M in RpcMethod]: RpcMethodDescriptor } = {
         params: [],
         flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
     },
+    "editor.scene-tree": {
+        method: "editor.scene-tree",
+        ns: "",
+        noun: "editor",
+        verb: "scene-tree",
+        stability: "operational",
+        deprecated: false,
+        params: ["path"],
+        flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
+    },
+    "editor.inspect": {
+        method: "editor.inspect",
+        ns: "",
+        noun: "editor",
+        verb: "inspect",
+        stability: "operational",
+        deprecated: false,
+        params: ["path", "idPath"],
+        flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
+    },
     "subscribe": {
         method: "subscribe",
         ns: "",
@@ -498,7 +520,7 @@ export const RPC_METHODS: { readonly [M in RpcMethod]: RpcMethodDescriptor } = {
 };
 
 /** Every RPC method name, in registry order. */
-export const RPC_METHOD_NAMES: readonly RpcMethod[] = ["describe", "new", "set", "migrate", "package.add", "resource.read", "asset.move", "asset.rename", "merge-file", "resolve-conflict", "re-key", "validate", "session.new", "session.step", "session.seed", "session.inject", "session.hash", "session.record", "replay", "determinism.diff", "install", "profile.gc", "profile.session", "ui.dump", "ui.query", "ui.send", "ui.assert", "tilemap.paint", "tilemap.fill", "build", "doctor", "edit", "edit-batch", "query", "snapshot", "subscribe", "unsubscribe", "ack", "reconcile", "shutdown", "debug.attach"];
+export const RPC_METHOD_NAMES: readonly RpcMethod[] = ["describe", "new", "set", "migrate", "package.add", "resource.read", "asset.move", "asset.rename", "merge-file", "resolve-conflict", "re-key", "validate", "session.new", "session.step", "session.seed", "session.inject", "session.hash", "session.record", "replay", "determinism.diff", "install", "profile.gc", "profile.session", "ui.dump", "ui.query", "ui.send", "ui.assert", "tilemap.paint", "tilemap.fill", "build", "doctor", "edit", "edit-batch", "query", "snapshot", "editor.scene-tree", "editor.inspect", "subscribe", "unsubscribe", "ack", "reconcile", "shutdown", "debug.attach"];
 
 /** Every subscribable event topic. */
 export type EventTopic =

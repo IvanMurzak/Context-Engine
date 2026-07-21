@@ -5,12 +5,13 @@
 // applying the L-30 rebase-or-drop policy under a concurrent writer. The whole panel is CI-assertable
 // WITHOUT booting CEF (R-EDIT-001 testable-by-construction editor).
 //
-// The panel commits through the OverrideWriteGateway seam: the CEF host implements it over
-// compose::plan_write + filesync's atomic CAS write (the `context set` path); headless tests inject an
-// in-memory implementation over compose::plan_write. The panel owns NO disk / no filesync dependency —
-// only the pure write ENVELOPE (compose::WriteRequest) and the L-20/L-30 commit policy. Wiring the
-// gateway to the live daemon write path + the R-HUX-011 instrumented input->commit latency measurement
-// is the CEF-host integration path (a trailing M5 surface), out of this headless panel's scope.
+// The panel commits through the OverrideWriteGateway seam: the disk-backed gateway (gui/viewport)
+// implements it over compose::plan_write + filesync's atomic CAS write (the `context set` path);
+// headless tests inject an in-memory implementation over compose::plan_write. The panel owns NO
+// disk / no filesync / no compose dependency — only the pure BOUNDARY-CLEAN write envelope
+// (OverrideWriteRequest, M9 e05d3) and the L-20/L-30 commit policy. Wiring the gateway to the live
+// daemon write path (a WIRE gateway over RPC `edit` + `--if-match`) is e09's task, out of this
+// headless panel's scope.
 
 #pragma once
 
@@ -18,7 +19,6 @@
 
 #include "context/editor/gui/uitree/panel.h"
 
-#include "context/editor/compose/compose_write.h" // compose::WriteRequest
 #include "context/editor/serializer/json_tree.h"
 
 #include <cstdint>
@@ -29,6 +29,35 @@
 
 namespace context::editor::gui::panels::inspector
 {
+
+// Which authored file an override write lands in (the boundary-clean mirror of
+// compose::WriteTarget — M9 e05d3, D10). `outermost` (the L-35 default) writes an override entry in
+// the root instancing scene; `defining_template` edits the entity's authored value in its defining
+// scene; `at_instance` writes an override in a mid-level instancing scene named by an id-path prefix.
+enum class OverrideWriteTarget
+{
+    outermost,
+    defining_template,
+    at_instance,
+};
+
+// The boundary-clean override-write envelope (M9 e05d3, D10/D18 — owner ruling 2026-07-20): what
+// the panel side of the OverrideWriteGateway seam hands a gateway, member-for-member the same shape
+// as compose::WriteRequest but with NO kernel type, so the panel library carries no compose:: on its
+// public link interface. Kernel-side gateway implementations convert through the ONE
+// builders::to_write_request (gui/panels/builders/inspector_builder.h); a wire gateway (e09) maps it
+// onto the daemon's RPC params directly.
+struct OverrideWriteRequest
+{
+    std::string root_scene;           // the addressing (root) scene path
+    std::vector<std::string> id_path; // L-35 id-path to the composed entity, from the root inward
+    std::string pointer;              // RFC 6901 JSON pointer of the field inside the entity
+    serializer::JsonValue value;      // the value to set
+    OverrideWriteTarget target = OverrideWriteTarget::outermost;
+    // target == at_instance: the id-path PREFIX naming the mid-level addressing scene (a strict,
+    // non-empty prefix of id_path; the override addresses the entity by the remaining suffix).
+    std::vector<std::string> at_instance;
+};
 
 // The result of ONE CAS-guarded override-write attempt through the `context set` write path.
 struct WriteAttempt
@@ -52,8 +81,12 @@ struct FieldState
 };
 
 // The seam the inspector commits override writes through — the SAME `context set` write path (L-35
-// single source of truth). Implemented by the CEF host over compose::plan_write + filesync's atomic
-// CAS write; by headless tests over an in-memory compose::plan_write. Both total (never throw).
+// single source of truth). Implemented by the disk-backed gateway (gui/viewport, over
+// compose::plan_write + filesync's atomic CAS write — converting the boundary-clean request via
+// builders::to_write_request) and by headless tests over an in-memory compose::plan_write; a WIRE
+// implementation over the daemon's RPC arrives with e09. Both total (never throw). The request type
+// is the boundary-clean OverrideWriteRequest (above), NEVER compose::WriteRequest — that is what
+// keeps this header, and with it the whole panel library, off the kernel's link closure (D10).
 class OverrideWriteGateway
 {
 public:
@@ -62,7 +95,7 @@ public:
     // Attempt the override write CAS-guarded on `expected_raw_hash` (the `--if-match` raw-byte hash).
     // On success: applied + the new file raw hash. On a concurrent-writer CAS mismatch: cas_mismatch +
     // the file's CURRENT raw hash. Any other failure carries a catalog `code` (compose.* / file.*).
-    [[nodiscard]] virtual WriteAttempt attempt(const compose::WriteRequest& request,
+    [[nodiscard]] virtual WriteAttempt attempt(const OverrideWriteRequest& request,
                                                std::uint64_t expected_raw_hash) const = 0;
 
     // The current composed value at (root_scene, id_path, pointer) + the outermost target file's
@@ -121,7 +154,8 @@ public:
 
     // Stage an in-flight edit for one field (a gesture in progress; no write yet — L-20 commits at
     // gesture end). Records the field's base value so commit() can apply the L-30 decision. Returns
-    // false for an unknown or non-editable field pointer.
+    // false for an unknown or non-editable field pointer — a readonly-KIND field is never editable
+    // here, whatever a producer's `editable` claim said (the model layer owns that invariant).
     bool stage_edit(const std::string& pointer, serializer::JsonValue new_value);
     [[nodiscard]] bool has_staged_edit() const noexcept { return staged_.has_value(); }
     [[nodiscard]] const std::string& staged_pointer() const noexcept { return staged_pointer_; }
@@ -185,7 +219,7 @@ private:
 // caller updates its own CAS token from `result.raw_hash` (applied/rebased/dropped) and decides
 // whether to keep its staged/queued edit (an error keeps it; a drop consumes it).
 [[nodiscard]] CommitResult commit_override_write(const OverrideWriteGateway& gateway,
-                                                 const compose::WriteRequest& request,
+                                                 const OverrideWriteRequest& request,
                                                  const std::string& root_scene,
                                                  const std::vector<std::string>& id_path,
                                                  const std::string& pointer,

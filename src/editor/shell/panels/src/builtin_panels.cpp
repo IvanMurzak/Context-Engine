@@ -2,10 +2,14 @@
 
 #include "context/editor/shell/panels/builtin_panels.h"
 
+#include "context/editor/client/client.h" // the pump's live daemon reads (complete type HERE only)
 #include "context/editor/gui/panels/problems/problems_panel.h"
 #include "context/editor/gui/uitree/builtin.h"
+#include "context/editor/shell/panels/inspector_feed.h"
 #include "context/editor/shell/panels/problems_feed.h" // ProblemsFeed complete type (see builtin_panels.h)
+#include "context/editor/shell/panels/scenetree_feed.h"
 
+#include <cstdio>
 #include <utility>
 
 namespace context::editor::shell::panels
@@ -19,10 +23,30 @@ namespace
 // coverage ctest is what keeps the two spellings honest.
 constexpr const char* kPlaceholderPanelId = "placeholder";
 
+// One synchronous daemon read for the pump below: claim-first is the CALLER's job (see the header's
+// failure posture). Returns the reply's `result` (the R-CLI-008 envelope) or nullopt, reporting the
+// failure to stderr — once per occurrence, because a claimed fetch is not retried until the next
+// trigger, so this cannot spam.
+[[nodiscard]] std::optional<contract::Json> pump_read(client::Client& client,
+                                                      const std::string& method,
+                                                      contract::Json params, const char* what)
+{
+    std::string error;
+    std::optional<contract::Json> reply = client.call(method, std::move(params), error);
+    if (!reply.has_value())
+    {
+        std::fprintf(stderr,
+                     "context_editor: the %s read (%s) failed (%s); it will retry on the next "
+                     "change\n",
+                     what, method.c_str(), error.c_str());
+    }
+    return reply;
+}
+
 } // namespace
 
-// Out-of-line so `ProblemsFeed` is complete here (builtin_panels.h forward-declares it to keep the
-// header's include chain RTTI/CEF-clean — see that header's comment).
+// Out-of-line so the feed types are complete here (builtin_panels.h forward-declares them to keep
+// the header's include chain RTTI/CEF-clean — see that header's comment).
 BuiltinPanels::BuiltinPanels() = default;
 BuiltinPanels::~BuiltinPanels() = default;
 BuiltinPanels::BuiltinPanels(BuiltinPanels&&) noexcept = default;
@@ -42,6 +66,46 @@ bool apply_problems_event(ProblemsFeed& feed, const std::string& topic, const co
     return feed.apply_event(topic, payload, generation);
 }
 
+bool apply_scenetree_event(SceneTreeFeed& feed, const std::string& topic,
+                           const contract::Json& payload, std::uint64_t generation)
+{
+    return feed.apply_event(topic, payload, generation);
+}
+
+void pump_panel_feeds(BuiltinPanels& panels, client::Client& client, const std::string& scene_path)
+{
+    // Scene tree: fetch when due AND a scene is named. The claim precedes the call (header: a
+    // failure waits for the next settle rather than hammering).
+    if (panels.scenetree != nullptr && !scene_path.empty() && panels.scenetree->fetch_due())
+    {
+        panels.scenetree->mark_fetched();
+        contract::Json params = contract::Json::object();
+        params.set("path", contract::Json(scene_path));
+        if (const std::optional<contract::Json> reply =
+                pump_read(client, "editor.scene-tree", std::move(params), "scene-tree"))
+        {
+            (void)panels.scenetree->apply_result(*reply);
+        }
+    }
+
+    // Inspector: fetch the pending selection. `scene_path` addresses the same root scene the tree
+    // was built from — a selection can only have come from it.
+    if (panels.inspector != nullptr && !scene_path.empty() &&
+        panels.inspector->pending().has_value())
+    {
+        const std::string identity = *panels.inspector->pending();
+        panels.inspector->mark_fetched();
+        contract::Json params = contract::Json::object();
+        params.set("path", contract::Json(scene_path));
+        params.set("idPath", contract::Json(identity));
+        if (const std::optional<contract::Json> reply =
+                pump_read(client, "editor.inspect", std::move(params), "inspector"))
+        {
+            (void)panels.inspector->apply_result(*reply);
+        }
+    }
+}
+
 const std::vector<std::string>& hostable_panel_ids()
 {
     // Built once. Kept in lockstep with the bindings below by `test_builtin_panels.cpp`, which
@@ -50,6 +114,8 @@ const std::vector<std::string>& hostable_panel_ids()
     static const std::vector<std::string> ids = {
         kPlaceholderPanelId,
         gui::panels::problems::ProblemsPanel::kContributionId,
+        gui::panels::scenetree::SceneTreePanel::kContributionId,
+        gui::panels::inspector::InspectorPanel::kContributionId,
     };
     return ids;
 }
@@ -88,6 +154,65 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
         }
         // On a refused binding the feed is DROPPED rather than kept: a feed nothing routes to would
         // pump daemon events into a model no renderer can ever see.
+    }
+
+    // --- Scene tree + Inspector (M9 e05d3, the D10-split pair) ----------------------------------
+    // Hostable because their kernel-typed builders moved daemon-side (gui/panels/builders/): the
+    // panel libraries on THIS closure are boundary-clean, and the models arrive as data over
+    // `editor.scene-tree` / `editor.inspect` (see the feeds). The Scene tree's selection is what
+    // drives the Inspector's fetch (R-HUX-011) — wired HERE, the one place holding both feeds.
+    {
+        auto scenetree = std::make_unique<SceneTreeFeed>(
+            host, gui::panels::scenetree::SceneTreePanel::kContributionId);
+        auto inspector = std::make_unique<InspectorFeed>(
+            host, gui::panels::inspector::InspectorPanel::kContributionId);
+
+        const bool tree_bound =
+            host.provide(gui::panels::scenetree::SceneTreePanel::kContributionId,
+                         scenetree->make_provider());
+        const bool inspector_bound =
+            host.provide(gui::panels::inspector::InspectorPanel::kContributionId,
+                         inspector->make_provider());
+
+        if (tree_bound)
+        {
+            ++out.bound;
+        }
+        if (inspector_bound)
+        {
+            ++out.bound;
+        }
+
+        // The selection loop, wired only when BOTH ends exist. The raw capture is safe by
+        // construction: both feeds live (and die) together in this bag, and no selection fires
+        // during destruction (builtin_panels.h documents the member order that keeps it so).
+        if (tree_bound && inspector_bound)
+        {
+            InspectorFeed* inspector_ptr = inspector.get();
+            scenetree->panel().add_selection_listener(
+                [inspector_ptr](const gui::panels::scenetree::SceneSelection& selection)
+                {
+                    if (selection.identity.empty())
+                    {
+                        inspector_ptr->request_clear();
+                    }
+                    else
+                    {
+                        inspector_ptr->request(selection.identity);
+                    }
+                });
+        }
+
+        if (tree_bound)
+        {
+            out.scenetree = std::move(scenetree);
+        }
+        if (inspector_bound)
+        {
+            out.inspector = std::move(inspector);
+        }
+        // A refused binding drops its feed (the ProblemsFeed rule); the selection listener was only
+        // wired when both bound, so a dangling capture cannot survive this scope.
     }
 
     return out;

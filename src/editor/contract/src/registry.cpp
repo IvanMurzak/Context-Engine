@@ -866,6 +866,36 @@ Registry::Registry()
         "plus the boot-time R-FILE-004 recovery diagnostics.",
         /*params=*/{}, /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
 
+    // --- M9 e05d3: the editor-panel READ surface (D10/D18, design 05 §4's `editor` namespace) ----
+    // The daemon-served composed reads the Shell's Scene tree + Inspector hydrate from. The
+    // kernel-typed model builders live daemon-side (gui/panels/builders/) and the panel models cross
+    // the wire AS DATA — the editor stays an ordinary client (no compose/schema on its closure).
+    // Operational (daemon-served; a one-shot CLI invocation rejects them with
+    // contract.operational_only, exactly like snapshot/query) and read-only (read_query scope —
+    // classified in bridge/src/scope.cpp + the redteam scope table). Additive under protocolMajor 1.
+    verbs_.push_back(make_verb(
+        "", "editor", "scene-tree",
+        "Read the composed derived-world SCENE TREE for a root scene (M9 D17/D18): the flattened "
+        "L-35 hierarchy — instances/overrides visible — as the boundary-clean panel model, built "
+        "daemon-side over the same disk-backed compose path `set` plans against. Served by a live "
+        "daemon; the editor Shell's Scene tree panel hydrates from exactly this.",
+        /*params=*/
+        {{"path", "path", true, "The root scene file to compose (project-relative)."}},
+        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "editor", "inspect",
+        "Read the INSPECTOR projection of one composed entity (M9 D17/D18): its kind schema's "
+        "R-CLI-005 introspection intersected with its composed value — the editable field set, "
+        "override provenance visible — plus the root scene file's raw-byte hash (the CAS token a "
+        "subsequent `set --if-match` guards on). Served by a live daemon; the editor Shell's "
+        "Inspector panel hydrates from exactly this.",
+        /*params=*/
+        {{"path", "path", true, "The root scene file to compose (project-relative)."},
+         {"idPath", "string", true,
+          "The L-35 id-path to the composed entity, slash-separated ([instanceId, ..., entityId])."}},
+        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
     // --- R-CLI-015 subscription protocol (subscribe / unsubscribe / ack) -------------------------
     // The concrete event-stream subscription methods pinned in the versioned contract (R-CLI-004):
     // subscribe returns a current-state snapshot + a subId (snapshot-then-delta), ack advances the

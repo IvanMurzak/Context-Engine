@@ -66,6 +66,10 @@ struct Options
     // `file://` path anywhere: assets ship in-app and are served over context-editor:// (04 §1).
     std::string url = shell::kAppEntryUrl;
     std::filesystem::path app_root = CONTEXT_WEBUI_ASSET_DIR;
+    // e05d3: the root scene the Scene tree + Inspector hydrate from (project-relative). EMPTY is the
+    // honest no-scene state — both panels stay empty, exactly like Problems without a daemon. Scene
+    // discovery/selection UX is a later seam (e08's session state); an explicit flag is the v1.
+    std::string scene;
     bool headless = false;   // never open an OS window (CI / Session 0 / a remote box)
     bool devtools = false;   // dev-loop only (review B-F11)
     int max_frames = 0;      // 0 == run until the window closes; >0 caps the loop (smoke runs)
@@ -78,6 +82,8 @@ void print_usage()
                 "  --project <dir>   project root (default: the current directory)\n"
                 "  --url <url>       the document to load (default: %s)\n"
                 "  --app-root <dir>  editor-core's asset root, served over context-editor://app/\n"
+                "  --scene <path>    root scene the Scene tree + Inspector hydrate from "
+                "(project-relative; empty = no scene)\n"
                 "  --headless        do not open an OS window; run the shell offscreen\n"
                 "  --devtools        enable DevTools (dev loop only)\n"
                 "  --frames <n>      run at most n loop iterations, then exit\n"
@@ -117,6 +123,10 @@ bool parse_options(int argc, char** argv, Options& out, bool& asked_for_help)
         else if (arg == "--app-root" && has_value)
         {
             out.app_root = argv[++i];
+        }
+        else if (arg == "--scene" && has_value)
+        {
+            out.scene = argv[++i];
         }
         else if (arg == "--frames" && has_value)
         {
@@ -356,7 +366,7 @@ int main(int argc, char** argv)
     // daemon restart can stall the loop for the ladder's duration, which the tuning below caps at
     // roughly a second rather than the ~21 s the defaults would allow.
     std::unique_ptr<client::SubscriptionConsumer> diagnostics;
-    if (daemon.client != nullptr && builtin.problems != nullptr)
+    if (daemon.client != nullptr && (builtin.problems != nullptr || builtin.scenetree != nullptr))
     {
         client::SubscriptionOptions subscription_options;
         subscription_options.poll_timeout_ms = 0; // never block the owner loop on a quiet stream
@@ -375,17 +385,36 @@ int main(int argc, char** argv)
         // drive it through `apply_problems_snapshot`/`apply_problems_event`, the non-member seams
         // builtin_panels.h/.cpp expose for exactly this caller.
         shell::panels::ProblemsFeed* feed = builtin.problems.get();
+        // e05d3: the Scene tree rides the SAME stream — a `derivation.settled` advances its status
+        // line and marks its re-read due (the owner loop's pump performs it). Forward-declared type,
+        // driven through the non-member seam, for the same RTTI/CEF reason as the problems feed.
+        shell::panels::SceneTreeFeed* tree_feed = builtin.scenetree.get();
         // 0 is only the FALLBACK stamp for a snapshot that carries no `generation` of its own; the
         // real cursor snapshot always does, and `apply_snapshot` prefers it. Passing 0 as the
         // authoritative stamp would mark every recovered provisional diagnostic stale-by-
         // construction, since the stream never settles below generation 1.
         diagnostics->on_snapshot(
             [feed](const std::string&, const contract::Json& snapshot)
-            { shell::panels::apply_problems_snapshot(*feed, snapshot, 0); });
+            {
+                if (feed != nullptr)
+                {
+                    shell::panels::apply_problems_snapshot(*feed, snapshot, 0);
+                }
+            });
         diagnostics->on_event(
-            [feed](const std::string&, const client::ClientEvent& event)
-            { (void)shell::panels::apply_problems_event(*feed, event.topic, event.payload,
-                                                        event.generation); });
+            [feed, tree_feed](const std::string&, const client::ClientEvent& event)
+            {
+                if (feed != nullptr)
+                {
+                    (void)shell::panels::apply_problems_event(*feed, event.topic, event.payload,
+                                                              event.generation);
+                }
+                if (tree_feed != nullptr)
+                {
+                    (void)shell::panels::apply_scenetree_event(*tree_feed, event.topic,
+                                                               event.payload, event.generation);
+                }
+            });
 
         client::SubscriptionSpec spec;
         spec.topics = {shell::panels::kDiagnosticsTopic, shell::panels::kDerivationTopic};
@@ -490,6 +519,13 @@ int main(int argc, char** argv)
                              pump_error.c_str());
                 diagnostics.reset();
             }
+        }
+        if (daemon.client != nullptr)
+        {
+            // e05d3: drain the live-hydration work the feeds marked due (Scene tree re-reads on
+            // settle; the Inspector's selection fetch). Synchronous on the owner loop by the same
+            // single-threaded reasoning as the diagnostics pump above; a no-op when nothing is due.
+            shell::panels::pump_panel_feeds(builtin, *daemon.client, options.scene);
         }
         if (options.max_frames > 0 && frames >= options.max_frames)
         {

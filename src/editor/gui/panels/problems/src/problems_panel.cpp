@@ -89,6 +89,7 @@ void ProblemsPanel::set_diagnostics(std::vector<ProblemDiagnostic> diagnostics)
         }
     }
     diagnostics_ = std::move(unique);
+    model_dirty_ = true;
 
     if (navigation_.diagnostic_identity.empty())
     {
@@ -111,6 +112,7 @@ void ProblemsPanel::set_diagnostics(std::vector<ProblemDiagnostic> diagnostics)
 
 bool ProblemsPanel::ingest(ProblemDiagnostic diagnostic)
 {
+    model_dirty_ = true;
     const std::string id = diagnostic.identity();
     for (ProblemDiagnostic& d : diagnostics_)
     {
@@ -144,6 +146,7 @@ void ProblemsPanel::on_derivation_settled(std::uint64_t generation, bridge::Stab
         kept.push_back(std::move(d));
     }
     diagnostics_ = std::move(kept);
+    model_dirty_ = true;
 
     if (!navigation_.diagnostic_identity.empty() && find(navigation_.diagnostic_identity) == nullptr)
     {
@@ -203,7 +206,7 @@ uitree::Panel ProblemsPanel::build_panel() const
     using uitree::Role;
     using uitree::UiNode;
 
-    const ProblemsModel model = build_problems_model(diagnostics_);
+    const ProblemsModel& model = this->model(); // the cached grouped view (see model())
 
     bool any_navigable = false;
     for (const ProblemGroup& group : model.groups)

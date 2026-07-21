@@ -32,6 +32,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -271,6 +272,109 @@ int main()
         CHECK(desc_resp.contains("result"));
         CHECK(desc_resp.at("result").at("ok").as_bool());
         CHECK(desc_resp.at("result").at("data").at("contract").contains("protocol"));
+
+        // ---- editor.scene-tree / editor.inspect (M9 e05d3): the composed panel reads -------------
+        // Served over the SAME disk-backed compose path `context set` plans against, so the fixture
+        // is REAL files under the project root (the MemoryFileStore above backs the derivation
+        // pipeline, not composition). Root instances child + overrides the child camera's fov —
+        // instances/overrides must be VISIBLE in the answered models (L-35).
+        {
+            const auto write_file = [&](const char* name, const std::string& text)
+            {
+                std::ofstream out(project / name, std::ios::binary);
+                out << text;
+            };
+            write_file("child.scene.json", R"({
+              "$schema": "ctx:scene", "version": 1,
+              "entities": [
+                {"id": "ccccccccccccccc1", "name": "Cam",
+                 "components": {
+                   "transform": {"position": [1, 2, 3]},
+                   "camera": {"fov": 1.0, "near": 0.1, "far": 500.0}
+                 }}
+              ]})");
+            write_file("root.scene.json", R"({
+              "$schema": "ctx:scene", "version": 1,
+              "entities": [],
+              "instances": [{"id": "aaaaaaaaaaaaaaa1", "scene": "child.scene.json"}],
+              "overrides": [
+                {"path": ["aaaaaaaaaaaaaaa1", "ccccccccccccccc1"],
+                 "pointer": "/components/camera/fov", "value": 1.4, "base": 1.0}
+              ]})");
+
+            // scene-tree: the composed hierarchy, instance boundary + overridden entity visible.
+            Json stp = Json::object();
+            stp.set("path", Json(std::string("root.scene.json")));
+            const std::optional<std::string> st = rw.request(rpc(6, "editor.scene-tree", std::move(stp)));
+            CHECK(st.has_value());
+            const Json st_resp = Json::parse(*st);
+            CHECK(st_resp.contains("result"));
+            const Json& tree = st_resp.at("result").at("data").at("sceneTree");
+            CHECK(tree.at("ok").as_bool());
+            CHECK(tree.at("entityCount").as_int() == 1);
+            CHECK(tree.at("roots").size() == 1u);
+            const Json& boundary = tree.at("roots").at(std::size_t{0});
+            CHECK(boundary.at("identity").as_string() == "aaaaaaaaaaaaaaa1");
+            CHECK(boundary.at("kind").as_string() == "instance");
+            const Json& cam = boundary.at("children").at(std::size_t{0});
+            CHECK(cam.at("identity").as_string() == "aaaaaaaaaaaaaaa1/ccccccccccccccc1");
+            CHECK(cam.at("displayName").as_string() == "Cam");
+            CHECK(cam.at("overridden").as_bool()); // the L-35 override is visible, not hidden
+
+            // inspect: the schema-driven field set with the override applied + marked, plus the
+            // root scene's raw-hash CAS token.
+            Json ip = Json::object();
+            ip.set("path", Json(std::string("root.scene.json")));
+            ip.set("idPath", Json(std::string("aaaaaaaaaaaaaaa1/ccccccccccccccc1")));
+            const std::optional<std::string> insp = rw.request(rpc(7, "editor.inspect", std::move(ip)));
+            CHECK(insp.has_value());
+            const Json insp_resp = Json::parse(*insp);
+            CHECK(insp_resp.contains("result"));
+            const Json& idata = insp_resp.at("result").at("data");
+            const Json& imodel = idata.at("inspector");
+            CHECK(imodel.at("present").as_bool());
+            CHECK(imodel.at("identity").as_string() == "aaaaaaaaaaaaaaa1/ccccccccccccccc1");
+            CHECK(imodel.at("kindId").as_string() == "ctx:scene");
+            CHECK(imodel.at("overrideCount").as_int() == 1);
+            bool saw_fov = false;
+            for (std::size_t i = 0; i < imodel.at("fields").size(); ++i)
+            {
+                const Json& field = imodel.at("fields").at(i);
+                if (field.at("pointer").as_string() == "/components/camera/fov")
+                {
+                    saw_fov = true;
+                    CHECK(field.at("overridden").as_bool());
+                    CHECK(field.at("value").as_string() == "1.4"); // the COMPOSED (overridden) value
+                }
+            }
+            CHECK(saw_fov);
+            CHECK(!idata.at("rawHash").as_string().empty());
+            CHECK(idata.at("rawHash").as_string() != "0"); // the file exists -> a real CAS token
+
+            // inspect an UNKNOWN id-path: present:false — a renderable state, not a protocol fault.
+            Json missing = Json::object();
+            missing.set("path", Json(std::string("root.scene.json")));
+            missing.set("idPath", Json(std::string("does-not-exist")));
+            const std::optional<std::string> none = rw.request(rpc(8, "editor.inspect", std::move(missing)));
+            CHECK(none.has_value());
+            const Json none_resp = Json::parse(*none);
+            CHECK(!none_resp.at("result").at("data").at("inspector").at("present").as_bool());
+
+            // inspect with a JAIL-ESCAPING path (R-SEC-008): the raw-hash CAS read must not become
+            // an out-of-project existence/content-hash oracle. The `..` path here names the very
+            // same on-disk root.scene.json that answered a real token above — escaping form alone
+            // must degrade it to the honest no-token "0" (and the composed model to present:false).
+            Json escaping = Json::object();
+            escaping.set("path", Json(std::string("../") + project.filename().string() +
+                                      "/root.scene.json"));
+            escaping.set("idPath", Json(std::string("aaaaaaaaaaaaaaa1/ccccccccccccccc1")));
+            const std::optional<std::string> jailed =
+                rw.request(rpc(9, "editor.inspect", std::move(escaping)));
+            CHECK(jailed.has_value());
+            const Json jailed_resp = Json::parse(*jailed);
+            CHECK(jailed_resp.at("result").at("data").at("rawHash").as_string() == "0");
+            CHECK(!jailed_resp.at("result").at("data").at("inspector").at("present").as_bool());
+        }
 
         // shutdown — breaks the serve loop (the thread joins below without a kill)
         const std::optional<std::string> s = rw.request(rpc(5, "shutdown", Json::object()));

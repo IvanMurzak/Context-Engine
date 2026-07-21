@@ -105,7 +105,7 @@ constexpr int kMaxRebaseRetries = 8;
 } // namespace
 
 CommitResult commit_override_write(const OverrideWriteGateway& gateway,
-                                   const compose::WriteRequest& request, const std::string& root_scene,
+                                   const OverrideWriteRequest& request, const std::string& root_scene,
                                    const std::vector<std::string>& id_path, const std::string& pointer,
                                    const serializer::JsonValue& collision_base,
                                    std::uint64_t base_raw_hash)
@@ -202,7 +202,11 @@ void InspectorPanel::clear()
 bool InspectorPanel::stage_edit(const std::string& pointer, serializer::JsonValue new_value)
 {
     const InspectorField* field = find_field(model_, pointer);
-    if (field == nullptr || !field->editable)
+    // The readonly->never-editable invariant is enforced HERE, at the model layer every producer
+    // feeds — not only by each producer (the builder derives editable from the kind; the wire
+    // parser clamps): a readonly widget has no editing affordance this build can render honestly,
+    // so no producer mistake may make it stageable (fail-closed).
+    if (field == nullptr || !field->editable || field->kind == WidgetKind::readonly)
     {
         return false;
     }
@@ -228,8 +232,15 @@ CommitResult InspectorPanel::commit()
     }
 
     const StagedEdit edit = *staged_;
-    const compose::WriteRequest request =
-        override_write_request(model_, edit.pointer, edit.new_value);
+    // The boundary-clean envelope (M9 e05d3): the L-35 outermost-scene default, addressed by the
+    // model's id-path — exactly what builders::override_write_request constructs kernel-side; the
+    // gateway converts (builders::to_write_request) or maps it onto the wire (e09).
+    OverrideWriteRequest request;
+    request.root_scene = model_.root_scene;
+    request.id_path = model_.id_path;
+    request.pointer = edit.pointer;
+    request.value = edit.new_value;
+    request.target = OverrideWriteTarget::outermost;
 
     // Route the gesture through the ONE L-20/L-30 commit engine (shared with the session undo/redo
     // replay): CAS-guarded on the snapshot base hash, rebase-or-drop under a concurrent writer.

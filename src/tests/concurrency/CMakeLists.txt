@@ -16,11 +16,12 @@ set(_concurrency_static_runtime
 # --- concurrency-coedit: Scenario 1 (co-edit) -----------------------------------------------------
 # The L-30 rebase-or-drop gesture engine under a concurrent second client + CAS --if-match + the
 # R-QA-010 fault-seam composition check + the 10k-round no-lost-update seeded property (R-QA-011).
-# Links context_gui_panel_inspector (the shared commit_override_write engine), context_testing (the
-# SeededRng + fault-scenario drivers), context_filesync (content_hash), context_compose (WriteRequest).
+# Links context_gui_panel_inspector (the shared commit_override_write engine + the boundary-clean
+# inspector::OverrideWriteRequest seam — since e05d3 no compose type is needed here), context_testing
+# (the SeededRng + fault-scenario drivers), context_filesync (content_hash).
 add_executable(context_test_coedit_concurrency test_coedit_concurrency.cpp)
 target_link_libraries(context_test_coedit_concurrency
-    PRIVATE context_gui_panel_inspector context_testing context_filesync context_compose
+    PRIVATE context_gui_panel_inspector context_testing context_filesync
             context_serializer context_warnings)
 target_link_options(context_test_coedit_concurrency PRIVATE ${_concurrency_static_runtime})
 target_include_directories(context_test_coedit_concurrency PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -315,6 +315,7 @@ foreach(_i RANGE ${_m5_exit_last})
     target_link_libraries(context_${_t}
         PRIVATE context_gui_a11y context_gui_contract context_gui_compositor
                 context_gui_panel_scenetree context_gui_panel_inspector context_gui_panel_problems
+                context_gui_panel_builders # e05d3: the kernel-typed model builders (split out, D10)
                 context_gui_viewport context_gui_playbar context_gui_undo context_gui_uitree
                 context_compose context_serializer context_render context_warnings)
     target_link_options(context_${_t} PRIVATE ${_m5_exit_static_runtime})

@@ -1,11 +1,12 @@
-// T1 for the panel composition root (M9 e05d1): what binds, what deliberately stays unhosted, and
-// the end-to-end path from the real roster through a real provider to a rendered panel.
+// T1 for the panel composition root (M9 e05d1/e05d3): what binds, what deliberately stays unhosted,
+// and the end-to-end path from the real roster through a real provider to a rendered panel.
 //
-// THE UNHOSTED ASSERTIONS ARE THE POINT, not an omission. `builtin.scene-tree` and
-// `builtin.inspector` are LISTED and NOT hosted in this build, because their libraries link
-// `context_compose`, which the D10 shell-boundary gate forbids. Asserting that here pins the current
-// state so e05d3 — whose whole job is to make them hostable — sees this test go red in exactly the
-// place that means "you succeeded", rather than discovering the boundary by configure failure.
+// e05d1 pinned `builtin.scene-tree` / `builtin.inspector` as LISTED-BUT-UNHOSTED (their libraries
+// linked `context_compose`, which the D10 shell-boundary gate forbids) — and pinned it HERE so that
+// e05d3, whose whole job was to make them hostable, saw this test go red in exactly the place that
+// means "you succeeded". e05d3 landed: the kernel-typed builders moved daemon-side, the panel
+// libraries are boundary-clean, and this file now asserts the HOSTED state — all four hostable
+// panels bound, and the Scene tree's selection wired to the Inspector's fetch (R-HUX-011).
 
 #include "context/editor/shell/panels/builtin_panels.h"
 
@@ -13,18 +14,20 @@
 #include "context/editor/gui/panels/problems/problems_panel.h"
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/panel_host.h"
-#include "context/editor/shell/panels/problems_feed.h" // ProblemsFeed complete type: builtin_panels.h
-                                                        // only forward-declares it now, and this file
-                                                        // calls ProblemsFeed methods on `bound.problems`.
+#include "context/editor/shell/panels/inspector_feed.h" // complete feed types: builtin_panels.h only
+#include "context/editor/shell/panels/problems_feed.h"  // forward-declares them, and this file calls
+#include "context/editor/shell/panels/scenetree_feed.h" // methods on the bag's members.
 
 #include "panels_test.h"
 
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace shell = context::editor::shell;
 namespace panels = context::editor::shell::panels;
 namespace gc = context::editor::gui::contract;
+namespace scenetree = context::editor::gui::panels::scenetree;
 using Json = context::editor::contract::Json;
 
 namespace
@@ -56,39 +59,42 @@ void binds_every_hostable_panel_and_nothing_else()
         CHECK(host.hosts(id));
     }
 
-    // TWO panels, from two different libraries — see builtin_panels.h on why one would not do.
-    CHECK(panels::hostable_panel_ids().size() == 2);
+    // FOUR panels, from three different libraries (uitree / problems / the e05d3 pair) — the
+    // panel-agnosticism claim exercised across every hosted shape.
+    CHECK(panels::hostable_panel_ids().size() == 4);
     CHECK(host.hosts("placeholder"));
     CHECK(host.hosts(context::editor::gui::panels::problems::ProblemsPanel::kContributionId));
+    CHECK(host.hosts("builtin.scene-tree"));
+    CHECK(host.hosts("builtin.inspector"));
 
-    // The feed owner came back, so the Problems provider's captures stay alive.
+    // The feed owners came back, so every provider's captures stay alive.
     CHECK(bound.problems != nullptr);
-
-    // --- the deliberate NOT-hosted set (see the file header).
-    CHECK(host.knows("builtin.scene-tree"));
-    CHECK(!host.hosts("builtin.scene-tree"));
-    CHECK(host.knows("builtin.inspector"));
-    CHECK(!host.hosts("builtin.inspector"));
+    CHECK(bound.scenetree != nullptr);
+    CHECK(bound.inspector != nullptr);
 
     // The whole roster is still LISTED — an unhostable panel is visible and honestly flagged, never
     // hidden.
     const Json listing = host.list();
     CHECK(listing.at("panels").size() == gc::builtin_contributions().size());
-    const Json* scenetree = find_panel(listing, "builtin.scene-tree");
-    CHECK(scenetree != nullptr && !scenetree->at("hosted").as_bool());
+    const Json* scenetree_entry = find_panel(listing, "builtin.scene-tree");
+    CHECK(scenetree_entry != nullptr && scenetree_entry->at("hosted").as_bool());
+    const Json* inspector_entry = find_panel(listing, "builtin.inspector");
+    CHECK(inspector_entry != nullptr && inspector_entry->at("hosted").as_bool());
     const Json* problems_entry =
         find_panel(listing, context::editor::gui::panels::problems::ProblemsPanel::kContributionId);
     CHECK(problems_entry != nullptr && problems_entry->at("hosted").as_bool());
-    // Problems is a read-only observer: no gestures, nothing persisted. REPORTED, not stubbed.
+    // The observers expose no gestures and persist nothing. REPORTED, not stubbed.
     CHECK(problems_entry != nullptr && !problems_entry->at("gestures").as_bool());
     CHECK(problems_entry != nullptr && !problems_entry->at("persists").as_bool());
+    CHECK(scenetree_entry != nullptr && !scenetree_entry->at("gestures").as_bool());
+    CHECK(inspector_entry != nullptr && !inspector_entry->at("persists").as_bool());
 }
 
-void renders_both_hosted_panels_through_the_bridge()
+void renders_the_hosted_panels_through_the_bridge()
 {
     shell::PanelHost host;
     const panels::BuiltinPanels bound = panels::install_builtin_panels(host);
-    CHECK(bound.bound == 2);
+    CHECK(bound.bound == 4);
 
     shell::BridgeRouter router;
     CHECK(host.install(router));
@@ -118,10 +124,25 @@ void renders_both_hosted_panels_through_the_bridge()
         CHECK(panelstest::mentions(problems->html, "problems.status"));
     }
 
-    // A rostered-but-unhosted panel refuses with the honest code.
-    std::string unhosted_code;
-    CHECK(!host.render("builtin.inspector", unhosted_code).has_value());
-    CHECK(unhosted_code == shell::kErrPanelNotHosted);
+    // The e05d3 pair render their honest EMPTY states before any daemon read arrives: a scene tree
+    // with no scene, an inspector with no selection.
+    std::string scenetree_code;
+    const std::optional<shell::PanelRender> tree = host.render("builtin.scene-tree", scenetree_code);
+    CHECK(tree.has_value());
+    if (tree.has_value())
+    {
+        CHECK(panelstest::mentions(tree->html, "scenetree.panel"));
+        CHECK(panelstest::mentions(tree->html, "scenetree.status"));
+    }
+    std::string inspector_code;
+    const std::optional<shell::PanelRender> inspector_render =
+        host.render("builtin.inspector", inspector_code);
+    CHECK(inspector_render.has_value());
+    if (inspector_render.has_value())
+    {
+        CHECK(panelstest::mentions(inspector_render->html, "inspector.panel"));
+        CHECK(panelstest::mentions(inspector_render->html, "No entity selected"));
+    }
 }
 
 // The live path, end to end through the SAME objects `context_editor` wires: a daemon event reaches
@@ -159,12 +180,45 @@ void a_daemon_event_reaches_the_rendered_panel()
     }
 }
 
+// The e05d3 selection loop, through the SAME wiring `context_editor` gets: adopting a scene tree,
+// selecting a row, and finding the Inspector's fetch PENDING for exactly that identity (R-HUX-011).
+// The pump (the RPC half) is exercised against a live daemon by the kernel-server suite; here the
+// composition-root wiring itself is the subject.
+void a_scene_selection_schedules_the_inspector_fetch()
+{
+    shell::PanelHost host;
+    const panels::BuiltinPanels bound = panels::install_builtin_panels(host);
+    CHECK(bound.scenetree != nullptr);
+    CHECK(bound.inspector != nullptr);
+    if (bound.scenetree == nullptr || bound.inspector == nullptr)
+    {
+        return;
+    }
+
+    scenetree::SceneTreeModel model;
+    scenetree::SceneTreeNode node;
+    node.identity = "inst1/ent1";
+    node.display_name = "Player";
+    model.roots.push_back(std::move(node));
+    bound.scenetree->panel().set_model(std::move(model));
+
+    CHECK(!bound.inspector->pending().has_value());
+    CHECK(bound.scenetree->panel().select("inst1/ent1"));
+    CHECK(bound.inspector->pending() == std::optional<std::string>("inst1/ent1"));
+
+    // Clearing the selection clears the panel (placeholder state) and drops the pending fetch.
+    bound.scenetree->panel().clear_selection();
+    CHECK(!bound.inspector->pending().has_value());
+    CHECK(!bound.inspector->panel().has_selection());
+}
+
 } // namespace
 
 int main()
 {
     binds_every_hostable_panel_and_nothing_else();
-    renders_both_hosted_panels_through_the_bridge();
+    renders_the_hosted_panels_through_the_bridge();
     a_daemon_event_reaches_the_rendered_panel();
+    a_scene_selection_schedules_the_inspector_fetch();
     PANELS_TEST_MAIN_END();
 }

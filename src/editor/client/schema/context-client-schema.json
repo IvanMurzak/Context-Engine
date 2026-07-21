@@ -823,6 +823,49 @@
       ]
     },
     {
+      "method": "editor.scene-tree",
+      "ns": "",
+      "noun": "editor",
+      "verb": "scene-tree",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [
+        "path"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "editor.inspect",
+      "ns": "",
+      "noun": "editor",
+      "verb": "inspect",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [
+        "path",
+        "idPath"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
       "method": "subscribe",
       "ns": "",
       "noun": "",

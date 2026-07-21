@@ -71,7 +71,7 @@ public:
     std::function<void()> on_first_attempt;
     mutable bool fired = false;
 
-    inspector::WriteAttempt attempt(const context::editor::compose::WriteRequest& request,
+    inspector::WriteAttempt attempt(const inspector::OverrideWriteRequest& request,
                                     std::uint64_t expected_raw_hash) const override
     {
         ++attempts;

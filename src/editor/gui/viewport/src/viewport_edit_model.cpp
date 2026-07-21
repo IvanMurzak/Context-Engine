@@ -6,6 +6,7 @@
 #include "context/editor/gui/viewport/viewport_edit_model.h"
 
 #include "context/editor/compose/json_pointer.h" // resolve_json_pointer
+#include "context/editor/gui/panels/builders/scene_tree_builder.h" // join_identity — the ONE key encoding
 
 #include <cmath>
 #include <sstream>
@@ -19,20 +20,7 @@ namespace
 
 using serializer::JsonValue;
 
-// The id-path joined with '/', the stable selection key (mirrors scene_tree_model / inspector).
-[[nodiscard]] std::string join_identity(const std::vector<std::string>& id_path)
-{
-    std::string out;
-    for (std::size_t i = 0; i < id_path.size(); ++i)
-    {
-        if (i != 0)
-        {
-            out += '/';
-        }
-        out += id_path[i];
-    }
-    return out;
-}
+using panels::builders::join_identity; // the exported stable-selection-key join
 
 // The value of a string member `key` on an object, or empty when absent / not a string.
 [[nodiscard]] std::string string_member(const JsonValue& value, const char* key)
@@ -288,7 +276,9 @@ inspector::CommitResult ViewportEditModel::commit_gesture(const inspector::Overr
         return result; // Status::none
     }
 
-    compose::WriteRequest request;
+    // The boundary-clean envelope (M9 e05d3): the gateway converts it to the compose::WriteRequest
+    // the write path consumes (builders::to_write_request), so the seam itself carries no kernel type.
+    inspector::OverrideWriteRequest request;
     request.root_scene = root_scene_;
     request.id_path = entity->id_path;
     request.pointer = gesture_pointer_;
@@ -296,13 +286,13 @@ inspector::CommitResult ViewportEditModel::commit_gesture(const inspector::Overr
     switch (edit_target_)
     {
     case EditTarget::outermost:
-        request.target = compose::WriteTarget::outermost;
+        request.target = inspector::OverrideWriteTarget::outermost;
         break;
     case EditTarget::edit_template:
-        request.target = compose::WriteTarget::defining_template;
+        request.target = inspector::OverrideWriteTarget::defining_template;
         break;
     case EditTarget::at_instance:
-        request.target = compose::WriteTarget::at_instance;
+        request.target = inspector::OverrideWriteTarget::at_instance;
         request.at_instance = at_instance_;
         break;
     }

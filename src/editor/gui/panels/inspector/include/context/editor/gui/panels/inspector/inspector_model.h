@@ -1,21 +1,17 @@
-// The inspector view model (M5-F3, R-EDIT-001 / R-DATA-002 / L-35 / R-CLI-005): the schema-driven,
-// CEF-free editable projection of the selected composed entity the inspector panel renders. Kept
-// separate from the panel's uitree rendering (mirroring scene_tree_model / scene_tree_panel) so the
-// schema -> editable-field derivation is asserted on its own, and so the write-envelope construction
-// (an L-35 override write through the `context set` path) is a pure, testable function.
+// The inspector view model (M5-F3 / M9 e05d3, R-EDIT-001 / R-DATA-002 / L-35 / R-CLI-005): the
+// schema-driven, CEF-free editable projection of the selected composed entity the inspector panel
+// renders. BOUNDARY-CLEAN by construction (D10/D18, owner ruling 2026-07-20): no compose::/schema::
+// type appears here — only plain data plus serializer::JsonValue (the value DOM, deliberately NOT a
+// kernel-internal module) — so the panel library is Shell-hostable under the D10 shell-boundary
+// gate. The kernel-typed builder (the schema -> editable-field derivation over R-CLI-005
+// introspection) and the compose::WriteRequest construction live on the kernel side of the wire:
+// gui/panels/builders/inspector_builder.h (context_gui_panel_builders).
 //
-// The fields are derived from the entity's kind schema via the R-CLI-005 introspection surface
-// (schema::introspection_json) intersected with the entity's composed value — only the components the
-// entity actually carries are surfaced, each field carrying its declared type + units + L-35
-// override provenance. This is an observer+edit surface: it reads the composed derived world and
-// commits edits back through the ONE `context set` write path (no parallel writer) — see
-// inspector_panel.h.
+// This is an observer+edit surface: it reads the composed derived world (as data) and commits edits
+// back through the ONE `context set` write path (no parallel writer) — see inspector_panel.h.
 
 #pragma once
 
-#include "context/editor/compose/compose_write.h" // compose::WriteRequest
-#include "context/editor/compose/flatten.h"       // compose::ComposedEntity
-#include "context/editor/schema/kind_schema.h"    // schema::KindSchema
 #include "context/editor/serializer/json_tree.h"
 
 #include <cstddef>
@@ -67,22 +63,6 @@ struct InspectorModel
     std::vector<InspectorField> fields;  // the editable component fields present on the entity
     std::size_t override_count = 0;      // how many fields carry an L-35 override
 };
-
-// Build the inspector model for a composed entity, driven by its kind schema's R-CLI-005
-// introspection (schema::introspection_json) intersected with the entity's composed value. Only the
-// entity's PRESENT component fields are surfaced; the immutable identity fields (/id, /$schema,
-// /version — L-37) and the L-32 `notes` annotation fields are excluded. Total and deterministic.
-[[nodiscard]] InspectorModel build_inspector_model(const compose::ComposedEntity& entity,
-                                                   const schema::KindSchema& kind_schema,
-                                                   const std::string& root_scene);
-
-// The L-35 override-write envelope for setting `pointer` to `value` on the model's entity: a
-// `compose::WriteRequest` targeting the OUTERMOST instancing scene (L-35 default), addressed by the
-// entity's id-path. This is the request the `context set` write path (compose::plan_write) consumes —
-// the inspector never writes a parallel path. Pure: it constructs the request, it does not apply it.
-[[nodiscard]] compose::WriteRequest override_write_request(const InspectorModel& model,
-                                                          const std::string& pointer,
-                                                          serializer::JsonValue value);
 
 // The field whose `pointer` equals `pointer`; nullptr when absent.
 [[nodiscard]] const InspectorField* find_field(const InspectorModel& model,

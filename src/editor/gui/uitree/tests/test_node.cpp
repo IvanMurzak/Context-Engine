@@ -92,5 +92,62 @@ int main()
         CHECK(!contains(html, "<b>")); // the literal <b> must not survive unescaped
     }
 
+    // --- render_html: <input> is a VOID element (M9 e05d3 inherited fix) ------------------------
+    // A textbox/checkbox emitted as `<input>text</input>` makes a conforming parser drop the end tag
+    // and hoist the text OUT of the input, corrupting the mounted DOM's correspondence with the
+    // model — latent until a Shell-hostable panel used those roles; the Inspector is built from them.
+    {
+        // Textbox: the node text rides `value="…"`; no content, no end tag.
+        UiNode box(Role::textbox, "f1");
+        box.set_label("/name").set_text("Player One").set_focusable(true).set_command("inspector.edit");
+        const std::string html = render_html(box);
+        CHECK(contains(html, "<input id=\"f1\" role=\"textbox\""));
+        CHECK(contains(html, "value=\"Player One\""));
+        CHECK(!contains(html, "</input>"));
+        CHECK(!contains(html, ">Player One")); // never as element CONTENT
+    }
+    {
+        // Checkbox: `type="checkbox"` always; `checked` present iff the text is "true".
+        UiNode on(Role::checkbox, "c-on");
+        on.set_label("/visible").set_text("true").set_focusable(true);
+        const std::string on_html = render_html(on);
+        CHECK(contains(on_html, "type=\"checkbox\""));
+        CHECK(contains(on_html, " checked"));
+        CHECK(!contains(on_html, "</input>"));
+        CHECK(!contains(on_html, "value=")); // checkbox state is `checked`, not a value attribute
+
+        UiNode off(Role::checkbox, "c-off");
+        off.set_label("/visible").set_text("false").set_focusable(true);
+        const std::string off_html = render_html(off);
+        CHECK(contains(off_html, "type=\"checkbox\""));
+        CHECK(!contains(off_html, "checked"));
+        CHECK(!contains(off_html, "</input>"));
+    }
+    {
+        // ADVERSARIAL T1 (the C-F6 escaping-contract lesson): a hostile field VALUE cannot break out
+        // of the value attribute, close the void tag early, or smuggle an element/handler in.
+        UiNode evil(Role::textbox, "f2");
+        evil.set_label("/name").set_text("\"><script>alert(1)</script><input onfocus=\"x()\" value=\"");
+        const std::string html = render_html(evil);
+        CHECK(contains(html,
+                       "value=\"&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;&lt;input "
+                       "onfocus=&quot;x()&quot; value=&quot;\""));
+        CHECK(!contains(html, "<script>"));  // the literal script tag must not survive
+        CHECK(!contains(html, "onfocus=\"x")); // nor a live handler attribute
+        CHECK(!contains(html, "</input>"));
+    }
+    {
+        // Out-of-contract nesting under a void element: children render as FOLLOWING SIBLINGS,
+        // deterministically on OUR side — never inside the input, never dropped.
+        UiNode box(Role::textbox, "f3");
+        box.set_label("/name").set_text("v");
+        box.add_child(UiNode(Role::text, "f3.note").set_text("note"));
+        const std::string html = render_html(box);
+        const std::size_t input_end = html.find('>');
+        CHECK(input_end != std::string::npos);
+        CHECK(contains(html, "<span id=\"f3.note\" role=\"text\">note</span>"));
+        CHECK(html.find("f3.note") > input_end); // the child follows the closed void tag
+    }
+
     UITREE_TEST_MAIN_END();
 }

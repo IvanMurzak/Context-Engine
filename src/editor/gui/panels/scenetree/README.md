@@ -12,8 +12,11 @@ assertion is the headless unit path below on the default 3-OS `build` matrix.
 
 ## Two pieces
 
-- **`scene_tree_model.h` — the derived-world view model.** `build_scene_tree(const
-  compose::ComposedScene&)` weaves the FLAT composed entities (each keyed by its **L-35 id-path**
+- **`scene_tree_model.h` — the derived-world view model.** BOUNDARY-CLEAN since M9 e05d3 (owner
+  ruling 2026-07-20): plain data only, no `compose::` type — which is what makes this library
+  Shell-hostable under the D10 shell-boundary gate. The kernel-typed builder `build_scene_tree(const
+  compose::ComposedScene&)` now lives in `../builders/` (`context_gui_panel_builders`, the daemon
+  side of the wire); it weaves the FLAT composed entities (each keyed by its **L-35 id-path**
   `[instanceId, …, entityId]`) into a nested `SceneTreeNode` hierarchy:
   - an id-path **prefix with no composed entity of its own** becomes a synthetic **instance boundary**
     (`NodeKind::instance`) — the sub-scene root the instance composes under, so **instances are

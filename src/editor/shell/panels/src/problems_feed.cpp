@@ -4,6 +4,7 @@
 #include "context/editor/shell/panels/problems_feed.h"
 
 #include "context/editor/shell/panels/builtin_panels.h" // kDiagnosticsTopic / kDerivationTopic
+#include "wire_read.h"                                  // read_string
 
 #include <utility>
 
@@ -12,17 +13,6 @@ namespace context::editor::shell::panels
 
 namespace
 {
-
-// Read an optional string member; returns the empty string when absent or not a string.
-[[nodiscard]] std::string read_string(const contract::Json& object, const std::string& key)
-{
-    if (!object.is_object() || !object.contains(key))
-    {
-        return std::string();
-    }
-    const contract::Json& value = object.at(key);
-    return value.is_string() ? value.as_string() : std::string();
-}
 
 // Read an optional non-negative integer member. Returns 0 when absent, not a number, or negative —
 // which is exactly what NavTarget means by "unspecified", so a hostile negative line number
@@ -274,7 +264,7 @@ std::optional<std::string> problems_row_identity(const problems::ProblemsPanel& 
 
     // The SAME grouped/row traversal build_panel walks, so index N here is the row build_panel
     // labelled `problems.row.N`.
-    const problems::ProblemsModel model = panel.model();
+    const problems::ProblemsModel& model = panel.model(); // cached — a click costs no rebuild
     std::size_t index = 0;
     for (const problems::ProblemGroup& group : model.groups)
     {
