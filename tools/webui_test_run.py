@@ -117,10 +117,13 @@ class ReportCollector:
                 length = int(self.headers.get("Content-Length", "0"))
                 body = self.rfile.read(length) if length > 0 else b""
                 if urlparse(self.path).path == "/report":
+                    # Commit the verdict + release the waiter BEFORE acknowledging the request, so an
+                    # observer that sees the 200 is guaranteed to see `report_body`/`done` already set
+                    # (main() waits on the Event, not the response — this only tightens the ordering).
                     collector.report_body = body
+                    collector.done.set()
                     self.send_response(200)
                     self.end_headers()
-                    collector.done.set()
                     return
                 self.send_response(404)
                 self.end_headers()
@@ -146,11 +149,14 @@ class ReportCollector:
 
 def find_browser(explicit: str | None) -> str | None:
     """Resolve a Chromium-family browser: --browser, then $CONTEXT_WEBUI_TEST_BROWSER, then PATH."""
+    def resolve(candidate: str) -> str | None:
+        """A named-or-path candidate kept when it resolves on PATH or exists on disk, else None."""
+        return candidate if shutil.which(candidate) or Path(candidate).exists() else None
     if explicit:
-        return explicit if shutil.which(explicit) or Path(explicit).exists() else None
+        return resolve(explicit)
     env = os.environ.get("CONTEXT_WEBUI_TEST_BROWSER")
     if env:
-        return env if shutil.which(env) or Path(env).exists() else None
+        return resolve(env)
     for name in BROWSER_CANDIDATES:
         found = shutil.which(name)
         if found:
