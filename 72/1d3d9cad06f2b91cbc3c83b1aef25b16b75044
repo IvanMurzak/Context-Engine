@@ -1,0 +1,21 @@
+src/editor/shell/cef/src/cef_shell_restore_smoke.cpp
+  s_c0dfe9a29f971c::t_3dd3215c42ea58 219-242
+  s_c0dfe9a29f971c::t_76fac71126c854 44-57
+  s_c0dfe9a29f971c::t_f0a449b62c8e68 669-706
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "721d3d9cad06f2b91cbc3c83b1aef25b16b75044",
+  "prompts": {},
+  "sessions": {
+    "s_c0dfe9a29f971c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4978019c-92af-4ac6-b924-8777a436c459",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
