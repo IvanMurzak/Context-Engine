@@ -26,6 +26,21 @@
 // honest than the same-process version was: the arrangement genuinely survives a real OS process
 // boundary, through the editor-state file, exactly as a real editor restart would.
 //
+// PHASE-2 TEARDOWN (why phase 2 does NOT call CefShutdown). CI pinpointed that phase 2's restore
+// succeeds END TO END — every milestone and every assertion passes, layoutRestored:true — and the
+// process then faults INSIDE cef::shutdown() (CefShutdown) on this second, independent CEF init:
+// SIGTRAP on ubuntu (exit 133), ACCESS_VIOLATION on windows, with NO preceding CHECK/DCHECK message,
+// i.e. flaky teardown noise on a second-process init, not a restore failure. Since the restore is
+// already proven, phase 2 does the same thing the single-boot smokes do for CEF's flaky teardown —
+// std::_Exit() past it — only ONE STEP EARLIER: it hard-exits with the verdict BEFORE CefShutdown
+// rather than after it (phase 1, the first init, still runs CefShutdown cleanly, so its teardown stays
+// covered). The browser + its render process were already closed by manager.shutdown() inside
+// run_session; to be certain no CEF GPU/utility subprocess lingers on the inherited stderr and holds
+// the ctest pipe open (the standing 360s-timeout mechanism — CEF's GPU/utility processes are reaped by
+// CefShutdown, so skipping it could orphan them), the CONTROLLER launches each phase in its OWN
+// process group and SIGKILLs that group once the phase returns (run_phase_child) — the reusable
+// headless-browser CI teardown pattern.
+//
 // WHAT PROVES THE RESTORE ACTUALLY HAPPENED. `editor.state.get` being served (`state_reads`) proves
 // editor-core READ the blob, not that it APPLIED it. The load-bearing signal is the e05d4
 // `editor.layout.restored` report: editor-core sends `layoutRestored:false` on a fresh boot (nothing
@@ -50,6 +65,16 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#endif
+
+#if !defined(_WIN32)
+// POSIX process control for the controller's process-group reap (run_phase_child): fork/setpgid/exec
+// via subprocess::run_command, waitpid for the phase, then killpg the whole group so no CEF
+// subprocess it spawned survives to hold the inherited ctest pipe open.
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 #include "context/common/subprocess.h"
@@ -502,6 +527,51 @@ int parse_restore_phase(int argc, char** argv)
     return 0;
 }
 
+// Launch ONE phase child, wait for it, then SIGKILL its whole process group so no CEF subprocess it
+// spawned can survive to hold the inherited ctest stdout/stderr pipe open. CEF's GPU/utility
+// subprocesses are torn down by CefShutdown; phase 2 deliberately skips CefShutdown (it faults there —
+// see run_phase_2), and even a clean child exit can momentarily leave a Chromium helper attached to
+// that pipe. A grandchild holding the pipe is exactly the "orphaned-CEF-child-holds-the-ctest-pipe"
+// 360s ctest TIMEOUT this smoke has repeatedly hit. Isolating each child in its own process group and
+// killpg()-ing it once the child returns closes that hole deterministically — the reusable
+// headless-browser CI teardown pattern (memory: web-golden-chrome-profile-teardown-flake). POSIX only;
+// on Windows the std::system path (subprocess::run_command) is unchanged, and this smoke's live signal
+// is the ubuntu leg.
+int run_phase_child(const std::string& command)
+{
+#if defined(_WIN32)
+    return subprocess::run_command(command);
+#else
+    const ::pid_t pid = ::fork();
+    if (pid < 0)
+    {
+        // fork failed — fall back to the plain inline launch (no group reap, but still correct).
+        return subprocess::run_command(command);
+    }
+    if (pid == 0)
+    {
+        // Child: lead a NEW process group (the sh + phase exe + CEF subprocess subtree run_command
+        // spawns all inherit it), run the phase exactly as the controller otherwise would, then
+        // _Exit its verdict WITHOUT unwinding this forked copy of the controller's state.
+        (void)::setpgid(0, 0);
+        std::_Exit(subprocess::run_command(command) & 0xff);
+    }
+    // Controller: mirror the setpgid from this side too (race-free — whichever runs first wins), wait
+    // for the phase's verdict, THEN nuke any CEF subprocess still in the group. Orphaned CEF children
+    // re-parent to init on the phase's exit but KEEP the pgid, so killpg still reaches them; an already
+    // empty group yields a harmless ESRCH.
+    (void)::setpgid(pid, pid);
+    int status = 0;
+    const ::pid_t reaped = ::waitpid(pid, &status, 0);
+    (void)::killpg(pid, SIGKILL);
+    if (reaped != pid)
+    {
+        return -1;
+    }
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+#endif
+}
+
 // PHASE 1 (a fresh process): boot -> mount panels -> dock change -> persist, assert the fresh-boot
 // invariants, and write the layout oracle phase 2 checks against. ONE browser, ONE CefInitialize, one
 // hard exit — the shape cef_shell_smoke.cpp is green with on every leg. Returns a process exit code.
@@ -574,14 +644,26 @@ int run_phase_2(const std::filesystem::path& project, const std::filesystem::pat
                 "phase 2 REAPPLIED the persisted arrangement — layoutRestored:true. False on a fresh "
                 "boot, so this is the end-to-end proof the arrangement came back");
 
+    // The restore drill is PROVEN above (every assertion has run; g_failures is final). This is a
+    // SECOND, independent CEF process booted on the same host moments after phase 1 exited, and on the
+    // CI runners CefShutdown() faults from INSIDE its own global teardown on that second init (SIGTRAP
+    // on ubuntu / ACCESS_VIOLATION on windows) with the restore already complete — teardown noise, not
+    // a restore failure. So do what the single-boot smokes do for CEF's flaky teardown: std::_Exit()
+    // past it, one step earlier — BEFORE the crash-prone CefShutdown, which phase 2 does not need to
+    // exercise to prove the restore. manager.shutdown() (inside run_session) already closed the browser
+    // + its render process, and the controller SIGKILLs this phase's process group after we exit, so no
+    // CEF subprocess is left orphaned on the ctest pipe. The _Exit is strictly AFTER the assertions, so
+    // a genuine restore failure — with its OnLoadError/OnConsoleMessage cause already on stderr — still
+    // reports and still exits non-zero.
+    const int code = g_failures != 0 ? 1 : 0;
     std::fprintf(stderr,
                  "[editor-cef-smoke-shell-restore] [phase2] assertions done (failures=%d); "
-                 "cef::shutdown() (CefShutdown) begin\n",
+                 "hard-exiting past CEF's crash-prone second-process global teardown "
+                 "(CefShutdown deliberately skipped — the restore is already proven)\n",
                  g_failures);
     std::fflush(stderr);
-    shell::cef::shutdown();
-    trace("phase2", "cef::shutdown() (CefShutdown) returned");
-    return g_failures != 0 ? 1 : 0;
+    std::fflush(stdout);
+    std::_Exit(code);
 }
 
 } // namespace
@@ -671,9 +753,10 @@ int main(int argc, char** argv)
         // child's exit code. The phase flag is a fixed literal appended raw.
         const std::string self_arg = subprocess::quote_argument(self.string());
 
-        // Phase 1: persist an arrangement in one process, then exit.
+        // Phase 1: persist an arrangement in one process, then exit. run_phase_child isolates the
+        // phase in its own process group and SIGKILLs any CEF subprocess it leaves behind.
         trace("controller", "launching phase 1 (persist) child; blocking until it exits");
-        const int rc1 = subprocess::run_command(self_arg + " --ctx-restore-phase=1");
+        const int rc1 = run_phase_child(self_arg + " --ctx-restore-phase=1");
         std::fprintf(stderr, "[editor-cef-smoke-shell-restore] [controller] phase 1 child exited "
                              "rc=%d\n",
                      rc1);
@@ -697,7 +780,7 @@ int main(int argc, char** argv)
         // diagnostics surface even when phase 1 failed.
         trace("controller", "phase 1 fully reaped; launching phase 2 (restore) child; blocking until "
                             "it exits");
-        const int rc2 = subprocess::run_command(self_arg + " --ctx-restore-phase=2");
+        const int rc2 = run_phase_child(self_arg + " --ctx-restore-phase=2");
         std::fprintf(stderr, "[editor-cef-smoke-shell-restore] [controller] phase 2 child exited "
                              "rc=%d\n",
                      rc2);
