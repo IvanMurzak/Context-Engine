@@ -1,0 +1,17 @@
+<!doctype html>
+<!--
+  The editor-core T1 unit-test page (M9 e07a). NOT a shipped document: it is served ONLY by
+  tools/webui_test_run.py to run editor-core.test.js in the headless Chromium the CI provisions, and
+  never reaches the Shell's context-editor:// asset root (only the app/ document set does), so no CSP
+  applies here. Loads the bundled test entry as a module; the entry runs every unit test, mirrors the
+  verdict into #webui-ts-result (for a --dump-dom run) and POSTs it to the driver.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>editor-core webui T1 tests</title>
+  </head>
+  <body>
+    <script type="module" src="./editor-core.test.js"></script>
+  </body>
+</html>
