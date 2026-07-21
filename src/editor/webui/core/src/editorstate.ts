@@ -32,6 +32,10 @@ import { BridgeError, isRecord } from "./bridge.js";
 export const EDITOR_STATE_GET_METHOD = "editor.state.get";
 export const EDITOR_STATE_PUBLISH_METHOD = "editor.state.publish";
 export const EDITOR_REGIONS_PUBLISH_METHOD = "editor.regions.publish";
+// M9 e05d4: the boot-time restore OUTCOME report. One-way, best-effort — editor-core tells the Shell
+// what its restore did so the restart smoke can distinguish a boot that reapplied an arrangement from
+// a fresh one. MUST match editor_state_bridge.h's kEditorLayoutRestoredMethod (note 1 above).
+export const EDITOR_LAYOUT_RESTORED_METHOD = "editor.layout.restored";
 
 /**
  * The closed RegionKind vocabulary (03 §6), mirroring `shell::RegionKind`'s wire tokens. Both native
@@ -119,6 +123,21 @@ export class EditorStateClient {
                     height: region.rect.height,
                 },
             })),
+        });
+    }
+
+    /**
+     * Report the boot-time restore OUTCOME to the Shell (M9 e05d4). One-way and best-effort: an
+     * older Shell that does not route `editor.layout.restored` refuses with `unknown_method`, which
+     * `#callTolerant` maps to `false` and the caller ignores — reporting the restore result must
+     * never affect whether the editor is up. The restart smoke asserts the Shell saw
+     * `layoutRestored:true` on a boot that reapplied a persisted arrangement.
+     */
+    async reportRestore(report: LayoutRestoreReport): Promise<boolean> {
+        return this.#callTolerant(EDITOR_LAYOUT_RESTORED_METHOD, {
+            layoutRestored: report.layoutRestored,
+            panelsRestored: report.panelsRestored,
+            degraded: [...report.degraded],
         });
     }
 
