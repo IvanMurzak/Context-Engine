@@ -100,11 +100,16 @@ if(OS_WINDOWS OR OS_LINUX)
         TIMEOUT 180)
 
     # --- the LIVE boot -> dock -> restart -> restore smoke (ctest editor-cef-smoke-shell-restore) ---
-    # M9 e05d4: boots editor-core twice against ONE project — session 1 persists a real docking
-    # arrangement, session 2 (a fresh browser + a fresh editor-state store LOADED from the file session
-    # 1 wrote) reads it back and reapplies it. Same `editor-cef-smoke-` family + same link recipe as the
-    # boot smoke above, so the per-OS `editor-cef-smoke` job's `ctest -R "^editor-cef-smoke-"` step picks
-    # it up with no regex change. TIMEOUT is doubled — two full boots.
+    # M9 e05d4: proves editor-core's arrangement survives a RESTART. The exe is a thin controller that
+    # runs ITSELF twice as two child processes (--ctx-restore-phase=1|2) against ONE project — phase 1
+    # persists a real docking arrangement then hard-exits, phase 2 (a fresh PROCESS + a fresh
+    # editor-state store LOADED from the file phase 1 wrote) reads it back and reapplies it. Two
+    # processes, not two browsers in one CefInitialize: a mid-process browser teardown SEGFAULTs on the
+    # Session-0 Windows runner AND ubuntu, and each single-browser phase is instead structurally
+    # identical to the proven-green boot smoke above (see the .cpp header). Same `editor-cef-smoke-`
+    # family + same link recipe as the boot smoke, so the per-OS `editor-cef-smoke` job's
+    # `ctest -R "^editor-cef-smoke-"` step picks it up with no regex change. TIMEOUT covers two full
+    # child-process boots run sequentially.
     #
     # ⚠ "Not Run = RED" TRIPWIRE: that job builds a hand-maintained --target list, so this executable
     # is ALSO listed in ci.yml's editor-cef-smoke build step (and mirrored in the profile's test.md
@@ -114,9 +119,12 @@ if(OS_WINDOWS OR OS_LINUX)
     add_dependencies(context_editor_shell_restore_smoke libcef_dll_wrapper)
     # Same archive-before-libcef link order as context_editor_shell_cef_smoke above, and for the same
     # single-left-to-right-pass reason: context_editor_cef holds cef_shell.cpp's CEF references, so it
-    # must precede the CEF libs. context_editor_panels is CEF-free and joins on the same side.
+    # must precede the CEF libs. context_editor_panels and context_common are CEF-free and join on the
+    # same side — context_common (the hardened std::system runner, issue #146) is what the controller
+    # re-launches its two phase children with, and introduces no CEF references of its own.
     target_link_libraries(context_editor_shell_restore_smoke
-        context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+        context_editor_cef context_editor_panels context_common
+        libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
     target_include_directories(context_editor_shell_restore_smoke PRIVATE "${CEF_ROOT}")
 
     COPY_FILES(context_editor_shell_restore_smoke "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}"
@@ -141,5 +149,5 @@ if(OS_WINDOWS OR OS_LINUX)
     add_test(NAME editor-cef-smoke-shell-restore COMMAND context_editor_shell_restore_smoke)
     set_tests_properties(editor-cef-smoke-shell-restore PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_restore_smoke>"
-        TIMEOUT 240)
+        TIMEOUT 360)
 endif()

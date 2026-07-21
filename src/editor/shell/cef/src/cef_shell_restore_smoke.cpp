@@ -3,32 +3,44 @@
 // This is the half of the e05 group that no single-boot test can reach: that the arrangement
 // editor-core builds SURVIVES A RESTART. `editor-cef-smoke-shell` proves ONE boot hydrates panels
 // over the real pump; this proves TWO boots against ONE project — the first persists a real docking
-// arrangement, the second (a fresh browser + a fresh editor-state store loaded from the file the
+// arrangement, the second (a fresh PROCESS + a fresh editor-state store loaded from the file the
 // first wrote) reads that arrangement back and REAPPLIES it. Completing it closes the e05 group.
 //
-// WHY A SECOND BROWSER RATHER THAN A SECOND PROCESS. CEF initialises ONCE per process
-// (`make_cef_browser_host` guards CefInitialize on `g_initialized`), so a true fork-and-restart is
-// not expressible in one ctest exe. Destroying the first window's browser (CEF stays initialised)
-// and creating a second is exactly design 03 §7's crash-recovery drill — "CEF respawns the browser;
-// editor-core reloads; layout + panel state restore from the session store" — and every CEF
-// operation here (CreateBrowserSync, a browser close + pump, the store flush) is one
-// `editor-cef-smoke-shell` already exercises on every run; this just sequences them twice. To keep
-// the restart HONEST rather than in-memory, session 2 builds a FRESH WindowManager whose store
-// LOADS `.editor/editor-state.json` from disk, and the smoke asserts that file's bytes match what
-// session 1 wrote — the full round trip through the file, not a shared in-memory struct.
+// WHY TWO PROCESSES, NOT TWO BROWSERS IN ONE. CEF initialises ONCE per process, so an earlier version
+// booted the second browser inside the SAME CefInitialize as the first, destroying browser 1's browser
+// MID-PROCESS to make room for browser 2. That mid-process teardown — running browser 1's live
+// native/GPU/renderer shutdown while the process stays alive to boot browser 2 — SEGFAULTed on the
+// Session-0 Windows runner AND on ubuntu. The single-boot smokes only survive CEF's flaky teardown by
+// std::_Exit()-ing straight past it (see finish()); a same-process restart cannot use that escape hatch
+// for its FIRST browser, because the process must live to boot the second. So the restart is now a
+// genuine PROCESS restart. A thin CONTROLLER (the process ctest launches) runs THIS SAME EXE twice, as
+// two child processes, each carrying `--ctx-restore-phase=1|2`:
+//   * PHASE 1 boots one browser, mounts panels, drives a dock change, persists it, asserts the
+//     fresh-boot invariants, writes a layout ORACLE, then std::_Exit()s — the exact one-browser /
+//     one-CefInitialize / hard-exit shape `editor-cef-smoke-shell` is green with on every leg;
+//   * PHASE 2 is a BRAND-NEW process (a fresh CefInitialize + a fresh WindowManager store LOADED from
+//     the file phase 1 wrote): it reads the arrangement back, REAPPLIES it, asserts `layoutRestored:true`
+//     and that what it loaded is byte-identical to phase 1's oracle, then std::_Exit()s.
+// Neither phase ever tears a browser down mid-process, so the crash class is gone on BOTH OSes — each
+// phase is structurally identical to the proven-green single-boot smoke. The round trip is also MORE
+// honest than the same-process version was: the arrangement genuinely survives a real OS process
+// boundary, through the editor-state file, exactly as a real editor restart would.
 //
 // WHAT PROVES THE RESTORE ACTUALLY HAPPENED. `editor.state.get` being served (`state_reads`) proves
 // editor-core READ the blob, not that it APPLIED it. The load-bearing signal is the e05d4
 // `editor.layout.restored` report: editor-core sends `layoutRestored:false` on a fresh boot (nothing
 // to restore) and `layoutRestored:true` only when `LayoutPersistence.restore` reapplied a persisted
-// arrangement — so the boolean is FALSE on session 1 and TRUE on session 2, which is the property
-// that distinguishes a restore from a fresh boot and which no persistence-path counter can express.
+// arrangement — so the boolean is FALSE in phase 1 and TRUE in phase 2, which is the property that
+// distinguishes a restore from a fresh boot and which no persistence-path counter can express.
 //
-// Like `cef_shell_smoke.cpp`, it is deliberately HEADLESS (a windowless browser, no native window),
-// presents through e03's MemoryBlitter, and hard-exits on Windows after the verdict to skip CEF's
-// flaky Session-0 teardown. CAUSE reporting (`OnLoadError` + `OnConsoleMessage`) is built into the
-// shared CefShell client this smoke boots through, so a page that never loads names its own failure
-// on stderr rather than presenting as an undiagnosable stall.
+// Each phase boots exactly as `cef_shell_smoke.cpp` does — a windowless browser, no native window,
+// presenting through e03's MemoryBlitter, hard-exiting on Windows after the verdict to skip CEF's
+// flaky Session-0 teardown. It hydrates the SAME real panel roster (placeholder + Problems + Scene tree
+// + Inspector: `hostable_panel_ids()`), so the restart proof covers every hostable panel, not a stub.
+// CAUSE reporting (`OnLoadError` + `OnConsoleMessage`) is built into the shared CefShell client each
+// phase boots through, and a child's stdout/stderr is inherited by the controller, so a page that never
+// loads names its own failure on stderr rather than presenting as an undiagnosable stall — in the
+// failing phase's log AND in the controller's ctest output.
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -40,6 +52,7 @@
 #include <windows.h>
 #endif
 
+#include "context/common/subprocess.h"
 #include "context/editor/shell/app_scheme.h"
 #include "context/editor/shell/cef/cef_shell.h"
 #include "context/editor/shell/editor_state.h"
@@ -65,6 +78,7 @@ namespace shell = context::editor::shell;
 namespace render = context::render;
 namespace present = context::render::present;
 namespace contract = context::editor::contract;
+namespace subprocess = context::common::subprocess;
 
 namespace
 {
@@ -139,8 +153,9 @@ int finish(int code)
 {
 #if defined(_WIN32)
     // Session-0 carve-out (mirrors cef_shell_smoke.cpp): CEF's teardown is flaky on the self-hosted
-    // Windows runner, so exit hard once the verdict is decided. Reached ONLY after both sessions and
-    // shell::cef::shutdown() — never between the two boots.
+    // Windows runner, so exit hard once the verdict is decided. In a phase child this is reached ONLY
+    // after its single session and shell::cef::shutdown(); in the controller (which never inits CEF)
+    // it is a plain hard exit with the verdict.
     std::fflush(stdout);
     std::fflush(stderr);
     std::_Exit(code);
@@ -227,8 +242,9 @@ SessionOutcome run_session(const std::filesystem::path& project,
     cef_options.native_window = nullptr; // windowless: no native window on a Session-0 runner
     cef_options.logical_size = size;
     cef_options.dpi = shell::DpiScale{};
-    // THE app scheme (04 §1). Session 1 carries the smoke-arrange flag so its FIRST arrangement is a
-    // real, non-default one; session 2 boots the plain entry URL and restores whatever is on disk.
+    // THE app scheme (04 §1). The arranging session carries the smoke-arrange flag so its FIRST
+    // arrangement is a real, non-default one; the restoring session boots the plain entry URL and
+    // restores whatever is on disk.
     std::string url = shell::kAppEntryUrl;
     if (cfg.arrange)
     {
@@ -326,8 +342,8 @@ SessionOutcome run_session(const std::filesystem::path& project,
     // — is still alive: manager.shutdown() clears its windows, whose EditorWindow destructors run the
     // browser's CloseBrowser + pump. `editor_state_bridge` (declared after `manager`) is destroyed
     // before it at return, so its region sink's `&manager` capture never dangles; nothing is pumped
-    // after this, so no bridge handler is invoked during the unwind. CEF stays INITIALISED — only the
-    // caller's final shutdown() tears it down.
+    // after this, so no bridge handler is invoked during the unwind. CEF stays INITIALISED — the
+    // phase's main() runs shell::cef::shutdown() next, then hard-exits (the single-boot smoke shape).
     manager.shutdown();
     return out;
 }
@@ -339,18 +355,126 @@ SessionOutcome run_session(const std::filesystem::path& project,
 #define CONTEXT_WEBUI_ASSET_DIR ""
 #endif
 
+// The fixed project dir the controller AND both phases resolve identically (process-independent), so
+// phase 1 writes and phase 2 reads THE SAME editor-state file — the disk half of the restart round
+// trip. Mirrors cef_shell_smoke.cpp's fixed-path convention; this test runs once, so a fixed name
+// cannot collide under ctest -j.
+std::filesystem::path restore_project_dir()
+{
+    std::error_code ec;
+    return std::filesystem::temp_directory_path(ec) / "context-editor-cef-restore-smoke";
+}
+
+// Phase 1 writes its persisted layout's canonical dump here; phase 2 reads it back and asserts its
+// OWN loaded layout is byte-identical — the cross-process form of the same-process
+// `second.loaded_layout == first.persisted_layout` assertion, isolating the layout blob from the rest
+// of the editor-state document.
+std::filesystem::path layout_oracle_path(const std::filesystem::path& project)
+{
+    return project / "restore-smoke-layout-oracle.json";
+}
+
+// `--ctx-restore-phase=N` -> N (1 or 2); 0 means no phase flag = the CONTROLLER invocation. The flag
+// is invisible to CEF's own subprocess re-exec: execute_subprocess() identifies a CEF subprocess by
+// `--type=` and returns before this is ever parsed.
+int parse_restore_phase(int argc, char** argv)
+{
+    const std::string flag = "--ctx-restore-phase=";
+    for (int i = 1; i < argc; ++i)
+    {
+        const std::string arg = argv[i] != nullptr ? argv[i] : std::string();
+        if (arg.rfind(flag, 0) == 0)
+        {
+            return std::atoi(arg.c_str() + flag.size());
+        }
+    }
+    return 0;
+}
+
+// PHASE 1 (a fresh process): boot -> mount panels -> dock change -> persist, assert the fresh-boot
+// invariants, and write the layout oracle phase 2 checks against. ONE browser, ONE CefInitialize, one
+// hard exit — the shape cef_shell_smoke.cpp is green with on every leg. Returns a process exit code.
+int run_phase_1(const std::filesystem::path& project, const std::filesystem::path& asset_root,
+                render::Extent2D size)
+{
+    const SessionOutcome first =
+        run_session(project, asset_root, size, SessionConfig{"session1", true, false});
+    SMOKE_CHECK(first.browser_started, "phase 1: a real windowless CEF browser started");
+    SMOKE_CHECK(first.hydrated,
+                "phase 1: booted from context-editor://, the handshake completed, and the panels "
+                "hydrated into a non-uniform composited frame");
+    SMOKE_CHECK(!first.loaded_layout.is_object(),
+                "phase 1 started with NO persisted arrangement — a fresh project");
+    SMOKE_CHECK(first.restore_reports >= 1,
+                "phase 1: editor-core reported its (empty) restore outcome");
+    SMOKE_CHECK(!first.layout_restored,
+                "phase 1 restored NOTHING (fresh project) — layoutRestored:false, the false half of "
+                "the signal that distinguishes a restore from a fresh boot");
+    SMOKE_CHECK(first.states_published >= 1,
+                "phase 1: the scripted dock change published an arrangement over editor.state.publish");
+    SMOKE_CHECK(first.store_write_count >= 1,
+                "phase 1: the Shell wrote the arrangement to the editor-state file");
+    SMOKE_CHECK(first.persisted_layout.is_object() &&
+                    first.persisted_layout.at("panels").is_object(),
+                "the persisted arrangement is a real Dockview layout (a toJSON with a panels object), "
+                "not a null/empty stub");
+
+    // The on-disk file exists (the disk half of the round trip) AND the oracle for phase 2 is written.
+    const std::filesystem::path state_file = shell::editor_state_path(project);
+    SMOKE_CHECK(std::filesystem::exists(state_file),
+                "the editor-state file exists on disk after phase 1");
+    const std::string oracle = first.persisted_layout.dump();
+    SMOKE_CHECK(subprocess::write_file(layout_oracle_path(project), oracle.data(), oracle.size()),
+                "phase 1 wrote the layout oracle for phase 2 to check against");
+
+    shell::cef::shutdown();
+    return g_failures != 0 ? 1 : 0;
+}
+
+// PHASE 2 (a BRAND-NEW process): a fresh CefInitialize + a fresh WindowManager store LOADED from the
+// file phase 1 wrote. Read the arrangement back, REAPPLY it, and assert layoutRestored:true + byte
+// identity with phase 1's oracle. ONE browser, ONE CefInitialize, one hard exit. Returns an exit code.
+int run_phase_2(const std::filesystem::path& project, const std::filesystem::path& asset_root,
+                render::Extent2D size)
+{
+    const SessionOutcome second =
+        run_session(project, asset_root, size, SessionConfig{"session2", false, true});
+    SMOKE_CHECK(second.browser_started,
+                "phase 2: a fresh browser started in a fresh process (the restart)");
+    SMOKE_CHECK(second.hydrated, "phase 2: booted and hydrated its panels");
+    SMOKE_CHECK(second.loaded_layout.is_object(),
+                "phase 2's fresh store LOADED a persisted arrangement from disk — the restart read "
+                "the file phase 1 wrote");
+    const std::string oracle = subprocess::read_file(layout_oracle_path(project));
+    SMOKE_CHECK(!oracle.empty(), "phase 2 read phase 1's layout oracle");
+    SMOKE_CHECK(second.loaded_layout.dump() == oracle,
+                "the arrangement phase 2 loaded from disk is byte-identical to what phase 1 persisted "
+                "— the full round trip through the editor-state file, across a real process boundary");
+    SMOKE_CHECK(second.state_reads >= 1,
+                "phase 2: editor-core read the persisted arrangement over editor.state.get");
+    SMOKE_CHECK(second.restore_reports >= 1, "phase 2: editor-core reported its restore outcome");
+    SMOKE_CHECK(second.layout_restored,
+                "phase 2 REAPPLIED the persisted arrangement — layoutRestored:true. False on a fresh "
+                "boot, so this is the end-to-end proof the arrangement came back");
+
+    shell::cef::shutdown();
+    return g_failures != 0 ? 1 : 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
-    // Subprocess re-entry FIRST: CEF's renderer/GPU/utility processes re-exec this binary.
+    // Subprocess re-entry FIRST: CEF's renderer/GPU/utility processes re-exec this binary. This runs
+    // in EVERY invocation — the controller, both phases, and all of CEF's own subprocesses — and
+    // returns >= 0 (so we return immediately) ONLY in a CEF subprocess. The --ctx-restore-phase flag
+    // is invisible to it: a CEF subprocess is identified by --type= and handled before the flag is
+    // ever parsed.
     const int subprocess_exit = shell::cef::execute_subprocess(argc, argv);
     if (subprocess_exit >= 0)
     {
         return subprocess_exit;
     }
-
-    std::printf("[editor-cef-smoke-shell-restore] live boot -> dock -> restart -> restore\n");
 
     const std::filesystem::path asset_root = CONTEXT_WEBUI_ASSET_DIR;
     if (asset_root.empty())
@@ -360,83 +484,106 @@ int main(int argc, char** argv)
         return finish(1);
     }
 
+    const std::filesystem::path project = restore_project_dir();
+    const render::Extent2D size{640, 480};
+    const int phase = parse_restore_phase(argc, argv);
+
+    // --- a PHASE child: boot exactly one browser, hard-exit past CEF teardown ----------------------
+    if (phase == 1)
+    {
+        std::printf("[editor-cef-smoke-shell-restore] phase 1: live boot -> dock -> persist\n");
+        std::error_code ec;
+        std::filesystem::create_directories(project, ec); // the controller made it; be idempotent
+        return finish(run_phase_1(project, asset_root, size));
+    }
+    if (phase == 2)
+    {
+        std::printf("[editor-cef-smoke-shell-restore] phase 2: fresh process -> restore\n");
+        return finish(run_phase_2(project, asset_root, size));
+    }
+
+    // --- the CONTROLLER: run THIS exe twice, as two child processes, and gate on both --------------
+    std::printf("[editor-cef-smoke-shell-restore] controller: live boot -> dock -> restart -> restore "
+                "across two processes\n");
+
+    // Resolve THIS executable so we can re-launch it. ctest passes the target's ABSOLUTE path as
+    // argv[0] (add_test COMMAND <target>); fall back to the cwd (the ctest WORKING_DIRECTORY = the exe
+    // dir) if it ever arrives relative.
+    std::filesystem::path self = (argc > 0 && argv[0] != nullptr) ? argv[0] : std::string();
+    if (self.empty())
+    {
+        std::fprintf(stderr, "[editor-cef-smoke-shell-restore] FAIL: argv[0] is empty; cannot "
+                             "re-launch the phase children\n");
+        return finish(1);
+    }
     std::error_code ec;
-    const std::filesystem::path project =
-        std::filesystem::temp_directory_path(ec) / "context-editor-cef-restore-smoke";
+    if (self.is_relative())
+    {
+        self = std::filesystem::current_path(ec) / self;
+    }
+
+    // Start from a clean project so phase 1 genuinely boots fresh (its loaded_layout must be null).
     std::filesystem::remove_all(project, ec);
     std::filesystem::create_directories(project, ec);
 
-    const render::Extent2D size{640, 480};
-
-    // --- SESSION 1: boot from the app scheme, mount panels, drive a dock change, persist -----------
-    const SessionOutcome first =
-        run_session(project, asset_root, size, SessionConfig{"session1", true, false});
-    SMOKE_CHECK(first.browser_started, "session 1: a real windowless CEF browser started");
-    SMOKE_CHECK(first.hydrated,
-                "session 1: booted from context-editor://, the handshake completed, and the panels "
-                "hydrated into a non-uniform composited frame");
-    SMOKE_CHECK(!first.loaded_layout.is_object(),
-                "session 1 started with NO persisted arrangement — a fresh project");
-    SMOKE_CHECK(first.restore_reports >= 1,
-                "session 1: editor-core reported its (empty) restore outcome");
-    SMOKE_CHECK(!first.layout_restored,
-                "session 1 restored NOTHING (fresh project) — layoutRestored:false, the false half "
-                "of the signal that distinguishes a restore from a fresh boot");
-    SMOKE_CHECK(first.states_published >= 1,
-                "session 1: the scripted dock change published an arrangement over "
-                "editor.state.publish");
-    SMOKE_CHECK(first.store_write_count >= 1,
-                "session 1: the Shell wrote the arrangement to the editor-state file");
-    SMOKE_CHECK(first.persisted_layout.is_object() &&
-                    first.persisted_layout.at("panels").is_object(),
-                "the persisted arrangement is a real Dockview layout (a toJSON with a panels object), "
-                "not a null/empty stub");
-
-    // The on-disk file exists (the disk half of the round trip, independent of the in-memory store).
-    const std::filesystem::path state_file = shell::editor_state_path(project);
-    SMOKE_CHECK(std::filesystem::exists(state_file),
-                "the editor-state file exists on disk after session 1");
-
-    // --- RESTART -> SESSION 2: a fresh browser + a fresh store loaded from disk, then restore ------
-    // Drain CEF's message loop BETWEEN the two boots. Session 1's manager.shutdown() closed browser
-    // 1, but its close() loop stops the instant OnBeforeClose releases the browser reference — the
-    // renderer/GPU subprocesses keep tearing down asynchronously, and with external_message_pump on
-    // NOTHING pumps CEF between here and session 2's CreateBrowserSync. Without this, on the
-    // Session-0 Windows runner browser 2 booted into a half-torn-down subprocess state, never
-    // hydrated, ran its full 30s clock, and SEGFAULTed on teardown (the windows-only regression this
-    // smoke's first CI run hit). Letting browser 1's subprocesses fully die first is the restart
-    // drill design 03 §7 describes — a real editor restart never reuses a half-dead process.
-    shell::cef::drain_message_loop();
-
-    const SessionOutcome second =
-        run_session(project, asset_root, size, SessionConfig{"session2", false, true});
-    SMOKE_CHECK(second.browser_started,
-                "session 2: a fresh browser started in the same CEF (the restart)");
-    SMOKE_CHECK(second.hydrated, "session 2: booted and hydrated its panels");
-    SMOKE_CHECK(second.loaded_layout.is_object(),
-                "session 2's fresh store LOADED a persisted arrangement from disk — the restart read "
-                "the file session 1 wrote");
-    SMOKE_CHECK(second.loaded_layout.dump() == first.persisted_layout.dump(),
-                "the arrangement session 2 loaded from disk is byte-identical to what session 1 "
-                "persisted — the full round trip through the editor-state file");
-    SMOKE_CHECK(second.state_reads >= 1,
-                "session 2: editor-core read the persisted arrangement over editor.state.get");
-    SMOKE_CHECK(second.restore_reports >= 1, "session 2: editor-core reported its restore outcome");
-    SMOKE_CHECK(second.layout_restored,
-                "session 2 REAPPLIED the persisted arrangement — layoutRestored:true. False on a "
-                "fresh boot, so this is the end-to-end proof the arrangement came back");
-
-    shell::cef::shutdown();
-    std::filesystem::remove_all(project, ec);
-
-    if (g_failures != 0)
+    int controller_failures = 0;
+    // context_common's quoter is fail-CLOSED — it THROWS a MetacharacterError on a shell
+    // metacharacter — but this TU compiles under CEF's -fno-exceptions dialect (like every
+    // src/editor/shell/cef/** TU), so a try/catch will not compile. PRE-CHECK with the noexcept
+    // predicate instead: a build-tree exe path never legitimately carries a metacharacter, so a hit is
+    // a real environment defect (reported), and when it is clean quote_argument() below cannot throw.
+    if (subprocess::has_shell_metacharacters(self.string(), subprocess::host_shell()))
     {
         std::fprintf(stderr,
-                     "[editor-cef-smoke-shell-restore] FAILED with %d assertion failure(s)\n",
-                     g_failures);
+                     "[editor-cef-smoke-shell-restore] FAIL: argv[0] <%s> carries a shell "
+                     "metacharacter; cannot safely build a phase command line\n",
+                     self.string().c_str());
+        ++controller_failures;
+    }
+    else
+    {
+        // quote_argument() applies the cmd.exe outer-quote workaround; run_command() returns the
+        // child's exit code. The phase flag is a fixed literal appended raw.
+        const std::string self_arg = subprocess::quote_argument(self.string());
+
+        // Phase 1: persist an arrangement in one process, then exit.
+        const int rc1 = subprocess::run_command(self_arg + " --ctx-restore-phase=1");
+        if (rc1 != 0)
+        {
+            std::fprintf(stderr,
+                         "[editor-cef-smoke-shell-restore] FAIL: phase 1 (persist) exited %d\n", rc1);
+            ++controller_failures;
+        }
+
+        // The disk half, observed from the controller: phase 1 must have left the editor-state file.
+        if (rc1 == 0 && !std::filesystem::exists(shell::editor_state_path(project)))
+        {
+            std::fprintf(stderr, "[editor-cef-smoke-shell-restore] FAIL: phase 1 left no editor-state "
+                                 "file on disk\n");
+            ++controller_failures;
+        }
+
+        // Phase 2: a FRESH process restores from that file, then exits. Run it regardless so its own
+        // diagnostics surface even when phase 1 failed.
+        const int rc2 = subprocess::run_command(self_arg + " --ctx-restore-phase=2");
+        if (rc2 != 0)
+        {
+            std::fprintf(stderr,
+                         "[editor-cef-smoke-shell-restore] FAIL: phase 2 (restore) exited %d\n", rc2);
+            ++controller_failures;
+        }
+    }
+
+    std::filesystem::remove_all(project, ec);
+
+    if (controller_failures != 0)
+    {
+        std::fprintf(stderr, "[editor-cef-smoke-shell-restore] FAILED with %d failure(s) across the "
+                             "restart drill\n",
+                     controller_failures);
         return finish(1);
     }
     std::printf("[editor-cef-smoke-shell-restore] PASS: a live arrangement was persisted, survived a "
-                "browser restart, and was restored from the editor-state file\n");
+                "process restart, and was restored from the editor-state file\n");
     return finish(0);
 }
