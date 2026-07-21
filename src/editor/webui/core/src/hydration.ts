@@ -76,13 +76,19 @@ export const COMMAND_ATTRIBUTE = "data-command";
  *
  * `class` is in the list because the WIDGET CLASS MUST FOLLOW THE ROLE on a reused element.
  * `render_html` never emits `class` (see `uitree::render_into` — it writes only id / role /
- * aria-label / tabindex / data-command), so the sole class an incoming element carries is the one
- * `#normalise` derives from its role. Syncing it therefore replaces a stale class automatically:
- * three role pairs share an HTML tag and so survive the reuse test — tree/list (`ul`),
- * treeitem/listitem (`li`), textbox/checkbox (`input`) — and without this an element whose role
- * changed within a pair would keep the previous class forever.
+ * aria-label / tabindex / data-command, plus type / value / checked on the void `<input>` roles),
+ * so the sole class an incoming element carries is the one `#normalise` derives from its role.
+ * Syncing it therefore replaces a stale class automatically: three role pairs share an HTML tag and
+ * so survive the reuse test — tree/list (`ul`), treeitem/listitem (`li`), textbox/checkbox
+ * (`input`) — and without this an element whose role changed within a pair would keep the previous
+ * class forever.
+ *
+ * `type` / `value` / `checked` carry the void `<input>` roles' state (M9 e05d3: a void element has
+ * no text child for `#syncOwnText` to update, so a changed field value or checkbox state moves ONLY
+ * through these attributes — without them a reused input would show the stale value forever).
  */
-const SYNCED_ATTRIBUTES = ["role", "aria-label", "tabindex", "class", COMMAND_ATTRIBUTE] as const;
+const SYNCED_ATTRIBUTES =
+    ["role", "aria-label", "tabindex", "class", "type", "value", "checked", COMMAND_ATTRIBUTE] as const;
 
 /**
  * Is this event target a text-entry control?
@@ -275,7 +281,14 @@ export class HydrationRuntime {
             // patcher may move or replace elements, and a user typing into a panel that re-rendered
             // because a diagnostic arrived elsewhere must not lose their place.
             const focusedNodeId = this.#focusedNodeId();
-            this.#patchElement(this.#container, incoming);
+            // ONE O(n) index of the PRE-PATCH mounted tree, built up front (M9 e05d3 inherited perf
+            // fix): the patcher previously ran a container-wide `querySelector` per incoming node —
+            // O(n) × n nodes = O(n²), quadratic in exactly the panel the Scene tree makes big.
+            // First occurrence wins, mirroring querySelector's first-match rule; elements IMPORTED
+            // during the patch are deliberately absent (a duplicate model id can therefore never
+            // re-claim a just-inserted element — strictly safer than the live lookup, see
+            // #patchElement's reuse-hazard note).
+            this.#patchElement(this.#container, incoming, this.#indexMounted());
             this.#patches += 1;
             if (focusedNodeId !== null) {
                 this.#element(focusedNodeId)?.focus();
@@ -567,6 +580,26 @@ export class HydrationRuntime {
     }
 
     /**
+     * Index every mounted element carrying a model node id, in document order, first occurrence
+     * wins. Built ONCE per patch pass — one O(n) traversal replacing the per-incoming-node
+     * container-wide `querySelector` that made the patch O(n²) (the Scene tree is the panel whose
+     * node count makes that bite). A snapshot of the PRE-PATCH tree by construction, which is
+     * exactly the reuse-candidate set: elements imported mid-patch must never be re-claimed.
+     */
+    #indexMounted(): Map<string, HTMLElement> {
+        const index = new Map<string, HTMLElement>();
+        for (const element of this.#container.querySelectorAll<HTMLElement>(
+            `[${NODE_ID_ATTRIBUTE}]`,
+        )) {
+            const nodeId = element.getAttribute(NODE_ID_ATTRIBUTE) ?? "";
+            if (nodeId !== "" && !index.has(nodeId)) {
+                index.set(nodeId, element);
+            }
+        }
+        return index;
+    }
+
+    /**
      * Incremental DOM patch, keyed by stable node ids (04 §4 step 3).
      *
      * Reuses an existing element when the SAME node id reappears with the same tag, syncing only the
@@ -574,9 +607,12 @@ export class HydrationRuntime {
      * preserves scroll position, focus, text selection and CSS transition state across a re-render —
      * a full replace loses all four, which in a live editor reads as the panel "flickering" every
      * time an unrelated diagnostic arrives.
+     *
+     * `mounted` is the ONE pre-built id -> element snapshot from `#indexMounted` (O(1) lookups, so
+     * the whole patch is O(n)); `claimed` marks what this pass already reused.
      */
     #patchElement(target: Element | DocumentFragment, source: ParentNode,
-                  claimed: Set<Element> = new Set()): void {
+                  mounted: Map<string, HTMLElement>, claimed: Set<Element> = new Set()): void {
         const sourceChildren = Array.from(source.children);
         for (let index = 0; index < sourceChildren.length; index += 1) {
             const incoming = sourceChildren[index];
@@ -584,17 +620,18 @@ export class HydrationRuntime {
                 continue;
             }
             const nodeId = incoming.getAttribute(NODE_ID_ATTRIBUTE) ?? "";
-            const candidate = nodeId === "" ? null : this.#element(nodeId);
+            const candidate = nodeId === "" ? null : (mounted.get(nodeId) ?? null);
             const anchor = target.children[index] ?? null;
 
-            // TWO REUSE HAZARDS, both from `#element` being a container-wide lookup:
+            // TWO REUSE HAZARDS the lookup must survive:
             //
-            //  * DUPLICATE IDS. `#element` returns the FIRST match, so a model that emitted the
-            //    same id twice (an `audit_a11y` violation, but `render` does not run the audit —
-            //    a buggy provider ships it) would have the second node reuse the element the
-            //    first just inserted, MOVING it instead of adding a sibling. The tree then holds
-            //    one element where the model declared two, and the trailing trim cannot see it.
-            //    `claimed` makes each element reusable at most once per pass.
+            //  * DUPLICATE IDS. The index keeps the FIRST match (querySelector's rule), so a model
+            //    that emitted the same id twice (an `audit_a11y` violation, but `render` does not
+            //    run the audit — a buggy provider ships it) would have the second node reuse the
+            //    SAME element, MOVING it instead of adding a sibling. `claimed` makes each element
+            //    reusable at most once per pass. (Since the index snapshots the PRE-patch tree,
+            //    a just-imported element can never be a candidate at all — the live-query variant
+            //    of this hazard is structurally gone.)
             //  * ANCESTOR REUSE. The match may be an ANCESTOR of `target`, and re-parenting a node
             //    under its own descendant throws `HierarchyRequestError` — which escapes `apply`
             //    mid-patch, leaves the DOM half-updated with `#revision` unadvanced, and replays on
@@ -612,7 +649,7 @@ export class HydrationRuntime {
                 claimed.add(existing);
                 this.#syncAttributes(existing, incoming);
                 this.#syncOwnText(existing, incoming);
-                this.#patchElement(existing, incoming, claimed);
+                this.#patchElement(existing, incoming, mounted, claimed);
                 this.#reused += 1;
                 if (anchor !== existing) {
                     target.insertBefore(existing, anchor);

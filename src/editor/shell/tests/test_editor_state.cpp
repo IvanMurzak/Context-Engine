@@ -283,6 +283,35 @@ void test_placement_index_grows_the_vector()
     shelltest::cleanup(root);
 }
 
+void test_out_of_range_numbers_degrade_to_defaults_not_ub()
+{
+    // M9 e05d3 inherited fix: `as_int()` on an out-of-int64-range double is UB (UBSan
+    // float-cast-overflow), and this file is hand-editable/corruptible on-disk input — Json::parse
+    // accepts `1e300` happily. The hardened readers range-check the DOUBLE first, so a hostile
+    // placement reads as the DEFAULT rather than tripping the cast (or wrapping to a huge unsigned
+    // extent the swapchain would then be handed).
+    const Json doc = Json::parse(R"({
+        "version": 1,
+        "windows": [
+            {"x": 1e300, "y": -1e300, "width": 1e300, "height": -5, "maximized": false},
+            {"x": 2147483647, "y": -2147483648, "width": 4294967295, "height": 1, "maximized": false}
+        ]
+    })");
+    const EditorState state = EditorState::from_json(doc);
+    CHECK(state.windows.size() == 2u);
+    // Out-of-range / negative-extent fields fall back to WindowPlacement's defaults.
+    const WindowPlacement defaults;
+    CHECK(state.windows[0].x == defaults.x);
+    CHECK(state.windows[0].y == defaults.y);
+    CHECK(state.windows[0].width == defaults.width);
+    CHECK(state.windows[0].height == defaults.height);
+    // The exact type bounds still READ — the guard rejects only what cannot be represented.
+    CHECK(state.windows[1].x == 2147483647);
+    CHECK(state.windows[1].y == -2147483647 - 1);
+    CHECK(state.windows[1].width == 4294967295u);
+    CHECK(state.windows[1].height == 1u);
+}
+
 } // namespace
 
 int main()
@@ -297,5 +326,6 @@ int main()
     test_the_write_is_atomic_and_leaves_no_temp_behind();
     test_a_failed_write_stays_dirty_so_the_next_flush_retries();
     test_placement_index_grows_the_vector();
+    test_out_of_range_numbers_degrade_to_defaults_not_ub();
     SHELL_TEST_MAIN_END();
 }

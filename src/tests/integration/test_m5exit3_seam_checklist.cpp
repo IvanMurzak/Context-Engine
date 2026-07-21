@@ -24,6 +24,7 @@
 #include "context/editor/gui/a11y/registry.h"
 #include "context/editor/gui/compositor/surface.h"
 #include "context/editor/gui/contract/registry.h"
+#include "context/editor/gui/panels/builders/scene_tree_builder.h"
 #include "context/editor/gui/panels/inspector/inspector_panel.h"
 #include "context/editor/gui/panels/problems/problems_panel.h"
 #include "context/editor/gui/panels/scenetree/scene_tree_model.h"
@@ -57,6 +58,7 @@ namespace contract = context::editor::gui::contract;
 namespace inspector = context::editor::gui::panels::inspector;
 namespace problems = context::editor::gui::panels::problems;
 namespace scenetree = context::editor::gui::panels::scenetree;
+namespace panelbuilders = context::editor::gui::panels::builders;
 namespace playbar = context::editor::gui::playbar;
 namespace undo = context::editor::gui::session::undo;
 namespace uitree = context::editor::gui::uitree;
@@ -202,7 +204,7 @@ int main()
         const compose::ComposedScene scene = compose::flatten("root.scene.json", r);
         CHECK(scene.ok);
         scenetree::SceneTreePanel tree;
-        tree.set_model(scenetree::build_scene_tree(scene));
+        tree.set_model(panelbuilders::build_scene_tree(scene));
         CHECK(tree.model().entity_count == 1);
         int events = 0;
         tree.add_selection_listener([&](const scenetree::SceneSelection&) { ++events; });
@@ -217,7 +219,7 @@ int main()
         WalkthroughGateway gw;
         gw.file_hash = 100;
         gw.field_values["/name"] = jstr("Old");
-        compose::WriteRequest req;
+        inspector::OverrideWriteRequest req;
         req.root_scene = "root.scene.json";
         req.id_path = {"ccccccccccccccc1"};
         req.pointer = "/name";
@@ -352,7 +354,7 @@ int main()
         CHECK(r.add("root.scene.json", R"({"$schema": "ctx:scene", "version": 1, "entities": [
           {"id": "ccccccccccccccc1", "name": "Hero"}]})"));
         scenetree::SceneTreePanel tree;
-        tree.set_model(scenetree::build_scene_tree(compose::flatten("root.scene.json", r)));
+        tree.set_model(panelbuilders::build_scene_tree(compose::flatten("root.scene.json", r)));
         int sel = 0;
         tree.add_selection_listener([&](const scenetree::SceneSelection&) { ++sel; });
         CHECK(tree.select("ccccccccccccccc1"));

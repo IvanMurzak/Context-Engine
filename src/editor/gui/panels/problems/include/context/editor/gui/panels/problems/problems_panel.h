@@ -13,6 +13,7 @@
 
 #include "context/editor/bridge/event_stream.h" // bridge::Stability
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -59,8 +60,27 @@ public:
         return diagnostics_;
     }
 
-    // The grouped, severity-ordered view model (built on demand from the current diagnostic set).
-    [[nodiscard]] ProblemsModel model() const { return build_problems_model(diagnostics_); }
+    // The grouped, severity-ordered view model, built LAZILY from the current diagnostic set and
+    // CACHED until a mutator (set_diagnostics / ingest / on_derivation_settled) invalidates it
+    // (M9 e05d3 inherited perf fix: one Problems click previously cost 3 full builds — the row-id
+    // resolution, the navigate, and the re-render each rebuilt — 2 of them wasted; navigation state
+    // is NOT part of the grouped model, so a click on an unchanged diagnostic set now costs 0). The
+    // reference stays valid until the next mutator call — do not hold it across one.
+    [[nodiscard]] const ProblemsModel& model() const
+    {
+        if (model_dirty_)
+        {
+            cached_model_ = build_problems_model(diagnostics_);
+            model_dirty_ = false;
+            ++model_builds_;
+        }
+        return cached_model_;
+    }
+
+    // How many times the grouped model was actually (re)built — the observable the caching claim is
+    // asserted on (mirrors PanelHost's counter discipline: a perf property nothing can read is a
+    // comment, not a property).
+    [[nodiscard]] std::size_t model_builds() const noexcept { return model_builds_; }
 
     // The inline markers editors draw (R-HUX-005), derived from the same diagnostic set as the list.
     [[nodiscard]] std::vector<InlineMarker> inline_markers() const
@@ -105,6 +125,12 @@ private:
     std::uint64_t generation_ = 0;
     bridge::Stability stability_ = bridge::Stability::stable;
     std::vector<NavigationListener> listeners_;
+
+    // The lazy model cache (see model()). `mutable` because model() is a const READ whose cache
+    // fill is not an observable state change; every diagnostic-set mutator flips the dirty flag.
+    mutable ProblemsModel cached_model_;
+    mutable bool model_dirty_ = true;
+    mutable std::size_t model_builds_ = 0;
 };
 
 } // namespace context::editor::gui::panels::problems

@@ -105,7 +105,7 @@ int main()
         const inspector::CommitResult r = model.commit_gesture(gw);
         CHECK(r.status == inspector::CommitResult::Status::applied);
         CHECK(!model.gesture_active()); // consumed at gesture end (L-20)
-        CHECK(gw.last_request.target == compose::WriteTarget::outermost);
+        CHECK(gw.last_request.target == inspector::OverrideWriteTarget::outermost);
         CHECK(gw.last_request.pointer == position);
         CHECK((gw.last_request.id_path == std::vector<std::string>{vpedit::kInst, vpedit::kTorch}));
         CHECK(vpedit::value_equal(gw.field_values[position], vpedit::jparse("[7, 0, 0]")));
@@ -124,7 +124,7 @@ int main()
         model.set_pending_value(vpedit::jparse("[3, 3, 3]"));
         const inspector::CommitResult r = model.commit_gesture(gw);
         CHECK(r.status == inspector::CommitResult::Status::applied);
-        CHECK(gw.last_request.target == compose::WriteTarget::defining_template);
+        CHECK(gw.last_request.target == inspector::OverrideWriteTarget::defining_template);
     }
 
     // --- retarget: --at-instance writes a MID-LEVEL instancing scene (DoD-1 retarget) ------------
@@ -141,7 +141,7 @@ int main()
         model.set_pending_value(vpedit::jparse("[4, 4, 4]"));
         const inspector::CommitResult r = model.commit_gesture(gw);
         CHECK(r.status == inspector::CommitResult::Status::applied);
-        CHECK(gw.last_request.target == compose::WriteTarget::at_instance);
+        CHECK(gw.last_request.target == inspector::OverrideWriteTarget::at_instance);
         CHECK((gw.last_request.at_instance == std::vector<std::string>{vpedit::kInst}));
     }
 

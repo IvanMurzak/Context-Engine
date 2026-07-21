@@ -9,6 +9,7 @@
 #include "context/editor/gui/uitree/panel.h"
 
 #include "context/editor/compose/flatten.h"
+#include "context/editor/gui/panels/builders/scene_tree_builder.h"
 #include "context/editor/serializer/json_tree.h"
 
 #include "scenetree_test.h"
@@ -19,6 +20,9 @@
 #include <vector>
 
 using namespace context::editor::gui::panels::scenetree;
+// The kernel-typed builder moved to context_gui_panel_builders (M9 e05d3, D10); the tests reach it
+// through its new home while the panel library under test stays boundary-clean.
+using context::editor::gui::panels::builders::build_scene_tree;
 namespace compose = context::editor::compose;
 namespace serializer = context::editor::serializer;
 namespace uitree = context::editor::gui::uitree;

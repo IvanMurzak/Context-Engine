@@ -199,5 +199,38 @@ int main()
         CHECK(html.find("a.json") != std::string::npos); // the file group header is legible
     }
 
+    // --- the grouped model is CACHED: reads share one build; only mutators invalidate -------------
+    // (M9 e05d3 inherited perf fix: one click previously cost 3 full builds, 2 wasted.)
+    {
+        ProblemsPanel panel;
+        panel.set_diagnostics({diag("k1", "boom", Severity::error, "a.json", 3,
+                                    bridge::Stability::stable, 1)});
+        CHECK(panel.model_builds() == 0u); // lazy: nothing built until someone reads
+
+        (void)panel.model();
+        (void)panel.model();
+        (void)panel.build_panel(); // the render path reads the SAME cache
+        CHECK(panel.model_builds() == 1u);
+
+        // A click (navigate) mutates NAVIGATION state only — the grouped model is untouched, so the
+        // whole click-to-render loop costs ZERO additional builds on an unchanged diagnostic set.
+        CHECK(panel.navigate("k1"));
+        (void)panel.model();
+        (void)panel.build_panel();
+        CHECK(panel.model_builds() == 1u);
+
+        // Every diagnostic-set mutator invalidates: the NEXT read rebuilds, exactly once.
+        (void)panel.ingest(diag("k2", "warn", Severity::warning, "b.json", 1,
+                                bridge::Stability::stable, 1));
+        (void)panel.model();
+        CHECK(panel.model_builds() == 2u);
+        panel.on_derivation_settled(2, bridge::Stability::stable);
+        (void)panel.model();
+        CHECK(panel.model_builds() == 3u);
+        panel.set_diagnostics({});
+        (void)panel.model();
+        CHECK(panel.model_builds() == 4u);
+    }
+
     PROBLEMS_TEST_MAIN_END();
 }

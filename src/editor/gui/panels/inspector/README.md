@@ -13,7 +13,11 @@ CI-assertable **without booting CEF**. It reuses the existing error-catalog code
 
 ## Two pieces
 
-- **`inspector_model.h` — the schema-driven editable projection.** `build_inspector_model(entity,
+- **`inspector_model.h` — the schema-driven editable projection.** BOUNDARY-CLEAN since M9 e05d3
+  (owner ruling 2026-07-20): the model carries plain data + `serializer::JsonValue` only — no
+  `compose::`/`schema::` type — which is what makes this library Shell-hostable under the D10
+  shell-boundary gate. The kernel-typed builders below now live in `../builders/`
+  (`context_gui_panel_builders`, the daemon side of the wire). `build_inspector_model(entity,
   kindSchema, rootScene)` derives the entity's editable fields from its kind schema's **R-CLI-005
   introspection** (`schema::introspection_json`) intersected with the composed value:
   - each **present component leaf** becomes an `InspectorField` carrying its declared `WidgetKind`
@@ -22,8 +26,9 @@ CI-assertable **without booting CEF**. It reuses the existing error-catalog code
     in the inspector, not hidden;
   - the **immutable identity fields** (`/id`, `/$schema`, `/version` — L-37) and the L-32 `notes`
     annotation fields are excluded from the editable set.
-  - `override_write_request(model, pointer, value)` builds the **override-write envelope**: a
-    `compose::WriteRequest` targeting the **outermost** instancing scene (L-35 default), addressed by
+  - `builders::override_write_request(model, pointer, value)` builds the **override-write
+    envelope**: a `compose::WriteRequest` targeting the **outermost** instancing scene (L-35
+    default), addressed by
     the entity's id-path — the exact request the `context set` write path consumes (single source of
     truth; no parallel writer).
 - **`inspector_panel.h` — the panel.** `InspectorPanel` holds the model + the in-flight gesture + the
@@ -42,7 +47,8 @@ CI-assertable **without booting CEF**. It reuses the existing error-catalog code
     fired on every applied / rebased / dropped outcome.
 
 The panel commits through the `OverrideWriteGateway` seam: the CEF host implements it over
-`compose::plan_write` + filesync's atomic CAS write (the live `context set` path); the headless tests
+`compose::plan_write` + filesync's atomic CAS write (the live `context set` path), converting the
+seam's boundary-clean `OverrideWriteRequest` via `builders::to_write_request`; the headless tests
 inject an in-memory implementation over `compose::plan_write`. Wiring the gateway to the live daemon
 write path + subscribing to the F2 `SceneSelection` + the R-HUX-011 instrumented input→commit latency
 measurement is the CEF-host integration path (a trailing M5 surface), out of this headless panel's scope.

@@ -4,6 +4,8 @@
 
 #include "context/editor/shell/editor_state_bridge.h"
 
+#include "json_number_read.h" // the shared range-guarded numeric read (float-cast-overflow UB guard)
+
 #include <string_view>
 #include <utility>
 
@@ -18,31 +20,12 @@ using contract::Json;
 // out-of-range value reads as 0 — a region rect is an area of the client area, so a negative origin
 // or extent is corruption, and clamping is the honest read (the same rule editor_state's read_u32
 // applies to a hand-edited window extent). Mirrors input.h: region rects are physical client pixels.
+// Region rects are UNTRUSTED renderer wire input; the double-range guard (why it must run BEFORE any
+// integral cast) lives in json_number_read.h — the ONE reader editor_state.cpp shares (M9 e05d3).
 [[nodiscard]] std::uint32_t read_pixel(const Json& rect, const char* key)
 {
-    if (!rect.is_object() || !rect.contains(key))
-    {
-        return 0;
-    }
-    const Json& value = rect.at(key);
-    if (!value.is_number())
-    {
-        return 0;
-    }
-    // Range-check on the DOUBLE, BEFORE any integral cast. `as_int()` is a `static_cast<int64_t>` of
-    // the stored double, and casting a double outside int64's range is UNDEFINED BEHAVIOUR — which the
-    // blocking `sanitize (ASan+UBSan, ubuntu)` leg reports as `float-cast-overflow`. Region rects are
-    // UNTRUSTED renderer wire input (`Json::parse` accepts `1e300` happily), so guarding AFTER the cast
-    // would be guarding after the UB already happened. A negative or over-uint32 coordinate — and a
-    // NaN, which fails every comparison — clamps to 0. (This is the guard the hardened read_u32 in
-    // panels/src/problems_feed.cpp already carries; editor_state's read_u32 reads the Shell's own file,
-    // not the live wire, so it is a lower-priority sibling.)
-    const double raw = value.as_number();
-    if (!(raw >= 0.0 && raw <= 4294967295.0))
-    {
-        return 0;
-    }
-    return static_cast<std::uint32_t>(raw);
+    const std::optional<double> raw = detail::number_in_range(rect, key, 0.0, 4294967295.0);
+    return raw.has_value() ? static_cast<std::uint32_t>(*raw) : 0;
 }
 
 } // namespace

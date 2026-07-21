@@ -23,6 +23,7 @@
 // docs/human-latency-budget.md), not a hard threshold gate: the assertion is that each loop was
 // measured and its instrumentation seam fired, not that it beat a number on a shared CI runner.
 
+#include "context/editor/gui/panels/builders/scene_tree_builder.h"
 #include "context/editor/gui/panels/inspector/inspector_model.h"
 #include "context/editor/gui/panels/inspector/inspector_panel.h"
 #include "context/editor/gui/panels/problems/problems_panel.h"
@@ -54,6 +55,7 @@ namespace compose = context::editor::compose;
 namespace inspector = context::editor::gui::panels::inspector;
 namespace problems = context::editor::gui::panels::problems;
 namespace scenetree = context::editor::gui::panels::scenetree;
+namespace panelbuilders = context::editor::gui::panels::builders;
 namespace playbar = context::editor::gui::playbar;
 namespace undo = context::editor::gui::session::undo;
 namespace uitree = context::editor::gui::uitree;
@@ -194,7 +196,7 @@ int main()
 
     // === INSPECT — F2 scene-tree lists the derived world; selection drives F3 =========================
     scenetree::SceneTreePanel tree;
-    tree.set_model(scenetree::build_scene_tree(scene));
+    tree.set_model(panelbuilders::build_scene_tree(scene));
     CHECK(tree.model().ok);
     CHECK(tree.model().entity_count == 2);
 

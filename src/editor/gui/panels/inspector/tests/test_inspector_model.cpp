@@ -6,6 +6,8 @@
 
 #include "context/editor/gui/panels/inspector/inspector_model.h"
 
+#include "context/editor/gui/panels/builders/inspector_builder.h"
+
 #include "context/editor/compose/compose_write.h"
 #include "context/editor/compose/flatten.h"
 #include "context/editor/compose/json_pointer.h"
@@ -22,6 +24,10 @@
 #include <vector>
 
 using namespace context::editor::gui::panels::inspector;
+// The kernel-typed builders moved to context_gui_panel_builders (M9 e05d3, D10); the tests reach
+// them through their new home while the panel library under test stays boundary-clean.
+using context::editor::gui::panels::builders::build_inspector_model;
+using context::editor::gui::panels::builders::override_write_request;
 namespace compose = context::editor::compose;
 namespace schema = context::editor::schema;
 namespace serializer = context::editor::serializer;

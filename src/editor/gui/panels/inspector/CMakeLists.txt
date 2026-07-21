@@ -19,14 +19,18 @@ target_include_directories(context_gui_panel_inspector PUBLIC ${CMAKE_CURRENT_SO
 
 # PUBLIC deps expose types in the public headers:
 #   context_gui_uitree  -> uitree::Panel                 (inspector_panel.h build_panel())
-#   context_compose     -> compose::ComposedEntity /
-#                          compose::WriteRequest          (inspector_model.h / inspector_panel.h)
-#   context_schema      -> schema::KindSchema             (inspector_model.h build_inspector_model())
-# context_compose PUBLIC-links context_serializer, so the serializer JSON tree + canonical/parse
-# helpers the .cpp uses arrive transitively. context_warnings is PRIVATE (no flag leak to a CEF-host
+#   context_serializer  -> serializer::JsonValue         (inspector_model.h field values,
+#                                                         inspector_panel.h staged edits/FieldState)
+# NO context_compose / context_schema (M9 e05d3, D10 owner ruling): the kernel-typed builders and
+# the compose::WriteRequest construction moved to context_gui_panel_builders, and the gateway seam
+# takes the boundary-clean inspector::OverrideWriteRequest — so this library is BOUNDARY-CLEAN and
+# Shell-hostable (the D10 shell-boundary gate audits it on `context_editor`'s closure). Do NOT
+# re-add a kernel-internal module here; whatever needs compose::/schema:: belongs in
+# gui/panels/builders/. context_serializer is deliberately NOT on the gate's FORBIDDEN list (it is
+# the value DOM, not a kernel module). context_warnings is PRIVATE (no flag leak to a CEF-host
 # consumer, per conventions.md). NO new third-party dependency (no vcpkg / license-allowlist change).
 target_link_libraries(context_gui_panel_inspector
-    PUBLIC context_gui_uitree context_compose context_schema
+    PUBLIC context_gui_uitree context_serializer
     PRIVATE context_warnings)
 
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) ------------------------------
@@ -44,10 +48,13 @@ set(_context_gui_panel_inspector_tests
     test_inspector_panel
     test_a11y)
 
+# The tests link context_gui_panel_builders too: they exercise the MOVED build_inspector_model /
+# override_write_request through their new kernel-side home (tests are not on any audited closure,
+# so the compose/schema reach is fine — that is exactly the D10 split's point).
 foreach(_t IN LISTS _context_gui_panel_inspector_tests)
     add_executable(context_gui_panel_inspector_${_t} tests/${_t}.cpp)
     target_link_libraries(context_gui_panel_inspector_${_t}
-        PRIVATE context_gui_panel_inspector context_warnings)
+        PRIVATE context_gui_panel_inspector context_gui_panel_builders context_warnings)
     target_link_options(context_gui_panel_inspector_${_t}
         PRIVATE ${_context_gui_panel_inspector_static_runtime})
     target_include_directories(context_gui_panel_inspector_${_t}

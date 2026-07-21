@@ -7,7 +7,6 @@
 
 #include "context/editor/gui/uitree/node.h"
 
-#include "context/editor/compose/compose_write.h"
 #include "context/editor/serializer/canonical.h"
 
 #include <sstream>
@@ -20,8 +19,6 @@ namespace context::editor::gui::session::undo
 
 namespace
 {
-
-namespace compose = context::editor::compose;
 
 using serializer::JsonValue;
 using Status = inspector::CommitResult::Status;
@@ -303,12 +300,14 @@ inspector::CommitResult UndoJournal::replay_edit(const FieldEdit& edit, bool red
         return res;
     }
 
-    compose::WriteRequest request;
+    // The boundary-clean envelope (M9 e05d3): the gateway converts it kernel-side, so the journal —
+    // like the inspector panel it mirrors — carries no compose type.
+    inspector::OverrideWriteRequest request;
     request.root_scene = edit.root_scene;
     request.id_path = edit.id_path;
     request.pointer = edit.pointer;
     request.value = target;
-    request.target = compose::WriteTarget::outermost; // L-35: the outermost instancing scene wins
+    request.target = inspector::OverrideWriteTarget::outermost; // L-35: the outermost scene wins
 
     // Route through the ONE L-20/L-30 engine, CAS-guarded on the just-read hash. If a writer races
     // between the read and the write, the engine re-reads and re-applies the field-path drop policy.

@@ -3,6 +3,8 @@
 
 #include "context/editor/shell/editor_state.h"
 
+#include "json_number_read.h" // the shared range-guarded numeric read (float-cast-overflow UB guard)
+
 #include <fstream>
 #include <random>
 #include <sstream>
@@ -32,23 +34,25 @@ using contract::Json;
     return token;
 }
 
+// Both readers route through detail::number_in_range (json_number_read.h): the range check runs on
+// the DOUBLE before any integral cast, because `as_int()` on an out-of-int64-range double (a
+// hand-edited `1e300` placement — this file is on-disk, corruptible input) is UB the blocking
+// `sanitize` leg reports as float-cast-overflow. This unifies the previously per-site (and here
+// previously MISSING) guard with editor_state_bridge.cpp's read_pixel (M9 e05d3 inherited fix).
+
 [[nodiscard]] std::int32_t read_i32(const Json& obj, const char* key, std::int32_t fallback)
 {
-    const Json& value = obj.at(key);
-    return value.is_number() ? static_cast<std::int32_t>(value.as_int()) : fallback;
+    const std::optional<double> raw =
+        detail::number_in_range(obj, key, -2147483648.0, 2147483647.0);
+    return raw.has_value() ? static_cast<std::int32_t>(*raw) : fallback;
 }
 
+// A negative extent in a hand-edited or corrupted document would wrap to an enormous unsigned one
+// and be handed to the swapchain; the defaulted value is the honest read.
 [[nodiscard]] std::uint32_t read_u32(const Json& obj, const char* key, std::uint32_t fallback)
 {
-    const Json& value = obj.at(key);
-    if (!value.is_number())
-    {
-        return fallback;
-    }
-    const std::int64_t raw = value.as_int();
-    // A negative extent in a hand-edited or corrupted document would wrap to an enormous unsigned
-    // one and be handed to the swapchain; the defaulted value is the honest read.
-    return raw < 0 ? fallback : static_cast<std::uint32_t>(raw);
+    const std::optional<double> raw = detail::number_in_range(obj, key, 0.0, 4294967295.0);
+    return raw.has_value() ? static_cast<std::uint32_t>(*raw) : fallback;
 }
 
 [[nodiscard]] WindowPlacement placement_from_json(const Json& obj)

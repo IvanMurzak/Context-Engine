@@ -28,6 +28,14 @@ target_link_libraries(context_editorkernel
 # and the .cpp calls migrate_document/hash_combine on the save paths.
 target_link_libraries(context_editorkernel PUBLIC context_migrate)
 
+# M9 e05d3 — the `editor.scene-tree` / `editor.inspect` composed reads (D17/D18): kernel_server.cpp
+# builds the boundary-clean panel models DAEMON-SIDE (context_gui_panel_builders, over the same
+# disk-backed compose path `context set` plans against — context_compose_project) and answers them
+# as wire data, so the Shell's panels hydrate with NO kernel module on the editor's own closure.
+# PRIVATE: nothing in the public headers exposes these types — this is serving machinery.
+target_link_libraries(context_editorkernel
+    PRIVATE context_gui_panel_builders context_compose_project)
+
 # Self-contained GCC runtime for the editorkernel ctest executables. The composition pulls the bridge
 # daemon's single-instance lock (std::filesystem) and thus newer libstdc++ symbols; on a MinGW host a
 # stale libstdc++-6.dll elsewhere on PATH can shadow the toolchain's and be loaded first, yielding

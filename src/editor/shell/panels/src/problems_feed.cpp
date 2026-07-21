@@ -274,7 +274,7 @@ std::optional<std::string> problems_row_identity(const problems::ProblemsPanel& 
 
     // The SAME grouped/row traversal build_panel walks, so index N here is the row build_panel
     // labelled `problems.row.N`.
-    const problems::ProblemsModel model = panel.model();
+    const problems::ProblemsModel& model = panel.model(); // cached — a click costs no rebuild
     std::size_t index = 0;
     for (const problems::ProblemGroup& group : model.groups)
     {

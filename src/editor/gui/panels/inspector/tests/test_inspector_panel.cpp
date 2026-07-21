@@ -8,7 +8,6 @@
 #include "context/editor/gui/panels/inspector/inspector_model.h"
 #include "context/editor/gui/uitree/panel.h"
 
-#include "context/editor/compose/compose_write.h"
 #include "context/editor/serializer/json_tree.h"
 
 #include "inspector_test.h"
@@ -20,7 +19,6 @@
 #include <vector>
 
 using namespace context::editor::gui::panels::inspector;
-namespace compose = context::editor::compose;
 namespace serializer = context::editor::serializer;
 namespace uitree = context::editor::gui::uitree;
 using serializer::JsonValue;
@@ -93,7 +91,7 @@ public:
     std::function<void()> on_first_attempt;
     mutable bool fired = false;
 
-    WriteAttempt attempt(const compose::WriteRequest& request,
+    WriteAttempt attempt(const OverrideWriteRequest& request,
                          std::uint64_t expected_raw_hash) const override
     {
         ++attempts;
@@ -276,7 +274,7 @@ int main()
         // A gateway that refuses with a compose error on the first attempt (never applies).
         struct RefusingGateway final : public OverrideWriteGateway
         {
-            WriteAttempt attempt(const compose::WriteRequest&, std::uint64_t) const override
+            WriteAttempt attempt(const OverrideWriteRequest&, std::uint64_t) const override
             {
                 WriteAttempt a;
                 a.code = "compose.write_target_not_found";

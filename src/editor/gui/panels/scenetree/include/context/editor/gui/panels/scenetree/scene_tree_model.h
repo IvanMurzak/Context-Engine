@@ -1,12 +1,12 @@
-// Derived-world scene-tree view model (M5-F2, R-EDIT-001 / L-35): the panel-facing, CEF-free
-// hierarchy the scene-tree panel renders. Kept separate from the panel's uitree rendering so the
-// tree-building logic — weaving the FLAT composed entities (each keyed by its L-35 id-path) into a
-// nested hierarchy with instances/overrides visible — is asserted on its own, and the panel renders
-// a stable projection. Read-only: an observer view of the composed derived world, never a write path.
+// Derived-world scene-tree view model (M5-F2 / M9 e05d3, R-EDIT-001 / L-35): the panel-facing,
+// CEF-free hierarchy the scene-tree panel renders. BOUNDARY-CLEAN by construction (D10/D18, owner
+// ruling 2026-07-20): plain data only — no compose::/schema:: type appears here, so the panel
+// library is Shell-hostable under the D10 shell-boundary gate. The kernel-typed builder that weaves
+// the FLAT composed entities (each keyed by its L-35 id-path) into this hierarchy lives on the
+// kernel side of the wire: gui/panels/builders/scene_tree_builder.h (context_gui_panel_builders).
+// Read-only: an observer view of the composed derived world, never a write path.
 
 #pragma once
-
-#include "context/editor/compose/flatten.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -51,12 +51,6 @@ struct SceneTreeModel
     std::size_t entity_count = 0;     // number of composed entities represented
     std::vector<SceneTreeNode> roots; // top-level nodes (id-path length 1)
 };
-
-// Build the scene-tree view model from a flattened composed scene (the real derived world). The flat
-// ComposedScene::entities are woven into a hierarchy by id-path prefix; a prefix with no own composed
-// entity becomes a synthetic instance-boundary node (NodeKind::instance). An entity whose
-// field_provenance carries an override contributor is marked `overridden`. Total and deterministic.
-[[nodiscard]] SceneTreeModel build_scene_tree(const compose::ComposedScene& scene);
 
 // Depth-first search for the node whose `identity` equals `identity` (the selection key). Returns
 // nullptr when absent. Searches the whole forest.

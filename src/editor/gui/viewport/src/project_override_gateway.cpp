@@ -12,6 +12,7 @@
 #include "context/editor/filesync/atomic_io.h"
 #include "context/editor/filesync/content_hash.h"
 #include "context/editor/filesync/native_file_store.h"
+#include "context/editor/gui/panels/builders/inspector_builder.h" // builders::to_write_request
 #include "context/editor/serializer/canonical.h"
 
 #include <optional>
@@ -30,14 +31,17 @@ ProjectOverrideWriteGateway::ProjectOverrideWriteGateway(std::filesystem::path p
 {
 }
 
-inspector::WriteAttempt ProjectOverrideWriteGateway::attempt(const compose::WriteRequest& request,
-                                                             std::uint64_t expected_raw_hash) const
+inspector::WriteAttempt ProjectOverrideWriteGateway::attempt(
+    const inspector::OverrideWriteRequest& request, std::uint64_t expected_raw_hash) const
 {
     inspector::WriteAttempt out;
 
-    // Plan the composed write over a FRESH resolver (always the current on-disk state).
+    // Plan the composed write over a FRESH resolver (always the current on-disk state). The
+    // boundary-clean request converts through the ONE builders mapping (M9 e05d3) — this gateway is
+    // the kernel side of the seam, so reaching compose here is exactly where that reach belongs.
     const compose::ProjectSceneResolver resolver(project_root_);
-    const compose::WritePlan plan = compose::plan_write(request, resolver);
+    const compose::WritePlan plan =
+        compose::plan_write(panels::builders::to_write_request(request), resolver);
     if (!plan.ok)
     {
         out.code = plan.error_code;

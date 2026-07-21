@@ -22,7 +22,6 @@
 namespace context::editor::gui::viewport
 {
 
-namespace compose = context::editor::compose;
 namespace inspector = context::editor::gui::panels::inspector;
 
 class ProjectOverrideWriteGateway final : public inspector::OverrideWriteGateway
@@ -30,12 +29,13 @@ class ProjectOverrideWriteGateway final : public inspector::OverrideWriteGateway
 public:
     explicit ProjectOverrideWriteGateway(std::filesystem::path project_root);
 
-    // Plan the composed write (compose::plan_write over a fresh ProjectSceneResolver), canonically
-    // serialize it, CAS-guard the target file's current raw bytes on `expected_raw_hash` (skipped when
-    // 0), then atomically write. On success: applied + the new file raw hash + the file/pointer that
-    // landed. On a CAS mismatch: cas_mismatch + the target file's CURRENT raw hash. On a write-path
+    // Convert the boundary-clean request (builders::to_write_request — M9 e05d3), plan the composed
+    // write (compose::plan_write over a fresh ProjectSceneResolver), canonically serialize it,
+    // CAS-guard the target file's current raw bytes on `expected_raw_hash` (skipped when 0), then
+    // atomically write. On success: applied + the new file raw hash + the file/pointer that landed.
+    // On a CAS mismatch: cas_mismatch + the target file's CURRENT raw hash. On a write-path
     // refusal: the compose.* / file.* catalog code.
-    [[nodiscard]] inspector::WriteAttempt attempt(const compose::WriteRequest& request,
+    [[nodiscard]] inspector::WriteAttempt attempt(const inspector::OverrideWriteRequest& request,
                                                   std::uint64_t expected_raw_hash) const override;
 
     // The current composed value at (root_scene, id_path, pointer) + the ROOT scene file's current raw

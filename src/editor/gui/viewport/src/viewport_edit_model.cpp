@@ -288,7 +288,9 @@ inspector::CommitResult ViewportEditModel::commit_gesture(const inspector::Overr
         return result; // Status::none
     }
 
-    compose::WriteRequest request;
+    // The boundary-clean envelope (M9 e05d3): the gateway converts it to the compose::WriteRequest
+    // the write path consumes (builders::to_write_request), so the seam itself carries no kernel type.
+    inspector::OverrideWriteRequest request;
     request.root_scene = root_scene_;
     request.id_path = entity->id_path;
     request.pointer = gesture_pointer_;
@@ -296,13 +298,13 @@ inspector::CommitResult ViewportEditModel::commit_gesture(const inspector::Overr
     switch (edit_target_)
     {
     case EditTarget::outermost:
-        request.target = compose::WriteTarget::outermost;
+        request.target = inspector::OverrideWriteTarget::outermost;
         break;
     case EditTarget::edit_template:
-        request.target = compose::WriteTarget::defining_template;
+        request.target = inspector::OverrideWriteTarget::defining_template;
         break;
     case EditTarget::at_instance:
-        request.target = compose::WriteTarget::at_instance;
+        request.target = inspector::OverrideWriteTarget::at_instance;
         request.at_instance = at_instance_;
         break;
     }

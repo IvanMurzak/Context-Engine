@@ -16,12 +16,15 @@ target_include_directories(context_gui_panel_scenetree PUBLIC ${CMAKE_CURRENT_SO
 
 # PUBLIC deps expose types in the public headers:
 #   context_gui_uitree  -> uitree::Panel                (scene_tree_panel.h build_panel())
-#   context_compose     -> compose::ComposedScene       (scene_tree_model.h build_scene_tree())
 #   context_bridge      -> bridge::Stability            (scene_tree_panel.h derivation.settled)
+# NO context_compose (M9 e05d3, D10 owner ruling): the kernel-typed builder moved to
+# context_gui_panel_builders, so this library is BOUNDARY-CLEAN and Shell-hostable — the D10
+# shell-boundary gate audits it on `context_editor`'s closure. Do NOT re-add a kernel-internal
+# module here; whatever needs compose::/schema:: types belongs in gui/panels/builders/.
 # context_warnings is PRIVATE (no flag leak to a CEF-host consumer, per conventions.md). NO new
 # third-party dependency (no vcpkg / license-allowlist change).
 target_link_libraries(context_gui_panel_scenetree
-    PUBLIC context_gui_uitree context_compose context_bridge
+    PUBLIC context_gui_uitree context_bridge
     PRIVATE context_warnings)
 
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) ------------------------------
@@ -37,10 +40,13 @@ set(_context_gui_panel_scenetree_tests
     test_scene_tree_panel
     test_a11y)
 
+# The tests link context_gui_panel_builders too: they exercise the MOVED build_scene_tree through
+# its new kernel-side home (tests are not on any audited closure, so the compose reach is fine —
+# that is exactly the D10 split's point).
 foreach(_t IN LISTS _context_gui_panel_scenetree_tests)
     add_executable(context_gui_panel_scenetree_${_t} tests/${_t}.cpp)
     target_link_libraries(context_gui_panel_scenetree_${_t}
-        PRIVATE context_gui_panel_scenetree context_warnings)
+        PRIVATE context_gui_panel_scenetree context_gui_panel_builders context_warnings)
     target_link_options(context_gui_panel_scenetree_${_t}
         PRIVATE ${_context_gui_panel_scenetree_static_runtime})
     target_include_directories(context_gui_panel_scenetree_${_t}

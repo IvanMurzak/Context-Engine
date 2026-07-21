@@ -19,7 +19,6 @@
 
 #include "concurrency_test.h"
 
-#include "context/editor/compose/compose_write.h"
 #include "context/editor/filesync/content_hash.h"
 #include "context/editor/gui/panels/inspector/inspector_panel.h"
 #include "context/editor/serializer/json_tree.h"
@@ -38,7 +37,6 @@ using conctest::jstr;
 using context::editor::filesync::content_hash;
 using context::editor::serializer::JsonValue;
 using context::testing::SeededRng;
-namespace compose = context::editor::compose;
 namespace inspector = context::editor::gui::panels::inspector;
 
 namespace
@@ -57,7 +55,7 @@ public:
     std::function<void()> on_first_attempt;
     mutable bool fired = false;
 
-    inspector::WriteAttempt attempt(const compose::WriteRequest& request,
+    inspector::WriteAttempt attempt(const inspector::OverrideWriteRequest& request,
                                     std::uint64_t expected_raw_hash) const override
     {
         if (on_first_attempt && !fired)
@@ -97,10 +95,11 @@ public:
     }
 };
 
-compose::WriteRequest make_request(const std::string& scene, const std::vector<std::string>& id_path,
-                                   const std::string& pointer, JsonValue value)
+inspector::OverrideWriteRequest make_request(const std::string& scene,
+                                             const std::vector<std::string>& id_path,
+                                             const std::string& pointer, JsonValue value)
 {
-    compose::WriteRequest r;
+    inspector::OverrideWriteRequest r;
     r.root_scene = scene;
     r.id_path = id_path;
     r.pointer = pointer;

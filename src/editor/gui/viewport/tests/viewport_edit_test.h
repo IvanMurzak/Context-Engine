@@ -131,11 +131,11 @@ public:
     mutable std::map<std::string, JsonValue> field_values;
     mutable int attempts = 0;
     mutable int reads = 0;
-    mutable compose::WriteRequest last_request; // the request of the LAST attempt (target assertions)
+    mutable inspector::OverrideWriteRequest last_request; // the LAST attempt (target assertions)
     std::function<void()> on_first_attempt;
     mutable bool fired = false;
 
-    inspector::WriteAttempt attempt(const compose::WriteRequest& request,
+    inspector::WriteAttempt attempt(const inspector::OverrideWriteRequest& request,
                                     std::uint64_t expected_raw_hash) const override
     {
         ++attempts;

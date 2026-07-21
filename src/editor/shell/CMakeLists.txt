@@ -67,9 +67,10 @@ target_include_directories(context_editor_shell PUBLIC ${CMAKE_CURRENT_SOURCE_DI
 #
 # NOTE WHAT IS *NOT* HERE: no `context_gui_panel_*` library. The host is panel-agnostic (see
 # panel_host.h), so panel libraries are linked by the EXECUTABLE that binds their providers —
-# src/editor/shell/panels/ below. That layering is load-bearing rather than tidy: two of today's
-# panels (scenetree, inspector) link `context_compose`, which IS forbidden, so a panel library on
-# THIS target's closure would break the gate the moment e05d3 tried to host them.
+# src/editor/shell/panels/ below. That layering stays load-bearing after e05d3: the hosted panel
+# libraries are boundary-clean NOW, but keeping them off THIS target's closure is what keeps the
+# runtime half panel-agnostic and the audited surface minimal (and any future not-yet-clean panel
+# out of the gate's blast radius).
 target_link_libraries(context_editor_shell
     PUBLIC context_client context_render_present context_gui_uitree context_gui_contract
     PRIVATE context_warnings)

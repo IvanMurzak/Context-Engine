@@ -7,20 +7,21 @@
 // (gui/contract/builtin_roster.h); the ABILITY to render one comes from a `PanelProvider` — a bundle
 // of std::functions — bound at the app's composition root. Adding a panel is therefore a roster entry
 // plus one provider binding, with ZERO change here or in the runtime. That property is not a nicety:
-// e05d3 lands the Scene tree and Inspector by binding two more providers, and it can only do that
-// cheaply if this layer never learned their names. `test_panel_host.cpp` asserts it directly, over
+// e05d3 landed the Scene tree and Inspector by binding exactly two more providers, with zero edits
+// here or in the runtime — the claim, cashed. `test_panel_host.cpp` asserts it directly, over
 // synthetic panels this file has never heard of.
 //
 // WHY A std::function BUNDLE RATHER THAN AN INTERFACE PANELS IMPLEMENT. The D10 shell-boundary gate
 // (src/CMakeLists.txt, `context_assert_shell_boundary`) forbids the EditorKernel's internal modules on
-// the Shell's transitive link closure, and TWO of today's panels violate it —
-// `context_gui_panel_scenetree` and `context_gui_panel_inspector` both link `context_compose`. If a
-// panel had to implement an interface declared here, hosting it would mean linking it HERE, and this
-// library would drag those modules across the boundary the moment e05d3 tried. A std::function is
-// erased: `context_editor_shell` links only `context_gui_uitree` + `context_gui_contract` (both
+// the Shell's transitive link closure — and until e05d3, TWO panels violated it
+// (`context_gui_panel_scenetree` / `context_gui_panel_inspector` PUBLIC-linked `context_compose`).
+// If a panel had to implement an interface declared here, hosting one would mean linking it HERE,
+// and this library would drag its closure across the boundary. A std::function is erased:
+// `context_editor_shell` links only `context_gui_uitree` + `context_gui_contract` (both
 // boundary-clean), the PANEL libraries are linked by the executable that binds their providers, and
-// the gate's FORBIDDEN list stays byte-identical. Resolving the two violations is e05d3's task, not
-// this one — see .claude/design/context-engine/m9-editor/tasks/e05d3-shell-boundary-refactor.md.
+// the gate's FORBIDDEN list stays byte-identical. e05d3 resolved the two violations by splitting the
+// kernel-typed builders out (gui/panels/builders/, daemon-side) — the erased seam is what let it
+// host both panels with zero edits here.
 //
 // THE ROSTER IS AUTHORITATIVE, THE PROVIDER TABLE IS CAPABILITY. Every rostered panel is LISTED;
 // a rostered panel with no provider is listed as `hosted: false` — an honest "this build cannot

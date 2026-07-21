@@ -2,10 +2,18 @@
 
 #include "context/editor/editorkernel/kernel_server.h"
 
+#include "context/editor/compose/flatten.h"          // e05d3: the editor.* composed reads
+#include "context/editor/compose/project_resolver.h" // e05d3: the disk-backed scene resolver
 #include "context/editor/contract/envelope.h"
 #include "context/editor/contract/json.h"
 #include "context/editor/contract/resource_handle.h"
 #include "context/editor/derivation/derivation_graph.h"
+#include "context/editor/filesync/content_hash.h"       // e05d3: the inspect CAS token
+#include "context/editor/filesync/native_file_store.h"  // e05d3: root-scene raw-byte read
+#include "context/editor/gui/panels/builders/inspector_builder.h"  // e05d3: kernel-side builders
+#include "context/editor/gui/panels/builders/scene_tree_builder.h" // e05d3
+#include "context/editor/gui/panels/builders/wire.h"               // e05d3: model -> wire JSON
+#include "context/editor/schema/kind_schema.h" // e05d3: engine_schemas() kind lookup
 
 #include <cstddef>
 #include <deque>
@@ -363,6 +371,106 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
         data.set("worldEntities", Json(static_cast<std::uint64_t>(kernel_.world().alive_count())));
         data.set("generation", Json(kernel_.generation()));
         return Envelope::success(std::move(data), kernel_.generation());
+    }
+
+    // `editor.scene-tree` — the M9 e05d3 composed SCENE-TREE read (D17/D18): flatten the requested
+    // root scene over the SAME disk-backed compose path `context set` plans against (a FRESH
+    // ProjectSceneResolver — always the current on-disk truth), build the boundary-clean panel model
+    // KERNEL-SIDE (gui/panels/builders), and answer it as data. The Shell's Scene tree panel
+    // hydrates from exactly this; the panel model crossing AS DATA is what keeps the editor an
+    // ordinary client (no compose on its closure). Read-only (read/query baseline). A scene that
+    // does not resolve is not an error envelope: flatten reports it honestly INSIDE the model
+    // (ok=false, zero entities), and the panel renders that state — the same tolerance the
+    // diagnostics feed applies.
+    if (method == "editor.scene-tree")
+    {
+        const std::optional<std::string> path = string_param(params, "path");
+        if (!path.has_value())
+            return Envelope::failure("usage.missing_argument",
+                                     "editor.scene-tree requires a string 'path' param");
+
+        const compose::ProjectSceneResolver resolver(kernel_.config().project_root);
+        const compose::ComposedScene scene = compose::flatten(*path, resolver);
+
+        Json data = Json::object();
+        data.set("sceneTree", gui::panels::builders::scene_tree_to_wire(
+                                  gui::panels::builders::build_scene_tree(scene)));
+        data.set("generation", Json(kernel_.generation()));
+        return Envelope::success(std::move(data), kernel_.generation());
+    }
+
+    // `editor.inspect` — the M9 e05d3 composed INSPECTOR read (D17/D18): resolve one composed
+    // entity by its L-35 id-path, intersect its kind schema's R-CLI-005 introspection with its
+    // composed value (kernel-side, gui/panels/builders), and answer the editable field set as data —
+    // plus the root scene file's raw-byte hash, the CAS token a subsequent `set --if-match` (the
+    // e09 wire write) guards on. An entity that does not resolve — unknown id-path, unregistered
+    // kind — answers `{present: false}` rather than a failure envelope: "nothing is selected there"
+    // is a renderable panel state, not a protocol fault, and it mints no new catalog code.
+    if (method == "editor.inspect")
+    {
+        const std::optional<std::string> path = string_param(params, "path");
+        const std::optional<std::string> id_path_joined = string_param(params, "idPath");
+        if (!path.has_value() || !id_path_joined.has_value())
+            return Envelope::failure("usage.missing_argument",
+                                     "editor.inspect requires string 'path' and 'idPath' params");
+
+        const compose::ProjectSceneResolver resolver(kernel_.config().project_root);
+        const compose::ComposedScene scene = compose::flatten(*path, resolver);
+
+        // The slash-join is injective (stable ids are lowercase hex; $root carries no '/'), so
+        // matching the joined form against the wire param needs no re-split.
+        const compose::ComposedEntity* entity = nullptr;
+        for (const compose::ComposedEntity& candidate : scene.entities)
+        {
+            std::string joined;
+            for (std::size_t i = 0; i < candidate.id_path.size(); ++i)
+            {
+                if (i != 0)
+                    joined += '/';
+                joined += candidate.id_path[i];
+            }
+            if (joined == *id_path_joined)
+            {
+                entity = &candidate;
+                break;
+            }
+        }
+
+        Json data = Json::object();
+        // The driving kind is the ROOT SCENE's — only `ctx:scene` documents enter composition
+        // (compose/scene_model.h), and its introspection publishes the entity fields under
+        // `/entities/[]/…` (exactly what build_inspector_model intersects). A registry without it
+        // would be an engine-registration defect; answered as present:false rather than invented.
+        const schema::KindSchema* kind = schema::engine_schemas().latest("ctx:scene");
+
+        if (entity == nullptr || kind == nullptr)
+        {
+            Json inspector = Json::object();
+            inspector.set("present", Json(false));
+            data.set("inspector", std::move(inspector));
+        }
+        else
+        {
+            data.set("inspector", gui::panels::builders::inspector_to_wire(
+                                      gui::panels::builders::build_inspector_model(*entity, *kind,
+                                                                                   *path)));
+        }
+
+        // The root scene file's CURRENT raw-byte hash — the outermost target's CAS token (the same
+        // read the disk-backed gateway's FieldState carries). 0 when the file is unreadable.
+        std::uint64_t raw_hash = 0;
+        {
+            const filesync::NativeFileStore store(kernel_.config().project_root);
+            if (const std::optional<std::string> bytes = store.read(*path))
+                raw_hash = filesync::content_hash(*bytes);
+        }
+        data.set("rawHash", hash_string(raw_hash));
+        data.set("generation", Json(kernel_.generation()));
+
+        Envelope env = Envelope::success(std::move(data), kernel_.generation());
+        if (entity != nullptr && kind == nullptr)
+            env.add_warning("the ctx:scene kind is not registered; no fields derived");
+        return env;
     }
 
     // `resource.read` — the R-CLI-017 large-result fetch (CLI: `context fetch`): read a bounded,
