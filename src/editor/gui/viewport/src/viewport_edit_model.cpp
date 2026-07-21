@@ -6,6 +6,7 @@
 #include "context/editor/gui/viewport/viewport_edit_model.h"
 
 #include "context/editor/compose/json_pointer.h" // resolve_json_pointer
+#include "context/editor/gui/panels/builders/scene_tree_builder.h" // join_identity — the ONE key encoding
 
 #include <cmath>
 #include <sstream>
@@ -19,20 +20,7 @@ namespace
 
 using serializer::JsonValue;
 
-// The id-path joined with '/', the stable selection key (mirrors scene_tree_model / inspector).
-[[nodiscard]] std::string join_identity(const std::vector<std::string>& id_path)
-{
-    std::string out;
-    for (std::size_t i = 0; i < id_path.size(); ++i)
-    {
-        if (i != 0)
-        {
-            out += '/';
-        }
-        out += id_path[i];
-    }
-    return out;
-}
+using panels::builders::join_identity; // the exported stable-selection-key join
 
 // The value of a string member `key` on an object, or empty when absent / not a string.
 [[nodiscard]] std::string string_member(const JsonValue& value, const char* key)

@@ -4,6 +4,7 @@
 
 #include "context/editor/gui/panels/builders/scene_tree_builder.h"
 
+#include "context/editor/schema/json_access.h" // schema::find_member — the shared JSON-tree accessor
 #include "context/editor/serializer/json_tree.h"
 
 #include <deque>
@@ -23,37 +24,13 @@ using scenetree::NodeKind;
 using scenetree::SceneTreeModel;
 using scenetree::SceneTreeNode;
 
-// The id-path joined with '/', the stable per-node selection key. Stable ids are lowercase hex and
-// the $root token carries no '/', so the join is injective — distinct id-paths never collide.
-[[nodiscard]] std::string join_identity(const std::vector<std::string>& id_path)
-{
-    std::string out;
-    for (std::size_t i = 0; i < id_path.size(); ++i)
-    {
-        if (i != 0)
-        {
-            out += '/';
-        }
-        out += id_path[i];
-    }
-    return out;
-}
-
-// The value of a string member `key` on an object JsonValue, or nullptr when absent / not a string.
+// The value of a string member `key` on an object JsonValue, or nullptr when absent / not a string
+// (schema::find_member plus the string-type filter).
 [[nodiscard]] const std::string* string_member(const serializer::JsonValue& value, const char* key)
 {
-    if (value.type != serializer::JsonValue::Type::object)
-    {
-        return nullptr;
-    }
-    for (const serializer::JsonMember& m : value.members)
-    {
-        if (m.key == key && m.value.type == serializer::JsonValue::Type::string)
-        {
-            return &m.value.string_value;
-        }
-    }
-    return nullptr;
+    const serializer::JsonValue* m = schema::find_member(value, key);
+    return (m != nullptr && m->type == serializer::JsonValue::Type::string) ? &m->string_value
+                                                                            : nullptr;
 }
 
 // True iff any pointer of `entity` was touched by an L-35 override contributor (so it is visibly
@@ -147,6 +124,20 @@ private:
 }
 
 } // namespace
+
+std::string join_identity(const std::vector<std::string>& id_path)
+{
+    std::string out;
+    for (std::size_t i = 0; i < id_path.size(); ++i)
+    {
+        if (i != 0)
+        {
+            out += '/';
+        }
+        out += id_path[i];
+    }
+    return out;
+}
 
 SceneTreeModel build_scene_tree(const compose::ComposedScene& scene)
 {

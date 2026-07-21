@@ -82,6 +82,8 @@ void print_usage()
                 "  --project <dir>   project root (default: the current directory)\n"
                 "  --url <url>       the document to load (default: %s)\n"
                 "  --app-root <dir>  editor-core's asset root, served over context-editor://app/\n"
+                "  --scene <path>    root scene the Scene tree + Inspector hydrate from "
+                "(project-relative; empty = no scene)\n"
                 "  --headless        do not open an OS window; run the shell offscreen\n"
                 "  --devtools        enable DevTools (dev loop only)\n"
                 "  --frames <n>      run at most n loop iterations, then exit\n"

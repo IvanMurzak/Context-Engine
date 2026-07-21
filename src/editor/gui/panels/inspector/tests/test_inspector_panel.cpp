@@ -184,6 +184,21 @@ int main()
         CHECK(panel.staged_pointer() == "/name");
         panel.discard_edit();
         CHECK(!panel.has_staged_edit());
+
+        // A producer mistake — a readonly-KIND field claiming editable:true — is refused by the
+        // MODEL layer itself, not only by each producer's own clamp (fail-closed at the one layer
+        // every producer feeds; no real builder/parser emits this combination).
+        InspectorModel forged = make_model();
+        for (InspectorField& f : forged.fields)
+        {
+            if (f.kind == WidgetKind::readonly)
+            {
+                f.editable = true; // the forged producer claim
+            }
+        }
+        InspectorPanel forged_panel;
+        forged_panel.set_model(std::move(forged), 100);
+        CHECK(!forged_panel.stage_edit("/note", jstr("x"))); // still refused: readonly KIND wins
     }
 
     // --- commit with no gateway / no staged edit is a no-op -----------------------------------------

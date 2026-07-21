@@ -1,15 +1,17 @@
-// The panel COMPOSITION ROOT (M9 e05d1, design 04 §3-§4): the one place that binds the Shell's
-// panel-agnostic `PanelHost` to the concrete C++ panel libraries this build can actually link.
+// The panel COMPOSITION ROOT (M9 e05d1/e05d3, design 04 §3-§4): the one place that binds the
+// Shell's panel-agnostic `PanelHost` to the concrete C++ panel libraries this build can actually
+// link.
 //
 // WHY THIS IS A SEPARATE LIBRARY FROM `context_editor_shell`. The D10 shell-boundary gate
 // (`context_assert_shell_boundary`, src/CMakeLists.txt) audits the transitive link closure of
 // `context_editor_shell` and `context_editor` and FATAL_ERRORs at configure time on any EditorKernel
-// internal module. Panel libraries are exactly where that bites: `context_gui_panel_scenetree` and
-// `context_gui_panel_inspector` both link `context_compose`, which IS forbidden. Keeping the
-// provider bindings HERE — in a library only the executable links — means `context_editor_shell`
-// itself never touches a panel library, so the runtime half stays boundary-clean by construction and
-// the gate's FORBIDDEN list needs no edit. Resolving the two violations so those panels CAN be
-// hosted is e05d3's whole task; this file is the seam it plugs into.
+// internal module. Panel libraries are exactly where that bites — until e05d3, TWO of them
+// (`context_gui_panel_scenetree` / `context_gui_panel_inspector`) linked `context_compose`, which IS
+// forbidden. Keeping the provider bindings HERE — in a library only the executable links — means
+// `context_editor_shell` itself never touches a panel library, so the runtime half stays
+// boundary-clean by construction and the gate's FORBIDDEN list needs no edit. e05d3 resolved the two
+// violations by splitting the kernel-typed builders out (gui/panels/builders/, linked daemon-side);
+// this file is the seam that now hosts both.
 //
 // WHAT "HOSTABLE TODAY" MEANS. Four of the rostered panels are hostable in this build:
 //

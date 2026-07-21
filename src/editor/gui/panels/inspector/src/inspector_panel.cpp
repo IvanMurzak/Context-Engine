@@ -202,7 +202,11 @@ void InspectorPanel::clear()
 bool InspectorPanel::stage_edit(const std::string& pointer, serializer::JsonValue new_value)
 {
     const InspectorField* field = find_field(model_, pointer);
-    if (field == nullptr || !field->editable)
+    // The readonly->never-editable invariant is enforced HERE, at the model layer every producer
+    // feeds — not only by each producer (the builder derives editable from the kind; the wire
+    // parser clamps): a readonly widget has no editing affordance this build can render honestly,
+    // so no producer mistake may make it stageable (fail-closed).
+    if (field == nullptr || !field->editable || field->kind == WidgetKind::readonly)
     {
         return false;
     }

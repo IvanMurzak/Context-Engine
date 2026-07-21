@@ -5,8 +5,11 @@
 #include "context/editor/shell/panels/inspector_feed.h"
 
 #include "context/editor/serializer/json_parse.h"
+#include "context/editor/serializer/sidecar_ref.h"      // parse_hash_string — the decimal-u64 inverse
 #include "context/editor/shell/panels/scenetree_feed.h" // parse_hex_u64 — the ONE hex-wire parser
+#include "wire_read.h"                                  // read_string / read_bool
 
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -17,23 +20,6 @@ namespace
 {
 
 namespace serializer = context::editor::serializer;
-
-// Read an optional string member; empty when absent or not a string (each feed owns its wire
-// tolerance — the problems_feed discipline).
-[[nodiscard]] std::string read_string(const contract::Json& object, const std::string& key)
-{
-    if (!object.is_object() || !object.contains(key))
-    {
-        return std::string();
-    }
-    const contract::Json& value = object.at(key);
-    return value.is_string() ? value.as_string() : std::string();
-}
-
-[[nodiscard]] bool read_bool(const contract::Json& object, const std::string& key)
-{
-    return object.is_object() && object.contains(key) && object.at(key).as_bool();
-}
 
 // One wire field entry -> one model field. nullopt when the entry carries no pointer (a field the
 // panel could neither label nor stage an edit against). The `value` member is the field's CANONICAL
@@ -58,8 +44,20 @@ namespace serializer = context::editor::serializer;
     field.kind = parse_widget_kind(read_string(wire, "kind"));
     field.overridden = read_bool(wire, "overridden");
     field.editable = read_bool(wire, "editable");
+    // FAIL-CLOSED ACROSS BOTH MEMBERS: an unknown kind token parses to `readonly` (see
+    // parse_widget_kind), and a readonly widget must not stay editable just because the wire's
+    // INDEPENDENT `editable` bit said so — InspectorPanel::stage_edit gates on `editable` alone,
+    // so without this clamp a future/hostile token would be visible AND editable through a widget
+    // this build cannot render honestly. The real builder never emits readonly+editable
+    // (inspector_builder.cpp derives editable from the kind), so round-trips are unchanged.
+    if (field.kind == inspector::WidgetKind::readonly)
+    {
+        field.editable = false;
+    }
 
-    serializer::ParseResult parsed = serializer::parse_json(read_string(wire, "value"));
+    // Parse the canonical value straight off the wire node — as_string() is a reference, so the
+    // (arbitrarily large for json-kind fields) canonical serialization is never copied first.
+    serializer::ParseResult parsed = serializer::parse_json(wire.at("value").as_string());
     if (parsed.ok)
     {
         field.value = std::move(parsed.root);
@@ -115,9 +113,9 @@ std::optional<inspector::InspectorModel> parse_inspector(const contract::Json& w
     model.identity = read_string(wire, "identity");
     model.identity_hash = parse_hex_u64(read_string(wire, "identityHash"));
     model.kind_id = read_string(wire, "kindId");
-    if (wire.contains("idPath") && wire.at("idPath").is_array())
+    const contract::Json& id_path = wire.at("idPath"); // at() is total: null when absent
+    if (id_path.is_array())
     {
-        const contract::Json& id_path = wire.at("idPath");
         for (std::size_t i = 0; i < id_path.size(); ++i)
         {
             if (id_path.at(i).is_string())
@@ -126,9 +124,9 @@ std::optional<inspector::InspectorModel> parse_inspector(const contract::Json& w
             }
         }
     }
-    if (wire.contains("fields") && wire.at("fields").is_array())
+    const contract::Json& fields = wire.at("fields");
+    if (fields.is_array())
     {
-        const contract::Json& fields = wire.at("fields");
         for (std::size_t i = 0; i < fields.size(); ++i)
         {
             if (std::optional<inspector::InspectorField> field = parse_field(fields.at(i)))
@@ -146,31 +144,16 @@ std::optional<inspector::InspectorModel> parse_inspector(const contract::Json& w
 
 std::uint64_t parse_raw_hash(const std::string& text)
 {
-    if (text.empty() || text.size() > 20)
-    {
-        return 0; // a u64 has at most 20 decimal digits; refuse rather than wrap
-    }
-    std::uint64_t out = 0;
-    for (const char c : text)
-    {
-        if (c < '0' || c > '9')
-        {
-            return 0;
-        }
-        const std::uint64_t digit = static_cast<std::uint64_t>(c - '0');
-        if (out > (static_cast<std::uint64_t>(-1) - digit) / 10)
-        {
-            return 0; // overflow -> not a u64 the daemon minted
-        }
-        out = out * 10 + digit;
-    }
-    return out;
+    // serializer::parse_hash_string is THE strict inverse of the daemon's decimal hash form
+    // (exactly the strings std::to_string(std::uint64_t) — kernel_server's hash_string — produces);
+    // any refusal degrades to 0, the model's honest "no CAS token".
+    return serializer::parse_hash_string(text).value_or(0);
 }
 
 std::optional<std::string> inspector_widget_pointer(const std::string& node_id)
 {
-    const std::string prefix = kInspectorWidgetPrefix;
-    if (node_id.size() <= prefix.size() || node_id.compare(0, prefix.size(), prefix) != 0)
+    constexpr std::string_view prefix = kInspectorWidgetPrefix;
+    if (node_id.size() <= prefix.size() || !std::string_view(node_id).starts_with(prefix))
     {
         return std::nullopt;
     }
@@ -199,16 +182,19 @@ void InspectorFeed::request_clear()
 bool InspectorFeed::apply_result(const contract::Json& reply)
 {
     // Envelope tolerance (mirrors SceneTreeFeed::apply_result): the rawHash rides the DATA level,
-    // sibling of `inspector`, so resolve data first and read both from there.
+    // sibling of `inspector`, so resolve data first and read both from there. at() is total (a
+    // shared null when absent), so each hop reads its member once.
     const contract::Json* data = &reply;
-    if (data->is_object() && data->contains("data") && data->at("data").is_object())
+    const contract::Json& nested_data = reply.at("data");
+    if (nested_data.is_object())
     {
-        data = &data->at("data");
+        data = &nested_data;
     }
     const contract::Json* wire = data;
-    if (wire->is_object() && wire->contains("inspector") && wire->at("inspector").is_object())
+    const contract::Json& nested_inspector = data->at("inspector");
+    if (nested_inspector.is_object())
     {
-        wire = &wire->at("inspector");
+        wire = &nested_inspector;
     }
     std::optional<inspector::InspectorModel> model = parse_inspector(*wire);
     if (!model.has_value())
@@ -240,7 +226,7 @@ PanelProvider InspectorFeed::make_provider()
         // The edit VALUE arrives as a JSON literal string (`"1.5"`, `"\"name\""`, `"true"`). A
         // dispatch with no parseable value is DECLINED — there is nothing honest to stage, and
         // stage_edit's own field/editable checks still apply to the rest.
-        serializer::ParseResult value = serializer::parse_json(read_string(params, "value"));
+        serializer::ParseResult value = serializer::parse_json(params.at("value").as_string());
         if (!value.ok)
         {
             return false;

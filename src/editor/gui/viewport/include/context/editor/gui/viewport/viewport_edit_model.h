@@ -18,8 +18,7 @@
 
 #include "context/editor/gui/panels/inspector/inspector_panel.h" // OverrideWriteGateway, CommitResult
 
-#include "context/editor/compose/compose_write.h" // WriteTarget / WriteRequest
-#include "context/editor/compose/flatten.h"       // ComposedScene / ProvenanceEntry / SceneResolver
+#include "context/editor/compose/flatten.h" // ComposedScene / ProvenanceEntry / SceneResolver
 #include "context/editor/serializer/json_tree.h"
 
 #include <cstdint>
@@ -33,10 +32,11 @@ namespace compose = context::editor::compose;
 namespace inspector = context::editor::gui::panels::inspector;
 namespace serializer = context::editor::serializer;
 
-// Which authored file an in-viewport edit writes into (R-CLI-006 / L-35) — the GUI affordance form of
-// the compose::WriteTarget the write path selects. `outermost` (default) writes an override in the
-// root instancing scene (it wins); `edit_template` writes the entity's authored value in its defining
-// scene; `at_instance` writes an override in a mid-level instancing scene named by an id-path prefix.
+// Which authored file an in-viewport edit writes into (R-CLI-006 / L-35) — the GUI affordance form
+// of the inspector::OverrideWriteTarget the write seam selects. `outermost` (default) writes an
+// override in the root instancing scene (it wins); `edit_template` writes the entity's authored
+// value in its defining scene; `at_instance` writes an override in a mid-level instancing scene
+// named by an id-path prefix.
 enum class EditTarget
 {
     outermost,

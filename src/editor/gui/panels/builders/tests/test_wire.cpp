@@ -56,10 +56,11 @@ int main()
         CHECK(wire.at("roots").size() == 1u);
         const Json& boundary = wire.at("roots").at(std::size_t{0});
         CHECK(boundary.at("kind").as_string() == "instance");
-        CHECK(boundary.at("identityHash").as_string() == "0"); // no own composed entity
+        CHECK(boundary.at("identityHash").as_string() == "0000000000000000"); // no own composed entity
         const Json& child = boundary.at("children").at(std::size_t{0});
         CHECK(child.at("kind").as_string() == "entity");
-        CHECK(child.at("identityHash").as_string() == "deadbeef01"); // lowercase hex STRING
+        // The zero-padded 16-char format_stable_id form — the flatten/pack "identityHash" rendering.
+        CHECK(child.at("identityHash").as_string() == "000000deadbeef01"); // lowercase hex STRING
         CHECK(child.at("overridden").as_bool());
 
         // Determinism: identical model -> byte-identical wire (the render-stability discipline).
@@ -91,7 +92,7 @@ int main()
 
         const Json wire = builders::inspector_to_wire(model);
         CHECK(wire.at("present").as_bool());
-        CHECK(wire.at("identityHash").as_string() == "ff00ff");
+        CHECK(wire.at("identityHash").as_string() == "0000000000ff00ff");
         CHECK(wire.at("idPath").size() == 2u);
         CHECK(wire.at("overrideCount").as_int() == 1);
         const Json& wf = wire.at("fields").at(std::size_t{0});

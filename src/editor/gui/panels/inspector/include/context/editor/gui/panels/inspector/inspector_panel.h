@@ -154,7 +154,8 @@ public:
 
     // Stage an in-flight edit for one field (a gesture in progress; no write yet — L-20 commits at
     // gesture end). Records the field's base value so commit() can apply the L-30 decision. Returns
-    // false for an unknown or non-editable field pointer.
+    // false for an unknown or non-editable field pointer — a readonly-KIND field is never editable
+    // here, whatever a producer's `editable` claim said (the model layer owns that invariant).
     bool stage_edit(const std::string& pointer, serializer::JsonValue new_value);
     [[nodiscard]] bool has_staged_edit() const noexcept { return staged_.has_value(); }
     [[nodiscard]] const std::string& staged_pointer() const noexcept { return staged_pointer_; }

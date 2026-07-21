@@ -5,6 +5,8 @@
 #include "context/editor/gui/panels/builders/inspector_builder.h"
 
 #include "context/editor/compose/json_pointer.h"
+#include "context/editor/gui/panels/builders/scene_tree_builder.h" // join_identity — the ONE key encoding
+#include "context/editor/schema/json_access.h" // schema::find_member — the shared JSON-tree accessor
 #include "context/editor/serializer/json_parse.h"
 
 #include <string>
@@ -29,36 +31,12 @@ using serializer::JsonValue;
 // entity field iff its data pointer is strictly under this prefix.
 constexpr const char* kEntityFieldPrefix = "/entities/[]";
 
-// The id-path joined with '/', the stable selection key (mirrors scene_tree_builder's join_identity).
-[[nodiscard]] std::string join_identity(const std::vector<std::string>& id_path)
-{
-    std::string out;
-    for (std::size_t i = 0; i < id_path.size(); ++i)
-    {
-        if (i != 0)
-        {
-            out += '/';
-        }
-        out += id_path[i];
-    }
-    return out;
-}
-
-// The value of a string member `key` on an object, or nullptr when absent / not a string.
+// The value of a string member `key` on an object, or nullptr when absent / not a string
+// (schema::find_member plus the string-type filter).
 [[nodiscard]] const std::string* string_member(const JsonValue& value, const char* key)
 {
-    if (value.type != JsonValue::Type::object)
-    {
-        return nullptr;
-    }
-    for (const serializer::JsonMember& m : value.members)
-    {
-        if (m.key == key && m.value.type == JsonValue::Type::string)
-        {
-            return &m.value.string_value;
-        }
-    }
-    return nullptr;
+    const JsonValue* m = schema::find_member(value, key);
+    return (m != nullptr && m->type == JsonValue::Type::string) ? &m->string_value : nullptr;
 }
 
 // The last '/'-separated token of a JSON pointer (the field's leaf name — the accessible name).
@@ -132,6 +110,35 @@ constexpr const char* kEntityFieldPrefix = "/entities/[]";
 }
 
 } // namespace
+
+const compose::ComposedEntity* find_entity_by_identity(const compose::ComposedScene& scene,
+                                                       const std::string& identity)
+{
+    // Split the key once; join_identity is injective (segments are lowercase hex or $root, never
+    // containing '/'), so comparing segment vectors equals comparing joined strings — with zero
+    // per-candidate allocations.
+    std::vector<std::string> segments;
+    std::size_t start = 0;
+    while (true)
+    {
+        const std::size_t slash = identity.find('/', start);
+        if (slash == std::string::npos)
+        {
+            segments.push_back(identity.substr(start));
+            break;
+        }
+        segments.push_back(identity.substr(start, slash - start));
+        start = slash + 1;
+    }
+    for (const compose::ComposedEntity& candidate : scene.entities)
+    {
+        if (candidate.id_path == segments)
+        {
+            return &candidate;
+        }
+    }
+    return nullptr;
+}
 
 InspectorModel build_inspector_model(const compose::ComposedEntity& entity,
                                      const schema::KindSchema& kind_schema,

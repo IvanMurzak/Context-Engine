@@ -20,9 +20,10 @@ target_include_directories(context_gui_undo PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/i
 #                                  commit_override_write   (the shared L-30 commit engine + seam)
 #   context_gui_uitree          -> uitree::Panel            (build_panel())
 #   context_serializer          -> serializer::JsonValue    (FieldEdit values + to_json())
-# context_gui_panel_inspector PUBLIC-links uitree + compose + serializer, so compose::WriteRequest
-# (used in the .cpp) + the serializer helpers arrive transitively. context_warnings is PRIVATE (no
-# flag leak to a CEF-host consumer, per conventions.md). NO new third-party dependency.
+# Since the e05d3 boundary split, context_gui_panel_inspector carries NO compose type on its PUBLIC
+# interface (the seam is the boundary-clean inspector::OverrideWriteRequest, which undo_journal.cpp
+# builds directly); the serializer helpers still arrive transitively. context_warnings is PRIVATE
+# (no flag leak to a CEF-host consumer, per conventions.md). NO new third-party dependency.
 target_link_libraries(context_gui_undo
     PUBLIC context_gui_panel_inspector context_gui_uitree context_serializer
     PRIVATE context_warnings)

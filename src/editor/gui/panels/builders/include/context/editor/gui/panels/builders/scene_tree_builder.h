@@ -11,8 +11,18 @@
 
 #include "context/editor/gui/panels/scenetree/scene_tree_model.h"
 
+#include <string>
+#include <vector>
+
 namespace context::editor::gui::panels::builders
 {
+
+// The L-35 id-path joined with '/' — THE stable selection/identity key every wire consumer keys by
+// (tree rows, the inspector model's `identity`, the daemon's `editor.inspect` idPath param). The
+// join is INJECTIVE: stable ids are lowercase hex and the $root token carries no '/', so distinct
+// id-paths never collide. One exported definition so the encoding cannot drift between producers
+// (a drift silently breaks selection).
+[[nodiscard]] std::string join_identity(const std::vector<std::string>& id_path);
 
 // Build the scene-tree view model from a flattened composed scene (the real derived world). The flat
 // ComposedScene::entities are woven into a hierarchy by id-path prefix; a prefix with no own composed

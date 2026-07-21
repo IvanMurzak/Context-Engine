@@ -359,6 +359,21 @@ int main()
             CHECK(none.has_value());
             const Json none_resp = Json::parse(*none);
             CHECK(!none_resp.at("result").at("data").at("inspector").at("present").as_bool());
+
+            // inspect with a JAIL-ESCAPING path (R-SEC-008): the raw-hash CAS read must not become
+            // an out-of-project existence/content-hash oracle. The `..` path here names the very
+            // same on-disk root.scene.json that answered a real token above — escaping form alone
+            // must degrade it to the honest no-token "0" (and the composed model to present:false).
+            Json escaping = Json::object();
+            escaping.set("path", Json(std::string("../") + project.filename().string() +
+                                      "/root.scene.json"));
+            escaping.set("idPath", Json(std::string("aaaaaaaaaaaaaaa1/ccccccccccccccc1")));
+            const std::optional<std::string> jailed =
+                rw.request(rpc(9, "editor.inspect", std::move(escaping)));
+            CHECK(jailed.has_value());
+            const Json jailed_resp = Json::parse(*jailed);
+            CHECK(jailed_resp.at("result").at("data").at("rawHash").as_string() == "0");
+            CHECK(!jailed_resp.at("result").at("data").at("inspector").at("present").as_bool());
         }
 
         // shutdown — breaks the serve loop (the thread joins below without a kill)

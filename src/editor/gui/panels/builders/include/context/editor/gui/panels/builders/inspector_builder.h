@@ -20,6 +20,14 @@
 namespace context::editor::gui::panels::builders
 {
 
+// Resolve `identity` — the join_identity selection key (scene_tree_builder.h) — back to its composed
+// entity, or nullptr when no entity carries that id-path. The inverse lookup every identity-keyed
+// consumer routes through (the daemon's `editor.inspect`, e09's wire write gateway): the join is
+// injective, so the lookup splits the key once and compares segment vectors — no per-candidate
+// string building. Total and deterministic.
+[[nodiscard]] const compose::ComposedEntity*
+find_entity_by_identity(const compose::ComposedScene& scene, const std::string& identity);
+
 // Build the inspector model for a composed entity, driven by its kind schema's R-CLI-005
 // introspection (schema::introspection_json) intersected with the entity's composed value. Only the
 // entity's PRESENT component fields are surfaced; the immutable identity fields (/id, /$schema,

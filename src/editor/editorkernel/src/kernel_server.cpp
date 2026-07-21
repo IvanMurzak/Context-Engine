@@ -10,6 +10,7 @@
 #include "context/editor/derivation/derivation_graph.h"
 #include "context/editor/filesync/content_hash.h"       // e05d3: the inspect CAS token
 #include "context/editor/filesync/native_file_store.h"  // e05d3: root-scene raw-byte read
+#include "context/editor/filesync/path_jail.h"          // e05d3: R-SEC-008 jail on the raw read
 #include "context/editor/gui/panels/builders/inspector_builder.h"  // e05d3: kernel-side builders
 #include "context/editor/gui/panels/builders/scene_tree_builder.h" // e05d3
 #include "context/editor/gui/panels/builders/wire.h"               // e05d3: model -> wire JSON
@@ -417,31 +418,20 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
         const compose::ProjectSceneResolver resolver(kernel_.config().project_root);
         const compose::ComposedScene scene = compose::flatten(*path, resolver);
 
-        // The slash-join is injective (stable ids are lowercase hex; $root carries no '/'), so
-        // matching the joined form against the wire param needs no re-split.
-        const compose::ComposedEntity* entity = nullptr;
-        for (const compose::ComposedEntity& candidate : scene.entities)
-        {
-            std::string joined;
-            for (std::size_t i = 0; i < candidate.id_path.size(); ++i)
-            {
-                if (i != 0)
-                    joined += '/';
-                joined += candidate.id_path[i];
-            }
-            if (joined == *id_path_joined)
-            {
-                entity = &candidate;
-                break;
-            }
-        }
+        // The builders library owns the identity-key encoding AND its inverse lookup — the same
+        // join_identity every wire consumer keys by (a third hand-rolled copy here would be the
+        // drift risk the exported helper exists to close).
+        const compose::ComposedEntity* entity =
+            gui::panels::builders::find_entity_by_identity(scene, *id_path_joined);
 
         Json data = Json::object();
         // The driving kind is the ROOT SCENE's — only `ctx:scene` documents enter composition
         // (compose/scene_model.h), and its introspection publishes the entity fields under
         // `/entities/[]/…` (exactly what build_inspector_model intersects). A registry without it
-        // would be an engine-registration defect; answered as present:false rather than invented.
-        const schema::KindSchema* kind = schema::engine_schemas().latest("ctx:scene");
+        // would be an engine-registration defect — answered as the same honest present:false as an
+        // unknown entity, never invented.
+        const schema::KindSchema* kind =
+            entity == nullptr ? nullptr : schema::engine_schemas().latest("ctx:scene");
 
         if (entity == nullptr || kind == nullptr)
         {
@@ -458,7 +448,13 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
 
         // The root scene file's CURRENT raw-byte hash — the outermost target's CAS token (the same
         // read the disk-backed gateway's FieldState carries). 0 when the file is unreadable.
+        // The R-SEC-008 jail is the CALLER's duty on a NativeFileStore (native_file_store.h): an
+        // escaping wire `path` (`../`, absolute) must not turn this read into an out-of-project
+        // existence/content-hash oracle — the composed read above needs no twin check because
+        // ProjectSceneResolver jails internally. An escaping path answers 0, the same honest
+        // "no CAS token" an unreadable file gets.
         std::uint64_t raw_hash = 0;
+        if (filesync::is_inside_jail(".", *path))
         {
             const filesync::NativeFileStore store(kernel_.config().project_root);
             if (const std::optional<std::string> bytes = store.read(*path))
@@ -466,11 +462,7 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
         }
         data.set("rawHash", hash_string(raw_hash));
         data.set("generation", Json(kernel_.generation()));
-
-        Envelope env = Envelope::success(std::move(data), kernel_.generation());
-        if (entity != nullptr && kind == nullptr)
-            env.add_warning("the ctx:scene kind is not registered; no fields derived");
-        return env;
+        return Envelope::success(std::move(data), kernel_.generation());
     }
 
     // `resource.read` — the R-CLI-017 large-result fetch (CLI: `context fetch`): read a bounded,

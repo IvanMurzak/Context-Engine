@@ -6,7 +6,9 @@
 
 #include "context/editor/shell/panels/builtin_panels.h" // kDerivationTopic
 #include "context/editor/shell/panels/problems_feed.h"  // kDerivationSettledEvent + parse_stability
+#include "wire_read.h"                                  // read_string / read_bool
 
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -15,18 +17,6 @@ namespace context::editor::shell::panels
 
 namespace
 {
-
-// Read an optional string member; empty when absent or not a string (the problems_feed helper,
-// repeated locally because that one is TU-private by design — each feed owns its wire tolerance).
-[[nodiscard]] std::string read_string(const contract::Json& object, const std::string& key)
-{
-    if (!object.is_object() || !object.contains(key))
-    {
-        return std::string();
-    }
-    const contract::Json& value = object.at(key);
-    return value.is_string() ? value.as_string() : std::string();
-}
 
 // One wire node -> one model node. nullopt when the entry is not an object or carries no identity
 // (a node the panel could neither select nor key a patch by). Children recurse; unparseable
@@ -49,10 +39,10 @@ namespace
     // default (selectable, hash-bearing), and an unknown future token must not invent a THIRD kind.
     node.kind = read_string(wire, "kind") == "instance" ? scenetree::NodeKind::instance
                                                         : scenetree::NodeKind::entity;
-    node.overridden = wire.contains("overridden") && wire.at("overridden").as_bool();
-    if (wire.contains("children") && wire.at("children").is_array())
+    node.overridden = read_bool(wire, "overridden");
+    const contract::Json& children = wire.at("children"); // at() is total: null when absent
+    if (children.is_array())
     {
-        const contract::Json& children = wire.at("children");
         for (std::size_t i = 0; i < children.size(); ++i)
         {
             if (std::optional<scenetree::SceneTreeNode> child = parse_node(children.at(i)))
@@ -97,7 +87,8 @@ std::uint64_t parse_hex_u64(const std::string& text)
 
 std::optional<scenetree::SceneTreeModel> parse_scene_tree(const contract::Json& wire)
 {
-    if (!wire.is_object() || !wire.contains("roots") || !wire.at("roots").is_array())
+    const contract::Json& roots = wire.at("roots"); // at() is total: null when absent / non-object
+    if (!roots.is_array())
     {
         // NO RECOGNIZED CONTAINER = NO INFORMATION — not the same as "an empty tree". The caller
         // keeps the current model rather than clearing it on a reply that said nothing.
@@ -105,8 +96,7 @@ std::optional<scenetree::SceneTreeModel> parse_scene_tree(const contract::Json& 
     }
     scenetree::SceneTreeModel model;
     model.root_scene = read_string(wire, "rootScene");
-    model.ok = !wire.contains("ok") || wire.at("ok").as_bool();
-    const contract::Json& roots = wire.at("roots");
+    model.ok = !wire.contains("ok") || wire.at("ok").as_bool(); // ABSENT means ok — contains() matters
     for (std::size_t i = 0; i < roots.size(); ++i)
     {
         if (std::optional<scenetree::SceneTreeNode> node = parse_node(roots.at(i)))
@@ -115,11 +105,12 @@ std::optional<scenetree::SceneTreeModel> parse_scene_tree(const contract::Json& 
         }
     }
     // entityCount is authoritative from the wire when present (the daemon counted the COMPOSED
-    // entities, which synthetic instance boundaries under-count locally); recomputed defensively
-    // otherwise so the status line never claims a count nothing sent.
-    if (wire.contains("entityCount") && wire.at("entityCount").is_number())
+    // entities, which synthetic instance boundaries under-count locally); left at the model's zero
+    // default otherwise, so the status line never claims a count nothing sent.
+    const contract::Json& entity_count = wire.at("entityCount");
+    if (entity_count.is_number())
     {
-        const double raw = wire.at("entityCount").as_number();
+        const double raw = entity_count.as_number();
         model.entity_count =
             (raw >= 0.0 && raw <= 9007199254740992.0) ? static_cast<std::size_t>(raw) : 0;
     }
@@ -128,8 +119,8 @@ std::optional<scenetree::SceneTreeModel> parse_scene_tree(const contract::Json& 
 
 std::optional<std::string> scenetree_row_identity(const std::string& node_id)
 {
-    const std::string prefix = kSceneTreeRowPrefix;
-    if (node_id.size() <= prefix.size() || node_id.compare(0, prefix.size(), prefix) != 0)
+    constexpr std::string_view prefix = kSceneTreeRowPrefix;
+    if (node_id.size() <= prefix.size() || !std::string_view(node_id).starts_with(prefix))
     {
         return std::nullopt;
     }
@@ -146,15 +137,18 @@ SceneTreeFeed::SceneTreeFeed(PanelHost& host, std::string panel_id)
 bool SceneTreeFeed::apply_result(const contract::Json& reply)
 {
     // Envelope tolerance: {result-envelope {data: {sceneTree}}} / {data:{sceneTree}} / {sceneTree}
-    // / the bare tree. The FIRST recognized shape wins.
+    // / the bare tree. The FIRST recognized shape wins. at() is total (a shared null when absent),
+    // so each hop reads its member once.
     const contract::Json* wire = &reply;
-    if (wire->is_object() && wire->contains("data") && wire->at("data").is_object())
+    const contract::Json& nested_data = reply.at("data");
+    if (nested_data.is_object())
     {
-        wire = &wire->at("data");
+        wire = &nested_data;
     }
-    if (wire->is_object() && wire->contains("sceneTree") && wire->at("sceneTree").is_object())
+    const contract::Json& nested_tree = wire->at("sceneTree");
+    if (nested_tree.is_object())
     {
-        wire = &wire->at("sceneTree");
+        wire = &nested_tree;
     }
     std::optional<scenetree::SceneTreeModel> model = parse_scene_tree(*wire);
     if (!model.has_value())

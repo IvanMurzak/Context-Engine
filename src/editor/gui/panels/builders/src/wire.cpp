@@ -4,6 +4,7 @@
 
 #include "context/editor/gui/panels/builders/wire.h"
 
+#include "context/editor/compose/stable_id.h" // format_stable_id — the ONE u64->hex wire form
 #include "context/editor/serializer/canonical.h"
 
 #include <cstdint>
@@ -20,22 +21,13 @@ namespace
 
 namespace serializer = context::editor::serializer;
 
-// A u64 hash as a lowercase hex STRING — Json numbers are doubles, and a hash above 2^53
-// would silently lose bits as a JSON number (the kernel_server rawHash discipline).
+// A u64 hash as a lowercase hex STRING — Json numbers are doubles, and a hash above 2^53 would
+// silently lose bits as a JSON number. compose::format_stable_id is the codebase's ONE u64->hex
+// formatter (zero-padded 16-char), so "identityHash" here renders byte-identically to the composed
+// scene JSON (compose/flatten.cpp) and the pack chunk bodies (pack/pack_writer.cpp).
 [[nodiscard]] std::string hex_of(std::uint64_t value)
 {
-    static const char* digits = "0123456789abcdef";
-    std::string out;
-    if (value == 0)
-    {
-        return "0";
-    }
-    while (value != 0)
-    {
-        out.insert(out.begin(), digits[value & 0xF]);
-        value >>= 4;
-    }
-    return out;
+    return compose::format_stable_id(value);
 }
 
 // The WidgetKind wire token. MIRRORED by the Shell-side inspector feed parser

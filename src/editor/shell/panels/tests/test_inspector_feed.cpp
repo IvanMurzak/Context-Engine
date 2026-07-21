@@ -250,6 +250,26 @@ void apply_result_adopts_the_model_and_the_cas_token()
     CHECK(parsed->fields.size() == 1u);
     CHECK(!parsed->fields[0].editable);
     CHECK(parsed->fields[0].kind == inspector::WidgetKind::readonly);
+
+    // An UNKNOWN widget token fails closed across BOTH members: the kind reads readonly AND the
+    // wire's independent `editable` bit is clamped off — stage_edit gates on `editable` alone, so
+    // the token downgrade by itself would still leave the field editable through a widget this
+    // build cannot render honestly.
+    Json alien_field = Json::object();
+    alien_field.set("pointer", Json(std::string("/alien")));
+    alien_field.set("kind", Json(std::string("holo-dial")));
+    alien_field.set("value", Json(std::string("1")));
+    alien_field.set("editable", Json(true));
+    Json alien_fields = Json::array();
+    alien_fields.push_back(std::move(alien_field));
+    Json alien_model = Json::object();
+    alien_model.set("present", Json(true));
+    alien_model.set("fields", std::move(alien_fields));
+    const std::optional<inspector::InspectorModel> alien = panels::parse_inspector(alien_model);
+    CHECK(alien.has_value());
+    CHECK(alien->fields.size() == 1u);
+    CHECK(alien->fields[0].kind == inspector::WidgetKind::readonly);
+    CHECK(!alien->fields[0].editable);
 }
 
 void edits_stage_through_the_provider()

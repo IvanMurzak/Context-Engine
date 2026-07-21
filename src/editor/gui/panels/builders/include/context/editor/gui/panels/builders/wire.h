@@ -8,7 +8,9 @@
 //
 // Two wire rules the shapes below encode:
 //   * u64 identity/CAS hashes cross as lowercase HEX STRINGS ("identityHash"), never JSON numbers —
-//     contract::Json numbers are doubles, and a hash above 2^53 would silently lose bits.
+//     contract::Json numbers are doubles, and a hash above 2^53 would silently lose bits. The hex
+//     form is compose::format_stable_id's zero-padded 16-char rendering — byte-identical to the
+//     "identityHash" the composed scene JSON (compose/flatten.cpp) and the pack chunk bodies emit.
 //   * inspector field VALUES cross as their canonical serialization ("value", a JSON string) —
 //     serializer::JsonValue and contract::Json are different DOMs, and the canonical byte form
 //     (R-FILE-001) is the engine's one value identity, so the round-trip is exact by construction.

@@ -49,8 +49,9 @@ namespace inspector = gui::panels::inspector;
 [[nodiscard]] std::optional<inspector::InspectorModel> parse_inspector(const contract::Json& wire);
 
 // The root scene file's raw-byte CAS token, carried as a DECIMAL string (the kernel_server rawHash
-// discipline — a u64 exceeds 2^53 as a JSON number). 0 for absent/garbage — which the panel treats
-// as "no CAS guard", exactly the honest state for an unknown file.
+// discipline — a u64 exceeds 2^53 as a JSON number; serializer::parse_hash_string is its strict
+// inverse). 0 for absent/garbage — which the panel treats as "no CAS guard", exactly the honest
+// state for an unknown file.
 [[nodiscard]] std::uint64_t parse_raw_hash(const std::string& text);
 
 // ---------------------------------------------------------------- the node-id -> field mapping
