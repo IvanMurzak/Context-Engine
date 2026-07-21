@@ -97,6 +97,19 @@ void check(bool condition, const char* what, int line)
 
 #define SMOKE_CHECK(cond, what) check((cond), (what), __LINE__)
 
+// Flushed progress trace. The phase-2 crash is not locally reproducible (CEF does not link on the
+// GCC dev host) and leaves ONLY a process exit code behind — no SMOKE_CHECK fires when the fault is
+// inside the live CEF pump/teardown rather than in an assertion — so every milestone is written to
+// stderr AND flushed immediately. The LAST `[label]` line before the gap in the CI log is where the
+// process died. Paired with the opt-in verbose CEF logging both phases request
+// (CefShellOptions::verbose_logging), so Chromium's own renderer/GPU subprocess errors interleave
+// into this same stream and name a cause the smoke's TU-local OnLoadError/OnConsoleMessage cannot.
+void trace(const char* label, const char* msg)
+{
+    std::fprintf(stderr, "[editor-cef-smoke-shell-restore] [%s] %s\n", label, msg);
+    std::fflush(stderr);
+}
+
 std::uint64_t now_us()
 {
     return static_cast<std::uint64_t>(
@@ -198,6 +211,7 @@ SessionOutcome run_session(const std::filesystem::path& project,
                            const SessionConfig& cfg)
 {
     SessionOutcome out;
+    trace(cfg.label, "run_session: begin");
 
     // handshake BEFORE bridge (it must outlive the router that captures it); manager BEFORE the
     // editor-state bridge (whose sink captures &manager) — the same declaration discipline
@@ -254,16 +268,22 @@ SessionOutcome run_session(const std::filesystem::path& project,
     cef_options.app_asset_root = asset_root;
     cef_options.bridge = &bridge;
     cef_options.windowless_frame_rate = 10;
+    // Full-tree verbose CEF logging for BOTH phases: the only failure signal here is a process exit
+    // code, so make Chromium name the cause on stderr (this smoke is where it is needed most).
+    cef_options.verbose_logging = true;
 
+    trace(cfg.label, "make_cef_browser_host: begin (CefInitialize on this fresh process)");
     std::string error;
     std::unique_ptr<shell::IBrowserHost> browser =
         shell::cef::make_cef_browser_host(cef_options, error);
     if (browser == nullptr)
     {
         std::fprintf(stderr, "[%s] FAIL: the browser did not start: %s\n", cfg.label, error.c_str());
+        std::fflush(stderr);
         return out;
     }
     out.browser_started = true;
+    trace(cfg.label, "browser started (CefInitialize + CreateBrowserSync OK)");
 
     shell::EditorWindowConfig config;
     config.compositor.import_options.force_software = true; // software OSR — the shipping Windows path
@@ -289,18 +309,61 @@ SessionOutcome run_session(const std::filesystem::path& project,
     // read + report for the restoring one. The 30s deadline bounds it, so a genuine no-restore
     // regression runs out the clock and the caller's assertion fails rather than hanging.
     const std::size_t expected_renders = shell::panels::hostable_panel_ids().size();
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    const auto loop_start = std::chrono::steady_clock::now();
+    const auto deadline = loop_start + std::chrono::seconds(30);
     bool presented = false;
+    // Edge-triggered milestone traces (each fires once) + a ~2s heartbeat. pump_once() calls into
+    // CEF every iteration, so a hang INSIDE it shows as a STALLED heartbeat — distinct from a loop
+    // that completes cleanly and then crashes in teardown, which is the ambiguity a bare exit code
+    // cannot resolve. `broke_early`/`pump_stopped` classify why the loop ended.
+    bool traced_presented = false;
+    bool traced_handshake = false;
+    bool traced_panels = false;
+    bool traced_read = false;
+    bool traced_report = false;
+    bool broke_early = false;
+    bool pump_stopped = false;
+    auto last_heartbeat = loop_start;
     while (std::chrono::steady_clock::now() < deadline)
     {
         if (!manager.pump_once(now_us()))
         {
+            pump_stopped = true;
             break;
         }
         if (!presented && editor->compositor().stats().view_frames > 0 &&
             blitter_raw->blit_count() > 0)
         {
             presented = true;
+        }
+        if (presented && !traced_presented)
+        {
+            traced_presented = true;
+            trace(cfg.label, "milestone: first CEF OSR frame composited + presented");
+        }
+        if (!traced_handshake && handshake.complete())
+        {
+            traced_handshake = true;
+            trace(cfg.label, "milestone: bridge handshake complete");
+        }
+        if (!traced_panels && panel_host.renders_served() >= expected_renders)
+        {
+            traced_panels = true;
+            trace(cfg.label, "milestone: all hostable panels rendered");
+        }
+        if (!traced_read && editor_state_bridge.state_reads() >= 1)
+        {
+            traced_read = true;
+            trace(cfg.label, "milestone: editor.state.get served (the restore read)");
+        }
+        if (!traced_report && editor_state_bridge.restore_reports() >= 1)
+        {
+            traced_report = true;
+            std::fprintf(stderr,
+                         "[editor-cef-smoke-shell-restore] [%s] milestone: editor.layout.restored "
+                         "reported (layoutRestored=%s)\n",
+                         cfg.label, editor_state_bridge.layout_restored() ? "true" : "false");
+            std::fflush(stderr);
         }
         bool hydrated = false;
         if (presented && handshake.complete() &&
@@ -322,10 +385,50 @@ SessionOutcome run_session(const std::filesystem::path& project,
                  editor_state_bridge.restore_reports() >= 1);
             if (arranged && restored)
             {
+                broke_early = true;
                 break;
             }
         }
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last_heartbeat >= std::chrono::seconds(2))
+        {
+            last_heartbeat = now;
+            const auto elapsed_ms =
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - loop_start).count();
+            std::fprintf(stderr,
+                         "[editor-cef-smoke-shell-restore] [%s] heartbeat t=%lldms presented=%d "
+                         "handshake=%d renders=%llu/%llu published=%llu reads=%llu reports=%llu\n",
+                         cfg.label, static_cast<long long>(elapsed_ms), presented ? 1 : 0,
+                         handshake.complete() ? 1 : 0,
+                         static_cast<unsigned long long>(panel_host.renders_served()),
+                         static_cast<unsigned long long>(expected_renders),
+                         static_cast<unsigned long long>(editor_state_bridge.states_published()),
+                         static_cast<unsigned long long>(editor_state_bridge.state_reads()),
+                         static_cast<unsigned long long>(editor_state_bridge.restore_reports()));
+            std::fflush(stderr);
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    {
+        const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - loop_start)
+                                    .count();
+        std::fprintf(stderr,
+                     "[editor-cef-smoke-shell-restore] [%s] pump loop exit: reason=%s elapsed=%lldms "
+                     "hydrated=%d presented=%d handshake=%d renders=%llu/%llu published=%llu "
+                     "reads=%llu reports=%llu layoutRestored=%d\n",
+                     cfg.label,
+                     broke_early ? "complete" : (pump_stopped ? "pump-stopped" : "deadline-30s"),
+                     static_cast<long long>(elapsed_ms), out.hydrated ? 1 : 0, presented ? 1 : 0,
+                     handshake.complete() ? 1 : 0,
+                     static_cast<unsigned long long>(panel_host.renders_served()),
+                     static_cast<unsigned long long>(expected_renders),
+                     static_cast<unsigned long long>(editor_state_bridge.states_published()),
+                     static_cast<unsigned long long>(editor_state_bridge.state_reads()),
+                     static_cast<unsigned long long>(editor_state_bridge.restore_reports()),
+                     editor_state_bridge.layout_restored() ? 1 : 0);
+        std::fflush(stderr);
     }
 
     // Force the debounced store write so the on-disk file reflects the last published arrangement
@@ -337,6 +440,12 @@ SessionOutcome run_session(const std::filesystem::path& project,
     out.layout_restored = editor_state_bridge.layout_restored();
     out.store_write_count = manager.state_store().write_count();
     out.persisted_layout = manager.state_store().state().layout;
+    std::fprintf(stderr,
+                 "[editor-cef-smoke-shell-restore] [%s] outcomes read: write_count=%d "
+                 "layoutRestored=%d — beginning teardown (manager.shutdown -> browser CloseBrowser + "
+                 "CEF subprocess reap)\n",
+                 cfg.label, out.store_write_count, out.layout_restored ? 1 : 0);
+    std::fflush(stderr);
 
     // Close + destroy the window (and its browser) NOW, while `bridge` — which the browser points at
     // — is still alive: manager.shutdown() clears its windows, whose EditorWindow destructors run the
@@ -345,6 +454,8 @@ SessionOutcome run_session(const std::filesystem::path& project,
     // after this, so no bridge handler is invoked during the unwind. CEF stays INITIALISED — the
     // phase's main() runs shell::cef::shutdown() next, then hard-exits (the single-boot smoke shape).
     manager.shutdown();
+    trace(cfg.label, "manager.shutdown() returned (browser + its CEF subprocesses torn down); "
+                     "run_session returning (CEF stays initialised)");
     return out;
 }
 
@@ -427,7 +538,13 @@ int run_phase_1(const std::filesystem::path& project, const std::filesystem::pat
     SMOKE_CHECK(subprocess::write_file(layout_oracle_path(project), oracle.data(), oracle.size()),
                 "phase 1 wrote the layout oracle for phase 2 to check against");
 
+    std::fprintf(stderr,
+                 "[editor-cef-smoke-shell-restore] [phase1] assertions done (failures=%d); "
+                 "cef::shutdown() (CefShutdown) begin\n",
+                 g_failures);
+    std::fflush(stderr);
     shell::cef::shutdown();
+    trace("phase1", "cef::shutdown() (CefShutdown) returned");
     return g_failures != 0 ? 1 : 0;
 }
 
@@ -457,7 +574,13 @@ int run_phase_2(const std::filesystem::path& project, const std::filesystem::pat
                 "phase 2 REAPPLIED the persisted arrangement — layoutRestored:true. False on a fresh "
                 "boot, so this is the end-to-end proof the arrangement came back");
 
+    std::fprintf(stderr,
+                 "[editor-cef-smoke-shell-restore] [phase2] assertions done (failures=%d); "
+                 "cef::shutdown() (CefShutdown) begin\n",
+                 g_failures);
+    std::fflush(stderr);
     shell::cef::shutdown();
+    trace("phase2", "cef::shutdown() (CefShutdown) returned");
     return g_failures != 0 ? 1 : 0;
 }
 
@@ -492,6 +615,7 @@ int main(int argc, char** argv)
     if (phase == 1)
     {
         std::printf("[editor-cef-smoke-shell-restore] phase 1: live boot -> dock -> persist\n");
+        std::fflush(stdout);
         std::error_code ec;
         std::filesystem::create_directories(project, ec); // the controller made it; be idempotent
         return finish(run_phase_1(project, asset_root, size));
@@ -499,6 +623,7 @@ int main(int argc, char** argv)
     if (phase == 2)
     {
         std::printf("[editor-cef-smoke-shell-restore] phase 2: fresh process -> restore\n");
+        std::fflush(stdout);
         return finish(run_phase_2(project, asset_root, size));
     }
 
@@ -547,7 +672,12 @@ int main(int argc, char** argv)
         const std::string self_arg = subprocess::quote_argument(self.string());
 
         // Phase 1: persist an arrangement in one process, then exit.
+        trace("controller", "launching phase 1 (persist) child; blocking until it exits");
         const int rc1 = subprocess::run_command(self_arg + " --ctx-restore-phase=1");
+        std::fprintf(stderr, "[editor-cef-smoke-shell-restore] [controller] phase 1 child exited "
+                             "rc=%d\n",
+                     rc1);
+        std::fflush(stderr);
         if (rc1 != 0)
         {
             std::fprintf(stderr,
@@ -565,7 +695,13 @@ int main(int argc, char** argv)
 
         // Phase 2: a FRESH process restores from that file, then exits. Run it regardless so its own
         // diagnostics surface even when phase 1 failed.
+        trace("controller", "phase 1 fully reaped; launching phase 2 (restore) child; blocking until "
+                            "it exits");
         const int rc2 = subprocess::run_command(self_arg + " --ctx-restore-phase=2");
+        std::fprintf(stderr, "[editor-cef-smoke-shell-restore] [controller] phase 2 child exited "
+                             "rc=%d\n",
+                     rc2);
+        std::fflush(stderr);
         if (rc2 != 0)
         {
             std::fprintf(stderr,

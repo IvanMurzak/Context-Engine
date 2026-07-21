@@ -71,6 +71,14 @@ struct CefShellOptions
     // decouples the engine's present rate from it (measured in the spike).
     int windowless_frame_rate = 60;
 
+    // Opt-in Chromium/CEF verbose logging for the WHOLE process tree — LOGSEVERITY_VERBOSE plus
+    // `--enable-logging=stderr --v=1`, which CEF propagates to the renderer/GPU/utility subprocesses
+    // it spawns. OFF by default (the shipping editor stays at LOGSEVERITY_WARNING and quiet). It
+    // exists for the un-locally-reproducible CEF-only smokes (e.g. the restart smoke), where the only
+    // failure signal is a process exit code and the actual fault lives inside a subprocess whose
+    // errors are otherwise never surfaced — turning it on makes Chromium name the cause on stderr.
+    bool verbose_logging = false;
+
     // --- e05c: the app scheme + the privileged bridge --------------------------------------------
 
     // editor-core's built asset root, served over `context-editor://app/…` (design 04 §1). Empty
