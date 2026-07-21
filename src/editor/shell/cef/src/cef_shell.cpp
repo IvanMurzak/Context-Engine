@@ -43,6 +43,7 @@
 #include <fstream>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #if !defined(_WIN32)
@@ -1138,6 +1139,28 @@ void shutdown()
     // Freed only now — every browser is gone and no IO-thread request can still be in flight.
     delete g_asset_resolver;
     g_asset_resolver = nullptr;
+}
+
+void drain_message_loop(std::chrono::milliseconds budget)
+{
+    // A no-op before CefInitialize / after CefShutdown: driving the loop then is undefined
+    // behaviour (mirrors the CefBrowserHostImpl::close() guard).
+    if (!g_initialized)
+    {
+        return;
+    }
+    // Pump on a small fixed cadence rather than in a tight spin. The teardown being waited out is
+    // paced by the OS reaping the just-closed browser's GPU/renderer subprocesses, so a brief yield
+    // between pumps is what actually lets it progress — a hot CefDoMessageLoopWork() loop would just
+    // busy-wait the CPU without giving the subprocess exits any wall-clock time. The budget bounds
+    // it so a stuck teardown can never hang the caller.
+    constexpr auto kGap = std::chrono::milliseconds{5};
+    const auto deadline = std::chrono::steady_clock::now() + budget;
+    do
+    {
+        CefDoMessageLoopWork();
+        std::this_thread::sleep_for(kGap);
+    } while (std::chrono::steady_clock::now() < deadline);
 }
 
 } // namespace context::editor::shell::cef

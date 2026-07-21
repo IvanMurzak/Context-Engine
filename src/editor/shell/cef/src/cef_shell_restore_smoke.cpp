@@ -398,6 +398,16 @@ int main(int argc, char** argv)
                 "the editor-state file exists on disk after session 1");
 
     // --- RESTART -> SESSION 2: a fresh browser + a fresh store loaded from disk, then restore ------
+    // Drain CEF's message loop BETWEEN the two boots. Session 1's manager.shutdown() closed browser
+    // 1, but its close() loop stops the instant OnBeforeClose releases the browser reference — the
+    // renderer/GPU subprocesses keep tearing down asynchronously, and with external_message_pump on
+    // NOTHING pumps CEF between here and session 2's CreateBrowserSync. Without this, on the
+    // Session-0 Windows runner browser 2 booted into a half-torn-down subprocess state, never
+    // hydrated, ran its full 30s clock, and SEGFAULTed on teardown (the windows-only regression this
+    // smoke's first CI run hit). Letting browser 1's subprocesses fully die first is the restart
+    // drill design 03 §7 describes — a real editor restart never reuses a half-dead process.
+    shell::cef::drain_message_loop();
+
     const SessionOutcome second =
         run_session(project, asset_root, size, SessionConfig{"session2", false, true});
     SMOKE_CHECK(second.browser_started,

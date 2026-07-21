@@ -34,6 +34,7 @@
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/render/rhi.h"
 
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -98,5 +99,23 @@ struct CefShellOptions
 
 // Shut CEF down. Call ONCE, after every browser host has been closed. Idempotent.
 void shutdown();
+
+// Pump CEF's message loop for a bounded wall-clock budget, yielding briefly between pumps, so a
+// just-closed browser's ASYNCHRONOUS GPU/renderer subprocess teardown runs to completion before a
+// new browser is created within the SAME CEF initialisation.
+//
+// WHY IT IS NEEDED. With external_message_pump=true (make_cef_browser_host) CEF only advances when
+// the owner calls CefDoMessageLoopWork(). A browser's close() pumps only until OnBeforeClose
+// releases the browser reference, then stops — but that reference release does NOT mean the
+// renderer/GPU subprocesses have finished tearing down; that continues asynchronously and needs the
+// loop pumped (and a little wall-clock time) to complete. Between one browser's close and the next
+// browser's CreateBrowserSync nothing else drives the loop, so on Windows the second browser can
+// boot into a half-torn-down subprocess state, never hydrate, and crash. Draining here lets the
+// first browser's subprocesses fully die first.
+//
+// This is TEST / restart-drill infrastructure — the shipping editor closes at most one browser per
+// CEF initialisation and never restarts one in-process, so it never needs this. A no-op when CEF is
+// not initialised (before CefInitialize / after shutdown()), mirroring the close() guard.
+void drain_message_loop(std::chrono::milliseconds budget = std::chrono::milliseconds{1500});
 
 } // namespace context::editor::shell::cef
