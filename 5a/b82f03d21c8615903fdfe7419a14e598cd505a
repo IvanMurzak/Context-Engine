@@ -1,0 +1,39 @@
+.github/workflows/ci.yml
+  s_d31210b6053a9e::t_caacade24525d9 1442-1492
+docs/ci-fleet-manifest.json
+  s_d31210b6053a9e::t_d132ab9e3207ed 854-863
+src/editor/webui/CMakeLists.txt
+  s_d31210b6053a9e::t_845f3e2f67b7bf 256-329
+src/editor/webui/core/src/test/editorstate.test.ts
+  s_d31210b6053a9e::t_b183df3632f69a 1-42
+src/editor/webui/core/src/test/guards.test.ts
+  s_d31210b6053a9e::t_35e720763aed71 1-54
+src/editor/webui/core/src/test/harness.ts
+  s_d31210b6053a9e::t_5f114a886cb366 1-128
+src/editor/webui/core/src/test/main.ts
+  s_d31210b6053a9e::t_287de3f9583650 1-35
+src/editor/webui/core/src/test/panels.test.ts
+  s_d31210b6053a9e::t_e31b03eda1871f 1-130
+src/editor/webui/test/harness.html
+  s_d31210b6053a9e::t_6f6d85dbb6bf57 1-17
+tools/tests/test_webui_test_run.py
+  s_d31210b6053a9e::t_092799015bdac9 1-212
+tools/webui_test_run.py
+  s_d31210b6053a9e::t_c27234806c08c2 1-266
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5ab82f03d21c8615903fdfe7419a14e598cd505a",
+  "prompts": {},
+  "sessions": {
+    "s_d31210b6053a9e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_d31210b6053a9e",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
