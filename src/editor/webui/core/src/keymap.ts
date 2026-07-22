@@ -23,6 +23,7 @@
 
 import { evaluateWhen, type WhenContext } from "./when.js";
 import type { CommandOutcome, CommandRegistry } from "./commands.js";
+import { PALETTE_TOGGLE_COMMAND_ID } from "./palette.js";
 import { BridgeError, isRecord, type ShellBridge } from "./bridge.js";
 
 // --------------------------------------------------------------------------- the wire vocabulary
@@ -200,6 +201,9 @@ export const DEFAULT_KEYBINDINGS: readonly Keybinding[] = [
     binding("Alt+ArrowDown", "view.panel.move.down", "panelFocus && !textInputFocus"),
     binding("Ctrl+W", "view.panel.close", "panelFocus && !textInputFocus"),
     binding("Ctrl+T", "view.theme.toggle"),
+    // The command palette (e07d): openable from ANYWHERE — including from inside a text field — so it
+    // carries no `when` guard. This is the universal keyboard path to every command (R-CLI-001).
+    binding("Ctrl+Shift+P", PALETTE_TOGGLE_COMMAND_ID),
 ];
 
 // ------------------------------------------------------------------------------- the user override schema

@@ -27,11 +27,25 @@
 // broken" diagnosis into a pile of unexplained panel failures.
 
 import { BridgeError, ShellBridge, isRecord } from "./bridge.js";
+import {
+    buildCommandRegistry,
+    type CommandOutcome,
+    type CommandRegistry,
+    type EditorCommandActions,
+} from "./commands.js";
 import { EditorStateClient, LayoutPersistence } from "./editorstate.js";
 import { editorCoreInfo } from "./info.js";
 import { Keymap, KeybindingsClient } from "./keymap.js";
+import { Palette, PALETTE_TOGGLE_COMMAND_ID, paletteCommands } from "./palette.js";
+import { PaletteView } from "./palette_view.js";
 import { PanelClient } from "./panels.js";
 import { PanelHost } from "./panelhost.js";
+import {
+    resolveContext,
+    STUB_EDITOR_UI,
+    STUB_SESSION_STATE,
+    type WhenContext,
+} from "./when.js";
 
 /** The element the docking root mounts into. Mirrors `app/index.html`'s `<main id="editor-root">`. */
 export const EDITOR_ROOT_ID = "editor-root";
@@ -208,6 +222,12 @@ async function startPanels(bridge: ShellBridge): Promise<PanelBringUp> {
                 // Shell refusal, so it can never keep `attach` from running below.
                 await stateClient.reportRestore(restoreReport);
                 persistence.attach();
+                // --- the command layer + palette (e07d) ----------------------------------------
+                // The docking root is up and persistence is live; wire the ONE command registry, the
+                // palette over it, and (only under `?ctx-smoke-palette`) drive the T2 command-driven
+                // scenario. Placed AFTER `persistence.attach()` so a palette-driven layout change
+                // publishes over the live editor.state channel — the observable the T2 smoke asserts.
+                startCommandLayer(host, client);
                 // e05d4 restart-smoke seam: only when the boot URL carries `?ctx-smoke-arrange`,
                 // perform ONE deterministic docking change so the arrangement that gets persisted
                 // differs from the fresh-boot default — which is what makes the restart proof
@@ -254,6 +274,199 @@ async function startKeybindings(bridge: ShellBridge): Promise<void> {
     }
     if (typeof document !== "undefined") {
         document.documentElement.setAttribute("data-editor-keybindings", detail);
+    }
+}
+
+/**
+ * Wire the D8 command layer (e07d): build the ONE registry from all three sources, create the palette
+ * over it, register the palette-open command, mount the palette overlay, and — only under the
+ * `?ctx-smoke-palette` boot flag — drive the T2 command-driven scenario.
+ *
+ * NEVER THROWS: like the rest of boot, a failure here degrades to "no command layer" rather than an
+ * unhandled rejection in a renderer nobody watches. Placed after `PanelHost.start()` so the roster is
+ * known and after `LayoutPersistence.attach()` so a palette-driven layout change actually publishes.
+ */
+function startCommandLayer(host: PanelHost, client: PanelClient): void {
+    if (typeof document === "undefined") {
+        return;
+    }
+    const roster = host.roster;
+    if (roster === null) {
+        return;
+    }
+    try {
+        const registry = buildCommandRegistry({
+            // The daemon RPC fan-in (D19) is a later seam; contract verbs are PROJECTED into the
+            // palette (with their introspected docs) now, and executing one is an honest refusal until
+            // the client fan-in lands — it never touches the bridge, so no boot-time refusal.
+            contractDispatch: (method): CommandOutcome => ({
+                ok: false,
+                note: `daemon RPC fan-in not wired yet (D19): ${method}`,
+            }),
+            editorActions: makeEditorActions(host),
+            // Session undo/redo binding + dispatch land here (e07c); the wire REPLAY of the journal is
+            // e09 (undo_journal.h). Executing them is an honest refusal until then.
+            sessionActions: {
+                undo: (): CommandOutcome => ({
+                    ok: false,
+                    note: "session undo replay lands in e09 (undo_journal.h)",
+                }),
+                redo: (): CommandOutcome => ({
+                    ok: false,
+                    note: "session redo replay lands in e09 (undo_journal.h)",
+                }),
+            },
+            roster,
+            // A panel-manifest command dispatches to its panel over the real `panel.command` bridge.
+            panelDispatch: async (panelId, commandId): Promise<CommandOutcome> => {
+                const result = await client.command(panelId, commandId, "");
+                return result !== null && result.dispatched
+                    ? { ok: true, note: `${panelId}/${commandId}` }
+                    : { ok: false, note: `${panelId}/${commandId} not dispatched` };
+            },
+        });
+
+        const palette = new Palette(registry);
+        const view = new PaletteView({
+            host: document.body,
+            palette,
+            // The real `editor.ui` bus (05 §5) is a later seam; filter by the stubbed "nothing focused"
+            // context today and swap ONLY this provider when it lands.
+            contextProvider: (): WhenContext =>
+                resolveContext({ editorUi: STUB_EDITOR_UI, session: STUB_SESSION_STATE }),
+        });
+        view.mount();
+        // Register the palette-open command AFTER the view exists, so its handler can reflect the model
+        // into the overlay. It is bound to Ctrl+Shift+P in the default keymap (keymap.ts).
+        registry.registerAll(
+            paletteCommands({
+                toggle: (): CommandOutcome => {
+                    palette.toggle();
+                    view.sync();
+                    return { ok: true, note: palette.isOpen ? "palette opened" : "palette closed" };
+                },
+            }),
+        );
+
+        void runPaletteSmoke(registry, palette, host, view);
+    } catch (error) {
+        // Honest degradation, mirrored onto <html> like the other boot states.
+        document.documentElement.setAttribute(
+            "data-editor-commands",
+            `command layer unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        );
+    }
+}
+
+/**
+ * The built-in editor actions the e07b editor commands dispatch to.
+ *
+ * `closeActivePanel` is the one that is FULLY wired in e07d — it is the observable the T2 palette smoke
+ * drives (a palette-executed close → a Dockview layout change → an `editor.state.publish`). Panel
+ * navigation and dock-move reach their real implementations with the 03 §6 input-pump / interaction
+ * seam, and the theme toggle with the e06 token kit; until then they are honest refusals, which keeps
+ * the command REACHABLE (it is in the registry, the palette, and the keymap) without faking an effect.
+ */
+function makeEditorActions(host: PanelHost): EditorCommandActions {
+    return {
+        focusNextPanel: (): CommandOutcome => ({
+            ok: false,
+            note: "panel focus navigation arrives with the 03 §6 input-pump seam",
+        }),
+        focusPreviousPanel: (): CommandOutcome => ({
+            ok: false,
+            note: "panel focus navigation arrives with the 03 §6 input-pump seam",
+        }),
+        moveActivePanel: (direction): CommandOutcome => ({
+            ok: false,
+            note: `dock move (${direction}) arrives with the interaction seam`,
+        }),
+        closeActivePanel: (): CommandOutcome => {
+            const mounted = host.mounted;
+            // Never empty the layout — close only when more than one panel is mounted, mirroring the
+            // e05d4 `applySmokeArrangement` guard.
+            if (mounted.length <= 1) {
+                return { ok: false, note: "no closable panel (would empty the layout)" };
+            }
+            const last = mounted[mounted.length - 1];
+            const closed = last !== undefined && host.close(last);
+            return closed
+                ? { ok: true, note: `closed ${last}` }
+                : { ok: false, note: "the docking root refused the close" };
+        },
+        toggleTheme: (): CommandOutcome => ({
+            ok: false,
+            note: "theme toggle wires to the token kit when e06 lands",
+        }),
+    };
+}
+
+/**
+ * The M9 e07d T2 palette-smoke seam — a NO-OP unless the boot URL carries `?ctx-smoke-palette`.
+ *
+ * Drives a scenario PURELY through the command layer, exactly as an agent or a T2 test would (10
+ * "the palette surface ≡ the scriptable surface"): OPEN the palette via its command, FILTER by a
+ * query, then EXECUTE the top match. The chosen command is `view.panel.close`, whose effect — a
+ * Dockview layout change → an `editor.state.publish` over the live bridge — is the OBSERVABLE the C++
+ * `editor-cef-smoke-shell-palette` leg asserts (`states_published() >= 1`). The outcome is mirrored
+ * onto `<html data-editor-palette>` for the `--dump-dom` local repro, the same diagnosability
+ * discipline `markDocument` gives the boot state.
+ *
+ * Guarded so it is inert in the shipping editor: it requires the explicit flag AND more than one
+ * mounted panel (so it never empties the layout), and it is total — any failure just records a
+ * diagnostic and leaves the editor usable, which the smoke would then catch as a missing publish.
+ *
+ * Drives the palette by mutating the MODEL and reflecting each mutation into the VIEW with
+ * `view.sync()` — the same "mutate the model, then sync the view" step the palette-toggle command and
+ * the view's own listeners perform (the model is passive; the view reflects it). Syncing after EXECUTE
+ * is load-bearing for correct UX: `palette.execute` closes only the model (palette.ts), so without the
+ * reflect the overlay would linger visually over the composited frame instead of dismissing the way a
+ * real Enter/click activation does (PaletteView.#activateSelected).
+ */
+async function runPaletteSmoke(
+    registry: CommandRegistry,
+    palette: Palette,
+    host: PanelHost,
+    view: PaletteView,
+): Promise<void> {
+    if (typeof location === "undefined" || !location.search.includes("ctx-smoke-palette")) {
+        return;
+    }
+    let detail = "palette smoke: nothing executed";
+    try {
+        const mounted = host.mounted;
+        const focus = mounted.length > 0 ? (mounted[mounted.length - 1] ?? "") : "";
+        // The scenario supplies its OWN when-context (a focused panel), so the palette surfaces the
+        // panel-focus-guarded `view.panel.close` deterministically regardless of the stubbed editor.ui.
+        const context: WhenContext = { panelFocus: focus, textInputFocus: false };
+        // OPEN the palette through the command layer (its own registered command), not a private call.
+        // The toggle command's handler already syncs the view, so the overlay is now visible.
+        await registry.execute(PALETTE_TOGGLE_COMMAND_ID);
+        // FILTER by a fuzzy query — proves the palette's filter runs over the live registry — and
+        // reflect it into the overlay, exactly as the view's own input listener does.
+        palette.setQuery("close panel");
+        view.sync();
+        const results = palette.results(context);
+        const target =
+            results.find((entry) => entry.command.id === "view.panel.close") ?? results[0];
+        if (target === undefined) {
+            detail = "palette smoke: no command matched 'close panel'";
+        } else {
+            // EXECUTE through the palette (→ the ONE registry), the SAME path a real activation drives.
+            const outcome = await palette.execute(target.command.id);
+            // Reflect the model's close into the overlay — the view step a real activation performs
+            // (PaletteView.#activateSelected) but a direct model.execute() does not, so the overlay is
+            // actually dismissed rather than left lingering over the composited frame.
+            view.sync();
+            detail = `palette smoke: executed ${target.command.id} -> ${
+                outcome.ok ? "ok" : "refused"
+            } (${outcome.note})`;
+        }
+    } catch (error) {
+        detail = `palette smoke error: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    if (typeof document !== "undefined") {
+        document.documentElement.setAttribute("data-editor-palette", detail);
     }
 }
 
