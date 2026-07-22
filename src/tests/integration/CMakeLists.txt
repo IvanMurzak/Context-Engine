@@ -114,6 +114,35 @@ if(CONTEXT_SANITIZE)
 endif()
 
 # ===================================================================================================
+# The M9 e14b PER-PROJECT SINGLE-INSTANCE ARBITRATION T2 DRILL (design 07 §4 / 05, D15/C-F23) — the
+# `context edit .` opener proven end to end as a REAL separate `context` process against a live "editor"
+# (the drill's own presence marker + a FocusRequestWatcher thread — the Shell owner-loop behaviour with
+# no GUI, so it is Session-0-safe on every OS leg). Links the client SDK (the arbitration + watcher) and
+# context_common (the ChildProcess helper it uses to spawn + capture the opener's envelope); it does NOT
+# link the Shell. A plain `editor-shell-` ctest, auto-run by the build job's general step on all three
+# OS legs with no ci.yml `--target` bookkeeping. `--no-launch` on every leg so CI never hosts a GUI.
+add_executable(context_test_e14b_arbitration test_e14b_arbitration.cpp)
+target_link_libraries(context_test_e14b_arbitration
+    PRIVATE context_client context_common context_warnings Threads::Threads)
+target_link_options(context_test_e14b_arbitration PRIVATE ${_m1_exit_static_runtime})
+target_compile_definitions(context_test_e14b_arbitration PRIVATE
+    CONTEXT_BINARY="$<TARGET_FILE:context>")
+add_dependencies(context_test_e14b_arbitration context)
+add_test(NAME editor-shell-arbitration-t2 COMMAND context_test_e14b_arbitration)
+# Three scenarios, each spawning + reaping a real `context edit` opener; cap generously so a regression
+# surfaces its diagnostics rather than hanging the CI job.
+set_tests_properties(editor-shell-arbitration-t2 PROPERTIES TIMEOUT 180)
+# The spawned `context` opener links the uninstrumented rusty_v8 archive (the M6 X1 `context profile gc`
+# path via context_cli), so on the sanitize legs the child needs the same narrow LSan demangler/
+# symbolizer suppressions the sibling CONTEXT_BINARY-spawning tests wire (see
+# editor-shell-daemon-lifecycle-t2 above; they can never mask a `context::` leak) — the spawned child
+# inherits this env. The drill binary itself links no V8.
+if(CONTEXT_SANITIZE)
+    set_tests_properties(editor-shell-arbitration-t2 PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
+endif()
+
+# ===================================================================================================
 # The M2 EXIT GATE (ROADMAP §1 M2 Exit / issue #68) — five exit scenarios + the data-model seam
 # checklist, each a BLOCKING per-PR ctest on every OS leg (registered in docs/ci-fleet-manifest.json
 # as the m2-exit-* gates; run by the "M2 exit gate" step in .github/workflows/ci.yml):

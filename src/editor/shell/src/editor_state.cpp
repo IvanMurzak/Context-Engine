@@ -163,6 +163,13 @@ Json EditorState::to_json() const
     doc.set("windows", array);
     doc.set("layout", layout.is_null() ? Json::object() : layout);
     doc.set("panels", panels.is_null() ? Json::object() : panels);
+    // The e14b presence marker: emitted ONLY while an editor holds the project. Its ABSENCE from the
+    // document is the honest "no editor present" an opener reads, so a cleared marker drops the key
+    // entirely rather than writing an empty object.
+    if (presence.has_value())
+    {
+        doc.set("presence", presence->to_json());
+    }
     return doc;
 }
 
@@ -183,6 +190,7 @@ EditorState EditorState::from_json(const Json& json)
     }
     state.layout = json.at("layout");
     state.panels = json.at("panels");
+    state.presence = client::PresenceMarker::from_json(json.at("presence"));
     return state;
 }
 
@@ -269,6 +277,28 @@ void EditorStateStore::set_panels(Json panels, std::uint64_t now_us)
         return;
     }
     state_.panels = std::move(panels);
+    mark_dirty(now_us);
+}
+
+void EditorStateStore::set_presence(const client::PresenceMarker& marker, std::uint64_t now_us)
+{
+    // Identical (same boot nonce + pid) => no dirty, so a per-frame re-assert is free.
+    if (state_.presence.has_value() && state_.presence->boot_nonce == marker.boot_nonce &&
+        state_.presence->pid == marker.pid)
+    {
+        return;
+    }
+    state_.presence = marker;
+    mark_dirty(now_us);
+}
+
+void EditorStateStore::clear_presence(std::uint64_t now_us)
+{
+    if (!state_.presence.has_value())
+    {
+        return;
+    }
+    state_.presence.reset();
     mark_dirty(now_us);
 }
 

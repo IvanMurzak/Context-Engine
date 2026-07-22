@@ -14,6 +14,7 @@ add_library(context_cli STATIC
     src/daemon_command.cpp
     src/determinism_command.cpp
     src/doctor_command.cpp
+    src/edit_open.cpp
     src/editor_driver.cpp
     src/fetch_command.cpp
     src/install_command.cpp
@@ -136,6 +137,7 @@ set(_context_cli_tests
     test_cli
     test_determinism_command
     test_doctor_command
+    test_edit_open
     test_editor_driver
     test_pkg_command
     test_merge_command
@@ -153,6 +155,11 @@ foreach(_t IN LISTS _context_cli_tests)
     target_include_directories(context_cli_${_t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     add_test(NAME cli-${_t} COMMAND context_cli_${_t})
 endforeach()
+
+# test_edit_open (`context edit .`, M9 e14b) references the client arbitration types (PresenceMarker /
+# make_boot_nonce) to build its fixtures, so it links context_client directly (PRIVATE in context_cli,
+# so its include path does not propagate through it — the same pattern as test_determinism_command).
+target_link_libraries(context_cli_test_edit_open PRIVATE context_client)
 
 # test_determinism_command (`context determinism diff`) crafts its two replay-artifact fixtures with
 # record_replay/replay_dump from the session runtime, so it links context_session directly (PRIVATE in
@@ -266,6 +273,7 @@ if(CONTEXT_SANITIZE)
         cli-test_cli
         cli-test_determinism_command
         cli-test_doctor_command
+        cli-test_edit_open
         cli-test_editor_driver
         cli-test_pkg_command
         cli-test_merge_command

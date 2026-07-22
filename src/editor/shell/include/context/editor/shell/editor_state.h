@@ -28,11 +28,13 @@
 
 #pragma once
 
+#include "context/editor/client/arbitration.h" // the D15/C-F23 editor presence marker (e14b)
 #include "context/editor/contract/json.h"
 #include "context/render/rhi.h"
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -67,6 +69,11 @@ struct EditorState
     std::vector<WindowPlacement> windows;
     contract::Json layout;
     contract::Json panels;
+    // The D15/C-F23 editor presence marker (e14b): set while THIS editor process holds the project,
+    // cleared on clean exit. An opener (`context edit .`) reads it to decide focus-vs-spawn. Because the
+    // Shell is this file's SINGLE WRITER (C-F3), the marker is written ONLY through this store — an
+    // opener never writes it, it only reads the serialized document.
+    std::optional<client::PresenceMarker> presence;
 
     [[nodiscard]] contract::Json to_json() const;
     // Parse, tolerating a partially-written or older document: every field is optional and a bad
@@ -105,6 +112,13 @@ public:
     // Record an editor-core blob. Same identical-value rule as set_placement.
     void set_layout(contract::Json layout, std::uint64_t now_us);
     void set_panels(contract::Json panels, std::uint64_t now_us);
+
+    // Set / clear the D15/C-F23 editor presence marker (e14b). Same identical-value rule: setting the
+    // marker already stored, or clearing an already-absent one, does NOT dirty the store. The Shell
+    // sets it on boot and clears it on clean exit; a caller flushes immediately (flush_now) rather than
+    // waiting out the debounce so a concurrent opener sees the presence without a 500 ms window.
+    void set_presence(const client::PresenceMarker& marker, std::uint64_t now_us);
+    void clear_presence(std::uint64_t now_us);
 
     // Write if a change is dirty AND the quiet period has elapsed. Returns true when it wrote.
     bool flush_if_due(std::uint64_t now_us);

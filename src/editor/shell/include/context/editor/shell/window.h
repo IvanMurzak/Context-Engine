@@ -106,6 +106,17 @@ public:
 
     virtual void set_title(std::string_view title) = 0;
 
+    // Best-effort: bring this window to the foreground — the D15/C-F23 single-instance FOCUS a second
+    // opener (`context edit .`) requests when it finds this editor already on the project (M9 e14b).
+    // Pure like every other seam on this interface (mirrors request_redraw): each backend states its own
+    // answer rather than inheriting a default. The Win32 override does the real OS raise; the headless
+    // backend explicitly no-ops (no OS window — the honest behaviour on a box with no interactive
+    // desktop, Session 0 / CI). Keeping it pure means a future windowed backend (macOS/X11, e12) is
+    // forced to implement the raise instead of silently no-op-ing the single-instance focus. Interactive
+    // verification rides the deferred interactive-Windows pass (docs/shell.md); the arbitration handshake
+    // itself is proven headlessly in the T2 drill.
+    virtual void request_activation() = 0;
+
     [[nodiscard]] virtual WindowPlacement placement() const = 0;
     virtual void apply_placement(const WindowPlacement& placement) = 0;
 
@@ -134,6 +145,7 @@ public:
     bool pump(std::vector<ShellEvent>& out) override;
     void request_redraw() override;
     void set_title(std::string_view title) override { title_ = std::string(title); }
+    void request_activation() override {} // no OS window to raise — the honest headless no-op
     [[nodiscard]] WindowPlacement placement() const override { return placement_; }
     void apply_placement(const WindowPlacement& placement) override;
     void close() override { alive_ = false; }

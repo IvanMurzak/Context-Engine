@@ -238,6 +238,21 @@ public:
             ::InvalidateRect(hwnd_, nullptr, FALSE);
         }
     }
+    void request_activation() override
+    {
+        // Best-effort single-instance FOCUS (M9 e14b, D15/C-F23): un-minimize then raise to the
+        // foreground. SetForegroundWindow is subject to the OS's focus-stealing rules, so this is
+        // honestly best-effort — a no-op window is never worse than a duplicate one. Interactive
+        // verification is the deferred interactive-Windows pass (docs/shell.md).
+        if (hwnd_ != nullptr)
+        {
+            if (::IsIconic(hwnd_))
+            {
+                ::ShowWindow(hwnd_, SW_RESTORE);
+            }
+            ::SetForegroundWindow(hwnd_);
+        }
+    }
     void set_title(std::string_view title) override
     {
         if (hwnd_ != nullptr)
