@@ -209,6 +209,52 @@ body {
     outline-offset: -2px;
 }
 
+/* --- the command palette (M9 e07d, design 05 §6 / 04 / 10) ------------------------------------ *
+ *
+ * A top-anchored overlay (the VS Code-familiar position) — a filter input over a results listbox —
+ * built at runtime by core/src/palette_view.ts with these CLASSES (no inline <style>, keeping the
+ * `webui-scheme-contract` inline-free rule intact for the authored documents). Presentation only; the
+ * command logic + ranking live in the palette MODEL. The real token kit is e06's — this is the
+ * minimum that makes the palette legible and keyboard-operable. `hidden` while closed is the model's
+ * state reflected by the view. */
+.ctx-palette {
+    position: fixed;
+    top: 12%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(560px, 90vw);
+    max-height: 60vh;
+    display: flex;
+    flex-direction: column;
+    background: #1c3557;
+    color: var(--editor-fg);
+    border: 1px solid rgba(230, 237, 245, 0.25);
+    border-radius: 6px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    z-index: 1000;
+    overflow: hidden;
+    font-size: 13px;
+}
+
+.ctx-palette[hidden] {
+    display: none;
+}
+
+.ctx-palette__input {
+    font: inherit;
+    color: inherit;
+    background: rgba(0, 0, 0, 0.25);
+    border: none;
+    border-bottom: 1px solid rgba(230, 237, 245, 0.2);
+    padding: 8px 12px;
+    outline: none;
+}
+
+.ctx-palette__input:focus-visible {
+    outline: 2px solid var(--editor-fg);
+    outline-offset: -2px;
+}
+
 .welcome-recent-name {
     font-size: 13px;
     font-weight: 500;
@@ -334,4 +380,43 @@ body {
 .welcome-template-label {
     font-size: 12px;
     font-weight: 500;
+}
+
+.ctx-palette__list {
+    margin: 0;
+    padding: 4px;
+    list-style: none;
+    overflow-y: auto;
+}
+
+.ctx-palette__item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.ctx-palette__item:hover {
+    background: rgba(230, 237, 245, 0.08);
+}
+
+.ctx-palette__item--selected {
+    background: rgba(230, 237, 245, 0.16);
+}
+
+.ctx-palette__title {
+    font-weight: 600;
+}
+
+.ctx-palette__doc {
+    font-size: 11px;
+    opacity: 0.7;
+}
+
+.ctx-palette__empty {
+    padding: 8px;
+    opacity: 0.6;
+    font-style: italic;
 }

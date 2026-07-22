@@ -331,6 +331,9 @@ export function mountWelcome(
             void client.open(recent.path);
         };
         row.addEventListener("click", activate);
+        // key-handler-ok: Enter/Space ARIA activation of this `role="button"` recent-project row —
+        // fires the SAME `activate()` (open the project) as the click above, never a global chord
+        // bypassing the keymap/command path (05 §6). Window-0 front-door chrome, not an editor panel.
         row.addEventListener("keydown", (event: KeyboardEvent) => {
             if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();

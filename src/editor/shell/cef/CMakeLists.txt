@@ -150,4 +150,48 @@ if(OS_WINDOWS OR OS_LINUX)
     set_tests_properties(editor-cef-smoke-shell-restore PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_restore_smoke>"
         TIMEOUT 360)
+
+    # --- the LIVE command-driven palette smoke (ctest editor-cef-smoke-shell-palette) --------------
+    # M9 e07d T2: boots the SAME live windowless browser as the boot smoke and then drives a scenario
+    # PURELY through the palette / command dispatch (open -> filter -> execute view.panel.close), whose
+    # editor.state.publish over the real bridge is the observable it asserts. Same `editor-cef-smoke-`
+    # family + same link recipe (context_editor_cef holds cef_shell.cpp's CEF refs, so it precedes the
+    # CEF libs — the single-left-to-right-pass reason; context_editor_panels binds the real providers so
+    # the live renderer has panels to close, and introduces no CEF refs of its own) as the boot smoke,
+    # so the per-OS `editor-cef-smoke` job's `ctest -R "^editor-cef-smoke-"` step picks it up with no
+    # regex change.
+    #
+    # ⚠ "Not Run = RED" TRIPWIRE: that job builds a hand-maintained --target list, so this executable is
+    # ALSO listed in ci.yml's editor-cef-smoke build step (and mirrored in the profile's test.md § CI).
+    # The regex would otherwise match a test whose executable was never built.
+    add_executable(context_editor_shell_palette_smoke src/cef_shell_palette_smoke.cpp)
+    SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_palette_smoke)
+    add_dependencies(context_editor_shell_palette_smoke libcef_dll_wrapper)
+    target_link_libraries(context_editor_shell_palette_smoke
+        context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+    target_include_directories(context_editor_shell_palette_smoke PRIVATE "${CEF_ROOT}")
+
+    COPY_FILES(context_editor_shell_palette_smoke "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}"
+               "${CEF_TARGET_OUT_DIR}")
+    COPY_FILES(context_editor_shell_palette_smoke "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}"
+               "${CEF_TARGET_OUT_DIR}")
+
+    # Same webui asset dependency + compiled-in root as the boot/restore smokes: the palette smoke loads
+    # `context-editor://app/index.html?ctx-smoke-palette`, so it needs editor-core's built asset set to
+    # exist when it runs. Expressed as add_dependencies() so the asset set travels with this target
+    # automatically, keeping ci.yml's --target list from needing the webui target added alongside it.
+    add_dependencies(context_editor_shell_palette_smoke context_editor_webui)
+    if(NOT CONTEXT_WEBUI_ASSET_DIR)
+        message(FATAL_ERROR
+            "context_editor_shell_palette_smoke: CONTEXT_WEBUI_ASSET_DIR is empty — src/editor/webui "
+            "must be added BEFORE src/editor/shell (src/CMakeLists.txt orders it so); it publishes the "
+            "asset root as CACHE INTERNAL.")
+    endif()
+    target_compile_definitions(context_editor_shell_palette_smoke PRIVATE
+        "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
+
+    add_test(NAME editor-cef-smoke-shell-palette COMMAND context_editor_shell_palette_smoke)
+    set_tests_properties(editor-cef-smoke-shell-palette PROPERTIES
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_palette_smoke>"
+        TIMEOUT 180)
 endif()

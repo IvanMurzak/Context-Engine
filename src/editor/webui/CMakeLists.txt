@@ -267,6 +267,15 @@ add_test(NAME webui-client-typings-drift
             --out "${_ctx_webui_core}/src/generated/client-schema.ts"
             --check)
 
+# 2b) The RAW-KEY-HANDLER lint (M9 e07d, design 05 §6): "no raw key handlers anywhere". A SOURCE scan
+# (no browser), so it rides the `webui-*` family on all three default `build` legs — every keyboard
+# capability must flow through the keymap + command registry, and a stray `keydown`/`onkeydown`
+# handler that bypasses that path (an unmarked one) fails the build. `tools/check_no_raw_key_handlers.py`
+# has its own pytest under tools/tests/ (the python-tests job). This is the T1 lint the DoD requires.
+add_test(NAME webui-no-raw-key-handlers
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_no_raw_key_handlers.py"
+            --sources "${_ctx_webui_core}/src")
+
 # --- 3) the editor-core T1 unit-test tier (M9 e07a; R-QA-013, design 09 §1 / 04) -----------------
 # Until now the webui workspace had NO local TS unit-test tier: the PURE, DOM-free editor-core logic
 # (the total parsers in panels.ts / editorstate.ts, the structural guards in bridge.ts / dockview.ts)

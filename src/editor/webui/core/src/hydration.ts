@@ -328,6 +328,9 @@ export class HydrationRuntime {
         // per-node listeners would have to be re-attached on every patch — the exact bookkeeping
         // that goes wrong and leaves a panel half-live after a re-render.
         this.#container.addEventListener("click", this.#onClick);
+        // key-handler-ok: Enter/Space ARIA activation of a focusable node, delegated at the panel body
+        // — it dispatches the node's BOUND command (04 §2 / #handleKey), never a global chord bypassing
+        // the keymap/command path (05 §6). The `webui-no-raw-key-handlers` T1 lint requires this marker.
         this.#container.addEventListener("keydown", this.#onKeyDown);
         if (this.#gesturesEnabled) {
             // Bound ONLY when the panel's manifest declares gestures. A panel that reports
