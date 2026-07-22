@@ -565,6 +565,48 @@ void hosts_the_real_roster()
     CHECK(host.knows("builtin.inspector"));
 }
 
+// e07b: a panel's manifest `commands` (04 §3) are projected INTO panel.list, so the editor-core
+// command registry's source (c) reads them from the promoted roster. A contribution that declares
+// commands carries them here — id, title, and the `when` clause verbatim (empty = always); a panel
+// that declares none still carries the field as an empty array, so the JS parser never sees it absent.
+void projects_manifest_commands_into_the_roster()
+{
+    gc::Contribution declares = make_contribution("test.declares", "Declares", 1);
+    declares.commands = {
+        gc::CommandContribution{"declares.alpha", "Alpha Command", "panelFocus == test.declares"},
+        gc::CommandContribution{"declares.beta", "Beta Command", ""},
+    };
+    gc::Contribution silent = make_contribution("test.silent", "Silent", 1); // declares no commands
+
+    std::vector<gc::Contribution> roster;
+    roster.push_back(std::move(declares));
+    roster.push_back(std::move(silent));
+    shell::PanelHost host(std::move(roster));
+
+    const Json listing = host.list();
+
+    const Json* with_commands = find_panel(listing, "test.declares");
+    CHECK(with_commands != nullptr);
+    if (with_commands != nullptr)
+    {
+        const Json& commands = with_commands->at("commands");
+        CHECK(commands.size() == 2);
+        CHECK(commands.at(0).at("id").as_string() == "declares.alpha");
+        CHECK(commands.at(0).at("title").as_string() == "Alpha Command");
+        CHECK(commands.at(0).at("when").as_string() == "panelFocus == test.declares");
+        CHECK(commands.at(1).at("id").as_string() == "declares.beta");
+        // An always-active command round-trips its `when` as the empty string, not a dropped field.
+        CHECK(commands.at(1).at("when").as_string().empty());
+    }
+
+    const Json* without = find_panel(listing, "test.silent");
+    CHECK(without != nullptr);
+    if (without != nullptr)
+    {
+        CHECK(without->at("commands").size() == 0);
+    }
+}
+
 } // namespace
 
 int main()
@@ -579,5 +621,6 @@ int main()
     binds_every_panel_method_on_the_router();
     refuses_hostile_params_without_crashing();
     hosts_the_real_roster();
+    projects_manifest_commands_into_the_roster();
     SHELL_TEST_MAIN_END();
 }

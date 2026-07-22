@@ -86,6 +86,8 @@ export interface PanelManifest {
     readonly contentType: PanelContentType;
     readonly schemaVersion: number;
     readonly capabilities: readonly string[];
+    /** The manifest-declared commands (manifest v2 `commands`, 04 §3), the e07b registry's source (c). */
+    readonly commands: readonly PanelManifestCommand[];
     readonly hosted: boolean;
     readonly gestures: boolean;
     readonly persists: boolean;
@@ -101,6 +103,21 @@ export interface PanelRoster {
 export interface PanelCommand {
     readonly id: string;
     readonly title: string;
+}
+
+/**
+ * One command a panel DECLARES IN ITS MANIFEST (manifest v2 `commands`, 04 §3), mirroring the C++
+ * `contract::CommandContribution` `{ id, title, when }`.
+ *
+ * DISTINCT from `PanelCommand` (a render-time command a uitree node activates): manifest commands are
+ * the panel-manifest source of the e07b command registry, declared once in the manifest — chiefly for
+ * iframe contributions, which have no C++ model to read commands from. `when` is an optional context
+ * clause (`""` = always), mirroring the C++ field's "empty = always" contract.
+ */
+export interface PanelManifestCommand {
+    readonly id: string;
+    readonly title: string;
+    readonly when: string;
 }
 
 /** The hydration payload for one panel (`shell::PanelRender`). */
@@ -193,6 +210,30 @@ function readContentType(content: Record<string, unknown>): PanelContentType {
     return CONTENT_TYPES.find((candidate) => candidate === token) ?? "unknown";
 }
 
+/**
+ * Parse a manifest's `commands` (04 §3), TOTAL and fail-closed. Non-record entries and entries with
+ * no usable id are DROPPED (never coerced) — the same discipline `parsePanelRender` applies to
+ * render-time commands. A missing/non-array `commands` member yields the empty list.
+ */
+function readManifestCommands(source: Record<string, unknown>): PanelManifestCommand[] {
+    const raw = source["commands"];
+    if (!Array.isArray(raw)) {
+        return [];
+    }
+    const commands: PanelManifestCommand[] = [];
+    for (const entry of raw) {
+        if (!isRecord(entry)) {
+            continue;
+        }
+        const id = readString(entry, "id");
+        if (id === "") {
+            continue;
+        }
+        commands.push({ id, title: readString(entry, "title", id), when: readString(entry, "when") });
+    }
+    return commands;
+}
+
 /** Parse one roster entry. `null` when it carries no usable id. */
 export function parsePanelManifest(value: unknown): PanelManifest | null {
     if (!isRecord(value)) {
@@ -214,6 +255,7 @@ export function parsePanelManifest(value: unknown): PanelManifest | null {
         contentType: readContentType(content),
         schemaVersion: readNumber(state, STATE_SCHEMA_VERSION_KEY, 1),
         capabilities: readStringArray(value, "capabilities"),
+        commands: readManifestCommands(value),
         hosted: readBoolean(value, "hosted"),
         gestures: readBoolean(value, "gestures"),
         persists: readBoolean(value, "persists"),

@@ -8,8 +8,16 @@ import { runTests, type TestSummary } from "./harness.js";
 import { panelsTests } from "./panels.test.js";
 import { editorstateTests } from "./editorstate.test.js";
 import { guardsTests } from "./guards.test.js";
+import { whenTests } from "./when.test.js";
+import { commandsTests } from "./commands.test.js";
 
-const result = runTests([...panelsTests, ...editorstateTests, ...guardsTests]);
+const result = runTests([
+    ...panelsTests,
+    ...editorstateTests,
+    ...guardsTests,
+    ...whenTests,
+    ...commandsTests,
+]);
 report(result);
 
 function report(summary: TestSummary): void {
