@@ -58,6 +58,14 @@ Envelope run_attach(const std::vector<std::string>& args)
     const bool do_shutdown = has_flag(args, "shutdown");
     const bool do_reconcile = has_flag(args, "reconcile");
 
+    // M9 e08a — EDITOR SESSION mode (D7 tier 1). Any `--editor-*` flag switches the drive from the
+    // edit/query file pair to the daemon's session state, so the CLI acts as a real SECOND CLIENT of
+    // the human's session instead of always writing a file first.
+    const std::optional<std::string> editor_select = flag_value(args, "editor-select");
+    const std::optional<std::string> editor_play = flag_value(args, "editor-play");
+    const bool editor_read = has_flag(args, "editor-session");
+    const bool editor_mode = editor_read || editor_select.has_value() || editor_play.has_value();
+
     // --- discover + connect + attach --------------------------------------------------------------
     // Request write (for `edit`) + session (for the optional `shutdown`); the daemon's launch-time
     // operator ceiling clamps this to least privilege (R-SEC-007). connect_to_project() retains the
@@ -76,6 +84,90 @@ Envelope run_attach(const std::vector<std::string>& args)
         // mismatch a single hardcoded code would claim.
         return finish(
             Envelope::failure(client->failure_code("handshake.incompatible_protocol"), err));
+
+    // --- M9 e08a: the EDITOR SESSION drive (replaces the edit/query pair when requested) ---------
+    if (editor_mode)
+    {
+        Json data = Json::object();
+        data.set("endpoint", Json(client->instance().endpoint));
+        data.set("attached", Json(true));
+        // This connection's echo-suppression identity: a `session` fact whose `origin` equals this
+        // is one WE caused. Reported so a scripted caller can apply the same rule the SDK does.
+        data.set("clientId", Json(static_cast<std::uint64_t>(client->client_id())));
+
+        const auto drive = [&](const std::string& method, Json params,
+                               const char* result_key) -> std::optional<Envelope> {
+            const std::optional<Json> res = client->call(method, std::move(params), err);
+            if (!res.has_value())
+                return finish(Envelope::failure(client->failure_code("internal.error"), err));
+            data.set(result_key, res->contains("data") ? res->at("data") : Json::object());
+            return std::nullopt;
+        };
+
+        if (editor_select.has_value())
+        {
+            Json ids = Json::array();
+            // Comma-separated L-35 id-paths; an EMPTY value is the legitimate "clear the selection"
+            // request, not a malformed one — so an empty token is dropped rather than sent as "".
+            std::string current;
+            for (const char ch : *editor_select)
+            {
+                if (ch == ',')
+                {
+                    if (!current.empty())
+                        ids.push_back(Json(current));
+                    current.clear();
+                }
+                else
+                {
+                    current.push_back(ch);
+                }
+            }
+            if (!current.empty())
+                ids.push_back(Json(current));
+
+            Json params = Json::object();
+            params.set("ids", std::move(ids));
+            if (const std::optional<std::string> mode = flag_value(args, "editor-select-mode");
+                mode.has_value())
+                params.set("mode", Json(*mode));
+            if (std::optional<Envelope> failed = drive("editor.select", std::move(params), "select"))
+                return *failed;
+        }
+
+        if (editor_play.has_value())
+        {
+            if (*editor_play != "play" && *editor_play != "pause" && *editor_play != "stop" &&
+                *editor_play != "step")
+                return finish(Envelope::failure(
+                    "usage.invalid", "--editor-play expects one of play | pause | stop | step, got '" +
+                                         *editor_play + "'"));
+            Json params = Json::object();
+            if (const std::optional<std::string> ticks = flag_value(args, "editor-ticks");
+                ticks.has_value())
+                params.set("ticks", Json(*ticks));
+            if (std::optional<Envelope> failed =
+                    drive("editor." + *editor_play, std::move(params), "play"))
+                return *failed;
+        }
+
+        // The READS always run last, so the reply reports the state AFTER any drive above — the
+        // observer's whole point ("what is the human looking at", answered from the contract).
+        if (std::optional<Envelope> failed =
+                drive("editor.selection-get", Json::object(), "selection"))
+            return *failed;
+        if (std::optional<Envelope> failed = drive("editor.cameras-get", Json::object(), "cameras"))
+            return *failed;
+
+        if (do_shutdown)
+        {
+            const std::optional<Json> stop_res = client->call("shutdown", Json::object(), err);
+            data.set("shutdownAck", Json(stop_res.has_value()));
+            if (!stop_res.has_value())
+                data.set("shutdownError", Json(err));
+        }
+        return finish(Envelope::success(std::move(data)));
+    }
 
     // --- optional: fold on-disk truth into the derived world over the wire (R-FILE-002) ----------
     // `--reconcile` drives the daemon's `reconcile` verb before the edit/query pair, so a project

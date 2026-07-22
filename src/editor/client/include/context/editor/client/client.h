@@ -124,6 +124,12 @@ public:
         return granted_scopes_;
     }
 
+    // This connection's per-daemon CLIENT ID, learned from the attach reply (M9 e08a / D7). It is
+    // the identity the `session` topic's `origin` field carries: a consumer applies a fact whose
+    // `origin` differs from this and DROPS one that matches — that single rule is the whole
+    // echo-suppression contract. 0 when not attached, or when the daemon predates e08a.
+    [[nodiscard]] std::uint64_t client_id() const noexcept { return client_id_; }
+
 private:
     // Only connect_to_project() (a static member, so it has access) seeds this. Deliberately NOT
     // public: the instance document is discovery output, not something a consumer overrides.
@@ -139,6 +145,8 @@ private:
     // Latched here so failure_code() answers without every caller threading a bool out of call().
     bool last_rejected_by_daemon_ = false;
     std::vector<std::string> granted_scopes_;
+    // The e08a echo-suppression identity this connection was assigned (see client_id()).
+    std::uint64_t client_id_ = 0;
 };
 
 } // namespace context::editor::client

@@ -866,6 +866,166 @@
       ]
     },
     {
+      "method": "editor.select",
+      "ns": "",
+      "noun": "editor",
+      "verb": "select",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [
+        "ids",
+        "mode"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "editor.selection-get",
+      "ns": "",
+      "noun": "editor",
+      "verb": "selection-get",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "editor.camera-set",
+      "ns": "",
+      "noun": "editor",
+      "verb": "camera-set",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [
+        "viewportId",
+        "transform",
+        "projection"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "editor.cameras-get",
+      "ns": "",
+      "noun": "editor",
+      "verb": "cameras-get",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "editor.play",
+      "ns": "",
+      "noun": "editor",
+      "verb": "play",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "editor.pause",
+      "ns": "",
+      "noun": "editor",
+      "verb": "pause",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "editor.stop",
+      "ns": "",
+      "noun": "editor",
+      "verb": "stop",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "editor.step",
+      "ns": "",
+      "noun": "editor",
+      "verb": "step",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan",
+        "ticks"
+      ]
+    },
+    {
       "method": "subscribe",
       "ns": "",
       "noun": "",
@@ -1062,13 +1222,43 @@
     },
     {
       "name": "session",
-      "description": "Session lifecycle + restart-class reload announcements.",
+      "description": "Session lifecycle + restart-class reload announcements, and the editor session-state facts (selection / cameras / play) every client shares (M9 D7).",
       "payloadSchema": {
         "fields": [
           {
             "name": "event",
             "type": "string",
-            "description": "The lifecycle event, e.g. started | reloaded | stopped."
+            "description": "The event: started | reloaded | stopped (lifecycle), or selection-changed | camera-changed | play-state (editor session state)."
+          },
+          {
+            "name": "origin",
+            "type": "generation",
+            "description": "Echo suppression: the id of the CLIENT whose call produced this fact (the value `attach` returned as clientId); 0 = the daemon itself."
+          },
+          {
+            "name": "ids",
+            "type": "json",
+            "description": "selection-changed: the L-35 id-paths now selected (the whole selection, not a delta)."
+          },
+          {
+            "name": "mode",
+            "type": "string",
+            "description": "selection-changed: how the change was applied — replace | add | toggle | remove."
+          },
+          {
+            "name": "viewportId",
+            "type": "string",
+            "description": "camera-changed: the viewport whose camera changed."
+          },
+          {
+            "name": "state",
+            "type": "string",
+            "description": "play-state: the L-51 provenance state after the transition — edit | playing | paused."
+          },
+          {
+            "name": "simTick",
+            "type": "generation",
+            "description": "play-state: the live session's fixed-tick counter (0 in edit state)."
           }
         ]
       }
@@ -2387,6 +2577,13 @@
       "retriable": true,
       "exitCode": 2,
       "origin": "R-BRIDGE-001"
+    },
+    {
+      "code": "editor.session_state_invalid",
+      "message": "The daemon's editor session file (.editor/session.json) is malformed or an unsupported version; it was renamed aside and the session state was reset to defaults.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-BRIDGE-008"
     }
   ],
   "largeResult": {

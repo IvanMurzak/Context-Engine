@@ -63,6 +63,14 @@ export type RpcMethod =
     | "snapshot"
     | "editor.scene-tree"
     | "editor.inspect"
+    | "editor.select"
+    | "editor.selection-get"
+    | "editor.camera-set"
+    | "editor.cameras-get"
+    | "editor.play"
+    | "editor.pause"
+    | "editor.stop"
+    | "editor.step"
     | "subscribe"
     | "unsubscribe"
     | "ack"
@@ -457,6 +465,86 @@ export const RPC_METHODS: { readonly [M in RpcMethod]: RpcMethodDescriptor } = {
         params: ["path", "idPath"],
         flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
     },
+    "editor.select": {
+        method: "editor.select",
+        ns: "",
+        noun: "editor",
+        verb: "select",
+        stability: "operational",
+        deprecated: false,
+        params: ["ids", "mode"],
+        flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
+    },
+    "editor.selection-get": {
+        method: "editor.selection-get",
+        ns: "",
+        noun: "editor",
+        verb: "selection-get",
+        stability: "operational",
+        deprecated: false,
+        params: [],
+        flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
+    },
+    "editor.camera-set": {
+        method: "editor.camera-set",
+        ns: "",
+        noun: "editor",
+        verb: "camera-set",
+        stability: "operational",
+        deprecated: false,
+        params: ["viewportId", "transform", "projection"],
+        flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
+    },
+    "editor.cameras-get": {
+        method: "editor.cameras-get",
+        ns: "",
+        noun: "editor",
+        verb: "cameras-get",
+        stability: "operational",
+        deprecated: false,
+        params: [],
+        flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
+    },
+    "editor.play": {
+        method: "editor.play",
+        ns: "",
+        noun: "editor",
+        verb: "play",
+        stability: "operational",
+        deprecated: false,
+        params: [],
+        flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
+    },
+    "editor.pause": {
+        method: "editor.pause",
+        ns: "",
+        noun: "editor",
+        verb: "pause",
+        stability: "operational",
+        deprecated: false,
+        params: [],
+        flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
+    },
+    "editor.stop": {
+        method: "editor.stop",
+        ns: "",
+        noun: "editor",
+        verb: "stop",
+        stability: "operational",
+        deprecated: false,
+        params: [],
+        flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
+    },
+    "editor.step": {
+        method: "editor.step",
+        ns: "",
+        noun: "editor",
+        verb: "step",
+        stability: "operational",
+        deprecated: false,
+        params: [],
+        flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan", "ticks"],
+    },
     "subscribe": {
         method: "subscribe",
         ns: "",
@@ -520,7 +608,7 @@ export const RPC_METHODS: { readonly [M in RpcMethod]: RpcMethodDescriptor } = {
 };
 
 /** Every RPC method name, in registry order. */
-export const RPC_METHOD_NAMES: readonly RpcMethod[] = ["describe", "new", "set", "migrate", "package.add", "resource.read", "asset.move", "asset.rename", "merge-file", "resolve-conflict", "re-key", "validate", "session.new", "session.step", "session.seed", "session.inject", "session.hash", "session.record", "replay", "determinism.diff", "install", "profile.gc", "profile.session", "ui.dump", "ui.query", "ui.send", "ui.assert", "tilemap.paint", "tilemap.fill", "build", "doctor", "edit", "edit-batch", "query", "snapshot", "editor.scene-tree", "editor.inspect", "subscribe", "unsubscribe", "ack", "reconcile", "shutdown", "debug.attach"];
+export const RPC_METHOD_NAMES: readonly RpcMethod[] = ["describe", "new", "set", "migrate", "package.add", "resource.read", "asset.move", "asset.rename", "merge-file", "resolve-conflict", "re-key", "validate", "session.new", "session.step", "session.seed", "session.inject", "session.hash", "session.record", "replay", "determinism.diff", "install", "profile.gc", "profile.session", "ui.dump", "ui.query", "ui.send", "ui.assert", "tilemap.paint", "tilemap.fill", "build", "doctor", "edit", "edit-batch", "query", "snapshot", "editor.scene-tree", "editor.inspect", "editor.select", "editor.selection-get", "editor.camera-set", "editor.cameras-get", "editor.play", "editor.pause", "editor.stop", "editor.step", "subscribe", "unsubscribe", "ack", "reconcile", "shutdown", "debug.attach"];
 
 /** Every subscribable event topic. */
 export type EventTopic =
@@ -575,9 +663,15 @@ export const EVENT_TOPICS: { readonly [T in EventTopic]: EventTopicDescriptor } 
     },
     "session": {
         name: "session",
-        description: "Session lifecycle + restart-class reload announcements.",
+        description: "Session lifecycle + restart-class reload announcements, and the editor session-state facts (selection / cameras / play) every client shares (M9 D7).",
         payloadFields: [
-            { name: "event", type: "string", description: "The lifecycle event, e.g. started | reloaded | stopped." },
+            { name: "event", type: "string", description: "The event: started | reloaded | stopped (lifecycle), or selection-changed | camera-changed | play-state (editor session state)." },
+            { name: "origin", type: "generation", description: "Echo suppression: the id of the CLIENT whose call produced this fact (the value `attach` returned as clientId); 0 = the daemon itself." },
+            { name: "ids", type: "json", description: "selection-changed: the L-35 id-paths now selected (the whole selection, not a delta)." },
+            { name: "mode", type: "string", description: "selection-changed: how the change was applied \u2014 replace | add | toggle | remove." },
+            { name: "viewportId", type: "string", description: "camera-changed: the viewport whose camera changed." },
+            { name: "state", type: "string", description: "play-state: the L-51 provenance state after the transition \u2014 edit | playing | paused." },
+            { name: "simTick", type: "generation", description: "play-state: the live session's fixed-tick counter (0 in edit state)." },
         ],
     },
     "clients": {
@@ -788,7 +882,8 @@ export type ErrorCode =
     | "tilemap.cell_out_of_bounds"
     | "tilemap.tile_unknown"
     | "attach.denied"
-    | "daemon.busy";
+    | "daemon.busy"
+    | "editor.session_state_invalid";
 
 /** A registry-projected description of one catalog error. */
 export interface ErrorDescriptor {
@@ -2013,7 +2108,14 @@ export const ERROR_CATALOG: { readonly [C in ErrorCode]: ErrorDescriptor } = {
         exitCode: 2,
         origin: "R-BRIDGE-001",
     },
+    "editor.session_state_invalid": {
+        code: "editor.session_state_invalid",
+        message: "The daemon's editor session file (.editor/session.json) is malformed or an unsupported version; it was renamed aside and the session state was reset to defaults.",
+        retriable: false,
+        exitCode: 5,
+        origin: "R-BRIDGE-008",
+    },
 };
 
 /** Every error code, in catalog order. */
-export const ERROR_CODES: readonly ErrorCode[] = ["usage.invalid", "usage.unknown_verb", "usage.unknown_flag", "usage.missing_argument", "namespace.collision", "file.not_found", "file.parse_error", "file.validation_failed", "cas.mismatch", "path.jail_violation", "handshake.incompatible_protocol", "version.mismatch", "package.engine_incompatible", "schema.newer_than_engine", "schema.newer_than_package", "contract.unimplemented", "internal.error", "scope.denied", "merge.conflict", "merge.id_conflict", "merge.binary_sidecar", "merge.meta_guid", "merge.newer_stamped", "merge.duplicate_id", "merge.no_conflict_at_path", "merge.rekey_target_invalid", "scope.insufficient", "contract.operational_only", "resource.unknown_handle", "migration.step_missing", "migration.step_failed", "migration.budget_exceeded", "migration.id_mutated", "migration.runner_unavailable", "migration.orphan_override", "sidecar.bad_magic", "sidecar.truncated", "sidecar.unsupported_version", "sidecar.ref_malformed", "sidecar.dangling_ref", "sidecar.orphaned", "sidecar.hash_mismatch", "asset.guid_duplicate", "asset.meta_orphaned", "asset.meta_invalid", "asset.heal_ambiguous", "asset.ref_dangling", "asset.ref_path_only", "asset.ref_hint_stale", "asset.move_source_missing", "asset.move_destination_exists", "asset.move_invalid", "import.source_malformed", "import.decode_failed", "import.unsupported_format", "import.jail_escape", "import.subprocess_failed", "import.non_deterministic", "import.cache_corrupt", "compose.write_target_not_found", "compose.immutable_pointer", "tilemap.chunk_oversize", "tilemap.region_invalid", "tilemap.id_duplicate", "stringtable.locale_duplicate", "stringtable.key_duplicate", "stringtable.fallback_unknown", "stringtable.fallback_cycle", "stringtable.value_invalid", "stringtable.plural_incomplete", "stringtable.value_locale_duplicate", "save.malformed", "save.unknown_component", "save.back_compat_exceeded", "save.format_unsupported", "session.state_invalid", "session.state_not_found", "session.input_invalid", "replay.artifact_invalid", "replay.manifest_drift", "replay.divergence", "query.syntax_error", "query.unknown_operator", "query.invalid_cursor", "query.unsupported_surface", "ts.transpile_failed", "ts.bundle_failed", "ts.type_error", "ts.runtime_error", "subscription.unknown_sub", "install.version_unpinned", "install.integrity_mismatch", "install.lockfile_incomplete", "install.scripts_required", "install.fetch_failed", "consent_required", "debug.attach_failed", "debug.unsupported", "merge.invalid_stable_id", "viewport.adapter_absent", "viewport.surface_unavailable", "viewport.render_failed", "play.not_running", "play.session_failed", "play.step_failed", "play.hot_reload_failed", "determinism.attestation_fastmath_forbidden", "determinism.attestation_strict_fp_missing", "determinism.attestation_flags_unverified", "physics3d.invalid_entity", "physics3d.missing_component", "physics3d.invalid_shape", "physics3d.invalid_mass", "physics3d.invalid_step", "physics2d.invalid_entity", "physics2d.missing_component", "physics2d.invalid_shape", "physics2d.invalid_mass", "physics2d.invalid_step", "anim.invalid_entity", "anim.missing_component", "anim.invalid_rig", "anim.duplicate_component", "anim.invalid_step", "particle.invalid_entity", "particle.missing_component", "particle.invalid_config", "particle.invalid_step", "spline.invalid_entity", "spline.missing_component", "spline.invalid_path", "spline.duplicate_component", "spline.invalid_step", "audio.invalid_entity", "audio.invalid_bus", "audio.invalid_event", "audio.device_unavailable", "input.invalid_context", "input.duplicate_context", "input.unknown_context", "input.unknown_action", "sim.gc.unavailable", "sim.gc.invalid_budget", "sim.gc.window_failed", "net.invalid_net_id", "net.duplicate_net_id", "net.snapshot_component_mismatch", "net.authority_conflict", "ui.scene_not_found", "ui.scene_invalid", "ui.node_not_found", "ui.invalid_event", "ui.assertion_failed", "transcode.no_target", "transcode.unsupported_format", "transcode.bad_descriptor", "build.template_unverified", "build.toolchain_fetch_failed", "build.aot_failed", "build.transcode_failed", "build.link_failed", "doctor.environment_incomplete", "doctor.toolchain_missing", "doctor.toolchain_version_mismatch", "doctor.filesync_budget_low", "doctor.signing_prereq_absent", "doctor.unknown_target", "build.artifact_unsigned", "tilemap.layer_not_found", "tilemap.cell_out_of_bounds", "tilemap.tile_unknown", "attach.denied", "daemon.busy"];
+export const ERROR_CODES: readonly ErrorCode[] = ["usage.invalid", "usage.unknown_verb", "usage.unknown_flag", "usage.missing_argument", "namespace.collision", "file.not_found", "file.parse_error", "file.validation_failed", "cas.mismatch", "path.jail_violation", "handshake.incompatible_protocol", "version.mismatch", "package.engine_incompatible", "schema.newer_than_engine", "schema.newer_than_package", "contract.unimplemented", "internal.error", "scope.denied", "merge.conflict", "merge.id_conflict", "merge.binary_sidecar", "merge.meta_guid", "merge.newer_stamped", "merge.duplicate_id", "merge.no_conflict_at_path", "merge.rekey_target_invalid", "scope.insufficient", "contract.operational_only", "resource.unknown_handle", "migration.step_missing", "migration.step_failed", "migration.budget_exceeded", "migration.id_mutated", "migration.runner_unavailable", "migration.orphan_override", "sidecar.bad_magic", "sidecar.truncated", "sidecar.unsupported_version", "sidecar.ref_malformed", "sidecar.dangling_ref", "sidecar.orphaned", "sidecar.hash_mismatch", "asset.guid_duplicate", "asset.meta_orphaned", "asset.meta_invalid", "asset.heal_ambiguous", "asset.ref_dangling", "asset.ref_path_only", "asset.ref_hint_stale", "asset.move_source_missing", "asset.move_destination_exists", "asset.move_invalid", "import.source_malformed", "import.decode_failed", "import.unsupported_format", "import.jail_escape", "import.subprocess_failed", "import.non_deterministic", "import.cache_corrupt", "compose.write_target_not_found", "compose.immutable_pointer", "tilemap.chunk_oversize", "tilemap.region_invalid", "tilemap.id_duplicate", "stringtable.locale_duplicate", "stringtable.key_duplicate", "stringtable.fallback_unknown", "stringtable.fallback_cycle", "stringtable.value_invalid", "stringtable.plural_incomplete", "stringtable.value_locale_duplicate", "save.malformed", "save.unknown_component", "save.back_compat_exceeded", "save.format_unsupported", "session.state_invalid", "session.state_not_found", "session.input_invalid", "replay.artifact_invalid", "replay.manifest_drift", "replay.divergence", "query.syntax_error", "query.unknown_operator", "query.invalid_cursor", "query.unsupported_surface", "ts.transpile_failed", "ts.bundle_failed", "ts.type_error", "ts.runtime_error", "subscription.unknown_sub", "install.version_unpinned", "install.integrity_mismatch", "install.lockfile_incomplete", "install.scripts_required", "install.fetch_failed", "consent_required", "debug.attach_failed", "debug.unsupported", "merge.invalid_stable_id", "viewport.adapter_absent", "viewport.surface_unavailable", "viewport.render_failed", "play.not_running", "play.session_failed", "play.step_failed", "play.hot_reload_failed", "determinism.attestation_fastmath_forbidden", "determinism.attestation_strict_fp_missing", "determinism.attestation_flags_unverified", "physics3d.invalid_entity", "physics3d.missing_component", "physics3d.invalid_shape", "physics3d.invalid_mass", "physics3d.invalid_step", "physics2d.invalid_entity", "physics2d.missing_component", "physics2d.invalid_shape", "physics2d.invalid_mass", "physics2d.invalid_step", "anim.invalid_entity", "anim.missing_component", "anim.invalid_rig", "anim.duplicate_component", "anim.invalid_step", "particle.invalid_entity", "particle.missing_component", "particle.invalid_config", "particle.invalid_step", "spline.invalid_entity", "spline.missing_component", "spline.invalid_path", "spline.duplicate_component", "spline.invalid_step", "audio.invalid_entity", "audio.invalid_bus", "audio.invalid_event", "audio.device_unavailable", "input.invalid_context", "input.duplicate_context", "input.unknown_context", "input.unknown_action", "sim.gc.unavailable", "sim.gc.invalid_budget", "sim.gc.window_failed", "net.invalid_net_id", "net.duplicate_net_id", "net.snapshot_component_mismatch", "net.authority_conflict", "ui.scene_not_found", "ui.scene_invalid", "ui.node_not_found", "ui.invalid_event", "ui.assertion_failed", "transcode.no_target", "transcode.unsupported_format", "transcode.bad_descriptor", "build.template_unverified", "build.toolchain_fetch_failed", "build.aot_failed", "build.transcode_failed", "build.link_failed", "doctor.environment_incomplete", "doctor.toolchain_missing", "doctor.toolchain_version_mismatch", "doctor.filesync_budget_low", "doctor.signing_prereq_absent", "doctor.unknown_target", "build.artifact_unsigned", "tilemap.layer_not_found", "tilemap.cell_out_of_bounds", "tilemap.tile_unknown", "attach.denied", "daemon.busy", "editor.session_state_invalid"];

@@ -73,6 +73,8 @@ Tests are ctest registrations, named in families the CI steps select by prefix r
 `src/render/present/`), `render-wgpu-*`, `shader-*`, `wasm-runner-*`,
 `cef-substrate-*`, `editor-cef-smoke-*`, `client-*` (the M9 client SDK, `src/editor/client/`),
 `editor-shell-*` (the M9 e04 native Shell, `src/editor/shell/`),
+`editor-session-*` (the M9 e08a daemon session state — the multi-client T2 drill in
+`src/tests/integration/`),
 `webui-*` (the M9 e05a editor-core web workspace, `src/editor/webui/`),
 `game-smoke-*`, `determinism-*`, `samples-corpus*`, and the
 milestone exit gates `m1-exit-*`, `m2-exit-*`, `m4-exit-*`, `m5-exit-*`, `m6-exit-*`, `m7-exit-*`,
@@ -80,7 +82,8 @@ milestone exit gates `m1-exit-*`, `m2-exit-*`, `m4-exit-*`, `m5-exit-*`, `m6-exi
 packed-wedge executables, the m6-exit-3 alias precedent), and `m85-exit-*` (the M8.5
 wedge-hardening/v1 gate; -1a/-1b/-2a/-2b/-4a/-4b/-4c are likewise ALIASES of landed executables).
 The `ui-*`,
-`render-ui-*`, `render-present-*`, `editor-shell-*`, `client-*`, and `webui-*` families are plain
+`render-ui-*`, `render-present-*`, `editor-shell-*`, `editor-session-*`, `client-*`, and `webui-*`
+families are plain
 package test families (not gates) — NOT in the
 general step's `-E` gate-exclusion regex, so they auto-run there, and the `build` job builds them via
 `--preset dev` (no `--target`/CI edits needed). Note `^cli-` does NOT match `client-`.
@@ -203,6 +206,8 @@ sim-vs-presentation-observer split) · `sim-render-timing-contract.md` (fixed ti
 interpolation) · `query-language.md` (the one query grammar) · `deprecation-policy.md` (the frozen
 `protocolMajor 1` contract lifecycle) · `wgsl-tool-decision.md` (Tint, measured) ·
 `client-sdk.md` (the `context_client` SDK, the subscription consumer, and the D10 boundary gate) ·
+`editor-session-state.md` (the M9 e08a daemon session state: the `editor` verbs, the `session` topic
+facts, the `origin` echo-suppression contract, and `.editor/session.json`) ·
 `present-path.md` (surface/swapchain, OSR import + composite, the CPU present fallback, and the
 headless-invariant gate) · `shell.md` (the native Shell: windows, the single-threaded owner loop, the
 per-window compositor + `PET_POPUP`, input arbitration, DPI, the D10 shell boundary, and the deferred

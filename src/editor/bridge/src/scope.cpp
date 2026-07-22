@@ -157,6 +157,18 @@ Scope required_scope_for(const std::string& rpc_method)
         rpc_method == "session.record" || rpc_method == "replay" || rpc_method == "ui.send" ||
         rpc_method == "shutdown")
         return Scope::session_control;
+    // The M9 e08a editor SESSION-STATE family (D7 tier 1). Design 05 §4 puts the whole `editor`
+    // session-state namespace on `session_control` — the READS (`editor.selection-get` /
+    // `editor.cameras-get`) included, because what they read is the live human session, not authored
+    // data, and the fail-CLOSED classification is the one the design pins. Deliberately DISTINCT
+    // from the deterministic `session.*` file-harness family above (C-F4) and from the e05d3
+    // `editor.scene-tree` / `editor.inspect` composed READS below, which project authored data and
+    // stay on the read/query baseline.
+    if (rpc_method == "editor.select" || rpc_method == "editor.selection-get" ||
+        rpc_method == "editor.camera-set" || rpc_method == "editor.cameras-get" ||
+        rpc_method == "editor.play" || rpc_method == "editor.pause" ||
+        rpc_method == "editor.stop" || rpc_method == "editor.step")
+        return Scope::session_control;
     // describe, the operational `query` read, the M9 e05d3 editor-panel reads (`editor.scene-tree` /
     // `editor.inspect` — composed-world projections the Shell's panels hydrate from; they plan no
     // write and touch no session), and everything else is a read/query read.

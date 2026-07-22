@@ -178,6 +178,18 @@ int main()
             {"session.seed", Scope::session_control},  {"session.inject", Scope::session_control},
             {"session.record", Scope::session_control},{"replay", Scope::session_control},
             {"ui.send", Scope::session_control},        {"shutdown", Scope::session_control},
+            // M9 e08a editor SESSION STATE (D7 tier 1): the whole family drives/reads the LIVE human
+            // session, so design 05 §4 puts it on session_control — the two READS included (what
+            // they read is the live session, not authored data). Distinct from the e05d3
+            // editor.scene-tree / editor.inspect authored-data projections above (read_query).
+            {"editor.select", Scope::session_control},
+            {"editor.selection-get", Scope::session_control},
+            {"editor.camera-set", Scope::session_control},
+            {"editor.cameras-get", Scope::session_control},
+            {"editor.play", Scope::session_control},
+            {"editor.pause", Scope::session_control},
+            {"editor.stop", Scope::session_control},
+            {"editor.step", Scope::session_control},
         };
         for (const contract::VerbSpec& v : contract::Registry::instance().verbs())
         {
