@@ -135,6 +135,25 @@ void test_non_directory_is_rejected()
     CHECK(env.exit_code() == 2);
 }
 
+// A --focus-timeout-ms that does not fit in an int is a usage error, NOT a silent wrap: an out-of-range
+// value would otherwise cast to a negative timeout and spawn a duplicate past a live editor.
+void test_out_of_range_focus_timeout_is_a_usage_error()
+{
+    const fs::path project = make_temp_project("timeout");
+    // Above INT_MAX (2147483647) — parses as a valid u64 but must be rejected before the int cast.
+    const Envelope env = run_edit_open(
+        {project.string(), "--no-launch", "--focus-timeout-ms", "4294967296"}, fs::path("context"));
+    CHECK(!env.ok());
+    CHECK(env.exit_code() == 2); // usage class
+    // A negative literal is likewise rejected by the strict parse (not a silent wrap).
+    const Envelope neg = run_edit_open(
+        {project.string(), "--no-launch", "--focus-timeout-ms", "-1"}, fs::path("context"));
+    CHECK(!neg.ok());
+    CHECK(neg.exit_code() == 2);
+    std::error_code ec;
+    fs::remove_all(project, ec);
+}
+
 // The locator resolves an install-layout sibling and a dev build-tree layout.
 void test_editor_locator()
 {
@@ -176,6 +195,7 @@ int main()
     test_stale_marker_times_out_and_reports_spawn();
     test_missing_argument_is_a_usage_error();
     test_non_directory_is_rejected();
+    test_out_of_range_focus_timeout_is_a_usage_error();
     test_editor_locator();
     CLI_TEST_MAIN_END();
 }

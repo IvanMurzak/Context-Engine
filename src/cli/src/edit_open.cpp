@@ -8,6 +8,7 @@
 #include "context/editor/contract/json.h"
 
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -74,11 +75,6 @@ std::optional<std::string> first_positional(const std::vector<std::string>& args
     return pos.front();
 }
 
-std::size_t positional_count(const std::vector<std::string>& args)
-{
-    return positionals_of(args).size();
-}
-
 // Resolve a project argument to an absolute path. weakly_canonical over an existing dir yields the real
 // path; on any error fall back to absolute() so the value is still usable + reportable.
 fs::path resolve_project(const std::string& arg)
@@ -102,15 +98,13 @@ bool is_edit_open_shape(const std::vector<std::string>& args_after_edit)
     // The project-open shape is exactly ONE positional that names a directory (or `.`/`..`). The
     // two-positional `edit <file> <content>` write and a lone file positional are NOT this shape and
     // stay the reserved operational verb.
-    if (positional_count(args_after_edit) != 1)
+    const std::vector<std::string> pos = positionals_of(args_after_edit);
+    if (pos.size() != 1)
         return false;
-    const std::optional<std::string> pos = first_positional(args_after_edit);
-    if (!pos.has_value())
-        return false;
-    if (*pos == "." || *pos == "..")
+    if (pos.front() == "." || pos.front() == "..")
         return true;
     std::error_code ec;
-    return fs::is_directory(fs::path(*pos), ec);
+    return fs::is_directory(fs::path(pos.front()), ec);
 }
 
 fs::path locate_editor_binary(const fs::path& self_exe)
@@ -147,8 +141,14 @@ Envelope run_edit_open(const std::vector<std::string>& args_after_edit, const fs
     int focus_timeout_ms = kDefaultFocusTimeoutMs;
     if (const std::optional<std::string> t = flag_value(args_after_edit, "focus-timeout-ms"))
     {
+        // Strict parse + range-check (like daemon_command's --crawl-interval-ms): a value above
+        // INT_MAX would wrap to a NEGATIVE int in the cast below, so the arbitration deadline is
+        // already in the past and a LIVE editor is never given time to acknowledge — spawning a
+        // DUPLICATE, the exact outcome this single-instance arbitration exists to prevent. Reject it
+        // as a usage error rather than silently wrap the safety net off.
         const std::optional<std::uint64_t> parsed = parse_u64(*t);
-        if (!parsed.has_value())
+        if (!parsed.has_value() ||
+            *parsed > static_cast<std::uint64_t>(std::numeric_limits<int>::max()))
             return Envelope::failure("usage.invalid",
                                      "--focus-timeout-ms expects a non-negative integer, got '" + *t +
                                          "'");
