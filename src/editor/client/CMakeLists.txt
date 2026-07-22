@@ -12,6 +12,7 @@
 
 add_library(context_client STATIC
     src/instance.cpp
+    src/arbitration.cpp
     src/wire.cpp
     src/client.cpp
     src/subscription.cpp
@@ -72,6 +73,7 @@ add_custom_target(context_client_schema ALL DEPENDS "${CONTEXT_CLIENT_SCHEMA_GEN
 # tests/client_test.h is the tiny CHECK() harness, tests/mock_channel.h the scripted wire.
 set(_context_client_tests
     test_client
+    test_arbitration
     test_subscription
     test_spawn_handshake
     test_schema)

@@ -312,11 +312,58 @@ void test_out_of_range_numbers_degrade_to_defaults_not_ub()
     CHECK(state.windows[1].height == 1u);
 }
 
+// ------------------------------------------------------------------- e14b: the presence marker
+
+void test_presence_marker_is_written_by_the_shell_and_read_back(void)
+{
+    // The Shell is the SINGLE writer of editor-state.json (C-F3): the D15/C-F23 presence marker rides
+    // this store, never a second writer. Set on boot, cleared on clean exit — an opener reads its
+    // presence/absence from the serialized document to decide focus-vs-spawn.
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "presence");
+    context::editor::client::PresenceMarker marker;
+    marker.pid = 5150;
+    marker.boot_nonce = "boot-nonce-e14b";
+
+    {
+        EditorStateStore store(root, 0);
+        store.load();
+        store.set_presence(marker, 0);
+        CHECK(store.dirty());
+        // Re-asserting the SAME marker each frame must be free (no dirty), like set_placement.
+        store.set_presence(marker, 1);
+        CHECK(store.flush_now());
+        CHECK(store.write_count() == 1);
+    }
+
+    // A separate reader (the opener's view) sees the marker in the serialized document.
+    const std::optional<context::editor::client::PresenceMarker> read =
+        context::editor::client::parse_presence_from_editor_state(read_file(editor_state_path(root)));
+    CHECK(read.has_value());
+    CHECK(read->boot_nonce == "boot-nonce-e14b");
+    CHECK(read->pid == 5150);
+
+    // Clearing it (clean exit) drops the key entirely — ABSENCE is the honest "no editor present".
+    {
+        EditorStateStore store(root, 0);
+        store.load();
+        CHECK(store.state().presence.has_value()); // it loaded the marker back
+        store.clear_presence(0);
+        CHECK(store.dirty());
+        CHECK(store.flush_now());
+    }
+    CHECK(!context::editor::client::parse_presence_from_editor_state(
+               read_file(editor_state_path(root)))
+               .has_value());
+
+    shelltest::cleanup(root);
+}
+
 } // namespace
 
 int main()
 {
     test_path_is_the_editor_owned_file();
+    test_presence_marker_is_written_by_the_shell_and_read_back();
     test_document_round_trips();
     test_a_maximized_window_still_records_its_restore_rect();
     test_malformed_and_missing_documents_degrade_rather_than_refuse();

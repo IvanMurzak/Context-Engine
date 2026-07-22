@@ -106,6 +106,14 @@ public:
 
     virtual void set_title(std::string_view title) = 0;
 
+    // Best-effort: bring this window to the foreground — the D15/C-F23 single-instance FOCUS a second
+    // opener (`context edit .`) requests when it finds this editor already on the project (M9 e14b).
+    // NON-pure: a backend with no OS window (the headless backend) simply does nothing, which is the
+    // honest behaviour on a box with no interactive desktop (Session 0 / CI). The real OS raise is the
+    // Win32 override; its interactive verification rides the deferred interactive-Windows pass
+    // (docs/shell.md) — the arbitration handshake itself is proven headlessly in the T2 drill.
+    virtual void request_activation() {}
+
     [[nodiscard]] virtual WindowPlacement placement() const = 0;
     virtual void apply_placement(const WindowPlacement& placement) = 0;
 

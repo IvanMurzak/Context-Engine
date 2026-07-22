@@ -8,6 +8,7 @@
 #include "context/cli/daemon_command.h"
 #include "context/cli/determinism_command.h"
 #include "context/cli/doctor_command.h"
+#include "context/cli/edit_open.h"
 #include "context/cli/editor_driver.h"
 #include "context/cli/fetch_command.h"
 #include "context/cli/install_command.h"
@@ -24,6 +25,7 @@
 #include "context/editor/contract/registry.h"
 
 #include <cstdio>
+#include <filesystem>
 #include <map>
 #include <string>
 #include <utility>
@@ -384,6 +386,22 @@ int main_cli(int argc, char** argv)
         std::fwrite(out_json.data(), 1, out_json.size(), stdout);
         std::fputc('\n', stdout);
         return rc;
+    }
+
+    // `context edit <dir>` (M9 e14b, D15/C-F23) is the project-OPEN entry path — a CLI-local
+    // operational command that launches / focuses the editor, NOT a contract verb. It is intercepted
+    // here (needing argv[0] to locate the sibling `context_editor`) and only for the project-open SHAPE
+    // (one positional naming a directory / `.`); the two-positional `edit <file> <content>` write falls
+    // through to run() and stays the reserved operational verb (`contract.operational_only`).
+    if (args.size() >= 2 && args[0] == "edit" &&
+        is_edit_open_shape(std::vector<std::string>(args.begin() + 1, args.end())))
+    {
+        const Envelope env = run_edit_open(std::vector<std::string>(args.begin() + 1, args.end()),
+                                           std::filesystem::path(argv[0]));
+        const std::string out = env.dump(2);
+        std::fwrite(out.data(), 1, out.size(), stdout);
+        std::fputc('\n', stdout);
+        return env.exit_code();
     }
 
     const Envelope env = run(args);

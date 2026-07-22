@@ -9,6 +9,7 @@
 // "this build contains no browser" rather than a target that only exists on one CI job. That is also
 // what lets the D10 `editor-boundary` job BUILD this binary against the installed client artifacts.
 
+#include "context/editor/client/arbitration.h" // e14b: the D15/C-F23 presence marker + focus watcher
 #include "context/editor/client/subscription.h"
 #include "context/editor/shell/app_scheme.h"
 #include "context/editor/shell/browser.h"
@@ -251,6 +252,27 @@ int main(int argc, char** argv)
     // the window itself is adopted later, once the browser + present path exist.
     shell::WindowManager manager(options.project);
 
+    // --- the editor presence marker + the single-instance focus watcher (e14b, D15/C-F23) ---------
+    //
+    // Publish THIS editor's presence into `.editor/editor-state.json` (the Shell is its SINGLE writer,
+    // C-F3 — the marker rides the store, never a second writer) so a second opener (`context edit .`)
+    // FOCUSES us instead of duplicating. Written immediately via flush_now (not the layout debounce) so
+    // an opener racing our boot sees us. The watcher, pumped from the owner loop below, consumes the
+    // opener's focus request and raises window 0. The marker is retracted on clean exit (further down),
+    // so a later open of a gone editor spawns a fresh one rather than trying to focus a corpse.
+    {
+        client::PresenceMarker marker;
+        marker.pid = client::current_process_id();
+        marker.boot_nonce = client::make_boot_nonce();
+        manager.state_store().set_presence(marker, now_us());
+        if (!manager.state_store().flush_now() && !manager.state_store().last_error().empty())
+        {
+            std::fprintf(stderr, "context_editor: could not publish the presence marker: %s\n",
+                         manager.state_store().last_error().c_str());
+        }
+    }
+    client::FocusRequestWatcher focus_watcher(options.project);
+
     shell::ShellHandshake handshake(shell::make_handshake_nonce());
     shell::BridgeRouter bridge;
     // The two daemon credentials that must never cross into the renderer (the token + the endpoint) are
@@ -472,6 +494,16 @@ int main(int argc, char** argv)
         // read-only STATE + reconnect with backoff, re-snapshotting on reattach. A daemon restart is
         // stalled at most the ladder's bounded duration. now in ms for the backoff clock.
         lifecycle.pump(static_cast<std::int64_t>(now_us() / 1000));
+        // e14b: a second opener that found our presence marker wrote a focus request — consume it and
+        // raise window 0 (best-effort; a headless backend simply does nothing). This is the C-F23
+        // single-instance FOCUS, arbitrated entirely through the project's own `.editor/` state.
+        if (focus_watcher.poll())
+        {
+            if (shell::EditorWindow* front = manager.window(0))
+            {
+                front->backend().request_activation();
+            }
+        }
         if (client::Client* live_client = lifecycle.client())
         {
             // e05d3: drain the live-hydration work the feeds marked due (Scene tree re-reads on settle;
@@ -493,6 +525,10 @@ int main(int argc, char** argv)
     // `shutdown`; an owned daemon other clients still hold is left running; an external daemon is never
     // touched. Runs before the manager/CEF teardown so the daemon call still has a live wire.
     lifecycle.shutdown_at_exit();
+    // e14b: retract the presence marker so a later opener spawns a fresh editor instead of trying to
+    // focus this process after it is gone. Cleared before manager.shutdown() flushes + closes.
+    manager.state_store().clear_presence(now_us());
+    (void)manager.state_store().flush_now();
     manager.shutdown();
 #if defined(CONTEXT_EDITOR_HAS_CEF)
     shell::cef::shutdown();
