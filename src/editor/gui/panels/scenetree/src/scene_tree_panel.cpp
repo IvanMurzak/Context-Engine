@@ -104,8 +104,9 @@ void SceneTreePanel::on_derivation_settled(std::uint64_t generation, bridge::Sta
 bool SceneTreePanel::select(const std::string& identity)
 {
     // A row that is not in the rendered model is a dead click — refuse locally rather than asking the
-    // daemon to select something this panel cannot even name.
-    if (find_node(model_, identity) == nullptr || gateway_ == nullptr)
+    // daemon to select something this panel cannot even name. The "no gateway bound" case is
+    // write_selection's, so it is not restated here.
+    if (find_node(model_, identity) == nullptr)
     {
         return false;
     }

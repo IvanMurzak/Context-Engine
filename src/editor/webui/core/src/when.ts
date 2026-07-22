@@ -121,6 +121,18 @@ export const STUB_EDITOR_UI: EditorUiSource = {
  * persisted across a restart (docs/editor-session-state.md: "restoring `playing` would be a lie about
  * L-51 provenance"). A caller with no session subscription reads this and is correct until the first
  * fact arrives; `DaemonSessionState` is what makes it stay correct after that.
+ *
+ * ⚠ **UNFINISHED WIRING — the e08b Definition-of-Done line 3 is NOT fully delivered.** `boot.ts`
+ * still resolves its when-context from THIS constant, so editor-core's `playState` is frozen at
+ * `edit` for the whole session: a command guarded by `playState == playing` never becomes active,
+ * and `DaemonSessionState` below — the real source, complete and covered by `when.test.ts` — is
+ * reachable from the tests ONLY. e08b could not land the wiring because `boot.ts` was owned by a
+ * co-scheduled sibling run (CE PR #351) under the file-scope rule, NOT because anything here is
+ * missing. THE REMAINING WORK IS ONE EDIT IN `boot.ts`: construct a `DaemonSessionState`, set its
+ * `clientId` from the attach reply, feed every `session`-topic payload to `applyFact`, call `reset()`
+ * on reconnect, and pass it as `session` to `resolveContext` in place of this constant. Delete this
+ * warning — and consider deleting the constant, whose only remaining honest caller is a test — in
+ * the same change.
  */
 export const STUB_SESSION_STATE: SessionStateSource = {
     playState: "edit",

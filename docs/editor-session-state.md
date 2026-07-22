@@ -163,7 +163,13 @@ The panels no longer own selection or play state; they are subscribers and write
 |---|---|---|---|
 | Scene tree panel | `editor.select` via `scenetree::SelectionGateway` | `selection-changed` | `src/editor/gui/panels/scenetree/` |
 | Playbar | `editor.play\|pause\|stop\|step` via `playbar::PlayControlGateway` | `play-state` | `src/editor/gui/playbar/` |
-| editor-core `when` contexts | — (read-only) | `play-state` | `src/editor/webui/core/src/when.ts` (`DaemonSessionState`) |
+| editor-core `when` contexts | — (read-only) | `play-state` ⚠ *source landed, not yet wired* | `src/editor/webui/core/src/when.ts` (`DaemonSessionState`) |
+
+⚠ The editor-core row is **half-delivered**: `DaemonSessionState` is complete and covered by
+`webui-ts-unit`, but `boot.ts` still resolves its when-context from the `STUB_SESSION_STATE` boot
+baseline, so the browser-side `playState` is frozen at `edit` until that one call site is swapped
+(`boot.ts` was owned by a co-scheduled run when e08b landed). The stub carries the same warning and
+the exact remaining steps. The two C++ rows are fully wired.
 
 Both C++ seams are declared in the boundary-clean panel libraries and implemented ONCE, wire-side, by
 `shell::panels::SessionFeed` (`src/editor/shell/panels/session_feed.{h,cpp}`) — which is also where

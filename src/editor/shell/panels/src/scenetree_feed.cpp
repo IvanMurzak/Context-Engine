@@ -193,9 +193,12 @@ PanelProvider SceneTreeFeed::make_provider()
         // identities. `scenetree_row_identity` is the translation that keeps it that way.
         //
         // e08b: select() is now a WRITE to the daemon, so what comes back is "the daemon applied it",
-        // not "the panel moved". The panel moves when the resulting `selection-changed` fact reaches
-        // SessionFeed — which is also what fires the selection listeners the Inspector feed hydrates
-        // from (R-HUX-011), so that loop now runs on daemon truth instead of a local decision.
+        // not "the panel decided". The panel then renders the write's REPLY — NOT the
+        // `selection-changed` fact it publishes, which carries our own `origin` and is dropped by
+        // SessionFeed's echo suppression (scene_tree_panel.h: reading it the other way round yields a
+        // panel that shows every OTHER client's selection and never its own). Applying that reply is
+        // what fires the selection listeners the Inspector feed hydrates from (R-HUX-011), so that
+        // loop now runs on daemon truth instead of a local decision.
         const std::optional<std::string> identity =
             scenetree_row_identity(read_string(params, "nodeId"));
         return identity.has_value() && panel_.select(*identity);

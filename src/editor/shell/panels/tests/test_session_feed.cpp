@@ -204,6 +204,63 @@ int main()
         CHECK(feed.echoes_dropped() == 0);
     }
 
+    // --- an UNREADABLE play-state token leaves the rendered state ALONE ----------------------------
+    // `edit` is a POSITIVE L-51 claim ("authored truth, no live session"), so a token from a NEWER
+    // daemon — or a fact with no `state` member at all — must NOT be read as one: the daemon
+    // publishes `play-state` only on a CHANGE, so a fabricated `edit` would never be corrected. This
+    // is the same rule the TS side applies (`toPlayState` in when.ts) — the two sources of the one
+    // contract must not disagree.
+    {
+        PanelHost host;
+        SessionFeed feed(host, playbar::PlaybarModel::kContributionId);
+        feed.bind_client(nullptr, kShellId);
+
+        CHECK(feed.apply_event(kSessionTopicName, play_fact(kOtherClientId, "playing", 7)));
+        CHECK(feed.playbar_model().state() == playbar::PlayState::playing);
+        const std::uint64_t generation = feed.playbar_model().control_generation();
+
+        // A token a newer daemon might mint: not applied, not counted, nothing notified.
+        CHECK(!feed.apply_event(kSessionTopicName, play_fact(kOtherClientId, "recording", 8)));
+        CHECK(feed.playbar_model().state() == playbar::PlayState::playing);
+        CHECK(feed.playbar_model().sim_tick() == 7);
+        CHECK(feed.playbar_model().control_generation() == generation);
+
+        // A `play-state` fact with no `state` member reads the same way — absent is not `edit`.
+        Json bare = Json::object();
+        bare.set("event", Json(std::string(kPlayStateEvent)));
+        bare.set("origin", Json(kOtherClientId));
+        bare.set("simTick", Json(std::uint64_t{9}));
+        CHECK(!feed.apply_event(kSessionTopicName, bare));
+        CHECK(feed.playbar_model().state() == playbar::PlayState::playing);
+
+        // ...and the daemon's own `edit` token still lands, so the rule costs no real transition.
+        CHECK(feed.apply_event(kSessionTopicName, play_fact(kOtherClientId, "edit", 0)));
+        CHECK(feed.playbar_model().state() == playbar::PlayState::edit);
+    }
+
+    // --- the same rule on the REPLY path: an unreadable reply state keeps the rendered one ---------
+    {
+        PanelHost host;
+        SessionFeed feed(host, playbar::PlaybarModel::kContributionId);
+
+        Wired wired = make_client(kShellId);
+        wired.channel->on("editor.play",
+                          [](const clientmock::Request&) { return play_reply("playing", 3, true); });
+        // A reply whose `state` this build cannot name. `PlayCommandResult::state` DEFAULTS to
+        // `edit`, so a reader that left it defaulted would render "no live session" on a step that
+        // demonstrably advanced the tick.
+        wired.channel->on(
+            "editor.step",
+            [](const clientmock::Request&) { return play_reply("recording", 4, true); });
+        feed.bind_client(wired.client.get(), wired.client->client_id());
+
+        CHECK(feed.playbar_model().play().ok);
+        CHECK(feed.playbar_model().state() == playbar::PlayState::playing);
+        CHECK(feed.playbar_model().step(1).ok);
+        CHECK(feed.playbar_model().state() == playbar::PlayState::playing); // unmoved, not `edit`
+        CHECK(feed.playbar_model().sim_tick() == 4);
+    }
+
     // --- the WRITE seam: `editor.select` over the real Client -------------------------------------
     {
         PanelHost host;

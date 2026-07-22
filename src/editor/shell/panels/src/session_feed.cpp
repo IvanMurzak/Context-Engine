@@ -28,10 +28,20 @@ namespace
 }
 
 // The daemon's `state` token -> the L-51 PlayState. e08a publishes exactly the tokens
-// `gui::playbar::state_token()` renders, so this is a lookup, not a translation layer — and an
-// UNKNOWN token reads as `edit`, the state that claims the least (never a fabricated live session).
-[[nodiscard]] playbar::PlayState parse_play_state(const std::string& token)
+// `gui::playbar::state_token()` renders, so this is a lookup, not a translation layer.
+//
+// `nullopt` for anything else — an absent/malformed member, or a token from a NEWER daemon. It must
+// NOT fall back to `edit`: `edit` is a POSITIVE L-51 claim ("authored truth, no live session"), so
+// asserting it on a token we simply do not understand would be a confident lie about provenance, and
+// the daemon publishes `play-state` only on a CHANGE — nothing would ever come along to correct it.
+// Leaving the last known state alone is the honest reading, and is byte-for-byte the rule the TS
+// side applies (`toPlayState` in src/editor/webui/core/src/when.ts).
+[[nodiscard]] std::optional<playbar::PlayState> parse_play_state(const std::string& token)
 {
+    if (token == playbar::state_token(playbar::PlayState::edit))
+    {
+        return playbar::PlayState::edit;
+    }
     if (token == playbar::state_token(playbar::PlayState::playing))
     {
         return playbar::PlayState::playing;
@@ -40,7 +50,7 @@ namespace
     {
         return playbar::PlayState::paused;
     }
-    return playbar::PlayState::edit;
+    return std::nullopt;
 }
 
 // A non-negative integer member as a u64; 0 when absent / not a number / negative.
@@ -136,8 +146,15 @@ bool SessionFeed::apply_event(const std::string& topic, const contract::Json& pa
 
     if (event == kPlayStateEvent)
     {
-        if (!playbar_.apply_play_state(parse_play_state(read_string(payload, "state")),
-                                       read_u64(payload, "simTick")))
+        // A token this build cannot name leaves the rendered state EXACTLY where it was (see
+        // parse_play_state) — an unreadable fact is not a fact about `edit`.
+        const std::optional<playbar::PlayState> state =
+            parse_play_state(read_string(payload, "state"));
+        if (!state.has_value())
+        {
+            return false;
+        }
+        if (!playbar_.apply_play_state(*state, read_u64(payload, "simTick")))
         {
             return false;
         }
@@ -213,7 +230,10 @@ playbar::PlayCommandResult SessionFeed::drive_play(const char* method, contract:
     const contract::Json& data = envelope_data(*reply);
     out.ok = true;
     out.changed = read_bool(data, "changed");
-    out.state = parse_play_state(read_string(data, "state"));
+    // Same rule as the fact path: a token this build cannot name keeps the last known state rather
+    // than asserting `edit`. `PlayCommandResult::state` defaults to `edit`, so it must be filled
+    // explicitly — leaving it defaulted IS the fabricated "no live session" claim.
+    out.state = parse_play_state(read_string(data, "state")).value_or(playbar_.state());
     out.sim_tick = read_u64(data, "simTick");
     return out;
 }
