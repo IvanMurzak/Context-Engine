@@ -1439,6 +1439,57 @@ jobs:
             out/web-export/
           if-no-files-found: error
 
+  # M9 e07a — the editor-core TS T1 unit-test tier (src/editor/webui/, design 09 §1 / 04). The webui
+  # workspace's PURE, DOM-free TypeScript (the total parsers in panels.ts / editorstate.ts, the
+  # structural guards in bridge.ts / dockview.ts) had NO local TS unit-test tier — live TS was proven
+  # ONLY by the CI-only editor-cef-smoke-shell leg (a full CI round per attempt). This job bundles a
+  # SECOND esbuild entry (the test bundle) through the SAME pinned esbuild + typecheck stamp — NO new
+  # npm dependency, a tiny in-repo assert shim under core/src/test/ — and runs it in the headless
+  # google-chrome the ubuntu image already ships (the render-web browser), reading the POSTed verdict
+  # back via tools/webui_test_run.py.
+  #
+  # ubuntu-only + BLOCKING, the render / editor-boundary single-OS-blocking precedent: a system
+  # browser in CI is only proven on ubuntu here (no existing job runs one on mac/windows), and the
+  # parse logic is a LANGUAGE property, not a platform one. The test SOURCES ride the production tsgo
+  # glob, so they are TYPECHECKED on all three `build` OS legs regardless; this job adds the
+  # browser-executed assertions on ubuntu.
+  #
+  # ⚠ "Not Run = RED" TRIPWIRE (CE #264): the webui-ts-* ctest exists only when the dev preset is
+  # configured with -DCONTEXT_WEBUI_BROWSER_TESTS=ON (default OFF, so the browser-less `build` matrix
+  # + local gate never register a test they cannot run). This job BUILDS context_editor_webui_test
+  # (its --target list) AND runs `ctest -R "^webui-ts-"` (its named step) — both halves are load-bearing.
+  webui-tests:
+    name: webui-tests (editor-core TS T1, headless Chromium)
+    needs: [license-gate, python-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain (L-42 manifest)
+        uses: ./.github/actions/pinned-toolchain
+
+      - name: Build environment (sccache + CMake env)
+        uses: ./.github/actions/setup-build-env
+
+      - name: Configure (dev preset + webui browser tests)
+        run: cmake -S src --preset dev -DCONTEXT_WEBUI_BROWSER_TESTS=ON
+
+      # Builds ONLY the test bundle target (esbuild + the pinned tsgo typecheck; the esbuild/tsgo
+      # binaries are staged at configure time) — NOT the whole engine, so the job is cheap.
+      - name: Build the editor-core TS test bundle (Not Run = RED tripwire — the --target half)
+        run: cmake --build --preset dev --target context_editor_webui_test
+        working-directory: src
+
+      # Headless google-chrome ships on the ubuntu image (render-web uses it) — no install, no xvfb
+      # (a plain DOM/JS run, no GPU). Not Run = RED: the named ctest step that runs the built family.
+      - name: webui TS T1 unit tier (headless Chromium)
+        run: ctest --preset dev -R "^webui-ts-" --output-on-failure
+        working-directory: src
+
+      - name: sccache stats
+        shell: bash
+        run: ${SCCACHE_PATH} --show-stats
+
   # Native shader cross-compile TOOLCHAIN de-risk (src/render/shadercc/, issue #125, sub-task B of
   # #119): make glslang + SPIRV-Cross + SPIRV-Tools (the vcpkg `shader-crosscompile` manifest feature)
   # AVAILABLE + CI-proven to build/link behind the default-OFF CONTEXT_BUILD_SHADER_CROSSCOMPILE flag —

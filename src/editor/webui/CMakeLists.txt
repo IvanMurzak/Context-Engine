@@ -253,3 +253,77 @@ add_test(NAME webui-client-typings-drift
             --schema "${CONTEXT_CLIENT_SCHEMA_GENERATED}"
             --out "${_ctx_webui_core}/src/generated/client-schema.ts"
             --check)
+
+# --- 3) the editor-core T1 unit-test tier (M9 e07a; R-QA-013, design 09 §1 / 04) -----------------
+# Until now the webui workspace had NO local TS unit-test tier: the PURE, DOM-free editor-core logic
+# (the total parsers in panels.ts / editorstate.ts, the structural guards in bridge.ts / dockview.ts)
+# was proven live ONLY by the CI-only `editor-cef-smoke-shell` leg (test.md § webui TS/DOM runtime
+# blind spot; R-QA-013 flagged the gap). This tier closes it by bundling a SECOND esbuild entry — the
+# test bundle — through the SAME pinned esbuild + the SAME typecheck stamp (NO new npm dependency; a
+# tiny in-repo assert shim under core/src/test/), then running it in the headless Chromium the CI
+# already provisions.
+#
+# It is a CI-ONLY BROWSER PATH, exactly like editor-cef-smoke / render-web: default OFF, so the
+# browser-less local Windows `dev` gate and the 3-OS `build` matrix never register a test they cannot
+# run. The dedicated `webui-tests` CI job (ubuntu, headless google-chrome) configures
+# -DCONTEXT_WEBUI_BROWSER_TESTS=ON, BUILDS `context_editor_webui_test` (its --target list) AND runs
+# `ctest -R "^webui-ts-"` (its named step) — BOTH halves are load-bearing: miss either and the ctest
+# reports "Not Run" -> RED (CE #264, the "Not Run = RED" tripwire). The test SOURCES under
+# core/src/test/ still ride the production tsgo glob above, so they are TYPECHECKED on every one of
+# the 3 `build` OS legs regardless of this option; only the browser-executed assertions run on ubuntu
+# (the parse logic is a language property, not a platform one — the render / editor-boundary
+# single-OS-blocking precedent).
+option(CONTEXT_WEBUI_BROWSER_TESTS
+    "Build + register the headless-Chromium editor-core TS unit tier (webui-ts-*); CI-only browser path (default OFF)."
+    OFF)
+
+if(CONTEXT_WEBUI_BROWSER_TESTS)
+    set(_ctx_webui_test_entry "${_ctx_webui_core}/src/test/main.ts")
+    set(_ctx_webui_test_assets "${CMAKE_BINARY_DIR}/editor-webui/test")
+    set(_ctx_webui_test_bundle_name "editor-core.test.js")
+    set(_ctx_webui_test_bundle "${_ctx_webui_test_assets}/${_ctx_webui_test_bundle_name}")
+
+    # Bundle the test entry through the SAME pinned esbuild and gate it on the SAME typecheck stamp as
+    # the production bundle — a type error in a test is a BUILD failure, not merely a test failure
+    # (the e05a DoD, extended to the tests). Same flags as the production bundle: a browser ESM module
+    # the headless Chromium loads directly.
+    add_custom_command(
+        OUTPUT "${_ctx_webui_test_bundle}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ctx_webui_test_assets}"
+        COMMAND "${CONTEXT_ESBUILD_BIN}" "${_ctx_webui_test_entry}"
+                --bundle
+                --format=esm
+                --platform=browser
+                --target=es2022
+                "--outfile=${_ctx_webui_test_bundle}"
+        DEPENDS ${_ctx_webui_inputs} "${_ctx_webui_stamps}/typecheck.stamp"
+        COMMENT "context_editor_webui_test: bundling the editor-core T1 test entry (pinned esbuild)"
+        VERBATIM)
+
+    # Stage the test-only harness page beside the test bundle (served by webui_test_run.py, NOT the
+    # Shell — no CSP applies). copy_if_different keeps incremental builds quiet.
+    add_custom_command(
+        OUTPUT "${_ctx_webui_test_assets}/harness.html"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ctx_webui_test_assets}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/test/harness.html"
+                "${_ctx_webui_test_assets}/harness.html"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test/harness.html"
+        COMMENT "context_editor_webui_test: staging the T1 harness page"
+        VERBATIM)
+
+    # NOT an ALL target: built only on demand by the webui-tests CI job's --target list (and a local
+    # -DCONTEXT_WEBUI_BROWSER_TESTS=ON repro). Keeping it out of ALL is what lets the default 3-OS
+    # build stay browser-free while the test SOURCES still typecheck there via the production glob.
+    add_custom_target(context_editor_webui_test
+        DEPENDS "${_ctx_webui_test_bundle}" "${_ctx_webui_test_assets}/harness.html")
+
+    # The headless-Chromium unit run. webui_test_run.py serves the test asset dir, runs the bundle in
+    # a Chromium-family browser, and exits non-zero on any failed assertion (or a missing browser /
+    # missing bundle).
+    add_test(NAME webui-ts-unit
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/webui_test_run.py"
+                --asset-dir "${_ctx_webui_test_assets}"
+                --page harness.html
+                --bundle-name "${_ctx_webui_test_bundle_name}")
+endif()
