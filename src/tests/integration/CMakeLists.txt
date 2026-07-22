@@ -134,7 +134,8 @@ target_compile_definitions(context_test_e08a_daemon_session_state PRIVATE
     CONTEXT_BINARY="$<TARGET_FILE:context>")
 add_dependencies(context_test_e08a_daemon_session_state context)
 add_test(NAME editor-session-multiclient-t2 COMMAND context_test_e08a_daemon_session_state)
-# Three scenarios, each spawning + reaping real daemons and several real `context attach` children;
+# Three test functions covering the four DoD scenarios (propagation + echo suppression + play share
+# one daemon), each spawning + reaping real daemons and several real `context attach` children;
 # cap generously so a regression surfaces its diagnostics rather than hanging the CI job.
 set_tests_properties(editor-session-multiclient-t2 PROPERTIES TIMEOUT 300)
 # The spawned `context` binary links the uninstrumented rusty_v8 archive (the M6 X1

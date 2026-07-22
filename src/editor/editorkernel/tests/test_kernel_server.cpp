@@ -1149,8 +1149,24 @@ int main()
             CHECK(bad_mode.has_value());
             CHECK(bad_mode->at("error").at("data").at("code").as_string() == "usage.invalid");
 
-            CHECK(req_demux(a, 13, rpc(13, "shutdown", Json::object()), a_events).has_value());
+            // --- ids are NEVER REUSED within a daemon lifetime ----------------------------------
+            // The second half of the echo-suppression trust argument (docs/editor-session-state.md):
+            // "two live clients differ" is not enough — a client that RECONNECTS after another has
+            // dropped must not inherit a departed client's id, or a fact still in flight would be
+            // mis-attributed and wrongly suppressed. e08b's panels and e08c's bus both key on this.
             a.close();
+            TransportClient c(transportE.endpoint());
+            CHECK(c.connect(3000));
+            const std::optional<std::string> c_attach =
+                c.request(rpc(1, "attach", attach_params("session")));
+            CHECK(c_attach.has_value());
+            const std::int64_t c_id = Json::parse(*c_attach).at("result").at("clientId").as_int();
+            CHECK(c_id != a_id); // A's slot is free, but its IDENTITY is spent
+            CHECK(c_id != b_id);
+            CHECK(c_id > b_id); // monotonic: a fresh id is always beyond every id ever issued
+
+            CHECK(c.request(rpc(2, "shutdown", Json::object())).has_value());
+            c.close();
             b.close();
         }
 

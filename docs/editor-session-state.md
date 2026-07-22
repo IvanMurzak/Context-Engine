@@ -55,13 +55,23 @@ safe to consume:
   **applies** a fact whose `origin` differs from its own id and **drops** one that matches. That
   single rule *is* the contract — there is no side channel and no server-side suppression to get
   subtly wrong.
+* **Ids are minted per WIRE CONNECTION.** The in-process attach path (`gui/contract`'s shim, which
+  calls `Dispatcher::attach` directly rather than going through a transport) gets no connection and
+  therefore `origin == 0`. That is correct today — nothing in-process drives the `editor.*` verbs —
+  but it means **echo suppression cannot distinguish two in-process consumers from each other**. A
+  consumer that needs its own identity must be a real wire client (the Shell already is, via
+  `context_client`); e08b/e08c should not route panel writes through the in-process shim expecting
+  per-panel `origin`.
 
 Two supporting invariants make it trustworthy, and both are tested:
 
 1. **A no-op publishes nothing.** Re-selecting the same ids, re-writing the same camera, or
    `stop` in `edit` state changes nothing and emits no event — otherwise the daemon itself would be
    an echo generator.
-2. **Ids are never reused within a daemon lifetime**, so a fact can never be mis-attributed.
+2. **Ids are never reused within a daemon lifetime** — the daemon mints them from a monotonic
+   counter, so a client that reconnects after another dropped never inherits the departed client's
+   id and a fact still in flight can never be mis-attributed. (`editorkernel-test_kernel_server`
+   asserts both halves: two live clients differ, *and* a reconnect's id is beyond every id issued.)
 
 ## Play state (L-51)
 

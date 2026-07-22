@@ -162,6 +162,15 @@ private:
     std::uint64_t sim_tick_ = 0;
 };
 
+// The encoding of the state's two projectable halves — ONE implementation each, deliberately shared
+// by the `session` topic facts, the `editor.*-get` replies, and `.editor/session.json` (to_json()
+// below). The wire and the file are documented to carry the SAME shape; a second copy of these six
+// lines is exactly how that stops being true.
+[[nodiscard]] contract::Json selection_ids_json(const EditorSessionState& state);
+// Cameras are an ARRAY of objects carrying their key (`{viewportId, transform, projection}`), never
+// a map-keyed object — the L-33 encoding discipline, so the file stays diffable and stable-ordered.
+[[nodiscard]] contract::Json cameras_json(const EditorSessionState& state);
+
 // The daemon-owned session file for a project root: `<project_root>/.editor/session.json`.
 [[nodiscard]] std::filesystem::path session_state_path(const std::filesystem::path& project_root);
 

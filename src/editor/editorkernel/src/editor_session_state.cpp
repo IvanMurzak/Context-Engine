@@ -219,16 +219,18 @@ PlayOutcome EditorSessionState::step(std::uint64_t ticks)
 
 // --- the persisted projection --------------------------------------------------------------------
 
-Json EditorSessionState::to_json() const
+Json selection_ids_json(const EditorSessionState& state)
 {
     Json ids = Json::array();
-    for (const std::string& id : selection_)
+    for (const std::string& id : state.selection())
         ids.push_back(Json(id));
-    Json selection = Json::object();
-    selection.set("ids", std::move(ids));
+    return ids;
+}
 
+Json cameras_json(const EditorSessionState& state)
+{
     Json cameras = Json::array();
-    for (const auto& [viewport_id, cam] : cameras_) // std::map => stable, sorted order
+    for (const auto& [viewport_id, cam] : state.cameras()) // std::map => stable, sorted order
     {
         Json entry = Json::object();
         entry.set("viewportId", Json(viewport_id));
@@ -236,11 +238,18 @@ Json EditorSessionState::to_json() const
         entry.set("projection", cam.projection);
         cameras.push_back(std::move(entry));
     }
+    return cameras;
+}
+
+Json EditorSessionState::to_json() const
+{
+    Json selection = Json::object();
+    selection.set("ids", selection_ids_json(*this));
 
     Json doc = Json::object();
     doc.set("version", Json(static_cast<std::int64_t>(kSessionFileVersion)));
     doc.set("selection", std::move(selection));
-    doc.set("cameras", std::move(cameras));
+    doc.set("cameras", cameras_json(*this));
     return doc;
 }
 

@@ -65,30 +65,10 @@ Json session_fact(const char* event, std::uint64_t origin)
     return ev;
 }
 
-Json selection_json(const EditorSessionState& state)
-{
-    Json ids = Json::array();
-    for (const std::string& id : state.selection())
-        ids.push_back(Json(id));
-    return ids;
-}
-
-// Cameras cross the wire as an ARRAY of objects carrying their key (never a map-keyed object) — the
-// same encoding discipline the authored-data conventions mandate, and the shape `.editor/session.json`
-// persists.
-Json cameras_json(const EditorSessionState& state)
-{
-    Json cameras = Json::array();
-    for (const auto& [viewport_id, cam] : state.cameras())
-    {
-        Json entry = Json::object();
-        entry.set("viewportId", Json(viewport_id));
-        entry.set("transform", cam.transform);
-        entry.set("projection", cam.projection);
-        cameras.push_back(std::move(entry));
-    }
-    return cameras;
-}
+// The wire shapes of selection / cameras come from editor_session_state.h
+// (`selection_ids_json` / `cameras_json`) rather than being rebuilt here: the `session` facts, these
+// `editor.*-get` replies, and `.editor/session.json` are documented to carry the SAME shape, so they
+// share the one encoder instead of a comment promising two copies agree.
 
 // Strict unsigned parse for `editor step --ticks` (the CLI projection delivers a flag as a string).
 // Deliberately strict: "-1" wrapping to ~2^64 would step the session ~forever, and a trailing-garbage
@@ -580,13 +560,13 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
         if (changed)
         {
             Json ev = session_fact("selection-changed", session.client_id);
-            ev.set("ids", selection_json(session_));
+            ev.set("ids", selection_ids_json(session_));
             ev.set("mode", Json(std::string(selection_mode_token(mode))));
             kernel_.events().publish("session", std::move(ev));
         }
 
         Json data = Json::object();
-        data.set("ids", selection_json(session_));
+        data.set("ids", selection_ids_json(session_));
         data.set("mode", Json(std::string(selection_mode_token(mode))));
         data.set("changed", Json(changed));
         return Envelope::success(std::move(data));
@@ -595,7 +575,7 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
     if (method == "editor.selection-get")
     {
         Json data = Json::object();
-        data.set("ids", selection_json(session_));
+        data.set("ids", selection_ids_json(session_));
         return Envelope::success(std::move(data));
     }
 
