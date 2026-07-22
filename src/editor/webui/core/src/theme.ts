@@ -656,6 +656,65 @@ export function defaultThemeId(probe: MediaQueryProbe): string {
     return probe(LIGHT_SCHEME_QUERY)?.matches === true ? BUILTIN_LIGHT : BUILTIN_DARK;
 }
 
+/**
+ * The boot-URL flag that PINS the first-run theme, overriding the `prefers-color-scheme` default.
+ *
+ * ⚠ THIS EXISTS BECAUSE THE FIRST-RUN DEFAULT IS AN AMBIENT HOST PREFERENCE, AND A PIXEL TEST CANNOT
+ * ASSERT A COLOUR IT DOES NOT CHOOSE. The live `editor-cef-smoke-shell` / `-shell-restore` legs scan
+ * the composited frame for the active theme's `colors.panel` by EXACT byte match — a colour that is
+ * `#0a0a0a` under Dark and `#ffffff` under Light. `defaultThemeId` follows `prefers-color-scheme`
+ * (06 §4 / C-F22, which is CORRECT product behaviour and is NOT changed here), and a CI host has no
+ * desktop colour-scheme preference at all: the runner has no settings portal (the ubuntu leg's own
+ * log is full of dbus/UPower connect failures), so Chromium falls back to its documented `light`
+ * default and the editor honestly boots `builtin.light`. The smokes' expectation was therefore
+ * coupled to whether the MACHINE happened to prefer dark — green on a dark-mode dev box, red on
+ * every CI host. Pinning the theme removes the ambient input from the test WITHOUT weakening the
+ * assertion by one texel: the smoke still requires the theme's real `colors.panel` to genuinely
+ * cover a tenth of the frame, it just now knows which theme that is.
+ *
+ * Named in the `?ctx-smoke-*` family boot.ts already reads (`ctx-smoke-palette` drives the e07d
+ * palette scenario, `ctx-smoke-arrange` the e05d4 restart drill) — same convention, same
+ * no-op-unless-present discipline.
+ */
+export const THEME_PIN_FLAG = "ctx-smoke-theme";
+
+/**
+ * Read the pinned theme id out of a boot URL's query string, or `""` when it carries no pin.
+ *
+ * TOTAL: a malformed query, an absent `URLSearchParams` (a harness), or an empty value all read as
+ * "no pin" rather than throwing — this runs before anything is on screen, and a throw here would
+ * cost the editor its theme entirely.
+ */
+export function parsePinnedThemeId(search: string): string {
+    if (search === "" || typeof URLSearchParams !== "function") {
+        return "";
+    }
+    try {
+        return new URLSearchParams(search).get(THEME_PIN_FLAG) ?? "";
+    } catch {
+        return "";
+    }
+}
+
+/**
+ * THE first-run theme id: an explicit pin when one is present AND known, the `prefers-color-scheme`
+ * default otherwise.
+ *
+ * `isKnown` is required rather than optional, and an UNKNOWN pin falls back to the default instead
+ * of being applied: `ThemeEngine.apply` refuses an id the registry does not hold, and at first run
+ * there is no previous theme for that refusal to fall back ON — so honouring a typo'd pin blindly
+ * would leave the window unstyled, which is precisely the outcome the engine's fail-closed contract
+ * exists to prevent.
+ */
+export function bootThemeId(
+    search: string,
+    probe: MediaQueryProbe,
+    isKnown: (id: string) => boolean,
+): string {
+    const pinned = parsePinnedThemeId(search);
+    return pinned !== "" && isKnown(pinned) ? pinned : defaultThemeId(probe);
+}
+
 /** What an `apply` did — returned so a caller (and a test) can assert on it without reading CSS. */
 export interface ThemeApplyReport {
     readonly applied: boolean;

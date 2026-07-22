@@ -28,16 +28,19 @@ import {
     REDUCED_MOTION_QUERY,
     THEMES_GET_METHOD,
     THEME_CHANGED_EVENT,
+    THEME_PIN_FLAG,
     THEME_TRANSITION_ATTRIBUTE,
     ThemeController,
     ThemeEngine,
     ThemeRegistry,
     TOKEN_VARIABLE_PREFIX,
     applyMotionPreference,
+    bootThemeId,
     defaultMediaQueryProbe,
     defaultThemeId,
     kebabCase,
     parseDurationMs,
+    parsePinnedThemeId,
     parseThemesSnapshot,
     prefersReducedMotion,
     themeCssVariables,
@@ -52,6 +55,22 @@ import {
 
 import darkTheme from "../../../tokens/themes/dark.theme.json";
 import lightTheme from "../../../tokens/themes/light.theme.json";
+
+/**
+ * The five Dockview variables that decide the PAINTED REGION the live CEF smokes' coverage floor is
+ * calibrated against, in ONE place because TWO tiers assert about them and they must agree: the case
+ * below proves they all RESOLVE to `colors.panel`, and `theme_dom.test.ts` proves the browser still
+ * COMPUTES that value on a real Dockview root after the cascade has had its say. A kit change that
+ * gives the tab strip its own step has to move the smokes' `kAppBackground*` constants in the same
+ * diff — this list is that tripwire, and duplicating it would let the two tiers drift apart.
+ */
+export const DOCKVIEW_BACKGROUND_VARIABLES = [
+    "--dv-background-color",
+    "--dv-group-view-background-color",
+    "--dv-tabs-and-actions-container-background-color",
+    "--dv-activegroup-visiblepanel-tab-background-color",
+    "--dv-inactivegroup-visiblepanel-tab-background-color",
+] as const;
 
 // --------------------------------------------------------------------------------- fakes
 
@@ -233,13 +252,7 @@ export const themeTests: readonly TestCase[] = [
             // smokes' kAppBackground* constants in the SAME diff — this test is that tripwire.
             const vars = themeCssVariables(darkTheme as ThemeDocument);
             const panel = vars[`${TOKEN_VARIABLE_PREFIX}colors-panel`];
-            for (const variable of [
-                "--dv-background-color",
-                "--dv-group-view-background-color",
-                "--dv-tabs-and-actions-container-background-color",
-                "--dv-activegroup-visiblepanel-tab-background-color",
-                "--dv-inactivegroup-visiblepanel-tab-background-color",
-            ]) {
+            for (const variable of DOCKVIEW_BACKGROUND_VARIABLES) {
                 assertEqual(vars[variable], panel, `${variable} resolves to colors.panel`);
             }
             assert(
@@ -913,6 +926,86 @@ export const themeTests: readonly TestCase[] = [
             });
             assert(reload.reloaded && !reload.reapplied, "no needless re-apply of a built-in");
             assertEqual(engine.activeId, BUILTIN_LIGHT, "the active theme is untouched");
+        },
+    },
+    {
+        // THE e06b CI REGRESSION, pinned. `colors.panel` is a PER-THEME value (#0a0a0a Dark,
+        // #ffffff Light) and the first run follows the host's `prefers-color-scheme` — correct
+        // product behaviour (06 §4 / C-F22), and a landmine for the live CEF smokes, which scan the
+        // composited frame for ONE hardcoded colour. A CI host has no colour-scheme preference at
+        // all (no settings portal), so Chromium falls back to `light`, the editor honestly boots
+        // `builtin.light`, and a smoke looking for Dark's #0a0a0a finds ZERO texels on a perfectly
+        // healthy frame. It was green on a dark-mode dev box and red on both CI legs. The boot-URL
+        // pin takes that ambient input out of the test; these cases are what keep it working.
+        name: "bootThemeId: an explicit pin BEATS the host's prefers-color-scheme",
+        run: () => {
+            const known = (id: string): boolean => id === BUILTIN_DARK || id === BUILTIN_LIGHT;
+            const lightHost = probeMatching(LIGHT_SCHEME_QUERY);
+            assertEqual(defaultThemeId(lightHost), BUILTIN_LIGHT, "the host really does prefer light");
+            assertEqual(
+                bootThemeId(`?${THEME_PIN_FLAG}=${BUILTIN_DARK}`, lightHost, known),
+                BUILTIN_DARK,
+                "the pin wins on a light-preferring host — the CEF smoke's whole premise",
+            );
+            assertEqual(
+                bootThemeId(`?${THEME_PIN_FLAG}=${BUILTIN_LIGHT}`, NULL_PROBE, known),
+                BUILTIN_LIGHT,
+                "and it wins the other way too, so the pin is not a disguised Dark default",
+            );
+        },
+    },
+    {
+        name: "bootThemeId: no pin leaves the prefers-color-scheme default untouched",
+        run: () => {
+            const known = (): boolean => true;
+            assertEqual(
+                bootThemeId("", probeMatching(LIGHT_SCHEME_QUERY), known),
+                BUILTIN_LIGHT,
+                "a bare boot URL still follows the host (C-F22 is NOT changed by the pin)",
+            );
+            assertEqual(bootThemeId("", NULL_PROBE, known), BUILTIN_DARK, "undetectable -> Dark");
+            assertEqual(
+                bootThemeId("?ctx-smoke-palette=1", probeMatching(LIGHT_SCHEME_QUERY), known),
+                BUILTIN_LIGHT,
+                "an unrelated ?ctx-smoke-* flag is not a theme pin",
+            );
+        },
+    },
+    {
+        // FAIL-CLOSED, and this is the case that makes it matter: `ThemeEngine.apply` refuses an
+        // unknown id, and at FIRST RUN there is no previous theme for that refusal to fall back ON —
+        // so honouring a typo'd pin blindly would leave the window unstyled.
+        name: "bootThemeId: an UNKNOWN pin falls back to the default rather than unstyling the editor",
+        run: () => {
+            const known = (id: string): boolean => id === BUILTIN_DARK;
+            assertEqual(
+                bootThemeId(`?${THEME_PIN_FLAG}=builtin.typo`, NULL_PROBE, known),
+                BUILTIN_DARK,
+                "an id the registry does not hold is ignored",
+            );
+            const engine = new ThemeEngine({ root: new RecordingRoot(), probe: NULL_PROBE });
+            const id = bootThemeId(`?${THEME_PIN_FLAG}=builtin.typo`, NULL_PROBE, (candidate) =>
+                engine.registry.has(candidate),
+            );
+            assert(engine.apply(id).applied, "boot still lands on a real theme, so nothing is unstyled");
+        },
+    },
+    {
+        name: "parsePinnedThemeId: total against every shape a boot URL can arrive in",
+        run: () => {
+            assertEqual(parsePinnedThemeId(""), "", "no query string");
+            assertEqual(parsePinnedThemeId("?a=1&b=2"), "", "no pin among other flags");
+            assertEqual(parsePinnedThemeId(`?${THEME_PIN_FLAG}=`), "", "an empty pin is no pin");
+            assertEqual(
+                parsePinnedThemeId(`?ctx-smoke-arrange=1&${THEME_PIN_FLAG}=${BUILTIN_HC_DARK}`),
+                BUILTIN_HC_DARK,
+                "read alongside the sibling smoke flags the restore drill sets",
+            );
+            assertEqual(
+                parsePinnedThemeId(`${THEME_PIN_FLAG}=${BUILTIN_DARK}`),
+                BUILTIN_DARK,
+                "a leading '?' is optional",
+            );
         },
     },
 ];

@@ -128,6 +128,21 @@ constexpr std::uint8_t kAppBackgroundB = 0x0a;
 constexpr std::uint8_t kAppBackgroundG = 0x0a;
 constexpr std::uint8_t kAppBackgroundR = 0x0a;
 
+// THE THEME THOSE THREE BYTES BELONG TO, PINNED INTO THE BOOT URL — do not drop it.
+//
+// `colors.panel` is a PER-THEME value (#0a0a0a Dark, #ffffff Light), and editor-core's first run
+// follows the host's `prefers-color-scheme` (06 §4 / C-F22 — correct product behaviour). A CI host
+// has no colour-scheme preference at all: no settings portal, so Chromium falls back to its `light`
+// default and the editor honestly boots `builtin.light`. The scan above would then find ZERO texels
+// of #0a0a0a and this smoke would fail on a perfectly healthy editor — which is exactly what it did
+// on ubuntu AND windows until this pin landed, while a dark-mode dev box measured it green.
+//
+// Pinning the theme takes the AMBIENT input out of the test and weakens nothing: the coverage floor,
+// the exact byte match and the non-uniformity check are all unchanged; the smoke simply now knows
+// which theme's `colors.panel` it is looking for. `webui-theme-contract` re-derives kAppBackground*
+// from THIS id's `*.theme.json` and reds if the two ever drift.
+constexpr const char* kSmokeThemeId = "builtin.dark";
+
 // Local rather than reused from tests/shell_test.h: that header pulls the render test fixtures,
 // which this CEF-linking target does not (and should not) build against.
 bool mentions(const std::string& haystack, const std::string& needle)
@@ -256,8 +271,11 @@ int main(int argc, char** argv)
     cef_options.native_window = nullptr; // windowless: no native window on a Session-0 runner
     cef_options.logical_size = size;
     cef_options.dpi = shell::DpiScale{};
-    // THE app scheme, not a data: URL and emphatically not a file:// path (04 §1).
-    cef_options.url = shell::kAppEntryUrl;
+    // THE app scheme, not a data: URL and emphatically not a file:// path (04 §1), carrying the
+    // theme pin so the per-pixel background assertion below is about a theme this test CHOSE rather
+    // than one the host's `prefers-color-scheme` chose for it (see kSmokeThemeId).
+    cef_options.url = std::string(shell::kAppEntryUrl) + "?" + shell::kThemePinFlag + "=" +
+                      kSmokeThemeId;
     cef_options.app_asset_root = CONTEXT_WEBUI_ASSET_DIR;
     cef_options.bridge = &bridge;
     // Keep the paint rate low: this smoke wants a FRAME, not a frame rate.

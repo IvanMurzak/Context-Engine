@@ -5,13 +5,29 @@
   never reaches the Shell's context-editor:// asset root (only the app/ document set does), so no CSP
   applies here. Loads the bundled test entry as a module; the entry runs every unit test, mirrors the
   verdict into #webui-ts-result (for a --dump-dom run) and POSTs it to the driver.
+
+  ⚠ IT LOADS THE REAL app.css, THE REAL dockview.css AND THE REAL PINNED ENGINE — deliberately, and
+  they are load-bearing rather than cosmetic. `theme_dom.test.ts` asserts what the browser actually
+  COMPUTES for Dockview's `--dv-*` chrome variables, which is decided by the cascade between app.css,
+  the vendored `dockview.css` and the copy dockview-core INJECTS at runtime. Serve this page without
+  them and that whole file passes vacuously (its `detectDockview` assertion is what makes the
+  vacuity loud instead of silent). The three files are staged beside the test bundle by
+  src/editor/webui/CMakeLists.txt; the paths below are relative to that staged dir, not to the app
+  asset root.
+
+  The classic <script> MUST precede the module, exactly as in the served index.html: it is a UMD
+  bundle, so loading it this way publishes `globalThis["dockview-core"]`, and a classic script runs
+  to completion before a deferred module executes — no load-order race.
 -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <title>editor-core webui T1 tests</title>
+    <link rel="stylesheet" href="./dockview.css" />
+    <link rel="stylesheet" href="./app.css" />
   </head>
   <body>
+    <script src="./dockview-core.min.js"></script>
     <script type="module" src="./editor-core.test.js"></script>
   </body>
 </html>

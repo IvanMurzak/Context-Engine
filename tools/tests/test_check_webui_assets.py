@@ -220,19 +220,21 @@ GOOD_DOCUMENT = (
 
 GOOD_STYLESHEET = ":root { --editor-bg: #132a44; }\n"
 
-# The five constants the bundle must agree with the Shell about.
+# The six constants the bundle must agree with the Shell about.
 SCHEME_BUNDLE = (
     'var BRIDGE_SCHEME = "context-editor";\n'
     'var BRIDGE_ORIGIN = "context-editor://app";\n'
     'var BRIDGE_ENDPOINT = "context-editor://ipc";\n'
     'var BRIDGE_QUERY_FUNCTION = "contextEditorQuery";\n'
     'var BRIDGE_CANCEL_FUNCTION = "contextEditorQueryCancel";\n'
+    'var THEME_PIN_FLAG = "ctx-smoke-theme";\n'
 )
 
 CPP_HEADER = (
     'inline constexpr const char* kAppScheme = "context-editor";\n'
     'inline constexpr const char* kAppOrigin = "context-editor://app";\n'
     'inline constexpr const char* kIpcEndpoint = "context-editor://ipc";\n'
+    'inline constexpr const char* kThemePinFlag = "ctx-smoke-theme";\n'
 )
 
 CPP_CEF = (
@@ -404,8 +406,12 @@ def test_the_real_repo_sources_agree_across_languages() -> None:
     """
     header = REPO_ROOT / "src" / "editor" / "shell" / "include" / "context" / "editor" / "shell"
     cef = REPO_ROOT / "src" / "editor" / "shell" / "cef" / "src"
-    ts = (REPO_ROOT / "src" / "editor" / "webui" / "core" / "src" / "bridge.ts").read_text(
-        encoding="utf-8")
+    # The WHOLE editor-core source, not `bridge.ts` alone: the scheme vocabulary is no longer
+    # confined to one module (`THEME_PIN_FLAG` is theme.ts's), and pinning the search to a single
+    # file would turn "the constant moved house" into a spurious drift failure.
+    ts = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((REPO_ROOT / "src" / "editor" / "webui" / "core" / "src").glob("*.ts")))
     for _human, cpp_file, cpp_name, ts_name in check_webui_assets.SCHEME_CONSTANTS:
         cpp_value = check_webui_assets._read_cpp_string_constant(header / cpp_file, cpp_name)
         assert f'{ts_name} = "{cpp_value}"' in ts, f"{ts_name} drifted from C++ {cpp_name}"
@@ -807,10 +813,11 @@ def test_the_real_editor_core_dependencies_are_the_approved_set() -> None:
 # --------------------------------------------------------------------- check 6b: Dockview chrome
 #
 # The theme's `--dv-*` override must OUTRANK dockview-core's own injected stylesheet. These pin the
-# regression that reddened `editor-cef-smoke-shell` on ubuntu + windows at M9 e06b: a bare
+# regression found while `editor-cef-smoke-shell` was red on ubuntu + windows at M9 e06b: a bare
 # `.dockview-theme-dark` block ties dockview's own specificity, loses on document order to the
 # RUNTIME-injected copy, and the docking chrome silently keeps the engine's stock greys — with the
-# live CEF smoke as the only signal, a full CI round-trip away.
+# live CEF smoke as the only signal, a full CI round-trip away. (It was a REAL defect but not the
+# whole cause of those red legs; the theme-contract cases at the end of this file pin the other one.)
 
 
 def _css(tmp_path: Path, body: str) -> Path:
@@ -848,3 +855,123 @@ def test_the_real_app_css_dockview_override_outranks_the_vendored_engine() -> No
     """Ground truth, not a fixture: the SHIPPED stylesheet must win the cascade."""
     sheet = REPO_ROOT / "src" / "editor" / "webui" / "app" / "app.css"
     assert check_webui_assets.check_dockview_chrome_specificity(sheet) == []
+
+
+# --- the M9 e06b theme-contract gate (--theme-contract) ------------------------------------------
+#
+# The regression pinned here is the SECOND, deeper cause of the same red legs the specificity gate
+# above addresses. `colors.panel` is a PER-THEME value, and editor-core's first run follows the
+# host's `prefers-color-scheme` (design 06 §4 / C-F22). A CI host has no colour-scheme preference at
+# all — no settings portal — so Chromium falls back to `light`, the editor honestly boots
+# `builtin.light` (#ffffff), and a smoke hardcoding the DARK panel colour (#0a0a0a) finds zero
+# matching texels on a perfectly healthy frame. It was green on a dark-mode dev box and red on both
+# CI legs, and the only signal was a full CI round-trip. Each smoke now PINS the theme it means, and
+# this gate keeps the pinned id, the hardcoded bytes and the theme JSON in lockstep.
+
+# The boot-URL statement that actually carries the pin — named so the cases below can remove it
+# without re-spelling it, which is how a "declared but never used" fixture stays honest.
+PINNED_URL_STATEMENT = (
+    'cef_options.url = std::string(shell::kAppEntryUrl) + "?" + shell::kThemePinFlag + "=" +\n'
+    "                  kSmokeThemeId;\n"
+)
+
+GOOD_THEME_SMOKE = (
+    "constexpr std::uint8_t kAppBackgroundB = 0x0a;\n"
+    "constexpr std::uint8_t kAppBackgroundG = 0x0a;\n"
+    "constexpr std::uint8_t kAppBackgroundR = 0x0a;\n"
+    'constexpr const char* kSmokeThemeId = "builtin.dark";\n'
+    + PINNED_URL_STATEMENT
+)
+
+
+def _theme_fixture(tmp_path: Path, *, smoke: str = GOOD_THEME_SMOKE,
+                   panel: str = "#0a0a0a") -> tuple[Path, Path]:
+    cef_dir = tmp_path / "cefsrc"
+    cef_dir.mkdir(parents=True, exist_ok=True)
+    for name in check_webui_assets.THEME_SMOKES:
+        (cef_dir / name).write_text(smoke, encoding="utf-8")
+    themes_dir = tmp_path / "themes"
+    themes_dir.mkdir(parents=True, exist_ok=True)
+    (themes_dir / "dark.theme.json").write_text(
+        json.dumps({"colors": {"panel": panel}}), encoding="utf-8")
+    return cef_dir, themes_dir
+
+
+def test_theme_contract_happy_path(tmp_path: Path, capsys) -> None:
+    cef_dir, themes_dir = _theme_fixture(tmp_path)
+    assert check_webui_assets.run_theme_contract(cef_dir, themes_dir) == 0
+    assert "theme contract OK" in capsys.readouterr().out
+
+
+def test_a_theme_whose_panel_colour_moved_fails(tmp_path: Path) -> None:
+    """THE regression: editing the theme's panel colour without moving kAppBackground* must red."""
+    cef_dir, themes_dir = _theme_fixture(tmp_path, panel="#ffffff")
+    failures = check_webui_assets.check_theme_contract(cef_dir, themes_dir)
+    assert len(failures) == len(check_webui_assets.THEME_SMOKES)
+    assert "#0a0a0a" in failures[0] and "#ffffff" in failures[0]
+
+
+def test_a_smoke_that_declares_a_pin_but_never_uses_it_fails(tmp_path: Path) -> None:
+    """A declared-but-unused pin leaves the theme on the HOST's preference — the original defect."""
+    smoke = GOOD_THEME_SMOKE.replace(
+        PINNED_URL_STATEMENT, "cef_options.url = shell::kAppEntryUrl;\n")
+    cef_dir, themes_dir = _theme_fixture(tmp_path, smoke=smoke)
+    failures = check_webui_assets.check_theme_contract(cef_dir, themes_dir)
+    assert len(failures) == len(check_webui_assets.THEME_SMOKES)
+    assert "prefers-color-scheme" in failures[0]
+
+
+def test_a_pin_mentioned_only_in_a_COMMENT_does_not_satisfy_the_gate(tmp_path: Path) -> None:
+    """The smokes explain the pin in prose, so a raw substring probe would be unfalsifiable."""
+    smoke = GOOD_THEME_SMOKE.replace(
+        PINNED_URL_STATEMENT,
+        "// the boot URL used to carry shell::kThemePinFlag here\n"
+        "cef_options.url = shell::kAppEntryUrl;\n")
+    cef_dir, themes_dir = _theme_fixture(tmp_path, smoke=smoke)
+    failures = check_webui_assets.check_theme_contract(cef_dir, themes_dir)
+    assert len(failures) == len(check_webui_assets.THEME_SMOKES)
+    assert "prefers-color-scheme" in failures[0]
+
+
+def test_a_non_builtin_pinned_theme_is_a_config_error(tmp_path: Path) -> None:
+    """A user theme is not present on a CI host, so a smoke may only pin a built-in."""
+    smoke = GOOD_THEME_SMOKE.replace('"builtin.dark"', '"user.mine"')
+    cef_dir, themes_dir = _theme_fixture(tmp_path, smoke=smoke)
+    with pytest.raises(check_webui_assets.CheckError, match="built-in"):
+        check_webui_assets.check_theme_contract(cef_dir, themes_dir)
+
+
+def test_a_non_hex_panel_colour_is_a_config_error(tmp_path: Path) -> None:
+    """The smokes compare raw bytes; a named/rgba() colour must fail loudly, never be skipped."""
+    cef_dir, themes_dir = _theme_fixture(tmp_path, panel="rgba(10,10,10,1)")
+    with pytest.raises(check_webui_assets.CheckError, match="rrggbb"):
+        check_webui_assets.check_theme_contract(cef_dir, themes_dir)
+
+
+def test_a_renamed_smoke_constant_is_a_config_error(tmp_path: Path) -> None:
+    smoke = GOOD_THEME_SMOKE.replace("kAppBackgroundR", "kAppBgR")
+    cef_dir, themes_dir = _theme_fixture(tmp_path, smoke=smoke)
+    with pytest.raises(check_webui_assets.CheckError, match="kAppBackgroundR"):
+        check_webui_assets.check_theme_contract(cef_dir, themes_dir)
+
+
+def test_a_missing_smoke_is_a_config_error(tmp_path: Path) -> None:
+    cef_dir, themes_dir = _theme_fixture(tmp_path)
+    (cef_dir / check_webui_assets.THEME_SMOKES[0]).unlink()
+    with pytest.raises(check_webui_assets.CheckError, match="no longer exists"):
+        check_webui_assets.check_theme_contract(cef_dir, themes_dir)
+
+
+def test_main_routes_the_theme_contract_flag(tmp_path: Path) -> None:
+    cef_dir, themes_dir = _theme_fixture(tmp_path)
+    assert check_webui_assets.main([
+        "--asset-dir", str(tmp_path), "--theme-contract",
+        "--shell-cef-dir", str(cef_dir), "--themes-dir", str(themes_dir),
+    ]) == 0
+
+
+def test_the_real_smokes_agree_with_the_real_themes() -> None:
+    """Ground truth, not a fixture: every SHIPPED CEF smoke pins a theme that paints its scan colour."""
+    cef_dir = REPO_ROOT / "src" / "editor" / "shell" / "cef" / "src"
+    themes_dir = REPO_ROOT / "src" / "editor" / "webui" / "tokens" / "themes"
+    assert check_webui_assets.check_theme_contract(cef_dir, themes_dir) == []

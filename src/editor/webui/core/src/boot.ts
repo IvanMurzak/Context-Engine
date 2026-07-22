@@ -45,8 +45,9 @@ import {
     ThemeController,
     ThemeEngine,
     ThemesClient,
+    bootThemeId,
     defaultMediaQueryProbe,
-    defaultThemeId,
+    parsePinnedThemeId,
     type ThemeRoot,
 } from "./theme.js";
 import { WELCOME_MODE_WELCOME, WelcomeClient, mountWelcome } from "./welcome.js";
@@ -360,12 +361,21 @@ function startTheme(): ThemeEngine | undefined {
         // what keeps the engine testable against a recording root instead of a live DOM.
         const root: ThemeRoot = document.documentElement;
         const engine = new ThemeEngine({ root, probe });
-        const report = engine.apply(defaultThemeId(probe));
+        // The `?ctx-smoke-theme=<id>` pin when the boot URL carries one, else the
+        // `prefers-color-scheme` default. The pin is what makes the live CEF smokes' per-pixel
+        // background assertion independent of whether the HOST prefers dark — see THEME_PIN_FLAG.
+        const search = typeof location === "undefined" ? "" : location.search;
+        const pin = parsePinnedThemeId(search);
+        const themeId = bootThemeId(search, probe, (id) => engine.registry.has(id));
+        // Reported so a red smoke names WHY it saw the colours it saw: "pinned" means the boot URL
+        // chose the theme, its absence means the host's `prefers-color-scheme` did.
+        const pinNote = pin === "" ? "" : pin === themeId ? ", pinned" : `, pin "${pin}" UNKNOWN`;
+        const report = engine.apply(themeId);
         document.documentElement.setAttribute(
             "data-editor-theme",
             report.applied
                 ? `${report.themeId} (${report.variableCount} tokens, fade ${report.fadeDurationMs}ms` +
-                  `${report.reducedMotion ? ", reduced-motion" : ""})`
+                  `${report.reducedMotion ? ", reduced-motion" : ""}${pinNote})`
                 : `unavailable: ${report.diagnostic}`,
         );
         watchReducedMotion(engine);

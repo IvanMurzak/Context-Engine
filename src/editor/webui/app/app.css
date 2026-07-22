@@ -129,10 +129,20 @@ html[data-theme-transition="true"] * {
  * declares: measured, only `--dv-background-color` survived (the one variable dockview.css never
  * declares), while the other four backgrounds resolved to dockview's stock #1e1e1e / #252526 and the
  * whole composited frame came back 95.9% #1e1e1e with ZERO texels of the theme's `colors.panel`.
- * That is what reddened `editor-cef-smoke-shell` on ubuntu + windows.
  *
  * `html .dockview-theme-dark` is specificity 0,1,1 — it outranks the injected declaration no matter
- * what order it arrives in, with no `!important` and no reach into the vendored engine. */
+ * what order it arrives in, with no `!important` and no reach into the vendored engine. That IS the
+ * cascade fix, and `webui-ts-unit`'s `theme_dom.test.ts` now asserts the COMPUTED result on a real
+ * Dockview root so it can never silently regress again.
+ *
+ * ⚠ IT WAS NOT, HOWEVER, THE WHOLE REASON `editor-cef-smoke-shell` WAS RED — do not read it as such,
+ * because the second cause is invisible from this file. `colors.panel` is a PER-THEME value, and the
+ * first-run theme follows the HOST's `prefers-color-scheme` (06 §4 / C-F22). A CI host has no
+ * colour-scheme preference at all, so Chromium's `light` default booted `builtin.light` (#ffffff)
+ * while the smokes scanned for Dark's #0a0a0a — zero matching texels on a perfectly healthy frame,
+ * on a machine-dependent input no stylesheet edit could touch. The smokes now PIN the theme in their
+ * boot URL (`?ctx-smoke-theme=`, theme.ts's THEME_PIN_FLAG) and `webui-theme-contract` keeps the
+ * pinned id, their scan constants and the theme JSON in lockstep. */
 html .dockview-theme-dark {
     --dv-background-color: var(--ctx-colors-panel, var(--editor-bg));
     --dv-group-view-background-color: var(--ctx-colors-panel, var(--editor-bg));

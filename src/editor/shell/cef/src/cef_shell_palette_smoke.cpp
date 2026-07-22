@@ -117,6 +117,14 @@ constexpr std::uint8_t kAppBackgroundB = 0x0a;
 constexpr std::uint8_t kAppBackgroundG = 0x0a;
 constexpr std::uint8_t kAppBackgroundR = 0x0a;
 
+// The theme those three bytes belong to, pinned into the boot URL below. This smoke asserts no
+// coverage FLOOR (see the note at its surface check) — but its heartbeat REPORTS the background
+// count, and a diagnostic that silently counts a colour the active theme never paints is worse than
+// no diagnostic. Pinning also keeps the whole `editor-cef-smoke-*` family on one known appearance.
+// Full rationale on the matching constant in cef_shell_smoke.cpp; kept in lockstep by
+// `webui-theme-contract`.
+constexpr const char* kSmokeThemeId = "builtin.dark";
+
 // The composed-surface scan cef_shell_smoke.cpp documents: the wait loop polls for EXACTLY the property
 // the "did the UI paint?" assertion checks, so it can neither break one poll too early (the CE #319
 // race) nor pass vacuously.
@@ -224,7 +232,8 @@ int main(int argc, char** argv)
     cef_options.dpi = shell::DpiScale{};
     // THE app scheme (04 §1), carrying the palette-smoke flag so editor-core's boot drives the scripted
     // OPEN -> FILTER -> EXECUTE scenario over the real palette + registry.
-    cef_options.url = std::string(shell::kAppEntryUrl) + "?ctx-smoke-palette=1";
+    cef_options.url = std::string(shell::kAppEntryUrl) + "?ctx-smoke-palette=1&" +
+                      shell::kThemePinFlag + "=" + kSmokeThemeId;
     cef_options.app_asset_root = asset_root;
     cef_options.bridge = &bridge;
     cef_options.windowless_frame_rate = 10;

@@ -168,6 +168,13 @@ constexpr std::uint8_t kAppBackgroundB = 0x0a;
 constexpr std::uint8_t kAppBackgroundG = 0x0a;
 constexpr std::uint8_t kAppBackgroundR = 0x0a;
 
+// The theme those three bytes belong to, pinned into BOTH phases' boot URLs. `colors.panel` is a
+// per-theme value and the first run otherwise follows the HOST's `prefers-color-scheme`, so without
+// this pin a CI host (no settings portal -> Chromium's `light` default) boots `builtin.light` and
+// the coverage floor below scans for a colour that is genuinely not on screen. Full rationale on the
+// matching constant in cef_shell_smoke.cpp; `webui-theme-contract` keeps the two in lockstep.
+constexpr const char* kSmokeThemeId = "builtin.dark";
+
 // The composed-surface scan cef_shell_smoke.cpp documents: the wait loop polls for EXACTLY the
 // property the "did the UI paint?" assertion checks, so it can neither break one poll too early (the
 // CE #319 race) nor pass vacuously.
@@ -336,13 +343,15 @@ SessionOutcome run_session(const std::filesystem::path& project,
     cef_options.native_window = nullptr; // windowless: no native window on a Session-0 runner
     cef_options.logical_size = size;
     cef_options.dpi = shell::DpiScale{};
-    // THE app scheme (04 §1). The arranging session carries the smoke-arrange flag so its FIRST
-    // arrangement is a real, non-default one; the restoring session boots the plain entry URL and
-    // restores whatever is on disk.
-    std::string url = shell::kAppEntryUrl;
+    // THE app scheme (04 §1). BOTH phases pin the theme (see kSmokeThemeId) so the per-pixel
+    // background coverage this drill asserts is a property of the restart, not of the host's
+    // colour-scheme preference. The arranging session ALSO carries the smoke-arrange flag so its
+    // FIRST arrangement is a real, non-default one; the restoring session restores what is on disk.
+    std::string url =
+        std::string(shell::kAppEntryUrl) + "?" + shell::kThemePinFlag + "=" + kSmokeThemeId;
     if (cfg.arrange)
     {
-        url += "?ctx-smoke-arrange=1";
+        url += "&ctx-smoke-arrange=1";
     }
     cef_options.url = url;
     cef_options.app_asset_root = asset_root;

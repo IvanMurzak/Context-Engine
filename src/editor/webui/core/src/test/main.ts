@@ -16,6 +16,7 @@ import { paletteTests } from "./palette.test.js";
 import { reachabilityTests } from "./reachability.test.js";
 import { tokensTests } from "./tokens.test.js";
 import { themeTests } from "./theme.test.js";
+import { themeDomTests } from "./theme_dom.test.js";
 
 const result = runTests([
     ...panelsTests,
@@ -29,6 +30,7 @@ const result = runTests([
     ...reachabilityTests,
     ...tokensTests,
     ...themeTests,
+    ...themeDomTests,
 ]);
 report(result);
 
