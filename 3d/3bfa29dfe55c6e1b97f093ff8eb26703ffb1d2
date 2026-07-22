@@ -1,0 +1,49 @@
+.github/workflows/ci.yml
+  s_81d8e34af091bf::t_2f137588a88dfa 1848,1850
+src/editor/shell/cef/CMakeLists.txt
+  s_81d8e34af091bf::t_c119c087600348 153-196
+src/editor/shell/cef/src/cef_shell_palette_smoke.cpp
+  s_81d8e34af091bf::t_a4000919f2a425 1-412
+src/editor/webui/CMakeLists.txt
+  s_81d8e34af091bf::t_fa598b9cd78e2d 257-265
+src/editor/webui/app/app.css
+  s_81d8e34af091bf::t_b91b7c8f6a3dd9 144-228
+src/editor/webui/core/src/boot.ts
+  s_81d8e34af091bf::t_4b60cfcdb42b80 30-35,39-40,43-48,225-230,280-457
+src/editor/webui/core/src/hydration.ts
+  s_81d8e34af091bf::t_90129e0b2323b0 331-333
+src/editor/webui/core/src/index.ts
+  s_81d8e34af091bf::t_3d0917a6e26c73 27-28
+src/editor/webui/core/src/keymap.ts
+  s_81d8e34af091bf::t_7fde4ad7e9c9b7 26,204-206
+src/editor/webui/core/src/palette.ts
+  s_81d8e34af091bf::t_2fbecd143722a8 1-265
+src/editor/webui/core/src/palette_view.ts
+  s_81d8e34af091bf::t_27af5d1afe7d60 1-260
+src/editor/webui/core/src/test/main.ts
+  s_81d8e34af091bf::t_0eefa4f7d10134 14-15,24-25
+src/editor/webui/core/src/test/palette.test.ts
+  s_81d8e34af091bf::t_c485c62bf3f875 1-368
+src/editor/webui/core/src/test/reachability.test.ts
+  s_81d8e34af091bf::t_8784f301c4e568 1-126
+tools/check_no_raw_key_handlers.py
+  s_81d8e34af091bf::t_37e35bfbe90fe7 1-119
+tools/tests/test_check_no_raw_key_handlers.py
+  s_81d8e34af091bf::t_9dd9e9faa6697a 1-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3d3bfa29dfe55c6e1b97f093ff8eb26703ffb1d2",
+  "prompts": {},
+  "sessions": {
+    "s_81d8e34af091bf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_81d8e34af091bf",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
