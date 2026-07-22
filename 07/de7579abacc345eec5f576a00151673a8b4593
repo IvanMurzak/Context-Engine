@@ -1,0 +1,21 @@
+src/editor/webui/CMakeLists.txt
+  s_5a84ac7c2c9455::t_c267f69c6fa08f 55-61,122-129
+src/editor/webui/core/tsconfig.json
+  s_5a84ac7c2c9455::t_3cdeb807afce91 2,14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "07de7579abacc345eec5f576a00151673a8b4593",
+  "prompts": {},
+  "sessions": {
+    "s_5a84ac7c2c9455": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8848-1bf6-75b0-ace9-c34fbe53db56",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
