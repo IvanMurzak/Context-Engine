@@ -432,17 +432,16 @@ int main(int argc, char** argv)
     // On EVERY (re)attach: register the daemon's token + endpoint with the egress guard so no renderer
     // can echo them back. A reconnect after a daemon restart mints a NEW token, so this runs per attach.
     lifecycle.on_attached(
-        [&bridge, &lifecycle, &daemon_secret_ok, session_feed](client::Client& attached)
+        [&bridge, &lifecycle, &daemon_secret_ok](client::Client&)
         {
             const bool ok = bridge.protect_secret(lifecycle.instance().token) &&
                             bridge.protect_secret(lifecycle.instance().endpoint);
             if (!ok)
                 daemon_secret_ok = false;
-            // e08b: re-bind the session feed's connection AND its echo-suppression identity. Ids are
-            // minted per WIRE CONNECTION, so a reconnect mints a new one — a stale id would suppress
-            // another client's facts and apply our own, both silently (session_feed.h).
-            if (session_feed != nullptr)
-                shell::panels::bind_session_client(*session_feed, &attached, attached.client_id());
+            // The session feed is deliberately NOT bound here: an attach hook can only ever tell it
+            // about a NEW client, never about a destroyed one, and the destroyed one is the hazard
+            // (session_feed.h § LIFETIME). The owner loop below re-derives the binding from the
+            // lifecycle instead, which covers attach, reattach AND detach in one place.
         });
     // 0 is only the FALLBACK generation stamp for a snapshot that carries none of its own; the real
     // cursor snapshot always does and apply_snapshot prefers it.
@@ -575,6 +574,13 @@ int main(int argc, char** argv)
         // read-only STATE + reconnect with backoff, re-snapshotting on reattach. A daemon restart is
         // stalled at most the ladder's bounded duration. now in ms for the backoff clock.
         lifecycle.pump(static_cast<std::int64_t>(now_us() / 1000));
+        // e08b: re-derive the session feed's non-owning client view from the lifecycle, immediately
+        // after the ONE call that can change it. Attach and reattach hand it the new client (with the
+        // new per-connection echo-suppression id); a lost daemon — which DESTROYS the client inside
+        // that same pump — clears it, so the next frame's renderer-driven panel write refuses
+        // honestly instead of calling through a freed pointer (session_feed.h § LIFETIME).
+        if (session_feed != nullptr)
+            shell::panels::bind_session_client(*session_feed, lifecycle.client());
         // e14b: a second opener that found our presence marker wrote a focus request — consume it and
         // raise window 0 (best-effort; a headless backend simply does nothing). This is the C-F23
         // single-instance FOCUS, arbitrated entirely through the project's own `.editor/` state.
@@ -607,6 +613,13 @@ int main(int argc, char** argv)
         std::this_thread::sleep_for(std::chrono::milliseconds(4));
     }
 
+    // e08b: clear the session feed's client view BEFORE the lifecycle frees the client below. The
+    // teardown that follows still PUMPS — manager.shutdown() closes the browser, which drives CEF —
+    // so a renderer message queued before exit can still reach a panel provider and issue a write.
+    // Unbinding first is what makes that write refuse instead of calling a destroyed Client; the
+    // ordering is the whole point, so it must precede shutdown_at_exit (session_feed.h § LIFETIME).
+    if (session_feed != nullptr)
+        shell::panels::bind_session_client(*session_feed, nullptr);
     // The exit policy (e14a): an owned daemon this process is the last client of gets a clean in-band
     // `shutdown`; an owned daemon other clients still hold is left running; an external daemon is never
     // touched. Runs before the manager/CEF teardown so the daemon call still has a live wire.

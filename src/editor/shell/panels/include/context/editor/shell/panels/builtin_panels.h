@@ -102,11 +102,20 @@ bool apply_scenetree_event(SceneTreeFeed& feed, const std::string& topic,
                            const contract::Json& payload, std::uint64_t generation);
 
 // The same seam for the e08b Session feed. `apply_session_event` forwards one `session` fact (the
-// feed itself drops our own echo — see session_feed.h); `bind_session_client` re-binds the live
-// connection AND this connection's echo-suppression identity, which MUST be re-done on every
-// (re)attach because ids are minted per wire connection. Both defined in builtin_panels.cpp.
+// feed itself drops our own echo — see session_feed.h). Both defined in builtin_panels.cpp.
 bool apply_session_event(SessionFeed& feed, const std::string& topic, const contract::Json& payload);
-void bind_session_client(SessionFeed& feed, client::Client* client, std::uint64_t client_id);
+
+// Point the Session feed at the daemon link's CURRENT client — `nullptr` to clear it. The feed's
+// pointer is a NON-OWNING view of a client the daemon lifecycle owns and can destroy (a lost daemon
+// tears the link down; exit resets it), so this is the seam the owner calls at EVERY point the
+// lifecycle can change that client, and with `nullptr` before it frees one. A cleared feed refuses
+// every write honestly (session_feed.h § LIFETIME).
+//
+// The echo-suppression identity is DERIVED from the client here rather than passed alongside it: ids
+// are minted per wire connection, so a caller pairing a client with a separately-carried id is a
+// stale-id bug waiting to happen — and a stale id silently suppresses another client's facts while
+// applying our own. There is no id to get wrong if the client is the only argument.
+void bind_session_client(SessionFeed& feed, client::Client* client);
 
 // The roster ids this build can render. Exposed so a caller (and the T1 suite) can assert what was
 // bound WITHOUT restating the list — the one enumeration lives in `install_builtin_panels`.

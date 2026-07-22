@@ -16,6 +16,8 @@
 #include "context/editor/shell/panels/session_feed.h"
 
 #include "context/editor/client/client.h"
+#include "context/editor/shell/panels/builtin_panels.h" // the bind_session_client seam (lifetime)
+
 #include "context/editor/gui/panels/scenetree/scene_tree_model.h"
 #include "context/editor/gui/playbar/playbar_panel.h"
 #include "context/editor/gui/uitree/panel.h"
@@ -411,6 +413,57 @@ int main()
                            dispatched, error_code));
         CHECK(!dispatched);
         CHECK(!error_code.empty());
+    }
+
+    // --- THE LIFETIME CONTRACT: clearing the client clears the IDENTITY with it -------------------
+    // The feed's `client::Client*` is a NON-OWNING view of a client the daemon lifecycle destroys on
+    // a lost daemon and at exit, so the owner clears it through `bind_session_client(feed, nullptr)`
+    // BEFORE the client dies (session_feed.h § LIFETIME). Two halves must both hold, and each has its
+    // own silent failure mode if it does not:
+    //   * the POINTER must go, or a renderer-driven panel write — which can land in the window
+    //     between "the daemon died" and "we reattached", or during the exit pump — calls through a
+    //     freed Client;
+    //   * the IDENTITY must go WITH it, or the detached feed keeps swallowing facts stamped with a
+    //     dead connection's id as if they were its own echo, and the panels silently stop updating.
+    // The id is DERIVED from the client at this seam precisely so the two cannot come apart.
+    {
+        PanelHost host;
+        SessionFeed feed(host, playbar::PlaybarModel::kContributionId);
+        scenetree::SceneTreePanel tree(&feed);
+        tree.set_model(two_node_model());
+        feed.bind_scene_tree(&tree, scenetree::SceneTreePanel::kContributionId);
+
+        Wired wired = make_client(kShellId);
+        wired.channel->on("editor.play",
+                          [](const clientmock::Request&) { return play_reply("playing", 2, true); });
+
+        // ATTACHED: the seam takes the client alone and derives the id from it.
+        context::editor::shell::panels::bind_session_client(feed, wired.client.get());
+        CHECK(feed.client_id() == kShellId);
+        CHECK(feed.playbar_model().play().ok);
+        const std::size_t plays_while_attached = wired.channel->requests_for("editor.play").size();
+        CHECK(plays_while_attached == 1);
+
+        // DETACHED — exactly what the owner does before the lifecycle frees the client. Then destroy
+        // the client, so anything the feed still held would be a dangling pointer from here on (the
+        // sanitizer legs are what turn that into a hard failure rather than a silent read).
+        context::editor::shell::panels::bind_session_client(feed, nullptr);
+        CHECK(feed.client_id() == 0);
+        wired.client.reset(); // takes the channel with it — `wired.channel` must not be read again
+
+        // Every write now refuses HONESTLY, having touched nothing: no daemon, so no delivery and no
+        // fabricated state. A cached pointer would instead have called into freed memory here.
+        const playbar::PlayAction played = feed.playbar_model().play();
+        CHECK(!played.ok);
+        CHECK(feed.playbar_model().state() == playbar::PlayState::playing); // unmoved, not invented
+        CHECK(!tree.select("e1"));
+        CHECK(tree.selection().identity.empty()); // the panel changed nothing, and says so
+
+        // ...and a fact carrying the DEAD connection's id is a foreign client's fact now, not our
+        // echo: it APPLIES. (`facts_applied` moving is the assertion; a retained id would drop it.)
+        CHECK(feed.apply_event(kSessionTopicName, selection_fact(kShellId, {"e2"})));
+        CHECK(tree.selection().identity == "e2");
+        CHECK(feed.echoes_dropped() == 0);
     }
 
     // --- THE STRUCTURAL CLAIM: no GUI panel holds authoritative selection / play state ------------

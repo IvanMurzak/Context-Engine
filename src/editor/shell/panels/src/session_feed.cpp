@@ -5,7 +5,7 @@
 
 #include "context/editor/client/client.h" // the wire writes (complete type HERE only)
 #include "context/editor/gui/playbar/playbar_panel.h"
-#include "wire_read.h" // read_string / read_bool
+#include "wire_read.h" // read_string / read_bool / read_u64 / envelope_data
 
 #include <cstdio>
 #include <optional>
@@ -16,16 +16,6 @@ namespace context::editor::shell::panels
 
 namespace
 {
-
-// The `data` member of an R-CLI-008 success envelope, or the reply itself when it is already bare.
-// The daemon always answers `{ok, data, generationAfter, warnings}` (dispatcher.cpp's
-// envelope_to_response), but tolerating the bare shape keeps this readable against a hand-built reply
-// in a test without the parser having to be told which it is.
-[[nodiscard]] const contract::Json& envelope_data(const contract::Json& reply)
-{
-    const contract::Json& data = reply.at("data");
-    return data.is_object() ? data : reply;
-}
 
 // The daemon's `state` token -> the L-51 PlayState. e08a publishes exactly the tokens
 // `gui::playbar::state_token()` renders, so this is a lookup, not a translation layer.
@@ -51,18 +41,6 @@ namespace
         return playbar::PlayState::paused;
     }
     return std::nullopt;
-}
-
-// A non-negative integer member as a u64; 0 when absent / not a number / negative.
-[[nodiscard]] std::uint64_t read_u64(const contract::Json& object, const std::string& key)
-{
-    const contract::Json& value = object.at(key);
-    if (!value.is_number())
-    {
-        return 0;
-    }
-    const std::int64_t raw = value.as_int();
-    return raw > 0 ? static_cast<std::uint64_t>(raw) : 0;
 }
 
 // The `ids` array of a `selection-changed` fact (or an `editor.selection-get` read). Non-string

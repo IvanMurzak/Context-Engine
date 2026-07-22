@@ -15,10 +15,21 @@
 // panels never see their own echo, so they cannot double-apply it, and they cannot tell a second
 // client's change from their own — which is exactly the point.
 //
-// WHY THE CLIENT ID IS RE-BOUND ON EVERY ATTACH. Ids are minted per WIRE CONNECTION and never reused
+// LIFETIME — THE CLIENT POINTER IS A NON-OWNING VIEW WITH A DEFINED CLEAR POINT. The feed does not
+// own the `client::Client` and cannot extend its life: the daemon lifecycle owns it and DESTROYS it
+// on a lost daemon (tear_down_link) and at exit (shutdown_at_exit). A cached pointer that outlives
+// either is a use-after-free reachable from ordinary UI — a panel write is renderer-driven, so it can
+// land in the window between "the daemon died" and "we reattached", or during the exit pump. The rule
+// that makes that impossible is structural, not a comment: the OWNER re-derives this binding from the
+// lifecycle at every point the lifecycle can change the client, and clears it with `nullptr` BEFORE
+// tearing the lifecycle down — one seam, `panels::bind_session_client` (builtin_panels.h), never a
+// pointer stashed once and trusted afterwards. A cleared feed is a plain subscriber whose every write
+// honestly reports "not delivered", which is the same state it starts in.
+//
+// WHY THE IDENTITY TRAVELS WITH THE POINTER. Ids are minted per WIRE CONNECTION and never reused
 // within a daemon lifetime; a reconnect (a daemon restart, the lifecycle's ladder) mints a NEW one.
 // A stale id would suppress a DIFFERENT client's facts and apply our own — both failure modes silent.
-// `bind_client` is therefore called from the lifecycle's on_attached hook, not once at construction.
+// So the id is derived FROM the client at the seam, and clearing the pointer clears the id with it.
 //
 // NOT ROUTED THROUGH THE IN-PROCESS SHIM. `gui/contract`'s shim calls `Dispatcher::attach` directly,
 // which has no connection and is therefore permanently `origin 0` — indistinguishable from the daemon
@@ -78,8 +89,11 @@ public:
 
     // --- wiring ---------------------------------------------------------------------------------
 
-    // Bind the live connection + THIS connection's echo-suppression identity. Called on every
-    // (re)attach; `nullptr` + 0 detaches (every write then honestly reports "not delivered").
+    // Bind the live connection + THIS connection's echo-suppression identity; `nullptr` + 0 detaches
+    // (every write then honestly reports "not delivered"). The LOW-LEVEL setter: the Shell always
+    // goes through `panels::bind_session_client`, which derives the id from the client so the two
+    // cannot disagree. Taking them separately is for tests that need an attached IDENTITY with no
+    // live connection (echo suppression in isolation) — see § LIFETIME above.
     void bind_client(client::Client* client, std::uint64_t client_id) noexcept;
 
     // The scene-tree panel whose RENDERED selection this feed drives, and the roster id to touch when

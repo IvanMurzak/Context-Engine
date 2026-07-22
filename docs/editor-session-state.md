@@ -174,8 +174,17 @@ the exact remaining steps. The two C++ rows are fully wired.
 Both C++ seams are declared in the boundary-clean panel libraries and implemented ONCE, wire-side, by
 `shell::panels::SessionFeed` (`src/editor/shell/panels/session_feed.{h,cpp}`) — which is also where
 the `origin` drop rule is applied, so no individual panel has to get it right. The Shell subscribes to
-the `session` topic alongside `diagnostics` / `derivation` (`editor_main.cpp`) and re-binds the feed's
-client id on every attach, because ids are per-connection.
+the `session` topic alongside `diagnostics` / `derivation` (`editor_main.cpp`).
+
+The feed's `client::Client*` is a **non-owning view of a client the daemon lifecycle owns and
+destroys** — on a lost daemon (`tear_down_link`) and at exit (`shutdown_at_exit`) — and a panel write
+is renderer-driven, so it can land in the window between those and a reattach, or during the exit
+pump. The Shell therefore re-derives the binding through the one `panels::bind_session_client(feed,
+client)` seam immediately after each `lifecycle.pump()` (the only call that can change the client),
+and clears it with `nullptr` **before** `shutdown_at_exit()` frees one; a cleared feed refuses every
+write honestly. The per-connection echo-suppression id is derived from the client at that seam rather
+than carried alongside it, so a stale id — which would silently suppress another client's facts while
+applying our own — has nowhere to come from.
 
 The in-process `SessionControl*` path the playbar used to drive is **removed**, not shadowed; the
 runtime-session adapter that produces play frames lives on in `context_gui_playbar_session` (see

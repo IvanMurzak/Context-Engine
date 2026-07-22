@@ -85,9 +85,11 @@ bool apply_session_event(SessionFeed& feed, const std::string& topic, const cont
     return feed.apply_event(topic, payload);
 }
 
-void bind_session_client(SessionFeed& feed, client::Client* client, std::uint64_t client_id)
+void bind_session_client(SessionFeed& feed, client::Client* client)
 {
-    feed.bind_client(client, client_id);
+    // The id comes from the client itself (0 when there is none), so the pointer and the identity
+    // cannot disagree — see the header for why a separately-carried id is a stale-id hazard.
+    feed.bind_client(client, client != nullptr ? client->client_id() : 0);
 }
 
 void pump_panel_feeds(BuiltinPanels& panels, client::Client& client, const std::string& scene_path)

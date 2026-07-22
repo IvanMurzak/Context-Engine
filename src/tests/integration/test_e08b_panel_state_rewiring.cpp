@@ -212,7 +212,8 @@ void panels_are_daemon_backed_across_two_clients()
         remove_tree(project);
         return;
     }
-    panels::bind_session_client(*builtin.session, shell_client.get(), shell_client->client_id());
+    panels::bind_session_client(*builtin.session, shell_client.get());
+    CHECK(builtin.session->client_id() == shell_client->client_id()); // derived, never hand-carried
     hydrate_scene_tree(*builtin.scenetree);
 
     scenetree::SceneTreePanel& tree = builtin.scenetree->panel();
