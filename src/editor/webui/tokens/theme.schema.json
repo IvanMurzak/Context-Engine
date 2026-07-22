@@ -1,0 +1,668 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://context-engine.dev/schemas/theme/v1.json",
+  "title": "Context Engine editor theme",
+  "description": "Versioned token schema for @context-engine/editor-tokens *.theme.json themes (design 06 § 1). Unknown keys are rejected (additionalProperties:false at every level).",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "const": "https://context-engine.dev/schemas/theme/v1.json"
+    },
+    "version": {
+      "const": 1
+    },
+    "name": {
+      "type": "string"
+    },
+    "appearance": {
+      "type": "string",
+      "enum": [
+        "dark",
+        "light"
+      ]
+    },
+    "highContrast": {
+      "type": "boolean"
+    },
+    "colors": {
+      "type": "object",
+      "properties": {
+        "canvas": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "panel": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "panel2": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "ink": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "muted": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "muted2": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "accent": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "accent2": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "line": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "chip": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "semantic": {
+          "type": "object",
+          "properties": {
+            "good": {
+              "type": "string",
+              "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+            },
+            "warn": {
+              "type": "string",
+              "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+            },
+            "bad": {
+              "type": "string",
+              "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+            },
+            "wait": {
+              "type": "string",
+              "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+            },
+            "idle": {
+              "type": "string",
+              "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+            }
+          },
+          "required": [
+            "good",
+            "warn",
+            "bad",
+            "wait",
+            "idle"
+          ],
+          "additionalProperties": false
+        },
+        "focusRing": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        }
+      },
+      "required": [
+        "canvas",
+        "panel",
+        "panel2",
+        "ink",
+        "muted",
+        "muted2",
+        "accent",
+        "accent2",
+        "line",
+        "chip",
+        "semantic",
+        "focusRing"
+      ],
+      "additionalProperties": false
+    },
+    "typography": {
+      "type": "object",
+      "properties": {
+        "fontUi": {
+          "type": "string"
+        },
+        "fontMono": {
+          "type": "string"
+        },
+        "tracking": {
+          "type": "string"
+        },
+        "lineHeight": {
+          "type": "number"
+        },
+        "numericVariant": {
+          "type": "string"
+        },
+        "size": {
+          "type": "object",
+          "properties": {
+            "2xs": {
+              "type": "string"
+            },
+            "xs": {
+              "type": "string"
+            },
+            "sm": {
+              "type": "string"
+            },
+            "base": {
+              "type": "string"
+            },
+            "md": {
+              "type": "string"
+            },
+            "lg": {
+              "type": "string"
+            },
+            "xl": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "2xs",
+            "xs",
+            "sm",
+            "base",
+            "md",
+            "lg",
+            "xl"
+          ],
+          "additionalProperties": false
+        },
+        "weight": {
+          "type": "object",
+          "properties": {
+            "regular": {
+              "type": "integer"
+            },
+            "medium": {
+              "type": "integer"
+            },
+            "semibold": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "regular",
+            "medium",
+            "semibold"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "fontUi",
+        "fontMono",
+        "tracking",
+        "lineHeight",
+        "numericVariant",
+        "size",
+        "weight"
+      ],
+      "additionalProperties": false
+    },
+    "shape": {
+      "type": "object",
+      "properties": {
+        "radius": {
+          "type": "object",
+          "properties": {
+            "sm": {
+              "type": "string"
+            },
+            "md": {
+              "type": "string"
+            },
+            "pill": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sm",
+            "md",
+            "pill"
+          ],
+          "additionalProperties": false
+        },
+        "borderWidth": {
+          "type": "string"
+        },
+        "focusRingWidth": {
+          "type": "string"
+        },
+        "selectionBarWidth": {
+          "type": "string"
+        },
+        "density": {
+          "type": "object",
+          "properties": {
+            "compact": {
+              "type": "string"
+            },
+            "default": {
+              "type": "string"
+            },
+            "comfortable": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "compact",
+            "default",
+            "comfortable"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "radius",
+        "borderWidth",
+        "focusRingWidth",
+        "selectionBarWidth",
+        "density"
+      ],
+      "additionalProperties": false
+    },
+    "elevation": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "enum": [
+            "border-step",
+            "shadow"
+          ]
+        },
+        "shadows": {
+          "type": "object",
+          "properties": {
+            "sm": {
+              "type": "string"
+            },
+            "md": {
+              "type": "string"
+            },
+            "lg": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sm",
+            "md",
+            "lg"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "additionalProperties": false
+    },
+    "motion": {
+      "type": "object",
+      "properties": {
+        "duration": {
+          "type": "object",
+          "properties": {
+            "fast": {
+              "type": "string"
+            },
+            "base": {
+              "type": "string"
+            },
+            "slow": {
+              "type": "string"
+            },
+            "theme": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "fast",
+            "base",
+            "slow",
+            "theme"
+          ],
+          "additionalProperties": false
+        },
+        "easing": {
+          "type": "object",
+          "properties": {
+            "standard": {
+              "type": "string"
+            },
+            "spring": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "standard",
+            "spring"
+          ],
+          "additionalProperties": false
+        },
+        "enableSpringPills": {
+          "type": "boolean"
+        },
+        "flourish": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "state-linked"
+              ]
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "bloomInset": {
+              "type": "string"
+            },
+            "blur": {
+              "type": "string"
+            },
+            "states": {
+              "type": "object",
+              "properties": {
+                "idle": {
+                  "type": "object",
+                  "properties": {
+                    "hue": {
+                      "type": "string",
+                      "enum": [
+                        "good",
+                        "warn",
+                        "bad",
+                        "wait",
+                        "idle"
+                      ]
+                    },
+                    "opacity": {
+                      "type": "number"
+                    },
+                    "rhythm": {
+                      "type": "string",
+                      "enum": [
+                        "breathe",
+                        "pulse",
+                        "none"
+                      ]
+                    },
+                    "duration": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "hue",
+                    "opacity",
+                    "rhythm",
+                    "duration"
+                  ],
+                  "additionalProperties": false
+                },
+                "running": {
+                  "type": "object",
+                  "properties": {
+                    "hue": {
+                      "type": "string",
+                      "enum": [
+                        "good",
+                        "warn",
+                        "bad",
+                        "wait",
+                        "idle"
+                      ]
+                    },
+                    "opacity": {
+                      "type": "number"
+                    },
+                    "rhythm": {
+                      "type": "string",
+                      "enum": [
+                        "breathe",
+                        "pulse",
+                        "none"
+                      ]
+                    },
+                    "duration": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "hue",
+                    "opacity",
+                    "rhythm",
+                    "duration"
+                  ],
+                  "additionalProperties": false
+                },
+                "compiling": {
+                  "type": "object",
+                  "properties": {
+                    "hue": {
+                      "type": "string",
+                      "enum": [
+                        "good",
+                        "warn",
+                        "bad",
+                        "wait",
+                        "idle"
+                      ]
+                    },
+                    "opacity": {
+                      "type": "number"
+                    },
+                    "rhythm": {
+                      "type": "string",
+                      "enum": [
+                        "breathe",
+                        "pulse",
+                        "none"
+                      ]
+                    },
+                    "duration": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "hue",
+                    "opacity",
+                    "rhythm",
+                    "duration"
+                  ],
+                  "additionalProperties": false
+                },
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "hue": {
+                      "type": "string",
+                      "enum": [
+                        "good",
+                        "warn",
+                        "bad",
+                        "wait",
+                        "idle"
+                      ]
+                    },
+                    "opacity": {
+                      "type": "number"
+                    },
+                    "rhythm": {
+                      "type": "string",
+                      "enum": [
+                        "breathe",
+                        "pulse",
+                        "none"
+                      ]
+                    },
+                    "duration": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "hue",
+                    "opacity",
+                    "rhythm",
+                    "duration"
+                  ],
+                  "additionalProperties": false
+                },
+                "paused": {
+                  "type": "object",
+                  "properties": {
+                    "hue": {
+                      "type": "string",
+                      "enum": [
+                        "good",
+                        "warn",
+                        "bad",
+                        "wait",
+                        "idle"
+                      ]
+                    },
+                    "opacity": {
+                      "type": "number"
+                    },
+                    "rhythm": {
+                      "type": "string",
+                      "enum": [
+                        "breathe",
+                        "pulse",
+                        "none"
+                      ]
+                    },
+                    "duration": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "hue",
+                    "opacity",
+                    "rhythm",
+                    "duration"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "idle",
+                "running",
+                "compiling",
+                "error",
+                "paused"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "kind",
+            "enabled",
+            "bloomInset",
+            "blur",
+            "states"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "duration",
+        "easing",
+        "enableSpringPills",
+        "flourish"
+      ],
+      "additionalProperties": false
+    },
+    "iconography": {
+      "type": "object",
+      "properties": {
+        "set": {
+          "type": "string"
+        },
+        "stroke": {
+          "type": "string"
+        },
+        "box": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "set",
+        "stroke",
+        "box"
+      ],
+      "additionalProperties": false
+    },
+    "viewport": {
+      "type": "object",
+      "properties": {
+        "axisX": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "axisY": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "axisZ": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "gridMajor": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "gridMinor": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "selectionOutline": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "gizmoActive": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
+        "cameraWidget": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        }
+      },
+      "required": [
+        "axisX",
+        "axisY",
+        "axisZ",
+        "gridMajor",
+        "gridMinor",
+        "selectionOutline",
+        "gizmoActive",
+        "cameraWidget"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "$schema",
+    "version",
+    "name",
+    "appearance",
+    "highContrast",
+    "colors",
+    "typography",
+    "shape",
+    "elevation",
+    "motion",
+    "iconography",
+    "viewport"
+  ],
+  "additionalProperties": false
+}

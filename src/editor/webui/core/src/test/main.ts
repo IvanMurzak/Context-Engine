@@ -13,6 +13,7 @@ import { commandsTests } from "./commands.test.js";
 import { keymapTests } from "./keymap.test.js";
 import { paletteTests } from "./palette.test.js";
 import { reachabilityTests } from "./reachability.test.js";
+import { tokensTests } from "./tokens.test.js";
 
 const result = runTests([
     ...panelsTests,
@@ -23,6 +24,7 @@ const result = runTests([
     ...keymapTests,
     ...paletteTests,
     ...reachabilityTests,
+    ...tokensTests,
 ]);
 report(result);
 

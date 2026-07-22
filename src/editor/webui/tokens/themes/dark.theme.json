@@ -1,0 +1,107 @@
+{
+  "$schema": "https://context-engine.dev/schemas/theme/v1.json",
+  "version": 1,
+  "name": "Dark",
+  "appearance": "dark",
+  "highContrast": false,
+  "colors": {
+    "canvas": "#000000",
+    "panel": "#0a0a0a",
+    "panel2": "#141414",
+    "ink": "#ededed",
+    "muted": "#a1a1a1",
+    "muted2": "#7e7e7e",
+    "accent": "#ededed",
+    "accent2": "#ededed",
+    "line": "#262626",
+    "chip": "#141414",
+    "semantic": {
+      "good": "#3fb950",
+      "warn": "#f5a623",
+      "bad": "#f85149",
+      "wait": "#a855f7",
+      "idle": "#8b949e"
+    },
+    "focusRing": "rgba(237, 237, 237, 0.6)"
+  },
+  "typography": {
+    "fontUi": "'Geist', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif",
+    "fontMono": "'Geist Mono', 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', monospace",
+    "tracking": "-0.011em",
+    "lineHeight": 1.45,
+    "numericVariant": "tabular-nums",
+    "size": {
+      "2xs": "10.5px",
+      "xs": "11.5px",
+      "sm": "12.5px",
+      "base": "13.5px",
+      "md": "15px",
+      "lg": "17px",
+      "xl": "19px"
+    },
+    "weight": {
+      "regular": 430,
+      "medium": 520,
+      "semibold": 600
+    }
+  },
+  "shape": {
+    "radius": {
+      "sm": "7px",
+      "md": "8px",
+      "pill": "999px"
+    },
+    "borderWidth": "1px",
+    "focusRingWidth": "2px",
+    "selectionBarWidth": "3px",
+    "density": {
+      "compact": "22px",
+      "default": "26px",
+      "comfortable": "32px"
+    }
+  },
+  "elevation": {
+    "model": "border-step"
+  },
+  "motion": {
+    "duration": {
+      "fast": "120ms",
+      "base": "140ms",
+      "slow": "160ms",
+      "theme": "350ms"
+    },
+    "easing": {
+      "standard": "cubic-bezier(0.4, 0, 0.2, 1)",
+      "spring": "cubic-bezier(0.34, 1.56, 0.64, 1)"
+    },
+    "enableSpringPills": true,
+    "flourish": {
+      "kind": "state-linked",
+      "enabled": true,
+      "bloomInset": "-5px",
+      "blur": "4px",
+      "states": {
+        "idle": { "hue": "idle", "opacity": 0.5, "rhythm": "breathe", "duration": "7s" },
+        "running": { "hue": "good", "opacity": 0.75, "rhythm": "breathe", "duration": "2.6s" },
+        "compiling": { "hue": "warn", "opacity": 0.85, "rhythm": "pulse", "duration": "0.95s" },
+        "error": { "hue": "bad", "opacity": 0.92, "rhythm": "pulse", "duration": "1.4s" },
+        "paused": { "hue": "idle", "opacity": 0.55, "rhythm": "none", "duration": "0s" }
+      }
+    }
+  },
+  "iconography": {
+    "set": "lucide",
+    "stroke": "1.5px",
+    "box": "18px"
+  },
+  "viewport": {
+    "axisX": "#ff5a5f",
+    "axisY": "#4ade80",
+    "axisZ": "#4d9fff",
+    "gridMajor": "rgba(237, 237, 237, 0.16)",
+    "gridMinor": "rgba(237, 237, 237, 0.06)",
+    "selectionOutline": "#22d3ee",
+    "gizmoActive": "#ffe14d",
+    "cameraWidget": "#ededed"
+  }
+}

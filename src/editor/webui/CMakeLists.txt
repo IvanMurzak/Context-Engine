@@ -52,6 +52,13 @@ if(NOT CONTEXT_CLIENT_SCHEMA_GENERATED)
 endif()
 
 set(_ctx_webui_core "${CMAKE_CURRENT_SOURCE_DIR}/core")
+# The @context-engine/editor-tokens data-layer package (M9 e06a, design 06 / D11). Its schema +
+# validator TS and the built-in *.theme.json / theme.schema.json are imported by the editor-core T1
+# test entry (core/src/test/tokens.test.ts), so they are typecheck + bundle inputs of the test bundle.
+# Listing them below keeps an incremental build correct when a token source changes (a clean CI build
+# rebuilds regardless). The tokens package declares NO npm dependency (its package.json has none), so
+# it does not touch the dockview-core-only web-layer allowlist.
+set(_ctx_webui_tokens "${CMAKE_CURRENT_SOURCE_DIR}/tokens")
 set(_ctx_webui_tsconfig "${_ctx_webui_core}/tsconfig.json")
 set(_ctx_webui_entry "${_ctx_webui_core}/src/index.ts")
 # The asset root the Shell will serve over context-editor://app/ (e05c wires the scheme).
@@ -112,7 +119,14 @@ endforeach()
 file(GLOB_RECURSE _ctx_webui_ts CONFIGURE_DEPENDS
      "${_ctx_webui_core}/src/*.ts" "${_ctx_webui_core}/src/*.tsx"
      "${_ctx_webui_core}/src/*.mts" "${_ctx_webui_core}/src/*.cts")
-set(_ctx_webui_inputs ${_ctx_webui_ts} "${_ctx_webui_tsconfig}" "${_ctx_webui_core}/package.json")
+# The editor-tokens data layer (M9 e06a) — the schema/validator TS plus the built-in theme DATA the
+# T1 test entry imports directly (esbuild inlines the *.theme.json via its json loader; tsgo resolves
+# them via resolveJsonModule). CONFIGURE_DEPENDS so a new theme or a schema edit re-globs.
+file(GLOB_RECURSE _ctx_webui_tokens_ts CONFIGURE_DEPENDS "${_ctx_webui_tokens}/src/*.ts")
+file(GLOB _ctx_webui_tokens_data CONFIGURE_DEPENDS
+     "${_ctx_webui_tokens}/themes/*.theme.json" "${_ctx_webui_tokens}/theme.schema.json")
+set(_ctx_webui_inputs ${_ctx_webui_ts} ${_ctx_webui_tokens_ts} ${_ctx_webui_tokens_data}
+    "${_ctx_webui_tsconfig}" "${_ctx_webui_core}/package.json" "${_ctx_webui_tokens}/package.json")
 
 # --- 1) SEMANTIC typecheck (a BUILD failure, per the e05a DoD) -----------------------------------
 # `--pretty false` keeps diagnostics machine-legible in CI logs (the same flag src/runtime/ts's
