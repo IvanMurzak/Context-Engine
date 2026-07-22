@@ -101,8 +101,10 @@ target_compile_definitions(context_test_e14a_daemon_lifecycle PRIVATE
     CONTEXT_BINARY="$<TARGET_FILE:context>")
 add_dependencies(context_test_e14a_daemon_lifecycle context)
 add_test(NAME editor-shell-daemon-lifecycle-t2 COMMAND context_test_e14a_daemon_lifecycle)
-# Four scenarios, each spawning + reaping a real daemon (spawn boot + kill + a respawn on the reconnect
-# leg); cap generously so a regression surfaces its diagnostics rather than hanging the CI job.
+# Five scenarios, each spawning + reaping real daemons (spawn boot + kill + a respawn on the reconnect
+# leg + the CE #352 shutdown-reply repetitions). This cap is the OUTER backstop only: since CE #352 the
+# drill arms its own stage watchdog, which fires well inside this timeout and prints the stage it died
+# in — so a regression reports a diagnosis here rather than being reduced to a bare ctest Timeout.
 set_tests_properties(editor-shell-daemon-lifecycle-t2 PROPERTIES TIMEOUT 300)
 # The spawned `context` binary links the uninstrumented rusty_v8 archive (the M6 X1 `context profile gc`
 # path via context_cli), so on the sanitize legs the child needs the same narrow LSan demangler/
