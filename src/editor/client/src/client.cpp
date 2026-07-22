@@ -115,14 +115,27 @@ bool Client::attach(const AttachOptions& options, std::string& error, bool* reje
         return false;
 
     granted_scopes_.clear();
-    if (result->contains("data") && result->at("data").is_object())
-    {
-        const Json& data = result->at("data");
-        if (data.contains("scopes") && data.at("scopes").is_array())
-            for (std::size_t i = 0; i < data.at("scopes").size(); ++i)
-                if (data.at("scopes").at(i).is_string())
-                    granted_scopes_.push_back(data.at("scopes").at(i).as_string());
-    }
+    client_id_ = 0;
+    // The attach reply is the ONE response the daemon returns UN-enveloped: the handshake branch of
+    // Dispatcher::handle puts the negotiated {protocolMajor, clientId, capabilities, scopes} object
+    // straight into JSON-RPC `result`, where every verb reply instead carries an R-CLI-008 envelope
+    // whose payload sits under `result.data`. Accept both shapes rather than assuming one: reading
+    // only `result.data` here silently left granted_scopes() EMPTY on every real attach (a latent
+    // defect this e08a work surfaced — the same read is what the new client_id() needs), and
+    // hard-coding the flat shape would break the moment attach is enveloped like its siblings.
+    const Json& data = (result->contains("data") && result->at("data").is_object()) ? result->at("data")
+                                                                                    : *result;
+    if (data.contains("scopes") && data.at("scopes").is_array())
+        for (std::size_t i = 0; i < data.at("scopes").size(); ++i)
+            if (data.at("scopes").at(i).is_string())
+                granted_scopes_.push_back(data.at("scopes").at(i).as_string());
+    // M9 e08a: this connection's client id — the value the `session` topic's `origin` field carries,
+    // so a consumer can drop a fact it caused. Absent on a pre-e08a daemon, which leaves it 0 (and 0
+    // never matches a real wire client's id, so echo suppression degrades to "apply everything"
+    // rather than mis-suppressing another client's fact).
+    if (data.contains("clientId") && data.at("clientId").is_number() &&
+        data.at("clientId").as_int() > 0)
+        client_id_ = static_cast<std::uint64_t>(data.at("clientId").as_int());
     attached_ = true;
     return true;
 }

@@ -26,8 +26,20 @@
 //   * resource.read {handle, range} -> read a chunk of an oversized spooled result by its
 //                                   R-CLI-017 opaque handle (STABLE contract verb, served here
 //                                   because the store lives with the composed daemon); read.
+//   * editor.select / editor.selection-get / editor.camera-set / editor.cameras-get /
+//     editor.play|pause|stop|step -> the M9 e08a DAEMON SESSION STATE (D7 tier 1): the semantic
+//                                   human state — selection, cameras, play — held HERE so every
+//                                   client shares one truth. Each real change publishes a `session`
+//                                   topic fact stamped with the acting client's id as `origin` (the
+//                                   echo-suppression contract). session_control scope.
 //   * shutdown                   -> ask the serve loop to stop; requires session_control.
 //   * describe / anything else   -> the dispatcher's default registry routing.
+//
+// Session-state PERSISTENCE (03 §1 — the daemon is the SINGLE writer of `.editor/session.json`; the
+// Shell owns `config.json`/layout and never this file): serve() restores it before accepting the
+// first client and writes it back on a clean stop. A corrupt file is renamed aside, defaults are
+// loaded, and the recovery is announced LOUDLY on the `diagnostics` topic + stderr (07 §6) —
+// never silently, never blocking the boot.
 //
 // Large results (R-CLI-017 / R-BRIDGE-007): serve() passes every response through
 // finalize_response(), which spools a response bigger than the (settable) threshold into the
@@ -53,6 +65,7 @@
 #include "context/editor/bridge/resource_store.h"
 #include "context/editor/bridge/transport.h"
 #include "context/editor/editorkernel/editor_kernel.h"
+#include "context/editor/editorkernel/editor_session_state.h"
 
 #include <atomic>
 #include <cstddef>
@@ -123,6 +136,20 @@ public:
     // from the const invoke() path, since it is mutable).
     [[nodiscard]] bool stop_requested() const noexcept { return stop_.load(); }
 
+    // The M9 e08a daemon session state (selection / cameras / play). Exposed for tests and for the
+    // composing layer; every wire mutation goes through invoke(), which is serialized with the rest
+    // of dispatch (L-50). Reading this from another thread while serve() runs is NOT safe.
+    [[nodiscard]] const EditorSessionState& session_state() const noexcept { return session_; }
+
+    // Restore the session state from `.editor/session.json` (serve() calls this before accepting the
+    // first client). Exposed so a test can drive the recovery path without a serve loop; the report
+    // is what the caller announces LOUDLY on a `recovered` outcome (07 §6).
+    SessionRestoreReport restore_session();
+
+    // Persist the session state to `.editor/session.json` (serve() calls this on a clean stop).
+    // Returns false + fills `error` when the write failed; a failed persist is reported, never fatal.
+    bool persist_session(std::string& error) const;
+
 private:
     // The R-CLI-017 spool: lives under the REAL `<project_root>/.editor/resources/` control dir
     // (outside the reconcile crawl root), keyed by this daemon lifetime's incarnation id — a
@@ -134,6 +161,10 @@ private:
     [[nodiscard]] bridge::ResourceStore& resources() const;
 
     EditorKernel& kernel_;
+    // The M9 e08a editor session state (D7 tier 1). Mutable because the `editor.*` verbs mutate it
+    // from the const invoke() path — the same reason `stop_` is mutable. Every access is serialized
+    // by the serve loop's single dispatch mutex (L-50), so it needs no lock of its own.
+    mutable EditorSessionState session_;
     mutable std::optional<bridge::ResourceStore> resources_;
     std::uint64_t large_result_threshold_ = bridge::kLargeResultThresholdBytes;
     // Mutable so the `shutdown` verb can flip it from the const invoke() path; the serve loop reads it.

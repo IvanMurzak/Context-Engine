@@ -9,6 +9,7 @@
 #include "mock_channel.h"
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -185,6 +186,72 @@ void test_attach_carries_token_scopes_and_protocol()
     CHECK(attaches[0].params.at("capabilities").size() == 1);
 }
 
+// The attach reply is the ONE response the daemon returns UN-ENVELOPED: `Dispatcher::handle`'s
+// handshake branch puts {protocolMajor, clientId, capabilities, scopes} straight into JSON-RPC
+// `result`, while every OTHER verb answers with an R-CLI-008 envelope whose payload sits under
+// `result.data`. The mock above scripts the ENVELOPED shape, which is exactly why a reader that
+// only looked under `result.data` left granted_scopes() silently EMPTY on every real attach from
+// e02 until e08a found it. This test scripts the FLAT shape the real daemon emits, so the
+// regression cannot come back without a red unit test (no daemon, no sockets).
+void test_attach_reads_the_flat_daemon_handshake_reply()
+{
+    auto owned = std::make_unique<MockChannel>();
+    MockChannel* mock = owned.get();
+    mock->on("attach",
+             [](const clientmock::Request&)
+             {
+                 // Byte-for-byte the dispatcher's handshake `result` — NOT ok_envelope().
+                 Json result = Json::object();
+                 result.set("protocolMajor", Json(static_cast<std::uint64_t>(1)));
+                 result.set("clientId", Json(static_cast<std::uint64_t>(7)));
+                 Json caps = Json::array();
+                 caps.push_back(Json(std::string("events")));
+                 result.set("capabilities", std::move(caps));
+                 Json scopes = Json::array();
+                 scopes.push_back(Json(std::string("read_query")));
+                 scopes.push_back(Json(std::string("session_control")));
+                 result.set("scopes", std::move(scopes));
+                 return result;
+             });
+    Client client(std::move(owned));
+
+    AttachOptions options;
+    options.scope = "session";
+    std::string error;
+    CHECK(client.attach(options, error));
+    CHECK(client.granted_scopes().size() == 2);
+    CHECK(client.granted_scopes()[1] == "session_control");
+    // The e08a echo-suppression identity, learned from the same flat reply.
+    CHECK(client.client_id() == 7);
+    CHECK(mock->requests_for("attach").size() == 1);
+}
+
+// A pre-e08a daemon answers the handshake with no `clientId` at all. That must degrade to 0 —
+// which never matches a real wire client's id (they start at 1) — so echo suppression falls back to
+// "apply everything" rather than silently DROPPING another client's fact as if it were our own.
+void test_attach_against_a_daemon_without_a_client_id_degrades_to_zero()
+{
+    auto owned = std::make_unique<MockChannel>();
+    owned->on("attach",
+              [](const clientmock::Request&)
+              {
+                  Json result = Json::object();
+                  result.set("protocolMajor", Json(static_cast<std::uint64_t>(1)));
+                  Json scopes = Json::array();
+                  scopes.push_back(Json(std::string("read_query")));
+                  result.set("scopes", std::move(scopes));
+                  return result;
+              });
+    Client client(std::move(owned));
+
+    AttachOptions options;
+    std::string error;
+    CHECK(client.attach(options, error));
+    CHECK(client.client_id() == 0);
+    CHECK(client.granted_scopes().size() == 1);
+    CHECK(client.granted_scopes()[0] == "read_query");
+}
+
 void test_attach_refusal_is_reported_as_a_daemon_rejection()
 {
     auto owned = std::make_unique<MockChannel>();
@@ -289,6 +356,8 @@ int main()
     test_build_request();
     test_parse_frame_classifies_every_shape();
     test_attach_carries_token_scopes_and_protocol();
+    test_attach_reads_the_flat_daemon_handshake_reply();
+    test_attach_against_a_daemon_without_a_client_id_degrades_to_zero();
     test_attach_refusal_is_reported_as_a_daemon_rejection();
     test_attach_omits_an_empty_token();
     test_call_demuxes_events_arriving_before_the_response();

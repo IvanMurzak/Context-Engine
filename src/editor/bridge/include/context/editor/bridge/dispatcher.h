@@ -45,6 +45,13 @@ struct Session
     // disconnect. Populated by handle() on a successful subscribe, pruned on unsubscribe. Only ever
     // read/written on the daemon's single dispatch thread (serialized), so it needs no own lock.
     std::vector<std::string> subscriptions;
+    // The per-daemon CLIENT ID of the connection this session belongs to (M9 e08a / D7). Stamped by
+    // the serve loop when it accepts the connection — BEFORE the attach handshake — and reported back
+    // to the client in the attach reply as `clientId`. It is the identity the `session` topic's
+    // `origin` field carries, so a client can recognise a fact it caused and suppress the echo. 0 is
+    // reserved for the DAEMON itself (the in-process attach path, an internal transition) — never a
+    // wire client, whose ids start at 1.
+    std::uint64_t client_id = 0;
 };
 
 // The seam that lets a COMPOSING layer (the EditorKernel, which sits ABOVE the bridge and therefore

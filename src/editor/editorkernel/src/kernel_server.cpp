@@ -16,7 +16,10 @@
 #include "context/editor/gui/panels/builders/wire.h"               // e05d3: model -> wire JSON
 #include "context/editor/schema/kind_schema.h" // e05d3: engine_schemas() kind lookup
 
+#include "context/editor/bridge/event_stream.h" // e08a: Stability on the loud recovery diagnostic
+
 #include <cstddef>
+#include <cstdio>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -48,6 +51,45 @@ std::optional<std::string> string_param(const Json& params, const std::string& k
     return std::nullopt;
 }
 
+// ---- M9 e08a session-state helpers ---------------------------------------------------------------
+
+// A `session` topic payload skeleton: the event class + the ECHO-SUPPRESSION contract (`origin` =
+// the acting client's id, the same value that client got back from `attach` as `clientId`; 0 = the
+// daemon itself). Every editor session-state fact is stamped this way, so the one rule a client
+// needs is "ignore a fact whose origin is me".
+Json session_fact(const char* event, std::uint64_t origin)
+{
+    Json ev = Json::object();
+    ev.set("event", Json(std::string(event)));
+    ev.set("origin", Json(origin));
+    return ev;
+}
+
+// The wire shapes of selection / cameras come from editor_session_state.h
+// (`selection_ids_json` / `cameras_json`) rather than being rebuilt here: the `session` facts, these
+// `editor.*-get` replies, and `.editor/session.json` are documented to carry the SAME shape, so they
+// share the one encoder instead of a comment promising two copies agree.
+
+// Strict unsigned parse for `editor step --ticks` (the CLI projection delivers a flag as a string).
+// Deliberately strict: "-1" wrapping to ~2^64 would step the session ~forever, and a trailing-garbage
+// tolerance would silently accept "2x" as 2.
+std::optional<std::uint64_t> parse_ticks(const std::string& raw)
+{
+    if (raw.empty())
+        return std::nullopt;
+    std::uint64_t value = 0;
+    for (const char ch : raw)
+    {
+        if (ch < '0' || ch > '9')
+            return std::nullopt;
+        const auto digit = static_cast<std::uint64_t>(ch - '0');
+        if (value > (0xFFFFFFFFFFFFFFFFULL - digit) / 10ULL)
+            return std::nullopt; // overflow
+        value = value * 10ULL + digit;
+    }
+    return value;
+}
+
 // ---- D19 multi-client fan-in support --------------------------------------------------------------
 
 // The connection thread's poll interval. On POSIX a request incurs NO added latency (poll() wakes the
@@ -75,6 +117,10 @@ struct Conn
     Conn(bridge::TransportConnection c, std::uint64_t cid, std::size_t budget)
         : conn(std::move(c)), id(cid), out_budget(budget)
     {
+        // Stamp the connection's identity onto its session BEFORE the attach handshake: the
+        // dispatcher carries it across attach and reports it back as `clientId`, and it is what the
+        // `session` topic's `origin` field carries for echo suppression (M9 e08a / D7).
+        session.client_id = cid;
     }
 
     bridge::TransportConnection conn; // this connection's thread only (reads AND writes)
@@ -216,6 +262,16 @@ bridge::ResourceStore& KernelServer::resources() const
         resources_.emplace(kernel_.config().project_root / ".editor" / "resources",
                            kernel_.events().incarnation_id());
     return *resources_;
+}
+
+SessionRestoreReport KernelServer::restore_session()
+{
+    return restore_session_state(kernel_.config().project_root, session_);
+}
+
+bool KernelServer::persist_session(std::string& error) const
+{
+    return persist_session_state(kernel_.config().project_root, session_, error);
 }
 
 std::optional<Envelope> KernelServer::invoke(const std::string& method, const Json& params,
@@ -465,6 +521,156 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
         return Envelope::success(std::move(data), kernel_.generation());
     }
 
+    // --- M9 e08a: the DAEMON SESSION-STATE verbs (D7 tier 1, design 05 §4) ----------------------
+    // Selection / cameras / play live HERE, in the daemon, so a second window, the CLI, and a
+    // scripted agent all read and drive ONE truth. Every real change publishes a `session` topic
+    // fact stamped with `origin` = the acting client's id; an unchanged call publishes NOTHING (an
+    // event for a no-op would be an echo generator, and `origin` exists precisely to kill echoes).
+    // The dispatcher already enforced session_control (scope.cpp) before we are reached.
+    if (method == "editor.select")
+    {
+        if (!params.contains("ids") || !params.at("ids").is_array())
+            return Envelope::failure("usage.missing_argument",
+                                     "editor select requires an 'ids' array of L-35 id-paths");
+        std::vector<std::string> ids;
+        ids.reserve(params.at("ids").size());
+        for (std::size_t i = 0; i < params.at("ids").size(); ++i)
+        {
+            const Json& id = params.at("ids").at(i);
+            if (!id.is_string())
+                return Envelope::failure("usage.invalid",
+                                         "editor select 'ids[" + std::to_string(i) +
+                                             "]' must be an L-35 id-path string");
+            ids.push_back(id.as_string());
+        }
+
+        SelectionMode mode = SelectionMode::replace;
+        if (const std::optional<std::string> raw = string_param(params, "mode"); raw.has_value())
+        {
+            const std::optional<SelectionMode> parsed = parse_selection_mode(*raw);
+            if (!parsed.has_value())
+                return Envelope::failure("usage.invalid",
+                                         "editor select 'mode' must be one of replace | add | "
+                                         "toggle | remove, got '" +
+                                             *raw + "'");
+            mode = *parsed;
+        }
+
+        const bool changed = session_.apply_selection(ids, mode);
+        if (changed)
+        {
+            Json ev = session_fact("selection-changed", session.client_id);
+            ev.set("ids", selection_ids_json(session_));
+            ev.set("mode", Json(std::string(selection_mode_token(mode))));
+            kernel_.events().publish("session", std::move(ev));
+        }
+
+        Json data = Json::object();
+        data.set("ids", selection_ids_json(session_));
+        data.set("mode", Json(std::string(selection_mode_token(mode))));
+        data.set("changed", Json(changed));
+        return Envelope::success(std::move(data));
+    }
+
+    if (method == "editor.selection-get")
+    {
+        Json data = Json::object();
+        data.set("ids", selection_ids_json(session_));
+        return Envelope::success(std::move(data));
+    }
+
+    if (method == "editor.camera-set")
+    {
+        const std::optional<std::string> viewport = string_param(params, "viewportId");
+        if (!viewport.has_value() || viewport->empty())
+            return Envelope::failure("usage.missing_argument",
+                                     "editor camera-set requires a non-empty string 'viewportId'");
+        // transform/projection are carried OPAQUELY (the viewport owns their meaning), so an absent
+        // member is a null — not an error. A camera with neither is still a legitimate registration.
+        Json transform = params.contains("transform") ? params.at("transform") : Json();
+        Json projection = params.contains("projection") ? params.at("projection") : Json();
+
+        const bool changed =
+            session_.set_camera(*viewport, std::move(transform), std::move(projection));
+        if (changed)
+        {
+            Json ev = session_fact("camera-changed", session.client_id);
+            ev.set("viewportId", Json(*viewport));
+            kernel_.events().publish("session", std::move(ev));
+        }
+
+        Json data = Json::object();
+        data.set("viewportId", Json(*viewport));
+        data.set("changed", Json(changed));
+        return Envelope::success(std::move(data));
+    }
+
+    if (method == "editor.cameras-get")
+    {
+        Json data = Json::object();
+        data.set("cameras", cameras_json(session_));
+        return Envelope::success(std::move(data));
+    }
+
+    if (method == "editor.play" || method == "editor.pause" || method == "editor.stop" ||
+        method == "editor.step")
+    {
+        PlayOutcome outcome;
+        if (method == "editor.play")
+            outcome = session_.play();
+        else if (method == "editor.pause")
+            outcome = session_.pause();
+        else if (method == "editor.stop")
+            outcome = session_.stop();
+        else
+        {
+            // `--ticks` is a verb FLAG, so it arrives as a string over the CLI projection and as a
+            // number over a hand-written RPC call — accept both rather than making the wire shape
+            // depend on which door the client came through.
+            std::uint64_t ticks = 1;
+            if (params.contains("ticks"))
+            {
+                const Json& raw = params.at("ticks");
+                if (raw.is_number() && raw.as_int() >= 0)
+                    ticks = static_cast<std::uint64_t>(raw.as_int());
+                else if (raw.is_string())
+                {
+                    const std::optional<std::uint64_t> parsed = parse_ticks(raw.as_string());
+                    if (!parsed.has_value())
+                        return Envelope::failure(
+                            "usage.invalid", "editor step '--ticks' expects a non-negative integer, "
+                                             "got '" + raw.as_string() + "'");
+                    ticks = *parsed;
+                }
+                else
+                {
+                    return Envelope::failure("usage.invalid",
+                                             "editor step '--ticks' expects a non-negative integer");
+                }
+            }
+            outcome = session_.step(ticks);
+        }
+
+        if (!outcome.ok)
+            return Envelope::failure(outcome.error_code,
+                                     "no live play session: start one with `editor play` first "
+                                     "(L-51 edit state).");
+
+        if (outcome.changed)
+        {
+            Json ev = session_fact("play-state", session.client_id);
+            ev.set("state", Json(std::string(play_state_token(outcome.state))));
+            ev.set("simTick", Json(outcome.sim_tick));
+            kernel_.events().publish("session", std::move(ev));
+        }
+
+        Json data = Json::object();
+        data.set("state", Json(std::string(play_state_token(outcome.state))));
+        data.set("simTick", Json(outcome.sim_tick));
+        data.set("changed", Json(outcome.changed));
+        return Envelope::success(std::move(data));
+    }
+
     // `resource.read` — the R-CLI-017 large-result fetch (CLI: `context fetch`): read a bounded,
     // hex-encoded chunk of a spooled oversized result by its opaque handle. v1 resolves against
     // THIS live daemon only (same-filesystem scope); a foreign / stale / malformed handle is
@@ -588,6 +794,32 @@ std::string KernelServer::finalize_response(std::string response) const
 int KernelServer::serve(bridge::TransportServer& server)
 {
     const std::string endpoint = server.endpoint();
+
+    // --- M9 e08a: restore the daemon-owned editor session state BEFORE the first client attaches --
+    // (03 §1: the daemon is the single writer of `.editor/session.json`.) A corrupt file is renamed
+    // aside and defaults are loaded — LOUDLY (07 §6): a `diagnostics` event, so any client that
+    // subscribes with `sinceSeq: 0` replays it out of the ring, PLUS stderr, so the operator sees it
+    // even with nobody attached. Never fatal: a daemon that refused to boot over a convenience file
+    // would be strictly worse than one that forgot a selection.
+    {
+        const SessionRestoreReport report = restore_session();
+        if (report.outcome == SessionRestoreOutcome::recovered)
+        {
+            const std::string message =
+                "the editor session file was unreadable and has been reset to defaults: " +
+                report.detail +
+                (report.quarantined_path.empty()
+                     ? std::string()
+                     : "; the corrupt file was moved aside to " + report.quarantined_path);
+            Json diag = Json::object();
+            diag.set("code", Json(std::string(kEditorSessionStateInvalidCode)));
+            diag.set("message", Json(message));
+            diag.set("pointer", Json(report.path));
+            kernel_.events().publish("diagnostics", std::move(diag), bridge::Stability::stable);
+            std::fprintf(stderr, "[editor-session] %s\n", message.c_str());
+            std::fflush(stderr);
+        }
+    }
 
     // ONE dispatch mutex serializes every handle() + finalize_response() + fan-out (L-50: the mutation
     // model stays single-threaded — concurrency lives at the transport, not the write queue). It also
@@ -789,6 +1021,20 @@ int KernelServer::serve(bridge::TransportServer& server)
     {
         std::lock_guard<std::mutex> lk(dispatch_mu);
         conns.clear();
+    }
+
+    // --- M9 e08a: the CLEAN-SHUTDOWN write of the daemon-owned session state --------------------
+    // Every connection thread has joined, so nothing else can touch the state. A failed write is
+    // reported, never fatal — losing a remembered selection must not turn a clean stop into a
+    // non-zero exit that a supervisor reads as a crash.
+    {
+        std::string persist_error;
+        if (!persist_session(persist_error))
+        {
+            std::fprintf(stderr, "[editor-session] could not persist the editor session state: %s\n",
+                         persist_error.c_str());
+            std::fflush(stderr);
+        }
     }
     return rc;
 }

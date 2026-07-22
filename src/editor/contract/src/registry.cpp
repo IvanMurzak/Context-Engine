@@ -896,6 +896,89 @@ Registry::Registry()
           "The L-35 id-path to the composed entity, slash-separated ([instanceId, ..., entityId])."}},
         /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
 
+    // --- M9 e08a: the DAEMON SESSION-STATE surface (D7 tier 1, design 05 §4) ---------------------
+    // The semantic human state — selection, cameras, play — promoted out of the GUI panels' private
+    // members into the daemon, so every client (a second window, the CLI, a scripted agent) sees and
+    // can DRIVE what the human sees over the one contract surface. Operational (a live daemon serves
+    // them; a one-shot CLI invocation is refused contract.operational_only, exactly like
+    // snapshot/query) and `session_control`-scoped — the whole namespace, reads included, per design
+    // 05 §4 (classified in bridge/src/scope.cpp + the redteam A5 scope table). Additive under
+    // protocolMajor 1: NEW verbs at this anchor, nothing reordered or renamed, and the deterministic
+    // `session *` file-harness family above is UNTOUCHED and stays distinct (C-F4) — that family
+    // drives a headless simulation over a state FILE, this one drives the live human session.
+    //
+    // Naming: the registry's identity is a two-level (noun, verb) pair, so design 05's prose form
+    // `editor selection get` is registered as the hyphenated `editor selection-get` — the same
+    // shape the sibling `editor scene-tree` already established.
+    verbs_.push_back(make_verb(
+        "", "editor", "select",
+        "Set the daemon's editor SELECTION (M9 D7): the L-35 id-paths the human has selected, as "
+        "the panels already key by. Publishes `selection-changed {ids, mode, origin}` on the "
+        "`session` topic when the selection actually changes, so every other client converges; "
+        "`origin` carries the acting client's id for echo suppression.",
+        /*params=*/
+        {{"ids", "json", true,
+          "Array of L-35 id-path strings (slash-separated). May be empty (clear the selection)."},
+         {"mode", "string", false,
+          "How to apply the ids: replace (default) | add | toggle | remove."}},
+        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "editor", "selection-get",
+        "Read the daemon's current editor SELECTION (M9 D7) — the L-35 id-paths the human has "
+        "selected. This is how an agent answers 'what is the human looking at' from the contract.",
+        /*params=*/{}, /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "editor", "camera-set",
+        "Set one viewport's CAMERA in the daemon's editor session state (M9 D7). `transform` and "
+        "`projection` are carried opaquely — the daemon is the custodian of the human's camera, the "
+        "viewport owns its meaning. Publishes `camera-changed {viewportId, origin}` on the "
+        "`session` topic when the camera actually changes.",
+        /*params=*/
+        {{"viewportId", "string", true, "The viewport whose camera this is."},
+         {"transform", "json", false, "The camera transform, as the viewport defines it."},
+         {"projection", "json", false, "The camera projection, as the viewport defines it."}},
+        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "editor", "cameras-get",
+        "Read every viewport CAMERA in the daemon's editor session state (M9 D7), as an array of "
+        "{viewportId, transform, projection}.",
+        /*params=*/{}, /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "editor", "play",
+        "Drive the daemon's PLAY state to playing (L-51): start a live session from `edit`, or "
+        "resume a `paused` one. Already playing is a benign no-op. Publishes "
+        "`play-state {state, simTick, origin}` on the `session` topic on a real transition — the "
+        "L-51 play-mode indicator every client renders is fed from exactly this.",
+        /*params=*/{}, /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "editor", "pause",
+        "Pause the daemon's live play session (L-51: playing -> paused). Issued in `edit` state it "
+        "is refused with play.not_running; already paused is a benign no-op.",
+        /*params=*/{}, /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "editor", "stop",
+        "Stop the daemon's live play session and return to `edit` (L-51): the runtime state is "
+        "DISCARDED, never written to authored files. Idempotent — stopping in `edit` is a benign "
+        "no-op, like a stopped transport bar.",
+        /*params=*/{}, /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "editor", "step",
+        "Advance the daemon's live play session by --ticks fixed ticks (R-SIM-002). Stepping leaves "
+        "playing/paused alone (you may step from either); issued in `edit` state it is refused with "
+        "play.not_running.",
+        /*params=*/{},
+        /*flags=*/
+        {{"ticks", "string", "The number of fixed ticks to advance (unsigned integer); defaults to 1.",
+          false}},
+        /*implemented=*/true, /*stability=*/"operational"));
+
     // --- R-CLI-015 subscription protocol (subscribe / unsubscribe / ack) -------------------------
     // The concrete event-stream subscription methods pinned in the versioned contract (R-CLI-004):
     // subscribe returns a current-state snapshot + a subId (snapshot-then-delta), ack advances the
@@ -1013,12 +1096,38 @@ Registry::Registry()
                                      "Optional RFC 6901 JSON-pointer / location the diagnostic is "
                                      "about."),
                     })});
-    register_topic({"session",
-                    "Session lifecycle + restart-class reload announcements.",
-                    payload_schema({
-                        schema_field("event", "string",
-                                     "The lifecycle event, e.g. started | reloaded | stopped."),
-                    })});
+    // `session` carries BOTH the daemon's own lifecycle announcements AND — since M9 e08a (D7 tier
+    // 1) — the editor SESSION-STATE facts the `editor` verbs above produce. Additive: the topic name
+    // is unchanged (the contract freeze pins topic NAMES) and every new field is optional, present
+    // only on the event class that carries it. `origin` IS the echo-suppression contract: it is the
+    // acting client's id (the same id `attach` returns as `clientId`), so a client that receives a
+    // fact it caused recognises its own id and does not re-apply/re-emit it. 0 means the DAEMON
+    // itself acted (a restore, an internal transition) — never a client.
+    register_topic(
+        {"session",
+         "Session lifecycle + restart-class reload announcements, and the editor session-state "
+         "facts (selection / cameras / play) every client shares (M9 D7).",
+         payload_schema({
+             schema_field("event", "string",
+                          "The event: started | reloaded | stopped (lifecycle), or "
+                          "selection-changed | camera-changed | play-state (editor session state)."),
+             schema_field("origin", "generation",
+                          "Echo suppression: the id of the CLIENT whose call produced this fact "
+                          "(the value `attach` returned as clientId); 0 = the daemon itself."),
+             schema_field("ids", "json",
+                          "selection-changed: the L-35 id-paths now selected (the whole selection, "
+                          "not a delta)."),
+             schema_field("mode", "string",
+                          "selection-changed: how the change was applied — replace | add | toggle | "
+                          "remove."),
+             schema_field("viewportId", "string",
+                          "camera-changed: the viewport whose camera changed."),
+             schema_field("state", "string",
+                          "play-state: the L-51 provenance state after the transition — edit | "
+                          "playing | paused."),
+             schema_field("simTick", "generation",
+                          "play-state: the live session's fixed-tick counter (0 in edit state)."),
+         })});
     register_topic({"clients",
                     "Client attach/detach on the daemon.",
                     payload_schema({

@@ -630,5 +630,25 @@ int main()
         CHECK(exit_code_for("attach.denied") == 6);
     }
 
+    // --- M9 e08a editor.session_state_invalid (D7 tier 1, design 07 §6) --------------------------
+    // Additive-only new row at the catalog tail (NOT on the frozen v0 baseline — the additive-only
+    // check above still holds). The LOUD corrupt-recovery diagnostic for `.editor/session.json`:
+    // validation-class and deterministic (re-reading the same malformed bytes re-fails). Its OWN
+    // code, deliberately NOT the R-QA-005 `session.state_invalid` of the deterministic `session *`
+    // FILE-harness family — C-F4 keeps those two families distinct, and both must remain live and
+    // separate. The string is the source-of-truth in
+    // editorkernel::kEditorSessionStateInvalidCode (editor_session_state.h).
+    {
+        const ErrorCode* invalid = find_code("editor.session_state_invalid");
+        CHECK(invalid != nullptr);
+        CHECK(invalid->exit_code == 5);     // validation class
+        CHECK(invalid->retriable == false); // deterministic — the same bytes re-fail
+        CHECK(invalid->origin == "R-BRIDGE-008");
+
+        // The C-F4 separation, asserted rather than assumed: both codes exist and are distinct.
+        CHECK(find_code("session.state_invalid") != nullptr);
+        CHECK(find_code("session.state_invalid")->origin == "R-QA-005");
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

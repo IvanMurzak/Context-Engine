@@ -114,6 +114,41 @@ if(CONTEXT_SANITIZE)
 endif()
 
 # ===================================================================================================
+# The M9 e08a DAEMON SESSION-STATE T2 DRILL (design 05 §4 / 03 §1 / 07 §6, D7 tier 1) — the semantic
+# human state (selection / cameras / play) proven shared across TWO KINDS of client against a REAL
+# `context daemon` over the loopback IPC wire: the shipped SDK (`context_client`, a scripted agent)
+# and the REAL `context` binary spawned as a separate process (the CLI). It links the headless,
+# CEF-free `context_gui_playbar` for ONE reason — to assert the daemon's play-state tokens are
+# byte-identical to the tokens the L-51 indicator renders, so the two can never drift — plus
+# `context_editorkernel` for the recovery diagnostic's code constant. A plain `editor-session-`
+# ctest, so the build job's general step auto-runs it on all three OS legs with NO ci.yml `--target`
+# bookkeeping. Reuses the header-only process helper + the RPC harness.
+add_executable(context_test_e08a_daemon_session_state test_e08a_daemon_session_state.cpp)
+target_link_libraries(context_test_e08a_daemon_session_state
+    PRIVATE context_client context_editorkernel context_gui_playbar context_warnings Threads::Threads)
+target_link_options(context_test_e08a_daemon_session_state PRIVATE ${_m1_exit_static_runtime})
+target_include_directories(context_test_e08a_daemon_session_state PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../cli/tests) # process_util.h (header-only, test-only)
+target_compile_definitions(context_test_e08a_daemon_session_state PRIVATE
+    CONTEXT_BINARY="$<TARGET_FILE:context>")
+add_dependencies(context_test_e08a_daemon_session_state context)
+add_test(NAME editor-session-multiclient-t2 COMMAND context_test_e08a_daemon_session_state)
+# Three test functions covering the four DoD scenarios (propagation + echo suppression + play share
+# one daemon), each spawning + reaping real daemons and several real `context attach` children;
+# cap generously so a regression surfaces its diagnostics rather than hanging the CI job.
+set_tests_properties(editor-session-multiclient-t2 PROPERTIES TIMEOUT 300)
+# The spawned `context` binary links the uninstrumented rusty_v8 archive (the M6 X1
+# `context profile gc` path via context_cli), so on the sanitize legs the child needs the same narrow
+# LSan demangler/symbolizer suppressions the sibling CONTEXT_BINARY-spawning tests wire (see
+# editor-shell-daemon-lifecycle-t2 below; they can never mask a `context::` leak) — the spawned child
+# inherits this env. The drill binary itself links no V8.
+if(CONTEXT_SANITIZE)
+    set_tests_properties(editor-session-multiclient-t2 PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
+endif()
+
+# ===================================================================================================
 # The M9 e14b PER-PROJECT SINGLE-INSTANCE ARBITRATION T2 DRILL (design 07 §4 / 05, D15/C-F23) — the
 # `context edit .` opener proven end to end as a REAL separate `context` process against a live "editor"
 # (the drill's own presence marker + a FocusRequestWatcher thread — the Shell owner-loop behaviour with

@@ -7,6 +7,12 @@
 // daemon emits (dispatcher.cpp's envelopes + kernel_server.cpp's `event` / `event.gap`
 // notifications), so a consumer that satisfies this mock satisfies the real protocol. The live-daemon
 // e2e test is what proves the two agree.
+//
+// ONE shape is NOT an envelope, and a `Responder` must script it verbatim rather than reaching for
+// ok_envelope(): the ATTACH handshake. `Dispatcher::handle` puts {protocolMajor, clientId,
+// capabilities, scopes} FLAT into JSON-RPC `result`, with no `ok`/`data` wrapper. A mock that
+// envelopes it is MORE forgiving than the daemon and hides a real reader bug (it hid an empty
+// granted_scopes() from e02 to e08a) — see test_client.cpp's flat-handshake test.
 
 #pragma once
 

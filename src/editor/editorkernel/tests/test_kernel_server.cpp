@@ -941,5 +941,299 @@ int main()
         fs::remove_all(projectD, ecD);
     }
 
+    // ---- M9 e08a: DAEMON SESSION STATE over the wire (D7 tier 1) ---------------------------------
+    //      TWO clients attached to ONE daemon: a change driven by either is seen by BOTH, stamped
+    //      with `origin` = the ACTING client's id — the echo-suppression contract e08b's panels and
+    //      e08c's bus both depend on. Also proves the R-SEC-007 classification (a read-only token is
+    //      refused the whole family), the L-51 play machine over RPC, and the clean-shutdown
+    //      persistence + restore round-trip through a REAL `.editor/session.json`.
+    const fs::path projectE = make_temp_project();
+    {
+        MemoryFileStore storeE;
+        NullWatcher watcherE;
+        context::kernel::ManualClock clockE;
+        context::kernel::InlineTaskRunner tasksE;
+
+        EditorKernelConfig cfgE;
+        cfgE.project_root = projectE;
+        cfgE.filesync_root = "proj";
+        cfgE.index_path = "proj/.editor/index";
+
+        EditorKernel kernelE(storeE, watcherE, clockE, tasksE, cfgE);
+        KernelServer serverE(kernelE);
+        CHECK(kernelE.start(ScopeSet::all()) == StartOutcome::booted);
+
+        TransportServer transportE(endpoint_for(
+            "ctx-kernelserver-session-" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())));
+        CHECK(transportE.listen());
+        std::thread srvE([&serverE, &transportE]() { serverE.serve(transportE); });
+
+        // A READ-ONLY token is refused the whole family — reads included (design 05 §4 puts the
+        // editor session-state namespace on session_control; what it reads is the LIVE human
+        // session, not authored data).
+        {
+            TransportClient ro(transportE.endpoint());
+            CHECK(ro.connect(3000));
+            CHECK(ro.request(rpc(1, "attach", attach_params("read"))).has_value());
+            for (const char* method :
+                 {"editor.select", "editor.selection-get", "editor.camera-set",
+                  "editor.cameras-get", "editor.play", "editor.pause", "editor.stop", "editor.step"})
+            {
+                const std::optional<std::string> denied =
+                    ro.request(rpc(2, method, Json::object()));
+                CHECK(denied.has_value());
+                const Json resp = Json::parse(*denied);
+                CHECK(resp.contains("error"));
+                CHECK(resp.at("error").at("data").at("code").as_string() == "scope.denied");
+            }
+            ro.close();
+        }
+
+        {
+            TransportClient a(transportE.endpoint());
+            TransportClient b(transportE.endpoint());
+            CHECK(a.connect(3000));
+            CHECK(b.connect(3000));
+
+            // Each client learns its OWN id from the attach reply — the value it must compare
+            // `origin` against to recognise (and drop) a fact it caused.
+            const std::optional<std::string> a_attach =
+                a.request(rpc(1, "attach", attach_params("session")));
+            CHECK(a_attach.has_value());
+            const Json a_result = Json::parse(*a_attach).at("result");
+            CHECK(a_result.contains("clientId"));
+            const std::int64_t a_id = a_result.at("clientId").as_int();
+            const std::optional<std::string> b_attach =
+                b.request(rpc(1, "attach", attach_params("session")));
+            CHECK(b_attach.has_value());
+            const std::int64_t b_id = Json::parse(*b_attach).at("result").at("clientId").as_int();
+            CHECK(a_id > 0);
+            CHECK(b_id > 0);
+            CHECK(a_id != b_id); // two clients are never the same origin
+
+            std::vector<Json> a_events;
+            std::vector<Json> b_events;
+            CHECK(req_demux(a, 2, subscribe_all(2), a_events).has_value());
+            CHECK(req_demux(b, 2, subscribe_all(2), b_events).has_value());
+
+            // Collect the `session` facts a client has seen, newest last.
+            const auto session_facts = [](const std::vector<Json>& events) {
+                std::vector<Json> out;
+                for (const Json& e : events)
+                {
+                    if (!is_event_frame(e))
+                        continue;
+                    const Json& inner = e.at("params").at("event");
+                    if (inner.at("topic").as_string() == "session")
+                        out.push_back(inner.at("payload"));
+                }
+                return out;
+            };
+            const auto find_fact = [&session_facts](const std::vector<Json>& events,
+                                                    const std::string& kind) -> std::optional<Json> {
+                std::optional<Json> found;
+                for (const Json& payload : session_facts(events))
+                    if (payload.at("event").as_string() == kind)
+                        found = payload;
+                return found;
+            };
+
+            // --- A selects; BOTH clients converge on the same selection -------------------------
+            Json sel = Json::object();
+            Json id_list = Json::array();
+            id_list.push_back(Json(std::string("root/child")));
+            id_list.push_back(Json(std::string("root/other")));
+            sel.set("ids", std::move(id_list));
+            const std::optional<Json> sel_resp = req_demux(a, 3, rpc(3, "editor.select", sel), a_events);
+            CHECK(sel_resp.has_value());
+            CHECK(sel_resp->at("result").at("ok").as_bool());
+            CHECK(sel_resp->at("result").at("data").at("changed").as_bool());
+            CHECK(sel_resp->at("result").at("data").at("ids").size() == 2);
+
+            // B reads the selection back over its OWN connection: one truth, two clients.
+            const std::optional<Json> b_sel =
+                req_demux(b, 3, rpc(3, "editor.selection-get", Json::object()), b_events);
+            CHECK(b_sel.has_value());
+            const Json& b_ids = b_sel->at("result").at("data").at("ids");
+            CHECK(b_ids.size() == 2);
+            CHECK(b_ids.at(0).as_string() == "root/child");
+
+            // ...and B RECEIVED the fact, stamped with A's id — so B knows it did not cause it.
+            const std::optional<Json> b_fact = find_fact(b_events, "selection-changed");
+            CHECK(b_fact.has_value());
+            CHECK(b_fact->at("origin").as_int() == a_id);
+            CHECK(b_fact->at("origin").as_int() != b_id); // B applies it (not an echo of its own)
+            CHECK(b_fact->at("mode").as_string() == "replace");
+            CHECK(b_fact->at("ids").size() == 2);
+
+            // A ALSO receives its own fact — with origin == A, which is exactly the echo it must
+            // suppress. That both sides see the same frame and disambiguate by `origin` alone IS
+            // the contract (no side-channel, no per-client filtering in the daemon).
+            const std::optional<Json> a_fact = find_fact(a_events, "selection-changed");
+            CHECK(a_fact.has_value());
+            CHECK(a_fact->at("origin").as_int() == a_id);
+
+            // --- an UNCHANGED re-select publishes NOTHING (no echo generator) -------------------
+            const std::size_t before = session_facts(b_events).size();
+            const std::optional<Json> again = req_demux(a, 4, rpc(4, "editor.select", sel), a_events);
+            CHECK(again.has_value());
+            CHECK(!again->at("result").at("data").at("changed").as_bool());
+            // Drain B by making a round-trip on B's own connection; no new session fact may appear.
+            CHECK(req_demux(b, 4, rpc(4, "editor.selection-get", Json::object()), b_events).has_value());
+            CHECK(session_facts(b_events).size() == before);
+
+            // --- B moves a camera; A sees it with origin == B ------------------------------------
+            Json cam = Json::object();
+            cam.set("viewportId", Json(std::string("main")));
+            Json transform = Json::object();
+            transform.set("x", Json(3));
+            cam.set("transform", std::move(transform));
+            CHECK(req_demux(b, 5, rpc(5, "editor.camera-set", std::move(cam)), b_events).has_value());
+            CHECK(req_demux(a, 5, rpc(5, "editor.cameras-get", Json::object()), a_events).has_value());
+            const std::optional<Json> a_cam_fact = find_fact(a_events, "camera-changed");
+            CHECK(a_cam_fact.has_value());
+            CHECK(a_cam_fact->at("origin").as_int() == b_id);
+            CHECK(a_cam_fact->at("viewportId").as_string() == "main");
+
+            // --- play control over RPC (L-51) ----------------------------------------------------
+            // Pausing in `edit` is refused with the reserved play.* code, not a silent no-op.
+            const std::optional<Json> bad_pause =
+                req_demux(a, 6, rpc(6, "editor.pause", Json::object()), a_events);
+            CHECK(bad_pause.has_value());
+            CHECK(bad_pause->contains("error"));
+            CHECK(bad_pause->at("error").at("data").at("code").as_string() == "play.not_running");
+
+            const std::optional<Json> play =
+                req_demux(a, 7, rpc(7, "editor.play", Json::object()), a_events);
+            CHECK(play.has_value());
+            CHECK(play->at("result").at("data").at("state").as_string() == "playing");
+
+            Json step = Json::object();
+            step.set("ticks", Json(std::string("4"))); // the CLI projection delivers a flag as text
+            CHECK(req_demux(a, 8, rpc(8, "editor.step", std::move(step)), a_events).has_value());
+
+            const std::optional<Json> stop =
+                req_demux(a, 9, rpc(9, "editor.stop", Json::object()), a_events);
+            CHECK(stop.has_value());
+            CHECK(stop->at("result").at("data").at("state").as_string() == "edit");
+            CHECK(stop->at("result").at("data").at("simTick").as_int() == 0); // L-51 discard
+
+            // B observed the whole play-state sequence — the L-51 indicator feed.
+            CHECK(req_demux(b, 6, rpc(6, "editor.selection-get", Json::object()), b_events).has_value());
+            std::vector<std::string> b_play_states;
+            for (const Json& payload : session_facts(b_events))
+                if (payload.at("event").as_string() == "play-state")
+                    b_play_states.push_back(payload.at("state").as_string() + ":" +
+                                            std::to_string(payload.at("simTick").as_int()));
+            CHECK(b_play_states.size() == 3);
+            CHECK(b_play_states[0] == "playing:0");
+            CHECK(b_play_states[1] == "playing:4"); // stepping leaves playing/paused alone
+            CHECK(b_play_states[2] == "edit:0");
+
+            // A malformed step is a usage failure, never a silent default.
+            Json bad_step = Json::object();
+            bad_step.set("ticks", Json(std::string("2x")));
+            CHECK(req_demux(a, 10, rpc(10, "editor.play", Json::object()), a_events).has_value());
+            const std::optional<Json> bad =
+                req_demux(a, 11, rpc(11, "editor.step", std::move(bad_step)), a_events);
+            CHECK(bad.has_value());
+            CHECK(bad->at("error").at("data").at("code").as_string() == "usage.invalid");
+
+            // A malformed select likewise.
+            Json bad_sel = Json::object();
+            bad_sel.set("ids", Json::array());
+            bad_sel.set("mode", Json(std::string("obliterate")));
+            const std::optional<Json> bad_mode =
+                req_demux(a, 12, rpc(12, "editor.select", std::move(bad_sel)), a_events);
+            CHECK(bad_mode.has_value());
+            CHECK(bad_mode->at("error").at("data").at("code").as_string() == "usage.invalid");
+
+            // --- ids are NEVER REUSED within a daemon lifetime ----------------------------------
+            // The second half of the echo-suppression trust argument (docs/editor-session-state.md):
+            // "two live clients differ" is not enough — a client that RECONNECTS after another has
+            // dropped must not inherit a departed client's id, or a fact still in flight would be
+            // mis-attributed and wrongly suppressed. e08b's panels and e08c's bus both key on this.
+            a.close();
+            TransportClient c(transportE.endpoint());
+            CHECK(c.connect(3000));
+            const std::optional<std::string> c_attach =
+                c.request(rpc(1, "attach", attach_params("session")));
+            CHECK(c_attach.has_value());
+            const std::int64_t c_id = Json::parse(*c_attach).at("result").at("clientId").as_int();
+            CHECK(c_id != a_id); // A's slot is free, but its IDENTITY is spent
+            CHECK(c_id != b_id);
+            CHECK(c_id > b_id); // monotonic: a fresh id is always beyond every id ever issued
+
+            CHECK(c.request(rpc(2, "shutdown", Json::object())).has_value());
+            c.close();
+            b.close();
+        }
+
+        srvE.join();
+        kernelE.stop();
+
+        // --- the clean-shutdown write: the daemon is the SINGLE writer of .editor/session.json ----
+        CHECK(fs::exists(projectE / ".editor" / "session.json"));
+        {
+            context::editor::editorkernel::EditorSessionState restored;
+            const auto report =
+                context::editor::editorkernel::restore_session_state(projectE, restored);
+            CHECK(report.outcome ==
+                  context::editor::editorkernel::SessionRestoreOutcome::restored);
+            CHECK(restored.selection().size() == 2);
+            CHECK(restored.selection()[0] == "root/child");
+            CHECK(restored.cameras().count("main") == 1);
+            // Play state is never persisted (L-51) — a restarted daemon holds no live session.
+            CHECK(restored.play_state() ==
+                  context::editor::editorkernel::EditorPlayState::edit);
+        }
+    }
+
+    // --- and a FRESH daemon on the same project RESTORES it (the "restore on next attach" half) ---
+    {
+        MemoryFileStore storeF;
+        NullWatcher watcherF;
+        context::kernel::ManualClock clockF;
+        context::kernel::InlineTaskRunner tasksF;
+
+        EditorKernelConfig cfgF;
+        cfgF.project_root = projectE; // the SAME project the previous daemon persisted
+        cfgF.filesync_root = "proj";
+        cfgF.index_path = "proj/.editor/index";
+
+        EditorKernel kernelF(storeF, watcherF, clockF, tasksF, cfgF);
+        KernelServer serverF(kernelF);
+        CHECK(kernelF.start(ScopeSet::all()) == StartOutcome::booted);
+
+        TransportServer transportF(endpoint_for(
+            "ctx-kernelserver-restore-" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())));
+        CHECK(transportF.listen());
+        std::thread srvF([&serverF, &transportF]() { serverF.serve(transportF); });
+
+        {
+            TransportClient c(transportF.endpoint());
+            CHECK(c.connect(3000));
+            CHECK(c.request(rpc(1, "attach", attach_params("session"))).has_value());
+            const std::optional<std::string> got =
+                c.request(rpc(2, "editor.selection-get", Json::object()));
+            CHECK(got.has_value());
+            const Json got_resp = Json::parse(*got);
+            const Json& ids = got_resp.at("result").at("data").at("ids");
+            CHECK(ids.size() == 2);
+            CHECK(ids.at(0).as_string() == "root/child"); // the human's selection survived a restart
+            CHECK(c.request(rpc(3, "shutdown", Json::object())).has_value());
+            c.close();
+        }
+
+        srvF.join();
+        kernelF.stop();
+    }
+    {
+        std::error_code ecE;
+        fs::remove_all(projectE, ecE);
+    }
+
     EDITORKERNEL_TEST_MAIN_END();
 }
