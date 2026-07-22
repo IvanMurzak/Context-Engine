@@ -300,6 +300,12 @@ export function mountWelcome(
     const client = new WelcomeClient(bridge);
     container.replaceChildren();
 
+    // Run the native folder picker and return the chosen absolute path, or null on cancel / empty path.
+    const pickFolderPath = async (): Promise<string | null> => {
+        const picked = await client.pickFolder();
+        return picked !== null && picked.picked && picked.path !== "" ? picked.path : null;
+    };
+
     const root = el("div", WELCOME_ROOT_CLASS);
     root.setAttribute("role", "region");
     root.setAttribute("aria-label", "Welcome");
@@ -345,9 +351,9 @@ export function mountWelcome(
     openFolder.textContent = "Open project…";
     openFolder.addEventListener("click", () => {
         void (async () => {
-            const picked = await client.pickFolder();
-            if (picked !== null && picked.picked && picked.path !== "") {
-                await client.open(picked.path);
+            const path = await pickFolderPath();
+            if (path !== null) {
+                await client.open(path);
             }
         })();
     });
@@ -369,17 +375,16 @@ export function mountWelcome(
 
     const startFromTemplate = (template: string): void => {
         void (async () => {
-            const location = await client.pickFolder();
-            if (location !== null && location.picked && location.path !== "") {
-                await client.newProject(location.path, template);
+            const path = await pickFolderPath();
+            if (path !== null) {
+                await client.newProject(path, template);
             }
         })();
     };
 
     // The primary CTA — ORDINARY primary styling, NO flourish (O1). Uses the first template as the
     // default "New from template" action; the chips below pick a specific one.
-    const firstTemplate = state.templates[0];
-    const defaultTemplate = firstTemplate !== undefined ? firstTemplate.name : "default";
+    const defaultTemplate = state.templates[0]?.name ?? "default";
     const cta = document.createElement("button");
     cta.type = "button";
     cta.className = "welcome-cta";

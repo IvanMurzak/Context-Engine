@@ -54,8 +54,6 @@ inline constexpr const char* kWelcomeModeProject = "project";
 // state: these classify a HOST-side caller/wiring error, not a daemon-contract failure).
 inline constexpr const char* kErrWelcomeBadParams = "welcome.bad_params";
 inline constexpr const char* kErrWelcomeUnknownTemplate = "welcome.unknown_template";
-inline constexpr const char* kErrWelcomeOpenFailed = "welcome.open_failed";
-inline constexpr const char* kErrWelcomeNewFailed = "welcome.new_failed";
 
 // ------------------------------------------------------------------------------- value types
 
@@ -147,6 +145,8 @@ struct CliResult
     [[nodiscard]] bool ok() const;
     // The envelope's `data.action` (`spawn` / `focused` / …) — empty when absent.
     [[nodiscard]] std::string action() const;
+    // The envelope's `data.<key>` as a bool (false when absent / not a bool). Sibling of action().
+    [[nodiscard]] bool data_bool(const char* key) const;
 };
 
 // The injectable `context <args>` runner. Real impl spawns the located `context` binary; tests inject a

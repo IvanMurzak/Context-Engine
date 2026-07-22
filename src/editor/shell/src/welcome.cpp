@@ -3,10 +3,10 @@
 #include "context/editor/shell/welcome.h"
 
 #include "context/common/child_process.h"
+#include "context/editor/shell/keybindings_bridge.h"
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <exception>
 #include <fstream>
 #include <sstream>
@@ -23,29 +23,6 @@ using contract::Json;
 namespace
 {
 
-// Read an environment variable's VALUE, cross-toolchain. MSVC rejects std::getenv as C4996 under
-// /W4 /WX, so the _MSC_VER branch uses the two-call getenv_s (the local MinGW/GCC gate + the Clang CI
-// legs compile the std::getenv branch — the one the local gate exercises). Mirrors doctor_command.cpp's
-// env_present, but returns the value (a home-dir path is not a secret).
-[[nodiscard]] std::optional<std::string> read_env(const char* name)
-{
-#if defined(_MSC_VER)
-    std::size_t len = 0;
-    if (::getenv_s(&len, nullptr, 0, name) != 0 || len == 0)
-        return std::nullopt;
-    std::string value(len, '\0');
-    if (::getenv_s(&len, value.data(), value.size(), name) != 0)
-        return std::nullopt;
-    value.resize(len > 0 ? len - 1 : 0); // len INCLUDES the terminating NUL
-    return value;
-#else
-    const char* value = std::getenv(name);
-    if (value == nullptr || value[0] == '\0')
-        return std::nullopt;
-    return std::string(value);
-#endif
-}
-
 // Read a string member off a JSON object, defaulting on any type mismatch (total over hostile input).
 [[nodiscard]] std::string read_string(const Json& object, const char* key)
 {
@@ -55,10 +32,20 @@ namespace
     return value.is_string() ? value.as_string() : std::string();
 }
 
+// Serialize one recent-project entry to its wire object. Shared by the read-path projection (state())
+// and the write-path store (record_recent_project) so the `{path,name,lastOpenedMs}` shape stays 1:1.
+[[nodiscard]] Json recent_to_json(const RecentProject& recent)
+{
+    Json entry = Json::object();
+    entry.set("path", Json(recent.path));
+    entry.set("name", Json(recent.name));
+    entry.set("lastOpenedMs", Json(recent.last_opened_ms));
+    return entry;
+}
+
 // The display name for a project path: the leaf folder, falling back to the whole path.
 [[nodiscard]] std::string project_display_name(const fs::path& project)
 {
-    std::error_code ec;
     fs::path normalized = project.lexically_normal();
     std::string leaf = normalized.filename().string();
     if (leaf.empty())
@@ -94,14 +81,12 @@ LaunchMode resolve_launch_mode(const fs::path& project, bool project_explicit)
 
 fs::path user_config_path()
 {
-#if defined(_WIN32)
-    std::optional<std::string> home = read_env("USERPROFILE");
-#else
-    std::optional<std::string> home = read_env("HOME");
-#endif
-    if (!home.has_value() || home->empty())
+    // Reuse the shell's single home-dir resolver (keybindings_bridge.h) — same platform rule
+    // (`USERPROFILE` on Windows, `HOME` on POSIX), returning nullopt when neither is set.
+    const std::optional<fs::path> home = home_directory();
+    if (!home.has_value())
         return fs::path();
-    return fs::path(*home) / ".context" / "config.json";
+    return *home / ".context" / "config.json";
 }
 
 std::vector<RecentProject> read_recent_projects(const fs::path& config_path)
@@ -201,13 +186,7 @@ bool record_recent_project(const fs::path& config_path, const fs::path& project,
     doc.set("version", Json(static_cast<std::int64_t>(1)));
     Json array = Json::array();
     for (const RecentProject& recent : merged)
-    {
-        Json entry = Json::object();
-        entry.set("path", Json(recent.path));
-        entry.set("name", Json(recent.name));
-        entry.set("lastOpenedMs", Json(recent.last_opened_ms));
-        array.push_back(std::move(entry));
-    }
+        array.push_back(recent_to_json(recent));
     doc.set("recents", std::move(array));
 
     // Create the parent dir, then write atomically (temp + rename) so a crash mid-write never leaves a
@@ -262,6 +241,16 @@ std::string CliResult::action() const
         return std::string();
     const Json& action = data.at("action");
     return action.is_string() ? action.as_string() : std::string();
+}
+
+bool CliResult::data_bool(const char* key) const
+{
+    if (!envelope.is_object() || !envelope.contains("data"))
+        return false;
+    const Json& data = envelope.at("data");
+    if (!data.is_object() || !data.contains(key))
+        return false;
+    return data.at(key).as_bool(); // as_bool() is total: false for a missing/non-bool value
 }
 
 CliResult run_context_cli(const fs::path& binary, const std::vector<std::string>& args)
@@ -349,13 +338,7 @@ Json WelcomeBridge::state()
 
     Json recents = Json::array();
     for (const RecentProject& recent : read_recent_projects(config_path_))
-    {
-        Json entry = Json::object();
-        entry.set("path", Json(recent.path));
-        entry.set("name", Json(recent.name));
-        entry.set("lastOpenedMs", Json(recent.last_opened_ms));
-        recents.push_back(std::move(entry));
-    }
+        recents.push_back(recent_to_json(recent));
     out.set("recents", std::move(recents));
 
     Json templates = Json::array();
@@ -439,13 +422,7 @@ bool WelcomeBridge::new_project(const std::string& directory, const std::string&
     // Thin wrapper over `context new <directory> <template>` (R-QA-006). On success, open the scaffold.
     const CliResult created = run_cli({"new", directory, tmpl});
     const bool ok = created.ok();
-    bool runnable = false;
-    if (ok && created.envelope.is_object() && created.envelope.contains("data"))
-    {
-        const Json& data = created.envelope.at("data");
-        if (data.is_object() && data.contains("runnable"))
-            runnable = data.at("runnable").as_bool();
-    }
+    const bool runnable = ok && created.data_bool("runnable");
 
     out = Json::object();
     out.set("created", Json(ok));

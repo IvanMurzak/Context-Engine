@@ -114,6 +114,12 @@ void test_recents_round_trip()
     recents = shell::read_recent_projects(config);
     CHECK(recents.size() == 3);
 
+    // An empty config path (no HOME/USERPROFILE resolved) is an honest IO refusal, never a crash:
+    // returns false with a diagnostic so recording a recent can never block opening a project.
+    error.clear();
+    CHECK(!shell::record_recent_project(fs::path(), project_a, 5000, 10, &error));
+    CHECK(!error.empty());
+
     shelltest::cleanup(root);
 }
 
@@ -272,6 +278,47 @@ void test_open_and_new_via_cli()
         CHECK(!welcome.new_project("C:/games/fresh", "3d-fps-not-real", out, error_code));
         CHECK(error_code == shell::kErrWelcomeUnknownTemplate);
         CHECK(!ran);
+    }
+
+    // A CLI FAILURE (`context edit` exits non-zero) is an ORDINARY result, not a hard refusal:
+    // open_project still returns true (it produced a valid response) with opened:false in the envelope,
+    // and error_code stays empty (the local bad-params refusal is a DIFFERENT path).
+    {
+        shell::WelcomeBridge welcome;
+        std::vector<std::string> seen;
+        welcome.bind_cli_runner(
+            [&seen](const std::vector<std::string>& args) -> shell::CliResult
+            {
+                seen = args;
+                return fake_result(false, "", false);
+            });
+        contract::Json out;
+        std::string error_code;
+        CHECK(welcome.open_project("C:/games/demo", out, error_code));
+        CHECK(!out.at("opened").as_bool());
+        CHECK(error_code.empty());
+        CHECK(seen.size() == 2);
+        CHECK(seen[0] == "edit");
+    }
+
+    // A scaffold FAILURE (`context new` exits non-zero) reports created:false and does NOT attempt to
+    // open the never-created directory — the `context edit` follow-up is gated on success.
+    {
+        shell::WelcomeBridge welcome;
+        std::vector<std::vector<std::string>> calls;
+        welcome.bind_cli_runner(
+            [&calls](const std::vector<std::string>& args) -> shell::CliResult
+            {
+                calls.push_back(args);
+                return fake_result(false, "", false);
+            });
+        contract::Json out;
+        std::string error_code;
+        CHECK(welcome.new_project("C:/games/fresh", "default", out, error_code));
+        CHECK(!out.at("created").as_bool());
+        CHECK(!out.at("opened").as_bool());
+        CHECK(calls.size() == 1);
+        CHECK(calls[0][0] == "new");
     }
 }
 
