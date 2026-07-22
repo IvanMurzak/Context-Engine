@@ -79,4 +79,37 @@ std::optional<InstanceInfo> discover_instance(const fs::path& project, int timeo
     }
 }
 
+std::string format_daemon_ready_line(const InstanceInfo& info)
+{
+    Json doc = Json::object();
+    doc.set("endpoint", Json(info.endpoint));
+    doc.set("token", Json(info.token));
+    doc.set("protocolMajor", Json(static_cast<std::uint64_t>(info.protocol_major)));
+    doc.set("pid", Json(static_cast<std::int64_t>(info.pid)));
+    return std::string(kDaemonReadyLinePrefix) + " " + doc.dump(0);
+}
+
+std::optional<InstanceInfo> parse_daemon_ready_line(std::string_view line)
+{
+    const std::string_view prefix = kDaemonReadyLinePrefix;
+    // Trim leading whitespace so an indented log framing does not defeat the prefix match.
+    std::size_t begin = 0;
+    while (begin < line.size() && (line[begin] == ' ' || line[begin] == '\t'))
+        ++begin;
+    line.remove_prefix(begin);
+    if (line.size() < prefix.size() || line.substr(0, prefix.size()) != prefix)
+        return std::nullopt;
+    std::string_view rest = line.substr(prefix.size());
+    // A separator MUST follow the prefix, so a stray token like "context.daemon.readyX" is not matched.
+    std::size_t sep = 0;
+    while (sep < rest.size() && (rest[sep] == ' ' || rest[sep] == '\t'))
+        ++sep;
+    if (sep == 0)
+        return std::nullopt;
+    rest.remove_prefix(sep);
+    // The payload has the same shape as instance.json — reuse its parser (it requires a non-empty
+    // endpoint, exactly the "usable ready line" condition).
+    return parse_instance_document(std::string(rest));
+}
+
 } // namespace context::editor::client

@@ -50,6 +50,7 @@ add_library(context_editor_shell STATIC
     src/ipc_bridge.cpp    # e05c: the privileged bridge envelope + token isolation (04 §1 / 08 §1)
     src/panel_host.cpp    # e05d1: the panel-agnostic panel.* surface over the e05b roster (04 §3-§4)
     src/editor_state_bridge.cpp  # e05d2: the editor.state.*/editor.regions.* surface (03 §1 / §6)
+    src/daemon_lifecycle.cpp  # e14a: spawn-or-attach + exit policy + reconnect/read-only (D18)
     src/shell.cpp)        # WindowManager / EditorWindow / the single-threaded owner loop
 
 target_include_directories(context_editor_shell PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -71,8 +72,13 @@ target_include_directories(context_editor_shell PUBLIC ${CMAKE_CURRENT_SOURCE_DI
 # libraries are boundary-clean NOW, but keeping them off THIS target's closure is what keeps the
 # runtime half panel-agnostic and the audited surface minimal (and any future not-yet-clean panel
 # out of the gate's blast radius).
+# PUBLIC context_common (e14a): daemon_lifecycle.h holds a context::common::process::ChildProcess by
+# value, so its include dir must reach every consumer of this header. context_common is D10-CLEAN (it
+# links only context_warnings — nothing kernel-internal), so adding it to the Shell's closure leaves
+# the shell-boundary gate's FORBIDDEN list byte-identical and non-vacuous. The daemon itself is launched
+# as a SUBPROCESS (a runtime dependency, not a link one), so nothing forbidden enters the closure.
 target_link_libraries(context_editor_shell
-    PUBLIC context_client context_render_present context_gui_uitree context_gui_contract
+    PUBLIC context_client context_common context_render_present context_gui_uitree context_gui_contract
     PRIVATE context_warnings)
 
 # MSVC exception semantics (/EHsc), restored for the Shell family.
@@ -136,6 +142,7 @@ set(_context_shell_tests
     test_ipc_bridge    # e05c: the T1 adversarial envelope suite + the 3 token-isolation controls
     test_panel_host    # e05d1: the panel-agnostic roster/render/command/gesture/D6-state surface
     test_editor_state_bridge  # e05d2: layout/panels publish+restore round-trip + region-map emission
+    test_daemon_lifecycle  # e14a: exit-policy decision, client census, reconnect/read-only state
     test_shell)        # the owner loop end to end + the authenticated-attach guard
 
 foreach(_t IN LISTS _context_shell_tests)

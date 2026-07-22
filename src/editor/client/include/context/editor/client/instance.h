@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace context::editor::client
 {
@@ -36,5 +37,28 @@ struct InstanceInfo
 // publishing the file) until `timeout_ms` elapses. nullopt when no usable instance document appears.
 [[nodiscard]] std::optional<InstanceInfo> discover_instance(const std::filesystem::path& project,
                                                             int timeout_ms);
+
+// ------------------------------------------------------------------- the spawn handshake (D18/e14a)
+//
+// When the editor Shell SPAWNS the daemon as a child (no live daemon to attach to), the D20 attach
+// token must reach the Shell over the child's STDOUT — never argv/env (05 §2 / 08 threat model) and
+// without racing the `.editor/instance.json` publish. `context daemon` therefore prints ONE
+// machine-readable line the instant it is listening:
+//
+//     context.daemon.ready {"endpoint":"...","token":"...","protocolMajor":1,"pid":1234}
+//
+// The line is `kDaemonReadyLinePrefix`, a space, then the same {endpoint, token, protocolMajor, pid}
+// compact JSON `instance.json` carries. Both the daemon (which emits it) and the Shell (which reads it
+// off the spawned child's stdout) live in different link domains but both link context_client, so the
+// format + prefix are single-sourced here.
+inline constexpr const char* kDaemonReadyLinePrefix = "context.daemon.ready";
+
+// Format the ready line for `info`. Pure — the inverse of parse_daemon_ready_line.
+[[nodiscard]] std::string format_daemon_ready_line(const InstanceInfo& info);
+
+// Parse ONE line of a spawned daemon's stdout. Returns the InstanceInfo when `line` is a ready marker
+// carrying a non-empty endpoint; nullopt for any other line (a log line, the daemon's own pretty
+// "listening" envelope, a torn write). A caller drains stdout line by line until this yields a value.
+[[nodiscard]] std::optional<InstanceInfo> parse_daemon_ready_line(std::string_view line);
 
 } // namespace context::editor::client
