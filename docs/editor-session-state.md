@@ -61,7 +61,19 @@ safe to consume:
   but it means **echo suppression cannot distinguish two in-process consumers from each other**. A
   consumer that needs its own identity must be a real wire client (the Shell already is, via
   `context_client`); e08b/e08c should not route panel writes through the in-process shim expecting
-  per-panel `origin`.
+  per-panel `origin`. e08b took exactly that route: the Shell's `SessionFeed` writes over the Shell's
+  own wire connection, so its `origin` is real.
+* **`origin == 0` is ALSO "not attached", so an unattached consumer must not treat a 0/0 match as its
+  own echo** — it would silently swallow every daemon-originated fact. Guard the comparison on
+  "I have an id at all" (both e08b consumers do, and both have a test for it).
+
+### The writer sees its own change through the REPLY, never the fact
+
+The corollary of the drop rule, and the one that is easy to get backwards: the fact a write publishes
+carries the WRITER's `origin`, so the writer is precisely the client that will not apply it. Every
+mutating verb therefore answers with the resulting state (`editor.select` -> `ids`, the play verbs ->
+`state` / `simTick`), and **that reply is how the acting client learns its own outcome**. A consumer
+that renders only from facts shows every other client's changes and none of its own.
 
 Two supporting invariants make it trustworthy, and both are tested:
 
@@ -143,6 +155,26 @@ Any `--editor-*` flag switches the drive from the edit/query file pair to the se
 reply reports this connection's `clientId`, so a script can apply the same echo-suppression rule the
 SDK does.
 
+## Who consumes it (M9 e08b — the GUI is rewired onto this)
+
+The panels no longer own selection or play state; they are subscribers and writers of the state above.
+
+| consumer | writes | subscribes | where |
+|---|---|---|---|
+| Scene tree panel | `editor.select` via `scenetree::SelectionGateway` | `selection-changed` | `src/editor/gui/panels/scenetree/` |
+| Playbar | `editor.play\|pause\|stop\|step` via `playbar::PlayControlGateway` | `play-state` | `src/editor/gui/playbar/` |
+| editor-core `when` contexts | — (read-only) | `play-state` | `src/editor/webui/core/src/when.ts` (`DaemonSessionState`) |
+
+Both C++ seams are declared in the boundary-clean panel libraries and implemented ONCE, wire-side, by
+`shell::panels::SessionFeed` (`src/editor/shell/panels/session_feed.{h,cpp}`) — which is also where
+the `origin` drop rule is applied, so no individual panel has to get it right. The Shell subscribes to
+the `session` topic alongside `diagnostics` / `derivation` (`editor_main.cpp`) and re-binds the feed's
+client id on every attach, because ids are per-connection.
+
+The in-process `SessionControl*` path the playbar used to drive is **removed**, not shadowed; the
+runtime-session adapter that produces play frames lives on in `context_gui_playbar_session` (see
+`src/editor/gui/playbar/README.md`).
+
 ## Tests
 
 * `editorkernel-test_editor_session_state` — the state machine, the persisted projection, and the
@@ -152,8 +184,13 @@ SDK does.
 * `editor-session-multiclient-t2` (`src/tests/integration/`) — the T2 drill against a REAL
   `context daemon`: the CLI **and** a scripted SDK agent as the two clients, play control, restart
   persistence, and corrupt recovery.
+* `editor-shell-test_session_feed` — the consumer side over a SCRIPTED wire (a real `client::Client`
+  on a mock channel): the fact dispatch, echo suppression, and the write seams.
+* `editor-session-panels-t2` (`src/tests/integration/`) — the e08b T2 drill: the REAL Shell panel
+  composition against a REAL daemon, with the real `context` binary as the second client. Both
+  directions and the no-echo-loop property, which no scripted wire can check.
 
 ## Not in scope here
 
-Panel rewiring (e08b), the `editor.ui` bus (e08c), writes/undo over the wire (e09), and the
-**second-window** propagation drill (e10 — it needs the multi-window subsystem, which is unbuilt).
+The `editor.ui` bus (e08c), writes/undo over the wire (e09), and the **second-window** propagation
+drill (e10 — it needs the multi-window subsystem, which is unbuilt).

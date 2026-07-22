@@ -421,20 +421,28 @@ int main(int argc, char** argv)
     // the apply_* non-member seams builtin_panels.h exposes for exactly this caller.
     shell::panels::ProblemsFeed* feed = builtin.problems.get();
     shell::panels::SceneTreeFeed* tree_feed = builtin.scenetree.get();
+    // e08b: the daemon session feed (selection / play). Same forward-declared-pointer discipline.
+    shell::panels::SessionFeed* session_feed = builtin.session.get();
 
-    lifecycle.set_subscription_topics(
-        {shell::panels::kDiagnosticsTopic, shell::panels::kDerivationTopic});
+    lifecycle.set_subscription_topics({shell::panels::kDiagnosticsTopic,
+                                       shell::panels::kDerivationTopic,
+                                       shell::panels::kSessionTopic});
     lifecycle.set_reconnect_policy(shell::ReconnectPolicy{/*initial_ms*/ 200, /*max_ms*/ 2000,
                                                           /*multiplier*/ 2});
     // On EVERY (re)attach: register the daemon's token + endpoint with the egress guard so no renderer
     // can echo them back. A reconnect after a daemon restart mints a NEW token, so this runs per attach.
     lifecycle.on_attached(
-        [&bridge, &lifecycle, &daemon_secret_ok](client::Client&)
+        [&bridge, &lifecycle, &daemon_secret_ok, session_feed](client::Client& attached)
         {
             const bool ok = bridge.protect_secret(lifecycle.instance().token) &&
                             bridge.protect_secret(lifecycle.instance().endpoint);
             if (!ok)
                 daemon_secret_ok = false;
+            // e08b: re-bind the session feed's connection AND its echo-suppression identity. Ids are
+            // minted per WIRE CONNECTION, so a reconnect mints a new one — a stale id would suppress
+            // another client's facts and apply our own, both silently (session_feed.h).
+            if (session_feed != nullptr)
+                shell::panels::bind_session_client(*session_feed, &attached, attached.client_id());
         });
     // 0 is only the FALLBACK generation stamp for a snapshot that carries none of its own; the real
     // cursor snapshot always does and apply_snapshot prefers it.
@@ -445,7 +453,7 @@ int main(int argc, char** argv)
                 shell::panels::apply_problems_snapshot(*feed, snapshot, 0);
         });
     lifecycle.on_event(
-        [feed, tree_feed](const std::string&, const client::ClientEvent& event)
+        [feed, tree_feed, session_feed](const std::string&, const client::ClientEvent& event)
         {
             if (feed != nullptr)
                 (void)shell::panels::apply_problems_event(*feed, event.topic, event.payload,
@@ -453,6 +461,10 @@ int main(int argc, char** argv)
             if (tree_feed != nullptr)
                 (void)shell::panels::apply_scenetree_event(*tree_feed, event.topic, event.payload,
                                                            event.generation);
+            // e08b: the `session` facts (another client's selection / play state). The feed itself
+            // drops the echo of our own writes, so nothing here needs to know about `origin`.
+            if (session_feed != nullptr)
+                (void)shell::panels::apply_session_event(*session_feed, event.topic, event.payload);
         });
 
     // START the spine: attach to a live daemon, else spawn `context daemon` as a child and read the D20

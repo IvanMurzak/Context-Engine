@@ -31,33 +31,22 @@ namespace
     return "EDIT MODE - authored state (file-authoritative)";
 }
 
-// A human/AT-facing summary of the observed play frame's drawables + lights (the same shape the
-// viewport uses), or "no live scene" in edit state.
-[[nodiscard]] std::string scene_text(const PlayFrame& frame, PlayState state)
+// Whether a live session exists, in words. Since M9 e08b the live session belongs to the DAEMON, so
+// the playbar reports its existence (which the `play-state` fact tells it) rather than a drawable
+// count from an in-process frame it no longer observes — that observation left with the in-process
+// SessionControl path (playbar_model.h explains why it was not kept as a second truth).
+[[nodiscard]] std::string session_text(PlayState state)
 {
-    if (state == PlayState::edit)
-    {
-        return "no live scene";
-    }
-    const std::size_t drawables = frame.snapshot.items.size();
-    const std::size_t lights =
-        frame.snapshot.directional_lights.size() + frame.snapshot.point_lights.size();
-    std::ostringstream out;
-    out << drawables << (drawables == 1 ? " drawable" : " drawables");
-    if (lights > 0)
-    {
-        out << ", " << lights << (lights == 1 ? " light" : " lights");
-    }
-    return out.str();
+    return state == PlayState::edit ? "no live session" : "live daemon session";
 }
 
-// The status line: the play state + simTick + observed-frame summary + the outcome (ready, or the last
-// reserved play.* error). Deterministic.
+// The status line: the play state + simTick + the live-session summary + the outcome (ready, or the
+// last reserved play.* error). Deterministic.
 [[nodiscard]] std::string status_text(const PlaybarModel& model)
 {
     std::ostringstream out;
     out << "Play bar - " << state_token(model.state()) << " - tick " << model.sim_tick() << " - "
-        << scene_text(model.last_frame(), model.state()) << " - "
+        << session_text(model.state()) << " - "
         << (model.last_error().empty() ? "ready" : model.last_error());
     return out.str();
 }

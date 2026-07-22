@@ -1,11 +1,15 @@
 // T1 unit tests for the when-context evaluator (M9 e07b, design 05 §6 / 03 §6). Two properties this
 // tier pins: (1) the SIX contexts resolve from their two sources with the fixed scope precedence
 // (text-input > focused panel > window > global) — the resolution-order matrix; and (2) the clause
-// evaluator is TOTAL and FAIL-CLOSED (empty = always, malformed = inactive, never a throw). It also
-// pins the e08 seam: swapping the session-state stub changes ONLY `playState`.
+// evaluator is TOTAL and FAIL-CLOSED (empty = always, malformed = inactive, never a throw).
+//
+// M9 e08b adds the third: the REAL daemon-backed `DaemonSessionState` — its `origin` echo
+// suppression, its tolerance, and the fact that a daemon `play-state` fact reaches a `when` clause
+// with ZERO change to the evaluator or the registry (the seam's whole purpose).
 
 import { assert, assertEqual, type TestCase } from "./harness.js";
 import {
+    DaemonSessionState,
     evaluateWhen,
     resolveContext,
     resolveWhenContext,
@@ -215,22 +219,124 @@ export const whenTests: readonly TestCase[] = [
 
     // ------------------------------------------------------------- the e08 (session state) seam
     {
-        name: "the session-state stub is the ONLY source e08 swaps (zero change to the other contexts)",
+        name: "the session source is the ONLY one e08 swapped (zero change to the other contexts)",
         run: () => {
-            const stopped = resolveContext({ editorUi: FULL_UI, session: STUB_SESSION_STATE });
-            assertEqual(stopped.playState, "stopped", "the stub reads stopped");
+            const base = resolveContext({ editorUi: FULL_UI, session: STUB_SESSION_STATE });
+            // e08b corrected the token: `edit` is the daemon's own L-51 vocabulary, not "stopped".
+            assertEqual(base.playState, "edit", "the boot baseline reads the daemon's `edit`");
 
-            // Swapping ONLY the session source (what e08 does) changes ONLY playState.
+            // Swapping ONLY the session source (what e08b did) changes ONLY playState.
             const playing: SessionStateSource = { playState: "playing" };
             const swapped = resolveContext({ editorUi: FULL_UI, session: playing });
             assertEqual(swapped.playState, "playing", "the swapped source drives playState");
-            assertEqual(swapped.panelFocus, stopped.panelFocus, "panelFocus unchanged by the swap");
-            assertEqual(swapped.windowType, stopped.windowType, "windowType unchanged by the swap");
+            assertEqual(swapped.panelFocus, base.panelFocus, "panelFocus unchanged by the swap");
+            assertEqual(swapped.windowType, base.windowType, "windowType unchanged by the swap");
             assertEqual(
                 swapped.textInputFocus,
-                stopped.textInputFocus,
+                base.textInputFocus,
                 "textInputFocus unchanged by the swap",
             );
+        },
+    },
+
+    // ------------------------------------------- e08b: the REAL daemon-backed session source
+    //
+    // These would all pass trivially against the old stub, which is exactly why each asserts
+    // something the stub CANNOT do: move on a daemon fact, drop an echo, and reject a token.
+    {
+        name: "DaemonSessionState: a `play-state` fact from another client drives playState",
+        run: () => {
+            const session = new DaemonSessionState();
+            session.clientId = 4;
+            assertEqual(session.playState, "edit", "boot is `edit` — play state is never persisted");
+
+            assert(
+                session.applyFact({ event: "play-state", origin: 9, state: "playing", simTick: 3 }),
+                "a fact from another client is applied",
+            );
+            assertEqual(session.playState, "playing", "the daemon's state is now the source");
+            assertEqual(session.applied, 1, "one fact moved the state");
+
+            // ...and it reaches a `when` clause with no change to the evaluator or the registry.
+            const ctx = resolveContext({ editorUi: FULL_UI, session });
+            assertEqual(
+                evaluateWhen("playState == playing", ctx),
+                true,
+                "a play-guarded command is active while the DAEMON says playing",
+            );
+            assertEqual(evaluateWhen("playState == edit", ctx), false, "and `edit` is not");
+        },
+    },
+    {
+        name: "DaemonSessionState: our OWN echo is dropped (the e08a `origin` contract)",
+        run: () => {
+            const session = new DaemonSessionState();
+            session.clientId = 4;
+            assert(
+                !session.applyFact({ event: "play-state", origin: 4, state: "playing" }),
+                "a fact stamped with our own client id is an echo",
+            );
+            assertEqual(session.playState, "edit", "an echo never moves the state");
+            assertEqual(session.echoesDropped, 1, "and it is counted, not silently ignored");
+        },
+    },
+    {
+        name: "DaemonSessionState: an UNATTACHED source (clientId 0) is a plain subscriber",
+        run: () => {
+            // 0 is also the DAEMON's own origin, so a naive `origin === clientId` test would make an
+            // unattached client swallow every daemon-originated fact in silence.
+            const session = new DaemonSessionState();
+            assertEqual(session.clientId, 0, "not attached");
+            assert(
+                session.applyFact({ event: "play-state", origin: 0, state: "paused" }),
+                "a daemon-originated fact is applied, not read as our echo",
+            );
+            assertEqual(session.playState, "paused", "the state moved");
+            assertEqual(session.echoesDropped, 0, "nothing was dropped");
+        },
+    },
+    {
+        name: "DaemonSessionState: malformed / foreign / unknown-token payloads leave the state alone",
+        run: () => {
+            const session = new DaemonSessionState();
+            assert(session.applyFact({ event: "play-state", origin: 9, state: "playing" }), "setup");
+            assertEqual(session.playState, "playing", "setup");
+
+            // Tolerance: none of these throws, and none of them moves the state.
+            for (const payload of [
+                null,
+                undefined,
+                "play-state",
+                [],
+                {},
+                { event: "selection-changed", origin: 9, ids: ["a"] },
+                { event: "camera-changed", origin: 9, viewportId: "main" },
+                { event: "play-state", origin: 9 },
+                { event: "play-state", origin: 9, state: 7 },
+                // An unknown token from a NEWER daemon: keep the last known state rather than
+                // claiming `edit` (a confident lie about whether a session is live).
+                { event: "play-state", origin: 9, state: "rewinding" },
+            ]) {
+                assert(!session.applyFact(payload), "no state change");
+            }
+            assertEqual(session.playState, "playing", "the last KNOWN state survived every one");
+            assertEqual(session.applied, 1, "only the real fact counted");
+        },
+    },
+    {
+        name: "DaemonSessionState: a restated fact is idempotent; reset returns to the boot baseline",
+        run: () => {
+            const session = new DaemonSessionState();
+            assert(session.applyFact({ event: "play-state", origin: 9, state: "playing" }), "setup");
+            assert(
+                !session.applyFact({ event: "play-state", origin: 9, state: "playing" }),
+                "a restatement (a `sinceSeq: 0` ring replay can deliver one twice) changes nothing",
+            );
+            assertEqual(session.applied, 1, "and is not counted twice");
+
+            // A reconnect means a restarted daemon, which holds no live session.
+            session.reset();
+            assertEqual(session.playState, "edit", "reset returns to the boot baseline");
         },
     },
     {

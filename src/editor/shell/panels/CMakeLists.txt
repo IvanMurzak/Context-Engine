@@ -17,11 +17,14 @@
 #   context_gui_panel_problems  -> gui_uitree / bridge       (bridge is deliberately NOT forbidden)
 #   context_gui_panel_scenetree -> gui_uitree / bridge       (e05d3: compose split OUT)
 #   context_gui_panel_inspector -> gui_uitree / serializer   (e05d3: compose+schema split OUT)
+#   context_gui_playbar         -> gui_uitree                (e08b: session_control split OUT, so the
+#                                                             transport carries no runtime/render dep)
 
 add_library(context_editor_panels STATIC
     src/problems_feed.cpp    # the live `diagnostics` topic -> ProblemsPanel projection (04 §4)
     src/scenetree_feed.cpp   # e05d3: the `editor.scene-tree` read -> SceneTreePanel projection
     src/inspector_feed.cpp   # e05d3: the `editor.inspect` read -> InspectorPanel projection
+    src/session_feed.cpp     # e08b: the `session` topic + the `editor.*` writes <-> panel state
     src/builtin_panels.cpp)  # the provider bindings + the live-hydration pump
 
 target_include_directories(context_editor_panels PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -32,7 +35,7 @@ target_include_directories(context_editor_panels PUBLIC ${CMAKE_CURRENT_SOURCE_D
 # complete-type use is builtin_panels.cpp-local.)
 target_link_libraries(context_editor_panels
     PUBLIC context_editor_shell context_gui_panel_problems context_gui_panel_scenetree
-           context_gui_panel_inspector
+           context_gui_panel_inspector context_gui_playbar
     PRIVATE context_warnings)
 
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) ------------------------------
@@ -50,6 +53,7 @@ set(_context_editor_panels_tests
     test_problems_feed     # the wire->model projection, promotion/settle, and the row-id mapping
     test_scenetree_feed    # e05d3: the scene-tree wire round-trip, settle->refetch, selection dispatch
     test_inspector_feed    # e05d3: the inspector wire round-trip, CAS token, edit staging dispatch
+    test_session_feed      # e08b: the `session` facts, origin echo suppression, the `editor.*` writes
     test_builtin_panels)   # the composition root: what binds, what stays unhosted, end to end
 
 # The two e05d3 feed tests ALSO link context_gui_panel_builders: the round-trip half builds models
@@ -61,6 +65,12 @@ foreach(_t IN LISTS _context_editor_panels_tests)
         PRIVATE context_editor_panels context_gui_panel_builders context_warnings)
     target_link_options(context_editor_panels_${_t}
         PRIVATE ${_context_editor_panels_static_runtime})
-    target_include_directories(context_editor_panels_${_t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    # The client SDK's own tests/ dir supplies `mock_channel.h` — the SCRIPTED WIRE the e08b session
+    # test drives a REAL client::Client over. Reusing it (rather than writing a second mock here) is
+    # deliberate: that header carries the standing "a mock more capable than the daemon hides real
+    # bugs" warning and the flat-attach-reply rule, and a private copy would drift off both.
+    target_include_directories(context_editor_panels_${_t} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../client/tests)
     add_test(NAME editor-shell-${_t} COMMAND context_editor_panels_${_t})
 endforeach()

@@ -10,10 +10,11 @@
 //      SCOPE, and the four scopes RESOLVE in a fixed precedence — text-input > focused panel > window
 //      > global (03 §6) — so a more-specific scope shadows a less-specific one.
 //
-//      ⚠ e08 (session state) HAS NOT LANDED. `playState` (and, later, selection) is therefore read
-//      from a LOCAL STUB behind `SessionStateSource`, so e08 swaps only that source with ZERO change
-//      to the registry or this evaluator. `editor.ui` is behind `EditorUiSource` for the same reason —
-//      the real bus wiring swaps the source, not the model.
+//      M9 e08b LANDED THE REAL `playState` SOURCE. `DaemonSessionState` below consumes the daemon's
+//      `session` topic facts (e08a — docs/editor-session-state.md) and carries the DAEMON'S OWN
+//      L-51 tokens, byte-identical to `gui::playbar::state_token()`. The evaluation semantics did not
+//      change; only the source did, exactly as the seam was built for. `editor.ui` is still behind
+//      `EditorUiSource` — the real bus is e08c, and it will swap that source the same way.
 //
 //   2. A TOTAL, FAIL-CLOSED EXPRESSION EVALUATOR. `evaluateWhen` never throws: an empty clause is
 //      "always active", and a MALFORMED clause is INACTIVE (false) rather than an exception deep in a
@@ -23,8 +24,15 @@
 //
 // NO keymap and NO palette here (those are e07c / e07d). This module is the substrate both consume.
 
-/** The play state (05 §4, D7). Owned by e08 (session state); read from a stub until it lands. */
-export type PlayState = "stopped" | "playing" | "paused";
+/**
+ * The L-51 play state (05 §4, D7), owned by the DAEMON.
+ *
+ * These three tokens are the daemon's own wire vocabulary — byte-identical to
+ * `editorkernel::play_state_token()` and `gui::playbar::state_token()`, which is why a `when` clause
+ * can compare against them with no translation layer to drift. `edit` (NOT "stopped") is authored
+ * truth with no live session: e08b corrected the token when the real source replaced the stub.
+ */
+export type PlayState = "edit" | "playing" | "paused";
 
 /** The six when-context keys (05 §6). The closed set — a clause referencing any other key is honest
  * about it (that key simply reads as absent), but nothing in the editor sets one. */
@@ -81,10 +89,11 @@ export interface EditorUiSource {
 }
 
 /**
- * The daemon session-state facts (05 §4, D7) — OWNED BY e08 (session state), NOT LANDED.
+ * The daemon session-state facts (05 §4, D7).
  *
- * Read from `STUB_SESSION_STATE` behind this interface so e08 swaps ONLY this source (with zero
- * registry change), exactly as the spec requires.
+ * The interface the four scope layers read `playState` from. `DaemonSessionState` below is the real
+ * implementation (M9 e08b); `STUB_SESSION_STATE` remains as the frozen boot baseline for a caller
+ * that has no daemon subscription yet.
  */
 export interface SessionStateSource {
     readonly playState: PlayState;
@@ -105,10 +114,103 @@ export const STUB_EDITOR_UI: EditorUiSource = {
     viewportMode: "",
 };
 
-/** The stopped-session baseline (the e08 stub — the ONE source e08 replaces). */
+/**
+ * The BOOT baseline: `edit`, no live session.
+ *
+ * Not a fiction — it is what the daemon itself holds at boot, because play state is deliberately not
+ * persisted across a restart (docs/editor-session-state.md: "restoring `playing` would be a lie about
+ * L-51 provenance"). A caller with no session subscription reads this and is correct until the first
+ * fact arrives; `DaemonSessionState` is what makes it stay correct after that.
+ */
 export const STUB_SESSION_STATE: SessionStateSource = {
-    playState: "stopped",
+    playState: "edit",
 };
+
+/**
+ * THE REAL SESSION-STATE SOURCE (M9 e08b): the daemon's `session` topic, projected onto the one fact
+ * the when-context model reads.
+ *
+ * It is a SINK, not a poller: the boot sequence subscribes to `session` and hands every payload to
+ * `applyFact`, exactly as the native Shell's `SessionFeed` does for the C++ panels. Two properties
+ * are carried over from that C++ side deliberately, because they are the contract and not an
+ * implementation detail:
+ *
+ *   * **`origin` echo suppression.** The daemon fans every fact out to every subscriber with no
+ *     per-client filtering; a consumer APPLIES a fact whose `origin` differs from its own client id
+ *     and DROPS one that matches. Set `clientId` from the attach reply. `0` means "not attached",
+ *     and is ALSO the daemon's own origin, so a 0/0 match is deliberately not treated as an echo —
+ *     otherwise an unattached client would silently swallow every daemon-originated fact.
+ *   * **Tolerance.** A malformed payload is IGNORED, never thrown: this feeds command-palette
+ *     filtering, and a `when` evaluation that throws deep in a dispatch path is strictly worse than
+ *     one that keeps the last known state.
+ */
+export class DaemonSessionState implements SessionStateSource {
+    /** This connection's echo-suppression identity (`clientId` from the attach reply). */
+    clientId = 0;
+
+    #playState: PlayState = "edit";
+    #applied = 0;
+    #echoesDropped = 0;
+
+    get playState(): PlayState {
+        return this.#playState;
+    }
+
+    /** How many facts actually moved the state, and how many were dropped as our own echo. */
+    get applied(): number {
+        return this.#applied;
+    }
+    get echoesDropped(): number {
+        return this.#echoesDropped;
+    }
+
+    /**
+     * Apply one `session` topic payload. Returns true only when the state actually changed, so a
+     * caller can skip a palette re-filter it does not need.
+     *
+     * Recognises `play-state` and ignores the rest (`selection-changed` / `camera-changed` carry no
+     * when-context key — the six keys are a closed set, 05 §6).
+     */
+    applyFact(payload: unknown): boolean {
+        if (!isRecord(payload)) {
+            return false;
+        }
+        const origin = typeof payload["origin"] === "number" ? payload["origin"] : 0;
+        if (this.clientId !== 0 && origin === this.clientId) {
+            this.#echoesDropped += 1;
+            return false;
+        }
+        if (payload["event"] !== "play-state") {
+            return false;
+        }
+        const state = toPlayState(payload["state"]);
+        if (state === null || state === this.#playState) {
+            return false;
+        }
+        this.#playState = state;
+        this.#applied += 1;
+        return true;
+    }
+
+    /** Reset to the boot baseline — what a reconnect means (a restarted daemon holds no session). */
+    reset(): void {
+        this.#playState = "edit";
+    }
+}
+
+/** A plain-object type guard, local so this module keeps its zero-import surface. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * A wire `state` token -> PlayState. `null` for anything else, so an unknown token from a NEWER
+ * daemon leaves the last known state alone rather than silently reading as `edit` — claiming "no live
+ * session" on a token we simply do not understand would be a confident lie.
+ */
+function toPlayState(token: unknown): PlayState | null {
+    return token === "edit" || token === "playing" || token === "paused" ? token : null;
+}
 
 /**
  * Map the two sources onto the four scope layers, placing each fact in its home scope: `playState`

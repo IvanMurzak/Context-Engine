@@ -65,6 +65,10 @@ class ProblemsFeed;
 // library's own panel headers. Callers holding only the bag drive them through the free seams below.
 class SceneTreeFeed;
 class InspectorFeed;
+// The e08b daemon-session feed, forward-declared for the SAME reason (it includes both panel headers
+// and reaches the typeid chain through scene_tree_panel.h). Callers holding only the bag drive it
+// through the free seams below.
+class SessionFeed;
 
 // The event topics the Problems live feed consumes. Declared HERE rather than in `problems_feed.h`
 // (which fully defines `ProblemsFeed` and is NOT safe to include from an `-fno-rtti` CEF TU — see
@@ -75,6 +79,12 @@ class InspectorFeed;
 // `problems_feed.cpp` includes this header for them.
 inline constexpr const char* kDiagnosticsTopic = "diagnostics";
 inline constexpr const char* kDerivationTopic = "derivation";
+// The M9 e08b DAEMON SESSION topic (selection / cameras / play — e08a, D7 tier 1). Re-declared here
+// for exactly the reason the two above are: `editor_main.cpp` subscribes to this string and only ever
+// sees the forward-declared `SessionFeed`, never `session_feed.h` (which is not `-fno-rtti`-safe to
+// include). `session_feed.h` defines the same value as `kSessionTopicName` and this header's own
+// static_assert in builtin_panels.cpp keeps the two spellings from drifting.
+inline constexpr const char* kSessionTopic = "session";
 
 // Thin free-function wrappers over `ProblemsFeed::apply_snapshot` / `apply_event`, for exactly the
 // same reason: a caller holding only the forward-declared `ProblemsFeed` above cannot call a member
@@ -90,6 +100,13 @@ bool apply_problems_event(ProblemsFeed& feed, const std::string& topic, const co
 // the panel's rendered surface changed. Defined in builtin_panels.cpp.
 bool apply_scenetree_event(SceneTreeFeed& feed, const std::string& topic,
                            const contract::Json& payload, std::uint64_t generation);
+
+// The same seam for the e08b Session feed. `apply_session_event` forwards one `session` fact (the
+// feed itself drops our own echo — see session_feed.h); `bind_session_client` re-binds the live
+// connection AND this connection's echo-suppression identity, which MUST be re-done on every
+// (re)attach because ids are minted per wire connection. Both defined in builtin_panels.cpp.
+bool apply_session_event(SessionFeed& feed, const std::string& topic, const contract::Json& payload);
+void bind_session_client(SessionFeed& feed, client::Client* client, std::uint64_t client_id);
 
 // The roster ids this build can render. Exposed so a caller (and the T1 suite) can assert what was
 // bound WITHOUT restating the list — the one enumeration lives in `install_builtin_panels`.
@@ -116,6 +133,12 @@ struct BuiltinPanels
     BuiltinPanels& operator=(const BuiltinPanels&) = delete;
 
     std::unique_ptr<ProblemsFeed> problems;
+    // The e08b daemon-session feed. DECLARED FIRST so it is DESTROYED LAST (members destroy in
+    // reverse order): it IS the SelectionGateway the Scene tree's panel writes through, and a gateway
+    // is contractually required to outlive its panel (scene_tree_panel.h). The reverse pointer — the
+    // feed's raw `SceneTreePanel*` — is only dereferenced from `apply_event`, which the owner loop
+    // stops calling before teardown, so no fact can arrive at a half-destroyed bag.
+    std::unique_ptr<SessionFeed> session;
     // The e05d3 live feeds. DECLARATION ORDER IS LOAD-BEARING: `install_builtin_panels` wires the
     // Scene tree's selection listener at the INSPECTOR feed, so the inspector must be destroyed
     // FIRST (members destroy in reverse order) — which member order scenetree-then-inspector gives.

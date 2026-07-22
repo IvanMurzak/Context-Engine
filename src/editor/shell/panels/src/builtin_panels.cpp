@@ -4,12 +4,15 @@
 
 #include "context/editor/client/client.h" // the pump's live daemon reads (complete type HERE only)
 #include "context/editor/gui/panels/problems/problems_panel.h"
+#include "context/editor/gui/playbar/playbar_model.h"
 #include "context/editor/gui/uitree/builtin.h"
 #include "context/editor/shell/panels/inspector_feed.h"
 #include "context/editor/shell/panels/problems_feed.h" // ProblemsFeed complete type (see builtin_panels.h)
 #include "context/editor/shell/panels/scenetree_feed.h"
+#include "context/editor/shell/panels/session_feed.h" // SessionFeed complete type (e08b)
 
 #include <cstdio>
+#include <string_view>
 #include <utility>
 
 namespace context::editor::shell::panels
@@ -72,6 +75,21 @@ bool apply_scenetree_event(SceneTreeFeed& feed, const std::string& topic,
     return feed.apply_event(topic, payload, generation);
 }
 
+// The e08b seams. The topic string is declared in BOTH headers for the RTTI/CEF reason builtin_panels.h
+// documents; this is the one TU that sees both, so it is where the two spellings are pinned together.
+static_assert(std::string_view(kSessionTopic) == std::string_view(kSessionTopicName),
+              "the subscriber's topic string and the feed's must be the same string");
+
+bool apply_session_event(SessionFeed& feed, const std::string& topic, const contract::Json& payload)
+{
+    return feed.apply_event(topic, payload);
+}
+
+void bind_session_client(SessionFeed& feed, client::Client* client, std::uint64_t client_id)
+{
+    feed.bind_client(client, client_id);
+}
+
 void pump_panel_feeds(BuiltinPanels& panels, client::Client& client, const std::string& scene_path)
 {
     // Scene tree: fetch when due AND a scene is named. The claim precedes the call (header: a
@@ -116,6 +134,10 @@ const std::vector<std::string>& hostable_panel_ids()
         gui::panels::problems::ProblemsPanel::kContributionId,
         gui::panels::scenetree::SceneTreePanel::kContributionId,
         gui::panels::inspector::InspectorPanel::kContributionId,
+        // e08b: hostable because the playbar stopped being a runtime-session driver. Its library now
+        // links nothing but the headless uitree (gui/playbar/CMakeLists.txt explains the split), so
+        // binding it here adds no weight to `context_editor`'s D10-audited closure.
+        gui::playbar::PlaybarModel::kContributionId,
     };
     return ids;
 }
@@ -156,6 +178,24 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
         // pump daemon events into a model no renderer can ever see.
     }
 
+    // --- the daemon session feed + the playbar (M9 e08b) -----------------------------------------
+    // Constructed BEFORE the Scene tree, because it IS the SelectionGateway that panel writes
+    // through: the panel takes the gateway at construction, and a gateway must outlive its panel.
+    // Binding the playbar provider here is what makes the L-51 indicator a live, daemon-fed surface
+    // rather than a rostered-but-unhosted one.
+    {
+        auto session =
+            std::make_unique<SessionFeed>(host, gui::playbar::PlaybarModel::kContributionId);
+        if (host.provide(gui::playbar::PlaybarModel::kContributionId, session->make_provider()))
+        {
+            ++out.bound;
+            out.session = std::move(session);
+        }
+        // A refused binding DROPS the feed (the ProblemsFeed rule) — and with it the Scene tree's
+        // gateway, so the tree below is constructed with none and honestly renders a selection it
+        // cannot change, rather than writing through a feed nothing routes to.
+    }
+
     // --- Scene tree + Inspector (M9 e05d3, the D10-split pair) ----------------------------------
     // Hostable because their kernel-typed builders moved daemon-side (gui/panels/builders/): the
     // panel libraries on THIS closure are boundary-clean, and the models arrive as data over
@@ -163,7 +203,7 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
     // drives the Inspector's fetch (R-HUX-011) — wired HERE, the one place holding both feeds.
     {
         auto scenetree = std::make_unique<SceneTreeFeed>(
-            host, gui::panels::scenetree::SceneTreePanel::kContributionId);
+            host, gui::panels::scenetree::SceneTreePanel::kContributionId, out.session.get());
         auto inspector = std::make_unique<InspectorFeed>(
             host, gui::panels::inspector::InspectorPanel::kContributionId);
 
@@ -213,6 +253,14 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
         }
         // A refused binding drops its feed (the ProblemsFeed rule); the selection listener was only
         // wired when both bound, so a dangling capture cannot survive this scope.
+
+        // e08b: point the session feed at the panel whose rendered selection it drives. Done AFTER
+        // the move, so the pointer is into the feed that will actually live in the bag.
+        if (out.session != nullptr && out.scenetree != nullptr)
+        {
+            out.session->bind_scene_tree(&out.scenetree->panel(),
+                                         gui::panels::scenetree::SceneTreePanel::kContributionId);
+        }
     }
 
     return out;

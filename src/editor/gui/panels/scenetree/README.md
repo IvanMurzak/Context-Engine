@@ -30,20 +30,42 @@ assertion is the headless unit path below on the default 3-OS `build` matrix.
   - `build_panel()` projects the model into a headless `uitree::Panel` (a `tree` of focusable
     `treeitem`s) — **a11y-conformant by construction** (`uitree::audit_a11y` returns no violations)
     and **deterministic** (identical state → byte-identical `render_html`, so re-render is stable);
-  - `select()` / `clear_selection()` drive selection and **emit a `SceneSelection` event** every
-    registered listener (other panels) consumes — the R-HUX-011 selection loop; every row is a
-    focusable, command-bound `treeitem`, so selection has a complete keyboard path (R-A11Y-001 /
-    R-CLI-001);
+  - `select()` / `clear_selection()` are **WRITE REQUESTS to the daemon** through the
+    `SelectionGateway` seam (M9 e08b — see below), and `apply_selection()` adopts the daemon's answer,
+    **emitting a `SceneSelection` event** every registered listener (other panels) consumes — the
+    R-HUX-011 selection loop; every row is a focusable, command-bound `treeitem`, so selection has a
+    complete keyboard path (R-A11Y-001 / R-CLI-001);
   - `on_derivation_settled(generation, stability)` consumes the **R-BRIDGE-008** quiescence event —
     advancing the generation and recording the `stability` (`stable` / `settling` / `unstable`) the
     status line reflects, so a settling world is visibly distinguished from a stable one;
-  - `set_model()` refreshes the tree from a fresh snapshot, **preserving the selection** when its
-    identity survives and clearing (notifying) it otherwise.
+  - `set_model()` refreshes the tree from a fresh snapshot, **never touching the selection** — only
+    re-resolving its L-37 identity hash against the new world (0 when the selected identity has no row
+    here). A node missing from THIS panel's view is not the daemon deselecting it.
 
 The panel consumes the bridge query surface + `derivation.settled` events at the seam
 (`set_model` from a snapshot, `on_derivation_settled` on the event); wiring it to a live
 `bridge::EventStream` subscription + the R-HUX-011 instrumented input→paint latency measurement is
 the CEF-host integration path (a trailing M5 surface), out of this headless panel's scope.
+
+## ⚠ M9 e08b — the panel RENDERS selection; the daemon OWNS it
+
+Selection is daemon session state (`docs/editor-session-state.md`, design 05 §4 / D7 tier 1), so this
+panel is a **subscriber and a writer**, never a custodian:
+
+- `select()` / `clear_selection()` go out through the **`SelectionGateway`** seam — a pure virtual
+  declared here (the `OverrideWriteGateway` pattern), so this library stays boundary-clean and the
+  write path is assertable with a recording double. The real implementation is
+  `shell::panels::SessionFeed`, over `editor.select` on the Shell's own wire connection.
+- The gateway answers with **the selection the daemon now holds**, and the panel renders *that* — it
+  never moves optimistically, so a request the daemon refused is never visible. The reply is also the
+  ONLY way the panel sees its own selection: the `selection-changed` fact a write publishes carries
+  this client's `origin` and is dropped by the echo-suppression rule one layer up.
+- `apply_selection()` is the single mutator of the rendered selection, fed identically by that reply
+  and by a fact caused by **another client** (a CLI, a scripted agent, a second window) — which is why
+  the Inspector's selection loop cannot tell the two apart, and must not.
+
+With no gateway bound (the a11y harness's default-constructed panel) `select()` simply reports false:
+a panel with no daemon cannot change a selection it does not own.
 
 ## Building + testing (default `dev` gate — no CEF)
 

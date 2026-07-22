@@ -59,18 +59,20 @@ void binds_every_hostable_panel_and_nothing_else()
         CHECK(host.hosts(id));
     }
 
-    // FOUR panels, from three different libraries (uitree / problems / the e05d3 pair) — the
-    // panel-agnosticism claim exercised across every hosted shape.
-    CHECK(panels::hostable_panel_ids().size() == 4);
+    // FIVE panels, from four different libraries (uitree / problems / the e05d3 pair / the e08b
+    // playbar) — the panel-agnosticism claim exercised across every hosted shape.
+    CHECK(panels::hostable_panel_ids().size() == 5);
     CHECK(host.hosts("placeholder"));
     CHECK(host.hosts(context::editor::gui::panels::problems::ProblemsPanel::kContributionId));
     CHECK(host.hosts("builtin.scene-tree"));
     CHECK(host.hosts("builtin.inspector"));
+    CHECK(host.hosts("builtin.playbar"));
 
     // The feed owners came back, so every provider's captures stay alive.
     CHECK(bound.problems != nullptr);
     CHECK(bound.scenetree != nullptr);
     CHECK(bound.inspector != nullptr);
+    CHECK(bound.session != nullptr);
 
     // The whole roster is still LISTED — an unhostable panel is visible and honestly flagged, never
     // hidden.
@@ -94,7 +96,7 @@ void renders_the_hosted_panels_through_the_bridge()
 {
     shell::PanelHost host;
     const panels::BuiltinPanels bound = panels::install_builtin_panels(host);
-    CHECK(bound.bound == 4);
+    CHECK(bound.bound == panels::hostable_panel_ids().size());
 
     shell::BridgeRouter router;
     CHECK(host.install(router));
@@ -181,16 +183,21 @@ void a_daemon_event_reaches_the_rendered_panel()
 }
 
 // The e05d3 selection loop, through the SAME wiring `context_editor` gets: adopting a scene tree,
-// selecting a row, and finding the Inspector's fetch PENDING for exactly that identity (R-HUX-011).
-// The pump (the RPC half) is exercised against a live daemon by the kernel-server suite; here the
-// composition-root wiring itself is the subject.
-void a_scene_selection_schedules_the_inspector_fetch()
+// the DAEMON's selection arriving, and the Inspector's fetch turning up PENDING for exactly that
+// identity (R-HUX-011).
+//
+// M9 e08b re-rooted this loop on daemon truth: the tree no longer decides a selection, so the loop
+// is driven the way the live editor drives it — a `selection-changed` fact through the session feed.
+// That is the whole point: the Inspector cannot tell (and must not care) whether the human clicked
+// this panel or a CLI on another terminal.
+void a_daemon_selection_schedules_the_inspector_fetch()
 {
     shell::PanelHost host;
     const panels::BuiltinPanels bound = panels::install_builtin_panels(host);
     CHECK(bound.scenetree != nullptr);
     CHECK(bound.inspector != nullptr);
-    if (bound.scenetree == nullptr || bound.inspector == nullptr)
+    CHECK(bound.session != nullptr);
+    if (bound.scenetree == nullptr || bound.inspector == nullptr || bound.session == nullptr)
     {
         return;
     }
@@ -203,13 +210,29 @@ void a_scene_selection_schedules_the_inspector_fetch()
     bound.scenetree->panel().set_model(std::move(model));
 
     CHECK(!bound.inspector->pending().has_value());
-    CHECK(bound.scenetree->panel().select("inst1/ent1"));
+
+    Json fact = Json::object();
+    fact.set("event", Json(std::string("selection-changed")));
+    fact.set("origin", Json(std::uint64_t{7})); // another client — not this Shell
+    Json ids = Json::array();
+    ids.push_back(Json(std::string("inst1/ent1")));
+    fact.set("ids", std::move(ids));
+    CHECK(panels::apply_session_event(*bound.session, panels::kSessionTopic, fact));
     CHECK(bound.inspector->pending() == std::optional<std::string>("inst1/ent1"));
 
-    // Clearing the selection clears the panel (placeholder state) and drops the pending fetch.
-    bound.scenetree->panel().clear_selection();
+    // A cleared selection (an empty id list) clears the panel and drops the pending fetch.
+    Json cleared = Json::object();
+    cleared.set("event", Json(std::string("selection-changed")));
+    cleared.set("origin", Json(std::uint64_t{7}));
+    cleared.set("ids", Json::array());
+    CHECK(panels::apply_session_event(*bound.session, panels::kSessionTopic, cleared));
     CHECK(!bound.inspector->pending().has_value());
     CHECK(!bound.inspector->panel().has_selection());
+
+    // With no daemon bound, a row activation writes NOTHING and moves NOTHING — the panel cannot
+    // change a selection it does not own (and the composition root leaves it honestly read-only).
+    CHECK(!bound.scenetree->panel().select("inst1/ent1"));
+    CHECK(!bound.inspector->pending().has_value());
 }
 
 } // namespace
@@ -219,6 +242,6 @@ int main()
     binds_every_hostable_panel_and_nothing_else();
     renders_the_hosted_panels_through_the_bridge();
     a_daemon_event_reaches_the_rendered_panel();
-    a_scene_selection_schedules_the_inspector_fetch();
+    a_daemon_selection_schedules_the_inspector_fetch();
     PANELS_TEST_MAIN_END();
 }

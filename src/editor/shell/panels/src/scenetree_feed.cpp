@@ -129,8 +129,9 @@ std::optional<std::string> scenetree_row_identity(const std::string& node_id)
 
 // ------------------------------------------------------------------------------------ the feed
 
-SceneTreeFeed::SceneTreeFeed(PanelHost& host, std::string panel_id)
-    : host_(host), panel_id_(std::move(panel_id))
+SceneTreeFeed::SceneTreeFeed(PanelHost& host, std::string panel_id,
+                             scenetree::SelectionGateway* selection_gateway)
+    : host_(host), panel_id_(std::move(panel_id)), panel_(selection_gateway)
 {
 }
 
@@ -189,8 +190,12 @@ PanelProvider SceneTreeFeed::make_provider()
             return false;
         }
         // The hydration runtime sends the ACTIVATED NODE's id — it knows nothing about scene
-        // identities. `scenetree_row_identity` is the translation that keeps it that way; select()
-        // fires the selection listeners the Inspector feed hydrates from (R-HUX-011).
+        // identities. `scenetree_row_identity` is the translation that keeps it that way.
+        //
+        // e08b: select() is now a WRITE to the daemon, so what comes back is "the daemon applied it",
+        // not "the panel moved". The panel moves when the resulting `selection-changed` fact reaches
+        // SessionFeed — which is also what fires the selection listeners the Inspector feed hydrates
+        // from (R-HUX-011), so that loop now runs on daemon truth instead of a local decision.
         const std::optional<std::string> identity =
             scenetree_row_identity(read_string(params, "nodeId"));
         return identity.has_value() && panel_.select(*identity);
