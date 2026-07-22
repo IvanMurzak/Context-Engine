@@ -1,5 +1,5 @@
 {
-    "$comment": "Typecheck config for @context-engine/editor-core, run by the pinned tsgo (--noEmit) from ../CMakeLists.txt as a BUILD step — a type error is a build failure, not merely a test failure (e05a DoD). esbuild strips types without checking them, so this is the only semantic gate over the workspace. Kept strict from day one: editor-core is a trusted zone that renders authored project strings (design 04 section 4), so type sloppiness here has a security dimension.",
+    "$comment": "Typecheck config for @context-engine/editor-core, run by the pinned tsgo (--noEmit) from ../CMakeLists.txt as a BUILD step — a type error is a build failure, not merely a test failure (e05a DoD). esbuild strips types without checking them, so this is the only semantic gate over the workspace. Kept strict from day one: editor-core is a trusted zone that renders authored project strings (design 04 section 4), so type sloppiness here has a security dimension. resolveJsonModule (M9 e06a) lets the T1 tokens tests (src/test/tokens.test.ts) import the sibling @context-engine/editor-tokens built-in *.theme.json + theme.schema.json DIRECTLY, validating the EXACT shipped bytes with zero drift; it is additive (permits JSON imports, relaxes nothing else).",
     "compilerOptions": {
         "target": "ES2022",
         "lib": [
@@ -11,6 +11,7 @@
         "moduleResolution": "bundler",
         "moduleDetection": "force",
         "noEmit": true,
+        "resolveJsonModule": true,
         "strict": true,
         "exactOptionalPropertyTypes": true,
         "noImplicitOverride": true,

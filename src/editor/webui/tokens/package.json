@@ -1,0 +1,9 @@
+{
+    "name": "@context-engine/editor-tokens",
+    "version": "0.0.1",
+    "private": true,
+    "description": "The M9 editor token DATA layer (design 06, D11 themes-as-data). Publishes the versioned JSON Schema + a dependency-free validator for *.theme.json, the monochrome-glow-ui built-in themes (Dark/Light + high-contrast pair), the Pulse-of-Work signature-flourish tokens, and the vendored Geist/Geist Mono woff2 fonts (OFL, under fonts/). Consumed by @context-engine/editor-core's theme engine (e06b) + component kit (e06c). Like editor-core there is NO npm install and NO runtime Node: the sources are typechecked + bundled at BUILD time by the SHA-pinned tsgo + esbuild, and this manifest declares dependencies ONLY so the deny-by-default license gate (tools/check_licenses.py) sees them — it has none by design (the allowlist for the web layer is dockview-core ONLY).",
+    "type": "module",
+    "main": "src/index.ts",
+    "license": "LicenseRef-Context-Engine-EULA"
+}
