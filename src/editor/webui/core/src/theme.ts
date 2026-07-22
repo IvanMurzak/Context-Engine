@@ -750,6 +750,20 @@ export class ThemeEngine {
         return this.#lastReport;
     }
 
+    /**
+     * THE environment seam: the media-query probe every environment question is asked through.
+     *
+     * Exposed (not just settable) because the engine is not the only thing that has to ask one. The
+     * controller's fall-back-to-default path needs the SAME answer this engine would give, and
+     * reaching for `defaultMediaQueryProbe()` there instead would create a second source of truth
+     * that silently disagrees with an injected probe — invisible in production, where boot passes
+     * the global probe anyway, and wrong everywhere else (a test, a harness, or any future host that
+     * injects a probe at all).
+     */
+    get probe(): MediaQueryProbe {
+        return this.#probe;
+    }
+
     /** Swap the media-query probe (the live `prefers-reduced-motion` listener re-applies through it). */
     setProbe(probe: MediaQueryProbe): void {
         this.#probe = probe;
@@ -1018,7 +1032,13 @@ export class ThemeController {
             if (this.#engine.registry.has(activeBefore)) {
                 this.#engine.apply(activeBefore);
             } else {
-                this.#engine.apply(defaultThemeId(defaultMediaQueryProbe()));
+                // THE ENGINE'S OWN PROBE, never a fresh `defaultMediaQueryProbe()`. The engine
+                // already holds the one environment seam (`ThemeEngine.probe`); asking the global
+                // scope again here would answer a question the engine may have been told to answer
+                // differently, so the fallback could land on a DIFFERENT theme than a first run on
+                // the same host would — and the disagreement is invisible until something injects a
+                // probe.
+                this.#engine.apply(defaultThemeId(this.#engine.probe));
             }
         }
         return { reloaded: true, registration, reapplied, generation: this.#lastGeneration };

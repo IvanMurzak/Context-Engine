@@ -867,6 +867,41 @@ export const themeTests: readonly TestCase[] = [
         },
     },
     {
+        // REGRESSION (e06b): the fallback used to resolve through a fresh `defaultMediaQueryProbe()`
+        // — the GLOBAL scope — instead of the engine's own probe. That is a second source of truth:
+        // it made the fallback land on whatever the HOST browser prefers rather than on what this
+        // engine was told, so the same snapshot fell back to Dark on one machine and Light on
+        // another — green on a Dark-preferring dev box, RED on CI's headless Chromium (which reports
+        // `prefers-color-scheme: light`), which is exactly how it was found.
+        //
+        // This case and the NULL_PROBE one above pin the invariant from OPPOSITE directions, so the
+        // pair is host-independent even though neither is alone: on a light-scheme host the sibling
+        // (expects Dark) catches a regression, and on a dark-scheme host this one (expects Light)
+        // does. Whichever way a future edit reaches for the global scope again, one of the two fails.
+        name: "controller: the broken-theme fallback follows the ENGINE's probe, not the global scope",
+        run: () => {
+            const probe = probeMatching(LIGHT_SCHEME_QUERY);
+            const root = new RecordingRoot();
+            const engine = new ThemeEngine({ root, probe });
+            assert(engine.probe === probe, "the engine exposes the very probe it was given");
+            const controller = new ThemeController(engine, new FakeThemesSource());
+            controller.applySnapshot({
+                generation: 1,
+                themes: [{ id: "user.mine", source: "user", text: userThemeText("Mine", "#aaaaaa") }],
+            });
+            engine.apply("user.mine");
+            controller.applySnapshot({
+                generation: 2,
+                themes: [{ id: "user.mine", source: "user", text: "{ broken" }],
+            });
+            assertEqual(
+                engine.activeId,
+                BUILTIN_LIGHT,
+                "the fallback asked THIS engine's probe (light), not globalThis.matchMedia",
+            );
+        },
+    },
+    {
         name: "controller: a reload that does not touch the active BUILT-IN theme leaves it alone",
         run: () => {
             const { engine } = engineWith(NULL_PROBE);

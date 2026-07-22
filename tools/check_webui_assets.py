@@ -365,6 +365,45 @@ def check_csp_clean_document(document: Path) -> list[str]:
     return failures
 
 
+def check_dockview_chrome_specificity(stylesheet: Path) -> list[str]:
+    """Check 6b — the theme's Dockview chrome override must OUTRANK the vendored engine's own CSS.
+
+    `dockview.css` declares the very same `--dv-*` variables on the very same `.dockview-theme-dark`
+    selector, and dockview-core ALSO injects that stylesheet into the document at RUNTIME. At equal
+    specificity the later declaration wins, so a bare `.dockview-theme-dark { --dv-...: ... }` block
+    in app.css is SILENTLY IGNORED for every variable dockview declares — the docking chrome keeps
+    the engine's stock greys and the editor's theme never reaches it.
+
+    That failure is invisible to every local gate: the stylesheet parses, the T1 suite's DOCKVIEW_CHROME
+    map still agrees with itself, and nothing throws. Its only signal is the live `editor-cef-smoke-shell`
+    legs finding none of the theme's `colors.panel` in the composited frame — one full CI round-trip
+    per attempt, which is exactly what it cost (measured: 95.9% of the frame was dockview's #1e1e1e
+    and ZERO texels were the theme colour). So it is mechanised here instead.
+    """
+    if not stylesheet.is_file():
+        return []
+    text = stylesheet.read_text(encoding="utf-8", errors="replace")
+    if "--dv-" not in text:
+        return []
+    # A qualified prefix (`html .dockview-theme-dark`) raises specificity to 0,1,1 and beats the
+    # injected 0,1,0 declaration regardless of document order. `!important` would also work, but the
+    # prefix is the narrower instrument, so accept either rather than mandating one.
+    for match in re.finditer(r"(?m)^([^\n{}]*\.dockview-theme-[a-z-]+)\s*\{([^{}]*)\}", text):
+        selector, body = match.group(1).strip(), match.group(2)
+        if "--dv-" not in body:
+            continue
+        qualified = re.match(r"^[a-z]+[\s>]", selector) is not None or ":root" in selector
+        if not qualified and "!important" not in body:
+            return [
+                f"{stylesheet.name}: the Dockview chrome override `{selector} {{ … }}` is declared at "
+                f"the SAME specificity (0,1,0) as dockview.css's own block, which dockview-core "
+                f"injects at RUNTIME — so it loses the cascade and the docking chrome silently keeps "
+                f"the engine's stock greys instead of the theme's tokens. Qualify the selector (e.g. "
+                f"`html {selector}`) so it outranks the injected declaration."
+            ]
+    return []
+
+
 def check_scheme_contract(asset_dir: Path, bundle_name: str, shell_include_dir: Path,
                           shell_cef_dir: Path) -> list[str]:
     """Checks 5 + 6 — cross-language scheme vocabulary, and no file:// anywhere in the asset set."""
@@ -664,6 +703,7 @@ def run_scheme_contract(asset_dir: Path, bundle_name: str, shell_include_dir: Pa
     stylesheet = asset_dir / APP_STYLESHEET
     if not stylesheet.is_file():
         failures.append(f"served stylesheet missing: {stylesheet}")
+    failures.extend(check_dockview_chrome_specificity(stylesheet))
     failures.extend(check_scheme_contract(asset_dir, bundle_name, shell_include_dir, shell_cef_dir))
 
     if failures:

@@ -119,8 +119,21 @@ html[data-theme-transition="true"] * {
  * "the five Dockview BACKGROUND variables share one token" is that tripwire.
  *
  * The remaining ink/line variables were not backgrounds before and are pure gain: the chrome now
- * reads the theme's ink hierarchy instead of Dockview's stock greys. */
-.dockview-theme-dark {
+ * reads the theme's ink hierarchy instead of Dockview's stock greys.
+ *
+ * ⚠⚠⚠ THE `html` PREFIX IS LOAD-BEARING — DO NOT "SIMPLIFY" IT AWAY. `dockview.css` declares these
+ * same variables on the SAME `.dockview-theme-dark` selector (specificity 0,1,0), and dockview-core
+ * ALSO INJECTS that stylesheet into the document AT RUNTIME (see index.html's note) — so the injected
+ * copy lands after this file in document order and, at equal specificity, WINS. A bare
+ * `.dockview-theme-dark` block here is therefore silently ignored for every variable dockview itself
+ * declares: measured, only `--dv-background-color` survived (the one variable dockview.css never
+ * declares), while the other four backgrounds resolved to dockview's stock #1e1e1e / #252526 and the
+ * whole composited frame came back 95.9% #1e1e1e with ZERO texels of the theme's `colors.panel`.
+ * That is what reddened `editor-cef-smoke-shell` on ubuntu + windows.
+ *
+ * `html .dockview-theme-dark` is specificity 0,1,1 — it outranks the injected declaration no matter
+ * what order it arrives in, with no `!important` and no reach into the vendored engine. */
+html .dockview-theme-dark {
     --dv-background-color: var(--ctx-colors-panel, var(--editor-bg));
     --dv-group-view-background-color: var(--ctx-colors-panel, var(--editor-bg));
     --dv-tabs-and-actions-container-background-color: var(--ctx-colors-panel, var(--editor-bg));

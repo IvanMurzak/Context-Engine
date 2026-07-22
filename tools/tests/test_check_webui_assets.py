@@ -802,3 +802,49 @@ def test_the_real_editor_core_dependencies_are_the_approved_set() -> None:
         (REPO_ROOT / "src" / "editor" / "webui" / "core" / "package.json").read_text(
             encoding="utf-8"))
     assert package["dependencies"] == check_webui_assets.EDITOR_CORE_DEPENDENCIES
+
+
+# --------------------------------------------------------------------- check 6b: Dockview chrome
+#
+# The theme's `--dv-*` override must OUTRANK dockview-core's own injected stylesheet. These pin the
+# regression that reddened `editor-cef-smoke-shell` on ubuntu + windows at M9 e06b: a bare
+# `.dockview-theme-dark` block ties dockview's own specificity, loses on document order to the
+# RUNTIME-injected copy, and the docking chrome silently keeps the engine's stock greys — with the
+# live CEF smoke as the only signal, a full CI round-trip away.
+
+
+def _css(tmp_path: Path, body: str) -> Path:
+    sheet = tmp_path / "app.css"
+    sheet.write_text(body, encoding="utf-8")
+    return sheet
+
+
+def test_an_unqualified_dockview_chrome_override_is_rejected(tmp_path: Path) -> None:
+    sheet = _css(tmp_path, ".dockview-theme-dark {\n    --dv-background-color: #0a0a0a;\n}\n")
+    failures = check_webui_assets.check_dockview_chrome_specificity(sheet)
+    assert len(failures) == 1
+    assert "same specificity" in failures[0].lower() or "SAME specificity" in failures[0]
+    assert "html .dockview-theme-dark" in failures[0]
+
+
+def test_a_qualified_dockview_chrome_override_passes(tmp_path: Path) -> None:
+    sheet = _css(tmp_path, "html .dockview-theme-dark {\n    --dv-background-color: #0a0a0a;\n}\n")
+    assert check_webui_assets.check_dockview_chrome_specificity(sheet) == []
+
+
+def test_an_important_dockview_chrome_override_passes(tmp_path: Path) -> None:
+    """`!important` is the other way to win the cascade; the gate accepts either instrument."""
+    sheet = _css(tmp_path, ".dockview-theme-dark {\n    --dv-background-color: #0a0a0a !important;\n}\n")
+    assert check_webui_assets.check_dockview_chrome_specificity(sheet) == []
+
+
+def test_a_dockview_block_that_sets_no_dv_variable_is_not_the_gate_s_business(tmp_path: Path) -> None:
+    """Only variable DECLARATIONS can lose this cascade; an ordinary rule is left alone."""
+    sheet = _css(tmp_path, ".dockview-theme-dark {\n    padding: 0;\n}\n--dv-marker: in-a-comment;\n")
+    assert check_webui_assets.check_dockview_chrome_specificity(sheet) == []
+
+
+def test_the_real_app_css_dockview_override_outranks_the_vendored_engine() -> None:
+    """Ground truth, not a fixture: the SHIPPED stylesheet must win the cascade."""
+    sheet = REPO_ROOT / "src" / "editor" / "webui" / "app" / "app.css"
+    assert check_webui_assets.check_dockview_chrome_specificity(sheet) == []
