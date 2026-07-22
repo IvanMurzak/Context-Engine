@@ -17,12 +17,14 @@ import {
     editorCommands,
     projectContractCommands,
     projectPanelCommands,
+    sessionCommands,
 } from "../commands.js";
 import type {
     Command,
     ContractDispatch,
     EditorCommandActions,
     PanelCommandDispatch,
+    SessionCommandActions,
 } from "../commands.js";
 import { parsePanelRoster } from "../panels.js";
 import type { PanelRoster } from "../panels.js";
@@ -64,6 +66,25 @@ function actionSpy(): ActionSpy {
             moveActivePanel: (direction) => record(`move:${direction}`),
             closeActivePanel: () => record("close"),
             toggleTheme: () => record("theme"),
+        },
+    };
+}
+
+interface SessionSpy {
+    readonly actions: SessionCommandActions;
+    readonly calls: string[];
+}
+function sessionSpy(): SessionSpy {
+    const calls: string[] = [];
+    const record = (tag: string) => {
+        calls.push(tag);
+        return { ok: true, note: tag };
+    };
+    return {
+        calls,
+        actions: {
+            undo: () => record("undo"),
+            redo: () => record("redo"),
         },
     };
 }
@@ -269,6 +290,26 @@ export const commandsTests: readonly TestCase[] = [
         },
     },
 
+    // ------------------------------------------------------------- (b') session commands
+    {
+        name: "sessionCommands: undo/redo with the stable ids the keymap binds, guarded off text input",
+        run: () => {
+            const spy = sessionSpy();
+            const commands = sessionCommands(spy.actions);
+            const byId = new Map(commands.map((command) => [command.id, command]));
+            const undo = byId.get("session.undo");
+            const redo = byId.get("session.redo");
+            assert(undo !== undefined, "session.undo is registered (undo_journal.h kUndoCommand)");
+            assert(redo !== undefined, "session.redo is registered (undo_journal.h kRedoCommand)");
+            assertEqual(undo?.when, "!textInputFocus", "undo does not fire while typing (03 §6)");
+            assertEqual(redo?.when, "!textInputFocus", "redo does not fire while typing (03 §6)");
+            assertEqual(undo?.category, "editor", "session commands are editor-category");
+            void undo?.handler();
+            void redo?.handler();
+            assertEqual(spy.calls, ["undo", "redo"], "each session command routes to its action");
+        },
+    },
+
     // ------------------------------------------------------------- (c) panel-manifest commands
     {
         name: "projectPanelCommands: reads manifest commands from the roster, carrying their when-clause",
@@ -305,23 +346,27 @@ export const commandsTests: readonly TestCase[] = [
         run: () => {
             const contract = contractSpy();
             const editor = actionSpy();
+            const session = sessionSpy();
             const panel = panelSpy();
             const registry = buildCommandRegistry({
                 contractDispatch: contract.dispatch,
                 editorActions: editor.actions,
+                sessionActions: session.actions,
                 roster: rosterWithCommands(),
                 panelDispatch: panel.dispatch,
             });
             const contractCount = RPC_METHOD_NAMES.length;
             const editorCount = editorCommands(editor.actions).length;
+            const sessionCount = sessionCommands(session.actions).length;
             const panelCount = 2;
             assertEqual(
                 registry.size,
-                contractCount + editorCount + panelCount,
+                contractCount + editorCount + sessionCount + panelCount,
                 "every source's commands are present",
             );
             assert(registry.has(contractCommandId("describe")), "a contract command is present");
             assert(registry.has("view.theme.toggle"), "an editor command is present");
+            assert(registry.has("session.undo"), "a session command is present");
             assert(registry.has("hello.greet"), "a panel command is present");
 
             // A focused-ext.hello context activates hello.greet; typing suppresses the guarded ones.
@@ -358,6 +403,7 @@ export const commandsTests: readonly TestCase[] = [
                 buildCommandRegistry({
                     contractDispatch: contractSpy().dispatch,
                     editorActions: actionSpy().actions,
+                    sessionActions: sessionSpy().actions,
                     roster: collidingRoster ?? { contractMajor: 2, panels: [] },
                     panelDispatch: panelSpy().dispatch,
                 });

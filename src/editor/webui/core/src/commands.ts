@@ -284,6 +284,57 @@ export function editorCommands(actions: EditorCommandActions): readonly Command[
     ];
 }
 
+// --------------------------------------------------------------------- (b') session commands
+//
+// Undo/redo are editor-level commands with STABLE ids (`session.undo` / `session.redo`,
+// undo_journal.h `kUndoCommand`/`kRedoCommand`) that the e07c keymap binds to Ctrl+Z / Ctrl+Y. They
+// are registered here so they resolve through the ONE registry like every other command; the keymap
+// is just a consumer that dispatches them. The HANDLERS route to an injected `SessionCommandActions`
+// so the actual undo/redo (the wire replay of the journal, undo_journal.h) can land later (e09)
+// without touching the command surface — e07c delivers the binding + dispatch, not the replay.
+
+/** The session actions the built-in session commands dispatch to (undo/redo). */
+export interface SessionCommandActions {
+    undo(): CommandOutcome | Promise<CommandOutcome>;
+    redo(): CommandOutcome | Promise<CommandOutcome>;
+}
+
+/**
+ * The built-in session command set (undo / redo).
+ *
+ * Guarded on `!textInputFocus`: when a DOM editable has focus, Ctrl+Z / Ctrl+Y belong to it (03 §6
+ * keyboard routing), so the SESSION undo/redo must not fire — the keymap's `when` for these chords and
+ * these commands' `when` agree, and the resolver honours both.
+ */
+export function sessionCommands(actions: SessionCommandActions): readonly Command[] {
+    return [
+        {
+            id: "session.undo",
+            title: "Undo",
+            category: "editor",
+            when: "!textInputFocus",
+            docs: {
+                summary: "Undo the last authored edit in the session",
+                detail: "session action; bound to Ctrl+Z; the wire replay lands in e09 (undo_journal.h)",
+            },
+            handler: () => actions.undo(),
+        },
+        {
+            id: "session.redo",
+            title: "Redo",
+            category: "editor",
+            when: "!textInputFocus",
+            docs: {
+                summary: "Redo the last undone authored edit in the session",
+                detail:
+                    "session action; bound to Ctrl+Y / Ctrl+Shift+Z; the wire replay lands in e09 " +
+                    "(undo_journal.h)",
+            },
+            handler: () => actions.redo(),
+        },
+    ];
+}
+
 // ------------------------------------------------------------------- (c) panel-manifest commands
 
 /** How a panel-manifest command reaches its panel: the caller supplies the dispatch (panel.command). */
@@ -328,24 +379,28 @@ export function projectPanelCommands(
 
 // --------------------------------------------------------------------------- assembly
 
-/** Everything the three projectors need to build the whole registry. */
+/** Everything the projectors need to build the whole registry. */
 export interface RegistrySources {
     readonly contractDispatch: ContractDispatch;
     readonly editorActions: EditorCommandActions;
+    readonly sessionActions: SessionCommandActions;
     readonly roster: PanelRoster;
     readonly panelDispatch: PanelCommandDispatch;
 }
 
 /**
- * Build a registry from all three sources, in the (a) contract → (b) editor → (c) panel order.
+ * Build a registry from every source, in the (a) contract → (b) editor → (b') session → (c) panel
+ * order.
  *
  * A duplicate id across sources throws (via `register`) rather than shadowing — a manifest command
- * that collides with an editor or contract id is a defect the build must surface, not swallow.
+ * that collides with an editor, session or contract id is a defect the build must surface, not
+ * swallow.
  */
 export function buildCommandRegistry(sources: RegistrySources): CommandRegistry {
     const registry = new CommandRegistry();
     registry.registerAll(projectContractCommands(sources.contractDispatch));
     registry.registerAll(editorCommands(sources.editorActions));
+    registry.registerAll(sessionCommands(sources.sessionActions));
     registry.registerAll(projectPanelCommands(sources.roster, sources.panelDispatch));
     return registry;
 }
