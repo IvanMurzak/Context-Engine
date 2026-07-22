@@ -41,6 +41,7 @@
 #include "context/editor/shell/cef/cef_shell.h"
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
+#include "context/editor/shell/keybindings_bridge.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
@@ -307,6 +308,19 @@ int main(int argc, char** argv)
         });
     SMOKE_CHECK(editor_state_bridge.install(bridge),
                 "the editor.state.*/editor.regions.* bridge surface installed");
+
+    // --- the keybindings read surface (e07c) --------------------------------------------------
+    // editor-core's boot loads the per-user keybindings override by calling `keybindings.get`. Like
+    // the editor-state methods above, that call rides this SAME privileged bridge — so unless the real
+    // KeybindingsBridge is installed here, the live boot hits the router's deny-by-default
+    // `unknown_method` REFUSAL and the "no envelope refusals" assertion below fails. Bound to an EMPTY
+    // path (a permanently-absent snapshot) so the smoke is deterministic regardless of whether the CI
+    // host happens to have a `~/.context/keybindings.json` — the method is served (present:false), the
+    // renderer applies the default keymap, and nothing is refused. Same lifetime tier as the bridges
+    // above.
+    shell::KeybindingsBridge keybindings_bridge;
+    keybindings_bridge.bind_path(std::filesystem::path{});
+    SMOKE_CHECK(keybindings_bridge.install(bridge), "the keybindings.get bridge surface installed");
 
     // Drive the integrated pump until the browser has painted, the bridge handshake completed,
     // every hostable panel has hydrated, AND the composed surface has ACTUALLY REPAINTED with the

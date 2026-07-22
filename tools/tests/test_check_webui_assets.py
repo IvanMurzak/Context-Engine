@@ -440,6 +440,8 @@ PANEL_BUNDLE = (
     'var EDITOR_LAYOUT_RESTORED_METHOD = "editor.layout.restored";\n'
     'var REGION_KIND_VIEWPORT = "viewport";\n'
     'var REGION_KIND_NATIVE = "native";\n'
+    # e07c keybindings vocabulary (keymap.ts).
+    'var KEYBINDINGS_GET_METHOD = "keybindings.get";\n'
 )
 
 # MIRRORS THE REAL HEADER'S SHAPE. The real `panel_host.h` declares the enum and the token
@@ -493,6 +495,9 @@ PANEL_CPP_EDITOR_STATE = (
     'inline constexpr const char* kRegionKindNative = "native";\n'
 )
 
+# The e07c keybindings method lives in keybindings_bridge.h, read the same plain-constant way.
+PANEL_CPP_KEYBINDINGS = 'inline constexpr const char* kKeybindingsGetMethod = "keybindings.get";\n'
+
 PANEL_DOCUMENT = (
     "<!DOCTYPE html>\n"
     '<html lang="en">\n'
@@ -510,6 +515,7 @@ PANEL_PACKAGE = {"name": "@context-engine/editor-core", "dependencies": {"dockvi
 def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str = PANEL_DOCUMENT,
                    header: str = PANEL_CPP_HEADER, state: str = PANEL_CPP_STATE,
                    source: str = PANEL_CPP_SOURCE, editor_state: str = PANEL_CPP_EDITOR_STATE,
+                   keybindings: str = PANEL_CPP_KEYBINDINGS,
                    package: dict | None = None,
                    stage_dockview: bool = True) -> tuple[Path, Path, Path, Path, Path]:
     asset_dir = tmp_path / "app"
@@ -524,6 +530,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
     include_dir.mkdir(parents=True, exist_ok=True)
     (include_dir / "panel_host.h").write_text(header, encoding="utf-8")
     (include_dir / "editor_state_bridge.h").write_text(editor_state, encoding="utf-8")
+    (include_dir / "keybindings_bridge.h").write_text(keybindings, encoding="utf-8")
 
     contract_dir = tmp_path / "contractinclude"
     contract_dir.mkdir(parents=True, exist_ok=True)
@@ -591,6 +598,27 @@ def test_a_renamed_editor_state_cpp_constant_is_a_config_error(tmp_path: Path) -
     renamed = PANEL_CPP_EDITOR_STATE.replace("kEditorStateGetMethod", "kEditorStateFetchMethod")
     with pytest.raises(check_webui_assets.CheckError):
         _run_panel(tmp_path, editor_state=renamed)
+
+
+def test_keybindings_vocabulary_drift_fails(tmp_path: Path) -> None:
+    """The e07c keybindings.get method: a drift here leaves the user override silently never loading."""
+    drifted = re.sub(r'(KEYBINDINGS_GET_METHOD = ")[^"]*(")', r"\1keybindings.drifted\2", PANEL_BUNDLE)
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+def test_bundle_missing_the_keybindings_constant_fails(tmp_path: Path) -> None:
+    """An ABSENT keybindings constant means editor-core cannot be calling the method the Shell routes."""
+    stripped = "\n".join(
+        line for line in PANEL_BUNDLE.splitlines() if "KEYBINDINGS_GET_METHOD" not in line)
+    assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+def test_a_renamed_keybindings_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
+    """Rot-into-a-no-op guard: rename the C++ constant and the gate can verify NOTHING → exit 2."""
+    renamed = PANEL_CPP_KEYBINDINGS.replace("kKeybindingsGetMethod", "kKeybindingsFetchMethod")
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, keybindings=renamed)
 
 
 @pytest.mark.parametrize("ts_name", ["STATE_SCHEMA_VERSION_KEY", "STATE_DATA_KEY"])
