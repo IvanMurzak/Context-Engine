@@ -132,6 +132,15 @@ add_test(NAME editor-shell-arbitration-t2 COMMAND context_test_e14b_arbitration)
 # Three scenarios, each spawning + reaping a real `context edit` opener; cap generously so a regression
 # surfaces its diagnostics rather than hanging the CI job.
 set_tests_properties(editor-shell-arbitration-t2 PROPERTIES TIMEOUT 180)
+# The spawned `context` opener links the uninstrumented rusty_v8 archive (the M6 X1 `context profile gc`
+# path via context_cli), so on the sanitize legs the child needs the same narrow LSan demangler/
+# symbolizer suppressions the sibling CONTEXT_BINARY-spawning tests wire (see
+# editor-shell-daemon-lifecycle-t2 above; they can never mask a `context::` leak) — the spawned child
+# inherits this env. The drill binary itself links no V8.
+if(CONTEXT_SANITIZE)
+    set_tests_properties(editor-shell-arbitration-t2 PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
+endif()
 
 # ===================================================================================================
 # The M2 EXIT GATE (ROADMAP §1 M2 Exit / issue #68) — five exit scenarios + the data-model seam

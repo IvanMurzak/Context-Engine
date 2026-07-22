@@ -273,6 +273,7 @@ if(CONTEXT_SANITIZE)
         cli-test_cli
         cli-test_determinism_command
         cli-test_doctor_command
+        cli-test_edit_open
         cli-test_editor_driver
         cli-test_pkg_command
         cli-test_merge_command
