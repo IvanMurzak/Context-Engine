@@ -348,7 +348,7 @@ function startCommandLayer(host: PanelHost, client: PanelClient): void {
             }),
         );
 
-        void runPaletteSmoke(registry, palette, host);
+        void runPaletteSmoke(registry, palette, host, view);
     } catch (error) {
         // Honest degradation, mirrored onto <html> like the other boot states.
         document.documentElement.setAttribute(
@@ -415,11 +415,19 @@ function makeEditorActions(host: PanelHost): EditorCommandActions {
  * Guarded so it is inert in the shipping editor: it requires the explicit flag AND more than one
  * mounted panel (so it never empties the layout), and it is total — any failure just records a
  * diagnostic and leaves the editor usable, which the smoke would then catch as a missing publish.
+ *
+ * Drives the palette by mutating the MODEL and reflecting each mutation into the VIEW with
+ * `view.sync()` — the same "mutate the model, then sync the view" step the palette-toggle command and
+ * the view's own listeners perform (the model is passive; the view reflects it). Syncing after EXECUTE
+ * is load-bearing: `palette.execute` closes only the model (palette.ts), so without the reflect the
+ * overlay would linger visually over the composited frame — which the live CEF smoke observes as the
+ * `#132a44` editor background dropping below its coverage floor.
  */
 async function runPaletteSmoke(
     registry: CommandRegistry,
     palette: Palette,
     host: PanelHost,
+    view: PaletteView,
 ): Promise<void> {
     if (typeof location === "undefined" || !location.search.includes("ctx-smoke-palette")) {
         return;
@@ -432,9 +440,12 @@ async function runPaletteSmoke(
         // panel-focus-guarded `view.panel.close` deterministically regardless of the stubbed editor.ui.
         const context: WhenContext = { panelFocus: focus, textInputFocus: false };
         // OPEN the palette through the command layer (its own registered command), not a private call.
+        // The toggle command's handler already syncs the view, so the overlay is now visible.
         await registry.execute(PALETTE_TOGGLE_COMMAND_ID);
-        // FILTER by a fuzzy query — proves the palette's filter runs over the live registry.
+        // FILTER by a fuzzy query — proves the palette's filter runs over the live registry — and
+        // reflect it into the overlay, exactly as the view's own input listener does.
         palette.setQuery("close panel");
+        view.sync();
         const results = palette.results(context);
         const target =
             results.find((entry) => entry.command.id === "view.panel.close") ?? results[0];
@@ -443,6 +454,10 @@ async function runPaletteSmoke(
         } else {
             // EXECUTE through the palette (→ the ONE registry), the SAME path a real activation drives.
             const outcome = await palette.execute(target.command.id);
+            // Reflect the model's close into the overlay — the view step a real activation performs
+            // (PaletteView.#activateSelected) but a direct model.execute() does not, so the overlay is
+            // actually dismissed rather than left lingering over the composited frame.
+            view.sync();
             detail = `palette smoke: executed ${target.command.id} -> ${
                 outcome.ok ? "ok" : "refused"
             } (${outcome.note})`;

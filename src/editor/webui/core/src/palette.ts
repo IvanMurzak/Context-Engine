@@ -228,10 +228,10 @@ export class Palette {
         const matched: PaletteEntry[] = [];
         for (const command of active) {
             // Match against the TITLE (what the user sees) primarily, and fall back to the id so a
-            // user who types an id fragment (`view.panel.close`) still finds it.
+            // user who types an id fragment (`view.panel.close`) still finds it (`??` evaluates the id
+            // match only when the title did not match).
             const titleMatch = fuzzyMatch(query, command.title);
-            const idMatch = titleMatch === null ? fuzzyMatch(query, command.id) : null;
-            const match = titleMatch ?? idMatch;
+            const match = titleMatch ?? fuzzyMatch(query, command.id);
             if (match === null) {
                 continue;
             }
