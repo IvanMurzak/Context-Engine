@@ -5,6 +5,8 @@
 #include "context/common/child_process.h"
 #include "context/editor/shell/keybindings_bridge.h"
 
+#include "json_number_read.h" // the shared range-guarded numeric read (float-cast-overflow UB guard)
+
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -131,8 +133,11 @@ std::vector<RecentProject> read_recent_projects(const fs::path& config_path)
         recent.name = read_string(entry, "name");
         if (recent.name.empty())
             recent.name = project_display_name(fs::path(path));
-        if (entry.is_object() && entry.contains("lastOpenedMs"))
-            recent.last_opened_ms = entry.at("lastOpenedMs").as_int();
+        // Range-guarded so a hostile/hand-edited lastOpenedMs cannot trip float-cast-overflow UB in
+        // as_int() (the shared sanitize-leg guard — json_number_read.h); absent/out-of-range keeps the
+        // 0 default. The ±9e15 bound is exactly double-representable (< 2^53) and covers any real epoch-ms.
+        if (const auto ms = detail::number_in_range(entry, "lastOpenedMs", -9.0e15, 9.0e15))
+            recent.last_opened_ms = static_cast<std::int64_t>(*ms);
         recents.push_back(std::move(recent));
     }
     return recents;
@@ -359,16 +364,8 @@ Json WelcomeBridge::pick_folder()
     ++folders_picked_;
     Json out = Json::object();
     std::optional<fs::path> picked = picker_ ? picker_() : native_pick_folder();
-    if (picked.has_value())
-    {
-        out.set("picked", Json(true));
-        out.set("path", Json(picked->generic_string()));
-    }
-    else
-    {
-        out.set("picked", Json(false));
-        out.set("path", Json(std::string()));
-    }
+    out.set("picked", Json(picked.has_value()));
+    out.set("path", Json(picked.has_value() ? picked->generic_string() : std::string()));
     return out;
 }
 

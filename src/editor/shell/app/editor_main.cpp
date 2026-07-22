@@ -370,7 +370,7 @@ int main(int argc, char** argv)
     // --- the welcome surface (e14c, design 07 §4 / 10 / D13) --------------------------------------
     //
     // The app's front door: `welcome.state` tells editor-core whether to render the welcome screen or
-    // the editor, and `welcome.recentProjects` / `welcome.pickFolder` / `welcome.newProject` back its
+    // the editor, and `welcome.open` / `welcome.pickFolder` / `welcome.newProject` back its
     // three actions. Installed on the SAME privileged bridge; the native folder picker is boundary-clean
     // (folder_picker.cpp, OS-SDK only) and `context new` / `context edit` are spawned as subprocesses via
     // the located `context` binary. The CEF boot smokes install NO welcome surface, so editor-core's
