@@ -97,6 +97,7 @@
 #include "context/editor/shell/editor_state.h"
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
+#include "context/editor/shell/keybindings_bridge.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
@@ -302,8 +303,13 @@ SessionOutcome run_session(const std::filesystem::path& project,
             }
         });
 
+    // e07c: editor-core's boot calls `keybindings.get`; install the surface so that call is served
+    // (present:false on the empty path) rather than refused. Empty path -> deterministic absent.
+    shell::KeybindingsBridge keybindings_bridge;
+    keybindings_bridge.bind_path(std::filesystem::path{});
+
     if (!handshake.install(bridge) || !panel_host.install(bridge) ||
-        !editor_state_bridge.install(bridge))
+        !editor_state_bridge.install(bridge) || !keybindings_bridge.install(bridge))
     {
         std::fprintf(stderr, "[%s] FAIL: a bridge surface refused to install\n", cfg.label);
         return out;

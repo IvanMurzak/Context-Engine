@@ -23,6 +23,7 @@ export * from "./panelhost.js";
 export * from "./editorstate.js";
 export * from "./when.js";
 export * from "./commands.js";
+export * from "./keymap.js";
 export * from "./boot.js";
 
 import { bootEditorCore } from "./boot.js";

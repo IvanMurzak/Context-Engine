@@ -10,6 +10,7 @@ import { editorstateTests } from "./editorstate.test.js";
 import { guardsTests } from "./guards.test.js";
 import { whenTests } from "./when.test.js";
 import { commandsTests } from "./commands.test.js";
+import { keymapTests } from "./keymap.test.js";
 import { welcomeTests } from "./welcome.test.js";
 
 const result = runTests([
@@ -18,6 +19,7 @@ const result = runTests([
     ...guardsTests,
     ...whenTests,
     ...commandsTests,
+    ...keymapTests,
     ...welcomeTests,
 ]);
 report(result);

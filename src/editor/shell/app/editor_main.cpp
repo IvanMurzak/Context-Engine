@@ -16,6 +16,7 @@
 #include "context/editor/shell/daemon_lifecycle.h"
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
+#include "context/editor/shell/keybindings_bridge.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
@@ -388,6 +389,23 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // --- the keybindings read/watch surface (e07c, design 05 §6 / 03 §6) --------------------------
+    //
+    // The Shell owns the per-user override `~/.context/keybindings.json`: editor-core is a pure
+    // wire-client and cannot read it, so this bridge reads + WATCHES the file and serves its bytes over
+    // `keybindings.get`; editor-core (keymap.ts) schema-validates + merges them. Boundary-clean (plain
+    // std::filesystem, nothing kernel-internal), so the D10 shell-boundary gate's FORBIDDEN list is
+    // untouched. Declared alongside the other bridges so it OUTLIVES the handler `install` captures; the
+    // watch tick runs in the owner loop below. An empty home directory yields a permanently-absent
+    // snapshot (the editor runs on the default keymap) rather than a failure.
+    shell::KeybindingsBridge keybindings_bridge;
+    keybindings_bridge.bind_path(shell::default_keybindings_path());
+    if (!keybindings_bridge.install(bridge))
+    {
+        std::fprintf(stderr, "context_editor: could not install the keybindings bridge surface\n");
+        return 1;
+    }
+
     // --- the LIVE daemon feed + the lifecycle handlers (the Problems read path, e14a) -------------
     //
     // The Shell subscribes as an ordinary client (D10) and forwards what arrives into the panel models;
@@ -562,6 +580,11 @@ int main(int argc, char** argv)
             // picked up automatically. Synchronous on the owner loop; a no-op when nothing is due.
             shell::panels::pump_panel_feeds(builtin, *live_client, options.scene);
         }
+        // e07c: watch the per-user keybindings file. A cheap stat gates the re-read, so an unchanged
+        // file costs one stat per loop; a change bumps the generation editor-core re-reads over the
+        // bridge (the hot-reload trigger). The return is intentionally discarded here — the renderer
+        // pulls the fresh snapshot on its own cadence over `keybindings.get`.
+        (void)keybindings_bridge.poll();
         if (options.max_frames > 0 && frames >= options.max_frames)
         {
             break;

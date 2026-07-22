@@ -29,6 +29,7 @@
 import { BridgeError, ShellBridge, isRecord } from "./bridge.js";
 import { EditorStateClient, LayoutPersistence } from "./editorstate.js";
 import { editorCoreInfo } from "./info.js";
+import { Keymap, KeybindingsClient } from "./keymap.js";
 import { PanelClient } from "./panels.js";
 import { PanelHost } from "./panelhost.js";
 import { WELCOME_MODE_WELCOME, WelcomeClient, mountWelcome } from "./welcome.js";
@@ -142,6 +143,19 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // with "the editor cannot talk to the Shell" would send the next diagnosis in exactly the
         // wrong direction.
         const panels = await startPanels(bridge);
+
+        // --- the keymap override feed (e07c) ------------------------------------------------------
+        // Load the per-user `~/.context/keybindings.json` override the Shell watches and serves
+        // (keybindings_bridge.h). This is the "the Shell publishes the keymap to editor-core" channel:
+        // the Shell owns the file (editor-core is a pure wire-client and cannot read it), editor-core
+        // schema-validates + merges it here. Best-effort like persistence — a Shell that does not serve
+        // the method (an older build) leaves the default keymap standing, and a malformed override is
+        // rejected with a diagnostic, so this can NEVER keep the editor from booting. The live input
+        // pump consumes the resolved keymap when 03 §6 keyboard routing wires it (a later seam); at boot
+        // the job is to LOAD + validate the override and prove the channel end to end (the
+        // `editor-cef-smoke-shell` leg asserts `keybindings.get` was served).
+        await startKeybindings(bridge);
+
         markDocument("ready", panels.error);
         return {
             attached: true,
@@ -239,6 +253,35 @@ async function startPanels(bridge: ShellBridge): Promise<PanelBringUp> {
             unavailable: [],
             error: error instanceof Error ? error.message : String(error),
         };
+    }
+}
+
+/**
+ * Load the per-user keybindings override at boot (e07c) — best-effort, never fatal.
+ *
+ * Fetches the Shell's `keybindings.get` snapshot and applies it to a fresh keymap: an absent file
+ * leaves the defaults, a valid override merges over them, and a malformed one is rejected with a
+ * diagnostic (the defaults stand). The outcome is written onto `<html data-editor-keybindings>` so the
+ * `--dump-dom` local repro and DevTools can read it — the same diagnosability discipline `markDocument`
+ * gives the boot state. NEVER throws: a bridge/parse failure degrades to "defaults", it does not fail
+ * boot.
+ */
+async function startKeybindings(bridge: ShellBridge): Promise<void> {
+    let detail = "defaults";
+    try {
+        const keymap = new Keymap();
+        const snapshot = await new KeybindingsClient(bridge).get();
+        const apply = keymap.applyUserOverride(snapshot.present ? snapshot.text : null);
+        detail = !snapshot.present
+            ? "no override; defaults"
+            : apply.applied
+              ? `override applied (${apply.userBindingCount} bindings, gen ${snapshot.generation})`
+              : `override REJECTED: ${apply.diagnostic}`;
+    } catch (error) {
+        detail = `keybindings feed unavailable: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    if (typeof document !== "undefined") {
+        document.documentElement.setAttribute("data-editor-keybindings", detail);
     }
 }
 
