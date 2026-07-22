@@ -1,0 +1,49 @@
+src/editor/shell/CMakeLists.txt
+  s_98e92082c6bb5d::t_87b8ceb6b7112e 53,146
+src/editor/shell/app/editor_main.cpp
+  s_98e92082c6bb5d::t_7bcd021b5b9d43 18,332-348,500-504
+src/editor/shell/cef/src/cef_shell_restore_smoke.cpp
+  s_98e92082c6bb5d::t_17404c0b8bd9db 100,306-310,312
+src/editor/shell/cef/src/cef_shell_smoke.cpp
+  s_98e92082c6bb5d::t_d18f9141e6a102 44,312-324
+src/editor/shell/include/context/editor/shell/keybindings_bridge.h
+  s_98e92082c6bb5d::t_9f5810f7433e7a 1-131
+src/editor/shell/src/keybindings_bridge.cpp
+  s_98e92082c6bb5d::t_e296abcd760dac 1-228
+src/editor/shell/tests/test_keybindings_bridge.cpp
+  s_98e92082c6bb5d::t_168ab37c2be3b6 1-259
+src/editor/webui/core/src/boot.ts
+  s_98e92082c6bb5d::t_92325afb80ce1c 32,118-130,231-259
+src/editor/webui/core/src/commands.ts
+  s_98e92082c6bb5d::t_c355821f5f16ae 287-337,382,386,392-393,396-397,403
+src/editor/webui/core/src/index.ts
+  s_98e92082c6bb5d::t_64399fee6f25d6 26
+src/editor/webui/core/src/keymap.ts
+  s_98e92082c6bb5d::t_eda269eee82781 1-518
+src/editor/webui/core/src/test/commands.test.ts
+  s_98e92082c6bb5d::t_f7d01993f67bfe 20,27,73-91,293-312,349,354,360,364,369,406
+src/editor/webui/core/src/test/keymap.test.ts
+  s_98e92082c6bb5d::t_ce2ace27c7195b 1-382
+src/editor/webui/core/src/test/main.ts
+  s_98e92082c6bb5d::t_ac6317ccfda15f 13,21
+tools/check_webui_assets.py
+  s_98e92082c6bb5d::t_43d301ba61db8d 133-141,435-449
+tools/tests/test_check_webui_assets.py
+  s_98e92082c6bb5d::t_94c8d2939604d9 443-444,498-500,518,533,603-623
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e6b4310ea2d1e5ac6e1e56a7fe8a67ad11fbb63c",
+  "prompts": {},
+  "sessions": {
+    "s_98e92082c6bb5d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_98e92082c6bb5d",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
