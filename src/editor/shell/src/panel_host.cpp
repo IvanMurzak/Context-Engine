@@ -64,6 +64,25 @@ namespace ut = gui::uitree;
     return out;
 }
 
+// The manifest-declared commands (04 §3 `commands`), projected for the editor-core command registry
+// (M9 e07b, its source (c)). Built-in uitree panels declare their commands on the C++ Panel model
+// instead, so their manifest `commands` are empty and this yields `[]`; iframe contributions — which
+// have no C++ model to read commands from — carry theirs here. `when` is the optional context clause
+// (empty = always), emitted verbatim so the JS `when`-evaluator sees exactly what the manifest states.
+[[nodiscard]] contract::Json project_commands(const std::vector<gc::CommandContribution>& commands)
+{
+    contract::Json out = contract::Json::array();
+    for (const gc::CommandContribution& command : commands)
+    {
+        contract::Json entry = contract::Json::object();
+        entry.set("id", contract::Json(command.id));
+        entry.set("title", contract::Json(command.title));
+        entry.set("when", contract::Json(command.when));
+        out.push_back(std::move(entry));
+    }
+    return out;
+}
+
 } // namespace
 
 // ------------------------------------------------------------------------------- gesture verbs
@@ -249,6 +268,10 @@ contract::Json PanelHost::list() const
         panel.set("state", state);
 
         panel.set("capabilities", project_capabilities(m.capabilities));
+        // The manifest-declared commands (04 §3), the editor-core command registry's source (c)
+        // (M9 e07b). Empty for every built-in uitree panel (they declare on the C++ model); an
+        // iframe contribution carries its own here.
+        panel.set("commands", project_commands(m.commands));
 
         // The HOST facts. `hosted` gates everything else the runtime may attempt; `gestures` and
         // `persists` tell it which optional verbs exist, so it never sends one that can only be
