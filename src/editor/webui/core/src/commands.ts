@@ -153,7 +153,7 @@ function contractCommandTitle(descriptor: RpcMethodDescriptor): string {
 }
 
 /** Project a verb descriptor into its introspected docs (the generalized `help_model` projection). */
-function contractCommandDoc(descriptor: RpcMethodDescriptor): CommandDoc {
+function contractCommandDoc(descriptor: RpcMethodDescriptor, title: string): CommandDoc {
     const lines = [`RPC method: ${descriptor.method}`];
     lines.push(`stability: ${descriptor.stability}${descriptor.deprecated ? " (deprecated)" : ""}`);
     if (descriptor.params.length > 0) {
@@ -163,7 +163,7 @@ function contractCommandDoc(descriptor: RpcMethodDescriptor): CommandDoc {
         lines.push(`flags: ${descriptor.flags.map((flag) => `--${flag}`).join(" ")}`);
     }
     return {
-        summary: `${contractCommandTitle(descriptor)} — ${descriptor.stability} contract verb`,
+        summary: `${title} — ${descriptor.stability} contract verb`,
         detail: lines.join("\n"),
     };
 }
@@ -181,12 +181,13 @@ export type ContractDispatch = (method: RpcMethod) => CommandOutcome | Promise<C
 export function projectContractCommands(dispatch: ContractDispatch): readonly Command[] {
     return RPC_METHOD_NAMES.map((method): Command => {
         const descriptor = RPC_METHODS[method];
+        const title = contractCommandTitle(descriptor);
         return {
             id: contractCommandId(method),
-            title: contractCommandTitle(descriptor),
+            title,
             category: "contract",
             when: "", // contract verbs are globally invocable; a specific verb may gain a when later
-            docs: contractCommandDoc(descriptor),
+            docs: contractCommandDoc(descriptor, title),
             handler: () => dispatch(method),
         };
     });

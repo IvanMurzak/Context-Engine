@@ -177,6 +177,9 @@ type Token =
     | { readonly kind: "str"; readonly text: string }
     | { readonly kind: "op"; readonly text: "==" | "!=" | "&&" | "||" | "!" | "(" | ")" };
 
+/** The identifier char class (context keys + unquoted values): letters, digits, `_`, `.`, `-`. */
+const ID_CHAR = /[A-Za-z0-9_.\-]/;
+
 /** Tokenize a clause. Returns `null` on any unrecognised character (the fail-closed path). */
 function tokenize(clause: string): Token[] | null {
     const tokens: Token[] = [];
@@ -196,15 +199,13 @@ function tokenize(clause: string): Token[] | null {
         if (c === "'" || c === '"') {
             // A quoted literal — read to the matching quote; an unterminated quote fails closed.
             let j = i + 1;
-            let text = "";
             while (j < n && clause[j] !== c) {
-                text += clause[j];
                 j += 1;
             }
             if (j >= n) {
                 return null;
             }
-            tokens.push({ kind: "str", text });
+            tokens.push({ kind: "str", text: clause.slice(i + 1, j) });
             i = j + 1;
             continue;
         }
@@ -229,14 +230,12 @@ function tokenize(clause: string): Token[] | null {
             }
             return null; // a lone `&`/`|` is not valid
         }
-        if (/[A-Za-z0-9_.\-]/.test(c)) {
+        if (ID_CHAR.test(c)) {
             let j = i;
-            let text = "";
-            while (j < n && /[A-Za-z0-9_.\-]/.test(clause[j] ?? "")) {
-                text += clause[j];
+            while (j < n && ID_CHAR.test(clause[j] ?? "")) {
                 j += 1;
             }
-            tokens.push({ kind: "id", text });
+            tokens.push({ kind: "id", text: clause.slice(i, j) });
             i = j;
             continue;
         }
