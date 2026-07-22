@@ -27,8 +27,7 @@ export type FieldSpec =
     | { readonly kind: "number" }
     | { readonly kind: "integer" }
     | { readonly kind: "boolean" }
-    | { readonly kind: "constNumber"; readonly value: number }
-    | { readonly kind: "constString"; readonly value: string }
+    | { readonly kind: "const"; readonly value: number | string }
     | { readonly kind: "enum"; readonly values: readonly string[] }
     | ObjectSpec;
 
@@ -95,14 +94,10 @@ function validateField(spec: FieldSpec, value: unknown, path: string, errors: st
                 errors.push(`${path}: expected a boolean`);
             }
             break;
-        case "constNumber":
+        case "const":
             if (value !== spec.value) {
-                errors.push(`${path}: expected the constant ${spec.value}`);
-            }
-            break;
-        case "constString":
-            if (value !== spec.value) {
-                errors.push(`${path}: expected the constant "${spec.value}"`);
+                const shown = typeof spec.value === "string" ? `"${spec.value}"` : String(spec.value);
+                errors.push(`${path}: expected the constant ${shown}`);
             }
             break;
         case "enum":
@@ -334,8 +329,8 @@ const VIEWPORT: ObjectSpec = {
 export const THEME_SCHEMA: ObjectSpec = {
     kind: "object",
     fields: {
-        $schema: { kind: "constString", value: SCHEMA_ID },
-        version: { kind: "constNumber", value: SCHEMA_VERSION },
+        $schema: { kind: "const", value: SCHEMA_ID },
+        version: { kind: "const", value: SCHEMA_VERSION },
         name: { kind: "string" },
         appearance: { kind: "enum", values: ["dark", "light"] },
         highContrast: { kind: "boolean" },
@@ -381,9 +376,7 @@ function fieldToJsonSchema(spec: FieldSpec): JsonSchemaNode {
             return { type: "integer" };
         case "boolean":
             return { type: "boolean" };
-        case "constNumber":
-            return { const: spec.value };
-        case "constString":
+        case "const":
             return { const: spec.value };
         case "enum":
             return { type: "string", enum: [...spec.values] };

@@ -7,13 +7,14 @@
 // EXACT shipped bytes — there is no in-test copy that could drift from what e06b/e06c consume.
 
 import { assert, assertEqual, type TestCase } from "./harness.js";
+import { isRecord } from "../bridge.js";
 import {
     SCHEMA_ID,
     SCHEMA_VERSION,
     THEME_SCHEMA,
     toJsonSchema,
     validateTheme,
-} from "../../../tokens/src/schema.js";
+} from "../../../tokens/src/index.js";
 
 import darkTheme from "../../../tokens/themes/dark.theme.json";
 import lightTheme from "../../../tokens/themes/light.theme.json";
@@ -51,16 +52,10 @@ const FLOURISH_EXPECTED = {
 function group(theme: unknown, ...path: readonly string[]): Record<string, unknown> {
     let node: unknown = theme;
     for (const key of path) {
-        assert(
-            typeof node === "object" && node !== null && !Array.isArray(node),
-            `expected object at ${path.join(".")}`,
-        );
+        assert(isRecord(node), `expected object at ${path.join(".")}`);
         node = (node as Record<string, unknown>)[key];
     }
-    assert(
-        typeof node === "object" && node !== null && !Array.isArray(node),
-        `expected object at ${path.join(".")}`,
-    );
+    assert(isRecord(node), `expected object at ${path.join(".")}`);
     return node as Record<string, unknown>;
 }
 
@@ -267,10 +262,25 @@ export const tokensTests: readonly TestCase[] = [
     {
         name: "toJsonSchema() is byte-identical to the committed theme.schema.json (no drift)",
         run: () => {
+            // Structural equality first — order-independent, so it renders a legible diff when a
+            // field's SHAPE drifts (an added/removed/retyped property).
             assertEqual(
                 toJsonSchema(),
                 publishedSchema,
                 "the published theme.schema.json matches the THEME_SCHEMA source of truth",
+            );
+            // Then true BYTE identity. gen-schema.mjs writes `JSON.stringify(toJsonSchema(), null, 2)
+            // + "\n"`, and JSON.parse→stringify round-trips object-key order faithfully, so
+            // re-serializing the imported file reproduces its exact committed bytes. The deepEqual
+            // above deliberately ignores object-key ORDER; without this a property REORDER in
+            // schema.ts that was never regenerated would ship a byte-stale schema.json green. This
+            // makes the "byte-identical / can never drift" contract in the name literally hold.
+            const regenerated = JSON.stringify(toJsonSchema(), null, 2) + "\n";
+            const committed = JSON.stringify(publishedSchema, null, 2) + "\n";
+            assertEqual(
+                regenerated,
+                committed,
+                "the committed theme.schema.json is byte-for-byte the gen-schema.mjs output",
             );
         },
     },
