@@ -1,0 +1,21 @@
+src/editor/shell/cef/src/cef_shell_palette_smoke.cpp
+  s_fa454bcf0f0c2b::t_62ff2372b57a4e 335,341-344,346,356-359,362,367-369,382-398,401-404
+src/editor/webui/core/src/boot.ts
+  s_fa454bcf0f0c2b::t_ddd2ee284f5d7b 422-424
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "aa123818775c3a9486efce3a0c0c81aafcc49dc2",
+  "prompts": {},
+  "sessions": {
+    "s_fa454bcf0f0c2b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_fa454bcf0f0c2b",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
