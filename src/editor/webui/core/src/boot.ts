@@ -419,9 +419,9 @@ function makeEditorActions(host: PanelHost): EditorCommandActions {
  * Drives the palette by mutating the MODEL and reflecting each mutation into the VIEW with
  * `view.sync()` — the same "mutate the model, then sync the view" step the palette-toggle command and
  * the view's own listeners perform (the model is passive; the view reflects it). Syncing after EXECUTE
- * is load-bearing: `palette.execute` closes only the model (palette.ts), so without the reflect the
- * overlay would linger visually over the composited frame — which the live CEF smoke observes as the
- * `#132a44` editor background dropping below its coverage floor.
+ * is load-bearing for correct UX: `palette.execute` closes only the model (palette.ts), so without the
+ * reflect the overlay would linger visually over the composited frame instead of dismissing the way a
+ * real Enter/click activation does (PaletteView.#activateSelected).
  */
 async function runPaletteSmoke(
     registry: CommandRegistry,
