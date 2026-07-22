@@ -64,13 +64,7 @@ ChildProcess::~ChildProcess()
     // The destructor behaves like detach(): close handles WITHOUT killing, so a spawned daemon that
     // other clients may be using survives the owning handle dropping.
     close_stdout();
-#if defined(_WIN32)
-    if (process_handle_ != nullptr)
-    {
-        ::CloseHandle(static_cast<HANDLE>(process_handle_));
-        process_handle_ = nullptr;
-    }
-#endif
+    close_process_handle();
     pid_ = 0;
 }
 
@@ -85,16 +79,14 @@ ChildProcess& ChildProcess::operator=(ChildProcess&& other) noexcept
         return *this;
     // Release anything we currently hold (detach semantics — never kill on a move).
     close_stdout();
+    close_process_handle();
 #if defined(_WIN32)
-    if (process_handle_ != nullptr)
-        ::CloseHandle(static_cast<HANDLE>(process_handle_));
     process_handle_ = other.process_handle_;
     stdout_read_ = other.stdout_read_;
 #else
     stdout_fd_ = other.stdout_fd_;
 #endif
     pid_ = other.pid_;
-    detached_ = other.detached_;
     exited_ = other.exited_;
     pending_ = std::move(other.pending_);
     other.reset();
@@ -104,7 +96,6 @@ ChildProcess& ChildProcess::operator=(ChildProcess&& other) noexcept
 void ChildProcess::reset() noexcept
 {
     pid_ = 0;
-    detached_ = false;
     exited_ = false;
     pending_.clear();
 #if defined(_WIN32)
@@ -117,7 +108,7 @@ void ChildProcess::reset() noexcept
 
 bool ChildProcess::valid() const noexcept
 {
-    return pid_ != 0 && !detached_;
+    return pid_ != 0;
 }
 
 void ChildProcess::close_stdout()
@@ -137,9 +128,8 @@ void ChildProcess::close_stdout()
 #endif
 }
 
-void ChildProcess::detach()
+void ChildProcess::close_process_handle()
 {
-    close_stdout();
 #if defined(_WIN32)
     if (process_handle_ != nullptr)
     {
@@ -147,11 +137,17 @@ void ChildProcess::detach()
         process_handle_ = nullptr;
     }
 #endif
+    // POSIX keeps no separate process handle — pid_ is the identity and reaping is waitpid's job.
+}
+
+void ChildProcess::detach()
+{
+    close_stdout();
+    close_process_handle();
     // On POSIX we intentionally do NOT waitpid here: reaping would block on the still-running daemon.
     // detach() is used as this process exits, so the orphaned child reparents to init and is reaped
     // there; a zombie would only accrue if the parent lived on indefinitely after detaching, which the
     // exit-policy caller never does.
-    detached_ = true;
     pid_ = 0;
 }
 
@@ -291,8 +287,7 @@ bool ChildProcess::wait(int timeout_ms, int& exit_code)
     ::GetExitCodeProcess(static_cast<HANDLE>(process_handle_), &code);
     exit_code = static_cast<int>(code);
     exited_ = true;
-    ::CloseHandle(static_cast<HANDLE>(process_handle_));
-    process_handle_ = nullptr;
+    close_process_handle();
     close_stdout();
     pid_ = 0;
     return true;
@@ -304,8 +299,7 @@ void ChildProcess::terminate()
     {
         ::TerminateProcess(static_cast<HANDLE>(process_handle_), 1);
         ::WaitForSingleObject(static_cast<HANDLE>(process_handle_), 5000);
-        ::CloseHandle(static_cast<HANDLE>(process_handle_));
-        process_handle_ = nullptr;
+        close_process_handle();
     }
     close_stdout();
     exited_ = true;

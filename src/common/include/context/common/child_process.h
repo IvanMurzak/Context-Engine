@@ -89,10 +89,10 @@ public:
 
 private:
     void close_stdout();
+    void close_process_handle();
     void reset() noexcept;
 
     std::int64_t pid_ = 0;
-    bool detached_ = false;
     bool exited_ = false;
     std::string pending_; // bytes read past the last newline, awaiting the next read_line()
 
