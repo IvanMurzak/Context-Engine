@@ -3,6 +3,7 @@
 #include "context/cli/daemon_command.h"
 
 #include "context/cli/args.h" // shared flag_value (single-sourced with attach/fetch)
+#include "context/editor/client/instance.h" // e14a: format_daemon_ready_line (stdio spawn handshake)
 #include "context/editor/bridge/transport.h"
 #include "context/editor/contract/envelope.h"
 #include "context/editor/contract/handshake.h"
@@ -324,6 +325,25 @@ int run_daemon(const std::vector<std::string>& args)
         data.set("project", Json(project.string()));
         data.set("pid", Json(static_cast<std::int64_t>(current_pid())));
         emit(Envelope::success(std::move(data)), std::nullopt);
+    }
+
+    // D18/e14a spawn handshake: a parent that SPAWNED this daemon (the editor Shell) reads the D20
+    // attach token off our STDOUT — never argv/env (05 §2 / 08 threat model) and without racing the
+    // instance.json publish. A SINGLE machine-readable line, distinct from the pretty envelope above so
+    // the parent drains stdout line by line until it matches (see client::parse_daemon_ready_line). The
+    // token is the same non-secret value already in the 0600 instance.json, delivered to exactly the
+    // process that launched us; a client that ATTACHES to a pre-existing daemon still discovers it from
+    // instance.json instead.
+    {
+        editor::client::InstanceInfo ready;
+        ready.endpoint = endpoint;
+        ready.token = token;
+        ready.protocol_major = static_cast<std::uint32_t>(editor::contract::kProtocolMajor);
+        ready.pid = static_cast<std::int64_t>(current_pid());
+        const std::string line = editor::client::format_daemon_ready_line(ready);
+        std::fwrite(line.data(), 1, line.size(), stdout);
+        std::fputc('\n', stdout);
+        std::fflush(stdout);
     }
 
     const int serve_rc = server.serve(transport);

@@ -8,6 +8,7 @@
 
 add_library(context_common STATIC
     src/subprocess.cpp
+    src/child_process.cpp
     src/verify_signature.cpp)
 
 target_include_directories(context_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -27,6 +28,17 @@ target_link_options(context_common_test_subprocess
     PRIVATE $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
 target_include_directories(context_common_test_subprocess PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 add_test(NAME common-subprocess COMMAND context_common_test_subprocess)
+
+# The long-running-child spawn primitive with captured stdout (M9 e14a). Self-re-exec test: it spawns
+# ITSELF in a set of child modes, so the primitive is exercised on all three OS legs with no external
+# binary. Streams file/pipe IO, so static-link the GCC runtime (GNU-gated) like the siblings.
+add_executable(context_common_test_child_process tests/test_child_process.cpp)
+target_link_libraries(context_common_test_child_process PRIVATE context_common context_warnings)
+target_link_options(context_common_test_child_process
+    PRIVATE $<$<CXX_COMPILER_ID:GNU>:-static-libgcc;-static-libstdc++>)
+target_include_directories(context_common_test_child_process PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME common-child_process COMMAND context_common_test_child_process)
+set_tests_properties(common-child_process PROPERTIES TIMEOUT 120)
 
 # The R-SEC-009 verify-before-use gate (task a08): the C++ mirror of tools/verify_artifact.py's
 # fail-closed coverage. Reuses the committed TEST-ONLY fixtures under tools/tests/fixtures/ (baked in

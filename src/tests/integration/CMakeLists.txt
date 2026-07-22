@@ -83,6 +83,37 @@ set_tests_properties(
 set_tests_properties(m1-exit-3-crash-recovery PROPERTIES TIMEOUT 600)
 
 # ===================================================================================================
+# The M9 e14a DAEMON-LIFECYCLE-SPINE T2 DRILL (design 07 §4 / 03 §7 / 05 §2) — the process model
+# (spawn-or-attach + the stdio token + the exit policy + reconnect/read-only) proven END TO END against
+# a REAL `context daemon` over the loopback IPC wire, the m1-exit cross-process precedent. It links the
+# native Shell (context_editor_shell — the lifecycle's home; CEF-free, default-built) and drives its
+# DaemonLifecycle, which SPAWNS `context daemon` via the context_common child-process primitive. A plain
+# `editor-shell-` ctest, so the build job's general step auto-runs it on all three OS legs with no
+# ci.yml `--target` bookkeeping. Reuses the header-only process helper + the RPC harness.
+add_executable(context_test_e14a_daemon_lifecycle test_e14a_daemon_lifecycle.cpp)
+target_link_libraries(context_test_e14a_daemon_lifecycle
+    PRIVATE context_editor_shell context_warnings Threads::Threads)
+target_link_options(context_test_e14a_daemon_lifecycle PRIVATE ${_m1_exit_static_runtime})
+target_include_directories(context_test_e14a_daemon_lifecycle PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../cli/tests) # process_util.h (header-only, test-only)
+target_compile_definitions(context_test_e14a_daemon_lifecycle PRIVATE
+    CONTEXT_BINARY="$<TARGET_FILE:context>")
+add_dependencies(context_test_e14a_daemon_lifecycle context)
+add_test(NAME editor-shell-daemon-lifecycle-t2 COMMAND context_test_e14a_daemon_lifecycle)
+# Four scenarios, each spawning + reaping a real daemon (spawn boot + kill + a respawn on the reconnect
+# leg); cap generously so a regression surfaces its diagnostics rather than hanging the CI job.
+set_tests_properties(editor-shell-daemon-lifecycle-t2 PROPERTIES TIMEOUT 300)
+# The spawned `context` binary links the uninstrumented rusty_v8 archive (the M6 X1 `context profile gc`
+# path via context_cli), so on the sanitize legs the child needs the same narrow LSan demangler/
+# symbolizer suppressions the sibling CONTEXT_BINARY-spawning tests wire (they can never mask a
+# `context::` leak); the spawned child inherits this env. The drill binary itself links no V8.
+if(CONTEXT_SANITIZE)
+    set_tests_properties(editor-shell-daemon-lifecycle-t2 PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
+endif()
+
+# ===================================================================================================
 # The M2 EXIT GATE (ROADMAP §1 M2 Exit / issue #68) — five exit scenarios + the data-model seam
 # checklist, each a BLOCKING per-PR ctest on every OS leg (registered in docs/ci-fleet-manifest.json
 # as the m2-exit-* gates; run by the "M2 exit gate" step in .github/workflows/ci.yml):

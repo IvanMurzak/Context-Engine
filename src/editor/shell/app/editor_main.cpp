@@ -12,6 +12,7 @@
 #include "context/editor/client/subscription.h"
 #include "context/editor/shell/app_scheme.h"
 #include "context/editor/shell/browser.h"
+#include "context/editor/shell/daemon_lifecycle.h"
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/panel_host.h"
@@ -215,23 +216,17 @@ int main(int argc, char** argv)
         }
     }
 
-    // --- the daemon (D10: an ordinary AUTHENTICATED client) ---------------------------------------
+    // --- the daemon lifecycle spine (e14a / D18) --------------------------------------------------
     //
-    // MOVED AHEAD OF THE BROWSER by e05c, and the order is load-bearing: the attach is where the
-    // Shell learns the D20 token and the daemon endpoint, and BOTH must be registered with the
-    // bridge's egress guard BEFORE a renderer exists that could ask for them. Attaching after the
-    // browser was created would leave a window — however short — in which the guard knew no secrets.
-    shell::DaemonAttach daemon = shell::attach_to_project(options.project);
-    if (!daemon.attached)
-    {
-        // Read-only, not fatal (03 §7): the editor opens and reports, and reconnect is the caller's
-        // to drive. A shell that refused to start without a daemon could not be used to diagnose why
-        // the daemon would not start.
-        std::fprintf(stderr, "context_editor: not attached to a daemon (%s%s%s); the editor opens "
-                             "read-only\n",
-                     daemon.error.c_str(), daemon.error_code.empty() ? "" : "; code=",
-                     daemon.error_code.c_str());
-    }
+    // The Shell SPAWNS-OR-ATTACHES the daemon: attach to a live one, else spawn `context daemon` as a
+    // child and read the D20 token off its stdout (never argv/env). The lifecycle owns the read-only
+    // STATE (03 §7), the reconnect-with-backoff, and the honest exit policy. It is CONFIGURED with its
+    // handlers below (after the bridge + panels it drives exist) and STARTED just before the browser,
+    // so the token + endpoint reach the bridge's egress guard before any renderer could ask for them —
+    // the same "ahead of the browser" ordering e05c relied on, now spanning the full lifecycle.
+    shell::DaemonLifecycle lifecycle;
+    const std::filesystem::path daemon_binary =
+        shell::locate_context_binary(std::filesystem::path(argv[0]));
 
     // --- the privileged bridge (e05c, design 04 §1 / 08 §1) ---------------------------------------
     //
@@ -258,25 +253,12 @@ int main(int argc, char** argv)
 
     shell::ShellHandshake handshake(shell::make_handshake_nonce());
     shell::BridgeRouter bridge;
-    if (daemon.client != nullptr)
-    {
-        // The two values that must never cross into the renderer. Read from the client's own
-        // discovery output rather than re-read from disk, so the guard protects exactly what this
-        // process is actually holding. (A later reconnect that mints a new token must re-protect it
-        // — that path arrives with e05d's client layer.)
-        //
-        // CHECKED, not fire-and-forget: control 3 is the backstop for the other two, so booting a
-        // renderer with an unprotected credential is strictly worse than not booting at all.
-        if (!bridge.protect_secret(daemon.client->instance().token) ||
-            !bridge.protect_secret(daemon.client->instance().endpoint))
-        {
-            std::fprintf(stderr,
-                         "context_editor: the egress guard refused a daemon credential (empty or "
-                         "shorter than the minimum protected length) — refusing to start a "
-                         "renderer that could echo it back\n");
-            return 1;
-        }
-    }
+    // The two daemon credentials that must never cross into the renderer (the token + the endpoint) are
+    // registered with the egress guard by the lifecycle's on_attached handler below — on EVERY (re)attach,
+    // because a reconnect after a daemon restart mints a NEW token (e14a). `daemon_secret_ok` latches a
+    // guard refusal so the initial boot can refuse to start a renderer that could echo an unprotected
+    // credential — control 3 is the backstop for the other two.
+    bool daemon_secret_ok = true;
     if (!handshake.install(bridge))
     {
         std::fprintf(stderr, "context_editor: could not install the bridge handshake\n");
@@ -346,90 +328,73 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // --- the LIVE diagnostics subscription (the Problems read path) -------------------------------
+    // --- the LIVE daemon feed + the lifecycle handlers (the Problems read path, e14a) -------------
     //
-    // The Shell subscribes as an ordinary client (D10) and forwards what arrives into the panel
-    // models. Without a daemon there is simply no feed — the editor opens read-only and Problems is
-    // empty, which is the honest state rather than a failure.
+    // The Shell subscribes as an ordinary client (D10) and forwards what arrives into the panel models;
+    // with no daemon there is simply no feed (Problems stays empty — the honest read-only state). The
+    // subscription is OWNED BY THE LIFECYCLE, which drives it single-threaded from the owner loop
+    // (poll_timeout_ms = 0, a short reconnect ladder — see daemon_lifecycle.cpp) and, crucially, RE-
+    // ESTABLISHES it on a daemon restart with the fresh token, re-snapshotting the feed (03 §7). The
+    // handlers registered here are re-attached to every new client automatically.
     //
-    // SINGLE-THREADED, DELIBERATELY, and this is the trade worth naming. `SubscriptionConsumer` is
-    // documented as blocking for up to `poll_timeout_ms` per pump and, on a dropped wire, for the
-    // whole reconnect ladder — its own header says not to drive it from a thread that must stay
-    // responsive. The alternative to a thread is what is done here: `poll_timeout_ms = 0` (a
-    // non-blocking poll) and a deliberately SHORT reconnect ladder, pumped from the owner loop.
-    //
-    // Why not a thread: the feed mutates the panel models, and the bridge handlers that RENDER those
-    // models run on this same owner/UI thread. A background pump would be a data race on every
-    // panel model, requiring a lock around the whole PanelHost — which is a real design (and may
-    // become the right one when panels get heavier), but it is strictly more machinery than e05d1
-    // needs and strictly more ways to be wrong. The cost of the choice made here is bounded: a
-    // daemon restart can stall the loop for the ladder's duration, which the tuning below caps at
-    // roughly a second rather than the ~21 s the defaults would allow.
-    std::unique_ptr<client::SubscriptionConsumer> diagnostics;
-    if (daemon.client != nullptr && (builtin.problems != nullptr || builtin.scenetree != nullptr))
-    {
-        client::SubscriptionOptions subscription_options;
-        subscription_options.poll_timeout_ms = 0; // never block the owner loop on a quiet stream
-        subscription_options.reconnect_timeout_ms = 250;
-        subscription_options.backoff.initial_ms = 50;
-        subscription_options.backoff.max_ms = 250;
-        subscription_options.backoff.max_attempts = 3;
+    // `feed`/`tree_feed` stay POINTERS TO FORWARD-DECLARED types — this TU never sees ProblemsFeed's
+    // complete definition (this executable is compiled -fno-rtti when CEF is on, and the full include
+    // chain reaches a kernel header whose templated methods use typeid). The lambdas drive them through
+    // the apply_* non-member seams builtin_panels.h exposes for exactly this caller.
+    shell::panels::ProblemsFeed* feed = builtin.problems.get();
+    shell::panels::SceneTreeFeed* tree_feed = builtin.scenetree.get();
 
-        diagnostics = std::make_unique<client::SubscriptionConsumer>(
-            *daemon.client, shell::make_shell_attach_options(), subscription_options);
-
-        // `feed` stays a POINTER TO THE FORWARD-DECLARED type — this TU never sees `ProblemsFeed`'s
-        // complete definition (builtin_panels.h's comment on the forward declare explains why: this
-        // executable is compiled `-fno-rtti` when CEF is on, and `problems_feed.h`'s full include
-        // chain reaches a kernel header whose templated methods use `typeid`). The lambdas below
-        // drive it through `apply_problems_snapshot`/`apply_problems_event`, the non-member seams
-        // builtin_panels.h/.cpp expose for exactly this caller.
-        shell::panels::ProblemsFeed* feed = builtin.problems.get();
-        // e05d3: the Scene tree rides the SAME stream — a `derivation.settled` advances its status
-        // line and marks its re-read due (the owner loop's pump performs it). Forward-declared type,
-        // driven through the non-member seam, for the same RTTI/CEF reason as the problems feed.
-        shell::panels::SceneTreeFeed* tree_feed = builtin.scenetree.get();
-        // 0 is only the FALLBACK stamp for a snapshot that carries no `generation` of its own; the
-        // real cursor snapshot always does, and `apply_snapshot` prefers it. Passing 0 as the
-        // authoritative stamp would mark every recovered provisional diagnostic stale-by-
-        // construction, since the stream never settles below generation 1.
-        diagnostics->on_snapshot(
-            [feed](const std::string&, const contract::Json& snapshot)
-            {
-                if (feed != nullptr)
-                {
-                    shell::panels::apply_problems_snapshot(*feed, snapshot, 0);
-                }
-            });
-        diagnostics->on_event(
-            [feed, tree_feed](const std::string&, const client::ClientEvent& event)
-            {
-                if (feed != nullptr)
-                {
-                    (void)shell::panels::apply_problems_event(*feed, event.topic, event.payload,
-                                                              event.generation);
-                }
-                if (tree_feed != nullptr)
-                {
-                    (void)shell::panels::apply_scenetree_event(*tree_feed, event.topic,
-                                                               event.payload, event.generation);
-                }
-            });
-
-        client::SubscriptionSpec spec;
-        spec.topics = {shell::panels::kDiagnosticsTopic, shell::panels::kDerivationTopic};
-        (void)diagnostics->add(spec);
-
-        std::string subscribe_error;
-        if (!diagnostics->start(subscribe_error))
+    lifecycle.set_subscription_topics(
+        {shell::panels::kDiagnosticsTopic, shell::panels::kDerivationTopic});
+    lifecycle.set_reconnect_policy(shell::ReconnectPolicy{/*initial_ms*/ 200, /*max_ms*/ 2000,
+                                                          /*multiplier*/ 2});
+    // On EVERY (re)attach: register the daemon's token + endpoint with the egress guard so no renderer
+    // can echo them back. A reconnect after a daemon restart mints a NEW token, so this runs per attach.
+    lifecycle.on_attached(
+        [&bridge, &lifecycle, &daemon_secret_ok](client::Client&)
         {
-            // Same posture as a failed attach: reported, non-fatal, and the editor still opens.
-            std::fprintf(stderr,
-                         "context_editor: could not subscribe to the diagnostics stream (%s); the "
-                         "Problems panel will stay empty\n",
-                         subscribe_error.c_str());
-            diagnostics.reset();
-        }
+            const bool ok = bridge.protect_secret(lifecycle.instance().token) &&
+                            bridge.protect_secret(lifecycle.instance().endpoint);
+            if (!ok)
+                daemon_secret_ok = false;
+        });
+    // 0 is only the FALLBACK generation stamp for a snapshot that carries none of its own; the real
+    // cursor snapshot always does and apply_snapshot prefers it.
+    lifecycle.on_snapshot(
+        [feed](const std::string&, const contract::Json& snapshot)
+        {
+            if (feed != nullptr)
+                shell::panels::apply_problems_snapshot(*feed, snapshot, 0);
+        });
+    lifecycle.on_event(
+        [feed, tree_feed](const std::string&, const client::ClientEvent& event)
+        {
+            if (feed != nullptr)
+                (void)shell::panels::apply_problems_event(*feed, event.topic, event.payload,
+                                                          event.generation);
+            if (tree_feed != nullptr)
+                (void)shell::panels::apply_scenetree_event(*tree_feed, event.topic, event.payload,
+                                                           event.generation);
+        });
+
+    // START the spine: attach to a live daemon, else spawn `context daemon` as a child and read the D20
+    // token off its stdout. Read-only, not fatal (03 §7) — the editor opens and pump() keeps retrying.
+    std::string daemon_error;
+    if (!lifecycle.spawn_or_attach(options.project, daemon_binary, daemon_error))
+    {
+        std::fprintf(stderr,
+                     "context_editor: not attached to a daemon (%s); the editor opens read-only\n",
+                     daemon_error.c_str());
+    }
+    // Control 3 backstop: if the guard refused a daemon credential on the initial attach, refuse to
+    // boot a renderer that could echo it back (CEF is not yet initialized here, so a clean early exit).
+    if (lifecycle.client() != nullptr && !daemon_secret_ok)
+    {
+        std::fprintf(stderr,
+                     "context_editor: the egress guard refused a daemon credential (empty or shorter "
+                     "than the minimum protected length) — refusing to start a renderer that could "
+                     "echo it back\n");
+        return 1;
     }
 
     // --- the browser ------------------------------------------------------------------------------
@@ -503,29 +468,16 @@ int main(int argc, char** argv)
     while (manager.pump_once(now_us()))
     {
         ++frames;
-        if (diagnostics != nullptr)
+        // Drive the daemon link (e14a / 03 §7): pump the live feed, and on a lost daemon enter the
+        // read-only STATE + reconnect with backoff, re-snapshotting on reattach. A daemon restart is
+        // stalled at most the ladder's bounded duration. now in ms for the backoff clock.
+        lifecycle.pump(static_cast<std::int64_t>(now_us() / 1000));
+        if (client::Client* live_client = lifecycle.client())
         {
-            // One non-blocking drain per frame. A pump failure here is UNRECOVERABLE by the
-            // consumer's own definition (the backoff ladder was exhausted, or the daemon REFUSED a
-            // re-subscribe), so the feed is dropped rather than retried forever: an editor silently
-            // burning a pump every frame against a daemon that will never answer is worse than one
-            // that stops and says so.
-            std::string pump_error;
-            if (!diagnostics->pump(pump_error))
-            {
-                std::fprintf(stderr,
-                             "context_editor: the diagnostics subscription stopped (%s); the "
-                             "Problems panel will no longer update\n",
-                             pump_error.c_str());
-                diagnostics.reset();
-            }
-        }
-        if (daemon.client != nullptr)
-        {
-            // e05d3: drain the live-hydration work the feeds marked due (Scene tree re-reads on
-            // settle; the Inspector's selection fetch). Synchronous on the owner loop by the same
-            // single-threaded reasoning as the diagnostics pump above; a no-op when nothing is due.
-            shell::panels::pump_panel_feeds(builtin, *daemon.client, options.scene);
+            // e05d3: drain the live-hydration work the feeds marked due (Scene tree re-reads on settle;
+            // the Inspector's selection fetch). Uses the CURRENT client, so a reconnect's new client is
+            // picked up automatically. Synchronous on the owner loop; a no-op when nothing is due.
+            shell::panels::pump_panel_feeds(builtin, *live_client, options.scene);
         }
         if (options.max_frames > 0 && frames >= options.max_frames)
         {
@@ -537,6 +489,10 @@ int main(int argc, char** argv)
         std::this_thread::sleep_for(std::chrono::milliseconds(4));
     }
 
+    // The exit policy (e14a): an owned daemon this process is the last client of gets a clean in-band
+    // `shutdown`; an owned daemon other clients still hold is left running; an external daemon is never
+    // touched. Runs before the manager/CEF teardown so the daemon call still has a live wire.
+    lifecycle.shutdown_at_exit();
     manager.shutdown();
 #if defined(CONTEXT_EDITOR_HAS_CEF)
     shell::cef::shutdown();
