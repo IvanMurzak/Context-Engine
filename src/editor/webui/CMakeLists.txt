@@ -243,6 +243,19 @@ add_test(NAME webui-panel-contract
             --package-json "${_ctx_webui_core}/package.json"
             --shell-src-dir "${CMAKE_CURRENT_SOURCE_DIR}/../shell/src")
 
+# 1d) The e14c WELCOME CONTRACT gate. The welcome surface adds four `welcome.*` method names plus the
+# `welcome`/`project` mode tokens, each declared once in welcome.h (C++) and once in welcome.ts. A rename
+# on either side unbinds the welcome screen or strands boot.ts's mode branch SILENTLY — the same class of
+# no-build-error failure the panel/scheme gates catch. This re-reads the production-reachable constants
+# out of the BUILT bundle and compares them to welcome.h.
+add_test(NAME webui-welcome-contract
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_webui_assets.py"
+            --asset-dir "${_ctx_webui_assets}"
+            --manifest "${_ctx_dockview_manifest}"
+            --bundle-name "${_ctx_webui_bundle_name}"
+            --welcome-contract
+            --shell-include-dir "${CMAKE_CURRENT_SOURCE_DIR}/../shell/include/context/editor/shell")
+
 # 2) The DRIFT gate (e05a DoD: "generated from e02's schema; drift-checked in CI"). Re-projects the
 # BUILD-GENERATED schema — the live registry's output, not the committed copy — and refuses any byte
 # difference against the committed typings. A registry change that does not reach the editor's

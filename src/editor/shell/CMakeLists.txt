@@ -51,6 +51,8 @@ add_library(context_editor_shell STATIC
     src/panel_host.cpp    # e05d1: the panel-agnostic panel.* surface over the e05b roster (04 §3-§4)
     src/editor_state_bridge.cpp  # e05d2: the editor.state.*/editor.regions.* surface (03 §1 / §6)
     src/daemon_lifecycle.cpp  # e14a: spawn-or-attach + exit policy + reconnect/read-only (D18)
+    src/welcome.cpp       # e14c: the welcome.* surface — recents + folder picker + new-from-template (D13)
+    src/folder_picker.cpp # e14c: the native OS folder dialog (Win32 real; honest gap elsewhere)
     src/shell.cpp)        # WindowManager / EditorWindow / the single-threaded owner loop
 
 target_include_directories(context_editor_shell PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -112,7 +114,10 @@ if(WIN32)
     # RegisterClassExW / CreateWindowExW / TrackMouseEvent / the DPI entry points. CMake's default
     # Windows library set already includes user32, but naming it keeps the dependency visible in the
     # target rather than inherited from a toolchain default that a future generator might not carry.
-    target_link_libraries(context_editor_shell PRIVATE user32)
+    # ole32 + uuid: the e14c native folder picker (folder_picker.cpp) drives IFileOpenDialog through COM
+    # (CoInitializeEx / CoCreateInstance / CoTaskMemFree + the CLSID/IID GUIDs). Boundary-clean — pure
+    # OS-SDK libraries, no engine-internal edge, so the D10 shell-boundary gate is unaffected.
+    target_link_libraries(context_editor_shell PRIVATE user32 ole32 uuid)
 endif()
 
 # Self-contained GCC runtime for every executable below. They use std::filesystem + stream IO, whose
@@ -143,6 +148,7 @@ set(_context_shell_tests
     test_panel_host    # e05d1: the panel-agnostic roster/render/command/gesture/D6-state surface
     test_editor_state_bridge  # e05d2: layout/panels publish+restore round-trip + region-map emission
     test_daemon_lifecycle  # e14a: exit-policy decision, client census, reconnect/read-only state
+    test_welcome       # e14c: launch-mode rule, recents round-trip, welcome.* bridge + picker/CLI seams
     test_shell)        # the owner loop end to end + the authenticated-attach guard
 
 foreach(_t IN LISTS _context_shell_tests)

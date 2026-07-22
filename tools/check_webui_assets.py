@@ -130,6 +130,21 @@ EDITOR_STATE_CONSTANTS = (
     ("region kind native", "editor_state_bridge.h", "kRegionKindNative", "REGION_KIND_NATIVE"),
 )
 
+# The M9 e14c WELCOME surface (design 07 §4 / 10 / D13), whose vocabulary lives in welcome.h. SAME
+# silent-drift hazard as the panel / editor-state surfaces: a `welcome.*` method renamed on one side
+# unbinds the welcome screen with no build error, and a mode-token rename strands boot.ts's welcome
+# branch (it compares `mode === WELCOME_MODE_WELCOME`). Cross-checked identically, from the header
+# constants and the built bundle. WELCOME_MODE_PROJECT is deliberately NOT listed: it is referenced only
+# by the tests, so esbuild tree-shakes it out of the PRODUCTION bundle this gate reads — and its drift is
+# harmless (boot.ts only ever compares against the "welcome" token, never "project").
+WELCOME_CONSTANTS = (
+    ("welcome.state", "welcome.h", "kWelcomeStateMethod", "WELCOME_STATE_METHOD"),
+    ("welcome.pickFolder", "welcome.h", "kWelcomePickFolderMethod", "WELCOME_PICK_FOLDER_METHOD"),
+    ("welcome.open", "welcome.h", "kWelcomeOpenMethod", "WELCOME_OPEN_METHOD"),
+    ("welcome.newProject", "welcome.h", "kWelcomeNewProjectMethod", "WELCOME_NEW_PROJECT_METHOD"),
+    ("welcome mode welcome", "welcome.h", "kWelcomeModeWelcome", "WELCOME_MODE_WELCOME"),
+)
+
 # The closed gesture vocabulary (04 §4), compared SET vs SET between the C++ wire tokens and the
 # bundle's own GESTURE_VERBS array, so a verb added on one side without the other — which would be
 # refused at runtime with no build error — fails here instead.
@@ -383,6 +398,50 @@ def check_scheme_contract(asset_dir: Path, bundle_name: str, shell_include_dir: 
     return failures
 
 
+def check_welcome_contract(asset_dir: Path, bundle_name: str, shell_include_dir: Path) -> list[str]:
+    """Check 8 — the M9 e14c welcome surface: the `welcome.*` method + mode vocabulary agrees across
+    the two languages. Same mechanism + authority direction as the panel / scheme surfaces: the C++
+    value (which the Shell actually ROUTES) is read and the BUILT bundle is compared against it."""
+    failures: list[str] = []
+
+    bundle = asset_dir / bundle_name
+    if not bundle.is_file():
+        return [f"bundle missing: {bundle}"]
+    bundle_text = bundle.read_text(encoding="utf-8", errors="replace")
+
+    for human, cpp_file, cpp_name, ts_name in WELCOME_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(
+                f"{human}: the bundle does not declare {ts_name} — the welcome screen cannot be "
+                f"calling the method / branching on the mode the Shell routes")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
+                f"Shell would route one name and editor-core would call another, so the welcome "
+                f"surface would unbind (or its mode branch strand) with NO error anywhere.")
+    return failures
+
+
+def run_welcome_contract(asset_dir: Path, bundle_name: str, shell_include_dir: Path) -> int:
+    """The M9 e14c gate (check 8). Separate entry point so a failure names the right gate."""
+    if not asset_dir.is_dir():
+        raise CheckError(f"asset dir does not exist: {asset_dir}")
+    if not shell_include_dir.is_dir():
+        raise CheckError(f"shell include dir does not exist: {shell_include_dir}")
+
+    failures = check_welcome_contract(asset_dir, bundle_name, shell_include_dir)
+    if failures:
+        for failure in failures:
+            print(f"[check_webui_assets] FAIL: {failure}", file=sys.stderr)
+        return 1
+
+    print("[check_webui_assets] OK: the welcome.* method + mode vocabulary matches the Shell's C++ "
+          "constants (welcome.h)")
+    return 0
+
+
 def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: Path,
                          contract_include_dir: Path, package_json: Path,
                          shell_src_dir: Path) -> list[str]:
@@ -590,6 +649,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="run the M9 e05d1 gate (cross-language panel.* vocabulary + D6 state "
                              "keys + gesture verbs + docking-engine loading + the editor-core "
                              "dependency allowlist) instead of the asset checks")
+    parser.add_argument("--welcome-contract", action="store_true",
+                        help="run the M9 e14c gate (cross-language welcome.* method + mode vocabulary) "
+                             "instead of the asset checks")
     parser.add_argument("--contract-include-dir", type=Path,
                         default=REPO_ROOT / "src" / "editor" / "gui" / "contract" / "include" /
                         "context" / "editor" / "gui" / "contract",
@@ -611,6 +673,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_panel_contract(args.asset_dir, args.bundle_name, args.shell_include_dir,
                                       args.contract_include_dir, args.package_json,
                                       args.shell_src_dir)
+        if args.welcome_contract:
+            return run_welcome_contract(args.asset_dir, args.bundle_name, args.shell_include_dir)
         return run(args.asset_dir, args.manifest, args.bundle_name)
     except CheckError as exc:
         print(f"[check_webui_assets] ERROR: {exc}", file=sys.stderr)
