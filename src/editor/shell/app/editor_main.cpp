@@ -20,6 +20,7 @@
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
+#include "context/editor/shell/welcome.h"
 #include "context/editor/shell/window.h"
 #include "context/render/rhi.h"
 
@@ -64,6 +65,10 @@ namespace
 struct Options
 {
     std::filesystem::path project = std::filesystem::current_path();
+    // e14c: whether `--project` was passed EXPLICITLY. A bare launch (no `--project`) that does not land
+    // in a project shows the welcome screen (D13); an explicit project always opens. `current_path()` is
+    // only the default so the daemon has a home when a project IS given by other means.
+    bool project_explicit = false;
     // e05c: the editor now boots editor-core over its OWN scheme by default rather than a blank
     // page. `--url` still overrides it (a diagnostic escape hatch), but there is deliberately no
     // `file://` path anywhere: assets ship in-app and are served over context-editor:// (04 §1).
@@ -118,6 +123,7 @@ bool parse_options(int argc, char** argv, Options& out, bool& asked_for_help)
         else if (arg == "--project" && has_value)
         {
             out.project = argv[++i];
+            out.project_explicit = true;
         }
         else if (arg == "--url" && has_value)
         {
@@ -229,6 +235,16 @@ int main(int argc, char** argv)
     shell::DaemonLifecycle lifecycle;
     const std::filesystem::path daemon_binary =
         shell::locate_context_binary(std::filesystem::path(argv[0]));
+
+    // --- the launch mode (e14c / D13) -------------------------------------------------------------
+    //
+    // A bare launch that is NOT already sitting in a project shows the WELCOME screen (recent projects,
+    // "Open project…", "New from template"); every other launch opens the project. editor-core asks
+    // `welcome.state` after the boot handshake and branches on this, so the daemon is spawned-or-attached
+    // ONLY in project mode — there is no project to attach to on the welcome screen.
+    const shell::LaunchMode launch_mode =
+        shell::resolve_launch_mode(options.project, options.project_explicit);
+    const bool project_mode = launch_mode == shell::LaunchMode::project;
 
     // --- the privileged bridge (e05c, design 04 §1 / 08 §1) ---------------------------------------
     //
@@ -351,6 +367,28 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // --- the welcome surface (e14c, design 07 §4 / 10 / D13) --------------------------------------
+    //
+    // The app's front door: `welcome.state` tells editor-core whether to render the welcome screen or
+    // the editor, and `welcome.open` / `welcome.pickFolder` / `welcome.newProject` back its
+    // three actions. Installed on the SAME privileged bridge; the native folder picker is boundary-clean
+    // (folder_picker.cpp, OS-SDK only) and `context new` / `context edit` are spawned as subprocesses via
+    // the located `context` binary. The CEF boot smokes install NO welcome surface, so editor-core's
+    // `welcome.state` there answers `unknown_method` and it defaults to the panel path — unchanged.
+    shell::WelcomeBridge welcome;
+    welcome.set_launch_mode(launch_mode);
+    if (project_mode)
+    {
+        const std::string project_name = options.project.lexically_normal().filename().string();
+        welcome.set_project_name(project_name);
+    }
+    welcome.set_cli_binary(daemon_binary);
+    if (!welcome.install(bridge))
+    {
+        std::fprintf(stderr, "context_editor: could not install the welcome bridge surface\n");
+        return 1;
+    }
+
     // --- the keybindings read/watch surface (e07c, design 05 §6 / 03 §6) --------------------------
     //
     // The Shell owns the per-user override `~/.context/keybindings.json`: editor-core is a pure
@@ -419,12 +457,25 @@ int main(int argc, char** argv)
 
     // START the spine: attach to a live daemon, else spawn `context daemon` as a child and read the D20
     // token off its stdout. Read-only, not fatal (03 §7) — the editor opens and pump() keeps retrying.
+    // e14c: ONLY in project mode. The welcome screen has no project, so there is nothing to attach to or
+    // spawn; the daemon lifecycle stays idle (read-only) until the user opens or creates a project, which
+    // launches a fresh `context_editor --project <path>` process (the e14a/D15 flow) with its own daemon.
     std::string daemon_error;
-    if (!lifecycle.spawn_or_attach(options.project, daemon_binary, daemon_error))
+    if (project_mode && !lifecycle.spawn_or_attach(options.project, daemon_binary, daemon_error))
     {
         std::fprintf(stderr,
                      "context_editor: not attached to a daemon (%s); the editor opens read-only\n",
                      daemon_error.c_str());
+    }
+    // e14c: record this project as the most-recent so the NEXT bare launch surfaces it on the welcome
+    // screen. Best-effort — a failure here (no HOME, a read-only disk) must never keep the editor from
+    // opening, so its result is deliberately ignored.
+    if (project_mode)
+    {
+        std::string recent_error;
+        (void)shell::record_recent_project(shell::user_config_path(), options.project,
+                                           static_cast<std::int64_t>(now_us() / 1000), 10,
+                                           &recent_error);
     }
     // Control 3 backstop: if the guard refused a daemon credential on the initial attach, refuse to
     // boot a renderer that could echo it back (CEF is not yet initialized here, so a clean early exit).

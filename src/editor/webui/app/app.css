@@ -142,6 +142,73 @@ body {
     cursor: pointer;
 }
 
+/* --- the welcome screen (M9 e14c, design 07 §4 / 10 / D13) ------------------------------------ *
+ *
+ * The app's front door on a bare launch: recent projects on the left, a hero + "New from template" on
+ * the right. Minimal on purpose (the real token/theme kit is e06's — it uses the placeholder
+ * --editor-bg/--editor-fg like the docking surface above, not a second copy of the token sheet).
+ *
+ * 🚫 NO FLOURISH on the CTA (O1, resolved 2026-07-19): the "Pulse of Work" flourish is state-linked and
+ * belongs only on the Play/active-action button; the welcome CTA has no such state, so `.welcome-cta` is
+ * an ORDINARY primary button — no aurora, no glow, no `::before` bloom. */
+.welcome-screen {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    box-sizing: border-box;
+}
+
+.welcome-recent {
+    width: 340px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid rgba(230, 237, 245, 0.14);
+    box-sizing: border-box;
+}
+
+.welcome-recent-header {
+    padding: 20px 20px 8px;
+}
+
+.welcome-eyebrow {
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    opacity: 0.55;
+}
+
+.welcome-recent-title {
+    margin: 4px 0 0;
+    font-size: 17px;
+    font-weight: 600;
+}
+
+.welcome-recent-list {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    margin: 0;
+    padding: 4px 12px;
+    list-style: none;
+}
+
+.welcome-recent-row {
+    padding: 8px 10px;
+    border-radius: 6px;
+    border-left: 3px solid transparent;
+    cursor: default;
+}
+
+.welcome-recent-row:hover {
+    background: rgba(230, 237, 245, 0.08);
+    border-left-color: rgba(230, 237, 245, 0.25);
+}
+
+.welcome-recent-row:focus-visible {
+    outline: 2px solid var(--editor-fg);
+    outline-offset: -2px;
+}
+
 /* --- the command palette (M9 e07d, design 05 §6 / 04 / 10) ------------------------------------ *
  *
  * A top-anchored overlay (the VS Code-familiar position) — a filter input over a results listbox —
@@ -186,6 +253,133 @@ body {
 .ctx-palette__input:focus-visible {
     outline: 2px solid var(--editor-fg);
     outline-offset: -2px;
+}
+
+.welcome-recent-name {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.welcome-recent-path {
+    font-size: 10.5px;
+    opacity: 0.55;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.welcome-recent-empty {
+    padding: 10px;
+    opacity: 0.55;
+    font-size: 12px;
+}
+
+.welcome-recent-footer {
+    padding: 14px 20px;
+    border-top: 1px solid rgba(230, 237, 245, 0.14);
+}
+
+.welcome-open-folder {
+    width: 100%;
+    font: inherit;
+    color: inherit;
+    background: rgba(230, 237, 245, 0.1);
+    border: 1px solid rgba(230, 237, 245, 0.25);
+    border-radius: 6px;
+    padding: 8px 10px;
+    cursor: pointer;
+}
+
+.welcome-open-folder:hover {
+    background: rgba(230, 237, 245, 0.16);
+}
+
+.welcome-hero {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    padding: 32px;
+    text-align: center;
+}
+
+.welcome-mark {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: var(--editor-fg);
+    opacity: 0.9;
+}
+
+.welcome-title {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 600;
+}
+
+.welcome-tagline {
+    margin: 0;
+    max-width: 420px;
+    opacity: 0.7;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+/* The primary CTA — ORDINARY primary styling (O1: no flourish). */
+.welcome-cta {
+    font: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--editor-bg);
+    background: var(--editor-fg);
+    border: 1px solid var(--editor-fg);
+    border-radius: 8px;
+    padding: 10px 20px;
+    cursor: pointer;
+}
+
+.welcome-cta:hover {
+    opacity: 0.9;
+}
+
+.welcome-cta:focus-visible {
+    outline: 2px solid var(--editor-fg);
+    outline-offset: 2px;
+}
+
+.welcome-template-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.welcome-template-chip {
+    font: inherit;
+    color: inherit;
+    min-width: 120px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(230, 237, 245, 0.25);
+    background: rgba(230, 237, 245, 0.06);
+    cursor: pointer;
+}
+
+.welcome-template-chip:hover {
+    border-color: rgba(230, 237, 245, 0.5);
+    background: rgba(230, 237, 245, 0.12);
+}
+
+.welcome-template-chip:focus-visible {
+    outline: 2px solid var(--editor-fg);
+    outline-offset: 2px;
+}
+
+.welcome-template-label {
+    font-size: 12px;
+    font-weight: 500;
 }
 
 .ctx-palette__list {

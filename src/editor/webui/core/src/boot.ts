@@ -40,6 +40,7 @@ import { Palette, PALETTE_TOGGLE_COMMAND_ID, paletteCommands } from "./palette.j
 import { PaletteView } from "./palette_view.js";
 import { PanelClient } from "./panels.js";
 import { PanelHost } from "./panelhost.js";
+import { WELCOME_MODE_WELCOME, WelcomeClient, mountWelcome } from "./welcome.js";
 import {
     resolveContext,
     STUB_EDITOR_UI,
@@ -122,6 +123,33 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         }
 
         await bridge.call("shell.ready", { nonce });
+
+        // --- the welcome screen (e14c, design 07 §4 / D13) ----------------------------------------
+        // A BARE launch shows the app's front door (recent projects / "Open project…" / "New from
+        // template") instead of the editor. Ask the Shell, and DEFAULT to the editor path when there
+        // is no welcome surface: `state()` returns null on an `unknown_method` refusal, which is
+        // exactly what the CEF boot smokes (which install no welcome surface) get — so they mount
+        // panels unchanged. Only an explicit `mode: "welcome"` diverts to the front door.
+        const welcomeState = await new WelcomeClient(bridge).state();
+        if (welcomeState !== null && welcomeState.mode === WELCOME_MODE_WELCOME) {
+            const container =
+                typeof document === "undefined" ? null : document.getElementById(EDITOR_ROOT_ID);
+            let recentCount = 0;
+            let templateCount = 0;
+            if (container !== null) {
+                const mount = mountWelcome(bridge, container, welcomeState);
+                recentCount = mount.recentCount;
+                templateCount = mount.templateCount;
+            }
+            markDocument("welcome", `recents:${recentCount} templates:${templateCount}`);
+            return {
+                attached: true,
+                ready: true,
+                panelsMounted: 0,
+                panelsUnavailable: [],
+                error: "",
+            };
+        }
 
         // --- the app layer (e05d1) ----------------------------------------------------------------
         // The channel is proven; bring up the panels. A failure HERE is reported but does NOT undo

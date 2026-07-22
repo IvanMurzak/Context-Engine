@@ -11,6 +11,7 @@ import { guardsTests } from "./guards.test.js";
 import { whenTests } from "./when.test.js";
 import { commandsTests } from "./commands.test.js";
 import { keymapTests } from "./keymap.test.js";
+import { welcomeTests } from "./welcome.test.js";
 import { paletteTests } from "./palette.test.js";
 import { reachabilityTests } from "./reachability.test.js";
 
@@ -21,6 +22,7 @@ const result = runTests([
     ...whenTests,
     ...commandsTests,
     ...keymapTests,
+    ...welcomeTests,
     ...paletteTests,
     ...reachabilityTests,
 ]);

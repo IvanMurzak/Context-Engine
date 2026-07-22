@@ -45,6 +45,7 @@
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
+#include "context/editor/shell/welcome.h"
 
 #include <chrono>
 #include <cstddef>
@@ -321,6 +322,24 @@ int main(int argc, char** argv)
     shell::KeybindingsBridge keybindings_bridge;
     keybindings_bridge.bind_path(std::filesystem::path{});
     SMOKE_CHECK(keybindings_bridge.install(bridge), "the keybindings.get bridge surface installed");
+
+    // --- the welcome launch-mode surface (e14c) -----------------------------------------------
+    // editor-core's boot calls `welcome.state` right after `shell.ready` to choose the welcome screen
+    // vs the editor (boot.ts). Like the editor-state and keybindings methods above, that call rides
+    // this SAME privileged bridge — so unless a real WelcomeBridge is installed here, the live boot
+    // hits the router's deny-by-default `unknown_method` REFUSAL and the "no envelope refusals"
+    // assertion below fails. boot.ts's own fallback (treat that refusal as "not welcome, proceed to
+    // the editor") keeps the smoke booting and rendering, but the strict `bridge.refused() == 0`
+    // invariant does not tolerate even a gracefully-handled refusal. Installed in PROJECT mode so the
+    // method is SERVED reporting `mode: "project"` and the renderer takes the same editor/panels path
+    // the rest of this smoke asserts — never the welcome screen (which mounts no panels). Bound to an
+    // EMPTY config path (a permanently-absent recents store) so the served state is deterministic
+    // regardless of whether the CI host happens to have a `~/.context/config.json`, mirroring the
+    // keybindings bridge's empty-path rationale. Same lifetime tier as the bridges above.
+    shell::WelcomeBridge welcome_bridge;
+    welcome_bridge.set_launch_mode(shell::LaunchMode::project);
+    welcome_bridge.set_config_path(std::filesystem::path{});
+    SMOKE_CHECK(welcome_bridge.install(bridge), "the welcome.state bridge surface installed");
 
     // Drive the integrated pump until the browser has painted, the bridge handshake completed,
     // every hostable panel has hydrated, AND the composed surface has ACTUALLY REPAINTED with the

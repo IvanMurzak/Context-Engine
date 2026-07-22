@@ -143,6 +143,35 @@ if(CONTEXT_SANITIZE)
 endif()
 
 # ===================================================================================================
+# The M9 e14c WELCOME-SCREEN T2 DRILL (design 07 §4 / 10, D13) — the app's front door (recent projects +
+# native folder picker + new-from-template) proven end to end against a REAL `context` CLI over
+# subprocesses, with NO GUI (headless-safe on every OS leg incl. Session 0). It links the native Shell
+# (context_editor_shell — the welcome surface's home, CEF-free, default-built) for the pure launch-mode
+# rule + the recents store + the `context new`/`context edit` wrapper, and spawns the REAL `context`
+# binary to prove the flows and the persona-A step budgets (open-recent = 2, new-from-template <= 7). A
+# plain `editor-shell-` ctest, so the build job's general step auto-runs it on all three OS legs with no
+# ci.yml `--target` bookkeeping.
+add_executable(context_test_e14c_welcome test_e14c_welcome.cpp)
+target_link_libraries(context_test_e14c_welcome
+    PRIVATE context_editor_shell context_warnings Threads::Threads)
+target_link_options(context_test_e14c_welcome PRIVATE ${_m1_exit_static_runtime})
+target_compile_definitions(context_test_e14c_welcome PRIVATE
+    CONTEXT_BINARY="$<TARGET_FILE:context>")
+add_dependencies(context_test_e14c_welcome context)
+add_test(NAME editor-shell-welcome-t2 COMMAND context_test_e14c_welcome)
+# Four scenarios, each scaffolding + opening real projects via `context new`/`context edit`; cap
+# generously so a regression surfaces its diagnostics rather than hanging the CI job.
+set_tests_properties(editor-shell-welcome-t2 PROPERTIES TIMEOUT 180)
+# The spawned `context` binary links the uninstrumented rusty_v8 archive (the M6 X1 `context profile gc`
+# path via context_cli), so on the sanitize legs the child needs the same narrow LSan suppressions the
+# sibling CONTEXT_BINARY-spawning tests wire (they can never mask a `context::` leak); the spawned child
+# inherits this env. The drill binary itself links no V8.
+if(CONTEXT_SANITIZE)
+    set_tests_properties(editor-shell-welcome-t2 PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
+endif()
+
+# ===================================================================================================
 # The M2 EXIT GATE (ROADMAP §1 M2 Exit / issue #68) — five exit scenarios + the data-model seam
 # checklist, each a BLOCKING per-PR ctest on every OS leg (registered in docs/ci-fleet-manifest.json
 # as the m2-exit-* gates; run by the "M2 exit gate" step in .github/workflows/ci.yml):
