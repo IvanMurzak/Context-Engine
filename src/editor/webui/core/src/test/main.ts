@@ -11,6 +11,8 @@ import { guardsTests } from "./guards.test.js";
 import { whenTests } from "./when.test.js";
 import { commandsTests } from "./commands.test.js";
 import { keymapTests } from "./keymap.test.js";
+import { paletteTests } from "./palette.test.js";
+import { reachabilityTests } from "./reachability.test.js";
 
 const result = runTests([
     ...panelsTests,
@@ -19,6 +21,8 @@ const result = runTests([
     ...whenTests,
     ...commandsTests,
     ...keymapTests,
+    ...paletteTests,
+    ...reachabilityTests,
 ]);
 report(result);
 
