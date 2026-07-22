@@ -442,6 +442,8 @@ PANEL_BUNDLE = (
     'var REGION_KIND_NATIVE = "native";\n'
     # e07c keybindings vocabulary (keymap.ts).
     'var KEYBINDINGS_GET_METHOD = "keybindings.get";\n'
+    # e06b themes vocabulary (theme.ts).
+    'var THEMES_GET_METHOD = "themes.get";\n'
 )
 
 # MIRRORS THE REAL HEADER'S SHAPE. The real `panel_host.h` declares the enum and the token
@@ -498,6 +500,9 @@ PANEL_CPP_EDITOR_STATE = (
 # The e07c keybindings method lives in keybindings_bridge.h, read the same plain-constant way.
 PANEL_CPP_KEYBINDINGS = 'inline constexpr const char* kKeybindingsGetMethod = "keybindings.get";\n'
 
+# The e06b themes method lives in themes_bridge.h, read the same plain-constant way.
+PANEL_CPP_THEMES = 'inline constexpr const char* kThemesGetMethod = "themes.get";\n'
+
 PANEL_DOCUMENT = (
     "<!DOCTYPE html>\n"
     '<html lang="en">\n'
@@ -516,6 +521,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
                    header: str = PANEL_CPP_HEADER, state: str = PANEL_CPP_STATE,
                    source: str = PANEL_CPP_SOURCE, editor_state: str = PANEL_CPP_EDITOR_STATE,
                    keybindings: str = PANEL_CPP_KEYBINDINGS,
+                   themes: str = PANEL_CPP_THEMES,
                    package: dict | None = None,
                    stage_dockview: bool = True) -> tuple[Path, Path, Path, Path, Path]:
     asset_dir = tmp_path / "app"
@@ -531,6 +537,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
     (include_dir / "panel_host.h").write_text(header, encoding="utf-8")
     (include_dir / "editor_state_bridge.h").write_text(editor_state, encoding="utf-8")
     (include_dir / "keybindings_bridge.h").write_text(keybindings, encoding="utf-8")
+    (include_dir / "themes_bridge.h").write_text(themes, encoding="utf-8")
 
     contract_dir = tmp_path / "contractinclude"
     contract_dir.mkdir(parents=True, exist_ok=True)
@@ -619,6 +626,27 @@ def test_a_renamed_keybindings_cpp_constant_is_a_config_error(tmp_path: Path) ->
     renamed = PANEL_CPP_KEYBINDINGS.replace("kKeybindingsGetMethod", "kKeybindingsFetchMethod")
     with pytest.raises(check_webui_assets.CheckError):
         _run_panel(tmp_path, keybindings=renamed)
+
+
+def test_themes_vocabulary_drift_fails(tmp_path: Path) -> None:
+    """The e06b themes.get method: a drift here leaves watched user themes silently never loading."""
+    drifted = PANEL_BUNDLE.replace('THEMES_GET_METHOD = "themes.get"', 'THEMES_GET_METHOD = "themes.drifted"')
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+def test_bundle_missing_the_themes_constant_fails(tmp_path: Path) -> None:
+    """An ABSENT themes constant means editor-core cannot be calling the method the Shell routes."""
+    stripped = "\n".join(
+        line for line in PANEL_BUNDLE.splitlines() if "THEMES_GET_METHOD" not in line)
+    assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+def test_a_renamed_themes_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
+    """Rot-into-a-no-op guard: rename the C++ constant and the gate can verify NOTHING → exit 2."""
+    renamed = PANEL_CPP_THEMES.replace("kThemesGetMethod", "kThemesFetchMethod")
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, themes=renamed)
 
 
 @pytest.mark.parametrize("ts_name", ["STATE_SCHEMA_VERSION_KEY", "STATE_DATA_KEY"])

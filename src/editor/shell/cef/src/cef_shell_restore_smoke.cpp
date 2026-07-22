@@ -101,6 +101,7 @@
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
+#include "context/editor/shell/themes_bridge.h"
 
 #include <chrono>
 #include <cstddef>
@@ -158,11 +159,14 @@ std::uint64_t now_us()
             .count());
 }
 
-// The app.css background, in BGRA8 — kept in lockstep with `--editor-bg: #132a44` and mirroring
-// cef_shell_smoke.cpp (the same served stylesheet paints the same background here).
-constexpr std::uint8_t kAppBackgroundB = 0x44;
-constexpr std::uint8_t kAppBackgroundG = 0x2a;
-constexpr std::uint8_t kAppBackgroundR = 0x13;
+// The editor's docking-surface background, in BGRA8 — mirroring cef_shell_smoke.cpp (the same served
+// stylesheet paints the same background here). Since e06b it tracks the ACTIVE THEME's `colors.panel`
+// (Dark, `tokens/themes/dark.theme.json` -> #0a0a0a) rather than app.css's pre-theme `--editor-bg`;
+// the full rationale, including why the coverage floor is unaffected, is on the matching constant in
+// cef_shell_smoke.cpp.
+constexpr std::uint8_t kAppBackgroundB = 0x0a;
+constexpr std::uint8_t kAppBackgroundG = 0x0a;
+constexpr std::uint8_t kAppBackgroundR = 0x0a;
 
 // The composed-surface scan cef_shell_smoke.cpp documents: the wait loop polls for EXACTLY the
 // property the "did the UI paint?" assertion checks, so it can neither break one poll too early (the
@@ -308,8 +312,15 @@ SessionOutcome run_session(const std::filesystem::path& project,
     shell::KeybindingsBridge keybindings_bridge;
     keybindings_bridge.bind_path(std::filesystem::path{});
 
+    // e06b: editor-core's boot calls `themes.get`; install the surface so that call is served (an
+    // empty list on the empty directory) rather than refused. Empty directory -> deterministic, so a
+    // CI host's own ~/.context/themes/ can never change what this smoke renders.
+    shell::ThemesBridge themes_bridge;
+    themes_bridge.bind_directory(std::filesystem::path{});
+
     if (!handshake.install(bridge) || !panel_host.install(bridge) ||
-        !editor_state_bridge.install(bridge) || !keybindings_bridge.install(bridge))
+        !editor_state_bridge.install(bridge) || !keybindings_bridge.install(bridge) ||
+        !themes_bridge.install(bridge))
     {
         std::fprintf(stderr, "[%s] FAIL: a bridge surface refused to install\n", cfg.label);
         return out;

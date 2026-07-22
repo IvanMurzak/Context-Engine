@@ -154,6 +154,15 @@ KEYBINDINGS_CONSTANTS = (
     ("keybindings.get", "keybindings_bridge.h", "kKeybindingsGetMethod", "KEYBINDINGS_GET_METHOD"),
 )
 
+# The M9 e06b THEME surface (design 06 §4), whose method name lives in themes_bridge.h. Identical
+# silent-drift hazard, one directory wider: a rename on one side leaves editor-core calling a method
+# the Shell no longer routes, so `~/.context/themes/*.theme.json` would silently never load — the
+# editor would simply always be on a built-in theme with nothing anywhere reporting why. Checked the
+# same way, from the header constant and the built bundle.
+THEMES_CONSTANTS = (
+    ("themes.get", "themes_bridge.h", "kThemesGetMethod", "THEMES_GET_METHOD"),
+)
+
 # The closed gesture vocabulary (04 §4), compared SET vs SET between the C++ wire tokens and the
 # bundle's own GESTURE_VERBS array, so a verb added on one side without the other — which would be
 # refused at runtime with no build error — fails here instead.
@@ -505,6 +514,22 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
                 f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
                 f"Shell would route one name and editor-core would call another, so ~/.context/"
                 f"keybindings.json would silently never reach the keymap with NO error anywhere.")
+
+    # 7a4 — the e06b themes vocabulary agrees across the two languages. Same mechanism as 7a3; a
+    # rename here leaves the watched-theme channel dead (the files silently never load).
+    for human, cpp_file, cpp_name, ts_name in THEMES_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(
+                f"{human}: the bundle does not declare {ts_name} — editor-core cannot be calling the "
+                f"themes method the Shell routes, so watched user themes would never load")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
+                f"Shell would route one name and editor-core would call another, so ~/.context/"
+                f"themes/*.theme.json would silently never reach the theme engine with NO error "
+                f"anywhere.")
 
     # 7b — the D6 persisted-blob member names agree (gui/contract/panel_state.h is their authority).
     for human, cpp_name, ts_name in PANEL_STATE_CONSTANTS:

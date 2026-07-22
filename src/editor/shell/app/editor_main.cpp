@@ -17,6 +17,7 @@
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/keybindings_bridge.h"
+#include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
@@ -406,6 +407,24 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // --- the watched-themes feed (e06b, design 06 §4) ---------------------------------------------
+    //
+    // The exact sibling of the keybindings bridge above, one directory wider: `~/.context/themes/
+    // *.theme.json` are per-user CONFIG files editor-core cannot read (pure wire-client), so this
+    // bridge reads + WATCHES the directory and serves the bytes over `themes.get`; editor-core
+    // (theme.ts) schema-validates them against the e06a token schema and registers what passes. A
+    // malformed theme is rejected THERE with a diagnostic and the applied theme stands — a bad theme
+    // is never a broken UI. Boundary-clean for the same reason (plain std::filesystem), so the D10
+    // FORBIDDEN list is untouched, and an unresolvable home yields a permanently-empty snapshot (the
+    // editor runs on the four built-in themes).
+    shell::ThemesBridge themes_bridge;
+    themes_bridge.bind_directory(shell::default_themes_directory());
+    if (!themes_bridge.install(bridge))
+    {
+        std::fprintf(stderr, "context_editor: could not install the themes bridge surface\n");
+        return 1;
+    }
+
     // --- the LIVE daemon feed + the lifecycle handlers (the Problems read path, e14a) -------------
     //
     // The Shell subscribes as an ordinary client (D10) and forwards what arrives into the panel models;
@@ -585,6 +604,11 @@ int main(int argc, char** argv)
         // bridge (the hot-reload trigger). The return is intentionally discarded here — the renderer
         // pulls the fresh snapshot on its own cadence over `keybindings.get`.
         (void)keybindings_bridge.poll();
+        // e06b: the same watch, one directory wider — a cheap re-enumeration gates the re-reads, so an
+        // unchanged theme directory costs one stat per file per loop and a real edit bumps the
+        // generation editor-core re-reads over `themes.get`. That is what makes editing a theme file
+        // repaint the live editor with no restart (design 06 §4's "instant feedback").
+        (void)themes_bridge.poll();
         if (options.max_frames > 0 && frames >= options.max_frames)
         {
             break;

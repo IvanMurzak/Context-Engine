@@ -45,6 +45,7 @@
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
+#include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/welcome.h"
 
 #include <chrono>
@@ -102,15 +103,30 @@ std::uint64_t now_us()
 #define CONTEXT_WEBUI_ASSET_DIR ""
 #endif
 
-// The background `src/editor/webui/app/app.css` sets, in BGRA8 (the composite's format). Keep in
-// lockstep with `--editor-bg: #132a44` there; the stylesheet's own comment says so too.
+// The editor's docking-surface background, in BGRA8 (the composite's format).
 //
-// Deliberately NOT e04's `#102040`: reusing the old data:-URL placeholder's colour would make "the
-// app scheme served our stylesheet" indistinguishable from "the old placeholder still loads",
-// which is precisely the regression this assertion exists to catch.
-constexpr std::uint8_t kAppBackgroundB = 0x44;
-constexpr std::uint8_t kAppBackgroundG = 0x2a;
-constexpr std::uint8_t kAppBackgroundR = 0x13;
+// ⚠ MOVED BY e06b, and the move is the point. Until the theme engine landed this was app.css's
+// standalone placeholder `--editor-bg: #132a44`. app.css now points all five Dockview background
+// variables at the ACTIVE THEME's `colors.panel` instead, so this constant tracks
+// `src/editor/webui/tokens/themes/dark.theme.json` -> `colors.panel` (#0a0a0a) — Dark being the
+// first-run default (design 06 §4: follow `prefers-color-scheme`, Dark when undetectable, and a
+// headless CEF renderer reports no preference).
+//
+// WHAT THE ASSERTION NOW PROVES, which is STRICTLY MORE than before: the stylesheet was served with
+// a usable media type AND the live browser's pixels reached the present path (as before) AND the
+// theme engine actually applied a theme — because if `editor-core.js` never ran, or the theme apply
+// threw, the `var(--ctx-colors-panel, var(--editor-bg))` fallback paints the OLD #132a44 and this
+// scan finds none of the colour it is looking for.
+//
+// Deliberately still not a value anything else produces: #0a0a0a is distinguishable from the
+// zero-filled surface (#000000) that a deleted row copy in render_cpu_frame would leave behind, and
+// from e04's old `#102040` data:-URL placeholder. Keeping ONE token behind all five background
+// variables is what preserves the painted REGION this coverage floor is calibrated against — see the
+// lockstep note on app.css's `.dockview-theme-dark` block, and the T1 tripwire test "the five
+// Dockview BACKGROUND variables share one token".
+constexpr std::uint8_t kAppBackgroundB = 0x0a;
+constexpr std::uint8_t kAppBackgroundG = 0x0a;
+constexpr std::uint8_t kAppBackgroundR = 0x0a;
 
 // Local rather than reused from tests/shell_test.h: that header pulls the render test fixtures,
 // which this CEF-linking target does not (and should not) build against.
@@ -323,6 +339,17 @@ int main(int argc, char** argv)
     keybindings_bridge.bind_path(std::filesystem::path{});
     SMOKE_CHECK(keybindings_bridge.install(bridge), "the keybindings.get bridge surface installed");
 
+    // --- the watched-themes read surface (e06b) -------------------------------------------------
+    // editor-core's boot loads watched user themes by calling `themes.get`, for exactly the same
+    // reason and with exactly the same failure mode as `keybindings.get` above: unserved, it is an
+    // `unknown_method` REFUSAL and the "no envelope refusals" assertion below fails. Bound to an EMPTY
+    // directory so the smoke is deterministic regardless of what the CI host has in
+    // `~/.context/themes/` — the method is served (an empty list), and the renderer applies a BUILT-IN
+    // theme, which is what the per-pixel background assertion above depends on.
+    shell::ThemesBridge themes_bridge;
+    themes_bridge.bind_directory(std::filesystem::path{});
+    SMOKE_CHECK(themes_bridge.install(bridge), "the themes.get bridge surface installed");
+
     // --- the welcome launch-mode surface (e14c) -----------------------------------------------
     // editor-core's boot calls `welcome.state` right after `shell.ready` to choose the welcome screen
     // vs the editor (boot.ts). Like the editor-state and keybindings methods above, that call rides
@@ -354,7 +381,7 @@ int main(int argc, char** argv)
     // climbs BEFORE the mounted DOM's apply() (hydration.ts:253) repaints into the CEF OSR frame, a
     // gap a05b42e's init()+onShow() startup double-refresh only widens. A loop that broke on
     // `renders_served >= expected` alone therefore sampled cpu_surface() while it was still the
-    // uniform #132a44 background, and the "NOT a uniform fill" assertion failed on a frame that had
+    // uniform #0a0a0a background, and the "NOT a uniform fill" assertion failed on a frame that had
     // simply not painted yet. So also require the surface to be NON-UNIFORM — the exact property
     // that assertion checks. (A raw OnPaint / `view_frames` counter is a weaker proxy: it cannot
     // tell a re-paint of the background apart from the UI's first paint, so waiting on it could
@@ -366,7 +393,7 @@ int main(int argc, char** argv)
     // editor-core's boot-time `editor.state.get` restore actually SUCCEEDS instead of being refused,
     // so LayoutPersistence applies a restored (non-default) arrangement asynchronously after the
     // FIRST non-uniform paint the loop above would have broken on — intermittently red on ubuntu with
-    // the SAME "app.css's #132a44 background covers a substantial part" assertion the loop does not
+    // the SAME "the active theme's #0a0a0a panel background covers a substantial part" assertion the loop does not
     // yet wait for. Require the loop's OWN scan to clear the same background-coverage floor that
     // assertion checks (not merely non-uniform), exactly the CE #319 fix's own reasoning applied to
     // the second per-pixel property: the loop waits for EXACTLY what the assertion will check, so it
@@ -427,7 +454,8 @@ int main(int argc, char** argv)
     //     a fact the old assertion could not express at all: a solid fill of the right colour would
     //     have passed every one of its nine samples.
     //
-    // The `app.css` note keeping --editor-bg in lockstep with kAppBackground* still applies, and the
+    // The `app.css` note keeping the docking-surface token in lockstep with kAppBackground* still
+    // applies (since e06b that token is the active theme's `colors.panel`, not `--editor-bg`), and the
     // stylesheet now also re-points Dockview's own surface colours at that variable so the editor's
     // background is genuinely present behind the UI rather than painted over by a theme.
     {
@@ -441,7 +469,7 @@ int main(int argc, char** argv)
         // could be coincidence, while a tenth of the window can only be the served stylesheet
         // painting the editor's background.
         SMOKE_CHECK(scan.scanned > 0 && scan.background_texels > scan.scanned / 10u,
-                    "app.css's #132a44 background covers a substantial part of the composited "
+                    "the active theme's #0a0a0a panel background covers a substantial part of the composited "
                     "frame — the app scheme served the STYLESHEET with a usable media type and the "
                     "LIVE browser's pixels reached the present path");
         SMOKE_CHECK(!scan.uniform,
