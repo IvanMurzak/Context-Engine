@@ -38,6 +38,7 @@
 #endif
 
 #include "context/editor/shell/app_scheme.h"
+#include "context/editor/shell/banners.h"
 #include "context/editor/shell/cef/cef_shell.h"
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
@@ -47,7 +48,6 @@
 #include "context/editor/shell/shell.h"
 #include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/user_config.h"
-#include "context/editor/shell/banners.h"
 #include "context/editor/shell/welcome.h"
 
 #include <chrono>
@@ -397,7 +397,6 @@ int main(int argc, char** argv)
     // reports a live link (so no banner paints and the per-pixel coverage floor is untouched).
     shell::BannerBridge banner_bridge;
     SMOKE_CHECK(banner_bridge.install(bridge), "the banner bridge surface installed");
-
 
     // --- the per-user config read surface (e06d) ------------------------------------------------
     // editor-core's boot reads the per-user config with `config.get` BEFORE it applies a theme

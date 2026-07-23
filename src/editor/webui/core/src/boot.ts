@@ -173,12 +173,6 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
             await startThemeFeed(bridge, theme);
         }
 
-        // --- the welcome screen (e14c, design 07 §4 / D13) ----------------------------------------
-        // A BARE launch shows the app's front door (recent projects / "Open project…" / "New from
-        // template") instead of the editor. Ask the Shell, and DEFAULT to the editor path when there
-        // is no welcome surface: `state()` returns null on an `unknown_method` refusal, which is
-        // exactly what the CEF boot smokes (which install no welcome surface) get — so they mount
-        // panels unchanged. Only an explicit `mode: "welcome"` diverts to the front door.
         // --- the e14d notification banners (design 07 §4 / 08) -----------------------------------
         // Asked for ONCE here, and handed to whichever surface comes up. Both calls degrade to null
         // on an `unknown_method` refusal, so a Shell with no banner bridge (the pre-e14d smokes)
@@ -198,6 +192,12 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
             },
         };
 
+        // --- the welcome screen (e14c, design 07 §4 / D13) ----------------------------------------
+        // A BARE launch shows the app's front door (recent projects / "Open project…" / "New from
+        // template") instead of the editor. Ask the Shell, and DEFAULT to the editor path when there
+        // is no welcome surface: `state()` returns null on an `unknown_method` refusal, which is
+        // exactly what the CEF boot smokes (which install no welcome surface) get — so they mount
+        // panels unchanged. Only an explicit `mode: "welcome"` diverts to the front door.
         const welcomeState = await new WelcomeClient(bridge).state();
         if (welcomeState !== null && welcomeState.mode === WELCOME_MODE_WELCOME) {
             const container =
@@ -219,11 +219,6 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
             };
         }
 
-        // --- the app layer (e05d1) ----------------------------------------------------------------
-        // The channel is proven; bring up the panels. A failure HERE is reported but does NOT undo
-        // `ready`: the bridge genuinely does round-trip, and conflating "the editor has no panels"
-        // with "the editor cannot talk to the Shell" would send the next diagnosis in exactly the
-        // wrong direction.
         // --- the e14d notification strip on the EDITOR path ---------------------------------------
         // The daemon-lost banner's real home: this is the only surface where losing the daemon
         // changes what the next keystroke does. Mounted BEFORE the panels so a read-only editor says
@@ -235,6 +230,11 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
             mountBanners(bannerHost, bannerData);
         }
 
+        // --- the app layer (e05d1) ----------------------------------------------------------------
+        // The channel is proven; bring up the panels. A failure HERE is reported but does NOT undo
+        // `ready`: the bridge genuinely does round-trip, and conflating "the editor has no panels"
+        // with "the editor cannot talk to the Shell" would send the next diagnosis in exactly the
+        // wrong direction.
         const panels = await startPanels(bridge, theme, config);
 
         // --- the keymap override feed (e07c) ------------------------------------------------------

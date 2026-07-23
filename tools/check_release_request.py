@@ -57,8 +57,30 @@ TS_SUFFIXES = (".ts", ".tsx", ".mts", ".cts")
 
 SKIP_DIRS = {"build", "build-msvc-check", "node_modules", "vcpkg_installed", ".git", "generated"}
 
-# Building a request means naming its header type or the release endpoint constant.
-REQUEST_BUILD = re.compile(r"\bHttpHeader\s*\{|\bkReleaseCheckEndpoint\b|\bkReleaseCheckUserAgent\b")
+# Building a request means naming its header type, naming the release endpoint constant, or MUTATING
+# a request's header list.
+#
+# ⚠ THE `.headers` CLAUSE IS THE ONE THAT CATCHES THE REALISTIC SMUGGLE, and its absence let the first
+# revision of this gate PASS a tree carrying
+#
+#     HttpRequest r = build_release_check_request();
+#     r.headers.push_back({"X-Install-Id", machine_id()});   // brace-init: `HttpHeader` unnamed
+#     (void)native_https_get(r);
+#
+# — a second request shape that names no header TYPE (C++20 brace-init needs none), no endpoint
+# constant (it starts from the sanctioned builder) and no URL literal (rule 4 sees nothing). Found by
+# PLANTING that shape, not by reading the regex; the plant is pinned in tools/tests/.
+REQUEST_BUILD = re.compile(
+    r"\bHttpHeader\s*\{|\bkReleaseCheckEndpoint\b|\bkReleaseCheckUserAgent\b"
+    r"|\.headers\s*(?:\.\s*(?:push_back|emplace_back|emplace|insert|assign|resize)\s*\(|=[^=])"
+)
+
+# The OTHER half of that plant, and an independent net under it: the ONE route to the wire is
+# `ReleaseNotice`, which issues `build_release_check_request()` through its bound transport. A direct
+# CALL to the OS client anywhere else is a request nobody reviewed, whatever it carries. Binding the
+# function as a value (`bind_transport(shell::native_https_get)` in the composition root) names no
+# paren and is untouched; only an invocation matches.
+TRANSPORT_CALL = re.compile(r"\bnative_https_get\s*\(")
 
 # --- rule 2: what native_net.cpp MUST keep saying -------------------------------------------------
 #
@@ -84,10 +106,42 @@ REQUIRED_TRANSPORT_GUARDS = (
 # Any of these spelled as a literal in `native_net.cpp` means a header is being contributed there
 # rather than coming from the request value. The `X-` catch-all is deliberate: a custom header is the
 # most natural place to smuggle an id.
-TRANSPORT_HEADER_LITERAL = re.compile(
-    r'L?"(?:[Uu]ser-[Aa]gent|[Aa]ccept-[Ll]anguage|[Aa]ccept-[Ee]ncoding|[Cc]ookie'
-    r'|[Aa]uthorization|[Ff]rom|[Rr]eferer|[Rr]eferrer|[Xx]-[A-Za-z-]+)"'
-)
+#
+# ⚠ MATCHING THE WHOLE LITERAL IS NOT ENOUGH, and that is how the first revision of this rule failed.
+# `native_net.cpp`'s own idiom writes a header as `name + L": " + value + L"\r\n"`, so the natural
+# smuggle carries the colon INSIDE the literal —
+#
+#     headers += L"X-Install-Id: ";
+#     headers += widen(machine_sid());
+#
+# — which a `"…name…"`-anchored pattern refuses to match because the literal does not END at the
+# name. The gate then PASSED a tree putting the machine SID on the wire: the precise leak rule 2
+# exists to refuse, and one no C++ assertion can see, because it happens BELOW the request value the
+# golden compares. Found by planting the shape production writes (conventions.md § Authoring a
+# SOURCE-SCAN gate: "plant by COPYING an existing production call site"), not by reading the regex.
+#
+# So a literal is scanned as TEXT, and a header name counts when it is the whole literal OR sits in
+# HTTP position — at the literal's start, or after a `\r\n` / `;` separator — followed by its colon.
+# Requiring the colon is what keeps the prose-shaped names (`From`) out of the failure strings this
+# file is full of.
+HEADER_NAME = (r"[Uu]ser-[Aa]gent|[Aa]ccept-[Ll]anguage|[Aa]ccept-[Ee]ncoding|[Cc]ookie"
+               r"|[Aa]uthorization|[Ff]rom|[Rr]eferer|[Rr]eferrer|[Xx]-[A-Za-z-]+")
+# One C/C++ string literal, optionally wide, escapes respected.
+STRING_LITERAL = re.compile(r'L?"(?:[^"\\\n]|\\.)*"')
+TRANSPORT_HEADER_WHOLE = re.compile(rf"^(?:{HEADER_NAME})$")
+TRANSPORT_HEADER_IN_POSITION = re.compile(rf"(?:^|\\r\\n|\\n|;)\s*(?:{HEADER_NAME})\s*:")
+
+
+def transport_header_literals(text: str):
+    """Yield (match_end, literal) for every string literal that names an HTTP header.
+
+    `text` must already be comment-stripped: the file's own header block explains at length why there
+    is no User-Agent here, and prose is not a contributed header.
+    """
+    for hit in STRING_LITERAL.finditer(text):
+        body = hit.group(0)[hit.group(0).index('"') + 1:-1]
+        if TRANSPORT_HEADER_WHOLE.match(body) or TRANSPORT_HEADER_IN_POSITION.search(body):
+            yield hit.end(), hit.group(0)
 
 # --- rule 3: network primitives editor-core may not use -------------------------------------------
 TS_NETWORK = re.compile(
@@ -176,14 +230,26 @@ def check(root: Path) -> list[str]:
         if rel in (SOLE_BUILDER, BUILDER_HEADER) or is_test_source(rel):
             continue
         hit = REQUEST_BUILD.search(text)
-        if hit is None:
+        if hit is not None:
+            violations.append(
+                f"{rel}:{line_of(text, hit.end())}: builds an outgoing update-check request "
+                f"({hit.group(0)!r}). There is exactly ONE builder ({SOLE_BUILDER}) so that "
+                f"'what does the editor send' is answerable by reading one function — and so the "
+                f"golden-request assertion in test_banners.cpp covers every request that exists."
+            )
+        # ...and the transport is reached only through `ReleaseNotice`. `native_net.cpp` DEFINES the
+        # function, so it is exempt here; the composition root binds it as a value, which matches no
+        # call pattern.
+        if rel == NATIVE_TRANSPORT:
             continue
-        violations.append(
-            f"{rel}:{line_of(text, hit.end())}: builds an outgoing update-check request "
-            f"({hit.group(0)!r}). There is exactly ONE builder ({SOLE_BUILDER}) so that "
-            f"'what does the editor send' is answerable by reading one function — and so the "
-            f"golden-request assertion in test_banners.cpp covers every request that exists."
-        )
+        call = TRANSPORT_CALL.search(text)
+        if call is not None:
+            violations.append(
+                f"{rel}:{line_of(text, call.end())}: calls the OS HTTPS client directly. The ONE "
+                f"route to the wire is `ReleaseNotice`, which issues "
+                f"`build_release_check_request()` ({SOLE_BUILDER}) — a request sent from anywhere "
+                f"else is one no assertion and no reviewer ever saw."
+            )
 
     # (2) the OS transport keeps its guards and contributes no header of its own.
     transport = strip_comments((root / NATIVE_TRANSPORT).read_text(encoding="utf-8",
@@ -196,10 +262,10 @@ def check(root: Path) -> list[str]:
                 f"property (c)); nothing in C++ can observe a violation, which is why it is pinned "
                 f"here."
             )
-    for hit in TRANSPORT_HEADER_LITERAL.finditer(transport):
+    for end, literal in transport_header_literals(transport):
         violations.append(
-            f"{NATIVE_TRANSPORT}:{line_of(transport, hit.end())}: names an HTTP header "
-            f"({hit.group(0)}). Headers come from the request VALUE built in {SOLE_BUILDER}, where "
+            f"{NATIVE_TRANSPORT}:{line_of(transport, end)}: names an HTTP header "
+            f"({literal}). Headers come from the request VALUE built in {SOLE_BUILDER}, where "
             f"test_banners.cpp can see them — a header added here is invisible to every assertion."
         )
 

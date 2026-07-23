@@ -46,6 +46,7 @@
 #endif
 
 #include "context/editor/shell/app_scheme.h"
+#include "context/editor/shell/banners.h"
 #include "context/editor/shell/cef/cef_shell.h"
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
@@ -55,7 +56,6 @@
 #include "context/editor/shell/shell.h"
 #include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/user_config.h"
-#include "context/editor/shell/banners.h"
 #include "context/editor/shell/welcome.h"
 
 #include <chrono>
@@ -304,7 +304,6 @@ int main(int argc, char** argv)
     // reports a live link (so no banner paints and the per-pixel coverage floor is untouched).
     shell::BannerBridge banner_bridge;
     SMOKE_CHECK(banner_bridge.install(bridge), "the banner bridge surface installed");
-
 
     // Drive the pump until the browser has hydrated AND the settings-driven change has been PERSISTED
     // by the Shell. The 30s deadline bounds it: a scenario that selected nothing runs the clock out and

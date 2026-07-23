@@ -115,11 +115,11 @@
 
 #include "context/common/subprocess.h"
 #include "context/editor/shell/app_scheme.h"
+#include "context/editor/shell/banners.h"
 #include "context/editor/shell/cef/cef_shell.h"
 #include "context/editor/shell/editor_state.h"
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
-#include "context/editor/shell/banners.h"
 #include "context/editor/shell/keybindings_bridge.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
