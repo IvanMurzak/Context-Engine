@@ -858,6 +858,22 @@ public:
         command_line->AppendSwitch("no-sandbox");
         command_line->AppendSwitch("disable-gpu");
         command_line->AppendSwitch("disable-gpu-compositing");
+        // Skip DirectComposition entirely (issue #381). Unlike src/editor/gui/host this Shell
+        // app keeps the software rasterizer enabled so the OSR software-present path (OnPaint
+        // BGRA readback) still produces frames — but that drives CEF/Chromium through the Windows
+        // software compositor, which probes DirectComposition (DCompositionCreateDevice3). On a
+        // Session-0 self-hosted Windows CI runner (a LocalSystem service session) that probe is
+        // ACCESS-DENIED (0x80070005), and CEF's failure path then re-enters a ref-counted
+        // destructor and aborts with `Check failed: !in_dtor_.` (cef_ref_counted.h) — crashing
+        // even single-window smokes (editor-cef-smoke-shell-palette AND -shell-multiwindow both
+        // died on runner context-engine-win-3 in main job 89341674600, each preceded by the DComp
+        // denial, while the SAME tree passed all 6 CEF smokes on runner context-engine-win-2 with
+        // zero DComp lines). The OSR CPU-present path genuinely does not need DirectComposition:
+        // Chromium's InitializeDirectComposition() (ui/gl/direct_composition_support.cc) honours
+        // this switch and returns BEFORE any DXGI/dcomp work, so the denied call — and thus the
+        // crash path, which fires only on that call's FAILURE — is never reached on ANY runner
+        // (verified against the pinned CEF build's Chromium 149 source; tools/cef-prebuilt.json).
+        command_line->AppendSwitch("disable-direct-composition");
         // Opt-in full-tree diagnostics (CefShellOptions::verbose_logging). Runs in the browser
         // process (g_verbose_logging set before CefInitialize) AND, via the switches CEF copies onto
         // each subprocess command line, in every renderer/GPU/utility child — so a fault that lives
