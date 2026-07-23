@@ -24,6 +24,7 @@ export * from "./editorstate.js";
 export * from "./when.js";
 export * from "./commands.js";
 export * from "./keymap.js";
+export * from "./theme.js";
 export * from "./palette.js";
 export * from "./palette_view.js";
 export * from "./boot.js";

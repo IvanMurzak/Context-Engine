@@ -40,6 +40,16 @@ import { Palette, PALETTE_TOGGLE_COMMAND_ID, paletteCommands } from "./palette.j
 import { PaletteView } from "./palette_view.js";
 import { PanelClient } from "./panels.js";
 import { PanelHost } from "./panelhost.js";
+import {
+    REDUCED_MOTION_QUERY,
+    ThemeController,
+    ThemeEngine,
+    ThemesClient,
+    bootThemeId,
+    defaultMediaQueryProbe,
+    parsePinnedThemeId,
+    type ThemeRoot,
+} from "./theme.js";
 import { WELCOME_MODE_WELCOME, WelcomeClient, mountWelcome } from "./welcome.js";
 import {
     resolveContext,
@@ -124,6 +134,23 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
 
         await bridge.call("shell.ready", { nonce });
 
+        // --- the theme engine (e06b, design 06) ---------------------------------------------------
+        // BEFORE the welcome screen and before the panels, deliberately: the tokens are what every
+        // surface below is drawn with, so applying them first means the first painted frame is
+        // already themed. Bringing panels up first would show one unthemed frame of docking chrome —
+        // exactly the flash the 350ms cross-fade exists to avoid — and would make the live smoke's
+        // per-pixel background assertion race the theme apply.
+        //
+        // The BUILT-IN half needs no Shell round trip (the themes ship inside the bundle), so it is
+        // synchronous and cannot fail. The WATCHED user themes need one `themes.get`, which a Shell
+        // that does not serve it refuses instantly — so loading them here too, rather than after the
+        // panels, costs nothing and means a user's own theme is on screen for the first frame as
+        // well. Both halves are best-effort: neither can keep the editor from booting.
+        const theme = startTheme();
+        if (theme !== undefined) {
+            await startThemeFeed(bridge, theme);
+        }
+
         // --- the welcome screen (e14c, design 07 §4 / D13) ----------------------------------------
         // A BARE launch shows the app's front door (recent projects / "Open project…" / "New from
         // template") instead of the editor. Ask the Shell, and DEFAULT to the editor path when there
@@ -156,7 +183,7 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // `ready`: the bridge genuinely does round-trip, and conflating "the editor has no panels"
         // with "the editor cannot talk to the Shell" would send the next diagnosis in exactly the
         // wrong direction.
-        const panels = await startPanels(bridge);
+        const panels = await startPanels(bridge, theme);
 
         // --- the keymap override feed (e07c) ------------------------------------------------------
         // Load the per-user `~/.context/keybindings.json` override the Shell watches and serves
@@ -210,7 +237,10 @@ interface PanelBringUp {
  * and so a panel failure has one obvious place to be handled rather than being tangled into the
  * nonce logic. Like its caller it NEVER throws.
  */
-async function startPanels(bridge: ShellBridge): Promise<PanelBringUp> {
+async function startPanels(
+    bridge: ShellBridge,
+    theme: ThemeEngine | undefined,
+): Promise<PanelBringUp> {
     if (typeof document === "undefined") {
         return { mounted: 0, unavailable: [], error: "no document to mount into" };
     }
@@ -255,7 +285,7 @@ async function startPanels(bridge: ShellBridge): Promise<PanelBringUp> {
                 // palette over it, and (only under `?ctx-smoke-palette`) drive the T2 command-driven
                 // scenario. Placed AFTER `persistence.attach()` so a palette-driven layout change
                 // publishes over the live editor.state channel — the observable the T2 smoke asserts.
-                startCommandLayer(host, client);
+                startCommandLayer(host, client, theme);
                 // e05d4 restart-smoke seam: only when the boot URL carries `?ctx-smoke-arrange`,
                 // perform ONE deterministic docking change so the arrangement that gets persisted
                 // differs from the fresh-boot default — which is what makes the restart proof
@@ -306,6 +336,113 @@ async function startKeybindings(bridge: ShellBridge): Promise<void> {
 }
 
 /**
+ * Bring up the theme engine and apply the first-run theme (e06b, design 06 §1-§4).
+ *
+ * Returns `undefined` only when there is no document to theme (a harness, a documentless host) —
+ * everything else is best-effort and NEVER throws: an editor that cannot theme itself must still
+ * boot, and the honest signal for that is the `data-editor-theme` attribute reading `unavailable`
+ * rather than an unhandled rejection in a renderer nobody watches.
+ *
+ * The first-run choice follows `prefers-color-scheme`, Dark when undetectable (06 §4 / C-F22).
+ * PERSISTING an explicit choice is e06d's (`~/.context/config.json`, single writer: the Shell), so
+ * today the choice lives for the session — stated plainly rather than half-implemented here.
+ *
+ * The live `prefers-reduced-motion` listener is registered when the environment supports it, so a
+ * user turning the OS setting on mid-session gets the static fallback WITHOUT a restart — the same
+ * "unconditionally honoured" rule applied over time, not just at boot.
+ */
+function startTheme(): ThemeEngine | undefined {
+    if (typeof document === "undefined") {
+        return undefined;
+    }
+    try {
+        const probe = defaultMediaQueryProbe();
+        // `document.documentElement` satisfies ThemeRoot structurally; naming the interface here is
+        // what keeps the engine testable against a recording root instead of a live DOM.
+        const root: ThemeRoot = document.documentElement;
+        const engine = new ThemeEngine({ root, probe });
+        // The `?ctx-smoke-theme=<id>` pin when the boot URL carries one, else the
+        // `prefers-color-scheme` default. The pin is what makes the live CEF smokes' per-pixel
+        // background assertion independent of whether the HOST prefers dark — see THEME_PIN_FLAG.
+        const search = typeof location === "undefined" ? "" : location.search;
+        const pin = parsePinnedThemeId(search);
+        const themeId = bootThemeId(search, probe, (id) => engine.registry.has(id));
+        // Reported so a red smoke names WHY it saw the colours it saw: "pinned" means the boot URL
+        // chose the theme, its absence means the host's `prefers-color-scheme` did.
+        const pinNote = pin === "" ? "" : pin === themeId ? ", pinned" : `, pin "${pin}" UNKNOWN`;
+        const report = engine.apply(themeId);
+        document.documentElement.setAttribute(
+            "data-editor-theme",
+            report.applied
+                ? `${report.themeId} (${report.variableCount} tokens, fade ${report.fadeDurationMs}ms` +
+                  `${report.reducedMotion ? ", reduced-motion" : ""}${pinNote})`
+                : `unavailable: ${report.diagnostic}`,
+        );
+        watchReducedMotion(engine);
+        return engine;
+    } catch (error) {
+        document.documentElement.setAttribute(
+            "data-editor-theme",
+            `unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return undefined;
+    }
+}
+
+/** Re-apply the active theme whenever the OS reduced-motion preference flips. Best-effort. */
+function watchReducedMotion(engine: ThemeEngine): void {
+    const scope = globalThis as { matchMedia?: (query: string) => unknown };
+    if (typeof scope.matchMedia !== "function") {
+        return;
+    }
+    const list = scope.matchMedia(REDUCED_MOTION_QUERY) as {
+        addEventListener?: (type: string, listener: () => void) => void;
+    };
+    if (typeof list.addEventListener !== "function") {
+        return; // an older engine with only the deprecated addListener — not worth a shim
+    }
+    list.addEventListener("change", () => {
+        engine.reapply();
+    });
+}
+
+/**
+ * Load the watched user themes (and any package contributions) over the Shell feed (e06b).
+ *
+ * editor-core cannot read `~/.context/themes/*.theme.json` itself — it is a pure wire-client — so the
+ * Shell watches them and publishes the bytes with a GENERATION counter (themes_bridge.h). This does
+ * the first pull; the `ThemeController` re-registers only when that counter moves, which is what
+ * makes the hot reload a counter compare on this side and one stat per owner-loop tick on the
+ * Shell's.
+ *
+ * NEVER FATAL, exactly like the keybindings feed: a Shell that does not serve `themes.get` (an older
+ * build, or a smoke's minimal router) leaves the built-in themes standing, and a malformed user theme
+ * is rejected with a diagnostic rather than applied. The outcome is written onto
+ * `<html data-editor-themes>` for the `--dump-dom` local repro and DevTools.
+ */
+async function startThemeFeed(bridge: ShellBridge, engine: ThemeEngine): Promise<void> {
+    let detail = "built-ins only";
+    try {
+        const controller = new ThemeController(engine, new ThemesClient(bridge));
+        const result = await controller.refresh();
+        const accepted = result.registration?.accepted.length ?? 0;
+        const rejected = result.registration?.rejected ?? [];
+        detail =
+            accepted === 0 && rejected.length === 0
+                ? "no watched themes; built-ins only"
+                : `${accepted} loaded, ${rejected.length} REJECTED` +
+                  (rejected.length === 0
+                      ? ""
+                      : ` (${rejected.map((entry) => `${entry.id}: ${entry.diagnostic}`).join(" | ")})`);
+    } catch (error) {
+        detail = `theme feed unavailable: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    if (typeof document !== "undefined") {
+        document.documentElement.setAttribute("data-editor-themes", detail);
+    }
+}
+
+/**
  * Wire the D8 command layer (e07d): build the ONE registry from all three sources, create the palette
  * over it, register the palette-open command, mount the palette overlay, and — only under the
  * `?ctx-smoke-palette` boot flag — drive the T2 command-driven scenario.
@@ -314,7 +451,11 @@ async function startKeybindings(bridge: ShellBridge): Promise<void> {
  * unhandled rejection in a renderer nobody watches. Placed after `PanelHost.start()` so the roster is
  * known and after `LayoutPersistence.attach()` so a palette-driven layout change actually publishes.
  */
-function startCommandLayer(host: PanelHost, client: PanelClient): void {
+function startCommandLayer(
+    host: PanelHost,
+    client: PanelClient,
+    theme: ThemeEngine | undefined,
+): void {
     if (typeof document === "undefined") {
         return;
     }
@@ -331,7 +472,7 @@ function startCommandLayer(host: PanelHost, client: PanelClient): void {
                 ok: false,
                 note: `daemon RPC fan-in not wired yet (D19): ${method}`,
             }),
-            editorActions: makeEditorActions(host),
+            editorActions: makeEditorActions(host, theme),
             // Session undo/redo binding + dispatch land here (e07c); the wire REPLAY of the journal is
             // e09 (undo_journal.h). Executing them is an honest refusal until then.
             sessionActions: {
@@ -392,10 +533,14 @@ function startCommandLayer(host: PanelHost, client: PanelClient): void {
  * `closeActivePanel` is the one that is FULLY wired in e07d — it is the observable the T2 palette smoke
  * drives (a palette-executed close → a Dockview layout change → an `editor.state.publish`). Panel
  * navigation and dock-move reach their real implementations with the 03 §6 input-pump / interaction
- * seam, and the theme toggle with the e06 token kit; until then they are honest refusals, which keeps
- * the command REACHABLE (it is in the registry, the palette, and the keymap) without faking an effect.
+ * seam; until then they are honest refusals, which keeps the command REACHABLE (it is in the registry,
+ * the palette, and the keymap) without faking an effect.
+ *
+ * `toggleTheme` is no longer one of them: e06b's theme engine makes it REAL — a live Dark<->Light swap
+ * with no restart, preserving high contrast. It refuses only when there is no engine at all (a
+ * documentless host), which is an honest "there is nothing to theme".
  */
-function makeEditorActions(host: PanelHost): EditorCommandActions {
+function makeEditorActions(host: PanelHost, theme: ThemeEngine | undefined): EditorCommandActions {
     return {
         focusNextPanel: (): CommandOutcome => ({
             ok: false,
@@ -422,10 +567,15 @@ function makeEditorActions(host: PanelHost): EditorCommandActions {
                 ? { ok: true, note: `closed ${last}` }
                 : { ok: false, note: "the docking root refused the close" };
         },
-        toggleTheme: (): CommandOutcome => ({
-            ok: false,
-            note: "theme toggle wires to the token kit when e06 lands",
-        }),
+        toggleTheme: (): CommandOutcome => {
+            if (theme === undefined) {
+                return { ok: false, note: "no theme engine on this host (no document to theme)" };
+            }
+            const report = theme.toggleAppearance();
+            return report.applied
+                ? { ok: true, note: `theme switched to ${report.themeId}` }
+                : { ok: false, note: report.diagnostic };
+        },
     };
 }
 

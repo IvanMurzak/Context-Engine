@@ -47,6 +47,7 @@
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
+#include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/welcome.h"
 
 #include <chrono>
@@ -107,11 +108,22 @@ std::uint64_t now_us()
 #define CONTEXT_WEBUI_ASSET_DIR ""
 #endif
 
-// The app.css background, in BGRA8 — kept in lockstep with `--editor-bg: #132a44` and mirroring
-// cef_shell_smoke.cpp (the same served stylesheet paints the same background here).
-constexpr std::uint8_t kAppBackgroundB = 0x44;
-constexpr std::uint8_t kAppBackgroundG = 0x2a;
-constexpr std::uint8_t kAppBackgroundR = 0x13;
+// The editor's docking-surface background, in BGRA8 — mirroring cef_shell_smoke.cpp (the same served
+// stylesheet paints the same background here). Since e06b it tracks the ACTIVE THEME's `colors.panel`
+// (Dark, `tokens/themes/dark.theme.json` -> #0a0a0a) rather than app.css's pre-theme `--editor-bg`;
+// the full rationale, including why the coverage floor is unaffected, is on the matching constant in
+// cef_shell_smoke.cpp.
+constexpr std::uint8_t kAppBackgroundB = 0x0a;
+constexpr std::uint8_t kAppBackgroundG = 0x0a;
+constexpr std::uint8_t kAppBackgroundR = 0x0a;
+
+// The theme those three bytes belong to, pinned into the boot URL below. This smoke asserts no
+// coverage FLOOR (see the note at its surface check) — but its heartbeat REPORTS the background
+// count, and a diagnostic that silently counts a colour the active theme never paints is worse than
+// no diagnostic. Pinning also keeps the whole `editor-cef-smoke-*` family on one known appearance.
+// Full rationale on the matching constant in cef_shell_smoke.cpp; kept in lockstep by
+// `webui-theme-contract`.
+constexpr const char* kSmokeThemeId = "builtin.dark";
 
 // The composed-surface scan cef_shell_smoke.cpp documents: the wait loop polls for EXACTLY the property
 // the "did the UI paint?" assertion checks, so it can neither break one poll too early (the CE #319
@@ -220,7 +232,8 @@ int main(int argc, char** argv)
     cef_options.dpi = shell::DpiScale{};
     // THE app scheme (04 §1), carrying the palette-smoke flag so editor-core's boot drives the scripted
     // OPEN -> FILTER -> EXECUTE scenario over the real palette + registry.
-    cef_options.url = std::string(shell::kAppEntryUrl) + "?ctx-smoke-palette=1";
+    cef_options.url = std::string(shell::kAppEntryUrl) + "?ctx-smoke-palette=1&" +
+                      shell::kThemePinFlag + "=" + kSmokeThemeId;
     cef_options.app_asset_root = asset_root;
     cef_options.bridge = &bridge;
     cef_options.windowless_frame_rate = 10;
@@ -287,6 +300,13 @@ int main(int argc, char** argv)
     shell::KeybindingsBridge keybindings_bridge;
     keybindings_bridge.bind_path(std::filesystem::path{});
     SMOKE_CHECK(keybindings_bridge.install(bridge), "the keybindings.get bridge surface installed");
+
+    // --- the watched-themes read surface (e06b) -------------------------------------------------
+    // editor-core's boot calls themes.get; serve it (an empty list on the empty directory) so the live
+    // boot is not refused. Same deterministic-empty binding as cef_shell_smoke.cpp.
+    shell::ThemesBridge themes_bridge;
+    themes_bridge.bind_directory(std::filesystem::path{});
+    SMOKE_CHECK(themes_bridge.install(bridge), "the themes.get bridge surface installed");
 
     // --- the welcome launch-mode surface (e14c) -----------------------------------------------
     // editor-core's boot calls `welcome.state` right after `shell.ready` to choose the welcome screen
@@ -358,7 +378,7 @@ int main(int argc, char** argv)
             const SurfaceScan scan =
                 scan_surface(editor->compositor().cpu_surface(), editor->compositor().size());
             // A real, MULTI-COLOUR UI reached the present path. Unlike the boot smoke this loop does
-            // NOT also gate on the static #132a44 background-COVERAGE floor — see the assertion block
+            // NOT also gate on the static #0a0a0a background-COVERAGE floor — see the assertion block
             // below for why a layout-mutating scenario has no stable cross-platform coverage fraction.
             painted = scan.scanned > 0 && !scan.uniform;
         }
@@ -373,7 +393,7 @@ int main(int argc, char** argv)
             const auto elapsed_ms =
                 std::chrono::duration_cast<std::chrono::milliseconds>(now - loop_start).count();
             // Scan the current surface for the heartbeat so a stalled loop names its CAUSE (DoD): the
-            // composited size, how much of it is the #132a44 background, and whether it is a solid fill.
+            // composited size, how much of it is the #0a0a0a background, and whether it is a solid fill.
             const SurfaceScan beat =
                 scan_surface(editor->compositor().cpu_surface(), editor->compositor().size());
             std::fprintf(stderr,
@@ -400,7 +420,7 @@ int main(int argc, char** argv)
     {
         // The live app genuinely PAINTED a real, multi-colour UI — not a blank or solid-colour frame.
         //
-        // ⚠ THIS TEST DELIBERATELY DOES NOT RE-ASSERT THE BOOT SMOKE'S STATIC #132a44 BACKGROUND-
+        // ⚠ THIS TEST DELIBERATELY DOES NOT RE-ASSERT THE BOOT SMOKE'S STATIC #0a0a0a BACKGROUND-
         // COVERAGE FLOOR (`background_texels > scanned/10`). That invariant — "the app scheme served
         // the STYLESHEET with a usable media type and the live browser's pixels reached the present
         // path" — is already proven, on this EXACT Windows software-OSR path, by the sibling
@@ -408,7 +428,7 @@ int main(int argc, char** argv)
         // drives a live layout-MUTATING scenario (open the palette -> filter -> close a docked panel
         // -> Dockview relayout -> dismiss the palette), whose FINAL composited background-coverage
         // FRACTION is not a stable cross-platform invariant: the post-relayout Dockview surface
-        // composites a different #132a44 fraction under Windows software OSR than under the Linux path
+        // composites a different #0a0a0a fraction under Windows software OSR than under the Linux path
         // (ubuntu passed the old floor in 0.83s; the self-hosted Windows leg held below it for the
         // full 30s deadline), with no bearing on what this test actually claims. The palette overlay
         // (`app.css .ctx-palette`) is itself CSS-bounded to <=52% of the frame, so it cannot be the

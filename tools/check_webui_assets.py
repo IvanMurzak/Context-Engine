@@ -76,7 +76,30 @@ SCHEME_CONSTANTS = (
     ("scheme", "app_scheme.h", "kAppScheme", "BRIDGE_SCHEME"),
     ("origin", "app_scheme.h", "kAppOrigin", "BRIDGE_ORIGIN"),
     ("ipc endpoint", "app_scheme.h", "kIpcEndpoint", "BRIDGE_ENDPOINT"),
+    ("theme pin flag", "app_scheme.h", "kThemePinFlag", "THEME_PIN_FLAG"),
 )
+
+# --- the M9 e06b THEME contract (check 9) ---------------------------------------------------------
+# The live CEF smokes scan the composited frame for the ACTIVE THEME's `colors.panel` by EXACT byte
+# match. That colour is per-theme (#0a0a0a Dark, #ffffff Light) and editor-core's first run otherwise
+# follows the HOST's `prefers-color-scheme`, so each smoke pins the theme it means (`kSmokeThemeId`)
+# into its boot URL and hardcodes that theme's panel colour as `kAppBackground{R,G,B}`.
+#
+# WHY THIS GATE EXISTS. Those two facts live in three places — the smoke's pinned id, the smoke's
+# three byte constants, and the theme JSON's `colors.panel` — and NOTHING made them agree. Editing a
+# built-in theme's panel colour, or re-pointing a smoke at another theme, leaves a scan looking for a
+# colour that is genuinely not on screen: the frame paints correctly, the editor is healthy, and the
+# assertion fails anyway. Its only other signal is a full CI round-trip on a leg no local gate can
+# run, which is exactly what it cost. Mechanised here instead, from the SOURCES, so it runs on every
+# `build` leg and locally.
+THEME_SMOKES = (
+    "cef_shell_smoke.cpp",
+    "cef_shell_restore_smoke.cpp",
+    "cef_shell_palette_smoke.cpp",
+)
+
+# `builtin.dark` -> `dark.theme.json` (theme.ts's BUILTIN_* ids are `builtin.<file stem>`).
+BUILTIN_THEME_ID_PREFIX = "builtin."
 
 # The message-router function names live in the CEF binding (they are CEF message-router config
 # values), not in a header — so they are read from there. BOTH names must be covered: CEF requires
@@ -152,6 +175,15 @@ WELCOME_CONSTANTS = (
 # and the built bundle.
 KEYBINDINGS_CONSTANTS = (
     ("keybindings.get", "keybindings_bridge.h", "kKeybindingsGetMethod", "KEYBINDINGS_GET_METHOD"),
+)
+
+# The M9 e06b THEME surface (design 06 §4), whose method name lives in themes_bridge.h. Identical
+# silent-drift hazard, one directory wider: a rename on one side leaves editor-core calling a method
+# the Shell no longer routes, so `~/.context/themes/*.theme.json` would silently never load — the
+# editor would simply always be on a built-in theme with nothing anywhere reporting why. Checked the
+# same way, from the header constant and the built bundle.
+THEMES_CONSTANTS = (
+    ("themes.get", "themes_bridge.h", "kThemesGetMethod", "THEMES_GET_METHOD"),
 )
 
 # The closed gesture vocabulary (04 §4), compared SET vs SET between the C++ wire tokens and the
@@ -356,6 +388,158 @@ def check_csp_clean_document(document: Path) -> list[str]:
     return failures
 
 
+def check_dockview_chrome_specificity(stylesheet: Path) -> list[str]:
+    """Check 6b — the theme's Dockview chrome override must OUTRANK the vendored engine's own CSS.
+
+    `dockview.css` declares the very same `--dv-*` variables on the very same `.dockview-theme-dark`
+    selector, and dockview-core ALSO injects that stylesheet into the document at RUNTIME. At equal
+    specificity the later declaration wins, so a bare `.dockview-theme-dark { --dv-...: ... }` block
+    in app.css is SILENTLY IGNORED for every variable dockview declares — the docking chrome keeps
+    the engine's stock greys and the editor's theme never reaches it.
+
+    That failure was invisible to every local gate when this gate was written: the stylesheet parses,
+    the T1 suite's DOCKVIEW_CHROME map still agrees with itself, and nothing throws (measured: 95.9%
+    of the frame was dockview's #1e1e1e and ZERO texels were the theme colour). It is mechanised here
+    as a cheap SOURCE-level tripwire, and `theme_dom.test.ts` now asserts the same property on the
+    COMPUTED value of a real Dockview root — which is the stronger check, since this one reasons
+    about a selector while that one reads what the browser actually resolved.
+
+    ⚠ Losing this cascade is only ONE of the two ways the live smoke went red at e06b; the other is
+    the ACTIVE THEME being chosen by the host's `prefers-color-scheme`, which no stylesheet check can
+    see. That one is `check_theme_contract`'s. Neither gate subsumes the other.
+    """
+    if not stylesheet.is_file():
+        return []
+    text = stylesheet.read_text(encoding="utf-8", errors="replace")
+    if "--dv-" not in text:
+        return []
+    # A qualified prefix (`html .dockview-theme-dark`) raises specificity to 0,1,1 and beats the
+    # injected 0,1,0 declaration regardless of document order. `!important` would also work, but the
+    # prefix is the narrower instrument, so accept either rather than mandating one.
+    for match in re.finditer(r"(?m)^([^\n{}]*\.dockview-theme-[a-z-]+)\s*\{([^{}]*)\}", text):
+        selector, body = match.group(1).strip(), match.group(2)
+        if "--dv-" not in body:
+            continue
+        qualified = re.match(r"^[a-z]+[\s>]", selector) is not None or ":root" in selector
+        if not qualified and "!important" not in body:
+            return [
+                f"{stylesheet.name}: the Dockview chrome override `{selector} {{ … }}` is declared at "
+                f"the SAME specificity (0,1,0) as dockview.css's own block, which dockview-core "
+                f"injects at RUNTIME — so it loses the cascade and the docking chrome silently keeps "
+                f"the engine's stock greys instead of the theme's tokens. Qualify the selector (e.g. "
+                f"`html {selector}`) so it outranks the injected declaration."
+            ]
+    return []
+
+
+def _read_cpp_byte_constant(source: Path, name: str) -> int:
+    """Read a `... name = 0x0a;` (or decimal) C++ integer constant. Raises CheckError when absent.
+
+    Same regex-over-source rationale as `_read_cpp_string_constant`: a rename fails LOUDLY rather
+    than quietly matching nothing, which for a gate whose whole job is catching drift is the only
+    acceptable failure mode.
+    """
+    try:
+        text = source.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise CheckError(f"cannot read {source}: {exc}") from exc
+    match = re.search(rf"\b{re.escape(name)}\s*=\s*(0[xX][0-9a-fA-F]+|\d+)\s*;", text)
+    if match is None:
+        raise CheckError(
+            f"constant '{name}' not found in {source} — it was renamed or removed, so the "
+            f"theme-colour drift check can no longer verify anything. Update THEME_SMOKES.")
+    return int(match.group(1), 0)
+
+
+def _theme_panel_rgb(themes_dir: Path, theme_id: str) -> tuple[int, int, int]:
+    """Resolve a built-in theme id to its `colors.panel` as an (r, g, b) triple.
+
+    Only `#rrggbb` is accepted, deliberately: the smokes compare RAW BGRA bytes, so a theme whose
+    panel colour became a named colour, a shorthand or an `rgba()` would silently stop being
+    comparable — and a gate that quietly skipped it would be worse than no gate.
+    """
+    if not theme_id.startswith(BUILTIN_THEME_ID_PREFIX):
+        raise CheckError(
+            f"pinned theme id {theme_id!r} is not a built-in id (expected a "
+            f"{BUILTIN_THEME_ID_PREFIX!r} prefix) — a smoke may only pin a theme that ships inside "
+            f"the bundle, because a user theme is not present on a CI host.")
+    stem = theme_id[len(BUILTIN_THEME_ID_PREFIX):]
+    path = themes_dir / f"{stem}.theme.json"
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise CheckError(
+            f"pinned theme {theme_id!r} resolves to {path}, which cannot be read: {exc}") from exc
+    except ValueError as exc:
+        raise CheckError(f"{path} is not valid JSON: {exc}") from exc
+    colors = document.get("colors") if isinstance(document, dict) else None
+    panel = colors.get("panel") if isinstance(colors, dict) else None
+    if not isinstance(panel, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", panel):
+        raise CheckError(
+            f"{path}: colors.panel is {panel!r}, not a '#rrggbb' literal — the CEF smokes compare "
+            f"raw bytes, so this value must stay a plain 6-digit hex colour.")
+    return int(panel[1:3], 16), int(panel[3:5], 16), int(panel[5:7], 16)
+
+
+def _strip_cpp_comments(text: str) -> str:
+    """Drop `//` and `/* */` comments before scanning C++ source.
+
+    The sibling of `_strip_html_comments`, and load-bearing for the same reason: the file being
+    scanned DOCUMENTS the very mechanism being checked, so scanning the prose as if it were code
+    makes the check unfalsifiable. String literals are not protected — a `//` inside one would
+    over-strip — which is acceptable here because the only thing looked for is an identifier.
+    """
+    return re.sub(r"//[^\n]*|/\*.*?\*/", "", text, flags=re.DOTALL)
+
+
+def check_theme_contract(shell_cef_dir: Path, themes_dir: Path) -> list[str]:
+    """Check 9 — every CEF smoke's hardcoded background colour IS its pinned theme's `colors.panel`,
+    and every one of them actually pins a theme rather than inheriting the host's preference."""
+    failures: list[str] = []
+    for smoke in THEME_SMOKES:
+        source = shell_cef_dir / smoke
+        if not source.is_file():
+            raise CheckError(
+                f"{source} is missing — THEME_SMOKES names a smoke that no longer exists, so this "
+                f"gate would pass vacuously.")
+        text = source.read_text(encoding="utf-8", errors="replace")
+        theme_id = _read_cpp_string_constant(source, "kSmokeThemeId")
+        expected = _theme_panel_rgb(themes_dir, theme_id)
+        actual = tuple(_read_cpp_byte_constant(source, f"kAppBackground{c}") for c in "RGB")
+        if actual != expected:
+            failures.append(
+                f"{smoke}: kAppBackground{{R,G,B}} = "
+                f"#{actual[0]:02x}{actual[1]:02x}{actual[2]:02x} but the pinned theme {theme_id!r} "
+                f"paints colors.panel = #{expected[0]:02x}{expected[1]:02x}{expected[2]:02x}. The "
+                f"per-pixel scan would look for a colour the running editor never paints, so the "
+                f"smoke fails on a perfectly healthy frame.")
+        # The pin has to REACH the boot URL. A `kSmokeThemeId` that is declared and never used would
+        # leave the first-run theme on `prefers-color-scheme` — green on a dark-mode dev box, red on
+        # every CI host, which is the exact defect this whole gate exists to make impossible.
+        #
+        # COMMENTS ARE STRIPPED FIRST, and that is not fussiness: these smokes carry a paragraph of
+        # prose explaining the pin, so a substring probe over the raw source would be satisfied by
+        # the EXPLANATION of the mechanism after someone deleted the mechanism.
+        if "kThemePinFlag" not in _strip_cpp_comments(text):
+            failures.append(
+                f"{smoke}: declares kSmokeThemeId but never references shell::kThemePinFlag, so the "
+                f"pin never reaches the boot URL and the active theme falls back to the HOST's "
+                f"prefers-color-scheme.")
+    return failures
+
+
+def run_theme_contract(shell_cef_dir: Path, themes_dir: Path) -> int:
+    failures = check_theme_contract(shell_cef_dir, themes_dir)
+    if failures:
+        print("webui theme contract FAILED:", file=sys.stderr)
+        for failure in failures:
+            print(f"  - {failure}", file=sys.stderr)
+        return 1
+    print(f"webui theme contract OK ({len(THEME_SMOKES)} CEF smokes pin a theme whose colors.panel "
+          f"matches their scan colour)")
+    return 0
+
+
 def check_scheme_contract(asset_dir: Path, bundle_name: str, shell_include_dir: Path,
                           shell_cef_dir: Path) -> list[str]:
     """Checks 5 + 6 — cross-language scheme vocabulary, and no file:// anywhere in the asset set."""
@@ -506,6 +690,22 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
                 f"Shell would route one name and editor-core would call another, so ~/.context/"
                 f"keybindings.json would silently never reach the keymap with NO error anywhere.")
 
+    # 7a4 — the e06b themes vocabulary agrees across the two languages. Same mechanism as 7a3; a
+    # rename here leaves the watched-theme channel dead (the files silently never load).
+    for human, cpp_file, cpp_name, ts_name in THEMES_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(
+                f"{human}: the bundle does not declare {ts_name} — editor-core cannot be calling the "
+                f"themes method the Shell routes, so watched user themes would never load")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
+                f"Shell would route one name and editor-core would call another, so ~/.context/"
+                f"themes/*.theme.json would silently never reach the theme engine with NO error "
+                f"anywhere.")
+
     # 7b — the D6 persisted-blob member names agree (gui/contract/panel_state.h is their authority).
     for human, cpp_name, ts_name in PANEL_STATE_CONSTANTS:
         cpp_value = _read_cpp_string_constant(contract_include_dir / "panel_state.h", cpp_name)
@@ -639,6 +839,7 @@ def run_scheme_contract(asset_dir: Path, bundle_name: str, shell_include_dir: Pa
     stylesheet = asset_dir / APP_STYLESHEET
     if not stylesheet.is_file():
         failures.append(f"served stylesheet missing: {stylesheet}")
+    failures.extend(check_dockview_chrome_specificity(stylesheet))
     failures.extend(check_scheme_contract(asset_dir, bundle_name, shell_include_dir, shell_cef_dir))
 
     if failures:
@@ -676,6 +877,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--welcome-contract", action="store_true",
                         help="run the M9 e14c gate (cross-language welcome.* method + mode vocabulary) "
                              "instead of the asset checks")
+    parser.add_argument("--theme-contract", action="store_true",
+                        help="run the M9 e06b gate (every CEF smoke pins a built-in theme and its "
+                             "hardcoded scan colour IS that theme's colors.panel) instead of the "
+                             "asset checks")
+    parser.add_argument("--themes-dir", type=Path,
+                        default=REPO_ROOT / "src" / "editor" / "webui" / "tokens" / "themes",
+                        help="dir holding the built-in *.theme.json files (--theme-contract only)")
     parser.add_argument("--contract-include-dir", type=Path,
                         default=REPO_ROOT / "src" / "editor" / "gui" / "contract" / "include" /
                         "context" / "editor" / "gui" / "contract",
@@ -697,6 +905,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_panel_contract(args.asset_dir, args.bundle_name, args.shell_include_dir,
                                       args.contract_include_dir, args.package_json,
                                       args.shell_src_dir)
+        if args.theme_contract:
+            return run_theme_contract(args.shell_cef_dir, args.themes_dir)
         if args.welcome_contract:
             return run_welcome_contract(args.asset_dir, args.bundle_name, args.shell_include_dir)
         return run(args.asset_dir, args.manifest, args.bundle_name)

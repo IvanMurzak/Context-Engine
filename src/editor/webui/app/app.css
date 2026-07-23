@@ -11,17 +11,21 @@
  * one path and gets the media type right (a `text/css` served as anything else is ignored, and the
  * smoke's per-pixel background assertion would fail).
  *
- * The design tokens + the real theme engine are e06's. Nothing here anticipates them: this is the
- * minimum that makes the window legible and the composite assertable.
+ * ⚠ THE THEME ENGINE (e06b) NOW OWNS THE COLOURS. `core/src/theme.ts` writes the whole token set as
+ * CSS custom properties (`--ctx-*`) onto <html> at boot and on every live switch, so every rule below
+ * reads a TOKEN with the pre-theme placeholder as its `var()` FALLBACK. That fallback is not dead
+ * code: it is what the document looks like in the instant between the stylesheet arriving and the
+ * bundle applying a theme, and what a bundle-less harness sees. The component KIT is still e06c's —
+ * this file stays the minimum that makes the window legible and the composite assertable.
  */
 
 :root {
-    /* The composited background the `editor-cef-smoke-shell` ctest asserts PER PIXEL. It is a
-     * known, distinctive value on purpose — counting frames proves nothing about whether the
-     * browser's pixels actually reached the present path, and reusing e04's placeholder colour
-     * would make "the app scheme served the bundle" indistinguishable from "the old data: URL
-     * placeholder still loads". Keep this in lockstep with kAppBackground* in
-     * src/editor/shell/cef/src/cef_shell_smoke.cpp. */
+    /* The PRE-THEME placeholder pair. Before e06b these WERE the editor's colours and the composited
+     * value the live CEF smokes asserted per pixel; now the theme engine's tokens override them the
+     * moment editor-core boots, and the smokes assert the ACTIVE THEME's `colors.panel` instead (see
+     * the lockstep note on the docking-surface block below). They remain as the honest "no theme
+     * applied yet" appearance — deliberately NOT a theme colour, so a frame painted in them is
+     * recognisable as exactly that. */
     --editor-bg: #132a44;
     --editor-fg: #e6edf5;
 }
@@ -31,11 +35,53 @@ body {
     margin: 0;
     padding: 0;
     height: 100%;
-    background: var(--editor-bg);
-    color: var(--editor-fg);
-    font-family: system-ui, sans-serif;
+    background: var(--ctx-colors-canvas, var(--editor-bg));
+    color: var(--ctx-colors-ink, var(--editor-fg));
+    font-family: var(--ctx-typography-font-ui, system-ui, sans-serif);
+    font-size: var(--ctx-typography-size-base, 13.5px);
+    line-height: var(--ctx-typography-line-height, 1.45);
+    letter-spacing: var(--ctx-typography-tracking, normal);
     /* The editor is a window, not a page: a scrollbar here would fight the docking layout. */
     overflow: hidden;
+}
+
+/* --- the 350ms theme cross-fade (M9 e06b, design 06 §2) --------------------------------------- *
+ *
+ * ARMED ONLY WHILE A SWITCH IS IN FLIGHT. `theme.ts` sets `data-theme-transition="true"` on <html>
+ * for exactly the fade's duration and clears it afterwards, which is what keeps the cross-fade a
+ * property of the SWITCH: a permanently-declared `transition: background-color var(--ctx-theme-fade-
+ * duration)` would still be 350ms long after the switch ended and would slow every hover and
+ * selection change for the rest of the session.
+ *
+ * It is also never armed for the FIRST apply (there is nothing to fade from at boot) and never under
+ * reduced motion, where the engine forces the duration to 0ms — so this rule is inert in both cases
+ * even before the media query below has its say. */
+html[data-theme-transition="true"],
+html[data-theme-transition="true"] * {
+    transition:
+        background-color var(--ctx-theme-fade-duration, 0ms) var(--ctx-motion-easing-standard, linear),
+        color var(--ctx-theme-fade-duration, 0ms) var(--ctx-motion-easing-standard, linear),
+        border-color var(--ctx-theme-fade-duration, 0ms) var(--ctx-motion-easing-standard, linear),
+        outline-color var(--ctx-theme-fade-duration, 0ms) var(--ctx-motion-easing-standard, linear);
+}
+
+/* --- reduced motion, honoured UNCONDITIONALLY (design 06 §1) ---------------------------------- *
+ *
+ * BELT AND BRACES, on purpose. The engine already collapses every motion token to 0s and every
+ * Pulse-of-Work rhythm to `none` when `prefers-reduced-motion: reduce` matches, so this block is
+ * normally redundant — but it holds even for a document whose bundle never executed, and it is what
+ * makes the guarantee a property of the STYLESHEET rather than of a script the user must trust to
+ * have run. Motion is dropped; colour is NOT touched (the static Pulse-of-Work fallback, TOKENS.md
+ * §5 — it was never an aurora, and the rotating halo was rejected outright on 2026-07-19). */
+@media (prefers-reduced-motion: reduce) {
+    html[data-theme-transition="true"],
+    html[data-theme-transition="true"] * {
+        transition: none;
+    }
+
+    .ctx-flourish::before {
+        animation: none;
+    }
 }
 
 #editor-root {
@@ -51,33 +97,184 @@ body {
  * engine's structure and its built-in themes. What follows re-points the ONE thing a theme must not
  * decide for us — the surface colour — at the editor's own background.
  *
- * THIS IS ALSO WHAT KEEPS `editor-cef-smoke-shell`'s PIXEL ASSERTION MEANINGFUL. That smoke proves
- * the app scheme served the STYLESHEET with a usable media type by finding `--editor-bg` in the
- * composited surface. Before e05d1 the window was empty, so every sampled texel was that colour;
- * now a real docking UI is mounted on top of it. Letting Dockview's theme paint its own greys would
- * have made the editor's background invisible in the composite and turned a live, load-bearing
- * assertion into a mystery failure. Inheriting instead is both the honest visual answer — the app's
- * background IS the editor's background until e06's token/theme engine lands — and the thing that
- * keeps the colour genuinely present in the frame.
+ * ⚠ e06b: THESE NOW COME FROM THE THEME TOKENS (design 06 §2 "Dockview chrome is skinned via its CSS
+ * variables from the same tokens", D2 synergy). The re-point stays HERE rather than relying on the
+ * engine's own `--dv-*` writes at `:root`, because `dockview.css` declares its defaults ON
+ * `.dockview-theme-dark` — a custom property set on that element beats one inherited from the root,
+ * so a rule at this specificity is what actually wins. The engine writes them at the root too; the
+ * two agree by construction (theme.ts's DOCKVIEW_CHROME table is the same map).
  *
- * e06 replaces this block with the real token kit; it is deliberately the minimum until then. */
-.dockview-theme-dark {
-    --dv-group-view-background-color: var(--editor-bg);
-    --dv-tabs-and-actions-container-background-color: var(--editor-bg);
-    --dv-activegroup-visiblepanel-tab-background-color: var(--editor-bg);
-    --dv-inactivegroup-visiblepanel-tab-background-color: var(--editor-bg);
-    --dv-background-color: var(--editor-bg);
-    --dv-paneview-active-outline-color: var(--editor-fg);
+ * THIS IS ALSO WHAT KEEPS `editor-cef-smoke-shell`'s PIXEL ASSERTION MEANINGFUL. That smoke proves
+ * the app scheme served the STYLESHEET with a usable media type by finding ONE known colour over a
+ * tenth of the composited surface. Before e05d1 the window was empty, so every sampled texel was
+ * that colour; now a real docking UI is mounted on top of it, and letting Dockview's theme paint its
+ * own greys would make the editor's background invisible in the composite.
+ *
+ * ⚠⚠ LOCKSTEP, UNCHANGED IN SHAPE BUT MOVED IN VALUE. All FIVE background variables below still
+ * resolve to ONE colour — now the active theme's `colors.panel` instead of `--editor-bg` — so the
+ * PAINTED REGION the smokes scan is byte-for-byte what it was and only the colour moved. The smokes'
+ * `kAppBackground*` constants therefore track `tokens/themes/dark.theme.json`'s `colors.panel`
+ * (#0a0a0a) instead of #132a44; see src/editor/shell/cef/src/cef_shell_smoke.cpp. A kit change that
+ * gives the tab strip its own `panel2` step MUST move those constants in the same diff — the T1 test
+ * "the five Dockview BACKGROUND variables share one token" is that tripwire.
+ *
+ * The remaining ink/line variables were not backgrounds before and are pure gain: the chrome now
+ * reads the theme's ink hierarchy instead of Dockview's stock greys.
+ *
+ * ⚠⚠⚠ THE `html` PREFIX IS LOAD-BEARING — DO NOT "SIMPLIFY" IT AWAY. `dockview.css` declares these
+ * same variables on the SAME `.dockview-theme-dark` selector (specificity 0,1,0), and dockview-core
+ * ALSO INJECTS that stylesheet into the document AT RUNTIME (see index.html's note) — so the injected
+ * copy lands after this file in document order and, at equal specificity, WINS. A bare
+ * `.dockview-theme-dark` block here is therefore silently ignored for every variable dockview itself
+ * declares: measured, only `--dv-background-color` survived (the one variable dockview.css never
+ * declares), while the other four backgrounds resolved to dockview's stock #1e1e1e / #252526 and the
+ * whole composited frame came back 95.9% #1e1e1e with ZERO texels of the theme's `colors.panel`.
+ *
+ * `html .dockview-theme-dark` is specificity 0,1,1 — it outranks the injected declaration no matter
+ * what order it arrives in, with no `!important` and no reach into the vendored engine. That IS the
+ * cascade fix, and `webui-ts-unit`'s `theme_dom.test.ts` now asserts the COMPUTED result on a real
+ * Dockview root so it can never silently regress again.
+ *
+ * ⚠ IT WAS NOT, HOWEVER, THE WHOLE REASON `editor-cef-smoke-shell` WAS RED — do not read it as such,
+ * because the second cause is invisible from this file. `colors.panel` is a PER-THEME value, and the
+ * first-run theme follows the HOST's `prefers-color-scheme` (06 §4 / C-F22). A CI host has no
+ * colour-scheme preference at all, so Chromium's `light` default booted `builtin.light` (#ffffff)
+ * while the smokes scanned for Dark's #0a0a0a — zero matching texels on a perfectly healthy frame,
+ * on a machine-dependent input no stylesheet edit could touch. The smokes now PIN the theme in their
+ * boot URL (`?ctx-smoke-theme=`, theme.ts's THEME_PIN_FLAG) and `webui-theme-contract` keeps the
+ * pinned id, their scan constants and the theme JSON in lockstep. */
+html .dockview-theme-dark {
+    --dv-background-color: var(--ctx-colors-panel, var(--editor-bg));
+    --dv-group-view-background-color: var(--ctx-colors-panel, var(--editor-bg));
+    --dv-tabs-and-actions-container-background-color: var(--ctx-colors-panel, var(--editor-bg));
+    --dv-activegroup-visiblepanel-tab-background-color: var(--ctx-colors-panel, var(--editor-bg));
+    --dv-inactivegroup-visiblepanel-tab-background-color: var(--ctx-colors-panel, var(--editor-bg));
+    --dv-activegroup-visiblepanel-tab-color: var(--ctx-colors-ink, var(--editor-fg));
+    --dv-activegroup-hiddenpanel-tab-color: var(--ctx-colors-muted, var(--editor-fg));
+    --dv-inactivegroup-visiblepanel-tab-color: var(--ctx-colors-muted, var(--editor-fg));
+    --dv-inactivegroup-hiddenpanel-tab-color: var(--ctx-colors-muted2, var(--editor-fg));
+    --dv-tab-divider-color: var(--ctx-colors-line, var(--editor-bg));
+    --dv-separator-border: var(--ctx-colors-line, var(--editor-bg));
+    --dv-paneview-header-border-color: var(--ctx-colors-line, var(--editor-bg));
+    --dv-paneview-active-outline-color: var(--ctx-colors-accent, var(--editor-fg));
 }
 
-/* The DOM slot the hydration runtime mounts a panel's uitree into (one per open panel). */
+/* --- Pulse of Work: the ONE signature flourish (M9 e06b; design 06 §2, mockups/TOKENS.md §5) --- *
+ *
+ * OWNER PICK O1 (resolved 2026-07-19): the glow's COLOUR AND RHYTHM mirror the Play button's real
+ * state, reusing the reserved status hues — so the signature flourish and the status signal are the
+ * same thing, at ZERO new colour tokens. The rotating conic "aurora" halo that preceded it was
+ * REJECTED OUTRIGHT at both candidate placements; nothing here revives it.
+ *
+ * Mechanism, verbatim from TOKENS.md §5: a `::before` radial-gradient bloom, `inset: -5px`,
+ * `filter: blur(4px)`, and ZERO `box-shadow` (consistent with the no-shadows rule — depth is border
+ * + surface step). Speed tracks ACTIVITY: compiling 0.95s (fastest) > error 1.4s > running 2.6s >
+ * idle 7s (slowest), paused frozen.
+ *
+ * The five per-state values are DERIVED VARIABLES the theme engine resolves (`theme.ts`), because
+ * the theme names a state's hue by its reserved SEMANTIC (`good` / `warn` / …) and CSS cannot
+ * dereference that indirection itself. So this block reads `--ctx-flourish-<state>-*` and needs no
+ * per-state rule of its own — a state is one `data-play-state` attribute on the host element, which
+ * is all a Play button (a later task) has to set.
+ *
+ * REDUCED MOTION: the engine rewrites every `-animation` to `none` and every `-duration` to 0ms, and
+ * the media query above re-asserts it. The bloom, its colour and its opacity REMAIN — motion
+ * dropped, colour retained. */
+.ctx-flourish {
+    position: relative;
+}
+
+.ctx-flourish::before {
+    content: "";
+    position: absolute;
+    inset: var(--ctx-motion-flourish-bloom-inset, -5px);
+    border-radius: inherit;
+    pointer-events: none;
+    z-index: -1;
+    background: radial-gradient(circle, var(--ctx-flourish-state-color, transparent) 0%, transparent 85%);
+    filter: blur(var(--ctx-motion-flourish-blur, 4px));
+    opacity: var(--ctx-flourish-state-opacity, 0);
+    animation: var(--ctx-flourish-state-animation, none)
+        var(--ctx-flourish-state-duration, 0s)
+        var(--ctx-motion-easing-standard, ease-in-out)
+        infinite;
+}
+
+/* The state selector: one attribute the host sets, mapping onto the derived per-state variables. */
+.ctx-flourish[data-play-state="idle"] {
+    --ctx-flourish-state-color: var(--ctx-flourish-idle-color);
+    --ctx-flourish-state-opacity: var(--ctx-flourish-idle-opacity);
+    --ctx-flourish-state-animation: var(--ctx-flourish-idle-animation);
+    --ctx-flourish-state-duration: var(--ctx-flourish-idle-duration);
+}
+
+.ctx-flourish[data-play-state="running"] {
+    --ctx-flourish-state-color: var(--ctx-flourish-running-color);
+    --ctx-flourish-state-opacity: var(--ctx-flourish-running-opacity);
+    --ctx-flourish-state-animation: var(--ctx-flourish-running-animation);
+    --ctx-flourish-state-duration: var(--ctx-flourish-running-duration);
+}
+
+.ctx-flourish[data-play-state="compiling"] {
+    --ctx-flourish-state-color: var(--ctx-flourish-compiling-color);
+    --ctx-flourish-state-opacity: var(--ctx-flourish-compiling-opacity);
+    --ctx-flourish-state-animation: var(--ctx-flourish-compiling-animation);
+    --ctx-flourish-state-duration: var(--ctx-flourish-compiling-duration);
+}
+
+.ctx-flourish[data-play-state="error"] {
+    --ctx-flourish-state-color: var(--ctx-flourish-error-color);
+    --ctx-flourish-state-opacity: var(--ctx-flourish-error-opacity);
+    --ctx-flourish-state-animation: var(--ctx-flourish-error-animation);
+    --ctx-flourish-state-duration: var(--ctx-flourish-error-duration);
+}
+
+.ctx-flourish[data-play-state="paused"] {
+    --ctx-flourish-state-color: var(--ctx-flourish-paused-color);
+    --ctx-flourish-state-opacity: var(--ctx-flourish-paused-opacity);
+    --ctx-flourish-state-animation: var(--ctx-flourish-paused-animation);
+    --ctx-flourish-state-duration: var(--ctx-flourish-paused-duration);
+}
+
+/* The two rhythms, named by theme.ts's derivation (`ctx-state-breathe` / `ctx-state-pulse`). */
+@keyframes ctx-state-breathe {
+    0%,
+    100% {
+        opacity: 0.55;
+    }
+
+    50% {
+        opacity: 0.9;
+    }
+}
+
+@keyframes ctx-state-pulse {
+    0%,
+    100% {
+        opacity: 0.55;
+        transform: scale(0.95);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1.1);
+    }
+}
+
+/* The DOM slot the hydration runtime mounts a panel's uitree into (one per open panel).
+ *
+ * NO `background` HERE, deliberately: the slot INHERITS the docking group's surface, which is what
+ * keeps the theme's `colors.panel` genuinely present across the whole panel area (the region the live
+ * CEF smokes' coverage floor is calibrated against). Type and ink come from the tokens, so a theme
+ * switch re-tokens the hydrated panels along with the chrome. */
 .ctx-panel-body {
     height: 100%;
     overflow: auto;
     padding: 8px;
     box-sizing: border-box;
-    font-size: 13px;
-    line-height: 1.5;
+    color: var(--ctx-colors-ink, var(--editor-fg));
+    font-size: var(--ctx-typography-size-sm, 13px);
+    line-height: var(--ctx-typography-line-height, 1.5);
 }
 
 /* --- widget classes, keyed by node ROLE (04 §4 step 4) ---------------------------------------- *
@@ -85,7 +282,9 @@ body {
  * PRESENTATION ONLY. The hydration runtime adds these from the node's `role` (see WIDGET_CLASSES in
  * core/src/hydration.ts); the VALUE semantics stay in the C++ model and the write path. They are
  * keyed by role rather than by anything panel-derived, which is what keeps a new panel from needing
- * a new rule here. Kept minimal on purpose — the real component kit is e06's. */
+ * a new rule here. Kept minimal on purpose — the real component KIT is e06c's; e06b only re-points
+ * what is already here at the tokens, so a live theme switch re-tokens the hydrated panels rather
+ * than leaving them on hardcoded literals that would visibly disagree with the rest of the editor. */
 .ctx-widget-region,
 .ctx-widget-group {
     display: block;
@@ -93,9 +292,9 @@ body {
 
 .ctx-widget-heading {
     margin: 0 0 6px;
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
+    font-size: var(--ctx-typography-size-sm, 13px);
+    font-weight: var(--ctx-typography-weight-semibold, 600);
+    letter-spacing: var(--ctx-typography-tracking, 0.02em);
 }
 
 .ctx-widget-status {
@@ -114,30 +313,34 @@ body {
 .ctx-widget-listitem,
 .ctx-widget-treeitem {
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: var(--ctx-shape-radius-sm, 3px);
     cursor: default;
 }
 
 /* A visible focus ring is not decoration — it is the R-A11Y-001 keyboard-navigation requirement made
- * legible. `:focus-visible` so it appears for keyboard users without ringing every mouse click. */
+ * legible. `:focus-visible` so it appears for keyboard users without ringing every mouse click. Both
+ * the WIDTH and the COLOUR are tokens, which is what makes the high-contrast pair's 2px solid-ink
+ * ring arrive by switching theme rather than by a second stylesheet. */
 .ctx-widget-listitem:focus-visible,
 .ctx-widget-treeitem:focus-visible,
 .ctx-widget-button:focus-visible {
-    outline: 2px solid var(--editor-fg);
+    outline: var(--ctx-shape-focus-ring-width, 2px) solid
+        var(--ctx-colors-focus-ring, var(--editor-fg));
     outline-offset: -2px;
 }
 
 .ctx-widget-listitem:hover,
 .ctx-widget-treeitem:hover {
-    background: rgba(230, 237, 245, 0.08);
+    background: var(--ctx-colors-panel2, rgba(230, 237, 245, 0.08));
 }
 
 .ctx-widget-button {
     font: inherit;
-    color: inherit;
-    background: rgba(230, 237, 245, 0.1);
-    border: 1px solid rgba(230, 237, 245, 0.25);
-    border-radius: 3px;
+    color: var(--ctx-colors-ink, inherit);
+    background: var(--ctx-colors-chip, rgba(230, 237, 245, 0.1));
+    border: var(--ctx-shape-border-width, 1px) solid
+        var(--ctx-colors-line, rgba(230, 237, 245, 0.25));
+    border-radius: var(--ctx-shape-radius-sm, 3px);
     padding: 2px 8px;
     cursor: pointer;
 }
@@ -226,14 +429,17 @@ body {
     max-height: 60vh;
     display: flex;
     flex-direction: column;
-    background: #1c3557;
-    color: var(--editor-fg);
-    border: 1px solid rgba(230, 237, 245, 0.25);
-    border-radius: 6px;
+    background: var(--ctx-colors-panel2, #1c3557);
+    color: var(--ctx-colors-ink, var(--editor-fg));
+    border: var(--ctx-shape-border-width, 1px) solid
+        var(--ctx-colors-line, rgba(230, 237, 245, 0.25));
+    border-radius: var(--ctx-shape-radius-md, 6px);
+    /* The one deliberate exception to the no-shadows rule (06 §2): the palette is a floating overlay
+     * over arbitrary content, where a border alone does not separate it from what is behind it. */
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
     z-index: 1000;
     overflow: hidden;
-    font-size: 13px;
+    font-size: var(--ctx-typography-size-sm, 13px);
 }
 
 .ctx-palette[hidden] {

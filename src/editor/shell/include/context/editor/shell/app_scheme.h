@@ -64,6 +64,16 @@ inline constexpr const char* kDefaultDocument = "index.html";
 // The document editor-core boots from.
 inline constexpr const char* kAppEntryUrl = "context-editor://app/index.html";
 
+// The boot-URL query flag that PINS editor-core's first-run theme (`theme.ts`'s THEME_PIN_FLAG).
+//
+// CROSS-LANGUAGE VOCABULARY, which is why it is declared HERE beside the rest of the scheme's:
+// the C++ smokes WRITE it into the boot URL and editor-core's `bootThemeId` READS it, so a rename on
+// either side would silently restore the ambient-`prefers-color-scheme` behaviour it exists to
+// remove — a live per-pixel assertion would then go back to depending on whether the HOST prefers
+// dark, with no build error anywhere. `webui-scheme-contract` compares this string against the one
+// compiled into the built bundle.
+inline constexpr const char* kThemePinFlag = "ctx-smoke-theme";
+
 // ------------------------------------------------------------------------------------- resolution
 
 enum class AssetStatus

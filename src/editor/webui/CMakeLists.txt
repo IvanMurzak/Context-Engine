@@ -270,6 +270,24 @@ add_test(NAME webui-welcome-contract
             --welcome-contract
             --shell-include-dir "${CMAKE_CURRENT_SOURCE_DIR}/../shell/include/context/editor/shell")
 
+# 1e) The e06b THEME CONTRACT gate. `colors.panel` is a PER-THEME value and editor-core's first run
+# follows the HOST's `prefers-color-scheme` (06 §4 / C-F22), so each live CEF smoke PINS the theme it
+# means into its boot URL and hardcodes that theme's panel colour as its scan constant. Three facts,
+# three files, no compiler between them: edit a built-in theme's panel colour, or re-point a smoke,
+# and the scan looks for a colour the running editor never paints — the frame is correct, the editor
+# is healthy, and the assertion fails anyway, with a full CI round-trip on a CEF-only leg as its only
+# signal. (That is exactly how it failed: a CI host has no colour-scheme preference, so Chromium's
+# `light` default booted `builtin.light` while the smokes scanned for Dark's #0a0a0a.) A SOURCE scan,
+# so it rides the `webui-*` family on all three default `build` legs — and runs locally.
+add_test(NAME webui-theme-contract
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_webui_assets.py"
+            --asset-dir "${_ctx_webui_assets}"
+            --manifest "${_ctx_dockview_manifest}"
+            --bundle-name "${_ctx_webui_bundle_name}"
+            --theme-contract
+            --shell-cef-dir "${CMAKE_CURRENT_SOURCE_DIR}/../shell/cef/src"
+            --themes-dir "${CMAKE_CURRENT_SOURCE_DIR}/tokens/themes")
+
 # 2) The DRIFT gate (e05a DoD: "generated from e02's schema; drift-checked in CI"). Re-projects the
 # BUILD-GENERATED schema — the live registry's output, not the committed copy — and refuses any byte
 # difference against the committed typings. A registry change that does not reach the editor's
@@ -348,11 +366,43 @@ if(CONTEXT_WEBUI_BROWSER_TESTS)
         COMMENT "context_editor_webui_test: staging the T1 harness page"
         VERBATIM)
 
+    # Stage the REAL stylesheets + the REAL pinned docking engine beside the test bundle.
+    #
+    # LOAD-BEARING, not convenience. `core/src/test/theme_dom.test.ts` asserts what the browser
+    # actually COMPUTES for Dockview's `--dv-*` chrome variables, and that value is decided by the
+    # cascade between app.css, the vendored `dockview.css` and the copy dockview-core injects at
+    # RUNTIME. Serving the harness without these three makes that whole file vacuous — so it is the
+    # SHIPPED bytes that are staged (the same files the app asset root gets), never a fixture: a
+    # fixture would pass while the shipped stylesheet failed, which is precisely the defect the tier
+    # exists to catch one CI round-trip earlier than `editor-cef-smoke-shell` does.
+    set(_ctx_webui_test_web_assets "")
+    foreach(_member IN LISTS _ctx_dockview_members)
+        add_custom_command(
+            OUTPUT "${_ctx_webui_test_assets}/${_member}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ctx_webui_test_assets}"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "${_ctx_dockview_dest}/${_member}" "${_ctx_webui_test_assets}/${_member}"
+            DEPENDS "${_ctx_dockview_dest}/${_member}"
+            COMMENT "context_editor_webui_test: staging ${_member} for the DOM tier"
+            VERBATIM)
+        list(APPEND _ctx_webui_test_web_assets "${_ctx_webui_test_assets}/${_member}")
+    endforeach()
+    add_custom_command(
+        OUTPUT "${_ctx_webui_test_assets}/app.css"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ctx_webui_test_assets}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/app/app.css" "${_ctx_webui_test_assets}/app.css"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/app/app.css"
+        COMMENT "context_editor_webui_test: staging app.css for the DOM tier"
+        VERBATIM)
+    list(APPEND _ctx_webui_test_web_assets "${_ctx_webui_test_assets}/app.css")
+
     # NOT an ALL target: built only on demand by the webui-tests CI job's --target list (and a local
     # -DCONTEXT_WEBUI_BROWSER_TESTS=ON repro). Keeping it out of ALL is what lets the default 3-OS
     # build stay browser-free while the test SOURCES still typecheck there via the production glob.
     add_custom_target(context_editor_webui_test
-        DEPENDS "${_ctx_webui_test_bundle}" "${_ctx_webui_test_assets}/harness.html")
+        DEPENDS "${_ctx_webui_test_bundle}" "${_ctx_webui_test_assets}/harness.html"
+                ${_ctx_webui_test_web_assets})
 
     # The headless-Chromium unit run. webui_test_run.py serves the test asset dir, runs the bundle in
     # a Chromium-family browser, and exits non-zero on any failed assertion (or a missing browser /

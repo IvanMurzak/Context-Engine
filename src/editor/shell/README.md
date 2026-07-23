@@ -31,6 +31,7 @@ This file is the directory map.
 | `include/.../compositor.h`, `src/compositor.cpp` | The layer stack, damage, the resize protocol, `PET_POPUP`, and both present paths (03 §4). |
 | `include/.../shell.h`, `src/shell.cpp` | `WindowManager` / `EditorWindow` / the owner loop, and the D10 authenticated attach. |
 | `include/.../panel_host.h`, `src/panel_host.cpp` | e05d1: the PANEL-AGNOSTIC `panel.*` bridge surface over the e05b roster — render, command, gesture verbs, the D6 state pair (04 §3-§4). Knows no panel id. |
+| `include/.../themes_bridge.h`, `src/themes_bridge.cpp` | e06b: the `themes.get` surface — reads + WATCHES `~/.context/themes/*.theme.json` and publishes the raw bytes with a generation counter (06 §4). Bytes only: the theme SCHEMA lives in editor-core (theme.ts), so a malformed theme is rejected there and never becomes a broken UI. D10 boundary-clean (plain `std::filesystem`), like its `keybindings_bridge.h` sibling. |
 | `panels/` | e05d1: the composition root. Binds a `PanelProvider` per hostable panel and projects the daemon's `diagnostics` topic onto the Problems model. |
 | `app/editor_main.cpp` | `context_editor`'s entry point. |
 | `smoke/shell_smoke_main.cpp` | The **Session-0-safe** smoke — e04's blocking CI requirement. |

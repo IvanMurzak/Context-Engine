@@ -101,6 +101,7 @@
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
+#include "context/editor/shell/themes_bridge.h"
 
 #include <chrono>
 #include <cstddef>
@@ -158,11 +159,21 @@ std::uint64_t now_us()
             .count());
 }
 
-// The app.css background, in BGRA8 — kept in lockstep with `--editor-bg: #132a44` and mirroring
-// cef_shell_smoke.cpp (the same served stylesheet paints the same background here).
-constexpr std::uint8_t kAppBackgroundB = 0x44;
-constexpr std::uint8_t kAppBackgroundG = 0x2a;
-constexpr std::uint8_t kAppBackgroundR = 0x13;
+// The editor's docking-surface background, in BGRA8 — mirroring cef_shell_smoke.cpp (the same served
+// stylesheet paints the same background here). Since e06b it tracks the ACTIVE THEME's `colors.panel`
+// (Dark, `tokens/themes/dark.theme.json` -> #0a0a0a) rather than app.css's pre-theme `--editor-bg`;
+// the full rationale, including why the coverage floor is unaffected, is on the matching constant in
+// cef_shell_smoke.cpp.
+constexpr std::uint8_t kAppBackgroundB = 0x0a;
+constexpr std::uint8_t kAppBackgroundG = 0x0a;
+constexpr std::uint8_t kAppBackgroundR = 0x0a;
+
+// The theme those three bytes belong to, pinned into BOTH phases' boot URLs. `colors.panel` is a
+// per-theme value and the first run otherwise follows the HOST's `prefers-color-scheme`, so without
+// this pin a CI host (no settings portal -> Chromium's `light` default) boots `builtin.light` and
+// the coverage floor below scans for a colour that is genuinely not on screen. Full rationale on the
+// matching constant in cef_shell_smoke.cpp; `webui-theme-contract` keeps the two in lockstep.
+constexpr const char* kSmokeThemeId = "builtin.dark";
 
 // The composed-surface scan cef_shell_smoke.cpp documents: the wait loop polls for EXACTLY the
 // property the "did the UI paint?" assertion checks, so it can neither break one poll too early (the
@@ -308,8 +319,15 @@ SessionOutcome run_session(const std::filesystem::path& project,
     shell::KeybindingsBridge keybindings_bridge;
     keybindings_bridge.bind_path(std::filesystem::path{});
 
+    // e06b: editor-core's boot calls `themes.get`; install the surface so that call is served (an
+    // empty list on the empty directory) rather than refused. Empty directory -> deterministic, so a
+    // CI host's own ~/.context/themes/ can never change what this smoke renders.
+    shell::ThemesBridge themes_bridge;
+    themes_bridge.bind_directory(std::filesystem::path{});
+
     if (!handshake.install(bridge) || !panel_host.install(bridge) ||
-        !editor_state_bridge.install(bridge) || !keybindings_bridge.install(bridge))
+        !editor_state_bridge.install(bridge) || !keybindings_bridge.install(bridge) ||
+        !themes_bridge.install(bridge))
     {
         std::fprintf(stderr, "[%s] FAIL: a bridge surface refused to install\n", cfg.label);
         return out;
@@ -325,13 +343,15 @@ SessionOutcome run_session(const std::filesystem::path& project,
     cef_options.native_window = nullptr; // windowless: no native window on a Session-0 runner
     cef_options.logical_size = size;
     cef_options.dpi = shell::DpiScale{};
-    // THE app scheme (04 §1). The arranging session carries the smoke-arrange flag so its FIRST
-    // arrangement is a real, non-default one; the restoring session boots the plain entry URL and
-    // restores whatever is on disk.
-    std::string url = shell::kAppEntryUrl;
+    // THE app scheme (04 §1). BOTH phases pin the theme (see kSmokeThemeId) so the per-pixel
+    // background coverage this drill asserts is a property of the restart, not of the host's
+    // colour-scheme preference. The arranging session ALSO carries the smoke-arrange flag so its
+    // FIRST arrangement is a real, non-default one; the restoring session restores what is on disk.
+    std::string url =
+        std::string(shell::kAppEntryUrl) + "?" + shell::kThemePinFlag + "=" + kSmokeThemeId;
     if (cfg.arrange)
     {
-        url += "?ctx-smoke-arrange=1";
+        url += "&ctx-smoke-arrange=1";
     }
     cef_options.url = url;
     cef_options.app_asset_root = asset_root;
