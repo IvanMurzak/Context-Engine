@@ -105,6 +105,17 @@ struct CefShellOptions
                                                                   std::string& error);
 
 // Shut CEF down. Call ONCE, after every browser host has been closed. Idempotent.
+//
+// LIFETIME INVARIANT — `shutdown()` must run BEFORE the `bridge` router (and everything its
+// handlers capture: the PanelHost, the panel models, the editor-state bridge, the window manager)
+// is destroyed. Closing the browser host is NOT enough: CEF keeps browser/frame state alive past
+// `CloseBrowser` and finishes tearing it down INSIDE `CefShutdown()`, still dispatching frame work
+// to the client — whose message-router handler holds the non-owning `CefShellOptions::bridge`
+// pointer above. Destroying the router first therefore leaves that pointer dangling across
+// `CefShutdown()`, which on the Session-0 Windows CI runner faults with an ACCESS_VIOLATION inside
+// CEF's own global teardown (CE #319). `editor_main.cpp` and the single-boot smokes satisfy this by
+// calling `manager.shutdown()` then `shutdown()` while every bridge local is still in scope; a
+// helper that owns a session's bridge surfaces must call `shutdown()` before it returns.
 void shutdown();
 
 } // namespace context::editor::shell::cef
