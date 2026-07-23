@@ -23,8 +23,13 @@ import { configTests } from "./config.test.js";
 import { settingsTests } from "./settings.test.js";
 import { bannerTests } from "./banners.test.js";
 import { uibusTests } from "./uibus.test.js";
+import { sessionTests } from "./session.test.js";
+import { bootTests } from "./boot.test.js";
 
-const result = runTests([
+// AWAITED since M9 e08d: `runTests` is async because the e08d boot cases drive the real, async
+// `bootEditorCore` (see boot.test.ts on why a synchronously-reachable seam would not prove the
+// wiring). Every pre-existing case stays synchronous and is unaffected.
+void runTests([
     ...panelsTests,
     ...editorstateTests,
     ...guardsTests,
@@ -43,8 +48,12 @@ const result = runTests([
     ...settingsTests,
     ...bannerTests,
     ...uibusTests,
-]);
-report(result);
+    ...sessionTests,
+    // LAST, deliberately: the boot cases drive the whole bundle against a mock Shell and leave real
+    // boot state on the shared document (`data-editor-*`, the applied theme's custom properties), so
+    // running them after every other case keeps that out of the others' way.
+    ...bootTests,
+]).then(report);
 
 function report(summary: TestSummary): void {
     const body = JSON.stringify(summary);

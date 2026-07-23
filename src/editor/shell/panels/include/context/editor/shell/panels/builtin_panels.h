@@ -105,6 +105,15 @@ bool apply_scenetree_event(SceneTreeFeed& feed, const std::string& topic,
 // feed itself drops our own echo — see session_feed.h). Both defined in builtin_panels.cpp.
 bool apply_session_event(SessionFeed& feed, const std::string& topic, const contract::Json& payload);
 
+// The READ half of that seam (M9 e08d): the feed's CURRENT L-51 play-state token
+// (`edit`/`playing`/`paused`, byte-identical to `gui::playbar::state_token()`), and how many facts
+// have actually moved it. `editor_main.cpp` relays both to editor-core over `session.state`
+// (session_bridge.h), so the browser side's `when`-contexts see daemon truth instead of a frozen
+// boot baseline. Free functions for the SAME forward-declaration reason as `apply_session_event`
+// above: the caller never sees `SessionFeed`'s complete type.
+[[nodiscard]] std::string session_play_state(const SessionFeed& feed);
+[[nodiscard]] std::size_t session_facts_applied(const SessionFeed& feed);
+
 // Point the Session feed at the daemon link's CURRENT client — `nullptr` to clear it. The feed's
 // pointer is a NON-OWNING view of a client the daemon lifecycle owns and can destroy (a lost daemon
 // tears the link down; exit resets it), so this is the seam the owner calls at EVERY point the

@@ -27,7 +27,7 @@ import {
 } from "../palette.js";
 import { PaletteView } from "../palette_view.js";
 import { RPC_METHOD_NAMES } from "../generated/client-schema.js";
-import { resolveContext, STUB_EDITOR_UI, STUB_SESSION_STATE } from "../when.js";
+import { DaemonSessionState, resolveContext, STUB_EDITOR_UI } from "../when.js";
 import type { WhenContext } from "../when.js";
 
 // --------------------------------------------------------------------------- test doubles
@@ -80,9 +80,12 @@ function fullRegistry(editorRecord?: string[]): CommandRegistry {
 }
 
 /** The resolved baseline context (nothing focused) most cases filter against. */
+// e08d deleted the frozen stub session constant; a freshly constructed `DaemonSessionState` IS the
+// same `edit` boot baseline (see when.ts), so this context is byte-identical to the one these cases
+// used before.
 const STUB_CONTEXT: WhenContext = resolveContext({
     editorUi: STUB_EDITOR_UI,
-    session: STUB_SESSION_STATE,
+    session: new DaemonSessionState(),
 });
 
 function mkCommand(id: string, title: string, over: Partial<Command> = {}): Command {

@@ -155,7 +155,7 @@ Any `--editor-*` flag switches the drive from the edit/query file pair to the se
 reply reports this connection's `clientId`, so a script can apply the same echo-suppression rule the
 SDK does.
 
-## Who consumes it (M9 e08b — the GUI is rewired onto this)
+## Who consumes it (M9 e08b — the GUI is rewired onto this; e08d — editor-core)
 
 The panels no longer own selection or play state; they are subscribers and writers of the state above.
 
@@ -163,13 +163,28 @@ The panels no longer own selection or play state; they are subscribers and write
 |---|---|---|---|
 | Scene tree panel | `editor.select` via `scenetree::SelectionGateway` | `selection-changed` | `src/editor/gui/panels/scenetree/` |
 | Playbar | `editor.play\|pause\|stop\|step` via `playbar::PlayControlGateway` | `play-state` | `src/editor/gui/playbar/` |
-| editor-core `when` contexts | — (read-only) | `play-state` ⚠ *source landed, not yet wired* | `src/editor/webui/core/src/when.ts` (`DaemonSessionState`) |
+| editor-core `when` contexts | — (read-only) | `play-state`, via the Shell's `session.state` relay | `src/editor/webui/core/src/when.ts` (`DaemonSessionState`) + `session.ts` (the feed) + `boot.ts` (`startSession`) |
 
-⚠ The editor-core row is **half-delivered**: `DaemonSessionState` is complete and covered by
-`webui-ts-unit`, but `boot.ts` still resolves its when-context from the `STUB_SESSION_STATE` boot
-baseline, so the browser-side `playState` is frozen at `edit` until that one call site is swapped
-(`boot.ts` was owned by a co-scheduled run when e08b landed). The stub carries the same warning and
-the exact remaining steps. The two C++ rows are fully wired.
+All three rows are wired. The editor-core row was **half-delivered by e08b** — `DaemonSessionState`
+landed complete, but `boot.ts` still resolved its when-context from a frozen `edit` stub, so the
+browser-side `playState` never moved — and **e08d closed it**: `boot.ts` builds the ONE when-context
+provider over a live `DaemonSessionState`, and the stub constant was DELETED rather than left in
+place. `boot.test.ts` fails if that source is reverted to a stub (verified by planting one).
+
+**editor-core reaches this state through the Shell, not the daemon.** It is a pure wire-client of the
+Shell (no daemon socket, no attach token), and the e05c bridge accepts no persistent queries — there
+is no push channel to the renderer at all. So the Shell RELAYS its own `SessionFeed`'s last-known
+state over the privileged bridge method **`session.state`**
+(`src/editor/shell/session_bridge.{h,cpp}`), answering with the daemon's own `play-state` fact shape
+plus `attached` / `generation`; editor-core hands that reply VERBATIM to `applyFact` and re-reads it
+on a cheap generation-compare poll, exactly as `themes.get` / `keybindings.get` are read. Echo
+suppression is not repeated there: it already happened Shell-side, in `SessionFeed`.
+
+⚠ **Known staleness (CE #356).** Play state is published as a FACT and there is no `play-state` GET
+verb, so after a daemon RESTART the Shell's — and therefore editor-core's — last-known state can be
+stale with no honest repair. Resetting to `edit` on re-attach was rejected: a dropped wire to a
+SURVIVING daemon would then falsely assert "no live session". `attached` is relayed so a consumer can
+at least distinguish "no link" from "a daemon in edit"; the real fix is a daemon-side read verb.
 
 Both C++ seams are declared in the boundary-clean panel libraries and implemented ONCE, wire-side, by
 `shell::panels::SessionFeed` (`src/editor/shell/panels/session_feed.{h,cpp}`) — which is also where
@@ -201,6 +216,11 @@ runtime-session adapter that produces play frames lives on in `context_gui_playb
   persistence, and corrupt recovery.
 * `editor-shell-test_session_feed` — the consumer side over a SCRIPTED wire (a real `client::Client`
   on a mock channel): the fact dispatch, echo suppression, and the write seams.
+* `editor-shell-test_session_bridge` — the e08d relay: the wire shape editor-core parses, the honest
+  unbound / throwing-provider degradations, and the binding over a real `BridgeRouter`.
+* `webui-ts-unit` (`core/src/test/session.test.ts` + `boot.test.ts`) — the e08d browser half: the
+  feed's reply -> sink path, and the BOOT WIRING (the live when-context resolves from the daemon's
+  play state; the case fails if that source is reverted to a stub).
 * `editor-session-panels-t2` (`src/tests/integration/`) — the e08b T2 drill: the REAL Shell panel
   composition against a REAL daemon, with the real `context` binary as the second client. Both
   directions and the no-echo-loop property, which no scripted wire can check.
@@ -208,4 +228,6 @@ runtime-session adapter that produces play frames lives on in `context_gui_playb
 ## Not in scope here
 
 The `editor.ui` bus (e08c), writes/undo over the wire (e09), and the **second-window** propagation
-drill (e10 — it needs the multi-window subsystem, which is unbuilt).
+drill (e10 — it needs the multi-window subsystem, which is unbuilt). editor-core's `editor.ui` half of
+the when-context is still the "nothing focused" baseline for the same reason: the bus is local to a
+window, and mirroring it is e10's seam.

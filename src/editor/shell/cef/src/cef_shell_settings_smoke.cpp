@@ -47,6 +47,7 @@
 
 #include "context/editor/shell/app_scheme.h"
 #include "context/editor/shell/banners.h"
+#include "context/editor/shell/session_bridge.h"
 #include "context/editor/shell/cef/cef_shell.h"
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
@@ -304,6 +305,18 @@ int main(int argc, char** argv)
     // reports a live link (so no banner paints and the per-pixel coverage floor is untouched).
     shell::BannerBridge banner_bridge;
     SMOKE_CHECK(banner_bridge.install(bridge), "the banner bridge surface installed");
+
+    // --- the daemon session read surface (e08d) --------------------------------------------------
+    // editor-core's boot reads the daemon's L-51 play state with `session.state` so its
+    // `when`-contexts see daemon truth instead of a frozen `edit` baseline (boot.ts `startSession`).
+    // Same failure mode as every surface above: the router denies unknown methods by DEFAULT, so an
+    // uninstalled session surface is an `unknown_method` REFUSAL and this file's strict
+    // `bridge.refused() == 0` invariant fails — even though boot.ts degrades gracefully to the boot
+    // baseline. Installed UNBOUND on purpose: this smoke has no daemon, so the surface honestly
+    // reports `state:"edit", attached:false` — which is also what makes the boot deterministic here
+    // (no live session can change the play state under the scenario).
+    shell::SessionBridge session_bridge;
+    SMOKE_CHECK(session_bridge.install(bridge), "the session.state bridge surface installed");
 
     // Drive the pump until the browser has hydrated AND the settings-driven change has been PERSISTED
     // by the Shell. The 30s deadline bounds it: a scenario that selected nothing runs the clock out and

@@ -65,15 +65,26 @@ import {
 } from "./theme.js";
 import { WELCOME_MODE_WELCOME, WelcomeClient, mountWelcome } from "./welcome.js";
 import { BannerClient, mountBanners, type BannerData } from "./banners.js";
+import { SessionFeed, describeSessionRead } from "./session.js";
 import {
+    DaemonSessionState,
     resolveContext,
     STUB_EDITOR_UI,
-    STUB_SESSION_STATE,
     type WhenContext,
 } from "./when.js";
 
 /** The element the docking root mounts into. Mirrors `app/index.html`'s `<main id="editor-root">`. */
 export const EDITOR_ROOT_ID = "editor-root";
+
+/**
+ * The attribute the live when-context's session facts are mirrored onto (M9 e08d).
+ *
+ * The same diagnosability discipline `markDocument` gives the boot state and `data-editor-theme` /
+ * `data-editor-config` / `data-editor-keybindings` give their feeds — AND, unlike those, it is a
+ * TEST SURFACE: `boot.test.ts` reads it to prove the live editor's when-context tracks the daemon's
+ * play state, because the resolved context is otherwise reachable only from inside the palette.
+ */
+export const SESSION_ATTRIBUTE = "data-editor-session";
 
 /** The e14d notification strip's host. Mirrors `app/index.html`'s `<div id="editor-banners">`. */
 export const EDITOR_BANNERS_ID = "editor-banners";
@@ -230,12 +241,20 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
             mountBanners(bannerHost, bannerData);
         }
 
+        // --- the when-context sources (e08d, design 05 §4 / §6) -----------------------------------
+        // Built BEFORE the panels because the command layer they bring up filters on it. This is the
+        // ONE construction site of the editor's when-context: the closure returned here is what the
+        // palette is handed, and what the `data-editor-session` report below is computed from — so a
+        // regression that re-froze the session source could not show a live value in the report while
+        // serving a frozen one to the palette.
+        const whenContext = await startSession(bridge);
+
         // --- the app layer (e05d1) ----------------------------------------------------------------
         // The channel is proven; bring up the panels. A failure HERE is reported but does NOT undo
         // `ready`: the bridge genuinely does round-trip, and conflating "the editor has no panels"
         // with "the editor cannot talk to the Shell" would send the next diagnosis in exactly the
         // wrong direction.
-        const panels = await startPanels(bridge, theme, config);
+        const panels = await startPanels(bridge, theme, config, whenContext);
 
         // --- the keymap override feed (e07c) ------------------------------------------------------
         // Load the per-user `~/.context/keybindings.json` override the Shell watches and serves
@@ -293,6 +312,7 @@ async function startPanels(
     bridge: ShellBridge,
     theme: ThemeEngine | undefined,
     config: UserConfigSnapshot,
+    whenContext: () => WhenContext,
 ): Promise<PanelBringUp> {
     if (typeof document === "undefined") {
         return { mounted: 0, unavailable: [], error: "no document to mount into" };
@@ -342,7 +362,7 @@ async function startPanels(
                 // palette over it, and (only under `?ctx-smoke-palette`) drive the T2 command-driven
                 // scenario. Placed AFTER `persistence.attach()` so a palette-driven layout change
                 // publishes over the live editor.state channel — the observable the T2 smoke asserts.
-                startCommandLayer(host, client, theme);
+                startCommandLayer(host, client, theme, whenContext);
                 // e06d settings-smoke seam: only under `?ctx-smoke-settings`, drive a REAL theme
                 // switch through the Settings panel so the live leg can assert the Shell persisted it.
                 runSettingsSmoke(settings.mount());
@@ -364,6 +384,54 @@ async function startPanels(
             error: error instanceof Error ? error.message : String(error),
         };
     }
+}
+
+/**
+ * Bring up the daemon session feed and return THE editor's when-context provider (e08d).
+ *
+ * THIS IS THE FIX FOR THE FROZEN `playState`. Before e08d, `boot.ts` resolved the when-context from
+ * e08b's `STUB_SESSION_STATE` boot baseline, so the live editor's `playState` was `edit` for the
+ * whole session and every `playState == playing` clause was wrong — while `DaemonSessionState`, the
+ * real source, was reachable from the tests only. Here that source is constructed, fed over the
+ * Shell's `session.state` relay (session.ts), and handed to `resolveContext` as the `session` half.
+ *
+ * ONE PROVIDER, ONE SESSION OBJECT. The returned closure is what the palette is given AND what the
+ * `data-editor-session` report is computed from, so the report cannot show a live value while the
+ * palette filters on a frozen one. That is what makes `boot.test.ts`'s assertion a real anti-stub
+ * gate rather than a second, independently-correct code path.
+ *
+ * NEVER FATAL and never throws, like every other boot feed: a Shell that does not serve the relay
+ * (an older build) leaves the sink on its `edit` boot baseline — which is exactly what such a build
+ * can honestly know — and the editor comes up filtering on it. The outcome is mirrored onto
+ * `<html data-editor-session>` so a `--dump-dom` repro and DevTools can read WHY.
+ */
+async function startSession(bridge: ShellBridge): Promise<() => WhenContext> {
+    const session = new DaemonSessionState();
+    // The ONE construction site of the editor's when-context. `editorUi` is still the baseline (the
+    // real bus is e08c's; wiring it across windows is e10's), so ONLY the session half moved here.
+    const whenContext = (): WhenContext =>
+        resolveContext({ editorUi: STUB_EDITOR_UI, session });
+    const report = (detail: string): void => {
+        if (typeof document !== "undefined") {
+            document.documentElement.setAttribute(SESSION_ATTRIBUTE, detail);
+        }
+    };
+    try {
+        const feed = new SessionFeed(bridge, session);
+        const first = await feed.refresh();
+        // Reported from the PROVIDER, not from the read: what a `when` clause would actually see.
+        report(`${describeSessionRead(first)}; when playState "${String(whenContext().playState)}"`);
+        if (first.served) {
+            // Only poll a Shell that answers. An older one refuses identically every tick, and a
+            // refusal per tick for the life of the window is a cost with no possible payoff.
+            feed.start();
+        }
+    } catch (error) {
+        report(
+            `session feed unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        );
+    }
+    return whenContext;
 }
 
 /**
@@ -530,6 +598,7 @@ function startCommandLayer(
     host: PanelHost,
     client: PanelClient,
     theme: ThemeEngine | undefined,
+    whenContext: () => WhenContext,
 ): void {
     if (typeof document === "undefined") {
         return;
@@ -574,10 +643,11 @@ function startCommandLayer(
         const view = new PaletteView({
             host: document.body,
             palette,
-            // The real `editor.ui` bus (05 §5) is a later seam; filter by the stubbed "nothing focused"
-            // context today and swap ONLY this provider when it lands.
-            contextProvider: (): WhenContext =>
-                resolveContext({ editorUi: STUB_EDITOR_UI, session: STUB_SESSION_STATE }),
+            // The when-context the palette filters on. Its SESSION half is live daemon truth since
+            // e08d (`startSession`); its `editor.ui` half is still the "nothing focused" baseline —
+            // the real bus is e08c's, and wiring it is e10's cross-window seam. One provider, built
+            // once in `bootEditorCore`, so there is exactly one place either half can be swapped.
+            contextProvider: whenContext,
         });
         view.mount();
         // Register the palette-open command AFTER the view exists, so its handler can reflect the model

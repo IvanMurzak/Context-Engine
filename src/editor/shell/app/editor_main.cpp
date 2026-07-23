@@ -22,6 +22,7 @@
 #include "context/editor/shell/user_config.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
+#include "context/editor/shell/session_bridge.h"
 #include "context/editor/shell/shell.h"
 #include "context/editor/shell/welcome.h"
 #include "context/editor/shell/window.h"
@@ -489,6 +490,37 @@ int main(int argc, char** argv)
     shell::panels::SceneTreeFeed* tree_feed = builtin.scenetree.get();
     // e08b: the daemon session feed (selection / play). Same forward-declared-pointer discipline.
     shell::panels::SessionFeed* session_feed = builtin.session.get();
+
+    // --- the daemon SESSION read surface for editor-core (e08d, design 05 §4 / §6) ---------------
+    // The Shell subscribes to the `session` topic below and `SessionFeed` holds the resulting L-51
+    // play state. editor-core needs that same fact for its `when`-contexts and has no daemon socket
+    // of its own, so it READS this relay over the privileged bridge — the boot.ts wiring that
+    // replaces e08b's frozen `STUB_SESSION_STATE` boot baseline.
+    //
+    // The provider reads the feed through the non-member seams (this TU only ever sees the
+    // forward-declared `SessionFeed`) and reports `attached` from the lifecycle, so a Shell with no
+    // daemon says "edit, not attached" rather than implying a live session in edit. Installed even
+    // OUTSIDE project mode: the welcome screen boots the same bundle, and an uninstalled method is a
+    // deny-by-default refusal on a channel whose smokes forbid refusals.
+    shell::SessionBridge session_bridge;
+    session_bridge.bind_provider(
+        [session_feed, &lifecycle]() -> shell::SessionStateSnapshot
+        {
+            shell::SessionStateSnapshot snapshot;
+            snapshot.attached = lifecycle.client() != nullptr;
+            if (session_feed != nullptr)
+            {
+                snapshot.play_state = shell::panels::session_play_state(*session_feed);
+                snapshot.generation = static_cast<std::uint64_t>(
+                    shell::panels::session_facts_applied(*session_feed));
+            }
+            return snapshot;
+        });
+    if (!session_bridge.install(bridge))
+    {
+        std::fprintf(stderr, "context_editor: could not install the session bridge surface\n");
+        return 1;
+    }
 
     lifecycle.set_subscription_topics({shell::panels::kDiagnosticsTopic,
                                        shell::panels::kDerivationTopic,

@@ -454,6 +454,9 @@ PANEL_BUNDLE = (
     'var CONFIG_GET_METHOD = "config.get";\n'
     'var CONFIG_SET_METHOD = "config.set";\n'
     'var CONFIG_THEME_KEY = "theme";\n'
+    # e08d session-relay vocabulary (session.ts + when.ts).
+    'var SESSION_STATE_METHOD = "session.state";\n'
+    'var PLAY_STATE_EVENT = "play-state";\n'
 )
 
 # MIRRORS THE REAL HEADER'S SHAPE. The real `panel_host.h` declares the enum and the token
@@ -520,6 +523,16 @@ PANEL_CPP_CONFIG = (
     'inline constexpr const char* kConfigThemeKey = "theme";\n'
 )
 
+# The e08d session relay's method + fact discriminator live in session_bridge.h, same
+# plain-constant way. BOTH are pinned because they fail DIFFERENTLY and both failures are
+# silent: a renamed METHOD means editor-core calls something the Shell no longer routes, a
+# renamed EVENT means it receives a reply `applyFact` no longer recognises — and either one
+# reproduces the frozen `playState` e08d fixed.
+PANEL_CPP_SESSION = (
+    'inline constexpr const char* kSessionStateMethod = "session.state";\n'
+    'inline constexpr const char* kSessionPlayStateEvent = "play-state";\n'
+)
+
 PANEL_DOCUMENT = (
     "<!DOCTYPE html>\n"
     '<html lang="en">\n'
@@ -540,6 +553,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
                    keybindings: str = PANEL_CPP_KEYBINDINGS,
                    themes: str = PANEL_CPP_THEMES,
                    config: str = PANEL_CPP_CONFIG,
+                   session: str = PANEL_CPP_SESSION,
                    package: dict | None = None,
                    stage_dockview: bool = True) -> tuple[Path, Path, Path, Path, Path]:
     asset_dir = tmp_path / "app"
@@ -557,6 +571,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
     (include_dir / "keybindings_bridge.h").write_text(keybindings, encoding="utf-8")
     (include_dir / "themes_bridge.h").write_text(themes, encoding="utf-8")
     (include_dir / "user_config.h").write_text(config, encoding="utf-8")
+    (include_dir / "session_bridge.h").write_text(session, encoding="utf-8")
 
     contract_dir = tmp_path / "contractinclude"
     contract_dir.mkdir(parents=True, exist_ok=True)
@@ -666,6 +681,33 @@ def test_a_renamed_themes_cpp_constant_is_a_config_error(tmp_path: Path) -> None
     renamed = PANEL_CPP_THEMES.replace("kThemesGetMethod", "kThemesFetchMethod")
     with pytest.raises(check_webui_assets.CheckError):
         _run_panel(tmp_path, themes=renamed)
+
+@pytest.mark.parametrize("ts_name", ["SESSION_STATE_METHOD", "PLAY_STATE_EVENT"])
+def test_session_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> None:
+    """The e08d session relay: a drift here re-freezes editor-core's `playState` at its baseline.
+
+    Worth its own case per member because the two drift INDEPENDENTLY and neither is visible at
+    runtime: a renamed METHOD is a refusal boot.ts degrades over, a renamed EVENT is a reply
+    `DaemonSessionState.applyFact` silently ignores. Both leave the editor up, nothing erroring, and
+    every `playState == playing` clause wrong — the exact state e08b shipped and e08d removed.
+    """
+    drifted = re.sub(rf'({ts_name} = ")[^"]*(")', r"\1drifted\2", PANEL_BUNDLE)
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+@pytest.mark.parametrize("ts_name", ["SESSION_STATE_METHOD", "PLAY_STATE_EVENT"])
+def test_bundle_missing_a_session_constant_fails(tmp_path: Path, ts_name: str) -> None:
+    """An ABSENT session constant means editor-core is not on the relay the Shell serves at all."""
+    stripped = "\n".join(line for line in PANEL_BUNDLE.splitlines() if ts_name not in line)
+    assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+def test_a_renamed_session_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
+    """Rot-into-a-no-op guard: rename the C++ constant and the gate can verify NOTHING -> exit 2."""
+    renamed = PANEL_CPP_SESSION.replace("kSessionStateMethod", "kSessionFetchMethod")
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, session=renamed)
 
 
 @pytest.mark.parametrize(

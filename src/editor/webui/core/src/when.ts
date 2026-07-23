@@ -10,11 +10,13 @@
 //      SCOPE, and the four scopes RESOLVE in a fixed precedence — text-input > focused panel > window
 //      > global (03 §6) — so a more-specific scope shadows a less-specific one.
 //
-//      M9 e08b LANDED THE REAL `playState` SOURCE. `DaemonSessionState` below consumes the daemon's
-//      `session` topic facts (e08a — docs/editor-session-state.md) and carries the DAEMON'S OWN
-//      L-51 tokens, byte-identical to `gui::playbar::state_token()`. The evaluation semantics did not
-//      change; only the source did, exactly as the seam was built for. `editor.ui` is still behind
-//      `EditorUiSource` — the real bus is e08c, and it will swap that source the same way.
+//      M9 e08b LANDED THE REAL `playState` SOURCE and M9 e08d WIRED IT. `DaemonSessionState` below
+//      consumes the daemon's `session` topic facts (e08a — docs/editor-session-state.md) and carries
+//      the DAEMON'S OWN L-51 tokens, byte-identical to `gui::playbar::state_token()`; since e08d it
+//      is what `boot.ts` resolves the live editor's when-context from, fed over the Shell's
+//      `session.state` relay (session.ts). The evaluation semantics did not change; only the source
+//      did, exactly as the seam was built for. `editor.ui` is still behind `EditorUiSource` — the
+//      real bus is e08c, and it will swap that source the same way.
 //
 //   2. A TOTAL, FAIL-CLOSED EXPRESSION EVALUATOR. `evaluateWhen` never throws: an empty clause is
 //      "always active", and a MALFORMED clause is INACTIVE (false) rather than an exception deep in a
@@ -91,13 +93,25 @@ export interface EditorUiSource {
 /**
  * The daemon session-state facts (05 §4, D7).
  *
- * The interface the four scope layers read `playState` from. `DaemonSessionState` below is the real
- * implementation (M9 e08b); `STUB_SESSION_STATE` remains as the frozen boot baseline for a caller
- * that has no daemon subscription yet.
+ * The interface the four scope layers read `playState` from. `DaemonSessionState` below is the ONE
+ * implementation (M9 e08b) and, since e08d, the one the live editor actually resolves from — there
+ * is deliberately no stub constant beside it any more (see `PLAY_STATE_EVENT`).
  */
 export interface SessionStateSource {
     readonly playState: PlayState;
 }
+
+/**
+ * The daemon's `play-state` fact discriminator (docs/editor-session-state.md).
+ *
+ * Exported rather than inlined into `applyFact` because the Shell's relay names the SAME token
+ * (`session_bridge.h` `kSessionPlayStateEvent`) and the `webui-panel-contract` gate cross-checks the
+ * two out of the built bundle. A drift makes every reply silently unrecognised — which presents
+ * EXACTLY like the frozen boot baseline e08d removed, so it is mechanised rather than trusted.
+ *
+ * Declared HERE, not in session.ts, so this module keeps its zero-IMPORT surface (see `isRecord`).
+ */
+export const PLAY_STATE_EVENT = "play-state";
 
 /** The two sources the six contexts are evaluated from. */
 export interface WhenContextSources {
@@ -115,37 +129,23 @@ export const STUB_EDITOR_UI: EditorUiSource = {
 };
 
 /**
- * The BOOT baseline: `edit`, no live session.
+ * THE SESSION-STATE SOURCE (M9 e08b, wired by e08d): the daemon's `session` topic, projected onto
+ * the one fact the when-context model reads.
  *
- * Not a fiction — it is what the daemon itself holds at boot, because play state is deliberately not
- * persisted across a restart (docs/editor-session-state.md: "restoring `playing` would be a lie about
- * L-51 provenance"). A caller with no session subscription reads this and is correct until the first
- * fact arrives; `DaemonSessionState` is what makes it stay correct after that.
+ * ITS BOOT BASELINE IS `edit`, AND THAT IS NOT A FICTION — it is what the daemon itself holds at
+ * boot, because play state is deliberately not persisted across a restart
+ * (docs/editor-session-state.md: "restoring `playing` would be a lie about L-51 provenance"). A
+ * freshly constructed instance is therefore CORRECT until the first fact arrives; what e08d added is
+ * the feed that makes it stay correct afterwards. There is no separate stub constant: e08b left one
+ * (`STUB_SESSION_STATE`) as the boot baseline for a caller with no subscription, `boot.ts` resolved
+ * the LIVE editor's when-context from it, and the result was a `playState` frozen at `edit` for the
+ * whole session — so e08d deleted it rather than leaving a placeholder that already proved it can
+ * become permanent.
  *
- * ⚠ **UNFINISHED WIRING — the e08b Definition-of-Done line 3 is NOT fully delivered.** `boot.ts`
- * still resolves its when-context from THIS constant, so editor-core's `playState` is frozen at
- * `edit` for the whole session: a command guarded by `playState == playing` never becomes active,
- * and `DaemonSessionState` below — the real source, complete and covered by `when.test.ts` — is
- * reachable from the tests ONLY. e08b could not land the wiring because `boot.ts` was owned by a
- * co-scheduled sibling run (CE PR #351) under the file-scope rule, NOT because anything here is
- * missing. THE REMAINING WORK IS ONE EDIT IN `boot.ts`: construct a `DaemonSessionState`, set its
- * `clientId` from the attach reply, feed every `session`-topic payload to `applyFact`, call `reset()`
- * on reconnect, and pass it as `session` to `resolveContext` in place of this constant. Delete this
- * warning — and consider deleting the constant, whose only remaining honest caller is a test — in
- * the same change.
- */
-export const STUB_SESSION_STATE: SessionStateSource = {
-    playState: "edit",
-};
-
-/**
- * THE REAL SESSION-STATE SOURCE (M9 e08b): the daemon's `session` topic, projected onto the one fact
- * the when-context model reads.
- *
- * It is a SINK, not a poller: the boot sequence subscribes to `session` and hands every payload to
- * `applyFact`, exactly as the native Shell's `SessionFeed` does for the C++ panels. Two properties
- * are carried over from that C++ side deliberately, because they are the contract and not an
- * implementation detail:
+ * It is a SINK, not a poller: something else hands it every payload (`session.ts`'s `SessionFeed`
+ * over the Shell relay), exactly as the native Shell's `SessionFeed` does for the C++ panels. Two
+ * properties are carried over from that C++ side deliberately, because they are the contract and not
+ * an implementation detail:
  *
  *   * **`origin` echo suppression.** The daemon fans every fact out to every subscriber with no
  *     per-client filtering; a consumer APPLIES a fact whose `origin` differs from its own client id
@@ -192,7 +192,7 @@ export class DaemonSessionState implements SessionStateSource {
             this.#echoesDropped += 1;
             return false;
         }
-        if (payload["event"] !== "play-state") {
+        if (payload["event"] !== PLAY_STATE_EVENT) {
             return false;
         }
         const state = toPlayState(payload["state"]);
