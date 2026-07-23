@@ -208,6 +208,9 @@ interpolation) · `query-language.md` (the one query grammar) · `deprecation-po
 `client-sdk.md` (the `context_client` SDK, the subscription consumer, and the D10 boundary gate) ·
 `editor-session-state.md` (the M9 e08a daemon session state: the `editor` verbs, the `session` topic
 facts, the `origin` echo-suppression contract, and `.editor/session.json`) ·
+`editor-ui-bus.md` (the M9 e08c `editor.ui` local bus — D7's chrome tier: the daemon-shaped envelope,
+the closed built-in topic set + package topic namespacing, the two checks that PROVE chrome never
+reaches the daemon, and the cross-window mirror SEAM whose drill is e10's) ·
 `present-path.md` (surface/swapchain, OSR import + composite, the CPU present fallback, and the
 headless-invariant gate) · `shell.md` (the native Shell: windows, the single-threaded owner loop, the
 per-window compositor + `PET_POPUP`, input arbitration, DPI, the D10 shell boundary, and the deferred
