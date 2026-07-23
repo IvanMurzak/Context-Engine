@@ -6,6 +6,11 @@
 //   2. bind its headless factory in gui/a11y/registry.cpp + link its library into context_gui_a11y,
 //   3. append its line to gui/a11y/coverage.manifest.jsonl,
 //   4. append its PanelHelp entry to help::panel_topics() (gui/help/src/help_model.cpp).
+// ⚠ A `ContentType::local` panel (M9 e06d — editor-core renders it from the kit; there IS no C++
+// model) skips anchor 2 BY CONSTRUCTION and pays for it on anchor 3: its coverage.manifest.jsonl line
+// MUST declare `ts-a11y`, which is what routes its a11y gate to the `webui-ts-*` browser tier over the
+// real DOM. gui-a11y-coverage enforces exactly that split — a local panel with a C++ factory, or
+// without the `ts-a11y` marker, is a red build. Anchors 1 and 4 are unchanged for it.
 // Anchors 1-3 are guarded by gui-a11y-coverage; anchor 4 by gui-help-contextual (and the
 // m85-exit-4c-contextual-help milestone gate) — a DIFFERENT ctest, which is why a roster addition that
 // skips the help topic passes the a11y guard and still reds the build. Both fail on the default 3-OS
@@ -49,6 +54,20 @@ Contribution builtin_panel(std::string id, std::string title, std::string icon, 
     // them here would create a second source of truth free to drift. The manifest `commands` array
     // exists for iframe contributions, which have no C++ model to read them from (04 §3/§5).
     // contract_version + sandbox keep their defaults (kContractMajor + least privilege).
+    return c;
+}
+
+// One built-in panel whose model lives in the RENDERER (ContentType::local, M9 e06d) rather than in a
+// C++ uitree model. Identical manifest in every other respect — the only difference is who produces
+// the content, which is exactly what `content.type` is for. See extension.h's `ContentType::local`
+// for when this is the right answer and when it is not.
+Contribution builtin_local_panel(std::string id, std::string title, std::string icon, DockZone zone,
+                                 bool singleton, int min_width, int min_height,
+                                 std::vector<std::string> capabilities)
+{
+    Contribution c = builtin_panel(std::move(id), std::move(title), std::move(icon), zone, singleton,
+                                   min_width, min_height, std::move(capabilities));
+    c.content.type = ContentType::local;
     return c;
 }
 
@@ -105,6 +124,14 @@ std::vector<Contribution> build_roster()
     roster.push_back(builtin_panel("builtin.session.undo", "Session History", "history",
                                    DockZone::bottom, true, 240, 120,
                                    Caps{kCapabilityReadQuery, kCapabilityFileWrite}));
+
+    // M9 e06d — the Settings panel (06 §4 / C-F14): theme picker, keymap-file shortcut, update info.
+    // The ONE `local` panel: its subject is the RENDERER's own state (the active theme = the CSS
+    // custom properties on the editor-core document), so editor-core renders it from the e06c kit and
+    // there is no C++ model to bind. `read_query` only — it changes NOTHING in the project; the user
+    // config it does change is written by the Shell through `config.set`, never by this panel.
+    roster.push_back(builtin_local_panel("builtin.settings", "Settings", "settings", DockZone::right,
+                                         true, 280, 200, Caps{kCapabilityReadQuery}));
 
     return roster;
 }

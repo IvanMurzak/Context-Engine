@@ -60,6 +60,24 @@ enum class ContentType
     uitree,
     // A third-party web panel loaded into a sandboxed iframe (04 §5). `entry` MUST name its URL.
     iframe,
+    // A panel editor-core renders ITSELF, from the e06c component kit (M9 e06d). `entry` MUST be
+    // empty — like `uitree`, the model IS the content; unlike `uitree`, that model lives in the
+    // RENDERER, not in C++.
+    //
+    // WHY A THIRD TOKEN EXISTS, stated so it is not reached for casually. The 04 §4 rule stands: a
+    // panel whose subject is PROJECT state is a C++ uitree model (headless-instantiable, one logic
+    // implementation serving both CI and the live editor). This token is for the strictly narrower
+    // case where the panel's subject IS THE RENDERER'S OWN STATE and has no C++ representation at
+    // all — the Settings panel's theme picker writes CSS custom properties on the editor-core
+    // document (06 §1), so a C++ model of it could only be a second, lagging copy of state it
+    // cannot observe. The test is "could a headless C++ model answer this panel's questions?"; when
+    // it can, `uitree` is the answer.
+    //
+    // A `local` panel is NOT exempt from the register-with-the-panel discipline — it is covered on
+    // the OTHER side of the wire: `gui-a11y-coverage` requires its coverage.manifest.jsonl line to
+    // declare `ts-a11y`, and its a11y is asserted in the `webui-ts-*` browser tier over the REAL
+    // DOM it renders, which is strictly closer to what a user meets than a scan of a C++ model.
+    local,
 };
 
 // Docking defaults for a panel contribution (04 §3 `dock`).

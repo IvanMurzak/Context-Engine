@@ -28,6 +28,13 @@
 
 import { BridgeError, ShellBridge, isRecord } from "./bridge.js";
 import {
+    ConfigClient,
+    EMPTY_CONFIG_SNAPSHOT,
+    configuredThemeId,
+    startupThemeId,
+    type UserConfigSnapshot,
+} from "./config.js";
+import {
     buildCommandRegistry,
     type CommandOutcome,
     type CommandRegistry,
@@ -39,14 +46,20 @@ import { Keymap, KeybindingsClient } from "./keymap.js";
 import { Palette, PALETTE_TOGGLE_COMMAND_ID, paletteCommands } from "./palette.js";
 import { PaletteView } from "./palette_view.js";
 import { PanelClient } from "./panels.js";
-import { PanelHost } from "./panelhost.js";
+import { PanelHost, type LocalPanelFactory } from "./panelhost.js";
+import {
+    SETTINGS_PANEL_ID,
+    mountSettings,
+    type SettingsPanelMount,
+    type ThemeChoice,
+} from "./settings.js";
 import {
     REDUCED_MOTION_QUERY,
     ThemeController,
     ThemeEngine,
     ThemesClient,
-    bootThemeId,
     defaultMediaQueryProbe,
+    defaultThemeId,
     parsePinnedThemeId,
     type ThemeRoot,
 } from "./theme.js";
@@ -146,7 +159,12 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // that does not serve it refuses instantly — so loading them here too, rather than after the
         // panels, costs nothing and means a user's own theme is on screen for the first frame as
         // well. Both halves are best-effort: neither can keep the editor from booting.
-        const theme = startTheme();
+        // The PERSISTED choice is read FIRST, because it decides which theme the first painted frame
+        // carries (06 §4 / C-F22). Best-effort like every other feed: a Shell that does not serve
+        // `config.get` yields the empty snapshot and the editor falls back to `prefers-color-scheme`,
+        // which is exactly the first-run behaviour.
+        const config = await loadUserConfig(bridge);
+        const theme = startTheme(config);
         if (theme !== undefined) {
             await startThemeFeed(bridge, theme);
         }
@@ -183,7 +201,7 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // `ready`: the bridge genuinely does round-trip, and conflating "the editor has no panels"
         // with "the editor cannot talk to the Shell" would send the next diagnosis in exactly the
         // wrong direction.
-        const panels = await startPanels(bridge, theme);
+        const panels = await startPanels(bridge, theme, config);
 
         // --- the keymap override feed (e07c) ------------------------------------------------------
         // Load the per-user `~/.context/keybindings.json` override the Shell watches and serves
@@ -240,6 +258,7 @@ interface PanelBringUp {
 async function startPanels(
     bridge: ShellBridge,
     theme: ThemeEngine | undefined,
+    config: UserConfigSnapshot,
 ): Promise<PanelBringUp> {
     if (typeof document === "undefined") {
         return { mounted: 0, unavailable: [], error: "no document to mount into" };
@@ -252,7 +271,11 @@ async function startPanels(
     }
     try {
         const client = new PanelClient(bridge);
-        const host = new PanelHost({ container, client });
+        // The Settings panel is editor-core's own content (e06d): the roster declares it
+        // `content.type: "local"` and THIS is the build that knows how to draw it. Nothing else about
+        // PanelHost changes — an unregistered local panel is reported unavailable like any other.
+        const settings = makeSettingsPanel(bridge, theme, config);
+        const host = new PanelHost({ container, client, localPanels: settings.factories });
         const report = await host.start();
 
         // --- layout persistence + region maps (e05d2) --------------------------------------------
@@ -286,6 +309,9 @@ async function startPanels(
                 // scenario. Placed AFTER `persistence.attach()` so a palette-driven layout change
                 // publishes over the live editor.state channel — the observable the T2 smoke asserts.
                 startCommandLayer(host, client, theme);
+                // e06d settings-smoke seam: only under `?ctx-smoke-settings`, drive a REAL theme
+                // switch through the Settings panel so the live leg can assert the Shell persisted it.
+                runSettingsSmoke(settings.mount());
                 // e05d4 restart-smoke seam: only when the boot URL carries `?ctx-smoke-arrange`,
                 // perform ONE deterministic docking change so the arrangement that gets persisted
                 // differs from the fresh-boot default — which is what makes the restart proof
@@ -351,7 +377,7 @@ async function startKeybindings(bridge: ShellBridge): Promise<void> {
  * user turning the OS setting on mid-session gets the static fallback WITHOUT a restart — the same
  * "unconditionally honoured" rule applied over time, not just at boot.
  */
-function startTheme(): ThemeEngine | undefined {
+function startTheme(config: UserConfigSnapshot): ThemeEngine | undefined {
     if (typeof document === "undefined") {
         return undefined;
     }
@@ -366,7 +392,22 @@ function startTheme(): ThemeEngine | undefined {
         // background assertion independent of whether the HOST prefers dark — see THEME_PIN_FLAG.
         const search = typeof location === "undefined" ? "" : location.search;
         const pin = parsePinnedThemeId(search);
-        const themeId = bootThemeId(search, probe, (id) => engine.registry.has(id));
+        // e06d: the PERSISTED choice now sits between the pin and the `prefers-color-scheme` default
+        // (config.ts `startupThemeId` is the single expression of that order). A persisted id the
+        // registry cannot resolve — a user theme whose file was deleted — falls back rather than
+        // leaving the window unstyled.
+        const persisted = configuredThemeId(config);
+        const themeId = startupThemeId(persisted, search, probe, (id: string) =>
+            engine.registry.has(id),
+        );
+        // Reported so a boot that came up in the "wrong" theme names WHY: a persisted choice, a pin,
+        // or the host preference. Diagnosing that from pixels alone cost e06b two CI rounds.
+        const sourceNote =
+            persisted === ""
+                ? ", first-run (prefers-color-scheme)"
+                : persisted === themeId
+                  ? ", from config"
+                  : `, config "${persisted}" UNRESOLVED`;
         // Reported so a red smoke names WHY it saw the colours it saw: "pinned" means the boot URL
         // chose the theme, its absence means the host's `prefers-color-scheme` did.
         const pinNote = pin === "" ? "" : pin === themeId ? ", pinned" : `, pin "${pin}" UNKNOWN`;
@@ -375,7 +416,7 @@ function startTheme(): ThemeEngine | undefined {
             "data-editor-theme",
             report.applied
                 ? `${report.themeId} (${report.variableCount} tokens, fade ${report.fadeDurationMs}ms` +
-                  `${report.reducedMotion ? ", reduced-motion" : ""}${pinNote})`
+                  `${report.reducedMotion ? ", reduced-motion" : ""}${pinNote}${sourceNote})`
                 : `unavailable: ${report.diagnostic}`,
         );
         watchReducedMotion(engine);
@@ -670,5 +711,135 @@ function applySmokeArrangement(host: PanelHost): void {
     const last = mounted.length > 1 ? mounted[mounted.length - 1] : undefined;
     if (last !== undefined) {
         host.close(last);
+    }
+}
+
+/**
+ * Read the per-user config at boot (e06d) — best-effort, never fatal.
+ *
+ * The document decides the startup theme, so it is fetched BEFORE anything is painted. A Shell that
+ * does not serve `config.get` (an older build, or a smoke's minimal router) yields the empty snapshot,
+ * which is indistinguishable from a genuine first run — the correct degrade, since in both cases
+ * nothing has been remembered. The outcome is mirrored onto `<html data-editor-config>` for the
+ * `--dump-dom` local repro, the same diagnosability discipline `markDocument` gives the boot state.
+ */
+async function loadUserConfig(bridge: ShellBridge): Promise<UserConfigSnapshot> {
+    let snapshot = EMPTY_CONFIG_SNAPSHOT;
+    let detail = "unavailable";
+    try {
+        snapshot = await new ConfigClient(bridge).get();
+        const theme = configuredThemeId(snapshot);
+        detail =
+            `gen ${snapshot.generation}, ${snapshot.writable ? "writable" : "READ-ONLY (no home)"}` +
+            (theme === "" ? ", no theme recorded" : `, theme "${theme}"`);
+    } catch (error) {
+        detail = `config feed unavailable: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    if (typeof document !== "undefined") {
+        document.documentElement.setAttribute("data-editor-config", detail);
+    }
+    return snapshot;
+}
+
+/** The local-panel factories this build registers, plus a handle on the mounted Settings panel. */
+interface SettingsBringUp {
+    readonly factories: ReadonlyMap<string, LocalPanelFactory>;
+    /** The live mount, or undefined until Dockview has materialised the panel. */
+    mount(): SettingsPanelMount | undefined;
+}
+
+/**
+ * Build the `builtin.settings` local-panel factory (e06d) and the wiring that makes it real.
+ *
+ * THE TWO HALVES OF A THEME PICK MEET HERE, and nowhere else: the panel is handed one callback, which
+ * APPLIES the theme through the engine (instant, local, always) and REQUESTS the write through the
+ * config client (durable, remote, allowed to fail). Keeping both out of settings.ts is what lets that
+ * panel be proven in a browser tier with no bridge and no ThemeEngine; keeping the request behind the
+ * typed client is what keeps the write path to one door (config.ts's own gate).
+ */
+function makeSettingsPanel(
+    bridge: ShellBridge,
+    theme: ThemeEngine | undefined,
+    config: UserConfigSnapshot,
+): SettingsBringUp {
+    let mounted: SettingsPanelMount | undefined;
+    const client = new ConfigClient(bridge);
+    const factories = new Map<string, LocalPanelFactory>();
+
+    factories.set(SETTINGS_PANEL_ID, (container: HTMLElement): (() => void) => {
+        const choices: readonly ThemeChoice[] =
+            theme === undefined
+                ? []
+                : theme.registry.list().map((entry) => ({
+                      id: entry.id,
+                      name: entry.name,
+                      source: entry.source,
+                      highContrast: entry.highContrast,
+                  }));
+        const mount = mountSettings(container, {
+            themes: choices,
+            activeThemeId: theme?.activeId ?? "",
+            keybindingsPath: config.keybindingsPath,
+            writable: config.writable,
+            systemThemeId: (): string => (theme === undefined ? "" : defaultThemeId(theme.probe)),
+            onSelectTheme: (themeId: string): void => {
+                // APPLY first: the switch is what the user asked for and must not wait on IO.
+                const report = theme?.apply(themeId);
+                if (report !== undefined && !report.applied) {
+                    mount.reportSave({ stored: false, diagnostic: report.diagnostic });
+                    return;
+                }
+                // Then REQUEST the write. The Shell is the single writer (C-F14); its verdict comes
+                // back to the panel so a failed save is visible rather than implied.
+                void client.setTheme(themeId).then((result) => {
+                    mount.reportSave({ stored: result.stored, diagnostic: result.diagnostic });
+                });
+            },
+        });
+        mounted = mount;
+        return (): void => {
+            mounted = undefined;
+        };
+    });
+
+    return { factories, mount: (): SettingsPanelMount | undefined => mounted };
+}
+
+/**
+ * The M9 e06d T2 settings-smoke seam — a NO-OP unless the boot URL carries `?ctx-smoke-settings`.
+ *
+ * Drives a REAL theme change through the REAL Settings panel: pick the first offered theme that is not
+ * the active one and select it exactly as a user's `<select>` change would. The observable the live
+ * `editor-cef-smoke-shell-settings` leg asserts is on the SHELL side — `UserConfigStore::writes() >= 1`
+ * plus the chosen theme id actually present in the config file on disk — which can only be true if this
+ * panel rendered, its picker was operable, the apply succeeded, and `config.set` round-tripped. A fresh
+ * boot with no interaction writes nothing, so that assertion is not satisfiable by accident.
+ *
+ * Guarded so it is inert in the shipping editor (explicit flag; total; a no-op with fewer than two
+ * themes), and mirrored onto `<html data-editor-settings>` for the `--dump-dom` repro.
+ */
+function runSettingsSmoke(mount: SettingsPanelMount | undefined): void {
+    if (typeof location === "undefined" || !location.search.includes("ctx-smoke-settings")) {
+        return;
+    }
+    let detail = "settings smoke: the Settings panel did not mount";
+    try {
+        if (mount !== undefined) {
+            const options = Array.from(
+                mount.element.querySelectorAll<HTMLOptionElement>("option"),
+            );
+            const target = options.find((option) => option.value !== mount.selectedThemeId);
+            if (target === undefined) {
+                detail = `settings smoke: no alternative theme among ${mount.themeCount}`;
+            } else {
+                mount.selectTheme(target.value);
+                detail = `settings smoke: selected ${mount.selectedThemeId} of ${mount.themeCount}`;
+            }
+        }
+    } catch (error) {
+        detail = `settings smoke error: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    if (typeof document !== "undefined") {
+        document.documentElement.setAttribute("data-editor-settings", detail);
     }
 }

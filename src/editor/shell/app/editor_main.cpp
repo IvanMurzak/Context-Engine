@@ -18,6 +18,7 @@
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/keybindings_bridge.h"
 #include "context/editor/shell/themes_bridge.h"
+#include "context/editor/shell/user_config.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
@@ -425,6 +426,22 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // --- the per-user config surface (e06d, design 06 4 / C-F14) ---------------------------------
+    //
+    // THE SHELL IS THE SINGLE WRITER of `~/.context/config.json`. This store reads + WATCHES it and
+    // serves `config.get`, and it is the ONLY thing in the process that writes it: the Settings panel
+    // REQUESTS a change over `config.set`, the store validates against a closed settable vocabulary and
+    // persists. Boundary-clean like its two siblings above (plain std::filesystem + stream IO), so the
+    // D10 FORBIDDEN list is untouched. An unresolvable home yields a permanently-empty document and
+    // every write refuses honestly - the editor still runs, it just cannot remember a choice.
+    shell::UserConfigStore user_config;
+    user_config.bind_path(shell::user_config_path());
+    if (!user_config.install(bridge))
+    {
+        std::fprintf(stderr, "context_editor: could not install the config bridge surface\n");
+        return 1;
+    }
+
     // --- the LIVE daemon feed + the lifecycle handlers (the Problems read path, e14a) -------------
     //
     // The Shell subscribes as an ordinary client (D10) and forwards what arrives into the panel models;
@@ -627,6 +644,11 @@ int main(int argc, char** argv)
         // generation editor-core re-reads over `themes.get`. That is what makes editing a theme file
         // repaint the live editor with no restart (design 06 §4's "instant feedback").
         (void)themes_bridge.poll();
+        // e06d: the same cheap-stat watch over the per-user config. It matters for MULTI-WINDOW: a
+        // theme picked in one editor window is written by that window's Shell, and this poll is how
+        // THIS window notices, so `config.get` serves the current document rather than the one it read
+        // at boot.
+        (void)user_config.poll();
         if (options.max_frames > 0 && frames >= options.max_frames)
         {
             break;

@@ -154,10 +154,15 @@ std::vector<VerbHelp> all_verb_help()
 
 std::vector<PanelHelp> panel_topics()
 {
-    // One topic per shipped editor panel (id + title match a11y::registered_panels() /
+    // One topic per shipped editor panel (id + title match the built-in ROSTER /
     // coverage.manifest.jsonl). `related_commands` are live registry commands — the
     // gui-help-test_help_model ctest asserts each resolves, and gui-help-contextual asserts this set
-    // == the registered panels.
+    // == the built-in roster.
+    //
+    // ⚠ THE ROSTER, not a11y::registered_panels(), since M9 e06d: a `ContentType::local` panel
+    // (editor-core renders it — Settings) has no C++ factory and so is absent from the scanned set,
+    // but it is every bit as shipped and every bit as in need of contextual help. Keying help off the
+    // scan would have silently exempted exactly the panels a user is most likely to open cold.
     return {
         {"placeholder", "Context Editor",
          "The editor host. Start here — scaffold a runnable project, then inspect the contract.",
@@ -189,6 +194,10 @@ std::vector<PanelHelp> panel_topics()
         {"builtin.session.undo", "Session History",
          "Session undo/redo (Ctrl+Z / Ctrl+Y) over this session's edits; durable history is git.",
          {"context set"}},
+        {"builtin.settings", "Settings",
+         "Per-user editor settings: pick a theme (applied live), find your keybindings file, and see "
+         "update state. Saved to ~/.context/config.json by the Shell.",
+         {"context doctor"}},
     };
 }
 

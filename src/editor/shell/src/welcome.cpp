@@ -3,14 +3,12 @@
 #include "context/editor/shell/welcome.h"
 
 #include "context/common/child_process.h"
-#include "context/editor/shell/keybindings_bridge.h"
 
 #include "json_number_read.h" // the shared range-guarded numeric read (float-cast-overflow UB guard)
 
 #include <cstddef>
 #include <cstdint>
 #include <exception>
-#include <fstream>
 #include <sstream>
 #include <system_error>
 #include <utility>
@@ -81,44 +79,18 @@ LaunchMode resolve_launch_mode(const fs::path& project, bool project_explicit)
 
 // ------------------------------------------------------------------------------- user config
 
-fs::path user_config_path()
-{
-    // Reuse the shell's single home-dir resolver (keybindings_bridge.h) — same platform rule
-    // (`USERPROFILE` on Windows, `HOME` on POSIX), returning nullopt when neither is set.
-    const std::optional<fs::path> home = home_directory();
-    if (!home.has_value())
-        return fs::path();
-    return *home / ".context" / "config.json";
-}
-
 std::vector<RecentProject> read_recent_projects(const fs::path& config_path)
 {
     std::vector<RecentProject> recents;
     if (config_path.empty())
         return recents;
 
-    std::error_code ec;
-    if (!fs::exists(config_path, ec))
-        return recents; // a first-ever launch has no recents — an ordinary state, not a failure
-
-    std::ifstream in(config_path, std::ios::binary);
-    if (!in)
+    // ONE reader for the document (user_config.h): it is total over an absent / oversized / malformed
+    // / non-object file, all of which mean the same thing here — nothing was recorded.
+    const Json doc = read_user_config(config_path);
+    if (!doc.contains(kConfigRecentsKey))
         return recents;
-    std::ostringstream buffer;
-    buffer << in.rdbuf();
-
-    Json doc;
-    try
-    {
-        doc = Json::parse(buffer.str());
-    }
-    catch (const std::exception&)
-    {
-        return recents; // a corrupt config is treated as "no recents", loudly-recoverable at write time
-    }
-    if (!doc.is_object() || !doc.contains("recents"))
-        return recents;
-    const Json& list = doc.at("recents");
+    const Json& list = doc.at(kConfigRecentsKey);
     if (!list.is_array())
         return recents;
 
@@ -187,45 +159,25 @@ bool record_recent_project(const fs::path& config_path, const fs::path& project,
             break;
     }
 
-    Json doc = Json::object();
-    doc.set("version", Json(static_cast<std::int64_t>(1)));
+    // MERGE, never replace (M9 e06d). Re-read the document as it is NOW and update only the recents
+    // member: `theme` — and anything a newer build records — must survive a project being opened. This
+    // used to build a fresh `{version, recents}` object, which is exactly how the theme this task
+    // persists would have been thrown away by the next launch.
+    Json doc = read_user_config(config_path);
+    doc.set(kConfigVersionKey, Json(kConfigVersion));
     Json array = Json::array();
     for (const RecentProject& recent : merged)
         array.push_back(recent_to_json(recent));
-    doc.set("recents", std::move(array));
+    doc.set(kConfigRecentsKey, std::move(array));
 
-    // Create the parent dir, then write atomically (temp + rename) so a crash mid-write never leaves a
-    // half-written config that the next read would treat as corrupt.
-    fs::create_directories(config_path.parent_path(), ec);
-    fs::path temp = config_path;
-    temp += ".tmp";
+    // THE single write primitive (user_config.h): creates the parent dir and publishes through a
+    // UNIQUE temp + rename, so a crash mid-write never leaves a half-written config AND two racing
+    // launches cannot stage through the same `.tmp` (the defect deferred from e14c, fixed there).
+    std::string write_error;
+    if (!write_user_config(config_path, doc, &write_error))
     {
-        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
-        if (!out)
-        {
-            set_error("could not open the temp config for writing");
-            return false;
-        }
-        out << doc.dump(2);
-        if (!out)
-        {
-            set_error("write to the temp config failed");
-            return false;
-        }
-    }
-    fs::rename(temp, config_path, ec);
-    if (ec)
-    {
-        // rename can fail across a pre-existing target on some platforms; remove + retry once.
-        fs::remove(config_path, ec);
-        std::error_code ec2;
-        fs::rename(temp, config_path, ec2);
-        if (ec2)
-        {
-            set_error("could not replace the config file: " + ec2.message());
-            fs::remove(temp, ec);
-            return false;
-        }
+        set_error(std::move(write_error));
+        return false;
     }
     return true;
 }

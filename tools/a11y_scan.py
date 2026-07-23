@@ -140,7 +140,17 @@ def gate(report: dict, manifest: dict[str, dict]) -> dict:
 
     declared = set(manifest.keys())
     scanned = set(report_panels.keys())
-    missing = sorted(declared - scanned)      # declared but never scanned -> coverage gap
+    # A `ts-a11y` panel is a ContentType::local panel (M9 e06d): editor-core RENDERS it from the
+    # component kit, so there is no C++ panel model for the harness to instantiate and it can never
+    # appear in `scanned`. Its a11y gate is the `webui-ts-*` browser tier over the real DOM. Exempting
+    # it here is not a hole: gui-a11y-coverage refuses a local roster entry whose manifest line lacks
+    # this marker, so the marker cannot be sprinkled onto a C++ panel to dodge this scan (that panel
+    # would then be BOTH scanned and exempt, and the `undeclared` direction below still covers it).
+    renderer_covered = {
+        pid for pid, entry in manifest.items()
+        if isinstance(entry.get("requires"), list) and "ts-a11y" in entry["requires"]
+    }
+    missing = sorted(declared - scanned - renderer_covered)  # declared, scannable, never scanned
     undeclared = sorted(scanned - declared)   # scanned but not declared   -> undeclared panel
 
     panel_results: dict[str, dict] = {}
@@ -168,6 +178,9 @@ def gate(report: dict, manifest: dict[str, dict]) -> dict:
         "coverage": {
             "declared": sorted(declared),
             "scanned": sorted(scanned),
+            # Reported, never silently dropped: a reader of this verdict must be able to see WHICH
+            # panels this run did not scan and why, or the exemption becomes invisible over time.
+            "renderer_covered": sorted(renderer_covered),
             "missing": missing,
             "undeclared": undeclared,
         },

@@ -12,6 +12,7 @@
 
 #include "contract_test.h"
 
+#include <algorithm>
 #include <set>
 #include <string>
 #include <vector>
@@ -75,8 +76,12 @@ int main()
             CHECK(!c.id.empty());
             CHECK(!c.title.empty());
             CHECK(c.contract_version == kContractMajor);
-            // Every built-in is a headless uitree panel (its C++ model IS the content).
-            CHECK(c.content.type == ContentType::uitree);
+            // Every built-in is either a headless uitree panel (its C++ model IS the content) or —
+            // since M9 e06d — a `local` panel editor-core renders itself. NEVER an iframe: a built-in
+            // loading third-party content into the trusted zone would be a contradiction in terms,
+            // and that is the assertion this line is really making.
+            CHECK(c.content.type == ContentType::uitree || c.content.type == ContentType::local);
+            // Either way there is nothing to LOAD: the model is the content, wherever it lives.
             CHECK(c.content.entry.empty());
             // D6: every panel declares a state schema version (>= 1) — "state contract on EVERY panel".
             CHECK(c.state.schema_version >= 1);
@@ -108,7 +113,10 @@ int main()
         const std::vector<Contribution>& roster = builtin_contributions();
         CHECK(!roster.empty());
         CHECK(roster.front().id == "placeholder");
-        CHECK(roster.back().id == "builtin.session.undo"); // the A-F2 promotion sits at the tail
+        CHECK(roster.back().id == "builtin.settings"); // M9 e06d appended the one `local` panel
+        // The A-F2 promotion is still on the roster, just no longer at its tail.
+        CHECK(std::any_of(roster.begin(), roster.end(), [](const Contribution& c)
+                          { return c.id == "builtin.session.undo"; }));
     }
 
     // --- manifest v2 accepts a fully-populated iframe contribution --------------------------------

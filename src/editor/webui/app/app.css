@@ -578,3 +578,34 @@ html .dockview-theme-dark {
     opacity: 0.6;
     font-style: italic;
 }
+
+/* --- the Settings panel LAYOUT (M9 e06d) ------------------------------------------------------- *
+ *
+ * LAYOUT ONLY. Every CONTROL inside this panel is a kit component (`components.css` styles them),
+ * so nothing here paints a colour, a border or a radius — these rules place things and nothing more.
+ * That split is deliberate: the moment a panel stylesheet started restyling a kit control, the kit
+ * would stop being the thing that guarantees two panels look alike, and the tokens-only lint that
+ * guards the kit would have no say over the result. */
+.ctx-settings {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ctx-shape-space-md, 12px);
+    height: 100%;
+}
+
+.ctx-settings__section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ctx-shape-space-md, 12px);
+    padding-top: var(--ctx-shape-space-sm, 8px);
+}
+
+/* The chip + save badge sit on one line under the picker: they answer two halves of one question
+ * ("which theme is this, and was it remembered?"), so separating them vertically would read as two
+ * unrelated notices. */
+.ctx-settings__status {
+    display: flex;
+    align-items: center;
+    gap: var(--ctx-shape-space-sm, 8px);
+    flex-wrap: wrap;
+}

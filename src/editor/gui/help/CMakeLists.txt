@@ -60,13 +60,15 @@ target_compile_definitions(context_gui_help_test_getting_started PRIVATE
     CONTEXT_HELP_SAMPLES_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../../..")
 add_test(NAME gui-help-getting-started COMMAND context_gui_help_test_getting_started)
 
-# The contextual cross-check links context_gui_a11y to assert help topics name the SAME panel set the
-# a11y harness scans (registered_panels()) — the register-with-the-panel discipline applied to help.
-# Forward-refs context_gui_a11y (added after help in gui/CMakeLists.txt); cross-directory linking is
-# valid at the repo's CMake >= 3.25 floor.
+# The contextual cross-check links context_gui_contract to assert help topics name the SAME panel set
+# the editor SHIPS (the built-in roster) — the register-with-the-panel discipline applied to help.
+#
+# ⚠ context_gui_contract, NOT context_gui_a11y, since M9 e06d: the scanned set (registered_panels())
+# excludes `ContentType::local` panels by construction, so keying this gate off it would have made
+# help optional for renderer-modelled panels. See tests/test_contextual.cpp's header.
 add_executable(context_gui_help_test_contextual tests/test_contextual.cpp)
 target_link_libraries(context_gui_help_test_contextual
-    PRIVATE context_gui_help context_gui_a11y context_warnings)
+    PRIVATE context_gui_help context_gui_contract context_warnings)
 target_link_options(context_gui_help_test_contextual
     PRIVATE ${_context_gui_help_static_runtime})
 target_include_directories(context_gui_help_test_contextual

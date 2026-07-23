@@ -51,6 +51,7 @@ add_library(context_editor_shell STATIC
     src/panel_host.cpp    # e05d1: the panel-agnostic panel.* surface over the e05b roster (04 §3-§4)
     src/editor_state_bridge.cpp  # e05d2: the editor.state.*/editor.regions.* surface (03 §1 / §6)
     src/keybindings_bridge.cpp   # e07c: the keybindings.get read/watch surface (05 §6 / 03 §6)
+    src/user_config.cpp          # e06d: ~/.context/config.json - the SHELL is its single writer (C-F14)
     src/themes_bridge.cpp        # e06b: the themes.get watched-theme-directory surface (06 §4)
     src/daemon_lifecycle.cpp  # e14a: spawn-or-attach + exit policy + reconnect/read-only (D18)
     src/welcome.cpp       # e14c: the welcome.* surface — recents + folder picker + new-from-template (D13)
@@ -151,6 +152,7 @@ set(_context_shell_tests
     test_editor_state_bridge  # e05d2: layout/panels publish+restore round-trip + region-map emission
     test_keybindings_bridge   # e07c: file read/watch/generation + keybindings.get over the router
     test_themes_bridge        # e06b: directory watch/generation + themes.get over the router
+    test_user_config          # e06d: the single-writer store - merge-preserving RMW, unique temp, config.*
     test_daemon_lifecycle  # e14a: exit-policy decision, client census, reconnect/read-only state
     test_welcome       # e14c: launch-mode rule, recents round-trip, welcome.* bridge + picker/CLI seams
     test_shell)        # the owner loop end to end + the authenticated-attach guard
@@ -301,7 +303,8 @@ if(CONTEXT_BUILD_GUI_CEF AND (OS_WINDOWS OR OS_LINUX))
         context_editor
         context_editor_shell_cef_smoke
         context_editor_shell_restore_smoke
-        context_editor_shell_palette_smoke)
+        context_editor_shell_palette_smoke
+        context_editor_shell_settings_smoke)
     foreach(_consumer IN LISTS _ctx_cef_stage_consumers)
         if(NOT TARGET ${_consumer})
             message(FATAL_ERROR
@@ -329,4 +332,16 @@ endif()
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME editor-shell-cef-staging
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_cef_staging.py"
+            --repo-root "${CMAKE_SOURCE_DIR}/..")
+
+# --- the C-F14 single-writer gate for ~/.context/config.json (M9 e06d) ---------------------------
+# The SAME source-scan tier as the CEF staging lint above, for the same reason: "the Shell is the
+# single writer" is trivially assertable and genuinely hard to prove from behaviour — a runtime test
+# passes just as happily with a second writer present. This scan answers the questions a second writer
+# would have to make false (one C++ writer; no client-side persistence in editor-core; one caller of
+# `config.set`), and it FAILED on the pre-e06d tree, where welcome.cpp had its own writer. Registered
+# in the non-gate `editor-shell-` family, so the build job's general ctest step runs it on all three OS
+# legs with no ci.yml --target bookkeeping; its own pytest lives in tools/tests/ (python-tests job).
+add_test(NAME editor-shell-config-writers
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_config_writers.py"
             --repo-root "${CMAKE_SOURCE_DIR}/..")

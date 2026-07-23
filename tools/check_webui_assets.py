@@ -186,6 +186,17 @@ THEMES_CONSTANTS = (
     ("themes.get", "themes_bridge.h", "kThemesGetMethod", "THEMES_GET_METHOD"),
 )
 
+# The M9 e06d USER-CONFIG surface (design 06 §4 / C-F14), whose method names live in user_config.h.
+# Identical silent-drift hazard, with a sharper edge than its siblings: a rename here does not break
+# anything a user can SEE at the time. The theme still switches — it just never persists, and the loss
+# only shows up on the NEXT launch, by which point nothing connects it to a renamed method. Checked the
+# same way, from the header constants and the built bundle.
+CONFIG_CONSTANTS = (
+    ("config.get", "user_config.h", "kConfigGetMethod", "CONFIG_GET_METHOD"),
+    ("config.set", "user_config.h", "kConfigSetMethod", "CONFIG_SET_METHOD"),
+    ("config theme key", "user_config.h", "kConfigThemeKey", "CONFIG_THEME_KEY"),
+)
+
 # The closed gesture vocabulary (04 §4), compared SET vs SET between the C++ wire tokens and the
 # bundle's own GESTURE_VERBS array, so a verb added on one side without the other — which would be
 # refused at runtime with no build error — fails here instead.
@@ -705,6 +716,22 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
                 f"Shell would route one name and editor-core would call another, so ~/.context/"
                 f"themes/*.theme.json would silently never reach the theme engine with NO error "
                 f"anywhere.")
+
+    # 7a5 — the e06d user-config vocabulary agrees across the two languages. Same mechanism as 7a4,
+    # with a delayed symptom: a drift here leaves the theme switching and never persisting, so the loss
+    # surfaces one launch LATER with nothing connecting it to the rename.
+    for human, cpp_file, cpp_name, ts_name in CONFIG_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(
+                f"{human}: the bundle does not declare {ts_name} — editor-core cannot be reading or "
+                f"requesting the user config the Shell serves, so a theme choice would never persist")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
+                f"Shell would route/accept one name and editor-core would send another, so the chosen "
+                f"theme would apply for the session and silently never reach ~/.context/config.json.")
 
     # 7b — the D6 persisted-blob member names agree (gui/contract/panel_state.h is their authority).
     for human, cpp_name, ts_name in PANEL_STATE_CONSTANTS:

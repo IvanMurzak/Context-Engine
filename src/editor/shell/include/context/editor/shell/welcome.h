@@ -22,6 +22,7 @@
 
 #include "context/editor/contract/json.h"
 #include "context/editor/shell/ipc_bridge.h"
+#include "context/editor/shell/user_config.h" // user_config_path() + the ONE write primitive (e06d)
 
 #include <cstdint>
 #include <filesystem>
@@ -97,11 +98,17 @@ struct WelcomeTemplate
                                              bool project_explicit);
 
 // ------------------------------------------------------------------------ user config (recents)
-
-// `<home>/.context/config.json` — the per-user recents store (07 §4). Resolves the home directory from
-// the platform env (`USERPROFILE` on Windows, `HOME` on POSIX); returns an empty path when neither is
-// set (the caller then has no recents, reported honestly rather than crashing).
-[[nodiscard]] std::filesystem::path user_config_path();
+//
+// The recents list is ONE MEMBER of the per-user config document (`~/.context/config.json`), which
+// since M9 e06d also carries the chosen theme. `user_config.h` owns that document — its path resolver,
+// its reader, and the SINGLE write primitive every writer in this process funnels through (C-F14).
+// Re-exported here (rather than re-declared) so existing callers of `shell::user_config_path()` are
+// unchanged, and so this header cannot grow a second, divergent definition of where the file lives.
+//
+// ⚠ `record_recent_project` below therefore MERGES rather than replaces. Until e06d it wrote a fresh
+// `{version, recents}` document, which silently discarded every other member — opening a project would
+// have thrown away the theme the user had just chosen. Read-modify-write is what makes two independent
+// features share one file safely.
 
 // Read the recents list from a config file. TOTAL over a missing / malformed / partial file: an
 // unreadable or absent config yields an EMPTY list, never an error — a first-ever launch has no recents

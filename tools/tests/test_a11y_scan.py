@@ -139,6 +139,40 @@ def test_gate_coverage_gap_declared_not_scanned():
     assert verdict["coverage"]["missing"] == ["scenetree"]
 
 
+def test_gate_ts_a11y_panel_is_exempt_from_the_cpp_scan():
+    """A ContentType::local panel (M9 e06d) is declared but unscannable — and must not read as a gap.
+
+    editor-core renders it, so no C++ model exists for the harness to instantiate. Its a11y gate is
+    the `webui-ts-*` browser tier; gui-a11y-coverage is what forces that marker onto exactly the local
+    roster entries, so this exemption cannot be claimed by a panel that HAS a C++ model.
+    """
+    report = {"panels": [placeholder_panel_report()]}
+    manifest = {
+        "placeholder": {"id": "placeholder"},
+        "builtin.settings": {"id": "builtin.settings", "requires": ["ts-a11y"]},
+    }
+    verdict = a11y_scan.gate(report, manifest)
+    assert verdict["pass"] is True
+    assert verdict["coverage"]["missing"] == []
+    assert verdict["coverage"]["renderer_covered"] == ["builtin.settings"]
+
+
+def test_gate_declared_without_ts_a11y_marker_is_still_a_gap():
+    """The exemption is keyed on the MARKER, not on absence from the report.
+
+    Without this, `missing` would be unreachable and the coverage half of the gate would be vacuous.
+    """
+    report = {"panels": [placeholder_panel_report()]}
+    manifest = {
+        "placeholder": {"id": "placeholder"},
+        # a genuine C++ panel someone forgot to register — `requires` names the C++ checks
+        "builtin.settings": {"id": "builtin.settings", "requires": ["semantic-scan"]},
+    }
+    verdict = a11y_scan.gate(report, manifest)
+    assert verdict["pass"] is False
+    assert verdict["coverage"]["missing"] == ["builtin.settings"]
+
+
 def test_gate_undeclared_panel_scanned():
     report = {"panels": [placeholder_panel_report(), placeholder_panel_report(id="ghost")]}
     manifest = {"placeholder": {"id": "placeholder"}}
@@ -239,3 +273,13 @@ def test_live_manifest_parses_and_declares_placeholder():
     manifest = a11y_scan.load_manifest(LIVE_MANIFEST)
     assert "placeholder" in manifest
     assert manifest["placeholder"]["title"] == "Context Editor"
+
+
+def test_live_manifest_settings_panel_is_renderer_covered():
+    """The one shipped local panel declares the marker this tool exempts on (M9 e06d).
+
+    Pinned against the LIVE manifest, so dropping the marker (and with it the TS a11y gate) fails here
+    as well as in gui-a11y-coverage — two tools, one fact.
+    """
+    manifest = a11y_scan.load_manifest(LIVE_MANIFEST)
+    assert manifest["builtin.settings"]["requires"] == ["ts-a11y"]
