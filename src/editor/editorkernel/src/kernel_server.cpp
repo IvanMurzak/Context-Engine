@@ -18,6 +18,7 @@
 
 #include "context/editor/bridge/event_stream.h" // e08a: Stability on the loud recovery diagnostic
 
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <deque>
@@ -97,6 +98,13 @@ std::optional<std::uint64_t> parse_ticks(const std::string& raw)
 // it is the idle re-poll cadence. Small so an editor feels live; a handful of connections × this
 // cadence is negligible CPU.
 constexpr int kPollIntervalMs = 5;
+
+// The BOUNDED window serve()'s teardown gives each connection thread to notice stop_, flush what it
+// has already queued (the `shutdown` verb's own reply included) and finish, before the teardown
+// force-unblocks the stragglers. A responsive peer's thread gets there within one kPollIntervalMs, so
+// this is normally consumed in single-digit milliseconds; the cap only bounds a peer that will not
+// read. See the teardown comment in serve() (CE #352) for why draining before unblock() is required.
+constexpr int kShutdownDrainGraceMs = 500;
 
 // One frame queued for a connection's own thread to flush. `is_event` frames count against the
 // per-connection event budget (droppable under backpressure); response frames never drop.
@@ -1002,17 +1010,53 @@ int KernelServer::serve(bridge::TransportServer& server)
         c->thread = std::thread(conn_body, c);
     }
 
-    // --- shutdown: nudge any connection stalled mid-frame, then join every connection's thread. Each
-    // connection's thread notices stop_ within one poll interval on its own; unblock() only covers a
-    // client stalled mid-frame. Snapshot + release the lock first — a thread's teardown needs
-    // dispatch_mu, so joining under it would deadlock.
+    // --- shutdown: let each connection thread FINISH ON ITS OWN first, then nudge only the ones that
+    // could not. Snapshot + release the lock first — a thread's teardown needs dispatch_mu, so joining
+    // under it would deadlock.
+    //
+    // The drain window below is LOAD-BEARING, not politeness (CE #352). `unblock()` half-closes the
+    // socket (POSIX `shutdown(fd, SHUT_RDWR)`; Windows `DisconnectNamedPipe`), which DISCARDS anything
+    // the connection has queued but not yet written — and the `shutdown` verb's own reply is exactly
+    // that: `handle_operational` sets `stop_` while building the reply, `conn_body` enqueues it at the
+    // BOTTOM of its iteration, and writes it via `flush_outbound()` at the TOP of the next one. Force-
+    // unblocking in that window destroys the reply, and the client that asked for the shutdown sees
+    // "peer disconnected before responding" instead of `{ok:true, data:{stopping:true}}`.
+    //
+    // It stayed invisible because the acceptor is normally PARKED in accept() and is only woken by
+    // wake_endpoint(), which the replying thread calls AFTER its flush succeeded. But any connection
+    // arriving in that same instant unparks the acceptor early — the `while (!stop_.load())` condition
+    // then exits the loop immediately and we reach this teardown before the reply is written. Measured
+    // on Linux with a single-variable A/B (one throwaway connect+close immediately before `shutdown`):
+    // 0/40 replies lost without it, 19/40 lost with it.
+    //
+    // Draining is an ORDERING fix, not a widened timeout: a responsive peer's thread reaches its loop
+    // top within one kPollIntervalMs, flushes everything queued, observes stop_ and marks itself
+    // finished — so this returns in milliseconds. The bound exists only for a peer that will not READ
+    // (its thread is stuck inside a blocking write) or is stalled mid-frame; those are precisely the
+    // stragglers unblock() is for, and the daemon must never wait on them indefinitely.
     std::vector<std::shared_ptr<Conn>> remaining;
     {
         std::lock_guard<std::mutex> lk(dispatch_mu);
         remaining = conns;
     }
+    const auto drain_deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(kShutdownDrainGraceMs);
+    for (;;)
+    {
+        bool all_finished = true;
+        for (const std::shared_ptr<Conn>& c : remaining)
+            if (!c->finished.load())
+            {
+                all_finished = false;
+                break;
+            }
+        if (all_finished || std::chrono::steady_clock::now() >= drain_deadline)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     for (const std::shared_ptr<Conn>& c : remaining)
-        c->conn.unblock(); // read-only on the handle -> race-free with the thread's in-flight read
+        if (!c->finished.load())
+            c->conn.unblock(); // read-only on the handle -> race-free with the thread's in-flight read
     for (const std::shared_ptr<Conn>& c : remaining)
         if (c->thread.joinable())
         {
