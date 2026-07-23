@@ -30,6 +30,12 @@
          by name (`KIT_STYLESHEET`), so serving the harness without this line makes that whole file
          fail loudly rather than pass vacuously. Staged from kit/styles/kit.css by ../CMakeLists.txt. -->
     <link rel="stylesheet" href="./kit.css" />
+    <!-- The SHIPPED authored-families stylesheet (M9 e06c2), in the SAME order index.html loads it.
+         `kit_components.test.ts` asserts what the browser COMPUTES for each of the twelve families
+         and finds this sheet by name (`KIT_COMPONENT_STYLESHEET`), so serving the harness without
+         this line makes that whole file fail loudly rather than pass vacuously. Staged from
+         kit/styles/components.css by ../CMakeLists.txt. -->
+    <link rel="stylesheet" href="./components.css" />
   </head>
   <body>
     <script src="./dockview-core.min.js"></script>

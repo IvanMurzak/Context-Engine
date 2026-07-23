@@ -17,6 +17,7 @@ check = load_tool("check_no_raw_key_handlers")
 _CORE_SRC = (
     Path(__file__).resolve().parents[2] / "src" / "editor" / "webui" / "core" / "src"
 )
+_KIT_SRC = Path(__file__).resolve().parents[2] / "src" / "editor" / "webui" / "kit" / "src"
 
 
 def _write(root: Path, name: str, body: str) -> None:
@@ -94,7 +95,37 @@ def test_empty_directory_is_a_config_error(tmp_path: Path) -> None:
     assert check.main(["--sources", str(tmp_path / "empty")]) == 2
 
 
-def test_live_editor_core_sources_are_clean() -> None:
-    """The shipped editor-core tree must pass its own lint (the integration guard)."""
+def test_multiple_source_roots_are_all_scanned(tmp_path: Path) -> None:
+    """The e06c2 widening: a finding in the SECOND root must fail the same single run.
+
+    A gate that took one directory would have reported the editor clean while the component kit's
+    tabs / tree / dialog / tooltip key handling sat one package over, unscanned — so the multi-root
+    behaviour is asserted rather than assumed, from both directions.
+    """
+    first = tmp_path / "core"
+    second = tmp_path / "kit"
+    _write(first, "a.ts", "const ok = true;\n")
+    _write(second, "b.ts", 'el.addEventListener("keydown", h);\n')
+    assert check.main(["--sources", str(first), str(second)]) == 1
+    # ...and the clean pair still passes, so the failure above is the handler and not the widening.
+    _write(second, "b.ts", "// key-handler-ok: ARIA tablist roving navigation\n"
+                           'el.addEventListener("keydown", h);\n')
+    assert check.main(["--sources", str(first), str(second)]) == 0
+
+
+def test_one_missing_root_among_several_is_a_config_error(tmp_path: Path) -> None:
+    """A typo'd second root must not silently degrade the gate to scanning only the first."""
+    first = tmp_path / "core"
+    _write(first, "a.ts", "const ok = true;\n")
+    assert check.main(["--sources", str(first), str(tmp_path / "nope")]) == 2
+
+
+def test_live_web_layer_sources_are_clean() -> None:
+    """The shipped web-layer tree must pass its own lint (the integration guard).
+
+    BOTH roots since e06c2 — editor-core AND the component kit, which is where a real share of the
+    editor's keyboard surface now lives.
+    """
     assert _CORE_SRC.is_dir(), f"editor-core sources not found at {_CORE_SRC}"
-    assert check.main(["--sources", str(_CORE_SRC)]) == 0
+    assert _KIT_SRC.is_dir(), f"component kit sources not found at {_KIT_SRC}"
+    assert check.main(["--sources", str(_CORE_SRC), str(_KIT_SRC)]) == 0

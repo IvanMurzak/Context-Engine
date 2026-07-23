@@ -41,6 +41,17 @@
          LAST of the three, so a kit rule outranks an app-level rule at equal specificity — the kit
          is the authority on how a widget looks. -->
     <link rel="stylesheet" href="./kit.css">
+    <!-- The component kit's AUTHORED FAMILIES (M9 e06c2, design 06 §3): buttons, fields, tabs, trees,
+         tables, chips, badges, toasts, empty-states, skeletons, dialogs, tooltips — the reusable
+         components editor chrome and builtin panels build with, and the surface package authors get.
+         A second <link> rather than an @import, for the same two reasons kit.css is one: an @import
+         is a serialised extra round trip, and the ownership stays legible in the document.
+
+         LAST, but nothing here may DEPEND on that. Where an authored family overrides a widget rule
+         it does so with a compound selector (`.ctx-widget-status.ctx-badge`), never by arriving
+         second — the e06c1 rule that appearance must not be decided by document order, which CMake
+         staging and a vendored engine's runtime injection would otherwise settle invisibly. -->
+    <link rel="stylesheet" href="./components.css">
 </head>
 <body>
     <!-- The docking root PanelHost mounts into (e05d1). Empty in the MARKUP on purpose: the panel

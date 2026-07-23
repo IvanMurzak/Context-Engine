@@ -16,8 +16,11 @@ dependency), *not* an install manifest — nothing reads it to resolve packages.
 | Path | What it is |
 |---|---|
 | `tokens/` | `@context-engine/editor-tokens` — the theme DATA layer (e06a): schema, validator, built-ins |
-| `kit/` | `@context-engine/editor-kit` — the component KIT (e06c1): the 12-role hydration widget layer, tokens-only. See [`kit/README.md`](kit/README.md) |
+| `kit/` | `@context-engine/editor-kit` — the component KIT: the 12-role hydration widget layer (e06c1) + the twelve authored families of design 06 §3 (e06c2), tokens-only. See [`kit/README.md`](kit/README.md) |
+| `kit/src/widgets.ts` | The closed `WIDGET_CLASSES` role map (moved out of the barrel by e06c2 so the families that import it do not form an import cycle) |
+| `kit/src/index.ts` | The kit's PUBLISHED entry point: the family factories, `COMPONENT_FAMILIES`, `KIT_STYLESHEETS` |
 | `kit/styles/kit.css` | The widget stylesheet, served as `context-editor://app/kit.css` |
+| `kit/styles/components.css` | The authored families' stylesheet, served as `context-editor://app/components.css` |
 | `core/` | `@context-engine/editor-core` — the app package |
 | `core/src/index.ts` | The bundle entry point: re-exports the whole surface, then boots the bridge |
 | `core/src/info.ts` | The contract-surface projection (was `index.ts` through e05b) |
@@ -129,28 +132,46 @@ gate-exclusion regex and runs automatically in the general ctest step on all thr
   editor-core's declared dependency set is still exactly the owner-ratified, version-pinned s1 set.
 - `webui-client-typings-drift` — re-projects the build-generated schema and refuses any byte
   difference.
-- `webui-kit-tokens-only` (e06c1) — the component kit consumes **only** `var(--ctx-*)` theme tokens
-  (design 06 §1: "raw values live in themes alone"). Rejects a raw colour anywhere in a kit
-  stylesheet, a raw value in a tokenised property family (fonts / shape / motion), any `var()`
+- `webui-kit-tokens-only` (e06c1) — the component kit's STYLESHEETS consume **only** `var(--ctx-*)`
+  theme tokens (design 06 §1: "raw values live in themes alone"). Rejects a raw colour anywhere in a
+  kit stylesheet, a raw value in a tokenised property family (fonts / shape / motion), any `var()`
   FALLBACK, and any non-`--ctx-` custom property. Proven non-vacuous by
   `tools/tests/test_check_kit_tokens.py`, which plants each violation and requires exit 1;
-  [`kit/README.md`](kit/README.md) records the jurisdiction and the one gap (box spacing, for which
-  e06a publishes no token).
-- `webui-kit-role-coverage` (e06c1) — the CLOSED 12-role set agrees across three languages: the C++
-  `uitree::role_token` vocabulary, the kit's `WIDGET_CLASSES` map, and the classes `kit.css` styles —
-  in both directions — **and** no `.ctx-widget-` rule survives in `app.css` (one styling owner). The
-  failure it prevents is silent by construction: a thirteenth role would render real, interactive,
-  completely unthemed DOM with no build error and nothing in a log.
+  [`kit/README.md`](kit/README.md) records the jurisdiction and the recorded gaps (box spacing, a
+  long-loop motion duration, a scrim opacity — none of which e06a publishes a token for).
+- `webui-kit-source-tokens` (e06c2) — the same rule for the kit's TYPESCRIPT, which is where a
+  component author would put a colour the theme does not publish and no CSS lint has ever looked:
+  an inline-style write, a `style` attribute, a runtime `<style>` element or CSSOM mutation, a raw
+  hex/`rgb()` colour in a string literal. The jurisdiction was widened WITH the sources — an
+  unwidened gate would have gone on reporting a clean kit while its whole new half was exempt.
+- `webui-kit-role-coverage` (e06c1, widened by e06c2) — the CLOSED 12-role set agrees across three
+  languages: the C++ `uitree::role_token` vocabulary, the kit's `WIDGET_CLASSES` map, and the classes
+  the kit stylesheets style — in both directions — **and** the one-styling-owner property from both
+  sides: no `.ctx-widget-` rule in `app.css`, and inside the kit only `kit.css` may style a widget
+  class with a BARE selector (a second sheet must compound a family class onto it, so it wins by
+  SPECIFICITY rather than by document order). The failure it prevents is silent by construction: a
+  thirteenth role would render real, interactive, completely unthemed DOM with no build error and
+  nothing in a log.
+- `webui-kit-family-coverage` (e06c2) — the kit ships EXACTLY the twelve component families of design
+  06 §3, each with an exported factory, a root class some kit stylesheet actually styles, and a
+  `reusesRoles` claim naming real members of the closed widget-class set. The tool carries its own
+  copy of the design's list (the design document lives outside this repo), so the roster cannot drift
+  into agreeing with itself.
 
 Python-side unit tests live in `tools/tests/test_gen_client_typings.py`,
 `tools/tests/test_check_webui_assets.py`, `tools/tests/test_check_kit_tokens.py`, and
 `tools/tests/test_fetch_dockview.py`.
 
 The browser-executed T1 tier (`webui-ts-unit`, the e07a `webui-tests` job) additionally carries
-`core/src/test/kit.test.ts`, which asserts what the browser actually COMPUTES for each of the twelve
-widget classes and that a live theme switch carries the whole layer — the half of the kit's DoD a
-source scan structurally cannot answer (was the sheet SERVED at all? is the token name it references
-one the engine writes? does another stylesheet win the cascade?).
+`core/src/test/kit.test.ts` and `core/src/test/kit_components.test.ts`, which assert what the browser
+actually COMPUTES for the twelve widget classes and the twelve authored families, that a live theme
+switch carries them all, that an authored `Button` computes IDENTICALLY to a hydrated
+`ctx-widget-button` (the reuse claim, where it is decided), and that the interactive families are
+really keyboard-operable — arrow-navigable tabs and trees, a modal dialog whose surroundings are
+genuinely inert and whose focus returns to its opener, a focus-reachable Escape-dismissible tooltip.
+That is the half of the kit's DoD a source scan structurally cannot answer (was the sheet SERVED at
+all? is the token name it references one the engine writes? does another stylesheet win the cascade?
+does pressing a key actually move focus?).
 
 ## Scope boundary (after e05d1)
 
@@ -176,12 +197,14 @@ and hydrates. Deliberately **not** here:
 - OS-window tear-out → **e10**. Dockview's popout API is deliberately UNUSED (B-F2): v7 rejects
   non-http(s) popout URLs, and its popout is opener-owned DOM transfer, which cannot produce the
   independent per-window editor-core instances design 04 §1 requires.
-- ~~the component kit's foundation + the hydration widget layer~~ → ✅ **e06c1** (`kit/`). The
-  AUTHORED component families (tabs, tables, dialogs, toasts, chips, badges, empty-states, skeletons,
-  tooltips) are **e06c2**'s and land in `kit/` too; the Settings panel + per-user config are **e06d**'s.
-  `app/app.css` keeps only what is not a widget class: the pre-theme placeholder pair, the docking
-  surface re-point, `.ctx-panel-body`, the Pulse-of-Work flourish, and the (pre-kit) welcome + palette
-  surfaces that e06c2/e06d are the natural homes for.
+- ~~the component kit's foundation + the hydration widget layer~~ → ✅ **e06c1** (`kit/`);
+  ~~the AUTHORED component families~~ → ✅ **e06c2** (`kit/`, all twelve of design 06 §3). The
+  Settings panel + per-user config are **e06d**'s — the kit's first consumer. `app/app.css` keeps
+  only what is not a widget class: the pre-theme placeholder pair, the docking surface re-point,
+  `.ctx-panel-body`, the Pulse-of-Work flourish, and the (pre-kit) welcome + palette surfaces.
+  Rebuilding those two on kit components is deliberately still open (`kit/README.md` § Recorded
+  findings, item 6): both are live surfaces with their own T1 suites and a CEF pixel smoke calibrated
+  against them, so it is its own change rather than a rider on e06c2.
 
 Grow the app along those seams. `index.ts` is the entry (re-export + boot) and should stay that
 thin — put new surface in its own module and re-export it.

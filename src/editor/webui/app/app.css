@@ -281,7 +281,10 @@ html .dockview-theme-dark {
  *
  * The twelve `ctx-widget-*` classes (04 §4 step 4) were declared HERE through e06b. They are now
  * `@context-engine/editor-kit`'s — `kit/styles/kit.css`, served beside this file as
- * `context-editor://app/kit.css` and linked by index.html.
+ * `context-editor://app/kit.css` and linked by index.html. Since e06c2 the kit also serves
+ * `components.css` (the twelve AUTHORED families of 06 §3); the rule below is unchanged by that —
+ * `.ctx-widget-*` still has exactly one owner, and `webui-kit-role-coverage` additionally refuses a
+ * BARE widget selector in any kit sheet other than kit.css.
  *
  * ⚠ DO NOT RE-ADD A `.ctx-widget-*` RULE TO THIS FILE. The move is not tidying: it gives the widget
  * layer exactly ONE styling owner, so appearance stops depending on which stylesheet the cascade

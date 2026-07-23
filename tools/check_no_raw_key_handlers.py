@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Fail on any RAW DOM key handler in editor-core that bypasses the keymap/command path (M9 e07d).
+"""Fail on any RAW DOM key handler in the editor's web layer that bypasses the keymap/command path
+(M9 e07d; jurisdiction widened to the component kit by e06c2).
 
 Design 05 §6: "no raw key handlers anywhere (enforced by review + a lint in T1)". Every keyboard
 capability in the editor MUST flow through the ONE command registry (e07b) and the keymap (e07c) — a
@@ -10,6 +11,13 @@ override, and the command surface an agent/CI drives.
 
 This is a SOURCE scan (like tools/check_webui_assets.py), so it runs on every default `build` leg with
 no browser — it is registered as the `webui-no-raw-key-handlers` ctest in the `webui-*` family.
+
+⚠ IT SCANS EVERY WEB-LAYER SOURCE ROOT, NOT JUST editor-core's. `--sources` takes one or more
+directories because M9 e06c2 moved a genuine share of the editor's keyboard surface into a SECOND
+package: the component kit's tabs, tree, dialog and tooltip families all attach key handlers. A lint
+whose jurisdiction stopped at `core/src` would have declared the tree clean while the tab strip's
+arrow-key handling sat one directory over, unreviewed — the same "widen the gate with the sources"
+discipline the kit's tokens-only lint follows.
 
 The rule, and its ONE escape hatch. Any of these patterns in an editor-core source is a FINDING:
 
@@ -74,22 +82,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--sources",
         required=True,
-        help="the editor-core TS source directory to scan (src/editor/webui/core/src)",
+        nargs="+",
+        help="the web-layer TS source directories to scan (editor-core's src, the kit's src)",
     )
     args = parser.parse_args(argv)
 
-    root = Path(args.sources)
-    if not root.is_dir():
-        print(f"[no-raw-key-handlers] ERROR: not a directory: {root}", file=sys.stderr)
-        return 2
+    roots = [Path(value) for value in args.sources]
+    for root in roots:
+        if not root.is_dir():
+            print(f"[no-raw-key-handlers] ERROR: not a directory: {root}", file=sys.stderr)
+            return 2
 
     sources = sorted(
         p
+        for root in roots
         for p in root.rglob("*")
         if p.is_file() and p.suffix in _TS_EXTENSIONS and not _is_test_source(p)
     )
     if not sources:
-        print(f"[no-raw-key-handlers] ERROR: no TS sources under {root}", file=sys.stderr)
+        print(
+            "[no-raw-key-handlers] ERROR: no TS sources under "
+            f"{', '.join(root.as_posix() for root in roots)}",
+            file=sys.stderr,
+        )
         return 2
 
     total = 0
@@ -111,7 +126,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    print(f"[no-raw-key-handlers] OK: scanned {len(sources)} editor-core source(s); no raw key handlers.")
+    print(
+        f"[no-raw-key-handlers] OK: scanned {len(sources)} web-layer source(s) across "
+        f"{len(roots)} root(s); no unjustified raw key handlers."
+    )
     return 0
 
 

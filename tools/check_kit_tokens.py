@@ -1,10 +1,24 @@
 #!/usr/bin/env python3
-"""The M9 e06c1 component-kit gates: TOKENS-ONLY, and the CLOSED 12-role widget layer.
+"""The M9 component-kit gates: TOKENS-ONLY, the CLOSED 12-role widget layer, and (e06c2) the kit's
+TS sources plus its published family roster.
 
-Two independent checks over the same package, each registered as its own ctest so a failure names
-which property broke (`webui-kit-tokens-only` / `webui-kit-role-coverage`). Both are SOURCE scans --
-no browser, no build artifact -- so they ride the `webui-*` family on all three default `build` legs
-and run locally under a plain `ctest --preset dev`.
+FOUR independent checks over the same package, each registered as its own ctest so a failure names
+which property broke (`webui-kit-tokens-only` / `webui-kit-role-coverage` / `webui-kit-source-tokens`
+/ `webui-kit-family-coverage`). All four are SOURCE scans -- no browser, no build artifact -- so they
+ride the `webui-*` family on all three default `build` legs and run locally under a plain
+`ctest --preset dev`.
+
+e06c1 shipped the first two, over a package that was one module and one stylesheet. e06c2 adds the
+twelve AUTHORED component families of design 06 section 3, which widens the kit's surface in two ways
+the original pair cannot see -- so the jurisdiction is widened with it rather than left to imply
+coverage it no longer has:
+
+  * the kit is now mostly TYPESCRIPT that CREATES elements, and TypeScript can smuggle appearance
+    past a stylesheet lint entirely (``element.style.color = "#0a0a0a"``, a ``style`` attribute, a
+    runtime ``<style>``). ``--source-tokens`` closes that;
+  * "the kit ships twelve families" is a claim nothing checked. ``--family-coverage`` reads the
+    package's own published roster and holds it against the design's list, the factories that must
+    exist, the classes that must be styled, and the role primitives a family claims to build on.
 
 --------------------------------------------------------------------------------------------------
 ``--tokens-only``  (design 06 section 1: "components reference ONLY semantic tokens; raw values live
@@ -53,10 +67,52 @@ construction: ``render_html`` emits only the twelve tags ``role_html_tag`` maps 
 runtime looks each node's role up in the map, so a THIRTEENTH role added to the C++ enum renders
 real, interactive, completely unthemed DOM -- no build error, no test failure, nothing in a log.
 
-It additionally asserts that NO ``.ctx-widget-`` rule survives in the app stylesheet -- the "exactly
-one styling owner" property. Two stylesheets styling the same class is not a duplicate to tidy later:
+It additionally asserts the "exactly one styling owner" property from BOTH sides. Outside the kit: no
+``.ctx-widget-`` rule survives in the app stylesheet. Inside it (e06c2, once the kit grew a second
+sheet): only the widget-layer sheet may style a widget class with a BARE selector -- another kit sheet
+must compound a class onto it (``.ctx-widget-status.ctx-badge``, specificity 0,2,0), so it wins by
+SPECIFICITY rather than by arriving second. Two rules tying at 0,1,0 is not a duplicate to tidy later:
 it is a cascade whose winner depends on document order, which is decided by CMake staging and by the
 runtime injection order of a vendored engine.
+
+--------------------------------------------------------------------------------------------------
+``--source-tokens``  (M9 e06c2 -- the OTHER way past the token layer)
+
+The tokens-only lint reads CSS. e06c2's authored families are TypeScript that BUILDS elements, and a
+component author who wants a colour the theme does not publish does not edit the stylesheet -- they
+write it in the module, where no CSS lint has ever looked::
+
+    element.style.backgroundColor = "#0a0a0a";      // invisible to --tokens-only
+    element.setAttribute("style", "color: red");    // invisible to --tokens-only
+    document.head.append(createStyleElement());     // invisible to --tokens-only
+
+So every ``*.ts`` under the kit's source directory is scanned for an inline-style write, a ``style``
+attribute, a runtime ``<style>`` element or stylesheet mutation, and a raw colour inside a string
+literal. Comments and string literals are separated by a real scanner rather than a regex, because a
+regex that strips ``//`` to end-of-line also eats the contents of any string containing ``//`` -- a
+one-character bypass of the whole check.
+
+NAMED CSS COLOURS ARE DELIBERATELY *NOT* SCANNED FOR HERE, unlike in CSS. In a CSS value position
+``red`` can only be a colour; in a TypeScript string it is prose, and a kit label reading "Green
+channel" is not a violation. Hex and colour-function literals carry no such ambiguity, and they are
+what an actual bypass looks like.
+
+--------------------------------------------------------------------------------------------------
+``--family-coverage``  (M9 e06c2 -- design 06 section 3's twelve named families)
+
+Design 06 section 3 names twelve component families. The kit publishes its own machine-readable
+roster of them (``COMPONENT_FAMILIES`` in ``kit/src/index.ts``); this check holds that roster against
+four independent facts:
+
+  1. it names EXACTLY the design's twelve (this module carries its own copy of that list -- the
+     design document lives outside this repository, so the two cannot drift into agreeing with each
+     other);
+  2. every declared ``factory`` really is exported by a kit module;
+  3. every declared ``rootClass`` really is styled by a kit stylesheet;
+  4. every role in ``reusesRoles`` really is a member of the closed ``WIDGET_CLASSES`` set -- which
+     is what makes "this family builds on the e06c1 primitive rather than forking it" a checkable
+     claim instead of a review note. That the two then RESOLVE THE SAME is a browser question, and
+     `core/src/test/kit_components.test.ts` answers it on the computed style.
 
 Exit codes: 0 = clean, 1 = at least one finding, 2 = a configuration error (bad path, unparseable
 source). A configuration error is deliberately NOT 1: a gate that cannot find its inputs must be
@@ -339,9 +395,47 @@ def read_styled_classes(styles_dir: Path) -> set[str]:
     return styled
 
 
-def check_role_coverage(kit_index_ts: Path, styles_dir: Path, node_cpp: Path,
-                        app_stylesheet: Path) -> list[str]:
+# A `.ctx-widget-*` selector, with a look at whether ANOTHER CLASS is compounded onto it.
+_CSS_WIDGET_SELECTOR_COMPOUND = re.compile(r"\.(ctx-widget-[a-z0-9-]+)(\.)?")
+
+
+def check_widget_layer_ownership(styles_dir: Path, widget_stylesheet: str) -> list[str]:
+    """Only the widget-layer sheet may style a widget class UNCONDITIONALLY (M9 e06c2).
+
+    e06c1 stated the property as "the widget layer has exactly ONE styling owner" and enforced it as
+    "no OTHER file declares a `.ctx-widget-` rule", which was the same thing while the kit was one
+    stylesheet. e06c2's authored families made it two, and one of them legitimately has to reach a
+    widget class: a LIVE badge IS the `status` role primitive (an `<output class="ctx-widget-status">`
+    reused rather than copied), and it has to be an inline pill rather than the widget layer's block
+    read-out.
+
+    So the property is stated at the level it was always ABOUT — appearance must never be decided by
+    document order — rather than at the level of a file count. A second kit sheet may narrow a widget
+    class only through a COMPOUND selector (`.ctx-widget-status.ctx-badge`, specificity 0,2,0), which
+    beats the widget layer's own 0,1,0 rule whichever sheet the browser reaches last. A BARE
+    `.ctx-widget-status` in a second sheet would tie at 0,1,0, and the winner would then be settled by
+    CMake staging order and by a vendored engine's runtime injection — invisible to a reader of either
+    file, which is exactly the failure e06c1 refused.
+    """
     failures: list[str] = []
+    for sheet in sorted(styles_dir.rglob("*.css")):
+        if sheet.name == widget_stylesheet:
+            continue
+        text = _strip_css_comments(sheet.read_text(encoding="utf-8", errors="replace"))
+        for name, compounded in _CSS_WIDGET_SELECTOR_COMPOUND.findall(text):
+            if not compounded:
+                failures.append(
+                    f"{sheet.name} styles `.{name}` with a BARE selector -- only {widget_stylesheet} "
+                    f"may do that. A second sheet must narrow a widget class through a COMPOUND "
+                    f"selector (`.{name}.ctx-<family>`), which wins by SPECIFICITY; a bare one ties "
+                    f"at 0,1,0 and lets document order decide appearance"
+                )
+    return failures
+
+
+def check_role_coverage(kit_index_ts: Path, styles_dir: Path, node_cpp: Path,
+                        app_stylesheet: Path, widget_stylesheet: str = "kit.css") -> list[str]:
+    failures: list[str] = check_widget_layer_ownership(styles_dir, widget_stylesheet)
     cpp_roles = read_cpp_roles(node_cpp)
     classes = read_widget_classes(kit_index_ts)
     styled = read_styled_classes(styles_dir)
@@ -383,6 +477,242 @@ def check_role_coverage(kit_index_ts: Path, styles_dir: Path, node_cpp: Path,
     return failures
 
 
+# ------------------------------------------------------------------- the kit TS source-tokens gate
+
+# The TS extensions the workspace's own CMake glob accepts. Kept in step with it deliberately: a file
+# the build typechecks and bundles but this gate does not read would be an exempt corner of the kit.
+_TS_EXTENSIONS = (".ts", ".tsx", ".mts", ".cts")
+
+# An inline-style WRITE, in any of the shapes a component author reaches for.
+_TS_INLINE_STYLE = re.compile(
+    r"\.style\s*(?:"
+    r"\.\s*[A-Za-z_$][\w$]*\s*=(?!=)"        # el.style.color = ...
+    r"|\.\s*setProperty\s*\("                 # el.style.setProperty("--x", ...)
+    r"|\.\s*cssText\s*=(?!=)"                 # el.style.cssText = ...
+    r"|\s*=(?!=)"                             # el.style = ...
+    r")"
+)
+_TS_STYLE_ATTRIBUTE = re.compile(r"""setAttribute\s*\(\s*['"]style['"]""", re.IGNORECASE)
+_TS_STYLE_ELEMENT = re.compile(r"""createElement\s*\(\s*['"]style['"]""", re.IGNORECASE)
+_TS_STYLESHEET_WRITE = re.compile(r"\.(?:insertRule|addRule|replaceSync|adoptedStyleSheets)\b")
+
+
+def split_ts_source(text: str) -> tuple[str, list[str]]:
+    """Split TypeScript into (code with comments blanked, the list of string-literal contents).
+
+    A REAL SCANNER, not a regex pair, and the difference is the gate's non-vacuity. Stripping ``//``
+    to end-of-line with a regex also deletes the rest of any line containing a string with ``//`` in
+    it, so ``const c = "url//#0a0a0a";`` would vanish before the colour scan ever saw it -- a bypass
+    that costs one character to write and is invisible to review. Blanking comments IN PLACE (rather
+    than deleting them) keeps every line number intact for the findings.
+    """
+    code: list[str] = []
+    literals: list[str] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        char = text[index]
+        nxt = text[index + 1] if index + 1 < length else ""
+        if char == "/" and nxt == "/":
+            while index < length and text[index] != "\n":
+                code.append(" ")
+                index += 1
+            continue
+        if char == "/" and nxt == "*":
+            while index < length and not (text[index] == "*" and index + 1 < length
+                                          and text[index + 1] == "/"):
+                code.append("\n" if text[index] == "\n" else " ")
+                index += 1
+            # The closing `*/` (or the unterminated tail).
+            for _ in range(min(2, length - index)):
+                code.append(" ")
+                index += 1
+            continue
+        if char in "\"'`":
+            quote = char
+            code.append(char)
+            index += 1
+            literal: list[str] = []
+            while index < length:
+                current = text[index]
+                if current == "\\" and index + 1 < length:
+                    literal.append(text[index : index + 2])
+                    code.append(text[index : index + 2])
+                    index += 2
+                    continue
+                if current == quote:
+                    break
+                literal.append(current)
+                code.append(current)
+                index += 1
+            if index < length:
+                code.append(quote)
+                index += 1
+            literals.append("".join(literal))
+            continue
+        code.append(char)
+        index += 1
+    return "".join(code), literals
+
+
+def check_source_tokens(source_dir: Path) -> list[str]:
+    if not source_dir.is_dir():
+        raise CheckError(f"not a directory: {source_dir}")
+    sources = sorted(p for p in source_dir.rglob("*") if p.is_file() and p.suffix in _TS_EXTENSIONS)
+    if not sources:
+        raise CheckError(f"no kit TypeScript under {source_dir} -- the gate would pass vacuously")
+
+    rules = (
+        (_TS_INLINE_STYLE, "writes an INLINE STYLE -- a kit component's appearance comes from "
+                           "styles/*.css (which the tokens-only lint scans) and from nowhere else"),
+        (_TS_STYLE_ATTRIBUTE, "sets a `style` ATTRIBUTE -- same rule, same reason"),
+        (_TS_STYLE_ELEMENT, "creates a `<style>` element at RUNTIME -- a second, unscanned styling "
+                            "owner, and one the CSP's style-src relaxation exists to bound"),
+        (_TS_STYLESHEET_WRITE, "mutates a STYLESHEET at runtime -- rules the tokens-only lint never "
+                               "sees"),
+    )
+
+    failures: list[str] = []
+    for source in sources:
+        text = source.read_text(encoding="utf-8", errors="replace")
+        code, literals = split_ts_source(text)
+        for pattern, why in rules:
+            for match in pattern.finditer(code):
+                line = code.count("\n", 0, match.start()) + 1
+                failures.append(f"{source.name}:{line}: {why}")
+        for literal in literals:
+            if _HEX_COLOUR.search(literal):
+                failures.append(
+                    f"{source.name}: the string literal {literal!r} carries a raw hex colour -- "
+                    f"raw values live in themes alone (design 06 section 1)"
+                )
+            elif _COLOUR_FUNCTION.search(literal):
+                failures.append(
+                    f"{source.name}: the string literal {literal!r} carries a raw colour function "
+                    f"-- raw values live in themes alone (design 06 section 1)"
+                )
+    return failures
+
+
+# ------------------------------------------------------------------ the family-coverage gate (e06c2)
+
+# The twelve families design 06 section 3 names, VERBATIM and in the design's order.
+#
+# This module's OWN copy, deliberately: the design document lives outside this repository, so a check
+# that read the list from the same file it is checking would only prove the file agrees with itself.
+DESIGN_COMPONENT_FAMILIES = (
+    "buttons",
+    "fields",
+    "tabs",
+    "trees",
+    "tables",
+    "chips",
+    "badges",
+    "toasts",
+    "empty-states",
+    "skeletons",
+    "dialogs",
+    "tooltips",
+)
+
+_TS_FAMILY_TABLE = re.compile(
+    r"export\s+const\s+COMPONENT_FAMILIES[^=]*=\s*\[(.*?)\n\];", re.DOTALL
+)
+_TS_FAMILY_ENTRY = re.compile(
+    r'\{\s*family:\s*"([^"]+)"\s*,\s*factory:\s*"([^"]+)"\s*,\s*rootClass:\s*"([^"]+)"\s*,\s*'
+    r"reusesRoles:\s*\[([^\]]*)\]\s*,?\s*\}",
+    re.DOTALL,
+)
+_TS_QUOTED = re.compile(r'"([^"]+)"')
+_CSS_ANY_CLASS = re.compile(r"\.([A-Za-z][\w-]*)")
+_TS_EXPORTED_FUNCTION = re.compile(r"export\s+function\s+([A-Za-z_$][\w$]*)\s*\(")
+
+
+def read_component_families(kit_index_ts: Path) -> list[tuple[str, str, str, list[str]]]:
+    """The kit's published family roster: (family, factory, rootClass, reusesRoles)."""
+    if not kit_index_ts.is_file():
+        raise CheckError(f"not a file: {kit_index_ts}")
+    match = _TS_FAMILY_TABLE.search(kit_index_ts.read_text(encoding="utf-8"))
+    if match is None:
+        raise CheckError(
+            f"{kit_index_ts.name}: no `export const COMPONENT_FAMILIES = [ ... ];` roster -- the "
+            f"gate cannot verify what it cannot read"
+        )
+    entries = [
+        (family, factory, root_class, _TS_QUOTED.findall(roles))
+        for family, factory, root_class, roles in _TS_FAMILY_ENTRY.findall(match.group(1))
+    ]
+    if not entries:
+        raise CheckError(f"{kit_index_ts.name}: COMPONENT_FAMILIES is empty or unparseable")
+    return entries
+
+
+def read_styled_class_names(styles_dir: Path) -> set[str]:
+    """EVERY class any kit stylesheet names -- not only the `ctx-widget-` ones."""
+    if not styles_dir.is_dir():
+        raise CheckError(f"not a directory: {styles_dir}")
+    styled: set[str] = set()
+    for sheet in sorted(styles_dir.rglob("*.css")):
+        text = _strip_css_comments(sheet.read_text(encoding="utf-8", errors="replace"))
+        styled.update(_CSS_ANY_CLASS.findall(text))
+    return styled
+
+
+def read_exported_functions(source_dir: Path) -> set[str]:
+    if not source_dir.is_dir():
+        raise CheckError(f"not a directory: {source_dir}")
+    exported: set[str] = set()
+    for source in sorted(p for p in source_dir.rglob("*") if p.suffix in _TS_EXTENSIONS):
+        code, _ = split_ts_source(source.read_text(encoding="utf-8", errors="replace"))
+        exported.update(_TS_EXPORTED_FUNCTION.findall(code))
+    if not exported:
+        raise CheckError(f"no exported functions under {source_dir} -- the gate would pass vacuously")
+    return exported
+
+
+def check_family_coverage(kit_index_ts: Path, kit_widgets_ts: Path, source_dir: Path,
+                          styles_dir: Path) -> list[str]:
+    failures: list[str] = []
+    entries = read_component_families(kit_index_ts)
+    declared = [family for family, _, _, _ in entries]
+    classes = read_widget_classes(kit_widgets_ts)
+    styled = read_styled_class_names(styles_dir)
+    exported = read_exported_functions(source_dir)
+
+    for family in sorted(set(DESIGN_COMPONENT_FAMILIES) - set(declared)):
+        failures.append(
+            f"design 06 section 3 names the `{family}` family and the kit's roster does not -- the "
+            f"kit ships one fewer family than the design promises package authors"
+        )
+    for family in sorted(set(declared) - set(DESIGN_COMPONENT_FAMILIES)):
+        failures.append(
+            f"the kit's roster names a `{family}` family design 06 section 3 does not -- a rename on "
+            f"one side, or a family that outgrew the design without the design being updated"
+        )
+    for family in sorted({name for name in declared if declared.count(name) > 1}):
+        failures.append(f"the kit's roster lists `{family}` more than once")
+
+    for family, factory, root_class, roles in entries:
+        if factory not in exported:
+            failures.append(
+                f"family `{family}` declares the factory `{factory}`, which no kit module exports -- "
+                f"the roster advertises a surface a consumer cannot call"
+            )
+        if root_class not in styled:
+            failures.append(
+                f"family `{family}` declares the root class `.{root_class}`, which NO kit stylesheet "
+                f"styles -- the family would render in the browser's own chrome, themed by nothing"
+            )
+        for role in roles:
+            if role not in classes:
+                failures.append(
+                    f"family `{family}` claims to build on the hydration role `{role}`, which is not "
+                    f"in the closed WIDGET_CLASSES set -- the reuse claim names a primitive that "
+                    f"does not exist, so the family is a forked path wearing a reuse label"
+                )
+    return failures
+
+
 # ------------------------------------------------------------------------------------------- main
 
 
@@ -393,14 +723,26 @@ def main(argv: list[str] | None = None) -> int:
                         help="run the tokens-only lint over the kit stylesheets")
     parser.add_argument("--role-coverage", action="store_true",
                         help="run the closed-role-set + one-styling-owner gate")
+    parser.add_argument("--source-tokens", action="store_true",
+                        help="run the kit TS inline-styling / raw-colour scan (e06c2)")
+    parser.add_argument("--family-coverage", action="store_true",
+                        help="run the design-06-section-3 twelve-family roster gate (e06c2)")
     parser.add_argument("--kit-styles", help="the kit's styles directory (kit/styles)")
-    parser.add_argument("--kit-source", help="the kit's module entry (kit/src/index.ts)")
+    parser.add_argument("--kit-source", help="the kit's widget-class map (kit/src/widgets.ts)")
+    parser.add_argument("--kit-index", help="the kit's published entry point (kit/src/index.ts)")
+    parser.add_argument("--kit-source-dir", help="the kit's TypeScript source directory (kit/src)")
     parser.add_argument("--uitree-source", help="the uitree role table (gui/uitree/src/node.cpp)")
     parser.add_argument("--app-stylesheet", help="the app base stylesheet (webui/app/app.css)")
+    parser.add_argument("--kit-widget-stylesheet", default="kit.css",
+                        help="the kit stylesheet that OWNS the widget layer (default kit.css)")
     args = parser.parse_args(argv)
 
-    if not (args.tokens_only or args.role_coverage):
-        print("[kit-tokens] ERROR: pass --tokens-only and/or --role-coverage", file=sys.stderr)
+    if not (args.tokens_only or args.role_coverage or args.source_tokens or args.family_coverage):
+        print(
+            "[kit-tokens] ERROR: pass at least one of --tokens-only / --role-coverage / "
+            "--source-tokens / --family-coverage",
+            file=sys.stderr,
+        )
         return 2
 
     failures: list[str] = []
@@ -419,7 +761,25 @@ def main(argv: list[str] | None = None) -> int:
             if missing:
                 raise CheckError(f"--role-coverage requires {', '.join(missing)}")
             failures += check_role_coverage(Path(args.kit_source), Path(args.kit_styles),
-                                            Path(args.uitree_source), Path(args.app_stylesheet))
+                                            Path(args.uitree_source), Path(args.app_stylesheet),
+                                            args.kit_widget_stylesheet)
+        if args.source_tokens:
+            label = "kit-source" if not (args.tokens_only or args.role_coverage) else label
+            if args.kit_source_dir is None:
+                raise CheckError("--source-tokens requires --kit-source-dir")
+            failures += check_source_tokens(Path(args.kit_source_dir))
+        if args.family_coverage:
+            label = ("kit-families"
+                     if not (args.tokens_only or args.role_coverage or args.source_tokens)
+                     else label)
+            missing = [n for n, v in (("--kit-index", args.kit_index),
+                                      ("--kit-source", args.kit_source),
+                                      ("--kit-source-dir", args.kit_source_dir),
+                                      ("--kit-styles", args.kit_styles)) if v is None]
+            if missing:
+                raise CheckError(f"--family-coverage requires {', '.join(missing)}")
+            failures += check_family_coverage(Path(args.kit_index), Path(args.kit_source),
+                                              Path(args.kit_source_dir), Path(args.kit_styles))
     except CheckError as error:
         print(f"[{label}] ERROR: {error}", file=sys.stderr)
         return 2
@@ -428,9 +788,11 @@ def main(argv: list[str] | None = None) -> int:
         for failure in failures:
             print(f"[{label}] FINDING: {failure}", file=sys.stderr)
         print(
-            f"[{label}] FAILED: {len(failures)} finding(s). Kit stylesheets consume ONLY "
-            f"`var(--ctx-*)` theme tokens (design 06 section 1), and the twelve hydration roles are "
-            f"a CLOSED set the kit must style exactly once (design 04 section 4). See "
+            f"[{label}] FAILED: {len(failures)} finding(s). Kit stylesheets AND kit TypeScript "
+            f"consume ONLY `var(--ctx-*)` theme tokens (design 06 section 1); the twelve hydration "
+            f"roles are a CLOSED set the kit must style exactly once (design 04 section 4); and the "
+            f"kit ships exactly the twelve component families of design 06 section 3, each with a "
+            f"real factory, a styled root class and an honest reuse claim. See "
             f"src/editor/webui/kit/README.md.",
             file=sys.stderr,
         )

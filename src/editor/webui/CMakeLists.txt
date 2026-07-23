@@ -134,9 +134,9 @@ file(GLOB _ctx_webui_tokens_data CONFIGURE_DEPENDS
 # bundle's DEPENDS — the exact stale-glob trap, one package over.
 #
 # The kit's STYLESHEETS are deliberately NOT inputs here: they are not typecheck or bundle inputs, and
-# `kit.css` re-stages off the explicit DEPENDS on the staging command below. (e06c2 adds more sheets
-# under `styles/`; each needs its own staging + `index.html` link, which is why widening this list
-# would not have served them either.)
+# each re-stages off the explicit DEPENDS on its own staging command below. (e06c2 added
+# `components.css` beside `kit.css`; a new sheet needs a staging entry + an `index.html` link, which
+# is why widening this glob would not have served it either.)
 file(GLOB_RECURSE _ctx_webui_kit_ts CONFIGURE_DEPENDS
      "${_ctx_webui_kit}/src/*.ts" "${_ctx_webui_kit}/src/*.tsx"
      "${_ctx_webui_kit}/src/*.mts" "${_ctx_webui_kit}/src/*.cts")
@@ -210,27 +210,34 @@ foreach(_doc IN LISTS _ctx_webui_documents)
     list(APPEND _ctx_webui_staged_documents "${_ctx_webui_assets}/${_doc}")
 endforeach()
 
-# --- 4b) stage the component KIT's stylesheet (e06c1) --------------------------------------------
-# Served as `context-editor://app/kit.css`, beside app.css and linked by index.html. It comes from a
-# DIFFERENT package (kit/, not app/), which is why it is staged here rather than added to the loop
-# above — the loop's source dir is app/ and widening it to two roots would obscure which document
-# belongs to which package.
+# --- 4b) stage the component KIT's stylesheets (e06c1 + e06c2) -----------------------------------
+# Served as `context-editor://app/kit.css` + `.../components.css`, beside app.css and linked by
+# index.html. They come from a DIFFERENT package (kit/, not app/), which is why they are staged here
+# rather than added to the loop above — the loop's source dir is app/ and widening it to two roots
+# would obscure which document belongs to which package.
 #
-# The file name is spelled ONCE more, in the kit's own `KIT_STYLESHEET` constant, because the T1 tier
-# looks the sheet up by name in `document.styleSheets` (a test that cannot find it must fail loudly,
-# not pass vacuously). A rename here without renaming there turns `kit.test.ts` red immediately, which
-# is the intended coupling.
-set(_ctx_webui_kit_stylesheet_name "kit.css")
-add_custom_command(
-    OUTPUT "${_ctx_webui_assets}/${_ctx_webui_kit_stylesheet_name}"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ctx_webui_assets}"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${_ctx_webui_kit}/styles/${_ctx_webui_kit_stylesheet_name}"
-            "${_ctx_webui_assets}/${_ctx_webui_kit_stylesheet_name}"
-    DEPENDS "${_ctx_webui_kit}/styles/${_ctx_webui_kit_stylesheet_name}"
-    COMMENT "context_editor_webui: staging the component kit stylesheet"
-    VERBATIM)
-list(APPEND _ctx_webui_staged_documents "${_ctx_webui_assets}/${_ctx_webui_kit_stylesheet_name}")
+# TWO SHEETS SINCE e06c2, and the split is by OWNER-OF-THE-ELEMENT rather than by size: `kit.css`
+# styles the twelve `ctx-widget-*` classes the HYDRATION RUNTIME puts on a C++ panel's nodes;
+# `components.css` styles the classes the kit's own authored factories create. Order is fixed here and
+# in index.html (kit first), though nothing is allowed to DEPEND on it — a component that overrides a
+# widget rule does so with a compound selector, never by arriving second (see components.css's header).
+#
+# Each name is spelled ONCE more, in the kit's own `KIT_STYLESHEET` / `KIT_COMPONENT_STYLESHEET`
+# constants, because the T1 tier looks the sheets up by name in `document.styleSheets` (a test that
+# cannot find one must fail loudly, not pass vacuously). A rename here without renaming there turns
+# `kit.test.ts` / `kit_components.test.ts` red immediately, which is the intended coupling.
+set(_ctx_webui_kit_stylesheets kit.css components.css)
+foreach(_sheet IN LISTS _ctx_webui_kit_stylesheets)
+    add_custom_command(
+        OUTPUT "${_ctx_webui_assets}/${_sheet}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ctx_webui_assets}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_ctx_webui_kit}/styles/${_sheet}" "${_ctx_webui_assets}/${_sheet}"
+        DEPENDS "${_ctx_webui_kit}/styles/${_sheet}"
+        COMMENT "context_editor_webui: staging the component kit stylesheet ${_sheet}"
+        VERBATIM)
+    list(APPEND _ctx_webui_staged_documents "${_ctx_webui_assets}/${_sheet}")
+endforeach()
 
 # ALL so a plain `cmake --build` produces the asset set — the bundle is a build output on every leg,
 # exactly like editor/client's generated schema.
@@ -343,9 +350,15 @@ add_test(NAME webui-client-typings-drift
 # capability must flow through the keymap + command registry, and a stray `keydown`/`onkeydown`
 # handler that bypasses that path (an unmarked one) fails the build. `tools/check_no_raw_key_handlers.py`
 # has its own pytest under tools/tests/ (the python-tests job). This is the T1 lint the DoD requires.
+#
+# ⚠ TWO SOURCE ROOTS SINCE e06c2. The component kit's tabs / tree / dialog / tooltip families attach
+# key handlers of their own (the ARIA roving-navigation and Escape-dismissal patterns), so a lint
+# whose jurisdiction stopped at `core/src` would have reported the editor clean while a real share of
+# its keyboard surface sat one package over, unreviewed. Both roots are scanned by ONE ctest, so the
+# gate cannot be half-satisfied.
 add_test(NAME webui-no-raw-key-handlers
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_no_raw_key_handlers.py"
-            --sources "${_ctx_webui_core}/src")
+            --sources "${_ctx_webui_core}/src" "${_ctx_webui_kit}/src")
 
 # 2c) The TOKENS-ONLY lint (M9 e06c1, design 06 section 1: "components reference ONLY semantic
 # tokens; raw values live in themes alone"). BLOCKING in T1 — a SOURCE scan, so it rides the `webui-*`
@@ -380,13 +393,54 @@ add_test(NAME webui-kit-tokens-only
 # THIRTEENTH role to the C++ enum ships real, interactive, completely unthemed DOM with no build
 # error and nothing in any log. The role list is DERIVED from the three sources rather than restated
 # here, so this gate cannot drift into agreeing with a copy of itself.
+#
+# `--kit-source` names `widgets.ts` rather than `index.ts` since e06c2: the map MOVED out of the
+# barrel so the authored families (which all import it) do not put the kit's own entry point inside an
+# import cycle. The gate parses the literal rather than resolving the module graph, so it reads the
+# file that DECLARES the map; `index.ts` re-exports it, so no importer changed.
 add_test(NAME webui-kit-role-coverage
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_kit_tokens.py"
             --role-coverage
-            --kit-source "${_ctx_webui_kit}/src/index.ts"
+            --kit-source "${_ctx_webui_kit}/src/widgets.ts"
             --kit-styles "${_ctx_webui_kit}/styles"
             --uitree-source "${CMAKE_CURRENT_SOURCE_DIR}/../gui/uitree/src/node.cpp"
-            --app-stylesheet "${CMAKE_CURRENT_SOURCE_DIR}/app/app.css")
+            --app-stylesheet "${CMAKE_CURRENT_SOURCE_DIR}/app/app.css"
+            --kit-widget-stylesheet kit.css)
+
+# 2e) The KIT SOURCE tokens gate (M9 e06c2). The tokens-only lint above reads CSS; e06c2's authored
+# families are TypeScript that BUILDS elements, and TypeScript can put appearance somewhere no CSS
+# lint has ever looked — `element.style.color = "#0a0a0a"`, a `style` attribute, a `<style>` element
+# created at runtime, a stylesheet mutated through the CSSOM. Widening the jurisdiction WITH the
+# sources is the point: an unwidened gate would have gone on reporting a clean kit while the whole
+# new half of it was exempt.
+#
+# PROVEN NON-VACUOUS in `tools/tests/test_check_kit_tokens.py`, which plants each shape and requires
+# exit 1 — including the one-character bypass the naive implementation had (a regex that strips `//`
+# to end-of-line also eats the contents of a string containing `//`, so the gate reads TS with a real
+# scanner instead).
+add_test(NAME webui-kit-source-tokens
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_kit_tokens.py"
+            --source-tokens
+            --kit-source-dir "${_ctx_webui_kit}/src")
+
+# 2f) The TWELVE-FAMILY roster gate (M9 e06c2, design 06 section 3). "The kit ships buttons, fields,
+# tabs, trees, tables, chips, badges, toasts, empty-states, skeletons, dialogs and tooltips" was a
+# sentence in a design document that nothing could check. It now reads the kit's own published roster
+# (`COMPONENT_FAMILIES` in index.ts) and holds it against four independent facts: the design's list
+# (the tool carries its own copy — the design lives outside this repo, so the two cannot drift into
+# agreeing with each other), the factories that must be exported, the root classes that must be
+# styled, and the closed WIDGET_CLASSES set every `reusesRoles` entry must belong to.
+#
+# That last one is what makes "build on the e06c1 primitive, do not fork a parallel implementation" a
+# CHECKED claim rather than a review note. That the two then RESOLVE THE SAME is a browser question,
+# and `core/src/test/kit_components.test.ts` answers it on the computed style.
+add_test(NAME webui-kit-family-coverage
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_kit_tokens.py"
+            --family-coverage
+            --kit-index "${_ctx_webui_kit}/src/index.ts"
+            --kit-source "${_ctx_webui_kit}/src/widgets.ts"
+            --kit-source-dir "${_ctx_webui_kit}/src"
+            --kit-styles "${_ctx_webui_kit}/styles")
 
 # --- 3) the editor-core T1 unit-test tier (M9 e07a; R-QA-013, design 09 §1 / 04) -----------------
 # Until now the webui workspace had NO local TS unit-test tier: the PURE, DOM-free editor-core logic
@@ -477,21 +531,22 @@ if(CONTEXT_WEBUI_BROWSER_TESTS)
         VERBATIM)
     list(APPEND _ctx_webui_test_web_assets "${_ctx_webui_test_assets}/app.css")
 
-    # The SHIPPED kit stylesheet, for the same load-bearing reason as app.css above: `kit.test.ts`
-    # asserts what the browser COMPUTED for each of the twelve widget classes and looks the sheet up
-    # by name, so a harness served without it fails loudly instead of passing vacuously. A fixture
-    # copy would be worse than nothing — it would pass while the shipped stylesheet was broken.
-    add_custom_command(
-        OUTPUT "${_ctx_webui_test_assets}/${_ctx_webui_kit_stylesheet_name}"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ctx_webui_test_assets}"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${_ctx_webui_kit}/styles/${_ctx_webui_kit_stylesheet_name}"
-                "${_ctx_webui_test_assets}/${_ctx_webui_kit_stylesheet_name}"
-        DEPENDS "${_ctx_webui_kit}/styles/${_ctx_webui_kit_stylesheet_name}"
-        COMMENT "context_editor_webui_test: staging kit.css for the DOM tier"
-        VERBATIM)
-    list(APPEND _ctx_webui_test_web_assets
-         "${_ctx_webui_test_assets}/${_ctx_webui_kit_stylesheet_name}")
+    # The SHIPPED kit stylesheets, for the same load-bearing reason as app.css above: `kit.test.ts`
+    # and `kit_components.test.ts` assert what the browser COMPUTED for the widget classes and for
+    # the twelve authored families, and look each sheet up by name — so a harness served without them
+    # fails loudly instead of passing vacuously. A fixture copy would be worse than nothing: it would
+    # pass while the shipped stylesheet was broken.
+    foreach(_sheet IN LISTS _ctx_webui_kit_stylesheets)
+        add_custom_command(
+            OUTPUT "${_ctx_webui_test_assets}/${_sheet}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ctx_webui_test_assets}"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "${_ctx_webui_kit}/styles/${_sheet}" "${_ctx_webui_test_assets}/${_sheet}"
+            DEPENDS "${_ctx_webui_kit}/styles/${_sheet}"
+            COMMENT "context_editor_webui_test: staging ${_sheet} for the DOM tier"
+            VERBATIM)
+        list(APPEND _ctx_webui_test_web_assets "${_ctx_webui_test_assets}/${_sheet}")
+    endforeach()
 
     # NOT an ALL target: built only on demand by the webui-tests CI job's --target list (and a local
     # -DCONTEXT_WEBUI_BROWSER_TESTS=ON repro). Keeping it out of ALL is what lets the default 3-OS
