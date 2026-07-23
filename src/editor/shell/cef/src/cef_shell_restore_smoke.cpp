@@ -12,9 +12,9 @@
 // native/GPU/renderer shutdown while the process stays alive to boot browser 2 — SEGFAULTed on the
 // Session-0 Windows runner AND on ubuntu. The single-boot smokes run CefShutdown and then std::_Exit()
 // past the C++ static/atexit teardown behind it (see finish()); a same-process restart cannot use that
-// escape hatch for its FIRST browser, because the process must live to boot the second. So the restart is now a
-// genuine PROCESS restart. A thin CONTROLLER (the process ctest launches) runs THIS SAME EXE twice, as
-// two child processes, each carrying `--ctx-restore-phase=1|2`:
+// escape hatch for its FIRST browser, because the process must live to boot the second. So the
+// restart is now a genuine PROCESS restart. A thin CONTROLLER (the process ctest launches) runs THIS
+// SAME EXE twice, as two child processes, each carrying `--ctx-restore-phase=1|2`:
 //   * PHASE 1 boots one browser, mounts panels, drives a dock change, persists it, asserts the
 //     fresh-boot invariants, writes a layout ORACLE, then std::_Exit()s — the exact one-browser /
 //     one-CefInitialize / hard-exit shape `editor-cef-smoke-shell` is green with on every leg;
@@ -302,7 +302,8 @@ struct SessionConfig
     bool expect_restore; // wait for the restore read + report before finishing
     // Run shell::cef::shutdown() (CefShutdown) HERE, before this function's bridge locals unwind —
     // the CE #319 ordering invariant documented in cef_shell.h. False leaves CEF initialised for a
-    // caller that hard-exits past its global teardown (phase 2 — see run_phase_2).
+    // caller that hard-exits past its global teardown (phase 2 — see run_phase_2; retiring that skip
+    // so the second init gets real teardown coverage too is tracked in CE #363).
     bool shutdown_cef;
 };
 
@@ -804,7 +805,7 @@ int run_phase_2(const std::filesystem::path& project, const std::filesystem::pat
     // fault is very likely the SAME use-after-free, and this skip is now the only remaining
     // containment in this file. It is deliberately left in place here so that a green run attributes
     // unambiguously to the phase-1 ordering fix; retiring it (`shutdown_cef = true` for session2) is
-    // a tracked follow-up, not this change. So, for now, do what the single-boot smokes do: std::_Exit()
+    // tracked in CE #363, not this change. So, for now, do what the single-boot smokes do: std::_Exit()
     // past it, one step earlier — BEFORE the crash-prone CefShutdown, which phase 2 does not need to
     // exercise to prove the restore. manager.shutdown() (inside run_session) already closed the browser
     // + its render process, and the controller SIGKILLs this phase's process group after we exit, so no
