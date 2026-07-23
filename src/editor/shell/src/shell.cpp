@@ -320,11 +320,10 @@ WindowManager::~WindowManager() = default;
 
 EditorWindow& WindowManager::add(std::unique_ptr<EditorWindow> window)
 {
-    const WindowId id = add_session(std::move(window), WindowSessionParts{});
-    WindowEntry* entry = find(id);
-    // find() cannot fail here: add_session just pushed this entry. Dereferencing without the guard
-    // would still be correct, but a null deref is not the failure mode to leave available.
-    return *entry->window;
+    // add_session always push_backs, so the adopted window IS the last entry — no lookup, and no
+    // null case to guard.
+    add_session(std::move(window), WindowSessionParts{});
+    return *windows_.back().window;
 }
 
 WindowId WindowManager::add_session(std::unique_ptr<EditorWindow> window,
@@ -561,7 +560,11 @@ std::size_t WindowManager::distinct_origins() const
         bool known = false;
         for (const std::uint64_t other : seen)
         {
-            known = known || other == origin;
+            if (other == origin)
+            {
+                known = true;
+                break;
+            }
         }
         if (!known)
         {

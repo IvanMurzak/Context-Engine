@@ -15,6 +15,7 @@
 // gone the instant the window is destroyed, and the session's bridge-side objects must NOT be, until
 // the manager itself is destroyed (which the app sequences after `shell::cef::shutdown()`).
 
+#include "context/editor/client/client.h"
 #include "context/editor/shell/shell.h"
 #include "context/editor/shell/window_registry.h"
 
@@ -32,6 +33,7 @@
 
 using namespace context::editor::shell;
 namespace render = context::render;
+namespace client = context::editor::client;
 namespace fs = std::filesystem;
 
 namespace
@@ -108,6 +110,9 @@ struct ScriptedFactory
     bool succeed_without_error_text = false;
     bool drop_browser = false;
     int calls = 0;
+    // Give the window its OWN wire connection, as `editor_main.cpp`'s factory does in project mode.
+    // Declared LAST so the positional aggregate initialisers above it keep working unchanged.
+    bool with_daemon_client = false;
 
     bool operator()(const WindowSpec& spec, WindowSessionParts& parts, std::string& error)
     {
@@ -132,6 +137,14 @@ struct ScriptedFactory
             parts.browser = std::make_unique<CountingBrowserHost>(*deaths, browsers_alive);
         }
         parts.bridge = std::make_unique<BridgeRouter>();
+        if (with_daemon_client)
+        {
+            // An UNCONNECTED client: its `client_id()` is 0 until a real attach seeds it, which is
+            // all this suite needs — the assertion it enables is about WHICH SOURCE the registry
+            // answers from, not about the number. The real ids come from a real daemon, which
+            // `editor-session-multiclient-t2` drills over the wire.
+            parts.daemon_client = std::make_unique<client::Client>(nullptr);
+        }
         parts.surfaces.push_back(std::make_shared<SurfaceProbe>(*deaths));
         error.clear();
         return true;
@@ -625,6 +638,45 @@ void test_each_window_reports_its_own_origin()
     shelltest::cleanup(project);
 }
 
+void test_a_window_that_owns_a_connection_answers_from_it_not_from_what_it_was_told()
+{
+    // THE BRANCH THE TEST ABOVE CANNOT REACH, and the one the app actually takes: a window the
+    // registry created in project mode owns its own `client::Client`, so `window_origin` must answer
+    // from THAT connection — never from a value the Shell was handed. Without this the "N windows
+    // are N origins" claim rests on two halves joined by an accessor nothing ever executed: the
+    // daemon minting distinct ids (`editor-session-multiclient-t2`, over a real wire) and the
+    // registry storing what it is told (above, with synthetic numbers). The join is what makes the
+    // claim end-to-end, and it is the half a later task would break silently.
+    const fs::path project = shelltest::make_temp_project("shell-registry", "own-connection");
+    Deaths deaths;
+    int alive = 0;
+    ScriptedFactory factory{&deaths, &alive, {}, false, false, 0, true};
+    {
+        WindowManager manager(project);
+        manager.bind_window_factory(std::ref(factory));
+        manager.add(make_primary_window(deaths, &alive));
+
+        const WindowCreateResult second = manager.create_window(secondary_spec());
+        CHECK(second.ok());
+
+        // ONE call, TWO answers — which is what makes this a discriminator rather than a restatement.
+        // The created window owns a connection, so the told value is ignored and its connection's own
+        // id (0 — e08a's "not attached", since nothing attached this one) stands.
+        manager.set_window_origin(second.id, 4242);
+        CHECK(manager.window_origin(second.id) == 0);
+        // The primary owns NO session client (the app adopts it with an empty session and TELLS the
+        // registry its lifecycle client's id), so the same call on it takes the other branch.
+        manager.set_window_origin(kPrimaryWindowId, 4242);
+        CHECK(manager.window_origin(kPrimaryWindowId) == 4242);
+
+        // Precedence matters beyond one accessor: an overridable origin would let a later task paper
+        // over a MISSING connection with a number, and every cross-window echo-suppression drill
+        // built on `distinct_origins()` would then pass by accident.
+        CHECK(manager.distinct_origins() == 1);
+    }
+    shelltest::cleanup(project);
+}
+
 // ------------------------------------------------------------------- 6. the script-injection seam
 
 void test_the_script_seam_is_recorded_by_the_scripted_host()
@@ -660,6 +712,7 @@ int main()
     test_a_window_that_dies_on_its_own_is_retired_not_freed();
 
     test_each_window_reports_its_own_origin();
+    test_a_window_that_owns_a_connection_answers_from_it_not_from_what_it_was_told();
     test_the_script_seam_is_recorded_by_the_scripted_host();
     SHELL_TEST_MAIN_END();
 }

@@ -354,6 +354,18 @@ int main(int argc, char** argv)
     SMOKE_CHECK(boot_window(shell::kPrimaryWindowId, primary_surfaces, 30),
                 "window 0 composited a live CEF frame and completed its bridge handshake");
 
+    // `primary` is a raw pointer INTO the registry, and `pump_once` retires a window that died on
+    // its own — so if window 0 did not survive its boot, every later use of `primary` reads freed
+    // memory. Bail with a legible verdict instead: an ACCESS_VIOLATION here would wear the exact
+    // `0xC0000005` signature the CE #319 catalogue entry describes and be triaged as that, turning a
+    // real break into a rerun.
+    if (manager.window(shell::kPrimaryWindowId) != primary)
+    {
+        std::fprintf(stderr, "[editor-cef-smoke-shell-multiwindow] FAIL: window 0 did not survive "
+                             "its own boot — the rest of the smoke would read freed memory\n");
+        return finish(1);
+    }
+
     // --- DoD: the Shell can CREATE a second window, with its own fresh editor-core instance -------
     shell::WindowSpec spec;
     spec.title = "Context Editor — window 1";
@@ -413,20 +425,29 @@ int main(int argc, char** argv)
         shell::ShellEvent release = click;
         release.pointer.action = shell::PointerAction::up;
         headless.post(release);
-        for (int i = 0; i < 20; ++i)
+        // Tracked, not discarded: a false `pump_once` means no window is left, and `primary` would
+        // then be a dangling pointer for the rest of this block (see the guard after window 0's boot).
+        bool pump_alive = true;
+        for (int i = 0; i < 20 && pump_alive; ++i)
         {
-            manager.pump_once(now_us());
+            pump_alive = manager.pump_once(now_us());
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        SMOKE_CHECK(pump_alive && manager.window(shell::kPrimaryWindowId) == primary,
+                    "window 0 survived the injected user gesture");
+        if (!pump_alive || manager.window(shell::kPrimaryWindowId) != primary)
+        {
+            return finish(1);
         }
 
         primary->browser().execute_script(
             "window.open('about:blank', '_blank', 'width=320,height=240');");
 
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
-        while (std::chrono::steady_clock::now() < deadline &&
+        while (pump_alive && std::chrono::steady_clock::now() < deadline &&
                shell::cef::popups_suppressed() == suppressed_before)
         {
-            manager.pump_once(now_us());
+            pump_alive = manager.pump_once(now_us());
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
 
