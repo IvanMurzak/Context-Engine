@@ -185,10 +185,17 @@
     line-height: var(--ctx-typography-line-height);
 }
 
+/* The group is a child of the row's own flex box, so `flex-basis: 100%` is what puts it on its own
+ * line under the row rather than beside the label. Declared here with the rest of the group's box and
+ * NOT as a second `.ctx-tree__group` block further down: two rules for one selector at equal
+ * specificity is a reader asking "which one wins" about a file whose whole point is that nobody
+ * should have to. No `display` here on purpose — a collapsed group relies on the UA's
+ * `[hidden] { display: none }`, which any author `display` declaration would silently defeat. */
 .ctx-tree__group {
     margin: 0;
     padding-left: 14px;
     list-style: none;
+    flex-basis: 100%;
 }
 
 .ctx-tree__item {
@@ -196,10 +203,6 @@
     align-items: center;
     gap: 4px;
     flex-wrap: wrap;
-}
-
-.ctx-tree__group {
-    flex-basis: 100%;
 }
 
 .ctx-tree__twisty::before {

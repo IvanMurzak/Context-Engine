@@ -67,20 +67,24 @@ type StyleProperty =
     | "borderTopLeftRadius"
     | "fontFamily";
 
-function colour(document_: Doc, key: string): string {
+/**
+ * A colour off a theme DOCUMENT — `colors.<key>`, or `colors.semantic.<key>` when `semantic`.
+ *
+ * One reader for both groups rather than two near-identical ones: the only difference was which
+ * object to index, and the `semantic` flag is already carried per-expectation.
+ */
+function colour(document_: Doc, key: string, semantic: boolean): string {
     const colors = document_["colors"] as Record<string, unknown> | undefined;
-    const value = colors === undefined ? undefined : colors[key];
-    assert(typeof value === "string", `the theme declares colors.${key}`);
-    return value as string;
-}
-
-function semanticColour(document_: Doc, key: string): string {
-    const colors = document_["colors"] as Record<string, unknown> | undefined;
-    const semantic = colors === undefined ? undefined : (colors["semantic"] as
-        | Record<string, unknown>
-        | undefined);
-    const value = semantic === undefined ? undefined : semantic[key];
-    assert(typeof value === "string", `the theme declares colors.semantic.${key}`);
+    const group = semantic
+        ? (colors?.["semantic"] as Record<string, unknown> | undefined)
+        : colors;
+    const value = group?.[key];
+    // Asserted rather than defaulted: a theme that stopped publishing the token must fail the case
+    // loudly, not quietly compare a computed colour against `undefined`.
+    assert(
+        typeof value === "string",
+        `the theme declares colors.${semantic ? "semantic." : ""}${key}`,
+    );
     return value as string;
 }
 
@@ -285,11 +289,7 @@ function mountSamples(host: HTMLElement): Readonly<Record<string, HTMLElement>> 
 }
 
 function expectedColour(document_: Doc, expectation: ThemeExpectation): string {
-    return toRgb(
-        expectation.semantic === true
-            ? semanticColour(document_, expectation.token)
-            : colour(document_, expectation.token),
-    );
+    return toRgb(colour(document_, expectation.token, expectation.semantic === true));
 }
 
 // -------------------------------------------------------------------------------------- the tests
@@ -392,6 +392,13 @@ export const kitComponentTests: readonly TestCase[] = [
     {
         name: "kit/components: authored fields and trees reuse their role primitives' paint too",
         run: () => {
+            // THE SAME ASSERTION THE BUTTON CASE MAKES, FOR THE OTHER FIVE REUSED ROLES, AND IT HAS
+            // TO BE ON THE COMPUTED STYLE. Class presence alone is exactly what a FORKED stylesheet
+            // would also satisfy: `components.css` is permitted to narrow a widget class through a
+            // compound selector (`.ctx-widget-textbox.ctx-field__control`, 0,2,0), so an authored
+            // field could carry the primitive's class and still be repainted by a rule of its own —
+            // passing every source gate, and passing a `classList.contains` check, while the whole
+            // "one visual contract" property was gone. Only the resolved cascade can tell.
             const engine = documentEngine();
             const host = mountHost();
             try {
@@ -406,27 +413,59 @@ export const kitComponentTests: readonly TestCase[] = [
                     tree.element,
                     list.element,
                 );
-                const cases: readonly (readonly [HTMLElement, string])[] = [
-                    [textField.control, "textbox"],
-                    [checkboxField.control, "checkbox"],
-                    [tree.element, "tree"],
-                    [list.element, "list"],
-                ];
-                for (const [element, role] of cases) {
-                    assert(
-                        element.classList.contains(WIDGET_CLASSES[role] as string),
-                        `the authored ${role} carries \`.${WIDGET_CLASSES[role]}\` — the e06c1 ` +
-                            `primitive, not a second class that looks like it`,
-                    );
-                }
                 const treeItem = tree.element.querySelector<HTMLElement>('[role="treeitem"]');
                 assert(treeItem !== null, "the authored tree renders a treeitem");
-                assert(
-                    (treeItem as HTMLElement).classList.contains(
-                        WIDGET_CLASSES["treeitem"] as string,
-                    ),
-                    "the authored tree's rows carry the `treeitem` primitive class",
-                );
+                const listItem = list.element.querySelector<HTMLElement>("li");
+                assert(listItem !== null, "the authored list renders a row");
+
+                // The hand-built counterpart of each authored element: the SAME tag the factory uses,
+                // carrying ONLY the e06c1 widget class. Same tag matters — a user-agent stylesheet
+                // difference between, say, `<input>` and `<div>` would show up as a paint difference
+                // that has nothing to do with the kit.
+                const cases: readonly (readonly [HTMLElement, string, keyof HTMLElementTagNameMap])[] =
+                    [
+                        [textField.control, "textbox", "input"],
+                        [checkboxField.control, "checkbox", "input"],
+                        [tree.element, "tree", "ul"],
+                        [treeItem as HTMLElement, "treeitem", "li"],
+                        [list.element, "list", "ul"],
+                        [listItem as HTMLElement, "listitem", "li"],
+                    ];
+                const paint: readonly StyleProperty[] = [
+                    "color",
+                    "backgroundColor",
+                    "borderTopColor",
+                    "borderTopLeftRadius",
+                    "fontFamily",
+                ];
+                for (const [element, role, tag] of cases) {
+                    const widgetClass = WIDGET_CLASSES[role] as string;
+                    assert(
+                        element.classList.contains(widgetClass),
+                        `the authored ${role} carries \`.${widgetClass}\` — the e06c1 primitive, ` +
+                            `not a second class that looks like it`,
+                    );
+                    const hydrated = window.document.createElement(tag);
+                    hydrated.className = widgetClass;
+                    if (element instanceof HTMLInputElement) {
+                        (hydrated as HTMLInputElement).type = element.type;
+                    }
+                    // Mounted in the SAME container, so anything inherited from the panel body is
+                    // inherited identically by both and cannot mask a difference either way.
+                    host.element.append(hydrated);
+                    const authoredStyle = window.getComputedStyle(element);
+                    const hydratedStyle = window.getComputedStyle(hydrated);
+                    for (const property of paint) {
+                        assertEqual(
+                            authoredStyle[property],
+                            hydratedStyle[property],
+                            `the authored ${role} and a bare \`.${widgetClass}\` agree on ` +
+                                `${property} — kit.css owns that decision for both, and a compound ` +
+                                `rule in components.css that repainted it would be a fork wearing a ` +
+                                `reuse label (design 06 §3)`,
+                        );
+                    }
+                }
             } finally {
                 host.dispose();
             }
@@ -1032,7 +1071,9 @@ export const kitComponentTests: readonly TestCase[] = [
                 assertEqual(
                     announced.element.getAttribute("role"),
                     "status",
-                    "an announcing skeleton says ONE sentence rather than N unlabelled boxes",
+                    "a `busyLabel` skeleton is a NAMED polite region rather than N unlabelled " +
+                        "boxes — what it is not is a guaranteed interruption, which is a live-region " +
+                        "property this shape cannot have (../../../kit/README.md § Recorded findings)",
                 );
                 assertEqual(announced.element.getAttribute("aria-label"), "Loading panels", "named");
             } finally {

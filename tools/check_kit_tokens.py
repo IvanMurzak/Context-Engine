@@ -92,6 +92,12 @@ literal. Comments and string literals are separated by a real scanner rather tha
 regex that strips ``//`` to end-of-line also eats the contents of any string containing ``//`` -- a
 one-character bypass of the whole check.
 
+EVERY SHAPE IN THE RULE LIST WAS ADDED BY PLANTING IT, NOT BY IMAGINING IT. A write is a write in
+whatever spelling reaches the element, so ``el.style["color"] = x``, ``Object.assign(el.style, ...)``,
+``setAttribute(`style`, ...)`` and the CSS Typed OM's ``attributeStyleMap`` are findings alongside the
+obvious ``el.style.color = x`` -- each of them slipped past an earlier revision of this gate, which is
+why ``tools/tests/test_check_kit_tokens.py`` now pins one case per spelling.
+
 NAMED CSS COLOURS ARE DELIBERATELY *NOT* SCANNED FOR HERE, unlike in CSS. In a CSS value position
 ``red`` can only be a colour; in a TypeScript string it is prose, and a kit label reading "Green
 channel" is not a violation. Hex and colour-function literals carry no such ambiguity, and they are
@@ -484,17 +490,34 @@ def check_role_coverage(kit_index_ts: Path, styles_dir: Path, node_cpp: Path,
 _TS_EXTENSIONS = (".ts", ".tsx", ".mts", ".cts")
 
 # An inline-style WRITE, in any of the shapes a component author reaches for.
+#
+# THE SHAPE LIST IS THE GATE. Each alternative below was found by PLANTING it and watching an earlier
+# revision of this rule report OK -- a gate that catches `el.style.color = x` but not
+# `el.style["color"] = x` is not a weaker gate, it is a gate with a two-character bypass, on the exact
+# axis it exists to close. The same reasoning added the template-literal `style` attribute and the
+# `Object.assign(el.style, ...)` spread, neither of which the first revision saw.
 _TS_INLINE_STYLE = re.compile(
-    r"\.style\s*(?:"
+    r"(?:"
+    # Object.assign(el.style, { color: ... }) -- a bulk write that never names `.style.<prop>`.
+    r"Object\s*\.\s*assign\s*\(\s*[^,()]*\.\s*style\b"
+    r"|\.style\s*(?:"
     r"\.\s*[A-Za-z_$][\w$]*\s*=(?!=)"        # el.style.color = ...
     r"|\.\s*setProperty\s*\("                 # el.style.setProperty("--x", ...)
     r"|\.\s*cssText\s*=(?!=)"                 # el.style.cssText = ...
+    r"|\[[^\]\n]*\]\s*=(?!=)"                 # el.style["color"] = ... / el.style[name] = ...
     r"|\s*=(?!=)"                             # el.style = ...
     r")"
+    r")"
 )
-_TS_STYLE_ATTRIBUTE = re.compile(r"""setAttribute\s*\(\s*['"]style['"]""", re.IGNORECASE)
-_TS_STYLE_ELEMENT = re.compile(r"""createElement\s*\(\s*['"]style['"]""", re.IGNORECASE)
-_TS_STYLESHEET_WRITE = re.compile(r"\.(?:insertRule|addRule|replaceSync|adoptedStyleSheets)\b")
+# A `style` ATTRIBUTE. The quote class carries the BACKTICK too: `setAttribute(`style`, ...)` is the
+# same write, and a rule that only knew about ' and " was a one-character bypass.
+_TS_STYLE_ATTRIBUTE = re.compile(r"""setAttribute\s*\(\s*['"`]style['"`]""", re.IGNORECASE)
+_TS_STYLE_ELEMENT = re.compile(r"""createElement\s*\(\s*['"`]style['"`]""", re.IGNORECASE)
+# A stylesheet mutated at runtime. `attributeStyleMap` is the CSS Typed OM spelling of an inline
+# style write -- a different API for the same thing `.style` does, and invisible to the rule above.
+_TS_STYLESHEET_WRITE = re.compile(
+    r"\.(?:insertRule|addRule|replaceSync|adoptedStyleSheets|attributeStyleMap)\b"
+)
 
 
 def split_ts_source(text: str) -> tuple[str, list[str]]:
@@ -746,14 +769,26 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     failures: list[str] = []
-    label = "kit-tokens"
+    # The label names the FIRST check selected, so a single-check invocation -- which is how all four
+    # ctests register -- reports under its own name. Derived once from an ordered table rather than
+    # re-assigned inside each branch behind an "unless an earlier flag was set" guard whose negation
+    # list had to grow with every check added.
+    label = next(
+        name
+        for enabled, name in (
+            (args.tokens_only, "kit-tokens"),
+            (args.role_coverage, "kit-roles"),
+            (args.source_tokens, "kit-source"),
+            (args.family_coverage, "kit-families"),
+        )
+        if enabled
+    )
     try:
         if args.tokens_only:
             if args.kit_styles is None:
                 raise CheckError("--tokens-only requires --kit-styles")
             failures += check_tokens_only(Path(args.kit_styles))
         if args.role_coverage:
-            label = "kit-roles" if not args.tokens_only else label
             missing = [n for n, v in (("--kit-source", args.kit_source),
                                       ("--kit-styles", args.kit_styles),
                                       ("--uitree-source", args.uitree_source),
@@ -764,14 +799,10 @@ def main(argv: list[str] | None = None) -> int:
                                             Path(args.uitree_source), Path(args.app_stylesheet),
                                             args.kit_widget_stylesheet)
         if args.source_tokens:
-            label = "kit-source" if not (args.tokens_only or args.role_coverage) else label
             if args.kit_source_dir is None:
                 raise CheckError("--source-tokens requires --kit-source-dir")
             failures += check_source_tokens(Path(args.kit_source_dir))
         if args.family_coverage:
-            label = ("kit-families"
-                     if not (args.tokens_only or args.role_coverage or args.source_tokens)
-                     else label)
             missing = [n for n, v in (("--kit-index", args.kit_index),
                                       ("--kit-source", args.kit_source),
                                       ("--kit-source-dir", args.kit_source_dir),

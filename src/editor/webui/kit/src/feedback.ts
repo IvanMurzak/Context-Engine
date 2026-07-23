@@ -21,7 +21,7 @@
 // fallback rule exists to refuse. So the skeleton ships as a STATIC surface step, and the missing
 // token is written down in `../README.md` § Known gaps for e06d/e16 to adopt.
 
-import { createElement, setText, uniqueId, type SemanticTone } from "./dom.js";
+import { createElement, setText, type SemanticTone } from "./dom.js";
 import { createButton, type ButtonOptions } from "./button.js";
 
 /** The roster root classes (mirrored in `index.ts`'s family table). */
@@ -172,10 +172,18 @@ export interface SkeletonOptions {
     /** How many placeholder lines to draw. Defaults to three. */
     readonly lines?: number;
     /**
-     * When given, the skeleton becomes a polite `status` announcing this once ("Loading panels").
+     * When given, the skeleton becomes a polite `status` NAMED by this string ("Loading panels").
      *
      * Off by default: the placeholder bars themselves are decorative and are always `aria-hidden`, so
-     * a screen-reader user hears one sentence instead of N unlabelled boxes.
+     * a screen-reader user meets one named region instead of N unlabelled boxes.
+     *
+     * ⚠ THE NAME IS NOT A GUARANTEED ANNOUNCEMENT, and the reason is the rule stated at the top of
+     * this module. A live region announces CONTENT CHANGES observed after it is registered; this one
+     * is mounted complete, and its label is an `aria-label` rather than content — the same shape the
+     * toast region deliberately avoids. So a user who navigates INTO the region always hears the
+     * name, but a user elsewhere on the page may hear nothing. That is an honest read-out of what the
+     * DOM does, not a claim of parity with the toast lanes; the fix needs a standing region owned by
+     * the CALLER, which is a contract change and is recorded in ../README.md § Recorded findings.
      */
     readonly busyLabel?: string;
 }
@@ -193,7 +201,6 @@ export function createSkeleton(options: SkeletonOptions = {}): KitSkeleton {
         element.setAttribute("role", "status");
         element.setAttribute("aria-live", "polite");
         element.setAttribute("aria-label", options.busyLabel);
-        element.id = uniqueId("ctx-skeleton");
     }
     const lines = Math.max(1, options.lines ?? 3);
     for (let index = 0; index < lines; index += 1) {

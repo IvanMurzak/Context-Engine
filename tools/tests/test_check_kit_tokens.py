@@ -389,6 +389,17 @@ def test_a_clean_kit_module_passes(tmp_path: Path) -> None:
         ("sheet.insertRule(rule);", "a runtime stylesheet mutation"),
         ('const bg = "#0a0a0a";', "a raw hex colour in a string literal"),
         ('const bg = "rgba(0, 0, 0, 0.5)";', "a raw colour function in a string literal"),
+        # THE SPELLING VARIANTS. Every one of these reached an element exactly as the shapes above do
+        # and was reported OK by the gate's first revision -- found by planting them, not by reading
+        # the regex. A gate that catches `el.style.color = x` but not `el.style["color"] = x` has a
+        # two-character bypass on the precise axis it exists to close, which is indistinguishable from
+        # not having the gate for any author who reaches for bracket notation.
+        ('element.style["color"] = "red";', "bracket notation on .style"),
+        ("element.style[property] = value;", "a COMPUTED bracket write, the same thing dynamically"),
+        ('element.setAttribute(`style`, "color: red");', "a TEMPLATE-LITERAL style attribute"),
+        ("document.createElement(`style`);", "a template-literal runtime <style> element"),
+        ('Object.assign(element.style, { color: "red" });', "a bulk Object.assign onto .style"),
+        ('element.attributeStyleMap.set("color", "red");', "the CSS Typed OM spelling of the same"),
     ],
 )
 def test_a_planted_styling_bypass_fails(tmp_path: Path, statement: str, why: str) -> None:
@@ -406,6 +417,11 @@ def test_a_planted_styling_bypass_fails(tmp_path: Path, statement: str, why: str
         'const green = "Green channel";',                     # a NAMED colour word in prose is fine
         "const style = computeStyleName();",                  # a variable merely called `style`
         "if (a.style === b.style) { return; }",               # a comparison, not a write
+        # The READ half of the bracket shapes above. Widening a gate is only free if it stays off
+        # what a module is allowed to do, and reading a computed value is not writing one.
+        'const ink = element.style["color"];',
+        'if (element.style["color"] === "red") { return; }',
+        'Object.assign(element.dataset, { tone: "good" });',  # assign onto something that is not .style
     ],
 )
 def test_legitimate_kit_typescript_is_not_a_finding(tmp_path: Path, statement: str) -> None:

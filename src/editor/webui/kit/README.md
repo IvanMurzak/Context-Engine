@@ -183,7 +183,16 @@ Both halves are gated on every `build` leg (`--role-coverage`) and in the browse
    raw `opacity`, which is outside the lint's value jurisdiction by construction — exactly as box
    spacing is, and for the same reason: no token exists. **Follow-up:** add an overlay/scrim token to
    the `colors` or `elevation` group.
-6. **`app/app.css` still carries raw colour literals** in the welcome screen and the command palette
+6. **A `busyLabel` skeleton is a NAMED region, not a guaranteed announcement.** `createSkeleton({
+   busyLabel })` sets `role="status"` + `aria-label`, which names the region for anyone who navigates
+   into it. It does **not** reliably announce to a user who is elsewhere on the page, for exactly the
+   reason `src/feedback.ts`'s own header gives for the toast lanes: a live region announces content
+   changes observed *after* it is registered, and a skeleton is mounted complete, with its label as an
+   attribute rather than as content. Stating this rather than letting the attribute imply parity with
+   the toast region. **Follow-up:** if a panel genuinely needs the interruption, it wants a standing
+   polite region it appends a sentence into (the `KitToastRegion` shape) — a caller contract change,
+   deliberately not folded into e06c2.
+7. **`app/app.css` still carries raw colour literals** in the welcome screen and the command palette
    (unchanged from e06c1). The pre-theme placeholder pair (`--editor-bg` / `--editor-fg`) is
    intentional and documented in that file. The welcome and palette surfaces are pre-kit UI.
    **Follow-up:** rebuild them on kit components (the palette is a dialog + list + fields; the welcome
