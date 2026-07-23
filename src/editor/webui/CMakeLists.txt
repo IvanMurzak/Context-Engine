@@ -360,6 +360,22 @@ add_test(NAME webui-no-raw-key-handlers
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_no_raw_key_handlers.py"
             --sources "${_ctx_webui_core}/src" "${_ctx_webui_kit}/src")
 
+# 2b2) The D7 `editor.ui` BOUNDARY gate (M9 e08c, design 05 §5). "UI chrome facts are NOT forwarded
+# to the daemon" is a hard boundary the task required to be PROVEN, not stated — and a runtime test
+# can only observe the paths it drives. This is the static half, and it is the one that catches a
+# forwarding path nothing happens to exercise: it refuses any mention of editor-core's ONE exit
+# (`ShellBridge`, bridge.ts) inside `uibus.ts`, and any `editor.ui.*` subscription ANYWHERE in
+# editor-core whose callback reaches that exit. The runtime half lives in the `webui-ts-unit` tier
+# (`core/src/test/uibus.test.ts`, which records the injected query function and requires zero
+# traffic); each catches what the other cannot, and both were verified by planting a violation.
+#
+# A SOURCE scan, so — like the raw-key-handler lint above — it rides the `webui-*` family on all
+# three default `build` legs with no browser and no `ci.yml` `--target` bookkeeping.
+# `tools/check_ui_bus_boundary.py` has its own pytest under tools/tests/ (the python-tests job).
+add_test(NAME webui-uibus-boundary
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_ui_bus_boundary.py"
+            --source-root "${_ctx_webui_core}/src")
+
 # 2c) The TOKENS-ONLY lint (M9 e06c1, design 06 section 1: "components reference ONLY semantic
 # tokens; raw values live in themes alone"). BLOCKING in T1 — a SOURCE scan, so it rides the `webui-*`
 # family on all three default `build` legs and runs under a plain local `ctest --preset dev`; there is

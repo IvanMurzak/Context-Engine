@@ -35,10 +35,14 @@
 //                   panel applies them itself; every switch re-posts, which is the iframe half of
 //                   "re-tokened on `editor.ui.theme-changed`".
 //
-// ⚠ THE `editor.ui` BUS IS A LOCAL STUB. e08 owns the real editor-ui event bus; it has not landed.
-// `EditorUiBus` below emits `editor.ui.theme-changed` with the envelope e08 will carry, so when the
-// real bus arrives the swap is ONE constructor argument in boot.ts — no consumer changes, no
-// envelope change. That is deliberate (the spec calls for it), not an accident of ordering.
+// THE `editor.ui` BUS IS REAL AS OF M9 e08c — `uibus.ts`, imported below. e06b shipped a local STUB
+// here so the theme engine could publish `editor.ui.theme-changed` before the bus existed; e08c
+// deleted that stub outright rather than leaving a "just to compile" placeholder to fossilize, and
+// this module now publishes onto the real bus. The swap cost this module its own fan-out bookkeeping
+// and cost its CONSUMERS nothing: `ThemeEngineOptions.bus`, `ThemeEngine.bus` and the iframe channel
+// all kept their shapes. The envelope gained the two fields the daemon-stream discipline requires —
+// `seq` and `topic` (which is `type` renamed to the daemon's own field name, 05 §5) — and no
+// consumer reads either: `IframeThemeChannel` carries the envelope opaquely.
 //
 // WHAT IS NOT HERE, on purpose: the component kit (e06c) and the Settings panel + per-user config
 // (e06d). In particular the ACTIVE THEME IS NOT PERSISTED yet — first run follows
@@ -46,6 +50,7 @@
 // session. `~/.context/config.json` is e06d's, and the Shell is its single writer.
 
 import { BridgeError, isRecord, type ShellBridge } from "./bridge.js";
+import { EditorUiBus, UI_TOPIC_THEME_CHANGED, type EditorUiEvent } from "./uibus.js";
 import { validateTheme } from "../../tokens/src/index.js";
 
 import darkTheme from "../../tokens/themes/dark.theme.json";
@@ -60,9 +65,6 @@ import hcLightTheme from "../../tokens/themes/high-contrast-light.theme.json";
 // editor-core calling a method the Shell no longer routes, so watched user themes would silently
 // never load and NOTHING would report it.
 export const THEMES_GET_METHOD = "themes.get";
-
-/** The `editor.ui` event name a theme switch emits. e08 will carry this SAME name and envelope. */
-export const THEME_CHANGED_EVENT = "editor.ui.theme-changed";
 
 /** The CSS custom-property prefix every token variable carries (mockups/TOKENS.md: `--ctx-*`). */
 export const TOKEN_VARIABLE_PREFIX = "--ctx-";
@@ -334,9 +336,9 @@ export function applyMotionPreference(
     return out;
 }
 
-// ------------------------------------------------------------------------------- the editor.ui bus (e08 STUB)
+// ------------------------------------------------------------------------------- the editor.ui bus (e08c)
 
-/** The `editor.ui.theme-changed` payload. e08's real bus carries this SAME shape (see the header). */
+/** The `editor.ui.theme-changed` payload. Carried on the real bus's envelope (uibus.ts). */
 export interface ThemeChangedPayload {
     readonly themeId: string;
     readonly name: string;
@@ -347,59 +349,8 @@ export interface ThemeChangedPayload {
     readonly variables: Readonly<Record<string, string>>;
 }
 
-/** An `editor.ui` event envelope: a name plus its payload. Deliberately e08's shape, not ours. */
-export interface EditorUiEvent {
-    readonly type: string;
-    readonly payload: ThemeChangedPayload;
-}
-
-/** Detaches a subscription. Mirrors Dockview's disposable convention so callers see one idiom. */
-export interface EditorUiSubscription {
-    dispose(): void;
-}
-
-/**
- * The LOCAL STUB of e08's `editor.ui` bus.
- *
- * Exists so the theme engine can publish `editor.ui.theme-changed` today with the envelope e08 will
- * carry tomorrow. When the real bus lands, `ThemeEngine` takes it as its `bus` argument and NOTHING
- * else changes — that zero-engine-change swap is the reason this is a bus at all rather than a
- * callback list inlined into the engine.
- *
- * Total by design: a throwing subscriber is isolated so one bad panel cannot break the theme switch
- * for every other subscriber.
- */
-export class EditorUiBus {
-    readonly #listeners = new Map<string, Set<(event: EditorUiEvent) => void>>();
-
-    subscribe(type: string, listener: (event: EditorUiEvent) => void): EditorUiSubscription {
-        const existing = this.#listeners.get(type);
-        const set = existing ?? new Set<(event: EditorUiEvent) => void>();
-        if (existing === undefined) {
-            this.#listeners.set(type, set);
-        }
-        set.add(listener);
-        return {
-            dispose: (): void => {
-                set.delete(listener);
-            },
-        };
-    }
-
-    emit(event: EditorUiEvent): void {
-        const set = this.#listeners.get(event.type);
-        if (set === undefined) {
-            return;
-        }
-        for (const listener of [...set]) {
-            try {
-                listener(event);
-            } catch {
-                // A subscriber's failure is its own; the switch must still reach everyone else.
-            }
-        }
-    }
-}
+/** A theme-change envelope: the real bus's `{seq, topic, origin, payload}` over the payload above. */
+export type ThemeChangedEvent = EditorUiEvent<ThemeChangedPayload>;
 
 // ------------------------------------------------------------------------------- iframe delivery (04 §5)
 
@@ -434,7 +385,7 @@ export const IFRAME_TARGET_ORIGIN = "*";
 
 export class IframeThemeChannel {
     readonly #targets = new Set<IframeMessageTarget>();
-    #last: EditorUiEvent | undefined;
+    #last: ThemeChangedEvent | undefined;
 
     /** Register a panel frame. It is posted the current theme immediately when one has been applied. */
     register(target: IframeMessageTarget): void {
@@ -453,14 +404,14 @@ export class IframeThemeChannel {
     }
 
     /** Broadcast a theme change to every registered frame, and remember it for late registrations. */
-    broadcast(event: EditorUiEvent): void {
+    broadcast(event: ThemeChangedEvent): void {
         this.#last = event;
         for (const target of [...this.#targets]) {
             this.#post(target, event);
         }
     }
 
-    #post(target: IframeMessageTarget, event: EditorUiEvent): void {
+    #post(target: IframeMessageTarget, event: ThemeChangedEvent): void {
         try {
             target.postMessage(event, IFRAME_TARGET_ORIGIN);
         } catch {
@@ -786,6 +737,14 @@ export class ThemeEngine {
         this.#iframes = options.iframes ?? new IframeThemeChannel();
         this.#probe = options.probe ?? defaultMediaQueryProbe();
         this.#schedule = options.schedule ?? defaultScheduler;
+        // THE IFRAME CHANNEL IS A BUS SUBSCRIBER, not a second fan-out. Before e08c `apply` pushed
+        // the envelope to the iframes and then to the stub bus by hand, with a comment explaining
+        // which had to go first; with a real bus there is ONE fan-out and the iframes are simply its
+        // first subscriber — registered here, in the constructor, so no caller-registered subscriber
+        // can get ahead of the panel frames (the slowest consumer, a message hop away).
+        this.#bus.subscribe<ThemeChangedPayload>(UI_TOPIC_THEME_CHANGED, (event) => {
+            this.#iframes.broadcast(event);
+        });
     }
 
     get registry(): ThemeRegistry {
@@ -896,21 +855,18 @@ export class ThemeEngine {
         };
         this.#lastReport = report;
 
-        const event: EditorUiEvent = {
-            type: THEME_CHANGED_EVENT,
-            payload: {
-                themeId: entry.id,
-                name: entry.name,
-                appearance: entry.appearance,
-                highContrast: entry.highContrast,
-                reducedMotion: reduced,
-                variables,
-            },
-        };
-        // The iframes BEFORE the bus: a panel frame is the slowest consumer (a message hop), and a
-        // bus subscriber that re-enters `apply` would otherwise reorder the two.
-        this.#iframes.broadcast(event);
-        this.#bus.emit(event);
+        // ONE fan-out: the bus delivers to every subscriber, the iframe channel among them (wired in
+        // the constructor). `publish` also RETAINS the envelope, so a panel that subscribes after
+        // this switch is handed the current theme immediately instead of rendering untokened until
+        // the next one — the snapshot-on-subscribe half of the envelope discipline (05 §5).
+        this.#bus.publish<ThemeChangedPayload>(UI_TOPIC_THEME_CHANGED, {
+            themeId: entry.id,
+            name: entry.name,
+            appearance: entry.appearance,
+            highContrast: entry.highContrast,
+            reducedMotion: reduced,
+            variables,
+        });
         return report;
     }
 

@@ -21,6 +21,7 @@ import { kitTests } from "./kit.test.js";
 import { kitComponentTests } from "./kit_components.test.js";
 import { configTests } from "./config.test.js";
 import { settingsTests } from "./settings.test.js";
+import { uibusTests } from "./uibus.test.js";
 
 const result = runTests([
     ...panelsTests,
@@ -39,6 +40,7 @@ const result = runTests([
     ...kitComponentTests,
     ...configTests,
     ...settingsTests,
+    ...uibusTests,
 ]);
 report(result);
 

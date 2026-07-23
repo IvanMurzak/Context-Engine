@@ -21,13 +21,11 @@ import {
     BUILTIN_HC_DARK,
     BUILTIN_HC_LIGHT,
     BUILTIN_LIGHT,
-    EditorUiBus,
     FLOURISH_STATES,
     IframeThemeChannel,
     LIGHT_SCHEME_QUERY,
     REDUCED_MOTION_QUERY,
     THEMES_GET_METHOD,
-    THEME_CHANGED_EVENT,
     THEME_PIN_FLAG,
     THEME_TRANSITION_ATTRIBUTE,
     ThemeController,
@@ -44,14 +42,16 @@ import {
     parseThemesSnapshot,
     prefersReducedMotion,
     themeCssVariables,
-    type EditorUiEvent,
     type MediaQueryLike,
     type MediaQueryProbe,
     type ThemeDocument,
     type ThemeRoot,
     type ThemesSnapshot,
     type ThemesSource,
+    type ThemeChangedEvent,
+    type ThemeChangedPayload,
 } from "../theme.js";
+import { EditorUiBus, UI_TOPIC_THEME_CHANGED } from "../uibus.js";
 
 import darkTheme from "../../../tokens/themes/dark.theme.json";
 import lightTheme from "../../../tokens/themes/light.theme.json";
@@ -568,18 +568,21 @@ export const themeTests: readonly TestCase[] = [
         },
     },
 
-    // ------------------------------------------------------------------ the editor.ui stub bus
+    // ------------------------------------------------------------------ the editor.ui bus (e08c)
     {
-        name: "apply emits editor.ui.theme-changed with the e08 envelope",
+        name: "apply publishes editor.ui.theme-changed on the REAL bus, with the daemon-shaped envelope",
         run: () => {
             const { engine } = engineWith(NULL_PROBE);
-            const seen: EditorUiEvent[] = [];
-            engine.bus.subscribe(THEME_CHANGED_EVENT, (event) => seen.push(event));
+            const seen: ThemeChangedEvent[] = [];
+            engine.bus.subscribe<ThemeChangedPayload>(UI_TOPIC_THEME_CHANGED, (event) =>
+                seen.push(event),
+            );
             engine.apply(BUILTIN_LIGHT);
             assertEqual(seen.length, 1, "one event per switch");
             const event = seen[0];
             assert(event !== undefined, "the event was delivered");
-            assertEqual(event?.type, THEME_CHANGED_EVENT, "the event name is e08's");
+            assertEqual(event?.topic, UI_TOPIC_THEME_CHANGED, "the topic is the design's");
+            assertEqual(event?.seq, 1, "and it carries the bus's monotonic seq");
             assertEqual(event?.payload.themeId, BUILTIN_LIGHT, "the payload names the theme");
             assertEqual(event?.payload.appearance, "light", "and its appearance");
             assertEqual(
@@ -590,31 +593,35 @@ export const themeTests: readonly TestCase[] = [
         },
     },
     {
+        name: "a panel that subscribes AFTER a switch is handed the current theme (snapshot-on-subscribe)",
+        run: () => {
+            // The e08c property e06b's stub could not offer: a late subscriber saw silence until the
+            // NEXT switch, which for a panel mounted after boot meant rendering untokened.
+            const { engine } = engineWith(NULL_PROBE);
+            engine.apply(BUILTIN_DARK);
+            const seen: ThemeChangedEvent[] = [];
+            engine.bus.subscribe<ThemeChangedPayload>(UI_TOPIC_THEME_CHANGED, (event) =>
+                seen.push(event),
+            );
+            assertEqual(seen.length, 1, "the retained envelope arrives on subscribe");
+            assertEqual(seen[0]?.payload.themeId, BUILTIN_DARK, "and it is the theme on screen");
+        },
+    },
+    {
         name: "the bus isolates a throwing subscriber and honours dispose()",
         run: () => {
             const bus = new EditorUiBus();
             let reached = 0;
-            bus.subscribe(THEME_CHANGED_EVENT, () => {
+            bus.subscribe(UI_TOPIC_THEME_CHANGED, () => {
                 throw new Error("a panel blew up");
             });
-            const subscription = bus.subscribe(THEME_CHANGED_EVENT, () => {
+            const subscription = bus.subscribe(UI_TOPIC_THEME_CHANGED, () => {
                 reached += 1;
             });
-            const event: EditorUiEvent = {
-                type: THEME_CHANGED_EVENT,
-                payload: {
-                    themeId: BUILTIN_DARK,
-                    name: "Dark",
-                    appearance: "dark",
-                    highContrast: false,
-                    reducedMotion: false,
-                    variables: {},
-                },
-            };
-            bus.emit(event);
+            bus.publish(UI_TOPIC_THEME_CHANGED, { themeId: BUILTIN_DARK });
             assertEqual(reached, 1, "one subscriber's failure does not deny the others");
             subscription.dispose();
-            bus.emit(event);
+            bus.publish(UI_TOPIC_THEME_CHANGED, { themeId: BUILTIN_DARK });
             assertEqual(reached, 1, "a disposed subscription stops receiving");
         },
     },
@@ -632,8 +639,8 @@ export const themeTests: readonly TestCase[] = [
             const last = frame.posts[1];
             assert(last !== undefined, "the second post was recorded");
             assertEqual(last?.targetOrigin, "*", "a sandboxed frame's origin is opaque, so '*'");
-            const message = last?.message as EditorUiEvent;
-            assertEqual(message.type, THEME_CHANGED_EVENT, "the SAME envelope the bus emits");
+            const message = last?.message as ThemeChangedEvent;
+            assertEqual(message.topic, UI_TOPIC_THEME_CHANGED, "the SAME envelope the bus emits");
             assertEqual(
                 message.payload.variables[`${TOKEN_VARIABLE_PREFIX}colors-ink`],
                 "#171717",
@@ -671,7 +678,9 @@ export const themeTests: readonly TestCase[] = [
             channel.register(healthy);
             assertEqual(channel.size, 2, "both frames are registered");
             channel.broadcast({
-                type: THEME_CHANGED_EVENT,
+                seq: 1,
+                topic: UI_TOPIC_THEME_CHANGED,
+                origin: "local",
                 payload: {
                     themeId: BUILTIN_DARK,
                     name: "Dark",
