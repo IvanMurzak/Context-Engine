@@ -23,6 +23,7 @@
 #include <atomic>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace context::editor::shell
@@ -83,9 +84,56 @@ public:
     // Drive one slice of the browser's work and deliver whatever frames it produced into `sink`.
     // Returns false once the browser is gone. For the CEF host this is where CefDoMessageLoopWork
     // runs — the integrated pump (03 §1).
+    //
+    // ⚠ THE HOST MAY RETAIN `sink` BEYOND THIS CALL, so the caller must keep it alive until
+    // `close()` (which unbinds it). The reference is NOT scoped to the call, and with N windows it
+    // cannot be: the CEF host's pump drives a PROCESS-WIDE message loop that dispatches the pending
+    // paints of EVERY browser in the process, so a sink bound only while its own host is pumping
+    // misses every frame the loop happens to deliver during a SIBLING window's pump — which, with
+    // the owner loop pumping window 0 first each tick, is very nearly all of them (see
+    // `cef_shell.h` § `frames_dropped_without_sink`). `EditorWindow` satisfies the requirement by
+    // construction: the sink is its own compositor member and the host is its browser member.
     virtual bool pump(IBrowserFrameSink& sink) = 0;
 
+    // Run a fragment of JavaScript in the browser's MAIN FRAME. Added by e10a for one reason: the
+    // `OnBeforePopup` suppression (03 §1) is a security containment boundary, and the only honest
+    // proof of it is a REAL `window.open` issued by REAL renderer content — a unit-level stub would
+    // assert that the handler we wrote returns true, which is not the same claim at all.
+    //
+    // PURE, like every other seam here: each host states its own answer. The CEF host runs
+    // `CefFrame::ExecuteJavaScript`; the scripted host records the source (it has no JS engine, and
+    // pretending otherwise would let a caller believe a script ran).
+    virtual void execute_script(std::string_view source) = 0;
+
     virtual void close() = 0;
+
+    // --- teardown, split into two phases so N browsers tear down SAFELY ---------------------------
+    //
+    // `close()` above does the whole thing at once: unbind the sink, ask CEF to close, AND drive the
+    // process-wide message loop until this browser is done. That is correct for ONE browser (the app's
+    // single window, the sibling single-window smokes, a host that simply goes out of scope). It is
+    // NOT correct for N: `CefDoMessageLoopWork()` is process-wide, so one browser's close-drain
+    // advances ANOTHER still-open browser's teardown, and on Windows that reaches a CEF ref-counted
+    // object's final Release INSIDE its own destructor — the `!in_dtor_` abort (CE #319 generalised to
+    // N windows tearing down at once). The WindowManager therefore drives the three phases below
+    // itself: ask EVERY window to close first, then ONE shared drain, then release the clients — so no
+    // window's teardown pump can re-enter another window's final destruction.
+    //
+    // The defaults route to `close()` / report "already closed" / no-op, so a host with no async
+    // teardown (the scripted host, the unit fakes) satisfies the interface unchanged.
+
+    // Phase 1: unbind the frame sink and ask CEF to close this browser, WITHOUT pumping the loop.
+    // Idempotent. Default: the synchronous `close()`.
+    virtual void request_close() { close(); }
+
+    // Has the browser finished acknowledging the close (its `OnBeforeClose` has run), so its client
+    // may be released? A host with no async teardown is closed the moment it is asked. Default: true.
+    [[nodiscard]] virtual bool is_closed() const { return true; }
+
+    // Phase 2: drive ONE slice of the shared teardown message loop, delivering no frames. Process-wide
+    // for the CEF host (it drains EVERY closing browser at once); a no-op for a host with no message
+    // loop. Called in a single drain loop after phase 1 has requested close on every window.
+    virtual void pump_teardown() {}
 };
 
 // ------------------------------------------------------------------- the integrated pump schedule
@@ -153,6 +201,7 @@ public:
     void send_key(const KeyEvent& event) override;
     void set_focus(bool focused) override;
     bool pump(IBrowserFrameSink& sink) override;
+    void execute_script(std::string_view source) override;
     void close() override { alive_ = false; }
 
     // --- scripting -------------------------------------------------------------------------------
@@ -177,6 +226,8 @@ public:
     // --- what it recorded ------------------------------------------------------------------------
     [[nodiscard]] const std::vector<PointerEvent>& pointers() const { return pointers_; }
     [[nodiscard]] const std::vector<KeyEvent>& keys() const { return keys_; }
+    // The scripts a caller asked to run. Recorded, never executed — see execute_script above.
+    [[nodiscard]] const std::vector<std::string>& scripts() const { return scripts_; }
     [[nodiscard]] render::Extent2D last_logical_size() const { return last_logical_size_; }
     [[nodiscard]] DpiScale last_dpi() const { return last_dpi_; }
     [[nodiscard]] int resize_count() const { return resize_count_; }
@@ -202,6 +253,7 @@ private:
     std::vector<Step> steps_;
     std::vector<PointerEvent> pointers_;
     std::vector<KeyEvent> keys_;
+    std::vector<std::string> scripts_;
     render::Extent2D last_logical_size_{};
     DpiScale last_dpi_;
     int resize_count_ = 0;

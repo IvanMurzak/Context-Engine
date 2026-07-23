@@ -42,6 +42,7 @@
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -76,6 +77,17 @@ bool g_initialized = false;
 // switches; CEF then propagates the switches onto the renderer/GPU/utility subprocess command lines
 // it builds from the browser process's, so the whole tree logs to stderr. Never mutated after boot.
 bool g_verbose_logging = false;
+
+// The e10a containment counters (cef_shell.h § the containment counters). Both are written on the
+// CEF UI thread — which IS the owner thread here (`multi_threaded_message_loop=false` + the
+// integrated pump, so every callback runs inside the owner's CefDoMessageLoopWork) — and read by
+// the owner thread between pumps. Plain ints, deliberately: making them atomic would advertise a
+// cross-thread contract this single-threaded design does not have.
+int g_browsers_created = 0;
+int g_popups_suppressed = 0;
+// The e10a frame-delivery tripwire (cef_shell.h § the containment counters). Written on the same
+// thread as the two above, for the same reason it is a plain int.
+int g_frames_dropped_without_sink = 0;
 
 // --------------------------------------------------------------------------- modifier translation
 
@@ -557,7 +569,22 @@ public:
     void OnPaint(CefRefPtr<CefBrowser>, PaintElementType type, const RectList& dirty_rects,
                  const void* buffer, int width, int height) override
     {
-        if (sink_ == nullptr || buffer == nullptr || width <= 0 || height <= 0)
+        if (sink_ == nullptr)
+        {
+            // A LIVE, already-bound browser losing a frame is the e10a multi-window defect (see
+            // `pump()` below): with N browsers sharing ONE process-wide message loop, a paint
+            // delivered while this browser's sink was unbound vanished silently and its window
+            // never composited anything. Counted so the condition is observable instead of being
+            // inferred from a window that merely stays blank. The two excluded cases are normal and
+            // not losses: before the owner's first `pump()` (nothing is driving this window yet)
+            // and from `close()` onward (the window is going away; nothing would composite them).
+            if (ever_bound_ && !closing_ && !closed_)
+            {
+                ++g_frames_dropped_without_sink;
+            }
+            return;
+        }
+        if (buffer == nullptr || width <= 0 || height <= 0)
         {
             return;
         }
@@ -602,10 +629,24 @@ public:
         // SUPPRESS every stray window.open (03 §1). Tear-out does NOT ride window.open — it is a
         // PanelHost/Shell mechanism (04 §2) — so a popup reaching here is an accident, and letting
         // CEF create a default popup window would put an un-composited native window on screen.
+        //
+        // e10a: counted AND logged. With N windows the Shell is now genuinely in the business of
+        // creating windows, so "a window appeared that the Shell did not create" stops being an
+        // impossible state and becomes the exact thing this boundary exists to prevent — and a
+        // containment boundary nothing can observe is one nothing can prove.
+        ++g_popups_suppressed;
+        std::fprintf(stderr, "[shell-cef] popup SUPPRESSED: window.open may not create an "
+                             "unmanaged window (03 §1)\n");
         return true;
     }
 
-    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override { browser_ = browser; }
+    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override
+    {
+        browser_ = browser;
+        // Every browser this process creates passes through here — including one CEF might create
+        // for a popup, which is why this is the honest denominator for the suppression assertion.
+        ++g_browsers_created;
+    }
 
     void OnBeforeClose(CefRefPtr<CefBrowser> browser) override
     {
@@ -664,7 +705,29 @@ public:
     }
 
     // --- driving it ---------------------------------------------------------------------------
-    void set_sink(IBrowserFrameSink* sink) { sink_ = sink; }
+    // Bind (or unbind) the sink this browser's frames are delivered into. The binding OUTLIVES the
+    // pump call that made it — see `CefBrowserHostImpl::pump` for why that is load-bearing rather
+    // than a convenience, and `close()`/`~CefBrowserHostImpl` for the two places that clear it.
+    void set_sink(IBrowserFrameSink* sink)
+    {
+        if (closing_)
+        {
+            // Once closing, the sink stays unbound for good. This makes the post-close
+            // use-after-free impossible BY CONSTRUCTION rather than by caller discipline: a stray
+            // `pump()` after `close()` cannot re-arm a pointer into a compositor that is gone.
+            return;
+        }
+        sink_ = sink;
+        ever_bound_ = ever_bound_ || sink != nullptr;
+    }
+
+    // The host is closing: drop the sink and stop treating a sink-less paint as a lost frame. Both
+    // halves matter — see `CefBrowserHostImpl::close()`, which calls this before it pumps.
+    void begin_close()
+    {
+        sink_ = nullptr;
+        closing_ = true;
+    }
     void set_view(render::Extent2D logical_size, DpiScale dpi)
     {
         logical_size_ = logical_size;
@@ -705,6 +768,13 @@ private:
     CefRefPtr<CefMessageRouterBrowserSide> router_;
     std::unique_ptr<BridgeQueryHandler> bridge_handler_;
     bool popup_visible_ = false;
+    // True once a sink has ever been bound. It is what lets the OnPaint tripwire above tell a
+    // genuine lost frame from the benign paints CEF can produce before the owner loop first pumps
+    // this window.
+    bool ever_bound_ = false;
+    // Set by `begin_close()`, ahead of `closed_` (which only lands once CEF calls OnBeforeClose).
+    // The gap between the two is the close pump, and it is the whole reason this flag exists.
+    bool closing_ = false;
     bool closed_ = false;
     bool load_ended_ = false;
     bool load_failed_ = false;
@@ -853,6 +923,14 @@ public:
     {
     }
 
+    // `close()` is what UNBINDS the frame sink, which is why destruction must go through it even
+    // for a host the caller never closed explicitly (an `EditorWindow` that simply goes out of
+    // scope — the shape the other Shell smokes and the app itself use). CEF outlives this host: it
+    // keeps its own reference to the client and finishes tearing the browser down inside
+    // `CefShutdown()` (CE #319), so a client left holding a sink pointer into a destroyed
+    // compositor would be that same use-after-free one layer down. It is airtight here because
+    // `EditorWindow`'s compositor and its browser host are adjacent members of one object: nothing
+    // can pump CEF between the compositor's destructor and this one.
     ~CefBrowserHostImpl() override { close(); }
 
     [[nodiscard]] const char* name() const override { return "cef-windowed-osr"; }
@@ -940,8 +1018,25 @@ public:
 
     bool pump(IBrowserFrameSink& sink) override
     {
-        // The sink is live only for the duration of this call, which is what lets OnPaint deliver
-        // CEF's buffer straight through with no copy.
+        // THE SINK STAYS BOUND PAST THIS CALL (browser.h § IBrowserHost::pump). It is tempting to
+        // scope it to the call — one browser, one pump, one sink — and that is what e10a shipped
+        // first. It is WRONG as soon as there are two windows, because `CefDoMessageLoopWork()` is
+        // PROCESS-WIDE: it drains the pending work of EVERY browser in the process, not just this
+        // one. Window 0's pump therefore dispatches window 1's `OnPaint` — at which point window 1's
+        // own sink was still null, so its frame was dropped on the floor (OnPaint above). The owner
+        // loop pumps window 0 first and every tick's work accumulates during the inter-tick sleep,
+        // so window 0's call won that race essentially every time: window 1 never composited a
+        // single frame in 30 seconds, deterministically, on both CI legs.
+        //
+        // Keeping the binding live means whichever browser's pump happens to drain the loop, each
+        // frame reaches ITS OWN window's compositor. Delivery is still synchronous and still
+        // copy-free (the sink consumes CEF's buffer inside the callback), and still single-threaded:
+        // every `CefDoMessageLoopWork()` in this process runs on the one owner thread.
+        //
+        // LIFETIME: the caller must keep `sink` alive until `close()` or this host's destruction,
+        // both of which unbind it. `EditorWindow` satisfies that by construction — the sink is its
+        // own `compositor_` member and the host is its `browser_` member, so no pump can run between
+        // the compositor's destruction and the unbind in `~CefBrowserHostImpl`.
         client_->set_sink(&sink);
         // The integrated pump. PumpSchedule::should_pump carries the whole policy — run when CEF's
         // scheduled work is due, and run anyway on the UNCONDITIONAL floor when nothing is
@@ -951,23 +1046,83 @@ public:
         {
             CefDoMessageLoopWork();
         }
-        client_->set_sink(nullptr);
         return !client_->closed();
     }
 
-    void close() override
+    void execute_script(std::string_view source) override
     {
         CefRefPtr<CefBrowser> browser = client_->browser();
-        // Driving the message loop after CefShutdown is undefined behaviour, and a host destroyed
-        // during static teardown would do exactly that. Guarding on g_initialized makes a late
-        // close a no-op instead.
-        if (browser == nullptr || !g_initialized)
+        if (browser == nullptr)
+        {
+            return;
+        }
+        CefRefPtr<CefFrame> frame = browser->GetMainFrame();
+        if (frame == nullptr)
+        {
+            return;
+        }
+        // The script URL is what the renderer attributes errors to; naming this seam (rather than
+        // passing the app origin) keeps a Shell-injected script distinguishable from editor-core's
+        // own code in a console trace.
+        frame->ExecuteJavaScript(CefString(std::string(source)), "context-editor://shell/inject",
+                                 0);
+    }
+
+    void request_close() override
+    {
+        // Phase 1 of a serialised teardown (browser.h § teardown). UNBIND FIRST — `client_->begin_close()`
+        // drops the sink and latches `closing_`, so a frame delivered during the drain that follows is
+        // dropped instead of dispatched into a compositor that is going away (CE #319's shape). Then ask
+        // CEF to close, but DO NOT pump: the WindowManager pumps the shared loop exactly once for the
+        // whole teardown, so no per-window close-drain can advance another window into a re-entrant
+        // final destruction (the e10a Windows `!in_dtor_` abort). Idempotent.
+        client_->begin_close();
+        CefRefPtr<CefBrowser> browser = client_->browser();
+        // Closing after CefShutdown is UB (a host destroyed during static teardown); guarding on
+        // g_initialized makes a late close a no-op. `close_requested_` keeps a second call — the
+        // destructor's `close()` after the manager already closed us — from re-issuing CloseBrowser.
+        if (browser == nullptr || !g_initialized || close_requested_)
         {
             return;
         }
         browser->GetHost()->CloseBrowser(/*force_close*/ true);
-        // Pump the close through: OnBeforeClose is what releases the browser reference, and leaving
-        // it pending would leak the browser past CefShutdown.
+        close_requested_ = true;
+    }
+
+    [[nodiscard]] bool is_closed() const override
+    {
+        // Closed once CEF's OnBeforeClose has released the browser reference (`client_->closed()`),
+        // or once CEF itself is gone (a close during static teardown is a no-op that is already done).
+        return !g_initialized || client_->closed();
+    }
+
+    void pump_teardown() override
+    {
+        // Phase 2: one slice of the PROCESS-WIDE loop, no sink bound. Unconditional (not gated on
+        // should_pump) — teardown must drain every pending OnBeforeClose, not wait for a schedule.
+        // DoMessageLoopWork with nothing pending returns immediately, so an extra slice is free.
+        if (g_initialized)
+        {
+            CefDoMessageLoopWork();
+        }
+    }
+
+    void close() override
+    {
+        // The SINGLE-window / destructor path: request the close and drain THIS browser closed in one
+        // call, exactly as before. `~CefBrowserHostImpl` relies on it for a host that simply goes out
+        // of scope, and the sibling single-window smokes + the app's window 0 reach teardown through
+        // it. Multi-window teardown instead calls request_close()/pump_teardown() so the drain is
+        // SHARED across all windows (see the WindowManager) rather than run once per browser — which is
+        // the interleaving that faulted `!in_dtor_` on Windows. The unbind-before-pump invariant is
+        // preserved: request_close() calls begin_close() before this drain runs.
+        request_close();
+        // OnBeforeClose is what releases the browser reference; leaving it pending would leak the
+        // browser past CefShutdown. A no-op once request_close() already saw g_initialized false.
+        if (!g_initialized)
+        {
+            return;
+        }
         for (int i = 0; i < 200 && !client_->closed(); ++i)
         {
             CefDoMessageLoopWork();
@@ -977,6 +1132,9 @@ public:
 private:
     CefRefPtr<ShellCefClient> client_;
     CefRefPtr<ShellCefApp> app_;
+    // Set once CloseBrowser has been issued, so a second close request (the destructor's `close()`
+    // after the manager already tore us down) does not re-issue it.
+    bool close_requested_ = false;
 };
 
 } // namespace
@@ -1140,6 +1298,21 @@ std::unique_ptr<IBrowserHost> make_cef_browser_host(const CefShellOptions& optio
     }
     error.clear();
     return std::make_unique<CefBrowserHostImpl>(client, g_app);
+}
+
+int browsers_created()
+{
+    return g_browsers_created;
+}
+
+int popups_suppressed()
+{
+    return g_popups_suppressed;
+}
+
+int frames_dropped_without_sink()
+{
+    return g_frames_dropped_without_sink;
 }
 
 void shutdown()

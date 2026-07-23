@@ -28,6 +28,43 @@ The load-bearing property, stated first because the module is arranged around it
 `WindowManager` owns N `EditorWindow`s; each binds a native window to one OSR browser, one
 `WindowCompositor` and one `InputArbiter`. Window 0 hosts the app menu + welcome screen (D13).
 
+**Since M9 e10a that N is real, and `WindowManager` is also the REGISTRY** (`window_registry.h`).
+Windows are peers addressable by a minted `WindowId`; **window 0 is primary**; a window is created
+and destroyed at runtime through a factory the app binds (`bind_window_factory`), because only the
+app knows how to make a browser. Three properties are load-bearing, and each is asserted by
+`editor-shell-test_window_registry`:
+
+- **Every window gets its own of everything that carries identity.** Its own `BridgeRouter` +
+  handshake — so a **fresh editor-core instance** boots into it (03 §1: not a shared instance, not
+  `retainContext`) and a handler can always tell which window asked — and its own **wire connection**
+  to the daemon, so it has its own `origin`. e08a mints `origin` per WIRE CONNECTION, so N windows are
+  genuinely N origins; the wire half of that is proven by `editor-session-multiclient-t2`, the
+  registry half (a window reports its OWN connection's id, and two windows sharing one connection
+  collapse to ONE origin) by the registry test.
+- **A retired session outlives `CefShutdown`.** `destroy_window` closes the window — which closes its
+  browser — but MOVES the session's bridge, client and captured surfaces into a graveyard emptied
+  only by `~WindowManager`; `pump_once` does the same for a window that died on its own, and
+  `shutdown()` for every window still open. The app must therefore destroy the manager AFTER
+  `shell::cef::shutdown()`, which `editor_main.cpp` does by declaration order. This is **CE #319
+  generalised**: that bug was one process-wide teardown freeing a router CEF was still dispatching
+  to; N windows add a MID-PROCESS destroy of the same shape, and `CloseBrowser` returning is not
+  proof CEF is done with the client.
+- **Ids are never reused.** A stale id resolves to nullptr forever rather than silently addressing a
+  different window — which is what a vector index would do to a panel e10b moved.
+
+**Creation failure is LOUD** (03 §7): `create_window` never partially adopts, reports one of
+`no-factory` / `factory-failed` / `incomplete-parts` / `limit-reached`, fires
+`on_window_create_failed` exactly once with the SOURCE window, and leaves the registry usable. e10a
+builds that seam and the report; **e10b owns the behaviour** (degrade to a floating Dockview group
+inside the source window). It is deliberately a C++ callback rather than a new bridge method: a new
+boot-time bridge surface must be installed in EVERY smoke or the router's deny-unknown-methods
+default reddens the ones that were not updated (the e06d regression). Live windows are capped at
+`kMaxEditorWindows` (16) — containment, not a UI limit.
+
+**What e10a does NOT do:** no panel moves. Tear-out, rehome, cross-window drag and per-window layout
+persistence are e10b–e10d, which target the registry above. Nothing in the app triggers
+`create_window` yet; the factory is bound and exercised by the smokes.
+
 Production runs `multi_threaded_message_loop=false` with an **integrated pump on the shell's main
 thread** — `CefDoMessageLoopWork` driven from `EditorWindow::pump_once`, scheduled by
 `OnScheduleMessagePumpWork`. The spike's "prod = multi-threaded + mutex" caveat is **rejected** by the
@@ -209,8 +246,32 @@ to be kept in sync.
 - **Never `SendExternalBeginFrame`** (L-41, cef#4033): CEF-internal pacing only.
 
 `OnPaint` delivers straight into the compositor with **no copy**: it runs inside
-`CefDoMessageLoopWork()`, which runs inside `pump()`, so the sink is live and CEF's buffer is valid
-for exactly that window.
+`CefDoMessageLoopWork()`, on the one owner thread, so CEF's buffer is valid for exactly the duration
+of the callback and the sink consumes it there.
+
+**The frame sink is bound for the browser's LIFETIME, not for the duration of one `pump()` call**
+(M9 e10a — the defect the multiwindow smoke caught on its own first CI run). `CefDoMessageLoopWork()`
+is **process-wide**: it drains the pending work of *every* browser in the process, so window 0's pump
+dispatches window 1's `OnPaint`. Binding the sink only while a window pumps its own browser therefore
+throws away every frame the loop happens to deliver during a *sibling* window's pump — and since the
+owner loop pumps window 0 first and each tick's work accumulates during the inter-tick sleep, window 0
+won that race essentially always: secondary windows composited **nothing at all**, deterministically,
+on both CI legs, while their bridges and handshakes worked perfectly (which is what made the symptom
+read as "the second window is blank" rather than "frames are being dropped").
+
+Two rules fall out and both are enforced in `cef/src/cef_shell.cpp`:
+
+- `IBrowserHost::pump(sink)` **retains** `sink`; the caller keeps it alive until `close()`.
+  `EditorWindow` satisfies this by construction — the sink is its own `compositor_` member and the
+  host is its `browser_` member.
+- `close()` **unbinds before it pumps**, not after. It also runs from the host's destructor, by which
+  point the owner's compositor is already gone, and it drives `CefDoMessageLoopWork()` — so unbinding
+  late would dispatch a paint into freed memory, CE #319's shape one layer down. Once closing, the
+  sink can never be re-bound.
+
+`shell::cef::frames_dropped_without_sink()` counts any frame delivered to a live, already-bound
+browser with no sink attached — i.e. the defect above, made observable. The multiwindow smoke asserts
+it is **zero**, so a regression reports itself instead of degrading to a blank window.
 
 ## 6. The D10 shell boundary
 
@@ -297,6 +358,8 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
 | `editor-shell-test_user_config` | e06d: the per-user config store - the total reader (absent / malformed / non-object / oversized), the merge-preserving read-modify-write (a member from a FUTURE build survives), the recents-and-theme co-existence regression, the CLOSED settable vocabulary (`config.unknown_key` / `config.bad_value` / `config.write_failed`), unique staging names, the generation watch (identical rewrite and cosmetic reformat are NOT changes), and the full `config.*` binding over a real router |
 | `editor-shell-config-writers` | e06d: the C-F14 SINGLE-WRITER source gate - exactly one TU writes `~/.context/config.json`, editor-core carries no client-side persistence API, and one module names `config.set` (`tools/check_config_writers.py`) |
 | `editor-cef-smoke-shell` | The LIVE CEF half: a real windowless browser through the real integrated pump, its `OnPaint` frames composited + presented, input round-tripped, a live resize repainted (`editor-cef-smoke` job, Windows/Linux) |
+| `editor-shell-test_window_registry` | e10a: the registry — window 0 primary, ids minted in order and NEVER reused, all four create-failure classes reported once with the source window (and the registry still usable after four in a row), the live-window cap, per-window `origin` reporting, and the CE #319 lifetime rule in both directions: a destroyed window's browser dies NOW while its session is retired until the manager does, across 25 create/destroy cycles and across `shutdown()` with windows still open |
+| `editor-cef-smoke-shell-multiwindow` | e10a, the LIVE half a fake cannot reach: a SECOND real CEF browser booting its OWN editor-core instance (two DIFFERENT round-tripped handshake nonces), a REAL renderer `window.open` refused by `OnBeforePopup` with NO browser created, and a MID-PROCESS destroy followed by another create (`editor-cef-smoke` job, Windows/Linux) |
 
 All `editor-shell-*` tests are a plain (non-gate) family: the `build` job's general ctest step runs
 them on all three OS legs and `--preset dev` builds them, so **no `ci.yml` `--target` bookkeeping**.
@@ -305,7 +368,9 @@ itself is built transitively by the jobs that build `context_editor` / the CEF s
 **no `ci.yml` change at all**.
 `editor-cef-smoke-shell` is the exception and IS on the `editor-cef-smoke` job's hand-maintained
 `--target` list — the "Not Run = RED" tripwire. So are its siblings
-`editor-cef-smoke-shell-restore` (e05d4), `-palette` (e07d) and `-settings` (e06d).
+`editor-cef-smoke-shell-restore` (e05d4), `-palette` (e07d), `-settings` (e06d) and
+`-multiwindow` (e10a). `editor-shell-test_window_registry` is NOT: it is a plain
+`editor-shell-*` family member like every other unit suite.
 
 ## 12. The per-user config — `~/.context/config.json` (M9 e06d, C-F14)
 
@@ -471,8 +536,12 @@ Named so the gaps are visible rather than assumed:
   no live content yet.
 - **No keymap.** The focus-class rule is implemented and the resolver seam is in place; the command
   keymap itself lands with **e07**, so every unresolved key currently falls through to the browser.
-- **No multi-window UI.** `WindowManager` owns N windows and the state file indexes them, but nothing
-  yet creates a second one (tear-out is 04's).
+- **No multi-window UI.** ✅ **HALF-LANDED with e10a**: the Shell can now CREATE and DESTROY a second
+  native window on demand, each with its own fresh editor-core instance, its own bridge and its own
+  `origin`, and `window.open` cannot produce an unmanaged one. What is still missing is everything
+  that MOVES a panel — the tear-out gesture, rehome, cross-window drag and per-window layout
+  persistence (e10b–e10d) — so nothing in the running app asks for a second window yet, and both
+  windows currently publish their layout into the same editor-state slot.
 - **No Windows accelerated OSR** — deferred by owner ruling pending gfx-rs/wgpu-native#621.
 - ~~**No app scheme.**~~ ✅ **LANDED with e05c.** `context-editor` is registered in every process
   (`STANDARD|SECURE|CORS_ENABLED|FETCH_ENABLED`), `context-editor://app/…` serves editor-core's built

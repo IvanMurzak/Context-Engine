@@ -4,6 +4,8 @@
 #include "context/editor/shell/shell.h"
 
 #include <cstddef>
+#include <cstdio>
+#include <string>
 #include <utility>
 
 namespace context::editor::shell
@@ -303,6 +305,37 @@ void EditorWindow::close()
     alive_ = false;
 }
 
+void EditorWindow::begin_close()
+{
+    // Phase 1: unbind the browser's sink and ask CEF to close it, but do NOT pump — the manager
+    // drives ONE shared drain for every closing window (browser.h § teardown). The compositor and
+    // backend stay attached until finish_close(): the browser's sink is already unbound here, so no
+    // frame reaches the compositor during the drain that follows.
+    if (browser_ != nullptr)
+    {
+        browser_->request_close();
+    }
+}
+
+bool EditorWindow::browser_closed() const
+{
+    return browser_ == nullptr || browser_->is_closed();
+}
+
+void EditorWindow::finish_close()
+{
+    // Phase 3: the non-CEF teardown, run after the shared drain confirmed the browser closed. The
+    // browser is deliberately NOT re-closed here (request_close() already did, and the drain
+    // completed it); resetting this window destroys the host, whose destructor close() is then a
+    // no-op on the already-closed browser.
+    compositor_.detach();
+    if (backend_ != nullptr)
+    {
+        backend_->close();
+    }
+    alive_ = false;
+}
+
 // ---------------------------------------------------------------------------------- WindowManager
 
 WindowManager::WindowManager(std::filesystem::path project_root)
@@ -311,7 +344,21 @@ WindowManager::WindowManager(std::filesystem::path project_root)
     store_.load();
 }
 
+// The graveyard is emptied HERE and nowhere else (shell.h § the class note / window_registry.h
+// § LIFETIME RULE). By the time this runs the app has already called `shell::cef::shutdown()`, so
+// CEF has finished dispatching to every client that held one of these routers.
+WindowManager::~WindowManager() = default;
+
 EditorWindow& WindowManager::add(std::unique_ptr<EditorWindow> window)
+{
+    // add_session always push_backs, so the adopted window IS the last entry — no lookup, and no
+    // null case to guard.
+    add_session(std::move(window), WindowSessionParts{});
+    return *windows_.back().window;
+}
+
+WindowId WindowManager::add_session(std::unique_ptr<EditorWindow> window,
+                                    WindowSessionParts&& session)
 {
     const std::size_t index = window->state_index();
     const EditorState& state = store_.state();
@@ -319,13 +366,306 @@ EditorWindow& WindowManager::add(std::unique_ptr<EditorWindow> window)
     {
         window->backend().apply_placement(state.windows[index]);
     }
-    windows_.push_back(std::move(window));
-    return *windows_.back();
+
+    WindowEntry entry;
+    entry.id = next_id_++;
+    entry.surfaces = std::move(session.surfaces);
+    entry.bridge = std::move(session.bridge);
+    entry.daemon_client = std::move(session.daemon_client);
+    entry.window = std::move(window);
+    windows_.push_back(std::move(entry));
+    return windows_.back().id;
 }
 
-EditorWindow* WindowManager::window(std::size_t index)
+void WindowManager::bind_window_factory(WindowFactory factory)
 {
-    return index < windows_.size() ? windows_[index].get() : nullptr;
+    factory_ = std::move(factory);
+}
+
+void WindowManager::on_window_create_failed(WindowCreateFailureSink sink)
+{
+    failure_sink_ = std::move(sink);
+}
+
+void WindowManager::report_failure(WindowCreateFailure failure)
+{
+    ++create_failures_;
+    // LOUD by default (03 §7): the report reaches stderr even when nothing bound a sink, because a
+    // window that silently did not open is indistinguishable from one that opened offscreen.
+    std::fprintf(stderr, "[shell] %s\n", describe(failure).c_str());
+    if (failure_sink_)
+    {
+        failure_sink_(failure);
+    }
+    last_failure_ = std::move(failure);
+}
+
+WindowCreateResult WindowManager::create_window(const WindowSpec& spec, WindowId source)
+{
+    WindowCreateResult result;
+    result.id = kInvalidWindowId;
+
+    const auto fail = [&](WindowCreateOutcome outcome, std::string error)
+    {
+        result.outcome = outcome;
+        result.error = std::move(error);
+        WindowCreateFailure failure;
+        failure.outcome = outcome;
+        failure.source = source;
+        failure.title = spec.title;
+        failure.error = result.error;
+        report_failure(std::move(failure));
+        return result;
+    };
+
+    if (windows_.size() >= kMaxEditorWindows)
+    {
+        return fail(WindowCreateOutcome::limit_reached,
+                    "the editor already has the maximum of " + std::to_string(kMaxEditorWindows) +
+                        " windows open");
+    }
+    if (factory_ == nullptr)
+    {
+        return fail(WindowCreateOutcome::no_factory,
+                    "no window factory is bound — this build cannot create a window");
+    }
+
+    WindowSessionParts parts;
+    std::string error;
+    if (!factory_(spec, parts, error))
+    {
+        return fail(WindowCreateOutcome::factory_failed,
+                    error.empty() ? std::string("the window factory reported a failure with no "
+                                                "reason")
+                                  : error);
+    }
+    if (!validate_window_parts(parts, error))
+    {
+        // A factory that says "yes" and hands back nothing usable is a DIFFERENT defect from one
+        // that says "no", and it is reported as such rather than crashing on the null browser.
+        return fail(WindowCreateOutcome::incomplete_parts, error);
+    }
+
+    EditorWindowConfig config;
+    config.state_index = spec.state_index;
+    auto window = std::make_unique<EditorWindow>(std::move(parts.backend), std::move(parts.browser),
+                                                 config);
+    if (spec.placement.has_value())
+    {
+        window->backend().apply_placement(*spec.placement);
+    }
+    // The window has NO present path yet: attaching one needs an RHI the registry does not own, so
+    // the caller does it (exactly as the app does for window 0). A window with no present path
+    // composites nothing, which is why the factory's diagnostic is surfaced by the caller too.
+    result.id = add_session(std::move(window), std::move(parts));
+    result.outcome = WindowCreateOutcome::created;
+    result.error.clear();
+    return result;
+}
+
+void WindowManager::retire(WindowEntry& entry)
+{
+    if (entry.window != nullptr)
+    {
+        // The browser has ALREADY been asked to close and the shared loop drained (by the caller —
+        // close_and_retire() for a single window, shutdown()'s phase 1+2 for all of them). All that
+        // remains is the non-CEF teardown and destroying the host, whose destructor close() is a
+        // no-op on the already-closed browser.
+        entry.window->finish_close();
+        entry.window.reset();
+    }
+    // THE CE #319 DISCIPLINE, generalised to a mid-process destroy: the browser is closed but CEF
+    // is not necessarily finished with the client that holds this router — it finishes inside
+    // CefShutdown. So the session is moved to the graveyard and freed only by ~WindowManager, which
+    // the app sequences after shell::cef::shutdown().
+    RetiredSession retired;
+    retired.surfaces = std::move(entry.surfaces);
+    retired.bridge = std::move(entry.bridge);
+    retired.daemon_client = std::move(entry.daemon_client);
+    if (retired.bridge != nullptr || retired.daemon_client != nullptr || !retired.surfaces.empty())
+    {
+        retired_.push_back(std::move(retired));
+    }
+}
+
+void WindowManager::drain_until(const std::function<bool()>& done)
+{
+    // `CefDoMessageLoopWork()` is PROCESS-WIDE, so pumping through ANY one live window's browser
+    // drains every closing browser at once — which is exactly why this is ONE shared drain rather
+    // than a pump per window: a per-window close-drain advances a SIBLING window's teardown and, on
+    // Windows, reaches a CEF ref-counted object's final Release inside its own destructor (the
+    // `!in_dtor_` abort; CE #319 generalised). The budget mirrors the old per-window 200-slice cap,
+    // scaled by the live count so a many-window teardown keeps the same per-window headroom; a host
+    // with no message loop reports closed immediately, so this runs zero slices for the unit fakes.
+    const int budget = 200 * (static_cast<int>(windows_.size()) + 1);
+    for (int i = 0; i < budget && !done(); ++i)
+    {
+        IBrowserHost* pump = nullptr;
+        for (WindowEntry& entry : windows_)
+        {
+            if (entry.window != nullptr)
+            {
+                pump = entry.window->browser_or_null();
+                if (pump != nullptr)
+                {
+                    break;
+                }
+            }
+        }
+        if (pump == nullptr)
+        {
+            break;
+        }
+        pump->pump_teardown();
+    }
+}
+
+bool WindowManager::all_browsers_closed() const
+{
+    for (const WindowEntry& entry : windows_)
+    {
+        if (entry.window != nullptr && !entry.window->browser_closed())
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+void WindowManager::close_and_retire(WindowEntry& entry)
+{
+    // Single-window teardown (a mid-process destroy, or a window that died on its own). Split the
+    // CloseBrowser from the drain — phase 1 asks THIS browser to close, phase 2 drains ONLY it closed
+    // (siblings keep painting: they were not asked to close, so the process-wide pump does no teardown
+    // work for them), phase 3 retires. Same shape as shutdown() below, for one window.
+    if (entry.window != nullptr)
+    {
+        EditorWindow* window = entry.window.get();
+        window->begin_close();
+        drain_until([window] { return window->browser_closed(); });
+    }
+    retire(entry);
+}
+
+WindowDestroyResult WindowManager::destroy_window(WindowId id)
+{
+    WindowDestroyResult result;
+    if (is_primary(id))
+    {
+        result.outcome = WindowDestroyOutcome::primary_refused;
+        result.error = "window 0 is primary (it hosts the app menu + welcome screen); it closes "
+                       "with the app, not on its own";
+        return result;
+    }
+    for (std::size_t i = 0; i < windows_.size(); ++i)
+    {
+        if (windows_[i].id != id)
+        {
+            continue;
+        }
+        close_and_retire(windows_[i]);
+        windows_.erase(windows_.begin() + static_cast<std::ptrdiff_t>(i));
+        result.outcome = WindowDestroyOutcome::destroyed;
+        result.error.clear();
+        return result;
+    }
+    result.outcome = WindowDestroyOutcome::unknown_window;
+    result.error = "no live window carries id " + std::to_string(static_cast<unsigned long long>(id));
+    return result;
+}
+
+WindowManager::WindowEntry* WindowManager::find(WindowId id)
+{
+    for (WindowEntry& entry : windows_)
+    {
+        if (entry.id == id)
+        {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+const WindowManager::WindowEntry* WindowManager::find(WindowId id) const
+{
+    for (const WindowEntry& entry : windows_)
+    {
+        if (entry.id == id)
+        {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+EditorWindow* WindowManager::window(WindowId id)
+{
+    WindowEntry* entry = find(id);
+    return entry != nullptr ? entry->window.get() : nullptr;
+}
+
+std::vector<WindowId> WindowManager::window_ids() const
+{
+    std::vector<WindowId> ids;
+    ids.reserve(windows_.size());
+    for (const WindowEntry& entry : windows_)
+    {
+        ids.push_back(entry.id);
+    }
+    return ids;
+}
+
+std::uint64_t WindowManager::window_origin(WindowId id) const
+{
+    const WindowEntry* entry = find(id);
+    if (entry == nullptr)
+    {
+        return 0;
+    }
+    // A session that owns its connection answers from it — the id the DAEMON minted, never a value
+    // the Shell chose for itself.
+    if (entry->daemon_client != nullptr)
+    {
+        return entry->daemon_client->client_id();
+    }
+    return entry->origin;
+}
+
+void WindowManager::set_window_origin(WindowId id, std::uint64_t origin)
+{
+    if (WindowEntry* entry = find(id))
+    {
+        entry->origin = origin;
+    }
+}
+
+std::size_t WindowManager::distinct_origins() const
+{
+    std::vector<std::uint64_t> seen;
+    for (const WindowEntry& entry : windows_)
+    {
+        const std::uint64_t origin = window_origin(entry.id);
+        if (origin == 0)
+        {
+            // 0 is "no identity" (e08a: it also means "not attached"), so it is never counted as
+            // one — two unattached windows are not two origins.
+            continue;
+        }
+        bool known = false;
+        for (const std::uint64_t other : seen)
+        {
+            if (other == origin)
+            {
+                known = true;
+                break;
+            }
+        }
+        if (!known)
+        {
+            seen.push_back(origin);
+        }
+    }
+    return seen.size();
 }
 
 bool WindowManager::pump_once(std::uint64_t now_us)
@@ -333,7 +673,7 @@ bool WindowManager::pump_once(std::uint64_t now_us)
     ++pumps_;
     for (std::size_t i = 0; i < windows_.size();)
     {
-        EditorWindow& window = *windows_[i];
+        EditorWindow& window = *windows_[i].window;
         const bool alive = window.pump_once(now_us);
         if (window.placement_dirty())
         {
@@ -342,6 +682,10 @@ bool WindowManager::pump_once(std::uint64_t now_us)
         }
         if (!alive)
         {
+            // A window that died on its own is retired exactly like an explicitly destroyed one:
+            // its bridge must not be freed while CEF may still reach it. close_and_retire drains its
+            // browser closed first (a browser that outlived its window still needs its OnBeforeClose).
+            close_and_retire(windows_[i]);
             windows_.erase(windows_.begin() + static_cast<std::ptrdiff_t>(i));
             continue;
         }
@@ -363,9 +707,30 @@ void WindowManager::shutdown()
         return;
     }
     shut_down_ = true;
-    for (std::unique_ptr<EditorWindow>& window : windows_)
+
+    // Teardown in THREE phases, serialised so N browsers close together instead of one at a time.
+    // The old code retired each window in turn, and each retire drove a FULL CloseBrowser + drain —
+    // so window 0's drain ran the process-wide `CefDoMessageLoopWork()` to completion while window 1
+    // was still open, and on Windows that reached a CEF ref-counted object's final Release inside its
+    // own destructor (the `!in_dtor_` abort; CE #319 generalised to N windows). Asking every browser
+    // to close FIRST, then draining ONCE, then releasing, is CEF's own multi-browser shutdown shape
+    // and removes that interleaving.
+
+    // Phase 1: ask every window's browser to close (unbind its sink + CloseBrowser), pumping NOTHING.
+    for (WindowEntry& entry : windows_)
     {
-        window->close();
+        if (entry.window != nullptr)
+        {
+            entry.window->begin_close();
+        }
+    }
+    // Phase 2: ONE shared drain that completes every window's pending OnBeforeClose.
+    drain_until([this] { return all_browsers_closed(); });
+    // Phase 3: finish + RETIRE each session to the graveyard — still BEFORE shell::cef::shutdown() in
+    // the app, so no router is freed while CEF may still reach it (CE #319, one per open window).
+    for (WindowEntry& entry : windows_)
+    {
+        retire(entry);
     }
     windows_.clear();
     // Unconditional, ignoring the debounce: waiting out a quiet period on the way down would just

@@ -254,6 +254,69 @@ void test_propagation_and_echo_suppression_and_play()
     remove_tree(project);
 }
 
+// ------------------------------------- 2b. N windows are N origins (M9 e10a, over a REAL wire)
+//
+// e10a makes N native editor windows real, and each one opens its OWN wire connection to the daemon
+// precisely so it has its OWN `origin` (the Shell's window factory in `editor_main.cpp` calls
+// `attach_to_project` per window). That is the premise every later cross-window drill rests on —
+// e10c/e10d's echo-suppression checks are meaningless if two windows share one identity — and it is
+// only true because ids are minted PER WIRE CONNECTION, which nothing but a real daemon can show.
+//
+// The registry's half (each window REPORTS its own connection's id, and two windows sharing one
+// connection collapse to one origin) is asserted CEF-free in `editor-shell-test_window_registry`.
+// This is the wire half: two connections to ONE daemon on ONE project get two different, non-zero
+// ids — deliberately checked here, in the drill that owns the `origin` contract, rather than
+// duplicated into a second daemon-spawning test.
+void test_two_windows_get_distinct_wire_origins()
+{
+    const fs::path project = itest::make_temp_project("e10a-window-origins");
+    ctest_proc::Process daemon = spawn_daemon(project, std::string());
+    CHECK(ctest_proc::valid(daemon));
+    if (!ctest_proc::valid(daemon))
+    {
+        remove_tree(project);
+        return;
+    }
+
+    std::string error;
+    // Two attaches, exactly as two windows of one editor make them.
+    const std::unique_ptr<client::Client> window0 = attach_agent(project, "session", error);
+    const std::unique_ptr<client::Client> window1 = attach_agent(project, "session", error);
+    CHECK(window0 != nullptr);
+    CHECK(window1 != nullptr);
+    if (window0 != nullptr && window1 != nullptr)
+    {
+        // Non-zero: 0 is the daemon itself AND "not attached", so it is never an identity.
+        CHECK(window0->client_id() > 0);
+        CHECK(window1->client_id() > 0);
+        // DISTINCT: the whole point. Same daemon, same project, same process — different wires.
+        CHECK(window0->client_id() != window1->client_id());
+
+        // ...and the identity is LIVE, not just a number handed out at attach: a change made over
+        // window 1's wire publishes a fact stamped with window 1's origin, which is what makes
+        // window 0 apply it and window 1 drop it as its own echo.
+        Json params = Json::object();
+        Json ids = Json::array();
+        ids.push_back(Json(std::string("root/from-window-1")));
+        params.set("ids", std::move(ids));
+        CHECK(window1->call("editor.select", std::move(params), error).has_value());
+
+        const std::vector<Json> facts =
+            collect_facts(*window0, "session", itest::scaled_timeout_ms(5000));
+        const std::optional<Json> fact = last_fact(facts, "selection-changed");
+        CHECK(fact.has_value());
+        if (fact.has_value())
+        {
+            CHECK(static_cast<std::uint64_t>(fact->at("origin").as_int()) == window1->client_id());
+            CHECK(static_cast<std::uint64_t>(fact->at("origin").as_int()) != window0->client_id());
+        }
+    }
+
+    CHECK(run_cli({"attach", "--project", project.string(), "--editor-session", "--shutdown"}) == 0);
+    reap(daemon);
+    remove_tree(project);
+}
+
 // -------------------------------------------------- 3. persistence across a daemon restart
 
 void test_session_state_survives_a_daemon_restart()
@@ -370,6 +433,7 @@ void test_corrupt_session_file_recovers_loudly_without_blocking_the_boot()
 int main()
 {
     test_propagation_and_echo_suppression_and_play();
+    test_two_windows_get_distinct_wire_origins();
     test_session_state_survives_a_daemon_restart();
     test_corrupt_session_file_recovers_loudly_without_blocking_the_boot();
     ITEST_MAIN_END();
