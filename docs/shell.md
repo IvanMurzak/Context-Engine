@@ -334,6 +334,68 @@ Three properties are worth knowing because each fixes a real defect:
 The store is polled from the owner loop like the keybindings and themes watches, so a theme picked in
 one editor window becomes visible to another without a restart.
 
+## 13. The two notification banners (M9 e14d, design 07 §4 / 08)
+
+Two strips the editor can raise: the **notify-only update banner** and the **daemon-lost read-only
+banner**. Both are Shell-owned STATE served over the privileged bridge (`update.state`,
+`daemon.linkState`) and rendered by editor-core (`core/src/banners.ts`) on the welcome screen, in the
+editor's fixed top strip, and — for updates — in Settings § Updates.
+
+**The update check is notify-only (O3, owner-confirmed 2026-07-22).** One HTTPS GET against the
+latest published release, a LOCAL version comparison, and a click-through to the downloads page.
+There is no in-app updater and no download; that is post-M9.
+
+**The privacy commitment is the feature, and it is proven rather than stated** (08 threat row,
+*Update-check privacy*: "notify-only version GET, no identifiers"). Four properties make it checkable:
+
+- **The request is a compile-time CONSTANT.** `build_release_check_request()` takes no arguments and
+  reads no host state — not the running version, not the OS, not a locale, not any machine / install /
+  user id, and it carries no query string and no body. Every Context Editor on every machine emits
+  byte-identical bytes, which is the strongest available claim: the server cannot tell two users
+  apart because the two requests are the same. `editor-shell-test_banners` golden-compares the whole
+  request (method, URL, every header, body) via `canonical_request_text()`, so ANY addition fails —
+  and each layer of that suite was falsified by planting a violation, not by inspection.
+- **The comparison is local.** The endpoint is asked what the latest release is; it is never told
+  what we run.
+- **The OS transport adds nothing.** `native_net.cpp` drives WinHTTP with a NULL user agent, NULL
+  accept types, cookies and authentication disabled, and the autologon policy set to HIGH — so no
+  default `User-Agent`, no `Accept: */*`, and never the signed-in user's credentials. Nothing in C++
+  can observe what WinHTTP put on the wire, so those four are pinned by the source gate
+  `tools/check_release_request.py` (ctest `editor-shell-release-request`), which also refuses a
+  second request builder and any header literal in the transport.
+- **editor-core may not make the request.** A renderer `fetch()` would look cleaner and would be a
+  privacy REGRESSION: Chromium attaches its own `User-Agent`, `Accept-Language` and client hints
+  beneath the JavaScript. The same gate refuses any network primitive in `src/editor/webui/**` (a
+  same-origin relative `fetch` — the T1 harness reporting to its own driver — is the one carve-out,
+  and it is carved out by the ARGUMENT's shape, not by the file being a test).
+
+**No new dependency.** The transport is the platform's own HTTPS client (WinHTTP, Windows SDK):
+nothing is added to `src/vcpkg.json` or `tools/license-allowlist.json`, so design 08 §3's standing
+owner-approval gate for a new dependency is not reached. macOS and Linux report an honest "not wired
+on this platform yet" until e12 brings their shells up — the same gap `native_pick_folder()` and the
+window backend leave — and the banner then says "not checked" rather than implying the build is
+current.
+
+**Two behaviours that look like omissions and are not.** (1) A FAILED check renders no banner; it is
+reported in Settings § Updates instead, because a strip on every offline launch is how the notice
+that matters gets ignored. (2) Dismissal is SESSION-scoped and deliberately not persisted — the
+config document has a closed settable vocabulary and one writer (§ 12), and a durable dismissal would
+have to answer "until which version?", a product question notify-only does not pose.
+
+**The daemon-lost banner reads e14a, it does not drive it.** `make_daemon_link_probe(lifecycle)`
+projects `DaemonLifecycle::read_only()` / `reconnect_attempts()` / `ownership()`; the backoff ladder
+and the read-only policy stay entirely in `daemon_lifecycle.h`. The probe is bound ONLY in project
+mode, which is a correctness point rather than an optimisation: `read_only()` is true whenever the
+Shell is not live read-write, and on the WELCOME screen that is always — no project is open, so there
+is no daemon to have lost. A daemon can only be LOST once one was wanted.
+
+**Every live CEF smoke installs `BannerBridge`.** editor-core asks for both banner states during
+boot and the router denies unknown methods by default, so an uninstalled surface would trip the
+smokes' strict `bridge.refused() == 0` invariant even though the renderer degrades gracefully — the
+exact regression e06d shipped with its config surface. The smokes bind neither collaborator, so the
+surface honestly reports "no update channel" and a live link: no network call, and no banner painted
+over the surface whose per-pixel coverage those legs assert.
+
 ## 9. Why the blocking smoke opens no window
 
 The Windows CI legs run on a self-hosted runner installed as a LocalSystem service — Session 0. There

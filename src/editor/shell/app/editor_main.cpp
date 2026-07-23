@@ -12,6 +12,7 @@
 #include "context/editor/client/arbitration.h" // e14b: the D15/C-F23 presence marker + focus watcher
 #include "context/editor/client/subscription.h"
 #include "context/editor/shell/app_scheme.h"
+#include "context/editor/shell/banners.h"
 #include "context/editor/shell/browser.h"
 #include "context/editor/shell/daemon_lifecycle.h"
 #include "context/editor/shell/editor_state_bridge.h"
@@ -442,6 +443,35 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // --- the two notification banners (e14d, design 07 §4 / 08 threat row) ------------------------
+    //
+    // THE UPDATE NOTICE runs its ONE HTTPS GET on a worker thread started here and adopted by the
+    // owner loop below, so a boot-time network round trip never stalls the first frame. The request is
+    // a byte-identical constant carrying no identifier of any kind (banners.h + the
+    // `editor-shell-release-request` gate); the version comparison happens locally.
+    //
+    // THE DAEMON-LOST PROBE IS BOUND ONLY IN PROJECT MODE, and that is a correctness point rather than
+    // an optimisation: `DaemonLifecycle::read_only()` is true whenever the Shell is not live
+    // read-write, which on the WELCOME screen is always — no project is open, so there is no daemon to
+    // have lost. Binding it there would paint a permanent "reconnecting" banner on the app's front
+    // door. A daemon can only be LOST once one was wanted.
+    shell::ReleaseNotice release_notice;
+    release_notice.bind_transport(shell::native_https_get);
+    release_notice.bind_url_opener(shell::native_open_url);
+    release_notice.begin_check();
+
+    shell::BannerBridge banners;
+    banners.bind_release_notice(&release_notice);
+    if (project_mode)
+    {
+        banners.bind_link_probe(shell::make_daemon_link_probe(lifecycle));
+    }
+    if (!banners.install(bridge))
+    {
+        std::fprintf(stderr, "context_editor: could not install the banner bridge surface\n");
+        return 1;
+    }
+
     // --- the LIVE daemon feed + the lifecycle handlers (the Problems read path, e14a) -------------
     //
     // The Shell subscribes as an ordinary client (D10) and forwards what arrives into the panel models;
@@ -649,6 +679,9 @@ int main(int argc, char** argv)
         // THIS window notices, so `config.get` serves the current document rather than the one it read
         // at boot.
         (void)user_config.poll();
+        // e14d: adopt the update check's result the frame it lands. Cheap — one integer compare while
+        // nothing is pending, and it runs at most once per launch (the check is one-shot).
+        (void)release_notice.poll();
         if (options.max_frames > 0 && frames >= options.max_frames)
         {
             break;

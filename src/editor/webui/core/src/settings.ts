@@ -40,6 +40,8 @@ import {
     type KitBadge,
     type KitToastRegion,
 } from "../../kit/src/index.js";
+import { renderUpdateBanner } from "./banners.js";
+import type { UpdateState } from "./banners.js";
 
 /** The roster id this panel is registered under (gui/contract/src/builtin_roster.cpp). */
 export const SETTINGS_PANEL_ID = "builtin.settings";
@@ -97,6 +99,19 @@ export interface SettingsPanelOptions {
      * and this module asks for answers, not for the environment.
      */
     readonly systemThemeId: () => string;
+    /**
+     * The e14d update state, as the Shell last reported it (`update.state`).
+     *
+     * `undefined`/`null` means "this Shell has no update surface" and renders the honest empty state.
+     * A LATER answer arrives through `reportUpdate` rather than through a promise this module would
+     * await — same discipline as `reportSave`: everything asynchronous is the caller's, which is what
+     * keeps the whole panel provable in the browser T1 tier with no bridge and no timer.
+     */
+    readonly update?: UpdateState | null;
+    /** Open the downloads page (notify-only, O3 — there is no in-app updater to invoke). */
+    readonly onOpenDownloads?: () => void;
+    /** Hide the update notice for this session. */
+    readonly onDismissUpdate?: () => void;
 }
 
 export interface SettingsPanelMount {
@@ -114,6 +129,14 @@ export interface SettingsPanelMount {
     selectTab(tabId: string): void;
     /** Report the outcome of the persist request this panel triggered (boot.ts calls it). */
     reportSave(report: SettingsSaveReport): void;
+    /**
+     * Re-render the Updates tab from a fresh `update.state` (e14d).
+     *
+     * The check runs on a Shell worker thread, so a panel mounted early legitimately sees
+     * `checked:false` and a real answer arrives seconds later. Without this the tab would report "not
+     * checked" for the rest of the session and a user would conclude the feature is broken.
+     */
+    reportUpdate(state: UpdateState | null): void;
 }
 
 /** Human label for a theme in the picker: its name, with high contrast called out (it matters). */
@@ -256,19 +279,67 @@ export function mountSettings(
         keymap.append(pathField.element);
     }
 
-    // --- updates ----------------------------------------------------------------------------------
-    // The e14d update banner is not landed. An EMPTY STATE (kit: empty-states) says so in the panel's
-    // own voice; inventing a "Check for updates" button that cannot check would be worse than the gap.
+    // --- updates (e14d, design 07 §4 / 08 threat row) ---------------------------------------------
+    // The SECOND surface for the notify-only update banner (the first is the welcome screen). It says
+    // MORE than the banner does, and deliberately: the banner appears only when there is something to
+    // act on, while this tab answers the question a user came here to ask — "am I current?" — in all
+    // four of its states, including the two the banner is silent about (up to date, and a check that
+    // could not complete). A failed check belongs here and NOT in a banner: a strip on every offline
+    // launch is how the notice that matters gets ignored.
     const updates = document.createElement("div");
     updates.className = "ctx-settings__section";
-    updates.append(
-        createEmptyState({
-            title: "No update channel configured",
-            description:
-                "This build does not check for updates. Update state will appear here once the " +
-                "release channel is wired.",
-        }).element,
-    );
+    const renderUpdates = (state: UpdateState | null): void => {
+        updates.replaceChildren();
+        if (state === null) {
+            // No update surface on this Shell at all (an `unknown_method` refusal) — the honest
+            // pre-e14d state, still reachable in a build with no banner bridge installed.
+            updates.append(
+                createEmptyState({
+                    title: "No update channel configured",
+                    description:
+                        "This build does not check for updates. Update state will appear here once " +
+                        "the release channel is wired.",
+                }).element,
+            );
+            return;
+        }
+        if (!state.checked) {
+            updates.append(
+                createEmptyState({
+                    title: "Could not check for updates",
+                    description:
+                        state.error === ""
+                            ? "The latest release could not be read."
+                            : `The latest release could not be read: ${state.error}`,
+                }).element,
+            );
+            return;
+        }
+        const banner = renderUpdateBanner(state, {
+            onOpenDownloads: () => options.onOpenDownloads?.(),
+            onDismiss: () => {
+                options.onDismissUpdate?.();
+                renderUpdates({ ...state, dismissed: true, updateAvailable: false });
+            },
+        });
+        if (banner !== null) {
+            updates.append(banner);
+            return;
+        }
+        // Checked, and current (or dismissed). Say so plainly with the version, so "am I current?"
+        // has an answer rather than an absence.
+        const version = state.current === "" ? "this build" : state.current;
+        updates.append(
+            createEmptyState({
+                title: state.dismissed ? "Update available" : "Up to date",
+                description: state.dismissed
+                    ? `Context Editor ${state.latest} is available; the notice is hidden for this ` +
+                      `session. You are running ${version}.`
+                    : `You are running ${version}, the latest published release.`,
+            }).element,
+        );
+    };
+    renderUpdates(options.update ?? null);
 
     // --- the tab set (kit: tabs) ------------------------------------------------------------------
     const tabs = createTabs({
@@ -320,6 +391,9 @@ export function mountSettings(
                         : `The theme could not be saved: ${report.diagnostic}`,
                 tone: "bad",
             });
+        },
+        reportUpdate: (state: UpdateState | null): void => {
+            renderUpdates(state);
         },
     };
 }

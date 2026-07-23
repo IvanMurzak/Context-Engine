@@ -18,6 +18,7 @@
 
 import type { ShellBridge } from "./bridge.js";
 import { BridgeError, isRecord } from "./bridge.js";
+import { mountBanners, type BannerData } from "./banners.js";
 
 // --------------------------------------------------------------------------- the wire vocabulary
 // MUST match welcome.h's kWelcome*Method / kWelcomeMode*. See note 1 above.
@@ -272,6 +273,10 @@ export interface WelcomeMount {
     readonly templateCount: number;
     /** The root element the welcome screen was rendered into. */
     readonly root: HTMLElement;
+    /** True when the e14d update banner is showing on the front door. */
+    readonly updateBannerShown: boolean;
+    /** True when the e14d daemon-lost banner is showing on the front door. */
+    readonly daemonBannerShown: boolean;
 }
 
 function el(tag: string, className: string, text = ""): HTMLElement {
@@ -291,11 +296,17 @@ function el(tag: string, className: string, text = ""): HTMLElement {
  * DOM ONLY, no `innerHTML`: every node is built with `createElement` + `textContent`, so a recent
  * project's on-disk name can never inject markup into the trusted editor-core zone. The CTA carries
  * ordinary primary styling (`.welcome-cta`) — NO flourish (O1). Returns a report for the tests.
+ *
+ * `banners` (e14d, OPTIONAL) mounts the notification strip ABOVE the two panes. Optional on purpose:
+ * every existing caller and test constructs a welcome screen without it, and a build with no update
+ * channel and no daemon link has genuinely nothing to show there — passing nothing is then the
+ * honest call, not a degraded one.
  */
 export function mountWelcome(
     bridge: ShellBridge,
     container: HTMLElement,
     state: WelcomeState,
+    banners?: BannerData,
 ): WelcomeMount {
     const client = new WelcomeClient(bridge);
     container.replaceChildren();
@@ -309,6 +320,20 @@ export function mountWelcome(
     const root = el("div", WELCOME_ROOT_CLASS);
     root.setAttribute("role", "region");
     root.setAttribute("aria-label", "Welcome");
+
+    // --- the e14d notification strip (design 07 §4) ----------------------------------------------
+    // ABOVE both panes, because both things it can say — "a newer editor exists", "the daemon is
+    // gone and you are read-only" — are true of the whole window, not of one pane. Mounted into its
+    // own host so the strip is one stable element whether or not it currently has a banner in it.
+    let updateBannerShown = false;
+    let daemonBannerShown = false;
+    if (banners !== undefined) {
+        const bannerHost = el("div", "welcome-banners");
+        const mounted = mountBanners(bannerHost, banners);
+        updateBannerShown = mounted.updateShown;
+        daemonBannerShown = mounted.daemonShown;
+        root.appendChild(bannerHost);
+    }
 
     // --- left: recent projects (persona A "open recent" = 2 steps) -------------------------------
     const recentPane = el("div", "welcome-recent");
@@ -408,9 +433,21 @@ export function mountWelcome(
     }
     hero.appendChild(chipRow);
 
-    root.appendChild(recentPane);
-    root.appendChild(hero);
+    // The two panes live in their own row (`.welcome-panes`) so the e14d banner strip above them is
+    // a full-width sibling rather than a third flex column. That is the ONLY structural change e14d
+    // makes to e14c's front door: the panes themselves, their classes, and their contents are
+    // untouched, so every welcome selector keeps resolving.
+    const panes = el("div", "welcome-panes");
+    panes.appendChild(recentPane);
+    panes.appendChild(hero);
+    root.appendChild(panes);
     container.appendChild(root);
 
-    return { recentCount: state.recents.length, templateCount: state.templates.length, root };
+    return {
+        recentCount: state.recents.length,
+        templateCount: state.templates.length,
+        root,
+        updateBannerShown,
+        daemonBannerShown,
+    };
 }
