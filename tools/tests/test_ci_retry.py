@@ -67,3 +67,61 @@ def test_retries_then_succeeds(tmp_path: Path):
 def test_no_command_is_usage_error():
     res = _run("-n", "3", "-d", "0", "--")
     assert res.returncode == 2
+
+
+def _timeout_available() -> bool:
+    """The -t tests need a REAL GNU `timeout` on PATH (the mechanism under test) — probe it
+    directly rather than trusting shutil.which alone (a stub/BusyBox `timeout` would silently
+    accept the -k flag differently). Skip cleanly where the probe fails."""
+    try:
+        return subprocess.run(
+            ["timeout", "-k", "1", "1", "true"], capture_output=True, text=True
+        ).returncode == 0
+    except OSError:
+        return False
+
+
+pytestmark_timeout = pytest.mark.skipif(
+    not _timeout_available(), reason="a working GNU 'timeout' binary is unavailable")
+
+
+@pytestmark_timeout
+def test_stalling_command_times_out_and_is_retried_then_succeeds(tmp_path: Path):
+    """A command that hangs past -t must be treated as a FAILURE (not left to block forever) and
+    retried — the exact CI toolchain-resilience defect (apt.llvm.org accepts the connection, then
+    goes silent: a fast non-zero exit is retryable, an unbounded hang is not)."""
+    marker = tmp_path / "attempted"
+    # First attempt: no marker yet -> create it and STALL past the 1s ceiling (sleep 5).
+    # Second attempt: marker present -> succeed immediately (no stall).
+    inner = (
+        f'if [ ! -f "{marker.as_posix()}" ]; then '
+        f'touch "{marker.as_posix()}"; sleep 5; '
+        f'else exit 0; fi'
+    )
+    res = _run("-n", "3", "-d", "0", "-t", "1", "--", "bash", "-c", inner)
+    assert res.returncode == 0
+    assert "TIMED OUT after 1s" in res.stderr
+    assert marker.exists()
+
+
+@pytestmark_timeout
+def test_persistently_stalling_command_exhausts_and_fails_non_zero():
+    res = _run("-n", "3", "-d", "0", "-t", "1", "--", "bash", "-c", "sleep 5")
+    assert res.returncode == 1
+    assert "timed out after 1s on every attempt (exhausted 3 attempts)" in res.stderr
+
+
+@pytestmark_timeout
+def test_fast_success_with_timeout_flag_exits_zero_immediately():
+    res = _run("-n", "3", "-d", "0", "-t", "5", "--", "true")
+    assert res.returncode == 0
+
+
+@pytestmark_timeout
+def test_fast_failure_with_timeout_flag_is_a_plain_failure_not_a_timeout():
+    """A fast non-zero exit (e.g. a real 404) is a FAILURE, not a TIMEOUT — the two must stay
+    distinguishable in the log even though both are retryable."""
+    res = _run("-n", "2", "-d", "0", "-t", "5", "--", "false")
+    assert res.returncode == 1
+    assert "failed after 2 attempts" in res.stderr
+    assert "timed out" not in res.stderr.lower()
