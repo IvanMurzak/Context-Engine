@@ -322,12 +322,20 @@ std::string Dispatcher::handle(const std::string& request_json, Session& session
             return envelope_to_response(id, *fail).dump(0);
         }
 
+        // The connection's CLIENT ID is stamped by the serve loop BEFORE the handshake, and
+        // attach() mints a fresh Session — so carry it across the assignment rather than resetting
+        // the identity the whole `origin` echo-suppression contract keys on (M9 e08a / D7).
+        const std::uint64_t client_id = session.client_id;
         session = std::get<Session>(result);
+        session.client_id = client_id;
         if (is_notification)
             return std::string();
 
         Json data = Json::object();
         data.set("protocolMajor", Json(static_cast<std::uint64_t>(session.protocol_major)));
+        // The identity this client must compare the `session` topic's `origin` against to suppress
+        // its own echoes (M9 e08a). 0 on the in-process attach path (no wire connection).
+        data.set("clientId", Json(session.client_id));
         Json caps = Json::array();
         for (const std::string& c : session.capabilities)
             caps.push_back(Json(c));

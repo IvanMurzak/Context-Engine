@@ -1,6 +1,12 @@
-// Scene-tree panel tests: selection events (the R-HUX-011 selection loop other panels consume),
-// the R-BRIDGE-008 derivation.settled / stability handling, deterministic (stable) re-render, and
-// selection preservation across a snapshot refresh.
+// Scene-tree panel tests: the M9 e08b DAEMON-BACKED selection (write requests out through the
+// SelectionGateway, rendered selection in through `apply_selection`), the R-HUX-011 selection loop
+// other panels consume, the R-BRIDGE-008 derivation.settled / stability handling, deterministic
+// (stable) re-render, and selection behaviour across a snapshot refresh.
+//
+// ⚠ THE GATEWAY DOUBLE IS DELIBERATELY NO MORE CAPABLE THAN THE DAEMON. It answers with the
+// selection the daemon would then hold — exactly what `editor.select`'s reply carries — and `nullopt`
+// when it refuses. It never reaches into the panel: the panel applies the ANSWER, which is what makes
+// "a selection the daemon never accepted is never rendered" testable rather than asserted.
 
 #include "context/editor/gui/panels/scenetree/scene_tree_panel.h"
 
@@ -63,6 +69,28 @@ namespace
     return build_scene_tree(scene);
 }
 
+// Records every write request and answers as the daemon does: the selection it now holds, or nullopt
+// on a refusal (see the header note).
+class RecordingGateway final : public SelectionGateway
+{
+public:
+    std::vector<std::vector<std::string>> requests;
+    std::vector<std::string> selection; // the daemon's state, after every accepted write
+    bool refuse = false;                // scope denied / no daemon / transport fault
+
+    std::optional<std::vector<std::string>>
+    request_selection(const std::vector<std::string>& ids) override
+    {
+        requests.push_back(ids);
+        if (refuse)
+        {
+            return std::nullopt;
+        }
+        selection = ids;
+        return selection;
+    }
+};
+
 [[nodiscard]] std::size_t count(const std::string& haystack, const std::string& needle)
 {
     std::size_t n = 0;
@@ -81,9 +109,10 @@ int main()
     // --- the panel registers under its R-EDIT-001 contribution id -------------------------------
     CHECK(std::string(SceneTreePanel::kContributionId) == "builtin.scene-tree");
 
-    // --- selection drives a selection event other panels consume --------------------------------
+    // --- e08b: `select` WRITES, then renders the DAEMON'S ANSWER ---------------------------------
     {
-        SceneTreePanel panel;
+        RecordingGateway gateway;
+        SceneTreePanel panel(&gateway);
         panel.set_model(standard_model());
 
         SceneSelection last;
@@ -96,21 +125,79 @@ int main()
             });
 
         CHECK(panel.select("inst1/c1"));
+        CHECK(gateway.requests.size() == 1);
+        CHECK(gateway.requests[0] == std::vector<std::string>{"inst1/c1"});
+        // The panel renders the daemon's reported selection — reached through the gateway's ANSWER,
+        // never through a local decision (the double never touches the panel).
         CHECK(notifications == 1);
         CHECK(last.identity == "inst1/c1");
         CHECK(last.identity_hash == 0x22);
         CHECK(panel.selection().identity == "inst1/c1");
 
-        // An unknown identity is ignored: no selection change, no notification.
+        // Re-selecting the same row: the write lands, the daemon reports the same selection, and
+        // nothing churns — the idempotence that keeps a repeated click from re-notifying every panel.
+        CHECK(panel.select("inst1/c1"));
+        CHECK(gateway.requests.size() == 2);
+        CHECK(notifications == 1);
+
+        // An unknown identity is a dead click: refused locally, never sent to the daemon.
         CHECK(!panel.select("ghost"));
+        CHECK(gateway.requests.size() == 2);
         CHECK(notifications == 1);
         CHECK(panel.selection().identity == "inst1/c1");
 
-        // Clearing notifies with an empty selection.
-        panel.clear_selection();
+        // A daemon REFUSAL leaves the rendered selection exactly where it was — an unapplied request
+        // is never visible, which is the whole reason the panel does not move optimistically.
+        gateway.refuse = true;
+        CHECK(!panel.select("e1"));
+        CHECK(gateway.requests.size() == 3);
+        CHECK(panel.selection().identity == "inst1/c1");
+        CHECK(notifications == 1);
+
+        // Clearing is a write too: an EMPTY id list.
+        gateway.refuse = false;
+        CHECK(panel.clear_selection());
+        CHECK(gateway.requests.size() == 4);
+        CHECK(gateway.requests[3].empty());
         CHECK(notifications == 2);
         CHECK(last.identity.empty());
         CHECK(panel.selection().identity.empty());
+    }
+
+    // --- e08b: with NO gateway the panel cannot change a selection it does not own ----------------
+    {
+        SceneTreePanel panel; // the a11y harness's default-constructed shape
+        panel.set_model(standard_model());
+        int notifications = 0;
+        panel.add_selection_listener([&](const SceneSelection&) { ++notifications; });
+
+        CHECK(!panel.select("e1"));
+        CHECK(!panel.clear_selection());
+        CHECK(panel.selection().identity.empty());
+        CHECK(notifications == 0);
+
+        // ...but it still RENDERS whatever the daemon says, which is the whole subscriber half.
+        CHECK(panel.apply_selection({"e1"}));
+        CHECK(panel.selection().identity == "e1");
+        CHECK(notifications == 1);
+    }
+
+    // --- e08b: the daemon's multi-id selection renders its FIRST id (single-select panel) ---------
+    {
+        SceneTreePanel panel;
+        panel.set_model(standard_model());
+        CHECK(panel.apply_selection({"inst1/c1", "inst1/c2"}));
+        CHECK(panel.selection().identity == "inst1/c1");
+
+        // An id with no row here is still adopted: the daemon's truth does not depend on what this
+        // panel has loaded. It simply renders unmarked (no hash) until a model containing it arrives.
+        CHECK(panel.apply_selection({"not-in-this-view"}));
+        CHECK(panel.selection().identity == "not-in-this-view");
+        CHECK(panel.selection().identity_hash == 0);
+        CHECK(uitree::render_html(panel.build_panel()).find("(selected)") == std::string::npos);
+
+        // A restatement of what is already rendered notifies nobody (a ring replay can repeat one).
+        CHECK(!panel.apply_selection({"not-in-this-view"}));
     }
 
     // --- build_panel is a11y-conformant + keyboard-reachable (the primary CI assertion) ---------
@@ -132,7 +219,7 @@ int main()
     {
         SceneTreePanel panel;
         panel.set_model(standard_model());
-        CHECK(panel.select("inst1/c1"));
+        CHECK(panel.apply_selection({"inst1/c1"}));
         const std::string html = uitree::render_html(panel.build_panel());
         CHECK(count(html, "(selected)") == 1);        // exactly the selected row
         CHECK(html.find("(overridden)") == std::string::npos); // no override marker in this fixture
@@ -143,7 +230,7 @@ int main()
     {
         SceneTreePanel panel;
         panel.set_model(standard_model());
-        panel.select("e1");
+        CHECK(panel.apply_selection({"e1"}));
         const std::string first = uitree::render_html(panel.build_panel());
         const std::string second = uitree::render_html(panel.build_panel());
         CHECK(first == second);
@@ -174,22 +261,26 @@ int main()
     {
         SceneTreePanel panel;
         panel.set_model(standard_model());
-        CHECK(panel.select("inst1/c1"));
+        CHECK(panel.apply_selection({"inst1/c1"}));
 
         int notifications = 0;
         panel.add_selection_listener([&](const SceneSelection&) { ++notifications; });
 
-        // The refreshed world still contains inst1/c1 -> selection preserved, no clear notification.
+        // The refreshed world still contains inst1/c1 -> nothing re-resolved, no notification.
         panel.set_model(standard_model());
         CHECK(panel.selection().identity == "inst1/c1");
+        CHECK(panel.selection().identity_hash == 0x22);
         CHECK(notifications == 0);
     }
 
-    // --- selection cleared (and listeners notified) when it vanishes from the new world ---------
+    // --- e08b: a refresh that DROPS the selected node does NOT deselect --------------------------
+    // Selection belongs to the daemon: a node missing from this panel's view of the world is not the
+    // daemon deselecting it. Only the L-37 identity hash is re-resolved (to 0 — "no hash"), and the
+    // row simply renders unmarked.
     {
         SceneTreePanel panel;
         panel.set_model(standard_model());
-        CHECK(panel.select("inst1/c1"));
+        CHECK(panel.apply_selection({"inst1/c1"}));
 
         int notifications = 0;
         SceneSelection last{"sentinel", 99};
@@ -205,9 +296,16 @@ int main()
         other.entities.push_back(entity({"x1"}, "Other", 0x99));
         panel.set_model(build_scene_tree(other));
 
-        CHECK(panel.selection().identity.empty());
-        CHECK(notifications == 1);
-        CHECK(last.identity.empty());
+        CHECK(panel.selection().identity == "inst1/c1"); // still the daemon's selection
+        CHECK(panel.selection().identity_hash == 0);     // but no row here to hash
+        CHECK(notifications == 1);                       // the re-resolution IS a rendered change
+        CHECK(last.identity == "inst1/c1");
+        CHECK(uitree::render_html(panel.build_panel()).find("(selected)") == std::string::npos);
+
+        // Bring the node back: the hash re-resolves and listeners see it again.
+        panel.set_model(standard_model());
+        CHECK(panel.selection().identity_hash == 0x22);
+        CHECK(notifications == 2);
     }
 
     // --- an empty model renders an a11y-clean panel with no exposed command ----------------------

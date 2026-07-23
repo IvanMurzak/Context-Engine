@@ -440,9 +440,12 @@ int main(int argc, char** argv)
     // the apply_* non-member seams builtin_panels.h exposes for exactly this caller.
     shell::panels::ProblemsFeed* feed = builtin.problems.get();
     shell::panels::SceneTreeFeed* tree_feed = builtin.scenetree.get();
+    // e08b: the daemon session feed (selection / play). Same forward-declared-pointer discipline.
+    shell::panels::SessionFeed* session_feed = builtin.session.get();
 
-    lifecycle.set_subscription_topics(
-        {shell::panels::kDiagnosticsTopic, shell::panels::kDerivationTopic});
+    lifecycle.set_subscription_topics({shell::panels::kDiagnosticsTopic,
+                                       shell::panels::kDerivationTopic,
+                                       shell::panels::kSessionTopic});
     lifecycle.set_reconnect_policy(shell::ReconnectPolicy{/*initial_ms*/ 200, /*max_ms*/ 2000,
                                                           /*multiplier*/ 2});
     // On EVERY (re)attach: register the daemon's token + endpoint with the egress guard so no renderer
@@ -454,6 +457,10 @@ int main(int argc, char** argv)
                             bridge.protect_secret(lifecycle.instance().endpoint);
             if (!ok)
                 daemon_secret_ok = false;
+            // The session feed is deliberately NOT bound here: an attach hook can only ever tell it
+            // about a NEW client, never about a destroyed one, and the destroyed one is the hazard
+            // (session_feed.h § LIFETIME). The owner loop below re-derives the binding from the
+            // lifecycle instead, which covers attach, reattach AND detach in one place.
         });
     // 0 is only the FALLBACK generation stamp for a snapshot that carries none of its own; the real
     // cursor snapshot always does and apply_snapshot prefers it.
@@ -464,7 +471,7 @@ int main(int argc, char** argv)
                 shell::panels::apply_problems_snapshot(*feed, snapshot, 0);
         });
     lifecycle.on_event(
-        [feed, tree_feed](const std::string&, const client::ClientEvent& event)
+        [feed, tree_feed, session_feed](const std::string&, const client::ClientEvent& event)
         {
             if (feed != nullptr)
                 (void)shell::panels::apply_problems_event(*feed, event.topic, event.payload,
@@ -472,6 +479,10 @@ int main(int argc, char** argv)
             if (tree_feed != nullptr)
                 (void)shell::panels::apply_scenetree_event(*tree_feed, event.topic, event.payload,
                                                            event.generation);
+            // e08b: the `session` facts (another client's selection / play state). The feed itself
+            // drops the echo of our own writes, so nothing here needs to know about `origin`.
+            if (session_feed != nullptr)
+                (void)shell::panels::apply_session_event(*session_feed, event.topic, event.payload);
         });
 
     // START the spine: attach to a live daemon, else spawn `context daemon` as a child and read the D20
@@ -582,6 +593,13 @@ int main(int argc, char** argv)
         // read-only STATE + reconnect with backoff, re-snapshotting on reattach. A daemon restart is
         // stalled at most the ladder's bounded duration. now in ms for the backoff clock.
         lifecycle.pump(static_cast<std::int64_t>(now_us() / 1000));
+        // e08b: re-derive the session feed's non-owning client view from the lifecycle, immediately
+        // after the ONE call that can change it. Attach and reattach hand it the new client (with the
+        // new per-connection echo-suppression id); a lost daemon — which DESTROYS the client inside
+        // that same pump — clears it, so the next frame's renderer-driven panel write refuses
+        // honestly instead of calling through a freed pointer (session_feed.h § LIFETIME).
+        if (session_feed != nullptr)
+            shell::panels::bind_session_client(*session_feed, lifecycle.client());
         // e14b: a second opener that found our presence marker wrote a focus request — consume it and
         // raise window 0 (best-effort; a headless backend simply does nothing). This is the C-F23
         // single-instance FOCUS, arbitrated entirely through the project's own `.editor/` state.
@@ -619,6 +637,13 @@ int main(int argc, char** argv)
         std::this_thread::sleep_for(std::chrono::milliseconds(4));
     }
 
+    // e08b: clear the session feed's client view BEFORE the lifecycle frees the client below. The
+    // teardown that follows still PUMPS — manager.shutdown() closes the browser, which drives CEF —
+    // so a renderer message queued before exit can still reach a panel provider and issue a write.
+    // Unbinding first is what makes that write refuse instead of calling a destroyed Client; the
+    // ordering is the whole point, so it must precede shutdown_at_exit (session_feed.h § LIFETIME).
+    if (session_feed != nullptr)
+        shell::panels::bind_session_client(*session_feed, nullptr);
     // The exit policy (e14a): an owned daemon this process is the last client of gets a clean in-band
     // `shutdown`; an owned daemon other clients still hold is left running; an external daemon is never
     // touched. Runs before the manager/CEF teardown so the daemon call still has a live wire.

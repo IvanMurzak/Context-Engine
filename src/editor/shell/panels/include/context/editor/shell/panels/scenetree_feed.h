@@ -72,7 +72,13 @@ class SceneTreeFeed
 public:
     // Non-owning: `host` must outlive the feed. `panel_id` is passed rather than hardcoded — the
     // feed is a MECHANISM the composition root points at a roster id.
-    SceneTreeFeed(PanelHost& host, std::string panel_id);
+    //
+    // `selection_gateway` (M9 e08b) is what the panel WRITES selection through — the Shell's live
+    // SessionFeed in the real editor, a recording double in the T1 suite, nullptr when no daemon
+    // session is wired (the panel then renders daemon selection but can request none). It must
+    // outlive the feed.
+    SceneTreeFeed(PanelHost& host, std::string panel_id,
+                  scenetree::SelectionGateway* selection_gateway = nullptr);
 
     SceneTreeFeed(const SceneTreeFeed&) = delete;
     SceneTreeFeed& operator=(const SceneTreeFeed&) = delete;

@@ -100,10 +100,13 @@ private:
     std::map<std::string, compose::SceneDoc, std::less<>> docs_;
 };
 
-// The play session the F5 playbar drives — a headless SessionControl double that yields a real
-// render::RenderSnapshot (the SAME type the F1 viewport observes, so play output flows F5 -> F1 with no
-// second render path). Mirrors the playbar's own test double (test_playbar_model.cpp / test_playbar_
-// panel.cpp): the demo scenario always instantiates + steps cleanly.
+// The RUNTIME play session — a headless SessionControl double that yields a real
+// render::RenderSnapshot (the SAME type the F1 viewport observes, so play output flows into the
+// viewport with no second render path). The demo scenario always instantiates + steps cleanly.
+//
+// M9 e08b: this is no longer what the PLAYBAR drives. Play STATE is daemon state now, so the
+// walkthrough drives the two halves the way the real editor does — the playbar over the daemon's
+// session seam (WalkthroughDaemon below), the frame out of the runtime session adapter.
 class WalkthroughSession final : public playbar::SessionControl
 {
 public:
@@ -160,6 +163,90 @@ private:
     }
 };
 
+// The DAEMON's session state, as a headless walkthrough can host it (M9 e08b, D7 tier 1). It stands
+// in for `editorkernel::EditorSessionState` behind the two seams the panels actually write through —
+// scenetree::SelectionGateway and playbar::PlayControlGateway — reproducing its reply shapes
+// EXACTLY: a real change answers `changed=true`, a benign no-op `ok=true, changed=false`, and a
+// control in `edit` state is refused `play.not_running`.
+//
+// It deliberately never touches the panels: it ANSWERS, exactly as the wire does, and the panels
+// render the answer. A double that reached in would hide the very failure this rewire risks — a
+// selection visible in the panel that the daemon never accepted.
+class WalkthroughDaemon final : public scenetree::SelectionGateway,
+                                public playbar::PlayControlGateway
+{
+public:
+    std::vector<std::string> selection; // the daemon's selection, after every applied write
+    int selection_writes = 0;
+
+    std::optional<std::vector<std::string>>
+    request_selection(const std::vector<std::string>& ids) override
+    {
+        ++selection_writes;
+        selection = ids; // a re-select of the same ids is a benign no-op: same answer, nothing new
+        return selection;
+    }
+
+    playbar::PlayCommandResult play() override
+    {
+        if (play_ == playbar::PlayState::playing)
+        {
+            return no_op();
+        }
+        play_ = playbar::PlayState::playing;
+        return changed();
+    }
+    playbar::PlayCommandResult pause() override
+    {
+        if (play_ == playbar::PlayState::edit)
+        {
+            return refusal();
+        }
+        if (play_ == playbar::PlayState::paused)
+        {
+            return no_op();
+        }
+        play_ = playbar::PlayState::paused;
+        return changed();
+    }
+    playbar::PlayCommandResult stop() override
+    {
+        if (play_ == playbar::PlayState::edit)
+        {
+            return no_op();
+        }
+        play_ = playbar::PlayState::edit;
+        tick_ = 0;
+        return changed();
+    }
+    playbar::PlayCommandResult step(std::uint64_t ticks) override
+    {
+        if (play_ == playbar::PlayState::edit)
+        {
+            return refusal();
+        }
+        tick_ += ticks;
+        return changed();
+    }
+
+private:
+    [[nodiscard]] playbar::PlayCommandResult changed() const
+    {
+        return playbar::PlayCommandResult{true, true, "", play_, tick_};
+    }
+    [[nodiscard]] playbar::PlayCommandResult no_op() const
+    {
+        return playbar::PlayCommandResult{true, false, "", play_, tick_};
+    }
+    [[nodiscard]] playbar::PlayCommandResult refusal() const
+    {
+        return playbar::PlayCommandResult{false, false, playbar::kPlayNotRunningCode, play_, tick_};
+    }
+
+    playbar::PlayState play_ = playbar::PlayState::edit;
+    std::uint64_t tick_ = 0;
+};
+
 // steady_clock elapsed nanoseconds between two marks — the R-HUX-011 instrumented-timestamp primitive
 // (cast to long long: a steady_clock rep is implementation-defined; conventions.md § Coding conventions).
 [[nodiscard]] long long elapsed_ns(std::chrono::steady_clock::time_point a,
@@ -195,7 +282,10 @@ int main()
     CHECK(scene.entities.size() == 2);
 
     // === INSPECT — F2 scene-tree lists the derived world; selection drives F3 =========================
-    scenetree::SceneTreePanel tree;
+    // e08b: selection lives in the DAEMON, so the panel writes through the session seam and renders
+    // what comes back. `daemon` stands in for it (see WalkthroughDaemon).
+    WalkthroughDaemon daemon;
+    scenetree::SceneTreePanel tree(&daemon);
     tree.set_model(panelbuilders::build_scene_tree(scene));
     CHECK(tree.model().ok);
     CHECK(tree.model().entity_count == 2);
@@ -210,12 +300,24 @@ int main()
     const std::string kSelectedIdentity = "ccccccccccccccc1"; // the top-level "Hero" entity (id-path len 1)
     CHECK(scenetree::find_node(tree.model(), kSelectedIdentity) != nullptr);
 
+    // The loop is the WHOLE ROUND TRIP now: the row activation WRITES (`editor select`), the daemon
+    // decides, and the panel renders the daemon's answer. The measurement spans both halves, because
+    // both are inside what the human waits for.
     const auto sel_t0 = std::chrono::steady_clock::now();
-    CHECK(tree.select(kSelectedIdentity)); // the real F2 selection event path
+    CHECK(tree.select(kSelectedIdentity)); // the write — the real F2 selection path since e08b
+    CHECK(daemon.selection_writes == 1);   // it went to the daemon, not to a private member
+    CHECK(daemon.selection == std::vector<std::string>{kSelectedIdentity});
     const auto sel_t1 = std::chrono::steady_clock::now();
     selection_loop_ns = elapsed_ns(sel_t0, sel_t1);
     CHECK(selection_events == 1); // the loop seam fired (the host times input->paint around it)
     CHECK(observed_selection.identity == kSelectedIdentity);
+    // ...and a selection made by a SECOND client reaches the same panel through the same door, with
+    // no write of its own — the e08b property, exercised inside the M5 journey it changes.
+    CHECK(tree.apply_selection({"ccccccccccccccc2"}));
+    CHECK(selection_events == 2);
+    CHECK(daemon.selection_writes == 1); // still one: nothing local was written to get there
+    CHECK(tree.apply_selection({kSelectedIdentity}));
+    CHECK(daemon.selection_writes == 1);
 
     // F3 inspector: build the editable projection of the SELECTED composed entity. The model addresses
     // the real entity (root scene + id-path); the current /name value is read from the composed world.
@@ -287,10 +389,13 @@ int main()
     CHECK(problems_panel.model().provisional == 0);
 
     // === PLAY IT — F5 playbar starts a session over the edit-state VIEW (L-51) ========================
+    // e08b split this into its two real halves: the PLAYBAR drives the daemon's L-51 state over the
+    // session seam, and the RUNTIME session adapter produces the frame the F1 viewport observes. Both
+    // are exercised, because both are part of "play it" — they are simply no longer the same object.
     WalkthroughSession session;
     session.drawables = 4;
     session.directional_lights = 1;
-    playbar::PlaybarModel playbar_model(&session);
+    playbar::PlaybarModel playbar_model(&daemon);
 
     int control_events = 0;
     playbar_model.add_control_listener(
@@ -298,14 +403,18 @@ int main()
 
     const playbar::PlayAction played = playbar_model.play();
     CHECK(played.ok);
-    CHECK(playbar_model.state() == playbar::PlayState::playing);
+    CHECK(playbar_model.state() == playbar::PlayState::playing); // the DAEMON's state, rendered
     CHECK(playbar_model.is_running());
     CHECK(control_events == 1);
-    // Advance a few fixed ticks — the produced frame is the observed play output (F1 viewport source).
+    // Advance a few fixed ticks — the daemon advances the simTick the transport shows...
     CHECK(playbar_model.step(3).ok);
     CHECK(playbar_model.sim_tick() == 3);
-    CHECK(playbar_model.last_frame().snapshot.items.size() == 4u);          // 4 drawables in the play frame
-    CHECK(playbar_model.last_frame().snapshot.directional_lights.size() == 1u);
+    // ...and the runtime session produces the observed play output (the F1 viewport source).
+    CHECK(session.start().ok);
+    const playbar::ControlOutcome play_frame = session.step(3);
+    CHECK(play_frame.ok);
+    CHECK(play_frame.frame.snapshot.items.size() == 4u); // 4 drawables in the play frame
+    CHECK(play_frame.frame.snapshot.directional_lights.size() == 1u);
 
     // === MAKE AN OVERRIDE EDIT — F3 inspector, captured as an undo checkpoint (F7) ====================
     undo::UndoJournal journal(&gateway);
@@ -355,7 +464,7 @@ int main()
     vp.add_view_update_listener([&](const viewport::ViewportUpdate&) { ++view_updates; });
 
     // The play output flows straight into the viewport — PlayFrame::snapshot IS render::RenderSnapshot.
-    vp.set_snapshot(playbar_model.last_frame().snapshot);
+    vp.set_snapshot(play_frame.frame.snapshot);
     CHECK(vp.scene().drawables == 4u);          // the SAME 4 drawables the playbar produced (F5 -> F1)
     CHECK(vp.scene().directional_lights == 1u);
 
@@ -377,8 +486,11 @@ int main()
     CHECK(vp.view_generation() == 1u);
 
     // === STOP — F5 discards the runtime session state (L-51: never written to files) ==================
+    // Both halves again: the playbar returns the DAEMON to `edit`, and the runtime session throws its
+    // state away. Nothing is written to authored files either way.
     CHECK(playbar_model.stop().ok);
     CHECK(playbar_model.state() == playbar::PlayState::edit);
+    session.discard();
     CHECK(!session.running);
 
     // === Every panel in the journey renders an a11y-clean, keyboard-navigable surface =================

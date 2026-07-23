@@ -6,7 +6,7 @@
 
 #include "context/editor/shell/panels/builtin_panels.h" // kDerivationTopic
 #include "context/editor/shell/panels/problems_feed.h"  // kDerivationSettledEvent + parse_stability
-#include "wire_read.h"                                  // read_string / read_bool
+#include "wire_read.h"                                  // read_string / read_bool / read_u64 / envelope_data
 
 #include <string_view>
 #include <utility>
@@ -107,13 +107,10 @@ std::optional<scenetree::SceneTreeModel> parse_scene_tree(const contract::Json& 
     // entityCount is authoritative from the wire when present (the daemon counted the COMPOSED
     // entities, which synthetic instance boundaries under-count locally); left at the model's zero
     // default otherwise, so the status line never claims a count nothing sent.
-    const contract::Json& entity_count = wire.at("entityCount");
-    if (entity_count.is_number())
-    {
-        const double raw = entity_count.as_number();
-        model.entity_count =
-            (raw >= 0.0 && raw <= 9007199254740992.0) ? static_cast<std::size_t>(raw) : 0;
-    }
+    // read_u64 carries the range check (an out-of-range double cast is UBSan `float-cast-overflow`
+    // on an untrusted wire — wire_read.h) and degrades to the model's zero default, which is exactly
+    // this field's "nothing sent" value.
+    model.entity_count = static_cast<std::size_t>(read_u64(wire, "entityCount"));
     return model;
 }
 
@@ -129,22 +126,18 @@ std::optional<std::string> scenetree_row_identity(const std::string& node_id)
 
 // ------------------------------------------------------------------------------------ the feed
 
-SceneTreeFeed::SceneTreeFeed(PanelHost& host, std::string panel_id)
-    : host_(host), panel_id_(std::move(panel_id))
+SceneTreeFeed::SceneTreeFeed(PanelHost& host, std::string panel_id,
+                             scenetree::SelectionGateway* selection_gateway)
+    : host_(host), panel_id_(std::move(panel_id)), panel_(selection_gateway)
 {
 }
 
 bool SceneTreeFeed::apply_result(const contract::Json& reply)
 {
     // Envelope tolerance: {result-envelope {data: {sceneTree}}} / {data:{sceneTree}} / {sceneTree}
-    // / the bare tree. The FIRST recognized shape wins. at() is total (a shared null when absent),
-    // so each hop reads its member once.
-    const contract::Json* wire = &reply;
-    const contract::Json& nested_data = reply.at("data");
-    if (nested_data.is_object())
-    {
-        wire = &nested_data;
-    }
+    // / the bare tree. The FIRST recognized shape wins. The `data` hop is the shared one
+    // (wire_read.h); the `sceneTree` hop is this feed's own, because which key to look for is policy.
+    const contract::Json* wire = &envelope_data(reply);
     const contract::Json& nested_tree = wire->at("sceneTree");
     if (nested_tree.is_object())
     {
@@ -189,8 +182,15 @@ PanelProvider SceneTreeFeed::make_provider()
             return false;
         }
         // The hydration runtime sends the ACTIVATED NODE's id — it knows nothing about scene
-        // identities. `scenetree_row_identity` is the translation that keeps it that way; select()
-        // fires the selection listeners the Inspector feed hydrates from (R-HUX-011).
+        // identities. `scenetree_row_identity` is the translation that keeps it that way.
+        //
+        // e08b: select() is now a WRITE to the daemon, so what comes back is "the daemon applied it",
+        // not "the panel decided". The panel then renders the write's REPLY — NOT the
+        // `selection-changed` fact it publishes, which carries our own `origin` and is dropped by
+        // SessionFeed's echo suppression (scene_tree_panel.h: reading it the other way round yields a
+        // panel that shows every OTHER client's selection and never its own). Applying that reply is
+        // what fires the selection listeners the Inspector feed hydrates from (R-HUX-011), so that
+        // loop now runs on daemon truth instead of a local decision.
         const std::optional<std::string> identity =
             scenetree_row_identity(read_string(params, "nodeId"));
         return identity.has_value() && panel_.select(*identity);

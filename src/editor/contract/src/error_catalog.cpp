@@ -1003,6 +1003,23 @@ const std::vector<ErrorCode>& catalog()
          "The daemon is already serving its maximum number of concurrent clients; the attach is "
          "refused. Transient — a slot frees when a client detaches, so a later retry can succeed.",
          true, kExitUsage, "R-BRIDGE-001"},
+        // --- M9 e08a: daemon editor session state (D7 tier 1, design 05 §4 / 07 §6) ------------------
+        // The LOUD corrupt-recovery diagnostic for `.editor/session.json`: the daemon found the file
+        // unreadable, renamed it aside, and booted on defaults (07 §6 — recovery is never silent and
+        // never blocking). Deliberately its OWN code rather than the R-QA-005 `session.state_invalid`
+        // of the deterministic `session *` FILE-harness family: C-F4 keeps those two families
+        // distinct, and collapsing their diagnostics would be the first place that boundary blurred.
+        // Reported as a `diagnostics` topic event (R-BRIDGE-008), not as a verb's failure envelope,
+        // so the exit class is the validation class its severity implies rather than a process
+        // outcome. The string is the source-of-truth in
+        // src/editor/editorkernel/include/.../editor_session_state.h as
+        // editorkernel::kEditorSessionStateInvalidCode (the promote-a-local-string pattern of
+        // bridge::kAttachDeniedCode / gui::playbar::kPlay*Code). Additive-only (protocolMajor stays
+        // 1): a NEW row at the END, nothing reordered/renamed.
+        {"editor.session_state_invalid",
+         "The daemon's editor session file (.editor/session.json) is malformed or an unsupported "
+         "version; it was renamed aside and the session state was reset to defaults.",
+         false, kExitValidation, "R-BRIDGE-008"},
     };
     return the_catalog;
 }

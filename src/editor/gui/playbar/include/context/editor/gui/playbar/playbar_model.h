@@ -1,20 +1,36 @@
-// The play-in-editor PLAYBAR model (M5-F5, issue #166; R-PLAY-001/002/003/004, R-EDIT-001, L-51, L-22,
-// R-HUX-011): the headless, CEF-free state machine that drives session-control over src/runtime/session/
-// (start / pause / stop / step) through the SessionControl seam, tracks the L-51 edit/play provenance
-// state, and holds the last rendered PlayFrame the F1 viewport observes. Observer-grade play only (the
-// M5 T1 loop) — no timeline / debugger / profiler surface (later milestones).
+// The play-in-editor PLAYBAR model (M5-F5, issue #166; R-PLAY-001/002/004, R-EDIT-001, L-51,
+// R-HUX-011): the headless, CEF-free transport that RENDERS the L-51 edit/play provenance state and
+// drives it. Observer-grade play only (the M5 T1 loop) — no timeline / debugger / profiler surface.
 //
-// L-51 (edit/play split): `edit` is authored truth (no live session); `playing`/`paused` run a live
-// runtime session over a session VIEW whose mutations are discarded on stop and never written to files.
-// The panel renders a LOUD play-mode indicator (playbar_panel.h). L-22 (hot reload): hot_reload()
-// reflects a live authored edit into the running session — live-preserving for a data-value edit,
-// restart-class for a shape/layout change. R-HUX-011: every control transition fires a PlayControlEvent
-// the CEF host times input->paint latency around (the same seam pattern as the viewport's view-update
-// listener); the headless model ships the seam, the host captures the real timestamp.
+// M9 e08b — THE PLAY STATE IS THE DAEMON'S, NOT THIS MODEL'S. Until e08a the model drove an
+// IN-PROCESS `SessionControl*` and owned the resulting state in a private member; the daemon now owns
+// it (design 05 §4 / D7 tier 1, docs/editor-session-state.md), so this model became a WRITER and a
+// SUBSCRIBER and the in-process path is GONE, not kept as a parallel truth:
+//
+//   * `play/pause/stop/step` are RPC write requests through the PlayControlGateway seam below
+//     (`editor.play|pause|stop|step`). The daemon answers with the resulting state, which is what
+//     this model then renders — it never computes a transition of its own.
+//   * `apply_play_state()` adopts a `play-state` fact published by ANOTHER client, so a CLI or agent
+//     driving play is visible on the L-51 indicator with no local write at all. e08a's `origin` echo
+//     suppression happens one layer up, so each real change lands exactly once.
+//
+// e08a deliberately mirrored THIS state machine token-for-token, so the rewire is a semantic no-op.
+// The one refinement is at the reply boundary: an R-CLI-008 envelope cannot express "ok=false with no
+// error code" (a failure must carry a catalog code), so a benign daemon no-op answers
+// `ok=true, changed=false` and this model's `PlayAction::ok` is fed from `changed` — losslessly, since
+// `ok` here always meant "something actually happened".
+//
+// WHAT LEFT WITH THE IN-PROCESS PATH. `PlayFrame` observation and L-22 `hot_reload()` were both
+// SessionControl operations, not play-state transitions, and the daemon has no verb for either yet.
+// They stay on the SessionControl seam itself (session_control.h — still built, still tested,
+// runtime-side), rather than being kept alive here behind a `SessionControl*` that would reintroduce
+// exactly the second truth this task removes. Re-homing them onto the wire is later work (e09+).
+//
+// R-HUX-011: every observed transition still fires a PlayControlEvent the CEF host times input->paint
+// latency around (the same seam pattern as the viewport's view-update listener); the headless model
+// ships the seam, the host captures the real timestamp.
 
 #pragma once
-
-#include "context/editor/gui/playbar/session_control.h"
 
 #include <cstdint>
 #include <functional>
@@ -27,8 +43,11 @@ namespace context::editor::gui::playbar
 // The reserved `play.*` error-domain block (M5-F5 mints it — this leg's single code-minter). Owned
 // HERE as string constants (the promote-a-local-string pattern of viewport::kViewport*Code /
 // bridge::kScopeDeniedCode / ts::kTs*Code) so this GUI lib does NOT link the editor/contract catalog;
-// src/editor/contract/src/error_catalog.cpp registers the SAME strings (append-only tail). USED by the
-// model + the SessionControl seam and asserted by the playbar tests + the contract catalog test.
+// src/editor/contract/src/error_catalog.cpp registers the SAME strings (append-only tail). Since e08b
+// the DAEMON is what emits them on a refused `editor.play|pause|stop|step` (its EditorSessionState
+// reuses this exact block, docs/editor-session-state.md); this model propagates whatever code it is
+// handed, and the SessionControl seam still mints them runtime-side. Asserted by the playbar tests,
+// the contract catalog test, and the e08a/e08b T2 drills.
 inline constexpr const char* kPlayNotRunningCode = "play.not_running";     // control issued in edit state
 inline constexpr const char* kPlaySessionFailedCode = "play.session_failed"; // start refused (fail-closed)
 inline constexpr const char* kPlayStepFailedCode = "play.step_failed";       // step refused (fail-closed)
@@ -67,6 +86,7 @@ struct PlayControlEvent
 };
 
 // The outcome of a playbar control action: ok + the resulting state, or a reserved play.* code.
+// `ok` is fed from the daemon's `changed` (see the header note): true iff something actually moved.
 struct PlayAction
 {
     bool ok = false;
@@ -74,47 +94,77 @@ struct PlayAction
     PlayState state = PlayState::edit;
 };
 
-// The headless playbar state machine. Drives an optional SessionControl seam (nullptr => a pure-state
-// model, e.g. the default the a11y harness scans). Total; every action reports success/failure by value.
+// One `editor.play|pause|stop|step` reply, member-for-member the daemon's answer (kernel_server.cpp:
+// `{state, simTick, changed}` on success, a reserved play.* catalog code on a refusal).
+struct PlayCommandResult
+{
+    bool ok = false;          // the daemon accepted the command (false => error_code is set)
+    bool changed = false;     // false + ok => a benign, idempotent no-op; nothing was published
+    std::string error_code;   // empty when ok; else a reserved play.* code
+    PlayState state = PlayState::edit; // the state AFTER the command, as the DAEMON reports it
+    std::uint64_t sim_tick = 0;
+};
+
+// The seam the playbar WRITES play control through (M9 e08b) — the sibling of the scene tree's
+// SelectionGateway, and declared here for the same reason: this library stays boundary-clean (no
+// client SDK, no RPC), so the transport is CI-assertable with a recording double and the real
+// implementation is a WIRE gateway shell-side. Total; every method reports by value.
+class PlayControlGateway
+{
+public:
+    virtual ~PlayControlGateway() = default;
+
+    [[nodiscard]] virtual PlayCommandResult play() = 0;
+    [[nodiscard]] virtual PlayCommandResult pause() = 0;
+    [[nodiscard]] virtual PlayCommandResult stop() = 0;
+    [[nodiscard]] virtual PlayCommandResult step(std::uint64_t ticks) = 0;
+};
+
+// The headless playbar. Renders the daemon's L-51 play state and drives it through an optional
+// PlayControlGateway (nullptr => a render-only model, e.g. the default the a11y harness scans).
+// Total; every action reports success/failure by value.
 class PlaybarModel
 {
 public:
     // The R-EDIT-001 contribution id this built-in panel registers under.
     static constexpr const char* kContributionId = "builtin.playbar";
 
-    explicit PlaybarModel(SessionControl* control = nullptr) noexcept : control_(control) {}
+    // Non-owning; the gateway must outlive the model.
+    explicit PlaybarModel(PlayControlGateway* gateway = nullptr) noexcept : gateway_(gateway) {}
 
+    // The RENDERED play state — the daemon's answer, not a locally computed transition.
     [[nodiscard]] PlayState state() const noexcept { return state_; }
     [[nodiscard]] bool is_running() const noexcept
     {
         return state_ == PlayState::playing || state_ == PlayState::paused;
     }
-    [[nodiscard]] std::uint64_t sim_tick() const noexcept { return last_frame_.sim_tick; }
-    // The last rendered frame — the snapshot the F1 viewport observes (ViewportPanel::set_snapshot).
-    [[nodiscard]] const PlayFrame& last_frame() const noexcept { return last_frame_; }
+    // The running session's simTick, as the daemon reports it.
+    [[nodiscard]] std::uint64_t sim_tick() const noexcept { return sim_tick_; }
     [[nodiscard]] std::uint64_t control_generation() const noexcept { return control_generation_; }
     [[nodiscard]] const std::string& last_error() const noexcept { return last_error_; }
 
-    // Start (edit -> playing) or resume (paused -> playing). On the edit->playing transition the seam
-    // begins a play session over the edit-state view (L-51; no authored-file writes). Already playing
-    // is a no-op-with-error (play.not_running is not it — an in-flight play is not "not running"; the
-    // action simply reports ok=false with no state change and no error code churn — see impl).
+    // --- the four transport WRITES (`editor.play|pause|stop|step`) -------------------------------
+    //
+    // Each issues the RPC and then renders what the DAEMON answered. With no gateway bound nothing is
+    // issued and nothing changes (ok=false, no code) — a transport bar with no daemon has nothing to
+    // drive, and inventing a local transition would be exactly the parallel truth e08b removes.
+    //
+    // Start (edit|paused -> playing). Already playing is a benign no-op (ok=false, no code).
     PlayAction play();
-
-    // playing -> paused. In edit state: play.not_running (nothing to pause).
+    // playing -> paused. In edit state the daemon refuses play.not_running; already paused is a no-op.
     PlayAction pause();
-
-    // Stop: playing/paused -> edit, discarding the runtime session state (L-51). Idempotent — stop in
-    // edit state is a benign no-op (ok, stays edit), like a stopped transport bar.
+    // playing|paused -> edit, discarding the runtime session state (L-51). Idempotent in edit.
     PlayAction stop();
-
-    // Advance the running session by `ticks` fixed ticks (R-SIM-002). In edit state: play.not_running.
-    // Propagates play.step_failed from the seam on a fail-closed refusal.
+    // Advance `ticks` fixed ticks (R-SIM-002). In edit state: play.not_running. Stepping leaves
+    // playing/paused alone (you may step from either).
     PlayAction step(std::uint64_t ticks = 1);
 
-    // L-22: reflect a live authored edit (an F3 inspector override write) into the running session.
-    // In edit state: play.not_running (no session to reload into). Propagates play.hot_reload_failed.
-    HotReloadOutcome hot_reload(const LiveEdit& edit);
+    // --- the daemon's fact (the SUBSCRIBER half) -------------------------------------------------
+    //
+    // Adopt a `play-state` fact published by another client (a CLI, an agent, a second window). This
+    // is what makes the L-51 indicator daemon-fed rather than self-fed. Notifies the R-HUX-011
+    // listeners and returns true only when the rendered state actually changed.
+    bool apply_play_state(PlayState state, std::uint64_t sim_tick);
 
     // Register a listener the CEF host / other panels use to react to a control transition — the seam
     // the host times input->paint latency around (R-HUX-011).
@@ -123,10 +173,13 @@ public:
 
 private:
     void notify(const std::string& transition);
+    // The ONE place a command reply becomes rendered state (all four transports share it).
+    PlayAction adopt(const PlayCommandResult& result, const char* transition);
 
-    SessionControl* control_ = nullptr;
+    PlayControlGateway* gateway_ = nullptr;
+    // The RENDERED state: what the daemon last said, never what this model decided.
     PlayState state_ = PlayState::edit;
-    PlayFrame last_frame_;
+    std::uint64_t sim_tick_ = 0;
     std::uint64_t control_generation_ = 0;
     std::string last_error_;
     std::vector<ControlListener> listeners_;

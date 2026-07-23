@@ -255,10 +255,17 @@ Envelope run(const std::vector<std::string>& args)
         return Envelope::failure("usage.invalid",
                                  "no verb supplied — try 'context describe --json'");
 
-    // `editor` is a CLI-local operational command family (a headless in-process driver over the
+    // `editor smoke` is a CLI-local operational command (a headless in-process driver over the
     // composed EditorKernel), NOT a contract registry verb — so it is intercepted before registry
     // resolution. See editor_driver.h for why it is deliberately outside the CLI ≡ RPC ≡ MCP surface.
-    if (args[0] == "editor")
+    //
+    // The interception is SCOPED to `smoke` (and to a bare `editor`, which keeps its usage message)
+    // because the `editor` NOUN is also a real registry namespace — the e05d3 composed reads
+    // (`editor scene-tree` / `editor inspect`) and the e08a session-state family
+    // (`editor select` / `editor play` / …). Intercepting the whole noun made every one of those
+    // answer `usage.unknown_verb` ("no such editor subcommand") instead of the honest
+    // `contract.operational_only` the registry gives every other daemon-served verb.
+    if (args[0] == "editor" && (args.size() == 1 || args[1] == "smoke"))
         return run_editor(std::vector<std::string>(args.begin() + 1, args.end()));
 
     // `attach` is the cross-process counterpart of `editor smoke`: it connects to a running daemon
