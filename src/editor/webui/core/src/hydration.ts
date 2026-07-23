@@ -41,29 +41,26 @@
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 import type { GestureVerb, PanelClient, PanelRender } from "./panels.js";
+import { WIDGET_CLASSES, widgetClassForRole } from "../../kit/src/index.js";
 
 /**
- * Presentation-only widget classes, keyed by node ROLE (04 §4 step 4).
+ * The presentation-only widget classes, keyed by node ROLE (04 §4 step 4).
  *
- * The VALUE semantics stay in the C++ model and the write path — these classes carry appearance and
- * nothing else, which is why a missing entry is harmless rather than a defect. Keyed by role because
- * role is what the uitree vocabulary actually publishes (`uitree::role_token`); keying on anything
- * derived from a panel id would be the special-casing this runtime exists to avoid.
+ * ⚠ THE KIT OWNS THIS MAP SINCE M9 e06c1 — `kit/src/index.ts`, beside the stylesheet that styles it.
+ * It is re-exported here so every importer and the `index.ts` barrel are unchanged, and because this
+ * is where a reader of the hydration runtime expects to find it.
+ *
+ * The move was the point of e06c1, not bookkeeping. The map lived here while `app/app.css` styled
+ * NINE of its twelve classes: two owners, in two packages, with nothing tying them together — a role
+ * could gain a class and never gain an appearance, and nothing would report it. With the names and
+ * the rules in one package, `webui-kit-role-coverage` can assert the three-way agreement (the C++
+ * `uitree::role_token` vocabulary ↔ the map ↔ `kit.css`'s selectors) on every `build` leg, and
+ * `webui-kit-tokens-only` can hold the kit to tokens with no raw literal anywhere in it.
+ *
+ * A missing entry is therefore NO LONGER "harmless" as this comment used to claim: it is a red
+ * build. That is the whole improvement — an unthemed role was previously invisible.
  */
-export const WIDGET_CLASSES: Readonly<Record<string, string>> = {
-    tree: "ctx-widget-tree",
-    treeitem: "ctx-widget-treeitem",
-    list: "ctx-widget-list",
-    listitem: "ctx-widget-listitem",
-    button: "ctx-widget-button",
-    textbox: "ctx-widget-textbox",
-    checkbox: "ctx-widget-checkbox",
-    heading: "ctx-widget-heading",
-    status: "ctx-widget-status",
-    region: "ctx-widget-region",
-    group: "ctx-widget-group",
-    text: "ctx-widget-text",
-};
+export { WIDGET_CLASSES };
 
 /** The attribute carrying a node's STABLE model id, which every DOM patch is keyed by. */
 export const NODE_ID_ATTRIBUTE = "data-node-id";
@@ -571,7 +568,10 @@ export class HydrationRuntime {
             element.setAttribute(NODE_ID_ATTRIBUTE, nodeId);
             element.setAttribute("id", `${this.#panelId}::${nodeId}`);
             const role = element.getAttribute("role") ?? "";
-            const widgetClass = WIDGET_CLASSES[role];
+            // Through the kit's own accessor rather than by indexing the map: it is the surface the
+            // kit publishes, and routing the runtime's only lookup through it keeps that surface
+            // exercised by every hydration test instead of being an export nothing calls.
+            const widgetClass = widgetClassForRole(role);
             if (widgetClass !== undefined) {
                 element.classList.add(widgetClass);
             }

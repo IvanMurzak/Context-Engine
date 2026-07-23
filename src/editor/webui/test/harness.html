@@ -25,6 +25,11 @@
     <title>editor-core webui T1 tests</title>
     <link rel="stylesheet" href="./dockview.css" />
     <link rel="stylesheet" href="./app.css" />
+    <!-- The SHIPPED kit stylesheet (M9 e06c1), in the SAME order index.html loads it. `kit.test.ts`
+         asserts what the browser COMPUTES for each of the twelve widget classes and finds the sheet
+         by name (`KIT_STYLESHEET`), so serving the harness without this line makes that whole file
+         fail loudly rather than pass vacuously. Staged from kit/styles/kit.css by ../CMakeLists.txt. -->
+    <link rel="stylesheet" href="./kit.css" />
   </head>
   <body>
     <script src="./dockview-core.min.js"></script>

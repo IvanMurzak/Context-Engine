@@ -17,6 +17,7 @@ import { reachabilityTests } from "./reachability.test.js";
 import { tokensTests } from "./tokens.test.js";
 import { themeTests } from "./theme.test.js";
 import { themeDomTests } from "./theme_dom.test.js";
+import { kitTests } from "./kit.test.js";
 
 const result = runTests([
     ...panelsTests,
@@ -31,6 +32,7 @@ const result = runTests([
     ...tokensTests,
     ...themeTests,
     ...themeDomTests,
+    ...kitTests,
 ]);
 report(result);
 
