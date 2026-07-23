@@ -77,12 +77,17 @@ import {
 export const EDITOR_ROOT_ID = "editor-root";
 
 /**
- * The attribute the live when-context's session facts are mirrored onto (M9 e08d).
+ * The attribute the BOOT-TIME session read and its resolved when-context are reported onto (M9 e08d).
  *
  * The same diagnosability discipline `markDocument` gives the boot state and `data-editor-theme` /
  * `data-editor-config` / `data-editor-keybindings` give their feeds — AND, unlike those, it is a
  * TEST SURFACE: `boot.test.ts` reads it to prove the live editor's when-context tracks the daemon's
  * play state, because the resolved context is otherwise reachable only from inside the palette.
+ *
+ * It is a SNAPSHOT of the first read, deliberately NOT kept live by the poll: its job is to report
+ * how boot resolved (and to be the anti-stub gate's readout), not to mirror the session. The LIVE
+ * value is the provider closure `startSession` returns — which is what the palette actually filters
+ * on, and the only thing a consumer should read the current play state from.
  */
 export const SESSION_ATTRIBUTE = "data-editor-session";
 

@@ -53,7 +53,21 @@ void runTests([
     // boot state on the shared document (`data-editor-*`, the applied theme's custom properties), so
     // running them after every other case keeps that out of the others' way.
     ...bootTests,
-]).then(report);
+])
+    .then(report)
+    // The harness catches per-CASE failures; this catches a failure of the RUN ITSELF (or of
+    // `report`). Without it such a failure is an unhandled rejection: no verdict is ever POSTed, so
+    // the driver blocks to its timeout with NOTHING naming the cause. That is the same escape
+    // `runTests`' `await` was added to close one level down, and it only became reachable here when
+    // this entry stopped being a synchronous top-level call — where a throw at least surfaced as a
+    // page error.
+    .catch((error: unknown) => {
+        report({
+            passed: 0,
+            failed: 1,
+            failures: [{ name: "the test run itself", error: String(error) }],
+        });
+    });
 
 function report(summary: TestSummary): void {
     const body = JSON.stringify(summary);
