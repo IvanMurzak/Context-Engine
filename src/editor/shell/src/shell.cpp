@@ -305,6 +305,37 @@ void EditorWindow::close()
     alive_ = false;
 }
 
+void EditorWindow::begin_close()
+{
+    // Phase 1: unbind the browser's sink and ask CEF to close it, but do NOT pump — the manager
+    // drives ONE shared drain for every closing window (browser.h § teardown). The compositor and
+    // backend stay attached until finish_close(): the browser's sink is already unbound here, so no
+    // frame reaches the compositor during the drain that follows.
+    if (browser_ != nullptr)
+    {
+        browser_->request_close();
+    }
+}
+
+bool EditorWindow::browser_closed() const
+{
+    return browser_ == nullptr || browser_->is_closed();
+}
+
+void EditorWindow::finish_close()
+{
+    // Phase 3: the non-CEF teardown, run after the shared drain confirmed the browser closed. The
+    // browser is deliberately NOT re-closed here (request_close() already did, and the drain
+    // completed it); resetting this window destroys the host, whose destructor close() is then a
+    // no-op on the already-closed browser.
+    compositor_.detach();
+    if (backend_ != nullptr)
+    {
+        backend_->close();
+    }
+    alive_ = false;
+}
+
 // ---------------------------------------------------------------------------------- WindowManager
 
 WindowManager::WindowManager(std::filesystem::path project_root)
@@ -436,7 +467,11 @@ void WindowManager::retire(WindowEntry& entry)
 {
     if (entry.window != nullptr)
     {
-        entry.window->close();
+        // The browser has ALREADY been asked to close and the shared loop drained (by the caller —
+        // close_and_retire() for a single window, shutdown()'s phase 1+2 for all of them). All that
+        // remains is the non-CEF teardown and destroying the host, whose destructor close() is a
+        // no-op on the already-closed browser.
+        entry.window->finish_close();
         entry.window.reset();
     }
     // THE CE #319 DISCIPLINE, generalised to a mid-process destroy: the browser is closed but CEF
@@ -451,6 +486,65 @@ void WindowManager::retire(WindowEntry& entry)
     {
         retired_.push_back(std::move(retired));
     }
+}
+
+void WindowManager::drain_until(const std::function<bool()>& done)
+{
+    // `CefDoMessageLoopWork()` is PROCESS-WIDE, so pumping through ANY one live window's browser
+    // drains every closing browser at once — which is exactly why this is ONE shared drain rather
+    // than a pump per window: a per-window close-drain advances a SIBLING window's teardown and, on
+    // Windows, reaches a CEF ref-counted object's final Release inside its own destructor (the
+    // `!in_dtor_` abort; CE #319 generalised). The budget mirrors the old per-window 200-slice cap,
+    // scaled by the live count so a many-window teardown keeps the same per-window headroom; a host
+    // with no message loop reports closed immediately, so this runs zero slices for the unit fakes.
+    const int budget = 200 * (static_cast<int>(windows_.size()) + 1);
+    for (int i = 0; i < budget && !done(); ++i)
+    {
+        IBrowserHost* pump = nullptr;
+        for (WindowEntry& entry : windows_)
+        {
+            if (entry.window != nullptr)
+            {
+                pump = entry.window->browser_or_null();
+                if (pump != nullptr)
+                {
+                    break;
+                }
+            }
+        }
+        if (pump == nullptr)
+        {
+            break;
+        }
+        pump->pump_teardown();
+    }
+}
+
+bool WindowManager::all_browsers_closed() const
+{
+    for (const WindowEntry& entry : windows_)
+    {
+        if (entry.window != nullptr && !entry.window->browser_closed())
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+void WindowManager::close_and_retire(WindowEntry& entry)
+{
+    // Single-window teardown (a mid-process destroy, or a window that died on its own). Split the
+    // CloseBrowser from the drain — phase 1 asks THIS browser to close, phase 2 drains ONLY it closed
+    // (siblings keep painting: they were not asked to close, so the process-wide pump does no teardown
+    // work for them), phase 3 retires. Same shape as shutdown() below, for one window.
+    if (entry.window != nullptr)
+    {
+        EditorWindow* window = entry.window.get();
+        window->begin_close();
+        drain_until([window] { return window->browser_closed(); });
+    }
+    retire(entry);
 }
 
 WindowDestroyResult WindowManager::destroy_window(WindowId id)
@@ -469,7 +563,7 @@ WindowDestroyResult WindowManager::destroy_window(WindowId id)
         {
             continue;
         }
-        retire(windows_[i]);
+        close_and_retire(windows_[i]);
         windows_.erase(windows_.begin() + static_cast<std::ptrdiff_t>(i));
         result.outcome = WindowDestroyOutcome::destroyed;
         result.error.clear();
@@ -589,8 +683,9 @@ bool WindowManager::pump_once(std::uint64_t now_us)
         if (!alive)
         {
             // A window that died on its own is retired exactly like an explicitly destroyed one:
-            // its bridge must not be freed while CEF may still reach it.
-            retire(windows_[i]);
+            // its bridge must not be freed while CEF may still reach it. close_and_retire drains its
+            // browser closed first (a browser that outlived its window still needs its OnBeforeClose).
+            close_and_retire(windows_[i]);
             windows_.erase(windows_.begin() + static_cast<std::ptrdiff_t>(i));
             continue;
         }
@@ -612,10 +707,29 @@ void WindowManager::shutdown()
         return;
     }
     shut_down_ = true;
+
+    // Teardown in THREE phases, serialised so N browsers close together instead of one at a time.
+    // The old code retired each window in turn, and each retire drove a FULL CloseBrowser + drain —
+    // so window 0's drain ran the process-wide `CefDoMessageLoopWork()` to completion while window 1
+    // was still open, and on Windows that reached a CEF ref-counted object's final Release inside its
+    // own destructor (the `!in_dtor_` abort; CE #319 generalised to N windows). Asking every browser
+    // to close FIRST, then draining ONCE, then releasing, is CEF's own multi-browser shutdown shape
+    // and removes that interleaving.
+
+    // Phase 1: ask every window's browser to close (unbind its sink + CloseBrowser), pumping NOTHING.
     for (WindowEntry& entry : windows_)
     {
-        // Retire, not destroy: `shutdown()` runs BEFORE `shell::cef::shutdown()` in the app, so
-        // freeing a router here is precisely the CE #319 use-after-free — one per open window.
+        if (entry.window != nullptr)
+        {
+            entry.window->begin_close();
+        }
+    }
+    // Phase 2: ONE shared drain that completes every window's pending OnBeforeClose.
+    drain_until([this] { return all_browsers_closed(); });
+    // Phase 3: finish + RETIRE each session to the graveyard — still BEFORE shell::cef::shutdown() in
+    // the app, so no router is freed while CEF may still reach it (CE #319, one per open window).
+    for (WindowEntry& entry : windows_)
+    {
         retire(entry);
     }
     windows_.clear();

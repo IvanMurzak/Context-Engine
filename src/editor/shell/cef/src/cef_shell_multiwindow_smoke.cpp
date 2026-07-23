@@ -54,6 +54,7 @@
 #include "context/editor/shell/keybindings_bridge.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
+#include "context/editor/shell/session_bridge.h"
 #include "context/editor/shell/shell.h"
 #include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/user_config.h"
@@ -135,6 +136,12 @@ struct WindowSurfaces
     shell::WelcomeBridge welcome;
     shell::BannerBridge banners;
     shell::UserConfigStore config;
+    // e08d landed the `session.state` daemon read AFTER e10a branched, and editor-core's boot now
+    // calls it (boot.ts `startSession`). Installed UNBOUND on every window here, exactly as the four
+    // sibling smokes install it: the router denies unknown methods by DEFAULT, so an uninstalled
+    // surface is an `unknown_method` REFUSAL that trips this smoke's `refused() == 0` invariant for
+    // every window. Unbound is the honest state for a smoke with no daemon (`edit`, `attached:false`).
+    shell::SessionBridge session_bridge;
 
     // Install every surface on `router`, routing region publishes to `window_id`. All the empty
     // paths are deliberate — a permanently-absent per-user file makes the boot deterministic
@@ -167,6 +174,8 @@ struct WindowSurfaces
         ok = banners.install(router) && ok;
         config.bind_path(std::filesystem::path{});
         ok = config.install(router) && ok;
+        // Unbound: no `bind_provider`, so it serves the `edit`/`attached:false` boot baseline.
+        ok = session_bridge.install(router) && ok;
         return ok;
     }
 };

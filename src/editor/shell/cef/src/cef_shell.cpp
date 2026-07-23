@@ -1068,27 +1068,61 @@ public:
                                  0);
     }
 
-    void close() override
+    void request_close() override
     {
-        // UNBIND FIRST, before any of the pumping below. `close()` also runs from the destructor —
-        // an `EditorWindow` that simply goes out of scope never calls it explicitly — and by then
-        // the sink IS the compositor member that was destroyed one line earlier, while this method
-        // still drives `CefDoMessageLoopWork()`. Dispatching an `OnPaint` into that would be a
-        // use-after-free of exactly CE #319's shape, one layer down. Frames produced during the
-        // close pump are therefore deliberately dropped (and deliberately NOT counted as losses by
-        // the OnPaint tripwire): the window is going away and nothing will composite them.
+        // Phase 1 of a serialised teardown (browser.h § teardown). UNBIND FIRST — `client_->begin_close()`
+        // drops the sink and latches `closing_`, so a frame delivered during the drain that follows is
+        // dropped instead of dispatched into a compositor that is going away (CE #319's shape). Then ask
+        // CEF to close, but DO NOT pump: the WindowManager pumps the shared loop exactly once for the
+        // whole teardown, so no per-window close-drain can advance another window into a re-entrant
+        // final destruction (the e10a Windows `!in_dtor_` abort). Idempotent.
         client_->begin_close();
         CefRefPtr<CefBrowser> browser = client_->browser();
-        // Driving the message loop after CefShutdown is undefined behaviour, and a host destroyed
-        // during static teardown would do exactly that. Guarding on g_initialized makes a late
-        // close a no-op instead.
-        if (browser == nullptr || !g_initialized)
+        // Closing after CefShutdown is UB (a host destroyed during static teardown); guarding on
+        // g_initialized makes a late close a no-op. `close_requested_` keeps a second call — the
+        // destructor's `close()` after the manager already closed us — from re-issuing CloseBrowser.
+        if (browser == nullptr || !g_initialized || close_requested_)
         {
             return;
         }
         browser->GetHost()->CloseBrowser(/*force_close*/ true);
-        // Pump the close through: OnBeforeClose is what releases the browser reference, and leaving
-        // it pending would leak the browser past CefShutdown.
+        close_requested_ = true;
+    }
+
+    [[nodiscard]] bool is_closed() const override
+    {
+        // Closed once CEF's OnBeforeClose has released the browser reference (`client_->closed()`),
+        // or once CEF itself is gone (a close during static teardown is a no-op that is already done).
+        return !g_initialized || client_->closed();
+    }
+
+    void pump_teardown() override
+    {
+        // Phase 2: one slice of the PROCESS-WIDE loop, no sink bound. Unconditional (not gated on
+        // should_pump) — teardown must drain every pending OnBeforeClose, not wait for a schedule.
+        // DoMessageLoopWork with nothing pending returns immediately, so an extra slice is free.
+        if (g_initialized)
+        {
+            CefDoMessageLoopWork();
+        }
+    }
+
+    void close() override
+    {
+        // The SINGLE-window / destructor path: request the close and drain THIS browser closed in one
+        // call, exactly as before. `~CefBrowserHostImpl` relies on it for a host that simply goes out
+        // of scope, and the sibling single-window smokes + the app's window 0 reach teardown through
+        // it. Multi-window teardown instead calls request_close()/pump_teardown() so the drain is
+        // SHARED across all windows (see the WindowManager) rather than run once per browser — which is
+        // the interleaving that faulted `!in_dtor_` on Windows. The unbind-before-pump invariant is
+        // preserved: request_close() calls begin_close() before this drain runs.
+        request_close();
+        // OnBeforeClose is what releases the browser reference; leaving it pending would leak the
+        // browser past CefShutdown. A no-op once request_close() already saw g_initialized false.
+        if (!g_initialized)
+        {
+            return;
+        }
         for (int i = 0; i < 200 && !client_->closed(); ++i)
         {
             CefDoMessageLoopWork();
@@ -1098,6 +1132,9 @@ public:
 private:
     CefRefPtr<ShellCefClient> client_;
     CefRefPtr<ShellCefApp> app_;
+    // Set once CloseBrowser has been issued, so a second close request (the destructor's `close()`
+    // after the manager already tore us down) does not re-issue it.
+    bool close_requested_ = false;
 };
 
 } // namespace

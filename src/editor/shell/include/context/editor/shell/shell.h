@@ -31,6 +31,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -118,7 +119,22 @@ public:
     [[nodiscard]] const WindowPlacement& last_placement() const { return last_placement_; }
     void clear_placement_dirty() { placement_dirty_ = false; }
 
+    // Single-shot close: ask the browser to close AND drain it (the browser host's own close), then
+    // detach the compositor and the backend. Correct for a window torn down on its own; the manager's
+    // N-window teardown uses the split begin_close()/browser_closed()/finish_close() below so the CEF
+    // drain is shared across all windows (browser.h § teardown; the e10a Windows `!in_dtor_` fix).
     void close();
+
+    // --- split teardown, driven by WindowManager for N windows -----------------------------------
+    // Phase 1: ask the browser to close (unbind its sink + CloseBrowser), WITHOUT draining the loop.
+    void begin_close();
+    // Has the browser finished closing (its OnBeforeClose ran)? True also when there is no browser.
+    [[nodiscard]] bool browser_closed() const;
+    // The pump-less browser seam, so the manager can drive the shared teardown loop through a window.
+    [[nodiscard]] IBrowserHost* browser_or_null() { return browser_.get(); }
+    // Phase 3: the non-CEF teardown (detach the compositor + the backend, mark dead), run AFTER the
+    // shared drain has confirmed the browser closed. The browser is NOT re-closed here.
+    void finish_close();
 
 private:
     void handle_event(const ShellEvent& event, std::uint64_t now_us);
@@ -267,9 +283,20 @@ private:
         std::unique_ptr<client::Client> daemon_client;
     };
 
-    // Close the window and move its session to the graveyard. The entry is left empty for the
-    // caller to erase.
+    // Finish a window whose browser has ALREADY been closed + drained (finish_close + reset) and move
+    // its session to the graveyard. The entry is left empty for the caller to erase.
     void retire(WindowEntry& entry);
+    // Close ONE window's browser, drain only it closed, then retire it. The single-window teardown
+    // path (a mid-process destroy, or a window that died on its own) — siblings keep painting because
+    // only this browser was asked to close.
+    void close_and_retire(WindowEntry& entry);
+    // Pump the PROCESS-WIDE CEF teardown loop until `done()` or a bounded budget is spent. Pumps
+    // through any one live window's browser (the loop drains every closing browser at once), so this
+    // is the ONE shared drain that keeps a per-window teardown from re-entering another window's final
+    // destruction (browser.h § teardown; the e10a Windows `!in_dtor_` abort, CE #319 generalised).
+    void drain_until(const std::function<bool()>& done);
+    // Have the browsers of every live window finished closing? The shutdown() drain's stop condition.
+    [[nodiscard]] bool all_browsers_closed() const;
     [[nodiscard]] WindowEntry* find(WindowId id);
     [[nodiscard]] const WindowEntry* find(WindowId id) const;
     void report_failure(WindowCreateFailure failure);

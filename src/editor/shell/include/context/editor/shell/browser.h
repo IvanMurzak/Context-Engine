@@ -106,6 +106,34 @@ public:
     virtual void execute_script(std::string_view source) = 0;
 
     virtual void close() = 0;
+
+    // --- teardown, split into two phases so N browsers tear down SAFELY ---------------------------
+    //
+    // `close()` above does the whole thing at once: unbind the sink, ask CEF to close, AND drive the
+    // process-wide message loop until this browser is done. That is correct for ONE browser (the app's
+    // single window, the sibling single-window smokes, a host that simply goes out of scope). It is
+    // NOT correct for N: `CefDoMessageLoopWork()` is process-wide, so one browser's close-drain
+    // advances ANOTHER still-open browser's teardown, and on Windows that reaches a CEF ref-counted
+    // object's final Release INSIDE its own destructor — the `!in_dtor_` abort (CE #319 generalised to
+    // N windows tearing down at once). The WindowManager therefore drives the three phases below
+    // itself: ask EVERY window to close first, then ONE shared drain, then release the clients — so no
+    // window's teardown pump can re-enter another window's final destruction.
+    //
+    // The defaults route to `close()` / report "already closed" / no-op, so a host with no async
+    // teardown (the scripted host, the unit fakes) satisfies the interface unchanged.
+
+    // Phase 1: unbind the frame sink and ask CEF to close this browser, WITHOUT pumping the loop.
+    // Idempotent. Default: the synchronous `close()`.
+    virtual void request_close() { close(); }
+
+    // Has the browser finished acknowledging the close (its `OnBeforeClose` has run), so its client
+    // may be released? A host with no async teardown is closed the moment it is asked. Default: true.
+    [[nodiscard]] virtual bool is_closed() const { return true; }
+
+    // Phase 2: drive ONE slice of the shared teardown message loop, delivering no frames. Process-wide
+    // for the CEF host (it drains EVERY closing browser at once); a no-op for a host with no message
+    // loop. Called in a single drain loop after phase 1 has requested close on every window.
+    virtual void pump_teardown() {}
 };
 
 // ------------------------------------------------------------------- the integrated pump schedule
