@@ -70,9 +70,12 @@ What exists today:
   have to guess the chrome state it missed).
 * `bus.receiveMirrored(event)` — the receiving end. The envelope is **re-sealed with the receiving
   bus's own `seq`** (a foreign counter spliced into a local one would break monotonicity for every
-  local subscriber) with its `origin` preserved, and is **not re-delivered to that bus's own mirror
-  sinks**. That is the echo suppression: without it two cross-attached windows ring forever. Both
-  properties are asserted by the two-bus drill in `uibus.test.ts`.
+  local subscriber) with its `origin` preserved. Two INDEPENDENT loop breakers then keep the seam
+  echo-free, and a transport needs whichever one matches its shape: a mirrored envelope is **not
+  re-delivered to that bus's own mirror sinks** (this terminates a ring of point-to-point sinks), and
+  an envelope arriving back at its **own `origin` is dropped** (this is what saves a transport that
+  BROADCASTS to every window including the sender — the shape a Shell hop most naturally takes). Each
+  has its own case in `uibus.test.ts`; the two-bus ring drill exercises only the first.
 * Nothing wires a sink at boot, **deliberately**. The Shell's bridge router denies unknown methods, so
   a boot-time call to a not-yet-existing mirror method would redden every CEF smoke that had not
   installed a stub for it.

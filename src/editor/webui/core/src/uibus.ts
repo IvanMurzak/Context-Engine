@@ -75,6 +75,16 @@ export const BUILTIN_UI_TOPICS = [
 export const DEFAULT_UI_ORIGIN = "local";
 
 /**
+ * How many refusals the diagnostic log keeps.
+ *
+ * BOUNDED because `publish` sits on a per-frame path: a drag publisher runs at frame rate, so ONE
+ * mis-declared topic would otherwise grow the log without bound for the life of the window — an
+ * unbounded leak reachable from an ordinary package bug, in a process that stays up for days.
+ * Newest-wins: a repeated refusal repeats, so recent context is what a diagnosis actually needs.
+ */
+export const UI_REJECTION_LOG_LIMIT = 128;
+
+/**
  * One `editor.ui` event.
  *
  * `seq` is monotonic and totally ordered WITHIN one bus — one window — mirroring the daemon stream's
@@ -265,9 +275,23 @@ export class EditorUiBus {
         return this.#seq;
     }
 
-    /** Every refusal this bus has reported, oldest first. The diagnosability channel. */
+    /**
+     * The refusals this bus has reported, oldest first — the diagnosability channel.
+     *
+     * Capped at `UI_REJECTION_LOG_LIMIT`, oldest dropped first (see that constant for why an
+     * unbounded log is not an option on a per-frame path).
+     */
     get rejections(): readonly UiRejection[] {
         return this.#rejections;
+    }
+
+    /** Record a refusal, keeping the log bounded. Every refusal in this class goes through here. */
+    #reject(rejection: UiRejection): UiRejection {
+        this.#rejections.push(rejection);
+        if (this.#rejections.length > UI_REJECTION_LOG_LIMIT) {
+            this.#rejections.shift();
+        }
+        return rejection;
     }
 
     /** The topics a package has successfully declared, plus the built-ins. */
@@ -298,9 +322,7 @@ export class EditorUiBus {
             if (diagnostic === "") {
                 accepted.push(topic);
             } else {
-                const rejection: UiRejection = { topic, diagnostic };
-                rejected.push(rejection);
-                this.#rejections.push(rejection);
+                rejected.push(this.#reject({ topic, diagnostic }));
             }
         }
         return { accepted, rejected };
@@ -331,8 +353,7 @@ export class EditorUiBus {
             const diagnostic = topic.startsWith(UI_TOPIC_PREFIX)
                 ? `"${topic}" is not one of the built-in editor.ui topics`
                 : `"${topic}" was never declared by a package manifest`;
-            const rejection: UiRejection = { topic, diagnostic };
-            this.#rejections.push(rejection);
+            this.#reject({ topic, diagnostic });
             return { published: false, seq: 0, event: undefined, diagnostic };
         }
         const event: EditorUiEvent<P> = {
@@ -364,7 +385,7 @@ export class EditorUiBus {
      */
     subscribe<P = unknown>(topic: string, listener: UiListener<P>): EditorUiSubscription {
         if (!this.isKnownTopic(topic)) {
-            this.#rejections.push({
+            this.#reject({
                 topic,
                 diagnostic: `cannot subscribe to "${topic}": it is not a built-in or declared topic`,
             });
@@ -428,25 +449,29 @@ export class EditorUiBus {
     /**
      * Apply an envelope that arrived from ANOTHER window.
      *
-     * Two properties make the seam loop-free and orderable, and both are asserted by
-     * `uibus.test.ts`'s two-bus drill:
+     * Three properties make the seam loop-free and orderable, each with its own case in
+     * `uibus.test.ts`:
      *
      *   * the envelope is RE-SEALED with THIS bus's next seq, because `seq` is a per-bus ordering and
      *     splicing a foreign counter into it would break monotonicity for every local subscriber;
-     *   * the ORIGIN is preserved, and a mirrored envelope is NOT re-delivered to the mirror sinks —
-     *     that is the echo suppression, and without it two cross-attached windows ring forever.
+     *   * the ORIGIN is preserved, so the receiving window can still tell whose fact it is;
+     *   * a mirrored envelope is NOT re-delivered to the mirror sinks, AND an envelope arriving back
+     *     at its OWN origin is dropped. Those are two INDEPENDENT loop breakers, not one: the first
+     *     terminates a ring of point-to-point sinks, and the second is what saves a transport that
+     *     BROADCASTS to every window including the sender — the shape e10's Shell hop most naturally
+     *     takes. Each needs its own test; the ring drill exercises only the first.
      */
     receiveMirrored(event: EditorUiEvent): UiPublishReport {
         if (!this.isKnownTopic(event.topic)) {
             const diagnostic = `mirrored envelope on unknown topic "${event.topic}"`;
-            this.#rejections.push({ topic: event.topic, diagnostic });
+            this.#reject({ topic: event.topic, diagnostic });
             return { published: false, seq: 0, event: undefined, diagnostic };
         }
         if (event.origin === this.#origin) {
             // Our own envelope came back around a mirror ring. Dropping it is what makes the seam
             // safe for a topology the editor does not control.
             const diagnostic = `mirrored envelope echoed back to its own origin "${event.origin}"`;
-            this.#rejections.push({ topic: event.topic, diagnostic });
+            this.#reject({ topic: event.topic, diagnostic });
             return { published: false, seq: 0, event: undefined, diagnostic };
         }
         const resealed: EditorUiEvent = {

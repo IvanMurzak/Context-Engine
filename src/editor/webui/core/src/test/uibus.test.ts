@@ -30,6 +30,7 @@ import {
     EditorUiBus,
     UI_TOPIC_DRAG,
     UI_TOPIC_FOCUS,
+    UI_REJECTION_LOG_LIMIT,
     UI_TOPIC_LAYOUT,
     UI_TOPIC_PALETTE,
     UI_TOPIC_THEME_CHANGED,
@@ -131,6 +132,26 @@ export const uibusTests: readonly TestCase[] = [
             subscription.dispose();
             bus.publish(UI_TOPIC_FOCUS, {});
             assertEqual(focus, 1, "a disposed subscription stops receiving");
+        },
+    },
+    {
+        name: "uibus: a throwing subscriber is isolated — one bad panel cannot deny the others",
+        run: () => {
+            // TOTALITY: the reason this is a bus rather than a callback list. Lived in
+            // `theme.test.ts` while the bus was e06b's stub; it belongs with its subject.
+            const bus = new EditorUiBus();
+            let reached = 0;
+            bus.subscribe(UI_TOPIC_THEME_CHANGED, () => {
+                throw new Error("a panel blew up");
+            });
+            const report = bus.publish(UI_TOPIC_THEME_CHANGED, { themeId: BUILTIN_DARK });
+            bus.subscribe(UI_TOPIC_THEME_CHANGED, () => {
+                reached += 1;
+            });
+            assert(report.published, "the publish itself still succeeded");
+            assertEqual(reached, 1, "a later subscriber is still served its snapshot");
+            bus.publish(UI_TOPIC_THEME_CHANGED, { themeId: BUILTIN_LIGHT });
+            assertEqual(reached, 2, "and every subsequent fact, past the throwing one");
         },
     },
 
@@ -247,6 +268,28 @@ export const uibusTests: readonly TestCase[] = [
             subscription.dispose(); // still a disposable, so caller teardown stays uniform
         },
     },
+    {
+        name: "uibus: the rejection log is BOUNDED — a per-frame refusal cannot grow it without bound",
+        run: () => {
+            // `publish` is reachable from a drag publisher at frame rate, so one mis-declared topic
+            // would otherwise leak for the life of the window. Newest-wins, so the log still answers
+            // "why is this being refused RIGHT NOW".
+            const bus = new EditorUiBus();
+            for (let index = 0; index < UI_REJECTION_LOG_LIMIT + 50; index += 1) {
+                bus.publish(`acme.tilemap.undeclared-${index}`, {});
+            }
+            assertEqual(bus.rejections.length, UI_REJECTION_LOG_LIMIT, "the log is capped");
+            assertEqual(
+                bus.rejections[bus.rejections.length - 1]?.topic,
+                `acme.tilemap.undeclared-${UI_REJECTION_LOG_LIMIT + 49}`,
+                "the most recent refusal is retained",
+            );
+            assert(
+                bus.rejections.every((r) => r.topic !== "acme.tilemap.undeclared-0"),
+                "and the oldest was dropped, not the newest",
+            );
+        },
+    },
 
     // ------------------------------------------------------------------ 3. the D7 boundary
     {
@@ -326,12 +369,43 @@ export const uibusTests: readonly TestCase[] = [
         },
     },
     {
+        name: "uibus: a BROADCAST transport cannot echo — a bus drops an envelope of its own origin",
+        run: () => {
+            // The loop breaker the ring drill below does NOT exercise. That one terminates because
+            // `receiveMirrored` never re-enters the mirror sinks; this one is what saves the shape a
+            // Shell hop most naturally takes — one broadcast to EVERY window, sender included. Its
+            // branch was unreachable from the suite until this case existed.
+            const a = new EditorUiBus({ origin: "window-a" });
+            a.publish(UI_TOPIC_FOCUS, { panelId: "scene-tree" });
+            let deliveries = 0;
+            a.subscribe(UI_TOPIC_FOCUS, () => {
+                deliveries += 1;
+            });
+            deliveries = 0; // discount the snapshot handed to the subscriber on attach
+            const echoed = a.receiveMirrored({
+                seq: 1,
+                topic: UI_TOPIC_FOCUS,
+                origin: "window-a",
+                payload: { panelId: "scene-tree" },
+            });
+            assert(!echoed.published, "an envelope of our own origin is refused");
+            assertEqual(echoed.seq, 0, "and consumes no seq");
+            assertEqual(a.seq, 1, "the counter is untouched");
+            assertEqual(deliveries, 0, "no subscriber sees the fact a second time");
+            assert(
+                a.rejections.some((r) => r.diagnostic.indexOf("echoed back") !== -1),
+                "and the drop is recorded rather than silent",
+            );
+        },
+    },
+    {
         name: "uibus: a mirror ring does not echo — a window drops its own envelope coming back",
         run: () => {
             const a = new EditorUiBus({ origin: "window-a" });
             const b = new EditorUiBus({ origin: "window-b" });
-            // Cross-attached: exactly the topology two mirrored windows form, and the one that rings
-            // forever without echo suppression.
+            // Cross-attached point-to-point sinks: the topology two mirrored windows form. This ring
+            // terminates on the FIRST loop breaker — `receiveMirrored` does not re-enter the sinks —
+            // so it never reaches the origin check; the case above covers that one.
             a.attachMirror({ deliver: (event) => void b.receiveMirrored(event) });
             b.attachMirror({ deliver: (event) => void a.receiveMirrored(event) });
             let deliveries = 0;

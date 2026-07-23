@@ -65,7 +65,15 @@ _BUS_EXIT = re.compile(_EXIT.pattern + r"|\.call\s*\(", re.IGNORECASE)
 # `bus.subscribe<ThemeChangedPayload>(UI_TOPIC_THEME_CHANGED, …)`, and a bare `subscribe\s*\(` pattern
 # silently skipped every generic one — which is how this gate passed a PLANTED forwarding path on its
 # first run. Found by planting a violation, not by reading the regex.
-_SUBSCRIBE = re.compile(r"\bsubscribe\s*(?:<[^<>()]*>)?\s*\(")
+#
+# The type argument must admit NESTING. A first fix spelled it `<[^<>()]*>`, which matches exactly one
+# level and therefore skipped `subscribe<Readonly<Record<string, string>>>(…)` — not a synthetic shape:
+# that is literally the type of `ThemeChangedPayload.variables`, one plausible refactor away from being
+# a real call site. Planting that shape passed the gate CLEAN with a live forwarding path in the tree,
+# the same bypass class one level deeper. `[^()]*?` admits any depth of `<>`, stays non-greedy so it
+# stops at the FIRST `>` that is followed by the call's `(`, and still cannot run across a call
+# boundary because parentheses are excluded.
+_SUBSCRIBE = re.compile(r"\bsubscribe\s*(?:<[^()]*?>)?\s*\(")
 
 # A ui-topic argument: the exported constants, or a literal in the reserved namespace.
 _UI_TOPIC_ARG = re.compile(r"""\bUI_TOPIC_[A-Z_]+\b|['"]editor\.ui\.[a-z0-9.-]*['"]""")

@@ -141,6 +141,37 @@ def test_rule_2_catches_a_GENERIC_subscribe_call(tmp_path: Path) -> None:
     assert len(findings) == 1, "a generic subscribe call must be scanned like any other"
 
 
+def test_rule_2_catches_a_NESTED_generic_subscribe_call(tmp_path: Path) -> None:
+    """REGRESSION: the SECOND generic bypass, found by planting the shape one refactor away.
+
+    The first fix admitted exactly one level of type argument (`<[^<>()]*>`), so
+    `subscribe<Readonly<Record<string, string>>>(…)` was skipped and the gate reported a CLEAN sweep
+    with a live forwarding path planted in theme.ts. That payload type is not invented — it is the
+    declared type of `ThemeChangedPayload.variables`. Found by planting, not by reading the regex.
+    """
+    consumer = (
+        'import { UI_TOPIC_THEME_CHANGED } from "./uibus.js";\n'
+        "bus.subscribe<Readonly<Record<string, string>>>(UI_TOPIC_THEME_CHANGED, (event) => {\n"
+        "    void bridge.call('editor.ui.forward', event);\n"
+        "});\n"
+    )
+    findings = check_ui_bus_boundary.check(_tree(tmp_path, consumer=consumer))
+    assert len(findings) == 1, "a NESTED generic type argument must not hide the call site"
+
+
+def test_rule_2_nested_generic_on_a_clean_callback_is_still_clean(tmp_path: Path) -> None:
+    """The widened type-argument pattern must not manufacture findings on innocent code."""
+    consumer = (
+        'import { UI_TOPIC_THEME_CHANGED } from "./uibus.js";\n'
+        "bus.subscribe<Readonly<Record<string, string>>>(UI_TOPIC_THEME_CHANGED, (event) => {\n"
+        "    paint(event);\n"
+        "});\n"
+        "// A non-ui subscription may still reach the Shell freely.\n"
+        "other.subscribe<Map<string, number>>('shell.something', () => void bridge.call('x'));\n"
+    )
+    assert check_ui_bus_boundary.check(_tree(tmp_path, consumer=consumer)) == []
+
+
 def test_rule_2_catches_a_string_literal_topic_and_a_multiline_callback(tmp_path: Path) -> None:
     consumer = (
         'bus.subscribe("editor.ui.theme-changed", (event) => {\n'

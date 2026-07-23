@@ -51,7 +51,7 @@ import {
     type ThemeChangedEvent,
     type ThemeChangedPayload,
 } from "../theme.js";
-import { EditorUiBus, UI_TOPIC_THEME_CHANGED } from "../uibus.js";
+import { UI_TOPIC_THEME_CHANGED } from "../uibus.js";
 
 import darkTheme from "../../../tokens/themes/dark.theme.json";
 import lightTheme from "../../../tokens/themes/light.theme.json";
@@ -607,24 +607,10 @@ export const themeTests: readonly TestCase[] = [
             assertEqual(seen[0]?.payload.themeId, BUILTIN_DARK, "and it is the theme on screen");
         },
     },
-    {
-        name: "the bus isolates a throwing subscriber and honours dispose()",
-        run: () => {
-            const bus = new EditorUiBus();
-            let reached = 0;
-            bus.subscribe(UI_TOPIC_THEME_CHANGED, () => {
-                throw new Error("a panel blew up");
-            });
-            const subscription = bus.subscribe(UI_TOPIC_THEME_CHANGED, () => {
-                reached += 1;
-            });
-            bus.publish(UI_TOPIC_THEME_CHANGED, { themeId: BUILTIN_DARK });
-            assertEqual(reached, 1, "one subscriber's failure does not deny the others");
-            subscription.dispose();
-            bus.publish(UI_TOPIC_THEME_CHANGED, { themeId: BUILTIN_DARK });
-            assertEqual(reached, 1, "a disposed subscription stops receiving");
-        },
-    },
+    // NOTE: "the bus isolates a throwing subscriber" lived here while the bus WAS theme.ts's own
+    // stub. e08c moved the bus to `uibus.ts`, so that case — which constructs a bare `EditorUiBus`
+    // and never touches a theme — now lives with its subject in `uibus.test.ts`. What stays here is
+    // what is genuinely about the THEME engine's use of the bus.
 
     // ------------------------------------------------------------------ iframe delivery (04 §5)
     {
