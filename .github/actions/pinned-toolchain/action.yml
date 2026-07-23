@@ -7,6 +7,23 @@
 #             follow-up recorded in the manifest). No live probe yet.
 # The manifest + tools/check_toolchain.py are the single source of truth; this action is
 # only the applicator. Requires the repo to be checked out first.
+#
+# CI toolchain-resilience fix (apt.llvm.org "accepts the connection, then goes silent" incident —
+# the Toolchain step was hanging 80-100+ min per leg, ticking toward the 6h runner ceiling):
+#   1. wget itself is bounded (--tries=3 --timeout=30) so a stalled fetch becomes a fast failure.
+#   2. tools/ci-retry.sh's new `-t` wraps the WHOLE install attempt (wget AND the apt operations
+#      llvm.sh runs internally) in GNU `timeout`, so ANY stall — not just the wget half — becomes
+#      a retryable failure instead of an unbounded hang.
+#   3. Every ci.yml job that uses this action now sets `timeout-minutes` as a backstop, so no leg
+#      can EVER again run to the runner's 6h default ceiling.
+#   4. The Linux install redirects apt's package-download cache into an actions/cache-backed,
+#      pin-keyed directory (see "Clang install cache" below), so a steady-state run does not hit
+#      apt.llvm.org for the .deb payload at all — only the very first (cache-miss) run per pin, or
+#      an outage that also takes down apt.llvm.org's lightweight repo-metadata endpoint, still
+#      needs the server reachable. That is the honest, correctly-scoped guarantee: fail-fast +
+#      retry + a job-timeout backstop + a warm cache for every subsequent run — it does NOT make a
+#      genuinely down server reachable, and it NEVER falls back to an unpinned/unverified compiler
+#      (check_toolchain.py --verify still runs unconditionally on every path).
 
 name: Pinned toolchain (L-42 manifest)
 description: Install/verify the per-target pinned toolchain declared in cmake/toolchain-versions.json
@@ -14,18 +31,17 @@ description: Install/verify the per-target pinned toolchain declared in cmake/to
 runs:
   using: composite
   steps:
-    - name: Apply toolchain manifest (Linux/macOS)
-      if: runner.os != 'Windows'
+    - name: Resolve toolchain manifest values (Linux)
+      if: runner.os == 'Linux'
+      id: linux-manifest
       shell: bash
       run: |
         set -euo pipefail
-        case "$RUNNER_OS" in
-          Linux)
-            PLATFORM=linux-x86_64
-            # One manifest read yields pin + install major, and asserts the install.method is
-            # the one this branch implements — the manifest field is load-bearing: pointing it
-            # at an install mechanism this action does not perform must fail loudly.
-            VARS="$(python3 - "$PLATFORM" <<'PYEOF'
+        PLATFORM=linux-x86_64
+        # One manifest read yields pin + install major, and asserts the install.method is
+        # the one this branch implements — the manifest field is load-bearing: pointing it
+        # at an install mechanism this action does not perform must fail loudly.
+        VARS="$(python3 - "$PLATFORM" <<'PYEOF'
         import json
         import sys
 
@@ -40,29 +56,71 @@ runs:
         print(f"MAJOR={entry['install']['major']}")
         PYEOF
             )"
-            eval "$VARS"
-            python3 tools/check_toolchain.py --platform "$PLATFORM" --describe
-            echo "[toolchain] installing clang $PIN (apt.llvm.org, major $MAJOR)"
-            # Retry/backoff around apt.llvm.org (Context-Engine#129): both the llvm.sh fetch AND the
-            # apt operations llvm.sh runs internally hit apt.llvm.org, which had a full-day outage
-            # (blocked #116). Retry the whole install so a transient blip no longer hard-fails CI.
-            # ($MAJOR is passed as $0 to the inner shell; RUNNER_TEMP is inherited from the env.)
-            bash tools/ci-retry.sh -- bash -c '
-              wget -q https://apt.llvm.org/llvm.sh -O "$RUNNER_TEMP/llvm.sh" \
-                && chmod +x "$RUNNER_TEMP/llvm.sh" \
-                && sudo "$RUNNER_TEMP/llvm.sh" "$0"' "$MAJOR"
-            "clang-$MAJOR" --version
-            "clang-$MAJOR" --version | python3 tools/check_toolchain.py --platform "$PLATFORM" --verify
-            echo "CC=clang-$MAJOR" >> "$GITHUB_ENV"
-            echo "CXX=clang++-$MAJOR" >> "$GITHUB_ENV"
-            ;;
-          macOS)
-            PLATFORM=macos-arm64
-            python3 tools/check_toolchain.py --platform "$PLATFORM" --describe
-            clang --version
-            clang --version | python3 tools/check_toolchain.py --platform "$PLATFORM" --verify
-            ;;
-        esac
+        eval "$VARS"
+        python3 tools/check_toolchain.py --platform "$PLATFORM" --describe
+        # Expose pin/major as step OUTPUTS (not just local shell vars) so the cache step below can
+        # key on them via a workflow-engine `${{ }}` expression.
+        echo "pin=$PIN" >> "$GITHUB_OUTPUT"
+        echo "major=$MAJOR" >> "$GITHUB_OUTPUT"
+
+    # Item 4 of the resilience fix: cache apt's DOWNLOADED .deb archives (not the installed system
+    # tree — /usr/lib, /usr/bin are root-owned and actions/cache's plain-user tar extraction cannot
+    # write there) in a directory we fully control, keyed on the exact pin. actions/cache follows
+    # this repo's cef-prebuilt-cache precedent: no restore-keys (a stale archive must never satisfy
+    # a new pin — a pin bump is an exact-key miss that re-fetches once, then re-saves), and saves on
+    # ANY branch (the key already scopes by pin, not by branch, so there is no per-branch growth to
+    # guard against, unlike the vcpkg caches elsewhere in this repo that restrict saving to main).
+    - name: Clang install cache (Linux, apt archive dir keyed on the L-42 pin)
+      if: runner.os == 'Linux'
+      uses: actions/cache@v6
+      with:
+        path: ${{ runner.temp }}/clang-apt-cache
+        key: clang-apt-debs-linux-x86_64-${{ steps.linux-manifest.outputs.major }}-${{ steps.linux-manifest.outputs.pin }}
+
+    - name: Install pinned clang (Linux, apt.llvm.org via llvm.sh)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        set -euo pipefail
+        PLATFORM=linux-x86_64
+        MAJOR="${{ steps.linux-manifest.outputs.major }}"
+        PIN="${{ steps.linux-manifest.outputs.pin }}"
+        echo "[toolchain] installing clang $PIN (apt.llvm.org, major $MAJOR)"
+        # Redirect apt's package-download cache to the actions/cache-backed dir above via an
+        # apt.conf.d drop-in: apt reads every drop-in for EVERY invocation, including the ones
+        # llvm.sh runs internally, so llvm.sh itself needs no changes. On a cache hit, apt finds
+        # the exact matching .deb already downloaded (validated by apt's own size+hash check
+        # before being trusted — a stale/corrupt entry is safely re-fetched, never silently used)
+        # and skips the apt.llvm.org fetch for it entirely.
+        CACHE_DIR="$RUNNER_TEMP/clang-apt-cache"
+        mkdir -p "$CACHE_DIR/partial"
+        echo "Dir::Cache::Archives \"$CACHE_DIR/\";" | sudo tee /etc/apt/apt.conf.d/99-clang-apt-cache.conf >/dev/null
+        # Retry/backoff around apt.llvm.org (Context-Engine#129, and the later CI
+        # toolchain-resilience fix): both the llvm.sh fetch AND the apt operations llvm.sh runs
+        # internally hit apt.llvm.org, which had a full-day 504 outage (blocked #116) and,
+        # separately, a SILENT STALL (accepts the connection, then never responds — the wget
+        # `--timeout`/`--tries` bound the fetch itself; the ci-retry `-t` bounds the WHOLE attempt,
+        # including the apt operations inside llvm.sh, so a stall anywhere in the chain becomes a
+        # retryable failure instead of an unbounded hang). ($MAJOR is passed as $0 to the inner
+        # shell; RUNNER_TEMP is inherited from the env.)
+        bash tools/ci-retry.sh -t 300 -- bash -c '
+          wget -q --tries=3 --timeout=30 https://apt.llvm.org/llvm.sh -O "$RUNNER_TEMP/llvm.sh" \
+            && chmod +x "$RUNNER_TEMP/llvm.sh" \
+            && sudo "$RUNNER_TEMP/llvm.sh" "$0"' "$MAJOR"
+        "clang-$MAJOR" --version
+        "clang-$MAJOR" --version | python3 tools/check_toolchain.py --platform "$PLATFORM" --verify
+        echo "CC=clang-$MAJOR" >> "$GITHUB_ENV"
+        echo "CXX=clang++-$MAJOR" >> "$GITHUB_ENV"
+
+    - name: Apply toolchain manifest (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        set -euo pipefail
+        PLATFORM=macos-arm64
+        python3 tools/check_toolchain.py --platform "$PLATFORM" --describe
+        clang --version
+        clang --version | python3 tools/check_toolchain.py --platform "$PLATFORM" --verify
     # Windows runs in pwsh (NOT bash): on a self-hosted LocalSystem runner `shell: bash` resolves to
     # WSL, which refuses to run under LocalSystem (WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED). The Windows branch
     # only needs the manifest describe, which is shell-agnostic.
