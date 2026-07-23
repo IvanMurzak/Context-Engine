@@ -111,6 +111,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
+    # CI toolchain-resilience fix: a backstop so a stalled external dependency (apt.llvm.org, …)
+    # can NEVER again run this leg to the runner's 6h default ceiling. Real green wall-clock here
+    # is well under 10 minutes; 45 is a generous multiple, not a tight budget.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
@@ -346,6 +350,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
+    timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
 
@@ -403,6 +408,7 @@ jobs:
           - preset: tsan
             name: sanitize (TSan, ubuntu)
     runs-on: ubuntu-latest
+    timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
 
@@ -444,6 +450,7 @@ jobs:
     name: bench baseline (10k corpus, ubuntu)
     needs: [license-gate, python-tests]
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     env:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-bincache
     steps:
@@ -575,6 +582,7 @@ jobs:
     name: bench attach proxy (10k, real pipeline, ubuntu)
     needs: [license-gate, python-tests]
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
 
@@ -652,6 +660,7 @@ jobs:
     name: build-time bench (warm cache, ubuntu)
     needs: [license-gate, python-tests]
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
 
@@ -726,6 +735,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
+    timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
 
@@ -797,6 +807,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
+    timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
 
@@ -848,6 +859,7 @@ jobs:
     name: linux-export (both flavors, clean-host boot)
     needs: [license-gate, python-tests]
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
 
@@ -921,6 +933,7 @@ jobs:
     name: windows-export (both flavors, clean-host boot + signing report)
     needs: [license-gate, python-tests]
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || 'windows-latest' }}
+    timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
 
@@ -1027,6 +1040,7 @@ jobs:
     name: macos-export (both flavors, clean-host boot + signing report)
     needs: [license-gate, python-tests]
     runs-on: macos-latest
+    timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
 
@@ -1096,6 +1110,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
+    timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     env:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-bincache
     steps:
@@ -1253,6 +1268,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
 
@@ -1462,6 +1478,7 @@ jobs:
     name: webui-tests (editor-core TS T1, headless Chromium)
     needs: [license-gate, python-tests]
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
 
@@ -1514,6 +1531,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.os != 'ubuntu-latest' }}
+    timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     defaults:
       run:
         shell: bash
@@ -1669,6 +1687,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
+    timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
 
@@ -1758,6 +1777,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
+    timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
 
@@ -1903,6 +1923,7 @@ jobs:
     name: editor-boundary (out-of-tree consumer + include-graph)
     needs: [license-gate, python-tests]
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
 
@@ -1999,6 +2020,7 @@ jobs:
     name: density bench (packed instances, ubuntu)
     needs: [license-gate, python-tests]
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
 
