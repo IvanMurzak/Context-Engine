@@ -383,6 +383,19 @@ int main(int argc, char** argv)
     SMOKE_CHECK(created_surfaces != nullptr,
                 "the second window got its own bridge surfaces");
 
+    // `create_window()` deliberately leaves the present path to the caller — attaching one needs an
+    // RHI the registry does not own (window_registry.h: "a window with no present path composites
+    // nothing"). Window 0 gets this from main() below; the factory-created window needs the exact
+    // same step, or its compositor's `view_frames` never leaves zero and `boot_window` times out
+    // waiting on a frame that was never going to arrive.
+    if (second.ok())
+    {
+        if (shell::EditorWindow* second_window = manager.window(second.id))
+        {
+            second_window->compositor().attach_cpu(std::make_unique<present::MemoryBlitter>(), size);
+        }
+    }
+
     if (second.ok() && created_surfaces != nullptr)
     {
         SMOKE_CHECK(boot_window(second.id, *created_surfaces, 30),
@@ -530,6 +543,15 @@ int main(int argc, char** argv)
         // An id is never reused: 2, not the destroyed 1.
         SMOKE_CHECK(third.id == 2, "the re-created window got a FRESH id, not the destroyed one");
         SMOKE_CHECK(factory_calls == 2, "the factory was called once per create");
+        // Same present-path attach the second window needed above — the re-created window is built
+        // through the same factory + `create_window()` path, so it needs it too.
+        if (third.ok())
+        {
+            if (shell::EditorWindow* third_window = manager.window(third.id))
+            {
+                third_window->compositor().attach_cpu(std::make_unique<present::MemoryBlitter>(), size);
+            }
+        }
         if (third.ok() && created_surfaces != nullptr)
         {
             SMOKE_CHECK(boot_window(third.id, *created_surfaces, 30),
