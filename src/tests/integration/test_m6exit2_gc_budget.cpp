@@ -82,8 +82,8 @@ constexpr double kBudgetMs = 0.25 * (1000.0 / 60.0);
 //   sanitize (ASan+UBSan, ubuntu) ................... maxPauseMs =   4.473 (enforced 4.167, RED)
 //
 // Only TSan was widened when this gate landed, because the ASan+UBSan leg then measured
-// maxPauseMs=0.991 and appeared to have 4x headroom. It does not: across ten consecutive
-// ASan+UBSan runs of that same workload (jobs 89084381975 … 89143913144) maxPauseMs ranged
+// maxPauseMs=0.991 and appeared to have 4x headroom. It does not: across the thirteen consecutive
+// ASan+UBSan runs of that same workload spanning jobs 89084381975 … 89143913144, maxPauseMs ranged
 // 1.056 … 4.473 ms — a 4.2x load-driven spread whose tail crosses the 4.167 ms ceiling, so the leg
 // reds intermittently with no engine regression (issue #335). ASan+UBSan is therefore widened too.
 // The blocking exit gate ("M6 exit gate" CI step, `ctest --preset dev`, on all three `build` legs)
@@ -121,6 +121,20 @@ static_assert(kSanitizerBudgetScale > 1.0,
               "enforced GC-pause ceiling would measure instrumentation overhead instead of "
               "R-SIM-008 (issue #335). Define CONTEXT_ASAN_BUILD / CONTEXT_TSAN_BUILD for the "
               "preset in src/tests/integration/CMakeLists.txt.");
+#endif
+// ...and the CONVERSE, because the guard above is worth exactly what its detection is worth. That
+// detection is one-directional: if a compiler answered neither probe, CONTEXT_M6EXIT2_INSTRUMENTED
+// would silently never be defined, the assert above would never be compiled at all, and the guard
+// would sit INERT on precisely the legs it exists to protect — passing vacuously, with no signal.
+// CONTEXT_SANITIZE / CONTEXT_TSAN add `-fsanitize=...` to every TU unconditionally
+// (src/CMakeLists.txt), and they are the ONLY things that plumb the widen defines, so a plumbed
+// define IMPLIES an instrumented TU. Assert that the compiler agrees: a detection that ever goes
+// blind then reds the `sanitize` / `tsan` leg at BUILD time instead of quietly disarming the guard.
+#if (defined(CONTEXT_ASAN_BUILD) || defined(CONTEXT_TSAN_BUILD))                                   \
+    && !defined(CONTEXT_M6EXIT2_INSTRUMENTED)
+#error "a sanitizer widen define is plumbed, but this compiler reports no active sanitizer: the "  \
+       "issue-#335 wiring guard above cannot fire and is inert. Extend the detection (see "        \
+       "integration_test.h's kSanitizerTimeoutScale) rather than removing this check."
 #endif
 
 constexpr int kWarmupTicks = 64;
@@ -342,11 +356,6 @@ int main()
     CHECK(agg.pause_count >= 1);    // non-vacuous: the scheduled windows genuinely collected
     CHECK(agg.in_window_count >= 1); // ...attributed to the inter-tick window
     CHECK(engine->gcPausesDropped() == 0); // nothing was lost engine-side
-    // #335 regression guard, mirrored at ctest level so a red leg names the cause in its own log
-    // instead of only failing to compile: the enforced ceiling may be WIDENED for instrumentation
-    // but must never be TIGHTER than the real R-SIM-008 budget. (The compile-time static_asserts
-    // beside kSanitizerBudgetScale are the guard that actually catches a missing widen.)
-    CHECK(kEnforcedBudgetMs >= kBudgetMs);
 
     // THE exit assertion: every observed JS-tier GC pause fits the inter-tick budget, and no
     // record loss can be hiding a breach (within_budget is fail-closed on drops). Enforces

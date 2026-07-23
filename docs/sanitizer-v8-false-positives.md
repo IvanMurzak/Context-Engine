@@ -153,14 +153,18 @@ headroom. It does not. Measured on run `29987903124` — ONE commit, bit-identic
 | `sanitize (TSan, ubuntu)` | 114.592 | 416.667 (100x) | green |
 | `sanitize (ASan+UBSan, ubuntu)` | **4.473** | **4.167 (1x)** | **RED** |
 
-Across ten consecutive ASan+UBSan runs of that same workload (jobs `89084381975` … `89143913144`)
-`maxPauseMs` ranged **1.056 … 4.473 ms** — a 4.2x load-driven spread whose tail crosses the ceiling.
+Across the thirteen consecutive ASan+UBSan runs of that same workload spanning jobs `89084381975` …
+`89143913144`, `maxPauseMs` ranged **1.056 … 4.473 ms** — a 4.2x load-driven spread whose tail
+crosses the ceiling.
 The gate's margin was under 1x of its own measurement noise, so it reds intermittently with no engine
 regression; that intermittency is what made it read as a flake. Fixed by widening ASan+UBSan 10x
 (`CONTEXT_ASAN_BUILD`, 9.3x margin over the worst observation, still an order of magnitude tighter
 than TSan's) and by a compile-time guard in `test_m6exit2_gc_budget.cpp` that asks the COMPILER
 whether a sanitizer is active and fails the build if the CMake wiring plumbed no widen for it — the
-defect was the missing wiring, not the constant, so the guard is on the wiring.
+defect was the missing wiring, not the constant, so the guard is on the wiring. The guard asserts
+BOTH directions: a plumbed widen define with no compiler-reported sanitizer is an `#error` too, so a
+detection that ever goes blind reds the leg at build time instead of silently passing vacuously and
+leaving the guard inert.
 
 **Generalises**: any real-time budget assertion added to this repo must be widened for BOTH sanitizer
 presets in the same PR (`conventions.md` § "Real-time / wall-clock budget assertions must be
