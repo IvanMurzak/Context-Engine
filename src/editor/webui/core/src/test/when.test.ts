@@ -15,10 +15,16 @@ import {
     resolveWhenContext,
     sourcesToLayers,
     STUB_EDITOR_UI,
-    STUB_SESSION_STATE,
     WHEN_CONTEXT_KEYS,
 } from "../when.js";
 import type { EditorUiSource, SessionStateSource, WhenContext } from "../when.js";
+
+// e08d DELETED the frozen stub session constant: `boot.ts` resolved the LIVE editor's when-context
+// from it and froze `playState` at `edit` for the whole session, so the placeholder was removed
+// rather than left where it had already proved it can become permanent. A FRESHLY CONSTRUCTED
+// `DaemonSessionState` IS the boot baseline (`edit`, no live session — see its doc comment), so the
+// cases below assert exactly what they asserted before, against the real source at rest.
+const BASELINE_SESSION = (): SessionStateSource => new DaemonSessionState();
 
 const FULL_UI: EditorUiSource = {
     textInputFocus: true,
@@ -221,7 +227,7 @@ export const whenTests: readonly TestCase[] = [
     {
         name: "the session source is the ONLY one e08 swapped (zero change to the other contexts)",
         run: () => {
-            const base = resolveContext({ editorUi: FULL_UI, session: STUB_SESSION_STATE });
+            const base = resolveContext({ editorUi: FULL_UI, session: BASELINE_SESSION() });
             // e08b corrected the token: `edit` is the daemon's own L-51 vocabulary, not "stopped".
             assertEqual(base.playState, "edit", "the boot baseline reads the daemon's `edit`");
 
@@ -344,7 +350,7 @@ export const whenTests: readonly TestCase[] = [
         run: () => {
             const resolved = resolveContext({
                 editorUi: STUB_EDITOR_UI,
-                session: STUB_SESSION_STATE,
+                session: BASELINE_SESSION(),
             });
             assertEqual(resolved.panelFocus, "", "no panel focused");
             assertEqual(resolved.textInputFocus, false, "no text input");
