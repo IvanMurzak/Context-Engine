@@ -71,11 +71,13 @@ if(OS_WINDOWS OR OS_LINUX)
         context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
     target_include_directories(context_editor_shell_cef_smoke PRIVATE "${CEF_ROOT}")
 
-    # Stage the libcef binary payload + resources next to the exe so it boots from the build tree.
-    COPY_FILES(context_editor_shell_cef_smoke "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}"
-               "${CEF_TARGET_OUT_DIR}")
-    COPY_FILES(context_editor_shell_cef_smoke "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}"
-               "${CEF_TARGET_OUT_DIR}")
+    # The libcef binary payload + resources are staged next to the exe by context_editor_cef_stage,
+    # the SINGLE stage target the parent directory creates (issue #360). Every executable that boots
+    # from ${CEF_TARGET_OUT_DIR} takes this dependency instead of attaching its own POST_BUILD copy:
+    # four concurrent copies of the identical payload into the identical directory is a Windows
+    # sharing violation waiting for ninja to schedule two links together, which is exactly what the
+    # intermittent `Error copying directory ... locales` failures were.
+    add_dependencies(context_editor_shell_cef_smoke context_editor_cef_stage)
 
     # --- the e05c asset root (and why this is a DEPENDENCY, not just a define) --------------------
     # The smoke now loads `context-editor://app/index.html`, so it needs editor-core's built asset
@@ -127,10 +129,8 @@ if(OS_WINDOWS OR OS_LINUX)
         libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
     target_include_directories(context_editor_shell_restore_smoke PRIVATE "${CEF_ROOT}")
 
-    COPY_FILES(context_editor_shell_restore_smoke "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}"
-               "${CEF_TARGET_OUT_DIR}")
-    COPY_FILES(context_editor_shell_restore_smoke "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}"
-               "${CEF_TARGET_OUT_DIR}")
+    # Same single-staging dependency as the boot smoke above (issue #360).
+    add_dependencies(context_editor_shell_restore_smoke context_editor_cef_stage)
 
     # Same webui asset dependency + compiled-in root as the boot smoke: the restore smoke loads
     # `context-editor://app/index.html`, so it needs editor-core's built asset set to exist when it
@@ -171,10 +171,8 @@ if(OS_WINDOWS OR OS_LINUX)
         context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
     target_include_directories(context_editor_shell_palette_smoke PRIVATE "${CEF_ROOT}")
 
-    COPY_FILES(context_editor_shell_palette_smoke "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}"
-               "${CEF_TARGET_OUT_DIR}")
-    COPY_FILES(context_editor_shell_palette_smoke "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}"
-               "${CEF_TARGET_OUT_DIR}")
+    # Same single-staging dependency as the boot smoke above (issue #360).
+    add_dependencies(context_editor_shell_palette_smoke context_editor_cef_stage)
 
     # Same webui asset dependency + compiled-in root as the boot/restore smokes: the palette smoke loads
     # `context-editor://app/index.html?ctx-smoke-palette`, so it needs editor-core's built asset set to

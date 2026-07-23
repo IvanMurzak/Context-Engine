@@ -196,6 +196,24 @@ set_tests_properties(editor-shell-smoke-session0 PROPERTIES TIMEOUT 120)
 # and a subdirectory's scope does not propagate back up. It is idempotent (the third call site).
 if(CONTEXT_BUILD_GUI_CEF)
     context_acquire_cef(context_editor editor-cef-smoke)
+
+    # --- ONE staging of the CEF payload for this whole directory tree (issue #360) ----------------
+    # CEF_TARGET_OUT_DIR is set by SET_CEF_TARGET_OUT_DIR() inside the macro above, in THIS directory
+    # scope — so it resolves to build/<preset>/editor/shell/<config>, and the cef/ subdirectory added
+    # below inherits that same value. FOUR executables therefore share one staging destination:
+    # context_editor here, plus the three live smokes in cef/. Each used to attach its OWN POST_BUILD
+    # COPY_FILES() of the identical payload, which ninja then ran concurrently as it linked them in
+    # parallel — a Windows sharing violation whenever two collided (issue #360; the CI job that builds
+    # all three smokes in one ninja invocation is where it bites). One stage target, and every consumer
+    # depends on it, removes the race by construction. See cmake/ContextCef.cmake for the mechanism +
+    # the evidence, and tools/check_cef_staging.py for the lint that keeps it that way.
+    #
+    # Windows/Linux only: macOS stages nothing next to the executable (COPY_MAC_FRAMEWORK embeds the
+    # framework into each .app instead), and the Shell has no macOS CEF executable until e12 anyway.
+    if(OS_WINDOWS OR OS_LINUX)
+        context_cef_stage_payload(context_editor_cef_stage "${CEF_TARGET_OUT_DIR}")
+    endif()
+
     add_subdirectory(cef)
 endif()
 
@@ -260,9 +278,53 @@ if(CONTEXT_BUILD_GUI_CEF AND (OS_WINDOWS OR OS_LINUX))
     target_include_directories(context_editor PRIVATE "${CEF_ROOT}")
     target_compile_definitions(context_editor PRIVATE CONTEXT_EDITOR_HAS_CEF=1)
 
-    # Stage the libcef binary payload + resources next to the exe so it runs from the build tree.
-    COPY_FILES(context_editor "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}" "${CEF_TARGET_OUT_DIR}")
-    COPY_FILES(context_editor "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "${CEF_TARGET_OUT_DIR}")
+    # The libcef binary payload + resources are staged next to the exe by the ONE shared stage target
+    # created above (issue #360) — never by a per-target POST_BUILD copy, which raced its three
+    # siblings into this same directory.
+    add_dependencies(context_editor context_editor_cef_stage)
 else()
     target_link_libraries(context_editor PRIVATE context_warnings)
 endif()
+
+# --- the CEF single-staging invariant, enforced on the real build graph (issue #360) --------------
+# Every executable that boots out of the shared ${CEF_TARGET_OUT_DIR} must depend on the ONE stage
+# target — that dependency is the entire fix, and it is exactly the sort of thing a new smoke exe
+# silently forgets. Reading MANUALLY_ADDED_DEPENDENCIES is ground truth about the graph CMake will
+# generate, which no source scan can be, so this runs at CONFIGURE time and fails the CEF-ON configure
+# on every leg before a single object is compiled. Its companion is the source-level lint below
+# (`editor-shell-cef-staging`), which catches the other half — a re-introduced per-target POST_BUILD
+# copy — and runs on the default CEF-OFF matrix where this block does not exist at all.
+if(CONTEXT_BUILD_GUI_CEF AND (OS_WINDOWS OR OS_LINUX))
+    set(_ctx_cef_stage_consumers
+        context_editor
+        context_editor_shell_cef_smoke
+        context_editor_shell_restore_smoke
+        context_editor_shell_palette_smoke)
+    foreach(_consumer IN LISTS _ctx_cef_stage_consumers)
+        if(NOT TARGET ${_consumer})
+            message(FATAL_ERROR
+                "CEF staging audit: expected target ${_consumer} to exist in a CONTEXT_BUILD_GUI_CEF "
+                "Windows/Linux configure. If it was renamed or removed, update this list — a silently "
+                "skipped consumer is how issue #360 would come back unnoticed.")
+        endif()
+        get_target_property(_manual_deps ${_consumer} MANUALLY_ADDED_DEPENDENCIES)
+        if(NOT _manual_deps OR NOT "context_editor_cef_stage" IN_LIST _manual_deps)
+            message(FATAL_ERROR
+                "CEF staging audit: ${_consumer} runs from \${CEF_TARGET_OUT_DIR} but does not depend "
+                "on context_editor_cef_stage. Add add_dependencies(${_consumer} "
+                "context_editor_cef_stage) — do NOT give it its own POST_BUILD COPY_FILES(), which is "
+                "the concurrent-copy race of issue #360.")
+        endif()
+    endforeach()
+endif()
+
+# --- the source-level companion lint (runs on EVERY default build leg, no CEF required) -----------
+# A SOURCE scan over the CMake build files (the same tier as tools/check_no_raw_key_handlers.py):
+# no CEF staging destination may have more than one writer, every consumer of a stage target must
+# depend on it, and the staging path must contain no retry / sleep / ignored exit code. Registered in
+# the non-gate `editor-shell-` family, so the build job's general ctest step runs it on all three OS
+# legs with no ci.yml --target bookkeeping. Its own pytest lives in tools/tests/ (python-tests job).
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_test(NAME editor-shell-cef-staging
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_cef_staging.py"
+            --repo-root "${CMAKE_SOURCE_DIR}/..")
