@@ -122,6 +122,25 @@ struct CefShellOptions
 [[nodiscard]] int browsers_created();
 [[nodiscard]] int popups_suppressed();
 
+// How many OSR frames were delivered to a LIVE, already-bound browser whose frame sink was not
+// bound at that moment — i.e. frames that were silently thrown away.
+//
+// This is the tripwire for the N-window frame-delivery defect e10a shipped first and CI caught:
+// `CefDoMessageLoopWork()` is PROCESS-WIDE, so one window's pump dispatches every OTHER window's
+// pending `OnPaint`. With the sink bound only for the duration of a window's own pump call, the
+// secondary windows' frames landed on the floor and those windows composited nothing — for the
+// entire 30-second boot window, deterministically, on both CI legs, while their bridges and
+// handshakes worked perfectly (which is what made the symptom read as "the window is blank"
+// rather than "frames are being dropped").
+//
+// The binding now spans the pump (`IBrowserHost::pump` in browser.h), which makes a nonzero value
+// here UNREACHABLE — and that is the point: this is a REGRESSION TRIPWIRE, not an independent
+// measurement of frame delivery. Undo the binding and the count goes nonzero immediately, so the
+// multiwindow smoke's assertion names the cause instead of leaving a blank window to be diagnosed
+// from CI logs. Paints before the owner's first pump and from `close()` onward are excluded —
+// neither is a loss.
+[[nodiscard]] int frames_dropped_without_sink();
+
 // Shut CEF down. Call ONCE, after every browser host has been closed. Idempotent.
 //
 // LIFETIME INVARIANT — `shutdown()` must run BEFORE the `bridge` router (and everything its

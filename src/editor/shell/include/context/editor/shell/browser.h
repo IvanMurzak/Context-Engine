@@ -84,6 +84,15 @@ public:
     // Drive one slice of the browser's work and deliver whatever frames it produced into `sink`.
     // Returns false once the browser is gone. For the CEF host this is where CefDoMessageLoopWork
     // runs — the integrated pump (03 §1).
+    //
+    // ⚠ THE HOST MAY RETAIN `sink` BEYOND THIS CALL, so the caller must keep it alive until
+    // `close()` (which unbinds it). The reference is NOT scoped to the call, and with N windows it
+    // cannot be: the CEF host's pump drives a PROCESS-WIDE message loop that dispatches the pending
+    // paints of EVERY browser in the process, so a sink bound only while its own host is pumping
+    // misses every frame the loop happens to deliver during a SIBLING window's pump — which, with
+    // the owner loop pumping window 0 first each tick, is very nearly all of them (see
+    // `cef_shell.h` § `frames_dropped_without_sink`). `EditorWindow` satisfies the requirement by
+    // construction: the sink is its own compositor member and the host is its browser member.
     virtual bool pump(IBrowserFrameSink& sink) = 0;
 
     // Run a fragment of JavaScript in the browser's MAIN FRAME. Added by e10a for one reason: the

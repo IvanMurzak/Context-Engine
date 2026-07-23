@@ -9,6 +9,10 @@
 //      `retainContext`). Proven by the handshake NONCE: each window's Shell mints a different one
 //      and only the document running in THAT window can round-trip it, so two completed handshakes
 //      with two different nonces is two live editor-core instances, not one document seen twice.
+//      Its frame half is the one N windows made hard: `CefDoMessageLoopWork()` is process-wide, so
+//      window 0's pump dispatches window 1's `OnPaint`. This smoke's own first CI run failed
+//      exactly there — every secondary window composited NOTHING while its bridge and handshake
+//      worked perfectly — and `frames_dropped_without_sink()` below is the tripwire left behind.
 //   2. **`window.open` cannot produce an unmanaged window.** Driven as a REAL renderer
 //      `window.open` — a real user gesture injected through the real input path first, so the popup
 //      is one Chromium would otherwise honour — and asserted in BOTH directions: `OnBeforePopup`
@@ -324,6 +328,19 @@ int main(int argc, char** argv)
             return true;
         });
 
+    // `create_window()` deliberately leaves the present path to the caller — attaching one needs an
+    // RHI the registry does not own (window_registry.h: "a window with no present path composites
+    // nothing"). Window 0 got it from main() above; EVERY factory-created window needs the exact
+    // same step, or its compositor's `view_frames` never leaves zero and `boot_window` times out
+    // waiting on a frame that was never going to arrive.
+    const auto attach_present_path = [&](shell::WindowId id)
+    {
+        if (shell::EditorWindow* window = manager.window(id))
+        {
+            window->compositor().attach_cpu(std::make_unique<present::MemoryBlitter>(), size);
+        }
+    };
+
     // Drive both windows until a window's editor-core has booted: a composited OSR frame AND a
     // completed handshake. Waiting on BOTH is what makes the wait non-vacuous — the frame proves the
     // scheme served a renderable document, the handshake proves the bundle executed and a value made
@@ -383,17 +400,9 @@ int main(int argc, char** argv)
     SMOKE_CHECK(created_surfaces != nullptr,
                 "the second window got its own bridge surfaces");
 
-    // `create_window()` deliberately leaves the present path to the caller — attaching one needs an
-    // RHI the registry does not own (window_registry.h: "a window with no present path composites
-    // nothing"). Window 0 gets this from main() below; the factory-created window needs the exact
-    // same step, or its compositor's `view_frames` never leaves zero and `boot_window` times out
-    // waiting on a frame that was never going to arrive.
     if (second.ok())
     {
-        if (shell::EditorWindow* second_window = manager.window(second.id))
-        {
-            second_window->compositor().attach_cpu(std::make_unique<present::MemoryBlitter>(), size);
-        }
+        attach_present_path(second.id);
     }
 
     if (second.ok() && created_surfaces != nullptr)
@@ -543,14 +552,9 @@ int main(int argc, char** argv)
         // An id is never reused: 2, not the destroyed 1.
         SMOKE_CHECK(third.id == 2, "the re-created window got a FRESH id, not the destroyed one");
         SMOKE_CHECK(factory_calls == 2, "the factory was called once per create");
-        // Same present-path attach the second window needed above — the re-created window is built
-        // through the same factory + `create_window()` path, so it needs it too.
         if (third.ok())
         {
-            if (shell::EditorWindow* third_window = manager.window(third.id))
-            {
-                third_window->compositor().attach_cpu(std::make_unique<present::MemoryBlitter>(), size);
-            }
+            attach_present_path(third.id);
         }
         if (third.ok() && created_surfaces != nullptr)
         {
@@ -560,6 +564,19 @@ int main(int argc, char** argv)
                         "the re-created window's bridge refused nothing");
         }
     }
+
+    // --- the frame-delivery invariant N windows introduced (cef_shell.h) --------------------------
+    //
+    // A STRUCTURAL TRIPWIRE, and worth being precise about what it does and does not prove. While
+    // the sink binding spans the pump (cef_shell.cpp), the state this counts is unreachable — so
+    // this assertion cannot fail today, and it is NOT independent evidence that the frames above
+    // arrived (the `view_frames > 0` checks in `boot_window` are). Its job is the REGRESSION: undo
+    // the binding — re-add an unbind at the end of `pump()`, or bind per-call in a future host —
+    // and the state becomes reachable instantly, so the failure reports itself BY NAME here instead
+    // of degrading into "a secondary window is blank", which is exactly the symptom that cost a
+    // full CI round-trip to diagnose the first time.
+    SMOKE_CHECK(shell::cef::frames_dropped_without_sink() == 0,
+                "no live window ever lost an OSR frame to an unbound sink");
 
     // --- teardown, in the ONE order that is safe (CE #319) ---------------------------------------
     // manager.shutdown() closes every browser and RETIRES every session; shell::cef::shutdown()
@@ -577,7 +594,8 @@ int main(int argc, char** argv)
         return finish(1);
     }
     std::printf("[editor-cef-smoke-shell-multiwindow] PASS: %d browsers created, %d popup(s) "
-                "suppressed, create/destroy/create clean\n",
-                shell::cef::browsers_created(), shell::cef::popups_suppressed());
+                "suppressed, %d frame(s) dropped without a sink, create/destroy/create clean\n",
+                shell::cef::browsers_created(), shell::cef::popups_suppressed(),
+                shell::cef::frames_dropped_without_sink());
     return finish(0);
 }

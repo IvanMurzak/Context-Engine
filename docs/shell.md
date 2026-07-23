@@ -246,8 +246,32 @@ to be kept in sync.
 - **Never `SendExternalBeginFrame`** (L-41, cef#4033): CEF-internal pacing only.
 
 `OnPaint` delivers straight into the compositor with **no copy**: it runs inside
-`CefDoMessageLoopWork()`, which runs inside `pump()`, so the sink is live and CEF's buffer is valid
-for exactly that window.
+`CefDoMessageLoopWork()`, on the one owner thread, so CEF's buffer is valid for exactly the duration
+of the callback and the sink consumes it there.
+
+**The frame sink is bound for the browser's LIFETIME, not for the duration of one `pump()` call**
+(M9 e10a — the defect the multiwindow smoke caught on its own first CI run). `CefDoMessageLoopWork()`
+is **process-wide**: it drains the pending work of *every* browser in the process, so window 0's pump
+dispatches window 1's `OnPaint`. Binding the sink only while a window pumps its own browser therefore
+throws away every frame the loop happens to deliver during a *sibling* window's pump — and since the
+owner loop pumps window 0 first and each tick's work accumulates during the inter-tick sleep, window 0
+won that race essentially always: secondary windows composited **nothing at all**, deterministically,
+on both CI legs, while their bridges and handshakes worked perfectly (which is what made the symptom
+read as "the second window is blank" rather than "frames are being dropped").
+
+Two rules fall out and both are enforced in `cef/src/cef_shell.cpp`:
+
+- `IBrowserHost::pump(sink)` **retains** `sink`; the caller keeps it alive until `close()`.
+  `EditorWindow` satisfies this by construction — the sink is its own `compositor_` member and the
+  host is its `browser_` member.
+- `close()` **unbinds before it pumps**, not after. It also runs from the host's destructor, by which
+  point the owner's compositor is already gone, and it drives `CefDoMessageLoopWork()` — so unbinding
+  late would dispatch a paint into freed memory, CE #319's shape one layer down. Once closing, the
+  sink can never be re-bound.
+
+`shell::cef::frames_dropped_without_sink()` counts any frame delivered to a live, already-bound
+browser with no sink attached — i.e. the defect above, made observable. The multiwindow smoke asserts
+it is **zero**, so a regression reports itself instead of degrading to a blank window.
 
 ## 6. The D10 shell boundary
 
