@@ -114,3 +114,99 @@ Win-x64).")
         add_subdirectory("${CEF_ROOT}/libcef_dll" "${CMAKE_CURRENT_BINARY_DIR}/libcef_dll_wrapper")
     endif()
 endmacro()
+
+# context_cef_stage_payload(<stage_target> <out_dir>) — stage the pinned CEF binary + resource payload
+# into <out_dir> EXACTLY ONCE, as a single stamp-guarded custom target every consumer depends on.
+#
+# WHY THIS EXISTS (Context-Engine#360). The distribution's own COPY_FILES() macro attaches the copy as
+# a POST_BUILD custom command on ONE target. That is correct when a directory holds a single CEF
+# executable — src/editor/cef/ and src/editor/gui/host/ each stage one target into their own
+# CEF_TARGET_OUT_DIR — but the Shell's out dir is shared by FOUR executables (context_editor plus the
+# three live smokes in shell/cef/, which inherit the parent's CEF_TARGET_OUT_DIR). Four POST_BUILD
+# copies of the SAME payload into the SAME directory, with no ordering constraint between them, is a
+# race: ninja links those executables in parallel, so two post-build steps run `cmake -E copy_directory`
+# over `Resources/locales` (or `copy_if_different` over `chrome_elf.dll`) at the same moment. POSIX
+# tolerates replacing a file another process holds open; Windows returns a sharing violation, so the
+# loser fails the build. Evidence: run 29970597216 / job 89091688077 linked the boot smoke at
+# 01:07:02.335 and the palette smoke at 01:07:02.878 — the second one's post-build.bat died copying
+# `locales` 0.7 s later, while the restore smoke linked at 01:07:03.619.
+#
+# The fix is structural, not defensive: ONE writer, and every consumer takes an ordinary build-graph
+# dependency on it. There is deliberately NO retry, NO sleep and NO ignored exit code anywhere in the
+# copy path — masking the race would leave a half-staged output directory that fails later and far
+# more confusingly. `tools/check_cef_staging.py` (ctest `editor-shell-cef-staging`) enforces all three
+# properties over the CMake sources on every default build leg.
+#
+# INCREMENTALITY. The copy is the OUTPUT-form of add_custom_command guarded by a stamp file, so it
+# re-runs only when a file of the pinned payload actually changes — not on every build. Re-copying a
+# few hundred MB per incremental build would be its own regression.
+#
+# Params:
+#   stage_target — the custom target consumers add_dependencies() on (e.g. context_editor_cef_stage).
+#   out_dir      — the staging destination; pass ${CEF_TARGET_OUT_DIR} from the acquiring scope.
+function(context_cef_stage_payload stage_target out_dir)
+    if(NOT CEF_BINARY_FILES AND NOT CEF_RESOURCE_FILES)
+        message(FATAL_ERROR
+            "context_cef_stage_payload(${stage_target}): CEF_BINARY_FILES/CEF_RESOURCE_FILES are empty \
+— call this AFTER context_acquire_cef() in the same directory scope, and only on a platform whose \
+payload is staged next to the executable (Windows/Linux; macOS embeds a framework instead).")
+    endif()
+
+    set(_commands "")
+    set(_depends "")
+
+    # The two (file list, source dir) pairs the four COPY_FILES() call sites used to pass individually.
+    set(_pairs
+        CEF_BINARY_FILES   CEF_BINARY_DIR
+        CEF_RESOURCE_FILES CEF_RESOURCE_DIR)
+    while(_pairs)
+        list(POP_FRONT _pairs _list_var _dir_var)
+        foreach(_name IN LISTS ${_list_var})
+            set(_source "${${_dir_var}}/${_name}")
+            get_filename_component(_leaf "${_name}" NAME)
+
+            # CEF_BINARY_DIR carries a literal $<CONFIGURATION> on Windows/macOS. A generator
+            # expression is legal in COMMAND (CMake expands it at generate time) but NOT in a DEPENDS
+            # entry or an IS_DIRECTORY probe, so resolve a concrete path for those two uses exactly the
+            # way the distribution's own COPY_SINGLE_FILE macro does (cmake/cef_macros.cmake): try the
+            # Release directory, fall back to Debug.
+            set(_probe "${_source}")
+            if(_source MATCHES "\\$<CONFIGURATION>")
+                string(REPLACE "$<CONFIGURATION>" "Release" _probe "${_source}")
+                if(NOT EXISTS "${_probe}")
+                    string(REPLACE "$<CONFIGURATION>" "Debug" _probe "${_source}")
+                endif()
+            endif()
+
+            if(IS_DIRECTORY "${_probe}")
+                list(APPEND _commands COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                                              "${_source}" "${out_dir}/${_leaf}")
+                # Depend on the directory's CONTENTS, so a payload change inside it restages. The CEF
+                # distribution is fetched (and re-extracted on a pin bump) by context_acquire_cef at
+                # CONFIGURE time, so these files always exist by the time this glob runs.
+                file(GLOB_RECURSE _dir_files "${_probe}/*")
+                list(APPEND _depends ${_dir_files})
+            else()
+                list(APPEND _commands COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                                              "${_source}" "${out_dir}/${_leaf}")
+                list(APPEND _depends "${_probe}")
+            endif()
+        endforeach()
+    endwhile()
+
+    # The stamp lives in the directory's binary dir, never inside out_dir: out_dir may carry the
+    # $<CONFIGURATION> genex, and add_custom_command(OUTPUT) wants a plain path.
+    set(_stamp "${CMAKE_CURRENT_BINARY_DIR}/${stage_target}.stamp")
+    add_custom_command(
+        OUTPUT "${_stamp}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${out_dir}"
+        ${_commands}
+        COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
+        DEPENDS ${_depends}
+        COMMENT "Staging the pinned CEF payload into ${out_dir} (once, shared by every consumer)"
+        VERBATIM)
+
+    # NOT an ALL target: it is built because a consumer depends on it, exactly like the POST_BUILD
+    # commands it replaces — so no ci.yml `--target` list changes.
+    add_custom_target(${stage_target} DEPENDS "${_stamp}")
+endfunction()
