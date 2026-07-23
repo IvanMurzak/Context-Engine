@@ -18,6 +18,7 @@ import { tokensTests } from "./tokens.test.js";
 import { themeTests } from "./theme.test.js";
 import { themeDomTests } from "./theme_dom.test.js";
 import { kitTests } from "./kit.test.js";
+import { kitComponentTests } from "./kit_components.test.js";
 
 const result = runTests([
     ...panelsTests,
@@ -33,6 +34,7 @@ const result = runTests([
     ...themeTests,
     ...themeDomTests,
     ...kitTests,
+    ...kitComponentTests,
 ]);
 report(result);
 

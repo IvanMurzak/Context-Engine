@@ -20,7 +20,12 @@
 // verbatim here.
 
 import { assert, assertEqual, type TestCase } from "./harness.js";
-import { KIT_STYLESHEET, WIDGET_CLASS_PREFIX, WIDGET_CLASSES } from "../../../kit/src/index.js";
+import {
+    KIT_STYLESHEET,
+    KIT_STYLESHEETS,
+    WIDGET_CLASS_PREFIX,
+    WIDGET_CLASSES,
+} from "../../../kit/src/index.js";
 import { BUILTIN_DARK, BUILTIN_LIGHT, REDUCED_MOTION_QUERY, ThemeEngine } from "../theme.js";
 
 import darkTheme from "../../../tokens/themes/dark.theme.json";
@@ -214,10 +219,17 @@ export const kitTests: readonly TestCase[] = [
             // document. A second sheet styling `.ctx-widget-*` makes appearance depend on load order
             // — which is settled by CMake staging and by a vendored engine's runtime injection, not
             // by anything a reader of either stylesheet can see.
+            //
+            // ⚠ WIDENED BY e06c2 FROM "one FILE" TO "one PACKAGE", which is the level the property
+            // was always about. The kit now ships TWO sheets, and one authored family legitimately
+            // reaches a widget class: a LIVE badge IS the `status` role primitive reused rather than
+            // copied. The order-dependence hazard is closed by SPECIFICITY instead — asserted in the
+            // very next case, and by `check_kit_tokens.py --role-coverage` on every `build` leg — so
+            // this case keeps its exact original meaning for every NON-kit stylesheet.
             let inspected = 0;
             for (const sheet of [...window.document.styleSheets]) {
                 const href = sheet.href ?? "";
-                if (href.endsWith(`/${KIT_STYLESHEET}`)) {
+                if (KIT_STYLESHEETS.some((name) => href.endsWith(`/${name}`))) {
                     continue;
                 }
                 let classes: Set<string>;
@@ -240,6 +252,56 @@ export const kitTests: readonly TestCase[] = [
                 inspected >= 2,
                 `at least the app + dockview stylesheets were inspected (saw ${inspected}) — a run ` +
                     `where nothing was readable would pass this case having checked nothing`,
+            );
+        },
+    },
+    {
+        name: "kit: a second kit sheet may only narrow a widget class by SPECIFICITY, never by order",
+        run: () => {
+            // The half of "one styling owner" that survives the kit having more than one stylesheet
+            // (e06c2). `kit.css` owns the widget layer; any OTHER kit sheet that reaches a widget
+            // class must compound a class onto it — `.ctx-widget-status.ctx-badge` is 0,2,0 and beats
+            // the widget layer's 0,1,0 whichever sheet the browser reaches last. A BARE
+            // `.ctx-widget-status` in a second sheet would TIE, and the winner would then be decided
+            // by CMake staging order and by a vendored engine's runtime injection.
+            //
+            // Asserted here on the SERVED bytes as well as by `check_kit_tokens.py --role-coverage`
+            // on the source: the source gate cannot see whether the sheet was served at all.
+            // The lookahead EXCLUDES the class-name characters as well as the dot. Without
+            // `[a-z0-9-]` in it, `[a-z0-9-]+` simply backtracks — `.ctx-widget-status.ctx-badge`
+            // matches as `…statu` followed by `s`, and the "is it compounded" question is answered
+            // about a prefix of the class name instead of the class name. That is the same
+            // greedy-backtracking hole e06c1's own role regex fell into, one file over.
+            const bare = new RegExp(`\\.${WIDGET_CLASS_PREFIX}[a-z0-9-]+(?![a-z0-9-.])`);
+            const widget = new RegExp(`\\.${WIDGET_CLASS_PREFIX}[a-z0-9-]+`);
+            let inspected = 0;
+            for (const sheet of [...window.document.styleSheets]) {
+                const href = sheet.href ?? "";
+                if (href.endsWith(`/${KIT_STYLESHEET}`)) {
+                    continue;
+                }
+                if (!KIT_STYLESHEETS.some((name) => href.endsWith(`/${name}`))) {
+                    continue;
+                }
+                inspected += 1;
+                for (const rule of [...sheet.cssRules]) {
+                    const selector = rule.cssText.split("{")[0] ?? "";
+                    if (!widget.test(selector)) {
+                        continue;
+                    }
+                    assert(
+                        !bare.test(selector),
+                        `${href} narrows a widget class with the BARE selector \`${selector.trim()}\`` +
+                            ` — only ${KIT_STYLESHEET} may do that. Compound a family class onto it ` +
+                            `so it wins by specificity rather than by document order`,
+                    );
+                }
+            }
+            assert(
+                inspected >= 1,
+                `at least one non-${KIT_STYLESHEET} kit stylesheet was served and inspected (saw ` +
+                    `${inspected}) — a run where none was readable would pass this case having ` +
+                    `checked nothing`,
             );
         },
     },

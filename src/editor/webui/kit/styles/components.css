@@ -1,0 +1,621 @@
+/*
+ * The editor component KIT — the AUTHORED COMPONENT FAMILIES (M9 e06c2; design 06 section 3, 04
+ * section 4).
+ *
+ * The twelve families of design 06 section 3: buttons, fields, tabs, trees, tables, chips, badges,
+ * toasts, empty-states, skeletons, dialogs, tooltips. `kit.css` (e06c1) owns the twelve
+ * `ctx-widget-*` HYDRATION classes; this sheet owns the classes the authored factories in `../src/`
+ * put on their own structure. The two are one package and one design language, split by WHO creates
+ * the element: the hydration runtime, or a caller of `createButton`.
+ *
+ * SAME RULES, NO EXCEPTIONS. Every colour, font, shape and motion value below is a `var(--ctx-*)`
+ * custom property the e06b theme engine writes from an e06a theme document, with no literal and no
+ * `var()` FALLBACK — the blocking `webui-kit-tokens-only` ctest scans every `*.css` under this
+ * directory, so this file inherited the gate by existing. Its TS siblings are covered by
+ * `webui-kit-source-tokens`, which refuses the other way past the token layer (an `element.style`
+ * write, a `style` attribute, a runtime `<style>` element, a colour in a string literal).
+ *
+ * ⚠ NOTHING HERE MAY DEPEND ON DOCUMENT ORDER. Where an authored family reuses a hydration widget
+ * class and needs to change one of its declarations, it does so with a COMPOUND selector — e.g.
+ * `.ctx-widget-status.ctx-badge` (specificity 0,2,0) beating `.ctx-widget-status` (0,1,0) — and never
+ * by arriving in a later stylesheet. That is the e06c1 "the cascade must not decide appearance"
+ * property, which matters more here than anywhere: the load order of the served sheets is settled by
+ * CMake staging and by a vendored engine's runtime injection, not by anything a reader of either
+ * file can see.
+ *
+ * ⚠ THIS IS NOT DOCKVIEW'S CHROME. `.ctx-tabs` is the IN-PANEL segmented control; the docking
+ * engine's own tab strip writes INLINE CSSOM styles at runtime that no stylesheet selector can beat,
+ * and is skinned exclusively through its `--dv-*` custom properties (`theme.ts`'s DOCKVIEW_CHROME +
+ * the `html .dockview-theme-dark` re-point in `app.css`). Conflating the two cost e06b two CI rounds.
+ *
+ * WHAT IS *NOT* TOKENISED HERE, STATED RATHER THAN HIDDEN (both recorded in `../README.md`):
+ *   * BOX SPACING — `padding` / `margin` / `gap` lengths are raw, because e06a publishes no spacing
+ *     token (its `shape.density` is three control HEIGHTS). Unchanged from e06c1.
+ *   * TWO NEW GAPS e06c2 surfaced: there is no LONG-LOOP motion duration (so skeletons are static
+ *     rather than strobing at 160ms or faking a duration with `calc()`), and no SCRIM opacity token
+ *     (so the dialog backdrop composes a theme colour with a raw `opacity`, which is outside the
+ *     lint's value jurisdiction by construction, exactly as box spacing is).
+ */
+
+/* --- buttons ------------------------------------------------------------------------------------ *
+ *
+ * `.ctx-button` adds LAYOUT ONLY. Every paint decision — ink, chip surface, line border, radius, the
+ * focus ring — is `kit.css`'s `.ctx-widget-button`, which the authored button also carries. That is
+ * what makes an authored `Button` and a hydrated `ctx-widget-button` the same button rather than two
+ * that happen to match today, and `kit_components.test.ts` asserts it on the COMPUTED style. */
+.ctx-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: var(--ctx-shape-density-compact);
+    transition: background-color var(--ctx-motion-duration-fast) var(--ctx-motion-easing-standard);
+}
+
+.ctx-button:disabled {
+    /* Opacity, not a muted ink token: a disabled control must dim its BORDER and background too, and
+     * the design has no "disabled" colour family. Opacity is outside the lint's value jurisdiction
+     * for the same reason box spacing is — no token exists for it. */
+    opacity: 0.5;
+    cursor: default;
+}
+
+.ctx-button[data-tone="primary"] {
+    color: var(--ctx-colors-canvas);
+    background: var(--ctx-colors-accent);
+    border-color: var(--ctx-colors-accent);
+}
+
+.ctx-button[data-tone="danger"] {
+    color: var(--ctx-colors-semantic-bad);
+    border-color: var(--ctx-colors-semantic-bad);
+}
+
+.ctx-button[data-tone="danger"]:hover {
+    background: var(--ctx-colors-panel2);
+}
+
+/* --- fields ------------------------------------------------------------------------------------- */
+.ctx-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 10px;
+}
+
+.ctx-field[data-field-kind="checkbox"] {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+}
+
+.ctx-field__label {
+    color: var(--ctx-colors-muted);
+    font-size: var(--ctx-typography-size-xs);
+    letter-spacing: var(--ctx-typography-tracking);
+}
+
+.ctx-field[data-field-kind="checkbox"] .ctx-field__label {
+    color: var(--ctx-colors-ink);
+    font-size: var(--ctx-typography-size-sm);
+}
+
+.ctx-field__description {
+    margin: 0;
+    color: var(--ctx-colors-muted2);
+    font-size: var(--ctx-typography-size-2xs);
+}
+
+/* The select has NO e06c1 role primitive (recorded in ../src/field.ts) — a bare `<select>` renders in
+ * the platform's own chrome, which in a dark editor is a bright rectangle the theme has no say over.
+ * The rules mirror `.ctx-widget-textbox`'s exactly, so the two fields read as one family. */
+.ctx-field__select {
+    font: inherit;
+    min-width: 0;
+    padding: 2px 6px;
+    color: var(--ctx-colors-ink);
+    background: var(--ctx-colors-panel2);
+    border: var(--ctx-shape-border-width) solid var(--ctx-colors-line);
+    border-radius: var(--ctx-shape-radius-sm);
+}
+
+.ctx-field__select:focus-visible {
+    outline: var(--ctx-shape-focus-ring-width) solid var(--ctx-colors-focus-ring);
+    outline-offset: calc(-1 * var(--ctx-shape-focus-ring-width));
+}
+
+/* --- tabs (IN-PANEL — see the header's dockview warning) ---------------------------------------- */
+.ctx-tabs {
+    display: flex;
+    flex-direction: column;
+}
+
+.ctx-tabs__list {
+    display: flex;
+    gap: 2px;
+    border-bottom: var(--ctx-shape-border-width) solid var(--ctx-colors-line);
+}
+
+/* The selection accent is the design's 3px ink bar (06 section 2), drawn on the INACTIVE tabs too —
+ * in `transparent` — so selecting a tab cannot shift the strip's layout by three pixels. */
+.ctx-tabs__tab {
+    font: inherit;
+    padding: 4px 10px;
+    color: var(--ctx-colors-muted);
+    background: none;
+    border: none;
+    border-bottom: var(--ctx-shape-selection-bar-width) solid transparent;
+    cursor: pointer;
+    transition: color var(--ctx-motion-duration-fast) var(--ctx-motion-easing-standard);
+}
+
+.ctx-tabs__tab:hover {
+    color: var(--ctx-colors-ink);
+}
+
+.ctx-tabs__tab[aria-selected="true"] {
+    color: var(--ctx-colors-ink);
+    border-bottom-color: var(--ctx-colors-accent);
+    font-weight: var(--ctx-typography-weight-medium);
+}
+
+.ctx-tabs__tab:focus-visible,
+.ctx-tabs__panel:focus-visible {
+    outline: var(--ctx-shape-focus-ring-width) solid var(--ctx-colors-focus-ring);
+    outline-offset: calc(-1 * var(--ctx-shape-focus-ring-width));
+}
+
+.ctx-tabs__panel {
+    padding: 8px 0;
+}
+
+/* --- trees + lists ------------------------------------------------------------------------------ *
+ *
+ * The `<ul>`/`<li>` paint (list-style, row padding, hover step, ink, the focus ring) is `kit.css`'s
+ * `.ctx-widget-tree` / `-list` / `-treeitem` / `-listitem`, which these elements also carry. What is
+ * added here is structure the widget layer has no opinion about: the indent, the twisty and the
+ * two-line row.
+ *
+ * The two ROOTS pin the row rhythm to the theme's line height, so a row's height is a property of the
+ * family rather than of whatever leading the surrounding surface happened to inherit — which is what
+ * keeps a long tree's scroll geometry stable when the same tree is mounted in a panel body, a dialog
+ * and a settings section. */
+.ctx-tree,
+.ctx-list {
+    line-height: var(--ctx-typography-line-height);
+}
+
+/* The group is a child of the row's own flex box, so `flex-basis: 100%` is what puts it on its own
+ * line under the row rather than beside the label. Declared here with the rest of the group's box and
+ * NOT as a second `.ctx-tree__group` block further down: two rules for one selector at equal
+ * specificity is a reader asking "which one wins" about a file whose whole point is that nobody
+ * should have to. No `display` here on purpose — a collapsed group relies on the UA's
+ * `[hidden] { display: none }`, which any author `display` declaration would silently defeat. */
+.ctx-tree__group {
+    margin: 0;
+    padding-left: 14px;
+    list-style: none;
+    flex-basis: 100%;
+}
+
+.ctx-tree__item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.ctx-tree__twisty::before {
+    content: "\25b8";
+    display: inline-block;
+    color: var(--ctx-colors-muted);
+    transition: transform var(--ctx-motion-duration-fast) var(--ctx-motion-easing-standard);
+}
+
+.ctx-tree__item[aria-expanded="true"] > .ctx-tree__twisty::before {
+    transform: rotate(90deg);
+}
+
+.ctx-list__item {
+    display: flex;
+}
+
+.ctx-list__button {
+    font: inherit;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    flex: 1 1 auto;
+    padding: 4px 6px;
+    color: inherit;
+    background: none;
+    border: none;
+    border-radius: var(--ctx-shape-radius-sm);
+    text-align: left;
+    cursor: pointer;
+}
+
+.ctx-list__button:focus-visible {
+    outline: var(--ctx-shape-focus-ring-width) solid var(--ctx-colors-focus-ring);
+    outline-offset: calc(-1 * var(--ctx-shape-focus-ring-width));
+}
+
+.ctx-list__detail {
+    color: var(--ctx-colors-muted2);
+    font-size: var(--ctx-typography-size-2xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A selected row is the design's 3px left ink bar (06 section 2), not a filled background: the
+ * elevation model is border + surface step, and a filled selection would compete with the hover
+ * step the widget layer already owns. */
+.ctx-list__item--selected > .ctx-list__button {
+    border-left: var(--ctx-shape-selection-bar-width) solid var(--ctx-colors-accent);
+    background: var(--ctx-colors-panel2);
+}
+
+/* --- tables ------------------------------------------------------------------------------------- */
+.ctx-table {
+    width: 100%;
+    border-collapse: collapse;
+    color: var(--ctx-colors-ink);
+    font-size: var(--ctx-typography-size-sm);
+}
+
+.ctx-table__caption {
+    padding-bottom: 6px;
+    color: var(--ctx-colors-muted);
+    font-size: var(--ctx-typography-size-xs);
+    text-align: left;
+}
+
+.ctx-table__header {
+    padding: 4px 6px;
+    color: var(--ctx-colors-muted);
+    font-size: var(--ctx-typography-size-xs);
+    font-weight: var(--ctx-typography-weight-medium);
+    text-align: left;
+    border-bottom: var(--ctx-shape-border-width) solid var(--ctx-colors-line);
+}
+
+.ctx-table__cell {
+    padding: 4px 6px;
+    font-weight: var(--ctx-typography-weight-regular);
+    text-align: left;
+    border-bottom: var(--ctx-shape-border-width) solid var(--ctx-colors-line);
+}
+
+/* Numerals get the theme's tabular variant so columns of digits actually line up — the reason
+ * `typography.numericVariant` exists as a token at all (06 section 2). */
+.ctx-table__header[data-numeric="true"],
+.ctx-table__cell[data-numeric="true"] {
+    text-align: right;
+    font-variant-numeric: var(--ctx-typography-numeric-variant);
+}
+
+.ctx-table__sort {
+    font: inherit;
+    padding: 0;
+    color: inherit;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.ctx-table__sort:focus-visible {
+    outline: var(--ctx-shape-focus-ring-width) solid var(--ctx-colors-focus-ring);
+    outline-offset: calc(-1 * var(--ctx-shape-focus-ring-width));
+}
+
+.ctx-table__header[aria-sort="ascending"] .ctx-table__sort::after {
+    content: "\2191";
+}
+
+.ctx-table__header[aria-sort="descending"] .ctx-table__sort::after {
+    content: "\2193";
+}
+
+.ctx-table__row:hover > .ctx-table__cell {
+    background: var(--ctx-colors-panel2);
+}
+
+/* --- chips + badges ----------------------------------------------------------------------------- *
+ *
+ * One appearance, two semantics (see ../src/status.ts). The tone attribute drives BOTH families from
+ * one selector list, and every tone is a reserved status hue of 06 section 2 — the only chroma in the
+ * design language. */
+.ctx-chip,
+.ctx-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 8px;
+    color: var(--ctx-colors-ink);
+    background: var(--ctx-colors-chip);
+    border: var(--ctx-shape-border-width) solid var(--ctx-colors-line);
+    border-radius: var(--ctx-shape-radius-pill);
+    font-size: var(--ctx-typography-size-xs);
+    line-height: var(--ctx-typography-line-height);
+}
+
+/* The LIVE badge reuses the `status` role primitive, so it inherits `.ctx-widget-status`'s block
+ * layout and muted ink from kit.css. A COMPOUND selector (0,2,0) restores the pill's inline box and
+ * ink — order-independently, which is the point (see the header). */
+.ctx-widget-status.ctx-badge {
+    display: inline-flex;
+    margin-bottom: 0;
+    color: var(--ctx-colors-ink);
+    font-size: var(--ctx-typography-size-xs);
+}
+
+.ctx-chip[data-tone="good"],
+.ctx-badge[data-tone="good"] {
+    color: var(--ctx-colors-semantic-good);
+    border-color: var(--ctx-colors-semantic-good);
+}
+
+.ctx-chip[data-tone="warn"],
+.ctx-badge[data-tone="warn"] {
+    color: var(--ctx-colors-semantic-warn);
+    border-color: var(--ctx-colors-semantic-warn);
+}
+
+.ctx-chip[data-tone="bad"],
+.ctx-badge[data-tone="bad"] {
+    color: var(--ctx-colors-semantic-bad);
+    border-color: var(--ctx-colors-semantic-bad);
+}
+
+.ctx-chip[data-tone="wait"],
+.ctx-badge[data-tone="wait"] {
+    color: var(--ctx-colors-semantic-wait);
+    border-color: var(--ctx-colors-semantic-wait);
+}
+
+.ctx-chip[data-tone="idle"],
+.ctx-badge[data-tone="idle"] {
+    color: var(--ctx-colors-semantic-idle);
+    border-color: var(--ctx-colors-semantic-idle);
+}
+
+.ctx-chip__action,
+.ctx-chip__remove {
+    font: inherit;
+    padding: 0;
+    color: inherit;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.ctx-chip__remove::before {
+    content: "\00d7";
+}
+
+.ctx-chip__action:focus-visible,
+.ctx-chip__remove:focus-visible {
+    outline: var(--ctx-shape-focus-ring-width) solid var(--ctx-colors-focus-ring);
+    outline-offset: var(--ctx-shape-focus-ring-width);
+}
+
+.ctx-chip--selected {
+    background: var(--ctx-colors-panel2);
+    border-color: var(--ctx-colors-accent);
+}
+
+/* --- toasts ------------------------------------------------------------------------------------- *
+ *
+ * The REGION is permanent and empty; messages are appended into one of its two live lanes (see
+ * ../src/feedback.ts for why the politeness has to exist before the content does). `pointer-events`
+ * is what keeps an empty region from swallowing clicks over the whole bottom of the window. */
+.ctx-toast-region {
+    position: fixed;
+    right: 12px;
+    bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-width: 420px;
+    pointer-events: none;
+    z-index: 900;
+}
+
+.ctx-toast-region__lane {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.ctx-toast {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    color: var(--ctx-colors-ink);
+    background: var(--ctx-colors-panel2);
+    border: var(--ctx-shape-border-width) solid var(--ctx-colors-line);
+    border-left: var(--ctx-shape-selection-bar-width) solid var(--ctx-colors-line);
+    border-radius: var(--ctx-shape-radius-md);
+    font-size: var(--ctx-typography-size-sm);
+    pointer-events: auto;
+}
+
+.ctx-toast[data-tone="good"] {
+    border-left-color: var(--ctx-colors-semantic-good);
+}
+
+.ctx-toast[data-tone="warn"] {
+    border-left-color: var(--ctx-colors-semantic-warn);
+}
+
+.ctx-toast[data-tone="bad"] {
+    border-left-color: var(--ctx-colors-semantic-bad);
+}
+
+.ctx-toast[data-tone="wait"] {
+    border-left-color: var(--ctx-colors-semantic-wait);
+}
+
+.ctx-toast__message {
+    flex: 1 1 auto;
+}
+
+.ctx-toast__close::before {
+    content: "\00d7";
+}
+
+/* --- empty states ------------------------------------------------------------------------------- */
+.ctx-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 24px 16px;
+    text-align: center;
+}
+
+.ctx-empty-state__mark {
+    width: 28px;
+    height: 28px;
+    background: var(--ctx-colors-panel2);
+    border: var(--ctx-shape-border-width) solid var(--ctx-colors-line);
+    border-radius: var(--ctx-shape-radius-md);
+}
+
+.ctx-empty-state__title {
+    margin: 0;
+    color: var(--ctx-colors-ink);
+    font-size: var(--ctx-typography-size-base);
+    font-weight: var(--ctx-typography-weight-medium);
+}
+
+.ctx-empty-state__description {
+    margin: 0;
+    max-width: 42ch;
+    color: var(--ctx-colors-muted);
+    font-size: var(--ctx-typography-size-sm);
+}
+
+/* --- skeletons ---------------------------------------------------------------------------------- *
+ *
+ * STATIC, deliberately. A shimmer needs a ~1.2-1.6s loop and e06a publishes no long-loop duration
+ * token; animating at the 160ms `slow` step would be a strobe, and `calc()` over it would be a raw
+ * value wearing a token's clothes. Recorded in ../README.md § Known gaps. */
+.ctx-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 4px 0;
+}
+
+.ctx-skeleton__line {
+    height: 10px;
+    background: var(--ctx-colors-panel2);
+    border-radius: var(--ctx-shape-radius-sm);
+}
+
+.ctx-skeleton__line[data-width="full"] {
+    width: 100%;
+}
+
+.ctx-skeleton__line[data-width="long"] {
+    width: 72%;
+}
+
+.ctx-skeleton__line[data-width="short"] {
+    width: 45%;
+}
+
+/* --- dialogs ------------------------------------------------------------------------------------ *
+ *
+ * A NATIVE `<dialog>`: the `[open]` guard is load-bearing, because the user-agent stylesheet gives a
+ * closed dialog `display: none` and an unguarded `display: flex` here would leave every dialog
+ * permanently on screen. The UA's own border/padding/background are all overridden — a dialog that
+ * kept them would be the one surface in the editor painted in the platform's colours. */
+.ctx-dialog {
+    padding: 0;
+    color: var(--ctx-colors-ink);
+    background: var(--ctx-colors-panel);
+    border: var(--ctx-shape-border-width) solid var(--ctx-colors-line);
+    border-radius: var(--ctx-shape-radius-md);
+    max-width: min(560px, 90vw);
+}
+
+.ctx-dialog[open] {
+    display: block;
+}
+
+/* The scrim. `opacity` composes the theme's canvas colour into a translucent wash because e06a
+ * publishes no scrim/overlay opacity token (recorded in ../README.md § Known gaps); the colour itself
+ * is still the theme's. `::backdrop` inherits custom properties from its originating element on the
+ * pinned CEF/Chromium build, which is what lets it read a `--ctx-*` token at all. */
+.ctx-dialog::backdrop {
+    background: var(--ctx-colors-canvas);
+    opacity: 0.6;
+}
+
+.ctx-dialog__surface {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px;
+}
+
+.ctx-dialog__title {
+    margin: 0;
+    color: var(--ctx-colors-ink);
+    font-size: var(--ctx-typography-size-md);
+    font-weight: var(--ctx-typography-weight-semibold);
+    letter-spacing: var(--ctx-typography-tracking);
+}
+
+.ctx-dialog__description {
+    margin: 0;
+    color: var(--ctx-colors-muted);
+    font-size: var(--ctx-typography-size-sm);
+}
+
+.ctx-dialog__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 8px;
+}
+
+/* --- tooltips ----------------------------------------------------------------------------------- *
+ *
+ * CSS-ONLY POSITIONING. A measured position would have to be written as an inline style, which the
+ * kit may never do, and the bubble lives INSIDE the hover host so moving the pointer onto it does not
+ * dismiss it (WCAG 1.4.13 "hoverable" — a property of the DOM shape, not of a timer). */
+.ctx-tooltip-host {
+    position: relative;
+    display: inline-flex;
+}
+
+.ctx-tooltip {
+    position: absolute;
+    left: 0;
+    z-index: 950;
+    width: max-content;
+    max-width: 280px;
+    padding: 4px 8px;
+    color: var(--ctx-colors-ink);
+    background: var(--ctx-colors-panel2);
+    border: var(--ctx-shape-border-width) solid var(--ctx-colors-line);
+    border-radius: var(--ctx-shape-radius-sm);
+    font-size: var(--ctx-typography-size-xs);
+}
+
+.ctx-tooltip[data-placement="top"] {
+    bottom: calc(100% + 4px);
+}
+
+.ctx-tooltip[data-placement="bottom"] {
+    top: calc(100% + 4px);
+}
+
+.ctx-tooltip[hidden] {
+    display: none;
+}

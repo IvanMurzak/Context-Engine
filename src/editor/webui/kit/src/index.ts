@@ -1,65 +1,62 @@
-// @context-engine/editor-kit — the component KIT's module surface (M9 e06c1, design 06 §3 / 04 §4).
+// @context-engine/editor-kit — THE PUBLISHED ENTRY POINT of the editor component kit
+// (M9 e06c1 + e06c2; design 06 §3, 04 §4).
 //
-// WHAT THE KIT IS. Design 06 §3: "editor-core ships the kit … consuming tokens only. The hydration
-// runtime's widget classes (04 §4) ARE kit components — so C++-modeled panels and iframe panels look
-// identical." e06c1 builds the FOUNDATION of that and closes the widget half; e06c2 adds the authored
-// component families (tabs, tables, dialogs, toasts, chips, badges, empty-states, skeletons,
-// tooltips) into this same package, on top of what is here.
+// WHAT THE KIT IS. Design 06 §3: "editor-core ships the kit (buttons, fields, tabs, trees, tables,
+// chips, badges, toasts, empty-states, skeletons, dialogs, tooltips) consuming tokens only. The
+// hydration runtime's widget classes (04 §4) are kit components — so C++-modeled panels and iframe
+// panels look identical. The kit + tokens are published to package authors; policy: tokens mandatory,
+// kit strongly recommended."
 //
-// WHY THIS FILE OWNS `WIDGET_CLASSES` RATHER THAN hydration.ts. The map lived in the hydration
-// runtime through e05d1, and `app/app.css` styled nine of its twelve classes — two owners, in two
-// packages, with nothing tying them together: a role could gain a class and never gain an appearance,
-// and no gate anywhere would notice. Moving the map HERE, beside the stylesheet that styles it, makes
-// the kit the SINGLE owner of the widget layer — class names and appearance in one package — and lets
-// `tools/check_kit_tokens.py --role-coverage` assert the three-way agreement mechanically (the C++
-// `uitree::role_token` vocabulary ↔ this map ↔ `styles/kit.css`'s selectors) on every `build` leg.
-// `hydration.ts` re-exports it, so every existing importer and the `index.ts` barrel are unchanged.
+//   * e06c1 built the FOUNDATION and closed the widget half: the twelve `ctx-widget-*` classes
+//     (`widgets.ts` + `styles/kit.css`), the blocking tokens-only lint, and the three-way closed-set
+//     gate over C++ / TS / CSS.
+//   * e06c2 adds the AUTHORED FAMILIES — the twelve named above — as framework-free factories in this
+//     package, each returning real DOM. Six of them BUILD ON an e06c1 role primitive rather than
+//     forking one (see `COMPONENT_FAMILIES.reusesRoles`), which is what makes an authored `Button`
+//     and a hydrated `ctx-widget-button` the same button rather than two that merely look alike.
 //
-// THE CLOSEDNESS IS LOAD-BEARING, WHICH IS WHY IT IS ASSERTED. `uitree::render_html` emits only the
-// twelve tags `role_html_tag` maps to, and `HydrationRuntime.#normalise` looks a node's role up in
-// this map — so a role the kit does not style renders UNTHEMED and silently. The gate above turns
-// that into a red build the moment the C++ vocabulary grows a thirteenth role, and `kit.test.ts`
-// (the e07a `webui-ts-*` tier) proves in a real browser that each class actually resolves to the
-// active theme's tokens.
+// THIS FILE IS THE SURFACE A PACKAGE AUTHOR PROGRAMS AGAINST. Everything a consumer needs is exported
+// here: the family factories, the widget-class map (for a package that renders uitree-shaped markup
+// itself), the stylesheet FILE NAMES it must link, and `COMPONENT_FAMILIES` — the machine-readable
+// roster of what the kit ships. Nothing else in the package is part of the contract; `dom.ts` in
+// particular is internal, precisely because a helper that accepted a colour or a length would be the
+// hole in "tokens only".
 //
-// NO RAW VALUES LIVE IN THIS PACKAGE. Every appearance in `styles/kit.css` is a `var(--ctx-*)` the
-// e06b theme engine writes from an e06a theme document — no literal, and not even a `var()` FALLBACK
-// (a fallback is a second source of truth for a value the theme already owns). The
-// `webui-kit-tokens-only` ctest enforces that on all three `build` legs; `README.md` records the
-// jurisdiction it covers today and the one gap it deliberately does not.
+// TWO GATES KEEP THE SURFACE HONEST, and both are SOURCE scans that ride the `webui-*` family on all
+// three `build` legs (no browser, no build artifact):
+//
+//   * `webui-kit-family-coverage` reads `COMPONENT_FAMILIES` below and asserts it names EXACTLY the
+//     twelve families of design 06 §3, that every declared factory really is exported by a kit
+//     module, that every declared root class really is styled by a kit stylesheet, and that every
+//     `reusesRoles` entry is a member of the closed `WIDGET_CLASSES` set. A family that were quietly
+//     dropped, renamed, or left unstyled is a red build rather than a gap someone notices at e06d.
+//   * `webui-kit-source-tokens` scans these TS sources for appearance smuggled past the stylesheet —
+//     an `element.style.*` write, a `style` attribute, a runtime `<style>`/`insertRule`, or a raw
+//     colour in a string literal. The CSS lint cannot see any of those, and they are the obvious way
+//     a component author bypasses it.
+//
+// The BROWSER half — that a family actually resolves to the active theme's tokens, that an authored
+// button computes identically to a hydrated one, and that the interactive families are keyboard-
+// operable — is `core/src/test/kit_components.test.ts` in the e07a `webui-ts-*` tier. Neither tier
+// subsumes the other: a source scan cannot see the cascade, and a browser tier cannot run on the
+// three default `build` legs.
+
+export * from "./widgets.js";
+export * from "./button.js";
+export * from "./field.js";
+export * from "./tabs.js";
+export * from "./collection.js";
+export * from "./status.js";
+export * from "./feedback.js";
+export * from "./overlay.js";
+
+// Re-exported from the internal helper module because a consumer's own code has to be able to NAME a
+// tone when it calls `createBadge` / `createChip` / `KitToastRegion.show`. Nothing else in `dom.ts`
+// is part of the surface.
+export { TONE_ATTRIBUTE, type SemanticTone } from "./dom.js";
 
 /**
- * Presentation-only widget classes, keyed by node ROLE (04 §4 step 4).
- *
- * The VALUE semantics stay in the C++ model and the write path — these classes carry appearance and
- * nothing else. Keyed by role because role is what the uitree vocabulary actually publishes
- * (`uitree::role_token`); keying on anything derived from a panel id would be the special-casing the
- * hydration runtime exists to avoid, and would put a panel id in the kit.
- *
- * ⚠ CLOSED SET. These twelve are exactly `uitree::Role`, and `webui-kit-role-coverage` fails if this
- * map, the C++ vocabulary and `styles/kit.css` ever disagree in EITHER direction. Adding an entry
- * here without a kit rule for it is a red build, not an unthemed widget nobody notices.
- */
-export const WIDGET_CLASSES: Readonly<Record<string, string>> = {
-    tree: "ctx-widget-tree",
-    treeitem: "ctx-widget-treeitem",
-    list: "ctx-widget-list",
-    listitem: "ctx-widget-listitem",
-    button: "ctx-widget-button",
-    textbox: "ctx-widget-textbox",
-    checkbox: "ctx-widget-checkbox",
-    heading: "ctx-widget-heading",
-    status: "ctx-widget-status",
-    region: "ctx-widget-region",
-    group: "ctx-widget-group",
-    text: "ctx-widget-text",
-};
-
-/** The prefix every widget class carries. The lint reads it; so does the "one owner" app.css scan. */
-export const WIDGET_CLASS_PREFIX = "ctx-widget-";
-
-/**
- * The kit stylesheet's served file name, beside `app.css` under `context-editor://app/`.
+ * The hydration widget layer's stylesheet, served beside `app.css` under `context-editor://app/`.
  *
  * Named here rather than spelled out at each use so the T1 tier can FIND the sheet it is asserting
  * about instead of hardcoding a path that a CMake rename would silently orphan — a test that cannot
@@ -67,7 +64,72 @@ export const WIDGET_CLASS_PREFIX = "ctx-widget-";
  */
 export const KIT_STYLESHEET = "kit.css";
 
-/** The kit class for a uitree role, or `undefined` for a role the kit does not know. */
-export function widgetClassForRole(role: string): string | undefined {
-    return WIDGET_CLASSES[role];
+/** The authored families' stylesheet (e06c2), served beside `kit.css`. Same naming discipline. */
+export const KIT_COMPONENT_STYLESHEET = "components.css";
+
+/**
+ * Every stylesheet a consumer of this kit must link, IN ORDER.
+ *
+ * Order is part of the contract: `components.css` may only ADD to what `kit.css` decides, and the two
+ * are written so that nothing depends on which the browser reaches last — a component that overrides
+ * a widget rule does so with a COMPOUND selector (`.ctx-widget-status.ctx-badge`, specificity 0,2,0),
+ * never by arriving second. That keeps the e06c1 "document order must not decide appearance" property
+ * true across both sheets.
+ */
+export const KIT_STYLESHEETS: readonly string[] = [KIT_STYLESHEET, KIT_COMPONENT_STYLESHEET];
+
+/** One entry of the kit's published component roster. */
+export interface ComponentFamily {
+    /** The family's name in design 06 §3, verbatim. */
+    readonly family: string;
+    /** The primary factory a consumer calls. Other factories in the same family are listed in README. */
+    readonly factory: string;
+    /** The class the family's root element carries — what `styles/components.css` styles. */
+    readonly rootClass: string;
+    /**
+     * The e06c1 hydration ROLES this family builds on, or `[]` when it is genuinely net-new.
+     *
+     * A non-empty list is a CLAIM the gates check: every entry must be a member of `WIDGET_CLASSES`,
+     * and `kit_components.test.ts` proves in a real browser that the authored element computes the
+     * same paint as the hydrated widget. It is how "do not fork a parallel implementation" stops
+     * being a review note.
+     */
+    readonly reusesRoles: readonly string[];
 }
+
+/**
+ * THE ROSTER — the twelve component families of design 06 §3, in the design's own order.
+ *
+ * `webui-kit-family-coverage` compares this to its own independently-held copy of the design's list,
+ * so the two cannot drift into agreeing with each other; the tool's copy is the in-repo record of a
+ * design document that lives outside this repository.
+ */
+export const COMPONENT_FAMILIES: readonly ComponentFamily[] = [
+    { family: "buttons", factory: "createButton", rootClass: "ctx-button", reusesRoles: ["button"] },
+    {
+        family: "fields",
+        factory: "createTextField",
+        rootClass: "ctx-field",
+        reusesRoles: ["textbox", "checkbox"],
+    },
+    { family: "tabs", factory: "createTabs", rootClass: "ctx-tabs", reusesRoles: [] },
+    {
+        family: "trees",
+        factory: "createTree",
+        rootClass: "ctx-tree",
+        reusesRoles: ["tree", "treeitem", "list", "listitem"],
+    },
+    { family: "tables", factory: "createTable", rootClass: "ctx-table", reusesRoles: [] },
+    { family: "chips", factory: "createChip", rootClass: "ctx-chip", reusesRoles: [] },
+    { family: "badges", factory: "createBadge", rootClass: "ctx-badge", reusesRoles: ["status"] },
+    { family: "toasts", factory: "createToastRegion", rootClass: "ctx-toast", reusesRoles: [] },
+    {
+        family: "empty-states",
+        factory: "createEmptyState",
+        rootClass: "ctx-empty-state",
+        reusesRoles: [],
+    },
+    { family: "skeletons", factory: "createSkeleton", rootClass: "ctx-skeleton", reusesRoles: [] },
+    { family: "dialogs", factory: "createDialog", rootClass: "ctx-dialog", reusesRoles: [] },
+    { family: "tooltips", factory: "createTooltip", rootClass: "ctx-tooltip", reusesRoles: [] },
+];

@@ -230,11 +230,14 @@ CLEAN_APP_CSS = """
 
 
 def _coverage_case(tmp_path: Path, *, cpp: str = CPP_ROLES, ts: str = KIT_INDEX_TS,
-                   css: str = COVERED_CSS, app: str = CLEAN_APP_CSS) -> int:
+                   css: str = COVERED_CSS, app: str = CLEAN_APP_CSS,
+                   second_sheet: str | None = None) -> int:
     (tmp_path / "node.cpp").write_text(cpp, encoding="utf-8")
     (tmp_path / "index.ts").write_text(ts, encoding="utf-8")
     (tmp_path / "app.css").write_text(app, encoding="utf-8")
     styles = _kit(tmp_path, css)
+    if second_sheet is not None:
+        (styles / "components.css").write_text(second_sheet, encoding="utf-8")
     return check_kit_tokens.main(
         [
             "--role-coverage",
@@ -308,6 +311,289 @@ def test_an_unreadable_widget_map_is_a_configuration_error(tmp_path: Path) -> No
     assert _coverage_case(tmp_path, ts="export const SOMETHING_ELSE = {};\n") == 2
 
 
+# ------------------------------------------------- the second-kit-sheet widget-ownership rule (e06c2)
+#
+# e06c1 enforced "one styling owner" as "no OTHER FILE declares a `.ctx-widget-` rule", which was the
+# same thing while the kit was one stylesheet. e06c2 made it two, and one authored family legitimately
+# reaches a widget class (a LIVE badge IS the `status` role primitive, reused rather than copied). The
+# property is therefore enforced at the level it was always ABOUT -- appearance must never be decided
+# by document order -- so a second sheet may narrow a widget class ONLY through a compound selector.
+
+
+def test_a_second_kit_sheet_may_compound_a_widget_class(tmp_path: Path) -> None:
+    """`.ctx-widget-text.ctx-badge` is 0,2,0 and beats the widget layer whatever the load order."""
+    second = ".ctx-widget-text.ctx-badge {\n    color: var(--ctx-colors-ink);\n}\n"
+    assert _coverage_case(tmp_path, second_sheet=second) == 0
+
+
+def test_a_second_kit_sheet_may_not_style_a_widget_class_BARE(tmp_path: Path) -> None:
+    """A bare rule TIES at 0,1,0, and CMake staging order then decides which one paints."""
+    second = ".ctx-widget-text {\n    color: var(--ctx-colors-ink);\n}\n"
+    assert _coverage_case(tmp_path, second_sheet=second) == 1
+
+
+def test_the_compound_check_is_not_defeated_by_greedy_backtracking(tmp_path: Path) -> None:
+    """The regex must anchor the END of the class name before asking "is a dot next?".
+
+    Without excluding the class-name characters from the lookahead, `[a-z0-9-]+` simply backtracks:
+    `.ctx-widget-text.ctx-badge` matches as `...tex` followed by `t`, so the "is it compounded"
+    question gets answered about a PREFIX of the class name and every compound selector reads as bare
+    (or, with the lookahead the other way round, every bare selector reads as compounded). This is the
+    same greedy-backtracking hole that made e06c1's role regex miss a thirteenth role.
+    """
+    assert _coverage_case(
+        tmp_path,
+        second_sheet=".ctx-widget-text.ctx-chip {\n    color: var(--ctx-colors-ink);\n}\n",
+    ) == 0
+    assert _coverage_case(
+        tmp_path,
+        second_sheet=".ctx-widget-text:hover {\n    color: var(--ctx-colors-ink);\n}\n",
+    ) == 1
+
+
+# ------------------------------------------------------- the kit TS source-tokens gate (e06c2)
+
+CLEAN_KIT_TS = """
+export function createThing(): HTMLElement {
+    const element = document.createElement("div");
+    element.classList.add("ctx-thing");
+    element.textContent = "hello";
+    return element;
+}
+"""
+
+
+def _kit_src(tmp_path: Path, ts: str = CLEAN_KIT_TS) -> Path:
+    source = tmp_path / "src"
+    source.mkdir(parents=True, exist_ok=True)
+    (source / "index.ts").write_text(ts, encoding="utf-8")
+    return source
+
+
+def _run_source_tokens(source: Path) -> int:
+    return check_kit_tokens.main(["--source-tokens", "--kit-source-dir", str(source)])
+
+
+def test_a_clean_kit_module_passes(tmp_path: Path) -> None:
+    assert _run_source_tokens(_kit_src(tmp_path)) == 0
+
+
+@pytest.mark.parametrize(
+    ("statement", "why"),
+    [
+        ('element.style.color = "#ff0000";', "an inline style property write"),
+        ('element.style.setProperty("--kit-ink", "#fff");', "a setProperty write"),
+        ('element.style.cssText = "color: red";', "a cssText write"),
+        ('element.setAttribute("style", "color: red");', "a style ATTRIBUTE"),
+        ('document.createElement("style");', "a runtime <style> element"),
+        ("sheet.insertRule(rule);", "a runtime stylesheet mutation"),
+        ('const bg = "#0a0a0a";', "a raw hex colour in a string literal"),
+        ('const bg = "rgba(0, 0, 0, 0.5)";', "a raw colour function in a string literal"),
+        # THE SPELLING VARIANTS. Every one of these reached an element exactly as the shapes above do
+        # and was reported OK by the gate's first revision -- found by planting them, not by reading
+        # the regex. A gate that catches `el.style.color = x` but not `el.style["color"] = x` has a
+        # two-character bypass on the precise axis it exists to close, which is indistinguishable from
+        # not having the gate for any author who reaches for bracket notation.
+        ('element.style["color"] = "red";', "bracket notation on .style"),
+        ("element.style[property] = value;", "a COMPUTED bracket write, the same thing dynamically"),
+        ('element.setAttribute(`style`, "color: red");', "a TEMPLATE-LITERAL style attribute"),
+        ("document.createElement(`style`);", "a template-literal runtime <style> element"),
+        ('Object.assign(element.style, { color: "red" });', "a bulk Object.assign onto .style"),
+        ('element.attributeStyleMap.set("color", "red");', "the CSS Typed OM spelling of the same"),
+    ],
+)
+def test_a_planted_styling_bypass_fails(tmp_path: Path, statement: str, why: str) -> None:
+    """THE non-vacuity proof for the TS half: each shape the CSS lint cannot see must fire here."""
+    assert _run_source_tokens(_kit_src(tmp_path, CLEAN_KIT_TS + "\n" + statement + "\n")) == 1, why
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        'element.classList.add("ctx-chip");',                 # classes are how the kit styles things
+        'element.setAttribute("data-tone", "good");',         # a tone attribute, not a style
+        "element.hidden = true;",                             # visibility through the platform
+        'const label = "Remove item";',                       # ordinary prose
+        'const green = "Green channel";',                     # a NAMED colour word in prose is fine
+        "const style = computeStyleName();",                  # a variable merely called `style`
+        "if (a.style === b.style) { return; }",               # a comparison, not a write
+        # The READ half of the bracket shapes above. Widening a gate is only free if it stays off
+        # what a module is allowed to do, and reading a computed value is not writing one.
+        'const ink = element.style["color"];',
+        'if (element.style["color"] === "red") { return; }',
+        'Object.assign(element.dataset, { tone: "good" });',  # assign onto something that is not .style
+    ],
+)
+def test_legitimate_kit_typescript_is_not_a_finding(tmp_path: Path, statement: str) -> None:
+    """The other half of a useful gate: it must not fire on what a kit module is allowed to write.
+
+    The named-colour case is the deliberate asymmetry with the CSS lint. In a CSS value position
+    `green` can only be a colour; in a TypeScript string it is prose, and a lint that reddened on a
+    label reading "Green channel" would teach authors to work around it.
+    """
+    assert _run_source_tokens(_kit_src(tmp_path, CLEAN_KIT_TS + "\n" + statement + "\n")) == 0
+
+
+def test_a_comment_may_name_a_raw_colour(tmp_path: Path) -> None:
+    """A gate that fired on its own documentation would teach authors to stop documenting."""
+    ts = "// the Dark theme's colors.panel is #0a0a0a, rgb(10, 10, 10)\n" + CLEAN_KIT_TS
+    assert _run_source_tokens(_kit_src(tmp_path, ts)) == 0
+    block = "/* #0a0a0a\n   rgba(0,0,0,0.5) */\n" + CLEAN_KIT_TS
+    assert _run_source_tokens(_kit_src(tmp_path, block)) == 0
+
+
+def test_a_string_containing_a_double_slash_does_not_hide_the_rest_of_the_line(
+    tmp_path: Path,
+) -> None:
+    """The one-character bypass a regex-based comment strip would have.
+
+    `re.sub(r"//.*", "", text)` deletes from the FIRST `//` to end of line -- including the contents
+    of a string that happens to contain one. `const c = "x//" + "#ff0000";` would then be invisible to
+    every rule below it on that line. The scanner tracks string state instead, so it is not.
+    """
+    ts = CLEAN_KIT_TS + '\nconst c = "context-editor://app/" + "#ff0000";\n'
+    assert _run_source_tokens(_kit_src(tmp_path, ts)) == 1
+
+
+def test_a_missing_or_empty_kit_source_directory_is_a_configuration_error(tmp_path: Path) -> None:
+    assert _run_source_tokens(tmp_path / "nope") == 2
+    empty = tmp_path / "src"
+    empty.mkdir()
+    assert _run_source_tokens(empty) == 2
+
+
+# ------------------------------------------------------- the twelve-family roster gate (e06c2)
+
+FULL_ROSTER = """
+export const COMPONENT_FAMILIES: readonly ComponentFamily[] = [
+%s
+];
+"""
+
+_ROSTER_ROWS = [
+    ("buttons", "createButton", "ctx-button", '"button"'),
+    ("fields", "createTextField", "ctx-field", '"textbox"'),
+    ("tabs", "createTabs", "ctx-tabs", ""),
+    ("trees", "createTree", "ctx-tree", '"tree"'),
+    ("tables", "createTable", "ctx-table", ""),
+    ("chips", "createChip", "ctx-chip", ""),
+    ("badges", "createBadge", "ctx-badge", '"status"'),
+    ("toasts", "createToastRegion", "ctx-toast", ""),
+    ("empty-states", "createEmptyState", "ctx-empty-state", ""),
+    ("skeletons", "createSkeleton", "ctx-skeleton", ""),
+    ("dialogs", "createDialog", "ctx-dialog", ""),
+    ("tooltips", "createTooltip", "ctx-tooltip", ""),
+]
+
+_WIDGETS_TS = """
+export const WIDGET_CLASSES: Readonly<Record<string, string>> = {
+    button: "ctx-widget-button",
+    textbox: "ctx-widget-textbox",
+    tree: "ctx-widget-tree",
+    status: "ctx-widget-status",
+};
+"""
+
+
+def _roster(rows: list[tuple[str, str, str, str]]) -> str:
+    body = "\n".join(
+        '    { family: "%s", factory: "%s", rootClass: "%s", reusesRoles: [%s] },'
+        % (family, factory, root, roles)
+        for family, factory, root, roles in rows
+    )
+    return FULL_ROSTER % body
+
+
+def _family_case(tmp_path: Path, *, rows: list[tuple[str, str, str, str]] | None = None,
+                 drop_factory: str = "", drop_class: str = "") -> int:
+    rows = list(_ROSTER_ROWS) if rows is None else rows
+    source = tmp_path / "src"
+    source.mkdir(parents=True, exist_ok=True)
+    (source / "index.ts").write_text(_roster(rows), encoding="utf-8")
+    (source / "widgets.ts").write_text(_WIDGETS_TS, encoding="utf-8")
+    (source / "families.ts").write_text(
+        "\n".join(
+            "export function %s(): HTMLElement { return document.createElement('div'); }" % factory
+            for _, factory, _, _ in rows
+            if factory != drop_factory
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    styles = tmp_path / "styles"
+    styles.mkdir(parents=True, exist_ok=True)
+    (styles / "components.css").write_text(
+        "\n".join(
+            ".%s {\n    color: var(--ctx-colors-ink);\n}" % root
+            for _, _, root, _ in rows
+            if root != drop_class
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return check_kit_tokens.main(
+        [
+            "--family-coverage",
+            "--kit-index", str(source / "index.ts"),
+            "--kit-source", str(source / "widgets.ts"),
+            "--kit-source-dir", str(source),
+            "--kit-styles", str(styles),
+        ]
+    )
+
+
+def test_the_full_twelve_family_roster_passes(tmp_path: Path) -> None:
+    assert _family_case(tmp_path) == 0
+
+
+def test_a_dropped_family_fails(tmp_path: Path) -> None:
+    """The headline failure: the kit quietly shipping eleven of the design's twelve families."""
+    assert _family_case(tmp_path, rows=_ROSTER_ROWS[:-1]) == 1
+
+
+def test_a_family_the_design_does_not_name_fails(tmp_path: Path) -> None:
+    rows = list(_ROSTER_ROWS)
+    rows[0] = ("buttonz", "createButton", "ctx-button", '"button"')
+    assert _family_case(tmp_path, rows=rows) == 1
+
+
+def test_a_factory_no_module_exports_fails(tmp_path: Path) -> None:
+    """A roster that advertises a surface a consumer cannot call."""
+    assert _family_case(tmp_path, drop_factory="createTabs") == 1
+
+
+def test_a_root_class_no_stylesheet_styles_fails(tmp_path: Path) -> None:
+    """The family would render in the browser's own chrome, themed by nothing."""
+    assert _family_case(tmp_path, drop_class="ctx-dialog") == 1
+
+
+def test_a_reuse_claim_naming_a_role_that_does_not_exist_fails(tmp_path: Path) -> None:
+    """"Builds on the e06c1 primitive" must name a member of the CLOSED widget-class set."""
+    rows = list(_ROSTER_ROWS)
+    rows[2] = ("tabs", "createTabs", "ctx-tabs", '"tab"')
+    assert _family_case(tmp_path, rows=rows) == 1
+
+
+def test_an_unreadable_roster_is_a_configuration_error(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    source.mkdir(parents=True)
+    (source / "index.ts").write_text("export const SOMETHING_ELSE = [];\n", encoding="utf-8")
+    (source / "widgets.ts").write_text(_WIDGETS_TS, encoding="utf-8")
+    styles = tmp_path / "styles"
+    styles.mkdir()
+    (styles / "components.css").write_text(".ctx-button { color: var(--ctx-colors-ink); }\n",
+                                           encoding="utf-8")
+    assert check_kit_tokens.main(
+        [
+            "--family-coverage",
+            "--kit-index", str(source / "index.ts"),
+            "--kit-source", str(source / "widgets.ts"),
+            "--kit-source-dir", str(source),
+            "--kit-styles", str(styles),
+        ]
+    ) == 2
+
+
 # ------------------------------------------------------------------------------------ the real tree
 
 
@@ -322,12 +608,14 @@ def test_the_shipped_kit_is_tokens_only() -> None:
 
 
 def test_the_shipped_role_set_agrees_across_all_three_languages() -> None:
+    # `--kit-source` names widgets.ts since e06c2: the map moved out of the barrel so the authored
+    # families that import it do not put the kit's own entry point inside an import cycle.
     root = _repo_root()
     assert (
         check_kit_tokens.main(
             [
                 "--role-coverage",
-                "--kit-source", str(root / "src/editor/webui/kit/src/index.ts"),
+                "--kit-source", str(root / "src/editor/webui/kit/src/widgets.ts"),
                 "--kit-styles", str(root / "src/editor/webui/kit/styles"),
                 "--uitree-source", str(root / "src/editor/gui/uitree/src/node.cpp"),
                 "--app-stylesheet", str(root / "src/editor/webui/app/app.css"),
@@ -341,8 +629,54 @@ def test_the_shipped_role_set_is_the_documented_twelve() -> None:
     """A belt-and-braces count: the closed set is TWELVE, and all three sources say so."""
     root = _repo_root()
     roles = check_kit_tokens.read_cpp_roles(root / "src/editor/gui/uitree/src/node.cpp")
-    classes = check_kit_tokens.read_widget_classes(root / "src/editor/webui/kit/src/index.ts")
+    classes = check_kit_tokens.read_widget_classes(root / "src/editor/webui/kit/src/widgets.ts")
     styled = check_kit_tokens.read_styled_classes(root / "src/editor/webui/kit/styles")
     assert len(roles) == 12
     assert set(classes) == roles
+    # The styled set may not GROW past the closed role set even though the kit now ships two
+    # stylesheets: `components.css` reaches exactly one widget class (`.ctx-widget-status.ctx-badge`,
+    # the live badge reusing the `status` primitive), which is already a member.
     assert set(classes.values()) == styled
+
+
+def test_the_shipped_kit_typescript_smuggles_no_appearance() -> None:
+    """The e06c2 TS half, over the REAL kit -- so this suite fails if a module regresses."""
+    root = _repo_root()
+    assert (
+        check_kit_tokens.main(
+            ["--source-tokens", "--kit-source-dir", str(root / "src/editor/webui/kit/src")]
+        )
+        == 0
+    )
+
+
+def test_the_shipped_kit_publishes_the_twelve_families_of_design_06() -> None:
+    root = _repo_root()
+    assert (
+        check_kit_tokens.main(
+            [
+                "--family-coverage",
+                "--kit-index", str(root / "src/editor/webui/kit/src/index.ts"),
+                "--kit-source", str(root / "src/editor/webui/kit/src/widgets.ts"),
+                "--kit-source-dir", str(root / "src/editor/webui/kit/src"),
+                "--kit-styles", str(root / "src/editor/webui/kit/styles"),
+            ]
+        )
+        == 0
+    )
+
+
+def test_the_shipped_roster_matches_the_designs_list_exactly() -> None:
+    """The roster's CONTENT, not merely its agreement with itself.
+
+    `DESIGN_COMPONENT_FAMILIES` is this tool's own copy of design 06 section 3's list (the design
+    document lives outside this repository), so comparing the two here is a real cross-check rather
+    than a tautology.
+    """
+    root = _repo_root()
+    entries = check_kit_tokens.read_component_families(
+        root / "src/editor/webui/kit/src/index.ts"
+    )
+    assert [family for family, _, _, _ in entries] == list(
+        check_kit_tokens.DESIGN_COMPONENT_FAMILIES
+    )
