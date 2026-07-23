@@ -230,4 +230,51 @@ if(OS_WINDOWS OR OS_LINUX)
     set_tests_properties(editor-cef-smoke-shell-settings PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_settings_smoke>"
         TIMEOUT 180)
+
+    # --- the LIVE MULTI-WINDOW smoke (ctest editor-cef-smoke-shell-multiwindow) --------------------
+    # M9 e10a: the three DoD lines a CEF-free test structurally cannot reach — a SECOND real CEF
+    # browser booting its OWN fresh editor-core instance (proven by two distinct round-tripped
+    # handshake nonces), a REAL renderer `window.open` refused by `OnBeforePopup` with NO browser
+    # created, and a MID-PROCESS window destroy followed by another create. The deterministic
+    # 25-cycle create/destroy version is the CEF-free `editor-shell-test_window_registry`, which runs
+    # on all three default `build` legs; this proves the same discipline on the real CEF path, on the
+    # Session-0 Windows runner where CE #319 faulted. Same `editor-cef-smoke-` family + the same link
+    # recipe as the sibling smokes (context_editor_cef precedes the CEF libs — the
+    # single-left-to-right-pass rule; context_editor_panels binds the real providers so each window's
+    # editor-core has panels to hydrate, and introduces no CEF refs of its own).
+    #
+    # ⚠ "Not Run = RED" TRIPWIRE: that job builds a hand-maintained --target list, so this executable
+    # is ALSO listed in ci.yml's editor-cef-smoke build step (and mirrored in the profile's test.md
+    # § CI). The regex would otherwise match a test whose executable was never built.
+    #
+    # TIMEOUT covers THREE sequential live browser boots (window 0, window 1, and the one created
+    # after the mid-process destroy) plus the popup and repaint waits — the sibling single-boot
+    # smokes budget 180s each.
+    add_executable(context_editor_shell_multiwindow_smoke src/cef_shell_multiwindow_smoke.cpp)
+    SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_multiwindow_smoke)
+    add_dependencies(context_editor_shell_multiwindow_smoke libcef_dll_wrapper)
+    target_link_libraries(context_editor_shell_multiwindow_smoke
+        context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+    target_include_directories(context_editor_shell_multiwindow_smoke PRIVATE "${CEF_ROOT}")
+
+    # Same single-staging dependency as the sibling smokes above (issue #360).
+    add_dependencies(context_editor_shell_multiwindow_smoke context_editor_cef_stage)
+
+    # Same webui asset dependency + compiled-in root as the sibling smokes: both windows load
+    # `context-editor://app/index.html`, so editor-core's built asset set must exist when it runs.
+    add_dependencies(context_editor_shell_multiwindow_smoke context_editor_webui)
+    if(NOT CONTEXT_WEBUI_ASSET_DIR)
+        message(FATAL_ERROR
+            "context_editor_shell_multiwindow_smoke: CONTEXT_WEBUI_ASSET_DIR is empty — "
+            "src/editor/webui must be added BEFORE src/editor/shell (src/CMakeLists.txt orders it "
+            "so); it publishes the asset root as CACHE INTERNAL.")
+    endif()
+    target_compile_definitions(context_editor_shell_multiwindow_smoke PRIVATE
+        "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
+
+    add_test(NAME editor-cef-smoke-shell-multiwindow
+        COMMAND context_editor_shell_multiwindow_smoke)
+    set_tests_properties(editor-cef-smoke-shell-multiwindow PROPERTIES
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_multiwindow_smoke>"
+        TIMEOUT 420)
 endif()

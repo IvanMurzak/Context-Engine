@@ -628,8 +628,124 @@ int main(int argc, char** argv)
 
     // The window is adopted now that its browser + present path exist; the manager applies any
     // remembered placement before the first frame (it was constructed far above so it could outlive
-    // the bridge handlers — see there).
+    // the bridge handlers — see there). It becomes `kPrimaryWindowId` — window 0, which hosts the
+    // app menu + welcome screen (D13) and is the one window the registry refuses to destroy.
+    //
+    // It is adopted with an EMPTY session on purpose: window 0's bridge is the `bridge` local above
+    // and its daemon connection belongs to the lifecycle, both of which already outlive
+    // `shell::cef::shutdown()` by declaration order. Only a window the REGISTRY created hands its
+    // session to the manager (see the factory below).
     manager.add(std::move(window));
+
+    // --- the window factory (e10a, design 03 §1) --------------------------------------------------
+    //
+    // HOW A SECOND NATIVE WINDOW IS BUILT. The registry owns WHEN; this owns HOW, because only the
+    // app knows how to make a browser. Nothing triggers it yet — the tear-out gesture that asks for a
+    // window is e10b's, and this task deliberately moves no panel — but every seam it needs is here
+    // and exercised by `editor-cef-smoke-shell-multiwindow`.
+    //
+    // Each window gets its OWN of everything that carries identity:
+    //   * its own `BridgeRouter` + handshake, so a fresh editor-core instance boots into it (03 §1 —
+    //     not a shared instance, not `retainContext`), and so a handler can always tell which window
+    //     asked (the ambiguity e10b's tear-out would otherwise have to invent an answer for);
+    //   * its own WIRE CONNECTION to the daemon, and therefore its own `origin` (e08a mints ids per
+    //     connection, so N windows are genuinely N origins — what makes e10c/e10d's cross-window
+    //     echo-suppression drills mean anything).
+    //
+    // Ownership of both is handed to the manager, which retires rather than frees them (shell.h) —
+    // the CE #319 rule, now applying to a MID-PROCESS destroy as well as the process-wide one.
+    manager.bind_window_factory(
+        [&options, project_mode](const shell::WindowSpec& spec, shell::WindowSessionParts& parts,
+                                 std::string& error) -> bool
+        {
+            shell::WindowDesc desc;
+            desc.title = spec.title;
+            desc.logical_size = spec.logical_size;
+            desc.visible = !spec.headless;
+            desc.placement = spec.placement;
+            if (spec.headless)
+            {
+                parts.backend = std::make_unique<shell::HeadlessWindowBackend>(desc);
+            }
+            else
+            {
+                shell::WindowBackendSelection selection = shell::make_window_backend(desc);
+                if (selection.backend == nullptr)
+                {
+                    // REPORTED as a create failure rather than degraded to headless: an invisible
+                    // second window is the silent failure 03 §7 exists to prevent, and the caller's
+                    // fallback (e10b's floating group in the SOURCE window) is the right answer.
+                    error = selection.diagnostic.empty()
+                                ? std::string("no native window backend on this platform")
+                                : selection.diagnostic;
+                    return false;
+                }
+                parts.backend = std::move(selection.backend);
+            }
+
+            auto handshake =
+                std::make_shared<shell::ShellHandshake>(shell::make_handshake_nonce());
+            auto window_bridge = std::make_unique<shell::BridgeRouter>();
+            if (!handshake->install(*window_bridge))
+            {
+                error = "could not install the bridge handshake on the new window";
+                return false;
+            }
+
+            if (project_mode)
+            {
+                shell::DaemonAttach attach = shell::attach_to_project(options.project);
+                if (attach.attached)
+                {
+                    parts.daemon_client = std::move(attach.client);
+                }
+                else
+                {
+                    // NOT a create failure: a window that opens read-only is exactly what 03 §7
+                    // prescribes for a lost daemon, and the primary window does the same. Its origin
+                    // is then 0 — which e08a also spells "not attached", so nothing reads it as an
+                    // identity.
+                    parts.diagnostic = "this window opened without its own daemon connection (" +
+                                       attach.error + "); it has no origin of its own";
+                }
+            }
+
+#if defined(CONTEXT_EDITOR_HAS_CEF)
+            shell::cef::CefShellOptions cef_options;
+            cef_options.native_window = parts.backend->native_window().handle;
+            cef_options.logical_size =
+                shell::to_logical(parts.backend->client_size(), parts.backend->dpi());
+            cef_options.dpi = parts.backend->dpi();
+            cef_options.url = options.url;
+            cef_options.devtools_enabled = options.devtools;
+            cef_options.app_asset_root = options.app_root;
+            cef_options.bridge = window_bridge.get();
+            std::string browser_error;
+            parts.browser = shell::cef::make_cef_browser_host(cef_options, browser_error);
+            if (parts.browser == nullptr)
+            {
+                error = "the browser did not start: " + browser_error;
+                return false;
+            }
+#else
+            parts.browser = std::make_unique<shell::ScriptedBrowserHost>();
+#endif
+            // The handshake goes in LAST and comes out FIRST-to-last-destroyed: the router's
+            // handlers captured it, so it must outlive the router (window_registry.h § LIFETIME).
+            parts.surfaces.push_back(std::move(handshake));
+            parts.bridge = std::move(window_bridge);
+            error.clear();
+            return true;
+        });
+
+    // The 03 §7 degradation seam. e10a reports; e10b decides what editor-core does about it (fall
+    // back to a floating Dockview group in the source window). The registry already logs the same
+    // line, so this is the hook, not the report.
+    manager.on_window_create_failed(
+        [](const shell::WindowCreateFailure& failure)
+        {
+            std::fprintf(stderr, "context_editor: %s\n", shell::describe(failure).c_str());
+        });
 
     // --- the owner loop ----------------------------------------------------------------------------
     int frames = 0;
@@ -647,6 +763,14 @@ int main(int argc, char** argv)
         // honestly instead of calling through a freed pointer (session_feed.h § LIFETIME).
         if (session_feed != nullptr)
             shell::panels::bind_session_client(*session_feed, lifecycle.client());
+        // e10a: keep window 0's reported `origin` in step with the connection it actually has. The
+        // primary's client belongs to the lifecycle rather than to a registry session, so the
+        // registry is TOLD rather than asking — and a reconnect mints a NEW id (e14a), which is
+        // exactly why this is re-derived here, immediately after the one call that can change it,
+        // rather than latched once at boot.
+        manager.set_window_origin(shell::kPrimaryWindowId,
+                                  lifecycle.client() != nullptr ? lifecycle.client()->client_id()
+                                                                : 0);
         // e14b: a second opener that found our presence marker wrote a focus request — consume it and
         // raise window 0 (best-effort; a headless backend simply does nothing). This is the C-F23
         // single-instance FOCUS, arbitrated entirely through the project's own `.editor/` state.

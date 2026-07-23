@@ -42,6 +42,7 @@
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -76,6 +77,14 @@ bool g_initialized = false;
 // switches; CEF then propagates the switches onto the renderer/GPU/utility subprocess command lines
 // it builds from the browser process's, so the whole tree logs to stderr. Never mutated after boot.
 bool g_verbose_logging = false;
+
+// The e10a containment counters (cef_shell.h § the containment counters). Both are written on the
+// CEF UI thread — which IS the owner thread here (`multi_threaded_message_loop=false` + the
+// integrated pump, so every callback runs inside the owner's CefDoMessageLoopWork) — and read by
+// the owner thread between pumps. Plain ints, deliberately: making them atomic would advertise a
+// cross-thread contract this single-threaded design does not have.
+int g_browsers_created = 0;
+int g_popups_suppressed = 0;
 
 // --------------------------------------------------------------------------- modifier translation
 
@@ -602,10 +611,24 @@ public:
         // SUPPRESS every stray window.open (03 §1). Tear-out does NOT ride window.open — it is a
         // PanelHost/Shell mechanism (04 §2) — so a popup reaching here is an accident, and letting
         // CEF create a default popup window would put an un-composited native window on screen.
+        //
+        // e10a: counted AND logged. With N windows the Shell is now genuinely in the business of
+        // creating windows, so "a window appeared that the Shell did not create" stops being an
+        // impossible state and becomes the exact thing this boundary exists to prevent — and a
+        // containment boundary nothing can observe is one nothing can prove.
+        ++g_popups_suppressed;
+        std::fprintf(stderr, "[shell-cef] popup SUPPRESSED: window.open may not create an "
+                             "unmanaged window (03 §1)\n");
         return true;
     }
 
-    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override { browser_ = browser; }
+    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override
+    {
+        browser_ = browser;
+        // Every browser this process creates passes through here — including one CEF might create
+        // for a popup, which is why this is the honest denominator for the suppression assertion.
+        ++g_browsers_created;
+    }
 
     void OnBeforeClose(CefRefPtr<CefBrowser> browser) override
     {
@@ -955,6 +978,25 @@ public:
         return !client_->closed();
     }
 
+    void execute_script(std::string_view source) override
+    {
+        CefRefPtr<CefBrowser> browser = client_->browser();
+        if (browser == nullptr)
+        {
+            return;
+        }
+        CefRefPtr<CefFrame> frame = browser->GetMainFrame();
+        if (frame == nullptr)
+        {
+            return;
+        }
+        // The script URL is what the renderer attributes errors to; naming this seam (rather than
+        // passing the app origin) keeps a Shell-injected script distinguishable from editor-core's
+        // own code in a console trace.
+        frame->ExecuteJavaScript(CefString(std::string(source)), "context-editor://shell/inject",
+                                 0);
+    }
+
     void close() override
     {
         CefRefPtr<CefBrowser> browser = client_->browser();
@@ -1140,6 +1182,16 @@ std::unique_ptr<IBrowserHost> make_cef_browser_host(const CefShellOptions& optio
     }
     error.clear();
     return std::make_unique<CefBrowserHostImpl>(client, g_app);
+}
+
+int browsers_created()
+{
+    return g_browsers_created;
+}
+
+int popups_suppressed()
+{
+    return g_popups_suppressed;
 }
 
 void shutdown()

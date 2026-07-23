@@ -4,6 +4,8 @@
 #include "context/editor/shell/shell.h"
 
 #include <cstddef>
+#include <cstdio>
+#include <string>
 #include <utility>
 
 namespace context::editor::shell
@@ -311,7 +313,22 @@ WindowManager::WindowManager(std::filesystem::path project_root)
     store_.load();
 }
 
+// The graveyard is emptied HERE and nowhere else (shell.h § the class note / window_registry.h
+// § LIFETIME RULE). By the time this runs the app has already called `shell::cef::shutdown()`, so
+// CEF has finished dispatching to every client that held one of these routers.
+WindowManager::~WindowManager() = default;
+
 EditorWindow& WindowManager::add(std::unique_ptr<EditorWindow> window)
+{
+    const WindowId id = add_session(std::move(window), WindowSessionParts{});
+    WindowEntry* entry = find(id);
+    // find() cannot fail here: add_session just pushed this entry. Dereferencing without the guard
+    // would still be correct, but a null deref is not the failure mode to leave available.
+    return *entry->window;
+}
+
+WindowId WindowManager::add_session(std::unique_ptr<EditorWindow> window,
+                                    WindowSessionParts&& session)
 {
     const std::size_t index = window->state_index();
     const EditorState& state = store_.state();
@@ -319,13 +336,239 @@ EditorWindow& WindowManager::add(std::unique_ptr<EditorWindow> window)
     {
         window->backend().apply_placement(state.windows[index]);
     }
-    windows_.push_back(std::move(window));
-    return *windows_.back();
+
+    WindowEntry entry;
+    entry.id = next_id_++;
+    entry.surfaces = std::move(session.surfaces);
+    entry.bridge = std::move(session.bridge);
+    entry.daemon_client = std::move(session.daemon_client);
+    entry.window = std::move(window);
+    windows_.push_back(std::move(entry));
+    return windows_.back().id;
 }
 
-EditorWindow* WindowManager::window(std::size_t index)
+void WindowManager::bind_window_factory(WindowFactory factory)
 {
-    return index < windows_.size() ? windows_[index].get() : nullptr;
+    factory_ = std::move(factory);
+}
+
+void WindowManager::on_window_create_failed(WindowCreateFailureSink sink)
+{
+    failure_sink_ = std::move(sink);
+}
+
+void WindowManager::report_failure(WindowCreateFailure failure)
+{
+    ++create_failures_;
+    // LOUD by default (03 §7): the report reaches stderr even when nothing bound a sink, because a
+    // window that silently did not open is indistinguishable from one that opened offscreen.
+    std::fprintf(stderr, "[shell] %s\n", describe(failure).c_str());
+    if (failure_sink_)
+    {
+        failure_sink_(failure);
+    }
+    last_failure_ = std::move(failure);
+}
+
+WindowCreateResult WindowManager::create_window(const WindowSpec& spec, WindowId source)
+{
+    WindowCreateResult result;
+    result.id = kInvalidWindowId;
+
+    const auto fail = [&](WindowCreateOutcome outcome, std::string error)
+    {
+        result.outcome = outcome;
+        result.error = std::move(error);
+        WindowCreateFailure failure;
+        failure.outcome = outcome;
+        failure.source = source;
+        failure.title = spec.title;
+        failure.error = result.error;
+        report_failure(std::move(failure));
+        return result;
+    };
+
+    if (windows_.size() >= kMaxEditorWindows)
+    {
+        return fail(WindowCreateOutcome::limit_reached,
+                    "the editor already has the maximum of " + std::to_string(kMaxEditorWindows) +
+                        " windows open");
+    }
+    if (factory_ == nullptr)
+    {
+        return fail(WindowCreateOutcome::no_factory,
+                    "no window factory is bound — this build cannot create a window");
+    }
+
+    WindowSessionParts parts;
+    std::string error;
+    if (!factory_(spec, parts, error))
+    {
+        return fail(WindowCreateOutcome::factory_failed,
+                    error.empty() ? std::string("the window factory reported a failure with no "
+                                                "reason")
+                                  : error);
+    }
+    if (!validate_window_parts(parts, error))
+    {
+        // A factory that says "yes" and hands back nothing usable is a DIFFERENT defect from one
+        // that says "no", and it is reported as such rather than crashing on the null browser.
+        return fail(WindowCreateOutcome::incomplete_parts, error);
+    }
+
+    EditorWindowConfig config;
+    config.state_index = spec.state_index;
+    auto window = std::make_unique<EditorWindow>(std::move(parts.backend), std::move(parts.browser),
+                                                 config);
+    if (spec.placement.has_value())
+    {
+        window->backend().apply_placement(*spec.placement);
+    }
+    // The window has NO present path yet: attaching one needs an RHI the registry does not own, so
+    // the caller does it (exactly as the app does for window 0). A window with no present path
+    // composites nothing, which is why the factory's diagnostic is surfaced by the caller too.
+    result.id = add_session(std::move(window), std::move(parts));
+    result.outcome = WindowCreateOutcome::created;
+    result.error.clear();
+    return result;
+}
+
+void WindowManager::retire(WindowEntry& entry)
+{
+    if (entry.window != nullptr)
+    {
+        entry.window->close();
+        entry.window.reset();
+    }
+    // THE CE #319 DISCIPLINE, generalised to a mid-process destroy: the browser is closed but CEF
+    // is not necessarily finished with the client that holds this router — it finishes inside
+    // CefShutdown. So the session is moved to the graveyard and freed only by ~WindowManager, which
+    // the app sequences after shell::cef::shutdown().
+    RetiredSession retired;
+    retired.surfaces = std::move(entry.surfaces);
+    retired.bridge = std::move(entry.bridge);
+    retired.daemon_client = std::move(entry.daemon_client);
+    if (retired.bridge != nullptr || retired.daemon_client != nullptr || !retired.surfaces.empty())
+    {
+        retired_.push_back(std::move(retired));
+    }
+}
+
+WindowDestroyResult WindowManager::destroy_window(WindowId id)
+{
+    WindowDestroyResult result;
+    if (is_primary(id))
+    {
+        result.outcome = WindowDestroyOutcome::primary_refused;
+        result.error = "window 0 is primary (it hosts the app menu + welcome screen); it closes "
+                       "with the app, not on its own";
+        return result;
+    }
+    for (std::size_t i = 0; i < windows_.size(); ++i)
+    {
+        if (windows_[i].id != id)
+        {
+            continue;
+        }
+        retire(windows_[i]);
+        windows_.erase(windows_.begin() + static_cast<std::ptrdiff_t>(i));
+        result.outcome = WindowDestroyOutcome::destroyed;
+        result.error.clear();
+        return result;
+    }
+    result.outcome = WindowDestroyOutcome::unknown_window;
+    result.error = "no live window carries id " + std::to_string(static_cast<unsigned long long>(id));
+    return result;
+}
+
+WindowManager::WindowEntry* WindowManager::find(WindowId id)
+{
+    for (WindowEntry& entry : windows_)
+    {
+        if (entry.id == id)
+        {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+const WindowManager::WindowEntry* WindowManager::find(WindowId id) const
+{
+    for (const WindowEntry& entry : windows_)
+    {
+        if (entry.id == id)
+        {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+EditorWindow* WindowManager::window(WindowId id)
+{
+    WindowEntry* entry = find(id);
+    return entry != nullptr ? entry->window.get() : nullptr;
+}
+
+std::vector<WindowId> WindowManager::window_ids() const
+{
+    std::vector<WindowId> ids;
+    ids.reserve(windows_.size());
+    for (const WindowEntry& entry : windows_)
+    {
+        ids.push_back(entry.id);
+    }
+    return ids;
+}
+
+std::uint64_t WindowManager::window_origin(WindowId id) const
+{
+    const WindowEntry* entry = find(id);
+    if (entry == nullptr)
+    {
+        return 0;
+    }
+    // A session that owns its connection answers from it — the id the DAEMON minted, never a value
+    // the Shell chose for itself.
+    if (entry->daemon_client != nullptr)
+    {
+        return entry->daemon_client->client_id();
+    }
+    return entry->origin;
+}
+
+void WindowManager::set_window_origin(WindowId id, std::uint64_t origin)
+{
+    if (WindowEntry* entry = find(id))
+    {
+        entry->origin = origin;
+    }
+}
+
+std::size_t WindowManager::distinct_origins() const
+{
+    std::vector<std::uint64_t> seen;
+    for (const WindowEntry& entry : windows_)
+    {
+        const std::uint64_t origin = window_origin(entry.id);
+        if (origin == 0)
+        {
+            // 0 is "no identity" (e08a: it also means "not attached"), so it is never counted as
+            // one — two unattached windows are not two origins.
+            continue;
+        }
+        bool known = false;
+        for (const std::uint64_t other : seen)
+        {
+            known = known || other == origin;
+        }
+        if (!known)
+        {
+            seen.push_back(origin);
+        }
+    }
+    return seen.size();
 }
 
 bool WindowManager::pump_once(std::uint64_t now_us)
@@ -333,7 +576,7 @@ bool WindowManager::pump_once(std::uint64_t now_us)
     ++pumps_;
     for (std::size_t i = 0; i < windows_.size();)
     {
-        EditorWindow& window = *windows_[i];
+        EditorWindow& window = *windows_[i].window;
         const bool alive = window.pump_once(now_us);
         if (window.placement_dirty())
         {
@@ -342,6 +585,9 @@ bool WindowManager::pump_once(std::uint64_t now_us)
         }
         if (!alive)
         {
+            // A window that died on its own is retired exactly like an explicitly destroyed one:
+            // its bridge must not be freed while CEF may still reach it.
+            retire(windows_[i]);
             windows_.erase(windows_.begin() + static_cast<std::ptrdiff_t>(i));
             continue;
         }
@@ -363,9 +609,11 @@ void WindowManager::shutdown()
         return;
     }
     shut_down_ = true;
-    for (std::unique_ptr<EditorWindow>& window : windows_)
+    for (WindowEntry& entry : windows_)
     {
-        window->close();
+        // Retire, not destroy: `shutdown()` runs BEFORE `shell::cef::shutdown()` in the app, so
+        // freeing a router here is precisely the CE #319 use-after-free — one per open window.
+        retire(entry);
     }
     windows_.clear();
     // Unconditional, ignoring the debounce: waiting out a quiet period on the way down would just

@@ -88,6 +88,14 @@ void ScriptedBrowserHost::set_focus(bool focused)
     focused_ = focused;
 }
 
+void ScriptedBrowserHost::execute_script(std::string_view source)
+{
+    // RECORDED, never run: this host has no JavaScript engine. Silently dropping the call would let
+    // a test believe a script executed here — and the one caller that matters (the popup-suppression
+    // proof) is only meaningful against a real renderer, which is why it lives in the live CEF smoke.
+    scripts_.emplace_back(source);
+}
+
 bool ScriptedBrowserHost::pump(IBrowserFrameSink& sink)
 {
     // Moved out before delivery: a sink that queues more work (a popup opening in response to a

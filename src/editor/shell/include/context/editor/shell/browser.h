@@ -23,6 +23,7 @@
 #include <atomic>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace context::editor::shell
@@ -84,6 +85,16 @@ public:
     // Returns false once the browser is gone. For the CEF host this is where CefDoMessageLoopWork
     // runs — the integrated pump (03 §1).
     virtual bool pump(IBrowserFrameSink& sink) = 0;
+
+    // Run a fragment of JavaScript in the browser's MAIN FRAME. Added by e10a for one reason: the
+    // `OnBeforePopup` suppression (03 §1) is a security containment boundary, and the only honest
+    // proof of it is a REAL `window.open` issued by REAL renderer content — a unit-level stub would
+    // assert that the handler we wrote returns true, which is not the same claim at all.
+    //
+    // PURE, like every other seam here: each host states its own answer. The CEF host runs
+    // `CefFrame::ExecuteJavaScript`; the scripted host records the source (it has no JS engine, and
+    // pretending otherwise would let a caller believe a script ran).
+    virtual void execute_script(std::string_view source) = 0;
 
     virtual void close() = 0;
 };
@@ -153,6 +164,7 @@ public:
     void send_key(const KeyEvent& event) override;
     void set_focus(bool focused) override;
     bool pump(IBrowserFrameSink& sink) override;
+    void execute_script(std::string_view source) override;
     void close() override { alive_ = false; }
 
     // --- scripting -------------------------------------------------------------------------------
@@ -177,6 +189,8 @@ public:
     // --- what it recorded ------------------------------------------------------------------------
     [[nodiscard]] const std::vector<PointerEvent>& pointers() const { return pointers_; }
     [[nodiscard]] const std::vector<KeyEvent>& keys() const { return keys_; }
+    // The scripts a caller asked to run. Recorded, never executed — see execute_script above.
+    [[nodiscard]] const std::vector<std::string>& scripts() const { return scripts_; }
     [[nodiscard]] render::Extent2D last_logical_size() const { return last_logical_size_; }
     [[nodiscard]] DpiScale last_dpi() const { return last_dpi_; }
     [[nodiscard]] int resize_count() const { return resize_count_; }
@@ -202,6 +216,7 @@ private:
     std::vector<Step> steps_;
     std::vector<PointerEvent> pointers_;
     std::vector<KeyEvent> keys_;
+    std::vector<std::string> scripts_;
     render::Extent2D last_logical_size_{};
     DpiScale last_dpi_;
     int resize_count_ = 0;

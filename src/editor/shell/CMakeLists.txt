@@ -58,6 +58,7 @@ add_library(context_editor_shell STATIC
     src/folder_picker.cpp # e14c: the native OS folder dialog (Win32 real; honest gap elsewhere)
     src/banners.cpp       # e14d: notify-only update check + daemon-lost banner surfaces (07 §4 / 08)
     src/native_net.cpp    # e14d: the OS HTTPS client + browser open (Win32 real; honest gap elsewhere)
+    src/window_registry.cpp  # e10a: the N-window vocabulary + the 03 §7 create-failure report
     src/shell.cpp)        # WindowManager / EditorWindow / the single-threaded owner loop
 
 # The version the e14d update banner reports as "running". PROJECT_VERSION is the ONE source of
@@ -173,6 +174,7 @@ set(_context_shell_tests
     test_daemon_lifecycle  # e14a: exit-policy decision, client census, reconnect/read-only state
     test_welcome       # e14c: launch-mode rule, recents round-trip, welcome.* bridge + picker/CLI seams
     test_banners       # e14d: the update-check PRIVACY suite, version compare, both banner surfaces
+    test_window_registry  # e10a: N windows by id, create/destroy, the retired-session lifetime rule
     test_shell)        # the owner loop end to end + the authenticated-attach guard
 
 foreach(_t IN LISTS _context_shell_tests)
@@ -322,7 +324,8 @@ if(CONTEXT_BUILD_GUI_CEF AND (OS_WINDOWS OR OS_LINUX))
         context_editor_shell_cef_smoke
         context_editor_shell_restore_smoke
         context_editor_shell_palette_smoke
-        context_editor_shell_settings_smoke)
+        context_editor_shell_settings_smoke
+        context_editor_shell_multiwindow_smoke)
     foreach(_consumer IN LISTS _ctx_cef_stage_consumers)
         if(NOT TARGET ${_consumer})
             message(FATAL_ERROR

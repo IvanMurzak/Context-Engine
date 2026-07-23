@@ -26,10 +26,13 @@
 #include "context/editor/shell/editor_state.h"
 #include "context/editor/shell/input.h"
 #include "context/editor/shell/window.h"
+#include "context/editor/shell/window_registry.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -146,30 +149,140 @@ private:
 // Owns the windows and the ONE editor-state store they persist placement through (03 §1: the Shell
 // is `.editor/editor-state.json`'s single writer — one store, not one per window, or two windows
 // would race each other on the same file).
+//
+// SINCE e10a IT IS ALSO THE REGISTRY (window_registry.h): windows are peers addressable by a minted
+// `WindowId`, window 0 is primary, and one can be created or destroyed at RUNTIME through a bound
+// factory. Two invariants make that safe, and both are asserted by
+// `editor-shell-test_window_registry`:
+//
+//   * **A retired session outlives `CefShutdown`.** `destroy_window` closes the window — which
+//     closes its browser — but MOVES the session's bridge, daemon client and captured surfaces into
+//     a graveyard that is emptied ONLY by ~WindowManager. `pump_once` does the same for a window
+//     that died on its own, and `shutdown()` for every window still open. The app must therefore
+//     destroy the manager AFTER `shell::cef::shutdown()`, which `editor_main.cpp` does by declaring
+//     it in the enclosing scope. This is CE #319 generalised from one process-wide teardown to N
+//     mid-process ones: `CloseBrowser` returning is not proof CEF is done with the client.
+//   * **Ids are never reused.** A stale id from a destroyed window resolves to nullptr forever
+//     rather than silently addressing a different window — which is what e10b's cross-window moves
+//     would otherwise do to a panel.
 class WindowManager
 {
 public:
     explicit WindowManager(std::filesystem::path project_root);
 
-    // Adopt a window. Its remembered placement (if any) is applied before the first frame.
+    // The graveyard is emptied here — see the class note. Declared so the ordering rule has a
+    // documented home rather than living only in a comment at a call site.
+    ~WindowManager();
+
+    WindowManager(const WindowManager&) = delete;
+    WindowManager& operator=(const WindowManager&) = delete;
+
+    // Adopt a window. Its remembered placement (if any) is applied before the first frame. The first
+    // adopted window becomes `kPrimaryWindowId`.
     EditorWindow& add(std::unique_ptr<EditorWindow> window);
 
-    // One pass over every window: pump each, persist any placement change, drop dead ones. Returns
+    // Adopt a window together with the per-window session objects the manager must OUTLIVE it with
+    // (its bridge, its daemon client, the surfaces its bridge captured). This is what `add` cannot
+    // express, and what every created window uses.
+    WindowId add_session(std::unique_ptr<EditorWindow> window, WindowSessionParts&& session);
+
+    // --- the registry (e10a, design 03 §1) --------------------------------------------------------
+
+    // Bind how a window is built. Without one, `create_window` reports `no_factory` rather than
+    // pretending: a build with no browser binding genuinely cannot make a second window.
+    void bind_window_factory(WindowFactory factory);
+    [[nodiscard]] bool has_window_factory() const { return factory_ != nullptr; }
+
+    // The 03 §7 degradation seam: called ONCE per failed create, with the full report. e10b owns
+    // what to do about it.
+    void on_window_create_failed(WindowCreateFailureSink sink);
+
+    // Create a window on demand. `source` is the window the request came from (e10b's floating-group
+    // home on failure). Never throws and never partially adopts: on any failure nothing is added,
+    // the failure sink fires exactly once, and the registry stays usable.
+    [[nodiscard]] WindowCreateResult create_window(const WindowSpec& spec,
+                                                   WindowId source = kPrimaryWindowId);
+
+    // Destroy one window by id. Refuses the primary (it hosts the menu/welcome screen — the app
+    // closes it via `shutdown()`), and refuses an unknown id. Its session is retired, not freed.
+    WindowDestroyResult destroy_window(WindowId id);
+
+    // The window carrying `id`, or nullptr. `window(kPrimaryWindowId)` is the primary.
+    [[nodiscard]] EditorWindow* window(WindowId id);
+    [[nodiscard]] std::vector<WindowId> window_ids() const;
+    [[nodiscard]] bool is_primary(WindowId id) const { return id == kPrimaryWindowId; }
+
+    // THIS window's `origin` — the e08a echo-suppression identity of its own wire connection, so N
+    // windows are genuinely N origins. A session that owns a client answers from it; otherwise the
+    // value bound by `set_window_origin` (which is how the primary reports the app-owned client's
+    // id). 0 means "no identity", which e08a also spells "not attached".
+    [[nodiscard]] std::uint64_t window_origin(WindowId id) const;
+    void set_window_origin(WindowId id, std::uint64_t origin);
+    // How many DISTINCT non-zero origins the live windows carry. Equal to the window count exactly
+    // when every window has its own connection — the property e10d's cross-window drills need.
+    [[nodiscard]] std::size_t distinct_origins() const;
+
+    // One pass over every window: pump each, persist any placement change, retire dead ones. Returns
     // false when no window is left — the loop's termination condition.
     bool pump_once(std::uint64_t now_us);
 
-    // Flush pending session state and close every window. Idempotent.
+    // Flush pending session state and close every window. Idempotent. Does NOT free the sessions —
+    // see the class note.
     void shutdown();
 
     [[nodiscard]] std::size_t window_count() const { return windows_.size(); }
-    [[nodiscard]] EditorWindow* window(std::size_t index);
     [[nodiscard]] EditorStateStore& state_store() { return store_; }
     [[nodiscard]] int pumps() const { return pumps_; }
 
+    // --- what it recorded (assertable state, not diagnostics) --------------------------------------
+    [[nodiscard]] std::size_t retired_session_count() const { return retired_.size(); }
+    [[nodiscard]] std::size_t create_failures() const { return create_failures_; }
+    [[nodiscard]] const WindowCreateFailure* last_create_failure() const
+    {
+        return last_failure_.has_value() ? &*last_failure_ : nullptr;
+    }
+    [[nodiscard]] WindowId last_minted_id() const { return next_id_ == 0 ? kInvalidWindowId
+                                                                        : next_id_ - 1; }
+
 private:
+    // One live window plus the session objects its browser can still reach. MEMBER ORDER IS
+    // DESTRUCTION ORDER REVERSED and load-bearing (window_registry.h § LIFETIME RULE): `window` —
+    // and with it the browser — is destroyed first, then the daemon client, then the bridge, then
+    // the surfaces the bridge's handlers captured.
+    struct WindowEntry
+    {
+        std::vector<std::shared_ptr<void>> surfaces;
+        std::unique_ptr<BridgeRouter> bridge;
+        std::unique_ptr<client::Client> daemon_client;
+        std::unique_ptr<EditorWindow> window;
+        WindowId id = kInvalidWindowId;
+        std::uint64_t origin = 0;
+    };
+
+    // A destroyed window's session, held until ~WindowManager. Same member order, same reason.
+    struct RetiredSession
+    {
+        std::vector<std::shared_ptr<void>> surfaces;
+        std::unique_ptr<BridgeRouter> bridge;
+        std::unique_ptr<client::Client> daemon_client;
+    };
+
+    // Close the window and move its session to the graveyard. The entry is left empty for the
+    // caller to erase.
+    void retire(WindowEntry& entry);
+    [[nodiscard]] WindowEntry* find(WindowId id);
+    [[nodiscard]] const WindowEntry* find(WindowId id) const;
+    void report_failure(WindowCreateFailure failure);
+
     std::filesystem::path project_root_;
     EditorStateStore store_;
-    std::vector<std::unique_ptr<EditorWindow>> windows_;
+    std::vector<WindowEntry> windows_;
+    std::vector<RetiredSession> retired_;
+    WindowFactory factory_;
+    WindowCreateFailureSink failure_sink_;
+    std::optional<WindowCreateFailure> last_failure_;
+    std::size_t create_failures_ = 0;
+    WindowId next_id_ = 0;
     int pumps_ = 0;
     bool shut_down_ = false;
 };
