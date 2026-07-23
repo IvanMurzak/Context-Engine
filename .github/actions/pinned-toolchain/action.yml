@@ -59,7 +59,7 @@ runs:
         eval "$VARS"
         python3 tools/check_toolchain.py --platform "$PLATFORM" --describe
         # Expose pin/major as step OUTPUTS (not just local shell vars) so the cache step below can
-        # key on them via a workflow-engine `${{ }}` expression.
+        # key on them via a workflow-engine expression (steps.linux-manifest.outputs.*).
         echo "pin=$PIN" >> "$GITHUB_OUTPUT"
         echo "major=$MAJOR" >> "$GITHUB_OUTPUT"
 
