@@ -61,9 +61,15 @@ public:
 
     // Make `method` answer with a JSON-RPC ERROR response (the daemon-side refusal shape — an
     // `attach.denied`, a `daemon.busy`, an unknown subId), as distinct from a transport failure.
-    void fail_method(const std::string& method, std::string message)
+    //
+    // `catalog_code` fills `error.data.code`, which is where dispatcher.cpp's envelope_error_data()
+    // puts the R-CLI-008 code and where Client reads last_error_code() from. Leave it EMPTY only to
+    // model a peer that sent no structured code (the `fallback` branch of Client::failure_code) —
+    // a real daemon always sends one, so a mock that never did would make every refusal look like
+    // that one exceptional case.
+    void fail_method(const std::string& method, std::string message, std::string catalog_code = {})
     {
-        errors_[method] = std::move(message);
+        errors_[method] = {std::move(message), std::move(catalog_code)};
     }
 
     // Queue a server-pushed frame the consumer will read on its next receive().
@@ -121,7 +127,16 @@ public:
         {
             Json err = Json::object();
             err.set("code", Json(-32000)); // the JSON-RPC server-error band the dispatcher uses
-            err.set("message", Json(failed->second));
+            err.set("message", Json(failed->second.message));
+            if (!failed->second.catalog_code.empty())
+            {
+                // envelope_error_data()'s shape: the R-CLI-008 error object under `error.data`.
+                Json data = Json::object();
+                data.set("code", Json(failed->second.catalog_code));
+                data.set("message", Json(failed->second.message));
+                data.set("retriable", Json(false));
+                err.set("data", std::move(data));
+            }
             response.set("error", std::move(err));
             inbound_.push_back(response.dump(0));
             return true;
@@ -198,8 +213,14 @@ private:
         return out.dump(0);
     }
 
+    struct Refusal
+    {
+        std::string message;
+        std::string catalog_code;
+    };
+
     std::map<std::string, Responder> responders_;
-    std::map<std::string, std::string> errors_;
+    std::map<std::string, Refusal> errors_;
     std::deque<std::string> inbound_;
     std::vector<Request> requests_;
     std::string error_;

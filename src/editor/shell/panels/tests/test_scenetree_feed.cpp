@@ -42,6 +42,21 @@ namespace
 
 constexpr const char* kPanelId = "builtin.scene-tree";
 
+// e08b: the daemon side of the selection seam. RECORDS the write and answers with the selection the
+// daemon would then hold — the shape `editor.select`'s reply carries. It never touches the panel.
+class RecordingSelectionGateway final : public scenetree::SelectionGateway
+{
+public:
+    std::vector<std::vector<std::string>> requests;
+
+    std::optional<std::vector<std::string>>
+    request_selection(const std::vector<std::string>& ids) override
+    {
+        requests.push_back(ids);
+        return ids;
+    }
+};
+
 // A lean in-memory SceneResolver over authored scene JSON strings (the m5-exit MapResolver shape).
 class MapResolver final : public compose::SceneResolver
 {
@@ -244,8 +259,12 @@ void selection_dispatches_through_the_provider()
     CHECK(!panels::scenetree_row_identity("scenetree.item.").has_value());
     CHECK(!panels::scenetree_row_identity("problems.row.0").has_value());
 
+    // e08b: selection is a WRITE to the daemon, so the provider needs a gateway. The double records
+    // the request and answers as the daemon does; it deliberately does NOT apply it (the real wire
+    // cannot either — a `selection-changed` fact does).
+    RecordingSelectionGateway gateway;
     shell::PanelHost host(roster_with_scenetree());
-    panels::SceneTreeFeed feed(host, kPanelId);
+    panels::SceneTreeFeed feed(host, kPanelId, &gateway);
     CHECK(host.provide(kPanelId, feed.make_provider()));
 
     scenetree::SceneTreeModel model;
@@ -255,20 +274,24 @@ void selection_dispatches_through_the_provider()
     model.roots.push_back(std::move(node));
     feed.panel().set_model(std::move(model));
 
-    // The runtime dispatches the ACTIVATED NODE id; the provider translates + selects.
+    // The runtime dispatches the ACTIVATED NODE id; the provider translates + WRITES.
     bool dispatched = false;
     std::string error;
     Json params = Json::object();
     params.set("nodeId", Json(std::string("scenetree.item.e1")));
     CHECK(host.invoke(kPanelId, scenetree::kSelectCommand, params, dispatched, error));
     CHECK(dispatched);
+    CHECK(gateway.requests.size() == 1);
+    CHECK(gateway.requests[0] == std::vector<std::string>{"e1"});
+    // ...and what is rendered is the DAEMON'S answer to that write, not a local decision.
     CHECK(feed.panel().selection().identity == "e1");
 
-    // An unknown row / a foreign node id is DECLINED, not an error.
+    // An unknown row / a foreign node id is DECLINED, not an error — and never reaches the daemon.
     Json bad = Json::object();
     bad.set("nodeId", Json(std::string("scenetree.item.ghost")));
     CHECK(host.invoke(kPanelId, scenetree::kSelectCommand, bad, dispatched, error));
     CHECK(!dispatched);
+    CHECK(gateway.requests.size() == 1);
 }
 
 } // namespace

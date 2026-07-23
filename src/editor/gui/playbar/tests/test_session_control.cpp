@@ -1,12 +1,19 @@
 // The REAL play session-control adapter (R-QA-013): RuntimeSessionControl drives an actual
 // context::runtime::session::Session (the demo scenario) — start/step/stop/hot-reload — and extracts
-// the render frame the F1 viewport observes. Proves the playbar drives the runtime session for real
+// the render frame the F1 viewport observes. Proves the adapter drives the runtime session for real
 // (not just a double), that stepping advances the fixed-tick simulation, and that L-51/L-22 semantics
-// hold on the real session. The fail-closed play.* codes are covered by the fault double in
-// test_playbar_model.cpp; here the adapter's own defensive guards are asserted.
+// hold on the real session, including its own fail-closed defensive guards.
+//
+// M9 e08b: this seam is no longer reached THROUGH the playbar (the daemon owns play state; the panel
+// is an RPC writer + subscriber), so it is driven directly here — and the M5-F5 "play output flows
+// through the F1 viewport with NO second render path" proof moved here with the PlayFrame it is
+// about, since that is the only place a PlayFrame is produced now.
 
 #include "context/editor/gui/playbar/playbar_model.h"
 #include "context/editor/gui/playbar/session_control.h"
+
+#include "context/editor/gui/uitree/panel.h"
+#include "context/editor/gui/viewport/viewport_panel.h"
 
 #include "context/runtime/session/session.h"
 
@@ -16,6 +23,8 @@
 
 using namespace context::editor::gui::playbar;
 namespace rsession = context::runtime::session;
+namespace uitree = context::editor::gui::uitree;
+namespace viewport = context::editor::gui::viewport;
 
 namespace
 {
@@ -95,6 +104,25 @@ int main()
         HotReloadOutcome h = control.apply_hot_reload(LiveEdit{"/x", false});
         CHECK(!h.ok);
         CHECK(h.error_code == kPlayHotReloadFailedCode);
+    }
+
+    // --- the play output flows through the F1 viewport (NO second render path) ---------------------
+    // The PlayFrame the adapter produces IS render::RenderSnapshot; handing it to the observer
+    // viewport reproduces the same scene the viewport renders (ViewportPanel::set_snapshot). The M5-F5
+    // property, asserted at the seam that now owns it.
+    {
+        RuntimeSessionControl control(demo_config());
+        const ControlOutcome started = control.start();
+        CHECK(started.ok);
+        const ControlOutcome stepped = control.step(1);
+        CHECK(stepped.ok);
+
+        viewport::ViewportPanel vp;
+        vp.set_snapshot(stepped.frame.snapshot); // the SAME snapshot type — no second render path
+        CHECK(vp.scene().drawables == stepped.frame.snapshot.items.size());
+
+        // and the viewport observing the play frame is itself still a11y-clean.
+        CHECK(uitree::audit_a11y(vp.build_panel()).empty());
     }
 
     PLAYBAR_TEST_MAIN_END();

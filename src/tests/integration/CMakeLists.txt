@@ -151,6 +151,37 @@ if(CONTEXT_SANITIZE)
 endif()
 
 # ===================================================================================================
+# The M9 e08b PANEL-STATE-REWIRING T2 DRILL (design 05 §4, D7 tier 1) — the e08b DoD proven end to
+# end: the REAL Shell panel composition (`install_builtin_panels` -> SceneTreeFeed + SessionFeed +
+# the hosted playbar) driving the REAL client SDK against a REAL `context daemon`, with the REAL
+# `context` binary spawned as the SECOND client. It is the only place the `origin` echo-suppression
+# contract can actually be checked — a scripted wire has no notion of "another connection" — so it
+# links the Shell panel library rather than re-deriving its wiring. A plain `editor-session-` ctest,
+# auto-run by the build job's general step on all three OS legs with NO ci.yml `--target` bookkeeping.
+add_executable(context_test_e08b_panel_state_rewiring test_e08b_panel_state_rewiring.cpp)
+target_link_libraries(context_test_e08b_panel_state_rewiring
+    PRIVATE context_editor_panels context_client context_warnings Threads::Threads)
+target_link_options(context_test_e08b_panel_state_rewiring PRIVATE ${_m1_exit_static_runtime})
+target_include_directories(context_test_e08b_panel_state_rewiring PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../cli/tests) # process_util.h (header-only, test-only)
+target_compile_definitions(context_test_e08b_panel_state_rewiring PRIVATE
+    CONTEXT_BINARY="$<TARGET_FILE:context>")
+add_dependencies(context_test_e08b_panel_state_rewiring context)
+add_test(NAME editor-session-panels-t2 COMMAND context_test_e08b_panel_state_rewiring)
+# One daemon + several real `context attach` children; cap generously so a regression surfaces its
+# diagnostics rather than hanging the CI job (the e08a drill's budget).
+set_tests_properties(editor-session-panels-t2 PROPERTIES TIMEOUT 300)
+# The spawned `context` binary links the uninstrumented rusty_v8 archive (the M6 X1
+# `context profile gc` path via context_cli), so on the sanitize legs the child needs the same narrow
+# LSan demangler/symbolizer suppressions its sibling CONTEXT_BINARY-spawning drills wire; the spawned
+# child inherits this env. The drill binary itself links no V8.
+if(CONTEXT_SANITIZE)
+    set_tests_properties(editor-session-panels-t2 PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
+endif()
+
+# ===================================================================================================
 # The M9 e14b PER-PROJECT SINGLE-INSTANCE ARBITRATION T2 DRILL (design 07 §4 / 05, D15/C-F23) — the
 # `context edit .` opener proven end to end as a REAL separate `context` process against a live "editor"
 # (the drill's own presence marker + a FocusRequestWatcher thread — the Shell owner-loop behaviour with
@@ -443,6 +474,10 @@ foreach(_i RANGE ${_m5_exit_last})
                 context_gui_panel_scenetree context_gui_panel_inspector context_gui_panel_problems
                 context_gui_panel_builders # e05d3: the kernel-typed model builders (split out, D10)
                 context_gui_viewport context_gui_playbar context_gui_undo context_gui_uitree
+                # e08b split the playbar: the transport (context_gui_playbar) carries no runtime dep,
+                # and the runtime session adapter + PlayFrame live in context_gui_playbar_session,
+                # which the walkthrough + seam checklist still drive directly.
+                context_gui_playbar_session
                 context_compose context_serializer context_render context_warnings)
     target_link_options(context_${_t} PRIVATE ${_m5_exit_static_runtime})
     target_include_directories(context_${_t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

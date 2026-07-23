@@ -1,10 +1,20 @@
-// The playbar state machine (R-QA-013: happy / edge / failure) over a fault-injecting SessionControl
-// double — the DoD's "runtime-session fault-injection" without a live daemon. Covers the L-51 edit/play
-// transitions (play/pause/resume/stop/step), the L-22 hot-reload classification, every reserved play.*
-// failure code, and the R-HUX-011 control-loop listener + generation counter.
+// The playbar transport (R-QA-013: happy / edge / failure) over a PlayControlGateway double — M9 e08b.
+//
+// ⚠ THE DOUBLE IS DELIBERATELY NO MORE CAPABLE THAN THE DAEMON. `DaemonLikeGateway` below reproduces
+// `EditorSessionState`'s reply shapes exactly (kernel_server.cpp / editor_session_state.cpp):
+//   * a real transition          -> ok=true,  changed=true,  the new state + simTick
+//   * a benign idempotent no-op  -> ok=true,  changed=false, the UNCHANGED state (nothing published)
+//   * a refusal                  -> ok=false, error_code=play.not_running
+// A double that answered `ok=true, changed=true` for a no-op — or that invented a state the daemon
+// would never return — would let this suite pass over a model the real daemon breaks. The cross-
+// process `editor-session-panels-t2` drill is what proves the two agree; this suite is what makes the
+// transport's own edges cheap to cover.
+//
+// Covers the four RPC writes, the `play-state` SUBSCRIBER half (a second client's change), the
+// ok<-changed mapping, refusal propagation, the no-gateway posture, and the R-HUX-011 control-loop
+// listener + generation counter.
 
 #include "context/editor/gui/playbar/playbar_model.h"
-#include "context/editor/gui/playbar/session_control.h"
 
 #include "playbar_test.h"
 
@@ -17,257 +27,265 @@ using namespace context::editor::gui::playbar;
 namespace
 {
 
-// A configurable SessionControl double: records calls, advances a simulated simTick, and can fail-close
-// any op to exercise the reserved play.* codes (runtime-session fault-injection).
-class StubSessionControl : public SessionControl
+// The daemon's L-51 machine, reply-for-reply (see the header note above).
+class DaemonLikeGateway final : public PlayControlGateway
 {
 public:
-    bool fail_start = false;
-    bool fail_step = false;
-    bool fail_hot_reload = false;
-    std::uint32_t drawables = 0; // how many drawables the produced frame carries
-
-    int starts = 0;
+    int plays = 0;
+    int pauses = 0;
+    int stops = 0;
     int steps = 0;
-    int discards = 0;
-    int reloads = 0;
-    std::uint64_t tick = 0;
-    bool running = false;
+    // Force every command to fail-close with this code (empty = behave like the real machine).
+    std::string force_error;
 
-    ControlOutcome start() override
+    [[nodiscard]] int calls() const noexcept { return plays + pauses + stops + steps; }
+    [[nodiscard]] PlayState daemon_state() const noexcept { return state_; }
+
+    PlayCommandResult play() override
     {
-        ++starts;
-        ControlOutcome out;
-        if (fail_start)
+        ++plays;
+        if (!force_error.empty())
         {
-            out.error_code = kPlaySessionFailedCode;
-            return out;
+            return refusal();
         }
-        running = true;
-        tick = 0;
-        out.ok = true;
-        out.frame = frame();
-        return out;
+        if (state_ == PlayState::playing)
+        {
+            return no_op(); // already playing — benign
+        }
+        state_ = PlayState::playing;
+        return changed();
     }
 
-    ControlOutcome step(std::uint64_t ticks) override
+    PlayCommandResult pause() override
+    {
+        ++pauses;
+        if (!force_error.empty())
+        {
+            return refusal();
+        }
+        if (state_ == PlayState::edit)
+        {
+            return refusal(kPlayNotRunningCode); // nothing to pause
+        }
+        if (state_ == PlayState::paused)
+        {
+            return no_op();
+        }
+        state_ = PlayState::paused;
+        return changed();
+    }
+
+    PlayCommandResult stop() override
+    {
+        ++stops;
+        if (!force_error.empty())
+        {
+            return refusal();
+        }
+        if (state_ == PlayState::edit)
+        {
+            return no_op(); // idempotent, like a stopped transport bar
+        }
+        state_ = PlayState::edit;
+        tick_ = 0; // L-51: the runtime tick counter is discarded on stop
+        return changed();
+    }
+
+    PlayCommandResult step(std::uint64_t ticks) override
     {
         ++steps;
-        ControlOutcome out;
-        if (fail_step)
+        if (!force_error.empty())
         {
-            out.error_code = kPlayStepFailedCode;
-            return out;
+            return refusal();
         }
-        tick += ticks;
-        out.ok = true;
-        out.frame = frame();
-        return out;
-    }
-
-    void discard() override
-    {
-        ++discards;
-        running = false;
-        tick = 0;
-    }
-
-    HotReloadOutcome apply_hot_reload(const LiveEdit& edit) override
-    {
-        ++reloads;
-        HotReloadOutcome out;
-        if (fail_hot_reload)
+        if (state_ == PlayState::edit)
         {
-            out.error_code = kPlayHotReloadFailedCode;
-            return out;
+            return refusal(kPlayNotRunningCode);
         }
-        if (edit.shape_or_layout_change)
-        {
-            out.reload_class = HotReloadClass::restart_class;
-            out.state_preserved = false;
-            tick = 0; // restart-class re-instantiates from tick 0
-        }
-        else
-        {
-            out.reload_class = HotReloadClass::live_preserving;
-            out.state_preserved = true;
-        }
-        out.ok = true;
-        out.frame = frame();
-        return out;
+        tick_ += ticks; // stepping leaves playing/paused alone
+        return changed();
     }
 
 private:
-    [[nodiscard]] PlayFrame frame() const
+    [[nodiscard]] PlayCommandResult changed() const
     {
-        PlayFrame f;
-        f.sim_tick = tick;
-        f.snapshot.sim_tick = tick;
-        f.snapshot.items.resize(drawables);
-        return f;
+        return PlayCommandResult{true, true, "", state_, tick_};
     }
+    [[nodiscard]] PlayCommandResult no_op() const
+    {
+        return PlayCommandResult{true, false, "", state_, tick_};
+    }
+    [[nodiscard]] PlayCommandResult refusal(const char* code = nullptr) const
+    {
+        PlayCommandResult out;
+        out.ok = false;
+        out.error_code = code != nullptr ? std::string(code) : force_error;
+        out.state = state_;
+        out.sim_tick = tick_;
+        return out;
+    }
+
+    PlayState state_ = PlayState::edit;
+    std::uint64_t tick_ = 0;
 };
 
 } // namespace
 
 int main()
 {
-    // --- default (edit) state ---------------------------------------------------------------------
+    // --- the happy L-51 path, driven entirely over RPC --------------------------------------------
     {
-        PlaybarModel model;
+        DaemonLikeGateway gateway;
+        PlaybarModel model(&gateway);
         CHECK(model.state() == PlayState::edit);
         CHECK(!model.is_running());
-        CHECK(model.sim_tick() == 0);
-        CHECK(model.control_generation() == 0);
-        CHECK(model.last_error().empty());
+
+        const PlayAction played = model.play();
+        CHECK(played.ok);
+        CHECK(played.error_code.empty());
+        CHECK(model.state() == PlayState::playing);
+        CHECK(gateway.plays == 1);
+
+        const PlayAction stepped = model.step(3);
+        CHECK(stepped.ok);
+        CHECK(model.sim_tick() == 3); // the DAEMON's simTick, not a locally incremented one
+        CHECK(model.state() == PlayState::playing);
+
+        const PlayAction paused = model.pause();
+        CHECK(paused.ok);
+        CHECK(model.state() == PlayState::paused);
+        CHECK(model.is_running()); // paused is still a live session (L-51)
+
+        const PlayAction resumed = model.play();
+        CHECK(resumed.ok);
+        CHECK(model.state() == PlayState::playing);
+
+        const PlayAction stopped = model.stop();
+        CHECK(stopped.ok);
+        CHECK(model.state() == PlayState::edit);
+        CHECK(model.sim_tick() == 0); // the runtime tick counter went with the session
     }
 
-    // --- happy path: play -> step -> pause -> resume -> step -> stop -------------------------------
+    // --- benign no-ops: ok=false with NO error code (the ok<-changed mapping) ----------------------
     {
-        StubSessionControl control;
-        control.drawables = 3;
-        PlaybarModel model(&control);
+        DaemonLikeGateway gateway;
+        PlaybarModel model(&gateway);
+        CHECK(model.play().ok);
 
-        std::vector<std::string> transitions;
-        model.add_control_listener([&](const PlayControlEvent& e) { transitions.push_back(e.transition); });
+        // play while playing: the daemon answers ok=true/changed=false, which the playbar reports as
+        // ok=false with no code — its `ok` has always meant "something actually happened".
+        const PlayAction again = model.play();
+        CHECK(!again.ok);
+        CHECK(again.error_code.empty());
+        CHECK(again.state == PlayState::playing);
+        CHECK(model.last_error().empty()); // a no-op is not an error and must not churn last_error
 
-        PlayAction a = model.play();
-        CHECK(a.ok);
-        CHECK(a.state == PlayState::playing);
-        CHECK(model.is_running());
-        CHECK(control.starts == 1);
-        CHECK(model.control_generation() == 1);
-        // the play frame flows through as the observed frame (F1 viewport source) — 3 drawables.
-        CHECK(model.last_frame().snapshot.items.size() == 3);
+        CHECK(model.stop().ok);
+        const PlayAction stop_again = model.stop(); // stop in edit is idempotent
+        CHECK(!stop_again.ok);
+        CHECK(stop_again.error_code.empty());
+    }
 
-        PlayAction s1 = model.step(2);
-        CHECK(s1.ok);
-        CHECK(model.state() == PlayState::playing);
-        CHECK(model.sim_tick() == 2); // the real session advanced 2 fixed ticks
-        CHECK(control.steps == 1);
+    // --- refusals propagate the daemon's catalog code VERBATIM ------------------------------------
+    {
+        DaemonLikeGateway gateway;
+        PlaybarModel model(&gateway);
 
-        PlayAction p = model.pause();
-        CHECK(p.ok);
-        CHECK(model.state() == PlayState::paused);
+        const PlayAction paused = model.pause(); // in edit: nothing to pause
+        CHECK(!paused.ok);
+        CHECK(paused.error_code == std::string(kPlayNotRunningCode));
+        CHECK(model.last_error() == std::string(kPlayNotRunningCode));
+        CHECK(model.state() == PlayState::edit); // a refusal changes nothing
 
-        // step while PAUSED still advances (transport step), state stays paused.
-        PlayAction s2 = model.step(1);
-        CHECK(s2.ok);
-        CHECK(model.state() == PlayState::paused);
-        CHECK(model.sim_tick() == 3);
+        const PlayAction stepped = model.step();
+        CHECK(!stepped.ok);
+        CHECK(stepped.error_code == std::string(kPlayNotRunningCode));
 
-        PlayAction r = model.play(); // resume
-        CHECK(r.ok);
-        CHECK(model.state() == PlayState::playing);
-        CHECK(control.starts == 1); // resume does NOT re-start a session
-
-        PlayAction st = model.stop();
-        CHECK(st.ok);
+        // A transport-level failure carries whatever code the wire layer reported.
+        gateway.force_error = kPlaySessionFailedCode;
+        const PlayAction failed = model.play();
+        CHECK(!failed.ok);
+        CHECK(failed.error_code == std::string(kPlaySessionFailedCode));
         CHECK(model.state() == PlayState::edit);
-        CHECK(!model.is_running());
-        CHECK(control.discards == 1);
-        CHECK(model.sim_tick() == 0); // the observed frame is cleared on stop (L-51 discard)
+    }
 
-        // R-HUX-011 loop fired once per transition, in order.
-        const std::vector<std::string> want{"play", "step", "pause", "step", "resume", "stop"};
-        CHECK(transitions == want);
+    // --- NO PARALLEL TRUTH: a second client's change lands with ZERO local writes ------------------
+    // This is the structural half of the e08b DoD for play state. The gateway records every RPC the
+    // model issued; a `play-state` fact published by ANOTHER client must move the rendered state
+    // without the model issuing anything at all.
+    {
+        DaemonLikeGateway gateway;
+        PlaybarModel model(&gateway);
+        CHECK(gateway.calls() == 0);
+
+        CHECK(model.apply_play_state(PlayState::playing, 12));
+        CHECK(model.state() == PlayState::playing);
+        CHECK(model.sim_tick() == 12);
+        CHECK(gateway.calls() == 0); // the panel wrote NOTHING to reach the state it renders
+
+        CHECK(model.apply_play_state(PlayState::edit, 0));
+        CHECK(model.state() == PlayState::edit);
+        CHECK(gateway.calls() == 0);
+
+        // A restatement of what is already rendered changes nothing and notifies nobody (the daemon
+        // never publishes one, but a `sinceSeq: 0` ring replay can deliver one twice).
+        CHECK(!model.apply_play_state(PlayState::edit, 0));
+    }
+
+    // --- with NO gateway the model is render-only: it cannot invent a transition -------------------
+    {
+        PlaybarModel model;
+        const PlayAction action = model.play();
+        CHECK(!action.ok);
+        CHECK(action.error_code.empty());
+        CHECK(model.state() == PlayState::edit);
+        CHECK(!model.pause().ok);
+        CHECK(!model.stop().ok);
+        CHECK(!model.step().ok);
+        CHECK(model.state() == PlayState::edit);
+        CHECK(model.control_generation() == 0); // nothing happened, so nothing was notified
+    }
+
+    // --- R-HUX-011: the control loop fires on every OBSERVED transition, from either door ----------
+    {
+        DaemonLikeGateway gateway;
+        PlaybarModel model(&gateway);
+        std::vector<PlayControlEvent> seen;
+        model.add_control_listener([&seen](const PlayControlEvent& e) { seen.push_back(e); });
+
+        CHECK(model.play().ok);   // "play"
+        CHECK(model.pause().ok);  // "pause"
+        CHECK(model.play().ok);   // "resume" — a LABEL over the same daemon transition
+        CHECK(model.step(2).ok);  // "step"
+        (void)model.play();       // a no-op publishes nothing, so it fires NOTHING
+        CHECK(model.stop().ok);   // "stop"
+        CHECK(model.apply_play_state(PlayState::playing, 4)); // another client — "session"
+
+        CHECK(seen.size() == 6);
+        if (seen.size() == 6)
+        {
+            CHECK(seen[0].transition == "play");
+            CHECK(seen[1].transition == "pause");
+            CHECK(seen[2].transition == "resume");
+            CHECK(seen[3].transition == "step");
+            CHECK(seen[4].transition == "stop");
+            CHECK(seen[5].transition == "session");
+            CHECK(seen[5].state == PlayState::playing);
+            CHECK(seen[5].sim_tick == 4);
+            // The generation counter is monotonic across BOTH doors.
+            for (std::size_t i = 1; i < seen.size(); ++i)
+            {
+                CHECK(seen[i].control_generation == seen[i - 1].control_generation + 1);
+            }
+        }
         CHECK(model.control_generation() == 6);
     }
 
-    // --- edit-state guards: pause / step / hot_reload with no live session => play.not_running -----
+    // --- the L-51 state tokens (the indicator vocabulary e08a mirrors byte-for-byte) ---------------
     {
-        PlaybarModel model; // no control
-        PlayAction p = model.pause();
-        CHECK(!p.ok);
-        CHECK(p.error_code == kPlayNotRunningCode);
-        CHECK(model.state() == PlayState::edit);
-
-        PlayAction s = model.step();
-        CHECK(!s.ok);
-        CHECK(s.error_code == kPlayNotRunningCode);
-
-        HotReloadOutcome h = model.hot_reload(LiveEdit{"/components/transform/position", false});
-        CHECK(!h.ok);
-        CHECK(h.error_code == kPlayNotRunningCode);
-    }
-
-    // --- stop is idempotent in edit; already-playing play / already-paused pause are benign no-ops --
-    {
-        StubSessionControl control;
-        PlaybarModel model(&control);
-        CHECK(model.stop().ok);              // stop in edit: benign ok, stays edit
-        CHECK(model.state() == PlayState::edit);
-
-        CHECK(model.play().ok);
-        PlayAction again = model.play();     // already playing
-        CHECK(!again.ok);
-        CHECK(again.error_code.empty());     // not an error — nothing changed
-        CHECK(model.state() == PlayState::playing);
-
-        CHECK(model.pause().ok);
-        PlayAction again_p = model.pause();  // already paused
-        CHECK(!again_p.ok);
-        CHECK(again_p.error_code.empty());
-        CHECK(model.state() == PlayState::paused);
-    }
-
-    // --- failure: start refused (fail-closed) => play.session_failed, stays edit -------------------
-    {
-        StubSessionControl control;
-        control.fail_start = true;
-        PlaybarModel model(&control);
-        PlayAction a = model.play();
-        CHECK(!a.ok);
-        CHECK(a.error_code == kPlaySessionFailedCode);
-        CHECK(model.state() == PlayState::edit);
-        CHECK(model.last_error() == kPlaySessionFailedCode);
-    }
-
-    // --- failure: step refused => play.step_failed, stays playing ---------------------------------
-    {
-        StubSessionControl control;
-        control.fail_step = true;
-        PlaybarModel model(&control);
-        CHECK(model.play().ok);
-        PlayAction s = model.step();
-        CHECK(!s.ok);
-        CHECK(s.error_code == kPlayStepFailedCode);
-        CHECK(model.state() == PlayState::playing); // the session is still live; the step failed
-    }
-
-    // --- L-22 hot reload: live-preserving (data value) vs restart-class (shape/layout) -------------
-    {
-        StubSessionControl control;
-        PlaybarModel model(&control);
-        CHECK(model.play().ok);
-        model.step(5);
-        CHECK(model.sim_tick() == 5);
-
-        // data-value edit -> live-preserving; state kept.
-        HotReloadOutcome live = model.hot_reload(LiveEdit{"/components/light/intensity", false});
-        CHECK(live.ok);
-        CHECK(live.reload_class == HotReloadClass::live_preserving);
-        CHECK(live.state_preserved);
-        CHECK(model.sim_tick() == 5); // runtime state preserved across the reload
-
-        // shape/layout change -> restart-class; state discarded + re-instantiated (loud event).
-        HotReloadOutcome restart = model.hot_reload(LiveEdit{"/components/transform", true});
-        CHECK(restart.ok);
-        CHECK(restart.reload_class == HotReloadClass::restart_class);
-        CHECK(!restart.state_preserved);
-        CHECK(model.sim_tick() == 0); // re-instantiated from tick 0
-        CHECK(model.state() == PlayState::playing);
-    }
-
-    // --- failure: hot reload refused => play.hot_reload_failed -------------------------------------
-    {
-        StubSessionControl control;
-        control.fail_hot_reload = true;
-        PlaybarModel model(&control);
-        CHECK(model.play().ok);
-        HotReloadOutcome h = model.hot_reload(LiveEdit{"/x", false});
-        CHECK(!h.ok);
-        CHECK(h.error_code == kPlayHotReloadFailedCode);
+        CHECK(std::string(state_token(PlayState::edit)) == "edit");
+        CHECK(std::string(state_token(PlayState::playing)) == "playing");
+        CHECK(std::string(state_token(PlayState::paused)) == "paused");
     }
 
     PLAYBAR_TEST_MAIN_END();

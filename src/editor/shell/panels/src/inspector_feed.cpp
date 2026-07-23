@@ -7,7 +7,7 @@
 #include "context/editor/serializer/json_parse.h"
 #include "context/editor/serializer/sidecar_ref.h"      // parse_hash_string — the decimal-u64 inverse
 #include "context/editor/shell/panels/scenetree_feed.h" // parse_hex_u64 — the ONE hex-wire parser
-#include "wire_read.h"                                  // read_string / read_bool
+#include "wire_read.h"                                  // read_string / read_bool / envelope_data
 
 #include <string_view>
 #include <utility>
@@ -182,14 +182,10 @@ void InspectorFeed::request_clear()
 bool InspectorFeed::apply_result(const contract::Json& reply)
 {
     // Envelope tolerance (mirrors SceneTreeFeed::apply_result): the rawHash rides the DATA level,
-    // sibling of `inspector`, so resolve data first and read both from there. at() is total (a
-    // shared null when absent), so each hop reads its member once.
-    const contract::Json* data = &reply;
-    const contract::Json& nested_data = reply.at("data");
-    if (nested_data.is_object())
-    {
-        data = &nested_data;
-    }
+    // sibling of `inspector`, so resolve data first (the shared hop — wire_read.h) and read both
+    // from there. The `inspector` hop below is this feed's own, because which key to look for is
+    // policy.
+    const contract::Json* data = &envelope_data(reply);
     const contract::Json* wire = data;
     const contract::Json& nested_inspector = data->at("inspector");
     if (nested_inspector.is_object())

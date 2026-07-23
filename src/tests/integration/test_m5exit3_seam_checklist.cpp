@@ -138,6 +138,82 @@ public:
     }
 };
 
+// The DAEMON's selection state behind the panel's write seam (M9 e08b, seam 4). It ANSWERS with the
+// selection it now holds — the shape `editor.select`'s reply carries — and never touches the panel.
+class SeamSelection final : public scenetree::SelectionGateway
+{
+public:
+    std::vector<std::string> selection;
+    int writes = 0;
+
+    std::optional<std::vector<std::string>>
+    request_selection(const std::vector<std::string>& ids) override
+    {
+        ++writes;
+        selection = ids;
+        return selection;
+    }
+};
+
+// The DAEMON's L-51 play machine behind the playbar's write seam (M9 e08b, seam 7), reply-for-reply:
+// a real transition answers changed=true, a benign no-op ok=true/changed=false, and a control in
+// `edit` is refused play.not_running.
+class SeamPlayDaemon final : public playbar::PlayControlGateway
+{
+public:
+    playbar::PlayCommandResult play() override
+    {
+        if (state_ == playbar::PlayState::playing)
+        {
+            return reply(true, false);
+        }
+        state_ = playbar::PlayState::playing;
+        return reply(true, true);
+    }
+    playbar::PlayCommandResult pause() override
+    {
+        if (state_ == playbar::PlayState::edit)
+        {
+            return refusal();
+        }
+        const bool changed = state_ != playbar::PlayState::paused;
+        state_ = playbar::PlayState::paused;
+        return reply(true, changed);
+    }
+    playbar::PlayCommandResult stop() override
+    {
+        if (state_ == playbar::PlayState::edit)
+        {
+            return reply(true, false);
+        }
+        state_ = playbar::PlayState::edit;
+        tick_ = 0;
+        return reply(true, true);
+    }
+    playbar::PlayCommandResult step(std::uint64_t ticks) override
+    {
+        if (state_ == playbar::PlayState::edit)
+        {
+            return refusal();
+        }
+        tick_ += ticks;
+        return reply(true, true);
+    }
+
+private:
+    [[nodiscard]] playbar::PlayCommandResult reply(bool ok, bool changed) const
+    {
+        return playbar::PlayCommandResult{ok, changed, "", state_, tick_};
+    }
+    [[nodiscard]] playbar::PlayCommandResult refusal() const
+    {
+        return playbar::PlayCommandResult{false, false, playbar::kPlayNotRunningCode, state_, tick_};
+    }
+
+    playbar::PlayState state_ = playbar::PlayState::edit;
+    std::uint64_t tick_ = 0;
+};
+
 } // namespace
 
 int main()
@@ -203,14 +279,21 @@ int main()
           {"id": "ccccccccccccccc1", "name": "Hero", "components": {"transform": {"position": [0,0,0]}}}]})"));
         const compose::ComposedScene scene = compose::flatten("root.scene.json", r);
         CHECK(scene.ok);
-        scenetree::SceneTreePanel tree;
+        // e08b: selection is DAEMON state — the seam is now WRITE-then-fact, so both halves are here.
+        SeamSelection selection_seam;
+        scenetree::SceneTreePanel tree(&selection_seam);
         tree.set_model(panelbuilders::build_scene_tree(scene));
         CHECK(tree.model().entity_count == 1);
         int events = 0;
         tree.add_selection_listener([&](const scenetree::SceneSelection&) { ++events; });
-        CHECK(tree.select("ccccccccccccccc1")); // the selection loop seam
-        CHECK(events == 1);
+        CHECK(tree.select("ccccccccccccccc1")); // the write half of the selection loop seam
+        CHECK(selection_seam.writes == 1);      // it went to the daemon, not to a private member
+        CHECK(events == 1);                     // ...and the panel rendered the daemon's ANSWER
         CHECK(tree.selection().identity == "ccccccccccccccc1");
+        // A second client's selection reaches the same panel with NO write of its own.
+        CHECK(tree.apply_selection({"ccccccccccccccc2"}));
+        CHECK(selection_seam.writes == 1);
+        CHECK(events == 2);
     }
 
     // === Seam 5 — F3 inspector override-write through the ONE path, L-20/L-30 (applied + drop) ========
@@ -262,37 +345,49 @@ int main()
         CHECK(panel.model().provisional == 0); // promoted to stable on settle
     }
 
-    // === Seam 7 — F5 play-in-editor SessionControl seam: L-51 edit/play + L-22 hot reload ============
+    // === Seam 7 — F5 play-in-editor: the L-51 edit/play seam + the L-22 hot-reload classification ====
+    // e08b split the seam in two. The PLAYBAR half now drives DAEMON play state over the session seam
+    // (the in-process path is gone, not shadowed); the SessionControl half still owns the runtime
+    // session and the L-22 classification. Both are asserted, because both are still real seams.
     {
-        SeamSession control;
-        control.drawables = 2;
-        playbar::PlaybarModel model(&control);
+        // 7a — the playbar over the daemon's L-51 machine.
+        SeamPlayDaemon daemon;
+        playbar::PlaybarModel model(&daemon);
         CHECK(model.state() == playbar::PlayState::edit);
         CHECK(model.play().ok);
         CHECK(model.state() == playbar::PlayState::playing); // L-51: a live session over the edit view
-        CHECK(control.running);
-        // L-22: a data-value edit is live-preserving; a shape/layout change is restart-class.
-        CHECK(model.hot_reload(playbar::LiveEdit{"/name", false}).reload_class ==
-              playbar::HotReloadClass::live_preserving);
-        CHECK(model.hot_reload(playbar::LiveEdit{"/components/x", true}).reload_class ==
-              playbar::HotReloadClass::restart_class);
         CHECK(model.stop().ok);
         CHECK(model.state() == playbar::PlayState::edit); // L-51: runtime state discarded on stop
-        CHECK(!control.running);
         // A control issued in edit state fail-closes with the reserved play.not_running code.
         CHECK(model.step(1).error_code == playbar::kPlayNotRunningCode);
+        // ...and a `play-state` fact from ANOTHER client moves the L-51 indicator with no local write.
+        CHECK(model.apply_play_state(playbar::PlayState::playing, 9));
+        CHECK(model.state() == playbar::PlayState::playing);
+        CHECK(model.sim_tick() == 9);
+
+        // 7b — the runtime session seam: L-51 start/discard + the L-22 reload classification.
+        SeamSession control;
+        control.drawables = 2;
+        CHECK(control.start().ok);
+        CHECK(control.running);
+        CHECK(control.apply_hot_reload(playbar::LiveEdit{"/name", false}).reload_class ==
+              playbar::HotReloadClass::live_preserving);
+        CHECK(control.apply_hot_reload(playbar::LiveEdit{"/components/x", true}).reload_class ==
+              playbar::HotReloadClass::restart_class);
+        control.discard();
+        CHECK(!control.running);
     }
 
     // === Seam 8 — F1 viewport observer: the SAME RenderSnapshot the play output produces (no 2nd path)
     {
         SeamSession control;
         control.drawables = 5;
-        playbar::PlaybarModel model(&control);
-        CHECK(model.play().ok);
-        CHECK(model.step(1).ok);
+        CHECK(control.start().ok);
+        const playbar::ControlOutcome stepped = control.step(1);
+        CHECK(stepped.ok);
         viewport::ViewportPanel vp;
-        vp.set_snapshot(model.last_frame().snapshot); // PlayFrame::snapshot IS render::RenderSnapshot
-        CHECK(vp.scene().drawables == 5u);             // F5 -> F1 with no second render path
+        vp.set_snapshot(stepped.frame.snapshot); // PlayFrame::snapshot IS render::RenderSnapshot
+        CHECK(vp.scene().drawables == 5u);       // play output -> F1 with no second render path
         vp.set_present_env(compositor::HostPlatform::linux_, compositor::SurfaceCapabilities{},
                            /*adapter_available=*/true, /*scene_render_ok=*/true, 640, 480);
         CHECK(vp.present().ok);
@@ -353,10 +448,13 @@ int main()
         MapResolver r;
         CHECK(r.add("root.scene.json", R"({"$schema": "ctx:scene", "version": 1, "entities": [
           {"id": "ccccccccccccccc1", "name": "Hero"}]})"));
-        scenetree::SceneTreePanel tree;
+        SeamSelection selection_seam;
+        scenetree::SceneTreePanel tree(&selection_seam);
         tree.set_model(panelbuilders::build_scene_tree(compose::flatten("root.scene.json", r)));
         int sel = 0;
         tree.add_selection_listener([&](const scenetree::SceneSelection&) { ++sel; });
+        // e08b: the loop is write -> daemon -> answer; the listener fires when daemon state lands,
+        // which is what makes a second client's selection drive this loop exactly like the panel's own.
         CHECK(tree.select("ccccccccccccccc1"));
         CHECK(sel == 1);
 
