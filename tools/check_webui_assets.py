@@ -168,6 +168,24 @@ WELCOME_CONSTANTS = (
     ("welcome mode welcome", "welcome.h", "kWelcomeModeWelcome", "WELCOME_MODE_WELCOME"),
 )
 
+# The M9 e14d BANNER surface (design 07 §4 / 08 threat row), whose vocabulary lives in banners.h.
+# Checked alongside the welcome surface because they are two halves of one feature area (e14) and one
+# gate failing names the right task either way. SAME silent-drift hazard: a renamed method leaves
+# editor-core asking for a banner state the Shell no longer routes, so the update notice would simply
+# never appear — a feature that fails CLOSED and silently is precisely the kind nobody notices is
+# broken. DAEMON_OWNERSHIP_EXTERNAL is deliberately NOT listed: production code compares only against
+# `owned` (the token the daemon-lost banner's copy differentiates on), so esbuild tree-shakes the
+# other out of the bundle this gate reads — the same carve-out WELCOME_MODE_PROJECT takes.
+BANNER_CONSTANTS = (
+    ("update.state", "banners.h", "kUpdateStateMethod", "UPDATE_STATE_METHOD"),
+    ("update.dismiss", "banners.h", "kUpdateDismissMethod", "UPDATE_DISMISS_METHOD"),
+    ("update.openDownloads", "banners.h", "kUpdateOpenDownloadsMethod",
+     "UPDATE_OPEN_DOWNLOADS_METHOD"),
+    ("daemon.linkState", "banners.h", "kDaemonLinkStateMethod", "DAEMON_LINK_STATE_METHOD"),
+    ("daemon ownership none", "banners.h", "kDaemonOwnershipNone", "DAEMON_OWNERSHIP_NONE"),
+    ("daemon ownership owned", "banners.h", "kDaemonOwnershipOwned", "DAEMON_OWNERSHIP_OWNED"),
+)
+
 # The M9 e07c keybindings surface (design 05 §6 / 03 §6), whose method name lives in
 # keybindings_bridge.h. SAME silent-drift hazard as the panel / editor-state surfaces: a rename on one
 # side leaves editor-core calling a method the Shell no longer routes, so the per-user override would
@@ -613,7 +631,7 @@ def check_welcome_contract(asset_dir: Path, bundle_name: str, shell_include_dir:
         return [f"bundle missing: {bundle}"]
     bundle_text = bundle.read_text(encoding="utf-8", errors="replace")
 
-    for human, cpp_file, cpp_name, ts_name in WELCOME_CONSTANTS:
+    for human, cpp_file, cpp_name, ts_name in WELCOME_CONSTANTS + BANNER_CONSTANTS:
         cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
         ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
         if ts_value is None:
@@ -641,8 +659,8 @@ def run_welcome_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
             print(f"[check_webui_assets] FAIL: {failure}", file=sys.stderr)
         return 1
 
-    print("[check_webui_assets] OK: the welcome.* method + mode vocabulary matches the Shell's C++ "
-          "constants (welcome.h)")
+    print("[check_webui_assets] OK: the welcome.* + banner (update.* / daemon.linkState) vocabulary "
+          "matches the Shell's C++ constants (welcome.h, banners.h)")
     return 0
 
 

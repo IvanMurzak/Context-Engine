@@ -64,6 +64,7 @@ import {
     type ThemeRoot,
 } from "./theme.js";
 import { WELCOME_MODE_WELCOME, WelcomeClient, mountWelcome } from "./welcome.js";
+import { BannerClient, mountBanners, type BannerData } from "./banners.js";
 import {
     resolveContext,
     STUB_EDITOR_UI,
@@ -73,6 +74,9 @@ import {
 
 /** The element the docking root mounts into. Mirrors `app/index.html`'s `<main id="editor-root">`. */
 export const EDITOR_ROOT_ID = "editor-root";
+
+/** The e14d notification strip's host. Mirrors `app/index.html`'s `<div id="editor-banners">`. */
+export const EDITOR_BANNERS_ID = "editor-banners";
 
 /** What `bootEditorCore` did — returned so a caller (and a test) can assert on it. */
 export interface BootReport {
@@ -175,6 +179,25 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // is no welcome surface: `state()` returns null on an `unknown_method` refusal, which is
         // exactly what the CEF boot smokes (which install no welcome surface) get — so they mount
         // panels unchanged. Only an explicit `mode: "welcome"` diverts to the front door.
+        // --- the e14d notification banners (design 07 §4 / 08) -----------------------------------
+        // Asked for ONCE here, and handed to whichever surface comes up. Both calls degrade to null
+        // on an `unknown_method` refusal, so a Shell with no banner bridge (the pre-e14d smokes)
+        // renders exactly what it did before. NOTE: editor-core makes NO network call of its own —
+        // the version check is the Shell's, for the privacy reason banners.ts documents.
+        const banners = new BannerClient(bridge);
+        const bannerData: BannerData = {
+            update: await banners.updateState(),
+            link: await banners.daemonLinkState(),
+            handlers: {
+                onOpenDownloads: (): void => {
+                    void banners.openDownloads();
+                },
+                onDismiss: (): void => {
+                    void banners.dismissUpdate();
+                },
+            },
+        };
+
         const welcomeState = await new WelcomeClient(bridge).state();
         if (welcomeState !== null && welcomeState.mode === WELCOME_MODE_WELCOME) {
             const container =
@@ -182,7 +205,7 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
             let recentCount = 0;
             let templateCount = 0;
             if (container !== null) {
-                const mount = mountWelcome(bridge, container, welcomeState);
+                const mount = mountWelcome(bridge, container, welcomeState, bannerData);
                 recentCount = mount.recentCount;
                 templateCount = mount.templateCount;
             }
@@ -201,6 +224,17 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // `ready`: the bridge genuinely does round-trip, and conflating "the editor has no panels"
         // with "the editor cannot talk to the Shell" would send the next diagnosis in exactly the
         // wrong direction.
+        // --- the e14d notification strip on the EDITOR path ---------------------------------------
+        // The daemon-lost banner's real home: this is the only surface where losing the daemon
+        // changes what the next keystroke does. Mounted BEFORE the panels so a read-only editor says
+        // so from its first frame rather than after the dock finishes materialising. A document with
+        // no `#editor-banners` element (an older shell, a bare harness) simply gets no strip.
+        const bannerHost =
+            typeof document === "undefined" ? null : document.getElementById(EDITOR_BANNERS_ID);
+        if (bannerHost !== null) {
+            mountBanners(bannerHost, bannerData);
+        }
+
         const panels = await startPanels(bridge, theme, config);
 
         // --- the keymap override feed (e07c) ------------------------------------------------------
@@ -764,6 +798,10 @@ function makeSettingsPanel(
 ): SettingsBringUp {
     let mounted: SettingsPanelMount | undefined;
     const client = new ConfigClient(bridge);
+    // e14d: the panel's Updates tab. Its own client rather than a threaded-in snapshot, because the
+    // panel can materialise long after boot (Dockview creates it lazily) and the check completes on a
+    // Shell worker thread — so the tab asks when it MOUNTS, and reports the answer into the live mount.
+    const bannerClient = new BannerClient(bridge);
     const factories = new Map<string, LocalPanelFactory>();
 
     factories.set(SETTINGS_PANEL_ID, (container: HTMLElement): (() => void) => {
@@ -782,6 +820,12 @@ function makeSettingsPanel(
             keybindingsPath: config.keybindingsPath,
             writable: config.writable,
             systemThemeId: (): string => (theme === undefined ? "" : defaultThemeId(theme.probe)),
+            onOpenDownloads: (): void => {
+                void bannerClient.openDownloads();
+            },
+            onDismissUpdate: (): void => {
+                void bannerClient.dismissUpdate();
+            },
             onSelectTheme: (themeId: string): void => {
                 // APPLY first: the switch is what the user asked for and must not wait on IO.
                 const report = theme?.apply(themeId);
@@ -797,6 +841,12 @@ function makeSettingsPanel(
             },
         });
         mounted = mount;
+        // Ask the Shell what it knows about updates and fill the tab in when the answer lands. A
+        // Shell with no banner surface answers `null`, which renders the honest "no update channel"
+        // empty state — the same thing the tab showed before e14d.
+        void bannerClient.updateState().then((state) => {
+            mount.reportUpdate(state);
+        });
         return (): void => {
             mounted = undefined;
         };

@@ -119,6 +119,7 @@
 #include "context/editor/shell/editor_state.h"
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
+#include "context/editor/shell/banners.h"
 #include "context/editor/shell/keybindings_bridge.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
@@ -357,9 +358,15 @@ SessionOutcome run_session(const std::filesystem::path& project,
     shell::ThemesBridge themes_bridge;
     themes_bridge.bind_directory(std::filesystem::path{});
 
+    // e14d: editor-core's boot calls `update.state` + `daemon.linkState`; install the surface so
+    // those calls are SERVED rather than refused (the router denies unknown methods by DEFAULT).
+    // NEITHER collaborator is bound: no update notice means no network call from this smoke, and no
+    // daemon-link probe means a live link, so no banner paints over the restored layout.
+    shell::BannerBridge banner_bridge;
+
     if (!handshake.install(bridge) || !panel_host.install(bridge) ||
         !editor_state_bridge.install(bridge) || !keybindings_bridge.install(bridge) ||
-        !themes_bridge.install(bridge))
+        !themes_bridge.install(bridge) || !banner_bridge.install(bridge))
     {
         std::fprintf(stderr, "[%s] FAIL: a bridge surface refused to install\n", cfg.label);
         return out;

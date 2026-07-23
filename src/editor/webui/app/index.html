@@ -59,6 +59,17 @@
          what makes adding a panel a roster + provider change with no edit to this document. -->
     <main id="editor-root" role="main" aria-label="Context Editor"></main>
 
+    <!-- The e14d notification strip (design 07 §4): the notify-only update banner and the daemon-lost
+         read-only banner. Empty in the MARKUP, like the docking root above — banners.ts fills it from
+         what the Shell reports, and an editor with nothing to say leaves it empty.
+
+         A FIXED OVERLAY rather than a flex sibling of #editor-root, deliberately. Dockview measures its
+         container to lay out, and this profile's most expensive CI signal is the live CEF smokes'
+         per-pixel background-coverage floor over that same surface — so a strip that changed the
+         docking root's box would risk both for a surface that is empty in every smoke. Overlaying costs
+         the dock nothing and is how a notification strip behaves anyway. -->
+    <div id="editor-banners" class="ctx-banners-host"></div>
+
     <!-- The pinned docking engine (dockview-core@7.0.2), staged beside this document by
          tools/fetch_dockview.py after a SHA verification, and re-hashed in place by the
          `webui-assets` ctest.

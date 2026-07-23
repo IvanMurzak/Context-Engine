@@ -205,6 +205,11 @@ public:
     [[nodiscard]] bool read_only() const noexcept { return !attached(); }
     // Bumps on every successful (re)attach. A caller polls it to notice a NEW live client cheaply.
     [[nodiscard]] std::uint64_t attach_generation() const noexcept { return attach_generation_; }
+    // How many reattach attempts the backoff ladder has made since the link was lost (0 while
+    // attached). Added by e14d so the daemon-lost BANNER can report the ladder progressing rather
+    // than a frozen "read-only" — a read-only projection of the ReconnectController above; the
+    // policy itself stays entirely here (e14a).
+    [[nodiscard]] int reconnect_attempts() const noexcept { return link_.attempts(); }
     [[nodiscard]] const ClientCensus& census() const noexcept { return census_; }
     // The endpoint + D20 token of the daemon currently attached. For the OWNED path this token arrived
     // over stdio; the caller protects it from the egress guard from HERE (the directly-built Client's

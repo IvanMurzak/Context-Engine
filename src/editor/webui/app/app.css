@@ -310,6 +310,18 @@ html .dockview-theme-dark {
     width: 100%;
     height: 100%;
     display: flex;
+    /* A COLUMN since e14d: the notification strip is a full-width sibling above the two panes, not a
+     * third column beside them. The panes keep their original row layout in `.welcome-panes`. */
+    flex-direction: column;
+    box-sizing: border-box;
+}
+
+/* The original two-pane row, unchanged in every respect except that it is now one level down. */
+.welcome-panes {
+    display: flex;
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 0;
     box-sizing: border-box;
 }
 
@@ -608,4 +620,77 @@ html .dockview-theme-dark {
     align-items: center;
     gap: var(--ctx-shape-space-sm, 8px);
     flex-wrap: wrap;
+}
+
+/* --- the notification banners (M9 e14d, design 07 §4 / 08) ------------------------------------- *
+ *
+ * Two strips that can appear above any surface: the notify-only UPDATE banner and the daemon-lost
+ * READ-ONLY banner. App chrome, not a kit family — the e06c roster is the design's closed list of
+ * twelve, so the CONTROLS inside a banner are the kit's (`ctx-button`, `ctx-badge`) while the strip
+ * itself is styled here, exactly as `.welcome-*` is.
+ *
+ * Tokens only: every colour is a theme custom property, so a theme switch re-tokens a banner for
+ * free and no banner can be the one surface that ignores high contrast. */
+.ctx-banners {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ctx-shape-space-sm, 8px);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.ctx-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--ctx-shape-space-sm, 8px);
+    flex-wrap: wrap;
+    padding: var(--ctx-shape-space-sm, 8px) var(--ctx-shape-space-md, 12px);
+    background: var(--ctx-colors-panel, #14181d);
+    color: var(--ctx-colors-ink, #e6edf5);
+    border-bottom: 1px solid var(--ctx-colors-line, rgba(230, 237, 245, 0.14));
+    box-sizing: border-box;
+}
+
+.ctx-banner__message {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* The daemon banner's raw diagnostic. Muted and secondary: it is for a user who is already reading
+ * the message above and wants to know WHY, never the first thing the eye lands on. */
+.ctx-banner__detail {
+    color: var(--ctx-colors-muted, #93a1b1);
+    flex-basis: 100%;
+}
+
+.ctx-banner__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--ctx-shape-space-sm, 8px);
+    flex-shrink: 0;
+}
+
+/* On the welcome screen the strip is the full width of the front door, above both panes. */
+.welcome-banners {
+    width: 100%;
+    flex: 0 0 auto;
+}
+
+/* The editor-path banner host: a fixed overlay across the top of the window (index.html explains why
+ * it is not a flex sibling of the docking root).
+ *
+ * `pointer-events: none` on the HOST and `auto` on each banner is what keeps an EMPTY strip — the
+ * state every CEF smoke and every healthy editor is in — completely inert: it covers the top of the
+ * dock in the layer stack but swallows no click, so tab strips and panel headers keep working. */
+.ctx-banners-host {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 40;
+    pointer-events: none;
+}
+
+.ctx-banners-host .ctx-banner {
+    pointer-events: auto;
 }

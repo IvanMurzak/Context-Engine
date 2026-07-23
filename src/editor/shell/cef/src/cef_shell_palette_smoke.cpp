@@ -49,6 +49,7 @@
 #include "context/editor/shell/shell.h"
 #include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/user_config.h"
+#include "context/editor/shell/banners.h"
 #include "context/editor/shell/welcome.h"
 
 #include <chrono>
@@ -326,6 +327,17 @@ int main(int argc, char** argv)
     welcome_bridge.set_launch_mode(shell::LaunchMode::project);
     welcome_bridge.set_config_path(std::filesystem::path{});
     SMOKE_CHECK(welcome_bridge.install(bridge), "the welcome.state bridge surface installed");
+
+    // e14d: editor-core's boot calls `update.state` + `daemon.linkState`; install the surface so
+    // those calls are SERVED rather than refused. The router denies unknown methods by DEFAULT, so an
+    // uninstalled banner surface trips this file's strict `bridge.refused() == 0` invariant even
+    // though editor-core degrades gracefully — the exact regression e06d shipped with its config
+    // surface. NEITHER collaborator is bound: with no update notice the surface honestly reports "no
+    // update channel is wired" (so this smoke makes NO network call), and with no daemon-link probe it
+    // reports a live link (so no banner paints and the per-pixel coverage floor is untouched).
+    shell::BannerBridge banner_bridge;
+    SMOKE_CHECK(banner_bridge.install(bridge), "the banner bridge surface installed");
+
 
     // --- the per-user config read surface (e06d) ------------------------------------------------
     // editor-core's boot reads the per-user config with `config.get` before it applies a theme

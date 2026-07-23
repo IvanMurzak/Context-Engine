@@ -56,7 +56,19 @@ add_library(context_editor_shell STATIC
     src/daemon_lifecycle.cpp  # e14a: spawn-or-attach + exit policy + reconnect/read-only (D18)
     src/welcome.cpp       # e14c: the welcome.* surface — recents + folder picker + new-from-template (D13)
     src/folder_picker.cpp # e14c: the native OS folder dialog (Win32 real; honest gap elsewhere)
+    src/banners.cpp       # e14d: notify-only update check + daemon-lost banner surfaces (07 §4 / 08)
+    src/native_net.cpp    # e14d: the OS HTTPS client + browser open (Win32 real; honest gap elsewhere)
     src/shell.cpp)        # WindowManager / EditorWindow / the single-threaded owner loop
+
+# The version the e14d update banner reports as "running". PROJECT_VERSION is the ONE source of
+# truth (src/CMakeLists.txt `project(... VERSION ...)`), so the banner can never disagree with the
+# versioned install layout. PRIVATE: it is an implementation detail of banners.cpp's default, and a
+# caller that wants a different value calls `set_current_version`.
+#
+# ⚠ It is NOT sent anywhere. The comparison against the latest published release happens locally
+# (banners.h property (b)); this define exists so the editor knows what IT is, never so a server does.
+target_compile_definitions(context_editor_shell PRIVATE
+    "CONTEXT_EDITOR_VERSION=\"${PROJECT_VERSION}\"")
 
 target_include_directories(context_editor_shell PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -120,7 +132,12 @@ if(WIN32)
     # ole32 + uuid: the e14c native folder picker (folder_picker.cpp) drives IFileOpenDialog through COM
     # (CoInitializeEx / CoCreateInstance / CoTaskMemFree + the CLSID/IID GUIDs). Boundary-clean — pure
     # OS-SDK libraries, no engine-internal edge, so the D10 shell-boundary gate is unaffected.
-    target_link_libraries(context_editor_shell PRIVATE user32 ole32 uuid)
+    # winhttp + shell32: the e14d update-check seam (native_net.cpp) — the OS HTTPS client and
+    # ShellExecuteW for the downloads-page click-through. Both ship with the Windows SDK, so the
+    # notify-only update banner adds NO third-party dependency, nothing to src/vcpkg.json, and
+    # nothing to tools/license-allowlist.json (the standing owner-approval gate of design 08 §3 is
+    # not reached). Boundary-clean, exactly like ole32/uuid above.
+    target_link_libraries(context_editor_shell PRIVATE user32 ole32 uuid winhttp shell32)
 endif()
 
 # Self-contained GCC runtime for every executable below. They use std::filesystem + stream IO, whose
@@ -155,6 +172,7 @@ set(_context_shell_tests
     test_user_config          # e06d: the single-writer store - merge-preserving RMW, unique temp, config.*
     test_daemon_lifecycle  # e14a: exit-policy decision, client census, reconnect/read-only state
     test_welcome       # e14c: launch-mode rule, recents round-trip, welcome.* bridge + picker/CLI seams
+    test_banners       # e14d: the update-check PRIVACY suite, version compare, both banner surfaces
     test_shell)        # the owner loop end to end + the authenticated-attach guard
 
 foreach(_t IN LISTS _context_shell_tests)
@@ -344,4 +362,17 @@ add_test(NAME editor-shell-cef-staging
 # legs with no ci.yml --target bookkeeping; its own pytest lives in tools/tests/ (python-tests job).
 add_test(NAME editor-shell-config-writers
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_config_writers.py"
+            --repo-root "${CMAKE_SOURCE_DIR}/..")
+
+# --- the e14d update-check PRIVACY gate (08 threat row: no identifiers, no telemetry) -------------
+# The SAME source-scan tier as the two lints above, and here for the sharpest version of their
+# reason: the C++ suite (editor-shell-test_banners) can prove the request VALUE carries no
+# identifier, but it cannot see what the OS HTTPS client adds BELOW that value, cannot see a SECOND
+# request builder it was never pointed at, and cannot see a renderer `fetch()` that would carry
+# Chromium's User-Agent + Accept-Language beneath the JavaScript. Those three are exactly where the
+# privacy commitment would be lost, so they are scanned from the sources. Registered in the non-gate
+# `editor-shell-` family, so the build job's general ctest step runs it on all three OS legs with no
+# ci.yml --target bookkeeping; its own pytest lives in tools/tests/ (python-tests job).
+add_test(NAME editor-shell-release-request
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_release_request.py"
             --repo-root "${CMAKE_SOURCE_DIR}/..")
