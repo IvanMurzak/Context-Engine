@@ -53,6 +53,7 @@ add_library(context_editor_shell STATIC
     src/keybindings_bridge.cpp   # e07c: the keybindings.get read/watch surface (05 §6 / 03 §6)
     src/user_config.cpp          # e06d: ~/.context/config.json - the SHELL is its single writer (C-F14)
     src/themes_bridge.cpp        # e06b: the themes.get watched-theme-directory surface (06 §4)
+    src/session_bridge.cpp       # e08d: the session.state daemon play-state relay (05 §4 / D7 tier 1)
     src/daemon_lifecycle.cpp  # e14a: spawn-or-attach + exit policy + reconnect/read-only (D18)
     src/welcome.cpp       # e14c: the welcome.* surface — recents + folder picker + new-from-template (D13)
     src/folder_picker.cpp # e14c: the native OS folder dialog (Win32 real; honest gap elsewhere)
@@ -170,6 +171,7 @@ set(_context_shell_tests
     test_editor_state_bridge  # e05d2: layout/panels publish+restore round-trip + region-map emission
     test_keybindings_bridge   # e07c: file read/watch/generation + keybindings.get over the router
     test_themes_bridge        # e06b: directory watch/generation + themes.get over the router
+    test_session_bridge       # e08d: the session.state relay - fact shape, honest unbound/throwing provider
     test_user_config          # e06d: the single-writer store - merge-preserving RMW, unique temp, config.*
     test_daemon_lifecycle  # e14a: exit-policy decision, client census, reconnect/read-only state
     test_welcome       # e14c: launch-mode rule, recents round-trip, welcome.* bridge + picker/CLI seams

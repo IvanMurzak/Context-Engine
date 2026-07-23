@@ -215,6 +215,19 @@ CONFIG_CONSTANTS = (
     ("config theme key", "user_config.h", "kConfigThemeKey", "CONFIG_THEME_KEY"),
 )
 
+# The M9 e08d SESSION relay (design 05 §4 / §6, D7 tier 1), whose vocabulary lives in
+# session_bridge.h. This one guards the sharpest silent failure of the family, and it has ALREADY
+# happened once in a different form: e08b landed the real `DaemonSessionState` but could not wire it,
+# so editor-core's `playState` sat frozen at `edit` for a whole release with the editor up, nothing
+# erroring, and every `playState == playing` clause quietly wrong. A rename of EITHER constant
+# reproduces exactly that state — the method (editor-core calls something the Shell no longer routes)
+# or the fact discriminator (`applyFact` stops recognising a reply it still receives) — so both are
+# pinned rather than trusted.
+SESSION_CONSTANTS = (
+    ("session.state", "session_bridge.h", "kSessionStateMethod", "SESSION_STATE_METHOD"),
+    ("session play-state event", "session_bridge.h", "kSessionPlayStateEvent", "PLAY_STATE_EVENT"),
+)
+
 # The closed gesture vocabulary (04 §4), compared SET vs SET between the C++ wire tokens and the
 # bundle's own GESTURE_VERBS array, so a verb added on one side without the other — which would be
 # refused at runtime with no build error — fails here instead.
@@ -750,6 +763,23 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
                 f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
                 f"Shell would route/accept one name and editor-core would send another, so the chosen "
                 f"theme would apply for the session and silently never reach ~/.context/config.json.")
+
+    # 7a6 — the e08d session-relay vocabulary agrees across the two languages. Same mechanism as
+    # 7a5, with the failure mode this whole task existed to remove: editor-core's when-contexts stop
+    # tracking the daemon and freeze on their boot baseline, with the editor up and nothing reporting.
+    for human, cpp_file, cpp_name, ts_name in SESSION_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(
+                f"{human}: the bundle does not declare {ts_name} — editor-core cannot be reading the "
+                f"daemon session state the Shell relays, so its `playState` when-context would be "
+                f"frozen at the boot baseline (the exact e08b defect e08d fixed)")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
+                f"Shell would route/emit one token and editor-core would call/expect another, so the "
+                f"daemon's play state would silently never reach a `when` clause.")
 
     # 7b — the D6 persisted-blob member names agree (gui/contract/panel_state.h is their authority).
     for human, cpp_name, ts_name in PANEL_STATE_CONSTANTS:

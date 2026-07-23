@@ -116,6 +116,7 @@
 #include "context/common/subprocess.h"
 #include "context/editor/shell/app_scheme.h"
 #include "context/editor/shell/banners.h"
+#include "context/editor/shell/session_bridge.h"
 #include "context/editor/shell/cef/cef_shell.h"
 #include "context/editor/shell/editor_state.h"
 #include "context/editor/shell/editor_state_bridge.h"
@@ -364,9 +365,16 @@ SessionOutcome run_session(const std::filesystem::path& project,
     // daemon-link probe means a live link, so no banner paints over the restored layout.
     shell::BannerBridge banner_bridge;
 
+    // e08d: editor-core's boot reads the daemon's L-51 play state with `session.state` so its
+    // `when`-contexts see daemon truth instead of a frozen `edit` baseline (boot.ts `startSession`).
+    // Installed for the same deny-by-default reason as every surface above, and UNBOUND on purpose:
+    // this smoke has no daemon, so the surface honestly reports `state:"edit", attached:false`.
+    shell::SessionBridge session_bridge;
+
     if (!handshake.install(bridge) || !panel_host.install(bridge) ||
         !editor_state_bridge.install(bridge) || !keybindings_bridge.install(bridge) ||
-        !themes_bridge.install(bridge) || !banner_bridge.install(bridge))
+        !themes_bridge.install(bridge) || !banner_bridge.install(bridge) ||
+        !session_bridge.install(bridge))
     {
         std::fprintf(stderr, "[%s] FAIL: a bridge surface refused to install\n", cfg.label);
         return out;

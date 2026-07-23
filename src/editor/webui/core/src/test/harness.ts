@@ -12,10 +12,19 @@
 // blind spot). Every later editor-core TS task (e07b/e07c/e07d) declares `T1-tested` DoD items that run
 // HERE.
 
-/** One unit test: a name plus a body that throws (via `assert*`) on failure. */
+/**
+ * One unit test: a name plus a body that throws (via `assert*`) on failure.
+ *
+ * `run` MAY be async (M9 e08d). Every case was synchronous while the tier proved pure parsers and
+ * resolvers, but the e08d boot wiring is only provable end to end by DRIVING `bootEditorCore` — an
+ * async function — against a mock bridge; asserting on a synchronously-reachable seam instead would
+ * be exactly the "a test that would pass with the stub still in place" the task forbids. `runTests`
+ * AWAITS each body, so a rejected promise fails its case rather than escaping as an unhandled
+ * rejection the driver would never see.
+ */
 export interface TestCase {
     readonly name: string;
-    readonly run: () => void;
+    readonly run: () => void | Promise<void>;
 }
 
 /** One test that threw, with its message — carried back to the driver so a red leg names the cause. */
@@ -71,12 +80,15 @@ export function assertNull(actual: unknown, message: string): void {
  * single break never hides the rest. Returns the verdict rather than reporting it — the entry module
  * owns transport (posting it to the driver).
  */
-export function runTests(tests: readonly TestCase[]): TestSummary {
+export async function runTests(tests: readonly TestCase[]): Promise<TestSummary> {
     let passed = 0;
     const failures: TestFailure[] = [];
     for (const test of tests) {
         try {
-            test.run();
+            // SEQUENTIAL, and awaited: the cases share one document, so running them concurrently
+            // would let a DOM-touching case observe another's mount. Awaiting a synchronous body
+            // costs one microtask and keeps the isolation rule above true for async ones too.
+            await test.run();
             passed += 1;
         } catch (error) {
             failures.push({ name: test.name, error: describeError(error) });

@@ -85,6 +85,19 @@ bool apply_session_event(SessionFeed& feed, const std::string& topic, const cont
     return feed.apply_event(topic, payload);
 }
 
+std::string session_play_state(const SessionFeed& feed)
+{
+    // `state_token()` is the ONE spelling of the L-51 vocabulary (docs/editor-session-state.md): the
+    // playbar, the daemon's `play-state` fact, and now editor-core's `when` contexts all compare
+    // against these same three bytes, which is what makes the relay translation-free.
+    return playbar::state_token(feed.playbar_model().state());
+}
+
+std::size_t session_facts_applied(const SessionFeed& feed)
+{
+    return feed.facts_applied();
+}
+
 void bind_session_client(SessionFeed& feed, client::Client* client)
 {
     // The id comes from the client itself (0 when there is none), so the pointer and the identity
