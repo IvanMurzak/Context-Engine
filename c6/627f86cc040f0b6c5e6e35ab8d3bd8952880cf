@@ -1,0 +1,19 @@
+.github/actions/pinned-toolchain/action.yml
+  s_208cb9abc9a45e::t_260fcc60c7936a 62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "c6627f86cc040f0b6c5e6e35ab8d3bd8952880cf",
+  "prompts": {},
+  "sessions": {
+    "s_208cb9abc9a45e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_208cb9abc9a45e",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
