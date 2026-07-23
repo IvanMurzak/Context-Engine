@@ -192,4 +192,42 @@ if(OS_WINDOWS OR OS_LINUX)
     set_tests_properties(editor-cef-smoke-shell-palette PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_palette_smoke>"
         TIMEOUT 180)
+
+    # --- the LIVE settings-driven smoke (ctest editor-cef-smoke-shell-settings) --------------------
+    # M9 e06d T2: boots the SAME live windowless browser and drives a REAL theme change through the
+    # REAL Settings panel (`?ctx-smoke-settings`), then asserts what only the SHELL can know — that it
+    # PERSISTED the choice to the user config (C-F14) and preserved the rest of the document. The
+    # config it writes is a TEMP file the smoke seeds and deletes, never the runner's own
+    # `~/.context/config.json`. Same `editor-cef-smoke-` family + the same link recipe as the palette
+    # smoke (context_editor_cef precedes the CEF libs for the single-left-to-right-pass reason;
+    # context_editor_panels binds the real providers so the live renderer has a populated dock).
+    #
+    # ⚠ "Not Run = RED" TRIPWIRE: that job builds a hand-maintained --target list, so this executable is
+    # ALSO listed in ci.yml's editor-cef-smoke build step (and mirrored in the profile's test.md § CI).
+    # The regex would otherwise match a test whose executable was never built.
+    add_executable(context_editor_shell_settings_smoke src/cef_shell_settings_smoke.cpp)
+    SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_settings_smoke)
+    add_dependencies(context_editor_shell_settings_smoke libcef_dll_wrapper)
+    target_link_libraries(context_editor_shell_settings_smoke
+        context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+    target_include_directories(context_editor_shell_settings_smoke PRIVATE "${CEF_ROOT}")
+
+    # Same single-staging dependency as the sibling smokes above (issue #360).
+    add_dependencies(context_editor_shell_settings_smoke context_editor_cef_stage)
+
+    # Same webui asset dependency + compiled-in root as the sibling smokes.
+    add_dependencies(context_editor_shell_settings_smoke context_editor_webui)
+    if(NOT CONTEXT_WEBUI_ASSET_DIR)
+        message(FATAL_ERROR
+            "context_editor_shell_settings_smoke: CONTEXT_WEBUI_ASSET_DIR is empty — src/editor/webui "
+            "must be added BEFORE src/editor/shell (src/CMakeLists.txt orders it so); it publishes the "
+            "asset root as CACHE INTERNAL.")
+    endif()
+    target_compile_definitions(context_editor_shell_settings_smoke PRIVATE
+        "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
+
+    add_test(NAME editor-cef-smoke-shell-settings COMMAND context_editor_shell_settings_smoke)
+    set_tests_properties(editor-cef-smoke-shell-settings PROPERTIES
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_settings_smoke>"
+        TIMEOUT 180)
 endif()

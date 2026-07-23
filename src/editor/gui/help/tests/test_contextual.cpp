@@ -1,11 +1,23 @@
 // The "help opens in-context for the shipped panels" contract (R-HUX-010 DoD): the contextual-help
-// topic set (help::panel_topics()) must name the SAME panels the a11y harness scans
-// (a11y::registered_panels()). A panel registered without a help topic (or a topic naming a phantom
+// topic set (help::panel_topics()) must name the SAME panels the editor SHIPS — the built-in roster
+// (gui/contract/builtin_roster.h). A panel shipped without a help topic (or a topic naming a phantom
 // panel) is a coverage gap — the same register-with-the-panel discipline the a11y coverage manifest
-// enforces, applied to help. Links context_gui_a11y to read the live registered-panel set.
+// enforces, applied to help.
+//
+// ⚠ THE ROSTER, NOT a11y::registered_panels() — CORRECTED BY M9 e06d. The two sets were identical
+// until a `ContentType::local` panel existed (Settings: editor-core renders it from the kit, so it has
+// no C++ factory and cannot appear in the scanned set). Keying this gate off the SCAN would have made
+// help optional for precisely the renderer-modelled panels, and silently: the gate would still pass.
+// The roster is what "shipped" means, so the roster is what help must cover.
 
-#include "context/editor/gui/a11y/registry.h"
+// help_model.h FIRST, deliberately: it names `contract::VerbSpec` meaning the EDITOR contract
+// (context::editor::contract), and pulling gui/contract in ahead of it would put a nearer
+// `context::editor::gui::contract` in scope for its own header — which resolves to the wrong
+// namespace and fails to compile. Include order is load-bearing here, not cosmetic.
 #include "context/editor/gui/help/help_model.h"
+
+#include "context/editor/gui/contract/builtin_roster.h"
+#include "context/editor/gui/contract/extension.h"
 
 #include "help_test.h"
 
@@ -20,11 +32,11 @@ using namespace context::editor::gui;
 
 int main()
 {
-    // The panels the a11y harness SCANS.
+    // The panels the editor SHIPS (the single built-in roster, M9 e05b).
     std::set<std::string> registered_ids;
-    for (const a11y::RegisteredPanel& rp : a11y::registered_panels())
+    for (const contract::Contribution& c : contract::builtin_contributions())
     {
-        registered_ids.insert(rp.id);
+        registered_ids.insert(c.id);
     }
     CHECK(!registered_ids.empty());
 
@@ -48,21 +60,21 @@ int main()
         for (const std::string& id : only_registered)
         {
             std::fprintf(stderr,
-                         "gui-help-contextual: panel %s is registered but has NO help topic in "
-                         "help::panel_topics() (add one in the same PR)\n",
+                         "gui-help-contextual: panel %s is on the built-in roster but has NO help "
+                         "topic in help::panel_topics() (add one in the same PR)\n",
                          id.c_str());
         }
         for (const std::string& id : only_topics)
         {
             std::fprintf(stderr,
-                         "gui-help-contextual: help topic %s is not a registered panel "
-                         "(a11y::registered_panels()) — remove or fix it\n",
+                         "gui-help-contextual: help topic %s is not a shipped panel "
+                         "(gui/contract/src/builtin_roster.cpp) - remove or fix it\n",
                          id.c_str());
         }
     }
     CHECK(topic_ids == registered_ids);
 
-    // Every registered panel resolves an in-context help topic (the "help opens in-context" DoD).
+    // Every shipped panel resolves an in-context help topic (the "help opens in-context" DoD).
     for (const std::string& id : registered_ids)
     {
         CHECK(help::contextual_help(id).has_value());

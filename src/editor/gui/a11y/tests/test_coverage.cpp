@@ -19,6 +19,19 @@
 // simply does not appear in registered_panels(), so it would be silently unscanned — the exact
 // vacuous-coverage shape that let the Problems panel ship uncovered (#168). Asserting all four sets
 // equal makes every single-anchor hand-edit a named, actionable failure on the default 3-OS matrix.
+//
+// M9 e06d PARTITIONS the roster, because a `ContentType::local` panel (Settings — editor-core renders
+// it from the e06c kit; there is no C++ model at all) can never have a factory or be scanned here:
+//
+//   roster  ==  declared (coverage.manifest.jsonl)          <- EVERY shipped panel is declared
+//   roster MINUS local  ==  factories  ==  scanned          <- the C++-modelled half, as before
+//   every local entry declares `ts-a11y` in its `requires`  <- its gate is the webui-ts-* browser tier
+//
+// That last line is what keeps the partition from being an escape hatch. Dropping a panel out of the
+// C++ scan is otherwise a one-word manifest edit (`"type": "local"`) with no visible consequence —
+// exactly the "a gate that checks nothing reads as passed" shape. Requiring the marker means a local
+// panel MUST claim the other tier's coverage in the same PR, and the marker is what tools/a11y_scan.py
+// keys its own exemption off, so the two tools cannot disagree about which panels it scans.
 
 #include "context/editor/gui/a11y/registry.h"
 
@@ -96,6 +109,31 @@ namespace
     return entries;
 }
 
+// id -> the whole (trimmed) manifest line. Used for membership questions the flat `line_field` reader
+// cannot answer — `requires` is an ARRAY, and a substring probe over its own line is both sufficient
+// and honest here (the alternative is a JSON dependency in a11y for one containment test).
+[[nodiscard]] std::map<std::string, std::string> manifest_lines(const std::string& path)
+{
+    std::map<std::string, std::string> lines;
+    std::ifstream f(path, std::ios::binary);
+    std::string line;
+    while (std::getline(f, line))
+    {
+        std::string trimmed = line;
+        trimmed.erase(0, trimmed.find_first_not_of(" \t\r\n"));
+        if (trimmed.empty() || trimmed[0] == '#')
+        {
+            continue;
+        }
+        const std::string id = line_field(trimmed, "id");
+        if (!id.empty())
+        {
+            lines.emplace(id, trimmed);
+        }
+    }
+    return lines;
+}
+
 [[nodiscard]] std::set<std::string> manifest_ids(const std::string& path)
 {
     std::set<std::string> ids;
@@ -131,6 +169,24 @@ int main()
     }
     CHECK(!roster_ids.empty());
 
+    // --- the partition: which roster entries CAN have a C++ factory (M9 e06d) --------------------
+    // A `local` panel is rendered by editor-core, so it has no C++ model to instantiate or scan. Every
+    // other panel must.
+    std::set<std::string> local_ids;
+    std::set<std::string> cpp_modelled_ids;
+    for (const contract::Contribution& c : contract::builtin_contributions())
+    {
+        if (c.content.type == contract::ContentType::local)
+        {
+            local_ids.insert(c.id);
+        }
+        else
+        {
+            cpp_modelled_ids.insert(c.id);
+        }
+    }
+    CHECK(!cpp_modelled_ids.empty()); // the C++-modelled half is never empty — this gate is not vacuous
+
     // --- the factory set: every id gui/a11y/registry.cpp can actually instantiate ----------------
     const std::vector<std::string> factory_id_list = a11y::panel_factory_ids();
     std::set<std::string> factory_ids;
@@ -159,15 +215,17 @@ int main()
     }
 
     // --- the roster <-> factory contract: a roster entry with NO factory is silently unscanned ----
-    // This is the direction the derivation cannot enforce by itself (see the file header).
-    if (roster_ids != factory_ids)
+    // This is the direction the derivation cannot enforce by itself (see the file header). Compared
+    // against the C++-MODELLED half of the roster since M9 e06d: a `local` panel legitimately has no
+    // factory, and demanding one would forbid the content type outright.
+    if (cpp_modelled_ids != factory_ids)
     {
         std::vector<std::string> roster_without_factory;
-        std::set_difference(roster_ids.begin(), roster_ids.end(), factory_ids.begin(),
+        std::set_difference(cpp_modelled_ids.begin(), cpp_modelled_ids.end(), factory_ids.begin(),
                             factory_ids.end(), std::back_inserter(roster_without_factory));
         std::vector<std::string> factory_without_roster;
-        std::set_difference(factory_ids.begin(), factory_ids.end(), roster_ids.begin(),
-                            roster_ids.end(), std::back_inserter(factory_without_roster));
+        std::set_difference(factory_ids.begin(), factory_ids.end(), cpp_modelled_ids.begin(),
+                            cpp_modelled_ids.end(), std::back_inserter(factory_without_roster));
         for (const std::string& id : roster_without_factory)
         {
             std::fprintf(stderr,
@@ -186,23 +244,27 @@ int main()
                          id.c_str());
         }
     }
-    CHECK(roster_ids == factory_ids);
+    CHECK(cpp_modelled_ids == factory_ids);
 
-    // --- the contract: the two original anchors must name the SAME set ---------------------------
-    // A registered_panels() entry with no manifest line (or vice versa) is a coverage gap — surface
-    // each side of the difference with an actionable message before the CHECK fails.
-    if (declared != registered_ids)
+    // --- the contract: the DECLARED set is every shipped panel -----------------------------------
+    // A roster entry with no manifest line (or a manifest line naming no shipped panel) is a coverage
+    // gap — surface each side of the difference with an actionable message before the CHECK fails.
+    //
+    // Compared against the ROSTER since M9 e06d (it was registered_panels()): a local panel is shipped
+    // and MUST be declared, but can never be scanned, so the scan stopped being the right yardstick
+    // for "declared" the moment the third content type existed.
+    if (declared != roster_ids)
     {
-        std::vector<std::string> only_registered;
-        std::set_difference(registered_ids.begin(), registered_ids.end(), declared.begin(),
-                            declared.end(), std::back_inserter(only_registered));
+        std::vector<std::string> only_roster;
+        std::set_difference(roster_ids.begin(), roster_ids.end(), declared.begin(), declared.end(),
+                            std::back_inserter(only_roster));
         std::vector<std::string> only_declared;
-        std::set_difference(declared.begin(), declared.end(), registered_ids.begin(),
-                            registered_ids.end(), std::back_inserter(only_declared));
-        for (const std::string& id : only_registered)
+        std::set_difference(declared.begin(), declared.end(), roster_ids.begin(), roster_ids.end(),
+                            std::back_inserter(only_declared));
+        for (const std::string& id : only_roster)
         {
             std::fprintf(stderr,
-                         "gui-a11y-coverage: panel %s is in registered_panels() but has NO line in "
+                         "gui-a11y-coverage: panel %s is on the built-in roster but has NO line in "
                          "coverage.manifest.jsonl (add it in the same PR)\n",
                          id.c_str());
         }
@@ -210,14 +272,41 @@ int main()
         {
             std::fprintf(stderr,
                          "gui-a11y-coverage: panel %s is declared in coverage.manifest.jsonl but is "
-                         "NOT in registered_panels() (register it in the same PR)\n",
+                         "NOT on the built-in roster (add its Contribution, or drop the line)\n",
                          id.c_str());
         }
     }
-    CHECK(declared == registered_ids);
+    CHECK(declared == roster_ids);
 
-    // --- and therefore all four anchors are the one set ------------------------------------------
-    CHECK(roster_ids == declared);
+    // --- and therefore the anchors are one set, partitioned by WHO RENDERS -----------------------
+    // Every shipped panel is declared (including the local ones the scan cannot reach), and the
+    // scanned set is exactly the C++-modelled half.
+    CHECK(registered_ids == cpp_modelled_ids);
+
+    // --- a local panel must claim the OTHER tier's coverage (M9 e06d) ----------------------------
+    // Without this, "drop a panel out of the a11y scan" is a one-word manifest edit with no visible
+    // consequence. The marker is also what tools/a11y_scan.py exempts on, so the two tools agree by
+    // construction about which panels the C++ harness is expected to scan.
+    {
+        const std::map<std::string, std::string> lines = manifest_lines(CONTEXT_GUI_A11Y_MANIFEST);
+        bool local_coverage_declared = true;
+        for (const std::string& id : local_ids)
+        {
+            const std::map<std::string, std::string>::const_iterator it = lines.find(id);
+            if (it == lines.end() || it->second.find("ts-a11y") == std::string::npos)
+            {
+                local_coverage_declared = false;
+                std::fprintf(stderr,
+                             "gui-a11y-coverage: panel %s is a content.type=\"local\" panel "
+                             "(editor-core renders it), so the C++ harness cannot scan it — its "
+                             "coverage.manifest.jsonl line MUST declare \"ts-a11y\" in `requires` "
+                             "and its a11y MUST be asserted in the webui-ts-* browser tier "
+                             "(core/src/test/settings.test.ts is the worked example)\n",
+                             id.c_str());
+            }
+        }
+        CHECK(local_coverage_declared);
+    }
 
     // --- the manifest's TITLE column tracks the roster -------------------------------------------
     // The anchors agree on IDs by construction, but `title` is hand-typed in each of them and nothing

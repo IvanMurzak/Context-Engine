@@ -74,6 +74,15 @@ std::string manifest_defect(const Contribution& c)
                "set to \"" +
                c.content.entry + "\"";
     }
+    if (c.content.type == ContentType::local && !c.content.entry.empty())
+    {
+        // Same rule as `uitree`, for the same reason: there is nothing to LOAD. A `local` panel is
+        // rendered by editor-core from the kit, so an `entry` here could only be a URL nothing
+        // fetches — silently ignored config is how a manifest starts lying about what it does.
+        return "content.type is \"local\" (editor-core renders the panel) but content.entry is set "
+               "to \"" +
+               c.content.entry + "\"";
+    }
     if (c.state.schema_version == 0)
     {
         return "state.schemaVersion is 0 — a persisted D6 blob must carry a version >= 1";

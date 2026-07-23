@@ -35,6 +35,7 @@
 #include <algorithm>
 #include <fstream>
 #include <set>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -54,7 +55,14 @@ namespace
 // Extract the `"id": "<value>"` field from every non-comment, non-blank line of the JSON-Lines
 // coverage manifest. Minimal parser (the manifest is one flat JSON object per line) — enough to
 // cross-check the DECLARED panel set against the harness registry without a JSON dependency here.
-[[nodiscard]] std::set<std::string> manifest_ids(const std::string& path)
+// `renderer_covered` collects the ids whose line declares `ts-a11y` -- the M9 e06d
+// `ContentType::local` panels (editor-core renders them, so this harness has no model to instantiate
+// and their a11y is gated in the webui-ts-* browser tier instead). They are DECLARED but never
+// SCANNED, exactly as tools/a11y_scan.py treats them, so the set comparison below must exclude them or
+// this gate would fail on a panel it is structurally unable to cover. The M5 intent is untouched:
+// every M5 observer panel is C++-modelled and is still required to be scanned AND declared.
+[[nodiscard]] std::set<std::string> manifest_ids(const std::string& path,
+                                                 std::set<std::string>* renderer_covered = nullptr)
 {
     std::set<std::string> ids;
     std::ifstream f(path, std::ios::binary);
@@ -78,7 +86,10 @@ namespace
         const std::size_t close = trimmed.find('"', open + 1);
         if (close == std::string::npos)
             continue;
-        ids.insert(trimmed.substr(open + 1, close - open - 1));
+        const std::string id = trimmed.substr(open + 1, close - open - 1);
+        ids.insert(id);
+        if (renderer_covered != nullptr && trimmed.find("ts-a11y") != std::string::npos)
+            renderer_covered->insert(id);
     }
     return ids;
 }
@@ -130,8 +141,15 @@ int main()
 
     // The registry (what the harness SCANS) must exactly match coverage.manifest.jsonl (what the CI DOM
     // gate DECLARES) — a panel in one but not the other is a coverage failure (mirrors tools/a11y_scan.py).
-    const std::set<std::string> declared = manifest_ids(CONTEXT_GUI_A11Y_MANIFEST);
-    CHECK(!declared.empty());
+    std::set<std::string> renderer_covered;
+    const std::set<std::string> all_declared =
+        manifest_ids(CONTEXT_GUI_A11Y_MANIFEST, &renderer_covered);
+    CHECK(!all_declared.empty());
+    // The SCANNABLE declared set: everything except the `ts-a11y` (ContentType::local) panels, which
+    // this harness structurally cannot instantiate (see manifest_ids). Mirrors tools/a11y_scan.py.
+    std::set<std::string> declared;
+    std::set_difference(all_declared.begin(), all_declared.end(), renderer_covered.begin(),
+                        renderer_covered.end(), std::inserter(declared, declared.end()));
     if (declared != registered_ids)
     {
         std::vector<std::string> only_declared;

@@ -5,6 +5,10 @@
 # union-merge their appends (see .gitattributes: merge=union) — keep one panel per line so appends
 # never collide. Fields: id (matches the registry id), title, owner (the task that added it),
 # requires (the checks the panel must pass).
+# `requires: ["ts-a11y"]` marks a ContentType::local panel (M9 e06d): editor-core renders it, so there
+# is no C++ model for the harness to scan and its a11y gate lives in the `webui-ts-*` browser tier over
+# the REAL DOM instead. gui-a11y-coverage requires that marker on exactly the local roster entries, and
+# tools/a11y_scan.py exempts them from the scanned-set cross-check (they can never appear in it).
 {"id": "placeholder", "title": "Context Editor", "owner": "M5-F0b", "requires": ["semantic-scan", "keyboard-nav"]}
 {"id": "builtin.scene-tree", "title": "Scene Tree", "owner": "M5-F2", "requires": ["semantic-scan", "keyboard-nav"]}
 {"id": "builtin.inspector", "title": "Inspector", "owner": "M5-F3", "requires": ["semantic-scan", "keyboard-nav"]}
@@ -15,3 +19,4 @@
 {"id": "builtin.viewport-edit", "title": "Viewport Edit", "owner": "M8.5-a19", "requires": ["semantic-scan", "keyboard-nav"]}
 {"id": "builtin.help", "title": "Help", "owner": "M8.5-a20", "requires": ["semantic-scan", "keyboard-nav"]}
 {"id": "builtin.session.undo", "title": "Session History", "owner": "M9-e05b", "requires": ["semantic-scan", "keyboard-nav"]}
+{"id": "builtin.settings", "title": "Settings", "owner": "M9-e06d", "requires": ["ts-a11y"]}

@@ -294,6 +294,8 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
 | `editor-shell-test_editor_state_bridge` | e05d2: the layout/panels publish→store→get round-trip (incl. a restart), all three persistence triggers (debounce, `flush_now`, crash-restore), region parsing (kind tokens, negative-pixel clamp, malformed-element skip) reaching a live `InputArbiter` and routing a pointer, the empty-publish clear, the `not_ready`/`bad_params` degrade paths, and the full `editor.*` JSON-RPC binding over a real router |
 | `editor-shell-test_problems_feed` | The LIVE `diagnostics` projection without a daemon: severity/stability tokens, all three snapshot shapes, every publisher shape the topic carries, hostile/degenerate payloads, R-BRIDGE-008 promotion + settle, and the node-id -> diagnostic-identity mapping |
 | `editor-shell-test_builtin_panels` | The composition root: what binds, that Scene tree + Inspector stay listed-but-unhosted until e05d3, and a daemon event reaching a rendered panel end to end |
+| `editor-shell-test_user_config` | e06d: the per-user config store - the total reader (absent / malformed / non-object / oversized), the merge-preserving read-modify-write (a member from a FUTURE build survives), the recents-and-theme co-existence regression, the CLOSED settable vocabulary (`config.unknown_key` / `config.bad_value` / `config.write_failed`), unique staging names, the generation watch (identical rewrite and cosmetic reformat are NOT changes), and the full `config.*` binding over a real router |
+| `editor-shell-config-writers` | e06d: the C-F14 SINGLE-WRITER source gate - exactly one TU writes `~/.context/config.json`, editor-core carries no client-side persistence API, and one module names `config.set` (`tools/check_config_writers.py`) |
 | `editor-cef-smoke-shell` | The LIVE CEF half: a real windowless browser through the real integrated pump, its `OnPaint` frames composited + presented, input round-tripped, a live resize repainted (`editor-cef-smoke` job, Windows/Linux) |
 
 All `editor-shell-*` tests are a plain (non-gate) family: the `build` job's general ctest step runs
@@ -302,7 +304,35 @@ That covers `context_editor_panels`' tests too — they register in the same fam
 itself is built transitively by the jobs that build `context_editor` / the CEF smoke, so e05d1 needed
 **no `ci.yml` change at all**.
 `editor-cef-smoke-shell` is the exception and IS on the `editor-cef-smoke` job's hand-maintained
-`--target` list — the "Not Run = RED" tripwire.
+`--target` list — the "Not Run = RED" tripwire. So are its siblings
+`editor-cef-smoke-shell-restore` (e05d4), `-palette` (e07d) and `-settings` (e06d).
+
+## 12. The per-user config — `~/.context/config.json` (M9 e06d, C-F14)
+
+One small JSON document holding the user's editor preferences: the chosen theme (06 §4), the recent
+projects the welcome screen lists (e14c), and the window defaults. Per-user, not per-project.
+
+**The Shell is its SINGLE WRITER.** editor-core is a pure wire-client with no filesystem: it READS the
+document over `config.get` and REQUESTS changes over `config.set`, and `UserConfigStore` (user_config.h)
+validates against a CLOSED settable vocabulary — today exactly one key, `theme` — before persisting.
+An unknown key or a malformed value is refused with a stable code and writes nothing.
+
+Three properties are worth knowing because each fixes a real defect:
+
+- **Every write is a read-modify-write over the parsed document.** `record_recent_project` used to
+  REPLACE the file with `{version, recents}`, so opening a project discarded whatever else was in it.
+  Two features share this document; a member an older build does not understand still survives a write
+  from it.
+- **Staging names are unique** (`<config>.tmp.<pid>.<counter>`). The e14c writer staged through one
+  fixed `.tmp`, so two launches racing could publish each other's partial bytes. The rename is the
+  atomic publish; last-writer-wins is the correct semantic for a single-user preference file.
+- **The single-writer rule is MECHANISED, not documented.** `tools/check_config_writers.py` (ctest
+  `editor-shell-config-writers`) fails a tree where a second TU writes the file, where editor-core
+  gains any client-side store (`localStorage` and friends), or where a second module names
+  `config.set`. It FAILED on the pre-e06d tree — that is what makes it a gate rather than a comment.
+
+The store is polled from the owner loop like the keybindings and themes watches, so a theme picked in
+one editor window becomes visible to another without a restart.
 
 ## 9. Why the blocking smoke opens no window
 

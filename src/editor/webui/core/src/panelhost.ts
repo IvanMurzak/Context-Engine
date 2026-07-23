@@ -38,10 +38,90 @@ const ZONE_DIRECTION: Readonly<Record<string, "left" | "right" | "above" | "belo
     center: "within",
 };
 
+/** Dockview's component name for a `local` panel — one renderer type serves them all, as above. */
+const LOCAL_COMPONENT = "context-local-panel";
+
+/**
+ * A panel editor-core renders ITSELF (M9 e06d, `content.type: "local"`).
+ *
+ * The factory is handed the panel's DOM slot and builds into it; it returns an optional disposer for
+ * whatever it attached. That is the WHOLE seam — deliberately: a local panel is ordinary editor-core
+ * code, and the moment this interface grew a lifecycle of its own it would become a second, weaker
+ * panel model competing with the C++ one.
+ */
+export type LocalPanelFactory = (container: HTMLElement) => (() => void) | void;
+
 /** A panel PanelHost is currently hosting. */
 interface HostedPanel {
     readonly manifest: PanelManifest;
-    readonly renderer: UitreePanelRenderer;
+    readonly renderer: PanelRenderer;
+}
+
+/** What PanelHost needs from any content renderer it mounts. */
+interface PanelRenderer extends DockviewContentRenderer {
+    readonly suspended: boolean;
+    refresh(): void;
+    dispose(): void;
+}
+
+/**
+ * The Dockview content renderer for a `local` panel.
+ *
+ * Mirrors `UitreePanelRenderer`'s lifecycle exactly (init on materialise, suspend on hide, dispose on
+ * close) so PanelHost's own code never branches on which kind of panel it is holding — the ONE place
+ * the distinction exists is `#create`, which is the same place Dockview's does.
+ */
+class LocalPanelRenderer implements PanelRenderer {
+    readonly element: HTMLElement;
+    readonly #factory: LocalPanelFactory;
+    #teardown: (() => void) | undefined;
+    #suspended = false;
+    #built = false;
+
+    constructor(panelId: string, factory: LocalPanelFactory) {
+        this.element = document.createElement("div");
+        this.element.className = "ctx-panel-body";
+        this.element.setAttribute("data-panel-id", panelId);
+        this.#factory = factory;
+    }
+
+    get suspended(): boolean {
+        return this.#suspended;
+    }
+
+    /**
+     * Dockview's content-initialisation hook — REQUIRED (see `UitreePanelRenderer.init` for what a
+     * missing one costs). Builds exactly once: a local panel owns its own DOM, so re-running the
+     * factory on every show would discard state the user is looking at (a half-typed field, a chosen
+     * tab) for no gain.
+     */
+    init(): void {
+        this.refresh();
+    }
+
+    refresh(): void {
+        if (this.#built) {
+            return;
+        }
+        this.#built = true;
+        const teardown = this.#factory(this.element);
+        this.#teardown = typeof teardown === "function" ? teardown : undefined;
+    }
+
+    onShow(): void {
+        this.#suspended = false;
+        this.refresh();
+    }
+
+    onHide(): void {
+        this.#suspended = true;
+    }
+
+    dispose(): void {
+        this.#teardown?.();
+        this.#teardown = undefined;
+        this.element.replaceChildren();
+    }
 }
 
 /**
@@ -52,7 +132,7 @@ interface HostedPanel {
  * matter which panel it is for. A per-panel renderer class — or a `switch` on the panel id inside
  * this one — is exactly what would make adding a panel a code change here.
  */
-class UitreePanelRenderer implements DockviewContentRenderer {
+class UitreePanelRenderer implements PanelRenderer {
     readonly element: HTMLElement;
     readonly #runtime: HydrationRuntime;
     #suspended = false;
@@ -80,6 +160,11 @@ class UitreePanelRenderer implements DockviewContentRenderer {
 
     get suspended(): boolean {
         return this.#suspended;
+    }
+
+    /** Re-pull this panel's render. The uniform seam PanelHost's `refreshAll` drives. */
+    refresh(): void {
+        void this.#runtime.refresh();
     }
 
     /**
@@ -129,6 +214,15 @@ export interface PanelHostOptions {
     readonly client: PanelClient;
     /** Injected for testability; defaults to the UMD global the staged script publishes. */
     readonly dockview?: DockviewModule;
+    /**
+     * Factories for the `content.type: "local"` panels this build can render (M9 e06d).
+     *
+     * KEYED BY ROSTER ID, and the roster still decides what exists: a factory with no roster entry is
+     * never mounted (nothing asks for it), and a local roster entry with no factory is reported
+     * `unavailable` exactly like an unhosted panel. So this map cannot introduce a panel behind the
+     * manifest's back — it only says which of the manifest's panels THIS bundle knows how to draw.
+     */
+    readonly localPanels?: ReadonlyMap<string, LocalPanelFactory>;
 }
 
 /** Why PanelHost could not start, when it could not. Empty on success. */
@@ -144,6 +238,7 @@ export class PanelHost {
     readonly #container: HTMLElement;
     readonly #client: PanelClient;
     readonly #dockview: DockviewModule | undefined;
+    readonly #localPanels: ReadonlyMap<string, LocalPanelFactory>;
     readonly #panels = new Map<string, HostedPanel>();
     #api: DockviewApi | null = null;
     #roster: PanelRoster | null = null;
@@ -152,6 +247,7 @@ export class PanelHost {
         this.#container = options.container;
         this.#client = options.client;
         this.#dockview = options.dockview ?? detectDockview();
+        this.#localPanels = options.localPanels ?? new Map<string, LocalPanelFactory>();
     }
 
     get api(): DockviewApi | null {
@@ -206,6 +302,19 @@ export class PanelHost {
         const unavailable: string[] = [];
         let mounted = 0;
         for (const manifest of roster.panels) {
+            if (manifest.contentType === "local") {
+                // A local panel has no Shell provider, so `hosted` is false for it BY CONSTRUCTION —
+                // this branch must therefore come BEFORE the hosted gate below, or the one panel
+                // editor-core renders itself would be reported unavailable in every build.
+                if (!this.#localPanels.has(manifest.id)) {
+                    unavailable.push(manifest.id);
+                    continue;
+                }
+                if (this.open(manifest)) {
+                    mounted += 1;
+                }
+                continue;
+            }
             if (!manifest.hosted) {
                 // The D10-blocked panels (Scene tree, Inspector) land here until e05d3. They are
                 // NAMED in the report rather than dropped: "the editor is missing a panel" must be
@@ -254,7 +363,7 @@ export class PanelHost {
         const previous = this.mounted[this.mounted.length - 1];
         this.#api.addPanel({
             id: manifest.id,
-            component: UITREE_COMPONENT,
+            component: manifest.contentType === "local" ? LOCAL_COMPONENT : UITREE_COMPONENT,
             title: manifest.title,
             // Placement follows the manifest's declared zone. `referencePanel` is only set once
             // something is already mounted — Dockview has nothing to place relative to otherwise.
@@ -296,7 +405,9 @@ export class PanelHost {
         await Promise.all(
             Array.from(this.#panels.values())
                 .filter((panel) => !panel.renderer.suspended)
-                .map((panel) => panel.renderer.runtime.refresh()),
+                .map(async (panel) => {
+                    panel.renderer.refresh();
+                }),
         );
     }
 
@@ -336,11 +447,11 @@ export class PanelHost {
      */
     #create(panelId: string): DockviewContentRenderer {
         const manifest = this.#roster?.panels.find((entry) => entry.id === panelId);
-        const renderer = new UitreePanelRenderer(
-            panelId,
-            this.#client,
-            manifest?.gestures ?? false,
-        );
+        const localFactory = this.#localPanels.get(panelId);
+        const renderer: PanelRenderer =
+            manifest?.contentType === "local" && localFactory !== undefined
+                ? new LocalPanelRenderer(panelId, localFactory)
+                : new UitreePanelRenderer(panelId, this.#client, manifest?.gestures ?? false);
         if (manifest !== undefined) {
             this.#panels.set(panelId, { manifest, renderer });
         }

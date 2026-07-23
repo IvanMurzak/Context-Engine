@@ -46,6 +46,7 @@
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
 #include "context/editor/shell/themes_bridge.h"
+#include "context/editor/shell/user_config.h"
 #include "context/editor/shell/welcome.h"
 
 #include <chrono>
@@ -385,6 +386,24 @@ int main(int argc, char** argv)
     welcome_bridge.set_launch_mode(shell::LaunchMode::project);
     welcome_bridge.set_config_path(std::filesystem::path{});
     SMOKE_CHECK(welcome_bridge.install(bridge), "the welcome.state bridge surface installed");
+
+    // --- the per-user config read surface (e06d) ------------------------------------------------
+    // editor-core's boot reads the per-user config with `config.get` BEFORE it applies a theme
+    // (boot.ts `loadUserConfig`), for exactly the same reason and with exactly the same failure mode
+    // as `keybindings.get` / `themes.get` / `welcome.state` above: unserved, it is an
+    // `unknown_method` REFUSAL and the "no envelope refusals" assertion below fails. boot.ts treats
+    // that refusal as an empty snapshot and boots anyway, but — as the welcome bridge's note already
+    // spells out — the strict `bridge.refused() == 0` invariant does not tolerate even a gracefully
+    // handled refusal. Bound to an EMPTY path (a permanently-absent document, `writable() == false`)
+    // so the smoke is deterministic regardless of whether the CI host happens to have a
+    // `~/.context/config.json`: nothing is persisted, and the renderer takes the first-run
+    // `prefers-color-scheme` path onto a BUILT-IN theme, which is what the per-pixel #0a0a0a
+    // background assertion above depends on. A host-recorded theme would otherwise change the
+    // composited colour and red this smoke on a developer machine only. Same lifetime tier as the
+    // bridges above.
+    shell::UserConfigStore user_config;
+    user_config.bind_path(std::filesystem::path{});
+    SMOKE_CHECK(user_config.install(bridge), "the config.* bridge surface installed");
 
     // Drive the integrated pump until the browser has painted, the bridge handshake completed,
     // every hostable panel has hydrated, AND the composed surface has ACTUALLY REPAINTED with the

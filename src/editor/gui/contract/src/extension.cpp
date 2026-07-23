@@ -49,6 +49,8 @@ const char* content_type_token(ContentType type)
         return "uitree";
     case ContentType::iframe:
         return "iframe";
+    case ContentType::local:
+        return "local";
     }
     return "uitree";
 }

@@ -57,8 +57,15 @@ export type DockZone = "left" | "right" | "top" | "bottom" | "center";
  * belongs in a sandboxed iframe on a different origin. `unknown` is the honest parse of a token
  * this build does not recognise, and it is NOT hostable — an unrecognised content type must fail
  * closed rather than defaulting into the sink.
+ *
+ * `local` (M9 e06d) is editor-core's OWN content: a panel this bundle renders itself from the
+ * component kit, for the narrow case where the panel's subject is the renderer's own state (Settings
+ * — the active theme IS the CSS custom properties on this document). It touches no HTML sink at all:
+ * PanelHost hands the panel's registered factory a DOM element and the factory builds nodes. So the
+ * innerHTML reasoning above simply does not apply to it, which is why it is a distinct token rather
+ * than a flavour of `uitree`.
  */
-export type PanelContentType = "uitree" | "iframe" | "unknown";
+export type PanelContentType = "uitree" | "iframe" | "local" | "unknown";
 
 export interface PanelDock {
     readonly zone: DockZone;
@@ -195,7 +202,7 @@ function readDock(source: Record<string, unknown>): PanelDock {
     };
 }
 
-const CONTENT_TYPES: readonly PanelContentType[] = ["uitree", "iframe"];
+const CONTENT_TYPES: readonly PanelContentType[] = ["uitree", "iframe", "local"];
 
 /**
  * Parse a panel's content type, FAILING CLOSED.
