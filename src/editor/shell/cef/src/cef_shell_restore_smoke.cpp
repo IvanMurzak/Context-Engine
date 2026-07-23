@@ -10,11 +10,11 @@
 // booted the second browser inside the SAME CefInitialize as the first, destroying browser 1's browser
 // MID-PROCESS to make room for browser 2. That mid-process teardown — running browser 1's live
 // native/GPU/renderer shutdown while the process stays alive to boot browser 2 — SEGFAULTed on the
-// Session-0 Windows runner AND on ubuntu. The single-boot smokes only survive CEF's flaky teardown by
-// std::_Exit()-ing straight past it (see finish()); a same-process restart cannot use that escape hatch
-// for its FIRST browser, because the process must live to boot the second. So the restart is now a
-// genuine PROCESS restart. A thin CONTROLLER (the process ctest launches) runs THIS SAME EXE twice, as
-// two child processes, each carrying `--ctx-restore-phase=1|2`:
+// Session-0 Windows runner AND on ubuntu. The single-boot smokes run CefShutdown and then std::_Exit()
+// past the C++ static/atexit teardown behind it (see finish()); a same-process restart cannot use that
+// escape hatch for its FIRST browser, because the process must live to boot the second. So the
+// restart is now a genuine PROCESS restart. A thin CONTROLLER (the process ctest launches) runs THIS
+// SAME EXE twice, as two child processes, each carrying `--ctx-restore-phase=1|2`:
 //   * PHASE 1 boots one browser, mounts panels, drives a dock change, persists it, asserts the
 //     fresh-boot invariants, writes a layout ORACLE, then std::_Exit()s — the exact one-browser /
 //     one-CefInitialize / hard-exit shape `editor-cef-smoke-shell` is green with on every leg;
@@ -25,6 +25,28 @@
 // phase is structurally identical to the proven-green single-boot smoke. The round trip is also MORE
 // honest than the same-process version was: the arrangement genuinely survives a real OS process
 // boundary, through the editor-state file, exactly as a real editor restart would.
+//
+// TEARDOWN ORDERING (CE #319 — why cef::shutdown() runs INSIDE run_session). CefShutdown must run
+// while the session's bridge surfaces are still ALIVE. An earlier shape ran it from the phase
+// function, AFTER run_session had returned and destroyed `bridge` / `panel_host` / `builtin` /
+// `editor_state_bridge` / `manager` — and phase 1 then died with an ACCESS_VIOLATION (0xC0000005)
+// inside CefShutdown on every `main` run, with `failures=0` already recorded. The CI log names the
+// mechanism: `manager.shutdown()` closes the browser, but CEF keeps browser/frame state alive past
+// it and finishes the teardown inside CefShutdown — a `browser_info_manager.cc` main-frame line is
+// emitted BETWEEN "CefShutdown begin" and the fault, i.e. CEF is still dispatching frame work to
+// the client, whose message-router handler holds a raw `BridgeRouter*` into the stack frame that
+// just unwound. That is a use-after-free of OUR objects, not CEF teardown noise, and it is exactly
+// the invariant `cef_shell_smoke.cpp` / `cef_shell_palette_smoke.cpp` / `editor_main.cpp` satisfy by
+// calling `manager.shutdown()` then `shell::cef::shutdown()` with every bridge local still in scope
+// — which is why those three run the SAME CefShutdown on the SAME runner in the SAME job and pass.
+// Two earlier readings are refuted by that log: it is NOT load-dependent (phase 1 completed its pump
+// loop in 608 ms, reason=complete — not the 30 s deadline), and the Session-0
+// `DCompositionCreateDevice3 -> 0x80070005` denial is NOT the discriminator (it is logged
+// identically by phase 2, which exits 0). So `run_session` now owns the whole CEF lifetime of its
+// session: it initialises CEF, runs the drill, closes the browser, and — when its config says so —
+// calls `shell::cef::shutdown()` before any of its locals unwind. Phase 1 ASSERTS that CefShutdown
+// returned (`cef_shutdown_returned`), so its teardown is covered by a real assertion rather than by
+// the absence of a crash.
 //
 // PHASE-2 TEARDOWN (why phase 2 does NOT call CefShutdown). CI pinpointed that phase 2's restore
 // succeeds END TO END — every milestone and every assertion passes, layoutRestored:true — and the
@@ -262,6 +284,10 @@ struct SessionOutcome
     std::size_t state_reads = 0;
     std::size_t restore_reports = 0;
     bool layout_restored = false;
+    // TRUE once shell::cef::shutdown() (CefShutdown) has RETURNED for this session — the CE #319
+    // assertion. Only a session whose config asked for the shutdown can set it; a crash inside
+    // CefShutdown never gets here, so the phase's SMOKE_CHECK on it is non-vacuous.
+    bool cef_shutdown_returned = false;
     int store_write_count = 0;
     // The store's layout blob at session START (what its WindowManager loaded from disk) and END
     // (after the flush). Deep copies, so they outlive the store.
@@ -274,13 +300,19 @@ struct SessionConfig
     const char* label;
     bool arrange;        // append ?ctx-smoke-arrange and wait for the resulting publish
     bool expect_restore; // wait for the restore read + report before finishing
+    // Run shell::cef::shutdown() (CefShutdown) HERE, before this function's bridge locals unwind —
+    // the CE #319 ordering invariant documented in cef_shell.h. False leaves CEF initialised for a
+    // caller that hard-exits past its global teardown (phase 2 — see run_phase_2; retiring that skip
+    // so the second init gets real teardown coverage too is tracked in CE #363).
+    bool shutdown_cef;
 };
 
 // Boot one live editor-core over the app scheme, drive the integrated pump until it has hydrated
 // (and, per the config, published an arrangement or reported a restore), then tear the browser down
-// (CEF stays initialised) and return what the bridge saw. ALL non-movable objects (router, host,
-// bridge, manager) live and die inside this function, in an order that keeps the browser destroyed
-// before the router it points at (see the teardown note at the bottom).
+// — and, when the config says so, shut CEF down too — and return what the bridge saw. ALL
+// non-movable objects (router, host, bridge, manager) live and die inside this function, in an
+// order that keeps the browser destroyed AND CEF fully shut down before the router it points at
+// (see the teardown note at the bottom and the CE #319 block in the file header).
 SessionOutcome run_session(const std::filesystem::path& project,
                            const std::filesystem::path& asset_root, render::Extent2D size,
                            const SessionConfig& cfg)
@@ -540,11 +572,26 @@ SessionOutcome run_session(const std::filesystem::path& project,
     // — is still alive: manager.shutdown() clears its windows, whose EditorWindow destructors run the
     // browser's CloseBrowser + pump. `editor_state_bridge` (declared after `manager`) is destroyed
     // before it at return, so its region sink's `&manager` capture never dangles; nothing is pumped
-    // after this, so no bridge handler is invoked during the unwind. CEF stays INITIALISED — the
-    // phase's main() runs shell::cef::shutdown() next, then hard-exits (the single-boot smoke shape).
+    // after this, so no bridge handler is invoked during the unwind.
     manager.shutdown();
-    trace(cfg.label, "manager.shutdown() returned (browser + its CEF subprocesses torn down); "
-                     "run_session returning (CEF stays initialised)");
+    trace(cfg.label, "manager.shutdown() returned (browser + its CEF subprocesses torn down)");
+
+    // CE #319: CefShutdown belongs HERE, not in the caller. CloseBrowser does NOT finish CEF's
+    // browser/frame teardown — CefShutdown does, and it still dispatches frame work to the client,
+    // whose message-router handler holds a raw pointer to `bridge` above. Running it after this
+    // function returned (so after `bridge`/`panel_host`/`builtin`/`editor_state_bridge` were
+    // destroyed) is a use-after-free, and it faulted 0xC0000005 on every `main` run of the Session-0
+    // Windows leg. Doing it here reproduces exactly the ordering the two green single-boot smokes and
+    // editor_main.cpp use. See cef_shell.h § LIFETIME INVARIANT.
+    if (cfg.shutdown_cef)
+    {
+        trace(cfg.label, "cef::shutdown() (CefShutdown) begin — bridge surfaces still alive");
+        shell::cef::shutdown();
+        out.cef_shutdown_returned = true;
+        trace(cfg.label, "cef::shutdown() (CefShutdown) returned");
+    }
+    trace(cfg.label, cfg.shutdown_cef ? "run_session returning (CEF shut down)"
+                                      : "run_session returning (CEF stays initialised)");
     return out;
 }
 
@@ -643,8 +690,12 @@ int run_phase_1(const std::filesystem::path& project, const std::filesystem::pat
                 render::Extent2D size)
 {
     const SessionOutcome first =
-        run_session(project, asset_root, size, SessionConfig{"session1", true, false});
+        run_session(project, asset_root, size, SessionConfig{"session1", true, false, true});
     SMOKE_CHECK(first.browser_started, "phase 1: a real windowless CEF browser started");
+    SMOKE_CHECK(first.cef_shutdown_returned,
+                "phase 1: CefShutdown ran to completion with the session's bridge surfaces still "
+                "alive — the CE #319 teardown-ordering invariant (a violation faults 0xC0000005 "
+                "inside CEF's global teardown and never reaches this line)");
     SMOKE_CHECK(first.hydrated,
                 "phase 1: booted from context-editor://, the handshake completed, and the panels "
                 "hydrated into a non-uniform composited frame");
@@ -672,13 +723,13 @@ int run_phase_1(const std::filesystem::path& project, const std::filesystem::pat
     SMOKE_CHECK(subprocess::write_file(layout_oracle_path(project), oracle.data(), oracle.size()),
                 "phase 1 wrote the layout oracle for phase 2 to check against");
 
+    // CEF is ALREADY shut down (run_session did it, in the only order that is safe — see the CE #319
+    // block in the file header), so there is nothing left to tear down here: report and exit.
     std::fprintf(stderr,
-                 "[editor-cef-smoke-shell-restore] [phase1] assertions done (failures=%d); "
-                 "cef::shutdown() (CefShutdown) begin\n",
+                 "[editor-cef-smoke-shell-restore] [phase1] assertions done (failures=%d); CEF "
+                 "already shut down inside run_session\n",
                  g_failures);
     std::fflush(stderr);
-    shell::cef::shutdown();
-    trace("phase1", "cef::shutdown() (CefShutdown) returned");
     return g_failures != 0 ? 1 : 0;
 }
 
@@ -689,7 +740,7 @@ int run_phase_2(const std::filesystem::path& project, const std::filesystem::pat
                 render::Extent2D size)
 {
     const SessionOutcome second =
-        run_session(project, asset_root, size, SessionConfig{"session2", false, true});
+        run_session(project, asset_root, size, SessionConfig{"session2", false, true, false});
     SMOKE_CHECK(second.browser_started,
                 "phase 2: a fresh browser started in a fresh process (the restart)");
 
@@ -747,9 +798,14 @@ int run_phase_2(const std::filesystem::path& project, const std::filesystem::pat
 
     // The restore drill is PROVEN above (every assertion has run; g_failures is final). This is a
     // SECOND, independent CEF process booted on the same host moments after phase 1 exited, and on the
-    // CI runners CefShutdown() faults from INSIDE its own global teardown on that second init (SIGTRAP
-    // on ubuntu / ACCESS_VIOLATION on windows) with the restore already complete — teardown noise, not
-    // a restore failure. So do what the single-boot smokes do for CEF's flaky teardown: std::_Exit()
+    // CI runners CefShutdown() faulted from INSIDE its own global teardown on that second init (SIGTRAP
+    // on ubuntu / ACCESS_VIOLATION on windows) with the restore already complete. NOTE (CE #319): that
+    // observation predates the teardown-ORDERING fix, and phase 2 ran the same offending order — its
+    // CefShutdown was called after run_session had destroyed the bridge surfaces — so the phase-2
+    // fault is very likely the SAME use-after-free, and this skip is now the only remaining
+    // containment in this file. It is deliberately left in place here so that a green run attributes
+    // unambiguously to the phase-1 ordering fix; retiring it (`shutdown_cef = true` for session2) is
+    // tracked in CE #363, not this change. So, for now, do what the single-boot smokes do: std::_Exit()
     // past it, one step earlier — BEFORE the crash-prone CefShutdown, which phase 2 does not need to
     // exercise to prove the restore. manager.shutdown() (inside run_session) already closed the browser
     // + its render process, and the controller SIGKILLs this phase's process group after we exit, so no
