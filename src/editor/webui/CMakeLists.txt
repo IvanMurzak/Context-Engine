@@ -131,12 +131,15 @@ file(GLOB _ctx_webui_tokens_data CONFIGURE_DEPENDS
      "${_ctx_webui_tokens}/themes/*.theme.json" "${_ctx_webui_tokens}/theme.schema.json")
 # The component kit's TS (M9 e06c1). CONFIGURE_DEPENDS for the same reason as the core glob: a kit
 # module added without re-globbing would be silently exempt from the type gate AND absent from the
-# bundle's DEPENDS — the exact stale-glob trap, one package over. Its STYLESHEETS are listed too, so
-# an incremental build re-stages `kit.css` when it changes (and re-runs the ctests that read it).
+# bundle's DEPENDS — the exact stale-glob trap, one package over.
+#
+# The kit's STYLESHEETS are deliberately NOT inputs here: they are not typecheck or bundle inputs, and
+# `kit.css` re-stages off the explicit DEPENDS on the staging command below. (e06c2 adds more sheets
+# under `styles/`; each needs its own staging + `index.html` link, which is why widening this list
+# would not have served them either.)
 file(GLOB_RECURSE _ctx_webui_kit_ts CONFIGURE_DEPENDS
      "${_ctx_webui_kit}/src/*.ts" "${_ctx_webui_kit}/src/*.tsx"
      "${_ctx_webui_kit}/src/*.mts" "${_ctx_webui_kit}/src/*.cts")
-file(GLOB_RECURSE _ctx_webui_kit_styles CONFIGURE_DEPENDS "${_ctx_webui_kit}/styles/*.css")
 set(_ctx_webui_inputs ${_ctx_webui_ts} ${_ctx_webui_tokens_ts} ${_ctx_webui_tokens_data}
     ${_ctx_webui_kit_ts}
     "${_ctx_webui_tsconfig}" "${_ctx_webui_core}/package.json" "${_ctx_webui_tokens}/package.json"

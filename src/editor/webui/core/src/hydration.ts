@@ -41,7 +41,7 @@
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 import type { GestureVerb, PanelClient, PanelRender } from "./panels.js";
-import { WIDGET_CLASSES } from "../../kit/src/index.js";
+import { WIDGET_CLASSES, widgetClassForRole } from "../../kit/src/index.js";
 
 /**
  * The presentation-only widget classes, keyed by node ROLE (04 §4 step 4).
@@ -568,7 +568,10 @@ export class HydrationRuntime {
             element.setAttribute(NODE_ID_ATTRIBUTE, nodeId);
             element.setAttribute("id", `${this.#panelId}::${nodeId}`);
             const role = element.getAttribute("role") ?? "";
-            const widgetClass = WIDGET_CLASSES[role];
+            // Through the kit's own accessor rather than by indexing the map: it is the surface the
+            // kit publishes, and routing the runtime's only lookup through it keeps that surface
+            // exercised by every hydration test instead of being an export nothing calls.
+            const widgetClass = widgetClassForRole(role);
             if (widgetClass !== undefined) {
                 element.classList.add(widgetClass);
             }

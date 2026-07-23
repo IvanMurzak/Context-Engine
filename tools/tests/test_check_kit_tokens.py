@@ -121,6 +121,58 @@ def test_legitimate_declarations_are_not_findings(tmp_path: Path, declaration: s
     assert _run_tokens_only(_kit(tmp_path, css)) == 0
 
 
+@pytest.mark.parametrize(
+    ("css", "why"),
+    [
+        (".ctx-widget-text { color: #ff0000; }", "the ONLY declaration is not at a line start"),
+        (
+            ".ctx-widget-text {\n    color: var(--ctx-colors-ink); background: rgba(0, 0, 0, 0.5);\n}",
+            "the SECOND declaration on a line",
+        ),
+        (
+            ".ctx-widget-text { color: var(--ctx-colors-ink); font-size: 13px; }",
+            "a raw font length in a one-line rule",
+        ),
+    ],
+)
+def test_a_compactly_written_rule_is_scanned_too(tmp_path: Path, css: str, why: str) -> None:
+    """Formatting must not be a bypass.
+
+    The scan is anchored on the declaration SEPARATOR (`{` / `;`), not on the start of a line. A
+    line-anchored scan reads only each line's FIRST declaration, so every rule the lint advertises
+    was evadable by writing the rule compactly -- legal CSS that no other gate rejects, and exactly
+    the shape a stylesheet minifier or a hurried author produces.
+    """
+    assert _run_tokens_only(_kit(tmp_path, CLEAN_KIT_CSS + "\n" + css + "\n")) == 1, why
+
+
+def test_a_selector_is_never_mistaken_for_a_declaration(tmp_path: Path) -> None:
+    """The other side of de-anchoring: a pseudo-class must not read as `property: value`.
+
+    A selector follows `}` or the start of a rule list -- never `{` or `;` -- so it cannot enter the
+    scan. Asserted rather than reasoned about, because a false positive here would fire on the
+    shipped stylesheet's own `:hover` / `:focus-visible` selector lists.
+    """
+    css = """
+.ctx-widget-listitem:hover,
+.ctx-widget-treeitem:hover {
+    background: var(--ctx-colors-panel2);
+}
+"""
+    assert _run_tokens_only(_kit(tmp_path, css)) == 0
+
+
+@pytest.mark.parametrize("weight", ["430", "520", "600"])
+def test_any_three_digit_font_weight_is_a_finding(tmp_path: Path, weight: str) -> None:
+    """The shipped themes' own weights are 430 / 520 / 600.
+
+    A rule matching only the `n00` ladder waves through the two literals an author copying from
+    `dark.theme.json` is likeliest to type.
+    """
+    css = CLEAN_KIT_CSS + "\n.ctx-widget-text {\n    font-weight: %s;\n}\n" % weight
+    assert _run_tokens_only(_kit(tmp_path, css)) == 1
+
+
 def test_a_missing_styles_directory_is_a_configuration_error(tmp_path: Path) -> None:
     assert _run_tokens_only(tmp_path / "nope") == 2
 
@@ -203,6 +255,23 @@ def test_a_new_cpp_role_with_no_kit_entry_fails(tmp_path: Path) -> None:
     cpp = CPP_ROLES.replace(
         '    case Role::text:\n        return "text";',
         '    case Role::text:\n        return "text";\n    case Role::slider:\n        return "slider";',
+    )
+    assert _coverage_case(tmp_path, cpp=cpp) == 1
+
+
+@pytest.mark.parametrize("token", ["slider", "listbox2", "doc-abstract", "menu_item"])
+def test_a_new_cpp_role_is_seen_whatever_its_token_is_spelled_like(tmp_path: Path,
+                                                                  token: str) -> None:
+    """The headline failure must not depend on the new role's SPELLING.
+
+    Reading only all-lowercase-letter tokens made `cpp_roles` come back SHORT for a role carrying a
+    digit or a hyphen, so the gate printed OK on precisely the thirteenth-role case it exists to
+    catch -- a vacuous pass, which is worse than no gate at all.
+    """
+    cpp = CPP_ROLES.replace(
+        '    case Role::text:\n        return "text";',
+        '    case Role::text:\n        return "text";\n    case Role::%s:\n        return "%s";'
+        % (token.replace("-", "_"), token),
     )
     assert _coverage_case(tmp_path, cpp=cpp) == 1
 

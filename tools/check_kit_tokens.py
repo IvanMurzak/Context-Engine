@@ -19,6 +19,11 @@ Scans every ``*.css`` under the kit's styles directory and fails on:
     (``border*``, ``outline*``, ``border-radius``) and motion (``transition*``, ``animation*``);
   * any ``var()`` FALLBACK, and any ``var(--x)`` whose name is not a ``--ctx-`` token.
 
+Declarations are found by their SEPARATOR (``{`` / ``;`` / start of file), never by line position, so
+a compactly written rule -- ``.ctx-widget-x { color: #ff0000; background: rgba(0,0,0,.5); }`` -- is
+scanned like any other. A line-anchored scan would see only each line's FIRST declaration, which
+makes every rule above bypassable by formatting alone.
+
 The last rule is the one that makes the first three hold. A fallback (``var(--ctx-colors-line,
 rgba(230, 237, 245, 0.25))`` -- the shape app.css shipped) is a raw literal in kit source with a
 token-shaped disguise, and a kit-local ``--`` variable is a second source of truth for a value the
@@ -134,23 +139,28 @@ _RAW_FAMILY = re.compile(
     re.IGNORECASE,
 )
 # A bare font WEIGHT number (`600`) -- `font-weight: var(--ctx-typography-weight-semibold)` instead.
-_RAW_WEIGHT = re.compile(r"(?<![\w.#-])[1-9]00(?![\w.%-])")
+# ANY three-digit weight, not just the `n00` ladder: the shipped themes' own weights are 430 / 520 /
+# 600, so a rule matching only multiples of 100 would wave through exactly the two literals an author
+# copying from `dark.theme.json` is most likely to type. The lookarounds keep it off a decimal
+# (`0.011em`), a percentage and anything inside an identifier; only the font family of properties
+# reaches this test, so a three-digit length elsewhere is judged by `_RAW_LENGTH` instead.
+_RAW_WEIGHT = re.compile(r"(?<![\w.#-])\d{3}(?![\w.%-])")
 
 # `var(` ... the token name ... an optional `,` fallback. Captured so both halves can be judged.
 _VAR_CALL = re.compile(r"var\(\s*(--[\w-]+)\s*(,)?")
 
-# One `property: value` declaration. Selectors and at-rules carry no `:` followed by a value block in
-# the shapes this stylesheet uses, and a pseudo-class (`:hover`) has no `;`-terminated value -- so
-# anchoring on "identifier, colon, value, terminator" is both simple and total for kit CSS.
-_DECLARATION = re.compile(r"(?m)^\s*([a-zA-Z-]+)\s*:\s*([^;{}]+)[;}]?")
-
-_VALUE_KEYWORDS = frozenset(
-    {
-        "inherit", "initial", "unset", "revert", "revert-layer", "none", "normal", "auto",
-        "transparent", "currentcolor", "solid", "dashed", "dotted", "double", "groove", "ridge",
-        "inset", "outset", "hidden", "thin", "medium", "thick",
-    }
-)
+# One `property: value` declaration.
+#
+# Anchored on the DECLARATION SEPARATOR -- the `{` that opens a block, the `;` that ends the previous
+# declaration, or the start of the file -- and NOT on the start of a LINE. That distinction is the
+# gate's non-vacuity: a line-anchored scan reads only the first declaration on each line, so the
+# entirely legal one-liner `.ctx-widget-x { color: #ff0000; background: rgba(0,0,0,.5); }` passed the
+# whole lint clean. Every rule below is worthless against a stylesheet an author happened to write
+# compactly, and e06c2 adds stylesheets to this same directory that inherit the gate by construction.
+#
+# A SELECTOR cannot be mistaken for a declaration under this anchor: a selector follows `}` or the
+# start of a rule list, never `{` or `;`. A pseudo-class (`:hover`) therefore never enters the scan.
+_DECLARATION = re.compile(r"(?:^|[{;])\s*([a-zA-Z-]+)\s*:\s*([^;{}]+)")
 
 
 def _strip_vars(value: str) -> str:
@@ -197,11 +207,15 @@ def _colour_findings(prop: str, value: str) -> list[str]:
 
 
 def _family_findings(prop: str, value: str) -> list[str]:
-    """Font-family literals, judged only where a family can legally appear."""
+    """Font-family literals, judged only where a family can legally appear.
+
+    `_RAW_FAMILY` matches a quote or a GENERIC-FAMILY keyword, and no CSS-wide keyword (`inherit`,
+    `normal`, `none`, ...) is either -- so `font: inherit`, the shape the kit actually writes, is
+    already clean without a second keyword allowlist to maintain.
+    """
     if prop not in {"font", "font-family"}:
         return []
-    bare = _strip_vars(value)
-    if _RAW_FAMILY.search(bare) and bare.strip().lower() not in _VALUE_KEYWORDS:
+    if _RAW_FAMILY.search(_strip_vars(value)):
         return [f"`{prop}` names a font family directly"]
     return []
 
@@ -252,7 +266,9 @@ def check_tokens_only(styles_dir: Path) -> list[str]:
         text = _strip_css_comments(sheet.read_text(encoding="utf-8", errors="replace"))
         for match in _DECLARATION.finditer(text):
             prop, value = match.group(1), match.group(2)
-            line = text.count("\n", 0, match.start()) + 1
+            # From the PROPERTY's own offset, not the match's: the match starts at the preceding `;`
+            # or `{`, which is routinely on the line above.
+            line = text.count("\n", 0, match.start(1)) + 1
             for finding in _scan_declaration(prop, value):
                 failures.append(f"{sheet.name}:{line}: {finding} -- `{value.strip()}`")
     return failures
@@ -290,7 +306,12 @@ def read_cpp_roles(node_cpp: Path) -> set[str]:
         raise CheckError(f"not a file: {node_cpp}")
     body = _function_body(node_cpp.read_text(encoding="utf-8"), _CPP_ROLE_TOKEN,
                           "uitree::role_token(Role)")
-    roles = set(re.findall(r'return\s+"([a-z]+)"', body))
+    # EVERY identifier-shaped string the function returns, not just the all-lowercase-letter ones. A
+    # role token carrying a digit or a hyphen (`listbox2`, an ARIA `doc-*` role) was previously
+    # invisible to this scan, so `cpp_roles` came back SHORT and the thirteenth role produced no
+    # finding at all -- the gate reported OK on precisely the failure it exists to catch. Prose is
+    # still excluded: a diagnostic string contains spaces and cannot match.
+    roles = set(re.findall(r'return\s+"([A-Za-z0-9_-]+)"', body))
     if not roles:
         raise CheckError(f"{node_cpp.name}: role_token() returned no recognisable role tokens")
     return roles
