@@ -1,0 +1,177 @@
+/*
+ * The editor component KIT — the hydration WIDGET LAYER (M9 e06c1; design 06 section 3, 04 section 4
+ * step 4).
+ *
+ * THE ONE STYLING OWNER of the twelve `ctx-widget-*` classes. Through e05d1 these rules lived in
+ * `app/app.css` — app-level CSS, nine of the twelve roles covered, and three appearances still
+ * spelled as raw literals inside `var()` fallbacks. Splitting them out is not tidying: it is what
+ * makes "every C++-modeled panel is themed because its widgets are kit widgets" a property something
+ * can CHECK. `webui-kit-role-coverage` asserts that this file styles every role in the closed
+ * `uitree::Role` vocabulary AND that no `.ctx-widget-` rule survives in `app.css`; a second styling
+ * path is therefore a red build rather than a cascade nobody can predict.
+ *
+ * TOKENS ONLY, WITH NO FALLBACKS. Every colour, font, shape and motion value below is a
+ * `var(--ctx-*)` custom property the e06b theme engine writes from an e06a theme document — enforced
+ * by the blocking `webui-kit-tokens-only` ctest, which rejects a raw literal ANYWHERE in this file,
+ * including inside a `var()` fallback. The absent fallbacks are deliberate: a fallback is a second
+ * source of truth for a value the theme already owns, and it cannot be reached in production anyway —
+ * `boot.ts` applies a theme before the bridge handshake completes, and a panel hydrates only after
+ * that, so no widget has ever painted without the token set present.
+ *
+ * WHAT IS *NOT* TOKENISED HERE, STATED RATHER THAN HIDDEN: bare box spacing (the `padding` /
+ * `margin` lengths). e06a's schema publishes NO spacing or padding token — design 06 section 1 names
+ * the density group as "control heights, paddings" but e06a shipped `shape.density` as three control
+ * HEIGHTS, and `mockups/TOKENS.md` section 3 records the 2/4/…/32px spacing scale as an un-adopted
+ * PROPOSAL "not named as a token group in doc 06 at all". Rejecting those lengths today would only
+ * force `calc()` over a height token — a bypass wearing compliance — so the lint's value jurisdiction
+ * stops at the families e06a actually publishes. See `../README.md` for the follow-up.
+ *
+ * NO PANEL ID APPEARS BELOW, and none may. A rule keyed to a panel is the special-casing the
+ * hydration runtime was built to avoid; a new panel gets its appearance from the roles its C++ model
+ * already emits, with no edit here.
+ */
+
+/* --- containers: region / group ---------------------------------------------------------------- *
+ *
+ * `region` is a panel body landmark (`<section>`), `group` a generic grouping (`<div>`). Both are
+ * already block-level; declaring it keeps the role's layout a property of the KIT rather than of a
+ * user-agent default a future reset could move under us. */
+.ctx-widget-region,
+.ctx-widget-group {
+    display: block;
+}
+
+/* --- heading (`<h2>`) --------------------------------------------------------------------------- */
+.ctx-widget-heading {
+    margin: 0 0 6px;
+    color: var(--ctx-colors-ink);
+    font-family: var(--ctx-typography-font-ui);
+    font-size: var(--ctx-typography-size-sm);
+    font-weight: var(--ctx-typography-weight-semibold);
+    letter-spacing: var(--ctx-typography-tracking);
+}
+
+/* --- status (`<output>`) — a live status region, e.g. the Problems count ------------------------ *
+ *
+ * The de-emphasis is the `muted` INK STEP, not an `opacity: 0.75` as it was in app.css. That matters
+ * beyond tidiness: opacity fades a colour toward whatever is behind it, so the high-contrast themes'
+ * AA+ ink ratio — the whole point of that pair — was silently diluted on exactly the roles a
+ * low-vision user most needs to read. A muted token is a colour the THEME chose. */
+.ctx-widget-status {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--ctx-colors-muted);
+    font-size: var(--ctx-typography-size-sm);
+}
+
+/* --- text (`<span>`) — inert text content ------------------------------------------------------ *
+ *
+ * One of the three roles app.css never styled. It inherited ink from `.ctx-panel-body` and so LOOKED
+ * fine, which is precisely why the gap survived: an inherited appearance is indistinguishable from a
+ * chosen one until something changes the container. Naming the token makes the role's colour the
+ * kit's decision and gives the T1 tier something falsifiable to assert. */
+.ctx-widget-text {
+    color: var(--ctx-colors-ink);
+}
+
+/* --- list / tree containers (`<ul>`) ------------------------------------------------------------ */
+.ctx-widget-list,
+.ctx-widget-tree {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+/* --- list / tree rows (`<li>`) ----------------------------------------------------------------- */
+.ctx-widget-listitem,
+.ctx-widget-treeitem {
+    padding: 2px 6px;
+    border-radius: var(--ctx-shape-radius-sm);
+    color: var(--ctx-colors-ink);
+    cursor: default;
+}
+
+.ctx-widget-listitem:hover,
+.ctx-widget-treeitem:hover {
+    background: var(--ctx-colors-panel2);
+}
+
+/* --- button (`<button>`) ----------------------------------------------------------------------- *
+ *
+ * `font: inherit` first, so the browser's own control font never leaks in ahead of the tokens the
+ * document root carries. The hover step is `panel2` — the elevation model is border + SURFACE STEP,
+ * never a shadow (06 section 1 / TOKENS.md section 4), so a hover that brightened by opacity would be
+ * off-model as well as off-token. */
+.ctx-widget-button {
+    font: inherit;
+    padding: 2px 8px;
+    color: var(--ctx-colors-ink);
+    background: var(--ctx-colors-chip);
+    border: var(--ctx-shape-border-width) solid var(--ctx-colors-line);
+    border-radius: var(--ctx-shape-radius-sm);
+    cursor: pointer;
+}
+
+.ctx-widget-button:hover {
+    background: var(--ctx-colors-panel2);
+}
+
+/* --- textbox (`<input>`) — the second role app.css never styled -------------------------------- *
+ *
+ * A bare `<input>` renders in the user agent's own chrome: a white field with a beveled border, in
+ * the platform's font. In a dark editor that is a bright rectangle the theme has no say over — the
+ * most visible possible instance of "the widget layer is not actually themed". `min-width: 0` because
+ * `<input>` carries a UA `size` default that refuses to shrink inside a narrow docked panel. */
+.ctx-widget-textbox {
+    font: inherit;
+    min-width: 0;
+    padding: 2px 6px;
+    color: var(--ctx-colors-ink);
+    background: var(--ctx-colors-panel2);
+    border: var(--ctx-shape-border-width) solid var(--ctx-colors-line);
+    border-radius: var(--ctx-shape-radius-sm);
+}
+
+/* --- checkbox (`<input type="checkbox">`) — the third unstyled role ----------------------------- *
+ *
+ * `accent-color` is the one property that re-tints a NATIVE checkbox without rebuilding it out of
+ * pseudo-elements. Rebuilding it is what a kit is usually tempted into, and it is the wrong trade
+ * here: the native control keeps its platform keyboard behaviour, its indeterminate state and its
+ * assistive-technology semantics — all of which the C++ model and the a11y audit already depend on. */
+.ctx-widget-checkbox {
+    margin: 0 6px 0 0;
+    accent-color: var(--ctx-colors-accent);
+    cursor: pointer;
+}
+
+/* --- the focus ring, on EVERY role (R-A11Y-001) ------------------------------------------------ *
+ *
+ * A visible focus ring is not decoration — it is the keyboard-navigation requirement made legible,
+ * and `:focus-visible` shows it to keyboard users without ringing every mouse click.
+ *
+ * WIDENED FROM THREE ROLES TO TWELVE, deliberately. app.css ringed only listitem / treeitem / button,
+ * but `render_html` writes `tabindex="0"` on any node whose MODEL says `focusable()` — the role is not
+ * consulted. A panel that makes a `region`, a `status` or a `text` node focusable (all legal, all
+ * reachable by the runtime's arrow-key walk over `focus_order`) therefore had a focus stop with NO
+ * ring: keyboard focus vanished mid-panel. Ringing every widget class removes the coupling between
+ * "which roles happen to be focusable today" and "which roles show focus".
+ *
+ * Both the WIDTH and the COLOUR are tokens, which is what makes the high-contrast pair's 2px solid-ink
+ * ring arrive by switching theme rather than by a second stylesheet. The offset is the ring width
+ * NEGATED, so the ring is drawn inside the element's own box and cannot be clipped by a scrolling
+ * panel body — derived from the token rather than restated as a literal that would drift from it. */
+.ctx-widget-region:focus-visible,
+.ctx-widget-group:focus-visible,
+.ctx-widget-heading:focus-visible,
+.ctx-widget-status:focus-visible,
+.ctx-widget-text:focus-visible,
+.ctx-widget-list:focus-visible,
+.ctx-widget-tree:focus-visible,
+.ctx-widget-listitem:focus-visible,
+.ctx-widget-treeitem:focus-visible,
+.ctx-widget-button:focus-visible,
+.ctx-widget-textbox:focus-visible,
+.ctx-widget-checkbox:focus-visible {
+    outline: var(--ctx-shape-focus-ring-width) solid var(--ctx-colors-focus-ring);
+    outline-offset: calc(-1 * var(--ctx-shape-focus-ring-width));
+}

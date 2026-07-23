@@ -15,6 +15,9 @@ dependency), *not* an install manifest — nothing reads it to resolve packages.
 
 | Path | What it is |
 |---|---|
+| `tokens/` | `@context-engine/editor-tokens` — the theme DATA layer (e06a): schema, validator, built-ins |
+| `kit/` | `@context-engine/editor-kit` — the component KIT (e06c1): the 12-role hydration widget layer, tokens-only. See [`kit/README.md`](kit/README.md) |
+| `kit/styles/kit.css` | The widget stylesheet, served as `context-editor://app/kit.css` |
 | `core/` | `@context-engine/editor-core` — the app package |
 | `core/src/index.ts` | The bundle entry point: re-exports the whole surface, then boots the bridge |
 | `core/src/info.ts` | The contract-surface projection (was `index.ts` through e05b) |
@@ -126,9 +129,28 @@ gate-exclusion regex and runs automatically in the general ctest step on all thr
   editor-core's declared dependency set is still exactly the owner-ratified, version-pinned s1 set.
 - `webui-client-typings-drift` — re-projects the build-generated schema and refuses any byte
   difference.
+- `webui-kit-tokens-only` (e06c1) — the component kit consumes **only** `var(--ctx-*)` theme tokens
+  (design 06 §1: "raw values live in themes alone"). Rejects a raw colour anywhere in a kit
+  stylesheet, a raw value in a tokenised property family (fonts / shape / motion), any `var()`
+  FALLBACK, and any non-`--ctx-` custom property. Proven non-vacuous by
+  `tools/tests/test_check_kit_tokens.py`, which plants each violation and requires exit 1;
+  [`kit/README.md`](kit/README.md) records the jurisdiction and the one gap (box spacing, for which
+  e06a publishes no token).
+- `webui-kit-role-coverage` (e06c1) — the CLOSED 12-role set agrees across three languages: the C++
+  `uitree::role_token` vocabulary, the kit's `WIDGET_CLASSES` map, and the classes `kit.css` styles —
+  in both directions — **and** no `.ctx-widget-` rule survives in `app.css` (one styling owner). The
+  failure it prevents is silent by construction: a thirteenth role would render real, interactive,
+  completely unthemed DOM with no build error and nothing in a log.
 
 Python-side unit tests live in `tools/tests/test_gen_client_typings.py`,
-`tools/tests/test_check_webui_assets.py`, and `tools/tests/test_fetch_dockview.py`.
+`tools/tests/test_check_webui_assets.py`, `tools/tests/test_check_kit_tokens.py`, and
+`tools/tests/test_fetch_dockview.py`.
+
+The browser-executed T1 tier (`webui-ts-unit`, the e07a `webui-tests` job) additionally carries
+`core/src/test/kit.test.ts`, which asserts what the browser actually COMPUTES for each of the twelve
+widget classes and that a live theme switch carries the whole layer — the half of the kit's DoD a
+source scan structurally cannot answer (was the sheet SERVED at all? is the token name it references
+one the engine writes? does another stylesheet win the cascade?).
 
 ## Scope boundary (after e05d1)
 
@@ -154,6 +176,12 @@ and hydrates. Deliberately **not** here:
 - OS-window tear-out → **e10**. Dockview's popout API is deliberately UNUSED (B-F2): v7 rejects
   non-http(s) popout URLs, and its popout is opener-owned DOM transfer, which cannot produce the
   independent per-window editor-core instances design 04 §1 requires.
+- ~~the component kit's foundation + the hydration widget layer~~ → ✅ **e06c1** (`kit/`). The
+  AUTHORED component families (tabs, tables, dialogs, toasts, chips, badges, empty-states, skeletons,
+  tooltips) are **e06c2**'s and land in `kit/` too; the Settings panel + per-user config are **e06d**'s.
+  `app/app.css` keeps only what is not a widget class: the pre-theme placeholder pair, the docking
+  surface re-point, `.ctx-panel-body`, the Pulse-of-Work flourish, and the (pre-kit) welcome + palette
+  surfaces that e06c2/e06d are the natural homes for.
 
 Grow the app along those seams. `index.ts` is the entry (re-export + boot) and should stay that
 thin — put new surface in its own module and re-export it.

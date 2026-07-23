@@ -33,6 +33,14 @@
     <title>Context Editor</title>
     <link rel="stylesheet" href="./dockview.css">
     <link rel="stylesheet" href="./app.css">
+    <!-- The component KIT (M9 e06c1, design 06 §3): the twelve `ctx-widget-*` classes the hydration
+         runtime puts on a C++ panel's nodes, styled from theme tokens only. A SEPARATE sheet, not an
+         @import from app.css, for two reasons: an @import is a serialised second round trip the
+         renderer discovers only after parsing app.css, and a separate <link> keeps the kit's
+         ownership of that layer legible in the document rather than buried in another stylesheet.
+         LAST of the three, so a kit rule outranks an app-level rule at equal specificity — the kit
+         is the authority on how a widget looks. -->
+    <link rel="stylesheet" href="./kit.css">
 </head>
 <body>
     <!-- The docking root PanelHost mounts into (e05d1). Empty in the MARKUP on purpose: the panel

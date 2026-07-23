@@ -59,6 +59,10 @@ set(_ctx_webui_core "${CMAKE_CURRENT_SOURCE_DIR}/core")
 # rebuilds regardless). The tokens package declares NO npm dependency (its package.json has none), so
 # it does not touch the dockview-core-only web-layer allowlist.
 set(_ctx_webui_tokens "${CMAKE_CURRENT_SOURCE_DIR}/tokens")
+# The @context-engine/editor-kit component kit (M9 e06c1, design 06 section 3 / 04 section 4). Its
+# module is imported by core/src/hydration.ts (which re-exports WIDGET_CLASSES), so it is a typecheck
+# + bundle input exactly like tokens/; its stylesheet is STAGED into the served asset root below.
+set(_ctx_webui_kit "${CMAKE_CURRENT_SOURCE_DIR}/kit")
 set(_ctx_webui_tsconfig "${_ctx_webui_core}/tsconfig.json")
 set(_ctx_webui_entry "${_ctx_webui_core}/src/index.ts")
 # The asset root the Shell will serve over context-editor://app/ (e05c wires the scheme).
@@ -125,8 +129,18 @@ file(GLOB_RECURSE _ctx_webui_ts CONFIGURE_DEPENDS
 file(GLOB_RECURSE _ctx_webui_tokens_ts CONFIGURE_DEPENDS "${_ctx_webui_tokens}/src/*.ts")
 file(GLOB _ctx_webui_tokens_data CONFIGURE_DEPENDS
      "${_ctx_webui_tokens}/themes/*.theme.json" "${_ctx_webui_tokens}/theme.schema.json")
+# The component kit's TS (M9 e06c1). CONFIGURE_DEPENDS for the same reason as the core glob: a kit
+# module added without re-globbing would be silently exempt from the type gate AND absent from the
+# bundle's DEPENDS — the exact stale-glob trap, one package over. Its STYLESHEETS are listed too, so
+# an incremental build re-stages `kit.css` when it changes (and re-runs the ctests that read it).
+file(GLOB_RECURSE _ctx_webui_kit_ts CONFIGURE_DEPENDS
+     "${_ctx_webui_kit}/src/*.ts" "${_ctx_webui_kit}/src/*.tsx"
+     "${_ctx_webui_kit}/src/*.mts" "${_ctx_webui_kit}/src/*.cts")
+file(GLOB_RECURSE _ctx_webui_kit_styles CONFIGURE_DEPENDS "${_ctx_webui_kit}/styles/*.css")
 set(_ctx_webui_inputs ${_ctx_webui_ts} ${_ctx_webui_tokens_ts} ${_ctx_webui_tokens_data}
-    "${_ctx_webui_tsconfig}" "${_ctx_webui_core}/package.json" "${_ctx_webui_tokens}/package.json")
+    ${_ctx_webui_kit_ts}
+    "${_ctx_webui_tsconfig}" "${_ctx_webui_core}/package.json" "${_ctx_webui_tokens}/package.json"
+    "${_ctx_webui_kit}/package.json")
 
 # --- 1) SEMANTIC typecheck (a BUILD failure, per the e05a DoD) -----------------------------------
 # `--pretty false` keeps diagnostics machine-legible in CI logs (the same flag src/runtime/ts's
@@ -192,6 +206,28 @@ foreach(_doc IN LISTS _ctx_webui_documents)
         VERBATIM)
     list(APPEND _ctx_webui_staged_documents "${_ctx_webui_assets}/${_doc}")
 endforeach()
+
+# --- 4b) stage the component KIT's stylesheet (e06c1) --------------------------------------------
+# Served as `context-editor://app/kit.css`, beside app.css and linked by index.html. It comes from a
+# DIFFERENT package (kit/, not app/), which is why it is staged here rather than added to the loop
+# above — the loop's source dir is app/ and widening it to two roots would obscure which document
+# belongs to which package.
+#
+# The file name is spelled ONCE more, in the kit's own `KIT_STYLESHEET` constant, because the T1 tier
+# looks the sheet up by name in `document.styleSheets` (a test that cannot find it must fail loudly,
+# not pass vacuously). A rename here without renaming there turns `kit.test.ts` red immediately, which
+# is the intended coupling.
+set(_ctx_webui_kit_stylesheet_name "kit.css")
+add_custom_command(
+    OUTPUT "${_ctx_webui_assets}/${_ctx_webui_kit_stylesheet_name}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ctx_webui_assets}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${_ctx_webui_kit}/styles/${_ctx_webui_kit_stylesheet_name}"
+            "${_ctx_webui_assets}/${_ctx_webui_kit_stylesheet_name}"
+    DEPENDS "${_ctx_webui_kit}/styles/${_ctx_webui_kit_stylesheet_name}"
+    COMMENT "context_editor_webui: staging the component kit stylesheet"
+    VERBATIM)
+list(APPEND _ctx_webui_staged_documents "${_ctx_webui_assets}/${_ctx_webui_kit_stylesheet_name}")
 
 # ALL so a plain `cmake --build` produces the asset set — the bundle is a build output on every leg,
 # exactly like editor/client's generated schema.
@@ -308,6 +344,47 @@ add_test(NAME webui-no-raw-key-handlers
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_no_raw_key_handlers.py"
             --sources "${_ctx_webui_core}/src")
 
+# 2c) The TOKENS-ONLY lint (M9 e06c1, design 06 section 1: "components reference ONLY semantic
+# tokens; raw values live in themes alone"). BLOCKING in T1 — a SOURCE scan, so it rides the `webui-*`
+# family on all three default `build` legs and runs under a plain local `ctest --preset dev`; there is
+# no browser and no build artifact in the loop.
+#
+# It rejects a raw colour ANYWHERE in a kit stylesheet, a raw value in a tokenised property family
+# (fonts / shape / motion), any `var()` FALLBACK, and any non-`--ctx-` custom property. The fallback
+# rule is what makes the others hold: `var(--ctx-colors-line, rgba(230, 237, 245, 0.25))` — the shape
+# app.css shipped — is a raw literal wearing a token's clothes.
+#
+# PROVEN NON-VACUOUS, not merely asserted to be: `tools/tests/test_check_kit_tokens.py` plants a raw
+# hex colour, a colour function, a named colour, a raw font size, a raw font weight, a raw font
+# family, a raw border length, a raw duration/easing and a `var()` fallback into a temporary
+# stylesheet and requires exit 1 on each — so the proof re-runs on every `python-tests` job rather
+# than living in one PR description. `src/editor/webui/kit/README.md` records the jurisdiction it
+# covers today and the one gap (box spacing) e06a publishes no token for.
+add_test(NAME webui-kit-tokens-only
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_kit_tokens.py"
+            --tokens-only
+            --kit-styles "${_ctx_webui_kit}/styles")
+
+# 2d) The CLOSED-ROLE-SET + ONE-STYLING-OWNER gate (M9 e06c1, design 04 section 4 step 4). A
+# three-way agreement across three languages that no compiler can see:
+#   * the C++ role vocabulary (`uitree::role_token`, gui/uitree/src/node.cpp),
+#   * the kit's `WIDGET_CLASSES` map (kit/src/index.ts),
+#   * the classes `kit/styles/*.css` actually style,
+# in BOTH directions, plus the assertion that NO `.ctx-widget-` rule survives in app.css.
+#
+# The failure it prevents is silent by construction. `render_html` emits only the twelve tags
+# `role_html_tag` maps to and the hydration runtime looks each node's role up in the map, so adding a
+# THIRTEENTH role to the C++ enum ships real, interactive, completely unthemed DOM with no build
+# error and nothing in any log. The role list is DERIVED from the three sources rather than restated
+# here, so this gate cannot drift into agreeing with a copy of itself.
+add_test(NAME webui-kit-role-coverage
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_kit_tokens.py"
+            --role-coverage
+            --kit-source "${_ctx_webui_kit}/src/index.ts"
+            --kit-styles "${_ctx_webui_kit}/styles"
+            --uitree-source "${CMAKE_CURRENT_SOURCE_DIR}/../gui/uitree/src/node.cpp"
+            --app-stylesheet "${CMAKE_CURRENT_SOURCE_DIR}/app/app.css")
+
 # --- 3) the editor-core T1 unit-test tier (M9 e07a; R-QA-013, design 09 §1 / 04) -----------------
 # Until now the webui workspace had NO local TS unit-test tier: the PURE, DOM-free editor-core logic
 # (the total parsers in panels.ts / editorstate.ts, the structural guards in bridge.ts / dockview.ts)
@@ -396,6 +473,22 @@ if(CONTEXT_WEBUI_BROWSER_TESTS)
         COMMENT "context_editor_webui_test: staging app.css for the DOM tier"
         VERBATIM)
     list(APPEND _ctx_webui_test_web_assets "${_ctx_webui_test_assets}/app.css")
+
+    # The SHIPPED kit stylesheet, for the same load-bearing reason as app.css above: `kit.test.ts`
+    # asserts what the browser COMPUTED for each of the twelve widget classes and looks the sheet up
+    # by name, so a harness served without it fails loudly instead of passing vacuously. A fixture
+    # copy would be worse than nothing — it would pass while the shipped stylesheet was broken.
+    add_custom_command(
+        OUTPUT "${_ctx_webui_test_assets}/${_ctx_webui_kit_stylesheet_name}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ctx_webui_test_assets}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_ctx_webui_kit}/styles/${_ctx_webui_kit_stylesheet_name}"
+                "${_ctx_webui_test_assets}/${_ctx_webui_kit_stylesheet_name}"
+        DEPENDS "${_ctx_webui_kit}/styles/${_ctx_webui_kit_stylesheet_name}"
+        COMMENT "context_editor_webui_test: staging kit.css for the DOM tier"
+        VERBATIM)
+    list(APPEND _ctx_webui_test_web_assets
+         "${_ctx_webui_test_assets}/${_ctx_webui_kit_stylesheet_name}")
 
     # NOT an ALL target: built only on demand by the webui-tests CI job's --target list (and a local
     # -DCONTEXT_WEBUI_BROWSER_TESTS=ON repro). Keeping it out of ALL is what lets the default 3-OS

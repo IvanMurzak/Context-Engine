@@ -277,73 +277,22 @@ html .dockview-theme-dark {
     line-height: var(--ctx-typography-line-height, 1.5);
 }
 
-/* --- widget classes, keyed by node ROLE (04 §4 step 4) ---------------------------------------- *
+/* --- the hydration widget layer LIVES IN THE KIT NOW (M9 e06c1) -------------------------------- *
  *
- * PRESENTATION ONLY. The hydration runtime adds these from the node's `role` (see WIDGET_CLASSES in
- * core/src/hydration.ts); the VALUE semantics stay in the C++ model and the write path. They are
- * keyed by role rather than by anything panel-derived, which is what keeps a new panel from needing
- * a new rule here. Kept minimal on purpose — the real component KIT is e06c's; e06b only re-points
- * what is already here at the tokens, so a live theme switch re-tokens the hydrated panels rather
- * than leaving them on hardcoded literals that would visibly disagree with the rest of the editor. */
-.ctx-widget-region,
-.ctx-widget-group {
-    display: block;
-}
-
-.ctx-widget-heading {
-    margin: 0 0 6px;
-    font-size: var(--ctx-typography-size-sm, 13px);
-    font-weight: var(--ctx-typography-weight-semibold, 600);
-    letter-spacing: var(--ctx-typography-tracking, 0.02em);
-}
-
-.ctx-widget-status {
-    display: block;
-    margin-bottom: 8px;
-    opacity: 0.75;
-}
-
-.ctx-widget-list,
-.ctx-widget-tree {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.ctx-widget-listitem,
-.ctx-widget-treeitem {
-    padding: 2px 6px;
-    border-radius: var(--ctx-shape-radius-sm, 3px);
-    cursor: default;
-}
-
-/* A visible focus ring is not decoration — it is the R-A11Y-001 keyboard-navigation requirement made
- * legible. `:focus-visible` so it appears for keyboard users without ringing every mouse click. Both
- * the WIDTH and the COLOUR are tokens, which is what makes the high-contrast pair's 2px solid-ink
- * ring arrive by switching theme rather than by a second stylesheet. */
-.ctx-widget-listitem:focus-visible,
-.ctx-widget-treeitem:focus-visible,
-.ctx-widget-button:focus-visible {
-    outline: var(--ctx-shape-focus-ring-width, 2px) solid
-        var(--ctx-colors-focus-ring, var(--editor-fg));
-    outline-offset: -2px;
-}
-
-.ctx-widget-listitem:hover,
-.ctx-widget-treeitem:hover {
-    background: var(--ctx-colors-panel2, rgba(230, 237, 245, 0.08));
-}
-
-.ctx-widget-button {
-    font: inherit;
-    color: var(--ctx-colors-ink, inherit);
-    background: var(--ctx-colors-chip, rgba(230, 237, 245, 0.1));
-    border: var(--ctx-shape-border-width, 1px) solid
-        var(--ctx-colors-line, rgba(230, 237, 245, 0.25));
-    border-radius: var(--ctx-shape-radius-sm, 3px);
-    padding: 2px 8px;
-    cursor: pointer;
-}
+ * The twelve `ctx-widget-*` classes (04 §4 step 4) were declared HERE through e06b. They are now
+ * `@context-engine/editor-kit`'s — `kit/styles/kit.css`, served beside this file as
+ * `context-editor://app/kit.css` and linked by index.html.
+ *
+ * ⚠ DO NOT RE-ADD A `.ctx-widget-*` RULE TO THIS FILE. The move is not tidying: it gives the widget
+ * layer exactly ONE styling owner, so appearance stops depending on which stylesheet the cascade
+ * happens to reach last (a question CMake staging order and a vendored engine's runtime injection
+ * would otherwise answer). The `webui-kit-role-coverage` ctest FAILS on any `.ctx-widget-` selector
+ * in this file, and it also asserts the kit styles every role the C++ `uitree::role_token`
+ * vocabulary emits — so the closed set cannot silently grow a thirteenth, unthemed member.
+ *
+ * Three things this file kept, because they are not widget classes: `.ctx-panel-body` (the DOM SLOT
+ * the runtime mounts a panel into — a host surface, not a role), `.ctx-flourish` (the Pulse-of-Work
+ * signature, e06b) and the docking-surface re-point above. */
 
 /* --- the welcome screen (M9 e14c, design 07 §4 / 10 / D13) ------------------------------------ *
  *
