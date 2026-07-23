@@ -48,6 +48,7 @@
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
 #include "context/editor/shell/themes_bridge.h"
+#include "context/editor/shell/user_config.h"
 #include "context/editor/shell/welcome.h"
 
 #include <chrono>
@@ -325,6 +326,17 @@ int main(int argc, char** argv)
     welcome_bridge.set_launch_mode(shell::LaunchMode::project);
     welcome_bridge.set_config_path(std::filesystem::path{});
     SMOKE_CHECK(welcome_bridge.install(bridge), "the welcome.state bridge surface installed");
+
+    // --- the per-user config read surface (e06d) ------------------------------------------------
+    // editor-core's boot reads the per-user config with `config.get` before it applies a theme
+    // (boot.ts `loadUserConfig`) — the same deny-by-default `unknown_method` REFUSAL trap as the
+    // four bridges above, and the same consequence for this scenario's strict
+    // `bridge.refused() == 0` assertion, which boot.ts's own empty-snapshot fallback does NOT avert.
+    // Bound to an EMPTY path so the scenario is deterministic regardless of the CI host's own
+    // `~/.context/config.json`. Same lifetime tier as the bridges above.
+    shell::UserConfigStore user_config;
+    user_config.bind_path(std::filesystem::path{});
+    SMOKE_CHECK(user_config.install(bridge), "the config.* bridge surface installed");
 
     // Drive the pump until the browser has hydrated (painted a non-uniform UI + handshake complete +
     // panels rendered — the CE #319 / e05d2 wait discipline) AND the palette-driven command has

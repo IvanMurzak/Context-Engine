@@ -84,6 +84,44 @@ def test_second_writer_via_rename_is_caught(tmp_path):
     assert any("config_command.cpp" in v for v in check_config_writers.check(root))
 
 
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        # Each of these PASSED the first revision of the gate. They were found by planting second
+        # writers rather than by reading the regex, which is the only method that finds this class of
+        # hole — see the CPP_WRITE comment. Every one is an ordinary way to put bytes on disk, not a
+        # contrived evasion, so a second-writer author could reach any of them innocently.
+        pytest.param('std::fstream out(p, std::ios::out);', id="fstream-ios-out"),
+        pytest.param('std::filesystem::copy_file(tmp, p, opts);', id="copy_file"),
+        pytest.param('std::FILE* f = std::fopen(p.string().c_str(), "w");', id="c-stdio-fopen"),
+        pytest.param('std::freopen(p.string().c_str(), "w", stdout);', id="c-stdio-freopen"),
+        pytest.param('std::rename(tmp.c_str(), p.c_str());', id="c-library-rename"),
+        pytest.param('std::basic_ofstream<char> out(p);', id="basic_ofstream"),
+    ],
+)
+def test_second_writer_spellings_the_first_gate_revision_missed(tmp_path, snippet):
+    root = make_tree(tmp_path)
+    write(root, "src/editor/shell/src/welcome.cpp",
+          f"auto doc = read_user_config(path);\n{snippet}\n")
+    assert any("welcome.cpp" in v for v in check_config_writers.check(root)), (
+        f"a second writer spelled {snippet!r} passed the single-writer gate"
+    )
+
+
+def test_stderr_logging_is_not_a_file_write(tmp_path):
+    """The false positive that the over-broad first fix introduced, pinned so it cannot come back.
+
+    `std::fprintf(stderr, …)` is this codebase's ordinary logging idiom and appears in files that
+    legitimately name the user config (editor_main.cpp, the settings smoke). Adding the C stdio WRITE
+    calls to CPP_WRITE reddened both while catching nothing an `fopen`/`freopen` match did not.
+    """
+    root = make_tree(tmp_path)
+    write(root, "src/editor/shell/app/editor_main.cpp",
+          'const auto p = user_config_path();\n'
+          'std::fprintf(stderr, "[shell] serving config from %s\\n", p.string().c_str());\n')
+    assert check_config_writers.check(root) == []
+
+
 def test_a_reader_is_not_a_writer(tmp_path):
     """Reading the document is unrestricted — only WRITING is funnelled."""
     root = make_tree(tmp_path)
@@ -153,10 +191,21 @@ def test_persistence_in_a_ts_test_is_still_caught(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_second_config_set_caller_is_caught(tmp_path):
+@pytest.mark.parametrize(
+    "quote",
+    [
+        pytest.param('"', id="double-quote"),
+        # Both PASSED the first revision, which matched only the double-quoted form. Quote style is a
+        # formatter's choice, so a gate keyed to one is decorative — a second door opened by pressing
+        # a different key.
+        pytest.param("'", id="single-quote"),
+        pytest.param("`", id="template-literal"),
+    ],
+)
+def test_second_config_set_caller_is_caught(tmp_path, quote):
     root = make_tree(tmp_path)
     write(root, "src/editor/webui/core/src/settings.ts",
-          'await bridge.call("config.set", { key: "theme", value: id });\n')
+          f"await bridge.call({quote}config.set{quote}, {{ key: \"theme\", value: id }});\n")
     violations = check_config_writers.check(root)
     assert len(violations) == 1
     assert "config.set" in violations[0]

@@ -58,10 +58,37 @@ SKIP_DIRS = {"build", "build-msvc-check", "node_modules", "vcpkg_installed", ".g
 # A source "names the user config" when it names the document path or its dedicated helpers.
 CONFIG_NAME = re.compile(r'"config\.json"|user_config_path\(|read_user_config\(|write_user_config\(')
 
-# ...and it "writes a file" when it opens one for output or publishes one by rename. Deliberately
-# syntactic: these are the only two ways to put bytes on disk in this codebase, and a scan that tried
-# to be smarter would be a scan nobody could predict.
-CPP_WRITE = re.compile(r"std::ofstream|ofstream\s+\w+|fs::rename\(|std::filesystem::rename\(")
+# ...and it "writes a file" when it opens one for output or publishes one by rename/copy. Deliberately
+# syntactic: a scan that tried to be smarter would be a scan nobody could predict.
+#
+# ⚠ THE SPELLING LIST IS THE WHOLE GATE. An earlier revision listed only `std::ofstream` /
+# `ofstream <var>` / `fs::rename(` / `std::filesystem::rename(`, and a review that PLANTED second
+# writers (rather than reading the regex) found FOUR spellings that sailed straight through: a
+# `std::fstream` opened with `std::ios::out`, `std::filesystem::copy_file`, C stdio
+# `std::fopen(p, "w")`, and the C library's own `std::rename`. Each is an ordinary way to put bytes
+# on disk that a second-writer author could reach for without any intent to evade. So the rule for
+# editing this list is: a spelling comes OUT only with evidence it cannot write, and any new way to
+# write a file that lands in this codebase goes IN with a `tools/tests/` case that plants it.
+#
+# Being generous here is deliberately cheap: a hit only becomes a finding in a file that ALSO names
+# the user config (see `check`), so the blast radius of an over-broad token is the handful of
+# config-touching translation units, where "prove this is not a second writer" is the posture we
+# want anyway.
+CPP_WRITE = re.compile(
+    r"std::ofstream"          # the common declaration
+    r"|\bofstream\s+\w+"      # ...and an unqualified one
+    r"|\bbasic_ofstream\b"    # the underlying template, named directly
+    r"|\bfstream\b"           # std::fstream opened with ios::out (NOT matched by \bofstream\b)
+    r"|\brename\("            # fs::rename / std::filesystem::rename / the C library's std::rename
+    r"|\bcopy_file\("         # std::filesystem::copy_file over the destination
+    r"|\bfopen\(|\bfreopen\(" # C stdio, opened "w"/"a"
+)
+# ...deliberately WITHOUT the C stdio write calls themselves (`fwrite`/`fputs`/`fprintf`). They look
+# like the obvious thing to add and are actively wrong here: `std::fprintf(stderr, …)` is this
+# codebase's ordinary logging idiom, so including them reddened `editor_main.cpp` and
+# `cef_shell_settings_smoke.cpp` — both of which merely LOG — while catching nothing new, because a
+# C-stdio write to a file needs an `fopen`/`freopen` in the same translation unit anyway (a FILE*
+# arriving as a parameter is outside any syntactic scan's reach, by construction).
 
 # Client-side persistence APIs. A renderer cannot open a file, so THESE are what a second store in
 # editor-core would be built from.
@@ -71,7 +98,12 @@ TS_PERSISTENCE = re.compile(
 )
 
 # The wire method that REQUESTS a write, and the one module allowed to name it.
-CONFIG_SET_LITERAL = re.compile(r'"config\.set"')
+#
+# ⚠ ALL THREE JavaScript string delimiters, for the same reason the C++ list above is generous: the
+# first revision matched only the double-quoted form, so `bridge.call('config.set', …)` and
+# `bridge.call(`config.set`, …)` opened a second write door with the gate still reporting PASS. Quote
+# style is a formatter's choice, never a security boundary — a gate that depends on one is decorative.
+CONFIG_SET_LITERAL = re.compile(r"""["'`]config\.set["'`]""")
 CONFIG_SET_OWNER = "src/editor/webui/core/src/config.ts"
 
 
