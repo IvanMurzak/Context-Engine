@@ -49,6 +49,20 @@ stub instead, so this pattern is invisible locally and is a **CI-only** phenomen
    They are pure stderr noise (the "masks real sanitizer signal" concern) — they are not what
    fails a test.
 
+   > 🚨 **Do NOT re-diagnose this signature. It has now been misfiled twice.** Because the
+   > `sanitize` leg runs `ctest --verbose`, these recovered `vptr` lines are printed by tests that
+   > **PASS**, so they show up in the log of any red run and read like the cause. Issue **#335**
+   > was filed on exactly the two citations quoted above — `native_file_store.cpp:333` and
+   > `reconcile_index.cpp:35` — hypothesising "a `static_cast` downcast of an istream to
+   > `std::ifstream`". There is no cast at either site (`std::ifstream in(...); if (!in)` /
+   > `in.bad()`; `std::ostringstream out; out << …`), and on the run that filed it those lines came
+   > from tests **84 and 85, both green**, while the job's single failure was a different test
+   > entirely (`406 - m6-exit-2-gc-budget`, see § Related below). **Triage rule**: the verdict is
+   > `The following tests FAILED:` at the tail of the ctest output — never the first `runtime
+   > error:` line in the log. UBSan's own `note:` also refutes the report on sight (it names the
+   > object's real dynamic type, e.g. expected `'std::basic_ifstream<char>'` vs note `object is of
+   > type 'std::basic_ifstream<char, std::char_traits<char>>'` — the same type).
+
 2. **LSan demangler-scratch leak (what actually fails a test).** Symbolizing each `vptr`
    diagnostic demangles the offending type name: `__sanitizer::Symbolizer::PlatformDemangle`
    → `DemangleCXXABI` → `__cxa_demangle` → LLVM's `itanium_demangle::`. The demangler's
@@ -120,6 +134,38 @@ vptr_check:std::__cxx11::basic_stringbuf
 
 Validate on a real `sanitize (ASan+UBSan, ubuntu)` run before removing the LSan net; if the
 noise disappears and no new failures appear, the LSan demangler suppression becomes redundant.
+
+## Related: `m6-exit-2` ASan+UBSan GC-budget widen gap (issue #335)
+
+The sibling of the `m1-exit-3` story below, on the *budget* axis rather than the *timeout* axis, and
+the ACTUAL cause of the red that issue #335 misattributed to the `vptr` noise above.
+
+`m6-exit-2-gc-budget` asserts a REAL wall-clock ceiling — `kBudgetMs = 4.167 ms`, the R-SIM-008
+quarter-timestep — which is only honestly measurable on an UNINSTRUMENTED build. When the gate
+landed it widened that ceiling 100x for TSan (`CONTEXT_TSAN_BUILD`) but left ASan+UBSan enforcing the
+real budget, because the ASan+UBSan leg then measured `maxPauseMs=0.991` and looked to have 4x
+headroom. It does not. Measured on run `29987903124` — ONE commit, bit-identical workload
+(`ticks=600 pauses=10 inWindow=10 dropped=0`):
+
+| leg | maxPauseMs | enforced | result |
+| --- | --- | --- | --- |
+| `build (ubuntu / macos / windows)` — uninstrumented | (real budget holds) | 4.167 | green |
+| `sanitize (TSan, ubuntu)` | 114.592 | 416.667 (100x) | green |
+| `sanitize (ASan+UBSan, ubuntu)` | **4.473** | **4.167 (1x)** | **RED** |
+
+Across ten consecutive ASan+UBSan runs of that same workload (jobs `89084381975` … `89143913144`)
+`maxPauseMs` ranged **1.056 … 4.473 ms** — a 4.2x load-driven spread whose tail crosses the ceiling.
+The gate's margin was under 1x of its own measurement noise, so it reds intermittently with no engine
+regression; that intermittency is what made it read as a flake. Fixed by widening ASan+UBSan 10x
+(`CONTEXT_ASAN_BUILD`, 9.3x margin over the worst observation, still an order of magnitude tighter
+than TSan's) and by a compile-time guard in `test_m6exit2_gc_budget.cpp` that asks the COMPILER
+whether a sanitizer is active and fails the build if the CMake wiring plumbed no widen for it — the
+defect was the missing wiring, not the constant, so the guard is on the wiring.
+
+**Generalises**: any real-time budget assertion added to this repo must be widened for BOTH sanitizer
+presets in the same PR (`conventions.md` § "Real-time / wall-clock budget assertions must be
+TSan-aware"), and the uninstrumented `build` legs remain the only place a real-time property is
+actually verified.
 
 ## Related: `m1-exit-3` instrumented-boot timeout flake
 

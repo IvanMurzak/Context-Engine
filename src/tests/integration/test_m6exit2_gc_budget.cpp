@@ -71,17 +71,56 @@ constexpr double kJumpVelocityRaw = 6.0 * 65536.0; // JUMP_VELOCITY
 // fixed timestep at the game's 60 Hz tick rate.
 constexpr double kBudgetMs = 0.25 * (1000.0 / 60.0);
 
-// The budget actually ENFORCED by this gate. Identical to kBudgetMs everywhere except the CI TSan
-// leg (CMakeLists.txt defines CONTEXT_TSAN_BUILD only under CONTEXT_TSAN): ThreadSanitizer's
-// per-access instrumentation inflates measured wall-clock GC-pause duration far beyond the real
-// budget (a CI run measured maxPauseMs=113.027 under TSan vs maxPauseMs=0.991 under ASan+UBSan on
-// the SAME commit) — a sanitizer-overhead artifact, not a regression. The blocking exit gate
-// ("M6 exit gate" CI step, `ctest --preset dev`) never sets CONTEXT_TSAN and always enforces the
-// real, unwidened kBudgetMs.
+// The budget actually ENFORCED by this gate, and the sanitizer-overhead widen it applies.
+//
+// kBudgetMs is a REAL wall-clock ceiling, so it can only be measured honestly on an UNINSTRUMENTED
+// build. BOTH CI sanitizer legs inflate the very quantity it bounds — measured on run 29987903124,
+// one commit, bit-identical workload (ticks=600 pauses=10 inWindow=10 dropped=0):
+//
+//   build (ubuntu/macos/windows), no instrumentation .. enforces 4.167 ms, green
+//   sanitize (TSan, ubuntu) .......................... maxPauseMs = 114.592 (enforced 416.667, ok)
+//   sanitize (ASan+UBSan, ubuntu) ................... maxPauseMs =   4.473 (enforced 4.167, RED)
+//
+// Only TSan was widened when this gate landed, because the ASan+UBSan leg then measured
+// maxPauseMs=0.991 and appeared to have 4x headroom. It does not: across ten consecutive
+// ASan+UBSan runs of that same workload (jobs 89084381975 … 89143913144) maxPauseMs ranged
+// 1.056 … 4.473 ms — a 4.2x load-driven spread whose tail crosses the 4.167 ms ceiling, so the leg
+// reds intermittently with no engine regression (issue #335). ASan+UBSan is therefore widened too.
+// The blocking exit gate ("M6 exit gate" CI step, `ctest --preset dev`, on all three `build` legs)
+// sets NEITHER define and always enforces the real, unwidened kBudgetMs — that is where R-SIM-008
+// is actually verified; on an instrumented leg this gate proves the machinery still runs and drops
+// nothing, not a real-time property the instrumentation makes unmeasurable.
 #if defined(CONTEXT_TSAN_BUILD)
-constexpr double kEnforcedBudgetMs = kBudgetMs * 100.0;
+constexpr double kSanitizerBudgetScale = 100.0; // 3.6x margin over the observed 114.592 ms
+#elif defined(CONTEXT_ASAN_BUILD)
+constexpr double kSanitizerBudgetScale = 10.0; // 9.3x margin over the observed 4.473 ms
 #else
-constexpr double kEnforcedBudgetMs = kBudgetMs;
+constexpr double kSanitizerBudgetScale = 1.0; // uninstrumented: enforce the REAL budget
+#endif
+constexpr double kEnforcedBudgetMs = kBudgetMs * kSanitizerBudgetScale;
+static_assert(kSanitizerBudgetScale >= 1.0, "the widen must never TIGHTEN the real budget");
+
+// Regression guard for issue #335. The defect was a BUILD-WIRING gap, not a wrong constant: the
+// CMake `if(CONTEXT_TSAN)` block plumbed CONTEXT_TSAN_BUILD while its sibling `if(CONTEXT_SANITIZE)`
+// block plumbed no ASan counterpart, so the ASan+UBSan leg silently enforced a real-time budget
+// against an instrumented measurement. Ask the COMPILER whether a sanitizer is active — independent
+// of the CMake defines, so the two cannot drift — and fail the build when the wiring did not widen
+// for it. A future preset that instruments this TU without plumbing its define therefore cannot
+// reach CI as an intermittent red. (Same detection idiom as integration_test.h's
+// kSanitizerTimeoutScale: GCC exposes __SANITIZE_*, Clang signals via __has_feature.)
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+#define CONTEXT_M6EXIT2_INSTRUMENTED 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+#define CONTEXT_M6EXIT2_INSTRUMENTED 1
+#endif
+#endif
+#if defined(CONTEXT_M6EXIT2_INSTRUMENTED)
+static_assert(kSanitizerBudgetScale > 1.0,
+              "this TU is sanitizer-instrumented but no wall-clock widen was plumbed for it: the "
+              "enforced GC-pause ceiling would measure instrumentation overhead instead of "
+              "R-SIM-008 (issue #335). Define CONTEXT_ASAN_BUILD / CONTEXT_TSAN_BUILD for the "
+              "preset in src/tests/integration/CMakeLists.txt.");
 #endif
 
 constexpr int kWarmupTicks = 64;
@@ -303,9 +342,15 @@ int main()
     CHECK(agg.pause_count >= 1);    // non-vacuous: the scheduled windows genuinely collected
     CHECK(agg.in_window_count >= 1); // ...attributed to the inter-tick window
     CHECK(engine->gcPausesDropped() == 0); // nothing was lost engine-side
+    // #335 regression guard, mirrored at ctest level so a red leg names the cause in its own log
+    // instead of only failing to compile: the enforced ceiling may be WIDENED for instrumentation
+    // but must never be TIGHTER than the real R-SIM-008 budget. (The compile-time static_asserts
+    // beside kSanitizerBudgetScale are the guard that actually catches a missing widen.)
+    CHECK(kEnforcedBudgetMs >= kBudgetMs);
+
     // THE exit assertion: every observed JS-tier GC pause fits the inter-tick budget, and no
     // record loss can be hiding a breach (within_budget is fail-closed on drops). Enforces
-    // kEnforcedBudgetMs (== kBudgetMs everywhere except the CI TSan leg — see its definition).
+    // kEnforcedBudgetMs (== kBudgetMs on every uninstrumented leg — see its definition).
     CHECK(channel.within_budget(kEnforcedBudgetMs));
 
     if (g_failures != 0)
