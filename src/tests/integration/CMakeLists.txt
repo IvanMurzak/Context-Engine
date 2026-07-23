@@ -627,6 +627,17 @@ set_tests_properties(m6-exit-2-gc-budget m6-exit-3-determinism-wedge PROPERTIES 
 if(CONTEXT_SANITIZE)
     set_tests_properties(m6-exit-2-gc-budget PROPERTIES ENVIRONMENT
         "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
+    # ASan+UBSan inflates the SAME measured wall-clock GC pause the CONTEXT_TSAN block below widens
+    # for — less violently, but past the ceiling. Run 29987903124, one commit, identical workload
+    # (ticks=600 pauses=10 dropped=0): this leg measured maxPauseMs=4.473 against the real 4.167 ms
+    # budget and went RED, while the TSan leg measured 114.592 (widened, green) and all three
+    # UNINSTRUMENTED `build` legs stayed green. Across thirteen consecutive runs of this leg
+    # maxPauseMs ranged 1.056..4.473 ms, so the ceiling sits INSIDE the instrumented noise
+    # distribution and the gate reds intermittently with no engine regression (issue #335). The
+    # widen was wired for TSan only when this gate landed. The blocking exit gate ("M6 exit gate"
+    # CI step, `ctest --preset dev`) sets neither define and still enforces the real, unwidened
+    # budget.
+    target_compile_definitions(context_test_m6exit2_gc_budget PRIVATE CONTEXT_ASAN_BUILD=1)
 endif()
 if(CONTEXT_TSAN)
     set_tests_properties(m6-exit-2-gc-budget PROPERTIES ENVIRONMENT
