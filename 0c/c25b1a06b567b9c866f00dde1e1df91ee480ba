@@ -1,0 +1,108 @@
+src/editor/webui/core/src/commands.ts
+  s_98a4c67d88b9f0::t_e34c0015121c07 214-227
+  s_98a4c67d88b9f0::t_70038469e0e286 287-313
+src/editor/shell/app/editor_main.cpp
+  s_98a4c67d88b9f0::t_5af23ca516b7f8 379-383
+  s_98a4c67d88b9f0::t_c57cc1bf87ec9b 816-818,845-854,856,887,898-903
+  s_98a4c67d88b9f0::t_962d095a276741 29
+  s_98a4c67d88b9f0::t_b1880fc20b3000 178-281
+  s_98a4c67d88b9f0::t_f3683bc0936666 635-650
+src/editor/shell/cef/src/cef_shell_palette_smoke.cpp
+  s_98a4c67d88b9f0::t_ec9bf7fc1d820f 45
+  s_98a4c67d88b9f0::t_df5e5273ee3ad1 354-359
+src/editor/shell/cef/src/cef_shell_tearout_smoke.cpp
+  s_98a4c67d88b9f0::t_50de1dc9c5bd26 1-501
+src/editor/shell/tests/test_window_bridge.cpp
+  s_98a4c67d88b9f0::t_5570c6b8cf9042 1-307,312,314-315,320-338
+  s_98a4c67d88b9f0::t_8dd88fc06a51e6 308-311,313,316-319
+src/editor/webui/core/src/test/window.test.ts
+  s_98a4c67d88b9f0::t_d3439d10535659 1-14,16-229
+  s_98a4c67d88b9f0::t_62b0e762ae80a8 15
+src/editor/webui/core/src/test/palette.test.ts
+  s_98a4c67d88b9f0::t_ba3883a6119133 47-48
+src/editor/webui/core/src/keymap.ts
+  s_98a4c67d88b9f0::t_8545358741a388 203-206
+src/editor/webui/core/src/test/keymap.test.ts
+  s_98a4c67d88b9f0::t_811558b53936cc 340-341
+src/editor/shell/cef/src/cef_shell_restore_smoke.cpp
+  s_98a4c67d88b9f0::t_8931e7798e1beb 120
+  s_98a4c67d88b9f0::t_086a12dc97c0db 375-380,384
+src/editor/shell/src/window_bridge.cpp
+  s_98a4c67d88b9f0::t_b4dc56c56afd64 1-300
+.github/workflows/ci.yml
+  s_98a4c67d88b9f0::t_7c61d95a62770d 1868,1870
+tools/tests/test_check_webui_assets.py
+  s_98a4c67d88b9f0::t_e426ed5227eb3d 460-466
+  s_98a4c67d88b9f0::t_b83f767f240e08 735-760
+  s_98a4c67d88b9f0::t_86c5c12bd2ce05 543-554
+  s_98a4c67d88b9f0::t_6cc5fbf6dcb609 576
+  s_98a4c67d88b9f0::t_3746b1bb0f9cd2 595
+  s_98a4c67d88b9f0::t_6055b3e2d9807d 734
+src/editor/shell/cef/CMakeLists.txt
+  s_98a4c67d88b9f0::t_fca2344c34cb75 280-322
+src/editor/webui/core/src/window.ts
+  s_98a4c67d88b9f0::t_c43a0f8d45b102 1-266
+src/editor/shell/cef/src/cef_shell_multiwindow_smoke.cpp
+  s_98a4c67d88b9f0::t_34685cab2bc718 328
+  s_98a4c67d88b9f0::t_a9737b42cc10d1 62
+  s_98a4c67d88b9f0::t_aa47f984a4f941 253-255,261
+  s_98a4c67d88b9f0::t_b19774f567b4a5 146-149,155
+  s_98a4c67d88b9f0::t_12f9ec04b28b3b 184-186
+src/editor/webui/core/src/index.ts
+  s_98a4c67d88b9f0::t_7a22f9c8c8651a 23
+tools/check_webui_assets.py
+  s_98a4c67d88b9f0::t_86f542398753f0 231-245
+  s_98a4c67d88b9f0::t_2cee08daf89faa 799-815
+src/editor/webui/core/src/dockview.ts
+  s_98a4c67d88b9f0::t_e7ca9bd8f5dccb 105-114
+src/editor/shell/include/context/editor/shell/window_bridge.h
+  s_98a4c67d88b9f0::t_b40b5b754baf86 1-216
+src/editor/shell/CMakeLists.txt
+  s_98a4c67d88b9f0::t_7a8afb84015cb5 332-333
+  s_98a4c67d88b9f0::t_62e9d5b9b5aea2 181
+  s_98a4c67d88b9f0::t_8f1d6d778b616d 63
+src/editor/webui/core/src/test/main.ts
+  s_98a4c67d88b9f0::t_0ac0229b2ef658 27
+  s_98a4c67d88b9f0::t_97a1ddbe2ac979 53
+src/editor/webui/core/src/test/commands.test.ts
+  s_98a4c67d88b9f0::t_1a2ef0d8fe03ba 294-324
+  s_98a4c67d88b9f0::t_2a05dddee93f3b 69-70
+src/editor/webui/core/src/boot.ts
+  s_98a4c67d88b9f0::t_4094fec4ab79f5 725
+  s_98a4c67d88b9f0::t_85aabcc9b8d054 620-712
+  s_98a4c67d88b9f0::t_9d23a23ad56e82 50
+  s_98a4c67d88b9f0::t_7a9895753e311a 814-826
+  s_98a4c67d88b9f0::t_983d30b49ba1ad 367-391,397
+  s_98a4c67d88b9f0::t_a323e6269eaf19 862-902
+  s_98a4c67d88b9f0::t_23775e94c5779d 745
+  s_98a4c67d88b9f0::t_c68736c434fa33 334-340,346-354
+src/editor/webui/core/src/panelhost.ts
+  s_98a4c67d88b9f0::t_bc9e85f6382de2 316-321
+  s_98a4c67d88b9f0::t_77009f6d74732b 284
+  s_98a4c67d88b9f0::t_8d1c30d1f36693 228-238
+  s_98a4c67d88b9f0::t_77d9590fce5a08 399-425
+src/editor/webui/core/src/test/reachability.test.ts
+  s_98a4c67d88b9f0::t_4e504dec54ed89 35-36
+src/editor/shell/cef/src/cef_shell_smoke.cpp
+  s_98a4c67d88b9f0::t_dece1ca63dd856 414-419
+  s_98a4c67d88b9f0::t_3b917f3cb0d68a 43
+src/editor/shell/cef/src/cef_shell_settings_smoke.cpp
+  s_98a4c67d88b9f0::t_c63fcd3247d285 321-326
+  s_98a4c67d88b9f0::t_ed199ae48a7174 51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "0cc25b1a06b567b9c866f00dde1e1df91ee480ba",
+  "prompts": {},
+  "sessions": {
+    "s_98a4c67d88b9f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0dba127-2d0c-4410-893b-e57b78fe0d8f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
