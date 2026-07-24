@@ -54,6 +54,25 @@ int main()
         CHECK(j.at("error").at("pointer").as_string() == "/entities/0/mesh");
     }
 
+    // --- with_error_data attaches structured detail to a failure's error.data (R-CLI-006) ------
+    {
+        Json fresh = Json::object();
+        fresh.set("actualRawHash", Json(std::string("98765")));
+        fresh.set("present", Json(true));
+        Envelope env = Envelope::failure("cas.mismatch").with_error_data(fresh);
+
+        const Json j = env.to_json();
+        CHECK(j.at("error").at("code").as_string() == "cas.mismatch");
+        CHECK(j.at("error").at("data").at("actualRawHash").as_string() == "98765");
+        CHECK(j.at("error").at("data").at("present").as_bool() == true);
+
+        // On a SUCCESS envelope it is a deliberate no-op — there is no error object to annotate.
+        Envelope ok = Envelope::success(Json::object());
+        ok.with_error_data(fresh);
+        CHECK(ok.ok());
+        CHECK(!ok.to_json().at("data").contains("actualRawHash"));
+    }
+
     // --- an unknown code still produces a well-formed envelope (exit 1) -------------------------
     {
         Envelope env = Envelope::failure("totally.unknown.code");

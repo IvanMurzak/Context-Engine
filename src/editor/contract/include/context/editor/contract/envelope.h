@@ -50,6 +50,12 @@ public:
     void add_warning(std::string warning) { warnings_.push_back(std::move(warning)); }
     void set_generation_after(std::uint64_t g) noexcept { generation_after_ = g; }
 
+    // Attach structured detail to this failure's `error.data` slot (e.g. the cas.mismatch fresh
+    // on-disk state a client rebases against, R-CLI-006). No-op on a success envelope — there is no
+    // error to annotate. Returns *this so a failure can be built and annotated in one expression:
+    // `Envelope::failure("cas.mismatch").with_error_data(state)`.
+    Envelope& with_error_data(Json data);
+
     // The process exit code: 0 when ok, else the catalog exit code for the error's `code`.
     [[nodiscard]] int exit_code() const;
 

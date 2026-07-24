@@ -35,6 +35,20 @@ Json diagnostic_json(const filesync::Diagnostic& diagnostic)
     return entry;
 }
 
+Json EditOutcome::CasConflict::to_json() const
+{
+    Json fresh = Json::object();
+    fresh.set("path", Json(path));
+    fresh.set("present", Json(present));
+    // 64-bit hashes as decimal STRINGS (Json's number type is double-backed): the retry token must
+    // round-trip losslessly (R-CLI-006), same convention as the success rawHash.
+    fresh.set("expectedRawHash", Json(std::to_string(expected_raw_hash)));
+    fresh.set("actualRawHash", Json(std::to_string(actual_raw_hash)));
+    if (present)
+        fresh.set("content", Json(content));
+    return fresh;
+}
+
 Envelope EditOutcome::envelope() const
 {
     if (ok)
@@ -73,12 +87,34 @@ Envelope EditOutcome::envelope() const
         return Envelope::success(std::move(data), ticket.generation_after);
     }
     // Failure: the catalog fills message/retriable/exit-code from `error_code` (e.g. scope.denied ->
-    // permission exit 6, R-SEC-007).
-    return Envelope::failure(error_code);
+    // permission exit 6, R-SEC-007). A cas.mismatch additionally carries the fresh on-disk state
+    // (design 05 §7 rebase-or-drop input) as structured error.data, so a cross-process editor gets
+    // the retry token (actualRawHash) + current bytes in the SAME reply — no second read round-trip.
+    Envelope env = Envelope::failure(error_code);
+    if (error_code == "cas.mismatch" && cas_conflict.has_value())
+        env.with_error_data(cas_conflict->to_json());
+    return env;
 }
 
 namespace
 {
+// Build the R-CLI-006 CAS conflict record shared by edit_file (single) and edit_files (batch): the
+// caller supplies the raw hash of `current`-or-empty; `present`/`content` derive from whether the
+// target exists on disk, and `actual_raw_hash` is 0 for an absent target (its `present:false`
+// already conveys absence). Kept in one place so the two collection sites never drift.
+EditOutcome::CasConflict make_cas_conflict(std::string key, std::uint64_t expected_raw_hash,
+                                           const std::optional<std::string>& current,
+                                           std::uint64_t actual_raw_hash)
+{
+    EditOutcome::CasConflict conflict;
+    conflict.path = std::move(key);
+    conflict.present = current.has_value();
+    conflict.expected_raw_hash = expected_raw_hash;
+    conflict.actual_raw_hash = current ? actual_raw_hash : 0;
+    conflict.content = current ? *current : std::string();
+    return conflict;
+}
+
 // The R-FILE-002 watcher.degraded diagnostic must NAME the effective crawl fallback cadence, so the
 // reconciler's note reflects this composition's actual policy (see EditorKernelConfig).
 filesync::ReconcilerConfig reconciler_config_for(const EditorKernelConfig& cfg)
@@ -235,7 +271,8 @@ bridge::Dispatcher::AttachResult EditorKernel::attach(const contract::ClientHand
 }
 
 EditOutcome EditorKernel::edit_file(std::string_view path, std::string_view data,
-                                    const bridge::ScopeSet& caller_scopes)
+                                    const bridge::ScopeSet& caller_scopes,
+                                    std::optional<std::uint64_t> expected_raw_hash)
 {
     EditOutcome out;
 
@@ -255,6 +292,24 @@ EditOutcome EditorKernel::edit_file(std::string_view path, std::string_view data
     {
         out.error_code = "path.jail_violation";
         return out;
+    }
+
+    // R-CLI-006 raw-byte CAS (`--if-match`): apply only if the target's CURRENT on-disk bytes still
+    // hash to the caller's precondition. Read through the daemon's OWN store (fs_ — the SAME store
+    // apply_write lands on below), so the check is TOCTOU-tight w.r.t. our own serialized writes and
+    // correct under an injected test store (a fresh NativeFileStore would read the WRONG backing).
+    // A mismatch — or an absent target — refuses the write with the fresh on-disk state a client
+    // rebases against (design 05 §7 rebase-or-drop); nothing is written.
+    if (expected_raw_hash.has_value())
+    {
+        const std::optional<std::string> current = fs_.read(key);
+        const std::uint64_t actual = filesync::content_hash(current ? *current : std::string());
+        if (!current || actual != *expected_raw_hash)
+        {
+            out.error_code = "cas.mismatch";
+            out.cas_conflict = make_cas_conflict(key, *expected_raw_hash, current, actual);
+            return out;
+        }
     }
 
     // Tool saves canonicalize the WHOLE file they write (R-FILE-001): JSON content lands on disk
@@ -354,12 +409,28 @@ EditBatchOutcome EditorKernel::edit_files(const std::vector<BatchEdit>& edits,
         derivation::CanonicalForm form = derivation::canonical_parse(e.data);
         (void)migrate_and_stamp_for_save(form, migrations_for(config_), config_.migration_runner);
         const std::optional<std::string> current = fs_.read(key);
+        const std::uint64_t prev_hash = filesync::content_hash(current ? *current : std::string());
         filesync::PlannedWrite w;
         w.path = key;
-        w.expected_prev_hash = filesync::content_hash(current ? *current : std::string());
+        w.expected_prev_hash = prev_hash;
         w.target_hash = filesync::content_hash(form.bytes);
         w.data = std::move(form.bytes);
         writes.push_back(std::move(w));
+
+        // R-CLI-006 raw-byte CAS (`--if-match`), per file: collect every target whose CURRENT bytes
+        // no longer hash to its precondition. Collected (not early-returned) so the reply names ALL
+        // conflicts; the whole batch is refused BELOW before the intent log opens — the batch is
+        // atomic, so a CAS failure on any one file writes NONE of them.
+        if (e.expected_raw_hash.has_value() && (!current || prev_hash != *e.expected_raw_hash))
+            out.cas_conflicts.push_back(
+                make_cas_conflict(key, *e.expected_raw_hash, current, prev_hash));
+    }
+
+    // Any per-file CAS precondition failed -> refuse the ENTIRE batch (atomic: not one byte written).
+    if (!out.cas_conflicts.empty())
+    {
+        out.error_code = "cas.mismatch";
+        return out;
     }
 
     // One op id per batch, unique across incarnations (the crashed incarnation's pending entry must

@@ -78,6 +78,11 @@ Json envelope_error_data(const Envelope& env)
         data.set("retriable", Json(e.retriable));
         if (e.pointer.has_value())
             data.set("pointer", Json(*e.pointer));
+        // Structured detail (e.g. the cas.mismatch fresh state, R-CLI-006) rides the wire under a
+        // nested `data` key so a cross-process client reconstructs the SAME error.data.data an
+        // in-process caller reads from Envelope::to_json (envelope.cpp). Absent for most failures.
+        if (e.data.has_value())
+            data.set("data", *e.data);
     }
     return data;
 }

@@ -412,7 +412,7 @@ export const RPC_METHODS: { readonly [M in RpcMethod]: RpcMethodDescriptor } = {
         verb: "edit",
         stability: "operational",
         deprecated: false,
-        params: ["path", "content"],
+        params: ["path", "content", "ifMatch"],
         flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
     },
     "edit-batch": {

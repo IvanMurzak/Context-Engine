@@ -834,7 +834,11 @@ Registry::Registry()
         "barrier (R-FILE-004 / R-CLI-006). Requires the file_write scope.",
         /*params=*/
         {{"path", "path", true, "Project-relative file to write."},
-         {"content", "string", true, "The full content to write (tool saves canonicalize JSON)."}},
+         {"content", "string", true, "The full content to write (tool saves canonicalize JSON)."},
+         {"ifMatch", "hash", false,
+          "Optional R-CLI-006 raw-byte CAS precondition (decimal string): apply only if the target's "
+          "CURRENT on-disk raw-byte hash matches. A mismatch is refused with cas.mismatch carrying "
+          "the fresh on-disk state (error.data) so a client rebases (design 05 §7)."}},
         /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
 
     verbs_.push_back(make_verb(
@@ -842,7 +846,10 @@ Registry::Registry()
         "Daemon-initiated MULTI-file write serialized through the R-FILE-004 crash-recovery intent "
         "log. Requires the file_write scope.",
         /*params=*/
-        {{"files", "json", true, "Non-empty array of {path, content} objects."}},
+        {{"files", "json", true,
+          "Non-empty array of {path, content} objects; each MAY carry an optional `ifMatch` raw-byte "
+          "CAS precondition (R-CLI-006). A mismatch on ANY file refuses the whole batch atomically "
+          "with cas.mismatch, naming every conflicting file's fresh state (error.data)."}},
         /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
 
     verbs_.push_back(make_verb(
