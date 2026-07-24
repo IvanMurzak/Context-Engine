@@ -48,6 +48,7 @@ import { PaletteView } from "./palette_view.js";
 import { PanelClient } from "./panels.js";
 import { PanelHost, type LocalPanelFactory } from "./panelhost.js";
 import { WindowClient, type WindowSeed } from "./window.js";
+import { DragClient, makeDropZoneHitTest, pumpCrossWindowDrag } from "./drag.js";
 import {
     SETTINGS_PANEL_ID,
     mountSettings,
@@ -332,6 +333,8 @@ async function startPanels(
     try {
         const client = new PanelClient(bridge);
         const windowClient = new WindowClient(bridge);
+        // e10c: the cross-window DRAG probe/answer for THIS window (any window can be a drop TARGET).
+        const dragClient = new DragClient(bridge);
         // e10b: is this window a TEAR-OUT TARGET? A boot seed means "a panel was moved here — open
         // ONLY it, restored from its D6 state", never the fresh default arrangement. An ordinary
         // window (and every CEF smoke that installs the surface unseeded) reports `seeded:false` and
@@ -388,7 +391,7 @@ async function startPanels(
                 // from a "move to window N" or a peer's window-close rehome) and, for a non-primary
                 // window, the pagehide rehome-to-window-0 ("close a window with panels ⇒ they rehome,
                 // never lost"). Both use the SAME recreate path as the seed-open above (D6).
-                await startWindowMechanism(windowClient, host, client);
+                await startWindowMechanism(windowClient, dragClient, host, client);
                 // --- the command layer + palette (e07d) ----------------------------------------
                 // The docking root is up and persistence is live; wire the ONE command registry, the
                 // palette over it, and (only under `?ctx-smoke-palette`) drive the T2 command-driven
@@ -669,17 +672,27 @@ async function applyRehomedPanels(
  */
 async function startWindowMechanism(
     windowClient: WindowClient,
+    dragClient: DragClient,
     host: PanelHost,
     client: PanelClient,
 ): Promise<number> {
     let windowId = 0;
     let detail = "single window";
+    // e10c: a cross-window drag targeting THIS window drops anywhere in its viewport (a rehome via the
+    // e10b move path — NOT Dockview's own drop, so in-window docking is untouched). `<html>` bounds the
+    // window; a null document (a non-DOM smoke) answers "no zone" honestly.
+    const dropZoneHitTest = makeDropZoneHitTest(() =>
+        typeof document !== "undefined" ? document.documentElement : null,
+    );
     try {
         const list = await windowClient.list();
         windowId = list?.windowId ?? 0;
         // Drain anything already queued (a move that landed before this window finished booting).
         const applied = await applyRehomedPanels(host, client, await windowClient.rehomed());
-        // The runtime poll: cheap, and started ONLY when the Shell actually serves the surface.
+        // The runtime poll: cheap, and started ONLY when the Shell actually serves the surface. It
+        // drains BOTH the rehome queue (e10b) and the cross-window drag probe (e10c) — the drag pump
+        // does nothing unless a drag from another window is currently over this one, so a window that is
+        // never a drop target pays only the one cheap `drag.probe` per tick.
         if (list !== null && typeof setInterval === "function") {
             setInterval((): void => {
                 void windowClient.rehomed().then((seeds) => {
@@ -687,6 +700,7 @@ async function startWindowMechanism(
                         void applyRehomedPanels(host, client, seeds);
                     }
                 });
+                void pumpCrossWindowDrag(dragClient, dropZoneHitTest);
             }, REHOME_POLL_MS);
         }
         // A non-primary window rehomes its panels to window 0 when it closes, so nothing is lost.

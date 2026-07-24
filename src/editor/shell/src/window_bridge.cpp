@@ -1,6 +1,9 @@
-// The window-management bridge surface for editor-core (M9 e10b) — see window_bridge.h for the model.
+// The window-management bridge surface for editor-core (M9 e10b, drag surface e10c) — see
+// window_bridge.h for the model.
 
 #include "context/editor/shell/window_bridge.h"
+
+#include "context/editor/shell/cross_window_drag.h" // the drag relay served by drag.probe/report-zone
 
 #include <utility>
 
@@ -121,6 +124,11 @@ void WindowBridge::bind_close(CloseHandler handler)
 void WindowBridge::bind_windows(WindowsProvider provider)
 {
     windows_ = std::move(provider);
+}
+
+void WindowBridge::bind_drag_store(CrossWindowDragStore* store)
+{
+    drag_store_ = store;
 }
 
 contract::Json WindowBridge::list() const
@@ -251,6 +259,49 @@ contract::Json WindowBridge::close()
     return out;
 }
 
+contract::Json WindowBridge::drag_probe()
+{
+    contract::Json out = contract::Json::object();
+    // No store bound (a smoke with no drag session) is the honest inactive answer, never a refusal.
+    const DragHover hover =
+        drag_store_ != nullptr ? drag_store_->hover_for(self_id_) : DragHover{};
+    out.set("active", contract::Json(hover.active));
+    if (hover.active)
+    {
+        ++drag_probes_active_;
+        out.set("panelId", contract::Json(hover.panel_id));
+        out.set("x", contract::Json(hover.local.x));
+        out.set("y", contract::Json(hover.local.y));
+        out.set("generation", contract::Json(static_cast<std::uint64_t>(hover.generation)));
+    }
+    return out;
+}
+
+contract::Json WindowBridge::drag_report_zone(const contract::Json& params, std::string& error_code)
+{
+    if (!params.is_object() || !params.contains("generation") ||
+        !params.at("generation").is_number())
+    {
+        error_code = kErrWindowBadParams;
+        return contract::Json{};
+    }
+    DragZone zone;
+    zone.generation = static_cast<std::uint64_t>(params.at("generation").as_int());
+    zone.valid = params.at("valid").as_bool();
+    const contract::Json& zone_id = params.at("zoneId");
+    zone.zone_id = zone_id.is_string() ? zone_id.as_string() : std::string{};
+    if (drag_store_ != nullptr)
+    {
+        // The store drops a stale-generation report itself; a null store (no drag session here) makes
+        // the report a well-formed no-op rather than a refusal.
+        drag_store_->report_zone(zone);
+        ++drag_zones_reported_;
+    }
+    contract::Json out = contract::Json::object();
+    out.set("recorded", contract::Json(true));
+    return out;
+}
+
 bool WindowBridge::install(BridgeRouter& router)
 {
     bool ok = router.register_method(kWindowListMethod,
@@ -293,6 +344,23 @@ bool WindowBridge::install(BridgeRouter& router)
     ok = router.register_method(kWindowCloseMethod,
                                 [this](const BridgeRequest&) -> BridgeResult
                                 { return BridgeResult::ok(close()); }) &&
+         ok;
+    ok = router.register_method(kDragProbeMethod,
+                                [this](const BridgeRequest&) -> BridgeResult
+                                { return BridgeResult::ok(drag_probe()); }) &&
+         ok;
+    ok = router.register_method(
+             kDragReportZoneMethod,
+             [this](const BridgeRequest& request) -> BridgeResult
+             {
+                 std::string error_code;
+                 contract::Json value = drag_report_zone(request.params, error_code);
+                 if (!error_code.empty())
+                 {
+                     return BridgeResult::error(error_code, "drag report-zone request was malformed");
+                 }
+                 return BridgeResult::ok(std::move(value));
+             }) &&
          ok;
     return ok;
 }

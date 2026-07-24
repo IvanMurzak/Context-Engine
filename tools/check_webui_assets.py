@@ -243,6 +243,16 @@ WINDOW_CONSTANTS = (
     ("window.close", "window_bridge.h", "kWindowCloseMethod", "WINDOW_CLOSE_METHOD"),
 )
 
+# The M9 e10c CROSS-WINDOW DRAG surface (design 04 §2), whose C++ vocabulary lives on the same
+# window-management surface (window_bridge.h) and whose TS mirror is drag.ts. A rename on one side
+# leaves the TARGET window's editor-core calling a `drag.*` method the Shell no longer routes, so its
+# drop-zone answer never round-trips and a cross-window drop silently does nothing — the same
+# silent-drift hazard the window surface has, on the harder-to-notice cross-origin seam.
+DRAG_CONSTANTS = (
+    ("drag.probe", "window_bridge.h", "kDragProbeMethod", "DRAG_PROBE_METHOD"),
+    ("drag.report-zone", "window_bridge.h", "kDragReportZoneMethod", "DRAG_REPORT_ZONE_METHOD"),
+)
+
 # The closed gesture vocabulary (04 §4), compared SET vs SET between the C++ wire tokens and the
 # bundle's own GESTURE_VERBS array, so a verb added on one side without the other — which would be
 # refused at runtime with no build error — fails here instead.
@@ -812,6 +822,24 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
                 f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
                 f"Shell would route one name and editor-core would call another, so a panel move would "
                 f"refuse with `unknown_method` and be silently lost with NO error anywhere.")
+
+    # 7a8 — the e10c cross-window drag vocabulary agrees across the two languages. Same mechanism as
+    # 7a7; the failure mode is the cross-origin one: a rename leaves the target window's editor-core
+    # calling a `drag.*` method the Shell no longer routes, so its drop-zone answer never reaches the
+    # drag session and a cross-window drop silently does nothing.
+    for human, cpp_file, cpp_name, ts_name in DRAG_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(
+                f"{human}: the bundle does not declare {ts_name} — editor-core cannot be answering the "
+                f"cross-window drop-zone query the Shell routes, so a drag between windows would never "
+                f"resolve a drop zone")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
+                f"Shell would route one name and editor-core would call another, so the drop-zone query "
+                f"would refuse with `unknown_method` and the cross-window drag would never find a target.")
 
     # 7b — the D6 persisted-blob member names agree (gui/contract/panel_state.h is their authority).
     for human, cpp_name, ts_name in PANEL_STATE_CONSTANTS:
