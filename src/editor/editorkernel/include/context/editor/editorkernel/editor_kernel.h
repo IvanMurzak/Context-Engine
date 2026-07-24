@@ -139,6 +139,13 @@ struct EditOutcome
         std::uint64_t expected_raw_hash = 0; // the caller's --if-match precondition
         std::uint64_t actual_raw_hash = 0;   // the target's CURRENT on-disk raw-byte hash (0 if absent)
         std::string content;                 // the target's CURRENT on-disk bytes (empty if absent)
+
+        // The ONE per-conflict wire shape both cas.mismatch reply paths emit — the single-edit
+        // failure's error.data (EditOutcome::envelope) AND each entry of edit-batch's error.data
+        // conflicts[] (kernel_server) — kept here so the two sites never drift. 64-bit hashes as
+        // decimal STRINGS (Json's number is double-backed — the retry token must round-trip
+        // losslessly, R-CLI-006); `content` is omitted when the target is absent.
+        [[nodiscard]] contract::Json to_json() const;
     };
     std::optional<CasConflict> cas_conflict;
 

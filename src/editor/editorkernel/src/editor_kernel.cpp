@@ -35,6 +35,20 @@ Json diagnostic_json(const filesync::Diagnostic& diagnostic)
     return entry;
 }
 
+Json EditOutcome::CasConflict::to_json() const
+{
+    Json fresh = Json::object();
+    fresh.set("path", Json(path));
+    fresh.set("present", Json(present));
+    // 64-bit hashes as decimal STRINGS (Json's number type is double-backed): the retry token must
+    // round-trip losslessly (R-CLI-006), same convention as the success rawHash.
+    fresh.set("expectedRawHash", Json(std::to_string(expected_raw_hash)));
+    fresh.set("actualRawHash", Json(std::to_string(actual_raw_hash)));
+    if (present)
+        fresh.set("content", Json(content));
+    return fresh;
+}
+
 Envelope EditOutcome::envelope() const
 {
     if (ok)
@@ -78,24 +92,29 @@ Envelope EditOutcome::envelope() const
     // the retry token (actualRawHash) + current bytes in the SAME reply — no second read round-trip.
     Envelope env = Envelope::failure(error_code);
     if (error_code == "cas.mismatch" && cas_conflict.has_value())
-    {
-        const CasConflict& c = *cas_conflict;
-        Json fresh = Json::object();
-        fresh.set("path", Json(c.path));
-        fresh.set("present", Json(c.present));
-        // 64-bit hashes as decimal STRINGS (Json's number type is double-backed): the retry token
-        // must round-trip losslessly (R-CLI-006), same convention as the success rawHash above.
-        fresh.set("expectedRawHash", Json(std::to_string(c.expected_raw_hash)));
-        fresh.set("actualRawHash", Json(std::to_string(c.actual_raw_hash)));
-        if (c.present)
-            fresh.set("content", Json(c.content));
-        env.with_error_data(std::move(fresh));
-    }
+        env.with_error_data(cas_conflict->to_json());
     return env;
 }
 
 namespace
 {
+// Build the R-CLI-006 CAS conflict record shared by edit_file (single) and edit_files (batch): the
+// caller supplies the raw hash of `current`-or-empty; `present`/`content` derive from whether the
+// target exists on disk, and `actual_raw_hash` is 0 for an absent target (its `present:false`
+// already conveys absence). Kept in one place so the two collection sites never drift.
+EditOutcome::CasConflict make_cas_conflict(std::string key, std::uint64_t expected_raw_hash,
+                                           const std::optional<std::string>& current,
+                                           std::uint64_t actual_raw_hash)
+{
+    EditOutcome::CasConflict conflict;
+    conflict.path = std::move(key);
+    conflict.present = current.has_value();
+    conflict.expected_raw_hash = expected_raw_hash;
+    conflict.actual_raw_hash = current ? actual_raw_hash : 0;
+    conflict.content = current ? *current : std::string();
+    return conflict;
+}
+
 // The R-FILE-002 watcher.degraded diagnostic must NAME the effective crawl fallback cadence, so the
 // reconciler's note reflects this composition's actual policy (see EditorKernelConfig).
 filesync::ReconcilerConfig reconciler_config_for(const EditorKernelConfig& cfg)
@@ -288,13 +307,7 @@ EditOutcome EditorKernel::edit_file(std::string_view path, std::string_view data
         if (!current || actual != *expected_raw_hash)
         {
             out.error_code = "cas.mismatch";
-            EditOutcome::CasConflict conflict;
-            conflict.path = key;
-            conflict.present = current.has_value();
-            conflict.expected_raw_hash = *expected_raw_hash;
-            conflict.actual_raw_hash = current ? actual : 0;
-            conflict.content = current ? *current : std::string();
-            out.cas_conflict = std::move(conflict);
+            out.cas_conflict = make_cas_conflict(key, *expected_raw_hash, current, actual);
             return out;
         }
     }
@@ -409,15 +422,8 @@ EditBatchOutcome EditorKernel::edit_files(const std::vector<BatchEdit>& edits,
         // conflicts; the whole batch is refused BELOW before the intent log opens — the batch is
         // atomic, so a CAS failure on any one file writes NONE of them.
         if (e.expected_raw_hash.has_value() && (!current || prev_hash != *e.expected_raw_hash))
-        {
-            EditOutcome::CasConflict conflict;
-            conflict.path = key;
-            conflict.present = current.has_value();
-            conflict.expected_raw_hash = *e.expected_raw_hash;
-            conflict.actual_raw_hash = current ? prev_hash : 0;
-            conflict.content = current ? *current : std::string();
-            out.cas_conflicts.push_back(std::move(conflict));
-        }
+            out.cas_conflicts.push_back(
+                make_cas_conflict(key, *e.expected_raw_hash, current, prev_hash));
     }
 
     // Any per-file CAS precondition failed -> refuse the ENTIRE batch (atomic: not one byte written).

@@ -377,7 +377,7 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
                 return Envelope::failure("usage.missing_argument",
                                          "edit-batch files[" + std::to_string(i) +
                                              "] needs string 'path' and 'content'");
-            BatchEdit edit{*path, *content, std::nullopt};
+            BatchEdit edit{*path, *content}; // expected_raw_hash defaults to nullopt (unconditional)
             // Optional per-file R-CLI-006 raw-byte CAS precondition (`--if-match`). A mismatch on ANY
             // file refuses the WHOLE batch (atomic — nothing written); the reply names every conflict.
             if (const std::optional<std::string> raw = string_param(f, "ifMatch"))
@@ -402,16 +402,7 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
             {
                 Json conflicts = Json::array();
                 for (const EditOutcome::CasConflict& c : out.cas_conflicts)
-                {
-                    Json entry = Json::object();
-                    entry.set("path", Json(c.path));
-                    entry.set("present", Json(c.present));
-                    entry.set("expectedRawHash", hash_string(c.expected_raw_hash));
-                    entry.set("actualRawHash", hash_string(c.actual_raw_hash));
-                    if (c.present)
-                        entry.set("content", Json(c.content));
-                    conflicts.push_back(std::move(entry));
-                }
+                    conflicts.push_back(c.to_json());
                 Json fresh = Json::object();
                 fresh.set("conflicts", std::move(conflicts));
                 return Envelope::failure("cas.mismatch").with_error_data(std::move(fresh));
