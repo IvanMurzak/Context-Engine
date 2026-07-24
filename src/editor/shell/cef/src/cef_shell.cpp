@@ -1107,6 +1107,18 @@ public:
         }
     }
 
+    void detach() override
+    {
+        // Retire mid-process WITHOUT closing (browser.h § IBrowserHost::detach). `begin_close()` drops
+        // the sink and latches `closing_`, so this browser stops painting into a compositor that is
+        // going away AND a later paint is not miscounted as a lost frame — but it does NOT issue
+        // `CloseBrowser`, so NO `CefDoMessageLoopWork()` runs here and CEF is not asked to tear this
+        // browser down while sibling browsers are live. The actual close + drain is deferred to the
+        // WindowManager's shared, all-closing `shutdown()` (the e10a Windows `!in_dtor_` fix). Pumping
+        // nothing here is the whole point; a stray pump is exactly the interleaving this avoids.
+        client_->begin_close();
+    }
+
     void close() override
     {
         // The SINGLE-window / destructor path: request the close and drain THIS browser closed in one

@@ -41,18 +41,23 @@ namespace
 
 // ------------------------------------------------------------------------------- the instruments
 
-// Two shared counters make "when did this die" assertable. A test that only checks the registry's
-// own bookkeeping would pass just as happily if the objects were leaked or freed too early — which
-// is precisely the defect class CE #319 belongs to.
+// Shared counters make "when did this die — and how was it torn down" assertable. A test that only
+// checks the registry's own bookkeeping would pass just as happily if the objects were leaked, freed
+// too early, OR — the e10a `!in_dtor_` defect class — CLOSED and drained mid-process while sibling
+// browsers are live. `closes` vs `detaches` is exactly that distinction: a mid-process retire must
+// DETACH the browser (stop it painting, defer its CEF teardown) and must NOT close it; the close
+// happens only later, in the shared all-closing `shutdown()` drain.
 struct Deaths
 {
-    int browsers = 0;
-    int surfaces = 0;
+    int browsers = 0;   // ~CountingBrowserHost ran (the host object was destroyed)
+    int surfaces = 0;   // ~SurfaceProbe ran (a captured session surface was freed)
+    int detaches = 0;   // IBrowserHost::detach() — retired mid-process, teardown deferred
+    int closes = 0;     // close()/request_close() — the browser was actually asked to close
 };
 
-// A browser host that records its own destruction. Everything else is the minimum IBrowserHost
-// needs; the compositor never sees a frame from it, which is fine — this suite is about lifetimes
-// and identity, and the composite path has its own suite (test_compositor).
+// A browser host that records its own destruction AND how it was torn down. Everything else is the
+// minimum IBrowserHost needs; the compositor never sees a frame from it, which is fine — this suite
+// is about lifetimes and identity, and the composite path has its own suite (test_compositor).
 class CountingBrowserHost final : public IBrowserHost
 {
 public:
@@ -80,7 +85,15 @@ public:
     void set_focus(bool) override {}
     bool pump(IBrowserFrameSink&) override { return alive_flag_; }
     void execute_script(std::string_view source) override { scripts_.emplace_back(source); }
-    void close() override { alive_flag_ = false; }
+    void close() override
+    {
+        ++deaths_.closes;
+        alive_flag_ = false;
+    }
+    // Mid-process retire: recorded, and DELIBERATELY does not close — the whole point of the e10a fix
+    // is that a destroyed window's browser is detached (stops painting, teardown deferred) but stays
+    // open until the shared shutdown() drain closes it with every other browser at once.
+    void detach() override { ++deaths_.detaches; }
 
     [[nodiscard]] const std::vector<std::string>& scripts() const { return scripts_; }
 
@@ -434,8 +447,17 @@ void test_the_live_window_count_is_capped()
 
 // ---------------------------------------------------- 4. THE LIFETIME RULE (CE #319 generalised)
 
-void test_a_destroyed_window_kills_its_browser_but_retires_its_session()
+void test_a_destroyed_window_detaches_its_browser_and_retires_the_whole_session()
 {
+    // THE e10a `!in_dtor_` FIX asserted deterministically, on all three build legs. A mid-process
+    // destroy must NOT close + drain the window's browser: `CefDoMessageLoopWork()` is process-wide,
+    // so closing ONE browser while a sibling is live drives the closing browser's CEF teardown
+    // interleaved with the live one and, on Windows, re-enters a libcef ref-counted object's own
+    // destructor (`!in_dtor_`, CE #319 generalised). So destroy DETACHES the browser (stops it
+    // painting, defers its CEF teardown) and retires the WHOLE session — browser host included —
+    // leaving the browser OPEN until the shared, all-closing `shutdown()` drain. A fake browser cannot
+    // reproduce the CEF crash, but it CAN pin the lifetime + teardown SHAPE the crash came from: the
+    // detach-not-close, and the browser host surviving the destroy.
     const fs::path project = shelltest::make_temp_project("shell-registry", "lifetime");
     Deaths deaths;
     int browsers_alive = 0;
@@ -449,30 +471,40 @@ void test_a_destroyed_window_kills_its_browser_but_retires_its_session()
         CHECK(second.ok());
         CHECK(browsers_alive == 2);
         CHECK(deaths.surfaces == 0);
+        CHECK(deaths.detaches == 0);
+        CHECK(deaths.closes == 0);
 
         CHECK(manager.destroy_window(second.id).ok());
 
-        // The BROWSER is gone immediately — it is the thing holding the OS resources and the raw
-        // router pointer, and leaving it alive is what "destroy" must not mean.
-        CHECK(browsers_alive == 1);
-        CHECK(deaths.browsers == 1);
+        // The browser is DETACHED, not closed and not destroyed. Detaching is what stops it painting
+        // into a compositor that is going away; NOT closing it is what keeps the mid-process
+        // `CefDoMessageLoopWork()` teardown — the `!in_dtor_` re-entrancy — from ever running here.
+        CHECK(deaths.detaches == 1);
+        CHECK(deaths.closes == 0);   // ← the browser was NOT asked to close mid-process
+        CHECK(deaths.browsers == 0); // ← ...and its host object still lives, in the graveyard
+        CHECK(browsers_alive == 2);
 
-        // The SESSION is not. CEF finishes tearing a closed browser down inside CefShutdown, still
-        // dispatching to the client that holds this window's `BridgeRouter*` (CE #319), so freeing
-        // it here is the use-after-free. It is retired instead.
+        // The SESSION — browser, bridge, daemon client, surfaces — is retired, not freed. CEF finishes
+        // tearing a browser down inside CefShutdown, still dispatching to the client that holds this
+        // window's `BridgeRouter*` (CE #319), so freeing any of it here is the use-after-free.
         CHECK(deaths.surfaces == 0);
         CHECK(manager.retired_session_count() == 1);
     }
-    // ...and freed when the MANAGER dies, which the app sequences after shell::cef::shutdown().
+    // ...and the WHOLE session — browser host included — is freed only when the MANAGER dies, which the
+    // app sequences after shell::cef::shutdown(). Exactly one death of each, never early, never twice.
+    CHECK(deaths.browsers == 2); // the primary + the retired secondary
     CHECK(deaths.surfaces == 1);
     shelltest::cleanup(project);
 }
 
 void test_repeated_create_destroy_tears_down_cleanly_and_leaks_nothing()
 {
-    // The CE #319 hazard class asserted, not assumed: 25 full create/destroy cycles in ONE manager.
-    // Every browser must die on its cycle; every session must survive to the end; nothing may
-    // accumulate in the live set.
+    // The e10a `!in_dtor_` hazard class asserted, not assumed: 25 full create/destroy cycles in ONE
+    // manager. Every destroy must DETACH its browser and retire the whole session — never close +
+    // drain it mid-process (the interleaving teardown that aborts on Windows). So across the loop NO
+    // browser is closed and NO browser host is destroyed; both happen only at the end, in the shared
+    // all-closing shutdown() drain and then ~WindowManager. Every session must survive to the end;
+    // nothing may accumulate in the LIVE set (window_count stays at the primary + one peer).
     const fs::path project = shelltest::make_temp_project("shell-registry", "cycles");
     Deaths deaths;
     int browsers_alive = 0;
@@ -492,16 +524,19 @@ void test_repeated_create_destroy_tears_down_cleanly_and_leaks_nothing()
             CHECK(created.id > previous);
             previous = created.id;
             CHECK(manager.window_count() == 2);
-            CHECK(browsers_alive == 2);
+            // Alive host objects = the primary + every retired peer so far + this new one.
+            CHECK(browsers_alive == cycle + 2);
 
             // Pump with both windows live: the loop must not care how many there are.
             CHECK(manager.pump_once(static_cast<std::uint64_t>(cycle) * 1000u));
 
             CHECK(manager.destroy_window(created.id).ok());
-            CHECK(manager.window_count() == 1);
-            CHECK(browsers_alive == 1);           // this cycle's browser is gone NOW
-            CHECK(deaths.browsers == cycle + 1);  // ...exactly one per cycle, never two, never zero
-            CHECK(deaths.surfaces == 0);          // ...and no session freed early, ever
+            CHECK(manager.window_count() == 1);          // only the primary is LIVE again
+            CHECK(deaths.detaches == cycle + 1);         // this cycle's browser was DETACHED...
+            CHECK(deaths.closes == 0);                   // ...never closed mid-process...
+            CHECK(deaths.browsers == 0);                 // ...and never destroyed mid-process...
+            CHECK(browsers_alive == cycle + 2);          // ...so its host still lives, in the graveyard
+            CHECK(deaths.surfaces == 0);                 // ...and no session freed early, ever
         }
 
         CHECK(manager.retired_session_count() == static_cast<std::size_t>(kCycles));
@@ -511,19 +546,26 @@ void test_repeated_create_destroy_tears_down_cleanly_and_leaks_nothing()
         CHECK(manager.window(kPrimaryWindowId) != nullptr);
         CHECK(manager.pump_once(1'000'000u));
 
-        // shutdown() closes the remaining window — and still frees NO session, because it runs
-        // BEFORE shell::cef::shutdown() in the app.
+        // shutdown() closes EVERY browser — the live primary AND all 25 retired-but-open peers, in ONE
+        // all-closing drain (never mid-process). It still frees NO session, because it runs BEFORE
+        // shell::cef::shutdown() in the app.
         manager.shutdown();
         CHECK(manager.window_count() == 0);
-        CHECK(browsers_alive == 0);
+        CHECK(deaths.closes == kCycles + 1);   // 25 retired peers + the primary, all closed together
+        CHECK(deaths.browsers == 0);           // ...but nothing destroyed yet
+        CHECK(browsers_alive == kCycles + 1);  // ...every host still alive in the graveyard
         CHECK(deaths.surfaces == 0);
-        CHECK(manager.retired_session_count() == static_cast<std::size_t>(kCycles));
+        // The primary is retired too now (its browser host must also outlive CefShutdown): 25 + 1.
+        CHECK(manager.retired_session_count() == static_cast<std::size_t>(kCycles + 1));
 
-        // Idempotent, as documented — a second shutdown must not double-retire.
+        // Idempotent, as documented — a second shutdown must not double-retire or double-close.
         manager.shutdown();
-        CHECK(manager.retired_session_count() == static_cast<std::size_t>(kCycles));
+        CHECK(manager.retired_session_count() == static_cast<std::size_t>(kCycles + 1));
+        CHECK(deaths.closes == kCycles + 1);
     }
-    // Only now: every session freed, exactly once each.
+    // Only now: every browser host and every session surface freed, exactly once each, after
+    // shell::cef::shutdown() would have run in the app.
+    CHECK(browsers_alive == 0);
     CHECK(deaths.surfaces == kCycles);
     CHECK(deaths.browsers == kCycles + 1);
     shelltest::cleanup(project);
@@ -552,13 +594,20 @@ void test_shutdown_retires_the_session_of_every_window_still_open()
 
         manager.shutdown();
 
-        // Every browser closed — that half is what shutdown has always done.
+        // Every browser CLOSED — in ONE shared all-closing drain, which is the half that keeps the
+        // interleaving teardown from re-entering; that half is what shutdown has always done.
         CHECK(manager.window_count() == 0);
-        CHECK(browsers_alive == 0);
-        // ...and NOT ONE session freed, because CEF has not been shut down yet.
+        CHECK(deaths.closes == 3);
+        // ...but NOT ONE session — browser host included — freed, because CEF has not been shut down
+        // yet: every host is retired, alive, in the graveyard (the primary is retired now too).
+        CHECK(deaths.browsers == 0);
+        CHECK(browsers_alive == 3);
         CHECK(deaths.surfaces == 0);
-        CHECK(manager.retired_session_count() == 2);
+        CHECK(manager.retired_session_count() == 3);
     }
+    // Freed only when the manager dies, after shell::cef::shutdown() in the app.
+    CHECK(browsers_alive == 0);
+    CHECK(deaths.browsers == 3);
     CHECK(deaths.surfaces == 2);
     shelltest::cleanup(project);
 }
@@ -585,11 +634,20 @@ void test_a_window_that_dies_on_its_own_is_retired_not_freed()
         CHECK(manager.window(second.id) == nullptr);
         CHECK(manager.window_count() == 1);
         CHECK(manager.retired_session_count() == 1);
+        // Retired the same careful way as an explicit destroy: the browser is DETACHED, not closed and
+        // not destroyed — its CEF teardown is deferred to the shared shutdown() drain, never driven
+        // here while the primary is live.
+        CHECK(deaths.detaches == 1);
+        CHECK(deaths.closes == 0);
+        CHECK(deaths.browsers == 0);
+        CHECK(browsers_alive == 2);
         CHECK(deaths.surfaces == 0);
 
         // The surviving window is untouched: one window's death is not the loop's.
         CHECK(manager.window(kPrimaryWindowId) != nullptr);
     }
+    CHECK(browsers_alive == 0);
+    CHECK(deaths.browsers == 2);
     CHECK(deaths.surfaces == 1);
     shelltest::cleanup(project);
 }
@@ -706,7 +764,7 @@ int main()
     test_a_create_failure_is_reported_once_with_the_source_and_leaves_the_registry_usable();
     test_the_live_window_count_is_capped();
 
-    test_a_destroyed_window_kills_its_browser_but_retires_its_session();
+    test_a_destroyed_window_detaches_its_browser_and_retires_the_whole_session();
     test_repeated_create_destroy_tears_down_cleanly_and_leaks_nothing();
     test_shutdown_retires_the_session_of_every_window_still_open();
     test_a_window_that_dies_on_its_own_is_retired_not_freed();
