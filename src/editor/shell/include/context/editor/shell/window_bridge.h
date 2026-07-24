@@ -47,9 +47,16 @@
 namespace context::editor::shell
 {
 
+// The cross-window drag relay (cross_window_drag.h). Forward-declared: `drag.probe` / `drag.report-zone`
+// are served by this surface (they are window management), but the store's full type lives with the
+// drag SESSION, so only window_bridge.cpp needs it. A null store makes both methods INERT (the honest
+// state of a build/smoke that installed no drag session), which is why the five sibling CEF smokes need
+// no change to keep `bridge.refused() == 0` — they get the methods, wired to nothing.
+class CrossWindowDragStore;
+
 // --------------------------------------------------------------------------- the wire vocabulary
 //
-// Grep-stable, and MIRRORED by the TS side (src/editor/webui/core/src/window.ts). The
+// Grep-stable, and MIRRORED by the TS side (src/editor/webui/core/src/window.ts, src/.../drag.ts). The
 // `webui-panel-contract` gate re-reads these values out of the BUILT bundle and compares them to the
 // C++ constants here, the same cross-language discipline e05c/e08d apply to their vocabularies — so a
 // rename on either side reds a ctest instead of silently unbinding the window surface at runtime.
@@ -60,6 +67,14 @@ inline constexpr const char* kWindowMoveToMethod = "window.move-to";
 inline constexpr const char* kWindowSeedMethod = "window.seed";
 inline constexpr const char* kWindowRehomedMethod = "window.rehomed";
 inline constexpr const char* kWindowCloseMethod = "window.close";
+
+// The CROSS-WINDOW DRAG surface (M9 e10c, 04 §2). `drag.probe`: the TARGET window's editor-core asks
+// "is a cross-window drag over me, and where?" and gets the cursor in its OWN client pixels. `drag.
+// report-zone`: it answers back which drop zone the cursor is over. Both ride this window-management
+// surface so they are installed on EVERY window that installs `window.*` — which is every live smoke —
+// with no per-smoke change, exactly the property window_registry.h wanted from a new boot-time method.
+inline constexpr const char* kDragProbeMethod = "drag.probe";
+inline constexpr const char* kDragReportZoneMethod = "drag.report-zone";
 
 // Refusal codes a window method answers with. LOCAL codes (not R-CLI-008 catalog codes), the same
 // rationale panel_host.h states: they classify a HOST-side caller/wiring error, not a daemon-contract
@@ -177,6 +192,13 @@ public:
     void bind_close(CloseHandler handler);
     void bind_windows(WindowsProvider provider);
 
+    // Bind the shared cross-window drag relay (e10c). NULL — the default — leaves `drag.probe` /
+    // `drag.report-zone` INERT: probe answers `{active:false}` and report-zone is an accepted no-op, so
+    // a smoke that installed no drag session still routes them (never `unknown_method`) while doing
+    // nothing. The app (and the drag smoke) bind a real store; the five sibling smokes do not, and need
+    // no edit for it.
+    void bind_drag_store(CrossWindowDragStore* store);
+
     // --- the method bodies, exposed for direct testing -------------------------------------------
     // Each is total over renderer-controlled `params`, and each is what the corresponding `window.*`
     // handler calls, so the T1 suite exercises the SAME code the renderer reaches.
@@ -191,7 +213,16 @@ public:
     [[nodiscard]] contract::Json rehomed();
     [[nodiscard]] contract::Json close();
 
-    // Bind every `window.*` method on `router`. False when ANY binding was refused (a name
+    // e10c — the cross-window drag probe/answer. `drag_probe` reports the hover THIS window (`self_id_`)
+    // should act on: `{active, panelId, x, y, generation}`, with x/y in this window's client pixels, or
+    // `{active:false}` when no drag is over it (or no store is bound). `drag_report_zone` records this
+    // window's answer (`{valid, zoneId, generation}`) into the store; `error_code` is set (kErrWindow
+    // BadParams) on a malformed report. Both are total over renderer-controlled `params`.
+    [[nodiscard]] contract::Json drag_probe();
+    [[nodiscard]] contract::Json drag_report_zone(const contract::Json& params,
+                                                  std::string& error_code);
+
+    // Bind every `window.*` + `drag.*` method on `router`. False when ANY binding was refused (a name
     // collision), which is a wiring bug the caller must not ignore.
     [[nodiscard]] bool install(BridgeRouter& router);
 
@@ -199,11 +230,16 @@ public:
     [[nodiscard]] std::size_t tear_outs() const { return tear_outs_; }
     [[nodiscard]] std::size_t moves() const { return moves_; }
     [[nodiscard]] std::size_t seeds_served() const { return seeds_served_; }
+    // How many `drag.probe` calls saw an ACTIVE hover for this window, and how many `drag.report-zone`
+    // answers it forwarded to the store — the live smoke asserts an editor-core round trip from these.
+    [[nodiscard]] std::size_t drag_probes_active() const { return drag_probes_active_; }
+    [[nodiscard]] std::size_t drag_zones_reported() const { return drag_zones_reported_; }
     [[nodiscard]] WindowId self_id() const { return self_id_; }
 
 private:
     WindowId self_id_;
     WindowMoveStore& store_;
+    CrossWindowDragStore* drag_store_ = nullptr;
     TearOutHandler tear_out_;
     MoveToHandler move_to_;
     CloseHandler close_;
@@ -211,6 +247,8 @@ private:
     std::size_t tear_outs_ = 0;
     std::size_t moves_ = 0;
     std::size_t seeds_served_ = 0;
+    std::size_t drag_probes_active_ = 0;
+    std::size_t drag_zones_reported_ = 0;
 };
 
 } // namespace context::editor::shell

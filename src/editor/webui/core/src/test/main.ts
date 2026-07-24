@@ -25,6 +25,7 @@ import { bannerTests } from "./banners.test.js";
 import { uibusTests } from "./uibus.test.js";
 import { sessionTests } from "./session.test.js";
 import { windowTests } from "./window.test.js";
+import { dragTests } from "./drag.test.js";
 import { bootTests } from "./boot.test.js";
 
 // AWAITED since M9 e08d: `runTests` is async because the e08d boot cases drive the real, async
@@ -51,6 +52,7 @@ void runTests([
     ...uibusTests,
     ...sessionTests,
     ...windowTests,
+    ...dragTests,
     // LAST, deliberately: the boot cases drive the whole bundle against a mock Shell and leave real
     // boot state on the shared document (`data-editor-*`, the applied theme's custom properties), so
     // running them after every other case keeps that out of the others' way.

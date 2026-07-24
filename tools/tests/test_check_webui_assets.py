@@ -464,6 +464,9 @@ PANEL_BUNDLE = (
     'var WINDOW_SEED_METHOD = "window.seed";\n'
     'var WINDOW_REHOMED_METHOD = "window.rehomed";\n'
     'var WINDOW_CLOSE_METHOD = "window.close";\n'
+    # e10c cross-window drag vocabulary (drag.ts).
+    'var DRAG_PROBE_METHOD = "drag.probe";\n'
+    'var DRAG_REPORT_ZONE_METHOD = "drag.report-zone";\n'
 )
 
 # MIRRORS THE REAL HEADER'S SHAPE. The real `panel_host.h` declares the enum and the token
@@ -550,6 +553,9 @@ PANEL_CPP_WINDOW = (
     'inline constexpr const char* kWindowSeedMethod = "window.seed";\n'
     'inline constexpr const char* kWindowRehomedMethod = "window.rehomed";\n'
     'inline constexpr const char* kWindowCloseMethod = "window.close";\n'
+    # e10c: the cross-window drag surface lives on the same header (window_bridge.h).
+    'inline constexpr const char* kDragProbeMethod = "drag.probe";\n'
+    'inline constexpr const char* kDragReportZoneMethod = "drag.report-zone";\n'
 )
 
 PANEL_DOCUMENT = (
@@ -754,6 +760,30 @@ def test_bundle_missing_a_window_constant_fails(tmp_path: Path, ts_name: str) ->
 def test_a_renamed_window_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
     """Rot-into-a-no-op guard: rename the C++ constant and the gate can verify NOTHING -> exit 2."""
     renamed = PANEL_CPP_WINDOW.replace("kWindowTearOutMethod", "kWindowRipOutMethod")
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, window=renamed)
+
+
+@pytest.mark.parametrize("ts_name", ["DRAG_PROBE_METHOD", "DRAG_REPORT_ZONE_METHOD"])
+def test_drag_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> None:
+    """The e10c cross-window drag surface: a drift here leaves the target window's editor-core calling a
+    method the Shell no longer routes, so its drop-zone answer never round-trips and a cross-window drop
+    silently does nothing — invisible at runtime, red one live-CEF-smoke round away."""
+    drifted = re.sub(rf'({ts_name} = ")[^"]*(")', r"\1drag.drifted\2", PANEL_BUNDLE)
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+@pytest.mark.parametrize("ts_name", ["DRAG_PROBE_METHOD", "DRAG_REPORT_ZONE_METHOD"])
+def test_bundle_missing_a_drag_constant_fails(tmp_path: Path, ts_name: str) -> None:
+    """An ABSENT drag constant means editor-core cannot be answering the cross-window drop-zone query."""
+    stripped = "\n".join(line for line in PANEL_BUNDLE.splitlines() if ts_name not in line)
+    assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+def test_a_renamed_drag_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
+    """Rot-into-a-no-op guard: rename the C++ drag constant and the gate can verify NOTHING -> exit 2."""
+    renamed = PANEL_CPP_WINDOW.replace("kDragProbeMethod", "kDragPollMethod")
     with pytest.raises(check_webui_assets.CheckError):
         _run_panel(tmp_path, window=renamed)
 

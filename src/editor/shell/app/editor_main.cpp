@@ -14,6 +14,7 @@
 #include "context/editor/shell/app_scheme.h"
 #include "context/editor/shell/banners.h"
 #include "context/editor/shell/browser.h"
+#include "context/editor/shell/cross_window_drag.h"
 #include "context/editor/shell/daemon_lifecycle.h"
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
@@ -249,7 +250,8 @@ struct SecondaryWindowSurfaces
     }
 
     [[nodiscard]] bool install(shell::BridgeRouter& router, shell::WindowManager& manager,
-                               shell::WindowMoveStore& store, shell::WindowId window_id, bool headless)
+                               shell::WindowMoveStore& store, shell::CrossWindowDragStore& drag_store,
+                               shell::WindowId window_id, bool headless)
     {
         bool ok = handshake.install(router);
         ok = panel_host.install(router) && ok;
@@ -274,6 +276,9 @@ struct SecondaryWindowSurfaces
         ok = config.install(router) && ok;
         ok = session_bridge.install(router) && ok; // unbound -> the honest edit/attached:false baseline
         bind_window_bridge_handlers(window_bridge, manager, store, headless);
+        // e10c: this window can be a cross-window drag TARGET, so it answers `drag.probe` / `drag.
+        // report-zone` off the SHARED relay — the same store window 0 and the drag session use.
+        window_bridge.bind_drag_store(&drag_store);
         ok = window_bridge.install(router) && ok;
         return ok;
     }
@@ -381,6 +386,11 @@ int main(int argc, char** argv)
     // it OUTLIVES every window's WindowBridge — including those in retired sessions the manager frees
     // only in ~WindowManager (window_registry.h § LIFETIME RULE).
     shell::WindowMoveStore move_store;
+    // e10c: the cross-window DRAG relay (the hover the Shell publishes for the window under the cursor,
+    // and the drop zone that window's editor-core answers over the bridge). ONE per app, shared by every
+    // window's WindowBridge and by the drag session below; declared with `move_store` so it OUTLIVES
+    // every window's bridge — including the retired ones the manager frees in ~WindowManager.
+    shell::CrossWindowDragStore drag_store;
     shell::WindowManager manager(options.project);
 
     // --- the editor presence marker + the single-instance focus watcher (e14b, D15/C-F23) ---------
@@ -642,6 +652,9 @@ int main(int argc, char** argv)
     // reddens the ones not updated (window_registry.h; the e06d `refused()==0` rule).
     shell::WindowBridge window_bridge(shell::kPrimaryWindowId, move_store);
     bind_window_bridge_handlers(window_bridge, manager, move_store, options.headless);
+    // e10c: window 0 answers the cross-window drag probe off the shared relay too — the primary is a
+    // valid drop target like any peer (a panel dragged out of window 1 can rehome back into it).
+    window_bridge.bind_drag_store(&drag_store);
     if (!window_bridge.install(bridge))
     {
         std::fprintf(stderr, "context_editor: could not install the window bridge surface\n");
@@ -813,9 +826,9 @@ int main(int argc, char** argv)
     // Ownership of both is handed to the manager, which retires rather than frees them (shell.h) —
     // the CE #319 rule, now applying to a MID-PROCESS destroy as well as the process-wide one.
     manager.bind_window_factory(
-        [&options, project_mode, &manager, &move_store](const shell::WindowSpec& spec,
-                                                        shell::WindowSessionParts& parts,
-                                                        std::string& error) -> bool
+        [&options, project_mode, &manager, &move_store, &drag_store](
+            const shell::WindowSpec& spec, shell::WindowSessionParts& parts,
+            std::string& error) -> bool
         {
             shell::WindowDesc desc;
             desc.title = spec.title;
@@ -850,7 +863,7 @@ int main(int argc, char** argv)
             const shell::WindowId expected_id =
                 static_cast<shell::WindowId>(manager.last_minted_id() + 1u);
             auto surfaces = std::make_shared<SecondaryWindowSurfaces>(expected_id, move_store);
-            if (!surfaces->install(*window_bridge_router, manager, move_store, expected_id,
+            if (!surfaces->install(*window_bridge_router, manager, move_store, drag_store, expected_id,
                                    spec.headless))
             {
                 error = "a bridge surface refused to install on the new window";
@@ -912,6 +925,70 @@ int main(int argc, char** argv)
         [](const shell::WindowCreateFailure& failure)
         {
             std::fprintf(stderr, "context_editor: %s\n", shell::describe(failure).c_str());
+        });
+
+    // --- the cross-window drag session (e10c, design 04 §2) ---------------------------------------
+    //
+    // The Shell-mediated drag of a panel BETWEEN windows: once a drag leaves a window's bounds the Shell
+    // tracks the global cursor, targets the window under it, queries THAT window's editor-core for its
+    // drop zone over the bridge (`drag.probe` / `drag.report-zone`, already live on EVERY window above),
+    // and on drop rehomes through e10b's EXISTING move path — no third recreate mechanism (D6).
+    //
+    // The seam is ASSEMBLED here — the window-under-cursor + screen->local resolvers, and the e10b drop
+    // path — but the interactive GESTURE that drives it (begin on drag-leaves-bounds, update on the
+    // global cursor, drop / Escape, and the OS cursor capture the session takes at `begin`) rides the
+    // deferred interactive-Windows pass (docs/shell.md), for the same reason e10a wired the window
+    // factory with no trigger and the profile defers every interactive-Windows drill: a Session-0 CI
+    // runner cannot drive a real global-cursor drag. The session's SAFETY-CRITICAL invariant (the
+    // capture is released on EVERY exit path) is proven by `editor-shell-test_cross_window_drag`; the
+    // cross-origin round trip by `editor-cef-smoke-shell-drag`.
+    shell::CrossWindowDragSession drag_session(drag_store);
+    drag_session.bind_window_at_point(
+        [&manager](shell::PointI screen) -> shell::WindowId
+        {
+            // The last (most recently created) window whose remembered screen rect contains the point —
+            // a reasonable stacking proxy until the interactive pass reads true OS z-order.
+            shell::WindowId hit = shell::kInvalidWindowId;
+            for (const shell::WindowId id : manager.window_ids())
+            {
+                shell::EditorWindow* candidate = manager.window(id);
+                if (candidate == nullptr)
+                {
+                    continue;
+                }
+                const shell::WindowPlacement placement = candidate->last_placement();
+                const std::int32_t right = placement.x + static_cast<std::int32_t>(placement.width);
+                const std::int32_t bottom = placement.y + static_cast<std::int32_t>(placement.height);
+                if (screen.x >= placement.x && screen.x < right && screen.y >= placement.y &&
+                    screen.y < bottom)
+                {
+                    hit = id;
+                }
+            }
+            return hit;
+        });
+    drag_session.bind_to_local(
+        [&manager](shell::WindowId target, shell::PointI screen) -> shell::PointI
+        {
+            if (shell::EditorWindow* window = manager.window(target))
+            {
+                const shell::WindowPlacement placement = window->last_placement();
+                return shell::PointI{screen.x - placement.x, screen.y - placement.y};
+            }
+            return screen;
+        });
+    drag_session.bind_drop(
+        [&manager, &move_store](shell::WindowId target, const shell::PanelSeed& seed) -> bool
+        {
+            // e10b's EXISTING rehome path — the SAME `enqueue_rehome` a `window.move-to` uses, drained
+            // by the target window's editor-core on its `window.rehomed` poll. NOT a third recreate
+            // mechanism (D6): a new one emerging here would be a REPORTABLE finding, not this line.
+            if (manager.window(target) == nullptr)
+            {
+                return false;
+            }
+            move_store.enqueue_rehome(target, seed);
+            return true;
         });
 
     // --- the owner loop ----------------------------------------------------------------------------
