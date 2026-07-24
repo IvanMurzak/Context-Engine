@@ -9,13 +9,33 @@
 # reuses SCCACHE_CACHE_KEY, exported by setup-build-env earlier in the same job, so the saved key
 # is byte-identical to the restored primary key → main keeps ~1 authoritative entry per
 # (preset, os, image, week). Windows is a no-op (setup-build-env computed no key there).
+#
+# QUIESCE-BEFORE-SAVE (issue #396): the sccache SERVER is still running when actions/cache tars the
+# local-disk dir (setup-build-env started it; the per-job `sccache stats` step only queried it — it
+# is NOT stopped anywhere before this composite runs), so sccache's own background writes/evictions
+# race the archive. GNU tar then reads files that vanish mid-read and dies with a fatal
+# `"/usr/bin/tar" failed with exit code 2` — non-fatal to the run (it stays green) but the warmed
+# cache is frequently NOT re-persisted, cooling later builds. `sccache --stop-server` flushes pending
+# writes and releases the dir, so tar archives a quiescent tree. This composite is the FINAL step of
+# each saver job, so stopping the server here strands nothing (no later step needs sccache).
 
 name: Save build environment (sccache dir, main only)
-description: Persist the sccache local-disk dir via actions/cache — save only on refs/heads/main (non-Windows); the key is the one setup-build-env exported.
+description: Persist the sccache local-disk dir via actions/cache — save only on refs/heads/main (non-Windows); the key is the one setup-build-env exported. Stops the sccache server first so the dir is quiescent while it is archived.
 
 runs:
   using: composite
   steps:
+    # Stop the sccache server so its local-disk dir has NO live writer while actions/cache tars it
+    # (issue #396 — see the header note). Guarded IDENTICALLY to the save below (non-Windows + main),
+    # so it runs only when a save actually follows. `${SCCACHE_PATH:-sccache}` reuses the binary path
+    # sccache-action exported (the same var the `sccache stats` steps use); `|| true` keeps an
+    # already-stopped/absent server from failing the job (stopping is best-effort — the save is what
+    # must succeed).
+    - name: Stop sccache server (quiesce dir before save, main only)
+      if: runner.os != 'Windows' && github.ref == 'refs/heads/main'
+      shell: bash
+      run: ${SCCACHE_PATH:-sccache} --stop-server || true
+
     - name: Save sccache dir (main only)
       if: runner.os != 'Windows' && github.ref == 'refs/heads/main'
       uses: actions/cache/save@v6
