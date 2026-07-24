@@ -4,7 +4,9 @@
 #include "context/editor/shell/window_bridge.h"
 
 #include "context/editor/shell/cross_window_drag.h" // the drag relay served by drag.probe/report-zone
+#include "json_number_read.h" // the shared range-guarded numeric read (float-cast-overflow UB guard)
 
+#include <cstdint>
 #include <set>
 #include <utility>
 
@@ -369,6 +371,38 @@ contract::Json WindowBridge::ui_mirror_poll()
     return out;
 }
 
+contract::Json WindowBridge::ui_mirror_report(const contract::Json& params, std::string& error_code)
+{
+    // A convergence report carries two non-negative running totals: how many mirrored facts the
+    // receiving bus APPLIED and how many own-origin echoes it DROPPED. A report missing either, or
+    // carrying a negative / non-numeric one, is a wiring bug it fails CLOSED on rather than recording
+    // a meaningless count the smoke would then assert against.
+    // Both counts are untrusted renderer-wire numbers, routed through the shared range-guarded read
+    // (json_number_read.h): the [0, u32-max] check runs on the DOUBLE before any integral cast, so an
+    // out-of-int64 double fails CLOSED here rather than triggering the `float-cast-overflow` UB the
+    // blocking `sanitize (ASan+UBSan)` leg reports. Absent / non-number / NaN / negative all read the
+    // same "no usable number" way — the wiring bug the smoke must never assert a meaningless count off.
+    const std::optional<double> applied = detail::number_in_range(params, "applied", 0.0, 4294967295.0);
+    const std::optional<double> suppressed =
+        detail::number_in_range(params, "suppressed", 0.0, 4294967295.0);
+    if (!applied.has_value() || !suppressed.has_value())
+    {
+        error_code = kErrWindowBadParams;
+        return contract::Json{};
+    }
+
+    // Last-write-wins: the renderer sends CUMULATIVE totals (they only grow), so the latest report
+    // holds the current convergence — the smoke waits for `applied` / `suppressed` to reach the value
+    // that proves the drill and they never regress.
+    ui_mirror_reported_applied_ = static_cast<std::size_t>(*applied);
+    ui_mirror_reported_suppressed_ = static_cast<std::size_t>(*suppressed);
+    ++ui_mirror_reports_;
+
+    contract::Json out = contract::Json::object();
+    out.set("recorded", contract::Json(true));
+    return out;
+}
+
 bool WindowBridge::install(BridgeRouter& router)
 {
     bool ok = router.register_method(kWindowListMethod,
@@ -445,6 +479,19 @@ bool WindowBridge::install(BridgeRouter& router)
     ok = router.register_method(kUiMirrorPollMethod,
                                 [this](const BridgeRequest&) -> BridgeResult
                                 { return BridgeResult::ok(ui_mirror_poll()); }) &&
+         ok;
+    ok = router.register_method(
+             kUiMirrorReportMethod,
+             [this](const BridgeRequest& request) -> BridgeResult
+             {
+                 std::string error_code;
+                 contract::Json value = ui_mirror_report(request.params, error_code);
+                 if (!error_code.empty())
+                 {
+                     return BridgeResult::error(error_code, "ui.mirror-report was malformed");
+                 }
+                 return BridgeResult::ok(std::move(value));
+             }) &&
          ok;
     return ok;
 }

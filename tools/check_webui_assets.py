@@ -253,6 +253,21 @@ DRAG_CONSTANTS = (
     ("drag.report-zone", "window_bridge.h", "kDragReportZoneMethod", "DRAG_REPORT_ZONE_METHOD"),
 )
 
+# The M9 e10d cross-window `editor.ui` MIRROR surface (design 05 §5, D7 tier 2), whose C++ vocabulary
+# also lives on the window-management surface (window_bridge.h) and whose TS mirror is uimirror.ts.
+# e10d-core LANDED these constants but did not yet WIRE the mirror at boot, so uimirror.ts was not in
+# the production bundle and this gate could not cross-check them; e10d-drill2 wires it (boot.ts) — the
+# transport is now live, so a rename on one side would silently stop the cross-window mirror
+# propagating (the sink calls a `ui.mirror` the Shell no longer routes) with NO build error. Guarded
+# here now, identically to the window / drag surfaces it rides beside. `ui.mirror-report` is the
+# convergence telemetry the LIVE `editor-cef-smoke-shell-uimirror` leg asserts on — its drift would
+# leave the receiving bus's applied/dropped verdict unobservable, so it is pinned alongside.
+UI_MIRROR_CONSTANTS = (
+    ("ui.mirror", "window_bridge.h", "kUiMirrorMethod", "UI_MIRROR_METHOD"),
+    ("ui.mirror-poll", "window_bridge.h", "kUiMirrorPollMethod", "UI_MIRROR_POLL_METHOD"),
+    ("ui.mirror-report", "window_bridge.h", "kUiMirrorReportMethod", "UI_MIRROR_REPORT_METHOD"),
+)
+
 # The closed gesture vocabulary (04 §4), compared SET vs SET between the C++ wire tokens and the
 # bundle's own GESTURE_VERBS array, so a verb added on one side without the other — which would be
 # refused at runtime with no build error — fails here instead.
@@ -840,6 +855,24 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
                 f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
                 f"Shell would route one name and editor-core would call another, so the drop-zone query "
                 f"would refuse with `unknown_method` and the cross-window drag would never find a target.")
+
+    # 7a9 — the e10d cross-window `editor.ui` mirror vocabulary agrees across the two languages. Same
+    # mechanism as 7a8; the failure mode is that the sink calls a `ui.mirror` (or the poller a
+    # `ui.mirror-poll`, or boot a `ui.mirror-report`) the Shell no longer routes, so a chrome fact
+    # published in one window silently never reaches the others — the mirror simply stops propagating.
+    for human, cpp_file, cpp_name, ts_name in UI_MIRROR_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(
+                f"{human}: the bundle does not declare {ts_name} — editor-core cannot be calling the "
+                f"cross-window mirror method the Shell routes, so an editor.ui fact would never reach "
+                f"another window")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
+                f"Shell would route one name and editor-core would call another, so the cross-window "
+                f"editor.ui mirror would silently stop propagating with NO error anywhere.")
 
     # 7b — the D6 persisted-blob member names agree (gui/contract/panel_state.h is their authority).
     for human, cpp_name, ts_name in PANEL_STATE_CONSTANTS:
