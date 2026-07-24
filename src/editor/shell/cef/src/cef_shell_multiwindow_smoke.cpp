@@ -59,6 +59,7 @@
 #include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/user_config.h"
 #include "context/editor/shell/welcome.h"
+#include "context/editor/shell/window_bridge.h"
 #include "context/editor/shell/window_registry.h"
 
 #include <chrono>
@@ -142,12 +143,16 @@ struct WindowSurfaces
     // surface is an `unknown_method` REFUSAL that trips this smoke's `refused() == 0` invariant for
     // every window. Unbound is the honest state for a smoke with no daemon (`edit`, `attached:false`).
     shell::SessionBridge session_bridge;
+    // e10b: the window-management surface. UNBOUND here — this smoke drives create/destroy through the
+    // manager DIRECTLY, not the bridge — but installed on every window so editor-core's boot-time
+    // `window.*` calls are served, not refused. Constructed in `install` (it needs the window id).
+    std::unique_ptr<shell::WindowBridge> window_bridge;
 
     // Install every surface on `router`, routing region publishes to `window_id`. All the empty
     // paths are deliberate — a permanently-absent per-user file makes the boot deterministic
     // regardless of what the CI host has in `~/.context/` (the sibling smokes' rationale, verbatim).
     [[nodiscard]] bool install(shell::BridgeRouter& router, shell::WindowManager& manager,
-                               shell::WindowId window_id)
+                               shell::WindowMoveStore& store, shell::WindowId window_id)
     {
         bool ok = handshake.install(router);
         ok = panel_host.install(router) && ok;
@@ -176,6 +181,9 @@ struct WindowSurfaces
         ok = config.install(router) && ok;
         // Unbound: no `bind_provider`, so it serves the `edit`/`attached:false` boot baseline.
         ok = session_bridge.install(router) && ok;
+        // e10b: the window.* surface, UNBOUND (create/destroy is driven through the manager here).
+        window_bridge = std::make_unique<shell::WindowBridge>(window_id, store);
+        ok = window_bridge->install(router) && ok;
         return ok;
     }
 };
@@ -242,12 +250,15 @@ int main(int argc, char** argv)
     // Declared BEFORE the manager so its bridge outlives every handler AND outlives the manager's
     // own teardown; `shell::cef::shutdown()` below runs while both are still in scope, which is the
     // CE #319 invariant `cef_shell.h` states.
+    // e10b: the cross-window move relay, declared FIRST so it outlives every window's WindowBridge —
+    // including those in retired sessions the manager frees only in ~WindowManager.
+    shell::WindowMoveStore move_store;
     shell::BridgeRouter primary_bridge;
     WindowSurfaces primary_surfaces;
 
     shell::WindowManager manager(project);
 
-    SMOKE_CHECK(primary_surfaces.install(primary_bridge, manager, shell::kPrimaryWindowId),
+    SMOKE_CHECK(primary_surfaces.install(primary_bridge, manager, move_store, shell::kPrimaryWindowId),
                 "every bridge surface installed on window 0");
 
     {
@@ -314,7 +325,7 @@ int main(int argc, char** argv)
             auto surfaces = std::make_shared<WindowSurfaces>();
             const shell::WindowId expected_id =
                 static_cast<shell::WindowId>(manager.last_minted_id() + 1u);
-            if (!surfaces->install(*window_bridge, manager, expected_id))
+            if (!surfaces->install(*window_bridge, manager, move_store, expected_id))
             {
                 error = "a bridge surface refused to install on the new window";
                 return false;

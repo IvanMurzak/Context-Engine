@@ -225,6 +225,17 @@ export interface PanelHostOptions {
     readonly localPanels?: ReadonlyMap<string, LocalPanelFactory>;
 }
 
+/** Options for `PanelHost.start`. */
+export interface PanelHostStartOptions {
+    /**
+     * When set, open ONLY the panel with this id instead of the whole default roster (M9 e10b) — the
+     * TEAR-OUT target's boot path: a new window seeded with a single moved panel shows exactly it, not
+     * a fresh default arrangement. An unhosted / unknown id opens nothing (reported like any other
+     * unavailable panel), so a stale seed cannot force an empty-but-broken window.
+     */
+    readonly only?: string;
+}
+
 /** Why PanelHost could not start, when it could not. Empty on success. */
 export interface PanelHostStartReport {
     readonly started: boolean;
@@ -270,7 +281,7 @@ export class PanelHost {
      * render — is a REPORTED state, because the alternative in a renderer whose only diagnostic
      * channel is a DOM attribute is an unhandled rejection nobody sees.
      */
-    async start(): Promise<PanelHostStartReport> {
+    async start(options: PanelHostStartOptions = {}): Promise<PanelHostStartReport> {
         if (this.#dockview === undefined) {
             return {
                 started: false,
@@ -302,6 +313,12 @@ export class PanelHost {
         const unavailable: string[] = [];
         let mounted = 0;
         for (const manifest of roster.panels) {
+            // e10b: a seeded (torn-out) window opens ONLY its one moved panel. Every other rostered
+            // panel is skipped here — not reported unavailable, because it IS hostable, just not part
+            // of this window's arrangement.
+            if (options.only !== undefined && manifest.id !== options.only) {
+                continue;
+            }
             if (manifest.contentType === "local") {
                 // A local panel has no Shell provider, so `hosted` is false for it BY CONSTRUCTION —
                 // this branch must therefore come BEFORE the hosted gate below, or the one panel
@@ -377,6 +394,33 @@ export class PanelHost {
                   }),
         });
         return this.#panels.has(manifest.id);
+    }
+
+    /**
+     * Open one panel BY ID, looked up from the roster (M9 e10b). The seed-open path: a torn-out or
+     * rehomed panel arrives as an id + a D6 state blob, and the target window opens it here, then the
+     * caller restores the blob over `panel.state.set`. Returns false when the id is unknown to this
+     * build's roster or already open — the same honest outcomes `open` reports.
+     */
+    openById(panelId: string): boolean {
+        const manifest = this.#roster?.panels.find((entry) => entry.id === panelId);
+        return manifest !== undefined && this.open(manifest);
+    }
+
+    /**
+     * Float a mounted panel's group inside THIS window (M9 e10b) — the LOUD degradation home when a
+     * secondary-window create fails (03 §7). The panel does not silently stay where it was: it becomes
+     * a floating Dockview group, which `dockview-core` renders with an inline `position:absolute` the
+     * user (and the live smoke) can SEE. Returns false when the panel is not mounted or the docking
+     * root is down (nothing to float), so the caller can report the degrade honestly.
+     */
+    floatPanel(panelId: string): boolean {
+        const panel = this.#api?.getPanel(panelId);
+        if (this.#api === null || panel === undefined) {
+            return false;
+        }
+        this.#api.addFloatingGroup(panel);
+        return true;
     }
 
     /** Close one panel, disposing its hydration runtime. */

@@ -277,4 +277,47 @@ if(OS_WINDOWS OR OS_LINUX)
     set_tests_properties(editor-cef-smoke-shell-multiwindow PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_multiwindow_smoke>"
         TIMEOUT 420)
+
+    # --- the LIVE TEAR-OUT + rehome smoke (ctest editor-cef-smoke-shell-tearout) -------------------
+    # M9 e10b: the DoD lines a CEF-free test cannot reach — a `window.tear-out` producing a SECOND
+    # real CEF browser that boots its OWN editor-core and RESTORES the moved D6 state (proven because
+    # the live renderer's `window.seed` consumes the relay's boot seed), a LOUD create-failure result
+    # (03 §7), and a `window.move-to` rehome that window 0's LIVE editor-core drains on its
+    # `window.rehomed` poll. Same `editor-cef-smoke-` family + the same link recipe as the multiwindow
+    # smoke (context_editor_cef precedes the CEF libs — the single-left-to-right-pass rule;
+    # context_editor_panels binds the real providers so each window's editor-core has panels to host).
+    #
+    # ⚠ "Not Run = RED" TRIPWIRE: that job builds a hand-maintained --target list, so this executable
+    # is ALSO listed in ci.yml's editor-cef-smoke build step (and mirrored in the profile's test.md
+    # § CI). The regex would otherwise match a test whose executable was never built.
+    #
+    # TIMEOUT covers TWO sequential live browser boots (window 0 + the torn-out window 1) plus the
+    # seed-consumption and rehome-drain waits — the sibling single-boot smokes budget 180s each.
+    add_executable(context_editor_shell_tearout_smoke src/cef_shell_tearout_smoke.cpp)
+    SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_tearout_smoke)
+    add_dependencies(context_editor_shell_tearout_smoke libcef_dll_wrapper)
+    target_link_libraries(context_editor_shell_tearout_smoke
+        context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+    target_include_directories(context_editor_shell_tearout_smoke PRIVATE "${CEF_ROOT}")
+
+    # Same single-staging dependency as the sibling smokes above (issue #360).
+    add_dependencies(context_editor_shell_tearout_smoke context_editor_cef_stage)
+
+    # Same webui asset dependency + compiled-in root as the sibling smokes: both windows load
+    # `context-editor://app/index.html`, so editor-core's built asset set must exist when it runs.
+    add_dependencies(context_editor_shell_tearout_smoke context_editor_webui)
+    if(NOT CONTEXT_WEBUI_ASSET_DIR)
+        message(FATAL_ERROR
+            "context_editor_shell_tearout_smoke: CONTEXT_WEBUI_ASSET_DIR is empty — "
+            "src/editor/webui must be added BEFORE src/editor/shell (src/CMakeLists.txt orders it "
+            "so); it publishes the asset root as CACHE INTERNAL.")
+    endif()
+    target_compile_definitions(context_editor_shell_tearout_smoke PRIVATE
+        "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
+
+    add_test(NAME editor-cef-smoke-shell-tearout
+        COMMAND context_editor_shell_tearout_smoke)
+    set_tests_properties(editor-cef-smoke-shell-tearout PROPERTIES
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_tearout_smoke>"
+        TIMEOUT 300)
 endif()

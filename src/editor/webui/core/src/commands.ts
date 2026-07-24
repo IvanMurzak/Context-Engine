@@ -211,6 +211,20 @@ export interface EditorCommandActions {
     moveActivePanel(direction: DockDirection): CommandOutcome | Promise<CommandOutcome>;
     closeActivePanel(): CommandOutcome | Promise<CommandOutcome>;
     toggleTheme(): CommandOutcome | Promise<CommandOutcome>;
+    /**
+     * Tear the active panel out into a NEW native window (M9 e10b, R-A11Y-001). The keyboard-only
+     * path for the OS-window tear-out — deliberately NOT a drag gesture (that is e10c) and NOT
+     * Dockview's popout (B-F2). Serializes the panel's D6 state, asks the Shell to create a window
+     * seeded with it, and — on a create FAILURE — degrades LOUDLY to a floating group in this window
+     * (03 §7). The action is what makes tear-out reachable without a pointer.
+     */
+    tearOutActivePanel(): CommandOutcome | Promise<CommandOutcome>;
+    /**
+     * Move the active panel to the MAIN window (window 0) — the "Move panel to window N" path for the
+     * one window that always exists (the app menu / welcome host, D13). Uses the SAME D6 relay as
+     * tear-out and window-close rehome; the target's editor-core recreates the panel on its poll.
+     */
+    movePanelToPrimary(): CommandOutcome | Promise<CommandOutcome>;
 }
 
 /**
@@ -269,6 +283,33 @@ export function editorCommands(actions: EditorCommandActions): readonly Command[
                 detail: "dock action; requires a focused panel and no text input",
             },
             handler: () => actions.closeActivePanel(),
+        },
+        {
+            id: "view.window.tearOut",
+            title: "Move Panel to New Window",
+            category: "editor",
+            when: "panelFocus && !textInputFocus",
+            docs: {
+                summary: "Tear the focused panel out into a new native window (state preserved)",
+                detail:
+                    "window action (M9 e10b, R-A11Y-001); serializes the panel's D6 state and seeds a " +
+                    "new Shell window with it — NOT Dockview popout (B-F2); a create failure degrades " +
+                    "loudly to a floating group in this window (03 §7)",
+            },
+            handler: () => actions.tearOutActivePanel(),
+        },
+        {
+            id: "view.window.moveToPrimary",
+            title: "Move Panel to Main Window",
+            category: "editor",
+            when: "panelFocus && !textInputFocus",
+            docs: {
+                summary: "Move the focused panel to the main window (window 0)",
+                detail:
+                    "window action (M9 e10b); uses the SAME D6 recreate relay as tear-out and " +
+                    "window-close rehome, delivered to the main window on its poll",
+            },
+            handler: () => actions.movePanelToPrimary(),
         },
         {
             id: "view.theme.toggle",

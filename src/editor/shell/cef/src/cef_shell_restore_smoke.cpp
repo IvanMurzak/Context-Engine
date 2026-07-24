@@ -117,6 +117,7 @@
 #include "context/editor/shell/app_scheme.h"
 #include "context/editor/shell/banners.h"
 #include "context/editor/shell/session_bridge.h"
+#include "context/editor/shell/window_bridge.h"
 #include "context/editor/shell/cef/cef_shell.h"
 #include "context/editor/shell/editor_state.h"
 #include "context/editor/shell/editor_state_bridge.h"
@@ -371,10 +372,16 @@ SessionOutcome run_session(const std::filesystem::path& project,
     // this smoke has no daemon, so the surface honestly reports `state:"edit", attached:false`.
     shell::SessionBridge session_bridge;
 
+    // e10b: editor-core's boot now calls `window.seed` / `window.list` / `window.rehomed`; install the
+    // surface (unbound — no tear-out is driven here) for the same deny-by-default reason as every
+    // surface above, or those calls refuse and this smoke's `refused() == 0` invariant trips.
+    shell::WindowMoveStore window_move_store;
+    shell::WindowBridge window_move_bridge(shell::kPrimaryWindowId, window_move_store);
+
     if (!handshake.install(bridge) || !panel_host.install(bridge) ||
         !editor_state_bridge.install(bridge) || !keybindings_bridge.install(bridge) ||
         !themes_bridge.install(bridge) || !banner_bridge.install(bridge) ||
-        !session_bridge.install(bridge))
+        !session_bridge.install(bridge) || !window_move_bridge.install(bridge))
     {
         std::fprintf(stderr, "[%s] FAIL: a bridge surface refused to install\n", cfg.label);
         return out;

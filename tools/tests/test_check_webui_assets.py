@@ -457,6 +457,13 @@ PANEL_BUNDLE = (
     # e08d session-relay vocabulary (session.ts + when.ts).
     'var SESSION_STATE_METHOD = "session.state";\n'
     'var PLAY_STATE_EVENT = "play-state";\n'
+    # e10b window-management vocabulary (window.ts).
+    'var WINDOW_LIST_METHOD = "window.list";\n'
+    'var WINDOW_TEAR_OUT_METHOD = "window.tear-out";\n'
+    'var WINDOW_MOVE_TO_METHOD = "window.move-to";\n'
+    'var WINDOW_SEED_METHOD = "window.seed";\n'
+    'var WINDOW_REHOMED_METHOD = "window.rehomed";\n'
+    'var WINDOW_CLOSE_METHOD = "window.close";\n'
 )
 
 # MIRRORS THE REAL HEADER'S SHAPE. The real `panel_host.h` declares the enum and the token
@@ -533,6 +540,18 @@ PANEL_CPP_SESSION = (
     'inline constexpr const char* kSessionPlayStateEvent = "play-state";\n'
 )
 
+# The e10b window-management surface's methods live in window_bridge.h, same plain-constant way. A
+# rename on either side leaves a tear-out / move / rehome calling a method the Shell no longer routes,
+# so the panel is silently lost — the exact thing 03 §7's loud-degradation contract forbids.
+PANEL_CPP_WINDOW = (
+    'inline constexpr const char* kWindowListMethod = "window.list";\n'
+    'inline constexpr const char* kWindowTearOutMethod = "window.tear-out";\n'
+    'inline constexpr const char* kWindowMoveToMethod = "window.move-to";\n'
+    'inline constexpr const char* kWindowSeedMethod = "window.seed";\n'
+    'inline constexpr const char* kWindowRehomedMethod = "window.rehomed";\n'
+    'inline constexpr const char* kWindowCloseMethod = "window.close";\n'
+)
+
 PANEL_DOCUMENT = (
     "<!DOCTYPE html>\n"
     '<html lang="en">\n'
@@ -554,6 +573,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
                    themes: str = PANEL_CPP_THEMES,
                    config: str = PANEL_CPP_CONFIG,
                    session: str = PANEL_CPP_SESSION,
+                   window: str = PANEL_CPP_WINDOW,
                    package: dict | None = None,
                    stage_dockview: bool = True) -> tuple[Path, Path, Path, Path, Path]:
     asset_dir = tmp_path / "app"
@@ -572,6 +592,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
     (include_dir / "themes_bridge.h").write_text(themes, encoding="utf-8")
     (include_dir / "user_config.h").write_text(config, encoding="utf-8")
     (include_dir / "session_bridge.h").write_text(session, encoding="utf-8")
+    (include_dir / "window_bridge.h").write_text(window, encoding="utf-8")
 
     contract_dir = tmp_path / "contractinclude"
     contract_dir.mkdir(parents=True, exist_ok=True)
@@ -708,6 +729,33 @@ def test_a_renamed_session_cpp_constant_is_a_config_error(tmp_path: Path) -> Non
     renamed = PANEL_CPP_SESSION.replace("kSessionStateMethod", "kSessionFetchMethod")
     with pytest.raises(check_webui_assets.CheckError):
         _run_panel(tmp_path, session=renamed)
+
+
+@pytest.mark.parametrize(
+    "ts_name",
+    ["WINDOW_LIST_METHOD", "WINDOW_TEAR_OUT_METHOD", "WINDOW_MOVE_TO_METHOD",
+     "WINDOW_SEED_METHOD", "WINDOW_REHOMED_METHOD", "WINDOW_CLOSE_METHOD"])
+def test_window_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> None:
+    """The e10b window surface: a drift here leaves a tear-out / move / rehome calling a method the
+    Shell no longer routes, so the panel refuses with `unknown_method` and is silently lost — the exact
+    03 §7 failure the DoD forbids, invisible at runtime (the editor is up, nothing errors)."""
+    drifted = re.sub(rf'({ts_name} = ")[^"]*(")', r"\1window.drifted\2", PANEL_BUNDLE)
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+@pytest.mark.parametrize("ts_name", ["WINDOW_TEAR_OUT_METHOD", "WINDOW_SEED_METHOD"])
+def test_bundle_missing_a_window_constant_fails(tmp_path: Path, ts_name: str) -> None:
+    """An ABSENT window constant means editor-core cannot be calling the surface the Shell serves."""
+    stripped = "\n".join(line for line in PANEL_BUNDLE.splitlines() if ts_name not in line)
+    assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+def test_a_renamed_window_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
+    """Rot-into-a-no-op guard: rename the C++ constant and the gate can verify NOTHING -> exit 2."""
+    renamed = PANEL_CPP_WINDOW.replace("kWindowTearOutMethod", "kWindowRipOutMethod")
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, window=renamed)
 
 
 @pytest.mark.parametrize(

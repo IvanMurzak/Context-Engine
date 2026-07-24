@@ -26,6 +26,7 @@
 #include "context/editor/shell/shell.h"
 #include "context/editor/shell/welcome.h"
 #include "context/editor/shell/window.h"
+#include "context/editor/shell/window_bridge.h"
 #include "context/render/rhi.h"
 
 #if defined(CONTEXT_EDITOR_HAS_CEF)
@@ -174,6 +175,110 @@ std::uint64_t now_us()
             .count());
 }
 
+// e10b: how a WINDOW-MANAGEMENT bridge's handlers reach the registry. Bound IDENTICALLY on window 0
+// and on every factory-created window, so a tear-out / move / rehome / close behaves the same wherever
+// it is asked. Captures only `manager` + `store`, both of which outlive every window AND the graveyard
+// the registry retires windows into, so the handlers stay valid for a retired session's whole life
+// (window_registry.h § LIFETIME RULE).
+void bind_window_bridge_handlers(shell::WindowBridge& wb, shell::WindowManager& manager,
+                                 shell::WindowMoveStore& store, bool headless)
+{
+    wb.bind_windows([&manager]() -> std::vector<shell::WindowId> { return manager.window_ids(); });
+    wb.bind_tear_out(
+        [&manager, &store, headless](const shell::WindowBridge::TearOut& req)
+            -> shell::WindowMoveResult
+        {
+            shell::WindowSpec spec;
+            if (!req.title.empty())
+                spec.title = req.title;
+            spec.headless = headless;
+            const shell::WindowCreateResult created = manager.create_window(spec, req.source);
+            if (!created.ok())
+                return {false, shell::kInvalidWindowId, shell::to_string(created.outcome),
+                        created.error};
+            // Seed the NEW window: its editor-core reads exactly this panel + state at boot (D6).
+            store.set_boot_seed(created.id, req.seed);
+            return {true, created.id, shell::to_string(created.outcome), std::string{}};
+        });
+    wb.bind_move_to(
+        [&manager, &store](const shell::WindowBridge::MoveTo& req) -> shell::WindowMoveResult
+        {
+            if (manager.window(req.target) == nullptr)
+                return {false, shell::kInvalidWindowId, std::string{}, "no live window with that id"};
+            store.enqueue_rehome(req.target, req.seed);
+            return {true, req.target, std::string{}, std::string{}};
+        });
+    wb.bind_close(
+        [&manager, &store](shell::WindowId self) -> shell::WindowMoveResult
+        {
+            const shell::WindowDestroyResult d = manager.destroy_window(self);
+            if (d.ok())
+                store.forget(self); // drop any seeds queued for a window that is now gone
+            return {d.ok(), self, shell::to_string(d.outcome), d.error};
+        });
+}
+
+// e10b: everything a FACTORY-CREATED window's editor-core calls during boot — the SAME surface set
+// window 0 gets (mirrors the multiwindow smoke's `WindowSurfaces`), so a torn-out panel is genuinely
+// LIVE in its new window (renders, restores its D6 state, and can be torn out / moved again), not a
+// blank second window. Type-erased into `parts.surfaces` (window_registry.h) so the registry outlives
+// it without knowing its shape; member order puts `handshake` first so it is destroyed LAST (the
+// router's handlers captured it), and the router lives in the session, outside this object.
+//
+// The daemon FEED is deliberately NOT wired here — only window 0's builtins are fed by the app's
+// lifecycle. A factory window's panels render their default state, and the moved panel's PRESERVED
+// content is its restored D6 state, which is exactly what tear-out must carry (04 §3). Cross-window
+// live-feed mirroring is e10c/e10d.
+struct SecondaryWindowSurfaces
+{
+    shell::ShellHandshake handshake{shell::make_handshake_nonce()};
+    shell::PanelHost panel_host;
+    shell::panels::BuiltinPanels builtin = shell::panels::install_builtin_panels(panel_host);
+    shell::EditorStateBridge editor_state;
+    shell::KeybindingsBridge keybindings;
+    shell::ThemesBridge themes;
+    shell::WelcomeBridge welcome;
+    shell::BannerBridge banners;
+    shell::UserConfigStore config;
+    shell::SessionBridge session_bridge;
+    shell::WindowBridge window_bridge;
+
+    SecondaryWindowSurfaces(shell::WindowId window_id, shell::WindowMoveStore& store)
+        : window_bridge(window_id, store)
+    {
+    }
+
+    [[nodiscard]] bool install(shell::BridgeRouter& router, shell::WindowManager& manager,
+                               shell::WindowMoveStore& store, shell::WindowId window_id, bool headless)
+    {
+        bool ok = handshake.install(router);
+        ok = panel_host.install(router) && ok;
+        editor_state.bind_store(&manager.state_store(), now_us);
+        editor_state.bind_regions(
+            [&manager, window_id](std::vector<shell::ShellRegion> regions)
+            {
+                // Routed to THIS window (window_registry.h): a hard-coded window 0 would hand the new
+                // window's region rects to the primary's input arbiter.
+                if (shell::EditorWindow* target = manager.window(window_id))
+                    target->input().regions().publish(std::move(regions));
+            });
+        ok = editor_state.install(router) && ok;
+        keybindings.bind_path(shell::default_keybindings_path());
+        ok = keybindings.install(router) && ok;
+        themes.bind_directory(shell::default_themes_directory());
+        ok = themes.install(router) && ok;
+        welcome.set_launch_mode(shell::LaunchMode::project);
+        ok = welcome.install(router) && ok;
+        ok = banners.install(router) && ok;
+        config.bind_path(shell::user_config_path());
+        ok = config.install(router) && ok;
+        ok = session_bridge.install(router) && ok; // unbound -> the honest edit/attached:false baseline
+        bind_window_bridge_handlers(window_bridge, manager, store, headless);
+        ok = window_bridge.install(router) && ok;
+        return ok;
+    }
+};
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -271,6 +376,11 @@ int main(int argc, char** argv)
     // this manager's window, so the manager must be the longest-lived composition object. Its
     // constructor loads `.editor/editor-state.json` (the Shell is that file's SINGLE writer, 03 §1);
     // the window itself is adopted later, once the browser + present path exist.
+    //
+    // e10b: the cross-window MOVE relay (boot seeds + rehome queues). Declared BEFORE the manager so
+    // it OUTLIVES every window's WindowBridge — including those in retired sessions the manager frees
+    // only in ~WindowManager (window_registry.h § LIFETIME RULE).
+    shell::WindowMoveStore move_store;
     shell::WindowManager manager(options.project);
 
     // --- the editor presence marker + the single-instance focus watcher (e14b, D15/C-F23) ---------
@@ -522,6 +632,22 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // --- the window-management surface (e10b, design 03 §1 / §7) -----------------------------------
+    //
+    // editor-core's ONLY way to move a panel between windows: tear-out, "move to window N", and
+    // window-close rehome all travel through here (the browser side has no window registry of its
+    // own). Bound to window 0 (the primary) + the shared move relay; the factory below installs the
+    // SAME surface on every window it creates. This is the ONE new boot-time bridge method e10b adds,
+    // so it is installed on EVERY live CEF smoke too, or the router's deny-unknown-methods default
+    // reddens the ones not updated (window_registry.h; the e06d `refused()==0` rule).
+    shell::WindowBridge window_bridge(shell::kPrimaryWindowId, move_store);
+    bind_window_bridge_handlers(window_bridge, manager, move_store, options.headless);
+    if (!window_bridge.install(bridge))
+    {
+        std::fprintf(stderr, "context_editor: could not install the window bridge surface\n");
+        return 1;
+    }
+
     lifecycle.set_subscription_topics({shell::panels::kDiagnosticsTopic,
                                        shell::panels::kDerivationTopic,
                                        shell::panels::kSessionTopic});
@@ -687,8 +813,9 @@ int main(int argc, char** argv)
     // Ownership of both is handed to the manager, which retires rather than frees them (shell.h) —
     // the CE #319 rule, now applying to a MID-PROCESS destroy as well as the process-wide one.
     manager.bind_window_factory(
-        [&options, project_mode](const shell::WindowSpec& spec, shell::WindowSessionParts& parts,
-                                 std::string& error) -> bool
+        [&options, project_mode, &manager, &move_store](const shell::WindowSpec& spec,
+                                                        shell::WindowSessionParts& parts,
+                                                        std::string& error) -> bool
         {
             shell::WindowDesc desc;
             desc.title = spec.title;
@@ -715,12 +842,18 @@ int main(int argc, char** argv)
                 parts.backend = std::move(selection.backend);
             }
 
-            auto handshake =
-                std::make_shared<shell::ShellHandshake>(shell::make_handshake_nonce());
-            auto window_bridge = std::make_unique<shell::BridgeRouter>();
-            if (!handshake->install(*window_bridge))
+            // e10b: ITS OWN router + the FULL boot surface (not just a handshake as in e10a), so a
+            // torn-out panel is genuinely LIVE in this window. Installed against the id the registry is
+            // ABOUT to mint (last_minted_id()+1 on a fresh create — the multiwindow smoke's proven
+            // pattern), so region routing + `window.seed` resolve to THIS window.
+            auto window_bridge_router = std::make_unique<shell::BridgeRouter>();
+            const shell::WindowId expected_id =
+                static_cast<shell::WindowId>(manager.last_minted_id() + 1u);
+            auto surfaces = std::make_shared<SecondaryWindowSurfaces>(expected_id, move_store);
+            if (!surfaces->install(*window_bridge_router, manager, move_store, expected_id,
+                                   spec.headless))
             {
-                error = "could not install the bridge handshake on the new window";
+                error = "a bridge surface refused to install on the new window";
                 return false;
             }
 
@@ -751,7 +884,7 @@ int main(int argc, char** argv)
             cef_options.url = options.url;
             cef_options.devtools_enabled = options.devtools;
             cef_options.app_asset_root = options.app_root;
-            cef_options.bridge = window_bridge.get();
+            cef_options.bridge = window_bridge_router.get();
             std::string browser_error;
             parts.browser = shell::cef::make_cef_browser_host(cef_options, browser_error);
             if (parts.browser == nullptr)
@@ -762,10 +895,12 @@ int main(int argc, char** argv)
 #else
             parts.browser = std::make_unique<shell::ScriptedBrowserHost>();
 #endif
-            // The handshake goes in LAST and comes out FIRST-to-last-destroyed: the router's
-            // handlers captured it, so it must outlive the router (window_registry.h § LIFETIME).
-            parts.surfaces.push_back(std::move(handshake));
-            parts.bridge = std::move(window_bridge);
+            // The full surface bundle goes in as ONE type-erased surface (it owns the handshake +
+            // panel host + every bridge, incl. this window's WindowBridge); it must outlive the router
+            // that captured it, which WindowSessionParts' member order guarantees (window_registry.h
+            // § LIFETIME RULE — surfaces are destroyed AFTER the bridge).
+            parts.surfaces.push_back(std::move(surfaces));
+            parts.bridge = std::move(window_bridge_router);
             error.clear();
             return true;
         });

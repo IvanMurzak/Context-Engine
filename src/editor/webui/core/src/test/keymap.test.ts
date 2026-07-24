@@ -337,6 +337,8 @@ export const keymapTests: readonly TestCase[] = [
                     moveActivePanel: (d) => record(`move:${d}`),
                     closeActivePanel: () => record("close"),
                     toggleTheme: () => record("theme"),
+                    tearOutActivePanel: () => record("tearOut"),
+                    movePanelToPrimary: () => record("moveToPrimary"),
                 },
                 sessionActions: { undo: () => record("undo"), redo: () => record("redo") },
                 roster: { contractMajor: 2, panels: [] },

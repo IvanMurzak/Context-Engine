@@ -200,6 +200,10 @@ export const DEFAULT_KEYBINDINGS: readonly Keybinding[] = [
     binding("Alt+ArrowUp", "view.panel.move.up", "panelFocus && !textInputFocus"),
     binding("Alt+ArrowDown", "view.panel.move.down", "panelFocus && !textInputFocus"),
     binding("Ctrl+W", "view.panel.close", "panelFocus && !textInputFocus"),
+    // e10b: the OS-window tear-out + move-to-main-window paths, keyboard-reachable (R-A11Y-001) —
+    // the design's keyboard alternative to the e10c drag gesture (which is out of scope here).
+    binding("Ctrl+Shift+N", "view.window.tearOut", "panelFocus && !textInputFocus"),
+    binding("Ctrl+Shift+M", "view.window.moveToPrimary", "panelFocus && !textInputFocus"),
     binding("Ctrl+T", "view.theme.toggle"),
     // The command palette (e07d): openable from ANYWHERE — including from inside a text field — so it
     // carries no `when` guard. This is the universal keyboard path to every command (R-CLI-001).

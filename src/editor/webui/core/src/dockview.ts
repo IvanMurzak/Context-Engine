@@ -102,6 +102,16 @@ export interface DockviewApi {
     addPanel(options: DockviewAddPanelOptions): DockviewPanelHandle;
     getPanel(id: string): DockviewPanelHandle | undefined;
     removePanel(panel: DockviewPanelHandle): void;
+    /**
+     * Float an existing panel's group inside THIS window (M9 e10b) — Dockview's IN-WINDOW floating,
+     * which is geometry and therefore in scope (NOT popout, B-F2). The loud-degradation home when a
+     * secondary-window create fails (03 §7): the torn-out panel becomes a floating group in the
+     * source window instead of silently doing nothing. `dockview-core` renders a floating group with
+     * an INLINE `position:absolute` on its container — which is what makes "it floated" observable on
+     * the rendered output rather than reasoned from a selector (panelhost.ts / the live smoke verify
+     * the RENDERED result, standing lesson #3).
+     */
+    addFloatingGroup(panel: DockviewPanelHandle): void;
     layout(width: number, height: number): void;
     toJSON(): unknown;
     fromJSON(state: unknown): void;

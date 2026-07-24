@@ -47,6 +47,7 @@ import { Palette, PALETTE_TOGGLE_COMMAND_ID, paletteCommands } from "./palette.j
 import { PaletteView } from "./palette_view.js";
 import { PanelClient } from "./panels.js";
 import { PanelHost, type LocalPanelFactory } from "./panelhost.js";
+import { WindowClient, type WindowSeed } from "./window.js";
 import {
     SETTINGS_PANEL_ID,
     mountSettings,
@@ -330,12 +331,27 @@ async function startPanels(
     }
     try {
         const client = new PanelClient(bridge);
+        const windowClient = new WindowClient(bridge);
+        // e10b: is this window a TEAR-OUT TARGET? A boot seed means "a panel was moved here — open
+        // ONLY it, restored from its D6 state", never the fresh default arrangement. An ordinary
+        // window (and every CEF smoke that installs the surface unseeded) reports `seeded:false` and
+        // takes the default path unchanged.
+        const boot = await windowClient.seed();
+        const seed: WindowSeed | null = boot.seeded ? boot.seed : null;
         // The Settings panel is editor-core's own content (e06d): the roster declares it
         // `content.type: "local"` and THIS is the build that knows how to draw it. Nothing else about
         // PanelHost changes — an unregistered local panel is reported unavailable like any other.
         const settings = makeSettingsPanel(bridge, theme, config);
         const host = new PanelHost({ container, client, localPanels: settings.factories });
-        const report = await host.start();
+        const report = await host.start(seed !== null ? { only: seed.panelId } : {});
+        // Restore the moved panel's D6 state onto the freshly-opened panel — the SAME recreate path
+        // (open + panel.state.set + refresh) window-close rehome uses, which is the whole point of D6:
+        // one mechanism, exercised here at boot and by the rehome poll at runtime. Asserted on the
+        // RENDERED output (a value a fresh panel could not have) by the live tear-out smoke.
+        if (seed !== null && report.started) {
+            await client.setState(seed.panelId, seed.state);
+            await host.refreshAll();
+        }
 
         // --- layout persistence + region maps (e05d2) --------------------------------------------
         // The panels are up; now make the ARRANGEMENT durable. Restore the persisted layout + per-
@@ -348,26 +364,37 @@ async function startPanels(
         // reachable through the mounted DOM.
         if (report.started) {
             try {
-                const stateClient = new EditorStateClient(bridge);
-                const persistence = new LayoutPersistence({
-                    panelHost: host,
-                    panelClient: client,
-                    stateClient,
-                });
-                const restoreReport = await persistence.restore();
-                // Report the restore OUTCOME to the Shell (e05d4). The restart smoke asserts this is
-                // `layoutRestored:false` on a fresh boot and `true` on a boot that reapplied a
-                // persisted arrangement — the end-to-end proof that the arrangement round-tripped
-                // through the Shell's editor-state store. Best-effort: `reportRestore` swallows a
-                // Shell refusal, so it can never keep `attach` from running below.
-                await stateClient.reportRestore(restoreReport);
-                persistence.attach();
+                // A seeded (torn-out) window is a FRESH target: it restores no persisted arrangement
+                // (cross-window layout persistence is e10d) — it shows exactly the moved panel. An
+                // ordinary window restores its layout + per-panel D6 state as before.
+                if (seed === null) {
+                    const stateClient = new EditorStateClient(bridge);
+                    const persistence = new LayoutPersistence({
+                        panelHost: host,
+                        panelClient: client,
+                        stateClient,
+                    });
+                    const restoreReport = await persistence.restore();
+                    // Report the restore OUTCOME to the Shell (e05d4). The restart smoke asserts this
+                    // is `layoutRestored:false` on a fresh boot and `true` on a boot that reapplied a
+                    // persisted arrangement — the end-to-end proof that the arrangement round-tripped
+                    // through the Shell's editor-state store. Best-effort: `reportRestore` swallows a
+                    // Shell refusal, so it can never keep `attach` from running below.
+                    await stateClient.reportRestore(restoreReport);
+                    persistence.attach();
+                }
+                // --- the cross-window move machinery (e10b) ------------------------------------
+                // Wire it in EVERY window: the rehome poll (this window opens panels moved INTO it,
+                // from a "move to window N" or a peer's window-close rehome) and, for a non-primary
+                // window, the pagehide rehome-to-window-0 ("close a window with panels ⇒ they rehome,
+                // never lost"). Both use the SAME recreate path as the seed-open above (D6).
+                await startWindowMechanism(windowClient, host, client);
                 // --- the command layer + palette (e07d) ----------------------------------------
                 // The docking root is up and persistence is live; wire the ONE command registry, the
                 // palette over it, and (only under `?ctx-smoke-palette`) drive the T2 command-driven
                 // scenario. Placed AFTER `persistence.attach()` so a palette-driven layout change
                 // publishes over the live editor.state channel — the observable the T2 smoke asserts.
-                startCommandLayer(host, client, theme, whenContext);
+                startCommandLayer(host, client, windowClient, theme, whenContext);
                 // e06d settings-smoke seam: only under `?ctx-smoke-settings`, drive a REAL theme
                 // switch through the Settings panel so the live leg can assert the Shell persisted it.
                 runSettingsSmoke(settings.mount());
@@ -590,6 +617,99 @@ async function startThemeFeed(bridge: ShellBridge, engine: ThemeEngine): Promise
     }
 }
 
+/** The <html> attribute the e10b window mechanism reports its state on (for --dump-dom + the smoke). */
+export const WINDOW_ATTRIBUTE = "data-editor-window";
+
+/** How often a window polls for panels moved INTO it (move-to-N + a peer's window-close rehome). */
+const REHOME_POLL_MS = 500;
+
+/** Mirror the window mechanism's state onto <html> for a --dump-dom repro and the live smoke. */
+function reportWindow(detail: string): void {
+    if (typeof document !== "undefined") {
+        document.documentElement.setAttribute(WINDOW_ATTRIBUTE, detail);
+    }
+}
+
+/**
+ * Open + restore every panel that has rehomed INTO this window (M9 e10b) — the RUNTIME half of the
+ * D6 recreate path (the boot seed is the boot half). Each seed is `openById` + `panel.state.set` +
+ * `refreshAll`, exactly the seed-open in `startPanels`, so rehome and tear-out demonstrably use the
+ * SAME mechanism (a DoD line). Best-effort and total: a panel this build cannot host is skipped.
+ */
+async function applyRehomedPanels(
+    host: PanelHost,
+    client: PanelClient,
+    seeds: readonly WindowSeed[],
+): Promise<number> {
+    let applied = 0;
+    for (const seed of seeds) {
+        if (host.openById(seed.panelId)) {
+            await client.setState(seed.panelId, seed.state);
+            applied += 1;
+        }
+    }
+    if (applied > 0) {
+        await host.refreshAll();
+    }
+    return applied;
+}
+
+/**
+ * Wire the cross-window MOVE machinery for THIS window (M9 e10b). Returns this window's id.
+ *
+ * Two channels, both over the SAME D6 relay as tear-out:
+ *   * the REHOME POLL — a light interval draining `window.rehomed`, so a panel moved to this window
+ *     (a "move to window N", or a closing peer's rehome) opens here at runtime;
+ *   * the PAGEHIDE REHOME — a NON-PRIMARY window, on close, moves every open panel to window 0, so
+ *     "close a window with panels ⇒ they rehome, never silently lost". The primary never does this:
+ *     it hosts the app menu / welcome screen (D13) and is the rehome TARGET, not a source.
+ *
+ * NEVER throws: a Shell with no window surface (an older build, or a smoke that did not install it)
+ * leaves the window on the default single-window behaviour, reported on `<html data-editor-window>`.
+ */
+async function startWindowMechanism(
+    windowClient: WindowClient,
+    host: PanelHost,
+    client: PanelClient,
+): Promise<number> {
+    let windowId = 0;
+    let detail = "single window";
+    try {
+        const list = await windowClient.list();
+        windowId = list?.windowId ?? 0;
+        // Drain anything already queued (a move that landed before this window finished booting).
+        const applied = await applyRehomedPanels(host, client, await windowClient.rehomed());
+        // The runtime poll: cheap, and started ONLY when the Shell actually serves the surface.
+        if (list !== null && typeof setInterval === "function") {
+            setInterval((): void => {
+                void windowClient.rehomed().then((seeds) => {
+                    if (seeds.length > 0) {
+                        void applyRehomedPanels(host, client, seeds);
+                    }
+                });
+            }, REHOME_POLL_MS);
+        }
+        // A non-primary window rehomes its panels to window 0 when it closes, so nothing is lost.
+        if (list !== null && windowId !== 0 && typeof window !== "undefined") {
+            window.addEventListener("pagehide", (): void => {
+                for (const id of [...host.mounted]) {
+                    void client.getState(id).then((state) => {
+                        void windowClient.moveTo(id, state, 0);
+                    });
+                }
+            });
+        }
+        detail =
+            windowId === 0
+                ? `window 0 (primary); ${applied} rehomed at boot`
+                : `window ${windowId} (secondary); rehome-on-close armed; ${applied} rehomed at boot`;
+    } catch (error) {
+        detail = `window mechanism unavailable: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    reportWindow(detail);
+    return windowId;
+}
+
 /**
  * Wire the D8 command layer (e07d): build the ONE registry from all three sources, create the palette
  * over it, register the palette-open command, mount the palette overlay, and — only under the
@@ -602,6 +722,7 @@ async function startThemeFeed(bridge: ShellBridge, engine: ThemeEngine): Promise
 function startCommandLayer(
     host: PanelHost,
     client: PanelClient,
+    windowClient: WindowClient,
     theme: ThemeEngine | undefined,
     whenContext: () => WhenContext,
 ): void {
@@ -621,7 +742,7 @@ function startCommandLayer(
                 ok: false,
                 note: `daemon RPC fan-in not wired yet (D19): ${method}`,
             }),
-            editorActions: makeEditorActions(host, theme),
+            editorActions: makeEditorActions(host, client, windowClient, theme),
             // Session undo/redo binding + dispatch land here (e07c); the wire REPLAY of the journal is
             // e09 (undo_journal.h). Executing them is an honest refusal until then.
             sessionActions: {
@@ -690,7 +811,19 @@ function startCommandLayer(
  * with no restart, preserving high contrast. It refuses only when there is no engine at all (a
  * documentless host), which is an honest "there is nothing to theme".
  */
-function makeEditorActions(host: PanelHost, theme: ThemeEngine | undefined): EditorCommandActions {
+function makeEditorActions(
+    host: PanelHost,
+    client: PanelClient,
+    windowClient: WindowClient,
+    theme: ThemeEngine | undefined,
+): EditorCommandActions {
+    // The "active" panel is the last-mounted one, mirroring `closeActivePanel` above — real focus
+    // tracking is the 03 §6 input-pump seam; until it lands this is the deterministic stand-in the
+    // tear-out / move commands share with close.
+    const activePanel = (): string | undefined => {
+        const mounted = host.mounted;
+        return mounted.length > 0 ? mounted[mounted.length - 1] : undefined;
+    };
     return {
         focusNextPanel: (): CommandOutcome => ({
             ok: false,
@@ -725,6 +858,47 @@ function makeEditorActions(host: PanelHost, theme: ThemeEngine | undefined): Edi
             return report.applied
                 ? { ok: true, note: `theme switched to ${report.themeId}` }
                 : { ok: false, note: report.diagnostic };
+        },
+        // e10b: tear the active panel out into a NEW window over the D6 relay (serialize -> create +
+        // seed -> the new window's editor-core recreates + restores). On success the panel is REMOVED
+        // here (the D6 destroy step). On a create FAILURE it degrades LOUDLY (03 §7) — the panel is
+        // floated (a visible floating group) and the reason is reported, never a silent no-op.
+        tearOutActivePanel: async (): Promise<CommandOutcome> => {
+            const active = activePanel();
+            if (active === undefined) {
+                return { ok: false, note: "no active panel to tear out" };
+            }
+            const state = await client.getState(active);
+            const result = await windowClient.tearOut(active, state);
+            if (result.created) {
+                host.close(active); // the panel now lives in the new window — recreate + destroy, D6
+                reportWindow(`torn out ${active} to window ${result.windowId}`);
+                return { ok: true, note: `torn out ${active} to window ${result.windowId}` };
+            }
+            const floated = host.floatPanel(active);
+            reportWindow(
+                `tear-out FAILED (${result.outcome}: ${result.error}); ` +
+                    `${floated ? "floated" : "kept"} ${active} in this window`,
+            );
+            return {
+                ok: false,
+                note: `tear-out failed (${result.outcome}); ${floated ? "floated" : "kept"} ${active} loudly`,
+            };
+        },
+        // e10b: move the active panel to the MAIN window (window 0) over the SAME relay. The target
+        // opens it on its rehome poll; on success the panel is removed here.
+        movePanelToPrimary: async (): Promise<CommandOutcome> => {
+            const active = activePanel();
+            if (active === undefined) {
+                return { ok: false, note: "no active panel to move" };
+            }
+            const state = await client.getState(active);
+            const result = await windowClient.moveTo(active, state, 0);
+            if (result.moved) {
+                host.close(active);
+                return { ok: true, note: `moved ${active} to window 0` };
+            }
+            return { ok: false, note: `move to window 0 failed: ${result.error}` };
         },
     };
 }

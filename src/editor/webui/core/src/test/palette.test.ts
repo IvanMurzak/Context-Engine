@@ -44,6 +44,8 @@ function noopEditorActions(record?: string[]): EditorCommandActions {
         moveActivePanel: (d) => note(`move:${d}`),
         closeActivePanel: () => note("close"),
         toggleTheme: () => note("theme"),
+        tearOutActivePanel: () => note("tearOut"),
+        movePanelToPrimary: () => note("moveToPrimary"),
     };
 }
 
