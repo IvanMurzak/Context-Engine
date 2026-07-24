@@ -35,6 +35,7 @@
 
 #include "context/editor/contract/json.h"
 #include "context/editor/shell/ipc_bridge.h"
+#include "context/editor/shell/ui_mirror.h"
 #include "context/editor/shell/window_registry.h"
 
 #include <cstddef>
@@ -75,6 +76,16 @@ inline constexpr const char* kWindowCloseMethod = "window.close";
 // with no per-smoke change, exactly the property window_registry.h wanted from a new boot-time method.
 inline constexpr const char* kDragProbeMethod = "drag.probe";
 inline constexpr const char* kDragReportZoneMethod = "drag.report-zone";
+
+// The CROSS-WINDOW `editor.ui` MIRROR surface (M9 e10d, 05 §5, D7 tier 2). `ui.mirror`: editor-core
+// hands the Shell one `editor.ui` envelope it published locally, and the Shell BROADCASTS it to every
+// live window (including the sender — the shape that arms the receiving bus's own-origin echo drop).
+// `ui.mirror-poll`: a window drains the envelopes broadcast INTO it, on the same cheap poll shape as
+// `window.rehomed` / `drag.probe`, and feeds each to `EditorUiBus.receiveMirrored`. Both ride this
+// window-management surface so they are installed on EVERY window that installs `window.*` — which is
+// every live smoke — with no per-smoke change (a null store leaves them INERT, never `unknown_method`).
+inline constexpr const char* kUiMirrorMethod = "ui.mirror";
+inline constexpr const char* kUiMirrorPollMethod = "ui.mirror-poll";
 
 // Refusal codes a window method answers with. LOCAL codes (not R-CLI-008 catalog codes), the same
 // rationale panel_host.h states: they classify a HOST-side caller/wiring error, not a daemon-contract
@@ -199,6 +210,13 @@ public:
     // no edit for it.
     void bind_drag_store(CrossWindowDragStore* store);
 
+    // Bind the shared cross-window `editor.ui` mirror relay (e10d). NULL — the default — leaves
+    // `ui.mirror` / `ui.mirror-poll` INERT: mirror accepts and drops the envelope, poll answers an
+    // empty batch, so a smoke that installed no mirror still ROUTES them (never `unknown_method`)
+    // while doing nothing. The app (and the mirror smoke) bind a real store; the sibling smokes do
+    // not, and need no edit for it — the same INERT-without-a-store discipline `bind_drag_store` uses.
+    void bind_ui_mirror_store(UiMirrorStore* store);
+
     // --- the method bodies, exposed for direct testing -------------------------------------------
     // Each is total over renderer-controlled `params`, and each is what the corresponding `window.*`
     // handler calls, so the T1 suite exercises the SAME code the renderer reaches.
@@ -222,6 +240,16 @@ public:
     [[nodiscard]] contract::Json drag_report_zone(const contract::Json& params,
                                                   std::string& error_code);
 
+    // e10d — the cross-window `editor.ui` mirror. `ui_mirror` takes ONE `{seq, topic, origin, payload}`
+    // envelope editor-core published and BROADCASTS it to every live window (self included) via the
+    // bound store + `WindowsProvider`; `error_code` is set (kErrWindowBadParams) on a malformed
+    // envelope, and a null store makes it a well-formed no-op. `ui_mirror_poll` drains the envelopes
+    // broadcast INTO this window (`{events:[...]}`), which editor-core feeds to `receiveMirrored`
+    // (dropping the one whose `origin` is its own — the broadcasting echo-suppression branch). Both
+    // are total over renderer-controlled `params`.
+    [[nodiscard]] contract::Json ui_mirror(const contract::Json& params, std::string& error_code);
+    [[nodiscard]] contract::Json ui_mirror_poll();
+
     // Bind every `window.*` + `drag.*` method on `router`. False when ANY binding was refused (a name
     // collision), which is a wiring bug the caller must not ignore.
     [[nodiscard]] bool install(BridgeRouter& router);
@@ -234,12 +262,18 @@ public:
     // answers it forwarded to the store — the live smoke asserts an editor-core round trip from these.
     [[nodiscard]] std::size_t drag_probes_active() const { return drag_probes_active_; }
     [[nodiscard]] std::size_t drag_zones_reported() const { return drag_zones_reported_; }
+    // How many `editor.ui` envelopes this window BROADCAST out (`ui.mirror` accepted) and how many it
+    // drained IN (`ui.mirror-poll` delivered) — the live smoke asserts a cross-window round trip from
+    // these, exactly as it does from `seeds_served()` / `drag_zones_reported()`.
+    [[nodiscard]] std::size_t ui_mirrors_published() const { return ui_mirrors_published_; }
+    [[nodiscard]] std::size_t ui_mirrors_delivered() const { return ui_mirrors_delivered_; }
     [[nodiscard]] WindowId self_id() const { return self_id_; }
 
 private:
     WindowId self_id_;
     WindowMoveStore& store_;
     CrossWindowDragStore* drag_store_ = nullptr;
+    UiMirrorStore* mirror_store_ = nullptr;
     TearOutHandler tear_out_;
     MoveToHandler move_to_;
     CloseHandler close_;
@@ -249,6 +283,8 @@ private:
     std::size_t seeds_served_ = 0;
     std::size_t drag_probes_active_ = 0;
     std::size_t drag_zones_reported_ = 0;
+    std::size_t ui_mirrors_published_ = 0;
+    std::size_t ui_mirrors_delivered_ = 0;
 };
 
 } // namespace context::editor::shell

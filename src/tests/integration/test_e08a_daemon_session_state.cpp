@@ -254,7 +254,7 @@ void test_propagation_and_echo_suppression_and_play()
     remove_tree(project);
 }
 
-// ------------------------------------- 2b. N windows are N origins (M9 e10a, over a REAL wire)
+// ---------------------- 2b. N windows are N origins + the e10d SECOND-WINDOW SELECTION DRILL 1
 //
 // e10a makes N native editor windows real, and each one opens its OWN wire connection to the daemon
 // precisely so it has its OWN `origin` (the Shell's window factory in `editor_main.cpp` calls
@@ -267,6 +267,18 @@ void test_propagation_and_echo_suppression_and_play()
 // This is the wire half: two connections to ONE daemon on ONE project get two different, non-zero
 // ids — deliberately checked here, in the drill that owns the `origin` contract, rather than
 // duplicated into a second daemon-spawning test.
+//
+// M9 e10d — INHERITED DRILL 1 (the "second WINDOW" selection-sync clause e08b deferred here because
+// no second window existed then; now one does). Distinct origins are necessary but NOT sufficient: the
+// DoD is that a SELECTION made in window A CONVERGES in window B THROUGH THE DAEMON, and that A's own
+// echo is SUPPRESSED at A. So this drill now also asserts, over the SAME two real wires:
+//   * CONVERGENCE — window B reads the SAME selection back (`editor.selection-get`), so B's view really
+//     became A's, not merely that B saw a frame go by;
+//   * ECHO SUPPRESSION AT THE SOURCE — window A receives its OWN `selection-changed` stamped with A's
+//     origin, the frame A must DROP (a single-window build has no second origin, so this A-applies /
+//     A-drops distinction cannot even be EXPRESSED there — which is the whole reason the clause waited
+//     for a real second window);
+//   * SYMMETRY — the same holds with the roles reversed, so neither direction is a fluke of ordering.
 void test_two_windows_get_distinct_wire_origins()
 {
     const fs::path project = itest::make_temp_project("e10a-window-origins");
@@ -309,6 +321,57 @@ void test_two_windows_get_distinct_wire_origins()
         {
             CHECK(static_cast<std::uint64_t>(fact->at("origin").as_int()) == window1->client_id());
             CHECK(static_cast<std::uint64_t>(fact->at("origin").as_int()) != window0->client_id());
+        }
+
+        // e10d Drill 1 — CONVERGENCE: window B (window0) does not merely SEE window A's frame; its own
+        // view of the daemon's selection became window A's. One truth, N windows (05 §4).
+        const std::optional<Json> b_view = window0->call("editor.selection-get", Json::object(), error);
+        CHECK(b_view.has_value());
+        if (b_view.has_value())
+        {
+            const Json& ids_b = b_view->at("data").at("ids");
+            CHECK(ids_b.size() == 1);
+            CHECK(ids_b.at(0).as_string() == "root/from-window-1");
+        }
+
+        // e10d Drill 1 — ECHO SUPPRESSION AT THE SOURCE: window A (window1) ALSO receives the fact it
+        // caused, stamped with ITS OWN origin — the frame the client drops rather than re-applying.
+        // The daemon broadcasts to every subscriber including the author, so this frame is on window1's
+        // stream too; the `origin == self` is the ONLY thing that tells A "this is my own echo".
+        const std::vector<Json> source_facts =
+            collect_facts(*window1, "session", itest::scaled_timeout_ms(3000));
+        const std::optional<Json> own_echo = last_fact(source_facts, "selection-changed");
+        CHECK(own_echo.has_value());
+        if (own_echo.has_value())
+        {
+            CHECK(static_cast<std::uint64_t>(own_echo->at("origin").as_int()) == window1->client_id());
+        }
+
+        // e10d Drill 1 — SYMMETRY: reverse the roles. window0 (now the source) selects; window1
+        // converges through the daemon and window0 sees its own echo. Neither direction is privileged.
+        Json rev = Json::object();
+        Json rev_ids = Json::array();
+        rev_ids.push_back(Json(std::string("root/from-window-0")));
+        rev.set("ids", std::move(rev_ids));
+        CHECK(window0->call("editor.select", std::move(rev), error).has_value());
+
+        const std::vector<Json> rev_facts =
+            collect_facts(*window1, "session", itest::scaled_timeout_ms(5000));
+        const std::optional<Json> rev_fact = last_fact(rev_facts, "selection-changed");
+        CHECK(rev_fact.has_value());
+        if (rev_fact.has_value())
+        {
+            // window1 APPLIES it (a foreign origin — window0's), so its own view converges.
+            CHECK(static_cast<std::uint64_t>(rev_fact->at("origin").as_int()) == window0->client_id());
+            CHECK(static_cast<std::uint64_t>(rev_fact->at("origin").as_int()) != window1->client_id());
+        }
+        const std::optional<Json> a_view = window1->call("editor.selection-get", Json::object(), error);
+        CHECK(a_view.has_value());
+        if (a_view.has_value())
+        {
+            const Json& ids_a = a_view->at("data").at("ids");
+            CHECK(ids_a.size() == 1);
+            CHECK(ids_a.at(0).as_string() == "root/from-window-0");
         }
     }
 

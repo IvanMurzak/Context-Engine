@@ -312,6 +312,155 @@ void test_out_of_range_numbers_degrade_to_defaults_not_ub()
     CHECK(state.windows[1].height == 1u);
 }
 
+// ------------------------------------------------------------- e10d: the schemaVersion guard (T1)
+
+void test_schema_version_mismatch_degrades_to_null_state_with_a_diagnostic()
+{
+    // THE HONEST-DEGRADATION CLAUSE (M9 e10d, T1). A document written by a FUTURE build carries a
+    // `version` this build does not understand. It must be NEITHER crashed on NOR silently
+    // reinterpreted under this build's field meanings — it degrades to a NULL state and REPORTS why.
+    const Json future = Json::parse(R"({
+        "version": 999,
+        "windows": [ {"x": 10, "y": 20, "width": 1280, "height": 800, "maximized": false} ],
+        "layout": {"dock": "left"},
+        "panels": {"inspector": {"open": true}}
+    })");
+    std::string diagnostic = "not-yet-set";
+    const EditorState degraded = EditorState::from_json(future, &diagnostic);
+    // NULL state: none of the future document's windows/layout/panels was reinterpreted.
+    CHECK(degraded.windows.empty());
+    CHECK(degraded.layout.is_null());
+    CHECK(degraded.panels.is_null());
+    // ...and the loss is REPORTED, not silent — the diagnostic names the found + supported versions.
+    CHECK(!diagnostic.empty());
+    CHECK(diagnostic.find("999") != std::string::npos);
+    CHECK(diagnostic.find(std::to_string(kEditorStateSchemaVersion)) != std::string::npos);
+
+    // A PAST/foreign version (not merely a higher one) is guarded the same way — the rule is
+    // "present and != supported", not "greater than". Version 0 must not be read as version 1.
+    std::string past_diag;
+    const EditorState past = EditorState::from_json(
+        Json::parse(R"({"version": 0, "windows": [ {"x": 1, "y": 2, "width": 3, "height": 4} ]})"),
+        &past_diag);
+    CHECK(past.windows.empty());
+    CHECK(!past_diag.empty());
+
+    // The MATCHING version reads normally, and passing no diagnostic sink still works (the guard's
+    // out-param is optional, so every pre-e10d call site keeps compiling and degrades safely).
+    std::string ok_diag = "cleared?";
+    const EditorState ok = EditorState::from_json(
+        Json::parse(R"({"version": 1, "windows": [ {"x": 7, "y": 8, "width": 640, "height": 480} ]})"),
+        &ok_diag);
+    CHECK(ok.windows.size() == 1u);
+    CHECK(ok.windows[0].x == 7);
+    CHECK(ok_diag.empty()); // a successful parse CLEARS the diagnostic
+
+    // An ABSENT version is NOT a mismatch — a pre-versioning / partially-written document still
+    // degrades tolerantly (this is what keeps `test_malformed_and_missing...` and the corrupted-
+    // extent reads working). The guard fires only on a version that is present AND wrong.
+    std::string absent_diag = "cleared?";
+    const EditorState no_version = EditorState::from_json(
+        Json::parse(R"({"windows": [ {"x": 5, "y": 6, "width": 800, "height": 600} ]})"), &absent_diag);
+    CHECK(no_version.windows.size() == 1u);
+    CHECK(absent_diag.empty());
+}
+
+void test_store_load_reports_a_schema_mismatch_without_crashing()
+{
+    // The STORE path of the guard: a future-version document on disk loads to a NULL state,
+    // `loaded_existing` stays false (so the empty layout is NOT restored as the user's), and
+    // `schema_diagnostic()` distinguishes "future build wrote this" from an ordinary fresh boot.
+    // No crash on ANY path is the whole point (T1).
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "schema");
+    const fs::path path = editor_state_path(root);
+    std::error_code ec;
+    fs::create_directories(path.parent_path(), ec);
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << R"({"version": 42, "windows": [ {"x": 3, "y": 3, "width": 300, "height": 300} ],)"
+               R"( "layout": {"dock": "right"}})";
+    }
+
+    EditorStateStore store(root);
+    bool loaded = true;
+    store.load(&loaded);
+    CHECK(!loaded); // a mismatch is NOT a successful load of the user's state
+    CHECK(!store.schema_diagnostic().empty());
+    CHECK(store.schema_diagnostic().find("42") != std::string::npos);
+    CHECK(store.state().windows.empty());
+    CHECK(store.state().layout.is_null());
+
+    // A subsequent VALID (matching-version) document loads normally AND clears the diagnostic — the
+    // signal is per-load, not sticky.
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << R"({"version": 1, "windows": [ {"x": 9, "y": 9, "width": 900, "height": 900} ]})";
+    }
+    EditorStateStore reopened(root);
+    bool loaded2 = false;
+    reopened.load(&loaded2);
+    CHECK(loaded2);
+    CHECK(reopened.schema_diagnostic().empty());
+    CHECK(reopened.state().windows.size() == 1u);
+    CHECK(reopened.state().windows[0].x == 9);
+
+    shelltest::cleanup(root);
+}
+
+// --------------------------------------------------------- e10d: N-window layout persistence (T2)
+
+void test_n_window_layout_and_placements_persist_and_restore()
+{
+    // THE N-WINDOW PERSISTENCE DoD (M9 e10d, T2), reusing THIS serializer — there is no second
+    // persistence path. Three peer windows, each with its OWN placement, plus the editor-owned
+    // layout + panels blobs, are written once and read back by a FRESH store across a "restart":
+    // window-0-primary and the peer ORDER (the indices are meaningful, D13) both survive.
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "nwindow");
+    {
+        EditorStateStore store(root, 0);
+        store.load();
+        // Window 0 is the D13 menu/welcome primary; 1 and 2 are docking peers on other monitors.
+        store.set_placement(0, placement(0, 0, 1280, 800, false, "\\\\.\\DISPLAY1"), 0);
+        store.set_placement(1, placement(-1920, 40, 1920, 1080, true, "\\\\.\\DISPLAY2"), 0);
+        store.set_placement(2, placement(1280, 0, 1024, 768, false, "\\\\.\\DISPLAY3"), 0);
+        // The opaque editor-core layout tree + per-panel state — the Shell round-trips them verbatim.
+        Json layout = Json::object();
+        layout.set("orientation", Json("horizontal"));
+        Json groups = Json::array();
+        groups.push_back(Json("scene"));
+        groups.push_back(Json("inspector"));
+        layout.set("groups", groups);
+        store.set_layout(layout, 0);
+        Json panels = Json::object();
+        panels.set("inspector", Json("expanded"));
+        store.set_panels(panels, 0);
+        CHECK(store.flush_now());
+    }
+
+    // The RESTART: a brand-new store over the same project reads the whole N-window arrangement back.
+    EditorStateStore restored(root);
+    bool loaded = false;
+    restored.load(&loaded);
+    CHECK(loaded);
+    CHECK(restored.schema_diagnostic().empty());
+    const EditorState& state = restored.state();
+    CHECK(state.windows.size() == 3u);
+    // window-0-primary preserved (index 0 is the menu/welcome host).
+    CHECK(state.windows[0] == placement(0, 0, 1280, 800, false, "\\\\.\\DISPLAY1"));
+    // Each peer's placement — monitor, restored rect, maximized — is intact and in order.
+    CHECK(state.windows[1].monitor == "\\\\.\\DISPLAY2");
+    CHECK(state.windows[1].x == -1920);
+    CHECK(state.windows[1].maximized);
+    CHECK(state.windows[2].monitor == "\\\\.\\DISPLAY3");
+    CHECK(state.windows[2].x == 1280);
+    CHECK(!state.windows[2].maximized);
+    // The layout tree + panel blobs the peers reference restore verbatim.
+    CHECK(state.layout.at("orientation").as_string() == "horizontal");
+    CHECK(state.layout.at("groups").size() == 2u);
+    CHECK(state.layout.at("groups").at(0).as_string() == "scene");
+    CHECK(state.panels.at("inspector").as_string() == "expanded");
+}
+
 // ------------------------------------------------------------------- e14b: the presence marker
 
 void test_presence_marker_is_written_by_the_shell_and_read_back(void)
@@ -374,5 +523,8 @@ int main()
     test_a_failed_write_stays_dirty_so_the_next_flush_retries();
     test_placement_index_grows_the_vector();
     test_out_of_range_numbers_degrade_to_defaults_not_ub();
+    test_schema_version_mismatch_degrades_to_null_state_with_a_diagnostic();
+    test_store_load_reports_a_schema_mismatch_without_crashing();
+    test_n_window_layout_and_placements_persist_and_restore();
     SHELL_TEST_MAIN_END();
 }

@@ -5,6 +5,7 @@
 
 #include "context/editor/shell/cross_window_drag.h" // the drag relay served by drag.probe/report-zone
 
+#include <set>
 #include <utility>
 
 namespace context::editor::shell
@@ -129,6 +130,11 @@ void WindowBridge::bind_windows(WindowsProvider provider)
 void WindowBridge::bind_drag_store(CrossWindowDragStore* store)
 {
     drag_store_ = store;
+}
+
+void WindowBridge::bind_ui_mirror_store(UiMirrorStore* store)
+{
+    mirror_store_ = store;
 }
 
 contract::Json WindowBridge::list() const
@@ -302,6 +308,67 @@ contract::Json WindowBridge::drag_report_zone(const contract::Json& params, std:
     return out;
 }
 
+contract::Json WindowBridge::ui_mirror(const contract::Json& params, std::string& error_code)
+{
+    // A well-formed `editor.ui` envelope carries at least a string `topic` and a string `origin`; the
+    // Shell never interprets the payload (D7 tier 2 is opaque to it) but a publish with no topic/origin
+    // is a wiring bug it fails CLOSED on rather than broadcasting a nameless fact.
+    if (!params.is_object() || !params.at("topic").is_string() ||
+        !params.at("origin").is_string())
+    {
+        error_code = kErrWindowBadParams;
+        return contract::Json{};
+    }
+
+    contract::Json out = contract::Json::object();
+    if (mirror_store_ == nullptr)
+    {
+        // No store bound (a smoke with no mirror session): a well-formed no-op, never a refusal, so
+        // the sibling smokes route the method without installing a session.
+        out.set("mirrored", contract::Json(false));
+        return out;
+    }
+
+    // THE BROADCAST (05 §5). Fan the envelope out to EVERY live window, the SENDER included: the
+    // sender's own `ui.mirror-poll` will then hand it to `receiveMirrored`, which drops it by
+    // `origin` — the branch a unicast relay would never light. `self_id_` is inserted explicitly so
+    // the broadcast reaches this window even if a WindowsProvider chose to report peers only.
+    std::set<WindowId> targets;
+    targets.insert(self_id_);
+    if (windows_)
+    {
+        for (const WindowId id : windows_())
+        {
+            targets.insert(id);
+        }
+    }
+    for (const WindowId id : targets)
+    {
+        mirror_store_->enqueue(id, params);
+    }
+    ++ui_mirrors_published_;
+
+    out.set("mirrored", contract::Json(true));
+    out.set("windows", contract::Json(static_cast<std::uint64_t>(targets.size())));
+    return out;
+}
+
+contract::Json WindowBridge::ui_mirror_poll()
+{
+    contract::Json out = contract::Json::object();
+    contract::Json events = contract::Json::array();
+    if (mirror_store_ != nullptr)
+    {
+        for (contract::Json& envelope : mirror_store_->take(self_id_))
+        {
+            events.push_back(std::move(envelope));
+            ++ui_mirrors_delivered_;
+        }
+    }
+    out.set("events", std::move(events));
+    return out;
+}
+
 bool WindowBridge::install(BridgeRouter& router)
 {
     bool ok = router.register_method(kWindowListMethod,
@@ -361,6 +428,23 @@ bool WindowBridge::install(BridgeRouter& router)
                  }
                  return BridgeResult::ok(std::move(value));
              }) &&
+         ok;
+    ok = router.register_method(
+             kUiMirrorMethod,
+             [this](const BridgeRequest& request) -> BridgeResult
+             {
+                 std::string error_code;
+                 contract::Json value = ui_mirror(request.params, error_code);
+                 if (!error_code.empty())
+                 {
+                     return BridgeResult::error(error_code, "ui.mirror envelope was malformed");
+                 }
+                 return BridgeResult::ok(std::move(value));
+             }) &&
+         ok;
+    ok = router.register_method(kUiMirrorPollMethod,
+                                [this](const BridgeRequest&) -> BridgeResult
+                                { return BridgeResult::ok(ui_mirror_poll()); }) &&
          ok;
     return ok;
 }
