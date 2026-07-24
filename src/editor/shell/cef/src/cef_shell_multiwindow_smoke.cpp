@@ -574,6 +574,72 @@ int main(int argc, char** argv)
         }
     }
 
+    // --- DoD (R-QA-013): the mid-process destroy is SAFE UNDER REPETITION -------------------------
+    //
+    // A single mid-process destroy fired the `!in_dtor_` abort only INTERMITTENTLY on the Session-0
+    // Windows runner (a timing race between the closing browser's teardown and the LIVE primary's work
+    // in the ONE process-wide message loop), so a single green destroy above proves little on its own.
+    // This loop makes the pre-fix crash near-CERTAIN: each iteration stands up a REAL second CEF
+    // browser next to the live primary, pumps it live, then destroys it mid-process — many independent
+    // chances to hit the interleaving teardown. PRE-FIX (destroy_window closed + drained the browser
+    // mid-process) this aborted within a few cycles on Windows; POST-FIX the destroy only DETACHES and
+    // retires the session, so no per-window CEF teardown runs here at all and the whole loop is clean.
+    // The browsers it retires are all closed together, safely, in the single shutdown() drain below.
+    {
+        constexpr int kChurnCycles = 6;
+        int churn_ok = 0;
+        for (int cycle = 0; cycle < kChurnCycles; ++cycle)
+        {
+            created_bridge = nullptr;
+            created_surfaces = nullptr;
+            shell::WindowSpec churn = spec;
+            churn.title = "Context Editor — churn";
+            const shell::WindowCreateResult made =
+                manager.create_window(churn, shell::kPrimaryWindowId);
+            if (!made.ok())
+            {
+                break;
+            }
+            attach_present_path(made.id);
+
+            // Pump both windows LIVE for a beat so the secondary is a genuinely running browser (not a
+            // just-constructed one) when it is destroyed — that is what makes its mid-process teardown
+            // dangerous pre-fix. Full boot is unnecessary; a live browser next to the live primary is.
+            bool alive = true;
+            for (int i = 0; i < 40 && alive; ++i)
+            {
+                alive = manager.pump_once(now_us());
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+            if (!alive || manager.window(shell::kPrimaryWindowId) != primary)
+            {
+                break;
+            }
+
+            // The mid-process destroy — the operation that aborted pre-fix. Post-fix it detaches +
+            // retires, running no CEF teardown drain, so the primary must sail through it every time.
+            const shell::WindowDestroyResult gone = manager.destroy_window(made.id);
+            if (!gone.ok() || manager.window(made.id) != nullptr)
+            {
+                break;
+            }
+            // The primary keeps pumping across the churn — a crash or corruption would surface here.
+            alive = manager.pump_once(now_us());
+            if (!alive || manager.window(shell::kPrimaryWindowId) != primary)
+            {
+                break;
+            }
+            ++churn_ok;
+        }
+        SMOKE_CHECK(churn_ok == kChurnCycles,
+                    "repeated mid-process create/destroy stayed clean with the primary live "
+                    "(the !in_dtor_ teardown race)");
+        // Every churn window's session was RETIRED, not freed: the earlier destroy retired 1, and each
+        // clean churn cycle retires one more.
+        SMOKE_CHECK(manager.retired_session_count() == static_cast<std::size_t>(1 + churn_ok),
+                    "each mid-process destroy retired its session, freeing none");
+    }
+
     // --- the frame-delivery invariant N windows introduced (cef_shell.h) --------------------------
     //
     // A STRUCTURAL TRIPWIRE, and worth being precise about what it does and does not prove. While
@@ -588,9 +654,11 @@ int main(int argc, char** argv)
                 "no live window ever lost an OSR frame to an unbound sink");
 
     // --- teardown, in the ONE order that is safe (CE #319) ---------------------------------------
-    // manager.shutdown() closes every browser and RETIRES every session; shell::cef::shutdown()
-    // finishes CEF's own teardown while every router is still alive; only then does `manager` (and
-    // with it the graveyard) unwind, at the end of main.
+    // manager.shutdown() closes EVERY browser in ONE all-closing drain — the live windows AND every
+    // session retired mid-process above (whose browser was left open precisely so it could be closed
+    // here, with nothing live, rather than mid-process). shell::cef::shutdown() then finishes CEF's own
+    // teardown while every router is still alive; only then does `manager` (and with it the graveyard,
+    // now holding every browser host too) unwind, at the end of main — after CEF is gone.
     manager.shutdown();
     shell::cef::shutdown();
     std::filesystem::remove_all(project, ec);

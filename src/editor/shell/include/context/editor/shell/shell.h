@@ -132,6 +132,11 @@ public:
     [[nodiscard]] bool browser_closed() const;
     // The pump-less browser seam, so the manager can drive the shared teardown loop through a window.
     [[nodiscard]] IBrowserHost* browser_or_null() { return browser_.get(); }
+    // Retire mid-process: unbind the browser's frame sink so it stops painting, but do NOT close it —
+    // its CEF teardown is deferred to the manager's shared all-closing `shutdown()` drain
+    // (browser.h § IBrowserHost::detach; the e10a `!in_dtor_` fix). Paired with `finish_close()`, which
+    // then releases the OS/GPU resources while the browser host stays alive in the graveyard.
+    void detach_browser();
     // Phase 3: the non-CEF teardown (detach the compositor + the backend, mark dead), run AFTER the
     // shared drain has confirmed the browser closed. The browser is NOT re-closed here.
     void finish_close();
@@ -171,13 +176,18 @@ private:
 // factory. Two invariants make that safe, and both are asserted by
 // `editor-shell-test_window_registry`:
 //
-//   * **A retired session outlives `CefShutdown`.** `destroy_window` closes the window — which
-//     closes its browser — but MOVES the session's bridge, daemon client and captured surfaces into
-//     a graveyard that is emptied ONLY by ~WindowManager. `pump_once` does the same for a window
-//     that died on its own, and `shutdown()` for every window still open. The app must therefore
-//     destroy the manager AFTER `shell::cef::shutdown()`, which `editor_main.cpp` does by declaring
-//     it in the enclosing scope. This is CE #319 generalised from one process-wide teardown to N
-//     mid-process ones: `CloseBrowser` returning is not proof CEF is done with the client.
+//   * **A retired session — the WHOLE session, browser included — outlives `CefShutdown`.**
+//     `destroy_window` DETACHES the window (unbinds its browser's frame sink so it stops painting, and
+//     releases its OS/GPU resources) and MOVES the entire session — its still-OPEN browser host, its
+//     bridge, its daemon client and its captured surfaces — into a graveyard emptied ONLY by
+//     ~WindowManager. It deliberately does NOT close + drain the browser mid-process: with sibling
+//     browsers live in the same process-wide message loop, driving one browser's CEF teardown re-enters
+//     a sibling's and aborts on Windows (`!in_dtor_`, CE #319 generalised). Every retired browser is
+//     instead closed in ONE shared, all-closing `shutdown()` drain — where no browser is live — and
+//     torn down by CEF, then destroyed here after `shell::cef::shutdown()`. `pump_once` retires a window
+//     that died on its own the same way. The app must therefore destroy the manager AFTER
+//     `shell::cef::shutdown()`, which `editor_main.cpp` does by declaring it in the enclosing scope:
+//     `CloseBrowser` returning is not proof CEF is done with the client.
 //   * **Ids are never reused.** A stale id from a destroyed window resolves to nullptr forever
 //     rather than silently addressing a different window — which is what e10b's cross-window moves
 //     would otherwise do to a panel.
@@ -275,27 +285,35 @@ private:
         std::uint64_t origin = 0;
     };
 
-    // A destroyed window's session, held until ~WindowManager. Same member order, same reason.
+    // A destroyed window's session, held until ~WindowManager. Same member order, same reason — and
+    // now it carries the WINDOW itself (and with it the browser host), because a mid-process destroy
+    // must NOT tear the browser down while sibling browsers are live (the e10a `!in_dtor_` abort). The
+    // browser is left OPEN (only its sink detached), closed together with every other browser in the
+    // shared `shutdown()` drain, and destroyed here, after `shell::cef::shutdown()` — the browser dies
+    // first, then the daemon client, then the bridge, then the surfaces its handlers captured.
     struct RetiredSession
     {
         std::vector<std::shared_ptr<void>> surfaces;
         std::unique_ptr<BridgeRouter> bridge;
         std::unique_ptr<client::Client> daemon_client;
+        std::unique_ptr<EditorWindow> window;
     };
 
-    // Finish a window whose browser has ALREADY been closed + drained (finish_close + reset) and move
-    // its session to the graveyard. The entry is left empty for the caller to erase.
+    // Detach a window (unbind its browser's sink + release its OS/GPU resources) and move the WHOLE
+    // session — the window with its still-OPEN browser host included — into the graveyard. The browser
+    // is NOT closed here: mid-process, closing + draining it while sibling browsers are live is the
+    // `!in_dtor_` re-entrancy (CE #319 generalised), so its CEF teardown is deferred to `shutdown()`'s
+    // shared all-closing drain and freed only by ~WindowManager. The entry is left empty for the
+    // caller to erase.
     void retire(WindowEntry& entry);
-    // Close ONE window's browser, drain only it closed, then retire it. The single-window teardown
-    // path (a mid-process destroy, or a window that died on its own) — siblings keep painting because
-    // only this browser was asked to close.
-    void close_and_retire(WindowEntry& entry);
     // Pump the PROCESS-WIDE CEF teardown loop until `done()` or a bounded budget is spent. Pumps
     // through any one live window's browser (the loop drains every closing browser at once), so this
-    // is the ONE shared drain that keeps a per-window teardown from re-entering another window's final
-    // destruction (browser.h § teardown; the e10a Windows `!in_dtor_` abort, CE #319 generalised).
+    // is the ONE shared drain — run ONLY from `shutdown()`, after EVERY browser (live and retired) has
+    // been asked to close, so no browser's teardown ever runs while another is still live (browser.h
+    // § teardown; the e10a Windows `!in_dtor_` abort, CE #319 generalised).
     void drain_until(const std::function<bool()>& done);
-    // Have the browsers of every live window finished closing? The shutdown() drain's stop condition.
+    // Have the browsers of every live AND retired window finished closing? The shutdown() drain's stop
+    // condition — retired browsers are closed in the SAME shared drain, never mid-process.
     [[nodiscard]] bool all_browsers_closed() const;
     [[nodiscard]] WindowEntry* find(WindowId id);
     [[nodiscard]] const WindowEntry* find(WindowId id) const;

@@ -134,6 +134,18 @@ public:
     // for the CEF host (it drains EVERY closing browser at once); a no-op for a host with no message
     // loop. Called in a single drain loop after phase 1 has requested close on every window.
     virtual void pump_teardown() {}
+
+    // Retire this browser MID-PROCESS: unbind its frame sink so it stops painting into a compositor
+    // that is going away, but do NOT ask CEF to close it — its CEF teardown is DEFERRED to the shared,
+    // all-closing `shutdown()` drain. This is the e10a `!in_dtor_` fix (CE #319 generalised): closing +
+    // draining a SINGLE browser mid-process, while sibling browsers are still live in the same
+    // process-wide message loop, drives `CefDoMessageLoopWork()` through the closing browser's teardown
+    // interleaved with the live siblings' work, and on Windows that re-enters a libcef-internal
+    // ref-counted object's own destructor (`Release()` with `in_dtor_` set). By keeping the browser
+    // OPEN until every browser is closing together, the interleaving teardown is unreachable. The host
+    // then outlives `shell::cef::shutdown()` in the registry's graveyard (window_registry.h § LIFETIME
+    // RULE). Default: no-op — a host with no async teardown / no live sink has nothing to unbind.
+    virtual void detach() {}
 };
 
 // ------------------------------------------------------------------- the integrated pump schedule
