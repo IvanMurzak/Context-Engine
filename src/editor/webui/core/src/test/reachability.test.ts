@@ -32,6 +32,8 @@ const editorSpy: EditorCommandActions = {
     moveActivePanel: () => ({ ok: true, note: "" }),
     closeActivePanel: () => ({ ok: true, note: "" }),
     toggleTheme: () => ({ ok: true, note: "" }),
+    tearOutActivePanel: () => ({ ok: true, note: "" }),
+    movePanelToPrimary: () => ({ ok: true, note: "" }),
 };
 const sessionSpy: SessionCommandActions = {
     undo: () => ({ ok: true, note: "" }),

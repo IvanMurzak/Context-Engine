@@ -48,6 +48,7 @@
 #include "context/editor/shell/app_scheme.h"
 #include "context/editor/shell/banners.h"
 #include "context/editor/shell/session_bridge.h"
+#include "context/editor/shell/window_bridge.h"
 #include "context/editor/shell/cef/cef_shell.h"
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
@@ -317,6 +318,12 @@ int main(int argc, char** argv)
     // (no live session can change the play state under the scenario).
     shell::SessionBridge session_bridge;
     SMOKE_CHECK(session_bridge.install(bridge), "the session.state bridge surface installed");
+    // e10b: editor-core's boot now calls `window.seed` / `window.list` / `window.rehomed`; install
+    // the surface (unbound — no tear-out is driven here) so those calls are not `unknown_method`
+    // refusals that trip this smoke's `refused() == 0` invariant (the e06d regression).
+    shell::WindowMoveStore window_move_store;
+    shell::WindowBridge window_move_bridge(shell::kPrimaryWindowId, window_move_store);
+    SMOKE_CHECK(window_move_bridge.install(bridge), "the window.* bridge surface installed");
 
     // Drive the pump until the browser has hydrated AND the settings-driven change has been PERSISTED
     // by the Shell. The 30s deadline bounds it: a scenario that selected nothing runs the clock out and

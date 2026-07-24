@@ -66,6 +66,8 @@ function actionSpy(): ActionSpy {
             moveActivePanel: (direction) => record(`move:${direction}`),
             closeActivePanel: () => record("close"),
             toggleTheme: () => record("theme"),
+            tearOutActivePanel: () => record("tearOut"),
+            movePanelToPrimary: () => record("moveToPrimary"),
         },
     };
 }
@@ -286,6 +288,37 @@ export const commandsTests: readonly TestCase[] = [
                 spy.calls,
                 ["focusNext", "move:right", "close", "theme"],
                 "each editor command routes to its action (direction preserved)",
+            );
+        },
+    },
+    {
+        name: "editorCommands: the e10b tear-out + move-to-primary window commands, keyboard-guarded",
+        run: () => {
+            const spy = actionSpy();
+            const commands = editorCommands(spy.actions);
+            const byId = new Map(commands.map((command) => [command.id, command]));
+            const tearOut = byId.get("view.window.tearOut");
+            const moveToPrimary = byId.get("view.window.moveToPrimary");
+            assert(tearOut !== undefined, "view.window.tearOut is registered (R-A11Y-001 keyboard path)");
+            assert(moveToPrimary !== undefined, "view.window.moveToPrimary is registered");
+            // Guarded on a focused panel AND not-in-a-text-input, like move/close (03 §6 routing) —
+            // typing in a field never tears a panel out.
+            assertEqual(
+                tearOut?.when,
+                "panelFocus && !textInputFocus",
+                "tear-out guards focus + text input",
+            );
+            assertEqual(
+                moveToPrimary?.when,
+                "panelFocus && !textInputFocus",
+                "move-to-primary guards focus + text input",
+            );
+            void tearOut?.handler();
+            void moveToPrimary?.handler();
+            assertEqual(
+                spy.calls,
+                ["tearOut", "moveToPrimary"],
+                "each window command routes to its action",
             );
         },
     },

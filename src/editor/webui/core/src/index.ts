@@ -20,6 +20,7 @@ export * from "./dockview.js";
 export * from "./panels.js";
 export * from "./hydration.js";
 export * from "./panelhost.js";
+export * from "./window.js";
 export * from "./editorstate.js";
 export * from "./when.js";
 export * from "./commands.js";

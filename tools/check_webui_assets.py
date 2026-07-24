@@ -228,6 +228,21 @@ SESSION_CONSTANTS = (
     ("session play-state event", "session_bridge.h", "kSessionPlayStateEvent", "PLAY_STATE_EVENT"),
 )
 
+# The M9 e10b WINDOW-MANAGEMENT surface (design 03 §1 / §7, 04 §2), whose vocabulary lives in
+# window_bridge.h. SAME silent-drift hazard as every sibling above, with the DoD's own failure mode:
+# a rename on one side leaves editor-core calling a `window.*` method the Shell no longer routes, so a
+# tear-out / move / rehome would refuse with `unknown_method` and the panel would never leave (or
+# reach) its window — "silently lost", the exact thing 03 §7's loud-degradation contract forbids.
+# Cross-checked identically, from the header constants and the built bundle.
+WINDOW_CONSTANTS = (
+    ("window.list", "window_bridge.h", "kWindowListMethod", "WINDOW_LIST_METHOD"),
+    ("window.tear-out", "window_bridge.h", "kWindowTearOutMethod", "WINDOW_TEAR_OUT_METHOD"),
+    ("window.move-to", "window_bridge.h", "kWindowMoveToMethod", "WINDOW_MOVE_TO_METHOD"),
+    ("window.seed", "window_bridge.h", "kWindowSeedMethod", "WINDOW_SEED_METHOD"),
+    ("window.rehomed", "window_bridge.h", "kWindowRehomedMethod", "WINDOW_REHOMED_METHOD"),
+    ("window.close", "window_bridge.h", "kWindowCloseMethod", "WINDOW_CLOSE_METHOD"),
+)
+
 # The closed gesture vocabulary (04 §4), compared SET vs SET between the C++ wire tokens and the
 # bundle's own GESTURE_VERBS array, so a verb added on one side without the other — which would be
 # refused at runtime with no build error — fails here instead.
@@ -780,6 +795,23 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
                 f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
                 f"Shell would route/emit one token and editor-core would call/expect another, so the "
                 f"daemon's play state would silently never reach a `when` clause.")
+
+    # 7a7 — the e10b window-management vocabulary agrees across the two languages. Same mechanism as
+    # 7a6, with the DoD's own failure mode: a rename here leaves a tear-out / move / rehome calling a
+    # method the Shell no longer routes, so the panel is silently lost — the exact thing 03 §7 forbids.
+    for human, cpp_file, cpp_name, ts_name in WINDOW_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(
+                f"{human}: the bundle does not declare {ts_name} — editor-core cannot be calling the "
+                f"window-management method the Shell routes, so a tear-out / move / rehome would never "
+                f"reach the registry")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
+                f"Shell would route one name and editor-core would call another, so a panel move would "
+                f"refuse with `unknown_method` and be silently lost with NO error anywhere.")
 
     # 7b — the D6 persisted-blob member names agree (gui/contract/panel_state.h is their authority).
     for human, cpp_name, ts_name in PANEL_STATE_CONSTANTS:
