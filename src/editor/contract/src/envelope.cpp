@@ -35,6 +35,15 @@ Envelope Envelope::failure(const std::string& code, std::string message,
     return env;
 }
 
+Envelope& Envelope::with_error_data(Json data)
+{
+    // Only a failure envelope has an `error` object to annotate; on a success envelope this is a
+    // deliberate no-op (the structured detail belongs on the error, never on success data).
+    if (error_)
+        error_->data = std::move(data);
+    return *this;
+}
+
 int Envelope::exit_code() const
 {
     if (ok_)

@@ -127,6 +127,21 @@ struct EditOutcome
     // only for JSON content (e.g. encoding.bom / encoding.crlf — already fixed on disk).
     std::vector<serializer::Diagnostic> encoding_diagnostics;
 
+    // The R-CLI-006 raw-byte CAS conflict, populated ONLY when error_code == "cas.mismatch" (an
+    // `--if-match` precondition that no longer holds): the fresh on-disk state a client rebases
+    // against (design 05 §7 rebase-or-drop input). envelope() serializes it into the failure's
+    // error.data so a cross-process editor gets the retry token (actual_raw_hash) + the current bytes
+    // in the SAME reply — no extra read round-trip before the rebase.
+    struct CasConflict
+    {
+        std::string path;                    // the target whose CAS precondition failed
+        bool present = false;                // did the target exist on disk at the write attempt
+        std::uint64_t expected_raw_hash = 0; // the caller's --if-match precondition
+        std::uint64_t actual_raw_hash = 0;   // the target's CURRENT on-disk raw-byte hash (0 if absent)
+        std::string content;                 // the target's CURRENT on-disk bytes (empty if absent)
+    };
+    std::optional<CasConflict> cas_conflict;
+
     // The uniform R-CLI-008 result envelope a CLI/RPC caller returns. Success carries the derived
     // generation the write targets + the two-hash split (`rawHash` + `canonicalHash`, labelled) +
     // any encoding diagnostics; failure carries the catalog code so Envelope::exit_code() classes
@@ -139,6 +154,12 @@ struct BatchEdit
 {
     std::string path;
     std::string data;
+    // R-CLI-006 raw-byte CAS precondition (`--if-match`): when set, the batch applies this file ONLY
+    // if its CURRENT on-disk raw-byte hash matches. A mismatch on ANY file refuses the WHOLE batch
+    // (atomic) with cas.mismatch before a byte is written. nullopt = unconditional (today's default).
+    // The default member initializer keeps every existing 2-field `BatchEdit{path, data}` aggregate
+    // init warning-clean under -Wmissing-field-initializers -Werror (this field is simply omitted).
+    std::optional<std::uint64_t> expected_raw_hash{};
 };
 
 // The result of a MULTI-file write through the kernel's intent-logged path (R-FILE-004).
@@ -149,6 +170,10 @@ struct EditBatchOutcome
     std::vector<derivation::WriteTicket> tickets; // one per edit, in order; valid iff ok
     std::string error_code;   // catalog code when !ok (scope.denied / path.jail_violation / …)
     std::string error_detail; // e.g. the offending path for a jail violation
+    // Populated ONLY when error_code == "cas.mismatch": one entry per file whose --if-match
+    // precondition failed, carrying the fresh on-disk state for a rebase. The batch is atomic, so on
+    // a CAS refusal NOTHING was written (not even the files that matched).
+    std::vector<EditOutcome::CasConflict> cas_conflicts;
 };
 
 // The uniform machine-readable JSON shape of ONE R-FILE-004/R-FILE-003 recovery diagnostic —
@@ -201,14 +226,18 @@ public:
     [[nodiscard]] bridge::Dispatcher::AttachResult
     attach(const contract::ClientHandshake& client, bridge::ScopeSet requested) const;
 
-    // Daemon-initiated ("CLI-verb") edit: scope-check (file_write, R-SEC-007) -> write THROUGH
-    // filesync atomic-IO (R-FILE-004, path-jailed) -> ingest into the derivation graph -> return the
-    // write ticket whose canonical_hash is the own-write read barrier key (R-CLI-006). A write with a
-    // caller scope lacking file_write is refused with scope.denied; a jail escape with
-    // path.jail_violation. The change does NOT reach the derived World until derivation runs a pass
-    // (await_hash / settle).
-    [[nodiscard]] EditOutcome edit_file(std::string_view path, std::string_view data,
-                                        const bridge::ScopeSet& caller_scopes);
+    // Daemon-initiated ("CLI-verb") edit: scope-check (file_write, R-SEC-007) -> optional raw-byte
+    // CAS (R-CLI-006) -> write THROUGH filesync atomic-IO (R-FILE-004, path-jailed) -> ingest into
+    // the derivation graph -> return the write ticket whose canonical_hash is the own-write read
+    // barrier key (R-CLI-006). A write with a caller scope lacking file_write is refused with
+    // scope.denied; a jail escape with path.jail_violation. When `expected_raw_hash` is set
+    // (`--if-match`), the write applies ONLY if the target's CURRENT on-disk raw-byte hash matches;
+    // otherwise it is refused with cas.mismatch and the outcome carries the fresh on-disk state
+    // (out.cas_conflict) for a rebase — NOTHING is written. The change does NOT reach the derived
+    // World until derivation runs a pass (await_hash / settle).
+    [[nodiscard]] EditOutcome
+    edit_file(std::string_view path, std::string_view data, const bridge::ScopeSet& caller_scopes,
+              std::optional<std::uint64_t> expected_raw_hash = std::nullopt);
 
     // Daemon-initiated MULTI-file write (R-FILE-004): scope-check (file_write) -> jail-check every
     // path up front (a batch naming the same path twice is refused with usage.invalid — each entry's

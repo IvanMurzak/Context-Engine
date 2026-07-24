@@ -18,8 +18,10 @@
 
 #include "context/editor/bridge/event_stream.h" // e08a: Stability on the loud recovery diagnostic
 
+#include <charconv>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <deque>
 #include <memory>
@@ -50,6 +52,23 @@ std::optional<std::string> string_param(const Json& params, const std::string& k
     if (params.contains(key) && params.at(key).is_string())
         return params.at(key).as_string();
     return std::nullopt;
+}
+
+// Parse a decimal raw-byte content hash — the `--if-match` CAS precondition. The wire carries
+// full-range 64-bit hashes as decimal STRINGS (see hash_string), so this is the inverse. Rejects
+// empty / non-decimal / trailing-garbage / overflowing input with nullopt, so the caller answers a
+// clean usage.invalid rather than silently CAS-ing against a garbage precondition.
+std::optional<std::uint64_t> parse_hash_u64(const std::string& text)
+{
+    if (text.empty())
+        return std::nullopt;
+    std::uint64_t value = 0;
+    const char* const begin = text.data();
+    const char* const end = begin + text.size();
+    const std::from_chars_result r = std::from_chars(begin, end, value);
+    if (r.ec != std::errc() || r.ptr != end)
+        return std::nullopt;
+    return value;
 }
 
 // ---- M9 e08a session-state helpers ---------------------------------------------------------------
@@ -297,7 +316,20 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
             return Envelope::failure("usage.missing_argument",
                                      "edit requires string 'path' and 'content' params");
 
-        EditOutcome out = kernel_.edit_file(*path, *content, session.scopes);
+        // Optional R-CLI-006 raw-byte CAS precondition. Carried as a decimal string (a full-range
+        // hash exceeds 2^53). On a mismatch, edit_file's outcome envelope carries the fresh on-disk
+        // state (error.data — the rebase input, design 05 §7); the dispatcher forwards it on the wire.
+        std::optional<std::uint64_t> if_match;
+        if (const std::optional<std::string> raw = string_param(params, "ifMatch"))
+        {
+            if_match = parse_hash_u64(*raw);
+            if (!if_match.has_value())
+                return Envelope::failure(
+                    "usage.invalid",
+                    "edit 'ifMatch' takes a decimal raw-byte content hash; got `" + *raw + "`");
+        }
+
+        EditOutcome out = kernel_.edit_file(*path, *content, session.scopes, if_match);
         if (!out.ok)
             return out.envelope();
 
@@ -345,12 +377,45 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
                 return Envelope::failure("usage.missing_argument",
                                          "edit-batch files[" + std::to_string(i) +
                                              "] needs string 'path' and 'content'");
-            edits.push_back(BatchEdit{*path, *content});
+            BatchEdit edit{*path, *content, std::nullopt};
+            // Optional per-file R-CLI-006 raw-byte CAS precondition (`--if-match`). A mismatch on ANY
+            // file refuses the WHOLE batch (atomic — nothing written); the reply names every conflict.
+            if (const std::optional<std::string> raw = string_param(f, "ifMatch"))
+            {
+                edit.expected_raw_hash = parse_hash_u64(*raw);
+                if (!edit.expected_raw_hash.has_value())
+                    return Envelope::failure(
+                        "usage.invalid",
+                        "edit-batch files[" + std::to_string(i) +
+                            "] 'ifMatch' takes a decimal raw-byte content hash; got `" + *raw + "`");
+            }
+            edits.push_back(std::move(edit));
         }
 
         EditBatchOutcome out = kernel_.edit_files(edits, session.scopes);
         if (!out.ok)
         {
+            // A CAS refusal carries the fresh on-disk state of every conflicting file so a
+            // cross-process editor rebases without a second read round-trip (design 05 §7). The
+            // batch is atomic, so on cas.mismatch NONE of the files were written.
+            if (out.error_code == "cas.mismatch")
+            {
+                Json conflicts = Json::array();
+                for (const EditOutcome::CasConflict& c : out.cas_conflicts)
+                {
+                    Json entry = Json::object();
+                    entry.set("path", Json(c.path));
+                    entry.set("present", Json(c.present));
+                    entry.set("expectedRawHash", hash_string(c.expected_raw_hash));
+                    entry.set("actualRawHash", hash_string(c.actual_raw_hash));
+                    if (c.present)
+                        entry.set("content", Json(c.content));
+                    conflicts.push_back(std::move(entry));
+                }
+                Json fresh = Json::object();
+                fresh.set("conflicts", std::move(conflicts));
+                return Envelope::failure("cas.mismatch").with_error_data(std::move(fresh));
+            }
             Envelope fail = Envelope::failure(out.error_code);
             if (!out.error_detail.empty())
                 fail.add_warning(out.error_detail);

@@ -1235,5 +1235,154 @@ int main()
         fs::remove_all(projectE, ecE);
     }
 
+    // --- G: raw-byte CAS on edit / edit-batch over the wire (M9 e09a, R-CLI-006 / design 05 §7) ---
+    // The daemon override-write precondition the editor's WireOverrideWriteGateway (e09b) drives: an
+    // `ifMatch` raw-byte hash guards the target's CURRENT on-disk bytes. A stale precondition is
+    // refused with cas.mismatch carrying the FRESH state (the retry token + current bytes) so a
+    // client rebases without a second read. Isolated daemon so its writes never perturb the shared
+    // world-entity counts asserted above.
+    {
+        const fs::path projectG = make_temp_project();
+        MemoryFileStore storeG;
+        NullWatcher watcherG;
+        context::kernel::ManualClock clockG;
+        context::kernel::InlineTaskRunner tasksG;
+        EditorKernelConfig cfgG;
+        cfgG.project_root = projectG;
+        cfgG.filesync_root = "proj";
+        cfgG.index_path = "proj/.editor/index";
+        EditorKernel kernelG(storeG, watcherG, clockG, tasksG, cfgG);
+        KernelServer serverG(kernelG);
+        CHECK(kernelG.start(ScopeSet::all()) == StartOutcome::booted);
+        TransportServer transportG(endpoint_for(
+            "ctx-ks-cas-" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())));
+        CHECK(transportG.listen());
+        std::thread srvG([&serverG, &transportG]() { serverG.serve(transportG); });
+
+        // Send an `edit` (optionally CAS-guarded), return the parsed reply.
+        const auto edit_if = [](TransportClient& client, std::int64_t id, const std::string& path,
+                                const std::string& content,
+                                const std::optional<std::string>& if_match) -> Json
+        {
+            Json p = Json::object();
+            p.set("path", Json(path));
+            p.set("content", Json(content));
+            if (if_match.has_value())
+                p.set("ifMatch", Json(*if_match));
+            const std::optional<std::string> r = client.request(rpc(id, "edit", std::move(p)));
+            CHECK(r.has_value());
+            return r.has_value() ? Json::parse(*r) : Json::object();
+        };
+
+        {
+            TransportClient c(transportG.endpoint());
+            CHECK(c.connect(3000));
+            CHECK(c.request(rpc(1, "attach", attach_params("write,session"))).has_value());
+
+            // 1) An initial unconditional write — the returned rawHash is the CAS token to feed back.
+            const Json e0 = edit_if(c, 2, "proj/cas.scene", "entity: 1", std::nullopt);
+            CHECK(e0.at("result").at("ok").as_bool());
+            const std::string r0 = e0.at("result").at("data").at("rawHash").as_string();
+
+            // 2) A MATCHING if-match applies (optimistic write succeeds) and moves the token on.
+            const Json e1 = edit_if(c, 3, "proj/cas.scene", "entity: 2", r0);
+            CHECK(e1.at("result").at("ok").as_bool());
+            const std::string r1 = e1.at("result").at("data").at("rawHash").as_string();
+            CHECK(r1 != r0); // the file moved on, so the old token is now stale
+
+            // 3) The now-STALE token conflicts: cas.mismatch carrying the fresh rebase state.
+            const Json stale = edit_if(c, 4, "proj/cas.scene", "entity: 3", r0);
+            CHECK(stale.contains("error"));
+            const Json& err = stale.at("error").at("data");
+            CHECK(err.at("code").as_string() == "cas.mismatch");
+            CHECK(err.at("retriable").as_bool()); // a CAS retry is meaningful (catalog R-CLI-006)
+            const Json& fresh = err.at("data");    // the design 05 §7 rebase-or-drop input
+            CHECK(fresh.at("present").as_bool());
+            CHECK(fresh.at("expectedRawHash").as_string() == r0);
+            CHECK(fresh.at("actualRawHash").as_string() == r1); // the fresh retry token
+            CHECK(!fresh.at("content").as_string().empty());     // current bytes, for the rebase
+
+            // 4) The stale write wrote NOTHING: the FRESH token still applies (proves no clobber).
+            const Json e2 = edit_if(c, 5, "proj/cas.scene", "entity: 4", r1);
+            CHECK(e2.at("result").at("ok").as_bool());
+
+            // 5) A garbage precondition is a clean usage error, never a silent CAS against nonsense.
+            const Json bad = edit_if(c, 6, "proj/cas.scene", "entity: 5", std::string("not-a-hash"));
+            CHECK(bad.at("error").at("data").at("code").as_string() == "usage.invalid");
+
+            // 5b) An if-match against an ABSENT file conflicts (present:false) — never a silent create.
+            const Json absent = edit_if(c, 20, "proj/absent.scene", "entity: 6", r1);
+            const Json& ea = absent.at("error").at("data");
+            CHECK(ea.at("code").as_string() == "cas.mismatch");
+            CHECK(!ea.at("data").at("present").as_bool());
+
+            // 6) edit-batch CAS is ATOMIC: one stale precondition refuses the WHOLE batch (no write).
+            const Json s1 = edit_if(c, 7, "proj/p1.scene", "one: 1", std::nullopt);
+            const std::string rp1 = s1.at("result").at("data").at("rawHash").as_string();
+            const Json s2 = edit_if(c, 8, "proj/p2.scene", "two: 1", std::nullopt);
+            const std::string rp2 = s2.at("result").at("data").at("rawHash").as_string();
+
+            const auto batch = [&c](std::int64_t id, const std::string& p1_match,
+                                    const std::string& p2_match) -> Json
+            {
+                Json f1 = Json::object();
+                f1.set("path", Json(std::string("proj/p1.scene")));
+                f1.set("content", Json(std::string("one: 2")));
+                f1.set("ifMatch", Json(p1_match));
+                Json f2 = Json::object();
+                f2.set("path", Json(std::string("proj/p2.scene")));
+                f2.set("content", Json(std::string("two: 2")));
+                f2.set("ifMatch", Json(p2_match));
+                Json files = Json::array();
+                files.push_back(std::move(f1));
+                files.push_back(std::move(f2));
+                Json p = Json::object();
+                p.set("files", std::move(files));
+                const std::optional<std::string> r = c.request(rpc(id, "edit-batch", std::move(p)));
+                CHECK(r.has_value());
+                return r.has_value() ? Json::parse(*r) : Json::object();
+            };
+
+            // p2's precondition is stale (rp1 != rp2) -> the whole batch is refused, p1 UNWRITTEN.
+            const Json bmiss = batch(9, rp1, rp1);
+            CHECK(bmiss.at("error").at("data").at("code").as_string() == "cas.mismatch");
+            const Json& conflicts = bmiss.at("error").at("data").at("data").at("conflicts");
+            CHECK(conflicts.size() == 1); // only the mismatching file is named
+            CHECK(conflicts.at(0).at("path").as_string().find("p2.scene") != std::string::npos);
+            CHECK(conflicts.at(0).at("present").as_bool());
+            CHECK(conflicts.at(0).at("actualRawHash").as_string() == rp2);
+            // Atomic proof: p1 was NOT clobbered, so its ORIGINAL token still applies in a clean batch.
+            const Json bok = batch(10, rp1, rp2);
+            CHECK(bok.at("result").at("ok").as_bool());
+
+            // 7) Scope is still enforced: an if-match does NOT let a read-only session write.
+            {
+                TransportClient ro(transportG.endpoint());
+                CHECK(ro.connect(3000));
+                CHECK(ro.request(rpc(1, "attach", attach_params("read"))).has_value());
+                Json p = Json::object();
+                p.set("path", Json(std::string("proj/cas.scene")));
+                p.set("content", Json(std::string("entity: 9")));
+                p.set("ifMatch", Json(std::string("12345")));
+                const std::optional<std::string> denied = ro.request(rpc(2, "edit", std::move(p)));
+                CHECK(denied.has_value());
+                CHECK(Json::parse(*denied).at("error").at("data").at("code").as_string() ==
+                      "scope.denied");
+                ro.close();
+            }
+
+            CHECK(c.request(rpc(99, "shutdown", Json::object())).has_value());
+            c.close();
+        }
+
+        srvG.join();
+        kernelG.stop();
+        {
+            std::error_code ecG;
+            fs::remove_all(projectG, ecG);
+        }
+    }
+
     EDITORKERNEL_TEST_MAIN_END();
 }

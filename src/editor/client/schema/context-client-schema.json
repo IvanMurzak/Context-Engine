@@ -747,7 +747,8 @@
       "deprecated": false,
       "params": [
         "path",
-        "content"
+        "content",
+        "ifMatch"
       ],
       "flags": [
         "json",
