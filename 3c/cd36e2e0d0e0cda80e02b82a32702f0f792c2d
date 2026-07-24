@@ -1,0 +1,63 @@
+src/editor/shell/src/window_bridge.cpp
+  s_98a4c67d88b9f0::t_6b19dac71f194b 432-448
+  s_98a4c67d88b9f0::t_6d3ab605fdea04 311-371
+  s_98a4c67d88b9f0::t_d7861585745961 135-139
+  s_98a4c67d88b9f0::t_7eb37092b32bec 8
+src/editor/webui/core/src/uimirror.ts
+  s_98a4c67d88b9f0::t_edd25d2e111753 1-149
+src/editor/shell/src/editor_state.cpp
+  s_98a4c67d88b9f0::t_9af64365dffe6b 178,180-183,189-210
+  s_98a4c67d88b9f0::t_1a499078f481a3 156-159
+  s_98a4c67d88b9f0::t_66cad012187d6a 242,253-259
+src/editor/shell/tests/test_editor_state.cpp
+  s_98a4c67d88b9f0::t_37de8fbaea5e38 315-463
+  s_98a4c67d88b9f0::t_87666de8c75c3b 526-528
+src/tests/integration/test_e08a_daemon_session_state.cpp
+  s_98a4c67d88b9f0::t_76404cbf49ba77 257,270-281
+  s_98a4c67d88b9f0::t_69c436e5120784 325-375
+src/editor/shell/include/context/editor/shell/ui_mirror.h
+  s_98a4c67d88b9f0::t_31374180ee8d13 1-84
+src/editor/webui/core/src/test/window_a11y.test.ts
+  s_98a4c67d88b9f0::t_3f7cdb4b81c12d 1-163
+src/editor/webui/core/src/test/main.ts
+  s_98a4c67d88b9f0::t_1cf840c555e948 58
+  s_98a4c67d88b9f0::t_fa57397faba99a 28
+  s_98a4c67d88b9f0::t_311b3ee53cff2e 29,57
+src/editor/shell/CMakeLists.txt
+  s_98a4c67d88b9f0::t_9d16b0ef636acc 184
+src/editor/webui/core/src/test/uimirror_broadcast.test.ts
+  s_98a4c67d88b9f0::t_5000061b7ca4b9 1-165
+src/editor/shell/include/context/editor/shell/window_bridge.h
+  s_98a4c67d88b9f0::t_34dea304a62bb7 265-269
+  s_98a4c67d88b9f0::t_c8f0db473e8685 38
+  s_98a4c67d88b9f0::t_54f5d345401d2e 80-89
+  s_98a4c67d88b9f0::t_2059b98482d3b1 276,286-287
+  s_98a4c67d88b9f0::t_9dc6b21ae8546b 213-219
+  s_98a4c67d88b9f0::t_d3b87bef966603 243-252
+src/editor/shell/tests/test_ui_mirror.cpp
+  s_98a4c67d88b9f0::t_5ceb0fad260ed1 148
+  s_98a4c67d88b9f0::t_5f179754675a6c 1-120,124-147,149-230
+  s_98a4c67d88b9f0::t_e6e707bddc1ea2 121-123
+src/editor/shell/include/context/editor/shell/editor_state.h
+  s_98a4c67d88b9f0::t_87cef2c18d8687 156-161
+  s_98a4c67d88b9f0::t_62ced7d93cf1ee 121-124
+  s_98a4c67d88b9f0::t_d7e06292fc8496 179
+  s_98a4c67d88b9f0::t_b393e86e44ca58 92-101
+  s_98a4c67d88b9f0::t_6fbe42b9ed5074 44-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "3ccd36e2e0d0e0cda80e02b82a32702f0f792c2d",
+  "prompts": {},
+  "sessions": {
+    "s_98a4c67d88b9f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0dba127-2d0c-4410-893b-e57b78fe0d8f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
