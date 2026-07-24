@@ -1,0 +1,76 @@
+src/editor/shell/include/context/editor/shell/cross_window_drag.h
+  s_98a4c67d88b9f0::t_3fc2331c02a3c2 1-346
+src/editor/webui/core/src/test/main.ts
+  s_98a4c67d88b9f0::t_7c09e3314c4dd5 55
+  s_98a4c67d88b9f0::t_fa67214b298a67 28
+src/editor/shell/app/editor_main.cpp
+  s_98a4c67d88b9f0::t_6dfaf54e8857c2 17
+  s_98a4c67d88b9f0::t_4f7d64478e2d95 829-831
+  s_98a4c67d88b9f0::t_4510b1eb71d247 655-657
+  s_98a4c67d88b9f0::t_19b8326250fcd7 279-281
+  s_98a4c67d88b9f0::t_3daa03b279ebbb 866
+  s_98a4c67d88b9f0::t_f4657d24e26f72 253-254
+  s_98a4c67d88b9f0::t_f44cafa619efcd 389-393
+  s_98a4c67d88b9f0::t_7c8606a7095cdc 930-993
+src/editor/shell/src/window_bridge.cpp
+  s_98a4c67d88b9f0::t_6d0b9561207f7b 1-2,6
+  s_98a4c67d88b9f0::t_c3c315570739f3 129-133
+  s_98a4c67d88b9f0::t_ec81db11fe8ec9 263-304
+  s_98a4c67d88b9f0::t_4ebe15b02bf59e 262
+  s_98a4c67d88b9f0::t_287d6f50a2ba21 348-364
+  s_98a4c67d88b9f0::t_7eceb3391d3ae1 7
+src/editor/shell/cef/CMakeLists.txt
+  s_98a4c67d88b9f0::t_64436e95be36a0 323-365
+src/editor/shell/src/cross_window_drag.cpp
+  s_98a4c67d88b9f0::t_98aee9c9a5ded7 1-277
+tools/tests/test_check_webui_assets.py
+  s_98a4c67d88b9f0::t_57ed491ede469a 467-469
+  s_98a4c67d88b9f0::t_eaf18089a0972c 556-558
+  s_98a4c67d88b9f0::t_92494530ca1998 767-790
+src/editor/shell/CMakeLists.txt
+  s_98a4c67d88b9f0::t_8f44cefc50afb4 335-336
+  s_98a4c67d88b9f0::t_10cc69762e3f38 183
+  s_98a4c67d88b9f0::t_2f6a49a14042c2 63-64
+src/editor/webui/core/src/boot.ts
+  s_98a4c67d88b9f0::t_244ad71e0ea347 51
+  s_98a4c67d88b9f0::t_496db18de9ad26 336-337
+  s_98a4c67d88b9f0::t_a372fc20bb770b 394
+  s_98a4c67d88b9f0::t_38931f948a3e6d 675,681-686,692-695,703
+src/editor/shell/include/context/editor/shell/window_bridge.h
+  s_98a4c67d88b9f0::t_13e0bd8dc12aaa 221
+  s_98a4c67d88b9f0::t_5db8f11feda155 50-56,59,71-77
+  s_98a4c67d88b9f0::t_8e7592b6494834 195-201
+  s_98a4c67d88b9f0::t_3411ac2939fb25 216-220,222-225,233-236,242,250-251
+  s_98a4c67d88b9f0::t_1b99a0de181d95 78
+.github/workflows/ci.yml
+  s_98a4c67d88b9f0::t_d055a510179838 1868,1870
+src/editor/webui/core/src/test/drag.test.ts
+  s_98a4c67d88b9f0::t_51ce45f5d3c766 90-91,97,105-107
+  s_98a4c67d88b9f0::t_b28e20c71134b6 1-89,92-96,98-104,108-141
+src/editor/shell/cef/src/cef_shell_drag_smoke.cpp
+  s_98a4c67d88b9f0::t_0dd05e87018136 1-482
+src/editor/webui/core/src/drag.ts
+  s_98a4c67d88b9f0::t_5bc31a1baa1e20 1-168
+src/editor/shell/tests/test_cross_window_drag.cpp
+  s_98a4c67d88b9f0::t_7656e1b3fe2d7b 1-407,410-411,415-467
+  s_98a4c67d88b9f0::t_c2a7cfa7c3471b 408-409,412-414
+tools/check_webui_assets.py
+  s_98a4c67d88b9f0::t_55a3250baf7699 246-255
+  s_98a4c67d88b9f0::t_2711110bbf9e25 826-843
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "14b87aad0e71c6ea09784676fd58b829aa4dccd1",
+  "prompts": {},
+  "sessions": {
+    "s_98a4c67d88b9f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a0dba127-2d0c-4410-893b-e57b78fe0d8f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
