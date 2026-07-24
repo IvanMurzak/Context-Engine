@@ -153,8 +153,10 @@ Json EditorState::to_json() const
 {
     Json doc = Json::object();
     // A version tag from the first byte written: the alternative is inferring the shape from which
-    // keys happen to be present, which stops working the moment the format actually changes.
-    doc.set("version", Json(1));
+    // keys happen to be present, which stops working the moment the format actually changes. This
+    // is the value `from_json` guards against (M9 e10d): a document carrying a DIFFERENT version is
+    // a foreign build's state and is refused rather than reinterpreted.
+    doc.set("version", Json(kEditorStateSchemaVersion));
     Json array = Json::array();
     for (const WindowPlacement& placement : windows)
     {
@@ -173,12 +175,38 @@ Json EditorState::to_json() const
     return doc;
 }
 
-EditorState EditorState::from_json(const Json& json)
+EditorState EditorState::from_json(const Json& json, std::string* schema_diagnostic)
 {
+    if (schema_diagnostic != nullptr)
+    {
+        schema_diagnostic->clear();
+    }
     EditorState state;
     if (!json.is_object())
     {
         return state;
+    }
+    // THE SCHEMA GUARD (M9 e10d, T1). Read the `version` tag FIRST, before any field. A version that
+    // is PRESENT and does not equal this build's is a foreign — typically FUTURE — document. Honest
+    // degradation forbids both crashing on it AND silently reinterpreting it under this build's
+    // field meanings, so a mismatch returns the DEFAULT (null) state plus a diagnostic and reads no
+    // further. An ABSENT version is a pre-versioning / partial document and still degrades tolerantly
+    // below (it is not a mismatch — the guard fires only on a version that is present and wrong).
+    const Json& version = json.at("version");
+    if (version.is_number())
+    {
+        const int found = static_cast<int>(version.as_int());
+        if (found != kEditorStateSchemaVersion)
+        {
+            if (schema_diagnostic != nullptr)
+            {
+                *schema_diagnostic = "editor-state.json schema version " + std::to_string(found) +
+                                     " does not match this build's version " +
+                                     std::to_string(kEditorStateSchemaVersion) +
+                                     "; refusing to reinterpret it (state reset to empty)";
+            }
+            return EditorState{};
+        }
     }
     const Json& windows = json.at("windows");
     if (windows.is_array())
@@ -211,6 +239,7 @@ const EditorState& EditorStateStore::load(bool* loaded_existing)
     {
         *loaded_existing = false;
     }
+    schema_diagnostic_.clear();
     std::ifstream in(path_, std::ios::binary);
     if (!in)
     {
@@ -221,8 +250,13 @@ const EditorState& EditorStateStore::load(bool* loaded_existing)
     buffer << in.rdbuf();
     try
     {
-        state_ = EditorState::from_json(Json::parse(buffer.str()));
-        if (loaded_existing != nullptr)
+        state_ = EditorState::from_json(Json::parse(buffer.str()), &schema_diagnostic_);
+        // A SCHEMA MISMATCH (M9 e10d, T1) is NOT a successful load: from_json returned the null
+        // state and reported why. `loaded_existing` stays false so a caller does not restore the
+        // (empty) layout as if it were the user's, and `schema_diagnostic()` carries the reason so
+        // the loss is REPORTED, never silent. An ordinary versioned/legacy document (empty
+        // diagnostic) loaded normally.
+        if (schema_diagnostic_.empty() && loaded_existing != nullptr)
         {
             *loaded_existing = true;
         }

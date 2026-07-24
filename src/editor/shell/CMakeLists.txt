@@ -181,6 +181,7 @@ set(_context_shell_tests
     test_window_registry  # e10a: N windows by id, create/destroy, the retired-session lifetime rule
     test_window_bridge # e10b: the window.* relay - tear-out/move/seed/rehome parse + the loud-fail path
     test_cross_window_drag  # e10c: the drag session - capture RELEASED on every path + the drag.* relay
+    test_ui_mirror     # e10d: the editor.ui cross-window mirror relay - broadcast-to-all incl. sender
     test_shell)        # the owner loop end to end + the authenticated-attach guard
 
 foreach(_t IN LISTS _context_shell_tests)

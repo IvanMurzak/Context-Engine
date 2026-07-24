@@ -25,6 +25,8 @@ import { bannerTests } from "./banners.test.js";
 import { uibusTests } from "./uibus.test.js";
 import { sessionTests } from "./session.test.js";
 import { windowTests } from "./window.test.js";
+import { windowA11yTests } from "./window_a11y.test.js";
+import { uimirrorBroadcastTests } from "./uimirror_broadcast.test.js";
 import { dragTests } from "./drag.test.js";
 import { bootTests } from "./boot.test.js";
 
@@ -52,6 +54,8 @@ void runTests([
     ...uibusTests,
     ...sessionTests,
     ...windowTests,
+    ...windowA11yTests,
+    ...uimirrorBroadcastTests,
     ...dragTests,
     // LAST, deliberately: the boot cases drive the whole bundle against a mock Shell and leave real
     // boot state on the shared document (`data-editor-*`, the applied theme's custom properties), so

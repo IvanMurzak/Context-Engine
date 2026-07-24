@@ -41,6 +41,16 @@
 namespace context::editor::shell
 {
 
+// The schema version this build writes and understands (M9 e10d). It is written as the document's
+// `version` tag by `to_json` and CHECKED by `from_json`: a document whose `version` is PRESENT and
+// does not equal this is a FUTURE (or otherwise foreign) build's state, which `from_json` refuses to
+// reinterpret — it degrades to a null state and reports a diagnostic instead (honest degradation, T1).
+// A document with NO `version` at all is a pre-versioning / partial write and is still read
+// tolerantly, exactly as before: the guard fires only on a version that is present AND wrong, never
+// on its absence, so a hand-truncated or legacy document keeps degrading to defaults rather than
+// being rejected wholesale.
+inline constexpr int kEditorStateSchemaVersion = 1;
+
 // Where a window was, well enough to put it back: which monitor, the restored rect, and whether it
 // was maximized. The RESTORED rect is stored even while maximized — restoring a maximized window
 // with no restore rect leaves it stuck full-screen the first time the user un-maximizes it.
@@ -79,7 +89,16 @@ struct EditorState
     // Parse, tolerating a partially-written or older document: every field is optional and a bad
     // one falls back to its default rather than failing the load. A session file that will not load
     // is a user losing their layout, so it degrades instead of refusing.
-    [[nodiscard]] static EditorState from_json(const contract::Json& json);
+    //
+    // THE SCHEMA GUARD (M9 e10d, T1). A document whose `version` is PRESENT and does NOT equal
+    // `kEditorStateSchemaVersion` is a foreign (typically FUTURE) build's state. It is NEITHER
+    // crashed on NOR silently reinterpreted: this returns a DEFAULT (null) `EditorState` and, when
+    // `schema_diagnostic` is non-null, writes a human-readable reason into it (found-vs-supported).
+    // An ABSENT `version` is not a mismatch — it degrades tolerantly as described above. A caller
+    // that wants to tell "null because a future build wrote this" from "null because fresh/malformed"
+    // passes a `schema_diagnostic` and checks whether it came back non-empty.
+    [[nodiscard]] static EditorState from_json(const contract::Json& json,
+                                               std::string* schema_diagnostic = nullptr);
 };
 
 // The path this store owns, relative to a project root: `<project>/.editor/editor-state.json`.
@@ -99,7 +118,10 @@ public:
 
     // Load the on-disk document, or a defaulted one when the file is absent/unreadable/malformed.
     // `loaded_existing` reports which happened — a caller that wants to know whether it is booting
-    // a fresh project should not have to guess from the contents.
+    // a fresh project should not have to guess from the contents. A SCHEMA MISMATCH (a future
+    // build's `version`) also loads a defaulted document with `*loaded_existing == false`, but is
+    // distinguished by a non-empty `schema_diagnostic()` (M9 e10d, T1): the layout is not lost
+    // SILENTLY — the reason is reported and the state is null rather than reinterpreted.
     const EditorState& load(bool* loaded_existing = nullptr);
 
     [[nodiscard]] const EditorState& state() const { return state_; }
@@ -131,6 +153,12 @@ public:
     // The reason the last write failed (empty when it succeeded). A failed session write is
     // REPORTED, never fatal: the editor keeps running on a read-only or full disk.
     [[nodiscard]] const std::string& last_error() const { return last_error_; }
+    // The reason the last `load()` degraded to a null state because the on-disk `version` did not
+    // match this build (M9 e10d, T1). Empty when the load succeeded, was fresh, or was merely
+    // malformed — a non-empty value is specifically the "a foreign/future build wrote this; refused
+    // to reinterpret it" signal, so a caller (and the live restore report) can surface it distinctly
+    // from an ordinary fresh boot.
+    [[nodiscard]] const std::string& schema_diagnostic() const { return schema_diagnostic_; }
     [[nodiscard]] const std::filesystem::path& path() const { return path_; }
 
 private:
@@ -148,6 +176,7 @@ private:
     bool dirty_ = false;
     int write_count_ = 0;
     std::string last_error_;
+    std::string schema_diagnostic_;
 };
 
 } // namespace context::editor::shell
