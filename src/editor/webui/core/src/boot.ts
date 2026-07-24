@@ -647,9 +647,16 @@ function reportWindow(detail: string): void {
     }
 }
 
-/** Mirror the e10d-drill2 cross-window mirror's convergence onto <html> for a --dump-dom repro. */
+/**
+ * Mirror the e10d-drill2 cross-window mirror's convergence onto <html> for a --dump-dom repro.
+ * FIRE-ON-CHANGE (like the poller's own `report()`): the runtime poll calls this every tick, but the
+ * convergence string only moves when `applied` / `suppressed` do, so an idle shipping window (which
+ * never publishes) writes the attribute once and then does no per-tick string/DOM work at all.
+ */
+let lastUiMirrorDetail: string | undefined;
 function reportUiMirror(detail: string): void {
-    if (typeof document !== "undefined") {
+    if (typeof document !== "undefined" && detail !== lastUiMirrorDetail) {
+        lastUiMirrorDetail = detail;
         document.documentElement.setAttribute(UI_MIRROR_ATTRIBUTE, detail);
     }
 }
