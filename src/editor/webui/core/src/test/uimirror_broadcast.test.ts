@@ -29,6 +29,8 @@ import type { ShellBridge } from "../bridge.js";
 class SharedBroadcastShell {
     readonly #queues = new Map<string, Record<string, unknown>[]>();
     readonly #windows: readonly string[];
+    /** The LATEST convergence report each window sent (last-write-wins, mirroring the C++ side). */
+    readonly reports = new Map<string, { applied: number; suppressed: number }>();
 
     constructor(windows: readonly string[]) {
         this.#windows = windows;
@@ -51,6 +53,14 @@ class SharedBroadcastShell {
                 const pending = this.#queues.get(selfId) ?? [];
                 this.#queues.set(selfId, []);
                 return Promise.resolve({ events: pending });
+            }
+            if (method === "ui.mirror-report" && params !== undefined) {
+                // Record what the receiving bus reported — the C++ `ui.mirror-report` counter's stand-in.
+                this.reports.set(selfId, {
+                    applied: params["applied"] as number,
+                    suppressed: params["suppressed"] as number,
+                });
+                return Promise.resolve({ recorded: true });
             }
             return Promise.resolve(null);
         };
@@ -143,6 +153,73 @@ export const uimirrorBroadcastTests: readonly TestCase[] = [
             assertEqual(await c.poller.poll(), 1, "C converged");
             assertEqual(await a.poller.poll(), 0, "A suppressed its own echo");
             assertEqual(c.bus.snapshot(UI_TOPIC_THEME_CHANGED)?.origin, "0", "C sees A's origin");
+        },
+    },
+    {
+        name: "broadcast mirror: the poller tracks cumulative applied/suppressed and REPORTS convergence",
+        run: async () => {
+            // The end-to-end shape the live `editor-cef-smoke-shell-uimirror` leg asserts on, in the
+            // fake-Shell tier: window A publishes, B applies + reports `applied>=1`, and A drops its own
+            // echo + reports `applied==0, suppressed>=1`. This is the ONE verdict the transport counters
+            // cannot see — a delivered count reads A's applied echo and its dropped one alike.
+            const shell = new SharedBroadcastShell(["0", "1"]);
+            const a = wireWindow(shell, "0");
+            const b = wireWindow(shell, "1");
+
+            a.bus.publish(UI_TOPIC_THEME_CHANGED, { variant: "dark" });
+            await Promise.resolve();
+
+            // B converges: it applied one foreign fact; its cumulative counters say so; its report lands.
+            await b.poller.poll();
+            assertEqual(b.poller.applied, 1, "B's cumulative applied climbed to 1");
+            assertEqual(b.poller.suppressed, 0, "B suppressed nothing (it published nothing of its own)");
+            await b.poller.report();
+            const bReport = shell.reports.get("1");
+            assert(bReport !== undefined, "B reported to the Shell");
+            assertEqual(bReport?.applied, 1, "B reported applied=1 (convergence — the fact reached B)");
+            assertEqual(bReport?.suppressed, 0, "B reported suppressed=0");
+
+            // A suppresses its OWN echo: it applied nothing, dropped one by origin; its report proves it.
+            await a.poller.poll();
+            assertEqual(a.poller.applied, 0, "A applied NOTHING — its own echo was suppressed by origin");
+            assertEqual(a.poller.suppressed, 1, "A's cumulative suppressed climbed to 1 (the echo drop)");
+            await a.poller.report();
+            const aReport = shell.reports.get("0");
+            assert(aReport !== undefined, "A reported to the Shell");
+            assertEqual(aReport?.applied, 0, "A reported applied=0 (it did NOT echo its own fact back in)");
+            assertEqual(aReport?.suppressed, 1, "A reported suppressed=1 (the broadcasting loop breaker)");
+        },
+    },
+    {
+        name: "broadcast mirror: report is FIRE-ON-CHANGE — silent while nothing has converged",
+        run: async () => {
+            // The shipping-editor case: nothing publishes on the bus, so a window's poll drains an empty
+            // batch every tick and its report must stay silent — no `ui.mirror-report` call at all, so the
+            // idle poll path costs the Shell nothing. Only a CHANGE in the totals re-reports.
+            const shell = new SharedBroadcastShell(["0", "1"]);
+            const a = wireWindow(shell, "0");
+            const b = wireWindow(shell, "1");
+
+            // No publish anywhere: both windows poll into the void and report NOTHING.
+            await a.poller.poll();
+            await a.poller.report();
+            await b.poller.poll();
+            await b.poller.report();
+            assert(shell.reports.get("0") === undefined, "an idle window sent no report (0/0 stays silent)");
+            assert(shell.reports.get("1") === undefined, "the peer idle window sent no report either");
+
+            // Now A publishes and B converges — the first change reports; a second report with no further
+            // change does not overwrite with a stale duplicate (fire-on-change).
+            a.bus.publish(UI_TOPIC_THEME_CHANGED, { variant: "light" });
+            await Promise.resolve();
+            await b.poller.poll();
+            await b.poller.report();
+            assertEqual(shell.reports.get("1")?.applied, 1, "B reported once it actually converged");
+            // A no-op poll (nothing new) leaves the counters unchanged, so report() is a no-op too.
+            await b.poller.poll();
+            await b.poller.report();
+            assertEqual(b.poller.applied, 1, "B applied nothing new on the empty second poll");
+            assertEqual(shell.reports.get("1")?.applied, 1, "the report is unchanged (fire-on-change)");
         },
     },
     {

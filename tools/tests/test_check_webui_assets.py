@@ -467,6 +467,10 @@ PANEL_BUNDLE = (
     # e10c cross-window drag vocabulary (drag.ts).
     'var DRAG_PROBE_METHOD = "drag.probe";\n'
     'var DRAG_REPORT_ZONE_METHOD = "drag.report-zone";\n'
+    # e10d cross-window editor.ui mirror vocabulary (uimirror.ts).
+    'var UI_MIRROR_METHOD = "ui.mirror";\n'
+    'var UI_MIRROR_POLL_METHOD = "ui.mirror-poll";\n'
+    'var UI_MIRROR_REPORT_METHOD = "ui.mirror-report";\n'
 )
 
 # MIRRORS THE REAL HEADER'S SHAPE. The real `panel_host.h` declares the enum and the token
@@ -556,6 +560,10 @@ PANEL_CPP_WINDOW = (
     # e10c: the cross-window drag surface lives on the same header (window_bridge.h).
     'inline constexpr const char* kDragProbeMethod = "drag.probe";\n'
     'inline constexpr const char* kDragReportZoneMethod = "drag.report-zone";\n'
+    # e10d: the cross-window editor.ui mirror surface lives on the same header (window_bridge.h).
+    'inline constexpr const char* kUiMirrorMethod = "ui.mirror";\n'
+    'inline constexpr const char* kUiMirrorPollMethod = "ui.mirror-poll";\n'
+    'inline constexpr const char* kUiMirrorReportMethod = "ui.mirror-report";\n'
 )
 
 PANEL_DOCUMENT = (
@@ -784,6 +792,31 @@ def test_bundle_missing_a_drag_constant_fails(tmp_path: Path, ts_name: str) -> N
 def test_a_renamed_drag_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
     """Rot-into-a-no-op guard: rename the C++ drag constant and the gate can verify NOTHING -> exit 2."""
     renamed = PANEL_CPP_WINDOW.replace("kDragProbeMethod", "kDragPollMethod")
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, window=renamed)
+
+
+@pytest.mark.parametrize(
+    "ts_name", ["UI_MIRROR_METHOD", "UI_MIRROR_POLL_METHOD", "UI_MIRROR_REPORT_METHOD"])
+def test_ui_mirror_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> None:
+    """The e10d cross-window mirror surface: a drift here leaves the sink / poller / reporter calling a
+    method the Shell no longer routes, so an editor.ui fact published in one window silently never reaches
+    the others — the mirror stops propagating with the editor up and nothing erroring."""
+    drifted = re.sub(rf'({ts_name} = ")[^"]*(")', r"\1ui.drifted\2", PANEL_BUNDLE)
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+@pytest.mark.parametrize("ts_name", ["UI_MIRROR_METHOD", "UI_MIRROR_REPORT_METHOD"])
+def test_bundle_missing_a_ui_mirror_constant_fails(tmp_path: Path, ts_name: str) -> None:
+    """An ABSENT mirror constant means editor-core cannot be on the cross-window surface the Shell serves."""
+    stripped = "\n".join(line for line in PANEL_BUNDLE.splitlines() if ts_name not in line)
+    assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+def test_a_renamed_ui_mirror_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
+    """Rot-into-a-no-op guard: rename the C++ mirror constant and the gate can verify NOTHING -> exit 2."""
+    renamed = PANEL_CPP_WINDOW.replace("kUiMirrorReportMethod", "kUiMirrorAckMethod")
     with pytest.raises(check_webui_assets.CheckError):
         _run_panel(tmp_path, window=renamed)
 

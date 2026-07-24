@@ -49,6 +49,8 @@ import { PanelClient } from "./panels.js";
 import { PanelHost, type LocalPanelFactory } from "./panelhost.js";
 import { WindowClient, type WindowSeed } from "./window.js";
 import { DragClient, makeDropZoneHitTest, pumpCrossWindowDrag } from "./drag.js";
+import { EditorUiBus, UI_TOPIC_THEME_CHANGED } from "./uibus.js";
+import { wireUiMirror, type UiMirrorWiring } from "./uimirror.js";
 import {
     SETTINGS_PANEL_ID,
     mountSettings,
@@ -386,12 +388,13 @@ async function startPanels(
                     await stateClient.reportRestore(restoreReport);
                     persistence.attach();
                 }
-                // --- the cross-window move machinery (e10b) ------------------------------------
+                // --- the cross-window move machinery (e10b) + editor.ui mirror (e10d-drill2) ----
                 // Wire it in EVERY window: the rehome poll (this window opens panels moved INTO it,
                 // from a "move to window N" or a peer's window-close rehome) and, for a non-primary
                 // window, the pagehide rehome-to-window-0 ("close a window with panels ⇒ they rehome,
-                // never lost"). Both use the SAME recreate path as the seed-open above (D6).
-                await startWindowMechanism(windowClient, dragClient, host, client);
+                // never lost"). Both use the SAME recreate path as the seed-open above (D6). It also
+                // brings up the cross-window `editor.ui` MIRROR on a per-window-origin bus (e10d-drill2).
+                await startWindowMechanism(windowClient, dragClient, host, client, bridge);
                 // --- the command layer + palette (e07d) ----------------------------------------
                 // The docking root is up and persistence is live; wire the ONE command registry, the
                 // palette over it, and (only under `?ctx-smoke-palette`) drive the T2 command-driven
@@ -623,6 +626,17 @@ async function startThemeFeed(bridge: ShellBridge, engine: ThemeEngine): Promise
 /** The <html> attribute the e10b window mechanism reports its state on (for --dump-dom + the smoke). */
 export const WINDOW_ATTRIBUTE = "data-editor-window";
 
+/** The <html> attribute the e10d-drill2 cross-window mirror reports its state on (for --dump-dom). */
+export const UI_MIRROR_ATTRIBUTE = "data-editor-uimirror";
+
+/**
+ * The e10d-drill2 mirror-smoke boot flag — a NO-OP unless the boot URL carries it. Under it, window 0
+ * (the publisher) re-publishes an `editor.ui` fact on every poll tick, so once the SECOND window is up
+ * and polling the broadcast reaches it. Every other window just drains + applies + reports, exactly as
+ * the shipping poll path does. Inert in the shipping editor (no flag ⇒ nothing publishes on the bus).
+ */
+const UI_MIRROR_SMOKE_FLAG = "ctx-smoke-uimirror";
+
 /** How often a window polls for panels moved INTO it (move-to-N + a peer's window-close rehome). */
 const REHOME_POLL_MS = 500;
 
@@ -630,6 +644,13 @@ const REHOME_POLL_MS = 500;
 function reportWindow(detail: string): void {
     if (typeof document !== "undefined") {
         document.documentElement.setAttribute(WINDOW_ATTRIBUTE, detail);
+    }
+}
+
+/** Mirror the e10d-drill2 cross-window mirror's convergence onto <html> for a --dump-dom repro. */
+function reportUiMirror(detail: string): void {
+    if (typeof document !== "undefined") {
+        document.documentElement.setAttribute(UI_MIRROR_ATTRIBUTE, detail);
     }
 }
 
@@ -675,6 +696,7 @@ async function startWindowMechanism(
     dragClient: DragClient,
     host: PanelHost,
     client: PanelClient,
+    bridge: ShellBridge,
 ): Promise<number> {
     let windowId = 0;
     let detail = "single window";
@@ -689,10 +711,25 @@ async function startWindowMechanism(
         windowId = list?.windowId ?? 0;
         // Drain anything already queued (a move that landed before this window finished booting).
         const applied = await applyRehomedPanels(host, client, await windowClient.rehomed());
+        // e10d-drill2: bring up the cross-window `editor.ui` MIRROR. THREAD THIS WINDOW'S ID INTO THE
+        // BUS ORIGIN — that is what lets a mirrored envelope be told apart from a locally-published one,
+        // so `receiveMirrored` drops this window's OWN fact when the Shell's broadcast delivers it back
+        // (the echo-suppression branch a broadcasting transport needs). `wireUiMirror` attaches the
+        // ShellUiMirrorSink (outbound) and returns the inbound poller. Nothing publishes on the bus in
+        // the shipping editor yet (the focus/layout/palette publishers are later seams), so the
+        // transport is live and ready but idle — the mirror smoke drives the one fact that exercises it.
+        let uiMirror: UiMirrorWiring | null = null;
+        let uiBus: EditorUiBus | null = null;
+        if (list !== null) {
+            uiBus = new EditorUiBus({ origin: String(windowId) });
+            uiMirror = wireUiMirror(bridge, uiBus);
+        }
+        const uiMirrorSmoke =
+            typeof location !== "undefined" && location.search.includes(UI_MIRROR_SMOKE_FLAG);
         // The runtime poll: cheap, and started ONLY when the Shell actually serves the surface. It
-        // drains BOTH the rehome queue (e10b) and the cross-window drag probe (e10c) — the drag pump
-        // does nothing unless a drag from another window is currently over this one, so a window that is
-        // never a drop target pays only the one cheap `drag.probe` per tick.
+        // drains the rehome queue (e10b), the cross-window drag probe (e10c) — the drag pump does
+        // nothing unless a drag from another window is currently over this one — and the `editor.ui`
+        // mirror (e10d-drill2), whose poll drains a peer's chrome facts and reports convergence.
         if (list !== null && typeof setInterval === "function") {
             setInterval((): void => {
                 void windowClient.rehomed().then((seeds) => {
@@ -701,6 +738,23 @@ async function startWindowMechanism(
                     }
                 });
                 void pumpCrossWindowDrag(dragClient, dropZoneHitTest);
+                // Under the mirror-smoke flag, WINDOW 0 (the publisher) re-publishes on every tick so
+                // the broadcast reaches the second window once it is up and polling; every window then
+                // drains + applies + reports. Inert without the flag — the shipping editor publishes
+                // nothing here, so the poll is an empty round trip and no report is ever sent.
+                if (uiBus !== null && uiMirrorSmoke && windowId === 0) {
+                    uiBus.publish(UI_TOPIC_THEME_CHANGED, { variant: "dark" });
+                }
+                if (uiMirror !== null) {
+                    const poller = uiMirror.poller;
+                    void poller.poll().then(() => {
+                        reportUiMirror(
+                            `window ${windowId} (origin "${windowId}"): applied ${poller.applied}, ` +
+                                `suppressed ${poller.suppressed}`,
+                        );
+                        return poller.report();
+                    });
+                }
             }, REHOME_POLL_MS);
         }
         // A non-primary window rehomes its panels to window 0 when it closes, so nothing is lost.

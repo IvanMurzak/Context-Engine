@@ -29,6 +29,16 @@ export const UI_MIRROR_METHOD = "ui.mirror";
 export const UI_MIRROR_POLL_METHOD = "ui.mirror-poll";
 
 /**
+ * The CONVERGENCE report (e10d-drill2). After a poll, editor-core tells the Shell how many mirrored
+ * facts its bus APPLIED (a peer's, foreign origin) and how many own-origin ECHOES it dropped — the one
+ * fact that lives ONLY in the receiving bus. The transport counters cannot see it (`ui.mirror-poll`
+ * hands a window its own echo back too, so a delivered count reads an applied fact and a dropped echo
+ * alike), so this is what makes the JS-only echo-suppression decision observable to the live smoke.
+ * MUST match window_bridge.h's `kUiMirrorReportMethod` (the same `webui-panel-contract` drift gate).
+ */
+export const UI_MIRROR_REPORT_METHOD = "ui.mirror-report";
+
+/**
  * Parse ONE mirrored envelope out of a `ui.mirror-poll` batch, total against a malformed one.
  *
  * The Shell round-trips the `{seq, topic, origin, payload}` envelope verbatim (it never interprets
@@ -96,15 +106,32 @@ export class ShellUiMirrorSink implements UiMirrorSink {
 export class UiMirrorPoller {
     readonly #bridge: ShellBridge;
     readonly #bus: EditorUiBus;
+    /** Cumulative facts APPLIED from a peer, and own-origin ECHOES dropped — the convergence verdict. */
+    #applied = 0;
+    #suppressed = 0;
+    /** The last totals actually reported, so `report()` only calls the Shell when they change. */
+    #reportedApplied = 0;
+    #reportedSuppressed = 0;
 
     constructor(bridge: ShellBridge, bus: EditorUiBus) {
         this.#bridge = bridge;
         this.#bus = bus;
     }
 
+    /** Total mirrored facts this window's bus APPLIED (a peer's, foreign origin) across every poll. */
+    get applied(): number {
+        return this.#applied;
+    }
+
+    /** Total own-origin ECHOES this window's bus DROPPED across every poll — the broadcasting breaker. */
+    get suppressed(): number {
+        return this.#suppressed;
+    }
+
     /**
-     * Drain once and apply every drained envelope. Returns how many were APPLIED (an own-origin echo
-     * the bus drops does not count) — a test asserts convergence from this, and boot reports it.
+     * Drain once and apply every drained envelope. Returns how many were APPLIED in THIS call (an
+     * own-origin echo the bus drops does not count) — a test asserts convergence from this, and it also
+     * folds into the running `applied` / `suppressed` totals `report()` sends to the Shell.
      */
     async poll(): Promise<number> {
         let applied = 0;
@@ -121,6 +148,12 @@ export class UiMirrorPoller {
                 // receiveMirrored drops the own-origin echo (published === false) and applies the rest.
                 if (this.#bus.receiveMirrored(event).published) {
                     applied += 1;
+                    this.#applied += 1;
+                } else if (event.origin === this.#bus.origin) {
+                    // The broadcasting loop breaker: our OWN envelope came back and was dropped by
+                    // origin. Counted apart from an unknown-topic refusal so the smoke's "does not echo
+                    // back into A" assertion reads the ECHO drop specifically.
+                    this.#suppressed += 1;
                 }
             }
         } catch (error) {
@@ -130,6 +163,38 @@ export class UiMirrorPoller {
             throw error;
         }
         return applied;
+    }
+
+    /**
+     * Report the running convergence totals to the Shell — FIRE-ON-CHANGE, so an idle window (nothing
+     * has mirrored) never calls at all, keeping the shipping editor's poll path silent until cross-window
+     * facts actually flow. Fire-and-forget: an older Shell that does not route `ui.mirror-report`
+     * (a `BridgeError`) is swallowed, exactly like the sink's — the mirror still works, only its
+     * telemetry is absent. This is what makes the receiving bus's applied/dropped verdict — otherwise
+     * reachable only from inside the renderer — observable to the live `editor-cef-smoke-shell-uimirror`
+     * leg (window B: `applied >= 1`; window A: `applied == 0`, `suppressed >= 1`).
+     */
+    async report(): Promise<void> {
+        if (this.#applied === 0 && this.#suppressed === 0) {
+            return; // nothing has converged or been suppressed — say nothing (the shipping-editor case)
+        }
+        if (this.#applied === this.#reportedApplied && this.#suppressed === this.#reportedSuppressed) {
+            return; // unchanged since the last report — no need to call again
+        }
+        this.#reportedApplied = this.#applied;
+        this.#reportedSuppressed = this.#suppressed;
+        try {
+            await this.#bridge.call(UI_MIRROR_REPORT_METHOD, {
+                origin: this.#bus.origin,
+                applied: this.#applied,
+                suppressed: this.#suppressed,
+            });
+        } catch (error) {
+            if (error instanceof BridgeError) {
+                return; // an older Shell with no report channel — the mirror still converges
+            }
+            // A non-bridge error is unexpected; still never propagate out of the poll path.
+        }
     }
 }
 

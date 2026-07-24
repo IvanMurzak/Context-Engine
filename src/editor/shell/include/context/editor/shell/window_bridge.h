@@ -87,6 +87,20 @@ inline constexpr const char* kDragReportZoneMethod = "drag.report-zone";
 inline constexpr const char* kUiMirrorMethod = "ui.mirror";
 inline constexpr const char* kUiMirrorPollMethod = "ui.mirror-poll";
 
+// The CROSS-WINDOW mirror CONVERGENCE report (M9 e10d-drill2). `ui.mirror-report`: after a window's
+// `EditorUiBus` drains a `ui.mirror-poll` batch, editor-core reports how many mirrored envelopes its
+// bus APPLIED (a peer's fact, foreign origin) and how many own-origin ECHOES it dropped — the ONE fact
+// that lives only in the receiving BUS and is invisible to the transport counters (`ui.mirror-poll`
+// delivers a window its OWN echo too, so a delivered count cannot tell an applied fact from a dropped
+// one). It is boot's fire-on-change telemetry — nothing publishes on the bus in the shipping editor
+// yet, so it never fires there — and it is what the LIVE `editor-cef-smoke-shell-uimirror` leg asserts
+// on to PROVE, end to end across two live browsers, that a fact published in window A converges in
+// window B (B reports `applied >= 1`) and does NOT echo back into A (A reports `applied == 0`,
+// `suppressed >= 1`). Rides this surface so it installs on every window with no per-smoke change; it
+// records into this bridge's own counters and needs no store (a build that never calls it just leaves
+// them at zero, so the sibling smokes are untouched).
+inline constexpr const char* kUiMirrorReportMethod = "ui.mirror-report";
+
 // Refusal codes a window method answers with. LOCAL codes (not R-CLI-008 catalog codes), the same
 // rationale panel_host.h states: they classify a HOST-side caller/wiring error, not a daemon-contract
 // failure, so minting catalog codes for them would pollute the published surface.
@@ -250,6 +264,15 @@ public:
     [[nodiscard]] contract::Json ui_mirror(const contract::Json& params, std::string& error_code);
     [[nodiscard]] contract::Json ui_mirror_poll();
 
+    // e10d-drill2 — the cross-window mirror CONVERGENCE report. `ui_mirror_report` records the
+    // cumulative `{applied, suppressed}` counts editor-core's receiving bus computed (facts APPLIED
+    // from a peer, own-origin ECHOES dropped) — last-write-wins, since the renderer sends running
+    // totals. `error_code` is set (kErrWindowBadParams) when `applied` / `suppressed` are missing or
+    // not non-negative numbers; a well-formed report is recorded and answered `{recorded:true}`. This
+    // is what makes the JS-only echo-suppression decision observable to the live smoke.
+    [[nodiscard]] contract::Json ui_mirror_report(const contract::Json& params,
+                                                  std::string& error_code);
+
     // Bind every `window.*` + `drag.*` method on `router`. False when ANY binding was refused (a name
     // collision), which is a wiring bug the caller must not ignore.
     [[nodiscard]] bool install(BridgeRouter& router);
@@ -267,6 +290,16 @@ public:
     // these, exactly as it does from `seeds_served()` / `drag_zones_reported()`.
     [[nodiscard]] std::size_t ui_mirrors_published() const { return ui_mirrors_published_; }
     [[nodiscard]] std::size_t ui_mirrors_delivered() const { return ui_mirrors_delivered_; }
+    // The LATEST cumulative convergence report editor-core's receiving bus sent (own-origin echoes
+    // DROPPED and peer facts APPLIED) plus how many reports arrived — the live smoke asserts on these
+    // to distinguish "converged" (applied) from "echo dropped" (suppressed), which the transport
+    // counters above cannot. Zero on a window whose editor-core never mirrored (every sibling smoke).
+    [[nodiscard]] std::size_t ui_mirror_reported_applied() const { return ui_mirror_reported_applied_; }
+    [[nodiscard]] std::size_t ui_mirror_reported_suppressed() const
+    {
+        return ui_mirror_reported_suppressed_;
+    }
+    [[nodiscard]] std::size_t ui_mirror_reports() const { return ui_mirror_reports_; }
     [[nodiscard]] WindowId self_id() const { return self_id_; }
 
 private:
@@ -285,6 +318,9 @@ private:
     std::size_t drag_zones_reported_ = 0;
     std::size_t ui_mirrors_published_ = 0;
     std::size_t ui_mirrors_delivered_ = 0;
+    std::size_t ui_mirror_reported_applied_ = 0;
+    std::size_t ui_mirror_reported_suppressed_ = 0;
+    std::size_t ui_mirror_reports_ = 0;
 };
 
 } // namespace context::editor::shell
