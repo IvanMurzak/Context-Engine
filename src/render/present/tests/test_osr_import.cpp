@@ -103,6 +103,37 @@ void test_linux_policy_is_gated()
     CHECK(open.accelerated());
 }
 
+void test_linux_accel_is_off_by_DEFAULT_not_merely_gated()
+{
+    // M9 e12a DoD: "Linux accel stays OFF without the gate — ASSERT it."
+    //
+    // The test above proves the gate SWITCHES the decision. That is a different claim from the one
+    // the DoD makes, and the difference is exactly how accelerated dmabuf would ship by accident:
+    // the gate is a plain bool on an options struct every caller default-constructs, so a future
+    // edit that flipped the DEFAULT would leave the test above passing unchanged — it never looks at
+    // the default at all — while every real Shell on Linux silently began importing dmabuf.
+    //
+    // So the DEFAULT is pinned here, at BOTH layers a caller can reach it through.
+    CHECK(!OsrImportOptions{}.linux_dmabuf_gate);
+
+    // ...and through the whole decision, with a producer that IS offering a shared texture, which is
+    // the only situation in which the gate can matter at all.
+    OsrImportOptions default_options;
+    default_options.shared_texture_offered = true;
+    const OsrImportDecision d = select_osr_import(PresentPlatform::linux_, default_options);
+    CHECK(d.source == ExternalTextureSource::CpuBgra);
+    CHECK(!d.accelerated());
+    // The refusal says WHY, so "why is Linux on the CPU path?" is answerable from the artifact
+    // rather than from this file.
+    CHECK(mentions(d.rationale, "gate"));
+
+    // The importer — the object the Shell actually constructs — must agree with the policy. It is
+    // the layer that would carry a divergent default of its own.
+    OsrTextureImporter importer(PresentPlatform::linux_, default_options);
+    CHECK(!importer.decision().accelerated());
+    CHECK(importer.decision().source == ExternalTextureSource::CpuBgra);
+}
+
 void test_force_software_beats_every_platform()
 {
     // The ONE L-41 switch. It must win on the platform that would otherwise accelerate.
@@ -466,6 +497,7 @@ int main()
     test_windows_policy_is_cpu_upload();
     test_macos_policy_is_accelerated();
     test_linux_policy_is_gated();
+    test_linux_accel_is_off_by_DEFAULT_not_merely_gated();
     test_force_software_beats_every_platform();
     test_software_osr_producer_never_accelerates();
     test_clip_rect();

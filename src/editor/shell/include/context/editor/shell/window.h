@@ -1,26 +1,29 @@
-// The Shell's native-window seam (design 03 §1) — one interface, a real Windows backend, and a
-// portable headless backend.
+// The Shell's native-window seam (design 03 §1) — one interface, real Windows and Linux backends,
+// and a portable headless backend.
 //
-// v1 ships the WINDOWS backend; macOS (NSWindow/NSView) and Linux (X11/XWayland) are e12's. That gap
-// is REPORTED, not silent: make_window_backend returns a selection carrying a diagnostic that names
-// e12, mirroring how e03's make_present_blitter reports its own missing platforms. A shell that
-// quietly opened no window would look identical to one that opened an invisible one.
+// e04 shipped the WINDOWS backend; e12a adds the LINUX one (X11/XWayland — native Wayland is
+// post-M9 per D21). macOS (NSWindow/NSView) is e12b's. That remaining gap is REPORTED, not silent:
+// make_window_backend returns a selection carrying a diagnostic that names e12b, mirroring how e03's
+// make_present_blitter reports its own missing platforms. A shell that quietly opened no window
+// would look identical to one that opened an invisible one.
 //
 // THE PLATFORM BLIND SPOT, AND WHAT IS DONE ABOUT IT. The local dev gate defines _WIN32, so a POSIX
-// branch gets no compile signal at all, and CI's Windows leg is the only thing that ever runs a
-// WndProc. So the Win32 backend is split in two:
+// branch gets no compile signal at all there, and CI's Windows leg is the only thing that ever runs
+// a WndProc. So EACH native backend is split in two, on the same seam:
 //
-//   * `translate_win32_message` — the MESSAGE DECODING, as a pure function over plain integers. It
-//     includes no <windows.h>, names no HWND, and is compiled and executed by the ctest on all three
-//     OSes. This is where the bit-twiddling that actually goes wrong lives (which half of LPARAM is
-//     x, that WM_MOUSEWHEEL's coordinates are SCREEN-relative while every other mouse message's are
-//     client-relative, that a wheel delta is signed and packed in the high word).
-//   * `win32_window.cpp` — the OS calls: RegisterClassExW, CreateWindowExW, the pump, per-monitor-v2
-//     DPI. Windows-only and honestly untested off-Windows, exactly as e03 left the GDI blit body.
+//   * `translate_win32_message` / `translate_x11_event` — the EVENT DECODING, as pure functions over
+//     plain integers. They include no <windows.h> and no <X11/Xlib.h>, name no HWND and no Display*,
+//     and are compiled and executed by the ctest on all three OSes. This is where the bit-twiddling
+//     that actually goes wrong lives (which half of LPARAM is x, that WM_MOUSEWHEEL's coordinates
+//     are SCREEN-relative while every other mouse message's are client-relative, that X11 encodes
+//     the wheel as buttons 4-7 whose RELEASE must not be counted a second time).
+//   * `win32_window.cpp` / `x11_window.cpp` — the OS calls: RegisterClassExW / XCreateWindow, the
+//     pump, per-monitor DPI. Each is honestly untested off its own platform, exactly as e03 left the
+//     GDI blit body.
 //
-// The WM_* values below are declared locally so the decoder needs no <windows.h>. They are
-// static_assert'ed against the real ones inside win32_window.cpp, so a wrong constant is a Windows
-// COMPILE error rather than a runtime mystery.
+// The WM_* and X11 values below are declared locally so the decoders need no platform header. They
+// are static_assert'ed against the real ones inside win32_window.cpp / x11_window.cpp, so a wrong
+// constant is a COMPILE error on the platform that has the header rather than a runtime mystery.
 
 #pragma once
 
@@ -29,6 +32,7 @@
 #include "context/editor/shell/input.h"
 #include "context/render/rhi.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -249,15 +253,174 @@ struct Win32Message
 [[nodiscard]] std::optional<ShellEvent> translate_win32_message(const Win32Message& message,
                                                                 const Win32ModifierState& modifiers);
 
+// --------------------------------------------------------------------- X11 event decoding (pure)
+
+// The subset of X core event types the Shell decodes (X11/X.h). Declared here so the decoder is
+// <X11/Xlib.h>-free and therefore compiled + tested on every OS; asserted against the real values
+// in x11_window.cpp.
+inline constexpr std::int32_t kX11KeyPress = 2;
+inline constexpr std::int32_t kX11KeyRelease = 3;
+inline constexpr std::int32_t kX11ButtonPress = 4;
+inline constexpr std::int32_t kX11ButtonRelease = 5;
+inline constexpr std::int32_t kX11MotionNotify = 6;
+inline constexpr std::int32_t kX11EnterNotify = 7;
+inline constexpr std::int32_t kX11LeaveNotify = 8;
+inline constexpr std::int32_t kX11FocusIn = 9;
+inline constexpr std::int32_t kX11FocusOut = 10;
+inline constexpr std::int32_t kX11Expose = 12;
+inline constexpr std::int32_t kX11ConfigureNotify = 22;
+inline constexpr std::int32_t kX11ClientMessage = 33;
+
+// Crossing/focus `mode` values. Only NotifyNormal is a real user-visible transition: X also
+// synthesizes LeaveNotify/FocusOut around every pointer or keyboard GRAB, and forwarding those tells
+// the browser the pointer left (dropping a hover) or that focus was lost, in the middle of a drag
+// that is still very much happening.
+inline constexpr std::int32_t kX11NotifyNormal = 0;
+inline constexpr std::int32_t kX11NotifyGrab = 1;
+inline constexpr std::int32_t kX11NotifyUngrab = 2;
+
+// X11 modifier masks (X11/X.h). Note Mod1 is Alt and Mod4 is Super — X names them by slot, not by
+// meaning, and every desktop maps them this way.
+inline constexpr std::uint32_t kX11ShiftMask = 1u << 0;
+inline constexpr std::uint32_t kX11LockMask = 1u << 1;
+inline constexpr std::uint32_t kX11ControlMask = 1u << 2;
+inline constexpr std::uint32_t kX11Mod1Mask = 1u << 3; // Alt
+inline constexpr std::uint32_t kX11Mod4Mask = 1u << 6; // Super / Meta
+inline constexpr std::uint32_t kX11Button1Mask = 1u << 8;
+inline constexpr std::uint32_t kX11Button2Mask = 1u << 9;
+inline constexpr std::uint32_t kX11Button3Mask = 1u << 10;
+
+// X core button numbers. 1/2/3 are left/MIDDLE/right — NOT left/right/middle: X's middle button is
+// 2, whereas Win32's MK_MBUTTON is the third bit, so a naive index-based port swaps middle and
+// right on every three-button mouse. 4..7 are not buttons at all: the core protocol has no scroll
+// axis, so a wheel notch arrives as a ButtonPress/ButtonRelease PAIR on 4 (up), 5 (down), 6 (left)
+// or 7 (right). 8/9 are the browser back/forward thumb buttons, which the Shell does not route.
+inline constexpr std::uint32_t kX11ButtonLeft = 1;
+inline constexpr std::uint32_t kX11ButtonMiddle = 2;
+inline constexpr std::uint32_t kX11ButtonRight = 3;
+inline constexpr std::uint32_t kX11ButtonWheelUp = 4;
+inline constexpr std::uint32_t kX11ButtonWheelDown = 5;
+inline constexpr std::uint32_t kX11ButtonWheelLeft = 6;
+inline constexpr std::uint32_t kX11ButtonWheelRight = 7;
+
+// One X event, flattened to plain integers. The three fields the decoder cannot compute itself are
+// resolved by the backend, which owns the Display connection: `keysym` (XkbKeycodeToKeysym),
+// `text` (the input method's UTF-32 result) and `is_delete_window` (an interned atom comparison).
+// Everything else is copied straight out of the XEvent union.
+struct X11Event
+{
+    std::int32_t type = 0;
+    // KeyPress/KeyRelease: the hardware keycode. ButtonPress/ButtonRelease: the button number.
+    std::uint32_t detail = 0;
+    // The modifier + button mask, as X reports it: the state BEFORE this event is applied.
+    std::uint32_t state = 0;
+    // Pointer + ConfigureNotify: client-area coordinates in physical pixels.
+    std::int32_t x = 0;
+    std::int32_t y = 0;
+    // ConfigureNotify: the new client size.
+    std::int32_t width = 0;
+    std::int32_t height = 0;
+    // Crossing (Enter/Leave) + focus events: NotifyNormal / NotifyGrab / NotifyUngrab.
+    std::int32_t mode = kX11NotifyNormal;
+    // Expose: how many more Expose events are already queued for this window.
+    std::int32_t count = 0;
+    // KeyPress/KeyRelease: the keysym the backend looked up for `detail` + `state`.
+    std::uint32_t keysym = 0;
+    // KeyPress: the character the input method produced, or 0 when the key produced no text.
+    char32_t text = 0;
+    // ClientMessage: true when it carries the WM_DELETE_WINDOW protocol atom.
+    bool is_delete_window = false;
+};
+
+// The window geometry the decoder compares a ConfigureNotify against. X sends one for EVERY
+// configure — including a pure move — so without the previous geometry a window dragged across the
+// desktop would report a "resize" per motion step and reconfigure the swapchain each time.
+struct X11WindowGeometry
+{
+    std::int32_t x = 0;
+    std::int32_t y = 0;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+};
+
+// Up to two ShellEvents from ONE X event. Two X events legitimately carry two facts each:
+// ConfigureNotify can change the size AND the position at once (a maximize does exactly that), and
+// a KeyPress carries both the raw key and the character it produced — where Windows splits the
+// latter into its own WM_CHAR. A fixed pair rather than a vector so decoding stays allocation-free
+// on the pump's hot path.
+struct X11EventBatch
+{
+    ShellEvent events[2];
+    std::size_t count = 0;
+
+    void push(const ShellEvent& event)
+    {
+        if (count < 2)
+        {
+            events[count++] = event;
+        }
+    }
+};
+
+// Map an X keysym to the Windows virtual-key code CEF expects in `windows_key_code`, on every
+// platform (CefKeyEvent's field is named for Windows but is the cross-platform contract). Returns 0
+// for a keysym with no VK equivalent, which is the honest "this key is text-only".
+//
+// WHAT IS EASY TO GET WRONG HERE, and is therefore asserted by the tests:
+//   * a LOWERCASE latin keysym must map to the UPPERCASE VK code — `a` is keysym 0x61 but VK 0x41,
+//     and passing 0x61 through makes every unshifted letter an unrecognised key in Chromium;
+//   * the keypad digits are VK_NUMPAD0..9, not the row digits, or a numeric-keypad shortcut fires
+//     the wrong command;
+//   * punctuation goes to the VK_OEM_* codes, which are NOT the ASCII values.
+[[nodiscard]] std::int32_t x11_keysym_to_windows_key_code(std::uint32_t keysym);
+
+// Decode one X event against the window's PREVIOUS geometry. An empty batch is the decoder's "this
+// event is not one the Shell cares about", which is most of them.
+//
+// WHAT IS EASY TO GET WRONG HERE, and is therefore asserted by the tests:
+//   * a wheel notch is a ButtonPress/ButtonRelease PAIR on button 4-7, so decoding the RELEASE too
+//     scrolls twice as far as the user asked;
+//   * X's button-number order is left/MIDDLE/right (see kX11Button*);
+//   * `state` is the mask BEFORE the event, so a press must add its own button and a release must
+//     clear it, or the modifiers handed to the browser lag one event behind;
+//   * LeaveNotify/FocusOut with mode != NotifyNormal is a GRAB artefact, not the pointer leaving;
+//   * an Expose with count > 0 is one of a run, and repainting per rectangle is a wasted frame each.
+[[nodiscard]] X11EventBatch translate_x11_event(const X11Event& event,
+                                                const X11WindowGeometry& previous);
+
+// Parse an `Xft.dpi` X-resource value ("144", "144.0", " 96 "). Returns nullopt for anything that is
+// not a positive number, so a malformed resource falls through to the screen derivation below
+// instead of scaling the whole editor by a garbage factor.
+[[nodiscard]] std::optional<std::uint32_t> x11_parse_xft_dpi(std::string_view value);
+
+// Derive a DPI from a screen's pixel width and its physical width in millimetres — X's only
+// built-in answer, and a famously unreliable one. It is REFUSED (falling back to 96) outside a
+// plausible band, because two common shapes produce nonsense rather than a wrong-but-close number:
+// a server that reports a hardcoded 1-metre-wide screen (~33 dpi, which would shrink the UI to
+// unreadable), and a multi-head X screen whose millimetres are the SUM across monitors while the
+// pixels are too — plausible per-axis, wrong per-monitor. Real per-monitor DPI needs RandR, which
+// is deliberately not a dependency of this task.
+[[nodiscard]] DpiScale x11_screen_dpi(std::int32_t pixels, std::int32_t millimetres);
+
 // ------------------------------------------------------------------------------ backend selection
 
 struct WindowBackendSelection
 {
     std::unique_ptr<IWindowBackend> backend;
     // Empty on success; otherwise why no native window could be created — including the honest
-    // "this platform's backend is e12's" for macOS/Linux.
+    // "this platform's backend is e12b's" for macOS.
     std::string diagnostic;
 };
+
+// The per-platform factories make_window_backend chooses between. Each returns nullptr when this
+// build is not for its platform — mirroring make_win32_gdi_blitter, so the off-platform refusal is
+// assertable by the ctest on every leg — or when window creation failed, in which case `error` says
+// why. `make_x11_window_backend` also returns nullptr (with an error) in a build configured without
+// the X11 development headers, and on a host with no reachable X display.
+[[nodiscard]] std::unique_ptr<IWindowBackend> make_win32_window_backend(const WindowDesc& desc,
+                                                                        std::string& error);
+[[nodiscard]] std::unique_ptr<IWindowBackend> make_x11_window_backend(const WindowDesc& desc,
+                                                                      std::string& error);
 
 // Create the native window backend for the host platform. Returns a null backend plus a diagnostic
 // on a platform whose backend does not exist yet, or when window creation failed.

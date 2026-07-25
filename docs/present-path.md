@@ -121,9 +121,20 @@ and viewport panels draw their diagnostic placeholder.
 
 `present/present_blit.h` lands the seam plus the **Windows GDI** implementation (`StretchDIBits` into
 the window DC, top-down DIB, tight repack for a padded stride, bars filled before a letterboxed
-present). X11 SHM and `CALayer.contents` are **e12's** — and that gap is REPORTED, not silent:
-`make_present_blitter` returns a `BlitterSelection` carrying an explicit diagnostic naming e12, so a
-caller degrades loudly instead of quietly presenting nothing.
+present) and, since **e12a**, the **X11** one (`XShmPutImage` through a MIT-SHM `XImage`, degrading to
+`XPutImage` where the server refuses shared memory). `CALayer.contents` is **e12b's** — and that gap
+is REPORTED, not silent: `make_present_blitter` returns a `BlitterSelection` carrying an explicit
+diagnostic naming e12b, so a caller degrades loudly instead of quietly presenting nothing.
+
+The X11 blitter composes its destination pixels from the **visual's channel masks** rather than
+memcpy'ing BGRA rows. A local 24/32-bit TrueColor visual on a little-endian box really is BGRX in
+memory, so a straight copy is right almost everywhere and silently swaps red and blue on the rest;
+the per-channel shift costs one instruction each on a path that exists only because there is no GPU.
+A visual that is not 32 bits per pixel is REFUSED (a reportable `false`), not drawn as garbage. The
+SHM segment is `IPC_RMID`-marked immediately after `shmat`, so a crashed editor cannot leak kernel
+segments for the rest of the machine's uptime, and the attach is probed with an error handler plus an
+`XSync` — `XShmAttach` fails asynchronously, so without that round trip the blitter would happily
+write into a segment the server never mapped.
 
 `compute_blit_plan` (aspect-preserving, centred, pure integer math) is kept apart from every OS call,
 which is what lets the geometry be pixel-asserted on all three OSes via `MemoryBlitter` — a portable
@@ -136,14 +147,17 @@ BEFORE the DC is acquired, so it cannot throw while holding a handle only one `R
 What remains inside `Win32GdiBlitter::blit` is the OS calls themselves — genuinely Windows-only and
 honestly untested off-Windows.
 
-**Known follow-up for e12 — `make_present_blitter` is keyed on the wrong axis.** It selects on
+**✅ DONE in e12a — `make_present_blitter` was keyed on the wrong axis.** It used to select on
 `PresentPlatform` plus a single `void*`. That is right for the IMPORT tier, which genuinely is
 OS-granular (DXGI / IOSurface / dmabuf), but a 2D present primitive is WINDOW-SYSTEM-granular: X11
 SHM needs `(Display*, Window)` and Wayland is a different mechanism on the same `PresentPlatform`.
-`rhi.h` already carries the right shape — `NativeWindowDesc` (`kind` + `handle` + `display`, with
-X11 and Wayland as distinct kinds). e12 should re-key the selection on that before adding the Linux
-blitter, rather than bolting a second parameter onto the current signature. Recorded here rather
-than changed now: it is an API decision for the milestone that lands the second implementation.
+`rhi.h` already carried the right shape — `NativeWindowDesc` (`kind` + `handle` + `display`, with X11
+and Wayland as distinct kinds) — and e12a re-keyed the selection on it while landing the Linux
+blitter, exactly as this note asked, rather than bolting a second parameter onto the old signature.
+
+The concrete payoff is the **Wayland** arm: it shares `PresentPlatform::linux_` with X11, so a
+platform-keyed switch would have handed a `wl_surface*` to the X11 blitter as if it were a `Window`.
+It is now a NAMED refusal with its own diagnostic, pinned by `render-present-test_present_blit`.
 
 Both blitters share one input validation, `is_blit_source_readable`: a real buffer, a stride at least
 as wide as its own pixels, and a `BlitImage::byte_size` covering through the last row. A blitter
@@ -202,7 +216,11 @@ Named so the gaps are visible rather than assumed. The first two were **closed b
 - ~~**No `PET_POPUP` second OSR layer.**~~ Landed by e04, which also added
   `IRenderPassEncoder::set_scissor_rect` to confine a layer's fullscreen-triangle draw to the popup
   rect (and `compute_layer_uv` to extrapolate the UV so the interpolation is correct inside it).
-- **No X11 / macOS CPU present blitter** — e12.
+- ~~**No X11 CPU present blitter.**~~ Landed by **e12a** (MIT-SHM `XShmPutImage`, `XPutImage`
+  fallback), proven live against a real X server by the `editor-shell-x11-window` smoke.
+- **No macOS CPU present blitter** — e12b.
+- **No Wayland present blitter** — post-M9 (D21 targets X11/XWayland). The selection NAMES the gap
+  rather than mis-dispatching a `wl_surface` into the X11 path.
 - **The macOS accelerated path has no runtime CI proof.** It compiles on the `render (macos-latest)`
   leg, but exercising it needs a live IOSurface from a real CEF host, which arrives with the Shell.
 - **Windows accelerated import is deferred**, pending gfx-rs/wgpu-native#621.

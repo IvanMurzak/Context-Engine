@@ -139,6 +139,18 @@ jobs:
         with:
           preset: dev   # sccache namespace this job SAVES on main (sccache-dev-<os>)
 
+      # M9 e12a: the X11 development headers, so this leg COMPILES AND LINKS the real Linux window
+      # backend + X11-SHM present blitter rather than their honest missing-headers stubs. Cheap
+      # (seconds) and display-free — nothing here opens a window, so no xvfb is needed and the
+      # uniform 3-OS dev-preset gate is otherwise untouched. Both CMake blocks probe rather than
+      # require, so this step is what makes the difference between real coverage and a stub on the
+      # routine leg; the LIVE windowed proof lives in `editor-cef-smoke`, which already has xvfb.
+      - name: Install X11 development headers (Linux — the e12a window backend + present blitter)
+        if: runner.os == 'Linux'
+        run: >
+          bash tools/ci-retry.sh -- bash -c 'sudo apt-get update && sudo apt-get install -y
+          libx11-dev libxext-dev'
+
       # Build files live in src/ (root stays minimal): configure with -S src; build/test
       # presets resolve CMakePresets.json from the working directory, so those run in src/.
       - name: Configure
@@ -1886,6 +1898,29 @@ jobs:
       - name: Editor-host boot smoke ctest (Linux, headless under xvfb)
         if: runner.os == 'Linux'
         run: xvfb-run -a ctest --preset dev -R "^editor-cef-smoke-" --output-on-failure
+        working-directory: src
+
+      # M9 e12a: the LIVE WINDOWED Linux proof — a REAL X11 window created by the real
+      # make_window_backend, the real owner loop + compositor, the real e05d1 panel models, and
+      # software-OSR frames presented through the real X11-SHM blitter, with the X SERVER as the
+      # event source (the repaint and the resize it asserts come BACK from the server). CEF-free, so
+      # it costs this job only a build; it rides here because this is the one Linux job that already
+      # carries libx11-dev + xvfb.
+      #
+      # ⚠ NON-VACUITY, and why this is a direct run rather than a `ctest -R` line. The ctest
+      # registration deliberately SKIPS (SKIP_RETURN_CODE 77) with no display, so the same executable
+      # can ride the default `build`/`sanitize` legs harmlessly. A `ctest` invocation here would
+      # report that skip as a PASS, and a build that had quietly compiled the X11 path OUT — the
+      # exact failure mode the probing find_package(X11) makes possible — would sail through green
+      # forever. `--require-x11 --require-display` turns both into hard failures, so this step fails
+      # if the backend, the blitter, or the display is not really there.
+      - name: Live windowed X11 Shell smoke (Linux, real window under xvfb — M9 e12a)
+        if: runner.os == 'Linux'
+        run: |
+          cmake --build --preset dev --target context_editor_shell_x11_smoke
+          smoke_exe="$(find build/dev -type f -name context_editor_shell_x11_smoke | head -n1)"
+          test -n "$smoke_exe" || { echo "context_editor_shell_x11_smoke was not built"; exit 1; }
+          xvfb-run -a "$smoke_exe" --require-x11 --require-display
         working-directory: src
 
       - name: Editor-host boot smoke ctest (macOS / Windows)

@@ -42,8 +42,9 @@ add_library(context_editor_shell STATIC
     src/dpi.cpp           # per-monitor DPI (replaces the spike's DPI-1.0 pin)
     src/input.cpp         # region arbitration + capture stack + focus-class routing (03 §6)
     src/editor_state.cpp  # .editor/editor-state.json — the Shell is its SINGLE writer (03 §1)
-    src/window.cpp        # the window seam, headless backend + the PURE Win32 message decoder
+    src/window.cpp        # the seam, headless backend, the PURE Win32 + X11 decoders, the platform choice
     src/win32_window.cpp  # the Windows OS calls (early-returns to an honest gap elsewhere)
+    src/x11_window.cpp    # e12a: the Linux X11/XWayland OS calls (ditto, off Linux)
     src/browser.cpp       # the CEF-free browser seam + the scripted host
     src/compositor.cpp    # the layer stack, damage, resize protocol, both present paths (03 §4)
     src/app_scheme.cpp    # e05c: context-editor://app/ resolution + the strict CSP (04 §1)
@@ -145,6 +146,29 @@ if(WIN32)
     target_link_libraries(context_editor_shell PRIVATE user32 ole32 uuid winhttp shell32)
 endif()
 
+# The Linux window backend (M9 e12a): XCreateWindow / the event pump / EWMH placement live in libX11
+# — the platform's OWN windowing system, the direct analogue of user32 above, so nothing enters
+# src/vcpkg.json or tools/license-allowlist.json and the design 08 §3 dependency gate is not reached
+# (the same reasoning the winhttp/ole32 note above records).
+#
+# PROBED, NOT REQUIRED, for the reason spelled out at the matching block in src/render/present/: a
+# hard requirement here would fail CONFIGURE on every ubuntu CI job that installs no X11 packages,
+# reddening the whole rollup. Without the headers x11_window.cpp compiles to its honest
+# "configured without the X11 development headers" refusal, which make_window_backend reports.
+if(UNIX AND NOT APPLE)
+    find_package(X11)
+    if(X11_FOUND AND TARGET X11::X11)
+        target_link_libraries(context_editor_shell PRIVATE X11::X11)
+        target_compile_definitions(context_editor_shell PRIVATE CONTEXT_SHELL_HAS_X11=1)
+        message(STATUS "context_editor_shell: X11 found — the Linux window backend is REAL in this "
+                       "build")
+    else()
+        message(STATUS "context_editor_shell: no X11 development headers — the Linux window backend "
+                       "compiles to its honest missing-headers report (install libx11-dev for the "
+                       "real one)")
+    endif()
+endif()
+
 # Self-contained GCC runtime for every executable below. They use std::filesystem + stream IO, whose
 # libstdc++ symbols live in a NEWER libstdc++-6.dll; on a MinGW host a stale libstdc++-6.dll earlier
 # on PATH can shadow the toolchain's and be loaded first, yielding STATUS_ENTRYPOINT_NOT_FOUND (or a
@@ -218,6 +242,32 @@ target_link_libraries(context_editor_shell_smoke PRIVATE context_editor_shell co
 target_link_options(context_editor_shell_smoke PRIVATE ${_context_shell_static_runtime})
 add_test(NAME editor-shell-smoke-session0 COMMAND context_editor_shell_smoke)
 set_tests_properties(editor-shell-smoke-session0 PROPERTIES TIMEOUT 120)
+
+# --- the LIVE WINDOWED Linux smoke (M9 e12a) -----------------------------------------------------
+# The mirror image of the Session-0 smoke above: same real owner loop, same real compositor, same
+# real panel models — but through a REAL X11 window, the REAL X11 present blitter, and the REAL X
+# server as the event source. It is the DoD proof that the editor boots WINDOWED with live panels
+# under Linux, and it links CEF nowhere, so it runs on the local dev host and costs the CI job
+# nothing but a build.
+#
+# Linux-only by construction, and it SKIPS (ctest SKIP_RETURN_CODE 77) when there is no display —
+# which is the ordinary state of `build (ubuntu-latest)` and both `sanitize` legs, where it must not
+# fail. That skip is NOT allowed to become permanent: the editor-cef-smoke Linux leg (which has
+# xvfb) runs the executable directly with --require-x11 --require-display, under which a compiled-out
+# X11 path or a missing display is a hard failure. Registered in the non-gate `editor-shell-` family,
+# so `--preset dev` builds it and the general ctest step runs it with no ci.yml --target bookkeeping.
+#
+# It links context_editor_panels (NOT context_editor_shell alone) for the same reason context_editor
+# does: the panel composition root is what binds real providers, and "live panels" is only a checked
+# claim if the real ones render.
+if(UNIX AND NOT APPLE)
+    add_executable(context_editor_shell_x11_smoke smoke/shell_x11_smoke_main.cpp)
+    target_link_libraries(context_editor_shell_x11_smoke PRIVATE context_editor_panels
+                                                                 context_warnings)
+    target_link_options(context_editor_shell_x11_smoke PRIVATE ${_context_shell_static_runtime})
+    add_test(NAME editor-shell-x11-window COMMAND context_editor_shell_x11_smoke)
+    set_tests_properties(editor-shell-x11-window PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+endif()
 
 # --- the windowed-OSR CEF binding (CI-only dependency path) --------------------------------------
 # Added ONLY behind CONTEXT_BUILD_GUI_CEF, and AFTER src/editor/cef in src/CMakeLists.txt so the

@@ -28,6 +28,33 @@ if(WIN32)
     target_link_libraries(context_render_present PRIVATE gdi32)
 endif()
 
+# The Linux CPU present fallback (M9 e12a): XShmPutImage / XPutImage into the window, the exact
+# counterpart of the gdi32 block above. libX11 + libXext are the platform's OWN windowing system —
+# the direct analogue of gdi32/user32 — so nothing enters src/vcpkg.json or the license allowlist
+# (the same reasoning src/editor/shell/ records for winhttp/ole32).
+#
+# PROBED, NOT REQUIRED, and this is load-bearing. Every ubuntu CI job configures this directory
+# (`build`, `sanitize` x2, `render`, `linux-export`, `editor-boundary`, the spikes, the benches…),
+# and only `editor-cef-smoke` and `build` install X11 development packages. A `find_package(X11
+# REQUIRED)` would therefore fail CONFIGURE — that is, red the whole rollup — on every other one.
+# Probing instead degrades to the honest "no X11 blitter in this build" diagnostic that
+# make_present_blitter already had to carry for a missing platform. Non-vacuity is enforced where it
+# matters instead: the editor-cef-smoke Linux leg runs the live windowed smoke with --require-x11,
+# which fails if this block did not fire.
+if(UNIX AND NOT APPLE)
+    find_package(X11)
+    if(X11_FOUND AND X11_XShm_FOUND AND TARGET X11::X11 AND TARGET X11::Xext)
+        target_link_libraries(context_render_present PRIVATE X11::X11 X11::Xext)
+        target_compile_definitions(context_render_present PRIVATE CONTEXT_PRESENT_HAS_X11=1)
+        message(STATUS "context_render_present: X11 + MIT-SHM found — the Linux CPU present "
+                       "fallback is REAL in this build")
+    else()
+        message(STATUS "context_render_present: no X11/MIT-SHM development headers — the Linux CPU "
+                       "present fallback compiles to its honest missing-platform report "
+                       "(install libx11-dev + libxext-dev for the real one)")
+    endif()
+endif()
+
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) -----------------------------
 # Plain assertion-bearing executables registered with ctest, in the `render-present-*` family. That
 # family is NOT a gate family, so it is auto-run by the build job's general ctest step on all three
