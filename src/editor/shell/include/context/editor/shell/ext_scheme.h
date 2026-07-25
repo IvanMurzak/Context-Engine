@@ -59,8 +59,9 @@
 // WHAT ACTUALLY DISCRIMINATES, and it is this file's own layer: only the SHELL knows which package's
 // bytes it served into a frame. So the bridge is bound not to an origin string but to a
 // SHELL-INJECTED, ALWAYS-FIRST BOOTSTRAP: every `text/html` document this scheme serves gets
-// `<script src="/<kExtPortBootstrapAsset>">` spliced in ahead of everything the document itself
-// carries (`ext_inject_port_bootstrap`), and that script — OUR code, not the package's — is what
+// `<script src="/<kExtPortBootstrapAsset>">` spliced in ahead of any SCRIPT the document itself
+// carries (`ext_inject_port_bootstrap` — a leading doctype is stepped over, the ONE thing that may
+// precede the tag, and it carries no code), and that script — OUR code, not the package's — is what
 // creates the `MessageChannel` and transfers one port UP to the editor
 // (`ext_port_bootstrap_script`). Three properties follow, and the design needs all three:
 //
@@ -69,6 +70,15 @@
 //      wrote. So the FIRST handshake a frame ever emits comes from the document the host navigated
 //      to, not from whatever the package later navigates to. A package cannot decline to emit it in
 //      order to leave the one-shot grant unclaimed for a second document.
+//      ⚠ THIS HOLDS ONLY BECAUSE EVERY PANEL DOCUMENT IS `text/html`, and that is ENFORCED
+//      (`ext_document_media_type_permitted`), not assumed. The splice is keyed on the media type, so
+//      a SCRIPTABLE document of any other type would run package code with no bootstrap at all —
+//      and `image/svg+xml` is both scriptable and on the shared asset allowlist. Such a document
+//      could then `location.replace()` to a second `context-ext://` document DURING PARSE, whose
+//      bootstrap would emit the first handshake the host ever sees, while the aborted navigation
+//      means the frame's own `load` never fires and editor-core's revocation never runs. That is
+//      verbatim the hazard this file declares discharged, so the media type of a DOCUMENT
+//      NAVIGATION is refused at the binding rather than left to the panel manifest.
 //   2. THE CHILD CREATES THE CHANNEL AND TRANSFERS THE PORT UPWARD, so the host NEVER posts a port
 //      DOWN to a Window. That removes a real race the reverse direction cannot close: a host that
 //      answered a handshake by posting a port to `event.source` would be naming a stable WindowProxy,
@@ -496,12 +506,19 @@ ext_response_headers(const std::string& mime_type);
 //     AFTER that '>'. This preserves standards mode, which a splice at offset 0 would destroy by
 //     displacing the doctype — and quirks mode is a real, silent behaviour change forced on
 //     third-party layout.
-//   * OTHERWISE splice at offset 0. That covers a document with no doctype (already quirks, so
-//     nothing is lost) AND — the case that matters — a document that puts ANYTHING else first,
-//     including a `<script>` before the doctype. Searching for the doctype anywhere in the prefix
-//     instead would let exactly that shape run package code ahead of the bootstrap, which is
-//     property 1 of the mechanism in the file header. The rule is therefore "the doctype must be
-//     FIRST for us to go second", never "find the doctype".
+//   * OTHERWISE splice at offset 0 — but never ahead of a UTF-8 BOM, which stays byte 0 (see below).
+//     Two of the three shapes this covers lose nothing: a document with no doctype is already
+//     quirks, and a document that puts a `<script>` before the doctype is the case the rule EXISTS
+//     for — searching for the doctype anywhere in the prefix instead would let exactly that shape
+//     run package code ahead of the bootstrap, which is property 1 of the mechanism in the file
+//     header. The rule is therefore "the doctype must be FIRST for us to go second", never "find
+//     the doctype".
+//     ⚠ THE THIRD SHAPE PAYS A REAL PRICE, ACCEPTED DELIBERATELY: `<!-- c --><!doctype html>` is
+//     legal STANDARDS-mode HTML (the "before html" insertion mode ignores comments), and splicing
+//     at 0 demotes it to quirks. Skipping a leading comment instead means scanning third-party
+//     bytes for `-->` — a tokenizer's worth of judgement about adversarial input, in order to move
+//     OUR script LATER. A package that wants standards mode puts its doctype first, as the spec
+//     already tells it to.
 //
 // NOTHING IS PARSED, and nothing else in the document is examined. An HTML-aware insertion point (the
 // end of `<head>`, after `<meta charset>`) would mean writing an HTML tokenizer's worth of judgement
@@ -512,9 +529,32 @@ ext_response_headers(const std::string& mime_type);
 [[nodiscard]] std::string ext_inject_port_bootstrap(const std::string& mime_type,
                                                     std::string_view body);
 
-// How far into a body the leading-doctype scan looks for the terminating '>' before giving up and
-// splicing at offset 0. Bounded because the body is third-party and a `<!doctype` with no '>' would
-// otherwise be a full-body scan on every HTML response.
+// May a response of this media type be served as a DOCUMENT NAVIGATION (a main or sub frame)?
+//
+// THE COMPANION GATE TO THE SPLICE, and the reason property 1 in the file header is a fact rather
+// than a hope. `ext_inject_port_bootstrap` rewrites `text/html` and nothing else, so a scriptable
+// document of ANY other type would run package code with no bootstrap ahead of it — and
+// `image/svg+xml` is exactly that: scriptable, framable, and on the shared asset allowlist
+// (`asset_media_types()`), which the panel-entry grammar does not constrain. From such a document a
+// package can navigate the frame to a SECOND `context-ext://` document during parse; that
+// document's bootstrap then emits the first handshake the host ever sees, and because the aborted
+// navigation means the frame's own `load` never fires, editor-core's revocation never runs either.
+// The grant would be live, and inside a document the host never chose.
+//
+// So a document navigation is refused unless its media type is one the splice covers. It is a
+// PREDICATE here, in the CEF-free half that all three `build` legs adversarially test, rather than a
+// media-type comparison written in the CEF binding — the binding only translates CEF's resource type
+// into "is this a document?", which is the one thing it alone can know.
+//
+// SUBRESOURCES ARE UNAFFECTED: an `<img src="…/icon.svg">` inside a panel is not a navigation, so it
+// still resolves and is served exactly as before. Only the entry (or a self-navigation) is narrowed.
+[[nodiscard]] bool ext_document_media_type_permitted(const std::string& mime_type);
+
+// How far FROM THE START OF THE `<!doctype` the scan looks for the terminating '>' before giving up
+// and splicing at the BOM floor. Measured from that offset, not from byte 0, so a document with a
+// long run of leading whitespace still gets its doctype honoured. Bounded because the body is
+// third-party and a `<!doctype` with no '>' would otherwise be a full-body scan on every HTML
+// response.
 inline constexpr std::size_t kExtDoctypeScanLimit = 1024;
 
 } // namespace context::editor::shell

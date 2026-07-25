@@ -246,13 +246,28 @@ ExtResolution ExtAssetResolver::resolve(std::string_view url) const
     // THE ONE SYNTHETIC ASSET (M9 e13b-1) — the port bootstrap, whose bytes are OURS rather than a
     // package file's (ext_scheme.h § the panel-port bootstrap).
     //
-    // ITS POSITION IN THIS FUNCTION IS THE WHOLE OF ITS SECURITY ARGUMENT. It is reached only after a
-    // valid package id, a MOUNTED package, a query/fragment strip, a successful percent-decode and a
-    // clean `split_safe_path_segments` — so it is not a package-enumeration oracle (an unmounted
-    // package answered 404 four checks up, indistinguishably from an absent asset) and it cannot be
-    // used to walk past the path rules (a request that failed any of them never gets here). Placing
-    // it EARLIER — before the mount lookup, say, since the bytes do not depend on the package —
-    // would answer 200 for every syntactically valid id, which IS that oracle.
+    // ITS POSITION IN THIS FUNCTION IS DELIBERATE: it is reached only after a valid package id, a
+    // MOUNTED package, a query/fragment strip, a successful percent-decode and a clean
+    // `split_safe_path_segments`, so it cannot be used to walk past the path rules (a request that
+    // failed any of them never gets here). Sitting after `split_safe_path_segments` is the part that
+    // is NOT negotiable.
+    //
+    // ⚠ THE MOUNT LOOKUP ABOVE MAKES THIS THE ONE URL IN THIS SCHEME WHOSE STATUS REVEALS MOUNT
+    // STATE, and the direction is the opposite of what it looks like. Every ordinary path keeps
+    // "unmounted package" and "absent asset" both at 404, which is the enumeration defence built
+    // four checks up. But this asset EXISTS in every mounted package by construction, so
+    // `context-ext://<id>/<kExtPortBootstrapAsset>` answers 200 iff `<id>` is mounted — a total,
+    // unambiguous oracle. Answering it EARLIER, before the mount lookup, would return a constant 200
+    // for every syntactically valid id and would therefore leak NOTHING; it is the placement here
+    // that carries the leak, not the placement there.
+    //
+    // It is kept here anyway, and the reason is that it is UNREACHABLE FROM A PANEL — by CSP, not by
+    // this branch: `connect-src 'none'` kills fetch/XHR/beacon, `script-src`/`img-src`/`style-src`/
+    // `font-src 'self'` resolve to the REQUESTING package's own origin so no cross-package
+    // subresource is ever dispatched, `frame-src`/`child-src`/`worker-src`/`object-src 'none'` leave
+    // no nested realm to probe from, and a self-navigation destroys the prober. ⚠ THAT MAKES THIS AN
+    // OBLIGATION ON WHOEVER RELAXES THE POLICY: the first task to widen `connect-src` (e13c) must
+    // either re-home this branch above `find(authority)` or accept the oracle knowingly.
     //
     // Nothing below runs for it: there is no file to canonicalize, contain, or stat.
     if (segments.size() == 1 && segments.front() == kExtPortBootstrapAsset)
@@ -450,7 +465,9 @@ bool is_html_media_type(const std::string& mime_type)
 }
 
 // The HTML spec's ASCII whitespace set — space, tab, LF, FF, CR. NOT `std::isspace`, which is
-// locale-dependent and UB on a negative `char`.
+// locale-dependent and UB on a negative `char`; and deliberately NOT the `is_space` helpers in
+// app_scheme.cpp / ipc_bridge.cpp, which also accept VT (0x0b) because they trim HTTP field values.
+// Different spec, different set — do not unify them.
 bool is_ascii_space(char ch)
 {
     return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\f' || ch == '\r';
@@ -460,16 +477,23 @@ bool is_ascii_space(char ch)
 // "the doctype must be FIRST for us to go second" rather than "find the doctype".
 std::size_t bootstrap_splice_offset(std::string_view body)
 {
-    std::size_t at = 0;
-    // A UTF-8 BOM, then ASCII whitespace: both may legitimately precede a doctype and neither is
-    // content, so skipping them is what keeps a BOM'd or indented document in standards mode. Any
-    // OTHER leading byte — a comment, a stray tag, a script — means the doctype is not first, and the
-    // fall-through to offset 0 below is the answer that keeps the bootstrap ahead of package code.
+    // THE BOM FLOOR — the offset every fall-through below returns, NOT 0. A UTF-8 BOM must stay at
+    // byte 0: BOM sniffing is step ONE of the HTML encoding algorithm and outranks the `charset` on
+    // `Content-Type`, so a tag spliced AHEAD of the BOM does not merely displace a cosmetic byte, it
+    // demotes the document from "encoding known with confidence certain" to the transport default.
+    // Returning a bare 0 from the two give-up paths (a body whose doctype is not first, and a
+    // `<!doctype` with no terminating '>') is what would do that — the BOM skip must survive them.
+    std::size_t floor_at = 0;
     if (body.size() >= 3 && static_cast<unsigned char>(body[0]) == 0xEF &&
         static_cast<unsigned char>(body[1]) == 0xBB && static_cast<unsigned char>(body[2]) == 0xBF)
     {
-        at = 3;
+        floor_at = 3;
     }
+    // Then ASCII whitespace: like the BOM it may legitimately precede a doctype and is not content,
+    // so skipping it is what keeps an indented document in standards mode. Any OTHER leading byte —
+    // a comment, a stray tag, a script — means the doctype is not first, and the fall-through to the
+    // floor below is the answer that keeps the bootstrap ahead of package code.
+    std::size_t at = floor_at;
     while (at < body.size() && is_ascii_space(body[at]))
     {
         ++at;
@@ -478,12 +502,12 @@ std::size_t bootstrap_splice_offset(std::string_view body)
     const std::string_view marker = "<!doctype";
     if (body.size() - at < marker.size() || !ascii_iequals(body.substr(at, marker.size()), marker))
     {
-        return 0;
+        return floor_at;
     }
     // BOUNDED: the body is third-party, so a `<!doctype` with no terminating '>' must not turn every
-    // HTML response into a full-body scan. Giving up splices at 0, which is safe in the direction
-    // that matters (the bootstrap still runs first) and costs only standards mode on a document that
-    // is malformed anyway.
+    // HTML response into a full-body scan. Giving up splices at the floor, which is safe in the
+    // direction that matters (the bootstrap still runs first) and costs only standards mode on a
+    // document that is malformed anyway.
     const std::size_t limit = std::min(body.size(), at + kExtDoctypeScanLimit);
     for (std::size_t i = at; i < limit; ++i)
     {
@@ -492,7 +516,7 @@ std::size_t bootstrap_splice_offset(std::string_view body)
             return i + 1;
         }
     }
-    return 0;
+    return floor_at;
 }
 
 } // namespace
@@ -550,6 +574,15 @@ std::string ext_inject_port_bootstrap(const std::string& mime_type, std::string_
     out.append(tag);
     out.append(body.substr(at));
     return out;
+}
+
+bool ext_document_media_type_permitted(const std::string& mime_type)
+{
+    // EXACTLY the predicate the splice keys on, deliberately the SAME call rather than a second
+    // spelling: the property being enforced is "no document navigation reaches a type
+    // `ext_inject_port_bootstrap` would decline to rewrite", so the two must not be able to drift
+    // apart. See ext_scheme.h for what an unbootstrapped scriptable document buys an attacker.
+    return is_html_media_type(mime_type);
 }
 
 } // namespace context::editor::shell

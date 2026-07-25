@@ -676,12 +676,13 @@ int main(int argc, char** argv)
                 "and nothing from the MOUNTED package was refused — a partially-served panel would "
                 "make every positive above ambiguous");
 
-    // --- no bridge reached the panel (e13a-2 ships the host, not the transport) -------------------
+    // --- the panel transport does NOT ride the CEF router (e13b-1 ships a port, not a verb) -------
     SMOKE_CHECK(bridge.refused() == 0,
                 "the live scenario produced no envelope refusals — every verb the boot path spoke "
                 "was one the router knows. This is a boot-surface invariant, NOT a check on the "
-                "absent panel transport: e13b's port rides MessageChannel/postMessage, which never "
-                "reaches this router, so no future transport could register here either way");
+                "panel transport: the e13b-1 port rides MessageChannel/postMessage, which never "
+                "reaches this router, so the port chain asserted above neither adds to nor "
+                "subtracts from this count");
     SMOKE_CHECK(bridge.secrets_blocked() == 0,
                 "no handler attempted to return a protected credential during the scenario");
     SMOKE_CHECK(shell::cef::popups_suppressed() == 0 && shell::cef::browsers_created() == 1,

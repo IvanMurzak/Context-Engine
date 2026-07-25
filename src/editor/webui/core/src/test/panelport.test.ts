@@ -249,6 +249,39 @@ async function waitForGrant(harness: PanelHarness): Promise<void> {
     );
 }
 
+/**
+ * Await the Nth `load` event on the frame element.
+ *
+ * THE SAME 10s BUDGET AS `waitForGrant`, FOR THE SAME REASON — this waits on a real cross-document
+ * load, the slowest thing this file waits on, and the budget bounds a HANG rather than measuring
+ * latency. ⚠ MEASURED: left at `waitFor`'s 5s default these went RED on a loaded runner (9 reds
+ * across 40 stressed runs of this tier) with a perfectly healthy build. An intermittent gate is
+ * worse than no gate — and a false red here wears the same bare `timed out` shape a genuine one-shot
+ * regression does, so the diagnose callback is not optional either.
+ */
+async function waitForLoad(harness: PanelHarness, count = 1): Promise<void> {
+    await waitFor(
+        `${String(count)} load event(s) on the frame`,
+        () => harness.bridge.stats.loads >= count,
+        10_000,
+        () =>
+            `state=${harness.bridge.state} stats=${JSON.stringify(harness.bridge.stats)} ` +
+            `probes=${JSON.stringify(harness.probes)}`,
+    );
+}
+
+/** Await a handshake refusal, with the same load-bound budget: the refusal follows a real load. */
+async function waitForRefusedHandshake(harness: PanelHarness, what: string): Promise<void> {
+    await waitFor(
+        what,
+        () => harness.bridge.stats.refusedHandshakes >= 1,
+        10_000,
+        () =>
+            `state=${harness.bridge.state} stats=${JSON.stringify(harness.bridge.stats)} ` +
+            `probes=${JSON.stringify(harness.probes)}`,
+    );
+}
+
 /** A well-formed request envelope, as an untrusted panel would build one. */
 function requestEnvelope(id: string, verb: string, extra: Record<string, unknown> = {}):
     Record<string, unknown> {
@@ -268,6 +301,28 @@ function replyFor(harness: PanelHarness, id: string): Record<string, unknown> | 
             (data as Record<string, unknown>)["id"] === id
         ) {
             return data as Record<string, unknown>;
+        }
+    }
+    return undefined;
+}
+
+/**
+ * The correlation id of the first HOST-issued request the child observed on its port — which is
+ * exactly how an untrusted panel learns one, since every envelope the host sends is readable by the
+ * peer it was sent to.
+ */
+function hostRequestId(harness: PanelHarness): string | undefined {
+    for (const probe of harness.probes) {
+        if (probe.probe !== "port-message") {
+            continue;
+        }
+        const data = probe["data"];
+        if (typeof data === "object" && data !== null) {
+            const record = data as Record<string, unknown>;
+            const id = record["id"];
+            if (record["kind"] === "request" && typeof id === "string") {
+                return id;
+            }
         }
     }
     return undefined;
@@ -346,7 +401,7 @@ export const panelPortTests: readonly TestCase[] = [
             const harness = createHarness();
             try {
                 await waitForGrant(harness);
-                await waitFor("the first document's load event", () => harness.bridge.stats.loads >= 1);
+                await waitForLoad(harness);
                 // Settle: give any spurious second load a generous window to arrive.
                 await delay(200);
                 assertEqual(
@@ -412,7 +467,7 @@ export const panelPortTests: readonly TestCase[] = [
                 childHtml: "<!doctype html><html><body>a panel with no bootstrap</body></html>",
             });
             try {
-                await waitFor("the child document to load", () => harness.bridge.stats.loads >= 1);
+                await waitForLoad(harness);
                 await delay(200);
                 assert(
                     !harness.bridge.granted,
@@ -441,10 +496,7 @@ export const panelPortTests: readonly TestCase[] = [
                 await waitForGrant(harness);
                 const first = harness.bridge.port;
                 harness.command({ cmd: "offer" });
-                await waitFor(
-                    "the second handshake to be refused",
-                    () => harness.bridge.stats.refusedHandshakes >= 1,
-                );
+                await waitForRefusedHandshake(harness, "the second handshake to be refused");
                 await delay(100);
                 assertEqual(
                     harness.bridge.stats.refusedHandshakes,
@@ -510,11 +562,11 @@ export const panelPortTests: readonly TestCase[] = [
                         </script></head><body>x</body></html>`,
                 });
                 try {
-                    await waitFor("the child to load", () => harness.bridge.stats.loads >= 1);
+                    await waitForLoad(harness);
                     harness.command({ cmd: command });
-                    await waitFor(
+                    await waitForRefusedHandshake(
+                        harness,
                         `the ${command} handshake to be refused`,
-                        () => harness.bridge.stats.refusedHandshakes >= 1,
                     );
                     assert(
                         !harness.bridge.granted,
@@ -539,12 +591,9 @@ export const panelPortTests: readonly TestCase[] = [
             const harness = createHarness();
             try {
                 await waitForGrant(harness);
-                await waitFor("the first load", () => harness.bridge.stats.loads >= 1);
+                await waitForLoad(harness);
                 harness.command({ cmd: "navigate" });
-                await waitFor(
-                    "the second load event (the panel navigated itself)",
-                    () => harness.bridge.stats.loads >= 2,
-                );
+                await waitForLoad(harness, 2);
                 assert(
                     harness.bridge.revoked,
                     "the port is REVOKED on the second load. Skipping this is the third plant: the " +
@@ -679,7 +728,6 @@ export const panelPortTests: readonly TestCase[] = [
             const harness = createHarness();
             try {
                 await waitForGrant(harness);
-                const before = harness.bridge.stats;
 
                 // A wrong VERSION is answered — the panel can be told to speak v1.
                 harness.command({
@@ -729,7 +777,13 @@ export const panelPortTests: readonly TestCase[] = [
                 // UNADDRESSED and UNCORRELATABLE envelopes get NO reply at all: answering them would
                 // turn the port into an echo for anything a panel cares to send, and there is nowhere
                 // to send a refusal for a request with no usable id.
+                // BASELINES CAPTURED HERE, not reused from the top of the case: an absolute `+ 8`
+                // counted from there silently bakes in how many refusals the tables ABOVE produce, so
+                // adding a row to either of them would make the wait's predicate already true on
+                // entry — it would return immediately and the `repliesSent` assertion below would
+                // race the four sends it exists to wait for.
                 const repliesBefore = harness.bridge.stats.repliesSent;
+                const refusedBefore = harness.bridge.stats.refusedRequests;
                 harness.command({ cmd: "send", index: 0, envelope: { hello: "world" } });
                 harness.command({
                     cmd: "send",
@@ -748,7 +802,9 @@ export const panelPortTests: readonly TestCase[] = [
                 });
                 await waitFor(
                     "the four unanswerable envelopes to be counted",
-                    () => harness.bridge.stats.refusedRequests >= before.refusedRequests + 8,
+                    () => harness.bridge.stats.refusedRequests >= refusedBefore + 4,
+                    10_000,
+                    () => `stats=${JSON.stringify(harness.bridge.stats)}`,
                 );
                 await delay(100);
                 assertEqual(
@@ -864,6 +920,116 @@ export const panelPortTests: readonly TestCase[] = [
                 // And it is idempotent.
                 harness.bridge.dispose();
                 assert(harness.bridge.revoked, "a second dispose is a no-op");
+            } finally {
+                harness.dispose();
+            }
+        },
+    },
+    {
+        // ⚠ THE CROSS-PANEL GUARD, WHICH NO OTHER CASE IN THIS FILE REACHES. Every bridge listens on
+        // the SAME editor window and every panel reports `event.origin === "null"`, so the ONE thing
+        // separating two live panels is `event.source === frame.contentWindow` in
+        // `#handleWindowMessage`. Every sibling case here drives a SINGLE harness, which measurably
+        // left that comparison untested: deleting it keeps this whole tier green while panel B's
+        // handshake consumes panel A's one-shot grant. That is the widest blast radius on this
+        // boundary, so it gets a case rather than a comment asserting the guard looks correct.
+        //
+        // Panel A's document carries NO bootstrap, so it never offers and its grant stays OPEN —
+        // which is precisely the state that is there to be stolen. Panel B handshakes normally.
+        name: "panelport: one panel's handshake CANNOT consume another panel's grant (cross-panel isolation)",
+        run: async (): Promise<void> => {
+            const quiet = createHarness({
+                childHtml: "<!doctype html><html><body>no bootstrap here</body></html>",
+            });
+            const loud = createHarness();
+            try {
+                await waitForLoad(quiet);
+                await waitForGrant(loud);
+                // Settle: give a mis-routed handshake every chance to land on the wrong bridge.
+                await delay(200);
+
+                assert(
+                    !quiet.bridge.granted,
+                    "panel A's bridge must hold NO port — its own document never offered one, and " +
+                        `panel B's offer is not A's to accept (state=${quiet.bridge.state})`,
+                );
+                assertEqual(quiet.bridge.port, undefined, "panel A holds no port");
+                // SILENTLY IGNORED, NOT REFUSED. A sibling's traffic must not move A's counters
+                // either, or one chatty panel could mask another's real refusals.
+                assertEqual(
+                    quiet.bridge.stats.refusedHandshakes,
+                    0,
+                    "a sibling panel's handshake is not even COUNTED against this bridge",
+                );
+                assertEqual(
+                    quiet.frame.getAttribute(PANEL_PORT_STATE_ATTRIBUTE),
+                    "pending",
+                    "panel A is still awaiting its OWN document's offer",
+                );
+                // ...and the isolation did not cost B the grant it legitimately earned.
+                assert(loud.bridge.granted, "panel B's own handshake WAS granted");
+                assertEqual(loud.bridge.stats.refusedHandshakes, 0, "and B refused nothing either");
+            } finally {
+                loud.dispose();
+                quiet.dispose();
+            }
+        },
+    },
+    {
+        // ⚠ THE VERSION GATE'S UNTRUSTED HALF. A `reply` is the direction that carries PANEL-CHOSEN
+        // data into a host caller, so a reply dispatched ahead of the version check lets a panel
+        // resolve a pending host request with any `v` at all — measured to hand `result` straight to
+        // the caller. The request direction (covered above) can be REFUSED; a reply cannot, because
+        // there is nothing to answer it with, so the correct outcome is that it is DROPPED and the
+        // request ends the honest way.
+        name: "panelport: a reply with the WRONG envelope version does not resolve a pending request",
+        run: async (): Promise<void> => {
+            const harness = createHarness({ requestTimeoutMs: 1_500 });
+            try {
+                await waitForGrant(harness);
+                // Silence the fixture's well-formed auto-reply, so the forged one is the ONLY answer.
+                harness.command({ cmd: "silence" });
+                await delay(50);
+                const pending = harness.bridge.request("host.probe");
+                // The child observes every envelope on its port, so the host's correlation id is
+                // readable from the probe log — exactly how an untrusted panel would obtain it.
+                await waitFor(
+                    "the child to observe the host's request",
+                    () => hostRequestId(harness) !== undefined,
+                    10_000,
+                    () => `probes=${JSON.stringify(harness.probes)}`,
+                );
+                const refusedBefore = harness.bridge.stats.refusedRequests;
+                harness.command({
+                    cmd: "send",
+                    index: 0,
+                    envelope: {
+                        ctx: PANEL_BRIDGE_TAG,
+                        v: 99,
+                        kind: "reply",
+                        id: hostRequestId(harness),
+                        ok: true,
+                        result: "V99-MUST-NOT-BE-ACCEPTED",
+                    },
+                });
+                // PROVE IT ARRIVED AND WAS DROPPED. Without this the case would pass vacuously on a
+                // request that merely timed out before the forged reply was ever delivered.
+                await waitFor(
+                    "the v99 reply to be received and dropped",
+                    () => harness.bridge.stats.refusedRequests > refusedBefore,
+                    10_000,
+                    () => `stats=${JSON.stringify(harness.bridge.stats)}`,
+                );
+
+                const reply = await pending;
+                assertEqual(reply.ok, false, "a v99 reply must NOT resolve the request");
+                assertEqual(
+                    reply.error?.code,
+                    PANEL_BRIDGE_REFUSALS.timeout,
+                    "the forged reply is dropped, so the request ends the only honest way it can",
+                );
+                assertEqual(reply.result, undefined, "and the forged payload never reaches the host");
+                assertEqual(harness.bridge.stats.pending, 0, "its pending entry is cleaned up");
             } finally {
                 harness.dispose();
             }

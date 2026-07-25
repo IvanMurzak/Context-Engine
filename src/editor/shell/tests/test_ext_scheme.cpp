@@ -1035,8 +1035,11 @@ void test_port_bootstrap_script()
 
     // STABLE ACROSS CALLS — it is served on every panel navigation and is built once behind a
     // function-local static, so an accidental per-call rebuild would be a silent allocation on the
-    // CEF IO thread.
-    CHECK(shell::ext_port_bootstrap_script() == script);
+    // CEF IO thread, and a rebuild returning `c_str()` of a LOCAL would be a dangling read there.
+    // Compared as POINTERS, deliberately: a content compare is satisfied by both of those defects,
+    // which are the only ones this assertion exists to catch.
+    CHECK(shell::ext_port_bootstrap_script() == shell::ext_port_bootstrap_script());
+    CHECK(std::string(shell::ext_port_bootstrap_script()) == script);
 }
 
 // WHERE THE TAG IS SPLICED — the adversarial half, and the one that decides whether the bootstrap
@@ -1051,16 +1054,15 @@ void test_port_bootstrap_injection()
         std::string("<script src=\"/") + shell::kExtPortBootstrapAsset + "\"></script>";
     const std::string html = "text/html; charset=utf-8";
 
-    // Helper: the offset of our tag, and of the document's own first script.
+    // Helper: is OUR tag the document's very first `<script`?
+    //
+    // ⚠ SEARCHED FROM OFFSET 0, never from the end of our own tag. Starting the search after
+    // ourselves can only ever find a LATER script, so `ours < theirs` would be unconditionally true
+    // and this helper would silently collapse into "the tag is present somewhere" — passing on the
+    // exact output a "find the doctype anywhere" regression produces.
     const auto injected_before_own_script = [&tag](const std::string& out) {
         const std::size_t ours = out.find(tag);
-        if (ours == std::string::npos)
-        {
-            return false;
-        }
-        // The document's own first `<script` is the next one after ours ends.
-        const std::size_t theirs = out.find("<script", ours + tag.size());
-        return theirs == std::string::npos || ours < theirs;
+        return ours != std::string::npos && out.find("<script") == ours;
     };
 
     {
@@ -1097,12 +1099,34 @@ void test_port_bootstrap_injection()
         CHECK(injected_before_own_script(out));
     }
     {
-        // A COMMENT before the doctype is the same shape (a comment can carry a conditional-comment
-        // script on legacy engines), so it takes the same answer.
+        // A COMMENT before the doctype takes the same answer. ⚠ THIS ONE COSTS SOMETHING REAL and is
+        // accepted knowingly: `<!-- c --><!doctype html>` is legal STANDARDS-mode HTML (the "before
+        // html" insertion mode ignores comments), so splicing at 0 demotes it to quirks. Skipping the
+        // comment instead means scanning third-party bytes for `-->` — a tokenizer's worth of
+        // judgement about adversarial input, in order to move OUR script LATER. Pinned so the
+        // trade-off is a decision on the record rather than an accident.
         const std::string out = shell::ext_inject_port_bootstrap(
             html, "<!-- hello --><!doctype html><script src=\"p.js\"></script>");
         CHECK(out.rfind(tag, 0) == 0);
         CHECK(injected_before_own_script(out));
+    }
+    {
+        // ⚠ A UTF-8 BOM STAYS AT BYTE 0 EVEN ON THE FALL-THROUGH PATHS. BOM sniffing is step one of
+        // the HTML encoding algorithm and OUTRANKS the `charset` on `Content-Type`, so a tag spliced
+        // ahead of the BOM is not a cosmetic displacement — it drops the document from "encoding
+        // known with confidence certain" to the transport default. The doctype-first case already
+        // covered the BOM above; these are the three shapes that reach a GIVE-UP path with a BOM
+        // present, which is where a bare `return 0` would put the tag in front of it.
+        const std::string bom = "\xEF\xBB\xBF";
+        for (const std::string& rest :
+             {std::string("<html><script src=\"p.js\"></script></html>"),
+              std::string("<!-- c --><!doctype html><script src=\"p.js\"></script>"),
+              "<!doctype " + std::string(shell::kExtDoctypeScanLimit + 64, 'x') + ">"})
+        {
+            const std::string out = shell::ext_inject_port_bootstrap(html, bom + rest);
+            CHECK(out.rfind(bom, 0) == 0);
+            CHECK(out.find(tag) == bom.size());
+        }
     }
     {
         // No doctype at all — already quirks, so offset 0 costs nothing.
@@ -1160,15 +1184,19 @@ void test_port_bootstrap_injection()
         CHECK(shell::ext_inject_port_bootstrap("text/html", htmlish) != htmlish);
     }
     {
+        // Asserted on the bytes the FUNCTION EMITS, not on this file's local `tag` literal — the
+        // property is what the Shell writes into third-party documents, and a test that inspects the
+        // string the test itself just built is only testing `kExtPortBootstrapAsset`'s spelling.
+        const std::string emitted = shell::ext_inject_port_bootstrap(html, "");
         // THE TAG IS AN ABSOLUTE PATH, which is what makes it resolve against the package ORIGIN
         // rather than the entry document's directory. A relative spelling 404s the bootstrap for every
         // package whose entry is not at the root.
-        CHECK(shelltest::mentions(tag, "src=\"/"));
+        CHECK(shelltest::mentions(emitted, "src=\"/"));
         // A CLASSIC external script — no `type="module"` and no `defer`/`async`, each of which would
         // defer execution past the package's own inline-order scripts and break property 1.
-        CHECK(!shelltest::mentions(tag, "module"));
-        CHECK(!shelltest::mentions(tag, "defer"));
-        CHECK(!shelltest::mentions(tag, "async"));
+        CHECK(!shelltest::mentions(emitted, "module"));
+        CHECK(!shelltest::mentions(emitted, "defer"));
+        CHECK(!shelltest::mentions(emitted, "async"));
     }
     {
         // NOTHING ELSE IN THE DOCUMENT MOVES: the output is the input with exactly the tag inserted,
@@ -1180,6 +1208,49 @@ void test_port_bootstrap_injection()
         CHECK(out.substr(0, at) + out.substr(at + tag.size()) == body);
         CHECK(out.size() == body.size() + tag.size());
     }
+}
+
+// WHAT MAY BE A PANEL DOCUMENT (M9 e13b-1) — the companion gate to the splice.
+//
+// The property under test is a RELATIONSHIP, not a list: nothing may be navigated to that
+// `ext_inject_port_bootstrap` would decline to rewrite. Asserted as that biconditional over the
+// shared allowlist, so a media type added later cannot become framable without also becoming
+// bootstrapped, whichever of the two a future edit touches first.
+void test_document_media_type_gate()
+{
+    const std::string htmlish = "<!doctype html><html></html>";
+    for (const auto& [extension, mime] : shell::asset_media_types())
+    {
+        const bool navigable = shell::ext_document_media_type_permitted(mime);
+        const bool rewritten = shell::ext_inject_port_bootstrap(mime, htmlish) != htmlish;
+        if (navigable != rewritten)
+        {
+            std::fprintf(stderr,
+                         "  [ext-doc-gate] %s (%s): navigable=%d but bootstrapped=%d — a document "
+                         "may never reach a media type the splice does not cover\n",
+                         extension.c_str(), mime.c_str(), static_cast<int>(navigable),
+                         static_cast<int>(rewritten));
+        }
+        CHECK(navigable == rewritten);
+    }
+
+    // ⚠ THE SHAPE THAT MOTIVATED THE GATE. SVG is scriptable, framable, AND on the shared asset
+    // allowlist, while the panel-entry grammar constrains scheme/id/path and never the media type —
+    // so without this an `entry` of `panel.svg` would be a document that runs package code with NO
+    // bootstrap ahead of it, free to navigate the frame onward and claim the grant from the next
+    // document's bootstrap (ext_scheme.h property 1).
+    CHECK(!shell::ext_document_media_type_permitted("image/svg+xml"));
+    // Neither may the synthetic bootstrap itself be navigated to, nor an XHTML document — which is
+    // scriptable too and is deliberately NOT on the allowlist, so it can only arrive by a future
+    // edit adding it.
+    CHECK(!shell::ext_document_media_type_permitted("text/javascript; charset=utf-8"));
+    CHECK(!shell::ext_document_media_type_permitted("application/xhtml+xml"));
+    CHECK(!shell::ext_document_media_type_permitted(""));
+
+    // ...and the ESSENCE alone decides, exactly as the splice does — the charset is a separate
+    // response field, so a document must not become unframable by declaring one.
+    CHECK(shell::ext_document_media_type_permitted("text/html"));
+    CHECK(shell::ext_document_media_type_permitted("text/html; charset=utf-8"));
 }
 
 void test_http_status_mapping()
@@ -1212,6 +1283,7 @@ int main()
     test_port_bootstrap_asset();
     test_port_bootstrap_script();
     test_port_bootstrap_injection();
+    test_document_media_type_gate();
     test_http_status_mapping();
     SHELL_TEST_MAIN_END();
 }

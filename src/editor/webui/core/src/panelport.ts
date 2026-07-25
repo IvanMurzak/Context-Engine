@@ -17,8 +17,15 @@
 //   * `event.source` / `frame.contentWindow` identity is NOT a document identity either. An iframe's
 //     `WindowProxy` is STABLE ACROSS SAME-SLOT NAVIGATIONS (a web-platform property), so a message
 //     from the third document loaded into a frame compares EQUAL to `frame.contentWindow` exactly as
-//     the first document's does. This is the trap the obligation warns about, and reaching for
-//     `event.source` is how one would walk straight into it while believing it closed.
+//     the first document's does. This is the trap the obligation warns about: treating `event.source`
+//     as an ANSWER is how one would walk straight into it while believing it closed.
+//     ⚠ IT IS NEVERTHELESS LOAD-BEARING HERE, for the OTHER question. Every bridge listens on the one
+//     editor `window` and every panel reports origin `"null"`, so something must say WHICH FRAME a
+//     message came from — and frame identity is exactly what a `WindowProxy` IS. `#handleWindowMessage`
+//     therefore uses it, and only for that: it separates panel A from panel B (which it can prove),
+//     never document 1 from document 3 in one frame (which it cannot — the one-shot latch and the
+//     revocation below are what answer THAT). Deleting the check does not weaken a redundant
+//     hygiene filter; it lets any panel consume any other panel's grant.
 //   * A URL-borne secret (`?nonce=…`) is READABLE BY THE PACKAGE'S OWN CODE (`location.search`), so a
 //     malicious panel can copy it onto another package's URL and navigate there. It authenticates the
 //     URL, which is not the thing in question.
@@ -406,10 +413,17 @@ export class PanelPortBridge {
         if (this.#hostWindow === undefined) {
             return;
         }
-        // NOT OUR FRAME ⇒ SILENT, and not counted. The editor's window carries messages from every
-        // panel, from `IframeThemeChannel`'s own traffic and from anything else on the page; treating
-        // those as refusals would make every bridge's counters a function of every other panel's
-        // behaviour, and one panel could then mask another's refusals by generating noise.
+        // ⚠ THIS IS THE CROSS-PANEL AUTHENTICATION, not counter hygiene — see the file header. Every
+        // bridge listens on the SAME editor window and every panel's `event.origin` is `"null"`, so
+        // this comparison is the ONLY thing that stops panel B's handshake from consuming panel A's
+        // one-shot grant. A `WindowProxy` is a FRAME identity: that is precisely the question being
+        // asked here, and it is the one thing it can answer. (T1 drives two live panels at once to
+        // pin it; without that case, deleting this line leaves the whole suite green.)
+        //
+        // The counter argument is real too, and secondary: the editor's window also carries
+        // `IframeThemeChannel` traffic and anything else on the page, so counting those as refusals
+        // would make every bridge's counters a function of every other panel's behaviour, and one
+        // panel could mask another's refusals by generating noise.
         if (event.source === null || event.source !== this.#frame.contentWindow) {
             return;
         }
@@ -478,8 +492,23 @@ export class PanelPortBridge {
             this.#refusedRequests += 1;
             return;
         }
+        // THE VERSION GATE COVERS BOTH DIRECTIONS. Evaluated here, ahead of the `kind` switch,
+        // because a REPLY is the direction that carries attacker-chosen data INTO a host caller: a
+        // reply short-circuiting to `#resolveReply` before this check would let a panel resolve a
+        // pending host request with any `v` it liked — or none — and `data["result"]` would be handed
+        // straight to that caller. The version field exists to make a future migration safe, so the
+        // half that must not be skipped is precisely the untrusted one.
+        const versionOk = data["v"] === PANEL_BRIDGE_VERSION;
         const kind = data["kind"];
         if (kind === "reply") {
+            if (!versionOk) {
+                // NOT REFUSED, dropped: a reply is an answer, so there is nothing to answer it with,
+                // and inventing a refusal would only give the panel a second correlation channel.
+                // The pending entry is deliberately left to its timeout — the honest outcome, since
+                // from the host's side no readable answer ever arrived.
+                this.#refusedRequests += 1;
+                return;
+            }
             this.#resolveReply(data);
             return;
         }
@@ -494,7 +523,7 @@ export class PanelPortBridge {
             this.#refusedRequests += 1;
             return;
         }
-        if (data["v"] !== PANEL_BRIDGE_VERSION) {
+        if (!versionOk) {
             this.#refuse(id, PANEL_BRIDGE_REFUSALS.unsupportedVersion, undefined,
                 `unsupported envelope version; this build speaks v${String(PANEL_BRIDGE_VERSION)}`);
             return;

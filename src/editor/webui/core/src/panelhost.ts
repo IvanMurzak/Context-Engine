@@ -585,6 +585,19 @@ export class PanelHost {
             id: manifest.id,
             component: componentFor(manifest),
             title: manifest.title,
+            // AN IFRAME PANEL IS NEVER DETACHED ON A TAB SWITCH (M9 e13b-1). Dockview's default
+            // `onlyWhenVisible` removes an inactive panel's element from the DOM, which for a frame
+            // means its browsing context is discarded and re-created on return — so `onHide`'s
+            // promise just below (`a tabbed-away package panel keeps its frame and therefore its
+            // state`) is not something this renderer can keep on its own; the strategy has to say it
+            // too. It is also a correctness requirement, not just a state one: the re-navigation
+            // fires a second `load`, which `PanelPortBridge` cannot tell from the package navigating
+            // itself, so it revokes the port — permanently, since the grant is one-shot. Without
+            // this the FIRST tab round-trip leaves every package panel portless.
+            //
+            // Scoped to `iframe` deliberately: the local and uitree renderers own their content and
+            // rebuild it cheaply and losslessly, so they keep the default and its memory behaviour.
+            ...(manifest.contentType === "iframe" ? { renderer: "always" as const } : {}),
             // Placement follows the manifest's declared zone. `referencePanel` is only set once
             // something is already mounted — Dockview has nothing to place relative to otherwise.
             ...(previous === undefined
