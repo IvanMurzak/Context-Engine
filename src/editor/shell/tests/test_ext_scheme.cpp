@@ -985,8 +985,10 @@ void test_port_bootstrap_asset()
     {
         // The reserved name does NOT shadow a real file of another name, and the package's own assets
         // are unaffected by the branch existing at all.
-        CHECK(resolver.resolve("context-ext://hello-panel/index.html").ok());
-        CHECK(!resolver.resolve("context-ext://hello-panel/index.html").synthetic);
+        const shell::ExtResolution real =
+            resolver.resolve("context-ext://hello-panel/index.html");
+        CHECK(real.ok());
+        CHECK(!real.synthetic);
     }
 
     shelltest::cleanup(root);
@@ -1251,6 +1253,42 @@ void test_document_media_type_gate()
     // response field, so a document must not become unframable by declaring one.
     CHECK(shell::ext_document_media_type_permitted("text/html"));
     CHECK(shell::ext_document_media_type_permitted("text/html; charset=utf-8"));
+
+    // THE REFUSAL'S OWN SHAPE, asserted here because the CEF binding only passes a bool: `!ok()`
+    // cannot tell a held boundary from a differently-held one, so the status and the reason are part
+    // of the contract. Nothing else on any leg reaches this refusal — the live iframe smoke's fixture
+    // only ever navigates `index.html`.
+    {
+        shell::ExtResolution svg;
+        svg.status = shell::AssetStatus::ok;
+        svg.mime_type = "image/svg+xml";
+        // NOT a document navigation ⇒ untouched. A panel's `<img src="…/icon.svg">` still resolves.
+        shell::ext_apply_document_gate(svg, /*is_document_navigation*/ false);
+        CHECK(svg.ok());
+
+        shell::ext_apply_document_gate(svg, /*is_document_navigation*/ true);
+        CHECK(!svg.ok());
+        CHECK(svg.status == shell::AssetStatus::forbidden);
+        CHECK(svg.reason == "media type may not be a panel document");
+
+        // HTML is a document ⇒ untouched, so the gate cannot refuse the panels it exists to protect.
+        shell::ExtResolution html_doc;
+        html_doc.status = shell::AssetStatus::ok;
+        html_doc.mime_type = "text/html; charset=utf-8";
+        shell::ext_apply_document_gate(html_doc, /*is_document_navigation*/ true);
+        CHECK(html_doc.ok());
+
+        // AN ALREADY-REFUSED RESOLUTION KEEPS ITS OWN REASON. The first refusal is the honest one;
+        // overwriting it would replace a mount/path/id diagnostic with a media-type one and make the
+        // resolver's enumeration defence unreadable in the log.
+        shell::ExtResolution unmounted;
+        unmounted.status = shell::AssetStatus::not_found;
+        unmounted.reason = "package is not mounted";
+        unmounted.mime_type = "image/svg+xml";
+        shell::ext_apply_document_gate(unmounted, /*is_document_navigation*/ true);
+        CHECK(unmounted.status == shell::AssetStatus::not_found);
+        CHECK(unmounted.reason == "package is not mounted");
+    }
 }
 
 void test_http_status_mapping()

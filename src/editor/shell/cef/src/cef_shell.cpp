@@ -452,6 +452,24 @@ public:
         else
         {
             resolution_ = g_ext_resolver->resolve(url);
+            // IS CEF ABOUT TO MAKE A DOCUMENT OUT OF THESE BYTES? (M9 e13b-1.)
+            //
+            // The ONE fact this TU knows that the resolver cannot. The resolver sees a URL and a
+            // media type, never the resource type — and that distinction is what the panel-port
+            // mechanism rests on, because the bootstrap is spliced into `text/html` and nothing else.
+            // A scriptable non-HTML document (`image/svg+xml` is both scriptable and on the shared
+            // asset allowlist) would run package code with NO bootstrap ahead of it and could then
+            // navigate the frame onward to claim a grant it never earned — ext_scheme.h property 1
+            // carries the full attack.
+            //
+            // ONE BIT IS PASSED AND NOTHING ELSE IS DECIDED: which media types may be documents, and
+            // the status + reason of the refusal, both live in `ext_apply_document_gate` where all
+            // three `build` legs assert them. Narrow on purpose — only an explicit main/sub-frame
+            // navigation is gated, so every subresource a panel legitimately loads (an `<img>` of
+            // that same `.svg`, a script, a style) is untouched and still served.
+            const cef_resource_type_t resource_type = request->GetResourceType();
+            ext_apply_document_gate(resolution_, resource_type == RT_MAIN_FRAME ||
+                                                    resource_type == RT_SUB_FRAME);
         }
         if (!resolution_.ok())
         {
@@ -462,33 +480,6 @@ public:
             // untrusted BY CONSTRUCTION and controls this string, so an unbounded URL is an
             // unbounded attacker-chosen write into the operator's diagnostic channel on every
             // refusal. The package id is bounded by the grammar; the path is not.
-            const std::string logged = clamp_logged_url(url);
-            std::fprintf(stderr, "[shell-cef] ext scheme refused <%s>: %s\n", logged.c_str(),
-                         resolution_.reason.c_str());
-            record_ext_request(url, /*served*/ false);
-            return true;
-        }
-
-        // IS THIS A DOCUMENT NAVIGATION, AND MAY THIS MEDIA TYPE BE ONE? (M9 e13b-1.)
-        //
-        // The ONE thing this TU knows that the resolver cannot: CEF's resource type. The resolver
-        // sees a URL and a media type, never whether the browser is about to make a DOCUMENT out of
-        // the bytes — and that distinction is what the panel-port mechanism rests on, because the
-        // bootstrap is spliced into `text/html` and nothing else. A scriptable non-HTML document
-        // (`image/svg+xml` is both scriptable and on the shared asset allowlist) would run package
-        // code with NO bootstrap ahead of it and could then navigate the frame onward to claim a
-        // grant it never earned — ext_scheme.h property 1 carries the full attack.
-        //
-        // So the RESOURCE TYPE is translated here and the POLICY is asked of the CEF-free half.
-        // Narrow on purpose: only an explicit main/sub-frame navigation is gated, so every
-        // subresource a panel legitimately loads (an `<img>` of that same `.svg`, a script, a style)
-        // is untouched and still served.
-        const cef_resource_type_t resource_type = request->GetResourceType();
-        if ((resource_type == RT_MAIN_FRAME || resource_type == RT_SUB_FRAME) &&
-            !ext_document_media_type_permitted(resolution_.mime_type))
-        {
-            resolution_.status = AssetStatus::forbidden;
-            resolution_.reason = "media type may not be a panel document";
             const std::string logged = clamp_logged_url(url);
             std::fprintf(stderr, "[shell-cef] ext scheme refused <%s>: %s\n", logged.c_str(),
                          resolution_.reason.c_str());

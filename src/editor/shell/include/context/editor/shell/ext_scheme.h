@@ -181,6 +181,19 @@ inline constexpr const char* kExtPortHandshakeTag = "context.panel-port.v1";
 // and the only consumer is third-party code in the panel's own realm.
 inline constexpr const char* kExtPortGlobalName = "contextPanelPort";
 
+// The BUDGET for both prefix scans `ext_inject_port_bootstrap` runs before splicing: how far the
+// leading-whitespace skip may walk, and how far past the start of a `<!doctype` the terminating '>'
+// may sit. Declared with its siblings above rather than beside the function, so the header has one
+// home for this vocabulary.
+//
+// Bounded because the body is THIRD-PARTY. Unbounded, either scan is a byte-at-a-time full-body walk
+// on the CEF IO thread for every HTML response — a document that is nothing but spaces, or a
+// `<!doctype` with no '>', would pay it and then fall through to the same offset anyway. Exceeding
+// either budget gives up and splices at the BOM floor, which is the direction that keeps the
+// bootstrap ahead of package code; the only thing lost is standards mode on a document already
+// pathological enough to spend a kilobyte before saying anything.
+inline constexpr std::size_t kExtDoctypeScanLimit = 1024;
+
 // ------------------------------------------------------ the pinned CEF scheme-registration options
 //
 // A CEF-FREE MIRROR of CEF's `cef_scheme_options_t` bit values, so the flag set this scheme is
@@ -501,7 +514,8 @@ ext_response_headers(const std::string& mime_type);
 // one call with no branch of its own (see the file header on why judgement never lives in that TU).
 //
 // WHERE IT SPLICES, and why the rule is this shape rather than "after `<head>`":
-//   * Skip a UTF-8 BOM and leading ASCII whitespace, then, IF what follows is a case-insensitive
+//   * Skip a UTF-8 BOM and up to `kExtDoctypeScanLimit` bytes of leading ASCII whitespace, then, IF
+//     what follows is a case-insensitive
 //     `<!doctype` whose terminating '>' is within `kExtDoctypeScanLimit` bytes, splice immediately
 //     AFTER that '>'. This preserves standards mode, which a splice at offset 0 would destroy by
 //     displacing the doctype — and quirks mode is a real, silent behaviour change forced on
@@ -550,11 +564,21 @@ ext_response_headers(const std::string& mime_type);
 // still resolves and is served exactly as before. Only the entry (or a self-navigation) is narrowed.
 [[nodiscard]] bool ext_document_media_type_permitted(const std::string& mime_type);
 
-// How far FROM THE START OF THE `<!doctype` the scan looks for the terminating '>' before giving up
-// and splicing at the BOM floor. Measured from that offset, not from byte 0, so a document with a
-// long run of leading whitespace still gets its doctype honoured. Bounded because the body is
-// third-party and a `<!doctype` with no '>' would otherwise be a full-body scan on every HTML
-// response.
-inline constexpr std::size_t kExtDoctypeScanLimit = 1024;
+// Apply the document gate to an ALREADY-RESOLVED response, in place.
+//
+// THE REFUSAL ITSELF LIVES HERE, not in the CEF binding, for the same reason every other refusal in
+// this file does: `!ok()` alone cannot tell a held boundary from a differently-held one, so the
+// status AND the reason string are part of the contract and belong somewhere all three `build` legs
+// can assert them. The binding's whole job is the ONE bit it alone knows — whether CEF is about to
+// make a document out of these bytes — so it passes that bit and nothing else.
+//
+// FORBIDDEN, not not_found, and deliberately unlike the enumeration-defence statuses above: this
+// refusal leaks nothing about the mount table (it is a property of the ASSET's declared media type,
+// which the requester already chose), and a 404 here would tell a package its own file is missing
+// when it is present and simply not a legal document.
+//
+// A resolution that already failed is left untouched — the first refusal is the honest one, and
+// overwriting it would replace a mount/path/id diagnostic with a media-type one.
+void ext_apply_document_gate(ExtResolution& resolution, bool is_document_navigation);
 
 } // namespace context::editor::shell

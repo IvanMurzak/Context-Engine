@@ -493,14 +493,24 @@ std::size_t bootstrap_splice_offset(std::string_view body)
     // so skipping it is what keeps an indented document in standards mode. Any OTHER leading byte —
     // a comment, a stray tag, a script — means the doctype is not first, and the fall-through to the
     // floor below is the answer that keeps the bootstrap ahead of package code.
+    //
+    // BOUNDED BY THE SAME BUDGET AS THE '>' SCAN BELOW, and for the same reason: the body is
+    // third-party, so a document that is nothing but megabytes of spaces must not become a
+    // byte-at-a-time full-body walk on the CEF IO thread before falling through to the floor anyway.
+    // A run of leading whitespace longer than the budget gives up rather than being honoured — the
+    // same safe direction every other give-up here takes.
+    const std::size_t space_limit = std::min(body.size(), floor_at + kExtDoctypeScanLimit);
     std::size_t at = floor_at;
-    while (at < body.size() && is_ascii_space(body[at]))
+    while (at < space_limit && is_ascii_space(body[at]))
     {
         ++at;
     }
 
+    // No length pre-check: `substr` clamps to what is available and `ascii_iequals` refuses any size
+    // mismatch, so a `body.size() - at < marker.size()` guard could never be the deciding test — it
+    // would only be an unsigned subtraction a reader has to prove cannot underflow.
     const std::string_view marker = "<!doctype";
-    if (body.size() - at < marker.size() || !ascii_iequals(body.substr(at, marker.size()), marker))
+    if (!ascii_iequals(body.substr(at, marker.size()), marker))
     {
         return floor_at;
     }
@@ -566,7 +576,11 @@ std::string ext_inject_port_bootstrap(const std::string& mime_type, std::string_
         // unconditional call has to be able to answer here.
         return std::string(body);
     }
-    const std::string tag = std::string("<script src=\"/") + kExtPortBootstrapAsset + "\"></script>";
+    // Function-local static, on the same terms as `ext_port_bootstrap_script` above: the value is
+    // constant, this runs on the CEF IO thread for every HTML response, and C++11 makes the
+    // initialization thread-safe. Rebuilt per call it would be a concat plus an allocation each time.
+    static const std::string tag =
+        std::string("<script src=\"/") + kExtPortBootstrapAsset + "\"></script>";
     const std::size_t at = bootstrap_splice_offset(body);
     std::string out;
     out.reserve(body.size() + tag.size());
@@ -574,6 +588,17 @@ std::string ext_inject_port_bootstrap(const std::string& mime_type, std::string_
     out.append(tag);
     out.append(body.substr(at));
     return out;
+}
+
+void ext_apply_document_gate(ExtResolution& resolution, bool is_document_navigation)
+{
+    if (!resolution.ok() || !is_document_navigation ||
+        ext_document_media_type_permitted(resolution.mime_type))
+    {
+        return;
+    }
+    resolution.status = AssetStatus::forbidden;
+    resolution.reason = "media type may not be a panel document";
 }
 
 bool ext_document_media_type_permitted(const std::string& mime_type)

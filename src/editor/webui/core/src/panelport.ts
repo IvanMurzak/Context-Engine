@@ -177,11 +177,6 @@ export interface PanelPortBridgeOptions {
     /** The panel frame. Listeners are installed on it IMMEDIATELY — construct before setting `src`. */
     readonly frame: HTMLIFrameElement;
     readonly panelId: string;
-    /**
-     * The window whose `message` events carry handshakes. Injected only so a T1 case can drive a
-     * bridge without racing the shared page; production passes nothing.
-     */
-    readonly hostWindow?: Window;
     /** The verb table. Absent / empty ⇒ every verb is refused, which is e13b-1's whole surface. */
     readonly verbs?: ReadonlyMap<string, PanelVerbHandler>;
     readonly handshakeTimeoutMs?: number;
@@ -244,7 +239,10 @@ export class PanelPortBridge {
         this.#panelId = options.panelId;
         this.#verbs = options.verbs ?? new Map<string, PanelVerbHandler>();
         this.#requestTimeoutMs = options.requestTimeoutMs ?? PANEL_BRIDGE_REQUEST_TIMEOUT_MS;
-        this.#hostWindow = options.hostWindow ?? window;
+        // The editor window's `message` events are where handshakes arrive. Held in a nullable field
+        // ONLY because `dispose` nulls it — that is the disposed sentinel the guard in
+        // `#handleWindowMessage` reads, for a message already queued when `dispose` ran.
+        this.#hostWindow = window;
         this.#onMessage = (event: MessageEvent): void => {
             this.#handleWindowMessage(event);
         };
@@ -257,7 +255,7 @@ export class PanelPortBridge {
         // ever offers and the panel would be silently portless.
         this.#hostWindow.addEventListener("message", this.#onMessage);
         this.#frame.addEventListener("load", this.#onLoad);
-        this.#reflect("pending");
+        this.#reflect();
         this.#handshakeTimer = setTimeout(() => {
             // The grant window closed with nothing offered. Revoking (rather than waiting forever)
             // is what bounds it — see PANEL_PORT_HANDSHAKE_TIMEOUT_MS.
@@ -476,7 +474,7 @@ export class PanelPortBridge {
         // the port and queue every message forever.
         port.start();
         this.#clearHandshakeTimer();
-        this.#reflect("granted");
+        this.#reflect();
         this.#settleWaiters(true);
     }
 
@@ -630,7 +628,7 @@ export class PanelPortBridge {
             );
         }
         this.#pending.clear();
-        this.#reflect("revoked");
+        this.#reflect();
         this.#settleWaiters(false);
     }
 
@@ -648,8 +646,16 @@ export class PanelPortBridge {
         }
     }
 
-    #reflect(state: PanelPortState): void {
-        this.#frame.setAttribute(PANEL_PORT_STATE_ATTRIBUTE, state);
+    /**
+     * Mirror `state` onto the frame element.
+     *
+     * DERIVED from the getter, never passed in. The attribute is the only diagnostic channel the T1
+     * tier and `extpanel.test.ts` can see, and a hand-written literal per call site is a second copy
+     * of the state machine — one a future transition can set to something `state` disagrees with,
+     * which no test would catch because both are asserted and never compared.
+     */
+    #reflect(): void {
+        this.#frame.setAttribute(PANEL_PORT_STATE_ATTRIBUTE, this.state);
     }
 }
 

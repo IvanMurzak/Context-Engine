@@ -585,19 +585,7 @@ export class PanelHost {
             id: manifest.id,
             component: componentFor(manifest),
             title: manifest.title,
-            // AN IFRAME PANEL IS NEVER DETACHED ON A TAB SWITCH (M9 e13b-1). Dockview's default
-            // `onlyWhenVisible` removes an inactive panel's element from the DOM, which for a frame
-            // means its browsing context is discarded and re-created on return — so `onHide`'s
-            // promise just below (`a tabbed-away package panel keeps its frame and therefore its
-            // state`) is not something this renderer can keep on its own; the strategy has to say it
-            // too. It is also a correctness requirement, not just a state one: the re-navigation
-            // fires a second `load`, which `PanelPortBridge` cannot tell from the package navigating
-            // itself, so it revokes the port — permanently, since the grant is one-shot. Without
-            // this the FIRST tab round-trip leaves every package panel portless.
-            //
-            // Scoped to `iframe` deliberately: the local and uitree renderers own their content and
-            // rebuild it cheaply and losslessly, so they keep the default and its memory behaviour.
-            ...(manifest.contentType === "iframe" ? { renderer: "always" as const } : {}),
+            ...rendererFor(manifest),
             // Placement follows the manifest's declared zone. `referencePanel` is only set once
             // something is already mounted — Dockview has nothing to place relative to otherwise.
             ...(previous === undefined
@@ -793,6 +781,37 @@ export class PanelHost {
             default:
                 return false;
         }
+    }
+}
+
+/**
+ * Dockview's RENDERING STRATEGY for a manifest — the sibling of `componentFor`, and enumerated as a
+ * switch for the same reason: this is the content type picking behaviour, so a new content type must
+ * confront the choice rather than inherit it.
+ *
+ * ⚠ AN IFRAME PANEL MUST NEVER BE DETACHED (M9 e13b-1). Dockview's default `onlyWhenVisible` removes
+ * an inactive panel's element from the DOM; for a frame that discards its browsing context and
+ * re-navigates `src` on return, which (a) throws away the third-party document's state — the promise
+ * `IframePanelRenderer.onHide` makes and cannot keep on its own — and (b) fires a SECOND `load`, which
+ * `PanelPortBridge` cannot tell from the package navigating itself, so it revokes the port. The grant
+ * is one-shot, so that is permanent: without `always`, the FIRST tab round-trip leaves every package
+ * panel portless. `local` and `uitree` own their content and rebuild it cheaply and losslessly, so
+ * they keep the default and its memory behaviour.
+ *
+ * Returned as a SPREADABLE fragment rather than `renderer | undefined` because
+ * `exactOptionalPropertyTypes` forbids passing an explicit `undefined` for an optional field.
+ */
+function rendererFor(manifest: PanelManifest): { renderer?: "always" } {
+    switch (manifest.contentType) {
+        case "iframe":
+            return { renderer: "always" };
+        case "local":
+        case "uitree":
+            return {};
+        default:
+            // An unknown content type never reaches `addPanel` (`open` refuses it), and if that ever
+            // changes it gets the safe default rather than a silently inherited one.
+            return {};
     }
 }
 

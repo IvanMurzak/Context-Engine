@@ -22,9 +22,17 @@
 //
 // NON-VACUITY was proven by PLANTING, not asserted: the three weakenings the parent DoD names — hand
 // the port with no handshake, accept a second port, skip revocation on re-navigation — each reddened a
-// named case here before being reverted byte-exact. The plant log is in the PR body.
+// named case here before being reverted byte-exact. Each plant is recorded inline at its own case
+// below as `⚠ PLANT (x)`.
 
 import { assert, assertEqual, AssertionError, type TestCase } from "./harness.js";
+import { isRecord } from "../bridge.js";
+import {
+    IFRAME_ALLOW,
+    IFRAME_LOADING,
+    IFRAME_REFERRER_POLICY,
+    IFRAME_SANDBOX,
+} from "../extpanel.js";
 import {
     EXT_PORT_HANDSHAKE_TAG,
     PANEL_BRIDGE_REFUSALS,
@@ -93,6 +101,7 @@ const CHILD_FIXTURE = `<!doctype html><html><head><script>
       channels[data.index].port1.postMessage(data.envelope);
     } else if (data.cmd === "silence") {
       silent = true;
+      report({ probe: "silenced" });
     } else if (data.cmd === "describe") {
       report({ probe: "describe", origin: String(location.origin), channels: channels.length });
     } else if (data.cmd === "navigate") {
@@ -140,10 +149,14 @@ interface HarnessOptions {
  */
 function createHarness(options: HarnessOptions = {}): PanelHarness {
     const frame = window.document.createElement("iframe");
-    frame.setAttribute("sandbox", "allow-scripts");
-    frame.setAttribute("allow", "");
-    frame.setAttribute("referrerpolicy", "no-referrer");
-    // `loading="eager"` MIRRORS PRODUCTION, and here it is also the FLAKE FIX. ⚠ MEASURED, twice: two
+    // THE PRODUCTION CONSTANTS, not literals. This file's claim is "that is not a mock of the
+    // mechanism; it IS the mechanism", and the opaque-origin premise every other case rests on is
+    // measured off THIS frame — so a hardcoded `"allow-scripts"` would keep measuring `origin ===
+    // "null"` and keep asserting the design's foundation on the day `IFRAME_SANDBOX` widened.
+    frame.setAttribute("sandbox", IFRAME_SANDBOX);
+    frame.setAttribute("allow", IFRAME_ALLOW);
+    frame.setAttribute("referrerpolicy", IFRAME_REFERRER_POLICY);
+    // `IFRAME_LOADING` is `"eager"`, which MIRRORS PRODUCTION and is also the FLAKE FIX. ⚠ MEASURED, twice: two
     // cases timed out waiting for a handshake on one run of this tier and passed on the next with
     // byte-identical code. The frames are appended to a document that ~280 earlier cases have already
     // grown, so they land far below the viewport — and Chromium DEPRIORITISES an offscreen iframe's
@@ -151,7 +164,7 @@ function createHarness(options: HarnessOptions = {}): PanelHarness {
     // wall-clock budget while nothing is actually wrong. Both halves of the fix are therefore kept:
     // eager loading, AND the fixed in-viewport placement below. An intermittent gate is worse than no
     // gate, so this is fixed at the cause rather than by widening the budget alone.
-    frame.setAttribute("loading", "eager");
+    frame.setAttribute("loading", IFRAME_LOADING);
     frame.style.position = "fixed";
     frame.style.top = "0";
     frame.style.left = "0";
@@ -235,50 +248,54 @@ async function waitFor(
     }
 }
 
+/**
+ * The budget for every wait that follows a REAL cross-document load — the slowest thing this file
+ * waits on. It bounds a HANG; it does not measure latency.
+ *
+ * ⚠ MEASURED: at `waitFor`'s 5s default these waits went RED on a loaded runner (9 reds across 40
+ * stressed runs of this tier) on a perfectly healthy build. An intermittent gate is worse than no
+ * gate — and a false red here wears the same bare `timed out` shape a genuine one-shot regression
+ * does, which is why `diagnose` below is not optional either.
+ */
+const LOAD_BOUND_MS = 10_000;
+
+/** Everything the bridge knows, for a timeout message — this tier's only diagnostic channel. */
+function diagnose(harness: PanelHarness): string {
+    return (
+        `state=${harness.bridge.state} stats=${JSON.stringify(harness.bridge.stats)} ` +
+        `probes=${JSON.stringify(harness.probes)}`
+    );
+}
+
 /** Await the grant the child's opening `offer()` produces. */
 async function waitForGrant(harness: PanelHarness): Promise<void> {
     await waitFor(
         "the child's handshake to be accepted",
         () => harness.bridge.granted,
-        // 10s, not the 5s default: a real cross-document load on a loaded CI runner is the slowest
-        // thing this file waits on, and the budget exists to bound a HANG, not to measure latency.
-        10_000,
-        () =>
-            `state=${harness.bridge.state} stats=${JSON.stringify(harness.bridge.stats)} ` +
-            `origins=${JSON.stringify(harness.origins)} probes=${JSON.stringify(harness.probes)}`,
+        LOAD_BOUND_MS,
+        // Plus the measured origins: this is the wait whose failure most often means the child never
+        // ran at all, and the origin list is what distinguishes that from a refused handshake.
+        () => `${diagnose(harness)} origins=${JSON.stringify(harness.origins)}`,
     );
 }
 
-/**
- * Await the Nth `load` event on the frame element.
- *
- * THE SAME 10s BUDGET AS `waitForGrant`, FOR THE SAME REASON — this waits on a real cross-document
- * load, the slowest thing this file waits on, and the budget bounds a HANG rather than measuring
- * latency. ⚠ MEASURED: left at `waitFor`'s 5s default these went RED on a loaded runner (9 reds
- * across 40 stressed runs of this tier) with a perfectly healthy build. An intermittent gate is
- * worse than no gate — and a false red here wears the same bare `timed out` shape a genuine one-shot
- * regression does, so the diagnose callback is not optional either.
- */
+/** Await the Nth `load` event on the frame element. */
 async function waitForLoad(harness: PanelHarness, count = 1): Promise<void> {
     await waitFor(
         `${String(count)} load event(s) on the frame`,
         () => harness.bridge.stats.loads >= count,
-        10_000,
-        () =>
-            `state=${harness.bridge.state} stats=${JSON.stringify(harness.bridge.stats)} ` +
-            `probes=${JSON.stringify(harness.probes)}`,
+        LOAD_BOUND_MS,
+        () => diagnose(harness),
     );
 }
 
-/** Await a handshake refusal, with the same load-bound budget: the refusal follows a real load. */
+/** Await a handshake refusal, on the same budget: the refusal follows a real load. */
 async function waitForRefusedHandshake(harness: PanelHarness, what: string): Promise<void> {
     await waitFor(
         what,
         () => harness.bridge.stats.refusedHandshakes >= 1,
-        10_000,
-        () =>
-            `state=${harness.bridge.state} stats=${JSON.stringify(harness.bridge.stats)} ` +
-            `probes=${JSON.stringify(harness.probes)}`,
+        LOAD_BOUND_MS,
+        () => diagnose(harness),
     );
 }
 
@@ -288,6 +305,16 @@ function requestEnvelope(id: string, verb: string, extra: Record<string, unknown
     return { ctx: PANEL_BRIDGE_TAG, v: PANEL_BRIDGE_VERSION, kind: "request", id, verb, ...extra };
 }
 
+/**
+ * The `error` object of a RAW reply envelope the child observed — the noisiest shape in this file
+ * otherwise, repeated at every site whose whole point is the exact refusal payload. (A typed host
+ * reply uses `reply.error` directly; this is for the untyped envelopes read back off a probe.)
+ */
+function replyError(reply: Record<string, unknown>): Record<string, unknown> | undefined {
+    const error = reply["error"];
+    return isRecord(error) ? error : undefined;
+}
+
 /** The reply the child observed for `id`, or undefined. */
 function replyFor(harness: PanelHarness, id: string): Record<string, unknown> | undefined {
     for (const probe of harness.probes) {
@@ -295,12 +322,8 @@ function replyFor(harness: PanelHarness, id: string): Record<string, unknown> | 
             continue;
         }
         const data = probe["data"];
-        if (
-            typeof data === "object" &&
-            data !== null &&
-            (data as Record<string, unknown>)["id"] === id
-        ) {
-            return data as Record<string, unknown>;
+        if (isRecord(data) && data["id"] === id) {
+            return data;
         }
     }
     return undefined;
@@ -317,10 +340,9 @@ function hostRequestId(harness: PanelHarness): string | undefined {
             continue;
         }
         const data = probe["data"];
-        if (typeof data === "object" && data !== null) {
-            const record = data as Record<string, unknown>;
-            const id = record["id"];
-            if (record["kind"] === "request" && typeof id === "string") {
+        if (isRecord(data)) {
+            const id = data["id"];
+            if (data["kind"] === "request" && typeof id === "string") {
                 return id;
             }
         }
@@ -764,12 +786,12 @@ export const panelPortTests: readonly TestCase[] = [
                     harness.command({ cmd: "send", index: 0, envelope });
                     const reply = await waitForReply(harness, id);
                     assertEqual(
-                        (reply["error"] as Record<string, unknown>)["code"],
+                        replyError(reply)?.["code"],
                         PANEL_BRIDGE_REFUSALS.malformedRequest,
                         `${id}: refused as malformed`,
                     );
                     assert(
-                        (reply["error"] as Record<string, unknown>)["verb"] === undefined,
+                        replyError(reply)?.["verb"] === undefined,
                         `${id}: and echoes no verb — there was no usable one to name`,
                     );
                 }
@@ -803,8 +825,8 @@ export const panelPortTests: readonly TestCase[] = [
                 await waitFor(
                     "the four unanswerable envelopes to be counted",
                     () => harness.bridge.stats.refusedRequests >= refusedBefore + 4,
-                    10_000,
-                    () => `stats=${JSON.stringify(harness.bridge.stats)}`,
+                    LOAD_BOUND_MS,
+                    () => diagnose(harness),
                 );
                 await delay(100);
                 assertEqual(
@@ -836,7 +858,14 @@ export const panelPortTests: readonly TestCase[] = [
 
                 // Timeout: the child stops answering, so the budget decides.
                 harness.command({ cmd: "silence" });
-                await delay(20);
+                // EVENT-DRIVEN, not a latency guess: the fixture reports when its handler has actually set the
+                // flag, so a slow cross-document postMessage cannot leave a later assertion racing an auto-reply.
+                await waitFor(
+                    "the child to confirm it went silent",
+                    () => harness.probes.some((probe) => probe.probe === "silenced"),
+                    LOAD_BOUND_MS,
+                    () => diagnose(harness),
+                );
                 const timedOut = await harness.bridge.request("probe.silent");
                 assertEqual(
                     timedOut.error?.code,
@@ -892,7 +921,14 @@ export const panelPortTests: readonly TestCase[] = [
             try {
                 await waitForGrant(harness);
                 harness.command({ cmd: "silence" });
-                await delay(20);
+                // EVENT-DRIVEN, not a latency guess: the fixture reports when its handler has actually set the
+                // flag, so a slow cross-document postMessage cannot leave a later assertion racing an auto-reply.
+                await waitFor(
+                    "the child to confirm it went silent",
+                    () => harness.probes.some((probe) => probe.probe === "silenced"),
+                    LOAD_BOUND_MS,
+                    () => diagnose(harness),
+                );
                 // A request in flight at dispose time must SETTLE, not linger to its budget.
                 const pending = harness.bridge.request("probe.inflight");
                 await waitFor("the request to be registered", () => harness.bridge.stats.pending === 1);
@@ -989,15 +1025,22 @@ export const panelPortTests: readonly TestCase[] = [
                 await waitForGrant(harness);
                 // Silence the fixture's well-formed auto-reply, so the forged one is the ONLY answer.
                 harness.command({ cmd: "silence" });
-                await delay(50);
+                // EVENT-DRIVEN, not a latency guess: the fixture reports when its handler has actually set the
+                // flag, so a slow cross-document postMessage cannot leave a later assertion racing an auto-reply.
+                await waitFor(
+                    "the child to confirm it went silent",
+                    () => harness.probes.some((probe) => probe.probe === "silenced"),
+                    LOAD_BOUND_MS,
+                    () => diagnose(harness),
+                );
                 const pending = harness.bridge.request("host.probe");
                 // The child observes every envelope on its port, so the host's correlation id is
                 // readable from the probe log — exactly how an untrusted panel would obtain it.
                 await waitFor(
                     "the child to observe the host's request",
                     () => hostRequestId(harness) !== undefined,
-                    10_000,
-                    () => `probes=${JSON.stringify(harness.probes)}`,
+                    LOAD_BOUND_MS,
+                    () => diagnose(harness),
                 );
                 const refusedBefore = harness.bridge.stats.refusedRequests;
                 harness.command({
@@ -1017,8 +1060,8 @@ export const panelPortTests: readonly TestCase[] = [
                 await waitFor(
                     "the v99 reply to be received and dropped",
                     () => harness.bridge.stats.refusedRequests > refusedBefore,
-                    10_000,
-                    () => `stats=${JSON.stringify(harness.bridge.stats)}`,
+                    LOAD_BOUND_MS,
+                    () => diagnose(harness),
                 );
 
                 const reply = await pending;
