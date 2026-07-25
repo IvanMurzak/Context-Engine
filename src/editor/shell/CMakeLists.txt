@@ -462,6 +462,32 @@ add_test(NAME editor-shell-config-writers
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_config_writers.py"
             --repo-root "${CMAKE_SOURCE_DIR}/..")
 
+# --- the C-F3 SESSION-FILE OWNERSHIP gate (M9 e09d, design 03 §1 / 07 §6) ------------------------
+# The SAME source-scan tier as the config-writers gate above, for the same reason one step further
+# out: `.editor/session.json` is the DAEMON's and `.editor/editor-state.json` is the SHELL's, and a
+# second writer of either is a torn write that needs TWO PROCESSES RACING to be observable at all —
+# so no runtime test in this repo can fail on it, however many are written. The scan answers the
+# questions a second writer would have to make false (one C++ writer per file; each owner in its own
+# process's subtree; the in-process compose/filesync override-write gateway named only by tests) plus
+# an ANTI-VACUITY half for EVERY ONE of them, because each prohibition is trivially satisfied by a
+# tree that deleted the thing it protects: the sole writer must still write THAT DOCUMENT (not merely
+# contain write machinery — its own private helper's definition supplies that forever), the gateway
+# TYPE must still be named by its owners, and the gateway LIBRARY must still be declared.
+#
+# Proven NON-VACUOUS by planting (conventions.md § "Authoring a SOURCE-SCAN gate") across TWO rounds,
+# the second run against the finished first revision. Both found real gaps, in both directions —
+# writers the scan missed AND a commented-out CMake link it wrongly reported, which would have redded
+# all three build legs. The single enumeration is the `# FOUND BY PLANTING` markers in
+# tools/tests/test_check_session_ownership.py (the python-tests job), each a regression case; no count
+# is repeated here, because the counts in this comment, docs/shell.md and that file's docstring had
+# already drifted into describing three different rounds.
+#
+# Registered in the non-gate `editor-shell-` family, so the build job's general ctest step runs it on
+# all three OS legs with no ci.yml --target bookkeeping.
+add_test(NAME editor-shell-session-ownership
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_session_ownership.py"
+            --repo-root "${CMAKE_SOURCE_DIR}/..")
+
 # --- the e14d update-check PRIVACY gate (08 threat row: no identifiers, no telemetry) -------------
 # The SAME source-scan tier as the two lints above, and here for the sharpest version of their
 # reason: the C++ suite (editor-shell-test_banners) can prove the request VALUE carries no

@@ -419,7 +419,8 @@ void a_daemon_event_reaches_the_rendered_panel()
     {
         return;
     }
-    const std::string panel_id = context::editor::gui::panels::problems::ProblemsPanel::kContributionId;
+    namespace problems_panel = context::editor::gui::panels::problems;
+    const std::string panel_id = problems_panel::ProblemsPanel::kContributionId;
 
     Json payload = Json::object();
     payload.set("code", Json("file.malformed"));
@@ -441,6 +442,47 @@ void a_daemon_event_reaches_the_rendered_panel()
         CHECK(panelstest::mentions(rendered->html, "scenes/level.json"));
         CHECK(panelstest::mentions(rendered->html, "data-command=\"problems.navigate\""));
     }
+}
+
+// M9 e09d: a SHELL-LOCAL problem reaches the Problems panel through the same dispatch a daemon
+// diagnostic takes. This is what makes the 07 §6 "loudly" of an editor-state recovery real inside a
+// GUI: the only other channel is stderr, which the human whose window layout just vanished is not
+// watching. The corrupt-recovery diagnostic is the concrete caller (editor_main.cpp).
+void a_shell_local_problem_reaches_the_rendered_panel()
+{
+    shell::PanelHost host;
+    panels::BuiltinPanels bound = panels::install_builtin_panels(host);
+    CHECK(bound.problems != nullptr);
+    if (bound.problems == nullptr)
+    {
+        return;
+    }
+    namespace problems_panel = context::editor::gui::panels::problems;
+    const std::string panel_id = problems_panel::ProblemsPanel::kContributionId;
+    const std::uint64_t before = host.revision(panel_id);
+
+    CHECK(panels::report_local_problem(
+        bound, shell::kEditorStateInvalidCode,
+        "the editor's own session file was unreadable and has been reset to defaults",
+        "/projects/demo/.editor/editor-state.json"));
+    CHECK(host.revision(panel_id) > before);
+
+    std::string error_code;
+    const std::optional<shell::PanelRender> rendered = host.render(panel_id, error_code);
+    CHECK(rendered.has_value());
+    if (rendered.has_value())
+    {
+        CHECK(panelstest::mentions(rendered->html, "has been reset to defaults"));
+        // The FILE is rendered too, not just the sentence: "your layout was reset" without saying
+        // which project's file is a diagnostic nobody can act on.
+        CHECK(panelstest::mentions(rendered->html, "editor-state.json"));
+    }
+
+    // A bag with no Problems feed is a NO-OP, not a crash: the caller has already reported to stderr,
+    // and an editor that fell over because it could not render its own diagnostic would be the joke
+    // version of loud.
+    panels::BuiltinPanels empty;
+    CHECK(!panels::report_local_problem(empty, shell::kEditorStateInvalidCode, "m", "p"));
 }
 
 // The e05d3 selection loop, through the SAME wiring `context_editor` gets: adopting a scene tree,
@@ -580,6 +622,7 @@ int main()
     an_empty_journal_document_restores_nothing();
     renders_the_hosted_panels_through_the_bridge();
     a_daemon_event_reaches_the_rendered_panel();
+    a_shell_local_problem_reaches_the_rendered_panel();
     a_daemon_selection_schedules_the_inspector_fetch();
     PANELS_TEST_MAIN_END();
 }

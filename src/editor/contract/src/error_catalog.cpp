@@ -1020,6 +1020,26 @@ const std::vector<ErrorCode>& catalog()
          "The daemon's editor session file (.editor/session.json) is malformed or an unsupported "
          "version; it was renamed aside and the session state was reset to defaults.",
          false, kExitValidation, "R-BRIDGE-008"},
+        // --- M9 e09d: the SHELL's half of the session-file split (03 §1 / C-F3, design 07 §6) ------
+        // The LOUD corrupt-recovery diagnostic for `.editor/editor-state.json` — the file the editor
+        // app owns (dock layout, window placement, panel state blobs, the undo journal, the presence
+        // marker). Deliberately its OWN code rather than reusing the daemon's
+        // `editor.session_state_invalid` directly above: the whole point of the ownership split is
+        // that the two files have two different owners, so a diagnostic that cannot say WHICH one was
+        // reset has thrown away the only distinction the split bought. Reported by the Shell as a
+        // `diagnostics` payload (the same shape the daemon publishes, so the Problems panel's one
+        // parser renders both) plus stderr, never as a verb's failure envelope — hence the validation
+        // exit class its severity implies rather than a process outcome. Deterministic: re-reading
+        // the same bytes fails the same way, so NOT retriable. The string is the source-of-truth in
+        // src/editor/shell/include/context/editor/shell/editor_state.h as
+        // shell::kEditorStateInvalidCode (the promote-a-local-string pattern of
+        // editorkernel::kEditorSessionStateInvalidCode / bridge::kAttachDeniedCode). Additive-only
+        // (protocolMajor stays 1): a NEW row at the END, nothing reordered/renamed.
+        {"editor.editor_state_invalid",
+         "The editor's own session file (.editor/editor-state.json) is malformed, unreadable or an "
+         "unsupported version; it was renamed aside and the window layout, panel state and session "
+         "undo history were reset to defaults.",
+         false, kExitValidation, "R-BRIDGE-008"},
     };
     return the_catalog;
 }

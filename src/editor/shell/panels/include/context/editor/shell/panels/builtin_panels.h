@@ -122,6 +122,27 @@ void apply_problems_snapshot(ProblemsFeed& feed, const contract::Json& snapshot,
 bool apply_problems_event(ProblemsFeed& feed, const std::string& topic, const contract::Json& payload,
                           std::uint64_t generation);
 
+// Publish a SHELL-LOCAL diagnostic into the Problems panel (M9 e09d). Everything else in that panel
+// arrives from the daemon's `diagnostics` topic; this is the seam for a problem the Shell is the only
+// process that can KNOW — concretely, `.editor/editor-state.json` having been corrupt and reset
+// (07 §6 demands that recovery be LOUD, and a stderr line nobody is watching is not loud in a GUI).
+//
+// It builds a payload in the shape the daemon publishes (`code` / `message` / `file`) and pushes it
+// through the SAME `apply_problems_event` dispatch, deliberately: a second rendering path for
+// "a problem" is how the two drift, and the panel's own tolerant parser already accepts this shape.
+//
+// `file` is the document the diagnostic is ABOUT, and it goes in the `file` member rather than
+// `pointer` because that is the one `ProblemsFeed`'s parser renders and offers navigation for —
+// `pointer` is read into the nav record but never displayed, so a path put there is invisible in the
+// panel. (The daemon's own `editor.session_state_invalid` puts its path in `pointer`; it gets away
+// with it only because the path is ALSO spelled inside its message text.)
+//
+// Returns true when the panel's model actually changed. A no-op — no Problems feed in this build —
+// returns false rather than failing: the caller has ALREADY reported to stderr, and an editor that
+// refused to boot because it could not render its own diagnostic would be the joke version of loud.
+bool report_local_problem(BuiltinPanels& panels, const std::string& code, const std::string& message,
+                          const std::string& file);
+
 // The same seam for the e05d3 Scene tree feed: forward one subscription event (the caller already
 // subscribes to `derivation` for Problems — the Scene tree rides the SAME stream). Returns true when
 // the panel's rendered surface changed. Defined in builtin_panels.cpp.

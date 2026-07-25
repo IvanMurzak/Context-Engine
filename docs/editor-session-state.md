@@ -141,6 +141,46 @@ The daemon **still boots and serves**. Refusing to start over a convenience file
 worse than forgetting a selection. `editor.session_state_invalid` is its own catalog code, never the
 R-QA-005 `session.state_invalid` of the `session *` file-harness family (C-F4).
 
+### The OTHER half of the split recovers identically (M9 e09d)
+
+`.editor/editor-state.json` — the **Shell's** file (dock layout, window placement, panel state blobs,
+the e09c session undo journal, the e14b presence marker) — is disposable by the same contract, and
+since e09d it recovers the same way: quarantined to `.editor/editor-state.corrupt[-N].json`, replaced
+by defaults, announced under its OWN catalog code `editor.editor_state_invalid` on **stderr** and as a
+`diagnostics` payload in the **Problems panel** (see `shell.md` § 14). It never blocks the boot
+either.
+
+The two announcements are **not** equivalent in durability, and the difference is worth knowing: the
+daemon's diagnostic is replayed out of the R-CLI-015 ring to any client subscribing with `sinceSeq:
+0`, whereas the Shell's lives only in the Problems panel's in-memory model — a daemon snapshot
+carrying a `diagnostics` container would replace the whole set and take it with it. That does not fire
+today (the real snapshot is a bare cursor), which is precisely why it is recorded as a caveat rather
+than left reading as a guarantee.
+
+And since e09d, preservation is a **precondition rather than a best effort**: if the unusable document
+can be neither moved aside nor copied, the Shell refuses to write session state at all rather than let
+the next flush destroy the only copy. Forgetting this session's layout is strictly better than
+destroying the previous session's.
+
+⚠ **"The same way" describes the shape, not yet the hardening.** e09d's review round fixed several
+things on the **Shell's** half that the daemon's still carries: an `exists()` probe whose *error* is
+honoured rather than read as "absent"; the same on the quarantine-slot probe (an errored probe there
+reads as "free", and the rename then replaces — destroying an earlier salvage); the exhausted-slot
+replacement announced instead of silent; a copy fallback when the rename is refused; the refuse-to-
+write precondition above; a range-guarded `version` read (the daemon's `as_int()` on an unguarded
+double is the same `float-cast-overflow` UB, latent only because no test feeds it one); and a
+size-capped read. The daemon's exposure is *deferred* rather than absent — `persist_session_state`
+runs at clean shutdown — but the parity is a filed follow-up, not a fact.
+
+Two codes, not one, deliberately: a recovery diagnostic that cannot say WHICH session file was reset
+has discarded the only distinction the ownership split created. And the messages differ too — the
+Shell's names the window layout and undo history, because that is what the user actually lost.
+
+**The split itself is mechanised, not documented**: `tools/check_session_ownership.py` (ctest
+`editor-shell-session-ownership`) fails a tree where either file gains a second writer, where an
+owner moves out of its process's subtree, or where the in-process override-write gateway is named
+from product code. See `shell.md` § 14.
+
 ## Driving it from the CLI
 
 `context attach` is a second client like any other:
