@@ -18,6 +18,7 @@ export * from "./info.js";
 export * from "./bridge.js";
 export * from "./dockview.js";
 export * from "./panels.js";
+export * from "./extpanel.js";
 export * from "./hydration.js";
 export * from "./panelhost.js";
 export * from "./window.js";

@@ -324,12 +324,30 @@ const char* ext_csp_header()
            "form-action 'none'; "
            // The panel may be framed BY THE EDITOR AND BY NOTHING ELSE. Not 'none' (which would
            // block the frame the panel exists to be) and not '*'.
-           "frame-ancestors context-editor:";
+           //
+           // TIGHTENED IN M9 e13a-2 from the scheme-source `context-editor:` to this HOST-source, as
+           // ext_scheme.h's e13a-2 obligation required. The scheme form also authorized
+           // `context-editor://ipc` (app_scheme.h declares that second host) — breadth nobody asked
+           // for. It was left broad in e13a-1 only because no live iframe existed to prove the
+           // host-source form does not silently collapse the directive and block panels outright;
+           // `editor-cef-smoke-shell-iframe` is that proof, and its assertion is specifically that
+           // the panel's OWN SUBRESOURCES were fetched — a frame the directive blocked never parses
+           // its document, so it never requests them.
+           "frame-ancestors context-editor://app";
+}
+
+bool is_script_media_type(const std::string& mime_type)
+{
+    // Essence only — the allowlist's script entries are `text/javascript; charset=utf-8`, and the
+    // charset is a separate response field (split_media_type). Compared against the ALLOWLIST's own
+    // spelling rather than a set of guesses: app_scheme.cpp maps both `.js` and `.mjs` to exactly
+    // this essence, so there is one string to agree with, not a family.
+    return split_media_type(mime_type).essence == "text/javascript";
 }
 
 std::vector<std::pair<std::string, std::string>> ext_response_headers(const std::string& mime_type)
 {
-    return {
+    std::vector<std::pair<std::string, std::string>> headers = {
         {"Content-Type", mime_type},
         {"Content-Security-Policy", ext_csp_header()},
         // Without nosniff a served asset whose bytes look like HTML can be re-interpreted as a
@@ -346,6 +364,25 @@ std::vector<std::pair<std::string, std::string>> ext_response_headers(const std:
         // versions would serve a stale panel against a fresh bridge contract.
         {"Cache-Control", "no-store"},
     };
+    if (is_script_media_type(mime_type))
+    {
+        // M9 e13a-2, ADDED FROM A MEASUREMENT, not from the spec — see ext_scheme.h § the CORS
+        // header for the full experiment. In one sentence: an ES MODULE is fetched in CORS mode, a
+        // `sandbox="allow-scripts"` panel's origin is the opaque `null`, and without this header the
+        // module is fetched and then DISCARDED — the document loads, its stylesheet applies, a
+        // CLASSIC script even runs, and only the module graph silently dies. `null` is not a
+        // permissive wildcard here; it is the literal serialization of the panel's own origin.
+        //
+        // SCRIPTS ONLY, deliberately, and this is the narrowest form that works (measured: the
+        // module graph resolves with the header on `.js`/`.mjs` alone). Stylesheets, images and
+        // fonts are fetched no-cors and need nothing, so withholding it from them keeps every
+        // non-script asset unreadable cross-origin by the SAME-ORIGIN POLICY rather than only by
+        // this scheme's CSP — which matters because every panel frame shares the opaque origin
+        // `null`, so a blanket header would make one package's assets CORS-readable by another's
+        // frame with the CSP as the only thing left standing.
+        headers.emplace_back("Access-Control-Allow-Origin", "null");
+    }
+    return headers;
 }
 
 } // namespace context::editor::shell

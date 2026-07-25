@@ -555,9 +555,33 @@ Named so the gaps are visible rather than assumed:
   `editor-cef-smoke-shell` now boots the real bundle over the real scheme and round-trips a handshake
   through it. **Packaging** the asset root install-relative is still **e15**'s: the default is a
   build-tree path compiled in by CMake.
-- **No package panels** — the iframe host, the MessageChannel-port bridge, the capability/consent
-  model, theme-token delivery, the `context new --template extension-panel` scaffold and the demo
-  external package are **e13a-2 / e13b–f**. ✅ **Their SECURITY FOUNDATION landed with e13a-1**:
+- **Package panels render; nothing talks to them yet** — the MessageChannel-port bridge, the
+  capability/consent model, theme-token delivery, the state-blob round trip, the
+  `context new --template extension-panel` scaffold and the demo external package are **e13b–f**.
+  ✅ **The IFRAME HOST landed with e13a-2**: editor-core's PanelHost renders a `content.type:
+  "iframe"` manifest as an `<iframe sandbox="allow-scripts">` (never `allow-same-origin` — an opaque
+  origin is what isolates one package from another and from the editor) pointed at a validated
+  `context-ext://<package-id>/…` URL, with `allow=""` (delegate no powerful feature) and
+  `referrerpolicy="no-referrer"`. It docks, floats and is disposed exactly like a built-in, through
+  the same Dockview geometry calls. The entry grammar is `extpanel.ts` — a total, fail-closed parser
+  that is the ONLY layer at which a `javascript:` / `data:` / `https:` entry can be refused at all,
+  since the Shell's resolver never sees a URL the browser did not route to it — and its vocabulary is
+  byte-compared against `ext_scheme.h` by the `webui-scheme-contract` ctest. The per-content-type
+  gate lives in `PanelHost#mountable`, applied in `open()` rather than in `start()`'s loop, because
+  `openById` (the e10b tear-out seed path) reached `addPanel` without it. Tiers: `webui-ts-unit`
+  (`extpanel.test.ts` — the grammar, plus the RENDERED frame's own `DOMTokenList` against real
+  Dockview) and the live `editor-cef-smoke-shell-iframe`.
+  ⚠ **Two facts about a sandboxed panel that were MEASURED, not assumed** (ext_scheme.h carries the
+  experiment). `'self'` in a CSP response header DOES match inside an opaque-origin document — CSP
+  resolves it from the response URL, not from the document's origin — so the strict panel policy
+  needs no relaxation. But an ES MODULE is fetched in CORS mode and a sandboxed frame's origin is the
+  opaque `null`, so a module response with no `Access-Control-Allow-Origin` is fetched and then
+  DISCARDED: the document loads, its stylesheet applies, a classic `<script>` even runs, and only the
+  module graph dies, naming no directive. `ext_response_headers` therefore emits
+  `Access-Control-Allow-Origin: null` on SCRIPT media types **only** — the narrowest form that works,
+  so every non-script asset stays unreadable cross-origin under the same-origin policy rather than
+  under the CSP alone (every panel frame shares the origin `null`).
+  ✅ **Their SECURITY FOUNDATION landed with e13a-1**:
   `context-ext` is registered in every process pinned to `STANDARD|SECURE|CORS_ENABLED` (no
   `CSP_BYPASSING`, no `LOCAL`, and — unlike the app scheme — no `FETCH_ENABLED`), its resource
   handler is installed **unconditionally**, and `context-ext://<package-id>/…` resolves through the
@@ -578,7 +602,11 @@ Named so the gaps are visible rather than assumed:
   editor-core's own CSP widened `frame-src 'none'` → `frame-src context-ext:` for this, and nothing
   else in that policy moved. The CEF-free `kExtSchemeOptions` pin is `static_assert`ed against CEF's
   own `CEF_SCHEME_OPTION_*` values in `cef_shell.cpp`, so a CEF bump that renumbered them fails the
-  build rather than silently changing the scheme's semantics.
+  build rather than silently changing the scheme's semantics. e13a-2 tightened the panel response's
+  `frame-ancestors` from the scheme-source `context-editor:` (which also authorized
+  `context-editor://ipc`) to the host-source `context-editor://app`, verified by the live smoke's
+  own assertion that the panel's SUBRESOURCES were fetched — a frame the directive blocked never
+  parses its document, so it never asks for them.
 - **No triple-click.** Double-click works (the window class sets `CS_DBLCLKS` and the decoder reports
   `click_count = 2`), but nothing tracks a click RUN, so `click_count` never reaches 3 and
   triple-click-to-select-line is inert in the browser.

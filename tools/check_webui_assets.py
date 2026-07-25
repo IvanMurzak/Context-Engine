@@ -77,6 +77,14 @@ SCHEME_CONSTANTS = (
     ("origin", "app_scheme.h", "kAppOrigin", "BRIDGE_ORIGIN"),
     ("ipc endpoint", "app_scheme.h", "kIpcEndpoint", "BRIDGE_ENDPOINT"),
     ("theme pin flag", "app_scheme.h", "kThemePinFlag", "THEME_PIN_FLAG"),
+    # The M9 e13a-2 EXTENSION scheme, on exactly the same terms as the app scheme above and for a
+    # sharper reason: editor-core BUILDS an `<iframe src>` from this vocabulary, so a rename on
+    # either side leaves it framing a scheme the Shell does not serve — every package panel comes up
+    # blank, with no build error anywhere and no unit test able to see it (the TS side would still
+    # agree with itself). The C++ value is the authority, as everywhere else here: the Shell is what
+    # actually REGISTERS the scheme.
+    ("ext scheme", "ext_scheme.h", "kExtScheme", "EXT_SCHEME"),
+    ("ext url prefix", "ext_scheme.h", "kExtUrlPrefix", "EXT_URL_PREFIX"),
 )
 
 # --- the M9 e06b THEME contract (check 9) ---------------------------------------------------------

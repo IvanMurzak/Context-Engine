@@ -220,7 +220,10 @@ GOOD_DOCUMENT = (
 
 GOOD_STYLESHEET = ":root { --editor-bg: #132a44; }\n"
 
-# The six constants the bundle must agree with the Shell about.
+# The constants the bundle must agree with the Shell about. Since M9 e13a-2 that includes the
+# EXTENSION scheme (`context-ext://`), which editor-core uses to build a third-party panel's
+# `<iframe src>` — a rename there leaves every package panel framing a scheme the Shell does not
+# serve, blank, with no build error anywhere.
 SCHEME_BUNDLE = (
     'var BRIDGE_SCHEME = "context-editor";\n'
     'var BRIDGE_ORIGIN = "context-editor://app";\n'
@@ -228,6 +231,8 @@ SCHEME_BUNDLE = (
     'var BRIDGE_QUERY_FUNCTION = "contextEditorQuery";\n'
     'var BRIDGE_CANCEL_FUNCTION = "contextEditorQueryCancel";\n'
     'var THEME_PIN_FLAG = "ctx-smoke-theme";\n'
+    'var EXT_SCHEME = "context-ext";\n'
+    'var EXT_URL_PREFIX = "context-ext://";\n'
 )
 
 CPP_HEADER = (
@@ -235,6 +240,14 @@ CPP_HEADER = (
     'inline constexpr const char* kAppOrigin = "context-editor://app";\n'
     'inline constexpr const char* kIpcEndpoint = "context-editor://ipc";\n'
     'inline constexpr const char* kThemePinFlag = "ctx-smoke-theme";\n'
+)
+
+# The e13a-2 extension scheme lives in its own header next to app_scheme.h, so the fixture writes a
+# second file — which is also what pins that SCHEME_CONSTANTS' per-entry `cpp_file` is honoured
+# rather than every constant being read out of one hardcoded header.
+CPP_EXT_HEADER = (
+    'inline constexpr const char* kExtScheme = "context-ext";\n'
+    'inline constexpr const char* kExtUrlPrefix = "context-ext://";\n'
 )
 
 CPP_CEF = (
@@ -245,7 +258,8 @@ CPP_CEF = (
 
 def _scheme_fixture(tmp_path: Path, *, document: str = GOOD_DOCUMENT,
                     stylesheet: str | None = GOOD_STYLESHEET, bundle: str = SCHEME_BUNDLE,
-                    header: str = CPP_HEADER, cef: str = CPP_CEF) -> tuple[Path, Path, Path]:
+                    header: str = CPP_HEADER, ext_header: str = CPP_EXT_HEADER,
+                    cef: str = CPP_CEF) -> tuple[Path, Path, Path]:
     asset_dir = tmp_path / "app"
     asset_dir.mkdir(parents=True, exist_ok=True)
     (asset_dir / "editor-core.js").write_text(bundle, encoding="utf-8")
@@ -256,6 +270,7 @@ def _scheme_fixture(tmp_path: Path, *, document: str = GOOD_DOCUMENT,
     include_dir = tmp_path / "include"
     include_dir.mkdir(parents=True, exist_ok=True)
     (include_dir / "app_scheme.h").write_text(header, encoding="utf-8")
+    (include_dir / "ext_scheme.h").write_text(ext_header, encoding="utf-8")
 
     cef_dir = tmp_path / "cefsrc"
     cef_dir.mkdir(parents=True, exist_ok=True)
@@ -346,6 +361,12 @@ def test_missing_bundle_fails_the_scheme_gate(tmp_path: Path) -> None:
     # CEF requires the browser-side and renderer-side router configs to agree, so a cancel-function
     # rename desyncs the channel exactly as a query-function rename does.
     ("BRIDGE_CANCEL_FUNCTION", "cefQueryCancel"),
+    # M9 e13a-2 — the EXTENSION scheme. editor-core builds a third-party panel's `<iframe src>` from
+    # these, so a drift here does not break a bridge, it points every package panel at a scheme
+    # nothing serves. Both spellings are covered because they are separate constants that a
+    # half-applied rename would leave DISAGREEING WITH EACH OTHER while each still looked plausible.
+    ("EXT_SCHEME", "context-extension"),
+    ("EXT_URL_PREFIX", "context-ext:/"),
 ])
 def test_scheme_vocabulary_drift_fails(tmp_path: Path, ts_name: str, drifted: str) -> None:
     """A rename on either side must RED, not produce a silently unreachable bridge."""

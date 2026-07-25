@@ -15,6 +15,14 @@
 // lifecycle and panel state already live here, not inside Dockview — but it does not attempt it, and
 // nothing here names `popout`.
 //
+// M9 e13a-2 ADDS THE THIRD CONTENT TYPE, `iframe` — a THIRD-PARTY package panel (04 §5). It changes
+// nothing about the division of labour above: a package panel docks, floats and tears out through
+// exactly the same Dockview geometry calls, and its lifecycle lives here like every other panel's.
+// What it adds is a TRUST TIER — see `IframePanelRenderer` — and one structural consequence: the
+// per-content-type gate that used to sit inline in `start`'s loop is now the `#mountable` predicate,
+// because `openById` (e10b's seed path) reached `open` without it and a gate one caller can walk
+// past is not a gate. `#renderer` is fail-closed for the same reason.
+//
 // ⚠ WHAT IS DELIBERATELY NOT HERE: layout PERSISTENCE. `toJSON`/`fromJSON` are exposed
 // (`captureLayout` / `restoreLayout`) because they are geometry operations this class owns, but
 // nothing writes them anywhere. The Shell is the SINGLE WRITER of `.editor/editor-state.json`
@@ -23,6 +31,13 @@
 
 import type { DockviewApi, DockviewContentRenderer, DockviewModule } from "./dockview.js";
 import { detectDockview } from "./dockview.js";
+import {
+    IFRAME_ALLOW,
+    IFRAME_LOADING,
+    IFRAME_REFERRER_POLICY,
+    IFRAME_SANDBOX,
+    parseExtPanelEntry,
+} from "./extpanel.js";
 import { HydrationRuntime } from "./hydration.js";
 import type { PanelClient, PanelManifest, PanelRoster } from "./panels.js";
 
@@ -40,6 +55,12 @@ const ZONE_DIRECTION: Readonly<Record<string, "left" | "right" | "above" | "belo
 
 /** Dockview's component name for a `local` panel — one renderer type serves them all, as above. */
 const LOCAL_COMPONENT = "context-local-panel";
+
+/** Dockview's component name for an `iframe` (third-party package) panel — one type for all, as above. */
+const IFRAME_COMPONENT = "context-iframe-panel";
+
+/** The class the iframe panel's own DOM slot carries, so the live smoke and the T1 tier can find it. */
+export const IFRAME_PANEL_CLASS = "ctx-panel-frame";
 
 /**
  * A panel editor-core renders ITSELF (M9 e06d, `content.type: "local"`).
@@ -120,6 +141,116 @@ class LocalPanelRenderer implements PanelRenderer {
     dispose(): void {
         this.#teardown?.();
         this.#teardown = undefined;
+        this.element.replaceChildren();
+    }
+}
+
+/**
+ * The Dockview content renderer for a THIRD-PARTY package panel (M9 e13a-2, `content.type: "iframe"`,
+ * design 04 §5 / 08 §1-§2).
+ *
+ * THE TRUST INVERSION THAT MAKES THIS CLASS DIFFERENT FROM ITS TWO SIBLINGS. `UitreePanelRenderer`
+ * mounts bytes the EDITOR produced (`render_html`'s escaping contract) and `LocalPanelRenderer` runs
+ * editor-core's OWN code. This one hosts code we did not write, cannot review, and — from e13b
+ * onward — did not even ship. So it mounts NOTHING into the editor's document: it creates one
+ * `<iframe>`, points it at the package's own origin, and never touches its contents again. There is
+ * no `innerHTML` anywhere in this class and there must never be one; a panel's HTML is loaded BY THE
+ * BROWSER over `context-ext://`, under the strict response CSP the Shell serves (ext_scheme.h), in a
+ * document whose origin is opaque to us and to every other package.
+ *
+ * WHAT ISOLATES IT, in the order the browser applies them:
+ *
+ *   1. `sandbox="allow-scripts"` WITHOUT `allow-same-origin` — an OPAQUE origin. The panel cannot
+ *      read this document, cannot reach another package's origin, and holds no storage keyed to the
+ *      package. See `extpanel.ts` `IFRAME_SANDBOX` for why each omitted token is omitted, and note
+ *      that the attribute is ASSERTED on the created element (`isSandboxSafe`) rather than trusted
+ *      from the constant.
+ *   2. The `src` is a validated `context-ext://<package-id>/…` URL — the ONLY string this class
+ *      accepts, and the ONLY layer at which a `javascript:` / `data:` / `https:` entry can be
+ *      refused at all (the Shell's resolver never sees a URL the browser did not route to it).
+ *   3. The Shell's response CSP (`default-src 'none'`, `connect-src 'none'`, `script-src 'self'`,
+ *      `frame-ancestors context-editor://app`) governs the loaded document, and editor-core's own
+ *      `frame-src context-ext:` is the embedder-side backstop.
+ *
+ * ⚠ NO BRIDGE IS HANDED TO THE FRAME — e13a-2 lands the HOST, not the transport. A sandboxed frame
+ * has origin `"null"`, so `event.origin` is not authentication and the port must be handed over at
+ * creation (B-F6); that is e13b's MessageChannel work. Until it exists this class deliberately
+ * installs NO `message` listener: an editor that listened now would be accepting unauthenticated
+ * postMessages from untrusted code for no capability in return. `ext_scheme.h`'s e13a-2 note about
+ * a frame re-navigating ITSELF to another package's origin is why the eventual port must key off the
+ * handshake's verified origin rather than off this element — recorded here so the class that will
+ * hold the port carries the warning.
+ */
+class IframePanelRenderer implements PanelRenderer {
+    readonly element: HTMLElement;
+    readonly #url: string;
+    readonly #panelId: string;
+    #frame: HTMLIFrameElement | undefined;
+    #suspended = false;
+
+    constructor(panelId: string, url: string) {
+        this.#panelId = panelId;
+        this.#url = url;
+        this.element = document.createElement("div");
+        this.element.className = `ctx-panel-body ${IFRAME_PANEL_CLASS}`;
+        this.element.setAttribute("data-panel-id", panelId);
+    }
+
+    get suspended(): boolean {
+        return this.#suspended;
+    }
+
+    /**
+     * Dockview's content-initialisation hook — REQUIRED (see `UitreePanelRenderer.init`). Builds the
+     * frame exactly ONCE, like the local renderer and for a stronger reason: re-creating it would
+     * reload the package's document and discard whatever the user was doing inside it, and a frame
+     * rebuilt on every show is a frame whose sandbox attribute is re-derived on every show.
+     */
+    init(): void {
+        this.refresh();
+    }
+
+    refresh(): void {
+        if (this.#frame !== undefined) {
+            return;
+        }
+        const frame = document.createElement("iframe");
+        // SANDBOX FIRST, BEFORE `src`. Attribute order is load-bearing here: the sandbox flags are
+        // computed when the frame's document begins loading, and `src` is what starts that load, so
+        // setting `src` first opens a window in which the frame is momentarily un-sandboxed. The
+        // element is not in the document yet either (it is appended last), which closes the same gap
+        // a second way — belt and braces, because only one of the two survives a careless edit.
+        frame.setAttribute("sandbox", IFRAME_SANDBOX);
+        frame.setAttribute("allow", IFRAME_ALLOW);
+        frame.setAttribute("referrerpolicy", IFRAME_REFERRER_POLICY);
+        frame.setAttribute("loading", IFRAME_LOADING);
+        // A labelled frame is a labelled landmark: a screen reader announces WHICH panel focus moved
+        // into, exactly as the uitree renderer's `data-panel-id` slot does (R-A11Y-001).
+        frame.setAttribute("title", this.#panelId);
+        frame.setAttribute("data-panel-id", this.#panelId);
+        frame.className = "ctx-panel-frame-element";
+        frame.setAttribute("src", this.#url);
+        this.#frame = frame;
+        this.element.replaceChildren(frame);
+    }
+
+    onShow(): void {
+        this.#suspended = false;
+        this.refresh();
+    }
+
+    onHide(): void {
+        // A tabbed-away package panel keeps its frame and therefore its state. Dropping the frame
+        // would be a reload disguised as an optimisation — the D6 purity rule cuts the other way for
+        // a document we do not own: we cannot rebuild it, so we must not discard it.
+        this.#suspended = true;
+    }
+
+    dispose(): void {
+        // Removing the element is what actually tears the package's document down; nulling `src`
+        // first would navigate the frame to `about:blank` (a load in a frame we are discarding) for
+        // no benefit.
+        this.#frame = undefined;
         this.element.replaceChildren();
     }
 }
@@ -319,36 +450,13 @@ export class PanelHost {
             if (options.only !== undefined && manifest.id !== options.only) {
                 continue;
             }
-            if (manifest.contentType === "local") {
-                // A local panel has no Shell provider, so `hosted` is false for it BY CONSTRUCTION —
-                // this branch must therefore come BEFORE the hosted gate below, or the one panel
-                // editor-core renders itself would be reported unavailable in every build.
-                if (!this.#localPanels.has(manifest.id)) {
-                    unavailable.push(manifest.id);
-                    continue;
-                }
-                if (this.open(manifest)) {
-                    mounted += 1;
-                }
-                continue;
-            }
-            if (!manifest.hosted) {
-                // The D10-blocked panels (Scene tree, Inspector) land here until e05d3. They are
-                // NAMED in the report rather than dropped: "the editor is missing a panel" must be
-                // an observable fact, not something a user discovers by its absence.
-                unavailable.push(manifest.id);
-                continue;
-            }
-            if (manifest.contentType !== "uitree") {
-                // THE SECURITY BOUNDARY, ENFORCED RATHER THAN ASSUMED. `UitreePanelRenderer` mounts
-                // its payload through `innerHTML`, which is safe ONLY because a `uitree` payload
-                // came from `render_html`'s escaping contract. The contract already carries a
-                // second content type (`iframe` — a third-party web panel, 04 §5), whose content is
-                // NOT ours and belongs in a sandboxed iframe on a different origin. Nothing
-                // registers an iframe provider today, which is exactly why the guard must exist
-                // now: the first one to appear would otherwise be routed straight into that sink.
-                // `parsePanelManifest` fails closed to `unknown` for an unrecognised token, so a
-                // drifted or malformed manifest lands here too rather than defaulting into it.
+            if (!this.#mountable(manifest)) {
+                // Rostered but not mountable in THIS build. NAMED in the report rather than
+                // dropped: "the editor is missing a panel" must be an observable fact, not
+                // something a user discovers by its absence. Three distinct causes land here — a
+                // D10-blocked uitree panel with no provider, a `local` panel this bundle has no
+                // factory for, and an `iframe` panel whose entry is not a URL editor-core may load
+                // — and `#mountable` is where each is decided, once, for both this loop and `open`.
                 unavailable.push(manifest.id);
                 continue;
             }
@@ -372,6 +480,15 @@ export class PanelHost {
         if (this.#api === null) {
             return false;
         }
+        // THE SINK GATE, APPLIED AT THE ONE CHOKEPOINT rather than in `start`'s loop (M9 e13a-2).
+        // `start` is not the only caller: `openById` (e10b's tear-out seed path) reaches here with a
+        // roster manifest and no content-type check of its own, so a gate that lived only in the
+        // loop above would be bypassed by a seeded window — and for an `iframe` manifest that means
+        // a third-party entry URL routed into `#create`. Refusing here is what makes the gate a
+        // property of the class instead of a property of one code path.
+        if (!this.#mountable(manifest)) {
+            return false;
+        }
         if (this.#panels.has(manifest.id)) {
             // A second open of a singleton FOCUSES the existing one rather than duplicating it —
             // the manifest's `dock.singleton` contract (04 §3).
@@ -380,7 +497,7 @@ export class PanelHost {
         const previous = this.mounted[this.mounted.length - 1];
         this.#api.addPanel({
             id: manifest.id,
-            component: manifest.contentType === "local" ? LOCAL_COMPONENT : UITREE_COMPONENT,
+            component: componentFor(manifest),
             title: manifest.title,
             // Placement follows the manifest's declared zone. `referencePanel` is only set once
             // something is already mounted — Dockview has nothing to place relative to otherwise.
@@ -491,14 +608,78 @@ export class PanelHost {
      */
     #create(panelId: string): DockviewContentRenderer {
         const manifest = this.#roster?.panels.find((entry) => entry.id === panelId);
-        const localFactory = this.#localPanels.get(panelId);
-        const renderer: PanelRenderer =
-            manifest?.contentType === "local" && localFactory !== undefined
-                ? new LocalPanelRenderer(panelId, localFactory)
-                : new UitreePanelRenderer(panelId, this.#client, manifest?.gestures ?? false);
+        const renderer = this.#renderer(panelId, manifest);
         if (manifest !== undefined) {
             this.#panels.set(panelId, { manifest, renderer });
         }
         return renderer;
+    }
+
+    /**
+     * Build the renderer a manifest calls for.
+     *
+     * FAIL-CLOSED ON THE SINK, which is why the `iframe` branch is not simply the last `else`: an
+     * `iframe` manifest whose entry does not parse must NEVER reach `UitreePanelRenderer`, because
+     * that renderer mounts its payload through `innerHTML` and a third-party panel's content is not
+     * ours to trust. `open` already refuses such a manifest (so this is unreachable in practice),
+     * and it is written to be correct anyway: the two guards are independent, and the day someone
+     * calls `addPanel` from a third place, this one still holds.
+     */
+    #renderer(panelId: string, manifest: PanelManifest | undefined): PanelRenderer {
+        if (manifest?.contentType === "local") {
+            const localFactory = this.#localPanels.get(panelId);
+            if (localFactory !== undefined) {
+                return new LocalPanelRenderer(panelId, localFactory);
+            }
+        }
+        if (manifest?.contentType === "iframe") {
+            const entry = parseExtPanelEntry(manifest.contentEntry);
+            // An unparseable entry yields an EMPTY frame rather than a uitree fallback: the panel is
+            // visibly, honestly blank, and nothing third-party-controlled was ever interpreted.
+            return new IframePanelRenderer(panelId, entry?.url ?? "about:blank");
+        }
+        return new UitreePanelRenderer(panelId, this.#client, manifest?.gestures ?? false);
+    }
+
+    /**
+     * Can THIS build mount this panel? The ONE predicate `start` reports `unavailable` from and
+     * `open` refuses on (M9 e13a-2) — previously three separate checks inside `start`'s loop, which
+     * is how `openById` came to bypass them.
+     *
+     * Per content type:
+     *   * `uitree` — needs a Shell PROVIDER (`hosted`). The D10-blocked panels were unavailable here
+     *     until e05d3 bound theirs.
+     *   * `local` — has no Shell provider BY CONSTRUCTION (`hosted` is always false for it), so it
+     *     is gated on THIS bundle carrying its factory instead.
+     *   * `iframe` — likewise has no Shell provider by construction: its bytes are served over
+     *     `context-ext://`, not over `panel.render`. It is gated on its `content.entry` being a URL
+     *     `parseExtPanelEntry` accepts, which is the whole security decision (extpanel.ts).
+     *   * `unknown` — an unrecognised token `parsePanelManifest` failed closed on. Never mountable:
+     *     defaulting a drifted manifest into ANY renderer is how a future content type ends up in
+     *     today's HTML sink.
+     */
+    #mountable(manifest: PanelManifest): boolean {
+        switch (manifest.contentType) {
+            case "uitree":
+                return manifest.hosted;
+            case "local":
+                return this.#localPanels.has(manifest.id);
+            case "iframe":
+                return parseExtPanelEntry(manifest.contentEntry) !== null;
+            default:
+                return false;
+        }
+    }
+}
+
+/** Dockview's component name for a manifest — the ONE place the content type picks a renderer type. */
+function componentFor(manifest: PanelManifest): string {
+    switch (manifest.contentType) {
+        case "local":
+            return LOCAL_COMPONENT;
+        case "iframe":
+            return IFRAME_COMPONENT;
+        default:
+            return UITREE_COMPONENT;
     }
 }

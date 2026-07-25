@@ -91,6 +91,20 @@ export interface PanelManifest {
     readonly contractVersion: number;
     readonly dock: PanelDock;
     readonly contentType: PanelContentType;
+    /**
+     * The manifest's `content.entry` (M9 e13a-2) — the URL an `iframe` panel loads, mirroring the
+     * C++ `ContentSpec::entry`. EMPTY for every other content type, which the C++ registry
+     * validation already enforces (`registry.cpp`: `uitree`/`local` with a non-empty entry is a
+     * rejected contribution), so an entry arriving on a `uitree` manifest is a Shell-side defect and
+     * this field is simply never read for one.
+     *
+     * CARRIED RAW AND UNVALIDATED HERE — deliberately. `parsePanelManifest` is a structural parser;
+     * whether this string is a URL editor-core may put in a frame is a SECURITY question with its
+     * own grammar, its own tests and its own module (`extpanel.ts` `parseExtPanelEntry`). Splitting
+     * them keeps the parser total (it never has to decide what a "safe" URL is) and keeps the
+     * grammar in one place instead of half-applied at parse time.
+     */
+    readonly contentEntry: string;
     readonly schemaVersion: number;
     readonly capabilities: readonly string[];
     /** The manifest-declared commands (manifest v2 `commands`, 04 §3), the e07b registry's source (c). */
@@ -260,6 +274,7 @@ export function parsePanelManifest(value: unknown): PanelManifest | null {
         contractVersion: readNumber(value, "contractVersion"),
         dock: readDock(value),
         contentType: readContentType(content),
+        contentEntry: readString(content, "entry"),
         schemaVersion: readNumber(state, STATE_SCHEMA_VERSION_KEY, 1),
         capabilities: readStringArray(value, "capabilities"),
         commands: readManifestCommands(value),

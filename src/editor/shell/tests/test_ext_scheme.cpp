@@ -35,6 +35,7 @@
 
 #include "shell_test.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <system_error>
@@ -754,7 +755,7 @@ void test_ext_csp_and_headers()
                              "object-src 'none'; "
                              "base-uri 'none'; "
                              "form-action 'none'; "
-                             "frame-ancestors context-editor:"));
+                             "frame-ancestors context-editor://app"));
 
     CHECK(shelltest::mentions(csp, "default-src 'none'"));
     CHECK(shelltest::mentions(csp, "script-src 'self'"));
@@ -783,8 +784,20 @@ void test_ext_csp_and_headers()
 
     // FRAMED BY THE EDITOR AND NOTHING ELSE. Emphatically not 'none' (which would block the frame
     // the panel exists to be) and not '*'.
-    CHECK(shelltest::mentions(csp, "frame-ancestors context-editor:"));
+    //
+    // ⚠ THE TIGHTENING M9 e13a-2 LANDED IS NOT SUBSTRING-CHECKABLE, and that is why the assertion
+    // below is an ends_with rather than a `mentions`. The OLD, broader value —
+    // `frame-ancestors context-editor:`, the scheme-source that also authorized
+    // `context-editor://ipc` — is a strict PREFIX of the new one, so `mentions(csp,
+    // "frame-ancestors context-editor:")` passes identically before and after and proves nothing.
+    // Anchoring on the END of the policy is what actually distinguishes them: `frame-ancestors` is
+    // the last directive, so a revert to the scheme form fails here immediately.
+    CHECK(shelltest::mentions(csp, "frame-ancestors context-editor://app"));
+    CHECK(csp.ends_with("frame-ancestors context-editor://app"));
     CHECK(!shelltest::mentions(csp, "frame-ancestors 'none'"));
+    // The app's own origin appears EXACTLY ONCE, in that directive — a second occurrence would mean
+    // some other directive had also been handed the editor's privileged origin.
+    CHECK(shelltest::count_occurrences(csp, "context-editor:") == 1);
 
     // No external hosts anywhere (08 §2 "strict CSP, no external hosts"). Probed WITHOUT the
     // slashes: a CSP scheme-source is spelled `https:`, never `https://`, so a probe for `https://`
@@ -815,6 +828,54 @@ void test_ext_csp_and_headers()
     };
     CHECK(shell::ext_response_headers("text/html; charset=utf-8") == expected_headers);
 
+    // --- the M9 e13a-2 CORS header: SCRIPTS ONLY -------------------------------------------------
+    //
+    // An ES module is fetched in CORS mode and a sandboxed panel's origin is the opaque `null`, so
+    // without this header a module is fetched and then DISCARDED — measured; ext_scheme.h carries
+    // the experiment. What is asserted here is the NARROWING, because that is the part a later edit
+    // would "simplify" away: every NON-script asset must still carry NO CORS header at all, so one
+    // package's stylesheet/image/font stays unreadable by another package's frame under the
+    // same-origin policy rather than under this scheme's CSP alone (every panel frame shares the
+    // opaque origin `null`, so a blanket header would make them mutually readable).
+    const std::vector<std::pair<std::string, std::string>> expected_script_headers = {
+        {"Content-Type", "text/javascript; charset=utf-8"},
+        {"Content-Security-Policy", csp},
+        {"X-Content-Type-Options", "nosniff"},
+        {"Referrer-Policy", "no-referrer"},
+        {"Cache-Control", "no-store"},
+        {"Access-Control-Allow-Origin", "null"},
+    };
+    CHECK(shell::ext_response_headers("text/javascript; charset=utf-8") == expected_script_headers);
+
+    // The charset is a SEPARATE response field, so the essence alone must classify identically —
+    // the `.mjs` and `.js` allowlist entries both map to this essence.
+    CHECK(shell::ext_response_headers("text/javascript").size() == expected_script_headers.size());
+
+    // EVERY non-script media type on the shared allowlist carries NO CORS header. Driven from the
+    // allowlist itself rather than from a hand-listed few, so a media type added there later cannot
+    // quietly acquire one.
+    for (const auto& [extension, mime] : shell::asset_media_types())
+    {
+        const auto headers = shell::ext_response_headers(mime);
+        const bool has_cors =
+            std::any_of(headers.begin(), headers.end(), [](const auto& header)
+                        { return header.first == "Access-Control-Allow-Origin"; });
+        const bool is_script = mime.rfind("text/javascript", 0) == 0;
+        if (has_cors != is_script)
+        {
+            std::fprintf(stderr, "  [ext-cors] %s (%s) has_cors=%d is_script=%d\n",
+                         extension.c_str(), mime.c_str(), has_cors ? 1 : 0, is_script ? 1 : 0);
+        }
+        CHECK(has_cors == is_script);
+    }
+
+    // And the REFUSAL response never carries one, whatever was asked for: a 403/404 body is not a
+    // package asset, and a CORS-readable refusal would hand a probing frame a cross-origin oracle
+    // for exactly the statuses `resolve` works to keep indistinguishable.
+    const auto refusal = shell::refusal_headers(shell::ext_csp_header());
+    CHECK(std::none_of(refusal.begin(), refusal.end(), [](const auto& header)
+                       { return header.first == "Access-Control-Allow-Origin"; }));
+
     // The REFUSED response's policy, pinned next to the served one. It carries the same CSP (an
     // error page is a document too) and no Content-Type — the binding sets `text/plain` itself.
     const std::vector<std::pair<std::string, std::string>> expected_refusal = {
@@ -828,7 +889,7 @@ void test_ext_csp_and_headers()
 
 // The e13a-1 widening of the EDITOR-CORE policy, asserted from this suite as well as its own: the
 // two sides of the seam must agree, and reading `frame-src context-ext:` next to
-// `frame-ancestors context-editor:` is what makes that agreement legible.
+// `frame-ancestors context-editor://app` is what makes that agreement legible.
 void test_app_policy_permits_framing_this_scheme()
 {
     const std::string app_csp = shell::app_csp_header();

@@ -37,14 +37,20 @@
 // the install path must refuse a package root containing a reparse point it did not create, rather
 // than leaving the property to the STL that happened to compile the resolver.
 //
-// ⚠ E13A-2 OBLIGATION — BIND THE BRIDGE TO A VERIFIED ORIGIN, NOT TO THE FRAME. editor-core's
-// widened `frame-src context-ext:` is a SCHEME-source, so it permits every package; and a
-// `sandbox="allow-scripts"` frame may always navigate ITSELF (sandbox restricts navigating the
-// TOP). Panel A can therefore set `location = 'context-ext://b/index.html'`, and the frame element
-// editor-core believes hosts A now hosts B. No bytes leak today — A's own script is destroyed by
-// the navigation, and this scheme still serves each origin only its own root — but any capability
-// or MessagePort e13a-2 hands to "the A frame" would land in B's document. The bridge must key off
-// the handshake's verified `event.origin`, never off the element it was granted to.
+// ⚠ E13B OBLIGATION (RE-HOMED FROM e13a-2, WHICH SHIPPED NO TRANSPORT) — BIND THE BRIDGE TO A
+// VERIFIED ORIGIN, NOT TO THE FRAME. editor-core's widened `frame-src context-ext:` is a
+// SCHEME-source, so it permits every package; and a `sandbox="allow-scripts"` frame may always
+// navigate ITSELF (sandbox restricts navigating the TOP). Panel A can therefore set
+// `location = 'context-ext://b/index.html'`, and the frame element editor-core believes hosts A now
+// hosts B. No bytes leak today — A's own script is destroyed by the navigation, and this scheme
+// still serves each origin only its own root — but any capability or MessagePort hands to "the A
+// frame" would land in B's document. The bridge must key off the handshake's verified
+// `event.origin`, never off the element it was granted to.
+//
+// e13a-2 landed the iframe HOST and deliberately installs NO `message` listener at all
+// (panelhost.ts `IframePanelRenderer`): an editor that listened before the port handshake existed
+// would be accepting unauthenticated postMessages from untrusted code for no capability in return.
+// So the hazard above is inert until e13b, which is exactly why it is recorded on e13b.
 //
 // CROSS-PACKAGE READS ARE THE AXIS THIS EXISTS TO CLOSE, and containment-per-root is NOT
 // sufficient on its own: if package B's root sat INSIDE package A's root, then
@@ -260,45 +266,74 @@ private:
 //   frame-src / object-src / base-uri / form-action 'none'
 //                       — a panel may not nest further frames, load plugins, rewrite its module
 //                         base URL, or post a form off-origin.
-//   frame-ancestors context-editor:
+//   frame-ancestors context-editor://app
 //                       — THE PANEL MAY ONLY BE FRAMED BY THE EDITOR. It is emphatically NOT
 //                         `'none'` (which would block the panel from being framed at all) and not
 //                         `*` (which would let any page that can reach the scheme frame it).
-//                         ⚠ A SCHEME-source, and the reason is liveness, not tightness. The tighter
-//                         spelling is the host-source `context-editor://app` (= `kAppOrigin`, a
-//                         compile-time constant right here), and the "the scheme carries exactly
-//                         one document origin" symmetry argument that would have justified the
-//                         scheme form does NOT hold: app_scheme.h declares a SECOND host,
-//                         `kIpcHost`, so `context-editor:` also authorizes `context-editor://ipc`
-//                         to frame a panel. That is empty today — only `kAppHost` gets a
-//                         `CefRegisterSchemeHandlerFactory`, so `//ipc` serves no document, and
-//                         `OnBeforeBrowse` independently pins the main frame to `kAppUrlPrefix` —
-//                         but it is breadth nobody asked for. It stays a scheme-source ONLY because
-//                         no live iframe smoke exists yet (that is e13a-2's) to prove the
-//                         host-source form does not silently collapse the directive and block
-//                         panels outright. E13A-2 OBLIGATION: once that smoke exists, tighten this
-//                         to `context-editor://app` and verify against it.
+//                         ⚠ A HOST-source since M9 e13a-2, TIGHTENED from e13a-1's scheme-source
+//                         `context-editor:`. The scheme form also authorized
+//                         `context-editor://ipc` to frame a panel (app_scheme.h declares that
+//                         SECOND host) — empty in practice, since only `kAppHost` gets a
+//                         `CefRegisterSchemeHandlerFactory` and `OnBeforeBrowse` independently pins
+//                         the main frame to `kAppUrlPrefix`, but breadth nobody asked for. It was
+//                         left broad only until a live iframe smoke could prove the host-source form
+//                         does not silently collapse the directive and block panels outright; that
+//                         smoke is `editor-cef-smoke-shell-iframe`, and the assertion which
+//                         discharges this obligation is deliberately NOT "the frame exists" but "the
+//                         panel's OWN SUBRESOURCES were requested over the scheme" — a frame this
+//                         directive blocked never parses its document, so it never asks for them.
+//                         ⚠ The value is `kAppOrigin`'s TEXT, not the constant: this policy is one
+//                         spelled-once string (ext_scheme.cpp), and `test_ext_scheme.cpp` pins the
+//                         whole thing by exact compare PLUS an `ends_with` — because the old,
+//                         broader value is a strict PREFIX of this one, so a substring probe passes
+//                         identically before and after and would prove nothing.
 //
-// ⚠ e13a-2 READ THIS BEFORE DEBUGGING A BLANK PANEL — there are TWO independent hypotheses, and
-// only the first is a CSP question:
-//   (1) `'self'` inside a document that editor-core framed with `sandbox="allow-scripts"` is
-//       resolved against the RESPONSE URL's origin, not the frame's (opaque) document origin — so
-//       it SHOULD match `context-ext://<pkg>/…`. If a live smoke shows a panel's own module
-//       refused, the console message from `OnConsoleMessage` names the directive, and the fix is a
-//       REVIEWED policy change here, never an `'unsafe-inline'` sprinkled at the call site (the
-//       same discipline the editor-core `style-src` saga above records).
-//   (2) The scheme is registered WITHOUT `FETCH_ENABLED` (deliberately — see kExtSchemeOptions),
-//       while the app scheme takes it. Module-graph fetching is not the Fetch API, so
-//       `CORS_ENABLED` alone is expected to suffice, but NOTHING has proven that on a live
-//       browser yet. If the
-//       console blames neither a directive nor a 403, this asymmetry is the second thing to check.
+// ⚠ THE TWO e13a-1 HYPOTHESES ABOUT A BLANK PANEL ARE NOW SETTLED BY MEASUREMENT — and the answer
+// was NEITHER of them. Both are recorded with their evidence, because the true cause looks exactly
+// like hypothesis (1) from the outside and would otherwise be re-derived as one:
 //
-// ⚠ NOT a `sandbox` directive, deliberately, and this is a REVIEWED omission rather than an
-// oversight: response-enforced `sandbox` would make containment independent of the embedder, but
-// `sandbox allow-scripts` WITHOUT `allow-same-origin` gives the document an opaque origin, and
-// whether `'self'` still matches the response URL then is precisely hypothesis (1) above — unproven
-// until e13a-2's live smoke exists. Adding it blind could brick every panel. E13A-2 OBLIGATION:
-// settle (1) against a real browser, then decide whether `sandbox` belongs in this response.
+//   (1) SETTLED YES — `'self'` DOES match inside a document framed `sandbox="allow-scripts"` (an
+//       OPAQUE origin). CSP computes `'self'` from the POLICY's self-origin, which is the RESPONSE
+//       URL's origin, not from the document's opaque origin. Measured: with the policy exactly as
+//       written above, a sandboxed panel's own `panel.css` loads and its own `panel.js` is fetched.
+//       So the policy needs no relaxation, and an `'unsafe-inline'` at a call site would still be
+//       the wrong fix for any future blank panel.
+//   (2) SETTLED IRRELEVANT — `FETCH_ENABLED` is not the missing piece, and withholding it (see
+//       kExtSchemeOptions) costs the module graph nothing.
+//
+// ⚠ THE ACTUAL CAUSE, and why `ext_response_headers` now emits a CORS header on SCRIPTS. An ES
+// module is ALWAYS fetched in CORS mode; a sandboxed frame's origin is the opaque `null`; so a
+// module response with no `Access-Control-Allow-Origin` is fetched and then DISCARDED by the CORS
+// check. The failure is silent and deeply misleading: the document loads, the stylesheet applies, a
+// CLASSIC `<script>` even executes, and ONLY the module graph dies — no directive is named, so every
+// symptom points at CSP. Measured on a real headless Chromium against a byte-identical policy, with
+// a no-sandbox control frame isolating the sandbox as the variable and a no-CSP run isolating CSP
+// out of it:
+//
+//     sandboxed + this CSP                  -> panel.css ✓  panel.js ✓  its imports ✗
+//     sandboxed + NO CSP AT ALL             -> panel.css ✓  panel.js ✓  its imports ✗   (not CSP)
+//     sandboxed + CSP + a classic <script>  -> the classic script RUNS ✓                (not scripting)
+//     NOT sandboxed + this CSP              -> everything ✓                             (it is the sandbox)
+//     sandboxed + this CSP + ACAO: null     -> everything ✓                             (it is CORS)
+//
+// The header is emitted for SCRIPT media types ONLY — the narrowest form that works, also measured.
+// Stylesheets, images and fonts are no-cors fetches and need nothing, so withholding it from them
+// keeps every NON-script package asset unreadable cross-origin by the same-origin policy itself
+// rather than by this scheme's CSP alone. That distinction is load-bearing: EVERY panel frame has
+// the same opaque origin `null`, so a blanket `Access-Control-Allow-Origin: null` would make one
+// package's assets CORS-readable by another package's frame, leaving `script-src 'self'` (which
+// resolves to the REQUESTING package's own origin, so it does refuse the cross-package script load)
+// as the only remaining control — exactly the "resting on the CSP alone" posture kExtSchemeOptions
+// declines elsewhere.
+//
+// ⚠ STILL NOT a `sandbox` directive, and hypothesis (1) settling does NOT by itself change that.
+// Response-enforced `sandbox` would make containment independent of the embedder, which is
+// genuinely attractive now that `'self'` is known to keep matching. What it would ALSO do is make
+// the response's own sandbox flags and the EMBEDDER's `sandbox` attribute two independent policies
+// that must agree, and the failure mode of a disagreement is a panel that works in the editor and
+// breaks in a devtools-opened tab (or vice versa) with no diagnostic. That is a reviewed change
+// belonging with the capability model (e13b), where there is a second policy surface to reconcile it
+// against, rather than a one-line hardening bolted on here.
 //
 // ⚠ THE OTHER EXTENSION CSP IN THIS REPO — read before assuming this is the only one. The M5
 // gui-host tier has `kDefaultExtensionCsp` (`context/editor/gui/contract/sandbox.h`), the default
@@ -320,6 +355,11 @@ private:
 // precisely to BE framed. `frame-ancestors` above is the modern, spec'd control and is what states
 // by WHOM; adding a legacy `X-Frame-Options` alongside it would at best be redundant and at worst
 // (on any consumer that honours the legacy header first) block the panel outright.
+//
+// `Access-Control-Allow-Origin: null` IS emitted, but ONLY on script media types — see the CORS
+// note above for the measurement that forced it and for why narrowing it to scripts is not
+// fastidiousness but the difference between the same-origin policy and the CSP being what keeps one
+// package's assets away from another's frame.
 //
 // TWO MORE REVIEWED OMISSIONS, recorded so neither is re-proposed as an easy win:
 //   * `Cross-Origin-Resource-Policy` — it LOOKS like the obvious hardening for an untrusted origin
