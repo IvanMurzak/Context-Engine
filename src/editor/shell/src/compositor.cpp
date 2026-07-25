@@ -190,8 +190,9 @@ void WindowCompositor::attach_cpu(std::unique_ptr<render::present::IPresentBlitt
     size_ = size;
     path_ = PresentPath::cpu_blit;
     diagnostic_ = blitter_ == nullptr
-                      ? "the CPU present path has no blitter on this platform (X11 SHM / "
-                        "CALayer.contents land with e12); the shell runs but presents nothing"
+                      ? "the CPU present path has no blitter in this build (on Linux: configure "
+                        "with the X11 development headers, libx11-dev + libxext-dev; macOS "
+                        "CALayer.contents lands with e12b); the shell runs but presents nothing"
                       : std::string{};
     damage_.external = true;
 }

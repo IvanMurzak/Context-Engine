@@ -115,8 +115,9 @@ public:
     // Pure like every other seam on this interface (mirrors request_redraw): each backend states its own
     // answer rather than inheriting a default. The Win32 override does the real OS raise; the headless
     // backend explicitly no-ops (no OS window — the honest behaviour on a box with no interactive
-    // desktop, Session 0 / CI). Keeping it pure means a future windowed backend (macOS/X11, e12) is
-    // forced to implement the raise instead of silently no-op-ing the single-instance focus. Interactive
+    // desktop, Session 0 / CI). Keeping it pure means a windowed backend — the X11 one (e12a) and the
+    // macOS one still owed (e12b) — is forced to implement the raise instead of silently no-op-ing the
+    // single-instance focus. The X11 override does the real EWMH activation. Interactive
     // verification rides the deferred interactive-Windows pass (docs/shell.md); the arbitration handshake
     // itself is proven headlessly in the T2 drill.
     virtual void request_activation() = 0;

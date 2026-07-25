@@ -25,8 +25,9 @@ This file is the directory map.
 | `include/.../dpi.h`, `src/dpi.cpp` | Per-monitor DPI: the DPI is stored, the scale factor derived. |
 | `include/.../input.h`, `src/input.cpp` | Region map + arbitration + the capture stack + focus-class key routing (03 §6). |
 | `include/.../editor_state.h`, `src/editor_state.cpp` | `.editor/editor-state.json` — the Shell is its SINGLE writer (03 §1). Debounced, crash-safe. |
-| `include/.../window.h`, `src/window.cpp` | The `IWindowBackend` seam, the headless backend, and the PURE Win32 message decoder. |
-| `src/win32_window.cpp` | The Windows OS calls only (`RegisterClassExW`/`CreateWindowExW`/WndProc/per-monitor-v2 DPI). Reports an honest gap on macOS/Linux (e12). |
+| `include/.../window.h`, `src/window.cpp` | The `IWindowBackend` seam, the headless backend, the PURE Win32 **and X11** message decoders, and `make_window_backend` — the platform choice itself (relocated here in e12a, when a second real backend made `win32_window.cpp`'s `#else` the wrong home for it). |
+| `src/win32_window.cpp` | The Windows OS calls only (`RegisterClassExW`/`CreateWindowExW`/WndProc/per-monitor-v2 DPI), behind `make_win32_window_backend` — which returns `nullptr` off Windows, like every other per-platform factory. |
+| `src/x11_window.cpp` | e12a: the Linux X11/XWayland OS calls only (`XCreateWindow`, the non-blocking pump, EWMH placement/activation/maximize, `WM_DELETE_WINDOW` + `_NET_WM_PING`, XIM text, `Xft.dpi`), behind `make_x11_window_backend`. One `Display` serves N windows, dispatched by `xany.window`. Compiles to an honest refusal without the X11 development headers. |
 | `include/.../browser.h`, `src/browser.cpp` | The CEF-free browser seam + the scripted host the smoke and tests drive. |
 | `include/.../compositor.h`, `src/compositor.cpp` | The layer stack, damage, the resize protocol, `PET_POPUP`, and both present paths (03 §4). |
 | `include/.../shell.h`, `src/shell.cpp` | `WindowManager` / `EditorWindow` / the owner loop, and the D10 authenticated attach. |
@@ -34,7 +35,8 @@ This file is the directory map.
 | `include/.../themes_bridge.h`, `src/themes_bridge.cpp` | e06b: the `themes.get` surface — reads + WATCHES `~/.context/themes/*.theme.json` and publishes the raw bytes with a generation counter (06 §4). Bytes only: the theme SCHEMA lives in editor-core (theme.ts), so a malformed theme is rejected there and never becomes a broken UI. D10 boundary-clean (plain `std::filesystem`), like its `keybindings_bridge.h` sibling. |
 | `panels/` | e05d1: the composition root. Binds a `PanelProvider` per hostable panel and projects the daemon's `diagnostics` topic onto the Problems model. |
 | `app/editor_main.cpp` | `context_editor`'s entry point. |
-| `smoke/shell_smoke_main.cpp` | The **Session-0-safe** smoke — e04's blocking CI requirement. |
+| `smoke/shell_smoke_main.cpp` | The **Session-0-safe** smoke — e04's blocking CI requirement. Opens no window, by design. |
+| `smoke/shell_x11_smoke_main.cpp` | e12a: the CEF-free **live windowed Linux** smoke — a real X11 window, the real X11 present blitter, the real e05d1 panel roster, and a server-driven Expose + ConfigureNotify. Registered as `editor-shell-x11-window` with `SKIP_RETURN_CODE 77`; run non-vacuously in `editor-cef-smoke` as a direct EXE under xvfb with `--require-x11 --require-display`. |
 | `cef/` | The windowed-OSR CEF binding + its live boot smoke. |
 | `tests/` | The `editor-shell-*` ctest family. |
 

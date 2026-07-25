@@ -32,6 +32,7 @@
 #include <X11/Xresource.h>
 #include <X11/Xutil.h>
 
+#include <clocale>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -172,7 +173,16 @@ bool x11_acquire(std::string& error)
     // The input method is BEST EFFORT. A minimal CI container (or a bare Xvfb) commonly has no
     // XIM server at all, and an editor that refused to open a window there would be useless — so a
     // null IM degrades to XLookupString's Latin-1 text rather than failing window creation.
-    if (::XSupportsLocale() != 0)
+    //
+    // ⚠ LC_CTYPE ONLY — never LC_ALL. Xlib reports XSupportsLocale() for the CURRENT locale, which
+    // without this call is "C": XOpenIM would then bind the built-in IM with the C locale's empty
+    // compose table, dead keys and Compose sequences would produce nothing, and the multi-byte
+    // branches of lookup_key() below could never fire — the whole XIM path would be dead code that
+    // still looks wired. But widening this to LC_ALL (or LC_NUMERIC) would set the process's
+    // numeric locale from the environment, and a locale whose decimal separator is a comma changes
+    // how the C numeric routines format doubles — which would corrupt the canonical-JSON byte form
+    // the authored-data contract (R-FILE-001) depends on, from a window backend, invisibly.
+    if (::setlocale(LC_CTYPE, "") != nullptr && ::XSupportsLocale() != 0)
     {
         (void)::XSetLocaleModifiers("");
         conn.input_method = ::XOpenIM(conn.display, nullptr, nullptr, nullptr);
@@ -269,7 +279,13 @@ public:
         return native;
     }
 
-    [[nodiscard]] render::Extent2D client_size() const override { return size_; }
+    // Derived, never cached separately: geometry_ is the ONE record of what the server last told us
+    // this window is, and a second copy would only add a sync invariant for the handle() switch to
+    // break silently.
+    [[nodiscard]] render::Extent2D client_size() const override
+    {
+        return render::Extent2D{geometry_.width, geometry_.height};
+    }
     [[nodiscard]] DpiScale dpi() const override { return dpi_; }
     [[nodiscard]] bool alive() const override { return window_ != 0 && alive_; }
 
@@ -300,6 +316,12 @@ public:
     [[nodiscard]] Window window_id() const { return window_; }
 
 private:
+    // This window's top-left in ROOT coordinates. The one rule the X11 backend repeats most: under
+    // a reparenting window manager (nearly all of them) the window's own x/y are relative to the
+    // WM's FRAME, so persisting or comparing those walks the window a titlebar up-and-left. Every
+    // site that needs a position goes through here so the rule cannot drift between them. Leaves
+    // its arguments untouched and returns false when the server refuses the translation.
+    [[nodiscard]] bool root_origin(std::int32_t& x, std::int32_t& y) const;
     void destroy();
     void set_maximized(bool maximized);
     [[nodiscard]] bool read_maximized() const;
@@ -310,7 +332,6 @@ private:
     Window window_ = 0;
     XIC input_context_ = nullptr;
     std::vector<ShellEvent> pending_;
-    render::Extent2D size_{};
     DpiScale dpi_;
     X11WindowGeometry geometry_;
     bool alive_ = true;
@@ -414,16 +435,20 @@ bool X11WindowBackend::create(const WindowDesc& desc, std::string& error)
     XWindowAttributes actual{};
     if (::XGetWindowAttributes(conn.display, window_, &actual) != 0)
     {
-        size_ = render::Extent2D{static_cast<std::uint32_t>(actual.width),
-                                 static_cast<std::uint32_t>(actual.height)};
-        geometry_.width = size_.width;
-        geometry_.height = size_.height;
+        geometry_.width = static_cast<std::uint32_t>(actual.width);
+        geometry_.height = static_cast<std::uint32_t>(actual.height);
+        // ROOT-relative, for the same reason placement() spells out below: under a reparenting WM
+        // `actual.x/y` are relative to the WM's frame. Seeding the cache with those and then
+        // comparing every later ConfigureNotify — which fills x/y from root_origin() too — compares
+        // two different coordinate spaces, so the first configure after mapping always reports a
+        // spurious `moved` and dirties the placement, costing an unnecessary editor-state write on
+        // every single startup.
         geometry_.x = actual.x;
         geometry_.y = actual.y;
+        (void)root_origin(geometry_.x, geometry_.y);
     }
     else
     {
-        size_ = physical;
         geometry_.width = physical.width;
         geometry_.height = physical.height;
         geometry_.x = x;
@@ -441,14 +466,7 @@ void X11WindowBackend::destroy()
         return;
     }
     X11Connection& conn = x11_connection();
-    for (std::size_t i = 0; i < conn.windows.size(); ++i)
-    {
-        if (conn.windows[i] == this)
-        {
-            conn.windows.erase(conn.windows.begin() + static_cast<std::ptrdiff_t>(i));
-            break;
-        }
-    }
+    std::erase(conn.windows, this);
     if (input_context_ != nullptr)
     {
         ::XDestroyIC(input_context_);
@@ -552,6 +570,26 @@ bool X11WindowBackend::read_maximized() const
     return vertical && horizontal;
 }
 
+bool X11WindowBackend::root_origin(std::int32_t& x, std::int32_t& y) const
+{
+    if (window_ == 0)
+    {
+        return false;
+    }
+    X11Connection& conn = x11_connection();
+    int root_x = 0;
+    int root_y = 0;
+    Window child = 0;
+    if (::XTranslateCoordinates(conn.display, window_, conn.root, 0, 0, &root_x, &root_y, &child) ==
+        0)
+    {
+        return false;
+    }
+    x = root_x;
+    y = root_y;
+    return true;
+}
+
 WindowPlacement X11WindowBackend::placement() const
 {
     WindowPlacement placement;
@@ -568,18 +606,8 @@ WindowPlacement X11WindowBackend::placement() const
         placement.height = static_cast<std::uint32_t>(attributes.height);
     }
 
-    // XTranslateCoordinates, NOT the attributes' x/y: under a REPARENTING window manager (which is
-    // nearly all of them) the window's own x/y are relative to the WM's frame, so persisting them
-    // walks the window a titlebar's height up-and-left on every restart.
-    int root_x = 0;
-    int root_y = 0;
-    Window child = 0;
-    if (::XTranslateCoordinates(conn.display, window_, conn.root, 0, 0, &root_x, &root_y, &child) !=
-        0)
-    {
-        placement.x = root_x;
-        placement.y = root_y;
-    }
+    // Root coordinates, NOT the attributes' x/y — see root_origin().
+    (void)root_origin(placement.x, placement.y);
 
     placement.maximized = read_maximized();
     // X core has no per-monitor identity — that needs RandR, deliberately not a dependency here — so
@@ -724,6 +752,26 @@ void X11WindowBackend::handle(const XEvent& event)
         return;
     }
 
+    // An XIC only receives input while it is FOCUSED. XCreateIC's XNFocusWindow names which window
+    // the context belongs to; it does not focus it. Without this pair an external XIM (ibus/fcitx
+    // via XMODIFIERS) never sees the keystrokes, so preedit and every CJK/dead-key composition are
+    // silently unavailable — and XFilterEvent can swallow keys that then produce no text at all.
+    // Real focus transitions only: X synthesizes FocusIn/FocusOut around every grab (menus, drags),
+    // and toggling the IC on those churns the IM mid-gesture. Same NotifyNormal rule the decoder
+    // applies before reporting a focus change to the Shell.
+    if ((event.type == FocusIn || event.type == FocusOut) && input_context_ != nullptr &&
+        event.xfocus.mode == NotifyNormal)
+    {
+        if (event.type == FocusIn)
+        {
+            ::XSetICFocus(input_context_);
+        }
+        else
+        {
+            ::XUnsetICFocus(input_context_);
+        }
+    }
+
     X11Event flat;
     flat.type = event.type;
     switch (event.type)
@@ -731,24 +779,10 @@ void X11WindowBackend::handle(const XEvent& event)
     case ConfigureNotify:
         flat.width = event.xconfigure.width;
         flat.height = event.xconfigure.height;
-        // Absolute, not the parent-relative x/y a reparenting WM reports — the same reason
-        // placement() uses XTranslateCoordinates.
-        {
-            int root_x = 0;
-            int root_y = 0;
-            Window child = 0;
-            if (::XTranslateCoordinates(conn.display, window_, conn.root, 0, 0, &root_x, &root_y,
-                                        &child) != 0)
-            {
-                flat.x = root_x;
-                flat.y = root_y;
-            }
-            else
-            {
-                flat.x = event.xconfigure.x;
-                flat.y = event.xconfigure.y;
-            }
-        }
+        // Absolute, not the parent-relative x/y a reparenting WM reports — see root_origin().
+        flat.x = event.xconfigure.x;
+        flat.y = event.xconfigure.y;
+        (void)root_origin(flat.x, flat.y);
         break;
     case Expose:
         flat.count = event.xexpose.count;
@@ -801,7 +835,6 @@ void X11WindowBackend::handle(const XEvent& event)
         switch (decoded.kind)
         {
         case ShellEventKind::resize:
-            size_ = decoded.size;
             geometry_.width = decoded.size.width;
             geometry_.height = decoded.size.height;
             break;

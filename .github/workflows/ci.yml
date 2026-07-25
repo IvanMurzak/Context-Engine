@@ -1822,13 +1822,19 @@ jobs:
 
       # CEF's Linux runtime dependencies + xvfb (windowless CEF still needs an X display to init its
       # ozone/X11 backend on Linux). Retry-wrapped like cef-substrate.
+      #
+      # `libxext-dev` is for the M9 e12a live windowed smoke below, NOT for CEF: the X11 window
+      # backend needs only `X11::X11` (libx11-dev, already here for CEF's -lX11), but the X11-SHM
+      # present blitter also probes `X11_XShm_FOUND` + `X11::Xext`, whose header
+      # (`X11/extensions/XShm.h`) ships in libxext-dev. Without it `CONTEXT_PRESENT_HAS_X11` never
+      # gets defined, the blitter compiles out, and the smoke's `--require-x11` fails by design.
       - name: Install CEF runtime deps + xvfb (Linux)
         if: runner.os == 'Linux'
         run: >
           bash tools/ci-retry.sh -- bash -c 'sudo apt-get update && sudo apt-get install -y
           libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0
           libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2
-          libasound2t64 libatspi2.0-0 libxshmfence1 libx11-dev xvfb'
+          libasound2t64 libatspi2.0-0 libxshmfence1 libx11-dev libxext-dev xvfb'
 
       - name: Configure (dev preset + CEF GUI host)
         run: cmake -S src --preset dev -DCONTEXT_BUILD_GUI_CEF=ON
@@ -1905,7 +1911,8 @@ jobs:
       # software-OSR frames presented through the real X11-SHM blitter, with the X SERVER as the
       # event source (the repaint and the resize it asserts come BACK from the server). CEF-free, so
       # it costs this job only a build; it rides here because this is the one Linux job that already
-      # carries libx11-dev + xvfb.
+      # carries a real X display (xvfb) plus libx11-dev — the install step above adds the one
+      # remaining piece, libxext-dev, for the blitter's MIT-SHM probe.
       #
       # ⚠ NON-VACUITY, and why this is a direct run rather than a `ctest -R` line. The ctest
       # registration deliberately SKIPS (SKIP_RETURN_CODE 77) with no display, so the same executable

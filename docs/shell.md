@@ -129,7 +129,7 @@ is, red the whole rollup — on all the others. Without the headers both files c
 place it matters: the `editor-cef-smoke` Linux leg runs the live windowed smoke with
 `--require-x11 --require-display`, under which a compiled-out X11 path is a hard failure.
 
-Three decoding traps, each pinned by a test:
+Three Win32 decoding traps, each pinned by a test:
 
 - **LPARAM's coordinate halves are SIGNED 16-bit.** A captured drag left of the client area reports
   −36, which read unsigned becomes 65500 — a position outside every region that silently re-routes
@@ -560,11 +560,19 @@ cmake --build --preset dev --target context_editor    # from src/
 | `window.open` | A page calling `window.open` produces NO second native window (`OnBeforePopup` suppresses it). |
 
 Automating this needs an interactive runner, which the design's gate table still tracks as
-unprovisioned. **e12a moved the Linux half of it off "manual" and onto CI**: `editor-shell-x11-window`
-opens a REAL X11 window under xvfb and asserts a server-driven repaint and a server-granted resize —
-so the window/present/DPI/event spine is machine-checked on Linux, and what remains manual there is
-the genuinely human half (does it LOOK right, does a `<select>` popup read correctly, does a live DPI
-change stay crisp). Windows and macOS still need the interactive runner.
+unprovisioned — **every row of the table above is still manual, on all three OSes.**
+
+What **e12a** moved onto CI is the layer *underneath* that table, on Linux: the CEF-FREE
+window/present/event spine. The `context_editor_shell_x11_smoke` executable — run directly under
+xvfb with `--require-x11 --require-display` in the `editor-cef-smoke` Linux leg, not via its
+`editor-shell-x11-window` ctest registration, which deliberately SKIPs where there is no display —
+opens a REAL X11 window, presents real frames through the real X11 blitter, and asserts a
+server-driven repaint (`XClearArea` → `Expose`) and a server-granted resize (`XMoveResizeWindow` →
+`ConfigureNotify`), plus the placement readback and the session-state flush.
+
+It does **not** shrink the table: it links no CEF and drives `ScriptedBrowserHost`, so the
+CEF-dependent rows — including the functional ones (wheel, keyboard, `PET_POPUP`, `window.open`) —
+remain manual on Linux exactly as on Windows and macOS.
 
 ## 11. What this does NOT yet do
 
@@ -577,8 +585,14 @@ Named so the gaps are visible rather than assumed:
   real window: each drives its scenario by POSTING scripted events into a `HeadlessWindowBackend`,
   and every one of them also runs on the Session-0 Windows runner where no interactive desktop
   exists — so a real-window mode is a per-smoke rework with its own per-OS branch, not a
-  constructor swap. Tracked as a follow-up; the X11 backend itself is proven windowed by the new
+  constructor swap. Tracked as **#408**; the X11 backend itself is proven windowed by the new
   smoke.
+- **No live DPI-change event on Linux.** `Xft.dpi` (falling back to the screen derivation) is read
+  ONCE, in `X11WindowBackend::create`. Nothing watches `RESOURCE_MANAGER` on the root window for the
+  `PropertyNotify` that a desktop scaling change publishes, and RandR is deliberately out of e12a —
+  so `ShellEventKind::dpi_changed` is unreachable on X11 and a scaling change made while the editor
+  is open does not re-inform `input_.set_dpi` / the browser / the compositor until restart. The Win32
+  backend does emit it (`WM_DPICHANGED`). Post-e12a.
 - **No macOS window backend** — e12b. `make_window_backend` reports the gap; the app degrades to the
   honest offscreen backend.
 - **No native viewport consumer.** Region arbitration routes to the native path, but camera controls,

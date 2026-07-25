@@ -18,17 +18,22 @@
 // is a checked claim rather than a screenshot someone looked at once.
 //
 // NOTHING HERE LINKS CEF. That is what makes it runnable on the local dev host (WSL/WSLg exposes a
-// real X server) and cheap in CI, where the `editor-cef-smoke` job already carries libx11-dev + xvfb.
+// real X server) and cheap in CI, where the `editor-cef-smoke` job already carries a real X display
+// (xvfb) plus libx11-dev. Note that job also needs libxext-dev — libx11-dev alone satisfies the
+// WINDOW backend but not the present blitter's MIT-SHM probe, so without it this smoke fails at
+// --require-x11 with no blitter; ci.yml installs both.
 //
 // EXIT CODES. 0 = pass. 1 = a real failure. 77 = ctest's SKIP: no X display (or a build configured
 // without the X11 headers), which is the ordinary state of the default `build` legs. The skip is
 // non-vacuous because the CI job that DOES have a display runs this with --require-x11
 // --require-display, under which both of those become hard failures.
 
+#include "context/editor/shell/dpi.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
 #include "context/render/present/present_blit.h"
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -36,6 +41,7 @@
 #include <memory>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 namespace shell = context::editor::shell;
@@ -116,14 +122,47 @@ std::vector<std::uint8_t> padded_frame(render::Extent2D coded, std::uint32_t byt
     return pixels;
 }
 
+// True when NO texel of the composed surface carries the producer's margin colour. The margin is
+// allocation padding that must never reach the window: seeing it means the compose path presented
+// the ALLOCATION instead of the visible rect. This is what makes padded_frame's contrasting margin
+// worth building — sampling a single interior texel would pass against a stride, origin or
+// right/bottom-edge bleed, which is exactly the class of mistake the padded shape exists to catch.
+[[nodiscard]] bool free_of(const std::vector<std::uint8_t>& surface, render::Extent2D size,
+                           Texel margin)
+{
+    for (std::uint32_t y = 0; y < size.height; ++y)
+    {
+        for (std::uint32_t x = 0; x < size.width; ++x)
+        {
+            const Texel texel = sample(surface, size, x, y);
+            if (texel.b == margin.b && texel.g == margin.g && texel.r == margin.r)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 // Pump the owner loop until `predicate` holds or the budget runs out. The events this smoke waits
 // for come from the X SERVER, so there is nothing to post and no deterministic frame count to
 // assume — the round trip is the entire point of waiting.
+//
+// ⚠ THE BUDGET IS WALL-CLOCK, AND MUST BE. `clock_us` is a FAKE clock the owner loop is merely
+// TOLD, and nothing inside pump_once() blocks — Xlib's queue check is non-blocking — so a budget
+// counted in ITERATIONS can burn all of them in microseconds and "time out" before the server has
+// had any chance to deliver the Expose or ConfigureNotify being waited on. That made both waits
+// racy: measured 3 failures in 8 consecutive runs against WSLg's real X server, on a step that is a
+// BLOCKING CI gate. Worse, the flake is invisible behind a predicate that is already true, which is
+// exactly why the repaint wait looked stable while it was still counting frames_attempted.
+// Sleeping between pumps makes the budget mean what it says and gives the server real time to
+// answer; the deadline (not the iteration count) is what ends the wait.
 template <typename Predicate>
 bool pump_until(shell::WindowManager& manager, std::uint64_t& clock_us, Predicate predicate,
-                int max_iterations = 400)
+                std::chrono::milliseconds budget = std::chrono::seconds(10))
 {
-    for (int i = 0; i < max_iterations; ++i)
+    const auto deadline = std::chrono::steady_clock::now() + budget;
+    for (;;)
     {
         if (predicate())
         {
@@ -134,6 +173,11 @@ bool pump_until(shell::WindowManager& manager, std::uint64_t& clock_us, Predicat
         {
             break;
         }
+        if (std::chrono::steady_clock::now() >= deadline)
+        {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     return predicate();
 }
@@ -297,15 +341,27 @@ int main(int argc, char** argv)
         const Texel texel = sample(surface, client, 5, 5);
         X11_CHECK(texel.b == 20 && texel.g == 40 && texel.r == 60,
                   "the composed surface carries the browser's premultiplied BGRA pixels");
+        X11_CHECK(free_of(surface, client, kMarginColor),
+                  "no texel of the padded allocation's margin reached the window");
     }
 
     // ------------------------------------------------------- 6. the X SERVER is the event source
     // request_redraw() asks the server for an Expose; the paint_requested that comes back has made a
     // full client -> server -> client round trip through the real decoder. Nothing is posted here.
-    const int paints_before = editor->compositor().stats().frames_attempted;
+    //
+    // ⚠ WAIT ON frames_presented, NEVER frames_attempted. render_frame() bumps `frames_attempted`
+    // UNCONDITIONALLY, before its damage gate (compositor.cpp), and the owner loop calls it once per
+    // pump_once — so a `frames_attempted > before` predicate goes true on the second iteration no
+    // matter what the server did, and would still pass with request_redraw(), XClearArea, or the
+    // decoder's Expose arm deleted outright. `frames_presented` only advances THROUGH that damage
+    // gate, and at this point in the smoke the only thing that can re-damage the compositor is the
+    // paint_requested -> mark_external_damage() path: step 5's frame already presented and cleared
+    // the damage, the scripted browser's queue is empty, and poll_placement sets placement_dirty_
+    // WITHOUT marking damage. So this predicate is true only if the Expose really came back.
+    const int presented_before = editor->compositor().stats().frames_presented;
     backend->request_redraw();
     const bool repainted = pump_until(manager, clock_us, [&] {
-        return editor->compositor().stats().frames_attempted > paints_before;
+        return editor->compositor().stats().frames_presented > presented_before;
     });
     X11_CHECK(repainted, "an Expose from the real X server drove a repaint through the owner loop");
 
@@ -313,6 +369,11 @@ int main(int argc, char** argv)
     // comes back. This is the whole resize protocol (03 §4) over a real window — swapchain-free,
     // but the browser really is told, by the real code path.
     const render::Extent2D before_resize = backend->client_size();
+    // The size the browser was last told about BEFORE the resize. It is already non-zero — the owner
+    // loop syncs it on the very first pump_once (the browser_size_synced_ latch) — so asserting
+    // merely that it is non-zero afterwards proves nothing and would pass with sync_browser_size()
+    // deleted from the resize arm. The claim is that it CHANGED.
+    const render::Extent2D browser_size_before = browser->last_logical_size();
     shell::WindowPlacement resized;
     resized.x = 40;
     resized.y = 60;
@@ -326,10 +387,18 @@ int main(int argc, char** argv)
     X11_CHECK(observed_resize, "a ConfigureNotify from the real X server resized the shell");
     if (observed_resize)
     {
-        X11_CHECK(editor->compositor().size().width == backend->client_size().width,
+        X11_CHECK(editor->compositor().size().width == backend->client_size().width &&
+                      editor->compositor().size().height == backend->client_size().height,
                   "the compositor took the size the X server actually granted");
-        X11_CHECK(browser->last_logical_size().width != 0u,
+        const render::Extent2D browser_size_after = browser->last_logical_size();
+        X11_CHECK(browser_size_after.width != browser_size_before.width ||
+                      browser_size_after.height != browser_size_before.height,
                   "the browser was told about the real resize (WasResized)");
+        X11_CHECK(browser_size_after.width ==
+                          to_logical(backend->client_size(), backend->dpi()).width &&
+                      browser_size_after.height ==
+                          to_logical(backend->client_size(), backend->dpi()).height,
+                  "the browser was told the LOGICAL size the X server actually granted");
     }
 
     // The placement the SERVER reports, not the one we asked for — a reparenting window manager is

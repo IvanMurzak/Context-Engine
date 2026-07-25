@@ -77,6 +77,18 @@ struct BlitPlan
 
 [[nodiscard]] BlitPlan compute_blit_plan(Extent2D src, Extent2D dst);
 
+// The nearest-neighbour source index for one axis: floor(offset * src_extent / plan_extent), clamped
+// to the last source texel. `offset_in_plan` is measured from the plan's origin, so a caller
+// iterating DESTINATION space passes `x - plan.x` while one iterating plan space passes `x`.
+//
+// Shared deliberately, alongside is_blit_source_readable above. MemoryBlitter is the ORACLE the blit
+// geometry is asserted against on every OS, and X11ShmBlitter cannot be unit-tested at all
+// (constructing it issues X requests), so "the X11 path samples exactly what the oracle predicts"
+// was a hand-maintained duplicate of a formula that no test could ever catch drifting. One function
+// makes it structural instead of a comment.
+[[nodiscard]] std::uint32_t blit_source_index(std::uint32_t offset_in_plan, std::uint32_t src_extent,
+                                              std::uint32_t plan_extent);
+
 // An OS-level 2D presentation primitive.
 class IPresentBlitter
 {
