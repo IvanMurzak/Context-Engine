@@ -27,16 +27,26 @@
 // CefMessageRouter query becomes a `BridgeRouter::dispatch` call. That is deliberate: this TU is
 // the one the local dev gate cannot build, so it holds as little judgement as possible.
 
+// M9 e13a-1 ADDS A SECOND SCHEME on the same terms: `context-ext://<package-id>/…`, the
+// per-package origin third-party panels are served from (design 04 §5 / 08 §1-§2). It is registered
+// in EVERY process pinned to `STANDARD|SECURE|CORS_ENABLED`, and its resource handler is installed
+// UNCONDITIONALLY — with no package mounted it refuses every request, which is the point. All the
+// judgement lives in the CEF-free `ExtAssetResolver` (ext_scheme.h). What e13a-1 does NOT add is
+// any of the panel system above it: the iframe host, the MessageChannel bridge, the capability
+// model and the scaffold are e13a-2 and e13b-f.
+
 #pragma once
 
 #include "context/editor/shell/browser.h"
 #include "context/editor/shell/dpi.h"
+#include "context/editor/shell/ext_scheme.h"
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/render/rhi.h"
 
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace context::editor::shell::cef
 {
@@ -97,6 +107,34 @@ struct CefShellOptions
     // The Shell registers its handlers and calls `protect_secret()` with the attach token BEFORE
     // handing the router over; the token never appears in these options and never reaches CEF.
     BridgeRouter* bridge = nullptr;
+
+    // --- e13a-1: the `context-ext://` extension scheme ---------------------------------------------
+
+    // The third-party packages whose assets may be served over `context-ext://<package-id>/…`
+    // (design 04 §5). Each entry is one package id and the directory its bundled assets live in.
+    //
+    // EMPTY IS THE DEFAULT AND IS FULLY SUPPORTED — it is in fact today's only state, since the
+    // install path is e13b's. The scheme is registered in every process and its handler is
+    // installed REGARDLESS: an `ExtAssetResolver` with no mounts refuses every request, which is
+    // the deny-by-default posture this scheme exists to have. Nothing here is a way to turn the
+    // boundary off.
+    //
+    // A mount that is refused (invalid id, missing root, a root that overlaps another package's —
+    // see ext_scheme.h) is REPORTED on stderr and skipped; the browser still boots and that one
+    // origin serves 403. There is deliberately no `file://` fallback for panels either.
+    //
+    // ⚠ NO PRODUCER EXISTS YET — nothing in the repo populates this field, by design: e13a-1 lands
+    // the boundary, e13b lands the install path that will fill it. It is the declared seam, not a
+    // live configuration surface, which is why the semantics below are documented rather than
+    // enforced by a test.
+    //
+    // ⚠ PROCESS-GLOBAL, FIRST CALL WINS. The resolver and its scheme-handler factory are registered
+    // once per process (CEF holds the factory until CefShutdown), so only the FIRST
+    // make_cef_browser_host() call's list is honoured — a second window cannot mount a different
+    // package set, and one that tries has its list ignored with a stderr report rather than
+    // silently. This is therefore a PROCESS-level option that happens to live on a per-window
+    // struct; e13b, which owns the install path, is where a real per-process mount table belongs.
+    std::vector<ExtPackageMount> ext_packages;
 };
 
 // Initialize CEF (once per process) and create the windowed-OSR browser. Returns nullptr plus

@@ -19,6 +19,14 @@
 // check independently catches anything the textual pass could miss (a symlink out of the root, a
 // decoder gap, an OS path quirk). A resolver with only one of the two is one bug away from serving
 // the user's home directory to a renderer.
+//
+// THIS HEADER IS ALSO THE SHELL'S SHARED SCHEME/ASSET-SERVING PRIMITIVE SET (M9 e13a-1). The
+// sibling `context-ext://` extension scheme (ext_scheme.h) resolves URLs against a DIFFERENT root
+// per package, but the containment chain it walks is the SAME one — `percent_decode`,
+// `split_safe_path_segments`, `media_type_for_extension`, `http_status_for`. They are declared here
+// rather than duplicated there ON PURPOSE: two copies of a traversal rejection drift, and the copy
+// that drifts is the one that ships the hole. One implementation, adversarially tested by BOTH
+// suites, is the whole point.
 
 #pragma once
 
@@ -84,6 +92,18 @@ enum class AssetStatus
     not_found,   // 404 — a well-formed, permitted path with nothing behind it
 };
 
+// The HTTP status a resource handler reports for `status`. Free function so the ONE mapping serves
+// both this scheme's `AssetResolution` and the extension scheme's `ExtResolution` (ext_scheme.h) —
+// a second copy could disagree, and a resolution that refuses with a 200 refuses nothing.
+[[nodiscard]] int http_status_for(AssetStatus status);
+
+// ASCII case-insensitive equality. Declared HERE rather than open-coded in the CEF binding for the
+// reason the whole layering exists: the binding is a translator the local dev gate cannot build and
+// no unit suite exercises, so a comparison loop written there is verified by nothing. HTTP header
+// names are case-insensitive, which is what needs it (see `refusal_headers` below and the CEF
+// binding's header de-duplication).
+[[nodiscard]] bool ascii_iequals(std::string_view a, std::string_view b);
+
 struct AssetResolution
 {
     AssetStatus status = AssetStatus::bad_request;
@@ -116,6 +136,36 @@ struct AssetResolution
 // Exposed (rather than kept private) because it is the first link in the containment chain and is
 // directly adversarially tested.
 [[nodiscard]] bool percent_decode(std::string_view input, std::string& out);
+
+// Split an ALREADY-DECODED relative URL path into segments on '/', refusing every shape that could
+// escape a root: a `.` or `..` segment, a backslash (a separator on Windows, so `..\..\x` is a
+// traversal a '/'-only split would hand through as ONE innocent segment), a control character, and
+// a COLON anywhere in a segment (both `C:` / `C:x`, which re-roots onto that drive on Windows
+// instead of appending, and `panel.js:evil` / `x::$DATA`, an NTFS alternate data stream whose bytes
+// no directory walk enumerates while `path::extension()` reports the BASE name's extension — see
+// the impl for why that one is refused textually rather than left to the media allowlist). Empty
+// segments (`//`, a leading or trailing slash) are skipped: they cannot escape, and refusing them
+// would refuse the legitimate bare root.
+//
+// Returns false with `reason` set on refusal. NOTHING here "cleans up" a suspicious path — a
+// cleaning pass is exactly how `....//` becomes `../`.
+//
+// This is the SECOND link in the containment chain, and — like `percent_decode` — it is public
+// because both schemes walk it and both suites attack it directly.
+[[nodiscard]] bool split_safe_path_segments(std::string_view path, std::vector<std::string>& out,
+                                            std::string& reason);
+
+// Is `inner` the same path as `outer`, or somewhere beneath it? A PURE path operation on two
+// ALREADY-CANONICAL paths — `lexically_relative` yields a path starting with ".." exactly when
+// `inner` escapes `outer`, and an EMPTY path when the two have different root names (a different
+// drive, or drive-vs-UNC), so both non-containment shapes fail CLOSED.
+//
+// The LAST link in the containment chain, and public for the same reason as the two above: it is
+// the check that catches what the textual pass structurally cannot (a symlink out of the root, a
+// decoder gap, an OS path quirk), both schemes rest on it, and a second copy is a second place for
+// a de-Morgan slip to land in only one of them.
+[[nodiscard]] bool path_contains_or_equals(const std::filesystem::path& outer,
+                                           const std::filesystem::path& inner);
 
 // Resolves `context-editor://app/...` URLs against a fixed asset root.
 class AppAssetResolver
@@ -174,17 +224,41 @@ private:
 //                         layer" row hold end to end: even a fully compromised renderer that got
 //                         hold of a secret has nowhere to send it. The bridge is not `fetch`, so
 //                         it is unaffected.
-//   frame-src / object-src / base-uri / form-action / frame-ancestors 'none'
-//                       — no framing in or out, no <base> rewrite of the module URLs, no form
-//                         posts. Third-party panels (04 §5) are sandboxed iframes on their OWN
-//                         `context-ext://` origins; when they land, THIS is the line that widens
-//                         (frame-src context-ext:), and widening it is a reviewed change.
+//   frame-src  context-ext:
+//                       — THE ONE FRAMING WIDENING (M9 e13a-1, design 04 §5 / 08 §1-§2), and the
+//                         reviewed change the previous `frame-src 'none'` comment foreshadowed.
+//                         Third-party panels are sandboxed iframes on their OWN
+//                         `context-ext://<package-id>` origins (ext_scheme.h), so editor-core must
+//                         be allowed to frame that SCHEME — and nothing else. It is a
+//                         SCHEME-source, not a host-source, because a per-package origin list
+//                         would have to be regenerated on every install; the containment that
+//                         matters is not "which package may be framed" (editor-core only ever
+//                         frames packages the user installed) but "which BYTES that frame can
+//                         read", which the deny-by-default `ExtAssetResolver` owns. No `http:` /
+//                         `https:` / `*` / `data:` source is added here or anywhere else in this
+//                         policy: a widening to `frame-src *` would let a hydration-escaping bug
+//                         frame the open web, which is the hole this directive exists to close.
+//   object-src / base-uri / form-action / frame-ancestors 'none'
+//                       — no plugins, no framing IN (the editor window is never someone else's
+//                         frame), no <base> rewrite of the module URLs, no form posts. These stay
+//                         at 'none': e13a-1 widened framing OUT only.
 [[nodiscard]] const char* app_csp_header();
 
 // The full response header set for a served asset. Ordered, and returned as a list rather than a
 // blob so the CEF binding can hand CEF a map without re-parsing a string it just built.
 [[nodiscard]] std::vector<std::pair<std::string, std::string>>
 app_response_headers(const std::string& mime_type);
+
+// The response header set for a REFUSED request (403/404), on either scheme — `csp` is the caller's
+// own policy (`app_csp_header()` or `ext_csp_header()`).
+//
+// IT LIVES HERE, not in the CEF binding that sends it, for the same reason every other policy
+// decision does. An error page IS a document: it loads on the requesting origin and it is the ONE
+// response an attacker can always elicit, so its policy deserves at least the scrutiny the happy
+// path gets. Spelled inside the binding it had neither a test nor a local build — deleting
+// `no-store` from it failed nothing — while the served-path twin next door is pinned by both scheme
+// suites on all three `build` legs. Now they are pinned side by side.
+[[nodiscard]] std::vector<std::pair<std::string, std::string>> refusal_headers(const char* csp);
 
 // A media type split into the two fields a response actually carries SEPARATELY.
 struct MediaType
