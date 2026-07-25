@@ -334,6 +334,34 @@ void edits_stage_through_the_provider()
     CHECK(!feed.panel().has_staged_edit());
 }
 
+// M9 e09b-2 — the OTHER half of the `gestures:false -> true` flip, pinned HERE so the capability
+// cannot quietly become unconditional: a feed with NO write path bound exposes NO gesture at all, so
+// the manifest reports `gestures:false`, `panel.gesture` refuses with `kErrPanelBadGesture`, and the
+// hydration runtime never installs its pointer handlers. A stubbed gesture that only ever swallowed
+// a commit is exactly what this task exists to retire — it must not come back as a default.
+// (`test_builtin_panels.cpp` asserts the TRUE side, after the composition root binds the gateway.)
+void a_feed_without_a_gateway_exposes_no_gesture()
+{
+    shell::PanelHost host(roster_with_inspector());
+    panels::InspectorFeed feed(host, kPanelId);
+    CHECK(!feed.has_gateway());
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+
+    const Json listing = host.list();
+    CHECK(listing.at("panels").size() == 1);
+    CHECK(!listing.at("panels").at(0).at("gestures").as_bool());
+
+    bool dispatched = true;
+    std::string error_code;
+    CHECK(!host.gesture(kPanelId, shell::GestureVerb::commit, Json::object(), dispatched,
+                        error_code));
+    CHECK(!dispatched);
+    CHECK(error_code == shell::kErrPanelBadGesture);
+    // And no commit was invented behind the refusal: nothing observed, nothing re-armed.
+    CHECK(feed.commits_observed() == 0);
+    CHECK(feed.rereads_armed() == 0);
+}
+
 void selection_fetch_mechanics()
 {
     shell::PanelHost host(roster_with_inspector());
@@ -368,6 +396,7 @@ int main()
     wire_round_trips_the_built_model();
     apply_result_adopts_the_model_and_the_cas_token();
     edits_stage_through_the_provider();
+    a_feed_without_a_gateway_exposes_no_gesture();
     selection_fetch_mechanics();
     PANELS_TEST_MAIN_END();
 }

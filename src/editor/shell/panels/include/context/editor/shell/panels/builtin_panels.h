@@ -69,6 +69,13 @@ class InspectorFeed;
 // and reaches the typeid chain through scene_tree_panel.h). Callers holding only the bag drive it
 // through the free seams below.
 class SessionFeed;
+// The M9 e09b-2 wire write gateway, forward-declared for the SAME reason (its header names
+// `inspector::OverrideWriteGateway`, so it reaches the panel headers' include chain). Callers holding
+// only the bag re-point its daemon connection through `bind_write_client` below.
+class WireOverrideWriteGateway;
+// The owner bag, defined below; forward-declared so `bind_write_client` can sit beside the sibling
+// `bind_session_client` seam it mirrors rather than being separated from it by the struct.
+struct BuiltinPanels;
 
 // The event topics the Problems live feed consumes. Declared HERE rather than in `problems_feed.h`
 // (which fully defines `ProblemsFeed` and is NOT safe to include from an `-fno-rtti` CEF TU — see
@@ -126,6 +133,19 @@ bool apply_session_event(SessionFeed& feed, const std::string& topic, const cont
 // applying our own. There is no id to get wrong if the client is the only argument.
 void bind_session_client(SessionFeed& feed, client::Client* client);
 
+// The SAME seam for the M9 e09b-2 WRITE path: point the Inspector's wire override-write gateway at
+// the daemon link's CURRENT client — `nullptr` to clear it. A no-op when no gateway is in the bag.
+//
+// It exists for exactly the reason `bind_session_client` does, and must be called at exactly the same
+// points: the gateway's `client::Client*` is a NON-OWNING view of a client the daemon lifecycle owns
+// and destroys (a lost daemon tears the link down; exit resets it), while a gesture commit is
+// renderer-driven and can land in that window. Clearing it BEFORE the lifecycle frees the client is
+// what turns a would-be use-after-free into an honest refusal (wire_override_gateway.h § LIFETIME).
+//
+// It takes the BAG, not the gateway, because the gateway type is only forward-declared here — and
+// because the two writes seams then read identically at the call site.
+void bind_write_client(BuiltinPanels& panels, client::Client* client);
+
 // The roster ids this build can render. Exposed so a caller (and the T1 suite) can assert what was
 // bound WITHOUT restating the list — the one enumeration lives in `install_builtin_panels`.
 [[nodiscard]] const std::vector<std::string>& hostable_panel_ids();
@@ -150,12 +170,18 @@ struct BuiltinPanels
     BuiltinPanels(const BuiltinPanels&) = delete;
     BuiltinPanels& operator=(const BuiltinPanels&) = delete;
 
+    // The e09b-2 WIRE override-write gateway. DECLARED FIRST so it is DESTROYED LAST (members
+    // destroy in reverse order), for the SAME reason the session feed is declared before the scene
+    // tree: it IS the OverrideWriteGateway the Inspector's panel holds a raw pointer to, and a
+    // gateway is contractually required to outlive its panel (inspector_panel.h).
+    std::unique_ptr<WireOverrideWriteGateway> writes;
     std::unique_ptr<ProblemsFeed> problems;
-    // The e08b daemon-session feed. DECLARED FIRST so it is DESTROYED LAST (members destroy in
-    // reverse order): it IS the SelectionGateway the Scene tree's panel writes through, and a gateway
-    // is contractually required to outlive its panel (scene_tree_panel.h). The reverse pointer — the
-    // feed's raw `SceneTreePanel*` — is only dereferenced from `apply_event`, which the owner loop
-    // stops calling before teardown, so no fact can arrive at a half-destroyed bag.
+    // The e08b daemon-session feed. DECLARED BEFORE THE SCENE TREE so it is destroyed AFTER it
+    // (members destroy in reverse order): it IS the SelectionGateway the Scene tree's panel writes
+    // through, and a gateway is contractually required to outlive its panel (scene_tree_panel.h). The
+    // reverse pointer — the feed's raw `SceneTreePanel*` — is only dereferenced from `apply_event`,
+    // which the owner loop stops calling before teardown, so no fact can arrive at a half-destroyed
+    // bag.
     std::unique_ptr<SessionFeed> session;
     // The e05d3 live feeds. DECLARATION ORDER IS LOAD-BEARING: `install_builtin_panels` wires the
     // Scene tree's selection listener at the INSPECTOR feed, so the inspector must be destroyed

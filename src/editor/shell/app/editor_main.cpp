@@ -1007,6 +1007,12 @@ int main(int argc, char** argv)
         // honestly instead of calling through a freed pointer (session_feed.h § LIFETIME).
         if (session_feed != nullptr)
             shell::panels::bind_session_client(*session_feed, lifecycle.client());
+        // e09b-2: the SAME re-derive for the Inspector's wire override-write gateway, for the SAME
+        // reason and at the SAME point — a gesture commit is renderer-driven, so it can land in the
+        // window between "the daemon died" (which DESTROYS the client inside the pump above) and
+        // "we reattached". Re-pointing here is what makes the next commit refuse honestly instead of
+        // writing through a freed pointer (wire_override_gateway.h § LIFETIME).
+        shell::panels::bind_write_client(builtin, lifecycle.client());
         // e10a: keep window 0's reported `origin` in step with the connection it actually has. The
         // primary's client belongs to the lifecycle rather than to a registry session, so the
         // registry is TOLD rather than asking — and a reconnect mints a NEW id (e14a), which is
@@ -1067,6 +1073,11 @@ int main(int argc, char** argv)
     // ordering is the whole point, so it must precede shutdown_at_exit (session_feed.h § LIFETIME).
     if (session_feed != nullptr)
         shell::panels::bind_session_client(*session_feed, nullptr);
+    // e09b-2: clear the write gateway's client view for the SAME reason and BEFORE the same call —
+    // the teardown below still PUMPS, so a renderer message queued before exit can still reach the
+    // Inspector's gesture provider and issue a commit. Unbinding first is what makes that commit
+    // refuse instead of calling a destroyed Client.
+    shell::panels::bind_write_client(builtin, nullptr);
     // The exit policy (e14a): an owned daemon this process is the last client of gets a clean in-band
     // `shutdown`; an owned daemon other clients still hold is left running; an external daemon is never
     // touched. Runs before the manager/CEF teardown so the daemon call still has a live wire.

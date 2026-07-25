@@ -33,6 +33,38 @@ export const panelsTests: readonly TestCase[] = [
             assertEqual(manifest?.schemaVersion, 2, "schemaVersion (read off state)");
             assertEqual(manifest?.capabilities, ["read", "focus"], "capabilities");
             assertEqual(manifest?.hosted, true, "hosted");
+            assertEqual(manifest?.gestures, false, "gestures");
+            assertEqual(manifest?.persists, true, "persists");
+        },
+    },
+    {
+        // M9 e09b-2 — the BROWSER end of the `gestures:false -> true` flip. Nothing else in this tier
+        // asserted `gestures` at all, and it is the one host fact whose loss is INVISIBLE: a manifest
+        // that parsed it as `false` would make `PanelHost.#create` build a `UitreePanelRenderer` with
+        // gestures off, `HydrationRuntime` would never install its pointer handlers, and the
+        // Inspector's L-20 commit gesture would simply never reach the Shell — with every C++ test,
+        // every parser test, and the build all still green. So it is pinned in BOTH directions here.
+        name: "parsePanelManifest: `gestures` round-trips and fails CLOSED (the commit-gesture seam)",
+        run: () => {
+            assertEqual(
+                parsePanelManifest({ id: "builtin.inspector", gestures: true })?.gestures,
+                true,
+                "a writing panel's gesture capability must survive the parse",
+            );
+            // Fail-closed on every not-exactly-true shape: an absent, non-boolean or truthy-but-not-
+            // `true` value must not turn into a capability the Shell does not actually host.
+            assertEqual(parsePanelManifest({ id: "p" })?.gestures, false, "absent -> false");
+            assertEqual(
+                parsePanelManifest({ id: "p", gestures: "true" })?.gestures,
+                false,
+                "a string 'true' is not the boolean",
+            );
+            assertEqual(parsePanelManifest({ id: "p", gestures: 1 })?.gestures, false, "1 -> false");
+            assertEqual(
+                parsePanelManifest({ id: "p", gestures: null })?.gestures,
+                false,
+                "null -> false",
+            );
         },
     },
     {

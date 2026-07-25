@@ -182,6 +182,38 @@ if(CONTEXT_SANITIZE)
 endif()
 
 # ===================================================================================================
+# The M9 e09b-2 CONCURRENT-CAS T2 DRILL (design 05 §7-§8, L-20 / L-30 / R-CLI-006) — the parent e09
+# DoD box 2 at the ENGINE level: the REAL Shell panel composition (`install_builtin_panels` ->
+# InspectorFeed + WireOverrideWriteGateway) committing a real gesture over the REAL daemon `edit` RPC
+# while a SECOND real `client::Client` — its own connection, its own daemon-minted id — races the same
+# file, asserting BOTH L-30 outcomes (rebase AND the loud drop). It links the Shell panel library for
+# the same reason the e08b drill does: a race is only observable against a live daemon, so the wiring
+# is DRIVEN rather than re-derived. A plain `editor-session-` ctest, auto-run by the build job's
+# general step on all three OS legs with NO ci.yml `--target` bookkeeping.
+add_executable(context_test_e09b_concurrent_cas test_e09b_concurrent_cas.cpp)
+target_link_libraries(context_test_e09b_concurrent_cas
+    PRIVATE context_editor_panels context_client context_warnings Threads::Threads)
+target_link_options(context_test_e09b_concurrent_cas PRIVATE ${_m1_exit_static_runtime})
+target_include_directories(context_test_e09b_concurrent_cas PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../cli/tests) # process_util.h (header-only, test-only)
+target_compile_definitions(context_test_e09b_concurrent_cas PRIVATE
+    CONTEXT_BINARY="$<TARGET_FILE:context>")
+add_dependencies(context_test_e09b_concurrent_cas context)
+add_test(NAME editor-session-concurrent-cas-t2 COMMAND context_test_e09b_concurrent_cas)
+# One daemon + two live client connections + several real composed writes; cap generously so a
+# regression surfaces its diagnostics rather than hanging the CI job (the e08a/e08b drill budget).
+set_tests_properties(editor-session-concurrent-cas-t2 PROPERTIES TIMEOUT 300)
+# The spawned `context` binary links the uninstrumented rusty_v8 archive (the M6 X1
+# `context profile gc` path via context_cli), so on the sanitize legs the child needs the same narrow
+# LSan demangler/symbolizer suppressions its sibling CONTEXT_BINARY-spawning drills wire; the spawned
+# child inherits this env. The drill binary itself links no V8.
+if(CONTEXT_SANITIZE)
+    set_tests_properties(editor-session-concurrent-cas-t2 PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
+endif()
+
+# ===================================================================================================
 # The M9 e14b PER-PROJECT SINGLE-INSTANCE ARBITRATION T2 DRILL (design 07 §4 / 05, D15/C-F23) — the
 # `context edit .` opener proven end to end as a REAL separate `context` process against a live "editor"
 # (the drill's own presence marker + a FocusRequestWatcher thread — the Shell owner-loop behaviour with
