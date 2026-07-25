@@ -50,7 +50,7 @@ struct InboundFrame
     // the refusals differ in exit class, so a guess is a wrong exit code.
     std::string error_code;
     // The WHOLE `error.data` object the dispatcher mirrored the R-CLI-008 envelope error into —
-    // `{code, message, retriable, [pointer], [data]}` (bridge/src/dispatcher.cpp
+    // `{code, message, retriable, [pointer], [data]}` (src/editor/bridge/src/dispatcher.cpp
     // `envelope_error_data`). `error_code` above is the ONE field lifted out for the common case;
     // this is everything else, unlifted.
     //

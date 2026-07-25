@@ -42,7 +42,7 @@ the mock and the daemon agree.
 
 A daemon refusal is a JSON-RPC **error response**, not a transport failure, and the dispatcher mirrors
 the whole R-CLI-008 envelope error into `error.data`
-(`bridge/src/dispatcher.cpp::envelope_error_data`):
+(`src/editor/bridge/src/dispatcher.cpp::envelope_error_data`):
 
 ```
 error.data = { code, message, retriable, [pointer], [data] }
@@ -69,9 +69,13 @@ if (!client.call("edit", std::move(params), error) && client.last_error_code() =
 {
     const Json& fresh = client.last_error_data().at("data"); // one conflict, for `edit`
     const std::string& retry = fresh.at("actualRawHash").as_string(); // feed back as the next ifMatch
-    const std::string& current = fresh.at("content").as_string();     // the bytes to rebase against
+    const std::string& current = fresh.at("content").as_string();     // only when `present` is true
 }
 ```
+
+`content` rides only when `fresh.at("present")` is true — a file DELETED under the write reports
+`present: false` and carries no bytes, so a client that reads `content` unguarded rebases against an
+empty string instead of noticing the deletion.
 
 Shapes differ by verb, deliberately: `edit` refuses ONE file so its detail is a single conflict object
 under `data`; `edit-batch` refuses **atomically** and must name every conflicting file, so its detail

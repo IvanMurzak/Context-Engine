@@ -1,7 +1,10 @@
 // The clean->compose write-request conversion (M9 e05d3): every target mode maps member-for-member,
 // and the model-based convenience constructor keeps its L-35 outermost default. This conversion is
 // what every kernel-side gateway routes through — a drifted member here would silently retarget
-// authored writes, so it is pinned field by field.
+// authored writes, so it is pinned field by field. Also pins the identity-key encoding against its
+// inverse (join_identity / split_identity, M9 e09b-1): the daemon's pointer/value `edit` turns a
+// wire idPath back into an id-path vector with it, so a split that drifts from the join addresses
+// the wrong entity.
 
 #include "context/editor/gui/panels/builders/inspector_builder.h"
 #include "context/editor/gui/panels/builders/scene_tree_builder.h" // join_identity / split_identity

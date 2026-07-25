@@ -32,10 +32,16 @@ namespace context::editor::gui::panels::builders
 // an id-path no composed entity has.
 //
 // Exported alongside the join (M9 e09b-1) so the encoding and its inverse stay one definition. Two
-// consumers need it and each would otherwise hand-roll a copy: find_entity_by_identity (below, which
-// had the original file-local copy) and the daemon's pointer/value `edit`, which must turn the wire
+// consumers reach it and each would otherwise hand-roll a copy: find_entity_by_identity
+// (inspector_builder.h, which had the original file-local copy) and the daemon's pointer/value
+// `edit`, which must turn the wire
 // `idPath` into the compose::WriteRequest id-path vector. A splitter that drifts from the join reads
 // as a mysterious "selection does not resolve".
+//
+// `context set` keeps a THIRD, semantically identical splitter (src/cli/src/set_command.cpp) — not
+// an oversight: context_cli cannot reach this header, since context_gui_panel_builders is PRIVATE to
+// context_editorkernel. Closing that last copy means moving the encoding down to context_compose,
+// which all three consumers already link; tracked as follow-up work, not folded into e09b-1.
 //
 // The two consumers treat a malformed key differently BY DESIGN, and both are correct: a READ
 // (find_entity_by_identity) answers "no such entity" — the honest present:false panel state — while

@@ -5,7 +5,7 @@
 #include "context/editor/gui/panels/builders/inspector_builder.h"
 
 #include "context/editor/compose/json_pointer.h"
-#include "context/editor/gui/panels/builders/scene_tree_builder.h" // join_identity/split_identity — the ONE key encoding + its inverse
+#include "context/editor/gui/panels/builders/scene_tree_builder.h" // join_identity + its inverse
 #include "context/editor/schema/json_access.h" // schema::find_member — the shared JSON-tree accessor
 #include "context/editor/serializer/json_parse.h"
 

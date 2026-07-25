@@ -29,7 +29,6 @@
 #include <vector>
 
 namespace fs = std::filesystem;
-namespace client_ns = context::editor::client;
 
 using context::editor::client::AttachOptions;
 using context::editor::client::Client;
@@ -326,8 +325,8 @@ void test_composed_pointer_value_write_lands_on_real_disk()
         return;
     }
 
-    std::unique_ptr<client_ns::WireChannel> channel =
-        client_ns::make_transport_channel(instance->endpoint, 5000);
+    std::unique_ptr<context::editor::client::WireChannel> channel =
+        context::editor::client::make_transport_channel(instance->endpoint, 5000);
     CHECK(channel != nullptr);
     Client client(std::move(channel));
     AttachOptions options;
@@ -359,13 +358,22 @@ void test_composed_pointer_value_write_lands_on_real_disk()
     const std::string base_token = before->at("data").at("rawHash").as_string();
     CHECK(base_token != "0"); // the file is readable, so there IS a CAS token
 
-    const auto composed_edit = [&](const std::string& value, const std::string& if_match,
-                                   bool* rejected) -> std::optional<Json>
+    // The well-formed composed request every case below starts from — one definition, so a wire-shape
+    // change is made once and every scenario keeps exercising the SAME request it was written for.
+    const auto base_params = [&]()
     {
         Json p = Json::object();
         p.set("rootScene", Json(kRoot));
         p.set("idPath", Json(kIdPath));
         p.set("pointer", Json(kPointer));
+        p.set("value", Json(std::string("1.0")));
+        return p;
+    };
+
+    const auto composed_edit = [&](const std::string& value, const std::string& if_match,
+                                   bool* rejected) -> std::optional<Json>
+    {
+        Json p = base_params();
         p.set("value", Json(value)); // a JSON literal in a string (its canonical serialization)
         if (!if_match.empty())
             p.set("ifMatch", Json(if_match));
@@ -418,9 +426,11 @@ void test_composed_pointer_value_write_lands_on_real_disk()
             for (std::size_t i = 0; i < fields.size(); ++i)
             {
                 const Json& f = fields.at(i);
-                if (f.at("pointer").as_string() == kPointer)
+                if (f.at("pointer").as_string() == kPointer && f.at("overridden").as_bool() &&
+                    f.at("value").as_string() == "2.5")
                 {
-                    saw_overridden_fov = f.at("overridden").as_bool() && f.at("value").as_string() == "2.5";
+                    saw_overridden_fov = true;
+                    break;
                 }
             }
             CHECK(saw_overridden_fov);
@@ -489,15 +499,6 @@ void test_composed_pointer_value_write_lands_on_real_disk()
             CHECK(rejected);
             CHECK(client.last_error_code() == expected_code);
         };
-        const auto base_params = [&]()
-        {
-            Json p = Json::object();
-            p.set("rootScene", Json(kRoot));
-            p.set("idPath", Json(kIdPath));
-            p.set("pointer", Json(kPointer));
-            p.set("value", Json(std::string("1.0")));
-            return p;
-        };
 
         // Mode confusion is refused, not guessed (the two shapes have no single honest reading).
         {
@@ -518,6 +519,37 @@ void test_composed_pointer_value_write_lands_on_real_disk()
         {
             Json p = base_params();
             p.set("target", Json(std::string("outermsot")));
+            refused_with(std::move(p), "usage.invalid");
+        }
+        // A retarget on the FULL-CONTENT shape is refused, not silently dropped. `target` and
+        // `atInstance` are composed-shape-only, so a request naming one alongside {path, content}
+        // has to reach the mode-confusion refusal — if it took the full-content branch instead, that
+        // branch would never read them and the write would land in a file the caller did not name.
+        {
+            Json p = Json::object();
+            p.set("path", Json(kRoot));
+            p.set("content", Json(std::string("{}")));
+            p.set("target", Json(std::string("template")));
+            refused_with(std::move(p), "usage.invalid");
+        }
+        // Present-but-WRONG-TYPE is refused exactly like mis-spelled: read as "absent" instead, a
+        // dropped `target`/`atInstance` writes the wrong file and a dropped `ifMatch` turns a
+        // CAS-guarded write into an unconditional overwrite. `null` is a JS client's UNSET optional
+        // and stays absent (asserted below); every other type is a usage error.
+        {
+            Json p = base_params();
+            p.set("target", Json(std::int64_t{7}));
+            refused_with(std::move(p), "usage.invalid");
+        }
+        {
+            Json p = base_params();
+            p.set("target", Json(std::string("at-instance")));
+            p.set("atInstance", Json::array()); // the NATURAL shape for an id-path, and not a string
+            refused_with(std::move(p), "usage.invalid");
+        }
+        {
+            Json p = base_params();
+            p.set("ifMatch", Json(std::int64_t{1234567890})); // the hash as a NUMBER, not a string
             refused_with(std::move(p), "usage.invalid");
         }
         // `at-instance` without its addressing prefix, and the prefix without the target.
@@ -548,10 +580,10 @@ void test_composed_pointer_value_write_lands_on_real_disk()
             Json p = base_params();
             p.set("pointer", Json(std::string("/id")));
             p.set("value", Json(std::string("\"bbbbbbbbbbbbbbb2\"")));
-            bool rejected = false;
-            CHECK(!client.call("edit", std::move(p), error, &rejected).has_value());
-            CHECK(rejected);
-            CHECK(!client.last_error_code().empty()); // compose's own refusal code, not a write
+            // compose's OWN refusal code, named exactly: an assertion that merely required "some
+            // code" would still pass if the L-37 guard were replaced by an unrelated usage error or
+            // a parse failure, which is precisely the regression worth catching.
+            refused_with(std::move(p), "compose.immutable_pointer");
         }
         // R-SEC-008: a scene path escaping the project root.
         {
@@ -559,14 +591,30 @@ void test_composed_pointer_value_write_lands_on_real_disk()
             p.set("rootScene", Json(std::string("../outside.scene.json")));
             refused_with(std::move(p), "path.jail_violation");
         }
+        // The COMPLEMENT of the type rule, and the reason it is `null`-tolerant: a generated client
+        // pads every declared param, and JSON.stringify keeps `null` while dropping only
+        // `undefined`. An explicit null is an UNSET optional, so this request must still WRITE —
+        // a strict "present means supplied" reading would refuse it and leave such a client unable
+        // to use either shape.
+        {
+            Json p = base_params();
+            p.set("value", Json(std::string("3.5")));
+            p.set("target", Json(nullptr));
+            p.set("atInstance", Json(nullptr));
+            p.set("ifMatch", Json(nullptr));
+            const std::optional<Json> ok = client.call("edit", std::move(p), error);
+            CHECK(ok.has_value());
+            if (ok.has_value())
+                CHECK(ok->at("data").at("target").as_string() == "outermost");
+        }
     }
 
     // --- R-SEC-007: the composed mode is NOT a scope bypass ---------------------------------------
     // It is the same `edit` verb, so the dispatcher's file_write requirement already covers it — this
     // asserts that, because a new write SHAPE that forgot its scope check would be a silent hole.
     {
-        std::unique_ptr<client_ns::WireChannel> ro_channel =
-            client_ns::make_transport_channel(instance->endpoint, 5000);
+        std::unique_ptr<context::editor::client::WireChannel> ro_channel =
+            context::editor::client::make_transport_channel(instance->endpoint, 5000);
         CHECK(ro_channel != nullptr);
         Client reader(std::move(ro_channel));
         AttachOptions ro_options;
@@ -574,10 +622,7 @@ void test_composed_pointer_value_write_lands_on_real_disk()
         ro_options.token = instance->token;
         std::string ro_error;
         CHECK(reader.attach(ro_options, ro_error));
-        Json p = Json::object();
-        p.set("rootScene", Json(kRoot));
-        p.set("idPath", Json(kIdPath));
-        p.set("pointer", Json(kPointer));
+        Json p = base_params();
         p.set("value", Json(std::string("0.5")));
         bool rejected = false;
         CHECK(!reader.call("edit", std::move(p), ro_error, &rejected).has_value());
