@@ -126,6 +126,7 @@
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
+#include "context/editor/shell/smoke/smoke_window.h"
 #include "context/editor/shell/themes_bridge.h"
 
 #include <chrono>
@@ -141,8 +142,8 @@
 #include <vector>
 
 namespace shell = context::editor::shell;
+namespace smoke = context::editor::shell::smoke;
 namespace render = context::render;
-namespace present = context::render::present;
 namespace contract = context::editor::contract;
 namespace subprocess = context::common::subprocess;
 
@@ -318,7 +319,7 @@ struct SessionConfig
 // (see the teardown note at the bottom and the CE #319 block in the file header).
 SessionOutcome run_session(const std::filesystem::path& project,
                            const std::filesystem::path& asset_root, render::Extent2D size,
-                           const SessionConfig& cfg)
+                           smoke::WindowMode mode, const SessionConfig& cfg)
 {
     SessionOutcome out;
     trace(cfg.label, "run_session: begin");
@@ -390,13 +391,21 @@ SessionOutcome run_session(const std::filesystem::path& project,
     shell::WindowDesc desc;
     desc.title = "Context Editor (restore smoke)";
     desc.logical_size = size;
-    desc.visible = false;
-    auto backend = std::make_unique<shell::HeadlessWindowBackend>(desc);
+    smoke::WindowSetup window_setup = smoke::make_smoke_window(desc, mode);
+    if (window_setup.backend == nullptr)
+    {
+        std::fprintf(stderr, "[%s] FAIL: no %s window could be created: %s\n", cfg.label,
+                     smoke::to_string(mode), window_setup.diagnostic.c_str());
+        return out;
+    }
+    // The size the WINDOW actually got: a real display's DPI makes it differ from the request, and
+    // CEF's view rect is DIP, so telling the browser the request would lay the document out wrong.
+    const smoke::BrowserGeometry geometry = smoke::browser_geometry(*window_setup.backend);
 
     shell::cef::CefShellOptions cef_options;
-    cef_options.native_window = nullptr; // windowless: no native window on a Session-0 runner
-    cef_options.logical_size = size;
-    cef_options.dpi = shell::DpiScale{};
+    cef_options.native_window = nullptr; // windowless in BOTH modes (POSIX ignores it entirely)
+    cef_options.logical_size = geometry.logical_size;
+    cef_options.dpi = geometry.dpi;
     // THE app scheme (04 §1). BOTH phases pin the theme (see kSmokeThemeId) so the per-pixel
     // background coverage this drill asserts is a property of the restart, not of the host's
     // colour-scheme preference. The arranging session ALSO carries the smoke-arrange flag so its
@@ -431,12 +440,19 @@ SessionOutcome run_session(const std::filesystem::path& project,
     shell::EditorWindowConfig config;
     config.compositor.import_options.force_software = true; // software OSR — the shipping Windows path
     config.placement_poll_us = 0;
-    auto window = std::make_unique<shell::EditorWindow>(std::move(backend), std::move(browser),
-                                                        config);
+    auto window = std::make_unique<shell::EditorWindow>(std::move(window_setup.backend),
+                                                        std::move(browser), config);
 
-    auto blitter = std::make_unique<present::MemoryBlitter>();
-    present::MemoryBlitter* blitter_raw = blitter.get();
-    window->compositor().attach_cpu(std::move(blitter), size);
+    // e03's portable blitter offscreen; in real mode the REAL OS blitter that
+    // `EditorWindow::attach_cpu_present()` selects from the REAL native window. Real mode REFUSES
+    // the in-memory blitter, so a lost X11 present path fails here instead of degrading silently.
+    const smoke::PresentSetup present_setup = smoke::attach_smoke_present(*window, mode);
+    if (!present_setup.ok)
+    {
+        std::fprintf(stderr, "[%s] FAIL: no %s present path: %s\n", cfg.label,
+                     smoke::to_string(mode), present_setup.diagnostic.c_str());
+        return out;
+    }
 
     manager.add(std::move(window));
     shell::EditorWindow* editor = manager.window(0);
@@ -475,7 +491,7 @@ SessionOutcome run_session(const std::filesystem::path& project,
             break;
         }
         if (!presented && editor->compositor().stats().view_frames > 0 &&
-            blitter_raw->blit_count() > 0)
+            editor->compositor().stats().frames_presented > 0)
         {
             presented = true;
         }
@@ -709,10 +725,10 @@ int run_phase_child(const std::string& command)
 // invariants, and write the layout oracle phase 2 checks against. ONE browser, ONE CefInitialize, one
 // hard exit — the shape cef_shell_smoke.cpp is green with on every leg. Returns a process exit code.
 int run_phase_1(const std::filesystem::path& project, const std::filesystem::path& asset_root,
-                render::Extent2D size)
+                render::Extent2D size, smoke::WindowMode mode)
 {
     const SessionOutcome first =
-        run_session(project, asset_root, size, SessionConfig{"session1", true, false, true});
+        run_session(project, asset_root, size, mode, SessionConfig{"session1", true, false, true});
     SMOKE_CHECK(first.browser_started, "phase 1: a real windowless CEF browser started");
     SMOKE_CHECK(first.cef_shutdown_returned,
                 "phase 1: CefShutdown ran to completion with the session's bridge surfaces still "
@@ -759,10 +775,10 @@ int run_phase_1(const std::filesystem::path& project, const std::filesystem::pat
 // file phase 1 wrote. Read the arrangement back, REAPPLY it, and assert layoutRestored:true + byte
 // identity with phase 1's oracle. ONE browser, ONE CefInitialize, one hard exit. Returns an exit code.
 int run_phase_2(const std::filesystem::path& project, const std::filesystem::path& asset_root,
-                render::Extent2D size)
+                render::Extent2D size, smoke::WindowMode mode)
 {
     const SessionOutcome second =
-        run_session(project, asset_root, size, SessionConfig{"session2", false, true, false});
+        run_session(project, asset_root, size, mode, SessionConfig{"session2", false, true, false});
     SMOKE_CHECK(second.browser_started,
                 "phase 2: a fresh browser started in a fresh process (the restart)");
 
@@ -871,6 +887,11 @@ int main(int argc, char** argv)
     const std::filesystem::path project = restore_project_dir();
     const render::Extent2D size{640, 480};
     const int phase = parse_restore_phase(argc, argv);
+    // e12a-x11-legs: `--real-window` (passed by the ctest registration on Linux) runs BOTH phases
+    // over a REAL X11 window + the REAL X11 present blitter. ⚠ The controller must FORWARD the flag
+    // to its phase children (below) — they are separate processes, and without it the controller
+    // would think it ran a real-window drill while both phases quietly ran offscreen.
+    const smoke::WindowMode window_mode = smoke::window_mode_from_args(argc, argv);
 
     // --- a PHASE child: boot exactly one browser, hard-exit past CEF teardown ----------------------
     if (phase == 1)
@@ -879,13 +900,13 @@ int main(int argc, char** argv)
         std::fflush(stdout);
         std::error_code ec;
         std::filesystem::create_directories(project, ec); // the controller made it; be idempotent
-        return finish(run_phase_1(project, asset_root, size));
+        return finish(run_phase_1(project, asset_root, size, window_mode));
     }
     if (phase == 2)
     {
         std::printf("[editor-cef-smoke-shell-restore] phase 2: fresh process -> restore\n");
         std::fflush(stdout);
-        return finish(run_phase_2(project, asset_root, size));
+        return finish(run_phase_2(project, asset_root, size, window_mode));
     }
 
     // --- the CONTROLLER: run THIS exe twice, as two child processes, and gate on both --------------
@@ -929,13 +950,17 @@ int main(int argc, char** argv)
     else
     {
         // quote_argument() applies the cmd.exe outer-quote workaround; run_command() returns the
-        // child's exit code. The phase flag is a fixed literal appended raw.
+        // child's exit code. The phase flag is a fixed literal appended raw — and so is the
+        // window-mode flag, FORWARDED so each phase child opens the same kind of window this
+        // controller was asked for. Both are fixed literals, so neither needs quoting.
         const std::string self_arg = subprocess::quote_argument(self.string());
+        const std::string mode_arg =
+            window_mode == smoke::WindowMode::real ? std::string(" --real-window") : std::string();
 
         // Phase 1: persist an arrangement in one process, then exit. run_phase_child isolates the
         // phase in its own process group and SIGKILLs any CEF subprocess it leaves behind.
         trace("controller", "launching phase 1 (persist) child; blocking until it exits");
-        const int rc1 = run_phase_child(self_arg + " --ctx-restore-phase=1");
+        const int rc1 = run_phase_child(self_arg + " --ctx-restore-phase=1" + mode_arg);
         std::fprintf(stderr, "[editor-cef-smoke-shell-restore] [controller] phase 1 child exited "
                              "rc=%d\n",
                      rc1);
@@ -959,7 +984,7 @@ int main(int argc, char** argv)
         // diagnostics surface even when phase 1 failed.
         trace("controller", "phase 1 fully reaped; launching phase 2 (restore) child; blocking until "
                             "it exits");
-        const int rc2 = run_phase_child(self_arg + " --ctx-restore-phase=2");
+        const int rc2 = run_phase_child(self_arg + " --ctx-restore-phase=2" + mode_arg);
         std::fprintf(stderr, "[editor-cef-smoke-shell-restore] [controller] phase 2 child exited "
                              "rc=%d\n",
                      rc2);

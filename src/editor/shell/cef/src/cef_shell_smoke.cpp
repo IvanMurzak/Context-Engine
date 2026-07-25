@@ -22,9 +22,20 @@
 // the Shell") lives in the CEF-FREE `editor-shell-test_ipc_bridge` suite, which runs on all three
 // default `build` legs instead of only here — the same layering rationale as the rest of the Shell.
 //
-// It is deliberately HEADLESS (a windowless browser, no native window) and presents through e03's
-// MemoryBlitter, so it is safe on the Session-0 self-hosted Windows runner: no visible window, no
-// GPU device, no native-render teardown. The Windows hard exit after success mirrors
+// TWO WINDOW MODES (M9 e12a-x11-legs, issue #408), selected by `--real-window`:
+//
+//   * DEFAULT — headless: no native window, presenting through e03's MemoryBlitter, and therefore
+//     safe on the Session-0 self-hosted Windows runner (no visible window, no GPU device, no
+//     native-render teardown). This is what the Windows leg runs.
+//   * `--real-window` — a REAL X11 window from the REAL make_window_backend, presenting through the
+//     REAL X11 blitter `EditorWindow::attach_cpu_present()` selects, with the REAL X server as the
+//     input source. The ctest registration passes the flag on Linux, where the `editor-cef-smoke`
+//     job already carries xvfb + libx11-dev + libxext-dev. It NEVER degrades: a missing display, a
+//     compiled-out X11 backend, or an OS blitter that did not resolve are hard failures here.
+//
+// CEF itself is windowless-OSR in BOTH modes — cef_shell.cpp uses `native_window` only under
+// _WIN32 — so the Shell's own X11 window is purely the PRESENT target, exactly the topology the
+// CEF-free `editor-shell-x11-window` smoke proves. The Windows hard exit after success mirrors
 // editor_host.cpp / cef_boot_smoke.cpp, skipping CEF's flaky Session-0 teardown.
 
 #if defined(_WIN32)
@@ -48,6 +59,7 @@
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
+#include "context/editor/shell/smoke/smoke_window.h"
 #include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/user_config.h"
 #include "context/editor/shell/welcome.h"
@@ -65,8 +77,8 @@
 #include <vector>
 
 namespace shell = context::editor::shell;
+namespace smoke = context::editor::shell::smoke;
 namespace render = context::render;
-namespace present = context::render::present;
 
 namespace
 {
@@ -218,7 +230,15 @@ int main(int argc, char** argv)
         return subprocess_exit;
     }
 
-    std::printf("[editor-cef-smoke-shell] live windowed-OSR CEF -> compositor -> present\n");
+    // e12a-x11-legs: `--real-window` (passed by the ctest registration on Linux) runs this whole
+    // scenario over a REAL X11 window + the REAL X11 present blitter + the REAL X server as the
+    // input source, instead of the offscreen shell. Parsed AFTER the subprocess re-entry above: a
+    // CEF renderer/GPU child inherits the flag on its command line and must never reach this body.
+    const smoke::WindowMode window_mode = smoke::window_mode_from_args(argc, argv);
+
+    std::printf("[editor-cef-smoke-shell] live windowed-OSR CEF -> compositor -> present (%s "
+                "window)\n",
+                smoke::to_string(window_mode));
 
     std::error_code ec;
     const std::filesystem::path project =
@@ -231,10 +251,22 @@ int main(int argc, char** argv)
     shell::WindowDesc desc;
     desc.title = "Context Editor (cef smoke)";
     desc.logical_size = size;
-    desc.visible = false;
-    // Headless on purpose — see the file header on why this is Session-0-safe.
-    auto backend = std::make_unique<shell::HeadlessWindowBackend>(desc);
-    shell::HeadlessWindowBackend* backend_raw = backend.get();
+    // Headless by DEFAULT (the Session-0 rationale in the file header) and REAL under
+    // `--real-window`. The seam decides; nothing here names a concrete backend, which is what
+    // removed the `HeadlessWindowBackend*` this smoke used to keep in order to reach `post()`
+    // (issue #408). Real mode never degrades — a null backend is a hard failure.
+    smoke::WindowSetup window_setup = smoke::make_smoke_window(desc, window_mode);
+    if (window_setup.backend == nullptr)
+    {
+        std::fprintf(stderr, "[editor-cef-smoke-shell] FAIL: no %s window could be created: %s\n",
+                     smoke::to_string(window_mode), window_setup.diagnostic.c_str());
+        return finish(1);
+    }
+    shell::IWindowBackend* backend_raw = window_setup.backend.get();
+    // The size the WINDOW actually got, which is not the size that was asked for once a real
+    // display's DPI is involved — CEF's view rect is DIP, so telling it the request would lay the
+    // document out at the wrong size on any display that is not at 96 dpi.
+    const smoke::BrowserGeometry geometry = smoke::browser_geometry(*backend_raw);
 
     // --- the privileged bridge (e05c) --------------------------------------------------------
     // `handshake` is declared BEFORE `bridge` (and installed after it) so that it OUTLIVES the
@@ -272,9 +304,13 @@ int main(int argc, char** argv)
     SMOKE_CHECK(panel_host.install(bridge), "the panel.* bridge surface installed");
 
     shell::cef::CefShellOptions cef_options;
-    cef_options.native_window = nullptr; // windowless: no native window on a Session-0 runner
-    cef_options.logical_size = size;
-    cef_options.dpi = shell::DpiScale{};
+    // Windowless in BOTH modes, and that is not an oversight: cef_shell.cpp uses
+    // `native_window` only under _WIN32 (SetAsWindowless(HWND)); the POSIX arm ignores it. So on
+    // Linux CEF stays windowless-OSR either way and the Shell's own X11 window is purely the
+    // PRESENT target — exactly the topology the CEF-free x11 smoke already proves.
+    cef_options.native_window = nullptr;
+    cef_options.logical_size = geometry.logical_size;
+    cef_options.dpi = geometry.dpi;
     // THE app scheme, not a data: URL and emphatically not a file:// path (04 §1), carrying the
     // theme pin so the per-pixel background assertion below is about a theme this test CHOSE rather
     // than one the host's `prefers-color-scheme` chose for it (see kSmokeThemeId).
@@ -307,13 +343,21 @@ int main(int argc, char** argv)
     // Software OSR — the shipping Windows path per the owner ruling of 2026-07-19.
     config.compositor.import_options.force_software = true;
     config.placement_poll_us = 0;
-    auto window = std::make_unique<shell::EditorWindow>(std::move(backend), std::move(browser),
-                                                        config);
+    auto window = std::make_unique<shell::EditorWindow>(std::move(window_setup.backend),
+                                                        std::move(browser), config);
 
-    // The C-F2 CPU present path with e03's portable blitter: no adapter, no swapchain.
-    auto blitter = std::make_unique<present::MemoryBlitter>();
-    present::MemoryBlitter* blitter_raw = blitter.get();
-    window->compositor().attach_cpu(std::move(blitter), size);
+    // The C-F2 CPU present path: e03's portable blitter offscreen, and in real mode the REAL OS
+    // blitter that `EditorWindow::attach_cpu_present()` selects from the REAL native window — the
+    // same call `context_editor` makes on a GPU-less boot. Real mode REFUSES the in-memory blitter,
+    // so a build that lost its X11 present path fails here instead of composing into a buffer and
+    // calling it a present.
+    const smoke::PresentSetup present_setup = smoke::attach_smoke_present(*window, window_mode);
+    if (!present_setup.ok)
+    {
+        std::fprintf(stderr, "[editor-cef-smoke-shell] FAIL: no %s present path: %s\n",
+                     smoke::to_string(window_mode), present_setup.diagnostic.c_str());
+        return finish(1);
+    }
 
     shell::WindowManager manager(project);
     manager.add(std::move(window));
@@ -476,7 +520,7 @@ int main(int argc, char** argv)
             break;
         }
         if (!presented && editor->compositor().stats().view_frames > 0 &&
-            blitter_raw->blit_count() > 0)
+            editor->compositor().stats().frames_presented > 0)
         {
             presented = true;
         }
@@ -498,7 +542,13 @@ int main(int argc, char** argv)
     SMOKE_CHECK(presented, "a real CEF OSR frame was composited and presented within 30s");
     SMOKE_CHECK(editor->compositor().stats().view_frames > 0,
                 "the compositor adopted at least one OnPaint frame");
-    SMOKE_CHECK(blitter_raw->blit_count() > 0, "the composited frame reached the present blitter");
+    // ⚠ READ FROM THE COMPOSITOR, not from a blitter handle. `blit_count()` is MemoryBlitter's and
+    // does not exist on the OS blitters real mode attaches, and the compositor's own counter is the
+    // same claim in both modes — `frames_presented` advances ONLY when the attached blitter's
+    // blit() returned true (compositor.cpp), which in real mode means a real XShmPutImage/XPutImage
+    // actually reached the X server.
+    SMOKE_CHECK(editor->compositor().stats().frames_presented > 0,
+                "the composited frame reached the present blitter");
     SMOKE_CHECK(!editor->compositor().cpu_surface().empty(), "the composed surface is non-empty");
 
     // The document's background, PER PIXEL. Counting frames is not enough: cpu_surface_ is zero-
@@ -600,36 +650,69 @@ int main(int argc, char** argv)
     // the arbitration half only. What makes this a LIVE-browser assertion is that CEF accepts the
     // translated events at all — a malformed CefMouseEvent/CefKeyEvent trips CEF's own checks — and
     // that the browser is still painting afterwards, which the post-resize repaint below asserts.
+    // ⚠ IN REAL-WINDOW MODE EVERY ONE OF THESE IS ASYNCHRONOUS. `inject_event` does not queue: the
+    // pointer and key are sent to this smoke's own window THROUGH THE X SERVER and come back on a
+    // later pump via the real decoder, and the resize is a request the server answers with its own
+    // ConfigureNotify. So the assertions below wait rather than reading the counters after one pump.
+    const int pointers_before = editor->input().pointer_dispatches();
+    const int keys_before = editor->input().key_dispatches();
+
     shell::ShellEvent move;
     move.kind = shell::ShellEventKind::pointer;
     move.pointer.action = shell::PointerAction::move;
     move.pointer.position = shell::PointI{100, 100};
-    backend_raw->post(move);
+    SMOKE_CHECK(smoke::inject_event(*backend_raw, window_mode, move), "the pointer move was injected");
 
     shell::ShellEvent click = move;
     click.pointer.action = shell::PointerAction::down;
     click.pointer.button = shell::MouseButton::left;
-    backend_raw->post(click);
+    SMOKE_CHECK(smoke::inject_event(*backend_raw, window_mode, click), "the pointer press was injected");
 
     shell::ShellEvent release = click;
     release.pointer.action = shell::PointerAction::up;
-    backend_raw->post(release);
+    // X reports the modifier mask BEFORE the event, so a release still carries its own button down.
+    release.pointer.modifiers.left_button_down = true;
+    SMOKE_CHECK(smoke::inject_event(*backend_raw, window_mode, release),
+                "the pointer release was injected");
 
     shell::ShellEvent key;
     key.kind = shell::ShellEventKind::key;
     key.key.action = shell::KeyAction::raw_key_down;
     key.key.windows_key_code = 0x09; // VK_TAB — moves DOM focus, so it is not a no-op
-    backend_raw->post(key);
+    SMOKE_CHECK(smoke::inject_event(*backend_raw, window_mode, key), "the key was injected");
 
-    SMOKE_CHECK(manager.pump_once(now_us()), "the loop ran with live input");
-    SMOKE_CHECK(editor->input().pointer_dispatches() == 3, "the pointer samples were arbitrated");
-    SMOKE_CHECK(editor->input().key_dispatches() == 1, "the key was arbitrated");
+    const auto input_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+    while (std::chrono::steady_clock::now() < input_deadline)
+    {
+        if (!manager.pump_once(now_us()))
+        {
+            break;
+        }
+        if (editor->input().pointer_dispatches() >= pointers_before + 3 &&
+            editor->input().key_dispatches() > keys_before)
+        {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    // DELTAS and `>=`, not absolute equality. In real-window mode the X server is entitled to have
+    // delivered input of its own (a crossing event as the window mapped under the pointer), and a
+    // real Tab press yields the raw key AND the character the decoder synthesizes from it — neither
+    // of which the offscreen backend can produce. Asserting exact counts would be asserting the
+    // state of whatever desktop this ran on; asserting the DELTA still fails at zero, which is the
+    // only outcome a broken input path can produce.
+    SMOKE_CHECK(editor->input().pointer_dispatches() >= pointers_before + 3,
+                "the three pointer samples were arbitrated");
+    SMOKE_CHECK(editor->input().key_dispatches() > keys_before, "the key was arbitrated");
 
-    // A live resize: the browser must accept WasResized and repaint at the new size.
+    // A live resize: the browser must accept WasResized and repaint at the new size. In real-window
+    // mode this is a REQUEST — the size the shell reacts to is the one the server grants, so the
+    // assertion is against `backend_raw->client_size()` rather than the number that was asked for.
+    const render::Extent2D size_before_resize = backend_raw->client_size();
     shell::ShellEvent resize;
     resize.kind = shell::ShellEventKind::resize;
     resize.size = render::Extent2D{800, 500};
-    backend_raw->post(resize);
+    SMOKE_CHECK(smoke::inject_event(*backend_raw, window_mode, resize), "the resize was injected");
     const int frames_before_resize = editor->compositor().stats().view_frames;
     const auto resize_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
     bool repainted = false;
@@ -639,7 +722,11 @@ int main(int argc, char** argv)
         {
             break;
         }
-        if (editor->compositor().stats().view_frames > frames_before_resize)
+        if (editor->compositor().stats().view_frames > frames_before_resize &&
+            editor->compositor().size().width == backend_raw->client_size().width &&
+            editor->compositor().size().height == backend_raw->client_size().height &&
+            (backend_raw->client_size().width != size_before_resize.width ||
+             backend_raw->client_size().height != size_before_resize.height))
         {
             repainted = true;
             break;
@@ -647,15 +734,18 @@ int main(int argc, char** argv)
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     SMOKE_CHECK(repainted, "the browser repainted after a live resize (WasResized)");
-    SMOKE_CHECK(editor->compositor().size().width == 800u, "the compositor took the new size");
+    SMOKE_CHECK(backend_raw->client_size().width != size_before_resize.width ||
+                    backend_raw->client_size().height != size_before_resize.height,
+                "the window really changed size");
+    SMOKE_CHECK(editor->compositor().size().width == backend_raw->client_size().width &&
+                    editor->compositor().size().height == backend_raw->client_size().height,
+                "the compositor took the size the window actually got");
 
-    // Read the presented-frame count BEFORE shutdown: the blitter is owned by the compositor
-    // (attach_cpu took the unique_ptr), and shutdown() -> EditorWindow::close() ->
-    // WindowCompositor::detach() destroys it (blitter_.reset()). `blitter_raw` dangles from here
-    // on, so the closing report below prints a value captured while it was still alive. Nothing is
-    // presented during teardown, so this count is final. (Same defect, same fix, as the
-    // Session-0 smoke in ../../smoke/shell_smoke_main.cpp.)
-    const int presented_frames = blitter_raw->blit_count();
+    // Read the presented-frame count BEFORE shutdown: shutdown() -> EditorWindow::close() ->
+    // WindowCompositor::detach() destroys the blitter, and nothing is presented during teardown, so
+    // this count is final. (Read from the COMPOSITOR rather than a MemoryBlitter handle, which real
+    // mode does not have — see the present assertion above.)
+    const int presented_frames = editor->compositor().stats().frames_presented;
 
     manager.shutdown();
     shell::cef::shutdown();
@@ -668,7 +758,9 @@ int main(int argc, char** argv)
         return finish(1);
     }
     std::printf("[editor-cef-smoke-shell] PASS: live CEF windowed-OSR composited + presented "
-                "(%d frames), input round-tripped, live resize repainted\n",
-                presented_frames);
+                "(%d frames through the %s blitter, %s window), input round-tripped, live resize "
+                "repainted\n",
+                presented_frames, present_setup.blitter_name.c_str(),
+                smoke::to_string(window_mode));
     return finish(0);
 }

@@ -45,6 +45,7 @@
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/session_bridge.h"
 #include "context/editor/shell/shell.h"
+#include "context/editor/shell/smoke/smoke_window.h"
 #include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/user_config.h"
 #include "context/editor/shell/welcome.h"
@@ -64,8 +65,8 @@
 #include <vector>
 
 namespace shell = context::editor::shell;
+namespace smoke = context::editor::shell::smoke;
 namespace render = context::render;
-namespace present = context::render::present;
 using Json = context::editor::contract::Json;
 
 namespace
@@ -139,8 +140,12 @@ struct WindowSurfaces
     shell::SessionBridge session_bridge;
     std::unique_ptr<shell::WindowBridge> window_bridge;
 
+    // `window_mode` (e12a-x11-legs) reaches the TEAR-OUT handler below, which is where this
+    // smoke's second window is specified: without it the handler could not honour a run that asked
+    // for real windows, and the tear-out target would silently stay offscreen.
     [[nodiscard]] bool install(shell::BridgeRouter& router, shell::WindowManager& manager,
-                               shell::WindowMoveStore& store, shell::WindowId window_id)
+                               shell::WindowMoveStore& store, shell::WindowId window_id,
+                               smoke::WindowMode window_mode)
     {
         bool ok = handshake.install(router);
         ok = panel_host.install(router) && ok;
@@ -169,10 +174,14 @@ struct WindowSurfaces
         window_bridge = std::make_unique<shell::WindowBridge>(window_id, store);
         window_bridge->bind_windows([&manager]() { return manager.window_ids(); });
         window_bridge->bind_tear_out(
-            [&manager, &store](const shell::WindowBridge::TearOut& req) -> shell::WindowMoveResult
+            [&manager, &store, window_mode](const shell::WindowBridge::TearOut& req)
+                -> shell::WindowMoveResult
             {
                 shell::WindowSpec spec;
-                spec.headless = true; // Session-0 safe: never a real OS window in this smoke
+                // e12a-x11-legs: a REAL torn-out window under --real-window, offscreen otherwise.
+                // This is the WindowSpec::headless switch itself, which is why the DoD names it: a
+                // run that asks for real windows must get one HERE too, not only for window 0.
+                spec.headless = window_mode == smoke::WindowMode::headless;
                 if (!req.title.empty())
                     spec.title = req.title;
                 const shell::WindowCreateResult created = manager.create_window(spec, req.source);
@@ -208,12 +217,18 @@ std::string boot_url()
     return std::string(shell::kAppEntryUrl) + "?" + shell::kThemePinFlag + "=" + kSmokeThemeId;
 }
 
-shell::cef::CefShellOptions make_cef_options(render::Extent2D size, shell::BridgeRouter* bridge)
+shell::cef::CefShellOptions make_cef_options(const smoke::BrowserGeometry& geometry,
+                                             shell::BridgeRouter* bridge)
 {
     shell::cef::CefShellOptions options;
-    options.native_window = nullptr; // windowless: no native window on a Session-0 runner
-    options.logical_size = size;
-    options.dpi = shell::DpiScale{};
+    // Windowless in BOTH window modes, and not merely for Session 0: cef_shell.cpp reads
+    // `native_window` only under _WIN32, so on Linux CEF stays windowless-OSR either way and the
+    // Shell's own X11 window is purely the PRESENT target.
+    options.native_window = nullptr;
+    // The size the WINDOW actually got: a real display's DPI makes it differ from the
+    // request, and CEF's view rect is DIP, so passing the request lays the document out wrong.
+    options.logical_size = geometry.logical_size;
+    options.dpi = geometry.dpi;
     options.url = boot_url();
     options.app_asset_root = CONTEXT_WEBUI_ASSET_DIR;
     options.bridge = bridge;
@@ -256,6 +271,12 @@ int main(int argc, char** argv)
         return subprocess_exit;
     }
 
+    // e12a-x11-legs: `--real-window` (passed by the ctest registration on Linux) runs this whole
+    // scenario over REAL X11 windows — window 0 AND every window the factory creates — presenting
+    // through the REAL X11 blitter. Parsed AFTER the subprocess re-entry above: a CEF renderer/GPU
+    // child inherits the flag on its command line and must never reach this body.
+    const smoke::WindowMode window_mode = smoke::window_mode_from_args(argc, argv);
+
     std::printf("[editor-cef-smoke-shell-tearout] tear-out over D6 -> a live second window that "
                 "restores the moved state; loud create-fail; rehome relay\n");
 
@@ -277,18 +298,25 @@ int main(int argc, char** argv)
 
     shell::WindowManager manager(project);
 
-    SMOKE_CHECK(primary_surfaces.install(primary_bridge, manager, move_store, shell::kPrimaryWindowId),
+    SMOKE_CHECK(primary_surfaces.install(primary_bridge, manager, move_store,
+                                         shell::kPrimaryWindowId, window_mode),
                 "every bridge surface installed on window 0");
 
     {
         shell::WindowDesc desc;
         desc.title = "Context Editor (tearout smoke)";
         desc.logical_size = size;
-        desc.visible = false;
-        auto backend = std::make_unique<shell::HeadlessWindowBackend>(desc);
+        smoke::WindowSetup window_setup = smoke::make_smoke_window(desc, window_mode);
+        if (window_setup.backend == nullptr)
+        {
+            std::fprintf(stderr, "[editor-cef-smoke-shell-tearout] FAIL: no %s window 0: %s\n",
+                         smoke::to_string(window_mode), window_setup.diagnostic.c_str());
+            return finish(1);
+        }
+        const smoke::BrowserGeometry geometry = smoke::browser_geometry(*window_setup.backend);
         std::string error;
         std::unique_ptr<shell::IBrowserHost> browser =
-            shell::cef::make_cef_browser_host(make_cef_options(size, &primary_bridge), error);
+            shell::cef::make_cef_browser_host(make_cef_options(geometry, &primary_bridge), error);
         if (browser == nullptr)
         {
             std::fprintf(stderr, "[editor-cef-smoke-shell-tearout] FAIL: window 0's browser did not "
@@ -299,9 +327,16 @@ int main(int argc, char** argv)
         shell::EditorWindowConfig config;
         config.compositor.import_options.force_software = true;
         config.placement_poll_us = 0;
-        auto window = std::make_unique<shell::EditorWindow>(std::move(backend), std::move(browser),
-                                                            config);
-        window->compositor().attach_cpu(std::make_unique<present::MemoryBlitter>(), size);
+        auto window = std::make_unique<shell::EditorWindow>(std::move(window_setup.backend),
+                                                            std::move(browser), config);
+        const smoke::PresentSetup present_setup =
+            smoke::attach_smoke_present(*window, window_mode);
+        if (!present_setup.ok)
+        {
+            std::fprintf(stderr, "[editor-cef-smoke-shell-tearout] FAIL: no %s present path for window 0: %s\n",
+                         smoke::to_string(window_mode), present_setup.diagnostic.c_str());
+            return finish(1);
+        }
         manager.add(std::move(window));
     }
 
@@ -324,21 +359,32 @@ int main(int argc, char** argv)
             shell::WindowDesc desc;
             desc.title = spec.title;
             desc.logical_size = spec.logical_size;
-            desc.visible = false;
-            parts.backend = std::make_unique<shell::HeadlessWindowBackend>(desc);
+            // The per-window real/headless switch editor_main.cpp honours: the SPEC decides,
+            // so the Nth window is a real OS window exactly when this run asked for one. A
+            // create failure is REPORTED (03 §7), never degraded to headless.
+            const smoke::WindowMode child_mode =
+                spec.headless ? smoke::WindowMode::headless : window_mode;
+            smoke::WindowSetup child_setup = smoke::make_smoke_window(desc, child_mode);
+            if (child_setup.backend == nullptr)
+            {
+                error = child_setup.diagnostic;
+                return false;
+            }
+            parts.backend = std::move(child_setup.backend);
 
             auto window_bridge_router = std::make_unique<shell::BridgeRouter>();
             auto surfaces = std::make_shared<WindowSurfaces>();
             const shell::WindowId expected_id =
                 static_cast<shell::WindowId>(manager.last_minted_id() + 1u);
-            if (!surfaces->install(*window_bridge_router, manager, move_store, expected_id))
+            if (!surfaces->install(*window_bridge_router, manager, move_store, expected_id,
+                                   window_mode))
             {
                 error = "a bridge surface refused to install on the new window";
                 return false;
             }
             std::string browser_error;
             parts.browser = shell::cef::make_cef_browser_host(
-                make_cef_options(spec.logical_size, window_bridge_router.get()), browser_error);
+                make_cef_options(smoke::browser_geometry(*parts.backend), window_bridge_router.get()), browser_error);
             if (parts.browser == nullptr)
             {
                 error = "the browser did not start: " + browser_error;
@@ -355,7 +401,14 @@ int main(int argc, char** argv)
     const auto attach_present_path = [&](shell::WindowId id)
     {
         if (shell::EditorWindow* window = manager.window(id))
-            window->compositor().attach_cpu(std::make_unique<present::MemoryBlitter>(), size);
+        {
+            // `mode_of` and NOT `window_mode`: this window was built by the FACTORY, which
+            // honours the spec's own headless flag — so the present path must match the
+            // window that was actually created rather than the one the run asked for.
+            const smoke::PresentSetup child_present =
+                smoke::attach_smoke_present(*window, smoke::mode_of(window->backend()));
+            SMOKE_CHECK(child_present.ok, "the created window took its present path");
+        }
     };
 
     const auto boot_window = [&](shell::WindowId id, WindowSurfaces& surfaces, int seconds) -> bool

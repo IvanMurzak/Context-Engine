@@ -750,13 +750,22 @@ Named so the gaps are visible rather than assumed:
 
 - ~~**No Linux window backend.**~~ Landed by **e12a**: `x11_window.cpp` (X11/XWayland, D21), the pure
   `translate_x11_event` decoder, the X11-SHM present blitter, and the live `editor-shell-x11-window`
-  smoke that opens a REAL window and asserts a server-driven repaint and resize. What e12a
-  deliberately did NOT do is re-point the eight live `editor-cef-smoke-shell*` scenario smokes at a
-  real window: each drives its scenario by POSTING scripted events into a `HeadlessWindowBackend`,
-  and every one of them also runs on the Session-0 Windows runner where no interactive desktop
-  exists — so a real-window mode is a per-smoke rework with its own per-OS branch, not a
-  constructor swap. Tracked as **#408**; the X11 backend itself is proven windowed by the new
-  smoke.
+  smoke that opens a REAL window and asserts a server-driven repaint and resize.
+- ~~**The live CEF scenario smokes never run through a real window.**~~ Landed by **e12a-x11-legs**
+  (#408). All **nine** `editor-cef-smoke-shell*` smokes now take their window through the shared
+  smoke-tier seam `src/editor/shell/smoke/smoke_window.h`, and the ctest registration passes
+  `--real-window` on **Linux**, where they open a REAL X11 window, present through the REAL X11
+  blitter `EditorWindow::attach_cpu_present()` selects, and take input FROM THE X SERVER. The
+  Windows leg keeps the offscreen backend, which is what the Session-0 runner requires. Two earlier
+  claims here were WRONG and are corrected rather than deleted, because both were load-bearing for
+  the "this is not a constructor swap" reading: the count is **nine**, not eight (`-uimirror` and
+  `-iframe` landed after this note was written), and only **two** of them ever `post()`ed at all —
+  the other seven built a `HeadlessWindowBackend` and drove their scenarios entirely through the CEF
+  bridge, so for those it genuinely WAS a construction swap. What was not a swap is INPUT: real mode
+  sends pointer and key events to the smoke's own window through the X server (XSendEvent with an
+  empty event mask, which the protocol delivers back to the creating client), so they re-enter
+  through the real `translate_x11_event`; a `post()`-shaped seam on the real backend would have
+  bypassed the server, the decoder and the window path, and passed with all three broken.
 - **No live DPI-change event on Linux.** `Xft.dpi` (falling back to the screen derivation) is read
   ONCE, in `X11WindowBackend::create`. Nothing watches `RESOURCE_MANAGER` on the root window for the
   `PropertyNotify` that a desktop scaling change publishes, and RandR is deliberately out of e12a —

@@ -96,6 +96,7 @@
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/session_bridge.h"
 #include "context/editor/shell/shell.h"
+#include "context/editor/shell/smoke/smoke_window.h"
 #include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/user_config.h"
 #include "context/editor/shell/welcome.h"
@@ -118,8 +119,8 @@
 
 namespace shell = context::editor::shell;
 namespace gc = context::editor::gui::contract;
+namespace smoke = context::editor::shell::smoke;
 namespace render = context::render;
-namespace present = context::render::present;
 
 namespace
 {
@@ -332,6 +333,12 @@ int main(int argc, char** argv)
         return subprocess_exit;
     }
 
+    // e12a-x11-legs: `--real-window` (passed by the ctest registration on Linux) runs this whole
+    // scenario over a REAL X11 window + the REAL X11 present blitter, instead of the offscreen
+    // shell. Parsed AFTER the subprocess re-entry above: a CEF renderer/GPU child inherits the flag
+    // on its command line and must never reach this body.
+    const smoke::WindowMode window_mode = smoke::window_mode_from_args(argc, argv);
+
     std::printf("[editor-cef-smoke-shell-iframe] live third-party package panel over the real CEF "
                 "pump + the context-ext:// scheme\n");
     std::fflush(stdout);
@@ -365,8 +372,16 @@ int main(int argc, char** argv)
     shell::WindowDesc desc;
     desc.title = "Context Editor (iframe smoke)";
     desc.logical_size = size;
-    desc.visible = false;
-    auto backend = std::make_unique<shell::HeadlessWindowBackend>(desc);
+    smoke::WindowSetup window_setup = smoke::make_smoke_window(desc, window_mode);
+    if (window_setup.backend == nullptr)
+    {
+        std::fprintf(stderr, "[editor-cef-smoke-shell-iframe] FAIL: no %s window could be created: %s\n",
+                     smoke::to_string(window_mode), window_setup.diagnostic.c_str());
+        return finish(1);
+    }
+    // The size the WINDOW actually got: a real display's DPI makes it differ from the request, and
+    // CEF's view rect is DIP, so telling the browser the request would lay the document out wrong.
+    const smoke::BrowserGeometry geometry = smoke::browser_geometry(*window_setup.backend);
 
     // --- the privileged bridges (the sibling smokes' set) -----------------------------------------
     // handshake BEFORE bridge (outlives the router that captures it); manager BEFORE the editor-state
@@ -399,9 +414,12 @@ int main(int argc, char** argv)
     SMOKE_CHECK(panel_host.install(bridge), "the panel.* bridge surface installed");
 
     shell::cef::CefShellOptions cef_options;
-    cef_options.native_window = nullptr; // windowless: no native window on a Session-0 runner
-    cef_options.logical_size = size;
-    cef_options.dpi = shell::DpiScale{};
+    // Windowless in BOTH window modes, and not merely for Session 0: cef_shell.cpp reads
+    // `native_window` only under _WIN32, so on Linux CEF stays windowless-OSR either way and the
+    // Shell's own X11 window is purely the PRESENT target.
+    cef_options.native_window = nullptr;
+    cef_options.logical_size = geometry.logical_size;
+    cef_options.dpi = geometry.dpi;
     cef_options.url = shell::kAppEntryUrl;
     cef_options.app_asset_root = asset_root;
     cef_options.bridge = &bridge;
@@ -434,11 +452,18 @@ int main(int argc, char** argv)
     config.compositor.import_options.force_software = true; // software OSR — the shipping Windows path
     config.placement_poll_us = 0;
     auto window =
-        std::make_unique<shell::EditorWindow>(std::move(backend), std::move(browser), config);
+        std::make_unique<shell::EditorWindow>(std::move(window_setup.backend), std::move(browser), config);
 
-    auto blitter = std::make_unique<present::MemoryBlitter>();
-    present::MemoryBlitter* blitter_raw = blitter.get();
-    window->compositor().attach_cpu(std::move(blitter), size);
+    // e03's portable blitter offscreen; in real mode the REAL OS blitter that
+    // `EditorWindow::attach_cpu_present()` selects from the REAL native window — the same call
+    // `context_editor` makes on a GPU-less boot. Real mode REFUSES the in-memory blitter.
+    const smoke::PresentSetup present_setup = smoke::attach_smoke_present(*window, window_mode);
+    if (!present_setup.ok)
+    {
+        std::fprintf(stderr, "[editor-cef-smoke-shell-iframe] FAIL: no %s present path: %s\n",
+                     smoke::to_string(window_mode), present_setup.diagnostic.c_str());
+        return finish(1);
+    }
 
     shell::WindowManager manager(project);
     manager.add(std::move(window));
@@ -528,7 +553,7 @@ int main(int argc, char** argv)
             break;
         }
         if (!presented && editor->compositor().stats().view_frames > 0 &&
-            blitter_raw->blit_count() > 0)
+            editor->compositor().stats().frames_presented > 0)
         {
             presented = true;
         }
