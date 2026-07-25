@@ -28,6 +28,10 @@ file(READ "${_ft_pin}" _ft_pin_json)
 string(JSON _ft_version GET "${_ft_pin_json}" version)
 string(JSON _ft_url     GET "${_ft_pin_json}" url)
 string(JSON _ft_sha     GET "${_ft_pin_json}" sha256)
+# Ordered fallback mirrors (issue #359). The pin's own "mirrors" array is the single source of
+# truth for them, so no URL is duplicated here; an absent/empty array yields an empty list and the
+# fetch behaves exactly as it did when savannah was the only source.
+context_download_pin_mirrors("${_ft_pin_json}" _ft_mirrors)
 
 set(_ft_deps "${CMAKE_BINARY_DIR}/_deps")
 set(_ft_tarball "${_ft_deps}/freetype-${_ft_version}.tar.gz")
@@ -38,6 +42,7 @@ if(NOT EXISTS "${_ft_src}/CMakeLists.txt")
     file(MAKE_DIRECTORY "${_ft_deps}")
     context_download(
         URL             "${_ft_url}"
+        URLS            ${_ft_mirrors}
         PATH            "${_ft_tarball}"
         EXPECTED_SHA256 "${_ft_sha}"
         DESCRIPTION     "FreeType ${_ft_version} source")

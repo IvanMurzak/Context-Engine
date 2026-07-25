@@ -243,6 +243,19 @@ fetchable-vs-preinstalled split per v1 target — what `context doctor` validate
   `tools/license-allowlist.json` (verified SPDX id — never guessed), or the license gate fails.
   Prefer the standard library; heavyweight prebuilts follow the SHA-pinned fetch + verify-before-use
   pattern (`cmake/ContextDownload.cmake`, `tools/fetch_*.py`).
+  **A CONFIGURE-time fetch must not be single-sourced** (#359). `src/packages/ui/text/` sits in
+  nearly every leg's dependency closure, so one host being down reds the ENTIRE rollup at configure
+  time — measured 2026-07-22, when a ~1h savannah 502 failed seven unrelated jobs across all three
+  OSes on a PR that touched only TypeScript. `context_download(URL <primary> URLS <mirror>...)`
+  tries each source in order and re-checks the SAME pin after every attempt, so redundancy costs
+  nothing security-wise: a mirror serving different bytes is refused and skipped, and the fetch
+  still fails CLOSED when no source yields the pinned artifact (R-SEC-009). A `tools/*-source.json`
+  pin therefore carries a `mirrors` array — each entry VERIFIED byte-identical (fetch it, compare
+  its SHA-256) before it is listed, and on INDEPENDENT infrastructure, since a mirror on the
+  primary's own host fails in the same outage. `tools/tests/test_source_pins.py` enforces that every
+  from-source pin has one, that each mirror URL carries the pinned version (a version bump must
+  re-point and re-verify them), and that the consuming CMake module actually forwards them — a
+  mirror list nothing passes to `context_download` is a fallback that can never fire.
 - **No Apache/ASCII-art file headers** — this is a proprietary-EULA repo. Source files carry a
   short one-line descriptive top comment, matching their neighbors.
 - **Conventional commits** (`feat:`, `fix:`, `build:`, `ci:`, `docs:`, `test:`, `chore:` …);

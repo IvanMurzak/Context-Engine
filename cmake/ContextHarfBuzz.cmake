@@ -33,6 +33,9 @@ file(READ "${_hb_pin}" _hb_pin_json)
 string(JSON _hb_version GET "${_hb_pin_json}" version)
 string(JSON _hb_url     GET "${_hb_pin_json}" url)
 string(JSON _hb_sha     GET "${_hb_pin_json}" sha256)
+# Ordered fallback mirrors (issue #359) — same shape as ContextFreetype: the pin's own "mirrors"
+# array is the single source of truth, verified against the SAME sha256 as the primary.
+context_download_pin_mirrors("${_hb_pin_json}" _hb_mirrors)
 
 set(_hb_deps "${CMAKE_BINARY_DIR}/_deps")
 set(_hb_tarball "${_hb_deps}/harfbuzz-${_hb_version}.tar.xz")
@@ -43,6 +46,7 @@ if(NOT EXISTS "${_hb_src}/src/harfbuzz.cc")
     file(MAKE_DIRECTORY "${_hb_deps}")
     context_download(
         URL             "${_hb_url}"
+        URLS            ${_hb_mirrors}
         PATH            "${_hb_tarball}"
         EXPECTED_SHA256 "${_hb_sha}"
         DESCRIPTION     "HarfBuzz ${_hb_version} source")
