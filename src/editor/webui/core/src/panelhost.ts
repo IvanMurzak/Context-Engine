@@ -59,7 +59,19 @@ const LOCAL_COMPONENT = "context-local-panel";
 /** Dockview's component name for an `iframe` (third-party package) panel — one type for all, as above. */
 const IFRAME_COMPONENT = "context-iframe-panel";
 
-/** The class the iframe panel's own DOM slot carries, so the live smoke and the T1 tier can find it. */
+/**
+ * Dockview's component name for a panel THIS BUILD cannot draw. It exists so `componentFor` never
+ * labels a drifted manifest with the sink's name: that label is what `captureLayout` PERSISTS, so
+ * naming it `context-uitree-panel` would write "draw this through the hydration sink" into the saved
+ * arrangement of a panel every gate in this file just refused.
+ */
+const UNAVAILABLE_COMPONENT = "context-unavailable-panel";
+
+/**
+ * The class the iframe panel's own DOM slot carries, so the T1 tier can find it — and so `app.css`
+ * can size the frame to its docked slot. The live smoke reads no DOM at all (its observable is which
+ * URLs the scheme handler served), so it is deliberately NOT a consumer of this.
+ */
 export const IFRAME_PANEL_CLASS = "ctx-panel-frame";
 
 /**
@@ -162,9 +174,11 @@ class LocalPanelRenderer implements PanelRenderer {
  *
  *   1. `sandbox="allow-scripts"` WITHOUT `allow-same-origin` — an OPAQUE origin. The panel cannot
  *      read this document, cannot reach another package's origin, and holds no storage keyed to the
- *      package. See `extpanel.ts` `IFRAME_SANDBOX` for why each omitted token is omitted, and note
- *      that the attribute is ASSERTED on the created element (`isSandboxSafe`) rather than trusted
- *      from the constant.
+ *      package. See `extpanel.ts` `IFRAME_SANDBOX` for why each omitted token is omitted. This class
+ *      SETS the attribute from that constant; what checks the value a browser actually parsed off
+ *      the RENDERED element is the T1 tier (`extpanel.test.ts` drives `isSandboxSafe` over the live
+ *      DOM). There is deliberately no runtime re-read here: it would be a branch no test can reach
+ *      without stubbing a module constant, and the tier that CAN reach it already does.
  *   2. The `src` is a validated `context-ext://<package-id>/…` URL — the ONLY string this class
  *      accepts, and the ONLY layer at which a `javascript:` / `data:` / `https:` entry can be
  *      refused at all (the Shell's resolver never sees a URL the browser did not route to it).
@@ -211,6 +225,12 @@ class IframePanelRenderer implements PanelRenderer {
     }
 
     refresh(): void {
+        // ONE-WAY, exactly like `LocalPanelRenderer.#built`: `dispose` deliberately LEAVES this set,
+        // so the single field means "already built OR torn down — never build again" rather than
+        // needing a second flag to say the second half. Without that, a `refresh`/`onShow` arriving
+        // after `dispose` would build a SECOND frame and re-navigate to the package URL inside an
+        // element no longer in the document — a load nobody can see, in a document nobody will tear
+        // down.
         if (this.#frame !== undefined) {
             return;
         }
@@ -228,6 +248,10 @@ class IframePanelRenderer implements PanelRenderer {
         // into, exactly as the uitree renderer's `data-panel-id` slot does (R-A11Y-001).
         frame.setAttribute("title", this.#panelId);
         frame.setAttribute("data-panel-id", this.#panelId);
+        // A literal, like `ctx-panel-body` in the three sibling renderers: `app.css` carries the
+        // matching rule and CSS cannot import a TS constant, so naming it here would buy a symbol on
+        // editor-core's public surface and no enforcement. `IFRAME_PANEL_CLASS` is a constant only
+        // because another MODULE (the T1 tier) selects on it.
         frame.className = "ctx-panel-frame-element";
         frame.setAttribute("src", this.#url);
         this.#frame = frame;
@@ -249,10 +273,47 @@ class IframePanelRenderer implements PanelRenderer {
     dispose(): void {
         // Removing the element is what actually tears the package's document down; nulling `src`
         // first would navigate the frame to `about:blank` (a load in a frame we are discarding) for
-        // no benefit.
-        this.#frame = undefined;
+        // no benefit. `#frame` is deliberately NOT cleared — see `refresh`: leaving it set is what
+        // keeps the latch one-way, and the renderer itself is dropped from `#panels` right after.
         this.element.replaceChildren();
     }
+}
+
+/**
+ * The renderer for a panel this build must NOT draw — an inert element and nothing else.
+ *
+ * It exists so `#renderer` can be fail-closed for EVERY content type rather than only for the
+ * `iframe` sink: the fall-through used to be `UitreePanelRenderer`, which means a manifest this
+ * build does not understand (`unknown`, or a `local` whose factory this bundle does not carry) got
+ * drawn through the `innerHTML` hydration sink — precisely what `#mountable`'s own doc says must
+ * never happen. It mounts nothing, calls no client method, and holds no runtime, so a panel that
+ * reaches it is visibly and honestly empty.
+ */
+class UnavailablePanelRenderer implements PanelRenderer {
+    readonly element: HTMLElement;
+
+    constructor(panelId: string) {
+        this.element = document.createElement("div");
+        this.element.className = "ctx-panel-body";
+        this.element.setAttribute("data-panel-id", panelId);
+        // MARKED, not merely empty. Without this the slot is byte-identical to a healthy panel that
+        // has not drawn yet, and "the editor is missing a panel" would be something a user discovers
+        // by its absence — the failure `start`'s own `unavailable` report exists to prevent. This is
+        // that report's equivalent for the one path that does not produce one (`restoreLayout`), and
+        // it is what the T1 tier asserts on.
+        this.element.setAttribute("data-panel-unavailable", "");
+    }
+
+    get suspended(): boolean {
+        return true;
+    }
+
+    /** REQUIRED by Dockview even here — see `UitreePanelRenderer.init` for what omitting it costs. */
+    init(): void {}
+
+    refresh(): void {}
+
+    dispose(): void {}
 }
 
 /**
@@ -618,27 +679,52 @@ export class PanelHost {
     /**
      * Build the renderer a manifest calls for.
      *
-     * FAIL-CLOSED ON THE SINK, which is why the `iframe` branch is not simply the last `else`: an
-     * `iframe` manifest whose entry does not parse must NEVER reach `UitreePanelRenderer`, because
-     * that renderer mounts its payload through `innerHTML` and a third-party panel's content is not
-     * ours to trust. `open` already refuses such a manifest (so this is unreachable in practice),
-     * and it is written to be correct anyway: the two guards are independent, and the day someone
-     * calls `addPanel` from a third place, this one still holds.
+     * FAIL-CLOSED ON THE SINK, and — since e13a-2's review — fail-closed for EVERY content type,
+     * not just for `iframe`. `UitreePanelRenderer` mounts its payload through `innerHTML`, so it is
+     * the sink, and it is now reached only by a manifest that explicitly says `uitree`. Everything
+     * else (an `iframe` entry that does not parse, a `local` whose factory this bundle does not
+     * carry, an `unknown` token `parsePanelManifest` failed closed on, or a panel id that is not in
+     * the roster at all) gets `UnavailablePanelRenderer` — because "defaulting a drifted manifest
+     * into ANY renderer is how a future content type ends up in today's HTML sink" is `#mountable`'s
+     * own rule, and a fall-through `else` into the sink is exactly that default.
+     *
+     * WHY THE GUARD IS DUPLICATED AT ALL — `open` already refuses every one of these via
+     * `#mountable`, so in practice this is unreachable FROM `open`. It is not unreachable from
+     * Dockview: `restoreLayout` hands a persisted arrangement to `fromJSON`, which drives
+     * `createComponent` → `#create` → here WITHOUT passing `open`. That is the "third place" this
+     * comment used to speak of hypothetically, and it is a real caller. The two guards stay
+     * independent on purpose — this is the construction chokepoint, `#mountable` is the policy — but
+     * neither is a copy of the other, which is what makes them safe to keep both.
      */
     #renderer(panelId: string, manifest: PanelManifest | undefined): PanelRenderer {
-        if (manifest?.contentType === "local") {
-            const localFactory = this.#localPanels.get(panelId);
-            if (localFactory !== undefined) {
-                return new LocalPanelRenderer(panelId, localFactory);
+        // Narrowed through an `if` rather than `switch (manifest?.contentType)` so TS keeps the
+        // narrowing inside each arm; the shape then matches `#mountable` and `componentFor`, which
+        // switch on the same discriminant directly below.
+        if (manifest === undefined) {
+            return new UnavailablePanelRenderer(panelId);
+        }
+        switch (manifest.contentType) {
+            case "local": {
+                const localFactory = this.#localPanels.get(panelId);
+                return localFactory === undefined
+                    ? new UnavailablePanelRenderer(panelId)
+                    : new LocalPanelRenderer(panelId, localFactory);
             }
+            case "iframe": {
+                // An unparseable entry is UNAVAILABLE, not an `about:blank` frame. Both spell "this
+                // panel cannot be drawn", and one spelling is enough — the `about:blank` form also
+                // contradicted `IframePanelRenderer`'s own invariant that a validated
+                // `context-ext://…` URL is the ONLY string it accepts.
+                const entry = parseExtPanelEntry(manifest.contentEntry);
+                return entry === null
+                    ? new UnavailablePanelRenderer(panelId)
+                    : new IframePanelRenderer(panelId, entry.url);
+            }
+            case "uitree":
+                return new UitreePanelRenderer(panelId, this.#client, manifest.gestures);
+            default:
+                return new UnavailablePanelRenderer(panelId);
         }
-        if (manifest?.contentType === "iframe") {
-            const entry = parseExtPanelEntry(manifest.contentEntry);
-            // An unparseable entry yields an EMPTY frame rather than a uitree fallback: the panel is
-            // visibly, honestly blank, and nothing third-party-controlled was ever interpreted.
-            return new IframePanelRenderer(panelId, entry?.url ?? "about:blank");
-        }
-        return new UitreePanelRenderer(panelId, this.#client, manifest?.gestures ?? false);
     }
 
     /**
@@ -679,7 +765,13 @@ function componentFor(manifest: PanelManifest): string {
             return LOCAL_COMPONENT;
         case "iframe":
             return IFRAME_COMPONENT;
-        default:
+        case "uitree":
             return UITREE_COMPONENT;
+        default:
+            // `unknown` names the UNAVAILABLE component, not the uitree one. `open` refuses such a
+            // manifest before this is ever reached, so today this is inert — but this function's
+            // result is what `captureLayout` PERSISTS, and a fall-through into the sink's name is
+            // the same default `#mountable` and `#renderer` both refuse to make.
+            return UNAVAILABLE_COMPONENT;
     }
 }

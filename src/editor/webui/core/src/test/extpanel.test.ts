@@ -189,6 +189,7 @@ const ENTRY_CASES: readonly (readonly [string, boolean, string])[] = [
     ["//pkg.hello/index.html", false, "protocol-relative: inherits the embedder's scheme"],
     ["context-ext:/pkg/index.html", false, "one slash — not the scheme's authority form"],
     ["context-ext:///index.html", false, "an EMPTY authority names no package"],
+    ["CONTEXT-EXT://pkg/index.html", false, "the SCHEME's own case: the prefix match is byte-exact, so a non-canonical spelling is refused rather than normalized into an accepted one (ONE row — every case-normalizing comparison accepts all-caps and mixed alike, so a second spelling would exercise the same predicate twice)"],
     ["context-ext://PKG/index.html", false, "upper case: Chromium lower-cases a host, so it is unreachable"],
     ["context-ext://a@b/index.html", false, "userinfo — would resolve against host `b`"],
     ["context-ext://pkg:9/index.html", false, "a port is not part of the id grammar"],
@@ -454,6 +455,14 @@ export const extPanelTests: readonly TestCase[] = [
                     "the frame is a LABELLED landmark (R-A11Y-001) — a screen reader announces " +
                         "which panel focus moved into",
                 );
+                assertEqual(
+                    iframe.getAttribute("loading"),
+                    "eager",
+                    "a docked panel is visible by construction, so it loads EAGERLY. This restates " +
+                        "the HTML default on purpose and is asserted for the same reason `allow` " +
+                        "is: an attribute set explicitly is a decision, and a decision nothing " +
+                        "checks is a comment",
+                );
             } finally {
                 mounted.dispose();
             }
@@ -565,6 +574,67 @@ export const extPanelTests: readonly TestCase[] = [
                 assertEqual(mounted.container.querySelectorAll("iframe").length, 0, "no frame");
             } finally {
                 mounted.dispose();
+            }
+        },
+    },
+    {
+        name: "iframe panel: restoreLayout is the THIRD caller, and it cannot reach the sink either",
+        run: async () => {
+            // THE REGRESSION THIS PINS. `#mountable` moving into `open` closed `openById`, but a
+            // third production caller never went through `open` at all: `restoreLayout` hands a
+            // persisted arrangement straight to Dockview's `fromJSON`, which calls `createComponent`
+            // → `#create` → `#renderer`. That path is reached at BOOT, from a blob captured by a
+            // DIFFERENT build — so the manifest it looks up can have drifted to `unknown` since the
+            // layout was written, and `#renderer`'s fall-through used to be `UitreePanelRenderer`,
+            // the `innerHTML` hydration sink. `#renderer` is now fail-closed for every content type.
+            const author = await mountHost([manifestJson()]);
+            let layout: unknown;
+            try {
+                assert(frameFor(author, "pkg.hello") !== null, "the authoring host mounted a frame");
+                layout = author.host.captureLayout();
+                assert(layout !== null, "and produced a layout to restore");
+            } finally {
+                author.dispose();
+            }
+
+            // The SAME panel id, whose content type this build no longer understands.
+            const drifted = await mountHost([
+                manifestJson({ contentType: "webview", entry: "context-ext://pkg.hello/x.html" }),
+            ]);
+            try {
+                const rendersBefore = drifted.shell.methods.filter(
+                    (m) => m === "panel.render",
+                ).length;
+                assert(drifted.host.restoreLayout(layout), "the arrangement restores");
+                // ANTI-VACUITY: without this the assertions below would also pass on a Dockview that
+                // never created the panel at all, which would prove nothing about `#renderer`.
+                assertEqual(
+                    drifted.host.mounted.length,
+                    1,
+                    "Dockview DID drive createComponent for the persisted panel — this path really " +
+                        "does reach `#renderer` without passing `open`",
+                );
+                assertEqual(
+                    drifted.shell.methods.filter((m) => m === "panel.render").length - rendersBefore,
+                    0,
+                    "and the drifted manifest reached NO renderer that hydrates: a `panel.render` " +
+                        "here is the uitree sink drawing untrusted-shaped content it was never " +
+                        "gated for",
+                );
+                assertEqual(
+                    drifted.container.querySelectorAll("iframe").length,
+                    0,
+                    "nor did it fall the other way into a frame",
+                );
+                assertEqual(
+                    drifted.container.querySelectorAll("[data-panel-unavailable]").length,
+                    1,
+                    "and the slot is MARKED unavailable rather than merely empty — an empty slot " +
+                        "is indistinguishable from a healthy panel that has not drawn yet, which " +
+                        "would make a missing panel something a user discovers by its absence",
+                );
+            } finally {
+                drifted.dispose();
             }
         },
     },

@@ -469,8 +469,12 @@ int main(int argc, char** argv)
             traced_module = true;
             trace("milestone: the panel's module GRAPH resolved (its own static import was served)");
         }
+        // WAIT FOR THE EXACT FACT THE VERDICT ASSERTS, not for a weaker proxy of it. `refused` being
+        // merely NON-EMPTY would also be satisfied by some other refusal landing first (a
+        // not-found subresource, say), letting the loop break before the unmounted package's own
+        // request has been answered — a red on a perfectly healthy build.
         if (presented && handshake.complete() && contains(served, url_ran) &&
-            !shell::cef::ext_refused_urls().empty())
+            contains(shell::cef::ext_refused_urls(), url_absent))
         {
             break;
         }
@@ -519,9 +523,13 @@ int main(int argc, char** argv)
                 "frame — look at the roster/manifest, not at the scheme)");
     SMOKE_CHECK(contains(served, url_css),
                 "the package DOCUMENT WAS PARSED — it requested its own stylesheet. A frame refused "
-                "by `frame-ancestors` fetches its document and then parses nothing, so this is the "
-                "assertion that verifies the e13a-2 host-source tightening, and it also proves "
-                "`style-src 'self'` matches inside an OPAQUE-origin (sandboxed) document");
+                "by `frame-ancestors` fetches its document and then parses nothing, so this proves "
+                "the directive ADMITTED the editor's frame — i.e. the e13a-2 host-source tightening "
+                "did not silently collapse it — and it also proves `style-src 'self'` matches inside "
+                "an OPAQUE-origin (sandboxed) document. NOTE the direction: this cannot catch a "
+                "REVERT to the looser scheme-source form, which still admits context-editor://app "
+                "and leaves every URL below served. The exact directive text is pinned by "
+                "test_ext_scheme.cpp instead");
     SMOKE_CHECK(contains(served, url_module),
                 "`script-src 'self'` matched the panel's own module ENTRY");
     SMOKE_CHECK(contains(served, url_ready),
@@ -530,8 +538,11 @@ int main(int argc, char** argv)
                 "is fetched in CORS mode and a sandboxed frame's origin is the opaque `null`; see "
                 "ext_scheme.h for the measurement");
     SMOKE_CHECK(contains(served, url_ran),
-                "the module BODY EXECUTED (its dynamic import fired) — scripts really do run in a "
-                "frame whose only sandbox token is `allow-scripts`");
+                "the module BODY EXECUTED (its dynamic import fired) — scripts really do run in the "
+                "frame editor-core created. This says nothing about the SANDBOX: dropping the "
+                "attribute would give the frame its real origin, make the module fetches "
+                "same-origin, and leave every URL here served just the same. The attribute's token "
+                "set is pinned on the rendered element by the T1 tier (extpanel.test.ts)");
 
     // --- the negative half: deny-by-default is LIVE in the browser, not just in the unit suite ----
     SMOKE_CHECK(contains(refused, url_absent),
@@ -550,9 +561,10 @@ int main(int argc, char** argv)
 
     // --- no bridge reached the panel (e13a-2 ships the host, not the transport) -------------------
     SMOKE_CHECK(bridge.refused() == 0,
-                "the live scenario produced no envelope refusals (a refusal here would mean either a "
-                "boot surface is missing or something tried to speak a panel-bridge protocol that "
-                "does not exist yet)");
+                "the live scenario produced no envelope refusals — every verb the boot path spoke "
+                "was one the router knows. This is a boot-surface invariant, NOT a check on the "
+                "absent panel transport: e13b's port rides MessageChannel/postMessage, which never "
+                "reaches this router, so no future transport could register here either way");
     SMOKE_CHECK(bridge.secrets_blocked() == 0,
                 "no handler attempted to return a protected credential during the scenario");
     SMOKE_CHECK(shell::cef::popups_suppressed() == 0 && shell::cef::browsers_created() == 1,

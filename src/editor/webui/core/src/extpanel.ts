@@ -105,6 +105,15 @@ export const IFRAME_LOADING = "eager";
  * in a frame, and a looser copy here would build URLs the Shell then refuses (a panel that silently
  * never loads), while a TIGHTER copy would hide packages the Shell would happily serve. The two are
  * kept honest by `extpanel.test.ts`, which drives the same table of shapes the C++ suite does.
+ *
+ * ⚠ THIS IS NOT editor-core's ONLY PACKAGE-ID GRAMMAR, and the other one gives DIFFERENT answers.
+ * `uibus.ts`'s `validatePackageId` validates the id a package declares BUS TOPICS under (05 §5) as
+ * dotted `[a-z0-9][a-z0-9-]*` segments. It accepts `12345` and `pkg-`, which this refuses, and
+ * refuses `a-b_c.d`, which this accepts. Neither is wrong: that one names a namespace in our own
+ * bus, this one must survive a round trip through Chromium's URL host parser, which is what forces
+ * the `_`, the numeric-last-label and the trailing-separator rules. They are recorded as distinct on
+ * purpose — if they are ever unified, it must be by making the BUS grammar adopt this one's
+ * constraints (the URL is the harder master), never the reverse.
  */
 export function isValidPackageId(id: string): boolean {
     if (id.length === 0 || id.length > EXT_PACKAGE_ID_MAX_LENGTH) {
@@ -201,13 +210,22 @@ export function parseExtPanelEntry(entry: string): ExtPanelEntry | null {
 }
 
 /**
- * Assert a rendered frame's `sandbox` list is the reviewed one — used by `panelhost.ts` right after
- * it creates the element, and by the T1 tier against the REAL DOM.
+ * Assert a rendered frame's `sandbox` list is the reviewed one — used by the T1 tier
+ * (`extpanel.test.ts`) against the REAL DOM, on the element Dockview actually mounted.
+ *
+ * NOT called from `panelhost.ts`: the value it would check there comes from `IFRAME_SANDBOX` one
+ * line above the call, so the branch could only be reached by stubbing a module constant, and a
+ * guard no test can reach is a guard that rots. The tier that CAN reach it — a real browser, a real
+ * `<iframe>`, the browser's own parse of the attribute — is where it lives instead.
  *
  * Checked on the ELEMENT rather than trusted from the constant, because `sandbox` is the attribute
  * an extension or a later refactor is most likely to widen, and because `DOMTokenList` normalizes:
  * asserting the parsed token set is what a browser will actually enforce, whereas asserting the
  * string is what someone wrote. Returns false if `allow-same-origin` appears by ANY route.
+ *
+ * DELIBERATELY ASYMMETRIC ON CASE: the forbidden token is matched case-INSENSITIVELY (as a browser
+ * matches it), while the required `allow-scripts` must be byte-exact. Both directions therefore
+ * fail CLOSED — an oddly-cased `ALLOW-SCRIPTS` is reported unsafe rather than waved through.
  */
 export function isSandboxSafe(frame: HTMLIFrameElement): boolean {
     const tokens = frame.getAttribute("sandbox");

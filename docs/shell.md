@@ -567,8 +567,13 @@ Named so the gaps are visible rather than assumed:
   that is the ONLY layer at which a `javascript:` / `data:` / `https:` entry can be refused at all,
   since the Shell's resolver never sees a URL the browser did not route to it — and its vocabulary is
   byte-compared against `ext_scheme.h` by the `webui-scheme-contract` ctest. The per-content-type
-  gate lives in `PanelHost#mountable`, applied in `open()` rather than in `start()`'s loop, because
-  `openById` (the e10b tear-out seed path) reached `addPanel` without it. Tiers: `webui-ts-unit`
+  gate lives in `PanelHost#mountable` and is *decided* in `open()` rather than in `start()`'s loop
+  (which still calls the same predicate, but only to build its `unavailable` report), because
+  `openById` (the e10b tear-out seed path) reached `addPanel` without it. `#renderer` is the second,
+  independent guard at the construction chokepoint: it is fail-closed for **every** content type, so
+  the one caller that does not pass `open` — `restoreLayout`, which hands a persisted arrangement
+  straight to Dockview's `createComponent` — cannot default a drifted manifest into the `innerHTML`
+  hydration sink either. Tiers: `webui-ts-unit`
   (`extpanel.test.ts` — the grammar, plus the RENDERED frame's own `DOMTokenList` against real
   Dockview) and the live `editor-cef-smoke-shell-iframe`.
   ⚠ **Two facts about a sandboxed panel that were MEASURED, not assumed** (ext_scheme.h carries the

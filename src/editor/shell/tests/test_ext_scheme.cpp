@@ -82,6 +82,13 @@ void test_package_id_grammar()
     // a request again — a package that is silently unreachable instead of loudly unmountable.
     CHECK(!shell::is_valid_package_id("Hello-Panel"));
     CHECK(!shell::is_valid_package_id("HELLO"));
+    // INTERIOR position is a DISTINCT axis from a leading one, and these two rows exist because both
+    // rows above are refused by the FIRST/LAST-character check alone — they exercise the character
+    // LOOP not at all, so a loop that stopped refusing upper case would leave every assertion in
+    // this function green. The TS mirror carries the same row (`paCkage`, extpanel.test.ts) for
+    // exactly this reason, added after that plant passed.
+    CHECK(!shell::is_valid_package_id("paCkage"));
+    CHECK(!shell::is_valid_package_id("hello-Panel"));
 
     // Every spelling that reads as a path fragment rather than a name.
     CHECK(!shell::is_valid_package_id("."));
@@ -106,10 +113,14 @@ void test_package_id_grammar()
     CHECK(!shell::is_valid_package_id("*"));
     CHECK(!shell::is_valid_package_id("pkg name"));
 
-    // Control bytes and non-ASCII are refused rather than normalized.
+    // Control bytes and non-ASCII are refused rather than normalized. The first two land INSIDE the
+    // id so they reach the character loop; the third is trailing, so it is the first/last check that
+    // refuses it — `pkg\xc3\xa9x` is the interior twin that reaches the loop, added for the same
+    // reason as the interior upper-case rows above.
     CHECK(!shell::is_valid_package_id(std::string("pkg\0x", 5)));
     CHECK(!shell::is_valid_package_id("pkg\tx"));
     CHECK(!shell::is_valid_package_id("pkg\xc3\xa9"));
+    CHECK(!shell::is_valid_package_id("pkg\xc3\xa9x"));
 }
 
 // ------------------------------------------------------------------------------- the mount table

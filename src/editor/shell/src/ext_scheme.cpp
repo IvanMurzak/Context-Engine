@@ -336,14 +336,32 @@ const char* ext_csp_header()
            "frame-ancestors context-editor://app";
 }
 
+// A second anonymous-namespace block rather than a jump up to the one at the top of the file: this
+// helper is meaningless away from its single caller directly below, and the file's other four
+// helpers are likewise anonymous — nothing here belongs on the library's link surface.
+namespace
+{
+
 bool is_script_media_type(const std::string& mime_type)
 {
     // Essence only — the allowlist's script entries are `text/javascript; charset=utf-8`, and the
     // charset is a separate response field (split_media_type). Compared against the ALLOWLIST's own
     // spelling rather than a set of guesses: app_scheme.cpp maps both `.js` and `.mjs` to exactly
     // this essence, so there is one string to agree with, not a family.
+    //
+    // THE GENERAL RULE IS "FETCHED IN CORS MODE", AND SCRIPTS ARE CURRENTLY ITS ONLY INSTANCE — the
+    // narrowness is the decision, not an oversight. A JSON module (`import … with {type:"json"}`)
+    // would be the next instance, and `.json` IS in the allowlist; it is deliberately NOT covered,
+    // because the header's cost is paid in the other direction: every panel frame shares the opaque
+    // origin `null`, so `Access-Control-Allow-Origin: null` on an asset makes it readable by every
+    // OTHER package's frame. Scripts pay that price because without it the module graph dies
+    // silently (ext_scheme.h's measurement); a data asset does not, and would simply become
+    // cross-package-readable for a feature nothing uses yet. Widening this is e13b's call to make
+    // WITH the capability model, not a one-line fix here.
     return split_media_type(mime_type).essence == "text/javascript";
 }
+
+} // namespace
 
 std::vector<std::pair<std::string, std::string>> ext_response_headers(const std::string& mime_type)
 {
