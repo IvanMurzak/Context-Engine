@@ -1,0 +1,35 @@
+src/editor/webui/core/src/boot.ts
+  s_0c171ff7d6a7f5::t_2631de57703585 39,880-884,907-918,932-939,942-943,959-990,1014-1022
+src/editor/webui/core/src/commands.ts
+  s_0c171ff7d6a7f5::t_7d94e54f1d05c5 185-194
+src/editor/webui/core/src/panelhost.ts
+  s_0c171ff7d6a7f5::t_959254e6f42110 51-53,109,112,242,256-258,338,365-371,854
+src/editor/webui/core/src/panelport.ts
+  s_0c171ff7d6a7f5::t_8202c3df261aac 148-161,401-414
+src/editor/webui/core/src/panelverbs.ts
+  s_0c171ff7d6a7f5::t_87fa7aa6beda6b 202-212,214-225,232-236,273-287,310,316-335,337,407-421,542-543
+src/editor/webui/core/src/test/commands.test.ts
+  s_0c171ff7d6a7f5::t_e2b2e21c474b17 13-19,658-726
+src/editor/webui/core/src/test/extpanel.test.ts
+  s_0c171ff7d6a7f5::t_31982c91f8911f 41,136-139,156,687-728
+src/editor/webui/core/src/test/panelport.test.ts
+  s_0c171ff7d6a7f5::t_72bb1b90f97536 38,790,980-1040
+src/editor/webui/core/src/test/panelverbs.test.ts
+  s_0c171ff7d6a7f5::t_b1bb12b7719697 44-48,73-74,95-99,141-152,156,172-173,703-831
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "6574387c1da25acb9d83602cd28c4d88d4a13113",
+  "prompts": {},
+  "sessions": {
+    "s_0c171ff7d6a7f5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "journal",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
