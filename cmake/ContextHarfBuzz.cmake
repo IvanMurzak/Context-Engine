@@ -29,13 +29,10 @@ set(_hb_pin "${CMAKE_CURRENT_LIST_DIR}/../tools/harfbuzz-source.json")
 if(NOT EXISTS "${_hb_pin}")
     message(FATAL_ERROR "ContextHarfBuzz: pin file not found at ${_hb_pin}")
 endif()
+# Only `version` is read here — url + sha256 + the ordered fallback mirrors (issue #359) stay inside
+# the pin, because context_download_from_pin takes the pin FILE rather than the pieces.
 file(READ "${_hb_pin}" _hb_pin_json)
 string(JSON _hb_version GET "${_hb_pin_json}" version)
-string(JSON _hb_url     GET "${_hb_pin_json}" url)
-string(JSON _hb_sha     GET "${_hb_pin_json}" sha256)
-# Ordered fallback mirrors (issue #359) — same shape as ContextFreetype: the pin's own "mirrors"
-# array is the single source of truth, verified against the SAME sha256 as the primary.
-context_download_pin_mirrors("${_hb_pin_json}" _hb_mirrors)
 
 set(_hb_deps "${CMAKE_BINARY_DIR}/_deps")
 set(_hb_tarball "${_hb_deps}/harfbuzz-${_hb_version}.tar.xz")
@@ -44,12 +41,10 @@ set(_hb_src "${_hb_deps}/harfbuzz-${_hb_version}")
 # --- fetch + verify + extract (idempotent — skip when already extracted) ---------------------------
 if(NOT EXISTS "${_hb_src}/src/harfbuzz.cc")
     file(MAKE_DIRECTORY "${_hb_deps}")
-    context_download(
-        URL             "${_hb_url}"
-        URLS            ${_hb_mirrors}
-        PATH            "${_hb_tarball}"
-        EXPECTED_SHA256 "${_hb_sha}"
-        DESCRIPTION     "HarfBuzz ${_hb_version} source")
+    context_download_from_pin(
+        PIN         "${_hb_pin}"
+        PATH        "${_hb_tarball}"
+        DESCRIPTION "HarfBuzz ${_hb_version} source")
     message(STATUS "ContextHarfBuzz: extracting HarfBuzz ${_hb_version}")
     file(ARCHIVE_EXTRACT INPUT "${_hb_tarball}" DESTINATION "${_hb_deps}")
 endif()

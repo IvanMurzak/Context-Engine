@@ -17,8 +17,20 @@
 #        (the staged bytes are the primary's, so a bad mirror cannot overwrite a verified artifact);
 #     8. URLS-only — the mirror list alone (no URL) is a valid source list;
 #     9/10. context_download_pin_mirrors — a pin with NO "mirrors" key parses to an empty list (so a
-#        mirror-less caller is unchanged), and a pin WITH mirrors parses them in declaration order.
-# BASE_DELAY 0 keeps it instant (no real backoff sleeps).
+#        mirror-less caller is unchanged), and a pin WITH mirrors parses them in declaration order;
+#     11. empty URLS — the mirror-less PRODUCTION call shape (`URLS ${<empty>}`), a different
+#        cmake_parse_arguments path from omitting URLS entirely.
+#   Out of process (cases 12-14, via test_download_retry_child.cmake — behaviours invisible from
+#   inside the calling process: the FATAL_ERROR branch every real caller takes, and assertions about
+#   attempts NOT made / delays NOT inherited):
+#     12. the production fail-closed FATAL message + source de-duplication + per-source backoff reset;
+#     13. a mistyped keyword is rejected instead of silently dropping a mirror list;
+#     14. a source repeating the SAME wrong bytes is abandoned early, and the good mirror still lands.
+#   context_download_from_pin (the pin-driven entry point every pinned caller should use):
+#     15. it reads the pin's `mirrors` and FORWARDS them — proven by an unreachable primary in the
+#        pin still landing off the pin's mirror, so dropping the forward reds this behaviourally;
+#     16. a pin with no "mirrors" key behaves exactly as a single-source fetch did before #359.
+# BASE_DELAY 0 keeps the in-process cases instant; only case 12 sleeps (2s), by design.
 cmake_minimum_required(VERSION 3.25)
 
 foreach(_req CONTEXT_DOWNLOAD_MODULE FIXTURE_DIR WORK_DIR)
@@ -236,7 +248,157 @@ if(NOT _two_mirrors STREQUAL "https://m1.invalid/a;https://m2.invalid/a")
         "urls in order)")
 endif()
 
+# 11. Mirror-less PRODUCTION call shape — `URLS ${<empty>}` leaves the URLS keyword immediately
+#     followed by PATH, which is a DIFFERENT cmake_parse_arguments path from omitting URLS entirely
+#     (cases 1-3). It is exactly what ContextFreetype/ContextHarfBuzz emit for a pin with no
+#     "mirrors" key, so it is the shape the next mirror-less pin will take. Reuses case 9's parse.
+context_download(
+    URL "${_good_url}"
+    URLS ${_no_mirrors}
+    PATH "${WORK_DIR}/empty_urls.bin"
+    EXPECTED_SHA256 "${_good_sha}"
+    DESCRIPTION "selfcheck-empty-urls"
+    RETRIES 2 BASE_DELAY 0
+    RESULT_VARIABLE _rc_empty)
+assert_rc("${_rc_empty}" 0 "empty-URLS case")
+assert_staged("${WORK_DIR}/empty_urls.bin" "${_good_sha}" "empty-URLS case")
+
+# ------------------------------------------------------------------------------------------------
+# Cases 12-14 run OUT OF PROCESS. Three behaviours cannot be observed from inside the calling
+# process: the production FATAL_ERROR branch (real callers omit RESULT_VARIABLE, and a FATAL_ERROR
+# would abort this script), and any assertion about attempts NOT made or delays NOT inherited. The
+# child script exercises them and this script asserts over its exit code + captured output.
+# ------------------------------------------------------------------------------------------------
+set(_test_dir "${CMAKE_CURRENT_LIST_DIR}")
+
+function(run_child _mode _out_rc _out_log)
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}"
+            -D "CONTEXT_DOWNLOAD_MODULE=${CONTEXT_DOWNLOAD_MODULE}"
+            -D "WORK_DIR=${WORK_DIR}/child-${_mode}"
+            -D "MODE=${_mode}"
+            ${ARGN}
+            -P "${_test_dir}/test_download_retry_child.cmake"
+        RESULT_VARIABLE _rc
+        OUTPUT_VARIABLE _out
+        ERROR_VARIABLE _err)
+    set(${_out_rc} "${_rc}" PARENT_SCOPE)
+    # STATUS goes to stdout and WARNING/FATAL_ERROR to stderr; assertions should not care which.
+    # Collapse all whitespace: CMake REFLOWS message(WARNING)/message(FATAL_ERROR) text to its own
+    # width and re-indents it, so a phrase that fits on one line here can arrive split across two
+    # ("...from all 2\n    pinned source(s)..."). Asserting on the raw capture would make every
+    # multi-word needle depend on CMake's wrap column rather than on the behaviour under test.
+    string(REGEX REPLACE "[ \t\r\n]+" " " _flat "${_out}${_err}")
+    set(${_out_log} "${_flat}" PARENT_SCOPE)
+endfunction()
+
+# Literal substring assertions (not regex) so URLs and "source(s)" need no escaping.
+function(assert_log_has _log _needle _label)
+    string(FIND "${_log}" "${_needle}" _pos)
+    if(_pos LESS 0)
+        message(FATAL_ERROR
+            "test_download_retry: ${_label} — expected output to contain '${_needle}'.\n${_log}")
+    endif()
+endfunction()
+
+function(assert_log_lacks _log _needle _label)
+    string(FIND "${_log}" "${_needle}" _pos)
+    if(NOT _pos LESS 0)
+        message(FATAL_ERROR
+            "test_download_retry: ${_label} — output must NOT contain '${_needle}'.\n${_log}")
+    endif()
+endfunction()
+
+# 12. Production fail-closed path + de-duplication + per-source backoff RESET.
+#     A caller that omits RESULT_VARIABLE gets message(FATAL_ERROR) — the branch every real caller
+#     takes and the only diagnostic anyone gets during a real outage, so its content is asserted.
+#     The primary is repeated inside URLS, so the reported source count proves de-duplication ran
+#     (2, not 3). RETRIES 2 + BASE_DELAY 1 makes each source emit exactly ONE "retrying in <n>s":
+#     with the per-source reset both read 1s; hoisting `set(_delay ...)` out of the source loop
+#     would make the second read 3s, so this reds on that regression without timing anything.
+run_child(fatal _rc_fatal _log_fatal)
+if(_rc_fatal EQUAL 0)
+    message(FATAL_ERROR "test_download_retry: fatal case exited 0 — the FATAL_ERROR branch did not fire")
+endif()
+assert_log_has("${_log_fatal}" "from all 2 pinned source(s)" "fatal case (de-duplication)")
+assert_log_has("${_log_fatal}" "R-SEC-009 fail-closed" "fatal case (refusal is attributed)")
+assert_log_has("${_log_fatal}" "Per-source reason:" "fatal case (self-contained diagnosis)")
+assert_log_has("${_log_fatal}" "dead-a.bin" "fatal case (primary named in the reason log)")
+assert_log_has("${_log_fatal}" "dead-b.bin" "fatal case (mirror named in the reason log)")
+assert_log_lacks("${_log_fatal}" "retrying in 3s" "fatal case (backoff reset per source)")
+string(REGEX MATCHALL "retrying in 1s" _resets "${_log_fatal}")
+list(LENGTH _resets _reset_count)
+if(NOT _reset_count EQUAL 2)
+    message(FATAL_ERROR
+        "test_download_retry: fatal case — expected both sources to restart the backoff at 1s, saw "
+        "${_reset_count} such retries.\n${_log_fatal}")
+endif()
+
+# 13. Mistyped keyword — a silently dropped mirror list is the "fallback that can never fire" mode
+#     the pin guard exists to prevent, but no guard covers the non-pin call sites (src/render, the
+#     spikes). cmake_parse_arguments swallows an unknown keyword, so context_download rejects it.
+run_child(badarg _rc_badarg _log_badarg)
+if(_rc_badarg EQUAL 0)
+    message(FATAL_ERROR "test_download_retry: badarg case exited 0 — a mistyped keyword was accepted")
+endif()
+assert_log_has("${_log_badarg}" "unrecognized argument(s): MIRRORS" "badarg case")
+
+# 14. A source serving the SAME wrong bytes every time is abandoned rather than retried to
+#     exhaustion (a repeated-identical hash is a deterministic wrong artifact, not a truncation).
+#     RETRIES 8: attempt 2 must appear (the repeat was seen) and attempt 3 must NOT (the remaining
+#     budget was dropped), while the good mirror still lands — an early abandon, never a failure.
+run_child(repeated-mismatch _rc_repeat _log_repeat
+    -D "WRONG_URL=${_wrong_url}"
+    -D "GOOD_URL=${_good_url}"
+    -D "GOOD_SHA=${_good_sha}")
+assert_rc("${_rc_repeat}" 0 "repeated-mismatch case")
+assert_log_has("${_log_repeat}" "attempt 2/8" "repeated-mismatch case (the repeat was detected)")
+assert_log_lacks("${_log_repeat}" "attempt 3/8" "repeated-mismatch case (budget abandoned)")
+
+# 15. context_download_from_pin — the pin-driven entry point, which reads url + sha256 + mirrors out
+#     of the pin FILE so a call site cannot forget to forward the mirror list. Asserted
+#     BEHAVIOURALLY rather than by linting the consuming module's text: the pin's primary is
+#     unreachable and the fetch still lands, which can only happen if the pin's `mirrors` array was
+#     read AND passed through. Stop forwarding it and this reds.
+set(_pin_file "${WORK_DIR}/thing-source.json")
+file(WRITE "${_pin_file}"
+    "{\n"
+    "  \"version\": \"1.0\",\n"
+    "  \"url\": \"${_unreachable}\",\n"
+    "  \"mirrors\": [\"${_good_url}\"],\n"
+    "  \"sha256\": \"${_good_sha}\"\n"
+    "}\n")
+context_download_from_pin(
+    PIN         "${_pin_file}"
+    PATH        "${WORK_DIR}/from_pin.bin"
+    DESCRIPTION "selfcheck-from-pin"
+    RETRIES 2 BASE_DELAY 0
+    RESULT_VARIABLE _rc_pin
+    SOURCE_VARIABLE _src_pin)
+assert_rc("${_rc_pin}" 0 "from-pin case")
+assert_staged("${WORK_DIR}/from_pin.bin" "${_good_sha}" "from-pin case")
+assert_source("${_src_pin}" "${_good_url}" "from-pin case")
+
+# 16. context_download_from_pin over a MIRROR-LESS pin — no "mirrors" key at all, which must behave
+#     exactly as a single-source fetch did before #359 rather than erroring on the missing key.
+set(_pin_bare "${WORK_DIR}/bare-source.json")
+file(WRITE "${_pin_bare}"
+    "{\n"
+    "  \"version\": \"1.0\",\n"
+    "  \"url\": \"${_good_url}\",\n"
+    "  \"sha256\": \"${_good_sha}\"\n"
+    "}\n")
+context_download_from_pin(
+    PIN         "${_pin_bare}"
+    PATH        "${WORK_DIR}/from_bare_pin.bin"
+    DESCRIPTION "selfcheck-from-pin-no-mirrors"
+    RETRIES 2 BASE_DELAY 0
+    RESULT_VARIABLE _rc_bare)
+assert_rc("${_rc_bare}" 0 "from-pin mirror-less case")
+assert_staged("${WORK_DIR}/from_bare_pin.bin" "${_good_sha}" "from-pin mirror-less case")
+
 message(STATUS
-    "test_download_retry: all 10 cases passed (success / fail-closed / transient / fallback / "
+    "test_download_retry: all 16 cases passed (success / fail-closed / transient / fallback / "
     "skip-bad-mirror / all-sources-bad / primary-preference / urls-only / pin-no-mirrors / "
-    "pin-mirrors-in-order)")
+    "pin-mirrors-in-order / empty-URLS / fatal+dedup+backoff-reset / badarg / repeated-mismatch / "
+    "from-pin / from-pin-no-mirrors)")
