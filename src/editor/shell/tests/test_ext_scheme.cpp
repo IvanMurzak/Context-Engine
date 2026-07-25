@@ -919,6 +919,378 @@ void test_app_policy_permits_framing_this_scheme()
     CHECK(shelltest::count_occurrences(app_csp, "data:") == 1);
 }
 
+// ------------------------------------------------- the e13b-1 panel-port bootstrap (ext_scheme.h)
+
+// The SYNTHETIC asset — the one path this scheme answers out of itself.
+//
+// Its whole security argument is WHERE it sits in `resolve`, so this block asserts that position from
+// both sides: it is served for a mounted package, and it is refused — with the SAME status and reason
+// an absent asset gets — for one that is not. A resolver that answered the bootstrap before consulting
+// the mount table would be a package-enumeration oracle (200 for every syntactically valid id), which
+// is exactly what the pairing below detects and what a bare `ok()` check on the positive case alone
+// would not.
+void test_port_bootstrap_asset()
+{
+    const std::filesystem::path root = shelltest::make_temp_project("ctx-ext-scheme", "bootstrap");
+    const std::filesystem::path pkg = root / "hello-panel";
+    write_file(pkg / "index.html", "<!DOCTYPE html><html></html>");
+
+    shell::ExtAssetResolver resolver;
+    std::string reason;
+    CHECK(resolver.mount("hello-panel", pkg, reason));
+
+    const std::string asset = std::string("context-ext://hello-panel/") + shell::kExtPortBootstrapAsset;
+    {
+        const shell::ExtResolution r = resolver.resolve(asset);
+        CHECK(r.ok());
+        CHECK(r.synthetic);
+        CHECK(r.http_status() == 200);
+        CHECK(r.package_id == "hello-panel");
+        // Classified through the SHARED allowlist, not a literal, so it carries the same
+        // `Access-Control-Allow-Origin: null` every other script response does.
+        CHECK(r.mime_type == "text/javascript; charset=utf-8");
+        // No file is named — the caller must take the bytes from `ext_port_bootstrap_script()`, and a
+        // path here would invite a caller to read one.
+        CHECK(r.file.empty());
+    }
+    {
+        // AN UNMOUNTED PACKAGE GETS NOTHING, and gets it in the SAME shape an absent asset does.
+        // `ctx.absent` is grammatically valid, so this refusal can only come from the mount table.
+        const shell::ExtResolution r =
+            resolver.resolve(std::string("context-ext://ctx.absent/") + shell::kExtPortBootstrapAsset);
+        CHECK(!r.ok());
+        CHECK(!r.synthetic);
+        CHECK(r.status == shell::AssetStatus::not_found);
+        CHECK(r.reason == "package is not mounted");
+    }
+    {
+        // EXACTLY ONE SEGMENT, and exactly that name. A nested spelling is an ordinary path that
+        // resolves against the package root and 404s there like any other absent file — asserted so
+        // the synthetic branch cannot be reached by a request the containment rules never saw.
+        const shell::ExtResolution nested = resolver.resolve(
+            std::string("context-ext://hello-panel/sub/") + shell::kExtPortBootstrapAsset);
+        CHECK(!nested.ok());
+        CHECK(!nested.synthetic);
+        CHECK(nested.status == shell::AssetStatus::not_found);
+        CHECK(nested.reason == "no such asset");
+        // And a traversal that ENDS in the reserved name is still a traversal: the textual pass runs
+        // first, so this must report the traversal gate rather than the synthetic 200.
+        const shell::ExtResolution up = resolver.resolve(
+            std::string("context-ext://hello-panel/../") + shell::kExtPortBootstrapAsset);
+        CHECK(!up.ok());
+        CHECK(!up.synthetic);
+        CHECK(up.status == shell::AssetStatus::forbidden);
+        CHECK(up.reason == "'..' traversal segment");
+    }
+    {
+        // The reserved name does NOT shadow a real file of another name, and the package's own assets
+        // are unaffected by the branch existing at all.
+        const shell::ExtResolution real =
+            resolver.resolve("context-ext://hello-panel/index.html");
+        CHECK(real.ok());
+        CHECK(!real.synthetic);
+    }
+
+    shelltest::cleanup(root);
+}
+
+// The bootstrap script's BYTES. Pinned because they are the only editor-authored code that ever runs
+// inside a third-party document, and because each property below is one the header claims and nothing
+// else enforces.
+void test_port_bootstrap_script()
+{
+    const std::string script = shell::ext_port_bootstrap_script();
+
+    // Assembled FROM the constants — so each of the three appears, and a rename that missed the
+    // assembly would drop it here rather than at a silent runtime mismatch.
+    CHECK(shelltest::mentions(script, shell::kExtPortHandshakeTag));
+    CHECK(shelltest::mentions(script, shell::kExtPortGlobalName));
+    CHECK(shelltest::mentions(script, shell::kAppOrigin));
+
+    // IT TRANSFERS, and it transfers exactly one port of a channel it created itself. This is the
+    // direction the whole design rests on (the child mints the channel; the host never posts a port
+    // down), so its two halves are asserted separately.
+    CHECK(shelltest::mentions(script, "new MessageChannel()"));
+    CHECK(shelltest::mentions(script, "[channel.port2]"));
+    CHECK(shelltest::mentions(script, "channel.port1"));
+
+    // NEVER `"*"`. This is the ONE direction in which a precise target origin is possible, and a
+    // wildcard here would make the port deliverable to any embedder that got hold of the frame.
+    CHECK(!shelltest::mentions(script, "\"*\""));
+    CHECK(!shelltest::mentions(script, "'*'"));
+
+    // The not-framed early return, so a panel document opened directly transfers nothing to itself.
+    CHECK(shelltest::mentions(script, "window.parent === window"));
+
+    // The global is installed unwritable + unconfigurable, so a package bundle cannot clobber the
+    // port with a look-alike and strand the real one.
+    CHECK(shelltest::mentions(script, "writable: false"));
+    CHECK(shelltest::mentions(script, "configurable: false"));
+
+    // Pure ASCII and no embedded closing tag — the header's fourth property. `</script` would
+    // truncate the host document the day this is ever inlined rather than served.
+    CHECK(!shelltest::mentions(script, "</script"));
+    for (const char ch : script)
+    {
+        CHECK(static_cast<unsigned char>(ch) < 0x80);
+    }
+
+    // STABLE ACROSS CALLS — it is served on every panel navigation and is built once behind a
+    // function-local static, so an accidental per-call rebuild would be a silent allocation on the
+    // CEF IO thread, and a rebuild returning `c_str()` of a LOCAL would be a dangling read there.
+    // Compared as POINTERS, deliberately: a content compare is satisfied by both of those defects,
+    // which are the only ones this assertion exists to catch.
+    CHECK(shell::ext_port_bootstrap_script() == shell::ext_port_bootstrap_script());
+    CHECK(std::string(shell::ext_port_bootstrap_script()) == script);
+}
+
+// WHERE THE TAG IS SPLICED — the adversarial half, and the one that decides whether the bootstrap
+// really runs before package code.
+//
+// The table is built around the ONE property that matters: for every prefix shape a document can
+// start with, our tag must end up ahead of ANY `<script>` the document carries. The cases are
+// therefore chosen by what they put FIRST, not by what looks like valid HTML.
+void test_port_bootstrap_injection()
+{
+    const std::string tag =
+        std::string("<script src=\"/") + shell::kExtPortBootstrapAsset + "\"></script>";
+    const std::string html = "text/html; charset=utf-8";
+
+    // Helper: is OUR tag the document's very first `<script`?
+    //
+    // ⚠ SEARCHED FROM OFFSET 0, never from the end of our own tag. Starting the search after
+    // ourselves can only ever find a LATER script, so `ours < theirs` would be unconditionally true
+    // and this helper would silently collapse into "the tag is present somewhere" — passing on the
+    // exact output a "find the doctype anywhere" regression produces.
+    const auto injected_before_own_script = [&tag](const std::string& out) {
+        const std::size_t ours = out.find(tag);
+        return ours != std::string::npos && out.find("<script") == ours;
+    };
+
+    {
+        // A LEADING DOCTYPE ⇒ spliced immediately after it, so standards mode survives. The tag must
+        // NOT precede the doctype: displacing it is a silent switch to quirks mode for third-party
+        // layout.
+        const std::string out = shell::ext_inject_port_bootstrap(
+            html, "<!DOCTYPE html>\n<html><head><script src=\"panel.js\"></script></head></html>");
+        CHECK(out.rfind("<!DOCTYPE html>", 0) == 0);
+        CHECK(out.find(tag) == std::string("<!DOCTYPE html>").size());
+        CHECK(injected_before_own_script(out));
+    }
+    {
+        // Case-insensitive, lower case, and with attributes + a BOM + leading whitespace — all shapes
+        // that may legitimately precede content, none of which may cost us the doctype.
+        for (const std::string& prefix :
+             {std::string("<!doctype html>"),
+              std::string("<!DocType HTML SYSTEM \"about:legacy-compat\">"),
+              std::string("\xEF\xBB\xBF<!doctype html>"), std::string("\n\t  <!doctype html>")})
+        {
+            const std::string out =
+                shell::ext_inject_port_bootstrap(html, prefix + "<script src=\"p.js\"></script>");
+            CHECK(out.find(tag) == prefix.size());
+            CHECK(injected_before_own_script(out));
+        }
+    }
+    {
+        // ⚠ THE CASE THE RULE EXISTS FOR: a `<script>` BEFORE the doctype. A "find the doctype
+        // anywhere" implementation would splice after it and run package code FIRST — the exact
+        // property-1 violation the header names. The doctype is not first, so we go to offset 0.
+        const std::string body = "<script src=\"evil.js\"></script><!doctype html><html></html>";
+        const std::string out = shell::ext_inject_port_bootstrap(html, body);
+        CHECK(out.rfind(tag, 0) == 0);
+        CHECK(injected_before_own_script(out));
+    }
+    {
+        // A COMMENT before the doctype takes the same answer. ⚠ THIS ONE COSTS SOMETHING REAL and is
+        // accepted knowingly: `<!-- c --><!doctype html>` is legal STANDARDS-mode HTML (the "before
+        // html" insertion mode ignores comments), so splicing at 0 demotes it to quirks. Skipping the
+        // comment instead means scanning third-party bytes for `-->` — a tokenizer's worth of
+        // judgement about adversarial input, in order to move OUR script LATER. Pinned so the
+        // trade-off is a decision on the record rather than an accident.
+        const std::string out = shell::ext_inject_port_bootstrap(
+            html, "<!-- hello --><!doctype html><script src=\"p.js\"></script>");
+        CHECK(out.rfind(tag, 0) == 0);
+        CHECK(injected_before_own_script(out));
+    }
+    {
+        // ⚠ A UTF-8 BOM STAYS AT BYTE 0 EVEN ON THE FALL-THROUGH PATHS. BOM sniffing is step one of
+        // the HTML encoding algorithm and OUTRANKS the `charset` on `Content-Type`, so a tag spliced
+        // ahead of the BOM is not a cosmetic displacement — it drops the document from "encoding
+        // known with confidence certain" to the transport default. The doctype-first case already
+        // covered the BOM above; these are the three shapes that reach a GIVE-UP path with a BOM
+        // present, which is where a bare `return 0` would put the tag in front of it.
+        const std::string bom = "\xEF\xBB\xBF";
+        for (const std::string& rest :
+             {std::string("<html><script src=\"p.js\"></script></html>"),
+              std::string("<!-- c --><!doctype html><script src=\"p.js\"></script>"),
+              "<!doctype " + std::string(shell::kExtDoctypeScanLimit + 64, 'x') + ">"})
+        {
+            const std::string out = shell::ext_inject_port_bootstrap(html, bom + rest);
+            CHECK(out.rfind(bom, 0) == 0);
+            CHECK(out.find(tag) == bom.size());
+        }
+    }
+    {
+        // No doctype at all — already quirks, so offset 0 costs nothing.
+        const std::string out =
+            shell::ext_inject_port_bootstrap(html, "<html><script src=\"p.js\"></script></html>");
+        CHECK(out.rfind(tag, 0) == 0);
+        CHECK(injected_before_own_script(out));
+    }
+    {
+        // An UNTERMINATED doctype must not become an unbounded scan, and must still fail SAFE. The
+        // padding is longer than the scan limit, so the '>' is beyond it.
+        const std::string body =
+            "<!doctype " + std::string(shell::kExtDoctypeScanLimit + 64, 'x') + ">";
+        const std::string out = shell::ext_inject_port_bootstrap(html, body);
+        CHECK(out.rfind(tag, 0) == 0);
+    }
+    {
+        // A doctype whose '>' sits just INSIDE the limit is still honoured — the bound is a bound, not
+        // an off-by-one that silently disables the standards-mode case for any long doctype.
+        const std::string prefix =
+            "<!doctype html " + std::string(shell::kExtDoctypeScanLimit - 32, 'a') + ">";
+        const std::string out = shell::ext_inject_port_bootstrap(html, prefix + "<html></html>");
+        CHECK(out.find(tag) == prefix.size());
+    }
+    {
+        // AN EMPTY DOCUMENT still gets the bootstrap: a package whose entry is empty is broken, but it
+        // must not be the one document that silently escapes the mechanism.
+        CHECK(shell::ext_inject_port_bootstrap(html, "") == tag);
+    }
+    {
+        // EVERY OTHER MEDIA TYPE PASSES THROUGH BYTE-IDENTICAL. Driven from the shared allowlist so a
+        // media type added later cannot quietly start being rewritten — and asserted on a body that
+        // LOOKS like HTML, because the decision must be the declared type's, never the bytes'.
+        const std::string htmlish = "<!doctype html><html></html>";
+        for (const auto& [extension, mime] : shell::asset_media_types())
+        {
+            const std::string out = shell::ext_inject_port_bootstrap(mime, htmlish);
+            if (shell::split_media_type(mime).essence == "text/html")
+            {
+                CHECK(out != htmlish);
+                continue;
+            }
+            if (out != htmlish)
+            {
+                std::fprintf(stderr, "  [ext-inject] %s (%s) was rewritten\n", extension.c_str(),
+                             mime.c_str());
+            }
+            CHECK(out == htmlish);
+        }
+        // Including the bare essence with no charset, and an unlistable type.
+        CHECK(shell::ext_inject_port_bootstrap("text/plain", htmlish) == htmlish);
+        CHECK(shell::ext_inject_port_bootstrap("", htmlish) == htmlish);
+        // ...while the bare HTML essence IS rewritten: the charset is a separate response field, so
+        // classification must key off the essence alone.
+        CHECK(shell::ext_inject_port_bootstrap("text/html", htmlish) != htmlish);
+    }
+    {
+        // Asserted on the bytes the FUNCTION EMITS, not on this file's local `tag` literal — the
+        // property is what the Shell writes into third-party documents, and a test that inspects the
+        // string the test itself just built is only testing `kExtPortBootstrapAsset`'s spelling.
+        const std::string emitted = shell::ext_inject_port_bootstrap(html, "");
+        // THE TAG IS AN ABSOLUTE PATH, which is what makes it resolve against the package ORIGIN
+        // rather than the entry document's directory. A relative spelling 404s the bootstrap for every
+        // package whose entry is not at the root.
+        CHECK(shelltest::mentions(emitted, "src=\"/"));
+        // A CLASSIC external script — no `type="module"` and no `defer`/`async`, each of which would
+        // defer execution past the package's own inline-order scripts and break property 1.
+        CHECK(!shelltest::mentions(emitted, "module"));
+        CHECK(!shelltest::mentions(emitted, "defer"));
+        CHECK(!shelltest::mentions(emitted, "async"));
+    }
+    {
+        // NOTHING ELSE IN THE DOCUMENT MOVES: the output is the input with exactly the tag inserted,
+        // asserted by reconstructing the input from the output.
+        const std::string body = "<!doctype html><html><body>hello &amp; goodbye</body></html>";
+        const std::string out = shell::ext_inject_port_bootstrap(html, body);
+        const std::size_t at = out.find(tag);
+        CHECK(at != std::string::npos);
+        CHECK(out.substr(0, at) + out.substr(at + tag.size()) == body);
+        CHECK(out.size() == body.size() + tag.size());
+    }
+}
+
+// WHAT MAY BE A PANEL DOCUMENT (M9 e13b-1) — the companion gate to the splice.
+//
+// The property under test is a RELATIONSHIP, not a list: nothing may be navigated to that
+// `ext_inject_port_bootstrap` would decline to rewrite. Asserted as that biconditional over the
+// shared allowlist, so a media type added later cannot become framable without also becoming
+// bootstrapped, whichever of the two a future edit touches first.
+void test_document_media_type_gate()
+{
+    const std::string htmlish = "<!doctype html><html></html>";
+    for (const auto& [extension, mime] : shell::asset_media_types())
+    {
+        const bool navigable = shell::ext_document_media_type_permitted(mime);
+        const bool rewritten = shell::ext_inject_port_bootstrap(mime, htmlish) != htmlish;
+        if (navigable != rewritten)
+        {
+            std::fprintf(stderr,
+                         "  [ext-doc-gate] %s (%s): navigable=%d but bootstrapped=%d — a document "
+                         "may never reach a media type the splice does not cover\n",
+                         extension.c_str(), mime.c_str(), static_cast<int>(navigable),
+                         static_cast<int>(rewritten));
+        }
+        CHECK(navigable == rewritten);
+    }
+
+    // ⚠ THE SHAPE THAT MOTIVATED THE GATE. SVG is scriptable, framable, AND on the shared asset
+    // allowlist, while the panel-entry grammar constrains scheme/id/path and never the media type —
+    // so without this an `entry` of `panel.svg` would be a document that runs package code with NO
+    // bootstrap ahead of it, free to navigate the frame onward and claim the grant from the next
+    // document's bootstrap (ext_scheme.h property 1).
+    CHECK(!shell::ext_document_media_type_permitted("image/svg+xml"));
+    // Neither may the synthetic bootstrap itself be navigated to, nor an XHTML document — which is
+    // scriptable too and is deliberately NOT on the allowlist, so it can only arrive by a future
+    // edit adding it.
+    CHECK(!shell::ext_document_media_type_permitted("text/javascript; charset=utf-8"));
+    CHECK(!shell::ext_document_media_type_permitted("application/xhtml+xml"));
+    CHECK(!shell::ext_document_media_type_permitted(""));
+
+    // ...and the ESSENCE alone decides, exactly as the splice does — the charset is a separate
+    // response field, so a document must not become unframable by declaring one.
+    CHECK(shell::ext_document_media_type_permitted("text/html"));
+    CHECK(shell::ext_document_media_type_permitted("text/html; charset=utf-8"));
+
+    // THE REFUSAL'S OWN SHAPE, asserted here because the CEF binding only passes a bool: `!ok()`
+    // cannot tell a held boundary from a differently-held one, so the status and the reason are part
+    // of the contract. Nothing else on any leg reaches this refusal — the live iframe smoke's fixture
+    // only ever navigates `index.html`.
+    {
+        shell::ExtResolution svg;
+        svg.status = shell::AssetStatus::ok;
+        svg.mime_type = "image/svg+xml";
+        // NOT a document navigation ⇒ untouched. A panel's `<img src="…/icon.svg">` still resolves.
+        shell::ext_apply_document_gate(svg, /*is_document_navigation*/ false);
+        CHECK(svg.ok());
+
+        shell::ext_apply_document_gate(svg, /*is_document_navigation*/ true);
+        CHECK(!svg.ok());
+        CHECK(svg.status == shell::AssetStatus::forbidden);
+        CHECK(svg.reason == "media type may not be a panel document");
+
+        // HTML is a document ⇒ untouched, so the gate cannot refuse the panels it exists to protect.
+        shell::ExtResolution html_doc;
+        html_doc.status = shell::AssetStatus::ok;
+        html_doc.mime_type = "text/html; charset=utf-8";
+        shell::ext_apply_document_gate(html_doc, /*is_document_navigation*/ true);
+        CHECK(html_doc.ok());
+
+        // AN ALREADY-REFUSED RESOLUTION KEEPS ITS OWN REASON. The first refusal is the honest one;
+        // overwriting it would replace a mount/path/id diagnostic with a media-type one and make the
+        // resolver's enumeration defence unreadable in the log.
+        shell::ExtResolution unmounted;
+        unmounted.status = shell::AssetStatus::not_found;
+        unmounted.reason = "package is not mounted";
+        unmounted.mime_type = "image/svg+xml";
+        shell::ext_apply_document_gate(unmounted, /*is_document_navigation*/ true);
+        CHECK(unmounted.status == shell::AssetStatus::not_found);
+        CHECK(unmounted.reason == "package is not mounted");
+    }
+}
+
 void test_http_status_mapping()
 {
     CHECK(shell::http_status_for(shell::AssetStatus::ok) == 200);
@@ -946,6 +1318,10 @@ int main()
     test_scheme_constants();
     test_ext_csp_and_headers();
     test_app_policy_permits_framing_this_scheme();
+    test_port_bootstrap_asset();
+    test_port_bootstrap_script();
+    test_port_bootstrap_injection();
+    test_document_media_type_gate();
     test_http_status_mapping();
     SHELL_TEST_MAIN_END();
 }

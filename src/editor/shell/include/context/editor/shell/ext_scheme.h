@@ -37,20 +37,74 @@
 // the install path must refuse a package root containing a reparse point it did not create, rather
 // than leaving the property to the STL that happened to compile the resolver.
 //
-// ⚠ E13B OBLIGATION (RE-HOMED FROM e13a-2, WHICH SHIPPED NO TRANSPORT) — BIND THE BRIDGE TO A
-// VERIFIED ORIGIN, NOT TO THE FRAME. editor-core's widened `frame-src context-ext:` is a
-// SCHEME-source, so it permits every package; and a `sandbox="allow-scripts"` frame may always
-// navigate ITSELF (sandbox restricts navigating the TOP). Panel A can therefore set
-// `location = 'context-ext://b/index.html'`, and the frame element editor-core believes hosts A now
-// hosts B. No bytes leak today — A's own script is destroyed by the navigation, and this scheme
-// still serves each origin only its own root — but any capability or MessagePort hands to "the A
-// frame" would land in B's document. The bridge must key off the handshake's verified
-// `event.origin`, never off the element it was granted to.
+// ⚠ E13B OBLIGATION — DISCHARGED IN M9 e13b-1. Recorded in full because the SHAPE of the answer is
+// the reviewable part, and because the obligation as originally written names a control that does
+// not exist.
 //
-// e13a-2 landed the iframe HOST and deliberately installs NO `message` listener at all
-// (panelhost.ts `IframePanelRenderer`): an editor that listened before the port handshake existed
-// would be accepting unauthenticated postMessages from untrusted code for no capability in return.
-// So the hazard above is inert until e13b, which is exactly why it is recorded on e13b.
+// THE HAZARD. editor-core's widened `frame-src context-ext:` is a SCHEME-source, so it permits every
+// package; and a `sandbox="allow-scripts"` frame may always navigate ITSELF (sandbox restricts
+// navigating the TOP). Panel A can therefore set `location = 'context-ext://b/index.html'`, and the
+// frame element editor-core believes hosts A now hosts B — so any capability or MessagePort handed to
+// "the A frame" would land in B's document.
+//
+// ⚠ THE OBLIGATION'S OWN PRESCRIPTION ("key off the handshake's verified `event.origin`") IS NOT
+// IMPLEMENTABLE, and e13b-1 measured why rather than working around it silently. `IFRAME_SANDBOX`
+// (extpanel.ts) never carries `allow-same-origin`, so EVERY panel document reports the opaque origin
+// `"null"` — one string shared by every package, which distinguishes nothing. The reflexive
+// substitute is no better: an iframe's `WindowProxy` is STABLE ACROSS SAME-SLOT NAVIGATIONS (a
+// web-platform property, not a bug), so an incoming `MessageEvent.source` compares EQUAL to
+// `frame.contentWindow` whether the message came from the first document ever loaded into that frame
+// or the third. Neither origin nor source/element identity can name a DOCUMENT INSTANCE.
+//
+// WHAT ACTUALLY DISCRIMINATES, and it is this file's own layer: only the SHELL knows which package's
+// bytes it served into a frame. So the bridge is bound not to an origin string but to a
+// SHELL-INJECTED, ALWAYS-FIRST BOOTSTRAP: every `text/html` document this scheme serves gets
+// `<script src="/<kExtPortBootstrapAsset>">` spliced in ahead of any SCRIPT the document itself
+// carries (`ext_inject_port_bootstrap` — a leading doctype is stepped over, the ONE thing that may
+// precede the tag, and it carries no code), and that script — OUR code, not the package's — is what
+// creates the `MessageChannel` and transfers one port UP to the editor
+// (`ext_port_bootstrap_script`). Three properties follow, and the design needs all three:
+//
+//   1. IT RUNS FIRST, BY BROWSER-ENFORCED DOCUMENT ORDER — an external CLASSIC script in the head
+//      blocks parsing until it has executed, and it is spliced ahead of any script the package
+//      wrote. So the FIRST handshake a frame ever emits comes from the document the host navigated
+//      to, not from whatever the package later navigates to. A package cannot decline to emit it in
+//      order to leave the one-shot grant unclaimed for a second document.
+//      ⚠ THIS HOLDS ONLY BECAUSE EVERY PANEL DOCUMENT IS `text/html`, and that is ENFORCED
+//      (`ext_document_media_type_permitted`), not assumed. The splice is keyed on the media type, so
+//      a SCRIPTABLE document of any other type would run package code with no bootstrap at all —
+//      and `image/svg+xml` is both scriptable and on the shared asset allowlist. Such a document
+//      could then `location.replace()` to a second `context-ext://` document DURING PARSE, whose
+//      bootstrap would emit the first handshake the host ever sees, while the aborted navigation
+//      means the frame's own `load` never fires and editor-core's revocation never runs. That is
+//      verbatim the hazard this file declares discharged, so the media type of a DOCUMENT
+//      NAVIGATION is refused at the binding rather than left to the panel manifest.
+//   2. THE CHILD CREATES THE CHANNEL AND TRANSFERS THE PORT UPWARD, so the host NEVER posts a port
+//      DOWN to a Window. That removes a real race the reverse direction cannot close: a host that
+//      answered a handshake by posting a port to `event.source` would be naming a stable WindowProxy,
+//      and if a navigation completed between the handshake being queued and the reply being
+//      delivered, the port would land in the NEW document. Here the port the host keeps is entangled
+//      with a port that only ever existed inside the handshaking document's realm; that document's
+//      navigation destroys its end, and no other document can obtain it (a `MessagePort` is not
+//      structured-cloneable, `frame-src`/`child-src`/`worker-src 'none'` leave the panel no second
+//      realm to hand it to, and the panel has no handle on any other frame).
+//   3. IT NEEDS NO CSP RELAXATION. An INLINE bootstrap would have required a `'nonce-…'` source on
+//      `script-src`, and a nonce is readable by the document's own script (`HTMLScriptElement.nonce`
+//      is not hidden from the IDL attribute), which would hand every panel an effective
+//      `'unsafe-inline'` — a real loss for a package that renders untrusted data of its own. An
+//      EXTERNAL script on the package's own origin is already authorized by `script-src 'self'`, so
+//      the policy below is unchanged, byte for byte.
+//
+// The editor-core half (panelport.ts) supplies the two remaining halves of the grant: the ONE-SHOT
+// (the first conforming handshake per frame is accepted and every later one refused, which is what
+// makes property 1 load-bearing) and REVOCATION ON RE-NAVIGATION (a second `load` event on the frame
+// element closes the port), so a document that somehow did obtain one holds a dead channel.
+//
+// ⚠ WHAT IS STILL NOT CLAIMED. This binds the port to the FIRST DOCUMENT LOADED INTO THE FRAME, and
+// that document is the one the host navigated to — it does NOT prove to the host WHICH PACKAGE that
+// was. Nothing in the browser can: the host chose the URL, so it knows the package it ASKED for, and
+// the Shell served exactly that URL. The residual gap is therefore a Shell/editor-core agreement,
+// not a browser-verified fact, and it is recorded as such rather than dressed up as authentication.
 //
 // CROSS-PACKAGE READS ARE THE AXIS THIS EXISTS TO CLOSE, and containment-per-root is NOT
 // sufficient on its own: if package B's root sat INSIDE package A's root, then
@@ -92,6 +146,53 @@ inline constexpr const char* kExtDefaultDocument = "index.html";
 // unbounded host is an unbounded key into the mount table and an unbounded string in every log line
 // a refusal writes.
 inline constexpr std::size_t kExtPackageIdMaxLength = 64;
+
+// ------------------------------------------------------- the e13b-1 panel-port bootstrap vocabulary
+
+// The ONE asset path this scheme serves out of ITSELF rather than out of a package (M9 e13b-1): the
+// port bootstrap the injected `<script src>` fetches. RESERVED — a package file at this path is
+// unreachable, which is stated rather than enforced because enforcing it would mean a filesystem
+// probe at mount time for a name no package has any reason to use.
+//
+// The leading '.' is load-bearing as a NAMESPACE MARKER, not as a hidden-file convention: it is one
+// segment (so `split_safe_path_segments` accepts it — only the exact `.` and `..` segments are
+// refused), and the injected tag names it ABSOLUTELY (`/` + this) so it resolves against the package
+// ORIGIN. A relative spelling would resolve against the entry document's DIRECTORY, which silently
+// 404s the bootstrap for any package whose entry is not at the root (`context-ext://pkg/ui/index.html`
+// would fetch `/ui/.context-panel-port.js`) — a whole class of package that would come up portless
+// with nothing naming the cause.
+inline constexpr const char* kExtPortBootstrapAsset = ".context-panel-port.js";
+
+// The handshake message's `ctx` discriminator — MIRRORED in editor-core (`EXT_PORT_HANDSHAKE_TAG`,
+// panelport.ts) and byte-compared against it by `tools/check_webui_assets.py --scheme-contract`
+// (ctest `webui-scheme-contract`), exactly as the scheme vocabulary above is.
+//
+// THE PROTOCOL VERSION IS IN THE STRING ON PURPOSE. A separate numeric constant is the obvious
+// spelling and it is the one that rots: the contract gate reads STRING constants out of the built
+// bundle, so a numeric version drifting between the injected script and the host's check would be
+// invisible to it — and the failure mode is total (the host refuses every handshake, every panel is
+// portless, nothing names why). Folding the version into the gated string makes a version bump a
+// RENAME, which the gate cannot miss.
+inline constexpr const char* kExtPortHandshakeTag = "context.panel-port.v1";
+
+// Where the bootstrap publishes the panel's end of the channel, for the package's own code:
+// `window.contextPanelPort`. A PACKAGE-facing name, so it is deliberately NOT in the cross-language
+// contract gate — editor-core never reads it (it lives inside a document editor-core cannot touch),
+// and the only consumer is third-party code in the panel's own realm.
+inline constexpr const char* kExtPortGlobalName = "contextPanelPort";
+
+// The BUDGET for both prefix scans `ext_inject_port_bootstrap` runs before splicing: how far the
+// leading-whitespace skip may walk, and how far past the start of a `<!doctype` the terminating '>'
+// may sit. Declared with its siblings above rather than beside the function, so the header has one
+// home for this vocabulary.
+//
+// Bounded because the body is THIRD-PARTY. Unbounded, either scan is a byte-at-a-time full-body walk
+// on the CEF IO thread for every HTML response — a document that is nothing but spaces, or a
+// `<!doctype` with no '>', would pay it and then fall through to the same offset anyway. Exceeding
+// either budget gives up and splices at the BOM floor, which is the direction that keeps the
+// bootstrap ahead of package code; the only thing lost is standards mode on a document already
+// pathological enough to spend a kilobyte before saying anything.
+inline constexpr std::size_t kExtDoctypeScanLimit = 1024;
 
 // ------------------------------------------------------ the pinned CEF scheme-registration options
 //
@@ -163,9 +264,18 @@ struct ExtResolution
     // The package the URL named, when the URL was well-formed enough to carry one. Empty otherwise.
     // Diagnostic only — it is NEVER used to build a path.
     std::string package_id;
-    // Only meaningful when `status == ok`.
+    // Only meaningful when `status == ok`. EMPTY when `synthetic` is set — see below.
     std::filesystem::path file;
     std::string mime_type;
+    // Set for the ONE asset the scheme serves out of ITSELF: the e13b-1 port bootstrap
+    // (`kExtPortBootstrapAsset`). The caller supplies the bytes from `ext_port_bootstrap_script()`
+    // instead of reading `file`.
+    //
+    // A FLAG RATHER THAN A SECOND STATUS, deliberately: `AssetStatus` is shared with the app scheme
+    // and is what `http_status_for` maps, so a synthetic member there would force every switch over
+    // it — in both schemes — to grow an arm for a case only this one has. Keeping it orthogonal means
+    // a caller that ignores the flag serves an EMPTY 200 rather than something wrong.
+    bool synthetic = false;
     // Why it was refused — for the diagnostic channel, never for the panel (a refusal reason is a
     // probe oracle; the handler returns the status alone to the frame).
     std::string reason;
@@ -374,5 +484,101 @@ private:
 //     that belongs at the iframe element, not here.
 [[nodiscard]] std::vector<std::pair<std::string, std::string>>
 ext_response_headers(const std::string& mime_type);
+
+// ------------------------------------------------------------ the e13b-1 panel-port bootstrap (§ above)
+
+// The bootstrap script's bytes — served as `kExtPortBootstrapAsset` on the package's own origin, and
+// the ONLY code in a panel document that the editor wrote. It creates one `MessageChannel`, publishes
+// `port1` on `window.<kExtPortGlobalName>` for the package, and transfers `port2` to the editor.
+//
+// FOUR PROPERTIES OF THE TEXT, each of which a rewrite must preserve (test_ext_scheme.cpp pins all
+// four, so this comment cannot drift away from the code alone):
+//   * It posts to `kAppOrigin` EXACTLY, never `"*"`. This is the one direction in which a precise
+//     target origin is possible — `targetOrigin` constrains the RECEIVER, and the receiver is
+//     editor-core on a known origin. (The REVERSE direction, editor->panel, is stuck with `"*"`
+//     because the panel's origin is opaque; that is why `IframeThemeChannel` uses it and why the
+//     asymmetry is correct rather than an oversight.) `frame-ancestors` already restricts who may
+//     frame a panel; this makes the port undeliverable to anyone else even if that directive were
+//     ever loosened.
+//   * It returns EARLY when the document is not framed (`parent === window`), so a panel document
+//     opened directly in a tab mints no channel and transfers nothing to itself.
+//   * The global is installed NON-WRITABLE and NON-CONFIGURABLE, so a package's own bundle shim
+//     cannot clobber the port with a look-alike and strand the real one unreferenced.
+//   * It is pure ASCII and contains no `</script` sequence, because it is delivered as a separate
+//     resource today but is spliced into a document's byte stream by NOTHING — if a future change
+//     ever inlines it, an embedded closing tag would truncate the host document.
+[[nodiscard]] const char* ext_port_bootstrap_script();
+
+// Splice the bootstrap `<script src>` tag into an HTML document, and return every OTHER media type's
+// body UNCHANGED. The whole decision lives here — in the CEF-free half — so the CEF binding's part is
+// one call with no branch of its own (see the file header on why judgement never lives in that TU).
+//
+// WHERE IT SPLICES, and why the rule is this shape rather than "after `<head>`":
+//   * Skip a UTF-8 BOM and up to `kExtDoctypeScanLimit` bytes of leading ASCII whitespace, then, IF
+//     what follows is a case-insensitive
+//     `<!doctype` whose terminating '>' is within `kExtDoctypeScanLimit` bytes, splice immediately
+//     AFTER that '>'. This preserves standards mode, which a splice at offset 0 would destroy by
+//     displacing the doctype — and quirks mode is a real, silent behaviour change forced on
+//     third-party layout.
+//   * OTHERWISE splice at offset 0 — but never ahead of a UTF-8 BOM, which stays byte 0 (see below).
+//     Two of the three shapes this covers lose nothing: a document with no doctype is already
+//     quirks, and a document that puts a `<script>` before the doctype is the case the rule EXISTS
+//     for — searching for the doctype anywhere in the prefix instead would let exactly that shape
+//     run package code ahead of the bootstrap, which is property 1 of the mechanism in the file
+//     header. The rule is therefore "the doctype must be FIRST for us to go second", never "find
+//     the doctype".
+//     ⚠ THE THIRD SHAPE PAYS A REAL PRICE, ACCEPTED DELIBERATELY: `<!-- c --><!doctype html>` is
+//     legal STANDARDS-mode HTML (the "before html" insertion mode ignores comments), and splicing
+//     at 0 demotes it to quirks. Skipping a leading comment instead means scanning third-party
+//     bytes for `-->` — a tokenizer's worth of judgement about adversarial input, in order to move
+//     OUR script LATER. A package that wants standards mode puts its doctype first, as the spec
+//     already tells it to.
+//
+// NOTHING IS PARSED, and nothing else in the document is examined. An HTML-aware insertion point (the
+// end of `<head>`, after `<meta charset>`) would mean writing an HTML tokenizer's worth of judgement
+// about adversarial bytes in order to move the script LATER, which is the wrong direction anyway. The
+// `<meta charset>`-within-1024-bytes rule is unaffected for a different reason: these responses carry
+// an explicit `charset` on `Content-Type` (`asset_media_types()`), and an HTTP charset OVERRIDES a
+// meta declaration, so displacing that element cannot change the document's encoding.
+[[nodiscard]] std::string ext_inject_port_bootstrap(const std::string& mime_type,
+                                                    std::string_view body);
+
+// May a response of this media type be served as a DOCUMENT NAVIGATION (a main or sub frame)?
+//
+// THE COMPANION GATE TO THE SPLICE, and the reason property 1 in the file header is a fact rather
+// than a hope. `ext_inject_port_bootstrap` rewrites `text/html` and nothing else, so a scriptable
+// document of ANY other type would run package code with no bootstrap ahead of it — and
+// `image/svg+xml` is exactly that: scriptable, framable, and on the shared asset allowlist
+// (`asset_media_types()`), which the panel-entry grammar does not constrain. From such a document a
+// package can navigate the frame to a SECOND `context-ext://` document during parse; that
+// document's bootstrap then emits the first handshake the host ever sees, and because the aborted
+// navigation means the frame's own `load` never fires, editor-core's revocation never runs either.
+// The grant would be live, and inside a document the host never chose.
+//
+// So a document navigation is refused unless its media type is one the splice covers. It is a
+// PREDICATE here, in the CEF-free half that all three `build` legs adversarially test, rather than a
+// media-type comparison written in the CEF binding — the binding only translates CEF's resource type
+// into "is this a document?", which is the one thing it alone can know.
+//
+// SUBRESOURCES ARE UNAFFECTED: an `<img src="…/icon.svg">` inside a panel is not a navigation, so it
+// still resolves and is served exactly as before. Only the entry (or a self-navigation) is narrowed.
+[[nodiscard]] bool ext_document_media_type_permitted(const std::string& mime_type);
+
+// Apply the document gate to an ALREADY-RESOLVED response, in place.
+//
+// THE REFUSAL ITSELF LIVES HERE, not in the CEF binding, for the same reason every other refusal in
+// this file does: `!ok()` alone cannot tell a held boundary from a differently-held one, so the
+// status AND the reason string are part of the contract and belong somewhere all three `build` legs
+// can assert them. The binding's whole job is the ONE bit it alone knows — whether CEF is about to
+// make a document out of these bytes — so it passes that bit and nothing else.
+//
+// FORBIDDEN, not not_found, and deliberately unlike the enumeration-defence statuses above: this
+// refusal leaks nothing about the mount table (it is a property of the ASSET's declared media type,
+// which the requester already chose), and a 404 here would tell a package its own file is missing
+// when it is present and simply not a legal document.
+//
+// A resolution that already failed is left untouched — the first refusal is the honest one, and
+// overwriting it would replace a mount/path/id diagnostic with a media-type one.
+void ext_apply_document_gate(ExtResolution& resolution, bool is_document_navigation);
 
 } // namespace context::editor::shell

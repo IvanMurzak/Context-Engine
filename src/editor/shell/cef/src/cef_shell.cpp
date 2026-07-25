@@ -452,6 +452,24 @@ public:
         else
         {
             resolution_ = g_ext_resolver->resolve(url);
+            // IS CEF ABOUT TO MAKE A DOCUMENT OUT OF THESE BYTES? (M9 e13b-1.)
+            //
+            // The ONE fact this TU knows that the resolver cannot. The resolver sees a URL and a
+            // media type, never the resource type — and that distinction is what the panel-port
+            // mechanism rests on, because the bootstrap is spliced into `text/html` and nothing else.
+            // A scriptable non-HTML document (`image/svg+xml` is both scriptable and on the shared
+            // asset allowlist) would run package code with NO bootstrap ahead of it and could then
+            // navigate the frame onward to claim a grant it never earned — ext_scheme.h property 1
+            // carries the full attack.
+            //
+            // ONE BIT IS PASSED AND NOTHING ELSE IS DECIDED: which media types may be documents, and
+            // the status + reason of the refusal, both live in `ext_apply_document_gate` where all
+            // three `build` legs assert them. Narrow on purpose — only an explicit main/sub-frame
+            // navigation is gated, so every subresource a panel legitimately loads (an `<img>` of
+            // that same `.svg`, a script, a style) is untouched and still served.
+            const cef_resource_type_t resource_type = request->GetResourceType();
+            ext_apply_document_gate(resolution_, resource_type == RT_MAIN_FRAME ||
+                                                    resource_type == RT_SUB_FRAME);
         }
         if (!resolution_.ok())
         {
@@ -469,11 +487,29 @@ public:
             return true;
         }
 
-        if (!load_body(resolution_.file))
+        if (resolution_.synthetic)
+        {
+            // The ONE asset this scheme serves out of ITSELF (M9 e13b-1): the panel-port bootstrap.
+            // Its bytes are ours, so there is no file to read — ext_scheme.h § the panel-port
+            // bootstrap, and `ExtAssetResolver::resolve` is where the request earned this branch.
+            body_ = ext_port_bootstrap_script();
+        }
+        else if (!load_body(resolution_.file))
         {
             resolution_.status = AssetStatus::not_found;
             record_ext_request(url, /*served*/ false);
             return true;
+        }
+        else
+        {
+            // The e13b-1 bootstrap splice, called with NO MEDIA-TYPE BRANCH of its own: which media
+            // types are rewritten and where the tag lands are BOTH decided inside the CEF-free
+            // `ext_inject_port_bootstrap`, which the local dev gate and all three `build` legs
+            // unit-test against adversarial document prefixes. A media-type COMPARISON written HERE
+            // would be policy in the one TU nothing local can compile — the mistake this whole
+            // handler is shaped to avoid, and why the navigation gate above asks a predicate rather
+            // than spelling `text/html` out a second time.
+            body_ = ext_inject_port_bootstrap(resolution_.mime_type, body_);
         }
         // Recorded only once the BYTES are in hand, so `ext_served_urls()` means "this asset was
         // actually delivered" rather than "the resolver approved of it" — the smoke's whole chain of

@@ -84,6 +84,17 @@ export interface DockviewAddPanelOptions {
     readonly title?: string;
     readonly position?: DockviewPanelPosition;
     readonly params?: Record<string, unknown>;
+    /**
+     * Which rendering strategy Dockview uses for this panel, defaulting to `"onlyWhenVisible"`.
+     *
+     * THE PLATFORM FACT: `"onlyWhenVisible"` DETACHES an inactive panel's element from the DOM and
+     * re-attaches it on return. Removing an ancestor of an `<iframe>` runs the iframe's removing
+     * steps and DISCARDS its nested browsing context, so re-insertion re-navigates `src` — a fresh
+     * document and a fresh `load` event. `"always"` keeps the element in Dockview's own render
+     * container, so it is never detached. A panel whose element must not be detached passes it; see
+     * `rendererFor` in `panelhost.ts` for which content types must and why.
+     */
+    readonly renderer?: "always" | "onlyWhenVisible";
 }
 
 /** A live panel handle. */

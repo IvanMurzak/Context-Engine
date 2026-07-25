@@ -715,9 +715,31 @@ Named so the gaps are visible rather than assumed:
   `editor-cef-smoke-shell` now boots the real bundle over the real scheme and round-trips a handshake
   through it. **Packaging** the asset root install-relative is still **e15**'s: the default is a
   build-tree path compiled in by CMake.
-- **Package panels render; nothing talks to them yet** — the MessageChannel-port bridge, the
+- **Package panels render, and now hold ONE authenticated port — but it grants nothing yet** — the
   capability/consent model, theme-token delivery, the state-blob round trip, the
-  `context new --template extension-panel` scaffold and the demo external package are **e13b–f**.
+  `context new --template extension-panel` scaffold and the demo external package are **e13b-2–f**.
+  ✅ **The PANEL PORT landed with e13b-1**: every `text/html` response the `context-ext://` scheme
+  serves gets `<script src="/.context-panel-port.js">` spliced in ahead of any script the document
+  carries (`ext_inject_port_bootstrap`), and the scheme serves that ONE synthetic asset out of itself
+  (`ext_port_bootstrap_script`, `ExtResolution::synthetic`) — so the code that mints the
+  `MessageChannel` and transfers a port UP to editor-core is the Shell's, never the package's. A
+  document navigation to any other media type is refused (`ext_document_media_type_permitted`),
+  which is what makes "the bootstrap ran first" true of EVERY panel rather than of the
+  well-behaved ones. editor-core's half (`panelport.ts` `PanelPortBridge`) accepts only the FIRST
+  conforming handshake per frame and revokes the port on a second `load` on the frame element; an
+  `iframe` panel is docked with Dockview's `renderer: "always"` so a tab switch cannot detach it and
+  forge that second load. The port ships **zero capability** — every verb answers
+  `bridge.verb_not_granted` out of an EMPTY table — so what landed is the authentication and the
+  lifecycle, not a feature. ⚠ The obligation as originally written ("key off the handshake's
+  verified `event.origin`") is NOT implementable: every panel document reports the opaque origin
+  `"null"`, and an iframe's `WindowProxy` is stable across same-slot navigations, so neither can name
+  a DOCUMENT INSTANCE (`event.source` IS used, but only to tell one FRAME from another). ⚠ NOT
+  claimed: that the host can prove WHICH PACKAGE the port-holding document is — that link is a
+  Shell/editor-core agreement, not a browser-verified fact. Tiers: `webui-ts-unit`
+  (`panelport.test.ts`, a real opaque-origin `srcdoc` child with real transfer semantics),
+  `editor-shell-test_ext_scheme` (the bootstrap bytes, the splice point, the document-media-type
+  gate — all three `build` legs), and the live `editor-cef-smoke-shell-iframe` (the port round-trips
+  the deny-all refusal through the real CEF pump).
   ✅ **The IFRAME HOST landed with e13a-2**: editor-core's PanelHost renders a `content.type:
   "iframe"` manifest as an `<iframe sandbox="allow-scripts">` (never `allow-same-origin` — an opaque
   origin is what isolates one package from another and from the editor) pointed at a validated
