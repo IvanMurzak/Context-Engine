@@ -10,7 +10,8 @@
 // `handler()` is exactly what `execute` invokes, so routing is proven either way.
 
 import { assert, assertEqual, type TestCase } from "./harness.js";
-import { SESSION_UNDO_PANEL_ID } from "../boot.js";
+import { SESSION_UNDO_PANEL_ID, makePanelDispatch, makeSessionActions } from "../boot.js";
+import { PanelClient } from "../panels.js";
 import {
     buildCommandRegistry,
     CommandRegistry,
@@ -345,16 +346,27 @@ export const commandsTests: readonly TestCase[] = [
         },
     },
 
-    // M9 e09c — the session actions are no longer a stub, and the id they dispatch AT is pinned.
+    // M9 e09c — the session actions are no longer a stub, driven through the PRODUCTION factories.
     //
-    // Two things this catches that nothing else does. (1) A drift in `SESSION_UNDO_PANEL_ID` fails no
-    // build: Ctrl+Z would simply dispatch to a panel that does not exist and answer `not dispatched`
-    // forever, with no error anywhere. (2) `dispatched:false` (nothing to undo) must NOT report `ok`
-    // — an undo that did nothing looking like one that worked is exactly the dishonest outcome this
-    // whole chain exists to avoid.
+    // WHY THE FACTORIES AND NOT A LOCAL LOOKALIKE. e07c left `sessionActions` an honest refusal
+    // ("the wire replay lands in e09") and e09c replaced it with a real `panel.command` dispatch. A
+    // case that builds its OWN actions object cannot tell those two apart — revert boot.ts to the
+    // stub and it stays green — so this drives `makeSessionActions(makePanelDispatch(client))`,
+    // which IS what `startCommandLayer` wires. (What it still does not cover is that call site
+    // itself; the palette is the only live consumer and is unreachable from this tier, because the
+    // keymap is not wired to dispatch until the 03 §6 input pump lands.)
+    //
+    // Two more things it catches that nothing else does. (1) A drift in `SESSION_UNDO_PANEL_ID`
+    // fails no build: Ctrl+Z would simply dispatch to a panel that does not exist and answer `not
+    // dispatched` forever, with no error anywhere. NOTE this pins only the TS spelling — the C++ end
+    // is pinned independently (test_undo_journal.cpp, test_roster.cpp) and NOTHING relates the two,
+    // so a re-spelling of `UndoJournal::kContributionId` would red the C++ suites and leave this
+    // one green. (2) `dispatched:false` must NOT report `ok`. That is the TS MAPPING only; that the
+    // C++ host actually answers false for nothing-to-undo, for a loud drop and for a refused replay
+    // is `undo_feed.cpp` § make_provider's property, pinned separately in `test_undo_feed.cpp`.
     {
         name: "session undo/redo dispatch to the Shell's session-undo panel and report its verdict honestly",
-        run: () => {
+        run: async () => {
             assertEqual(
                 SESSION_UNDO_PANEL_ID,
                 "builtin.session.undo",
@@ -363,34 +375,47 @@ export const commandsTests: readonly TestCase[] = [
 
             const seen: string[] = [];
             let dispatched = true;
-            const dispatch = (panelId: string, commandId: string): CommandOutcome => {
-                seen.push(`${panelId}/${commandId}`);
-                return dispatched
-                    ? { ok: true, note: `${panelId}/${commandId}` }
-                    : { ok: false, note: `${panelId}/${commandId} not dispatched` };
-            };
-            const actions: SessionCommandActions = {
-                undo: () => dispatch(SESSION_UNDO_PANEL_ID, "session.undo"),
-                redo: () => dispatch(SESSION_UNDO_PANEL_ID, "session.redo"),
-            };
+            // A `PanelClient` stand-in at the CLIENT's own seam: `command()` is the one method the
+            // dispatcher calls, and its `{dispatched, revision}` reply is the panel bridge's shape.
+            const client = {
+                command: (panelId: string, commandId: string, nodeId: string) => {
+                    seen.push(`${panelId}/${commandId}/${nodeId}`);
+                    return Promise.resolve({ dispatched, revision: 7 });
+                },
+            } as unknown as PanelClient;
+
+            const actions = makeSessionActions(makePanelDispatch(client));
             const byId = new Map(sessionCommands(actions).map((c) => [c.id, c]));
 
-            void byId.get("session.undo")?.handler();
-            void byId.get("session.redo")?.handler();
+            const undone = await byId.get("session.undo")?.handler();
+            const redone = await byId.get("session.redo")?.handler();
             assertEqual(
                 seen,
-                ["builtin.session.undo/session.undo", "builtin.session.undo/session.redo"],
+                ["builtin.session.undo/session.undo/", "builtin.session.undo/session.redo/"],
                 "both route to the Shell's session-undo panel over panel.command",
             );
+            assertEqual((undone as CommandOutcome).ok, true, "a dispatched undo reports ok");
+            assertEqual((redone as CommandOutcome).ok, true, "a dispatched redo reports ok");
 
-            // Nothing to undo -> the journal exposes no such command -> `dispatched:false`.
+            // Nothing to undo / a loud drop / a refused replay -> the host answers `dispatched:false`.
             dispatched = false;
-            const refused = byId.get("session.undo")?.handler();
+            const refused = await byId.get("session.undo")?.handler();
             assertEqual(
                 (refused as CommandOutcome).ok,
                 false,
                 "an undo the host did not dispatch is NOT reported as ok",
             );
+            assert(
+                (refused as CommandOutcome).note.includes("not dispatched"),
+                "and says so, rather than reporting a bare failure",
+            );
+
+            // A bridge failure (`command` resolves null) is the same honest false, never a throw.
+            const deadClient = {
+                command: () => Promise.resolve(null),
+            } as unknown as PanelClient;
+            const dead = await makeSessionActions(makePanelDispatch(deadClient)).undo();
+            assertEqual(dead.ok, false, "an unreachable panel bridge refuses honestly");
         },
     },
 

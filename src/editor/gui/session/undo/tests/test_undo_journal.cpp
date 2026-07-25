@@ -1,7 +1,7 @@
 // Session undo/redo journal tests (M5-F7): gesture-batch checkpointing (L-20), undo/redo replayed as
 // CAS-guarded override writes through the inspector gateway seam, the L-30 rebase-or-drop policy under
 // a concurrent writer, the R-HUX-001 no-blind-clobber guard (a field a co-writer touched is DROPPED,
-// never overwritten), and `.editor/session.json` JSON round-tripping. Happy + edge + failure (R-QA-013).
+// never overwritten), and the host-persisted JSON round-trip. Happy + edge + failure (R-QA-013).
 
 #include "context/editor/gui/session/undo/undo_journal.h"
 
@@ -156,6 +156,83 @@ int main()
         CHECK(!journal.can_redo());                // a dropped undo is not redoable
     }
 
+    // --- AN UNREADABLE FIELD IS A REFUSAL, NOT A FABRICATED COLLISION -------------------------------
+    // The up-front guard READS before it attempts, so it is the one place a failed read can be
+    // mistaken for a moved value. Reachable only since M9 e09c gave the journal a host: on the
+    // GESTURE path `attempt` refuses first, which is why `wire_override_gateway.h` § LIFETIME says
+    // the ATTEMPT refusal is what fails THAT path closed. Getting this wrong invents a concurrent
+    // writer out of a dropped daemon connection — and, because a DROP is consumed, silently costs
+    // the human their undo step over an outage.
+    {
+        FakeGateway gw;
+        gw.field_values["/name"] = jstr("New");
+        gw.readable = false; // no connection / refused read / the entity no longer resolves
+
+        UndoJournal journal(&gw);
+        journal.capture(make_edit("/name", jstr("Old"), jstr("New")));
+
+        const ReplayResult r = journal.undo();
+        CHECK(r.status == Status::error); // NOT dropped — nothing was observed to have changed
+        CHECK(!r.ok());
+        // NOT `cas.mismatch`: naming the read-unavailable code IS the fabrication guard.
+        CHECK(r.edits.size() == 1);
+        CHECK(r.edits.size() == 1 &&
+              r.edits[0].code == std::string(UndoJournal::kReadUnavailableCode));
+        CHECK(r.edits.size() == 1 && !r.edits[0].message.empty());
+        CHECK(gw.attempts == 0); // a field we cannot read is a field we must not overwrite
+        CHECK(value_equal(gw.field_values["/name"], jstr("New"))); // untouched
+        // AND THE STEP SURVIVES. This is the half that makes the journal durable rather than
+        // merely persistent: a transient outage must not eat the user's history.
+        CHECK(journal.can_undo());
+        CHECK(journal.undo_depth() == 1);
+        CHECK(!journal.can_redo()); // it did not cross to the redo stack either
+
+        // Once the project is reachable again the SAME step still works.
+        gw.readable = true;
+        const ReplayResult retried = journal.undo();
+        CHECK(retried.ok());
+        CHECK(value_equal(gw.field_values["/name"], jstr("Old")));
+        CHECK(!journal.can_undo());
+        CHECK(journal.can_redo());
+    }
+
+    // --- a WRITE-PATH refusal (not a CAS event) also keeps the step, from the other direction -------
+    {
+        FakeGateway gw;
+        gw.field_values["/name"] = jstr("New");
+        gw.refuse_write_code = "shell.no_daemon"; // the read succeeds; the WRITE is refused
+
+        UndoJournal journal(&gw);
+        journal.capture(make_edit("/name", jstr("Old"), jstr("New")));
+
+        const ReplayResult r = journal.undo();
+        CHECK(r.status == Status::error);
+        CHECK(r.edits.size() == 1 && r.edits[0].code == "shell.no_daemon");
+        CHECK(gw.attempts == 1);                                   // it DID try
+        CHECK(value_equal(gw.field_values["/name"], jstr("New"))); // and wrote nothing
+        CHECK(journal.can_undo());                                 // so the step is kept
+        CHECK(!journal.can_redo());
+    }
+
+    // --- a REDO refused the same way is kept on the REDO stack, not silently migrated ---------------
+    {
+        FakeGateway gw;
+        gw.field_values["/name"] = jstr("New");
+
+        UndoJournal journal(&gw);
+        journal.capture(make_edit("/name", jstr("Old"), jstr("New")));
+        CHECK(journal.undo().ok()); // the checkpoint is now on the redo stack
+        CHECK(journal.can_redo());
+
+        gw.readable = false;
+        const ReplayResult r = journal.redo();
+        CHECK(r.status == Status::error);
+        CHECK(journal.can_redo()); // KEPT where it was…
+        CHECK(journal.redo_depth() == 1);
+        CHECK(!journal.can_undo()); // …and NOT moved to the other stack
+        CHECK(value_equal(gw.field_values["/name"], jstr("Old")));
+    }
+
     // --- redo also refuses to clobber a co-writer (drops loudly) ------------------------------------
     {
         FakeGateway gw;
@@ -228,7 +305,7 @@ int main()
         CHECK(journal.redo().status == Status::none);
     }
 
-    // --- `.editor/session.json` round-trip: to_json -> canonical -> parse -> load_json --------------
+    // --- host-persisted round-trip: to_json -> canonical -> parse -> load_json ----------------------
     {
         UndoJournal journal;
         journal.begin_gesture("g1");

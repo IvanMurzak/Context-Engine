@@ -17,6 +17,8 @@
 
 #include "context/editor/shell/panels/wire_override_gateway.h"
 
+#include "context/editor/shell/panels/undo_feed.h" // e09c: the replay rides THIS gateway
+
 #include "context/editor/client/client.h"
 #include "context/editor/compose/compose_write.h"                       // write_target_token
 #include "context/editor/gui/panels/builders/inspector_builder.h"       // build_inspector_model
@@ -28,8 +30,7 @@
 #include "context/editor/serializer/canonical.h"
 #include "context/editor/serializer/json_parse.h"
 
-#include "mock_channel.h"
-#include "panels_test.h"
+#include "panels_wire_test.h" // the shared REAL-client-over-a-scripted-wire fixture
 
 #include <cstdint>
 #include <map>
@@ -46,6 +47,7 @@ namespace compose = context::editor::compose;
 namespace schema = context::editor::schema;
 namespace serializer = context::editor::serializer;
 namespace client = context::editor::client;
+namespace undo = context::editor::gui::session::undo;
 using context::editor::shell::panels::WireOverrideWriteGateway;
 using Json = context::editor::contract::Json;
 
@@ -58,46 +60,11 @@ const std::vector<std::string> kIdPath = {"aaaaaaaaaaaaaaa1", "ccccccccccccccc1"
 constexpr std::uint64_t kBaseHash = 111111111111111111ull; // > 2^53: the decimal-string discipline
 
 // --- the scripted wire ------------------------------------------------------------------------
-
-struct Wired
-{
-    clientmock::MockChannel* channel = nullptr;
-    std::unique_ptr<client::Client> client;
-};
-
-[[nodiscard]] Wired make_client()
-{
-    auto channel = std::make_unique<clientmock::MockChannel>();
-    clientmock::MockChannel* raw = channel.get();
-    // The attach reply is FLAT in `result` — NOT an envelope (mock_channel.h's standing warning).
-    raw->on("attach",
-            [](const clientmock::Request&)
-            {
-                Json result = Json::object();
-                result.set("protocolMajor",
-                           Json(static_cast<std::uint64_t>(
-                               context::editor::contract::kProtocolMajor)));
-                result.set("clientId", Json(std::uint64_t{9}));
-                Json caps = Json::array();
-                caps.push_back(Json(std::string("describe")));
-                result.set("capabilities", std::move(caps));
-                Json scopes = Json::array();
-                scopes.push_back(Json(std::string("read")));
-                scopes.push_back(Json(std::string("file_write")));
-                result.set("scopes", std::move(scopes));
-                return result;
-            });
-
-    Wired out;
-    out.channel = raw;
-    out.client = std::make_unique<client::Client>(std::move(channel));
-    client::AttachOptions options;
-    options.scope = "read,write";
-    options.token = "t";
-    std::string error;
-    CHECK(out.client->attach(options, error));
-    return out;
-}
+//
+// `Wired` + `make_wired_client` live in panels_wire_test.h: the attach handshake's flat-in-`result`
+// shape is a property of the DAEMON, so it is written down once rather than per suite.
+using panelstest::make_wired_client;
+using panelstest::Wired;
 
 // The daemon's `edit` success data (kernel_server.cpp finish_edit + serve_composed_edit).
 [[nodiscard]] Json edit_reply(const char* raw_hash, bool reflected)
@@ -280,7 +247,7 @@ void id_path_join_mirrors_the_builders_authority()
 // value literal, the explicit target, and the CAS token as a DECIMAL STRING.
 void an_applied_write_sends_the_composed_edit_shape()
 {
-    Wired wired = make_client();
+    Wired wired = make_wired_client();
     wired.channel->on("edit", [](const clientmock::Request&) { return edit_reply("222", true); });
 
     WireOverrideWriteGateway gateway;
@@ -327,7 +294,7 @@ void an_applied_write_sends_the_composed_edit_shape()
 // as the literal string "0", which the daemon would read as a real (never-matching) precondition.
 void a_zero_base_hash_sends_no_precondition()
 {
-    Wired wired = make_client();
+    Wired wired = make_wired_client();
     wired.channel->on("edit", [](const clientmock::Request&) { return edit_reply("222", true); });
     WireOverrideWriteGateway gateway;
     gateway.bind_client(wired.client.get());
@@ -340,7 +307,7 @@ void a_zero_base_hash_sends_no_precondition()
 // An `at-instance` retarget carries its addressing prefix, joined the same way.
 void an_at_instance_retarget_carries_its_prefix()
 {
-    Wired wired = make_client();
+    Wired wired = make_wired_client();
     wired.channel->on("edit", [](const clientmock::Request&) { return edit_reply("222", true); });
     WireOverrideWriteGateway gateway;
     gateway.bind_client(wired.client.get());
@@ -363,7 +330,7 @@ void an_at_instance_retarget_carries_its_prefix()
 // A miss is still an APPLIED write — the bytes are on disk — but it must be COUNTED, not swallowed.
 void a_barrier_miss_is_counted_but_still_applied()
 {
-    Wired wired = make_client();
+    Wired wired = make_wired_client();
     wired.channel->on("edit", [](const clientmock::Request&) { return edit_reply("222", false); });
     WireOverrideWriteGateway gateway;
     gateway.bind_client(wired.client.get());
@@ -377,7 +344,7 @@ void a_barrier_miss_is_counted_but_still_applied()
 // read WITHOUT a second round trip (design 05 §7).
 void a_cas_mismatch_lifts_the_retry_token_from_the_refusal()
 {
-    Wired wired = make_client();
+    Wired wired = make_wired_client();
     wired.channel->fail_method("edit", "stale precondition", "cas.mismatch", cas_detail("999"));
     WireOverrideWriteGateway gateway;
     gateway.bind_client(wired.client.get());
@@ -395,7 +362,7 @@ void a_cas_mismatch_lifts_the_retry_token_from_the_refusal()
 // a rebase loop over a request the write path will never accept.
 void a_non_cas_refusal_is_an_error_not_a_mismatch()
 {
-    Wired wired = make_client();
+    Wired wired = make_wired_client();
     wired.channel->fail_method("edit", "read-only session", "scope.denied");
     WireOverrideWriteGateway gateway;
     gateway.bind_client(wired.client.get());
@@ -432,7 +399,7 @@ void an_unbound_gateway_refuses_and_writes_nothing()
 // reply, through the SAME parser the Inspector panel hydrates from.
 void the_reread_resolves_the_field_and_the_cas_token()
 {
-    Wired wired = make_client();
+    Wired wired = make_wired_client();
     wired.channel->on("editor.inspect",
                       [](const clientmock::Request&) { return inspect_reply("1.4", "333"); });
     WireOverrideWriteGateway gateway;
@@ -466,7 +433,7 @@ void the_reread_resolves_the_field_and_the_cas_token()
 // indistinguishable from a drop.
 void a_concurrent_write_elsewhere_rebases()
 {
-    Wired wired = make_client();
+    Wired wired = make_wired_client();
     wired.channel->fail_method_times("edit", 1, "stale precondition", "cas.mismatch",
                                      cas_detail("999"));
     wired.channel->on("edit", [](const clientmock::Request&) { return edit_reply("444", true); });
@@ -500,7 +467,7 @@ void a_concurrent_write_elsewhere_rebases()
 // the guarantee this whole write path exists for.
 void a_concurrent_write_to_the_same_field_drops_loudly()
 {
-    Wired wired = make_client();
+    Wired wired = make_wired_client();
     wired.channel->fail_method("edit", "stale precondition", "cas.mismatch", cas_detail("999"));
     // The re-read shows the field MOVED (1.4 -> 2.0) under the in-flight gesture.
     wired.channel->on("editor.inspect",
@@ -538,6 +505,64 @@ void a_lost_daemon_mid_gesture_refuses_rather_than_overwrites()
     CHECK(result.code == std::string(WireOverrideWriteGateway::kNoDaemonCode));
 }
 
+// e09c — AN UNDO REPLAY IS THE SAME WIRE WRITE A GESTURE IS. The DoD's "no second write path" half,
+// asserted at the FRAME rather than at a refusal code: drive a real `UndoFeed` bound to this real
+// gateway and read the `edit` request that comes out. A journal that grew a private writer would
+// send nothing here, and one that mis-addressed would send a different frame — neither can pass.
+//
+// It also pins the direction, which a code-level assertion cannot: the frame carries the checkpoint's
+// BEFORE value (the undo target), guarded on the CAS token the daemon reported for the re-read.
+void an_undo_replay_sends_the_same_edit_frame_a_gesture_does()
+{
+    Wired wired = make_wired_client();
+    // The field currently holds the AFTER value (2.5) — i.e. the state the recorded gesture left.
+    wired.channel->on("editor.inspect",
+                      [](const clientmock::Request&)
+                      { return inspect_reply("2.5", std::to_string(kBaseHash).c_str()); });
+    wired.channel->on("edit", [](const clientmock::Request&) { return edit_reply("222", true); });
+
+    WireOverrideWriteGateway gateway;
+    gateway.bind_client(wired.client.get());
+
+    context::editor::shell::PanelHost host;
+    panels::UndoFeed feed(host, std::string(undo::UndoJournal::kContributionId));
+    feed.bind_gateway(&gateway);
+
+    undo::FieldEdit edit;
+    edit.root_scene = kRoot;
+    edit.id_path = kIdPath;
+    edit.pointer = kPointer;
+    edit.before = literal("1.4");
+    edit.after = literal("2.5");
+    feed.record(std::move(edit));
+
+    const undo::ReplayResult result = feed.replay_undo();
+    CHECK(result.ok());
+    // THROUGH THIS GATEWAY OBJECT, not merely through one of its class: these counters live on the
+    // instance the composition root binds, so a journal writing through a second gateway would leave
+    // them at zero while every status assertion above still passed.
+    CHECK(gateway.reads_issued() == 1);
+    CHECK(gateway.writes_issued() == 1);
+    CHECK(gateway.writes_applied() == 1);
+
+    const std::vector<clientmock::Request> sent = wired.channel->requests_for("edit");
+    CHECK(sent.size() == 1);
+    if (sent.size() == 1)
+    {
+        const Json& p = sent.front().params;
+        CHECK(p.at("rootScene").as_string() == kRoot);
+        CHECK(p.at("idPath").as_string() == builders::join_identity(kIdPath));
+        CHECK(p.at("pointer").as_string() == kPointer);
+        // The BEFORE value — an undo restores what was there, and it says so on the wire. Same
+        // canonical-literal-in-a-string encoding a live gesture sends (the case above).
+        CHECK(p.at("value").as_string() == "1.4");
+        CHECK(p.at("target").as_string() == "outermost");
+        // CAS-guarded on the token the re-read reported, exactly as a live gesture is.
+        CHECK(p.at("ifMatch").is_string());
+        CHECK(p.at("ifMatch").as_string() == std::to_string(kBaseHash));
+    }
+}
+
 } // namespace
 
 int main()
@@ -555,5 +580,6 @@ int main()
     a_concurrent_write_elsewhere_rebases();
     a_concurrent_write_to_the_same_field_drops_loudly();
     a_lost_daemon_mid_gesture_refuses_rather_than_overwrites();
+    an_undo_replay_sends_the_same_edit_frame_a_gesture_does();
     PANELS_TEST_MAIN_END();
 }

@@ -434,6 +434,27 @@ void a_feed_without_a_gateway_exposes_no_gesture()
     CHECK(feed.rereads_armed() == 0);
 }
 
+// M9 e09c — `request_refresh` is the ONE home for "the file changed under the panel, re-read it".
+// Two callers route through it: this feed's own commit listener (read-your-writes) and, since e09c,
+// `pump_panel_feeds` after a landed undo/redo replay (read-your-replays, which `InspectorPanel::commit`
+// never runs for). Pinned here so the shared seam has coverage independent of either caller.
+void request_refresh_rearms_the_inspected_identity()
+{
+    shell::PanelHost host;
+    panels::InspectorFeed feed(host, kPanelId);
+
+    // Nothing inspected -> an ordinary false, and nothing armed. A seam that armed an EMPTY identity
+    // would send the pump fetching for no entity, once per frame, forever.
+    CHECK(!feed.request_refresh());
+    CHECK(!feed.pending().has_value());
+    CHECK(feed.rereads_armed() == 0);
+
+    feed.panel().set_model(one_field_model("Before"), 100);
+    CHECK(feed.request_refresh());
+    CHECK(feed.pending() == std::optional<std::string>("aaaaaaaaaaaaaaa1/ccccccccccccccc1"));
+    CHECK(feed.rereads_armed() == 1);
+}
+
 // --- M9 e09c: a resolved gesture commit becomes an undo checkpoint -------------------------------
 //
 // The RECORD half of the session-undo wiring, pinned at the seam that produces it. The part that is
@@ -559,6 +580,7 @@ int main()
     token_parsers_are_total();
     wire_round_trips_the_built_model();
     apply_result_adopts_the_model_and_the_cas_token();
+    request_refresh_rearms_the_inspected_identity();
     edits_stage_through_the_provider();
     a_feed_without_a_gateway_exposes_no_gesture();
     a_resolved_commit_becomes_an_undo_checkpoint();

@@ -5,7 +5,7 @@
 // replay through the ONE L-30 engine, a JSON round-trip — and then sat inert: `to_json`/`load_json`
 // were called by NO host, no host recorded a checkpoint, and no host could replay one. A journal
 // nobody reads or writes is not short-horizon undo; it is dead code that LOOKS like undo. This file
-// is the host, and it closes all three halves at once:
+// is the host, and it closes all three at once:
 //
 //   * RECORDS. The Inspector's resolved gesture commits arrive here as checkpoints (the composition
 //     root wires `InspectorFeed`'s checkpoint sink at `record`). Only an APPLIED or REBASED commit
@@ -22,14 +22,17 @@
 //     survives an editor restart: boot loads the blob back and Ctrl+Z still works on the previous
 //     session's edits.
 //
-// WHY THE BLOB IS A CANONICAL STRING. `editor_state.h` § EditorState::undo states it: the journal's
-// DOM is `serializer::JsonValue` and the store's is `contract::Json`, and the latter holds every
-// number as a `double` — so a nested-object conversion would round-trip user data through a lossy
-// hop. The transport is therefore `serialize_canonical` bytes (R-FILE-001, the engine's one value
-// identity) and the ONE journal serializer stays `UndoJournal::to_json`.
+// WHY THE BLOB IS A CANONICAL STRING: `editor_state.h` § EditorState::undo carries the argument (the
+// two DOMs disagree on number identity). What matters HERE is only the consequence — the transport is
+// `serialize_canonical` bytes (R-FILE-001, the engine's one value identity), so the ONE journal
+// serializer stays `UndoJournal::to_json` and this file adds none.
 //
-// TOTAL AND DISK-FREE, like the sibling feeds: every function here is pure over its inputs, opens no
-// file, and is T1-testable on all three default `build` legs with no CEF and no daemon.
+// TOTAL AND DISK-FREE, like the sibling feeds: nothing here opens a file, and the whole surface is
+// T1-testable on all three default `build` legs with no CEF and no daemon. Unlike `InspectorFeed`
+// this feed is a write INITIATOR rather than a projection — `replay_undo`/`replay_redo` mutate the
+// journal and, in the live Shell, issue the daemon's `edit` RPC — but every one of those writes
+// leaves through the injected gateway seam, so a test drives the whole path against an in-memory
+// gateway.
 
 #pragma once
 
@@ -74,7 +77,7 @@ namespace undo = gui::session::undo;
 class UndoFeed
 {
 public:
-    // Non-owning: `host` must outlive the feed (the provider below captures `this`).
+    // Non-owning: `host` must outlive the feed.
     UndoFeed(PanelHost& host, std::string panel_id);
 
     // Non-copyable AND non-movable, like every sibling feed: `make_provider` captures `this`, and the
@@ -105,11 +108,30 @@ public:
     void record(undo::FieldEdit edit);
 
     // Ctrl+Z / Ctrl+Y. Named `replay_*` for the namespace-alias reason above. Both dirty the blob
-    // whenever the stacks actually moved — including a DROPPED replay, which still pops the
-    // checkpoint (a checkpoint whose field a co-writer has since moved can never be replayed, so
-    // keeping it would offer the human an undo that is guaranteed to refuse).
+    // (and touch the panel) IFF the stacks actually moved, which is read off the journal's own
+    // depths rather than inferred from the status — so the accounting stays right across the
+    // three outcomes a replay that RAN can have (a `none` never ran at all — nothing to replay, or
+    // no gateway — and returns before any of this):
+    //   * APPLIED / REBASED — the checkpoint crossed to the other stack. Moved.
+    //   * DROPPED — a co-writer moved the field, so the revert was refused AND the checkpoint is
+    //     consumed (it could never be replayed now). Moved.
+    //   * ERROR — the write path refused (no daemon, an unreadable field); nothing was written and
+    //     the journal KEPT the step for a retry (undo_journal.h § undo). NOT moved: dirtying here
+    //     would rewrite the session file byte-identically and re-render an unchanged depth.
     undo::ReplayResult replay_undo();
     undo::ReplayResult replay_redo();
+
+    // READ-YOUR-REPLAYS. True once since the last call when a replay actually LANDED a write, then
+    // cleared — the signal `pump_panel_feeds` consumes to re-arm the Inspector's re-read.
+    //
+    // WHY IT EXISTS. A replay writes the field through the gateway DIRECTLY, never through
+    // `InspectorPanel::commit`, so the Inspector's own commit listener (which is what normally
+    // re-arms its fetch, inspector_feed.cpp § READ-YOUR-WRITES) never fires. Without this the panel
+    // keeps rendering the pre-undo value AND keeps the pre-undo CAS token, so the human's very next
+    // edit to that field is guaranteed to be dropped as a "concurrent writer" that is really their
+    // own undo. Pulled by the owner loop rather than pushed through a sink so this feed holds no
+    // pointer back to the Inspector — which is declared AFTER it and therefore dies FIRST.
+    [[nodiscard]] bool take_replay_landed() noexcept;
 
     // --- persistence (the C-F3 single-writer seam's payload) --------------------------------------
 
@@ -131,25 +153,38 @@ public:
     // How many of those were LOUD DROPS: a co-writer moved the field, so the replay refused rather
     // than restoring stale bytes. The count is what makes the R-HUX-001 guarantee assertable.
     [[nodiscard]] std::size_t replay_drops() const noexcept { return replay_drops_; }
+    // How many were REFUSED by the write path (nothing written, no concurrency event observed) —
+    // the step is KEPT, so this is the count that makes "a daemon blip does not cost the human
+    // their history" assertable, as distinct from a drop.
+    [[nodiscard]] std::size_t replay_refusals() const noexcept { return replay_refusals_; }
 
     // The provider to bind on the PanelHost. Captures `this` — the feed must OUTLIVE the binding.
     // `build` renders the journal's own headless a11y-clean panel; `invoke` dispatches the two
     // commands that panel exposes (`session.undo` / `session.redo`), which is how the R-CLI-001
-    // keyboard/CLI path reaches the replay. No gesture (undo has no continuous geometry) and no D6
+    // keyboard/CLI path reaches the replay. It reports `dispatched` iff the replay actually LANDED
+    // a write — a drop and a refusal both answer false, because that bit is what the palette shows
+    // the human as success (see the .cpp). No gesture (undo has no continuous geometry) and no D6
     // state pair — the journal's state is persisted through the store, not through the panel-state
     // channel, precisely because the Shell owns it and editor-core must not.
     [[nodiscard]] PanelProvider make_provider();
 
 private:
+    // The whole body of `replay_undo` / `replay_redo`, parameterized on direction (the same
+    // `bool redo` shape `UndoJournal::replay_edit` uses): run the replay, count the outcome, report
+    // a refusal, and dirty/touch iff the stacks moved.
+    undo::ReplayResult run_replay(bool redo);
+
     PanelHost& host_;
     std::string panel_id_;
     undo::UndoJournal journal_;
     // Mirrors "a non-null gateway was bound": UndoJournal exposes no gateway accessor.
     bool gateway_bound_ = false;
     bool dirty_ = false;
+    bool replay_landed_ = false;
     std::size_t checkpoints_recorded_ = 0;
     std::size_t replays_run_ = 0;
     std::size_t replay_drops_ = 0;
+    std::size_t replay_refusals_ = 0;
 };
 
 } // namespace context::editor::shell::panels

@@ -13,9 +13,17 @@
 // forbids.
 //
 // The journal owns NO disk / no filesync dependency (mirroring the inspector panel): it commits
-// through the inspector::OverrideWriteGateway seam and (de)serializes to a plain JSON tree the CEF
-// host persists to the gitignored `.editor/session.json`. Headless + fault-injectable WITHOUT booting
-// CEF (drive an in-memory gateway; R-QA-010 concurrency seams).
+// through the inspector::OverrideWriteGateway seam and (de)serializes to a plain JSON tree its HOST
+// persists. Headless + fault-injectable WITHOUT booting CEF (drive an in-memory gateway; R-QA-010
+// concurrency seams).
+//
+// ⚠ WHERE THAT TREE LANDS: the gitignored `.editor/editor-state.json`, NOT `.editor/session.json`.
+// Since M9 e09c the host is the Shell's `shell/panels/undo_feed.{h,cpp}`, which carries the tree as
+// an opaque canonical string through `EditorStateStore::set_undo` — the ONE seam it reaches disk
+// through. `.editor/session.json` belongs to the DAEMON, which is its single writer (C-F3, design
+// 03 §1; kernel_server.h says the same from the other side), so persisting the journal there would
+// put a second writer on that file. This header said `session.json` until e09c gave the journal a
+// real host; do not restore that wording.
 
 #pragma once
 
@@ -41,7 +49,7 @@ namespace uitree = context::editor::gui::uitree;
 // records the L-35 addressing (root_scene + id-path + entity-relative pointer) plus the `before`
 // (undo target) and `after` (redo target / the value the field is EXPECTED to currently hold) values.
 // Deliberately self-contained (no InspectorModel handle) so a checkpoint survives selection changes
-// and JSON round-trips to `.editor/session.json`.
+// and the JSON round-trip its host persists (see the header note: `.editor/editor-state.json`).
 struct FieldEdit
 {
     std::string root_scene;               // the addressing (root) scene the override targets (L-35)
@@ -81,8 +89,8 @@ struct ReplayResult
 
 // The session undo/redo journal over the inspector override-write surface. Records gesture
 // checkpoints, replays undo/redo as CAS-guarded override writes through the gateway seam (never
-// clobbering a concurrent writer), and (de)serializes to the gitignored `.editor/session.json`. Total
-// and deterministic; owns no disk.
+// clobbering a concurrent writer), and (de)serializes to a JSON tree its host persists (since e09c:
+// the gitignored `.editor/editor-state.json`). Total and deterministic; owns no disk.
 class UndoJournal
 {
 public:
@@ -92,6 +100,15 @@ public:
     static constexpr const char* kRedoCommand = "session.redo";
     // The R-EDIT-001 contribution id this session surface registers under.
     static constexpr const char* kContributionId = "builtin.session.undo";
+    // The `CommitResult::code` a replay reports when the field could not be READ at all (no
+    // connection, a refused read, an entity that no longer resolves). Deliberately NOT
+    // `cas.mismatch`: nothing was written and no concurrent writer was observed — see `replay_edit`.
+    //
+    // The prefix names the LAYER, not the `edit` RPC, and that is deliberate: this code never
+    // reaches an Envelope or `exit_code_for`, so an `edit.*` spelling would read like a wire code
+    // the contract catalog should know and does not. `WireOverrideWriteGateway::kNoDaemonCode`
+    // (`shell.no_daemon`) is the same shape for the same reason — a host-minted, uncatalogued code.
+    static constexpr const char* kReadUnavailableCode = "undo.read_unavailable";
     // The `to_json` schema version (bumped if the on-disk journal shape changes).
     static constexpr int kJournalVersion = 1;
 
@@ -120,15 +137,27 @@ public:
     // write through the gateway, reverting in reverse order. A field a concurrent writer touched since
     // is DROPPED loudly (never clobbered, R-HUX-001). Only a cleanly-reverted checkpoint (every field
     // applied/rebased) moves onto the redo stack. `none` when there is nothing to undo / no gateway.
+    //
+    // AN ERROR KEEPS THE STEP; A DROP CONSUMES IT — the same caller contract every other user of
+    // `commit_override_write` honours (inspector_panel.h; InspectorPanel::commit keeps its staged
+    // gesture on a refusal for exactly this reason). A drop means the field MOVED, so this step can
+    // never be replayed and re-offering it would hand the human an undo guaranteed to refuse. A
+    // refusal — no daemon, an unreadable field, a write path that said no — wrote NOTHING, so the
+    // step is still perfectly good; consuming it would silently cost the human their history over a
+    // transient outage, which is precisely what a durable journal must not do. A partially-landed
+    // batch is treated as consumed (see `nothing_landed` in the .cpp).
     ReplayResult undo();
     // Redo the most recently undone checkpoint (Ctrl+Y): replay each field's `after`, forward order,
-    // same CAS + drop-on-collision guarantees. Only a cleanly re-applied checkpoint returns to undo.
+    // same CAS + drop-on-collision guarantees, and the same keep-on-error rule as `undo` above. Only
+    // a cleanly re-applied checkpoint returns to undo.
     ReplayResult redo();
     [[nodiscard]] const ReplayResult& last_replay() const noexcept { return last_; }
 
-    // --- `.editor/session.json` persistence (R-FILE-006 gitignored session state) -------------------
-    // Serialize the undo + redo stacks to a canonical-serializable JSON tree (the host writes it to
-    // `.editor/session.json`). The live gateway is NOT serialized — it is re-attached on load.
+    // --- host-persisted session state (R-FILE-006 gitignored) ---------------------------------------
+    // Serialize the undo + redo stacks to a canonical-serializable JSON tree. The HOST decides where
+    // it lands; since e09c that is the Shell writing `.editor/editor-state.json` (see the file header
+    // — NOT the daemon's `.editor/session.json`). The live gateway is NOT serialized — it is
+    // re-attached on load.
     [[nodiscard]] serializer::JsonValue to_json() const;
     // Replace the stacks from a previously-serialized tree. Total + robust: a malformed / wrong-shape
     // tree leaves the journal EMPTY and returns false (a corrupt session file never throws or crashes
@@ -147,6 +176,13 @@ private:
     // (expecting the field to currently hold `after`); `redo=true` re-applies `after` (expecting
     // `before`). The up-front expected-value check is the R-HUX-001 no-clobber guard.
     [[nodiscard]] inspector::CommitResult replay_edit(const FieldEdit& edit, bool redo) const;
+
+    // The ONE home for the keep-vs-consume policy `undo` and `redo` share: push `cp` onto `to` when
+    // the replay cleanly landed, back onto `from` when it refused without writing anything, and
+    // consume it otherwise. Both callers route through here so the rule cannot drift between the
+    // two near-identical mirrors.
+    void settle(Checkpoint cp, const ReplayResult& r, bool all_ok, std::vector<Checkpoint>& from,
+                std::vector<Checkpoint>& to);
 
     const inspector::OverrideWriteGateway* gateway_ = nullptr;
     std::vector<Checkpoint> undo_;

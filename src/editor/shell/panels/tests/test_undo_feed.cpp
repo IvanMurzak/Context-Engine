@@ -16,9 +16,11 @@
 //
 // THE GATEWAY DOUBLE MODELS THE PROJECT FILES, NOT THE WIRE. It holds the composed value + a CAS
 // token and applies exactly the `attempt`/`read` contract `inspector_panel.h` publishes, so the L-30
-// engine under test is the REAL one. The wire half is asserted where it belongs — in
-// `test_builtin_panels.cpp`, which drives the composition root's REAL `WireOverrideWriteGateway` and
-// proves the journal's replay reaches it (there is no second write path).
+// engine under test is the REAL one. The wire half is asserted where it belongs, in two halves:
+// the FRAME in `test_wire_override_gateway.cpp` (`an_undo_replay_sends_the_same_edit_frame_a_gesture_does`
+// — a real `UndoFeed` over the real gateway, and the outbound `edit` params it produces), and WHICH
+// OBJECT it left through in `test_builtin_panels.cpp` (the composition root's own gateway INSTANCE,
+// asserted through its per-instance counters — there is no second write path).
 //
 // Deliberately survives the restart: the double outlives the "process" in
 // `test_the_journal_survives_an_editor_restart`, because the project's authored files outlive an
@@ -26,11 +28,12 @@
 //
 // PLANTED-VIOLATION VERIFICATION (conventions.md — "a gate that cannot fail is worse than no gate").
 // Every assertion family here, and in the sibling e09c cases in `test_inspector_feed.cpp` /
-// `test_builtin_panels.cpp` / `../../tests/test_editor_state.cpp`, was falsified by planting the
-// corresponding defect and watching the named test go RED — eleven plants, each restored with a
-// timestamp-INVALIDATING byte copy (`shutil.copyfile` + `os.utime(path, None)`, never `copy2`, or
-// ninja skips the rebuild and the next plant silently runs against the previous plant's binary) and
-// the round closed by a post-restore run that came back GREEN on a byte-exact tree:
+// `test_builtin_panels.cpp` / `test_wire_override_gateway.cpp` / `../../tests/test_editor_state.cpp`,
+// was falsified by planting the corresponding defect and watching the NAMED test go RED — twenty
+// plants across two rounds, each restored with a timestamp-INVALIDATING byte copy
+// (`shutil.copyfile` + `os.utime(path, None)`, never `copy2`, or ninja skips the rebuild and the next
+// plant silently runs against the previous plant's binary) and each round closed by a post-restore
+// run that came back GREEN on a byte-exact tree (md5-verified against the out-of-tree backup):
 //
 //   * `EditorState::to_json` drops the `undo` blob / `from_json` never reads it back;
 //   * `EditorStateStore::set_undo` never marks the store dirty (so nothing is ever flushed);
@@ -40,7 +43,16 @@
 //   * the checkpoint is snapshotted AFTER `commit()` consumes the gesture (null/null pair);
 //   * a loudly-DROPPED commit is journaled as an undo step;
 //   * the composition root binds the journal to NO gateway;
-//   * `publish_undo_state` never reaches the store / `restore_undo_state` never adopts the blob.
+//   * `publish_undo_state` never reaches the store / `restore_undo_state` never adopts the blob;
+//   * `replay_edit` falls through to the `cas.mismatch` comparison for a field it could not READ;
+//   * `undo()`/`redo()` CONSUME the checkpoint on an `error` aggregate that landed nothing;
+//   * `UndoFeed::run_replay` dirties + touches unconditionally instead of on a depth delta;
+//   * `take_replay_landed` is never raised (so the Inspector is never re-armed);
+//   * the provider reports a DROPPED replay as `dispatched` (the pre-refine `status != none`);
+//   * `pump_panel_feeds` never consumes the landed-replay flag;
+//   * `restore_undo_state` claims success for a well-formed but EMPTY journal;
+//   * `InspectorFeed::request_refresh` arms an EMPTY identity;
+//   * an undo replay sends the `after` value (the wrong direction) on the wire.
 
 #include "context/editor/shell/panels/undo_feed.h"
 
@@ -80,40 +92,14 @@ constexpr const char* kPointer = "/components/camera/fov";
 
 // --- tiny fixtures ------------------------------------------------------------------------------
 //
-// A local temp-project helper rather than shell_test.h's: that header pulls context/render/rhi.h,
-// which nothing in this suite builds against (panels_test.h states the same rule).
+// `make_temp_project` / `cleanup` / `read_file` come from panels_test.h — the harness this whole
+// directory shares — rather than being retyped here.
+using panelstest::cleanup;
+using panelstest::read_file;
+
 [[nodiscard]] fs::path make_temp_project(const char* tag)
 {
-    static int counter = 0;
-    // The tick count is materialised into a CONCRETE long long BEFORE std::to_string: a chrono rep
-    // is implementation-defined and Apple libc++ finds the overload ambiguous on one where GCC and
-    // MSVC do not (test.md § Suite 1, the macOS libc++ note).
-    static const long long run_ticks = static_cast<long long>(
-        std::chrono::high_resolution_clock::now().time_since_epoch().count());
-    static const std::string run_stamp = std::to_string(run_ticks);
-    std::error_code ec;
-    fs::path root = fs::temp_directory_path(ec) /
-                    (std::string("context-undo-feed-") + tag + "-" + run_stamp + "-" +
-                     std::to_string(++counter));
-    fs::remove_all(root, ec);
-    fs::create_directories(root, ec);
-    return root;
-}
-
-void cleanup(const fs::path& path)
-{
-    std::error_code ec;
-    fs::remove_all(path, ec);
-}
-
-[[nodiscard]] std::string read_file(const fs::path& path)
-{
-    // std::ifstream, not std::fopen: MSVC /W4 /WX rejects the C stdio family as C4996 and the local
-    // GCC gate cannot see it (conventions.md § Coding conventions).
-    std::ifstream in(path, std::ios::binary);
-    std::ostringstream buffer;
-    buffer << in.rdbuf();
-    return buffer.str();
+    return panelstest::make_temp_project("context-undo-feed", tag);
 }
 
 [[nodiscard]] serializer::JsonValue jnum(double value)
@@ -163,6 +149,13 @@ public:
     {
         ++reads;
         inspector::FieldState state;
+        if (!readable)
+        {
+            // The default every real gateway returns when it cannot resolve the field — no daemon
+            // connection, a refused `editor.inspect`, an entity that is gone. present:false, a null
+            // value, a 0 token.
+            return state;
+        }
         state.raw_hash = raw_hash;
         const auto it = values.find(key(root_scene, id_path, pointer));
         state.present = it != values.end();
@@ -171,6 +164,14 @@ public:
             state.value = it->second;
         }
         return state;
+    }
+
+    // The composed field's starting value, THROUGH `key()` — so a test never hand-builds the
+    // private encoding. A hand-built key that drifted from `key()` would seed an entry nothing
+    // reads, and every assertion would then pass against an absent field rather than a real one.
+    void seed(const serializer::JsonValue& value)
+    {
+        values[key(kScene, {"cam"}, kPointer)] = value;
     }
 
     // A CO-WRITER moving the field out from under us: the value changes AND the file's token
@@ -188,6 +189,7 @@ public:
     }
 
     mutable std::map<std::string, serializer::JsonValue> values;
+    mutable bool readable = true; // false => every read reports the "could not read" default
     mutable std::uint64_t raw_hash = 100;
     mutable std::size_t attempts = 0;
     mutable std::size_t reads = 0;
@@ -278,7 +280,7 @@ void test_a_corrupt_or_absent_blob_degrades_to_an_empty_journal()
 void test_a_recorded_checkpoint_replays_through_the_bound_gateway()
 {
     FieldStore store;
-    store.values[std::string(kScene) + "/cam#" + kPointer] = jnum(75.0); // the committed state
+    store.seed(jnum(75.0)); // the committed state
 
     PanelHost host;
     panels::UndoFeed feed(host, kPanelId);
@@ -312,7 +314,7 @@ void test_a_replay_whose_field_a_co_writer_moved_drops_loudly()
 {
     // THE R-HUX-001 GUARANTEE. "Restore the previous bytes" is exactly what undo must NOT do.
     FieldStore store;
-    store.values[std::string(kScene) + "/cam#" + kPointer] = jnum(75.0);
+    store.seed(jnum(75.0));
 
     PanelHost host;
     panels::UndoFeed feed(host, kPanelId);
@@ -349,12 +351,129 @@ void test_an_unbound_feed_replays_nothing_rather_than_pretending()
     CHECK(feed.journal().can_undo());
 }
 
+void test_a_redo_whose_field_a_co_writer_moved_drops_loudly_too()
+{
+    // `replay_redo` is `replay_undo`'s twin, and an untested twin is where a copy-paste divergence
+    // hides. The scenario is ordinary: an undo lands, a co-writer then touches the field, and the
+    // redo must refuse exactly as the undo would have.
+    FieldStore store;
+    store.seed(jnum(75.0));
+
+    PanelHost host;
+    panels::UndoFeed feed(host, kPanelId);
+    feed.bind_gateway(&store);
+    feed.record(fov_edit(60.0, 75.0));
+    CHECK(feed.replay_undo().ok()); // disk now holds 60; the step is on the redo stack
+    CHECK(feed.journal().can_redo());
+    feed.mark_clean();
+
+    store.external_write(jnum(120.0)); // another writer takes the field
+
+    const undo::ReplayResult result = feed.replay_redo();
+    CHECK(result.status == inspector::CommitResult::Status::dropped);
+    CHECK(feed.replay_drops() == 1u);
+    CHECK(feed.replays_run() == 2u);
+    CHECK(store.field() == canonical(jnum(120.0))); // the co-writer's value SURVIVES
+    CHECK(!feed.journal().can_redo());              // consumed, like a dropped undo
+    CHECK(feed.dirty());                            // the stacks moved, so the blob is stale
+}
+
+void test_a_replay_the_write_path_refuses_keeps_the_step_and_dirties_nothing()
+{
+    // THE DURABILITY HALF. A refusal is not a drop: nothing was written, so the human's step must
+    // survive — and because the journal did not move, the persisted blob must NOT be marked stale
+    // (a byte-identical rewrite of the session file every frame the daemon is down) and the panel
+    // must NOT be re-rendered at an unchanged depth.
+    FieldStore store;
+    store.seed(jnum(75.0));
+    store.readable = false; // the field cannot be read at all
+
+    PanelHost host;
+    panels::UndoFeed feed(host, kPanelId);
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    feed.bind_gateway(&store);
+    feed.record(fov_edit(60.0, 75.0));
+    feed.mark_clean();
+    const std::uint64_t revision_before = host.revision(kPanelId);
+
+    const undo::ReplayResult result = feed.replay_undo();
+    CHECK(result.status == inspector::CommitResult::Status::error);
+    CHECK(feed.replay_refusals() == 1u);
+    CHECK(feed.replay_drops() == 0u);
+    CHECK(store.attempts == 0u);   // never written
+    CHECK(feed.journal().can_undo()); // KEPT
+    CHECK(!feed.dirty());             // nothing moved -> nothing to re-persist
+    CHECK(host.revision(kPanelId) == revision_before); // and nothing to re-render
+    CHECK(!feed.take_replay_landed());                 // and certainly nothing to re-read
+
+    // Reachable again: the SAME step still works.
+    store.readable = true;
+    CHECK(feed.replay_undo().ok());
+    CHECK(store.field() == canonical(jnum(60.0)));
+}
+
+void test_a_landed_replay_raises_the_read_your_replays_flag_once()
+{
+    // A replay writes the field through the gateway DIRECTLY, so `InspectorPanel::commit` never runs
+    // and the Inspector's own commit listener — which is what re-arms its re-read — never fires.
+    // `pump_panel_feeds` consumes THIS flag instead. Without it the panel keeps rendering the
+    // pre-undo value AND the pre-undo CAS token, so the human's next edit to that field is dropped
+    // as a "concurrent writer" that is really their own Ctrl+Z.
+    FieldStore store;
+    store.seed(jnum(75.0));
+
+    PanelHost host;
+    panels::UndoFeed feed(host, kPanelId);
+    feed.bind_gateway(&store);
+    feed.record(fov_edit(60.0, 75.0));
+    CHECK(!feed.take_replay_landed()); // recording is not replaying
+
+    CHECK(feed.replay_undo().ok());
+    CHECK(feed.take_replay_landed());  // raised…
+    CHECK(!feed.take_replay_landed()); // …and CONSUMED, so one landed replay arms exactly one fetch
+
+    // A DROPPED replay wrote nothing, so there is nothing to read back.
+    feed.record(fov_edit(10.0, 60.0));
+    store.external_write(jnum(120.0));
+    CHECK(feed.replay_undo().status == inspector::CommitResult::Status::dropped);
+    CHECK(!feed.take_replay_landed());
+}
+
+void test_the_touch_seam_repaints_the_surface_on_every_move()
+{
+    // Every mutator claims to touch the panel so the rendered depth keeps up. Asserted the way the
+    // sibling feeds assert it (test_problems_feed.cpp), including the NEGATIVE case above.
+    FieldStore store;
+    store.seed(jnum(75.0));
+
+    PanelHost host;
+    panels::UndoFeed feed(host, kPanelId);
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    feed.bind_gateway(&store);
+
+    const std::uint64_t before_record = host.revision(kPanelId);
+    feed.record(fov_edit(60.0, 75.0));
+    CHECK(host.revision(kPanelId) > before_record);
+
+    const std::uint64_t before_undo = host.revision(kPanelId);
+    CHECK(feed.replay_undo().ok());
+    CHECK(host.revision(kPanelId) > before_undo);
+
+    const std::uint64_t before_redo = host.revision(kPanelId);
+    CHECK(feed.replay_redo().ok());
+    CHECK(host.revision(kPanelId) > before_redo);
+
+    const std::uint64_t before_load = host.revision(kPanelId);
+    CHECK(!feed.load_blob(Json(std::string{}))); // an absent blob still re-renders (now empty)
+    CHECK(host.revision(kPanelId) > before_load);
+}
+
 // --- the panel surface --------------------------------------------------------------------------
 
 void test_the_provider_dispatches_the_two_commands()
 {
     FieldStore store;
-    store.values[std::string(kScene) + "/cam#" + kPointer] = jnum(75.0);
+    store.seed(jnum(75.0));
 
     PanelHost host;
     panels::UndoFeed feed(host, kPanelId);
@@ -381,6 +500,16 @@ void test_the_provider_dispatches_the_two_commands()
     // not a placeholder.
     const gui::uitree::Panel panel = provider.build();
     CHECK(panelstest::mentions(gui::uitree::render_html(panel), "1 undoable"));
+
+    // AND THE HONEST VERDICT. `invoke` answers `dispatched` iff the replay LANDED a write, because
+    // that bit is what the palette shows the human as success (boot.ts § sessionActions). Every
+    // assertion above passes identically under the older `status != none` spelling — `none` is false
+    // and `applied` is true either way — so a DROPPED replay is the only case that tells them apart,
+    // and without it the whole honest-verdict property is untested.
+    store.external_write(jnum(999.0)); // a co-writer takes the field
+    CHECK(!provider.invoke(undo::UndoJournal::kUndoCommand, Json::object()));
+    CHECK(feed.replay_drops() == 1u);                // it DID run and DID refuse…
+    CHECK(store.field() == canonical(jnum(999.0)));  // …leaving the co-writer's value untouched
 }
 
 // --- persistence through the ONE Shell-side seam ------------------------------------------------
@@ -389,7 +518,7 @@ void test_the_journal_reaches_the_editor_state_file_through_the_store()
 {
     const fs::path root = make_temp_project("store");
     FieldStore store;
-    store.values[std::string(kScene) + "/cam#" + kPointer] = jnum(75.0);
+    store.seed(jnum(75.0));
 
     PanelHost host;
     panels::UndoFeed feed(host, kPanelId);
@@ -489,6 +618,11 @@ void test_a_restart_from_a_corrupt_blob_boots_with_an_empty_history()
     state_store.load();
     PanelHost host;
     panels::UndoFeed feed(host, kPanelId);
+    // DIRTY FIRST, so the postcondition below is a real transition rather than a restatement of the
+    // constructor: `load_blob` promises the feed is CLEAN afterwards (it now matches disk), and a
+    // virgin feed is already clean, which would make the assertion pass with the line deleted.
+    feed.record(fov_edit(60.0, 75.0));
+    CHECK(feed.dirty());
     CHECK(!feed.load_blob(state_store.state().undo)); // refused...
     CHECK(!feed.journal().can_undo());                // ...and empty, not half-loaded
     CHECK(!feed.dirty());
@@ -504,6 +638,10 @@ int main()
     test_a_corrupt_or_absent_blob_degrades_to_an_empty_journal();
     test_a_recorded_checkpoint_replays_through_the_bound_gateway();
     test_a_replay_whose_field_a_co_writer_moved_drops_loudly();
+    test_a_redo_whose_field_a_co_writer_moved_drops_loudly_too();
+    test_a_replay_the_write_path_refuses_keeps_the_step_and_dirties_nothing();
+    test_a_landed_replay_raises_the_read_your_replays_flag_once();
+    test_the_touch_seam_repaints_the_surface_on_every_move();
     test_an_unbound_feed_replays_nothing_rather_than_pretending();
     test_the_provider_dispatches_the_two_commands();
     test_the_journal_reaches_the_editor_state_file_through_the_store();

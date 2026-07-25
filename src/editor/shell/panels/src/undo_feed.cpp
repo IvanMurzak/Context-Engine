@@ -17,6 +17,24 @@ namespace
 {
 namespace serializer = context::editor::serializer;
 using Status = undo::ReplayResult::Status;
+
+// The message that EXPLAINS a non-ok replay: the first edit that did not land, not the first edit
+// full stop. A multi-edit checkpoint whose SECOND field collided has an `applied` result at
+// `edits.front()` carrying an empty message, so reporting `front()` would degrade the diagnostic to
+// "undo dropped: " — the one thing a loud refusal must never be. (The Inspector commits one field
+// per gesture today, so this is latent; it is one line to keep it from becoming a bug when a
+// batched gesture lands.)
+[[nodiscard]] const char* first_message(const undo::ReplayResult& result)
+{
+    for (const auto& edit : result.edits)
+    {
+        if (!edit.ok() && !edit.message.empty())
+        {
+            return edit.message.c_str();
+        }
+    }
+    return "";
+}
 } // namespace
 
 // --------------------------------------------------------------------------- the persistence blob
@@ -58,7 +76,17 @@ bool undo_journal_from_blob(const contract::Json& blob, undo::UndoJournal& journ
                                                 : parsed.diagnostics.front().message.c_str());
         return false;
     }
-    return journal.load_json(parsed.root);
+    if (!journal.load_json(parsed.root))
+    {
+        // Well-formed JSON that is not a journal document (a wrong-shaped or hand-edited blob).
+        // `load_json` has already left the journal EMPTY; reporting it is what makes the "a corrupt
+        // one leaves the journal EMPTY and reports why" contract in builtin_panels.h true on THIS
+        // branch too, not just on the unparseable one above.
+        std::fprintf(stderr, "context_editor: the persisted undo journal was not a journal "
+                             "document; the undo history was reset\n");
+        return false;
+    }
+    return true;
 }
 
 // ------------------------------------------------------------------------------------- the feed
@@ -87,43 +115,64 @@ void UndoFeed::record(undo::FieldEdit edit)
 
 undo::ReplayResult UndoFeed::replay_undo()
 {
-    undo::ReplayResult result = journal_.undo();
+    return run_replay(/*redo=*/false);
+}
+
+undo::ReplayResult UndoFeed::replay_redo()
+{
+    return run_replay(/*redo=*/true);
+}
+
+undo::ReplayResult UndoFeed::run_replay(bool redo)
+{
+    // Sampled HERE rather than by each caller: "the depths must be read before the replay" is then
+    // an invariant of this function instead of a contract two call sites have to remember.
+    const std::size_t undo_before = journal_.undo_depth();
+    const std::size_t redo_before = journal_.redo_depth();
+    const char* const verb = redo ? "redo" : "undo";
+    undo::ReplayResult result = redo ? journal_.redo() : journal_.undo();
     if (result.status == Status::none)
     {
-        return result; // nothing to undo / no gateway — the stacks did not move
+        return result; // nothing to undo/redo, or no gateway — the stacks did not move
     }
     ++replays_run_;
     if (result.status == Status::dropped)
     {
         ++replay_drops_;
         // R-HUX-001: the field moved under us, so the revert was REFUSED rather than clobbering a
-        // co-writer. e09b-3 owns the human-visible chrome; reporting it here is what keeps the drop
-        // from being silent in the meantime (the same posture inspector_feed.cpp takes).
-        std::fprintf(stderr, "context_editor: undo dropped — %s\n",
-                     result.edits.empty() ? "" : result.edits.front().message.c_str());
+        // co-writer, and the checkpoint is consumed (it can never be replayed now). e09b-3 owns the
+        // human-visible chrome; reporting it here is what keeps the drop from being silent in the
+        // meantime (the same posture inspector_feed.cpp takes).
+        std::fprintf(stderr, "context_editor: %s dropped: %s\n", verb, first_message(result));
     }
-    dirty_ = true;
-    host_.touch(panel_id_);
+    else if (result.status == Status::error)
+    {
+        ++replay_refusals_;
+        // NOT a concurrency event and NOT a loss: the write path refused (no daemon, an unreadable
+        // field), so nothing was written and the journal KEPT the step for the human to retry once
+        // the project is reachable again (undo_journal.h § undo). Reported for the same reason a
+        // drop is — a refusal the human never hears about looks exactly like an undo that worked.
+        std::fprintf(stderr, "context_editor: %s refused: %s\n", verb, first_message(result));
+    }
+    // DIRTY IFF THE STACKS ACTUALLY MOVED — read off the journal rather than inferred from the
+    // status, so this stays correct however the journal's keep-vs-consume policy evolves. A refusal
+    // that kept its checkpoint changed nothing, so it must not dirty the persisted blob (which would
+    // rewrite `.editor/editor-state.json` byte-identically) and must not bump the panel's revision
+    // (which would force a re-render of an unchanged depth).
+    if (journal_.undo_depth() != undo_before || journal_.redo_depth() != redo_before)
+    {
+        replay_landed_ = replay_landed_ || result.ok();
+        dirty_ = true;
+        host_.touch(panel_id_);
+    }
     return result;
 }
 
-undo::ReplayResult UndoFeed::replay_redo()
+bool UndoFeed::take_replay_landed() noexcept
 {
-    undo::ReplayResult result = journal_.redo();
-    if (result.status == Status::none)
-    {
-        return result;
-    }
-    ++replays_run_;
-    if (result.status == Status::dropped)
-    {
-        ++replay_drops_;
-        std::fprintf(stderr, "context_editor: redo dropped — %s\n",
-                     result.edits.empty() ? "" : result.edits.front().message.c_str());
-    }
-    dirty_ = true;
-    host_.touch(panel_id_);
-    return result;
+    const bool landed = replay_landed_;
+    replay_landed_ = false;
+    return landed;
 }
 
 contract::Json UndoFeed::to_blob() const
@@ -150,13 +199,20 @@ PanelProvider UndoFeed::make_provider()
         // The journal exposes a command ONLY when it is reachable (undo_journal.cpp's build_panel),
         // so a dispatch arriving for an unavailable action is a stale mounted DOM — it answers
         // `Status::none` below and is reported as not dispatched, which is the honest outcome.
+        // `ok()`, NOT `status != none`: `dispatched` is the ONLY bit that reaches the human here.
+        // The renderer's session action maps it straight to the palette's success/failure (boot.ts
+        // § sessionActions), so reporting `true` for a LOUDLY DROPPED or REFUSED replay would tell
+        // the human their undo worked while the file was left exactly as it was — the silent
+        // failure R-HUX-001 exists to forbid. The panel's revision is bumped by `host_.touch`
+        // independently, so declining here costs no re-render. e09b-3 gives the refusal its own
+        // chrome; until then "it did not happen" is the honest bit to send.
         if (command_id == undo::UndoJournal::kUndoCommand)
         {
-            return replay_undo().status != Status::none;
+            return replay_undo().ok();
         }
         if (command_id == undo::UndoJournal::kRedoCommand)
         {
-            return replay_redo().status != Status::none;
+            return replay_redo().ok();
         }
         return false;
     };

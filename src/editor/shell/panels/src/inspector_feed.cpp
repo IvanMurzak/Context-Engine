@@ -246,21 +246,28 @@ void InspectorFeed::on_commit(const inspector::CommitResult& result)
     {
         return;
     }
-    // READ-YOUR-WRITES (05 §7). The panel must observe its own commit; re-arm the pending fetch for
-    // the identity currently inspected so the next `pump_panel_feeds` re-reads `editor.inspect` and
-    // the field comes back with its new value and `overridden:true`. Without this the panel would
-    // wait for the next selection change or `derivation.settled` — i.e. it would render a value it
-    // had already successfully written as if it had not.
+    // READ-YOUR-WRITES (05 §7). The panel must observe its own commit, so the next
+    // `pump_panel_feeds` re-reads `editor.inspect` and the field comes back with its new value and
+    // `overridden:true`. Without this the panel would wait for the next selection change or
+    // `derivation.settled` — i.e. it would render a value it had already successfully written as if
+    // it had not.
+    (void)request_refresh();
+}
+
+bool InspectorFeed::request_refresh()
+{
     const std::string& identity = panel_.model().identity;
-    if (!identity.empty())
+    if (identity.empty())
     {
-        // Through the NAMED seam, not a second `pending_ = ...`: `request` is the one place that
-        // documents the replace-a-pending-fetch rule. (It replaces unconditionally, so a selection
-        // that moved between the gesture and this commit is re-armed onto the OLD identity and its
-        // fetch waits for the next pump-triggering change — narrow, and noted in the PR body.)
-        request(identity);
-        ++rereads_armed_;
+        return false; // nothing inspected — an ordinary state, not a failure
     }
+    // Through the NAMED seam, not a second `pending_ = ...`: `request` is the one place that
+    // documents the replace-a-pending-fetch rule. (It replaces unconditionally, so a selection that
+    // moved between the gesture and this call is re-armed onto the OLD identity and its fetch waits
+    // for the next pump-triggering change — narrow, and noted in the PR body.)
+    request(identity);
+    ++rereads_armed_;
+    return true;
 }
 
 void InspectorFeed::request(const std::string& identity)

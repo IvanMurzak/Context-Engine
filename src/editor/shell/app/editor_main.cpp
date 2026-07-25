@@ -460,6 +460,9 @@ int main(int argc, char** argv)
     // undo_feed.cpp reports) simply restores nothing and starts empty.
     // (Reported through the free seam alone — `UndoFeed` stays forward-declared here, so this TU
     // keeps its narrow include set, the discipline builtin_panels.h documents for every feed.)
+    // True only when a step actually came back (see the seam): a well-formed but EMPTY journal
+    // loads fine and restores nothing, and announcing "restored" for that is the kind of cheerful
+    // noise that teaches a reader to stop believing the log.
     if (shell::panels::restore_undo_state(builtin, manager.state_store().state()))
     {
         std::fprintf(stderr, "context_editor: restored the previous session's undo history\n");

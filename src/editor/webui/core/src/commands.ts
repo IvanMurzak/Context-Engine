@@ -330,9 +330,10 @@ export function editorCommands(actions: EditorCommandActions): readonly Command[
 // Undo/redo are editor-level commands with STABLE ids (`session.undo` / `session.redo`,
 // undo_journal.h `kUndoCommand`/`kRedoCommand`) that the e07c keymap binds to Ctrl+Z / Ctrl+Y. They
 // are registered here so they resolve through the ONE registry like every other command; the keymap
-// is just a consumer that dispatches them. The HANDLERS route to an injected `SessionCommandActions`
-// so the actual undo/redo (the wire replay of the journal, undo_journal.h) can land later (e09)
-// without touching the command surface — e07c delivers the binding + dispatch, not the replay.
+// is just a consumer that dispatches them. The HANDLERS route to an injected `SessionCommandActions`,
+// which is what let the wire replay land in a LATER task (e09c) without touching this surface at all:
+// e07c delivered the binding + dispatch, and boot.ts now injects the real replay over the
+// `panel.command` bridge at the Shell's session-undo host.
 
 /** The session actions the built-in session commands dispatch to (undo/redo). */
 export interface SessionCommandActions {
@@ -356,7 +357,9 @@ export function sessionCommands(actions: SessionCommandActions): readonly Comman
             when: "!textInputFocus",
             docs: {
                 summary: "Undo the last authored edit in the session",
-                detail: "session action; bound to Ctrl+Z; the wire replay lands in e09 (undo_journal.h)",
+                detail:
+                    "session action; bound to Ctrl+Z; replayed over the same CAS-guarded write path " +
+                    "a live edit takes, so it drops rather than clobbers a concurrent writer",
             },
             handler: () => actions.undo(),
         },
@@ -368,8 +371,9 @@ export function sessionCommands(actions: SessionCommandActions): readonly Comman
             docs: {
                 summary: "Redo the last undone authored edit in the session",
                 detail:
-                    "session action; bound to Ctrl+Y / Ctrl+Shift+Z; the wire replay lands in e09 " +
-                    "(undo_journal.h)",
+                    "session action; bound to Ctrl+Y / Ctrl+Shift+Z; replayed over the same " +
+                    "CAS-guarded write path a live edit takes, so it drops rather than clobbers a " +
+                    "concurrent writer",
             },
             handler: () => actions.redo(),
         },

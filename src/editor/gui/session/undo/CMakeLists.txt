@@ -7,7 +7,8 @@
 #
 # Pure C++ over the F0b headless uitree lib + the F3 inspector commit engine — NO CEF — so it builds +
 # unit-tests on the DEFAULT 3-OS matrix and the local dev gate, exactly like context_gui_panel_inspector.
-# The `.editor/session.json` disk write is the CEF-host integration path; this lib owns no disk (it
+# The disk write is the HOST's integration path (since e09c: the Shell, into
+# `.editor/editor-state.json` — never the daemon's `.editor/session.json`); this lib owns no disk (it
 # (de)serializes to a JSON tree), mirroring the inspector panel.
 
 add_library(context_gui_undo STATIC

@@ -124,6 +124,16 @@ public:
     // any pending fetch.
     void request_clear();
 
+    // Re-arm a re-read of the entity CURRENTLY inspected, because the file changed under the panel:
+    // its own commit landed (READ-YOUR-WRITES, 05 §7) or an undo/redo replay wrote the field behind
+    // its back (READ-YOUR-REPLAYS, e09c — a replay goes through the gateway directly, so `commit`
+    // and therefore the commit listener never run). Returns false when nothing is inspected, which
+    // is an ordinary state and not a failure.
+    //
+    // THE ONE HOME for that rule: `on_commit` and `pump_panel_feeds` both route through it, so
+    // "which identity, and when is it empty" is not spelled out in two places that can drift.
+    bool request_refresh();
+
     // The pump's contract (mirrors SceneTreeFeed): the pending identity to fetch, claimed via
     // `mark_fetched()` BEFORE the RPC so a failed call waits for the next selection change.
     [[nodiscard]] const std::optional<std::string>& pending() const noexcept { return pending_; }
@@ -166,7 +176,9 @@ public:
     // gesture was refused rather than overwriting it. The human-visible surface is e09b-3; the COUNT
     // is what makes a drop assertable today instead of invisible.
     [[nodiscard]] std::size_t drops_observed() const noexcept { return drops_observed_; }
-    // How many applied/rebased commits re-armed the read-your-writes fetch (05 §7).
+    // How many times a re-read was armed by `request_refresh` — an applied/rebased commit
+    // (read-your-writes, 05 §7) or, since e09c, a landed undo/redo replay (read-your-replays). NOT
+    // selection changes, which arm through `request` directly.
     [[nodiscard]] std::size_t rereads_armed() const noexcept { return rereads_armed_; }
     // How many resolved commits were journaled as undo checkpoints (M9 e09c). Strictly <=
     // `commits_observed()`: a drop, an error, and a commit with no sink bound are all excluded.

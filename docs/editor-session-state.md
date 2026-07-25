@@ -227,7 +227,7 @@ runtime-session adapter that produces play frames lives on in `context_gui_playb
 
 ## Not in scope here
 
-The `editor.ui` bus (e08c), writes/undo over the wire (e09), and the **second-window** propagation
+The `editor.ui` bus (e08c), writes/undo over the wire (e09b-2 / e09c — LANDED; see `docs/shell.md` § Session undo), and the **second-window** propagation
 drill (e10 — it needs the multi-window subsystem, which is unbuilt). editor-core's `editor.ui` half of
 the when-context is still the "nothing focused" baseline for the same reason: the bus is local to a
 window, and mirroring it is e10's seam.

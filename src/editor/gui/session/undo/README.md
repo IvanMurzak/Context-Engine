@@ -6,8 +6,11 @@ undo with **gesture-batch auto-checkpointing** (one undo step per gesture, not p
 to the M5 shipped editing surface — the **F3 inspector override writes** (`../../panels/inspector/`).
 
 This is a **short-horizon session convenience layered on the write path**, NOT an engine undo
-subsystem: durable/long-range history stays **git** (R-FILE-007 / L-21). It reuses the existing
-`cas.mismatch` error-catalog code — **no new error-catalog codes**.
+subsystem: durable/long-range history stays **git** (R-FILE-007 / L-21). It mints **no catalog
+codes**: a collision reuses the existing `cas.mismatch`, and a field that cannot be read at all
+reports the local, uncatalogued `undo.read_unavailable` (`UndoJournal::kReadUnavailableCode`) — a
+host-side condition kept out of the published R-CLI-008 catalog for the same reason
+`wire_override_gateway.h` keeps `shell.no_daemon` out.
 
 ## The load-bearing safety property (R-HUX-001)
 
@@ -16,17 +19,24 @@ queue, `--if-match` CAS, and the **L-30 rebase-or-drop** policy — so an undo c
 concurrent writer** (human or AI). A naive "restore the previous bytes" undo is exactly what
 R-HUX-001 forbids. Each replay:
 
-1. **reads the field's CURRENT value** (the up-front no-clobber guard). If it no longer holds the value
-   we last wrote, a concurrent writer touched it → the undo/redo is **DROPPED LOUDLY** (a `cas.mismatch`
-   diagnostic + event), the stale value is never restored over the co-writer's change;
+0. **attempts to READ the field.** If it cannot be read *at all* — no daemon connection, a refused
+   `editor.inspect`, an entity that no longer resolves — the replay is an **ERROR, not a drop**:
+   nothing was written and no concurrent writer was observed, so it reports `undo.read_unavailable`
+   rather than a fabricated `cas.mismatch`;
+1. otherwise **compares the field's CURRENT value** (the up-front no-clobber guard). If it no longer
+   holds the value we last wrote, a concurrent writer touched it → the undo/redo is **DROPPED LOUDLY**
+   (a `cas.mismatch` diagnostic + event), the stale value is never restored over the co-writer's change;
 2. otherwise routes the revert (or re-apply) through **`inspector::commit_override_write`** — the ONE
    L-20/L-30 commit engine shared with the inspector's gesture commit — CAS-guarded on the just-read
    hash: if a writer races between the read and the write, it **rebases** onto the new state when the
    field path is untouched, or **drops** if the same field path collided. Collision is decided at
    **field-path granularity** (R-FILE-006 / L-30), not file granularity.
 
-Only a **cleanly-reverted** checkpoint (every field applied/rebased) moves onto the redo stack; a
-dropped undo is a loud, terminal no-progress event — the user re-applies.
+Only a **cleanly-reverted** checkpoint (every field applied/rebased) moves onto the redo stack. A
+**dropped** undo is a loud, terminal no-progress event — the field moved, so the step is consumed and
+the user re-applies. A **refused** one wrote nothing, so the journal **KEEPS** the step and the user
+can retry once the project is reachable — the same caller contract the inspector honours for a refused
+gesture (`inspector_panel.h`: an error keeps it, a drop consumes it).
 
 ## Pieces
 
@@ -41,9 +51,10 @@ dropped undo is a loud, terminal no-progress event — the user re-applies.
     invalidates the redo future.
   - **`undo()` / `redo()`** — the CAS-guarded, no-clobber replay above, returning a `ReplayResult`
     whose per-field outcomes reuse `inspector::CommitResult`.
-  - **`to_json()` / `load_json()`** — canonical-serializable persistence for the gitignored
-    **`.editor/session.json`** (R-FILE-006 ephemeral session state). Total + robust: a malformed
-    session file leaves an empty journal, never throws.
+  - **`to_json()` / `load_json()`** — canonical-serializable persistence its HOST writes to the
+    gitignored **`.editor/editor-state.json`** (R-FILE-006 ephemeral session state) — *not* the
+    daemon's `.editor/session.json`, which the daemon is the single writer of (C-F3). Total +
+    robust: a malformed session file leaves an empty journal, never throws.
   - **`build_panel()`** — a headless `uitree::Panel` exposing undo/redo availability + one
     keyboard-reachable command per available action, **a11y-conformant by construction**
     (`uitree::audit_a11y` returns no violations) and deterministic. Commands appear only when
@@ -51,10 +62,11 @@ dropped undo is a loud, terminal no-progress event — the user re-applies.
 
 The journal owns **NO disk / no filesync dependency** (mirroring the inspector panel): it commits
 through the `inspector::OverrideWriteGateway` seam and (de)serializes to a JSON tree. Wiring the
-gateway to the live daemon write path, binding Ctrl+Z/Y, and persisting `.editor/session.json` is the
-**CEF-host integration path** (a trailing M5 surface), out of this headless module's scope. The
-mechanism — write-path replay, CAS, rebase-or-drop — **extends to viewport transforms once F1 lands**
-(R-HUX-001).
+gateway to the live daemon write path, binding Ctrl+Z/Y, and persisting the tree is the **host
+integration path**, out of this headless module's scope — **landed at M9 e09c** in the native Shell
+(`src/editor/shell/panels/undo_feed.{h,cpp}`, which carries the tree as an opaque canonical string
+into `.editor/editor-state.json` through `EditorStateStore::set_undo`). The mechanism — write-path
+replay, CAS, rebase-or-drop — **extends to viewport transforms once F1 lands** (R-HUX-001).
 
 ## Building + testing (default `dev` gate — no CEF)
 
@@ -66,7 +78,8 @@ ctest --preset dev -R "^gui-session-undo-"   # journal replay / L-30 / a11y
 - `gui-session-undo-test_undo_journal` — gesture-batch checkpointing, undo/redo replay through an
   in-memory gateway, the **L-30 rebase** (unrelated field moved) and **loud DROP** (this field
   collided — the **R-HUX-001 no-blind-clobber** assertion: `attempts == 0`, the co-writer's value
-  untouched), redo, redo-future invalidation, and `.editor/session.json` JSON round-tripping.
+  untouched), an unreadable field reported as an ERROR that KEEPS the step (never a fabricated
+  `cas.mismatch`), redo, redo-future invalidation, and the host-persisted JSON round-trip.
 - `gui-session-undo-test_undo_a11y` — the per-surface a11y scan + keyboard-only reachability
   (R-A11Y-001) across the empty / undoable / undo+redo-available states.
 

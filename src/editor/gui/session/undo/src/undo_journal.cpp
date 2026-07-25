@@ -1,7 +1,8 @@
 // GUI session undo/redo journal (M5-F7): gesture-batch checkpointing + undo/redo replayed as
 // CAS-guarded override writes through the inspector gateway seam (the ONE write path), with an
 // up-front no-clobber guard + the shared L-30 rebase-or-drop engine so an undo never overwrites a
-// concurrent writer (R-HUX-001). Plus canonical JSON (de)serialization for `.editor/session.json`.
+// concurrent writer (R-HUX-001). Plus canonical JSON (de)serialization for the host to persist
+// (since e09c: `.editor/editor-state.json` — see the header on why NOT `.editor/session.json`).
 
 #include "context/editor/gui/session/undo/undo_journal.h"
 
@@ -9,6 +10,7 @@
 
 #include "context/editor/serializer/canonical.h"
 
+#include <algorithm>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -107,6 +109,26 @@ using Status = inspector::CommitResult::Status;
         return Status::rebased;
     }
     return Status::applied;
+}
+
+// Whether a replay left the project completely UNTOUCHED — no field applied, none rebased. Paired
+// with an `error` aggregate it is the precondition for returning the checkpoint to the stack it was
+// popped from: a refusal wrote nothing, so the step is still exactly as undoable (or redoable) as it
+// was a moment ago, and consuming it would cost the human a step over a transient outage.
+//
+// Both halves of that pair are load-bearing. A DROPPED aggregate also touches nothing, but a drop
+// means the field MOVED — that step can never be replayed, so it is consumed (R-HUX-001; re-offering
+// it would hand the human an undo guaranteed to refuse forever). And a PARTIALLY-landed batch is
+// excluded by this predicate because re-offering it would replay the fields that already moved,
+// whose up-front guard would then drop. (The Inspector produces one-edit checkpoints today, so the
+// partial case is not reachable in this build; the guard is what keeps it correct if a batched
+// gesture ever is.)
+[[nodiscard]] bool nothing_landed(const std::vector<inspector::CommitResult>& edits)
+{
+    // `CommitResult::ok()` IS the applied-or-rebased predicate — spelling it out again here would be
+    // a third copy of a rule that must not drift.
+    return std::none_of(edits.begin(), edits.end(),
+                        [](const inspector::CommitResult& e) { return e.ok(); });
 }
 
 // --- JSON serialization of a checkpoint (members authored sorted; the canonical writer re-sorts) ----
@@ -288,6 +310,29 @@ inspector::CommitResult UndoJournal::replay_edit(const FieldEdit& edit, bool red
     // Up-front R-HUX-001 no-clobber guard: read the field's CURRENT value; if it no longer holds the
     // value we last wrote, a concurrent writer touched it -> drop loudly, never restore stale bytes.
     const inspector::FieldState current = gateway_->read(edit.root_scene, edit.id_path, edit.pointer);
+    if (!current.present)
+    {
+        // COULD NOT READ != WAS CHANGED. Every gateway reports an unreadable field the same way — a
+        // default FieldState (`present:false`, a null value, a 0 token): no daemon connection, a
+        // refused `editor.inspect`, an entity that no longer resolves. Falling through to the
+        // comparison below would read that null as "the value moved" and report `cas.mismatch`,
+        // inventing a concurrent writer that does not exist — and, because a `dropped` checkpoint is
+        // CONSUMED, silently costing the human the undo step over a transient outage.
+        //
+        // This path is reachable only because the journal reads BEFORE it attempts: on the gesture
+        // path `attempt` refuses first, which is why `wire_override_gateway.h` § LIFETIME says the
+        // ATTEMPT refusal, not the read, is what fails THAT path closed. It is an ERROR — nothing was
+        // written, so the caller KEEPS the checkpoint (inspector_panel.h's caller contract: an error
+        // keeps it, a drop consumes it).
+        res.status = Status::error;
+        res.code = kReadUnavailableCode;
+        res.message = "the field `" + edit.pointer + "` could not be read, so the " +
+                      std::string(redo ? "redo" : "undo") +
+                      " was not attempted; nothing was written — try again once the project is "
+                      "reachable";
+        res.raw_hash = current.raw_hash;
+        return res;
+    }
     if (!canonical_equal(current.value, expected))
     {
         res.status = Status::dropped;
@@ -337,10 +382,7 @@ ReplayResult UndoJournal::undo()
         r.edits.push_back(std::move(res));
     }
     r.status = aggregate(r.edits);
-    if (all_ok)
-    {
-        redo_.push_back(std::move(cp)); // only a cleanly-reverted checkpoint can be redone
-    }
+    settle(std::move(cp), r, all_ok, /*from=*/undo_, /*to=*/redo_);
     last_ = r;
     return r;
 }
@@ -367,12 +409,25 @@ ReplayResult UndoJournal::redo()
         r.edits.push_back(std::move(res));
     }
     r.status = aggregate(r.edits);
-    if (all_ok)
-    {
-        undo_.push_back(std::move(cp)); // a cleanly re-applied checkpoint returns to the undo stack
-    }
+    settle(std::move(cp), r, all_ok, /*from=*/redo_, /*to=*/undo_);
     last_ = r;
     return r;
+}
+
+void UndoJournal::settle(Checkpoint cp, const ReplayResult& r, bool all_ok,
+                         std::vector<Checkpoint>& from, std::vector<Checkpoint>& to)
+{
+    if (all_ok)
+    {
+        to.push_back(std::move(cp)); // only a cleanly-replayed checkpoint crosses to the other stack
+        return;
+    }
+    if (r.status == Status::error && nothing_landed(r.edits))
+    {
+        from.push_back(std::move(cp)); // a refusal wrote nothing -> the step is unchanged, so keep it
+    }
+    // Anything else is CONSUMED: a drop means the field moved and this step can never be replayed
+    // (R-HUX-001), and a partially-landed batch cannot be re-offered (see `nothing_landed`).
 }
 
 serializer::JsonValue UndoJournal::to_json() const
