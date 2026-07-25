@@ -38,6 +38,54 @@ parking every event frame it passes on a queue the consumer drains.
 transport in the e2e test. Both are required: the mock proves the state machine, the live test proves
 the mock and the daemon agree.
 
+### Refusals: the code, and the payload under it (M9 e09b-1)
+
+A daemon refusal is a JSON-RPC **error response**, not a transport failure, and the dispatcher mirrors
+the whole R-CLI-008 envelope error into `error.data`
+(`src/editor/bridge/src/dispatcher.cpp::envelope_error_data`):
+
+```
+error.data = { code, message, retriable, [pointer], [data] }
+```
+
+The SDK exposes both halves, and the split matters:
+
+| Accessor | What it answers |
+|---|---|
+| `Client::last_error_code()` / `InboundFrame::error_code` | The catalog id (`attach.denied`, `cas.mismatch`, `scope.denied`, …). Re-emit it verbatim — each maps to a different exit class, so a guess reports the wrong status. |
+| `Client::failure_code(fallback)` | The whole "which code do I report" rule in one place, including the transport-fault case (`internal.error`). |
+| `Client::last_error_data()` / `InboundFrame::error_data` | The **entire** `error.data` object, including the nested `data` the refusal's structured detail rides in. Null when there was none. |
+
+Both are reset at the start of every `call()`, so a stale payload can never be read against a later,
+unrelated refusal.
+
+**Why the payload exists at all: `cas.mismatch`.** A write refused by its `--if-match` precondition
+carries the **fresh on-disk state** so a client rebases with **no second read round-trip** — the
+design 05 §7 rebase-or-drop input:
+
+```cpp
+Json params = /* … an edit … */;
+if (!client.call("edit", std::move(params), error) && client.last_error_code() == "cas.mismatch")
+{
+    const Json& fresh = client.last_error_data().at("data"); // one conflict, for `edit`
+    const std::string& retry = fresh.at("actualRawHash").as_string(); // feed back as the next ifMatch
+    const std::string& current = fresh.at("content").as_string();     // only when `present` is true
+}
+```
+
+`content` rides only when `fresh.at("present")` is true — a file DELETED under the write reports
+`present: false` and carries no bytes, so a client that reads `content` unguarded rebases against an
+empty string instead of noticing the deletion.
+
+Shapes differ by verb, deliberately: `edit` refuses ONE file so its detail is a single conflict object
+under `data`; `edit-batch` refuses **atomically** and must name every conflicting file, so its detail
+is `conflicts[]` of that same per-file shape. Both are reachable through the one accessor — there is
+no second SDK surface to keep in step.
+
+⚠ **64-bit hashes cross as decimal STRINGS**, never JSON numbers: `contract::Json` numbers are
+double-backed and a full-range hash exceeds 2^53, so a numeric round-trip would silently corrupt the
+retry token. Feed `actualRawHash` straight back as the next `ifMatch`.
+
 ## The subscription consumer
 
 Five behaviors, each of which a hand-rolled client gets subtly wrong:

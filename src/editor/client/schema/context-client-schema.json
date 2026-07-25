@@ -748,6 +748,12 @@
       "params": [
         "path",
         "content",
+        "rootScene",
+        "idPath",
+        "pointer",
+        "value",
+        "target",
+        "atInstance",
         "ifMatch"
       ],
       "flags": [

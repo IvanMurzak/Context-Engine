@@ -17,10 +17,12 @@
 #include "process_util.h"
 
 #include <chrono>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -270,6 +272,369 @@ void test_connect_to_project_seeds_the_token()
     std::error_code ec;
     fs::remove_all(project, ec);
 }
+// --- 4. M9 e09b-1: the POINTER/VALUE composed write, on REAL DISK, end to end ----------------------
+//
+// WHY THIS HARNESS AND NOT test_kernel_server.cpp: that one hosts the kernel over a MemoryFileStore,
+// whose keys are DISJOINT from the real on-disk files a composed read resolves against (it writes its
+// compose fixtures with std::ofstream and its edits into memory). A pointer/value write reads
+// through compose from real disk and writes through the kernel's store — under that split brain the
+// two halves address different worlds, so the path is structurally untestable there. Here the daemon
+// is the real process with a real NativeFileStore, so plan -> serialize -> atomic write -> derive is
+// exercised exactly as it ships.
+//
+// Layout note: the daemon roots its FileStore at the project dir and jails the reconcile crawl to the
+// `proj/` subdir (daemon_command.cpp), so authored paths are "proj/<file>" — the same string is the
+// compose resolver's key and the kernel's write path, which is precisely what makes the write land
+// where the read looked.
+void test_composed_pointer_value_write_lands_on_real_disk()
+{
+    const fs::path project = make_temp_project("compose");
+    const fs::path authored = project / "proj";
+    std::error_code mk;
+    fs::create_directories(authored, mk);
+
+    // A real two-file composition on real disk: root instances child, so an `outermost` override
+    // lands in root.scene.json — a file the CALLER never names. That is the whole point of the mode.
+    const auto write_file = [&](const char* name, const std::string& text)
+    {
+        std::ofstream out(authored / name, std::ios::binary | std::ios::trunc);
+        out << text;
+    };
+    write_file("child.scene.json", R"({
+      "$schema": "ctx:scene", "version": 1,
+      "entities": [
+        {"id": "ccccccccccccccc1", "name": "Cam",
+         "components": {
+           "transform": {"position": [1, 2, 3]},
+           "camera": {"fov": 1.0, "near": 0.1, "far": 500.0}
+         }}
+      ]})");
+    write_file("root.scene.json", R"({
+      "$schema": "ctx:scene", "version": 1,
+      "entities": [],
+      "instances": [{"id": "aaaaaaaaaaaaaaa1", "scene": "proj/child.scene.json"}]})");
+
+    ctest_proc::Process daemon =
+        ctest_proc::spawn(CONTEXT_BINARY, {"daemon", "--project", project.string()});
+    CHECK(ctest_proc::valid(daemon));
+    const std::optional<InstanceInfo> instance = discover_instance(project, 15000);
+    CHECK(instance.has_value());
+    if (!instance.has_value())
+    {
+        abandon_daemon(daemon);
+        return;
+    }
+
+    std::unique_ptr<context::editor::client::WireChannel> channel =
+        context::editor::client::make_transport_channel(instance->endpoint, 5000);
+    CHECK(channel != nullptr);
+    Client client(std::move(channel));
+    AttachOptions options;
+    options.scope = "write,session";
+    options.token = instance->token;
+    std::string error;
+    CHECK(client.attach(options, error));
+
+    const std::string kRoot = "proj/root.scene.json";
+    const std::string kIdPath = "aaaaaaaaaaaaaaa1/ccccccccccccccc1";
+    const std::string kPointer = "/components/camera/fov";
+
+    // The CAS token the editor actually holds: the root scene's raw hash, as reported by the SAME
+    // read the Inspector hydrates from. Nothing here invents a hash.
+    const auto inspect = [&]() -> std::optional<Json>
+    {
+        Json p = Json::object();
+        p.set("path", Json(kRoot));
+        p.set("idPath", Json(kIdPath));
+        return client.call("editor.inspect", std::move(p), error);
+    };
+    const std::optional<Json> before = inspect();
+    CHECK(before.has_value());
+    if (!before.has_value())
+    {
+        shutdown_daemon(daemon, *instance);
+        return;
+    }
+    const std::string base_token = before->at("data").at("rawHash").as_string();
+    CHECK(base_token != "0"); // the file is readable, so there IS a CAS token
+
+    // The well-formed composed request every case below starts from — one definition, so a wire-shape
+    // change is made once and every scenario keeps exercising the SAME request it was written for.
+    const auto base_params = [&]()
+    {
+        Json p = Json::object();
+        p.set("rootScene", Json(kRoot));
+        p.set("idPath", Json(kIdPath));
+        p.set("pointer", Json(kPointer));
+        p.set("value", Json(std::string("1.0")));
+        return p;
+    };
+
+    const auto composed_edit = [&](const std::string& value, const std::string& if_match,
+                                   bool* rejected) -> std::optional<Json>
+    {
+        Json p = base_params();
+        p.set("value", Json(value)); // a JSON literal in a string (its canonical serialization)
+        if (!if_match.empty())
+            p.set("ifMatch", Json(if_match));
+        return client.call("edit", std::move(p), error, rejected);
+    };
+
+    // --- the happy path: a field-addressed write lands in the file COMPOSITION chose --------------
+    const std::optional<Json> applied = composed_edit("2.5", base_token, nullptr);
+    CHECK(applied.has_value());
+    if (!applied.has_value())
+    {
+        shutdown_daemon(daemon, *instance);
+        return;
+    }
+    CHECK(applied->at("ok").as_bool());
+    const Json& wrote = applied->at("data");
+    // The caller addressed a FIELD; the daemon reports the FILE it resolved and wrote.
+    CHECK(wrote.at("file").as_string() == kRoot);
+    // The pointer the reply reports is the one written INSIDE that file — for an outermost
+    // override that is the override ENTRY's slot, not the entity-relative field pointer the caller
+    // sent. Reporting where the bytes actually landed is the R-CLI-006 provenance contract.
+    CHECK(wrote.at("pointer").as_string() == "/overrides/0/value");
+    CHECK(wrote.at("target").as_string() == "outermost");
+    const std::string token_after_write = wrote.at("rawHash").as_string();
+    CHECK(token_after_write != base_token); // the bytes genuinely moved
+
+    // REAL DISK, not a seam: read the file back with a plain stream and see the override.
+    {
+        std::ifstream in(authored / "root.scene.json", std::ios::binary);
+        const std::string on_disk((std::istreambuf_iterator<char>(in)),
+                                  std::istreambuf_iterator<char>());
+        CHECK(on_disk.find("\"overrides\"") != std::string::npos);
+        CHECK(on_disk.find(kPointer) != std::string::npos);
+        CHECK(on_disk.find("2.5") != std::string::npos);
+        // serialize_canonical's byte form (R-FILE-001): exactly one trailing newline.
+        CHECK(!on_disk.empty() && on_disk.back() == '\n');
+        CHECK(on_disk.size() >= 2 && on_disk[on_disk.size() - 2] != '\n');
+    }
+
+    // It went through COMPOSITION, not a blind byte write: the composed read now answers the new
+    // value AND marks the field overridden, and the derived world agrees with the reported hash.
+    {
+        const std::optional<Json> after = inspect();
+        CHECK(after.has_value());
+        if (after.has_value())
+        {
+            CHECK(after->at("data").at("rawHash").as_string() == token_after_write);
+            const Json& fields = after->at("data").at("inspector").at("fields");
+            bool saw_overridden_fov = false;
+            for (std::size_t i = 0; i < fields.size(); ++i)
+            {
+                const Json& f = fields.at(i);
+                if (f.at("pointer").as_string() == kPointer && f.at("overridden").as_bool() &&
+                    f.at("value").as_string() == "2.5")
+                {
+                    saw_overridden_fov = true;
+                    break;
+                }
+            }
+            CHECK(saw_overridden_fov);
+        }
+        Json qp = Json::object();
+        qp.set("path", Json(kRoot));
+        const std::optional<Json> derived = client.call("query", std::move(qp), error);
+        CHECK(derived.has_value());
+        if (derived.has_value())
+        {
+            CHECK(derived->at("data").at("present").as_bool());
+            // The canonical hash the write reported IS the one derivation indexed — proof the bytes
+            // on disk are the canonical form, without re-serializing them here.
+            CHECK(derived->at("data").at("canonicalHash").as_string() ==
+                  wrote.at("canonicalHash").as_string());
+        }
+    }
+
+    // --- the CAS mismatch: the refusal carries the rebase input, and the SDK can READ it ----------
+    // Re-using the now-STALE base token models the concurrent writer the L-30 guarantee is about.
+    {
+        bool rejected = false;
+        const std::optional<Json> stale = composed_edit("9.5", base_token, &rejected);
+        CHECK(!stale.has_value());
+        CHECK(rejected);
+        CHECK(client.last_error_code() == "cas.mismatch");
+        // THE e09b-1 point: before this task the payload below existed on the wire but no SDK
+        // consumer could reach it — parse_frame lifted `code` and dropped the rest.
+        CHECK(!client.last_error_data().is_null());
+        const Json& fresh = client.last_error_data().at("data");
+        CHECK(fresh.at("path").as_string() == kRoot);
+        CHECK(fresh.at("present").as_bool());
+        CHECK(fresh.at("expectedRawHash").as_string() == base_token);
+        CHECK(fresh.at("actualRawHash").as_string() == token_after_write);
+        CHECK(!fresh.at("content").as_string().empty()); // the CURRENT bytes ride along
+
+        // The stale write did NOT clobber: a refused CAS writes nothing.
+        // ⚠ Windows: this read MUST be scoped so the handle is CLOSED before the retry below. The
+        // daemon writes through filesync atomic-IO (temp + rename), and a rename over a file with an
+        // open read handle FAILS on Windows — surfacing as a bare `internal.error` from the write,
+        // which reads exactly like a product bug and is not one.
+        {
+            std::ifstream in(authored / "root.scene.json", std::ios::binary);
+            const std::string on_disk((std::istreambuf_iterator<char>(in)),
+                                      std::istreambuf_iterator<char>());
+            CHECK(on_disk.find("9.5") == std::string::npos);
+        }
+
+        // REBASE WITHOUT A SECOND READ (design 05 §7): retry using ONLY the token the refusal
+        // carried — no re-read of the file, which is exactly what the payload exists to make
+        // unnecessary.
+        const std::string retry_token = fresh.at("actualRawHash").as_string();
+        const std::optional<Json> rebased = composed_edit("9.5", retry_token, nullptr);
+        CHECK(rebased.has_value());
+        if (rebased.has_value())
+            CHECK(rebased->at("data").at("rawHash").as_string() != token_after_write);
+    }
+
+    // --- failure paths: every one is a NAMED refusal, never a hopeful write -----------------------
+    {
+        const auto refused_with = [&](Json params, const char* expected_code)
+        {
+            bool rejected = false;
+            const std::optional<Json> r = client.call("edit", std::move(params), error, &rejected);
+            CHECK(!r.has_value());
+            CHECK(rejected);
+            CHECK(client.last_error_code() == expected_code);
+        };
+
+        // Mode confusion is refused, not guessed (the two shapes have no single honest reading).
+        {
+            Json p = base_params();
+            p.set("content", Json(std::string("{}")));
+            refused_with(std::move(p), "usage.invalid");
+        }
+        // A partial composed request names what is missing rather than falling back to the
+        // full-content shape and reporting a confusing "requires path and content".
+        {
+            Json p = Json::object();
+            p.set("rootScene", Json(kRoot));
+            p.set("pointer", Json(kPointer));
+            refused_with(std::move(p), "usage.missing_argument");
+        }
+        // A mis-typed target would otherwise silently default to `outermost` and write the WRONG
+        // FILE — the one outcome this write path exists to prevent.
+        {
+            Json p = base_params();
+            p.set("target", Json(std::string("outermsot")));
+            refused_with(std::move(p), "usage.invalid");
+        }
+        // A retarget on the FULL-CONTENT shape is refused, not silently dropped. `target` and
+        // `atInstance` are composed-shape-only, so a request naming one alongside {path, content}
+        // has to reach the mode-confusion refusal — if it took the full-content branch instead, that
+        // branch would never read them and the write would land in a file the caller did not name.
+        {
+            Json p = Json::object();
+            p.set("path", Json(kRoot));
+            p.set("content", Json(std::string("{}")));
+            p.set("target", Json(std::string("template")));
+            refused_with(std::move(p), "usage.invalid");
+        }
+        // Present-but-WRONG-TYPE is refused exactly like mis-spelled: read as "absent" instead, a
+        // dropped `target`/`atInstance` writes the wrong file and a dropped `ifMatch` turns a
+        // CAS-guarded write into an unconditional overwrite. `null` is a JS client's UNSET optional
+        // and stays absent (asserted below); every other type is a usage error.
+        {
+            Json p = base_params();
+            p.set("target", Json(std::int64_t{7}));
+            refused_with(std::move(p), "usage.invalid");
+        }
+        {
+            Json p = base_params();
+            p.set("target", Json(std::string("at-instance")));
+            p.set("atInstance", Json::array()); // the NATURAL shape for an id-path, and not a string
+            refused_with(std::move(p), "usage.invalid");
+        }
+        {
+            Json p = base_params();
+            p.set("ifMatch", Json(std::int64_t{1234567890})); // the hash as a NUMBER, not a string
+            refused_with(std::move(p), "usage.invalid");
+        }
+        // `at-instance` without its addressing prefix, and the prefix without the target.
+        {
+            Json p = base_params();
+            p.set("target", Json(std::string("at-instance")));
+            refused_with(std::move(p), "usage.missing_argument");
+        }
+        {
+            Json p = base_params();
+            p.set("atInstance", Json(std::string("aaaaaaaaaaaaaaa1")));
+            refused_with(std::move(p), "usage.invalid");
+        }
+        // A malformed id-path (a doubled separator) cannot address an entity.
+        {
+            Json p = base_params();
+            p.set("idPath", Json(std::string("aaaaaaaaaaaaaaa1//ccccccccccccccc1")));
+            refused_with(std::move(p), "usage.invalid");
+        }
+        // A `value` that is not a JSON literal.
+        {
+            Json p = base_params();
+            p.set("value", Json(std::string("{not json")));
+            refused_with(std::move(p), "file.parse_error");
+        }
+        // L-37: the immutable identity pointers survive re-derivation and are never written.
+        {
+            Json p = base_params();
+            p.set("pointer", Json(std::string("/id")));
+            p.set("value", Json(std::string("\"bbbbbbbbbbbbbbb2\"")));
+            // compose's OWN refusal code, named exactly: an assertion that merely required "some
+            // code" would still pass if the L-37 guard were replaced by an unrelated usage error or
+            // a parse failure, which is precisely the regression worth catching.
+            refused_with(std::move(p), "compose.immutable_pointer");
+        }
+        // R-SEC-008: a scene path escaping the project root.
+        {
+            Json p = base_params();
+            p.set("rootScene", Json(std::string("../outside.scene.json")));
+            refused_with(std::move(p), "path.jail_violation");
+        }
+        // The COMPLEMENT of the type rule, and the reason it is `null`-tolerant: a generated client
+        // pads every declared param, and JSON.stringify keeps `null` while dropping only
+        // `undefined`. An explicit null is an UNSET optional, so this request must still WRITE —
+        // a strict "present means supplied" reading would refuse it and leave such a client unable
+        // to use either shape.
+        {
+            Json p = base_params();
+            p.set("value", Json(std::string("3.5")));
+            p.set("target", Json(nullptr));
+            p.set("atInstance", Json(nullptr));
+            p.set("ifMatch", Json(nullptr));
+            const std::optional<Json> ok = client.call("edit", std::move(p), error);
+            CHECK(ok.has_value());
+            if (ok.has_value())
+                CHECK(ok->at("data").at("target").as_string() == "outermost");
+        }
+    }
+
+    // --- R-SEC-007: the composed mode is NOT a scope bypass ---------------------------------------
+    // It is the same `edit` verb, so the dispatcher's file_write requirement already covers it — this
+    // asserts that, because a new write SHAPE that forgot its scope check would be a silent hole.
+    {
+        std::unique_ptr<context::editor::client::WireChannel> ro_channel =
+            context::editor::client::make_transport_channel(instance->endpoint, 5000);
+        CHECK(ro_channel != nullptr);
+        Client reader(std::move(ro_channel));
+        AttachOptions ro_options;
+        ro_options.scope = "read";
+        ro_options.token = instance->token;
+        std::string ro_error;
+        CHECK(reader.attach(ro_options, ro_error));
+        Json p = base_params();
+        p.set("value", Json(std::string("0.5")));
+        bool rejected = false;
+        CHECK(!reader.call("edit", std::move(p), ro_error, &rejected).has_value());
+        CHECK(rejected);
+        CHECK(reader.last_error_code() == "scope.denied");
+    }
+
+    shutdown_daemon(daemon, *instance);
+
+    std::error_code ec;
+    fs::remove_all(project, ec);
+}
 } // namespace
 
 int main()
@@ -277,5 +642,6 @@ int main()
     test_live_subscription_receives_real_events();
     test_tokenless_attach_is_denied();
     test_connect_to_project_seeds_the_token();
+    test_composed_pointer_value_write_lands_on_real_disk();
     CLIENT_TEST_MAIN_END();
 }

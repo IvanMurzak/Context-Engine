@@ -49,6 +49,19 @@ struct InboundFrame
     // client can re-emit the daemon's OWN classification instead of inferring one from context —
     // the refusals differ in exit class, so a guess is a wrong exit code.
     std::string error_code;
+    // The WHOLE `error.data` object the dispatcher mirrored the R-CLI-008 envelope error into —
+    // `{code, message, retriable, [pointer], [data]}` (src/editor/bridge/src/dispatcher.cpp
+    // `envelope_error_data`). `error_code` above is the ONE field lifted out for the common case;
+    // this is everything else, unlifted.
+    //
+    // WHY it exists (M9 e09b-1): a refusal's STRUCTURED DETAIL rides under the nested `data` key,
+    // and for `cas.mismatch` that detail IS the rebase input design 05 §7 mandates — the fresh
+    // on-disk state (`actualRawHash` + the current bytes) that lets a client rebase WITHOUT a second
+    // read round-trip. `edit` carries one conflict object (`error.data.data`); `edit-batch` carries
+    // `error.data.conflicts[]`. Before this field, parse_frame lifted `code` and DISCARDED the rest,
+    // so the daemon computed a rebase payload no SDK consumer could ever read. Null (`is_null()`)
+    // when the frame is not an error, or when the peer sent no structured `error.data`.
+    contract::Json error_data;
     contract::Json result;
 
     // event

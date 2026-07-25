@@ -1,14 +1,19 @@
 // The clean->compose write-request conversion (M9 e05d3): every target mode maps member-for-member,
 // and the model-based convenience constructor keeps its L-35 outermost default. This conversion is
 // what every kernel-side gateway routes through — a drifted member here would silently retarget
-// authored writes, so it is pinned field by field.
+// authored writes, so it is pinned field by field. Also pins the identity-key encoding against its
+// inverse (join_identity / split_identity, M9 e09b-1): the daemon's pointer/value `edit` turns a
+// wire idPath back into an id-path vector with it, so a split that drifts from the join addresses
+// the wrong entity.
 
 #include "context/editor/gui/panels/builders/inspector_builder.h"
+#include "context/editor/gui/panels/builders/scene_tree_builder.h" // join_identity / split_identity
 
 #include "context/editor/serializer/json_tree.h"
 
 #include "builders_test.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -79,6 +84,34 @@ int main()
         CHECK(request.id_path == model.id_path);
         CHECK(request.pointer == "/components/camera/fov");
         CHECK(request.target == compose::WriteTarget::outermost);
+    }
+
+    // --- split_identity: the EXPORTED inverse of join_identity (M9 e09b-1) ----------------------
+    // The daemon's pointer/value `edit` turns a wire idPath back into this id-path vector, so a
+    // splitter that disagreed with the join would retarget authored writes just as silently as a
+    // drifted member above.
+    {
+        // Round-trip: join then split is the identity, for every arity the wire carries.
+        const std::vector<std::vector<std::string>> paths = {
+            {"aaaaaaaaaaaaaaa1"},
+            {"aaaaaaaaaaaaaaa1", "ccccccccccccccc1"},
+            {"aaaaaaaaaaaaaaa1", "bbbbbbbbbbbbbbb2", "ccccccccccccccc1"},
+            {"$root"}};
+        for (const std::vector<std::string>& path : paths)
+        {
+            const std::optional<std::vector<std::string>> back =
+                builders::split_identity(builders::join_identity(path));
+            CHECK(back.has_value());
+            CHECK(back.has_value() && *back == path);
+        }
+
+        // Malformed keys join_identity can never PRODUCE are refused, so a write path answers a
+        // usage error instead of inventing an id-path no composed entity has.
+        CHECK(!builders::split_identity("").has_value());
+        CHECK(!builders::split_identity("/").has_value());
+        CHECK(!builders::split_identity("/aaaaaaaaaaaaaaa1").has_value());   // leading
+        CHECK(!builders::split_identity("aaaaaaaaaaaaaaa1/").has_value());   // trailing
+        CHECK(!builders::split_identity("aaaaaaaaaaaaaaa1//c").has_value()); // doubled
     }
 
     BUILDERS_TEST_MAIN_END();

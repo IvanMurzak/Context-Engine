@@ -830,15 +830,51 @@ Registry::Registry()
     // NOT one-shot CLI verbs (the CLI rejects them with contract.operational_only).
     verbs_.push_back(make_verb(
         "", "", "edit",
-        "Daemon-initiated single-file write through filesync atomic-IO with the read-your-writes "
-        "barrier (R-FILE-004 / R-CLI-006). Requires the file_write scope.",
+        "Daemon-initiated write through filesync atomic-IO with the read-your-writes barrier "
+        "(R-FILE-004 / R-CLI-006). Requires the file_write scope. TWO shapes, one verb — they share "
+        "the scope, the CAS contract and the barrier, and differ only in ADDRESSING: (a) FULL "
+        "CONTENT — {path, content}: replace a project-relative file's bytes outright; (b) "
+        "POINTER/VALUE (composed, L-35) — {rootScene, idPath, pointer, value}: set ONE field on a "
+        "composed entity and let composition decide which authored file the override lands in (the "
+        "same plan as `context set`), replying with what was written — `file`, `pointer` (the "
+        "pointer that actually landed INSIDE that file, not the caller's field pointer), `target`, "
+        "`baseRecorded` — alongside the `rawHash` / `canonicalHash` / `reflected` both shapes "
+        "report. (b) is the canonical editor write "
+        "(design 05 §8): a GUI client cannot synthesize `content` for a composed override because "
+        "the composition module is off its D10 link boundary. Pass one shape or the other — a "
+        "request mixing them is refused with usage.invalid rather than guessed.",
         /*params=*/
-        {{"path", "path", true, "Project-relative file to write."},
-         {"content", "string", true, "The full content to write (tool saves canonicalize JSON)."},
+        {{"path", "path", false, "FULL-CONTENT shape: project-relative file to write."},
+         {"content", "string", false,
+          "FULL-CONTENT shape: the full content to write (tool saves canonicalize JSON)."},
+         {"rootScene", "path", false,
+          "POINTER/VALUE shape: the addressing (root) scene path the composed entity is resolved "
+          "from — the same value `editor.scene-tree` and `editor.inspect` take as `path`."},
+         {"idPath", "string", false,
+          "POINTER/VALUE shape: the L-35 id-path to the composed entity, slash-joined from the root "
+          "inward — the SAME identity key `editor.scene-tree` answers and `editor.inspect` takes."},
+         {"pointer", "string", false,
+          "POINTER/VALUE shape: RFC 6901 JSON pointer of the field to set INSIDE the addressed "
+          "entity. The immutable identity pointers (/id, /$schema, /version) are refused (L-37)."},
+         {"value", "string", false,
+          "POINTER/VALUE shape: the value to set, carried as a JSON literal in a STRING (its "
+          "canonical serialization — the same form `editor.inspect` field values cross in), not as "
+          "a bare JSON value."},
+         {"target", "string", false,
+          "POINTER/VALUE shape: where the write lands — `outermost` (default: an override in the "
+          "root instancing scene), `template` (the entity's authored value in its defining scene), "
+          "or `at-instance` (an override in a mid-level instancing scene)."},
+         {"atInstance", "string", false,
+          "POINTER/VALUE shape: with target=`at-instance`, the slash-joined id-path PREFIX naming "
+          "the mid-level addressing scene. Required with that target, refused without it."},
          {"ifMatch", "hash", false,
           "Optional R-CLI-006 raw-byte CAS precondition (decimal string): apply only if the target's "
           "CURRENT on-disk raw-byte hash matches. A mismatch is refused with cas.mismatch carrying "
-          "the fresh on-disk state (error.data) so a client rebases (design 05 §7)."}},
+          "the fresh on-disk state (error.data) so a client rebases (design 05 §7). In the "
+          "POINTER/VALUE shape it guards the file COMPOSITION resolved: that is the root scene "
+          "`editor.inspect` reports a rawHash for ONLY under target=`outermost` — `template` and "
+          "`at-instance` resolve a different authored file no read verb reports a token for, so pass "
+          "no ifMatch there and take the token from the first refusal's error.data."}},
         /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
 
     verbs_.push_back(make_verb(

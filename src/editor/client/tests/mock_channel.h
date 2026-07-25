@@ -67,9 +67,14 @@ public:
     // model a peer that sent no structured code (the `fallback` branch of Client::failure_code) —
     // a real daemon always sends one, so a mock that never did would make every refusal look like
     // that one exceptional case.
-    void fail_method(const std::string& method, std::string message, std::string catalog_code = {})
+    // `detail` fills the NESTED `error.data.data` — the refusal's structured payload (the
+    // cas.mismatch fresh state, design 05 §7). Leave it null for a refusal that carries none; a
+    // mock that never modelled it is what let the daemon compute a rebase payload no SDK consumer
+    // could read (M9 e09b-1).
+    void fail_method(const std::string& method, std::string message, std::string catalog_code = {},
+                     Json detail = {})
     {
-        errors_[method] = {std::move(message), std::move(catalog_code)};
+        errors_[method] = {std::move(message), std::move(catalog_code), std::move(detail)};
     }
 
     // Queue a server-pushed frame the consumer will read on its next receive().
@@ -135,6 +140,8 @@ public:
                 data.set("code", Json(failed->second.catalog_code));
                 data.set("message", Json(failed->second.message));
                 data.set("retriable", Json(false));
+                if (!failed->second.detail.is_null())
+                    data.set("data", failed->second.detail); // the nested structured payload
                 err.set("data", std::move(data));
             }
             response.set("error", std::move(err));
@@ -217,6 +224,7 @@ private:
     {
         std::string message;
         std::string catalog_code;
+        Json detail; // the nested error.data.data (null = the refusal carried no structured detail)
     };
 
     std::map<std::string, Responder> responders_;

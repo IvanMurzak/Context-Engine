@@ -109,7 +109,11 @@ target_compile_definitions(context_client_test_client_e2e
 add_dependencies(context_client_test_client_e2e context)
 add_test(NAME client-test_client_e2e COMMAND context_client_test_client_e2e)
 # The daemon child can block if something goes wrong; cap the cross-process test so CI never hangs.
-set_tests_properties(client-test_client_e2e PROPERTIES TIMEOUT 120)
+# The TIMEOUT covers FOUR sequential live daemon boots (subscribe/events, the D20 tokenless-attach
+# denial, the CAS drill, and the M9 e09b-1 composed real-disk write) plus a fifth read-only attach —
+# scaled to the boot count the way the shell/cef smokes scale theirs, with headroom for the
+# sanitizer legs, which run this same test instrumented.
+set_tests_properties(client-test_client_e2e PROPERTIES TIMEOUT 300)
 
 # Sanitize preset only: the spawned `context` binary links context_js on the V8-capable legs, baking
 # the uninstrumented rusty_v8 archive (and a second, hidden-visibility copy of the C++ runtime's

@@ -459,5 +459,26 @@ int main()
     CHECK(!is_immutable_pointer("/name"));
     CHECK(!is_immutable_pointer("/components/transform/position"));
 
+    // --- the exported WriteTarget wire token + its inverse (M9 e09b-1) ---------------------------
+    // THREE surfaces name a target by these spellings — the `context set` envelope, the daemon's
+    // pointer/value `edit` reply, and that verb's inbound `target` param — so the pair is pinned
+    // here: a producer/consumer drift is a write landing in a file the caller did not ask for.
+    CHECK(write_target_token(WriteTarget::outermost) == "outermost");
+    CHECK(write_target_token(WriteTarget::defining_template) == "template");
+    CHECK(write_target_token(WriteTarget::at_instance) == "at-instance");
+    for (const WriteTarget t :
+         {WriteTarget::outermost, WriteTarget::defining_template, WriteTarget::at_instance})
+    {
+        const std::optional<WriteTarget> back = parse_write_target(write_target_token(t));
+        CHECK(back.has_value());
+        CHECK(back.has_value() && *back == t);
+    }
+    // An unknown token is nullopt, NOT a silent fallback to `outermost` — the caller must be able to
+    // refuse a mis-typed target rather than retarget the write.
+    CHECK(!parse_write_target("").has_value());
+    CHECK(!parse_write_target("outermsot").has_value());
+    CHECK(!parse_write_target("Outermost").has_value());
+    CHECK(!parse_write_target("at_instance").has_value());
+
     COMPOSE_TEST_MAIN_END();
 }

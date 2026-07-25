@@ -5,10 +5,11 @@
 #include "context/editor/gui/panels/builders/inspector_builder.h"
 
 #include "context/editor/compose/json_pointer.h"
-#include "context/editor/gui/panels/builders/scene_tree_builder.h" // join_identity — the ONE key encoding
+#include "context/editor/gui/panels/builders/scene_tree_builder.h" // join_identity + its inverse
 #include "context/editor/schema/json_access.h" // schema::find_member — the shared JSON-tree accessor
 #include "context/editor/serializer/json_parse.h"
 
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -114,25 +115,17 @@ constexpr const char* kEntityFieldPrefix = "/entities/[]";
 const compose::ComposedEntity* find_entity_by_identity(const compose::ComposedScene& scene,
                                                        const std::string& identity)
 {
-    // Split the key once; join_identity is injective (segments are lowercase hex or $root, never
-    // containing '/'), so comparing segment vectors equals comparing joined strings — with zero
-    // per-candidate allocations.
-    std::vector<std::string> segments;
-    std::size_t start = 0;
-    while (true)
-    {
-        const std::size_t slash = identity.find('/', start);
-        if (slash == std::string::npos)
-        {
-            segments.push_back(identity.substr(start));
-            break;
-        }
-        segments.push_back(identity.substr(start, slash - start));
-        start = slash + 1;
-    }
+    // Split the key once through the EXPORTED inverse of join_identity (scene_tree_builder.h); the
+    // join is injective (segments are lowercase hex or $root, never containing '/'), so comparing
+    // segment vectors equals comparing joined strings — with zero per-candidate allocations. A
+    // malformed key splits to nullopt and resolves to "no such entity", exactly as the previous
+    // file-local splitter's segment vector matched no candidate.
+    const std::optional<std::vector<std::string>> segments = split_identity(identity);
+    if (!segments.has_value())
+        return nullptr;
     for (const compose::ComposedEntity& candidate : scene.entities)
     {
-        if (candidate.id_path == segments)
+        if (candidate.id_path == *segments)
         {
             return &candidate;
         }

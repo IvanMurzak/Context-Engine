@@ -98,6 +98,27 @@ public:
     // vs busy) carry different exit classes.
     [[nodiscard]] const std::string& last_error_code() const noexcept { return last_error_code_; }
 
+    // The WHOLE `error.data` object of the most recent REFUSED call — the daemon's structured
+    // refusal detail, of which last_error_code() is only the lifted `code`. Null when the last call
+    // succeeded, failed on the wire, or was refused without structured data; reset at the start of
+    // every call, exactly like last_error_code().
+    //
+    // The motivating consumer (M9 e09b-1, design 05 §7): a `cas.mismatch` on `edit` carries the
+    // FRESH ON-DISK STATE under the nested `data` key — `{path, present, expectedRawHash,
+    // actualRawHash, content}` — so the rebase-or-drop engine re-runs against current truth with NO
+    // second read round-trip. `edit-batch` carries `conflicts[]` of the same per-file shape instead,
+    // because it refuses atomically and must name every conflict. Read it as:
+    //
+    //     if (!client.call("edit", params, error) && client.last_error_code() == "cas.mismatch")
+    //     {
+    //         const Json& fresh = client.last_error_data().at("data"); // edit: one conflict
+    //         const std::string& current = fresh.at("actualRawHash").as_string(); // retry token
+    //     }
+    //
+    // 64-bit hashes are decimal STRINGS on the wire (contract::Json numbers are double-backed, and a
+    // full-range hash exceeds 2^53) — feed `actualRawHash` straight back as the next `ifMatch`.
+    [[nodiscard]] const contract::Json& last_error_data() const noexcept { return last_error_data_; }
+
     // The R-CLI-008 code to report for the most recent FAILED call — the whole rule in one place,
     // because getting it wrong is invisible in review: every code maps to an EXIT CLASS, so a
     // plausible guess reports the wrong exit status to a script.
@@ -139,6 +160,8 @@ private:
     InstanceInfo instance_;
     std::deque<InboundFrame> pending_events_;
     std::string last_error_code_;
+    // The last refusal's full `error.data` (see last_error_data()). Cleared with last_error_code_.
+    contract::Json last_error_data_;
     std::int64_t next_id_ = 0;
     bool attached_ = false;
     // Whether the most recent failed call was a daemon REFUSAL rather than a transport fault.

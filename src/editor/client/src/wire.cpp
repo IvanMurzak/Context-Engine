@@ -72,12 +72,17 @@ std::optional<InboundFrame> parse_frame(const std::string& text)
                                       ? err.at("message").as_string()
                                       : std::string("(no message)");
             // The dispatcher mirrors the R-CLI-008 envelope error into `error.data` (see
-            // envelope_error_data): `data.code` is the catalog id the caller should re-emit.
+            // envelope_error_data): `data.code` is the catalog id the caller should re-emit, and
+            // the REST of that object is the refusal's structured detail — for `cas.mismatch`, the
+            // design 05 §7 rebase input. Keep the whole object (error_data), not just the lifted
+            // code: a client that must rebase needs the fresh state, and re-deriving it would cost
+            // the extra read round-trip the payload exists to avoid.
             if (err.is_object() && err.contains("data") && err.at("data").is_object())
             {
                 const Json& data = err.at("data");
                 if (data.contains("code") && data.at("code").is_string())
                     frame.error_code = data.at("code").as_string();
+                frame.error_data = data;
             }
             return frame;
         }

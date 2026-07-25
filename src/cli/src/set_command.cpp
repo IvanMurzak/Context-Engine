@@ -60,20 +60,6 @@ namespace
     return it->second;
 }
 
-[[nodiscard]] const char* target_name(compose::WriteTarget target)
-{
-    switch (target)
-    {
-    case compose::WriteTarget::outermost:
-        return "outermost";
-    case compose::WriteTarget::defining_template:
-        return "template";
-    case compose::WriteTarget::at_instance:
-        return "at-instance";
-    }
-    return "outermost";
-}
-
 } // namespace
 
 Envelope run_set(const std::vector<std::string>& positionals,
@@ -190,7 +176,9 @@ Envelope run_set(const std::vector<std::string>& positionals,
     Json data = Json::object();
     data.set("file", Json(plan.file));
     data.set("pointer", Json(plan.pointer));
-    data.set("target", Json(std::string(target_name(plan.target))));
+    // The ONE exported target spelling (compose_write.h) — shared with the daemon's pointer/value
+    // `edit` reply, so the CLI and the wire never name the same target differently.
+    data.set("target", Json(std::string(compose::write_target_token(plan.target))));
     data.set("baseRecorded", Json(plan.base_recorded));
     // 64-bit hashes as decimal STRINGS: a full-range hash exceeds 2^53 and would lose precision as a
     // JSON number (R-CLI-006 barrier keys must round-trip losslessly) — mirrors editor smoke output.

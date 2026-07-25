@@ -9,6 +9,7 @@
 #include "mock_channel.h"
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -335,6 +336,87 @@ void test_poll_event_reports_disconnect()
     CHECK(disconnected);
 }
 
+// --- M9 e09b-1: the refusal's STRUCTURED DETAIL reaches an SDK consumer ------------------------------
+// Before this, parse_frame lifted `error.data.code` and DISCARDED the rest, so the cas.mismatch
+// rebase payload the daemon computes (design 05 §7) was invisible to every consumer of this SDK.
+void test_parse_frame_exposes_the_whole_error_data()
+{
+    // The daemon's single-`edit` cas.mismatch shape: envelope_error_data's {code,message,retriable}
+    // with the fresh on-disk state under the NESTED `data` key.
+    const std::optional<InboundFrame> conflict = parse_frame(
+        R"({"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"CAS precondition failed",)"
+        R"("data":{"code":"cas.mismatch","message":"CAS precondition failed","retriable":false,)"
+        R"("data":{"path":"proj/a.scene.json","present":true,"expectedRawHash":"111",)"
+        R"("actualRawHash":"222","content":"{}"}}}})");
+    CHECK(conflict.has_value());
+    CHECK(conflict->has_error);
+    CHECK(conflict->error_code == "cas.mismatch"); // the lifted code still works
+    CHECK(!conflict->error_data.is_null());
+    CHECK(conflict->error_data.at("code").as_string() == "cas.mismatch");
+    const Json& fresh = conflict->error_data.at("data");
+    // The rebase input: the retry token + the target's CURRENT bytes, in the SAME reply — the whole
+    // point is that a rebase costs NO second read round-trip.
+    CHECK(fresh.at("actualRawHash").as_string() == "222");
+    CHECK(fresh.at("present").as_bool());
+    CHECK(fresh.at("content").as_string() == "{}");
+
+    // The edit-batch shape carries `conflicts[]` instead (it refuses atomically and must name every
+    // conflicting file) — the same accessor reaches it, no second SDK surface.
+    const std::optional<InboundFrame> batch = parse_frame(
+        R"({"jsonrpc":"2.0","id":8,"error":{"code":-32000,"message":"CAS precondition failed",)"
+        R"("data":{"code":"cas.mismatch","message":"CAS precondition failed","retriable":false,)"
+        R"("conflicts":[{"path":"proj/a.scene.json","actualRawHash":"9"}]}}})");
+    CHECK(batch.has_value());
+    CHECK(batch->error_data.at("conflicts").size() == 1u);
+    CHECK(batch->error_data.at("conflicts").at(std::size_t{0}).at("actualRawHash").as_string() == "9");
+
+    // A refusal with NO structured data leaves error_data null rather than a phantom empty object,
+    // so a consumer can tell "the daemon sent no detail" from "the detail was empty".
+    const std::optional<InboundFrame> bare = parse_frame(
+        R"({"jsonrpc":"2.0","id":9,"error":{"code":-32000,"message":"attach denied"}})");
+    CHECK(bare.has_value());
+    CHECK(bare->error_data.is_null());
+
+    // A SUCCESS frame never carries error data.
+    const std::optional<InboundFrame> ok =
+        parse_frame(R"({"jsonrpc":"2.0","id":10,"result":{"ok":true,"data":{}}})");
+    CHECK(ok.has_value());
+    CHECK(ok->error_data.is_null());
+}
+
+void test_last_error_data_carries_the_rebase_payload_and_resets()
+{
+    auto owned = std::make_unique<MockChannel>();
+    MockChannel* mock = owned.get();
+    Json fresh = Json::object();
+    fresh.set("path", Json(std::string("proj/root.scene.json")));
+    fresh.set("present", Json(true));
+    fresh.set("expectedRawHash", Json(std::string("111")));
+    fresh.set("actualRawHash", Json(std::string("222")));
+    fresh.set("content", Json(std::string("{\"entities\":[]}")));
+    // fail_method's `detail` IS the nested error.data.data, so the fresh state goes in directly.
+    mock->fail_method("edit", "CAS precondition failed", "cas.mismatch", std::move(fresh));
+    mock->on("query", [](const clientmock::Request&)
+             { return MockChannel::ok_envelope(Json::object()); });
+    Client client(std::move(owned));
+
+    std::string error;
+    CHECK(!client.call("edit", Json::object(), error).has_value());
+    CHECK(client.last_error_code() == "cas.mismatch");
+    CHECK(!client.last_error_data().is_null());
+    // The full rebase-or-drop input, straight off the refusal — this is what e09b-2's gateway
+    // re-runs commit_override_write against. The 64-bit hash is a decimal STRING, so it feeds back
+    // as the next ifMatch with no precision loss.
+    CHECK(client.last_error_data().at("data").at("actualRawHash").as_string() == "222");
+    CHECK(client.last_error_data().at("data").at("content").as_string() == "{\"entities\":[]}");
+
+    // Reset on the NEXT call, exactly like last_error_code — a stale rebase payload read after a
+    // later, unrelated call would rebase against bytes that are no longer the conflict.
+    CHECK(client.call("query", Json::object(), error).has_value());
+    CHECK(client.last_error_data().is_null());
+    CHECK(client.last_error_code().empty());
+}
+
 void test_call_on_a_dead_wire_fails()
 {
     auto owned = std::make_unique<MockChannel>();
@@ -355,6 +437,8 @@ int main()
     test_discover_instance_reads_a_published_document();
     test_build_request();
     test_parse_frame_classifies_every_shape();
+    test_parse_frame_exposes_the_whole_error_data();
+    test_last_error_data_carries_the_rebase_payload_and_resets();
     test_attach_carries_token_scopes_and_protocol();
     test_attach_reads_the_flat_daemon_handshake_reply();
     test_attach_against_a_daemon_without_a_client_id_degrades_to_zero();

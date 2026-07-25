@@ -41,6 +41,18 @@ enum class WriteTarget
     at_instance,       // --at-instance <idPath>: an override in a mid-level instancing scene
 };
 
+// THE token a WriteTarget is named by outside C++ — "outermost" | "template" | "at-instance" — and
+// its inverse (nullopt on an unknown token, so a caller answers a clean usage error rather than
+// silently defaulting a mis-typed target to `outermost` and writing to the WRONG FILE).
+//
+// One exported definition (M9 e09b-1) because THREE surfaces must agree on these spellings: the
+// `context set` result envelope's `target` field, the daemon's pointer/value `edit` reply, and that
+// verb's inbound `target` param. They are the CLI's own `--edit-template` / `--at-instance` flag
+// semantics rendered as data, and a drift between producer and consumer here is a write landing in a
+// different file than the caller asked for — the one class of bug this write path exists to prevent.
+[[nodiscard]] std::string_view write_target_token(WriteTarget target) noexcept;
+[[nodiscard]] std::optional<WriteTarget> parse_write_target(std::string_view token) noexcept;
+
 // A composed-write request, addressing a composed entity from the root scene's perspective.
 struct WriteRequest
 {

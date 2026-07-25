@@ -149,6 +149,7 @@ std::optional<Json> Client::call(const std::string& method, Json params, std::st
         return std::nullopt;
     }
     last_error_code_.clear();
+    last_error_data_ = Json();
     last_rejected_by_daemon_ = false;
     const std::int64_t id = ++next_id_;
     if (!channel_->send(build_request(id, method, std::move(params))))
@@ -189,6 +190,10 @@ std::optional<Json> Client::call(const std::string& method, Json params, std::st
         {
             error = "daemon rejected '" + method + "': " + frame->error_message;
             last_error_code_ = std::move(frame->error_code);
+            // The refusal's structured detail (design 05 §7's rebase input on cas.mismatch). MOVED,
+            // like the code above and the result below — Json is a recursive value type, and a
+            // cas.mismatch payload carries the target file's WHOLE current bytes.
+            last_error_data_ = std::move(frame->error_data);
             last_rejected_by_daemon_ = true;
             if (rejected_by_daemon != nullptr)
                 *rejected_by_daemon = true;

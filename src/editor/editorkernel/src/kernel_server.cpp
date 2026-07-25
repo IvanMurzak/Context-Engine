@@ -2,6 +2,7 @@
 
 #include "context/editor/editorkernel/kernel_server.h"
 
+#include "context/editor/compose/compose_write.h"    // e09b-1: plan_write — the composed WRITE path
 #include "context/editor/compose/flatten.h"          // e05d3: the editor.* composed reads
 #include "context/editor/compose/project_resolver.h" // e05d3: the disk-backed scene resolver
 #include "context/editor/contract/envelope.h"
@@ -14,7 +15,9 @@
 #include "context/editor/gui/panels/builders/inspector_builder.h"  // e05d3: kernel-side builders
 #include "context/editor/gui/panels/builders/scene_tree_builder.h" // e05d3
 #include "context/editor/gui/panels/builders/wire.h"               // e05d3: model -> wire JSON
-#include "context/editor/schema/kind_schema.h" // e05d3: engine_schemas() kind lookup
+#include "context/editor/schema/kind_schema.h"      // e05d3: engine_schemas() kind lookup
+#include "context/editor/serializer/canonical.h"    // e09b-1: serialize_canonical (composed write)
+#include "context/editor/serializer/json_parse.h"   // e09b-1: the `value` JSON literal
 
 #include "context/editor/bridge/event_stream.h" // e08a: Stability on the loud recovery diagnostic
 
@@ -54,6 +57,32 @@ std::optional<std::string> string_param(const Json& params, const std::string& k
     return std::nullopt;
 }
 
+// A param is ABSENT when it is missing OR an explicit JSON null — the shape a generated client emits
+// for an unset optional (JSON.stringify keeps `null` and drops only `undefined`), and the client
+// schema now advertises every `edit` param to every generated client. Json::at is TOTAL (a shared
+// null for a missing key), so this reads the member ONCE — no contains()+at() double scan.
+[[nodiscard]] bool param_present(const Json& params, const std::string& key)
+{
+    return !params.at(key).is_null();
+}
+
+// Refuses a param that is PRESENT with a NON-STRING type. string_param alone cannot tell "absent"
+// from "present with the wrong type", and for an OPTIONAL param that conflation silently DROPS the
+// caller's intent: a dropped `target`/`atInstance` writes the override to a DIFFERENT file than the
+// caller named, and a dropped `ifMatch` turns a CAS-guarded write into an unconditional overwrite of
+// whatever a concurrent writer landed. Both are the silent-write-loss class this path exists to make
+// impossible, so a mis-TYPED param is a named usage error exactly as a mis-SPELLED one is.
+[[nodiscard]] std::optional<Envelope> reject_non_string(const Json& params, const std::string& key,
+                                                        const std::string& subject)
+{
+    const Json& value = params.at(key);
+    if (!value.is_null() && !value.is_string())
+        return Envelope::failure("usage.invalid",
+                                 subject + " must be a STRING; a value of another JSON type is "
+                                           "refused rather than read as absent");
+    return std::nullopt;
+}
+
 // Parse a decimal raw-byte content hash — the `--if-match` CAS precondition. The wire carries
 // full-range 64-bit hashes as decimal STRINGS (see hash_string), so this is the inverse. Rejects
 // empty / non-decimal / trailing-garbage / overflowing input with nullopt, so the caller answers a
@@ -69,6 +98,281 @@ std::optional<std::uint64_t> parse_hash_u64(const std::string& text)
     if (r.ec != std::errc() || r.ptr != end)
         return std::nullopt;
     return value;
+}
+
+// Reads the OPTIONAL R-CLI-006 CAS precondition — the ONE contract all three write sites share
+// (`edit`'s two shapes and `edit-batch`'s per-file token). `out` is left untouched only when the
+// param is genuinely ABSENT: a present-but-non-string or non-decimal token is the named refusal, so
+// no site can silently degrade a CAS-guarded write into an unconditional overwrite of whatever a
+// concurrent writer landed. `subject` names the param the way that site's caller sees it
+// (`edit 'ifMatch'`, `edit-batch files[3] 'ifMatch'`).
+[[nodiscard]] std::optional<Envelope> read_if_match(const Json& params, const std::string& subject,
+                                                    std::optional<std::uint64_t>& out)
+{
+    if (std::optional<Envelope> refusal = reject_non_string(params, "ifMatch", subject))
+        return refusal;
+    if (const std::optional<std::string> raw = string_param(params, "ifMatch"))
+    {
+        out = parse_hash_u64(*raw);
+        if (!out.has_value())
+            return Envelope::failure("usage.invalid", subject +
+                                                          " takes a decimal raw-byte content hash; "
+                                                          "got `" +
+                                                          *raw + "`");
+    }
+    return std::nullopt;
+}
+
+// ---- M9 e09b-1: the pointer/value (COMPOSED) `edit` mode -----------------------------------------
+
+// The keys that mark an `edit` request as the pointer/value COMPOSED write (the canonical design
+// 05 §8 flow) rather than e09a's full-content write. ANY of them selects the mode; the branch then
+// demands the four REQUIRED ones (rootScene, idPath, pointer, value), so a partial request is a
+// NAMED usage error instead of being silently re-read as the other mode and writing something the
+// caller never asked for.
+//
+// `target`/`atInstance` are optional to the branch and STILL selectors here: they are
+// composed-shape-only params, so leaving them out of this predicate would let {path, content,
+// target} take the full-content branch — which reads neither — and SILENTLY DROP the retarget,
+// writing to a different file than the caller named. Naming them here routes that request to the
+// composed branch's mode-confusion refusal instead, which is the promise the contract makes.
+//
+// Presence is param_present, not contains: an explicit null is an UNSET optional, so a generated
+// client that pads every declared param with null still reaches the shape it actually filled in.
+[[nodiscard]] bool is_composed_edit(const Json& params)
+{
+    return param_present(params, "rootScene") || param_present(params, "idPath") ||
+           param_present(params, "pointer") || param_present(params, "value") ||
+           param_present(params, "target") || param_present(params, "atInstance");
+}
+
+// Split a wire id-path param into its L-35 segments, or the named refusal. Both composed-edit
+// id-paths — `idPath` and the `at-instance` addressing prefix — carry the SAME encoding through the
+// SAME exported inverse, so they must answer identically when one is malformed.
+[[nodiscard]] std::optional<Envelope> read_id_path(const std::string& text, const char* param,
+                                                   std::vector<std::string>& out)
+{
+    const std::optional<std::vector<std::string>> segments =
+        gui::panels::builders::split_identity(text);
+    if (!segments.has_value())
+        return Envelope::failure("usage.invalid",
+                                 std::string("edit '") + param +
+                                     "' is a slash-separated L-35 id-path with no empty segments; "
+                                     "got `" +
+                                     text + "`");
+    out = *segments;
+    return std::nullopt;
+}
+
+// The tail BOTH `edit` shapes end in: the R-CLI-006 read-your-writes barrier, the R-FILE-001
+// two-hash split (rawHash = on-disk byte identity and the NEXT ifMatch token; canonicalHash = the
+// barrier key), the world stamps, and the not-yet-reflected warning. `data` arrives carrying only
+// the shape-specific ADDRESSING keys, the one thing the two shapes genuinely disagree about — the
+// registry's claim that they "share the scope, the CAS contract and the barrier" is true of the
+// CODE only while this stays ONE definition rather than two copies kept in step by eye.
+[[nodiscard]] Envelope finish_edit(EditorKernel& kernel, const std::string& file,
+                                   const derivation::WriteTicket& ticket, Json data)
+{
+    const std::optional<derivation::DerivedSource> observed =
+        kernel.query_after_hash(file, ticket.canonical_hash);
+    const bool reflected = observed.has_value() && observed->canonical_hash == ticket.canonical_hash;
+
+    data.set("rawHash", hash_string(ticket.raw_hash));
+    data.set("canonicalHash", hash_string(ticket.canonical_hash));
+    data.set("reflected", Json(reflected));
+    data.set("worldEntities", Json(static_cast<std::uint64_t>(kernel.world().alive_count())));
+    data.set("generation", Json(kernel.generation()));
+
+    Envelope env = Envelope::success(std::move(data), kernel.generation());
+    if (!reflected)
+        env.add_warning("the derived world did not reflect the edit within the read barrier bound");
+    return env;
+}
+
+// `edit` in POINTER/VALUE mode — the write the EDITOR actually issues (design 05 §8:
+// `edit {file, pointer, value, ifMatch}`).
+//
+// WHY the daemon must serve this at all, rather than the editor composing bytes and sending the
+// full-content mode: `context_compose` is on the D10 shell-boundary FORBIDDEN list
+// (src/CMakeLists.txt `context_assert_shell_boundary`, pinned by the `editor-shell-boundary`
+// ctest), so the editor structurally CANNOT resolve an override target or synthesize `content`. The
+// capability therefore lives HERE, on the daemon, and the editor stays an ordinary client sending a
+// gesture. This branch moves the capability; it does not relax the gate — that FORBIDDEN list is
+// untouched, and `context_compose` remains forbidden to the Shell.
+//
+// The body is deliberately the same sequence `context set` runs (src/cli/src/set_command.cpp):
+// plan_write over a FRESH disk-backed resolver -> canonical serialize -> CAS-guarded atomic write.
+// Same path, two front doors — never a parallel write path (L-35 single source of truth).
+//
+// Note design 05 §8 names an inbound `file`: in practice the file is an OUTPUT of the plan, because
+// COMPOSITION decides where an override lands (outermost scene / defining template / a mid-level
+// instance). The caller addresses the FIELD (rootScene + idPath + pointer) and the reply reports the
+// file that was written — which is also exactly what e09b-2's WriteAttempt::file needs.
+[[nodiscard]] Envelope serve_composed_edit(EditorKernel& kernel, const Json& params,
+                                           const bridge::ScopeSet& scopes)
+{
+    // Mode confusion is REFUSED, never guessed: a request carrying both shapes' keys has no single
+    // honest reading, and picking one would write bytes the caller did not ask for.
+    if (param_present(params, "path") || param_present(params, "content"))
+        return Envelope::failure("usage.invalid",
+                                 "edit takes EITHER the full-content shape {path, content} or the "
+                                 "composed pointer/value shape {rootScene, idPath, pointer, value} "
+                                 "— never both in one request");
+
+    // Type-strict on the OPTIONAL params BEFORE anything reads them (see reject_non_string). The
+    // four REQUIRED params need no such pass — a mis-typed one already lands in the missing-argument
+    // refusal below, which is equally a named refusal and equally not a write.
+    for (const char* key : {"target", "atInstance"})
+    {
+        if (std::optional<Envelope> refusal =
+                reject_non_string(params, key, std::string("edit '") + key + "'"))
+            return std::move(*refusal);
+    }
+
+    const std::optional<std::string> root_scene = string_param(params, "rootScene");
+    const std::optional<std::string> id_path_joined = string_param(params, "idPath");
+    const std::optional<std::string> pointer = string_param(params, "pointer");
+    const std::optional<std::string> value_text = string_param(params, "value");
+    if (!root_scene.has_value() || !id_path_joined.has_value() || !pointer.has_value() ||
+        !value_text.has_value())
+        return Envelope::failure("usage.missing_argument",
+                                 "the composed edit mode requires string 'rootScene', 'idPath', "
+                                 "'pointer' and 'value' params ('value' is a JSON literal)");
+    if (pointer->empty())
+        return Envelope::failure("usage.invalid",
+                                 "edit 'pointer' must be a non-empty RFC 6901 JSON pointer naming "
+                                 "the field inside the addressed entity");
+
+    // R-SEC-008, the same lexical pre-check `context set` and `editor.inspect` run. The resolver
+    // jails internally and edit_file re-jails the WRITE TOCTOU-safely against the filesync root, so
+    // this is the early, legible refusal rather than the only guard.
+    if (!filesync::is_inside_jail(".", *root_scene))
+        return Envelope::failure("path.jail_violation", "the scene path `" + *root_scene +
+                                                            "` escapes the project root (R-SEC-008)");
+
+    compose::WriteRequest request;
+    request.root_scene = *root_scene;
+    request.pointer = *pointer;
+    // The wire `idPath` is the SAME joined identity key `editor.inspect` takes and the scene-tree
+    // answers, split through the builders' exported inverse — one encoding, one inverse.
+    if (std::optional<Envelope> refusal = read_id_path(*id_path_joined, "idPath", request.id_path))
+        return std::move(*refusal);
+
+    request.target = compose::WriteTarget::outermost; // L-35 default: the outermost instancing scene
+    if (const std::optional<std::string> target_token = string_param(params, "target"))
+    {
+        const std::optional<compose::WriteTarget> resolved =
+            compose::parse_write_target(*target_token);
+        if (!resolved.has_value())
+            return Envelope::failure("usage.invalid",
+                                     "edit 'target' is one of outermost | template | at-instance; "
+                                     "got `" + *target_token + "`");
+        request.target = *resolved;
+    }
+
+    const std::optional<std::string> at_instance = string_param(params, "atInstance");
+    if (request.target == compose::WriteTarget::at_instance)
+    {
+        if (!at_instance.has_value())
+            return Envelope::failure("usage.missing_argument",
+                                     "edit target `at-instance` requires the 'atInstance' id-path "
+                                     "prefix naming the mid-level addressing scene");
+        if (std::optional<Envelope> refusal =
+                read_id_path(*at_instance, "atInstance", request.at_instance))
+            return std::move(*refusal);
+    }
+    else if (at_instance.has_value())
+    {
+        // Refused rather than ignored: silently dropping the retarget would write the override to a
+        // DIFFERENT file than the caller named, which is precisely the mistake this write path
+        // exists to make impossible.
+        return Envelope::failure("usage.invalid",
+                                 "edit 'atInstance' is meaningful only with target `at-instance`; "
+                                 "pass both or neither");
+    }
+
+    // The value crosses as its CANONICAL SERIALIZATION (a JSON literal carried in a string) — the
+    // same convention the inspector READ answers with (gui/panels/builders/wire.h) and `context set`
+    // takes on the command line. contract::Json and serializer::JsonValue are different DOMs, and
+    // the canonical byte form is the engine's ONE value identity (R-FILE-001), so this round-trip is
+    // exact by construction and needs no second, hand-rolled DOM converter to drift out of step.
+    serializer::ParseResult parsed_value = serializer::parse_json(*value_text);
+    if (!parsed_value.ok)
+    {
+        const std::string detail = parsed_value.diagnostics.empty()
+                                       ? std::string("malformed JSON")
+                                       : parsed_value.diagnostics.front().code + ": " +
+                                             parsed_value.diagnostics.front().message;
+        return Envelope::failure("file.parse_error",
+                                 "the 'value' param is not valid JSON (" + detail +
+                                     ") — pass a JSON literal, e.g. `[1, 2, 3]` or `\"text\"`");
+    }
+    request.value = std::move(parsed_value.root);
+
+    // Optional R-CLI-006 raw-byte CAS precondition, read through the ONE helper the full-content
+    // shape and `edit-batch` also read it through, so no shape can drift into accepting a token the
+    // others refuse (the decimal-string convention exists because a full-range hash exceeds 2^53).
+    std::optional<std::uint64_t> if_match;
+    if (std::optional<Envelope> refusal = read_if_match(params, "edit 'ifMatch'", if_match))
+        return std::move(*refusal);
+
+    // Planning is SCOPED: the resolver retains a parsed tree and a SceneDoc for every scene file the
+    // composition walked, and `plan.document` is a whole further copy of the target's. Nothing past
+    // this point needs any of it — only the serialized bytes and the plan's four small addressing
+    // facts — so releasing it here keeps several documents' worth of memory off the write and the
+    // barrier below, which are the longest stretch of the operation AND the part held under the
+    // single dispatch mutex.
+    std::string new_bytes;
+    std::string plan_file;
+    std::string plan_pointer;
+    compose::WriteTarget plan_target = compose::WriteTarget::outermost;
+    bool plan_base_recorded = false;
+    {
+        // A FRESH resolver per operation: its cache is a snapshot-per-instance (project_resolver.h),
+        // so reusing one across writes would plan the second write against pre-first-write bytes.
+        const compose::ProjectSceneResolver resolver(kernel.config().project_root);
+        const compose::WritePlan plan = compose::plan_write(request, resolver);
+        if (!plan.ok)
+            return Envelope::failure(plan.error_code, plan.error_message, plan.error_pointer);
+
+        if (!serializer::serialize_canonical(plan.document, new_bytes))
+            return Envelope::failure("internal.error",
+                                     "the mutated scene document could not be canonically "
+                                     "serialized");
+
+        plan_file = plan.file;
+        plan_pointer = plan.pointer;
+        plan_target = plan.target;
+        plan_base_recorded = plan.base_recorded;
+    }
+
+    // The write itself goes through the SAME daemon path the full-content mode uses: the defensive
+    // file_write scope re-check, the TOCTOU-tight CAS against the daemon's OWN store, filesync
+    // atomic IO, and the derivation ingest. The CAS therefore guards `plan.file` — the file
+    // COMPOSITION chose — which is the right target, but note WHICH file that is: only under
+    // target=`outermost` is it the root scene, the one `editor.inspect` reports a rawHash for.
+    // `template` / `at-instance` resolve a DIFFERENT authored file, and no read verb reports a token
+    // for those today, so a client retargeting either passes no ifMatch and takes its token from the
+    // first refusal's error.data. A concurrent writer that moved the file is refused here with the
+    // fresh on-disk state attached, the design 05 §7 rebase input.
+    EditOutcome out = kernel.edit_file(plan_file, new_bytes, scopes, if_match);
+    if (!out.ok)
+        return out.envelope();
+
+    Json data = Json::object();
+    // `file`, NOT `path`: here the target is an OUTPUT of the plan (the caller never named it), not
+    // an input echoed back, and `file` is the name design 05 §8, the `context set` envelope, and
+    // e09b-2's WriteAttempt::file all already use. One name, one meaning — a second alias for the
+    // same value would be exactly the drift this module keeps closing elsewhere.
+    data.set("file", Json(plan_file));
+    data.set("pointer", Json(plan_pointer)); // the pointer that actually landed (provenance)
+    data.set("target", Json(std::string(compose::write_target_token(plan_target))));
+    data.set("baseRecorded", Json(plan_base_recorded)); // an override `base` snapshot was recorded
+
+    // Everything after the addressing keys — the R-CLI-006 barrier, the R-FILE-001 two-hash split,
+    // the world stamps and the not-yet-reflected warning — is the tail the full-content shape ends
+    // in too, so it is ONE definition rather than a copy labelled "exactly as the other mode does".
+    return finish_edit(kernel, plan_file, out.ticket, std::move(data));
 }
 
 // ---- M9 e08a session-state helpers ---------------------------------------------------------------
@@ -310,48 +614,36 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
     // world already reflects the write (R-CLI-006).
     if (method == "edit")
     {
+        // M9 e09b-1: `edit` serves TWO shapes on one verb. The pointer/value (composed) mode is the
+        // canonical design 05 §8 editor write — the caller addresses a FIELD and composition decides
+        // which file the override lands in. Selected by the presence of its own keys, so the
+        // full-content shape below still answers exactly as e09a shipped it. One verb rather than
+        // two because the scope (file_write), the CAS contract, and the read-your-writes barrier are
+        // identical — only the addressing differs, which is why read_if_match and finish_edit are
+        // literally shared between the two rather than mirrored.
+        if (is_composed_edit(params))
+            return serve_composed_edit(kernel_, params, session.scopes);
+
         const std::optional<std::string> path = string_param(params, "path");
         const std::optional<std::string> content = string_param(params, "content");
         if (!path.has_value() || !content.has_value())
             return Envelope::failure("usage.missing_argument",
                                      "edit requires string 'path' and 'content' params");
 
-        // Optional R-CLI-006 raw-byte CAS precondition. Carried as a decimal string (a full-range
-        // hash exceeds 2^53). On a mismatch, edit_file's outcome envelope carries the fresh on-disk
+        // Optional R-CLI-006 raw-byte CAS precondition, read through the same helper both other
+        // write sites use. On a mismatch, edit_file's outcome envelope carries the fresh on-disk
         // state (error.data — the rebase input, design 05 §7); the dispatcher forwards it on the wire.
         std::optional<std::uint64_t> if_match;
-        if (const std::optional<std::string> raw = string_param(params, "ifMatch"))
-        {
-            if_match = parse_hash_u64(*raw);
-            if (!if_match.has_value())
-                return Envelope::failure(
-                    "usage.invalid",
-                    "edit 'ifMatch' takes a decimal raw-byte content hash; got `" + *raw + "`");
-        }
+        if (std::optional<Envelope> refusal = read_if_match(params, "edit 'ifMatch'", if_match))
+            return refusal;
 
         EditOutcome out = kernel_.edit_file(*path, *content, session.scopes, if_match);
         if (!out.ok)
             return out.envelope();
 
-        const std::optional<derivation::DerivedSource> observed =
-            kernel_.query_after_hash(*path, out.ticket.canonical_hash);
-        const bool reflected =
-            observed.has_value() && observed->canonical_hash == out.ticket.canonical_hash;
-
         Json data = Json::object();
         data.set("path", Json(*path));
-        // The R-FILE-001 two-hash split, labelled: rawHash = on-disk byte identity (CAS
-        // `--if-match`); canonicalHash = canonical-content identity (the R-CLI-006 barrier key).
-        data.set("rawHash", hash_string(out.ticket.raw_hash));
-        data.set("canonicalHash", hash_string(out.ticket.canonical_hash));
-        data.set("reflected", Json(reflected));
-        data.set("worldEntities", Json(static_cast<std::uint64_t>(kernel_.world().alive_count())));
-        data.set("generation", Json(kernel_.generation()));
-
-        Envelope env = Envelope::success(std::move(data), kernel_.generation());
-        if (!reflected)
-            env.add_warning("the derived world did not reflect the edit within the read barrier bound");
-        return env;
+        return finish_edit(kernel_, *path, out.ticket, std::move(data));
     }
 
     // `edit-batch` — the daemon-initiated MULTI-file write, serialized through the R-FILE-004
@@ -378,17 +670,15 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
                                          "edit-batch files[" + std::to_string(i) +
                                              "] needs string 'path' and 'content'");
             BatchEdit edit{*path, *content}; // expected_raw_hash defaults to nullopt (unconditional)
-            // Optional per-file R-CLI-006 raw-byte CAS precondition (`--if-match`). A mismatch on ANY
-            // file refuses the WHOLE batch (atomic — nothing written); the reply names every conflict.
-            if (const std::optional<std::string> raw = string_param(f, "ifMatch"))
-            {
-                edit.expected_raw_hash = parse_hash_u64(*raw);
-                if (!edit.expected_raw_hash.has_value())
-                    return Envelope::failure(
-                        "usage.invalid",
-                        "edit-batch files[" + std::to_string(i) +
-                            "] 'ifMatch' takes a decimal raw-byte content hash; got `" + *raw + "`");
-            }
+            // Optional per-file R-CLI-006 raw-byte CAS precondition (`--if-match`), through the same
+            // helper `edit` reads its own token with. A mismatch on ANY file refuses the WHOLE batch
+            // (atomic — nothing written); the reply names every conflict. The type-strictness earns
+            // its keep here too: a mis-typed per-file token read as absent would drop THAT file's
+            // precondition alone and write it unconditionally inside an otherwise guarded batch.
+            if (std::optional<Envelope> refusal =
+                    read_if_match(f, "edit-batch files[" + std::to_string(i) + "] 'ifMatch'",
+                                  edit.expected_raw_hash))
+                return refusal;
             edits.push_back(std::move(edit));
         }
 
