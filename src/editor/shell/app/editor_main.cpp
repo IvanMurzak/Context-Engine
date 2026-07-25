@@ -481,17 +481,30 @@ int main(int argc, char** argv)
         const shell::EditorStateRestoreReport& restore = manager.state_store().restore_report();
         if (restore.outcome == shell::EditorStateRestoreOutcome::recovered)
         {
+            // The suffix is decided from the STRUCTURED facts, not from an empty `quarantined_path`
+            // alone: "no copy was needed" and "no copy exists, and those bytes are the only ones the
+            // user has left" both leave it empty, and only the second is the one worth shouting.
+            const std::string outcome_suffix =
+                !restore.quarantined_path.empty()
+                    ? "; the corrupt file was moved aside to " + restore.quarantined_path
+                    : (restore.preservation_failed
+                           ? std::string("; it could NOT be preserved, so it has been left exactly "
+                                         "as it is and this editor will not save session state "
+                                         "over it")
+                           : std::string());
             const std::string message =
                 "the editor's own session file was unreadable and has been reset to defaults "
                 "(window layout, panel state and session undo history): " +
-                restore.detail +
-                (restore.quarantined_path.empty()
-                     ? std::string()
-                     : "; the corrupt file was moved aside to " + restore.quarantined_path);
+                restore.detail + outcome_suffix;
             std::fprintf(stderr, "[editor-state] %s\n", message.c_str());
             std::fflush(stderr);
+            // The PANEL gets the project-relative spelling, not `restore.path`. That argument lands
+            // in the payload's `file` member, which is the member ProblemsFeed renders and groups
+            // by, and every other row in the panel is project-relative — an absolute native path
+            // would be the one entry with a `C:\…` group header. stderr above keeps the absolute
+            // form, where the reader may have no project context at all.
             (void)shell::panels::report_local_problem(builtin, shell::kEditorStateInvalidCode,
-                                                      message, restore.path);
+                                                      message, restore.project_relative_path);
         }
     }
     if (!panel_host.install(bridge))

@@ -160,12 +160,55 @@ CPP_WRITE_PRIMITIVE = re.compile(
     r"|\bcopy_file\("         # std::filesystem::copy_file over the destination
     r"|\bcopy_options\b"      # std::filesystem::copy with overwrite_existing (omits `copy_file`)
     r"|\bfopen\(|\bfreopen\(" # C stdio, opened "w"/"a"
+    # ...and the two PLATFORM write paths, which the list omitted entirely while the repo uses BOTH:
+    # `native_file_store.cpp` and `bridge/src/lock.cpp` open files with POSIX `::open` + `O_WRONLY`,
+    # and `native_file_store.cpp` + `bridge/src/transport.cpp` use `CreateFileW`/`WriteFile`. The
+    # stdio exclusion reasoned below does NOT extend to these — they need no `fopen` in the TU.
+    r"|\bO_WRONLY\b|\bO_CREAT\b"          # POSIX open(2) for writing
+    r"|\bCreateFileW?\s*\(|\bWriteFile\s*\("   # Win32 create/write
+    r"|\bMoveFileEx[AW]?\s*\(|\bReplaceFile[AW]?\s*\(" # ...and the Win32 rename/publish pair
+    r"|\bfilesystem::copy\s*\("           # std::filesystem::copy over a destination
+    r"|\bwofstream\b"                     # the wide sibling of ofstream
 )
 CPP_WRITE = re.compile(
     CPP_WRITE_PRIMITIVE.pattern
     + r"|\bwrite_file\w*\s*\("    # the repo's own test/helper write wrappers
     + r"|\batomic_write\w*\s*\("  # filesync's R-FILE-004 primitive, reached directly
 )
+
+# The write that must still be applied to the OWNED DOCUMENT ITSELF, per file.
+#
+# ⚠ THIS EXISTS BECAUSE THE PRIMITIVE-vs-WRAPPER SPLIT ABOVE DID NOT ACTUALLY CLOSE THE VACUITY HOLE
+# — it moved it one level down, and a second planting round found it still open. `editor_state.cpp`
+# DEFINES `atomic_write_text`, whose body contains `std::ofstream` and `std::filesystem::rename`; so
+# "the TU contains a PRIMITIVE write token somewhere" is satisfied forever by the sole writer's own
+# private helper, no matter what happens to the real save. Planted and confirmed: delete every actual
+# write of the document and the gate still reported PASS.
+#
+# So this asserts the helper's CALL — a write applied to this store's own path — which a helper
+# DEFINITION cannot satisfy. That is necessarily per-writer configuration, and deliberately so: this
+# gate's contract is "a gate that cannot find its subject must FAIL, not pass", so a refactor that
+# moves the write trips this loudly and the author repoints it. That is the tripwire working, not a
+# maintenance burden to design away.
+#
+# ⚠ ITS LIMIT, STATED RATHER THAN OVERSTATED (proven by planting, third round): a DEAD call satisfies
+# this exactly as a live one does. Gutting `EditorStateStore::write()` while leaving a never-called
+# `legacy_write_unused()` containing `atomic_write_text(path_, …)` behind still reports PASS. Closing
+# that needs the search scoped to the owner API's own function body (find the entry point, scan to
+# its matching brace) — a real improvement, filed rather than done here. What this rule buys today is
+# defence in depth: "the sole writer moved" is already caught by rules 1-2 firing on the NEW writer,
+# and "the write vanished" by the behavioural round-trips in test_editor_state.cpp /
+# test_editor_session_state.cpp. This layer catches both being deleted at once — not a dead sibling.
+OWNED_WRITE = {
+    ".editor/session.json": re.compile(
+        r"\brename\s*\(\s*tmp\s*,\s*path\b"      # write-then-rename publish
+        r"|\bofstream\s+\w+\s*\(\s*path\b"       # ...and the direct-truncate fallback
+    ),
+    ".editor/editor-state.json": re.compile(
+        r"\batomic_write_text\s*\(\s*path_\b"    # the debounced save
+        r"|\brename\s*\(\s*path_\b"              # ...and the e09d quarantine move
+    ),
+}
 # ...deliberately WITHOUT the C stdio write calls themselves (`fwrite`/`fputs`/`fprintf`). They look
 # like the obvious thing to add and are actively wrong here: `std::fprintf(stderr, …)` is this
 # codebase's ordinary logging idiom — and BOTH session-file owners log their recovery through it — so
@@ -235,6 +278,16 @@ GATEWAY_OWNERS = (
 # follow-up for a task permitted to touch `src/CMakeLists.txt`.
 GATEWAY_LIBRARY = "context_gui_viewport_edit"
 SHELL_LINK_TARGETS = ("context_editor_shell", "context_editor", "context_editor_panels")
+# ...plus EVERY link call written under the Shell's own CMake subtree, whatever target it names.
+#
+# ⚠ THE TWO COVER DIFFERENT AXES AND NEITHER SUBSUMES THE OTHER — measured, not assumed. The rule
+# keys on where the `target_link_libraries` CALL is written, not where its target is DECLARED, and
+# CMake >= 3.13 allows a cross-directory call. So the SUBTREE half catches a link written inside
+# `src/editor/shell/**` against a target the tuple never heard of (`context_editor_cef`, a real
+# STATIC library the tuple had already fallen behind), while the TUPLE half catches a link against a
+# named Shell target written ANYWHERE ELSE — e.g. in `src/CMakeLists.txt`. Deleting either leaves a
+# planted violation undetected; both plants are pinned in tools/tests/.
+SHELL_CMAKE_SUBTREE = "src/editor/shell/"
 CMAKE_ROOTS = ("src",)
 CMAKE_NAMES = ("CMakeLists.txt",)
 # `target_link_libraries(<target> ...)` up to its closing paren — CMake has no nesting here.
@@ -243,7 +296,9 @@ TARGET_LINK = re.compile(r"target_link_libraries\s*\(\s*([A-Za-z0-9_]+)([^)]*)\)
 # Where C++ is scanned. The whole engine — a second writer is no less a second writer for living in
 # the CLI, and the gateway is no less on the live path for being reached from a package.
 CPP_ROOTS = ("src",)
-CPP_SUFFIXES = (".cpp", ".h", ".hpp", ".cc", ".mm")
+# Matched case-INSENSITIVELY (see iter_sources). `.inl`/`.ipp` matter most: an inline or template
+# writer in one is exactly the shape that gets added without anyone thinking of this gate.
+CPP_SUFFIXES = (".cpp", ".h", ".hpp", ".cc", ".mm", ".inl", ".ipp", ".cxx", ".hxx", ".c")
 
 # Directories never scanned (build output, fetched third-party payloads).
 SKIP_DIRS = {"build", "build-msvc-check", "node_modules", "vcpkg_installed", ".git"}
@@ -253,6 +308,26 @@ SKIP_DIRS = {"build", "build-msvc-check", "node_modules", "vcpkg_installed", ".g
 #: comments heavily). Comments are blanked (not deleted) before every match so line numbers stay true
 #: and a finding still points at real code.
 COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
+
+#: CMake comments are `#`, which `COMMENT` knows nothing about — so before this the CMake half read
+#: its own prose as code, in BOTH directions. Planted and confirmed:
+#:
+#:   * FALSE POSITIVE — a commented-out `# target_link_libraries(context_editor_shell PRIVATE
+#:     context_gui_viewport_edit)` was reported as a real forbidden link. That is not hypothetical
+#:     here: `src/editor/shell/CMakeLists.txt` carries ~20 lines of `#` prose about this very
+#:     gateway, so the next author who documents the rule BY EXAMPLE reds all three `build` legs
+#:     with a message asserting a link that does not exist.
+#:   * FALSE NEGATIVE — `TARGET_LINK`'s `[^)]*` payload stops at the first `)` CHARACTER, so a `#`
+#:     comment containing one (`# see ContextCef.cmake context_acquire_cef() for why`) inside a link
+#:     block truncated the payload and hid the real forbidden link below it. That idiom is already
+#:     in the scanned file.
+#:
+#: ⚠ QUOTE-AWARE, not `#[^\n]*`. A naive cut at the first `#` truncates any line carrying one inside
+#: a double-quoted string, and `src/CMakeLists.txt` + `src/editor/shell/CMakeLists.txt` (the very
+#: file rule 4b scans) contain three — `option(... "…(issue #150)…")` and two `"…issue #360…"`
+#: strings — whose closing `")` would be discarded, re-creating the unbalanced-paren truncation
+#: above. Same algorithm as `tools/check_cef_staging.py`'s stripper, which is the tier this rule
+#: occupies; the two should be shared through `tools/_ci_common.py` (filed, see the module docstring).
 
 #: `#include <fstream>` is not a write, and the generous `\bfstream\b` token in CPP_WRITE matches it.
 #: That is not academic: it produced BOTH directions of wrongness in one planting round. It reported
@@ -267,6 +342,10 @@ COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
 INCLUDE = re.compile(r"^[ \t]*#[ \t]*include[^\n]*", re.MULTILINE)
 
 
+class UnreadableSourceError(Exception):
+    """A source in the scan corpus could not be read — a config error, never a silent skip."""
+
+
 def _blank(match: re.Match) -> str:
     """Replace a span with spaces, keeping newlines — so offsets (and line numbers) stay true."""
     return re.sub(r"[^\n]", " ", match.group(0))
@@ -276,9 +355,38 @@ def strip_comments(text: str) -> str:
     return COMMENT.sub(_blank, text)
 
 
+def strip_cmake_comments(text: str) -> str:
+    """Blank CMake `#` comments, honouring double-quoted strings (which may contain `#`)."""
+    out: list[str] = []
+    for line in text.splitlines():
+        in_quotes = False
+        cut = len(line)
+        i = 0
+        while i < len(line):
+            ch = line[i]
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == '"':
+                in_quotes = not in_quotes
+            elif ch == "#" and not in_quotes:
+                cut = i
+                break
+            i += 1
+        # Blank rather than truncate, so column offsets — and therefore `line_of` — stay true.
+        out.append(line[:cut] + " " * (len(line) - cut))
+    return "\n".join(out)
+
+
+def _without_includes(text: str) -> str:
+    """`text` with `#include` lines blanked — the one place that rule lives, since `find_write` and
+    `_write_on_a_line_naming` must agree about it."""
+    return INCLUDE.sub(_blank, text)
+
+
 def find_write(text: str, pattern: "re.Pattern[str]" = CPP_WRITE):
     """The first FILE-WRITE spelling in comment-stripped `text`, ignoring `#include` lines."""
-    return pattern.search(INCLUDE.sub(_blank, text))
+    return pattern.search(_without_includes(text))
 
 
 def is_test_source(rel: str) -> bool:
@@ -307,26 +415,61 @@ def is_test_source(rel: str) -> bool:
     return name.startswith("test_") or "_smoke" in name
 
 
-def iter_sources(root: Path, rel_roots: tuple[str, ...], suffixes: tuple[str, ...]):
-    """Yield (relative_posix_path, comment-stripped text) for every scannable source."""
+def iter_sources(root: Path, rel_roots: tuple[str, ...], suffixes: tuple[str, ...],
+                 strip=strip_comments, names: tuple[str, ...] | None = None):
+    """Yield (relative_posix_path, comment-stripped text) for every scannable source.
+
+    ⚠ AN UNREADABLE SOURCE RAISES rather than being skipped. Silently dropping it from the corpus is
+    the one failure mode a source-scan gate must never have: a second writer inside the skipped file
+    is then indistinguishable from no second writer, and the gate prints PASS. `--repo-root` handling
+    turns this into exit 2, per the same "a gate that cannot find its subject must fail" rule the
+    anchor check follows.
+    """
     for rel_root in rel_roots:
         base = root / rel_root
         if not base.is_dir():
             continue
-        for path in sorted(base.rglob("*")):
-            if path.suffix not in suffixes or not path.is_file():
+        # Sorted on the POSIX spelling, not the Path: Path comparison is case-insensitive on Windows
+        # and case-sensitive elsewhere, which would make violation ORDER differ per runner.
+        for path in sorted(base.rglob("*"), key=lambda p: p.as_posix()):
+            # `.lower()`, because suffix matching is case-sensitive and a `WELCOME.CPP` would
+            # otherwise leave the corpus unscanned (planted, confirmed missed).
+            if path.suffix.lower() not in suffixes or not path.is_file():
+                continue
+            # FILTER BEFORE READING. The raise-don't-skip rule below is airtight for a corpus where a
+            # skipped file could hide a violation, and vacuous for a file that is not in the corpus
+            # at all — without this, an unreadable `README.txt` under `src/` would exit 2 on a rule
+            # whose subject is `CMakeLists.txt`.
+            if names is not None and path.name not in names:
                 continue
             if any(part in SKIP_DIRS for part in path.relative_to(root).parts):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            yield path.relative_to(root).as_posix(), strip_comments(text)
+            except OSError as exc:
+                raise UnreadableSourceError(
+                    f"{path.relative_to(root).as_posix()} could not be read ({exc}) — refusing to "
+                    f"scan a partial corpus, because a second writer in a skipped file is "
+                    f"indistinguishable from no second writer"
+                ) from exc
+            yield path.relative_to(root).as_posix(), strip(text)
 
 
 def line_of(text: str, match_end: int) -> int:
     return text.count("\n", 0, match_end) + 1
+
+
+def _write_on_a_line_naming(text: str, name: "re.Pattern[str]"):
+    """(1-based line number, matched write spelling) for the first line that BOTH names the document
+    and writes a file — the narrow test a DOCUMENTED READER must still pass. None when there is
+    none."""
+    for index, line in enumerate(_without_includes(text).splitlines(), start=1):
+        if name.search(line) is None:
+            continue
+        write = CPP_WRITE.search(line)
+        if write is not None:
+            return index, write.group(0)
+    return None
 
 
 def check(root: Path) -> list[str]:
@@ -371,6 +514,15 @@ def check(root: Path) -> list[str]:
                 f"writes nothing, so this gate would pass vacuously. Point SOLE_WRITERS at the real "
                 f"writer."
             )
+        # ...and the write must still land on THIS document. The check above is satisfied by the
+        # writer's own private helper DEFINITION (see OWNED_WRITE), so on its own it cannot fail.
+        if find_write(text, OWNED_WRITE[label]) is None:
+            violations.append(
+                f"{writer}: no longer writes {label} ITSELF — it still contains write machinery, but "
+                f"nothing that puts bytes on that document's own path, so rules 1-4 would pass "
+                f"vacuously over a file nobody writes. Either restore the write or repoint "
+                f"OWNED_WRITE[{label!r}] at its new spelling."
+            )
         # (3) the SPLIT itself: the owner lives in its own process's subtree.
         if not writer.startswith(owner_subtree):
             violations.append(
@@ -407,7 +559,24 @@ def check(root: Path) -> list[str]:
             if rel in exempt or is_test_source(rel):
                 continue
             if DOCUMENTED_READERS.get(rel, (None, None))[0] == label:
-                continue # a reviewed reader — its own two obligations are checked just above
+                # A reviewed reader — its own two obligations are checked just above. But the
+                # exemption is NARROWED to what it was granted for: "reads the document, writes only
+                # its own sibling artifact". A write spelling on the SAME LINE as the document is not
+                # that, and it is one line away in practice — `arbitration.cpp` already defines a
+                # general-purpose `atomic_write_text(target, text)` and already computes the
+                # editor-state path, so redirecting one argument made it a second writer with the
+                # whole-file exemption green (planted, confirmed missed).
+                same_line = _write_on_a_line_naming(text, FILE_NAMES[label])
+                if same_line is None:
+                    continue
+                line_no, write_hit = same_line
+                violations.append(
+                    f"{rel}:{line_no}: is a documented READER of {label} but writes a file on the "
+                    f"same line as it ({write_hit!r}). The exemption covers reading that document "
+                    f"while writing its OWN sibling artifact — not writing that document. Route it "
+                    f"through {SOLE_WRITERS[label][0]}."
+                )
+                continue
             if FILE_NAMES[label].search(text) is None:
                 continue
             write = find_write(text)
@@ -427,12 +596,18 @@ def check(root: Path) -> list[str]:
             )
 
     # (4b) ...and no Shell target LINKS the library it lives in (the CMake half of rule 4).
-    for rel, text in iter_sources(root, CMAKE_ROOTS, (".txt",)):
-        if Path(rel).name not in CMAKE_NAMES:
-            continue
+    gateway_library_defined = False
+    for rel, text in iter_sources(root, CMAKE_ROOTS, (".txt",), strip_cmake_comments, CMAKE_NAMES):
+        if re.search(rf"\badd_library\s*\(\s*{re.escape(GATEWAY_LIBRARY)}\b", text) is not None:
+            gateway_library_defined = True
         for call in TARGET_LINK.finditer(text):
             target, payload = call.group(1), call.group(2)
-            if target not in SHELL_LINK_TARGETS:
+            # A named Shell target, OR any target declared inside the Shell's own subtree — the
+            # explicit tuple had already gone stale (`context_editor_cef`, a real STATIC library at
+            # src/editor/shell/cef/CMakeLists.txt that `context_editor` links, was absent from it, so
+            # linking the gateway there passed). The subtree rule is what makes a NEW Shell target
+            # covered on the day it is written rather than on the day someone remembers this list.
+            if target not in SHELL_LINK_TARGETS and not rel.startswith(SHELL_CMAKE_SUBTREE):
                 continue
             if re.search(rf"\b{re.escape(GATEWAY_LIBRARY)}\b", payload) is None:
                 continue
@@ -445,7 +620,27 @@ def check(root: Path) -> list[str]:
                 f"forbids its context_compose/context_filesync dependencies transitively)."
             )
 
+    if not gateway_library_defined:
+        # (4b) ANTI-VACUITY. Renaming the library retires the link rule silently: no CMake file
+        # mentions the old name, so nothing can ever match. Planted and confirmed — the rename left
+        # the gate PASSING with the forbidden link present under the new name.
+        violations.append(
+            f"no CMake file declares add_library({GATEWAY_LIBRARY}) — the library holding the "
+            f"in-process override-write gateway has moved or been renamed, so the Shell link rule "
+            f"matches nothing and passes vacuously. Repoint GATEWAY_LIBRARY at its new name."
+        )
+
     # (4) the in-process compose/filesync gateway stays off the live path.
+    #
+    # ANTI-VACUITY FIRST, for the same reason as 4b: renaming the TYPE retires the rule everywhere at
+    # once. Planted and confirmed — renaming `ProjectOverrideWriteGateway` in both owner files AND
+    # constructing the renamed type from live Shell code reported PASS.
+    if not any(INPROCESS_GATEWAY.search(by_rel.get(owner, "")) for owner in GATEWAY_OWNERS):
+        violations.append(
+            f"none of the gateway's own files {list(GATEWAY_OWNERS)} still names the in-process "
+            f"override-write gateway — INPROCESS_GATEWAY matches nothing, so the live-path rule "
+            f"passes vacuously. Repoint it at the type's new spelling."
+        )
     for rel, text in sources:
         if rel in GATEWAY_OWNERS or is_test_source(rel):
             continue
@@ -473,7 +668,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         violations = check(root)
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, UnreadableSourceError) as exc:
         print(f"[session-ownership] ERROR: {exc}", file=sys.stderr)
         return 2
 

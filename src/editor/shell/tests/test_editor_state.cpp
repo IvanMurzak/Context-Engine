@@ -775,6 +775,244 @@ void test_the_quarantine_path_is_a_sibling_and_not_the_owned_file()
     CHECK(std::string(kEditorStateInvalidCode) == "editor.editor_state_invalid");
 }
 
+// ------------------------------------------------- e09d refine: preservation is a PRECONDITION
+
+void test_a_document_that_cannot_be_preserved_is_never_written_over()
+{
+    // THE DATA-LOSS REGRESSION. Before this, a quarantine whose rename FAILED reported "…could NOT
+    // be renamed aside and remains at <path>" — and then the boot's very next act destroyed exactly
+    // those bytes: editor_main publishes the presence marker and calls flush_now(), which
+    // atomic-writes defaults over the file the message had just promised was still there. The user
+    // lost their window layout AND their undo history with no copy anywhere, which is the silent
+    // reset e09d exists to eliminate, with a reassuring diagnostic on top.
+    //
+    // Forced portably by making preservation IMPOSSIBLE: every quarantine slot is occupied, and the
+    // slot the exhausted-bound fallback lands on is a NON-EMPTY DIRECTORY — a destination both
+    // `rename` and `copy_file` refuse on every platform.
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "nopreserve");
+    const fs::path path = editor_state_path(root);
+    std::error_code ec;
+
+    // shelltest::write_file, not a raw ofstream, and that matters MORE here than anywhere else in
+    // this file: it ASSERTS the fixture landed. If these 64 occupying entries silently failed to
+    // appear, `preserve_unusable_document` would find a free slot, preservation would SUCCEED, and
+    // every assertion below would hold vacuously against a test that proved nothing.
+    const std::string original = R"({"windows": [ {"x": 42,)"; // malformed on purpose
+    shelltest::write_file(path, original);
+    fs::create_directories(editor_state_quarantine_path(root, 0), ec);
+    shelltest::write_file(editor_state_quarantine_path(root, 0) / "occupied.txt", "x");
+    for (int n = 1; n < 64; ++n)
+    {
+        shelltest::write_file(editor_state_quarantine_path(root, n), "taken");
+    }
+
+    EditorStateStore store(root, 0);
+    bool loaded = true;
+    store.load(&loaded);
+    CHECK(!loaded);
+
+    const EditorStateRestoreReport& report = store.restore_report();
+    CHECK(report.outcome == EditorStateRestoreOutcome::recovered);
+    CHECK(report.preservation_failed);       // the fact a caller must be able to act on...
+    CHECK(report.quarantined_path.empty());  // ...and no quarantine is CLAIMED that does not exist
+    CHECK(report.detail.find("could NOT be preserved") != std::string::npos);
+
+    // THE ASSERTION THIS TEST EXISTS FOR: the boot's write is REFUSED, and the user's bytes survive
+    // it byte-for-byte. Without the guard this flush succeeds and `original` is gone forever.
+    store.set_presence([] {
+        context::editor::client::PresenceMarker m;
+        m.pid = 4321;
+        m.boot_nonce = "nonce";
+        return m;
+    }(), 0);
+    CHECK(store.dirty());
+    CHECK(!store.flush_now());
+    CHECK(!store.last_error().empty());
+    CHECK(store.last_error().find("refusing to write") != std::string::npos);
+    CHECK(store.dirty()); // still dirty, so a later flush retries rather than dropping the change
+    CHECK(fs::exists(path));
+    CHECK(read_file(path) == original);
+
+    // ...and it is a REFUSAL, not a wedge: once the obstruction clears, the retry inside write()
+    // preserves the document and the store resumes saving.
+    fs::remove_all(editor_state_quarantine_path(root, 0), ec);
+    CHECK(store.flush_now());
+    CHECK(!store.restore_report().preservation_failed);
+    CHECK(read_file(editor_state_quarantine_path(root, 0)) == original); // salvaged after all
+    CHECK(read_file(path) != original);                                  // ...and now safe to write
+
+    shelltest::cleanup(root);
+}
+
+void test_exhausting_the_quarantine_slots_says_which_salvage_it_replaced()
+{
+    // The bound silently REPLACED the oldest quarantine, and the comment describing it claimed the
+    // opposite ("the last candidate is overwritten"; the initialiser makes it the FIRST). Destroying
+    // a prior salvage may be the least-bad option at the bound, but it is not something to do
+    // quietly — a user chasing a lost layout needs to know a copy was consumed.
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "slots");
+    const fs::path path = editor_state_path(root);
+    for (int n = 0; n < 64; ++n)
+    {
+        // write_file asserts each slot landed — the same vacuity guard as the sibling test above.
+        shelltest::write_file(editor_state_quarantine_path(root, n),
+                             "older salvage " + std::to_string(n));
+    }
+    const std::string original = "{ not json";
+    shelltest::write_file(path, original);
+
+    EditorStateStore store(root, 0);
+    store.load();
+    const EditorStateRestoreReport& report = store.restore_report();
+    CHECK(report.outcome == EditorStateRestoreOutcome::recovered);
+    CHECK(!report.preservation_failed);
+    CHECK(report.quarantined_path == editor_state_quarantine_path(root, 0).string());
+    CHECK(report.detail.find("slots are exhausted") != std::string::npos);
+    CHECK(read_file(editor_state_quarantine_path(root, 0)) == original); // slot 0 replaced...
+    CHECK(read_file(editor_state_quarantine_path(root, 1)) == "older salvage 1"); // ...and only it
+
+    shelltest::cleanup(root);
+}
+
+void test_an_unusable_version_is_a_mismatch_and_never_a_cast_over_the_range()
+{
+    // TWO holes in one guard, both reached from a hand-edited file.
+    //
+    // (a) `1e300` went through `as_int()`, a `static_cast<int64_t>` of the stored double — UB the
+    //     blocking `sanitize (ASan+UBSan, ubuntu)` leg reports as `float-cast-overflow`.
+    //     `Json::parse` accepts it happily (test_out_of_range_numbers_degrade_to_defaults_not_ub
+    //     pins that for the placement members); the version read was the one that had never been
+    //     routed through the shared range guard, and since e09d it decides whether the file is
+    //     MOVED AND REPLACED.
+    // (b) a version that is present but NOT A NUMBER (`"1"`, null, an object) skipped the guard
+    //     entirely and was reinterpreted under this build's field meanings — reported as a clean
+    //     "restored". The header's rule is "present AND wrong"; each of these is present and wrong.
+    const char* const shapes[] = {
+        R"({"version": 1e300, "windows": []})",
+        R"({"version": -1e300, "windows": []})",
+        R"({"version": "1", "windows": []})",
+        R"({"version": null, "windows": []})",
+        R"({"version": {}, "windows": []})",
+    };
+    int n = 0;
+    for (const char* shape : shapes)
+    {
+        const std::string tag = "ver" + std::to_string(n++);
+        const fs::path root = shelltest::make_temp_project("context-shell-state", tag.c_str());
+        shelltest::write_file(editor_state_path(root), shape);
+        EditorStateStore store(root, 0);
+        check_recovered(store, root, shape, editor_state_quarantine_path(root, 0));
+        CHECK(!store.schema_diagnostic().empty());
+        shelltest::cleanup(root);
+    }
+}
+
+void test_a_minimal_but_valid_document_is_restored_rather_than_quarantined()
+{
+    // THE OVER-QUARANTINE DIRECTION, which nothing pinned. Quarantining is destructive-ish (it moves
+    // the user's file), so a regression that classified "parsed, but carries nothing we recognise"
+    // as unusable would move perfectly good documents aside — and would have passed the whole suite,
+    // because every recovery case feeds it something genuinely broken. These three are the honest
+    // minimum a real project produces, and all of them must load.
+    const char* const shapes[] = {"{}", R"({"version": 1})", R"({"windows": []})"};
+    int n = 0;
+    for (const char* shape : shapes)
+    {
+        const std::string tag = "minimal" + std::to_string(n++);
+        const fs::path root = shelltest::make_temp_project("context-shell-state", tag.c_str());
+        const fs::path path = editor_state_path(root);
+        shelltest::write_file(path, shape);
+        EditorStateStore store(root, 0);
+        bool loaded = false;
+        store.load(&loaded);
+        CHECK(loaded);
+        CHECK(store.restore_report().outcome == EditorStateRestoreOutcome::restored);
+        CHECK(!store.restore_report().preservation_failed);
+        CHECK(store.restore_report().quarantined_path.empty());
+        CHECK(store.schema_diagnostic().empty());
+        CHECK(fs::exists(path));                                        // NOT moved aside
+        CHECK(!fs::exists(editor_state_quarantine_path(root, 0)));
+        shelltest::cleanup(root);
+    }
+}
+
+void test_a_document_that_is_simply_absent_is_never_announced_as_a_recovery()
+{
+    // THE OVER-CORRECTION GUARD, and a regression the preservation work itself introduced before
+    // this test existed. `exists(path_, ec)` can report an ERROR (a locked parent, `.editor` present
+    // as a FILE, a transient Windows sharing error) rather than a clean yes/no, and treating that as
+    // "absent" is a silent reset — so it now falls through to the unusable path. But the unusable
+    // path ends in "nothing could be preserved, so never write over those bytes", and for a document
+    // that IS NOT THERE that would announce a recovery which never happened AND wedge the store into
+    // never saving layout again, for the whole session, over bytes that do not exist.
+    //
+    // The rename and the copy answer what the probe could not: both refusing with "no such file" IS
+    // the absence proof. Asserted here through the ordinary absent case, which must stay a silent,
+    // writable `fresh` — the property the tri-state exists to keep.
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "absent");
+    EditorStateStore store(root, 0);
+    bool loaded = true;
+    store.load(&loaded);
+    CHECK(!loaded);
+    CHECK(store.restore_report().outcome == EditorStateRestoreOutcome::fresh);
+    CHECK(!store.restore_report().preservation_failed);
+    CHECK(store.restore_report().detail.empty());
+    CHECK(store.restore_report().quarantined_path.empty());
+    CHECK(!fs::exists(editor_state_quarantine_path(root, 0)));
+
+    // ...and the store still SAVES. A fresh project that could not write its layout would be the
+    // wedge this test exists to rule out.
+    store.set_placement(0, placement(5, 5, 500, 500), 0);
+    CHECK(store.flush_now());
+    CHECK(store.last_error().empty());
+    CHECK(fs::exists(editor_state_path(root)));
+
+    shelltest::cleanup(root);
+}
+
+void test_a_failed_write_re_arms_the_debounce_rather_than_retrying_every_pump()
+{
+    // The owner loop pumps `flush_if_due` at ~250 Hz and the store stays dirty on failure by design,
+    // so a persistent failure used to re-run the whole write path once per FRAME — and since e09d a
+    // refused write re-runs the quarantine-slot probe with it. Re-arming the debounce paces the
+    // retry instead. Asserted on the pre-existing failure mode (an unwritable parent), because it
+    // was already true there and the fix covers both.
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "rearm");
+    const fs::path blocker = root / "blocked";
+    shelltest::write_file(blocker, "not a directory");
+
+    EditorStateStore store(blocker / "sub", 1000);
+    store.load();
+    store.set_placement(0, placement(1, 1, 100, 100), 0);
+    CHECK(!store.flush_if_due(5000)); // due, attempted, failed
+    CHECK(store.dirty());
+    CHECK(!store.last_error().empty());
+    // The very next pump is NOT due again: the failure re-armed the clock at 5000.
+    CHECK(!store.flush_if_due(5004));
+    CHECK(store.dirty());
+    // ...and it becomes due again one debounce later, so the retry still happens.
+    CHECK(!store.flush_if_due(6001)); // still fails (the blocker is still a file), but it TRIED
+    CHECK(store.dirty());
+
+    shelltest::cleanup(root);
+}
+
+void test_the_report_carries_a_project_relative_path_for_the_problems_panel()
+{
+    // The panel's payload `file` member is the one ProblemsFeed RENDERS and GROUPS BY, and every
+    // other row in it is project-relative (merge_command.cpp, test_problems_feed.cpp). An absolute
+    // native path there would be the one `C:\…` group header in the list. stderr keeps the absolute
+    // form, where the reader may have no project context at all — so the report carries both.
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "relpath");
+    EditorStateStore store(root, 0);
+    store.load();
+    const EditorStateRestoreReport& report = store.restore_report();
+    CHECK(report.path == editor_state_path(root).string());
+    CHECK(report.project_relative_path == ".editor/editor-state.json");
+    CHECK(report.project_relative_path.find('\\') == std::string::npos); // slash-separated always
+    shelltest::cleanup(root);
+}
+
 } // namespace
 
 int main()
@@ -801,5 +1039,12 @@ int main()
     test_quarantine_names_do_not_collide();
     test_fresh_and_restored_are_not_recoveries();
     test_the_quarantine_path_is_a_sibling_and_not_the_owned_file();
+    test_a_document_that_cannot_be_preserved_is_never_written_over();
+    test_exhausting_the_quarantine_slots_says_which_salvage_it_replaced();
+    test_an_unusable_version_is_a_mismatch_and_never_a_cast_over_the_range();
+    test_a_minimal_but_valid_document_is_restored_rather_than_quarantined();
+    test_a_document_that_is_simply_absent_is_never_announced_as_a_recovery();
+    test_a_failed_write_re_arms_the_debounce_rather_than_retrying_every_pump();
+    test_the_report_carries_a_project_relative_path_for_the_problems_panel();
     SHELL_TEST_MAIN_END();
 }

@@ -469,16 +469,18 @@ add_test(NAME editor-shell-config-writers
 # so no runtime test in this repo can fail on it, however many are written. The scan answers the
 # questions a second writer would have to make false (one C++ writer per file; each owner in its own
 # process's subtree; the in-process compose/filesync override-write gateway named only by tests) plus
-# an anti-vacuity half, because every one of those prohibitions is trivially satisfied by a tree that
-# deleted the thing it protects.
+# an ANTI-VACUITY half for EVERY ONE of them, because each prohibition is trivially satisfied by a
+# tree that deleted the thing it protects: the sole writer must still write THAT DOCUMENT (not merely
+# contain write machinery — its own private helper's definition supplies that forever), the gateway
+# TYPE must still be named by its owners, and the gateway LIBRARY must still be declared.
 #
-# Proven NON-VACUOUS by planting (conventions.md § "Authoring a SOURCE-SCAN gate"): 21 shapes spanning
-# the write-spelling axis (including the six C++ spellings that defeated e06d's equivalent gate), the
-# file-NAME spelling axis, the cross-process direction, the gateway, and the anchors themselves, plus
-# four green controls. The round found FIVE real gaps in the first revision — three ordinary filename
-# spellings (`".editor/editor-state.json"` as one literal, a raw string literal, a Windows separator)
-# and two ways the anti-vacuity half reported a writer that no longer wrote. Each is now a regression
-# case in tools/tests/test_check_session_ownership.py (the python-tests job).
+# Proven NON-VACUOUS by planting (conventions.md § "Authoring a SOURCE-SCAN gate") across TWO rounds,
+# the second run against the finished first revision. Both found real gaps, in both directions —
+# writers the scan missed AND a commented-out CMake link it wrongly reported, which would have redded
+# all three build legs. The single enumeration is the `# FOUND BY PLANTING` markers in
+# tools/tests/test_check_session_ownership.py (the python-tests job), each a regression case; no count
+# is repeated here, because the counts in this comment, docs/shell.md and that file's docstring had
+# already drifted into describing three different rounds.
 #
 # Registered in the non-gate `editor-shell-` family, so the build job's general ctest step runs it on
 # all three OS legs with no ci.yml --target bookkeeping.

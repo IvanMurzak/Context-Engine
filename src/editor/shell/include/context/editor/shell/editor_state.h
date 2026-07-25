@@ -151,6 +151,14 @@ struct EditorState
 // the diagnostic has lost the only thing the ownership split was for.
 inline constexpr const char* kEditorStateInvalidCode = "editor.editor_state_invalid";
 
+// The ceiling on a document `load()` will read into memory. Named here rather than buried in the
+// .cpp to match every sibling reader in this module (`kMaxUserConfigBytes`, `kMaxKeybindingsBytes`,
+// `kMaxThemeBytes`, `kMaxReleaseBodyBytes`), and generous on purpose: since e09c this file carries
+// the session undo journal, so it is the one editor-state document with a real growth path. The cap
+// exists to stop an unbounded slurp throwing `bad_alloc` out of a CONSTRUCTOR on the boot path, not
+// to police size.
+inline constexpr std::uintmax_t kMaxEditorStateBytes = 64u * 1024u * 1024u;
+
 // How a `load()` went. `recovered` is the LOUD path (07 §6): the file existed but was
 // unreadable / malformed / structurally wrong / written by a foreign build, so it was renamed aside
 // and the defaults were loaded.
@@ -166,10 +174,24 @@ enum class EditorStateRestoreOutcome
 struct EditorStateRestoreReport
 {
     EditorStateRestoreOutcome outcome = EditorStateRestoreOutcome::fresh;
-    std::string path;             // the file the store looked at
-    std::string quarantined_path; // where a corrupt file was moved (empty unless `recovered`, and
-                                  // ALSO empty when the rename itself failed — see `detail`)
+    std::string path; // the file the store looked at, as an ABSOLUTE native path (for the operator
+                      // channel: stderr, where the reader may have no project context at all)
+    // The SAME document as `path`, project-relative and slash-separated — what a Problems-panel row
+    // must carry in its payload's `file` member. That member is the one the panel RENDERS and GROUPS
+    // BY, and every other row in it is project-relative (merge_command.cpp, the panel's own tests),
+    // so an absolute `C:\…\.editor\editor-state.json` group header would be the one odd entry in the
+    // list. Derived lexically, so it costs no filesystem call and cannot throw.
+    std::string project_relative_path;
+    std::string quarantined_path; // where the unusable document was preserved (empty unless
+                                  // `recovered`, and ALSO empty when NEITHER the rename nor the
+                                  // copy fallback could preserve it — see `detail` and
+                                  // `preservation_failed`)
     std::string detail;           // human-readable reason (empty unless `recovered`)
+    // A named shorthand for `outcome == recovered && quarantined_path.empty()`, promoted to a member
+    // so no caller has to re-derive the rule — because this is the rule that GATES `write()`. It
+    // means: the document was unusable, nothing could be saved, and the bytes still on disk are
+    // therefore the user's only copy. The store refuses to write while it holds.
+    bool preservation_failed = false;
 };
 
 // The debounced, crash-safe writer. Times are microseconds on a monotonic clock the CALLER supplies.
@@ -191,10 +213,16 @@ public:
     // distinguished by a non-empty `schema_diagnostic()` (M9 e10d, T1): the layout is not lost
     // SILENTLY — the reason is reported and the state is null rather than reinterpreted.
     //
-    // ⚠ NEVER THROWS AND NEVER BLOCKS (07 §6). Since M9 e09d a document that cannot be adopted is
-    // also moved ASIDE before the defaults are taken — see `restore_report()`. The quarantine is why
-    // "reported, not silent" is more than a log line: a user who lost their layout still HAS the
-    // bytes, and a maintainer reading the bug report can look at exactly what failed.
+    // ⚠ NEVER THROWS AND NEVER BLOCKS (07 §6). The whole classify path — including the slurp, which
+    // is SIZE-CAPPED first so a runaway document cannot throw `bad_alloc` out of a constructor and
+    // take the boot with it — is exception-guarded.
+    //
+    // Since M9 e09d a document that cannot be adopted is also PRESERVED before the defaults are
+    // taken — see `restore_report()`. That is why "reported, not silent" is more than a log line: a
+    // user who lost their layout still HAS the bytes. And preservation is a PRECONDITION, not a
+    // best effort: if neither the rename nor the copy could save them, the store refuses to write
+    // at all rather than let the next flush destroy the only copy — see
+    // `restore_report().preservation_failed`.
     const EditorState& load(bool* loaded_existing = nullptr);
 
     [[nodiscard]] const EditorState& state() const { return state_; }
@@ -255,6 +283,27 @@ private:
     // run must not push the deadline out, or a stream of edits would defer the write forever.
     // Every setter routes through here so that rule lives in exactly one place.
     void mark_dirty(std::uint64_t now_us);
+
+    // Why a preservation attempt ended. THREE outcomes, not two: "there was nothing there to save"
+    // is emphatically NOT "we failed to save it", and collapsing them makes the store refuse to
+    // write over a file that does not exist.
+    enum class Preserved
+    {
+        yes,     // a copy now exists at `restore_report_.quarantined_path`
+        nothing, // the document is not on disk at all — nothing to lose, nothing to announce
+        failed,  // it IS there and nothing could be saved; those bytes are the only copy
+    };
+
+    // Put a copy of the UNUSABLE document somewhere safe, and report where (`note` is OUTPUT-only —
+    // the caller appends it, so this never has to be pre-seeded).
+    //
+    // It tries the RENAME first (it preserves the bytes without needing to read them, so it works
+    // even on the document that could not be OPENED) and falls back to a byte COPY, which covers the
+    // one case a rename cannot: the source is locked against being moved or deleted — a reader's
+    // open handle on Windows, a backup/AV agent — while the directory itself is perfectly writable.
+    // That fallback is the whole reason this is a function: `load()` and `write()` both need it, the
+    // second so a preservation that failed at boot is RETRIED rather than latched forever.
+    Preserved preserve_unusable_document(std::string& note);
 
     std::filesystem::path project_root_;
     std::filesystem::path path_;

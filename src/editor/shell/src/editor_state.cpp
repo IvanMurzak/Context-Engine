@@ -199,15 +199,28 @@ EditorState EditorState::from_json(const Json& json, std::string* schema_diagnos
     // field meanings, so a mismatch returns the DEFAULT (null) state plus a diagnostic and reads no
     // further. An ABSENT version is a pre-versioning / partial document and still degrades tolerantly
     // below (it is not a mismatch — the guard fires only on a version that is present and wrong).
-    const Json& version = json.at("version");
-    if (version.is_number())
+    if (json.contains("version"))
     {
-        const int found = static_cast<int>(version.as_int());
-        if (found != kEditorStateSchemaVersion)
+        // RANGE-GUARDED, like every other numeric read in this file (json_number_read.h). It is the
+        // read that most needs it: `as_int()` is a `static_cast<int64_t>` of the stored double, and
+        // `Json::parse` accepts `1e300` out of a hand-edited file happily — so the unguarded cast was
+        // UB the blocking `sanitize (ASan+UBSan, ubuntu)` leg reports as `float-cast-overflow`. The
+        // check runs on the DOUBLE, before any cast.
+        //
+        // nullopt therefore folds together the two shapes this build cannot claim to understand: a
+        // version that is not a number at all (`"2"`, `null`, `{}` — present and wrong, which is
+        // exactly what the guard is for) and one no build could have written. Both are a MISMATCH.
+        // Reading past either would be the silent reinterpretation e10d exists to refuse.
+        const std::optional<double> raw =
+            detail::number_in_range(json, "version", -2147483648.0, 2147483647.0);
+        if (!raw.has_value() || static_cast<int>(*raw) != kEditorStateSchemaVersion)
         {
             if (schema_diagnostic != nullptr)
             {
-                *schema_diagnostic = "editor-state.json schema version " + std::to_string(found) +
+                const std::string found = raw.has_value()
+                                              ? std::to_string(static_cast<int>(*raw))
+                                              : ("the unusable value " + json.at("version").dump());
+                *schema_diagnostic = "editor-state.json schema version " + found +
                                      " does not match this build's version " +
                                      std::to_string(kEditorStateSchemaVersion) +
                                      "; refusing to reinterpret it (state reset to empty)";
@@ -264,23 +277,39 @@ const EditorState& EditorStateStore::load(bool* loaded_existing)
     schema_diagnostic_.clear();
     restore_report_ = EditorStateRestoreReport{};
     restore_report_.path = path_.string();
+    // Lexical, so it neither touches the disk nor throws. `path_` is `project_root_` joined with the
+    // two fixed components, so this is always `.editor/editor-state.json` — see the member.
+    restore_report_.project_relative_path = path_.lexically_relative(project_root_).generic_string();
 
     std::error_code exists_ec;
-    if (!std::filesystem::exists(path_, exists_ec))
+    const bool present = std::filesystem::exists(path_, exists_ec);
+    if (!present && !exists_ec)
     {
         // FRESH: a first boot on this project. Not an error, and NOT something to announce — the
         // absence is the honest state, and a diagnostic for it would teach a reader to ignore the
         // one that matters.
+        //
+        // ⚠ `!present` ALONE IS NOT "absent": `exists(p, ec)` returns false on ERROR too (a
+        // permission bit on `.editor/`, a path-length refusal, a transient Windows sharing error).
+        // Taking that as fresh is the pre-e09d silent reset reached through the one branch e09d had
+        // not hardened — the file is left in place, unannounced, for the first flush to destroy. An
+        // indeterminate probe therefore falls THROUGH to the unusable path below.
         state_ = EditorState{};
         return state_;
     }
 
-    // From here the file EXISTS, so every remaining path either adopts it or quarantines it. `detail`
-    // accumulates the human-readable reason the quarantine happened; `ok` gates it.
+    // From here the file EXISTS (or its existence could not be determined, which is not a licence to
+    // overwrite it), so every remaining path either adopts it or preserves it. `detail` accumulates
+    // the human-readable reason; `ok` gates it.
     std::string detail;
     bool ok = false;
     std::ifstream in(path_, std::ios::binary);
-    if (!in)
+    if (exists_ec)
+    {
+        detail = "could not determine whether the editor state file exists (" + exists_ec.message() +
+                 "), so it is being treated as present and unreadable rather than absent";
+    }
+    else if (!in)
     {
         // Present but unopenable (a permission bit, a lock, a directory where a file should be). It
         // used to be indistinguishable from "fresh" here, which meant the user's layout vanished
@@ -289,16 +318,37 @@ const EditorState& EditorStateStore::load(bool* loaded_existing)
     }
     else
     {
-        std::ostringstream buffer;
-        buffer << in.rdbuf();
-        const std::string text = buffer.str();
-        if (text.empty())
+        try
         {
-            detail = "the editor state file is empty";
-        }
-        else
-        {
-            try
+            // THE READ IS BOUNDED, rather than a `file_size` probe followed by an unbounded slurp.
+            // An unbounded `buffer << in.rdbuf()` on a runaway document throws `bad_alloc` inside
+            // WindowManager's CONSTRUCTOR, so the throw escapes `main` and takes the boot with it —
+            // breaking the header's never-throws-never-blocks contract on precisely the "unusable
+            // document" this function exists to survive.
+            //
+            // WHY NOT `file_size` FIRST: that probe can FAIL, and treating an indeterminate answer as
+            // "small enough" is the same fail-open this very function rejects two branches up for
+            // `exists()`. Capping the READ needs no probe to be right, and closes the TOCTOU between
+            // a size answer and the bytes that arrive.
+            std::string text;
+            {
+                char chunk[64 * 1024];
+                while (text.size() <= kMaxEditorStateBytes &&
+                       (in.read(chunk, sizeof(chunk)) || in.gcount() > 0))
+                {
+                    text.append(chunk, static_cast<std::size_t>(in.gcount()));
+                }
+            }
+            if (text.size() > kMaxEditorStateBytes)
+            {
+                detail = "the editor state file is implausibly large (over " +
+                         std::to_string(kMaxEditorStateBytes) + " bytes) and was not read";
+            }
+            else if (text.empty())
+            {
+                detail = "the editor state file is empty";
+            }
+            else
             {
                 const Json doc = Json::parse(text);
                 if (!doc.is_object())
@@ -323,7 +373,7 @@ const EditorState& EditorStateStore::load(bool* loaded_existing)
                         // A FOREIGN (typically FUTURE) build's document — M9 e10d refused to
                         // reinterpret it, and e09d moves it aside rather than leaving it in place.
                         //
-                        // WHY QUARANTINE RATHER THAN LEAVE IT: leaving it is not preservation. The
+                        // WHY PRESERVE RATHER THAN LEAVE IT: leaving it is not preservation. The
                         // store keeps running on defaults and the FIRST dirty flush replaces the
                         // file, so the newer build's state is destroyed either way — the only
                         // question is whether a copy survives. It does now.
@@ -331,10 +381,17 @@ const EditorState& EditorStateStore::load(bool* loaded_existing)
                     }
                 }
             }
-            catch (const std::exception& e)
-            {
-                detail = std::string("the editor state file is not well-formed JSON: ") + e.what();
-            }
+        }
+        catch (const std::exception& e)
+        {
+            // Covers the parse AND the read: a malformed document, and equally an allocation that
+            // could not be satisfied. Either way this returns a REPORT, never an exception — the
+            // caller is a constructor on the boot path. The wording keeps the parse case (which is
+            // what throws in practice) legible while staying honest that the read can throw too;
+            // `what()` distinguishes them.
+            detail = std::string("the editor state file is not well-formed JSON, or could not be "
+                                 "read: ") +
+                     e.what();
         }
     }
 
@@ -357,36 +414,111 @@ const EditorState& EditorStateStore::load(bool* loaded_existing)
     in.close();
     state_ = EditorState{};
 
+    std::string note;
+    const Preserved preserved = preserve_unusable_document(note);
+    if (preserved == Preserved::nothing)
+    {
+        // THE DOCUMENT IS NOT THERE. Only an indeterminate `exists()` probe can reach here, and the
+        // rename+copy just answered the question it could not: both refused with "no such file", so
+        // there is nothing to preserve, nothing was lost, and nothing must be announced.
+        //
+        // Reporting `recovered` here would tell the user their layout and undo history "have been
+        // reset" for a file that never existed — and, worse, latch the write refusal below for a
+        // session whose bytes do not exist, so the editor would silently never save again. That is
+        // strictly worse than the behaviour this whole change is replacing.
+        restore_report_ = EditorStateRestoreReport{};
+        restore_report_.path = path_.string();
+        restore_report_.project_relative_path =
+            path_.lexically_relative(project_root_).generic_string();
+        return state_;
+    }
+
+    restore_report_.outcome = EditorStateRestoreOutcome::recovered;
+    restore_report_.detail = detail + note;
+    if (preserved == Preserved::failed)
+    {
+        // NOTHING could be saved — neither the move nor the copy — and the document IS there. Those
+        // bytes are now the user's ONLY copy of their layout and undo history, so the store must not
+        // write over them: `write()` refuses (and retries the preservation) while this holds. Saying
+        // "it remains at <path>" and then letting the very next flush replace it is the silent reset
+        // e09d exists to eliminate, with a reassuring message on top.
+        restore_report_.preservation_failed = true;
+        restore_report_.detail +=
+            "; it could NOT be preserved, so it is being left exactly as it is at " +
+            restore_report_.path + " and this editor will NOT save session state over it";
+    }
+    return state_;
+}
+
+EditorStateStore::Preserved EditorStateStore::preserve_unusable_document(std::string& note)
+{
+    note.clear();
+    // Pick a FREE quarantine name, bounded so a pathological directory cannot spin.
+    //
+    // ⚠ `exists(candidate, ec)` RETURNS FALSE ON ERROR as well as on absence, so a bare `!exists`
+    // reads an indeterminate probe as "free" — and `rename` REPLACES an existing destination, which
+    // would destroy an EARLIER recovery's quarantine. `&& !probe_ec` makes indeterminate mean
+    // "not free", which is the safe direction.
     std::filesystem::path quarantine = editor_state_quarantine_path(project_root_);
-    // Pick a FREE quarantine name, bounded so a pathological directory cannot spin; the last
-    // candidate is overwritten. Same convention (and same bound) as the daemon's session half.
+    bool free_slot = false;
     for (int n = 0; n < 64; ++n)
     {
         std::error_code probe_ec;
         const std::filesystem::path candidate = editor_state_quarantine_path(project_root_, n);
-        if (!std::filesystem::exists(candidate, probe_ec))
+        if (!std::filesystem::exists(candidate, probe_ec) && !probe_ec)
         {
             quarantine = candidate;
+            free_slot = true;
             break;
         }
     }
+    // The exhausted-slot clause is composed but NOT appended yet: it announces a prior salvage being
+    // replaced, and until the rename or copy actually lands, no such replacement has happened. (It
+    // used to be appended here, so a total failure produced a report claiming a replacement AND
+    // admitting nothing could be saved, in the same sentence.)
+    const std::string exhausted =
+        free_slot ? std::string()
+                  : ("; the quarantine slots are exhausted, so the OLDEST quarantine (" +
+                     quarantine.string() + ") was replaced");
 
+    // The RENAME first: it preserves the bytes without reading them, so it also covers the document
+    // that could not be opened at all.
     std::error_code rename_ec;
     std::filesystem::rename(path_, quarantine, rename_ec);
-    restore_report_.outcome = EditorStateRestoreOutcome::recovered;
-    restore_report_.detail = detail;
-    if (rename_ec)
-    {
-        // Could not move it aside — say so instead of claiming a quarantine that did not happen.
-        // The file stays put; the next load quarantines it again (still non-blocking).
-        restore_report_.detail += "; the corrupt file could NOT be renamed aside (" +
-                                  rename_ec.message() + ") and remains at " + restore_report_.path;
-    }
-    else
+    if (!rename_ec)
     {
         restore_report_.quarantined_path = quarantine.string();
+        note = exhausted;
+        return Preserved::yes;
     }
-    return state_;
+
+    // The COPY fallback covers what a rename cannot: a source locked against being moved or deleted
+    // while the directory is writable. On Windows an ordinary reader — `arbitration.cpp` opens this
+    // very document with a plain `ifstream` to read the presence marker — denies DELETE sharing, so
+    // an opener racing our boot is enough to refuse the rename while a copy succeeds.
+    std::error_code copy_ec;
+    std::filesystem::copy_file(path_, quarantine,
+                               std::filesystem::copy_options::overwrite_existing, copy_ec);
+    if (!copy_ec)
+    {
+        restore_report_.quarantined_path = quarantine.string();
+        note = exhausted + "; it could not be moved aside (" + rename_ec.message() +
+               ") so a COPY was preserved and the unusable original was left in place";
+        return Preserved::yes;
+    }
+
+    // BOTH refused because the document is not there. That is not a failure to preserve — there is
+    // nothing to preserve — and the caller must not announce a recovery or refuse to write over a
+    // file that does not exist.
+    if (rename_ec == std::errc::no_such_file_or_directory &&
+        copy_ec == std::errc::no_such_file_or_directory)
+    {
+        return Preserved::nothing;
+    }
+
+    note = "; it could neither be moved aside (" + rename_ec.message() + ") nor copied (" +
+           copy_ec.message() + ")";
+    return Preserved::failed;
 }
 
 void EditorStateStore::mark_dirty(std::uint64_t now_us)
@@ -480,7 +612,18 @@ bool EditorStateStore::flush_if_due(std::uint64_t now_us)
     {
         return false;
     }
-    return write();
+    if (write())
+    {
+        return true;
+    }
+    // RE-ARM THE DEBOUNCE ON FAILURE, so a failing write retries at the debounce rate instead of on
+    // every pump. This loop is pumped from the owner loop at ~250 Hz, and the store stays dirty by
+    // design (a transient full disk must not drop the layout) — so without this, a persistent
+    // failure spins the retry once per frame forever. That was already true of a failing
+    // `atomic_write_text`; e09d made each attempt far more expensive, because a write refused for an
+    // unpreserved document re-runs the whole quarantine-slot probe.
+    dirty_since_us_ = now_us;
+    return false;
 }
 
 bool EditorStateStore::flush_now()
@@ -494,6 +637,31 @@ bool EditorStateStore::flush_now()
 
 bool EditorStateStore::write()
 {
+    if (restore_report_.preservation_failed)
+    {
+        // `load()` classified the on-disk document unusable but could save no copy of it, so those
+        // bytes are the user's ONLY window layout and undo history. RETRY the preservation first —
+        // the obstruction is typically transient (a reader's open handle, an AV scan), and retrying
+        // is what keeps this from latching the session into read-only for a lock that cleared
+        // seconds later.
+        std::string note;
+        const Preserved preserved = preserve_unusable_document(note);
+        if (preserved == Preserved::failed)
+        {
+            // Still nothing saved: REFUSE. The store stays dirty, so this retries on the next flush
+            // and the caller sees the reason through `last_error()` exactly like any other failed
+            // write — an editor that forgets this session's layout is strictly better than one that
+            // destroys the previous session's.
+            last_error_ = "refusing to write " + path_.string() +
+                          ": the unusable document already there could not be preserved and is the "
+                          "only copy of the previous session's layout and undo history" +
+                          note;
+            return false;
+        }
+        // Preserved after all — or gone, which is equally safe to write over.
+        restore_report_.preservation_failed = false;
+        restore_report_.detail += note + "; a later flush succeeded in preserving it";
+    }
     const std::string text = state_.to_json().dump(2);
     if (!atomic_write_text(path_, text, last_error_))
     {

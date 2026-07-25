@@ -419,7 +419,8 @@ void a_daemon_event_reaches_the_rendered_panel()
     {
         return;
     }
-    const std::string panel_id = context::editor::gui::panels::problems::ProblemsPanel::kContributionId;
+    namespace problems_panel = context::editor::gui::panels::problems;
+    const std::string panel_id = problems_panel::ProblemsPanel::kContributionId;
 
     Json payload = Json::object();
     payload.set("code", Json("file.malformed"));
@@ -456,7 +457,8 @@ void a_shell_local_problem_reaches_the_rendered_panel()
     {
         return;
     }
-    const std::string panel_id = context::editor::gui::panels::problems::ProblemsPanel::kContributionId;
+    namespace problems_panel = context::editor::gui::panels::problems;
+    const std::string panel_id = problems_panel::ProblemsPanel::kContributionId;
     const std::uint64_t before = host.revision(panel_id);
 
     CHECK(panels::report_local_problem(

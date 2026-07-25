@@ -4,11 +4,23 @@ MUTATION COVERAGE, not happy-path coverage: a gate whose only test is "the live 
 indistinguishable from a gate that always passes. Every rule is exercised by planting the violation
 it exists to catch into a synthetic tree, and the live repository is checked once at the end.
 
-EVERY CASE BELOW THAT CARRIES A `# FOUND BY PLANTING` NOTE IS A REAL GAP THIS GATE ONCE HAD. The
-first revision passed its own reading and was defeated, in one round against the real tree, by three
-ordinary ways of spelling a filename and two ways of making its anti-vacuity half report a writer
-that no longer writes. Those five are pinned here so no future edit can reintroduce them, per
-`conventions.md` § "Authoring a SOURCE-SCAN gate" clause (3).
+EVERY CASE BELOW THAT CARRIES A `# FOUND BY PLANTING` NOTE IS A REAL GAP THIS GATE ONCE HAD, and
+those notes are the ONE enumeration of them — `docs/shell.md` and the ctest registration comment in
+`src/editor/shell/CMakeLists.txt` describe the rounds in prose and deliberately state no count, since
+the counts they used to carry had already drifted into describing three different rounds.
+
+TWO rounds, both against the real tree, both productive. The first defeated the gate's own reading
+with ordinary ways of spelling a filename and two ways of making its anti-vacuity half report a
+writer that no longer writes. The second, run against the finished first revision, found that the fix
+for that last one had MOVED the hole rather than closed it (the sole writer defines the very helper
+whose name satisfied the check), that rules 4 and 4b had no anti-vacuity half at all, that unstripped
+CMake `#` comments produced a false positive AND a false negative, that the Shell target list had
+already gone stale, that a documented reader's whole-file exemption covered writing the document it
+was exempted for reading, that the two platform write APIs this repo uses were absent from the
+spelling list, and that the scan corpus skipped `.inl` and was case-sensitive about suffixes.
+
+All are pinned here so no future edit can reintroduce them, per `conventions.md` § "Authoring a
+SOURCE-SCAN gate" clause (3).
 """
 
 from __future__ import annotations
@@ -33,25 +45,39 @@ def write(root: Path, rel: str, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+# The synthetic sole writers MIRROR THE REAL ONES' SHAPE, and that is load-bearing rather than
+# cosmetic: each is a private `atomic`/temp helper (whose body carries the PRIMITIVE write spellings)
+# plus a call that applies it to the store's own path. That is exactly the shape in which the
+# anti-vacuity half was found VACUOUS — the helper's definition satisfied "this TU writes" no matter
+# what happened to the real save — so a fixture without it cannot exercise `OWNED_WRITE` at all.
+SESSION_WRITER_SRC = (
+    'fs::path session_state_path(const fs::path& r) { return r / ".editor" / "session.json"; }\n'
+    "bool persist_session_state(const fs::path& r) {\n"
+    "  const fs::path path = session_state_path(r);\n"
+    "  std::ofstream f(path, std::ios::binary);\n"
+    "  return true;\n"
+    "}\n"
+)
+EDITOR_STATE_WRITER_SRC = (
+    'fs::path editor_state_path(const fs::path& r) { return r / ".editor" / "editor-state.json"; }\n'
+    "bool atomic_write_text(const fs::path& target, const std::string& text) {\n"
+    "  std::ofstream out(target, std::ios::binary);\n"
+    "  return true;\n"
+    "}\n"
+    "bool EditorStateStore::write() { return atomic_write_text(path_, text_); }\n"
+)
+# Rules 4 and 4b each need their SUBJECT to exist, or they match nothing and pass vacuously.
+GATEWAY_CMAKE_REL = "src/editor/gui/viewport/CMakeLists.txt"
+GATEWAY_CMAKE_SRC = f"add_library({gate.GATEWAY_LIBRARY} STATIC src/project_override_gateway.cpp)\n"
+
+
 def make_tree(tmp_path: Path) -> Path:
     """A minimal tree carrying every anchor the tool requires, and nothing else."""
-    write(
-        tmp_path,
-        gate.SOLE_WRITERS[SESSION][0],
-        'fs::path session_state_path(const fs::path& r) { return r / ".editor" / "session.json"; }\n'
-        "bool persist_session_state(const fs::path& r) { std::ofstream out(session_state_path(r));"
-        " return true; }\n",
-    )
+    write(tmp_path, gate.SOLE_WRITERS[SESSION][0], SESSION_WRITER_SRC)
     write(tmp_path, gate.WRITER_HEADERS[SESSION], "bool persist_session_state(const fs::path&);\n")
-    write(
-        tmp_path,
-        gate.SOLE_WRITERS[EDITOR_STATE][0],
-        "fs::path editor_state_path(const fs::path& r) { return r / \".editor\" /"
-        ' "editor-state.json"; }\n'
-        "bool write_state(const fs::path& r) { std::ofstream out(editor_state_path(r));"
-        " return true; }\n",
-    )
+    write(tmp_path, gate.SOLE_WRITERS[EDITOR_STATE][0], EDITOR_STATE_WRITER_SRC)
     write(tmp_path, gate.WRITER_HEADERS[EDITOR_STATE], "class EditorStateStore;\n")
+    write(tmp_path, GATEWAY_CMAKE_REL, GATEWAY_CMAKE_SRC)
     for owner in gate.GATEWAY_OWNERS:
         write(tmp_path, owner, "class ProjectOverrideWriteGateway {};\n")
     for reader, (label, _reason) in gate.DOCUMENTED_READERS.items():
@@ -73,6 +99,9 @@ def make_tree(tmp_path: Path) -> Path:
 
 
 def test_clean_tree_passes(tmp_path):
+    # ...which is ALSO the assertion that the narrowed DOCUMENTED_READERS exemption did not swallow
+    # itself: `make_tree` writes the reader in exactly its sanctioned shape (reads the document,
+    # writes only its own sibling artifact), so a narrowing that over-reached would red here.
     assert gate.check(make_tree(tmp_path)) == []
 
 
@@ -113,6 +142,17 @@ SECOND_WRITER_SPELLINGS = [
     ("freopen_w", 'std::freopen(p, "w", stream);'),
     ("atomic_write_wrapper", "filesync::atomic_write(p, bytes);"),
     ("write_file_wrapper", "write_file(p, bytes);"),
+    # FOUND BY PLANTING (second round): the list knew only the C++ stdlib, while this repo writes
+    # files through BOTH platform APIs — `::open`/`O_WRONLY` in native_file_store.cpp and
+    # bridge/src/lock.cpp, `CreateFileW`/`WriteFile` in native_file_store.cpp and
+    # bridge/src/transport.cpp. The stdio exclusion the tool documents does NOT extend to these:
+    # unlike `fwrite`, they need no `fopen` in the same TU.
+    ("posix_open_wronly", "int fd = ::open(p.c_str(), O_WRONLY | O_CREAT, 0644);"),
+    ("win32_createfile", "HANDLE h = CreateFileW(p.c_str(), GENERIC_WRITE, 0, nullptr, 2, 0, 0);"),
+    ("win32_writefile", "WriteFile(h, bytes.data(), n, &written, nullptr);"),
+    ("win32_movefileex", "MoveFileExW(tmp.c_str(), p.c_str(), MOVEFILE_REPLACE_EXISTING);"),
+    ("filesystem_copy", "std::filesystem::copy(src, p);"),
+    ("wofstream", "std::wofstream out(p);"),
 ]
 
 
@@ -161,6 +201,21 @@ def test_write_spelling_list_is_a_superset_of_the_sibling_gate(tmp_path):
             assert gate.CPP_WRITE.search(line) is not None, (
                 f"{line!r} is a write spelling check_config_writers.py knows and this gate does not"
             )
+
+
+def test_the_drift_tripwire_compares_the_PATTERNS_not_a_fixed_corpus():
+    """...and the corpus above is BLIND to the event it is named for.
+
+    FOUND BY PLANTING: the behavioural check is bounded by its own nine hardcoded lines, so the
+    sibling learning a spelling that is not in that list (`WriteFile(`, say) leaves it green — which
+    is precisely the drift it exists to detect. Comparing the alternations makes the assertion
+    structural, so a spelling ADDED to the sibling tomorrow reds this test until it is added here.
+    """
+    sibling = set(config_writers.CPP_WRITE.pattern.split("|"))
+    ours = set(gate.CPP_WRITE.pattern.split("|"))
+    assert not (sibling - ours), (
+        f"check_config_writers.CPP_WRITE knows alternatives this gate does not: {sibling - ours}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +475,237 @@ def test_a_reader_that_reaches_the_owner_store_is_reported(tmp_path):
           "shell::EditorStateStore store(project);\n")
     violations = gate.check(root)
     assert any("OWNING WRITE API" in v for v in violations), violations
+
+
+# ---------------------------------------------------------------------------
+# THE SECOND PLANTING ROUND (e09d refine). Every case below is a hole the gate still had after the
+# first round — each planted against a synthetic tree, each confirmed to report PASS before the fix.
+# ---------------------------------------------------------------------------
+
+
+def test_a_writer_whose_only_write_is_its_own_helper_definition_is_caught(tmp_path):
+    """FOUND BY PLANTING: the PRIMITIVE-vs-wrapper split did not close the vacuity hole, it moved it.
+
+    The real writer DEFINES `atomic_write_text`, whose body holds `std::ofstream` and
+    `std::filesystem::rename` — so "this TU contains a primitive write" is satisfied forever by the
+    helper, whatever happens to the actual save. Here the store's write is gutted while the helper
+    survives, which is the real tree's exact shape: the old check passed.
+    """
+    root = make_tree(tmp_path)
+    write(
+        root,
+        gate.SOLE_WRITERS[EDITOR_STATE][0],
+        'fs::path editor_state_path(const fs::path& r) { return r / ".editor" / "editor-state.json"; }\n'
+        "bool atomic_write_text(const fs::path& target, const std::string& text) {\n"
+        "  std::ofstream out(target, std::ios::binary);\n"
+        "  return true;\n"
+        "}\n"
+        "bool EditorStateStore::write() { return false; /* stopped writing */ }\n",
+    )
+    violations = gate.check(root)
+    assert any("no longer writes" in v and "ITSELF" in v for v in violations), violations
+
+
+def test_a_renamed_gateway_type_does_not_retire_rule_4_silently(tmp_path):
+    """FOUND BY PLANTING: renaming the TYPE everywhere made rule 4 match nothing — and a live-path
+    use of the renamed type then passed."""
+    root = make_tree(tmp_path)
+    for owner in gate.GATEWAY_OWNERS:
+        write(root, owner, "class OverrideWriteGateway {};\n")
+    write(root, "src/editor/shell/src/welcome.cpp",
+          "gui::viewport::OverrideWriteGateway gateway(project);\n")
+    violations = gate.check(root)
+    assert any("passes vacuously" in v and "INPROCESS_GATEWAY" in v for v in violations), violations
+
+
+def test_a_renamed_gateway_library_does_not_retire_rule_4b_silently(tmp_path):
+    """FOUND BY PLANTING: the same vacuity one layer down — no CMake file declares the library the
+    link rule names, so the rule can never fire."""
+    root = make_tree(tmp_path)
+    write(root, GATEWAY_CMAKE_REL, "add_library(context_gui_viewport_edit_renamed STATIC g.cpp)\n")
+    violations = gate.check(root)
+    assert any("add_library" in v and "vacuously" in v for v in violations), violations
+
+
+def test_a_commented_out_cmake_link_is_not_a_hit(tmp_path):
+    """FOUND BY PLANTING (a FALSE POSITIVE that would red all three `build` legs).
+
+    `strip_comments` only knows C/C++ comments; CMake's are `#`. The file this gate scans already
+    carries ~20 lines of `#` prose about this very gateway, so the next author to document the rule
+    BY EXAMPLE would have failed CI with a message asserting a link that does not exist.
+    """
+    root = make_tree(tmp_path)
+    write(root, "src/editor/shell/CMakeLists.txt",
+          "# NEVER do this:\n"
+          f"# target_link_libraries(context_editor_shell PRIVATE {gate.GATEWAY_LIBRARY})\n")
+    assert gate.check(root) == []
+
+
+def test_a_link_hidden_behind_a_paren_in_a_cmake_comment_is_caught(tmp_path):
+    """FOUND BY PLANTING (the FALSE NEGATIVE half of the same bug).
+
+    `TARGET_LINK`'s `[^)]*` payload stops at the first `)` CHARACTER, so a `#` comment containing one
+    truncated the call and hid the forbidden link below it. That idiom is already in the scanned file
+    (`# see ContextCef.cmake context_acquire_cef() for why`).
+    """
+    root = make_tree(tmp_path)
+    write(root, "src/editor/shell/CMakeLists.txt",
+          "target_link_libraries(context_editor_shell PRIVATE\n"
+          "    # see ContextCef.cmake context_acquire_cef() for why\n"
+          f"    {gate.GATEWAY_LIBRARY})\n")
+    violations = gate.check(root)
+    assert any(gate.GATEWAY_LIBRARY in v and "IN-PROCESS" in v for v in violations), violations
+
+
+def test_a_shell_sub_library_absent_from_the_named_tuple_is_caught(tmp_path):
+    """FOUND BY PLANTING: `SHELL_LINK_TARGETS` had already gone stale.
+
+    `context_editor_cef` is a real STATIC library at src/editor/shell/cef/CMakeLists.txt that
+    `context_editor` links, and it was absent from the hand-maintained tuple — so putting the gateway
+    on the Shell's link closure through it passed. Membership is now decided by the SUBTREE too.
+    """
+    root = make_tree(tmp_path)
+    write(root, "src/editor/shell/cef/CMakeLists.txt",
+          f"target_link_libraries(context_editor_cef PRIVATE {gate.GATEWAY_LIBRARY})\n")
+    violations = gate.check(root)
+    assert any(gate.GATEWAY_LIBRARY in v for v in violations), violations
+
+
+def test_a_documented_reader_that_writes_the_document_it_reads_is_caught(tmp_path):
+    """FOUND BY PLANTING: the reader exemption was whole-FILE, and the real reader is one line away.
+
+    `arbitration.cpp` already defines a general-purpose `atomic_write_text(target, text)` and already
+    computes the editor-state path; redirecting one argument made it a second writer of the Shell's
+    document with the exemption green. The exemption is now narrowed to what it was granted for.
+    """
+    root = make_tree(tmp_path)
+    reader = next(iter(gate.DOCUMENTED_READERS))
+    write(root, reader,
+          'auto text = read_file(project / ".editor" / "editor-state.json");\n'
+          "std::ofstream out(focus_request_path(project));\n"
+          'atomic_write_text(project / ".editor" / "editor-state.json", blob);\n')
+    violations = gate.check(root)
+    assert any("same line" in v for v in violations), violations
+
+
+def test_a_dead_call_still_satisfies_the_owned_write_check(tmp_path):
+    """FOUND BY PLANTING: `OWNED_WRITE`'s documented LIMIT, pinned so it cannot be forgotten.
+
+    A never-called sibling containing the owned-write spelling satisfies the check exactly as the
+    real save does, so gutting `write()` while leaving one behind reports PASS. The tool now STATES
+    this limit instead of claiming the check is airtight; this test is what keeps the two honest — if
+    someone brace-scopes the search to the owner API's body (the filed fix), this test flips and the
+    stale claim is impossible to leave behind.
+    """
+    root = make_tree(tmp_path)
+    write(
+        root,
+        gate.SOLE_WRITERS[EDITOR_STATE][0],
+        'fs::path editor_state_path(const fs::path& r) { return r / ".editor" / "editor-state.json"; }\n'
+        "bool atomic_write_text(const fs::path& target, const std::string& text) {\n"
+        "  std::ofstream out(target, std::ios::binary);\n"
+        "  return true;\n"
+        "}\n"
+        "static bool legacy_write_unused() { return atomic_write_text(path_, text_); }\n"
+        "bool EditorStateStore::write() { return false; /* the real save is gone */ }\n",
+    )
+    # DOCUMENTING the gap, not asserting it is fine: this is the shape the tool's comment names as
+    # still open, and the assertion records today's behaviour so a future fix has to update it.
+    assert gate.check(root) == []
+
+
+def test_a_cross_directory_link_against_a_named_shell_target_is_caught(tmp_path):
+    """FOUND BY PLANTING: `SHELL_LINK_TARGETS` covers an axis `SHELL_CMAKE_SUBTREE` does not.
+
+    CMake >= 3.13 allows `target_link_libraries` to be written in a DIFFERENT directory from the
+    target's declaration. Without the named tuple this plant — the forbidden link written in
+    src/CMakeLists.txt against a Shell target — passes, so deleting the tuple as "redundant with the
+    subtree rule" would have been a green change that removed real coverage.
+    """
+    root = make_tree(tmp_path)
+    write(root, "src/CMakeLists.txt",
+          f"target_link_libraries(context_editor PRIVATE {gate.GATEWAY_LIBRARY})\n")
+    violations = gate.check(root)
+    assert any(gate.GATEWAY_LIBRARY in v for v in violations), violations
+
+
+def test_a_cmake_string_containing_a_hash_is_not_read_as_a_comment(tmp_path):
+    """FOUND BY PLANTING: a naive `#[^\\n]*` stripper cuts into double-quoted strings.
+
+    `src/CMakeLists.txt` and `src/editor/shell/CMakeLists.txt` both carry `"…issue #NNN…"` strings.
+    Cutting the line at that `#` discards everything after it — INCLUDING the call's closing paren —
+    so `TARGET_LINK`, which requires one, stops matching and the forbidden link below is MISSED.
+    """
+    root = make_tree(tmp_path)
+    write(root, "src/editor/shell/CMakeLists.txt",
+          f'target_link_libraries(context_editor_shell PRIVATE "flag#1" {gate.GATEWAY_LIBRARY})\n')
+    violations = gate.check(root)
+    assert any(gate.GATEWAY_LIBRARY in v for v in violations), violations
+
+
+def test_an_unreadable_non_subject_file_does_not_fail_the_cmake_pass(tmp_path):
+    """The raise-don't-skip rule is airtight for a corpus where a skipped file could hide a
+    violation, and vacuous for a file that is not in the corpus. A `README.txt` under `src/` is not a
+    CMakeLists, so it must be filtered BEFORE it is read."""
+    root = make_tree(tmp_path)
+    write(root, "src/README.txt", "not a CMakeLists\n")
+
+    real_read_text = Path.read_text
+
+    def refuse(self, *args, **kwargs):
+        if self.name == "README.txt":
+            raise OSError(13, "Permission denied")
+        return real_read_text(self, *args, **kwargs)
+
+    import pytest as _pytest
+    monkeypatch = _pytest.MonkeyPatch()
+    monkeypatch.setattr(Path, "read_text", refuse)
+    try:
+        assert gate.check(root) == []
+    finally:
+        monkeypatch.undo()
+
+
+@pytest.mark.parametrize("rel", ["src/editor/shell/src/dump.inl", "src/editor/shell/src/WELCOME.CPP"])
+def test_the_scan_corpus_covers_more_suffixes_and_ignores_case(tmp_path, rel):
+    """FOUND BY PLANTING: `.inl` was outside `CPP_SUFFIXES` and suffix matching was case-sensitive, so
+    an inline writer in either shape was never scanned at all."""
+    root = make_tree(tmp_path)
+    write(root, rel,
+          'std::ofstream out(project / ".editor" / "editor-state.json");\n')
+    violations = gate.check(root)
+    assert any("ONE writer" in v for v in violations), violations
+
+
+def test_an_unreadable_source_is_a_config_error_not_a_silent_skip(tmp_path, monkeypatch):
+    """FOUND BY PLANTING: `except OSError: continue` dropped the file from the corpus and printed
+    PASS. For a source-scan gate that is the one failure mode that must never be silent — a second
+    writer in the skipped file is indistinguishable from no second writer."""
+    root = make_tree(tmp_path)
+    victim = "src/editor/shell/src/welcome.cpp"
+    write(root, victim,
+          'std::ofstream out(project / ".editor" / "editor-state.json");\n')
+
+    real_read_text = Path.read_text
+
+    def refuse(self, *args, **kwargs):
+        if self.name == "welcome.cpp":
+            raise OSError(13, "Permission denied")
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", refuse)
+    with pytest.raises(gate.UnreadableSourceError):
+        gate.check(root)
+    assert gate.main(["--repo-root", str(root)]) == 2
+
+
+def test_main_returns_1_when_there_are_violations(tmp_path):
+    """The exit code the CI gate actually keys on had no test: every plant called `check()` directly,
+    so turning `return 1` into `return 0` left the whole suite green and the gate advisory."""
+    root = make_tree(tmp_path)
+    write(root, "src/editor/shell/src/welcome.cpp",
+          'std::ofstream out(project / ".editor" / "editor-state.json");\n')
+    assert gate.main(["--repo-root", str(root)]) == 1
 
 
 # ---------------------------------------------------------------------------

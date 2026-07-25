@@ -472,7 +472,7 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
 | `editor-shell-test_undo_feed` | e09c: the session undo host — a checkpoint recorded and replayed through the BOUND gateway, a co-writer's field DROPPED loudly on undo AND redo (R-HUX-001), a refused replay KEEPING the step while dirtying and touching nothing, the read-your-replays flag raised once then consumed, the provider's honest `dispatched` verdict, and the DoD line: the journal round-trips through a REAL `EditorStateStore` writing a REAL `.editor/editor-state.json`, survives a full teardown/rebuild, and Ctrl+Z still reverts the pre-restart edit |
 | `editor-shell-test_user_config` | e06d: the per-user config store - the total reader (absent / malformed / non-object / oversized), the merge-preserving read-modify-write (a member from a FUTURE build survives), the recents-and-theme co-existence regression, the CLOSED settable vocabulary (`config.unknown_key` / `config.bad_value` / `config.write_failed`), unique staging names, the generation watch (identical rewrite and cosmetic reformat are NOT changes), and the full `config.*` binding over a real router |
 | `editor-shell-config-writers` | e06d: the C-F14 SINGLE-WRITER source gate - exactly one TU writes `~/.context/config.json`, editor-core carries no client-side persistence API, and one module names `config.set` (`tools/check_config_writers.py`) |
-| `editor-shell-session-ownership` | e09d: the C-F3 SESSION-FILE OWNERSHIP source gate - one C++ writer per session file, each owner in its OWN process's subtree, and the in-process override-write gateway named/linked only by tests (`tools/check_session_ownership.py`) - see § 14 |
+| `editor-shell-session-ownership` | e09d: the C-F3 SESSION-FILE OWNERSHIP source gate - one C++ writer per session file (which must still write THAT document, not merely contain write machinery), each owner in its OWN process's subtree, and the in-process override-write gateway named by nothing but its own definition and tests and linked by no Shell target (`tools/check_session_ownership.py`) - see § 14 |
 | `editor-cef-smoke-shell` | The LIVE CEF half: a real windowless browser through the real integrated pump, its `OnPaint` frames composited + presented, input round-tripped, a live resize repainted (`editor-cef-smoke` job, Windows/Linux) |
 | `editor-shell-test_window_registry` | e10a: the registry — window 0 primary, ids minted in order and NEVER reused, all four create-failure classes reported once with the source window (and the registry still usable after four in a row), the live-window cap, per-window `origin` reporting, and the CE #319 lifetime rule in both directions: a destroyed window's browser dies NOW while its session is retired until the manager does, across 25 create/destroy cycles and across `shutdown()` with windows still open |
 | `editor-cef-smoke-shell-multiwindow` | e10a, the LIVE half a fake cannot reach: a SECOND real CEF browser booting its OWN editor-core instance (two DIFFERENT round-tripped handshake nonces), a REAL renderer `window.open` refused by `OnBeforePopup` with NO browser created, and a MID-PROCESS destroy followed by another create (`editor-cef-smoke` job, Windows/Linux) |
@@ -618,11 +618,28 @@ DOCUMENTED READER with its reason, and re-checked on every run: the entry is rep
 naming the document, and reported as a violation if it starts naming the owner's store.
 
 **It was verified by PLANTING, not by reading the pattern** (`conventions.md` § "Authoring a
-SOURCE-SCAN gate"), and the round paid for itself: 21 planted shapes plus 5 green controls found FIVE
-real holes in the first revision — three ordinary filename spellings (`".editor/editor-state.json"` as
-one literal, a raw string literal, a Windows separator), an `#include <fstream>` counted as a write,
-and an anti-vacuity half satisfied by the writer's own helper name. Each is now a regression case in
-`tools/tests/test_check_session_ownership.py`.
+SOURCE-SCAN gate"), across **two rounds**, and both paid for themselves.
+
+The first round found ordinary filename spellings the pattern missed (the whole relative path as one
+literal, a raw string literal, a Windows separator), an `#include <fstream>` counted as a write, and
+an anti-vacuity half satisfied by a name the writer itself defines.
+
+The second round, run against the finished first revision, found that fixing that last one had **moved
+the hole rather than closed it** — the sole writer *defines* `atomic_write_text`, whose body carries
+the primitive write spellings, so "this TU still writes" was satisfied forever no matter what happened
+to the real save. It also found rules 4 and 4b had **no anti-vacuity half at all** (renaming the
+gateway type, or its library, retired each rule silently); a **false positive** that would have redded
+all three `build` legs, because CMake's `#` comments were never stripped and a commented-out link read
+as a real one; the same unstripped comments **hiding** a real link behind a `)`; a Shell sub-library
+missing from the hand-maintained target list; a documented READER one line from becoming a second
+writer under a whole-file exemption; the two **platform** write APIs this repo actually uses
+(POSIX `open`/Win32 `CreateFileW`) missing from the spelling list entirely; and a scan corpus that
+skipped `.inl` and was case-sensitive about suffixes.
+
+⚠ **The enumeration lives in ONE place**: the `# FOUND BY PLANTING` markers in
+`tools/tests/test_check_session_ownership.py`, each a regression case. Earlier revisions of this
+paragraph, the CMake registration comment, and that file's own docstring each carried a *count*, and
+the three had already drifted into describing different rounds — so none of them states a number now.
 
 ### Recovery is loud and non-blocking (07 §6)
 
