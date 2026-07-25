@@ -199,23 +199,41 @@ export function requireCapability(
  * refused for the life of the window. The prefix makes that structurally impossible rather than a
  * race, and it also makes a palette row attributable to a package by reading its id.
  *
- * ⚠ THE MANIFEST PATH IS DELIBERATELY NOT RETRO-CONSTRAINED. `projectPanelCommands` (commands.ts)
- * projects a panel's manifest `commands` as authored; those ids are reviewed at install and validated
- * C++-side (`registry.cpp` refuses an id declared twice within one contribution). Tightening them here
- * would silently drop commands from manifests that already ship, and the collision they can still
- * produce is exactly what the non-fatal registration rule now handles — one command refused,
- * attributably, instead of the whole palette.
+ * ⚠ THE MANIFEST PATH IS DELIBERATELY NOT RETRO-CONSTRAINED **FOR REGISTRATION**.
+ * `projectPanelCommands` (commands.ts) projects a panel's manifest `commands` as authored; those ids
+ * are reviewed at install and validated C++-side (`registry.cpp` refuses an id declared twice within
+ * one contribution). Tightening them here would silently drop commands from manifests that already
+ * ship, and the collision they can still produce is exactly what the non-fatal registration rule now
+ * handles — one command refused, attributably, instead of the whole palette.
+ *
+ * ⚠ BUT REGISTERING AN ID AND OWNING ONE ARE DIFFERENT QUESTIONS, and only the first is relaxed.
+ * `makePanelBridgeVerbs` drops reserved-namespace ids from the set a panel OWNS
+ * (`isReservedCommandId`), because ownership is what `execute` checks. See the filter's own comment
+ * for the escalation that closes.
  */
+/**
+ * Is `commandId` inside one of the editor's OWN namespaces (`RESERVED_COMMAND_PREFIXES`)?
+ *
+ * Shared by the two places that must agree on the answer: the runtime grammar below, which refuses
+ * to REGISTER such an id, and the manifest-ownership filter in `makePanelBridgeVerbs`, which refuses
+ * to let one confer OWNERSHIP. Written once so the two can never drift into different notions of
+ * "the editor's own namespace" — a drift that would reopen the escalation the filter exists to close.
+ */
+export function isReservedCommandId(commandId: string): boolean {
+    return RESERVED_COMMAND_PREFIXES.some((prefix) => commandId.startsWith(prefix));
+}
+
 export function validatePackageCommandId(packageId: string, commandId: string): string {
     if (commandId.length === 0 || commandId.length > PANEL_COMMAND_FIELD_MAX_LENGTH) {
         return `"${commandId}" is not a usable command id (1..${String(
             PANEL_COMMAND_FIELD_MAX_LENGTH,
         )} characters)`;
     }
-    for (const prefix of RESERVED_COMMAND_PREFIXES) {
-        if (commandId.startsWith(prefix)) {
-            return `"${commandId}" is inside the reserved editor namespace "${prefix}"`;
-        }
+    if (isReservedCommandId(commandId)) {
+        // Re-derived only for the DIAGNOSTIC; the decision above is the shared one, so the two paths
+        // cannot answer differently about what "reserved" means.
+        const prefix = RESERVED_COMMAND_PREFIXES.find((entry) => commandId.startsWith(entry)) ?? "";
+        return `"${commandId}" is inside the reserved editor namespace "${prefix}"`;
     }
     if (packageId.length === 0) {
         return `"${commandId}" cannot be namespaced: this panel has no package id`;
@@ -252,6 +270,21 @@ export interface PanelVerbContext {
     readonly request: (verb: string, params?: unknown) => Promise<PanelBridgeReply>;
 }
 
+/**
+ * One panel's verb table, plus the teardown that withdraws what it registered.
+ *
+ * `dispose` is not optional bookkeeping: the registry outlives every panel, so without it a closed
+ * panel's runtime commands stay in the palette and the keymap, dispatching over a dead port — and,
+ * worse, the panel can never re-register them, because a reopened panel gets a FRESH table (with an
+ * empty `registered` set) whose registrations then collide with its own orphans and lose under
+ * incumbent-wins. `CommandRegistry.unregister` exists for exactly this caller.
+ */
+export interface PanelVerbTable {
+    readonly verbs: ReadonlyMap<string, PanelVerbHandler>;
+    /** Withdraw every command this table registered. Idempotent. */
+    readonly dispose: () => void;
+}
+
 /** One command as `bridge.commands.list` reports it back to its own panel. */
 export interface PanelCommandView {
     readonly id: string;
@@ -274,18 +307,34 @@ export interface PanelCommandView {
  * NEVER THROWS except through `PanelVerbRefusal` (the sanctioned panel-facing refusal). An ordinary
  * throw would reach `PanelPortBridge.#invoke`'s generic host-fault path and tell the panel nothing.
  */
-export function makePanelBridgeVerbs(
-    context: PanelVerbContext,
-): ReadonlyMap<string, PanelVerbHandler> {
+export function makePanelBridgeVerbs(context: PanelVerbContext): PanelVerbTable {
     // The ids this panel registered at RUNTIME, in registration order. Held here rather than derived
     // from the registry because the registry cannot say WHO registered a command — and a scoping rule
     // that cannot name its subject is not a scoping rule.
     const registered = new Set<string>();
 
-    const ownIds = (): readonly string[] => [...context.manifestCommandIds, ...registered];
+    // ⚠ A MANIFEST DECLARATION IS NOT A GRANT — the rule this file's header states for
+    // `capabilities`, applied to commands, where it was missing.
+    //
+    // `projectPanelCommands` projects manifest ids AS AUTHORED (see `validatePackageCommandId`), so a
+    // package may DECLARE anything — including `session.undo` or `view.window.tearOut`. Incumbent-wins
+    // then refuses that registration and the id keeps pointing at the EDITOR's command. That is
+    // precisely what made reading the raw manifest list as ownership an escalation: `owns()` said yes
+    // (the package declared it), `registry.get()` handed back the editor's entry, and `execute` ran
+    // the editor's command — replaying an undo, tearing out a window — from a sandboxed panel, with
+    // no capability anywhere in the path.
+    //
+    // Ownership is therefore filtered to ids OUTSIDE the editor's own namespaces. The commands stay
+    // projected and their palette rows are unaffected; a package simply never becomes the owner of an
+    // id the editor reserves. The runtime path already refuses these at registration, so this makes
+    // the two paths agree on the one question `execute` asks.
+    const manifestOwned: readonly string[] = context.manifestCommandIds.filter(
+        (id) => !isReservedCommandId(id),
+    );
 
-    const owns = (id: string): boolean =>
-        registered.has(id) || context.manifestCommandIds.includes(id);
+    const ownIds = (): readonly string[] => [...manifestOwned, ...registered];
+
+    const owns = (id: string): boolean => registered.has(id) || manifestOwned.includes(id);
 
     /** The registry, or a panel-facing refusal when the command layer never came up. */
     const requireRegistry = (): CommandRegistry => {
@@ -355,7 +404,21 @@ export function makePanelBridgeVerbs(
         return null;
     };
 
-    return new Map<string, PanelVerbHandler>([
+    /**
+     * Withdraw everything this panel registered — the renderer's teardown calls it.
+     *
+     * Uses the LATE-BOUND registry like every verb: a window whose command layer never came up has
+     * nothing to withdraw, which is a no-op rather than a reason to throw out of `dispose()`.
+     */
+    const dispose = (): void => {
+        const registry = context.registry();
+        for (const id of registered) {
+            registry?.unregister(id);
+        }
+        registered.clear();
+    };
+
+    const verbs = new Map<string, PanelVerbHandler>([
         [
             PANEL_VERB_COMMANDS_LIST,
             (): PanelCommandView[] => {
@@ -476,6 +539,8 @@ export function makePanelBridgeVerbs(
             },
         ],
     ]);
+
+    return { verbs, dispose };
 }
 
 /** One refused registration / withdrawal, as reported back to the panel. */

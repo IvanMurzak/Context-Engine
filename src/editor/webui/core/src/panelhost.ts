@@ -48,6 +48,9 @@ import { HydrationRuntime } from "./hydration.js";
 import type { PanelClient, PanelManifest, PanelRoster } from "./panels.js";
 import { PANEL_BRIDGE_REFUSALS, PanelPortBridge } from "./panelport.js";
 import type { PanelBridgeReply, PanelVerbHandler } from "./panelport.js";
+// TYPE-ONLY, and the direction is deliberate: `panelverbs.ts` does not import this module, so the
+// table's shape can live with the factory that produces it without creating a cycle.
+import type { PanelVerbTable } from "./panelverbs.js";
 
 /** Dockview's component name for every uitree panel. One renderer type serves them all — see `#create`. */
 const UITREE_COMPONENT = "context-uitree-panel";
@@ -103,10 +106,10 @@ export interface PanelVerbBinding {
 }
 
 /** Builds one panel's verb table. Absent ⇒ every panel keeps e13b-1's deny-all empty table. */
-export type PanelVerbFactory = (binding: PanelVerbBinding) => ReadonlyMap<string, PanelVerbHandler>;
+export type PanelVerbFactory = (binding: PanelVerbBinding) => PanelVerbTable;
 
 /** The renderer-side half of `PanelVerbFactory`: everything bound except the late `request`. */
-type PanelVerbBinder = (request: PanelPortRequest) => ReadonlyMap<string, PanelVerbHandler>;
+type PanelVerbBinder = (request: PanelPortRequest) => PanelVerbTable;
 
 /**
  * A panel editor-core renders ITSELF (M9 e06d, `content.type: "local"`).
@@ -236,7 +239,7 @@ class IframePanelRenderer implements PanelRenderer {
     readonly element: HTMLElement;
     readonly #url: string;
     readonly #panelId: string;
-    readonly #verbs: ReadonlyMap<string, PanelVerbHandler>;
+    readonly #verbs: PanelVerbTable;
     #frame: HTMLIFrameElement | undefined;
     #bridge: PanelPortBridge | undefined;
     #suspended = false;
@@ -250,10 +253,9 @@ class IframePanelRenderer implements PanelRenderer {
         // `commands.invoke` dispatch needs the bridge, and the bridge needs the table. Deferring
         // through the field means the only way to observe the `undefined` window is to fire a verb
         // before `refresh()` ran — and a verb can only ARRIVE on a port that does not exist yet.
-        this.#verbs =
-            verbs?.((verb: string, params?: unknown): Promise<PanelBridgeReply> =>
-                this.request(verb, params),
-            ) ?? new Map<string, PanelVerbHandler>();
+        this.#verbs = verbs?.((verb: string, params?: unknown): Promise<PanelBridgeReply> =>
+            this.request(verb, params),
+        ) ?? { verbs: new Map<string, PanelVerbHandler>(), dispose: (): void => {} };
         this.element = document.createElement("div");
         this.element.className = `ctx-panel-body ${IFRAME_PANEL_CLASS}`;
         this.element.setAttribute("data-panel-id", panelId);
@@ -333,7 +335,7 @@ class IframePanelRenderer implements PanelRenderer {
             frame,
             panelId: this.#panelId,
             // e13b-2's verbs, or the empty table (= e13b-1's deny-all) when the host wired none.
-            verbs: this.#verbs,
+            verbs: this.#verbs.verbs,
         });
         frame.setAttribute("src", this.#url);
         this.#frame = frame;
@@ -360,6 +362,13 @@ class IframePanelRenderer implements PanelRenderer {
         // `event.source` of every OTHER panel's messages. `PanelPortBridge.dispose` is idempotent, so
         // a second dispose (or one after a revocation) is a no-op.
         this.#bridge?.dispose();
+        // THEN THE COMMANDS. The registry outlives this renderer, so anything the panel registered
+        // over `bridge.commands.register` has to be withdrawn HERE or it outlives the panel: a ghost
+        // palette row dispatching over the port just closed above, and — because a reopened panel
+        // builds a FRESH verb table — an orphan that beats the panel's own re-registration under
+        // incumbent-wins, permanently costing it that command for the life of the window. After the
+        // bridge, so no in-flight invoke can re-enter a half-withdrawn table.
+        this.#verbs.dispose();
         // Removing the element is what actually tears the package's document down; nulling `src`
         // first would navigate the frame to `about:blank` (a load in a frame we are discarding) for
         // no benefit. `#frame` is deliberately NOT cleared — see `refresh`: leaving it set is what
@@ -842,7 +851,7 @@ export class PanelHost {
                 const binder: PanelVerbBinder | undefined =
                     factory === undefined
                         ? undefined
-                        : (request: PanelPortRequest): ReadonlyMap<string, PanelVerbHandler> =>
+                        : (request: PanelPortRequest): PanelVerbTable =>
                               factory({
                                   panelId,
                                   packageId: entry.packageId,

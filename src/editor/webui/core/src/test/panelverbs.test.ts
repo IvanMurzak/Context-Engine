@@ -41,7 +41,11 @@ import {
     makePanelBridgeVerbs,
     validatePackageCommandId,
 } from "../panelverbs.js";
-import type { PanelCapabilityGrants, PanelCommandView } from "../panelverbs.js";
+import type {
+    PanelCapabilityGrants,
+    PanelCommandRejection,
+    PanelCommandView,
+} from "../panelverbs.js";
 import type { WhenContext } from "../when.js";
 
 // ------------------------------------------------------------------------------------- the fixture
@@ -66,6 +70,8 @@ function grantSpy(answer: boolean): GrantSpy {
 
 interface VerbFixture {
     readonly verbs: ReadonlyMap<string, PanelVerbHandler>;
+    /** The table's teardown — what `IframePanelRenderer.dispose` calls. */
+    readonly dispose: () => void;
     readonly registry: CommandRegistry;
     /** Every `commands.invoke` the host sent DOWN the port, in order. */
     readonly invoked: string[];
@@ -86,6 +92,11 @@ interface FixtureOptions {
     readonly manifestCommandIds?: readonly string[];
     /** Replaces the registry with `undefined` — the "command layer never came up" arm. */
     readonly withoutRegistry?: boolean;
+    /**
+     * Build over an EXISTING registry instead of a fresh one — how the reopened-panel case models
+     * the real lifecycle, where the registry outlives every panel and only the verb table is new.
+     */
+    readonly registry?: CommandRegistry;
     /** Panel replies to `commands.invoke` with this. Default: accepted. */
     readonly invokeReply?: PanelBridgeReply;
 }
@@ -127,20 +138,22 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
         undo: () => ({ ok: true, note: "" }),
         redo: () => ({ ok: true, note: "" }),
     };
-    const registry = buildCommandRegistry({
-        contractDispatch: (method) => ({ ok: true, note: method }),
-        editorActions: noopEditor,
-        sessionActions: noopSession,
-        roster,
-        panelDispatch: (panelId, commandId) => {
-            invoked.push(`panel.command:${panelId}/${commandId}`);
-            return { ok: true, note: commandId };
-        },
-    });
+    const registry =
+        options.registry ??
+        buildCommandRegistry({
+            contractDispatch: (method) => ({ ok: true, note: method }),
+            editorActions: noopEditor,
+            sessionActions: noopSession,
+            roster,
+            panelDispatch: (panelId, commandId) => {
+                invoked.push(`panel.command:${panelId}/${commandId}`);
+                return { ok: true, note: commandId };
+            },
+        });
     const state: { context: WhenContext } = {
         context: { panelFocus: "", textInputFocus: false },
     };
-    const verbs = makePanelBridgeVerbs({
+    const table = makePanelBridgeVerbs({
         panelId: PANEL_ID,
         packageId: PACKAGE_ID,
         declaredCapabilities: options.declaredCapabilities ?? [],
@@ -156,7 +169,8 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
     return {
         registry,
         invoked,
-        verbs,
+        verbs: table.verbs,
+        dispose: table.dispose,
         setContext: (context: WhenContext): void => {
             state.context = context;
         },
@@ -684,6 +698,135 @@ export const panelVerbsTests: readonly TestCase[] = [
                     `…and is told why, by the reserved-namespace rule: ${denial}`,
                 );
             }
+        },
+    },
+
+    // --------------------------------------- a manifest DECLARATION never confers ownership (03 fix)
+    {
+        // ⚠ PLANT: drop the `isReservedCommandId` filter in `makePanelBridgeVerbs` (build `owns()`
+        // from `context.manifestCommandIds` again) and this case goes RED on the very first assertion
+        // — `execute` runs the EDITOR's `session.undo`.
+        name: "panelverbs: a manifest declaring a RESERVED id does not get to execute the editor's command",
+        run: async (): Promise<void> => {
+            // The package declares ids inside the editor's own namespaces. `projectPanelCommands`
+            // projects them as authored, incumbent-wins refuses each one, and the ids keep pointing at
+            // the EDITOR's commands — which is exactly what made reading the raw manifest list as
+            // ownership an escalation.
+            // These two ARE in the assembled registry, so each is a live escalation target rather
+            // than a lookup miss dressed up as a refusal. (`workbench.palette.toggle` is deliberately
+            // NOT here: `buildCommandRegistry` does not register it — boot.ts does, separately — so a
+            // precondition asserting its presence would be false. It is covered below instead, which
+            // is the stronger case anyway.)
+            const escalations = ["session.undo", "view.window.tearOut"];
+            const fx = fixture({
+                manifestCommandIds: [...escalations, "workbench.palette.toggle", "hello.manifest"],
+            });
+
+            for (const id of escalations) {
+                assert(
+                    fx.registry.get(id) !== undefined,
+                    `precondition: the editor's "${id}" is in the registry`,
+                );
+                const refusal = await refusalFrom(fx, PANEL_VERB_COMMANDS_EXECUTE, { id });
+                assertEqual(
+                    refusal.code,
+                    PANEL_BRIDGE_REFUSALS.capabilityNotGranted,
+                    `"${id}" is refused as an ESCALATION even though the manifest names it`,
+                );
+                assert(
+                    !fx.invoked.some((entry) => entry.includes(id)),
+                    `…and nothing was dispatched for "${id}"`,
+                );
+            }
+
+            // THE FILTER IS BY NAMESPACE, NOT BY REGISTRY PRESENCE. `workbench.palette.toggle` is not
+            // in this registry at all (boot.ts registers the palette's own command separately), and it
+            // is refused all the same — so ownership is decided by the id's namespace, never by "did
+            // the lookup happen to miss". A registry-presence rule would hand the id to whichever
+            // package declared it before the editor got there.
+            const paletteRefusal = await refusalFrom(fx, PANEL_VERB_COMMANDS_EXECUTE, {
+                id: "workbench.palette.toggle",
+            });
+            assertEqual(
+                paletteRefusal.code,
+                PANEL_BRIDGE_REFUSALS.capabilityNotGranted,
+                "a reserved id absent from the registry is refused as an escalation, not as unknown",
+            );
+
+            // The SAME manifest's ordinary id still works — the filter drops reserved ids only, and a
+            // rule that broke legitimate manifest commands would be a regression, not a fix.
+            const outcome = (await call(fx, PANEL_VERB_COMMANDS_EXECUTE, {
+                id: "hello.manifest",
+            })) as CommandOutcome;
+            assert(outcome.ok, "an ordinary manifest command is unaffected by the ownership filter");
+
+            // `list` is built from the same owned set, so it cannot leak the editor's commands either.
+            const listed = (await call(fx, PANEL_VERB_COMMANDS_LIST)) as PanelCommandView[];
+            for (const id of escalations) {
+                assert(
+                    !listed.some((view) => view.id === id),
+                    `bridge.commands.list does not report the editor's "${id}" as this panel's`,
+                );
+            }
+        },
+    },
+
+    // ------------------------------------------------ the table's teardown withdraws its work (03 fix)
+    {
+        // ⚠ PLANT: make `dispose()` a no-op and BOTH halves below go red — the id stays in the
+        // registry, and the re-registration is refused by the orphan under incumbent-wins.
+        name: "panelverbs: dispose() withdraws the panel's runtime commands, so a reopened panel can re-register",
+        run: async (): Promise<void> => {
+            const fx = fixture({});
+            const id = `${PACKAGE_ID}.refresh`;
+            await call(fx, PANEL_VERB_COMMANDS_REGISTER, {
+                commands: [{ id, title: "Refresh", when: "" }],
+            });
+            assert(fx.registry.get(id) !== undefined, "precondition: the command registered");
+
+            // What `IframePanelRenderer.dispose` does when the panel is closed.
+            fx.dispose();
+            assertEqual(
+                fx.registry.get(id),
+                undefined,
+                "a closed panel leaves no ghost command in the registry (and none in the palette)",
+            );
+
+            // THE PERMANENT-BREAK HALF. A reopened panel builds a FRESH table with an empty
+            // `registered` set; without the withdrawal above its re-registration would collide with
+            // its own orphan and lose under incumbent-wins — costing it that command for the life of
+            // the window, with no way to withdraw an id it no longer knows it holds.
+            const reopened = fixture({ registry: fx.registry });
+            const reply = (await call(reopened, PANEL_VERB_COMMANDS_REGISTER, {
+                commands: [{ id, title: "Refresh", when: "" }],
+            })) as { registered: string[]; rejected: PanelCommandRejection[] };
+            assertEqual(
+                JSON.stringify(reply.registered),
+                JSON.stringify([id]),
+                "the reopened panel re-registers the same id cleanly",
+            );
+            assertEqual(reply.rejected.length, 0, "…with nothing refused");
+        },
+    },
+
+    // `dispose()` is idempotent and safe with no command layer — `PanelHost.dispose` can reach it
+    // twice, and a window whose command layer never came up must not throw out of teardown.
+    {
+        name: "panelverbs: dispose() is idempotent and survives a missing command layer",
+        run: async (): Promise<void> => {
+            const fx = fixture({});
+            await call(fx, PANEL_VERB_COMMANDS_REGISTER, {
+                commands: [{ id: `${PACKAGE_ID}.a`, title: "A", when: "" }],
+            });
+            fx.dispose();
+            fx.dispose();
+            assertEqual(
+                fx.registry.get(`${PACKAGE_ID}.a`),
+                undefined,
+                "a second dispose is a no-op, not a throw",
+            );
+            const headless = fixture({ withoutRegistry: true });
+            headless.dispose();
         },
     },
 ];

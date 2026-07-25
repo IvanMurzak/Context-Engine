@@ -35,6 +35,7 @@ import {
 } from "../extpanel.js";
 import {
     EXT_PORT_HANDSHAKE_TAG,
+    PANEL_BRIDGE_MAX_PENDING,
     PANEL_BRIDGE_REFUSALS,
     PANEL_BRIDGE_TAG,
     PANEL_BRIDGE_TOKEN_MAX_LENGTH,
@@ -786,7 +787,7 @@ export const panelPortTests: readonly TestCase[] = [
                 grants: DENY_ALL_CAPABILITY_GRANTS,
                 request: () => Promise.resolve({ ok: true, result: null }),
             });
-            const harness = createHarness({ verbs });
+            const harness = createHarness({ verbs: verbs.verbs });
             try {
                 await waitForGrant(harness);
 
@@ -971,6 +972,67 @@ export const panelPortTests: readonly TestCase[] = [
                     0,
                     "and the pending entry is cleaned up, so a silent panel cannot grow the map",
                 );
+            } finally {
+                harness.dispose();
+            }
+        },
+    },
+    {
+        // ⚠ PLANT: remove the `#pending.size >= PANEL_BRIDGE_MAX_PENDING` guard from
+        // `PanelPortBridge.request` and this case goes RED — the map grows past the cap unbounded.
+        //
+        // WHY IT IS NEEDED SINCE e13b-2: in e13b-1 `request` had no production caller, so `#pending`
+        // only ever grew at the HOST's initiative. `bridge.commands.execute` makes it panel-DRIVEN —
+        // each inbound execute of an owned command dispatches one `commands.invoke` back down the
+        // port — so a panel that simply never answers chooses the rate at which host timers accrue.
+        name: "panelport: in-flight host requests are BOUNDED, so a silent panel cannot flood the host",
+        run: async (): Promise<void> => {
+            // A budget long enough that nothing times out while the cap is being probed: this case is
+            // about the CAP, and a short budget would settle entries out from under it.
+            const harness = createHarness({ requestTimeoutMs: 30_000 });
+            try {
+                await waitForGrant(harness);
+                harness.command({ cmd: "silence" });
+                await waitFor(
+                    "the child to confirm it went silent",
+                    () => harness.probes.some((probe) => probe.probe === "silenced"),
+                    LOAD_BOUND_MS,
+                    () => diagnose(harness),
+                );
+
+                // Fill the map to exactly the cap. Deliberately NOT awaited — these stay pending.
+                const inflight: Promise<unknown>[] = [];
+                for (let index = 0; index < PANEL_BRIDGE_MAX_PENDING; index += 1) {
+                    inflight.push(harness.bridge.request(`probe.flood${String(index)}`));
+                }
+                await waitFor(
+                    "the pending map to reach the cap",
+                    () => harness.bridge.stats.pending === PANEL_BRIDGE_MAX_PENDING,
+                    LOAD_BOUND_MS,
+                    () => diagnose(harness),
+                );
+
+                // The one past the cap is refused IMMEDIATELY — as a reply, like every other refusal
+                // on this path, so no caller has to catch.
+                const refused = await harness.bridge.request("probe.overflow");
+                assertEqual(
+                    refused.error?.code,
+                    PANEL_BRIDGE_REFUSALS.timeout,
+                    "the request past the cap is refused rather than queued",
+                );
+                assert(
+                    (refused.error?.message ?? "").includes("in flight"),
+                    `…and says why: ${String(refused.error?.message)}`,
+                );
+                assertEqual(
+                    harness.bridge.stats.pending,
+                    PANEL_BRIDGE_MAX_PENDING,
+                    "the refused request never occupied a correlation slot",
+                );
+
+                // Teardown settles the flood rather than leaving it to the 30s budget.
+                harness.dispose();
+                await Promise.all(inflight);
             } finally {
                 harness.dispose();
             }

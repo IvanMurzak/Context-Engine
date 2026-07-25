@@ -182,9 +182,16 @@ export class CommandRegistry {
     /**
      * The registrations this registry REFUSED, oldest first — the diagnosability channel.
      *
-     * Capped at `COMMAND_REJECTION_LOG_LIMIT`. `boot.ts` mirrors a non-empty log onto
-     * `<html data-editor-commands>`, so a collision is visible in a `--dump-dom` repro and in
-     * DevTools rather than only in whatever the palette happens to be missing.
+     * Capped at `COMMAND_REJECTION_LOG_LIMIT`. `boot.ts` mirrors the log onto
+     * `<html data-editor-commands>`, so an ASSEMBLY-TIME collision is visible in a `--dump-dom` repro
+     * and in DevTools rather than only in whatever the palette happens to be missing.
+     *
+     * ⚠ THAT MIRROR IS A BOOT-TIME SNAPSHOT, taken once at the end of `startCommandLayer`. A refusal
+     * produced LATER by `bridge.commands.register` is appended here but never reaches the attribute —
+     * and since e13b-2 those are most of them (see `COMMAND_REJECTION_LOG_LIMIT`, whose bound exists
+     * precisely because untrusted code chooses the runtime refusal rate). The runtime channel is the
+     * `register` REPLY, which returns each rejection with its diagnostic to the panel that caused it;
+     * this log is what an operator reads afterwards.
      */
     get rejections(): readonly CommandRejection[] {
         return this.#rejections;

@@ -146,6 +146,20 @@ export const PANEL_BRIDGE_REQUEST_TIMEOUT_MS = 5_000;
 export const PANEL_BRIDGE_TOKEN_MAX_LENGTH = 128;
 
 /**
+ * The most host-issued requests that may be in flight to ONE panel at once.
+ *
+ * ⚠ THE PANEL CHOOSES THE RATE SINCE M9 e13b-2. In e13b-1 `request` had no production caller, so
+ * `#pending` only ever grew at the host's own initiative and needed no bound. `bridge.commands.execute`
+ * makes it panel-DRIVEN: each inbound execute of an owned command dispatches one `commands.invoke`
+ * back down the port, which pins a Map entry and a `PANEL_BRIDGE_REQUEST_TIMEOUT_MS` timer. A panel
+ * that simply never answers therefore holds `rate x 5s` live timers and closures — from a sandboxed
+ * frame, in a process designed to stay up for days. This is the same amplification argument
+ * `PANEL_BRIDGE_TOKEN_MAX_LENGTH` and `PANEL_COMMAND_REGISTRATION_LIMIT` make; this was the one
+ * untrusted-input path in the pair of modules left unbounded.
+ */
+export const PANEL_BRIDGE_MAX_PENDING = 64;
+
+/**
  * The frame element's port-state attribute — a DIAGNOSTIC, mirroring `data-panel-unavailable`'s role
  * in panelhost.ts.
  *
@@ -381,6 +395,20 @@ export class PanelPortBridge {
                         : PANEL_BRIDGE_REFUSALS.portUnavailable,
                     verb,
                     "no live panel port",
+                ),
+            );
+        }
+        // Bounded, and refused as a REPLY rather than a rejection — every other refusal on this path
+        // resolves, so no caller has to catch (see the method doc). Checked before the id is minted:
+        // a refused request never occupies a correlation slot.
+        if (this.#pending.size >= PANEL_BRIDGE_MAX_PENDING) {
+            return Promise.resolve(
+                refusal(
+                    PANEL_BRIDGE_REFUSALS.timeout,
+                    verb,
+                    `too many requests in flight to this panel (max ${String(
+                        PANEL_BRIDGE_MAX_PENDING,
+                    )})`,
                 ),
             );
         }

@@ -10,7 +10,13 @@
 // `handler()` is exactly what `execute` invokes, so routing is proven either way.
 
 import { assert, assertEqual, type TestCase } from "./harness.js";
-import { SESSION_UNDO_PANEL_ID, makePanelDispatch, makeSessionActions } from "../boot.js";
+import {
+    SESSION_UNDO_PANEL_ID,
+    claimPaletteToggle,
+    makePanelDispatch,
+    makeSessionActions,
+} from "../boot.js";
+import { PALETTE_TOGGLE_COMMAND_ID, paletteCommands } from "../palette.js";
 import { PanelClient } from "../panels.js";
 import {
     buildCommandRegistry,
@@ -647,6 +653,75 @@ export const commandsTests: readonly TestCase[] = [
             assertEqual(rejection?.id, "view.theme.toggle", "it names the colliding id");
             assertEqual(rejection?.category, "panel", "…the source that lost");
             assertEqual(rejection?.incumbent, "editor", "…and the source that won");
+        },
+    },
+
+    // ------------------------------------------- the palette's own id is unconditionally the editor's
+    {
+        // ⚠ PLANT: drop the `unregister` from `claimPaletteToggle` (leave the bare `tryRegisterAll`)
+        // and this case goes RED — the package keeps the id and `execute` runs the PACKAGE's handler,
+        // which is Ctrl+Shift+P dispatching into a package instead of opening the palette.
+        //
+        // This is the ONE built-in registered AFTER the panel source, so incumbent-wins — which
+        // protects every other editor id — runs the WRONG way for it. See boot.ts § claimPaletteToggle.
+        name: "commands: a squatter on workbench.palette.toggle is EVICTED, so the palette is never lost",
+        run: (): void => {
+            const registry = new CommandRegistry();
+            let squatterRan = false;
+            // A package manifest got there first — the state `projectPanelCommands` can produce today,
+            // since manifest ids are projected as authored.
+            registry.tryRegister({
+                id: PALETTE_TOGGLE_COMMAND_ID,
+                title: "Definitely The Palette",
+                category: "panel",
+                when: "",
+                docs: { summary: "squat", detail: "squat" },
+                handler: () => {
+                    squatterRan = true;
+                    return { ok: true, note: "squatter" };
+                },
+            });
+            assertEqual(
+                registry.get(PALETTE_TOGGLE_COMMAND_ID)?.category,
+                "panel",
+                "precondition: the package holds the palette's id",
+            );
+
+            let toggled = false;
+            const evicted = claimPaletteToggle(
+                registry,
+                paletteCommands({
+                    toggle: () => {
+                        toggled = true;
+                        return { ok: true, note: "palette opened" };
+                    },
+                }),
+            );
+
+            assertEqual(evicted?.title, "Definitely The Palette", "the squatter is reported, not silently dropped");
+            assertEqual(
+                registry.get(PALETTE_TOGGLE_COMMAND_ID)?.category,
+                "editor",
+                "the EDITOR now holds the palette's own id (the squatter's was `panel`)",
+            );
+            void registry.execute(PALETTE_TOGGLE_COMMAND_ID);
+            assert(toggled, "Ctrl+Shift+P resolves to the palette");
+            assert(!squatterRan, "…and never to the package that tried to take it");
+        },
+    },
+
+    // The eviction is not a blanket unregister: with nobody squatting it must change nothing and
+    // report nothing, or every clean boot would announce an eviction that never happened.
+    {
+        name: "commands: claimPaletteToggle reports no eviction on a clean registry",
+        run: (): void => {
+            const registry = new CommandRegistry();
+            const evicted = claimPaletteToggle(registry, paletteCommands({ toggle: () => ({ ok: true, note: "" }) }));
+            assertEqual(evicted, undefined, "nothing was evicted");
+            assert(
+                registry.get(PALETTE_TOGGLE_COMMAND_ID) !== undefined,
+                "…and the palette command registered normally",
+            );
         },
     },
 ];

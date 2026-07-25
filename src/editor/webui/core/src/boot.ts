@@ -36,6 +36,7 @@ import {
 } from "./config.js";
 import {
     buildCommandRegistry,
+    type Command,
     type CommandOutcome,
     type CommandRegistry,
     type EditorCommandActions,
@@ -876,9 +877,11 @@ function startCommandLayer(
             // NOT a duplicate registration: `panel.list` projects a panel's MANIFEST commands, which
             // are empty for every built-in uitree panel (panel_host.cpp § list) — the journal's
             // `session.undo` / `session.redo` ride its RENDER instead. So `projectPanelCommands`
-            // contributes nothing here and these two ids stay the registry's only ones, which
-            // matters because `buildCommandRegistry` THROWS on a collision, and a throw here
-            // degrades the whole palette.
+            // contributes nothing here and these two ids stay the registry's only ones. Since e13b-2
+            // that is a tidiness fact, no longer a load-bearing one: `buildCommandRegistry` NO LONGER
+            // THROWS on a collision (commands.ts § buildCommandRegistry), and the session source is
+            // registered BEFORE the panel source, so a manifest colliding on either id would now cost
+            // exactly that manifest command and leave the palette whole.
             //
             // And `dispatched:false` is the honest outcome for all three of nothing-to-undo, a loud
             // drop, and a refused replay — in every one the file was left exactly as it was.
@@ -901,11 +904,18 @@ function startCommandLayer(
         view.mount();
         // Register the palette-open command AFTER the view exists, so its handler can reflect the model
         // into the overlay. It is bound to Ctrl+Shift+P in the default keymap (keymap.ts).
-        // NON-FATAL, like every other source (commands.ts § tryRegisterAll): the palette's own open
-        // command is registered LAST of all, so a package that somehow held `workbench.palette.toggle`
-        // would cost us this one command — never the palette itself, which is the surface the whole
-        // keyboard path depends on.
-        registry.tryRegisterAll(
+        //
+        // ⚠ EVICT ANY SQUATTER FIRST — this is the ONE built-in that registers AFTER the panel source,
+        // so it is the ONE the assembly order does not already protect. Every other editor id is
+        // registered inside `buildCommandRegistry` BEFORE `projectPanelCommands`, where incumbent-wins
+        // makes the editor the incumbent; this one runs after it, so a package manifest declaring
+        // `workbench.palette.toggle` would be the incumbent and OUR registration would be the one
+        // refused. That is not "costing us this one command": Ctrl+Shift+P resolves through the same
+        // registry (keymap.ts), and the palette has no other opener — the chord would dispatch into
+        // the package and the editor's universal keyboard surface (R-A11Y-001) would be gone.
+        // `unregister` is the withdrawal primitive e13b-2 added, and this is its second real caller.
+        const squatter = claimPaletteToggle(
+            registry,
             paletteCommands({
                 toggle: (): CommandOutcome => {
                     palette.toggle();
@@ -919,10 +929,18 @@ function startCommandLayer(
         // now survivable, which is exactly why it must be VISIBLE: the old failure took the whole
         // palette down and said "duplicate command id", and the new one silently drops one command
         // unless the collision is reported with the id and both of its sources.
+        // The eviction above is reported for the same reason a refusal is: a package that tried to
+        // take the palette's own id is exactly the event an operator must be able to see, and an
+        // eviction that only ever showed up as "the package's command is missing" would be the silent
+        // failure this attribution channel exists to end.
+        const evicted =
+            squatter === undefined
+                ? ""
+                : `; EVICTED a squatter on "${PALETTE_TOGGLE_COMMAND_ID}" (${squatter.title})`;
         reportCommands(
             registry.rejections.length === 0
-                ? `ready; ${String(registry.size)} commands`
-                : `ready; ${String(registry.size)} commands; ` +
+                ? `ready; ${String(registry.size)} commands${evicted}`
+                : `ready; ${String(registry.size)} commands${evicted}; ` +
                       `${String(registry.rejections.length)} REFUSED: ` +
                       registry.rejections.map((rejection) => rejection.diagnostic).join(" | "),
         );
@@ -936,6 +954,38 @@ function startCommandLayer(
         );
         return undefined;
     }
+}
+
+/**
+ * Register the palette's own commands, EVICTING anyone already holding the toggle id.
+ * Returns the evicted command, or `undefined` when nobody held it (the normal case).
+ *
+ * ⚠ THE ONE BUILT-IN THAT THE ASSEMBLY ORDER DOES NOT PROTECT. Every other editor command is
+ * registered inside `buildCommandRegistry` BEFORE `projectPanelCommands`, so incumbent-wins makes the
+ * editor the incumbent and a colliding manifest id loses. The palette's toggle is registered AFTER
+ * the whole registry is built (its handler needs the view, which needs the registry), so the order
+ * runs the other way: a package manifest declaring `workbench.palette.toggle` would be the incumbent
+ * and the EDITOR's registration would be the one refused.
+ *
+ * That is not "costing us one command". Ctrl+Shift+P resolves through this same registry (keymap.ts)
+ * and the palette has no other opener, so the chord would dispatch into the package and the editor's
+ * universal keyboard surface (R-A11Y-001) would be gone for the life of the window. Evicting first
+ * makes the editor's claim unconditional.
+ *
+ * Extracted and exported so the invariant is assertable at T1: `startCommandLayer` needs a live DOM,
+ * a host and a client, and an invariant only provable through a full boot is one a regression can
+ * quietly take away.
+ */
+export function claimPaletteToggle(
+    registry: CommandRegistry,
+    commands: readonly Command[],
+): Command | undefined {
+    const squatter = registry.get(PALETTE_TOGGLE_COMMAND_ID);
+    if (squatter !== undefined) {
+        registry.unregister(PALETTE_TOGGLE_COMMAND_ID);
+    }
+    registry.tryRegisterAll(commands);
+    return squatter;
 }
 
 /** Mirror the command layer's outcome onto `<html data-editor-commands>`. */
@@ -961,9 +1011,15 @@ function reportCommands(detail: string): void {
  * PACKAGE instead (`commands.invoke`, panelverbs.ts), which is the direction e13b-1 built
  * `PanelPortBridge.request` for and named e13b-2 as the first consumer of.
  *
- * The fallback is deliberate rather than defensive: no `host`, no port, or a package panel whose
- * document never handshook all resolve back to the `panel.command` route, whose honest
- * `dispatched:false` is the same answer as before.
+ * The fallback is deliberate rather than defensive, and it covers EXACTLY TWO cases: no `host`, or a
+ * panel that is not a mounted `iframe` renderer (`uitree` / `local` / unavailable). Those resolve back
+ * to the `panel.command` route, whose honest `dispatched:false` is the same answer as before.
+ *
+ * A mounted package panel with NO live port does NOT fall back — `PanelHost.portRequest` returns a
+ * closure for any `IframePanelRenderer` regardless of port state, and the renderer answers
+ * `bridge.port_unavailable` / `bridge.port_revoked` itself. That is the honest outcome, not a
+ * degradation: `panel.command` has no C++ model to answer for an iframe panel either, so re-routing
+ * there would only relabel the same failure.
  *
  * Exported so the T1 tier can drive THIS function rather than a copy of it (`commands.test.ts`).
  */
