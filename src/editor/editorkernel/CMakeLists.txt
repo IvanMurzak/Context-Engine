@@ -37,6 +37,14 @@ target_link_libraries(context_editorkernel PUBLIC context_migrate)
 target_link_libraries(context_editorkernel
     PRIVATE context_gui_panel_builders context_compose_project)
 
+# M9 e09b-1 — the pointer/value (composed) `edit` mode: kernel_server.cpp now also drives the WRITE
+# half of composition (compose::plan_write + the canonical serializer) over that same disk-backed
+# resolver, so the editor can issue the design 05 §8 field-addressed write it structurally cannot
+# compose itself (context_compose is D10-FORBIDDEN to the Shell). Both are already reachable
+# transitively through context_compose_project's PUBLIC interface; named EXPLICITLY per this file's
+# standing rule, because this target now uses each directly.
+target_link_libraries(context_editorkernel PRIVATE context_compose context_serializer)
+
 # Self-contained GCC runtime for the editorkernel ctest executables. The composition pulls the bridge
 # daemon's single-instance lock (std::filesystem) and thus newer libstdc++ symbols; on a MinGW host a
 # stale libstdc++-6.dll elsewhere on PATH can shadow the toolchain's and be loaded first, yielding

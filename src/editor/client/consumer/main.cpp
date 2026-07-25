@@ -59,6 +59,19 @@ int main()
     check(event && event->kind == client::FrameKind::event, "a pushed event frame is classified");
     check(event && event->sub_id == "sub-1", "the event's subscription id is exposed");
 
+    // The M9 e09b-1 widening of this EXPORTED surface: a refusal's structured detail (the
+    // cas.mismatch rebase input, design 05 §7) must be reachable by an out-of-tree consumer, not
+    // just in-tree. A stranger writing an editor against the published package is exactly who needs
+    // it — without it a CAS conflict is unrecoverable without a second read round-trip.
+    const std::optional<client::InboundFrame> refusal = client::parse_frame(
+        R"({"jsonrpc":"2.0","id":4,"error":{"code":-32000,"message":"CAS precondition failed",)"
+        R"("data":{"code":"cas.mismatch","data":{"actualRawHash":"222"}}}})");
+    check(refusal && refusal->has_error, "a daemon refusal frame is classified as an error response");
+    check(refusal && refusal->error_code == "cas.mismatch", "the R-CLI-008 catalog code is exposed");
+    check(refusal && !refusal->error_data.is_null(), "the refusal's structured data is exposed");
+    check(refusal && refusal->error_data.at("data").at("actualRawHash").as_string() == "222",
+          "the cas.mismatch retry token reaches an out-of-tree consumer");
+
     // --- subscription consumer types --------------------------------------------------------------
     client::BackoffPolicy backoff;
     backoff.initial_ms = 10;

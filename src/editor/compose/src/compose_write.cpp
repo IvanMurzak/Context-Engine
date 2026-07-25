@@ -288,6 +288,31 @@ void collect_scenes(const std::string& scene, const WriteResolver& resolver, std
 
 } // namespace
 
+std::string_view write_target_token(WriteTarget target) noexcept
+{
+    switch (target)
+    {
+    case WriteTarget::outermost:
+        return "outermost";
+    case WriteTarget::defining_template:
+        return "template";
+    case WriteTarget::at_instance:
+        return "at-instance";
+    }
+    return "outermost";
+}
+
+std::optional<WriteTarget> parse_write_target(std::string_view token) noexcept
+{
+    if (token == "outermost")
+        return WriteTarget::outermost;
+    if (token == "template")
+        return WriteTarget::defining_template;
+    if (token == "at-instance")
+        return WriteTarget::at_instance;
+    return std::nullopt; // deliberately NOT a default of `outermost` — see the header
+}
+
 bool is_immutable_pointer(std::string_view pointer) noexcept
 {
     std::vector<std::string> tokens;

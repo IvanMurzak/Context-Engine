@@ -11,7 +11,9 @@
 
 #include "context/editor/gui/panels/scenetree/scene_tree_model.h"
 
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace context::editor::gui::panels::builders
@@ -23,6 +25,23 @@ namespace context::editor::gui::panels::builders
 // id-paths never collide. One exported definition so the encoding cannot drift between producers
 // (a drift silently breaks selection).
 [[nodiscard]] std::string join_identity(const std::vector<std::string>& id_path);
+
+// The INVERSE of join_identity: split a wire identity key back into its L-35 id-path segments.
+// nullopt when the key is malformed — empty, or carrying an empty segment (a leading, trailing, or
+// doubled '/') — because join_identity can never PRODUCE such a key, so accepting one would invent
+// an id-path no composed entity has.
+//
+// Exported alongside the join (M9 e09b-1) so the encoding and its inverse stay one definition. Two
+// consumers need it and each would otherwise hand-roll a copy: find_entity_by_identity (below, which
+// had the original file-local copy) and the daemon's pointer/value `edit`, which must turn the wire
+// `idPath` into the compose::WriteRequest id-path vector. A splitter that drifts from the join reads
+// as a mysterious "selection does not resolve".
+//
+// The two consumers treat a malformed key differently BY DESIGN, and both are correct: a READ
+// (find_entity_by_identity) answers "no such entity" — the honest present:false panel state — while
+// a WRITE answers a usage error, because silently writing nothing is the one outcome a write path
+// must never produce.
+[[nodiscard]] std::optional<std::vector<std::string>> split_identity(std::string_view identity);
 
 // Build the scene-tree view model from a flattened composed scene (the real derived world). The flat
 // ComposedScene::entities are woven into a hierarchy by id-path prefix; a prefix with no own composed

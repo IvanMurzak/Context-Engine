@@ -7,9 +7,12 @@
 #include "context/editor/schema/json_access.h" // schema::find_member — the shared JSON-tree accessor
 #include "context/editor/serializer/json_tree.h"
 
+#include <cstddef>
 #include <deque>
 #include <map>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace context::editor::gui::panels::builders
@@ -137,6 +140,30 @@ std::string join_identity(const std::vector<std::string>& id_path)
         out += id_path[i];
     }
     return out;
+}
+
+std::optional<std::vector<std::string>> split_identity(std::string_view identity)
+{
+    // join_identity never emits an empty key nor an empty segment, so either is a malformed key
+    // rather than an id-path — refuse it here instead of inventing a segment vector no composed
+    // entity can match (see the header for why each consumer treats that refusal differently).
+    if (identity.empty())
+        return std::nullopt;
+    std::vector<std::string> segments;
+    std::size_t start = 0;
+    while (true)
+    {
+        const std::size_t slash = identity.find('/', start);
+        const std::size_t count = slash == std::string_view::npos ? identity.size() - start
+                                                                  : slash - start;
+        if (count == 0)
+            return std::nullopt; // a leading, trailing, or doubled '/'
+        segments.emplace_back(identity.substr(start, count));
+        if (slash == std::string_view::npos)
+            break;
+        start = slash + 1;
+    }
+    return segments;
 }
 
 SceneTreeModel build_scene_tree(const compose::ComposedScene& scene)

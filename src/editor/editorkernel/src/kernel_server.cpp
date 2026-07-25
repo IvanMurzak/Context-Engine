@@ -2,6 +2,7 @@
 
 #include "context/editor/editorkernel/kernel_server.h"
 
+#include "context/editor/compose/compose_write.h"    // e09b-1: plan_write — the composed WRITE path
 #include "context/editor/compose/flatten.h"          // e05d3: the editor.* composed reads
 #include "context/editor/compose/project_resolver.h" // e05d3: the disk-backed scene resolver
 #include "context/editor/contract/envelope.h"
@@ -14,7 +15,9 @@
 #include "context/editor/gui/panels/builders/inspector_builder.h"  // e05d3: kernel-side builders
 #include "context/editor/gui/panels/builders/scene_tree_builder.h" // e05d3
 #include "context/editor/gui/panels/builders/wire.h"               // e05d3: model -> wire JSON
-#include "context/editor/schema/kind_schema.h" // e05d3: engine_schemas() kind lookup
+#include "context/editor/schema/kind_schema.h"      // e05d3: engine_schemas() kind lookup
+#include "context/editor/serializer/canonical.h"    // e09b-1: serialize_canonical (composed write)
+#include "context/editor/serializer/json_parse.h"   // e09b-1: the `value` JSON literal
 
 #include "context/editor/bridge/event_stream.h" // e08a: Stability on the loud recovery diagnostic
 
@@ -69,6 +72,199 @@ std::optional<std::uint64_t> parse_hash_u64(const std::string& text)
     if (r.ec != std::errc() || r.ptr != end)
         return std::nullopt;
     return value;
+}
+
+// ---- M9 e09b-1: the pointer/value (COMPOSED) `edit` mode -----------------------------------------
+
+// The keys that mark an `edit` request as the pointer/value COMPOSED write (the canonical design
+// 05 §8 flow) rather than e09a's full-content write. ANY of them selects the mode; the branch then
+// demands the full set, so a partial request is a NAMED usage error instead of being silently
+// re-read as the other mode and writing something the caller never asked for.
+[[nodiscard]] bool is_composed_edit(const Json& params)
+{
+    return params.contains("rootScene") || params.contains("idPath") || params.contains("pointer") ||
+           params.contains("value");
+}
+
+// `edit` in POINTER/VALUE mode — the write the EDITOR actually issues (design 05 §8:
+// `edit {file, pointer, value, ifMatch}`).
+//
+// WHY the daemon must serve this at all, rather than the editor composing bytes and sending the
+// full-content mode: `context_compose` is on the D10 shell-boundary FORBIDDEN list
+// (src/CMakeLists.txt `context_assert_shell_boundary`, pinned by the `editor-shell-boundary`
+// ctest), so the editor structurally CANNOT resolve an override target or synthesize `content`. The
+// capability therefore lives HERE, on the daemon, and the editor stays an ordinary client sending a
+// gesture. This branch moves the capability; it does not relax the gate — that FORBIDDEN list is
+// untouched, and `context_compose` remains forbidden to the Shell.
+//
+// The body is deliberately the same sequence `context set` runs (src/cli/src/set_command.cpp):
+// plan_write over a FRESH disk-backed resolver -> canonical serialize -> CAS-guarded atomic write.
+// Same path, two front doors — never a parallel write path (L-35 single source of truth).
+//
+// Note design 05 §8 names an inbound `file`: in practice the file is an OUTPUT of the plan, because
+// COMPOSITION decides where an override lands (outermost scene / defining template / a mid-level
+// instance). The caller addresses the FIELD (rootScene + idPath + pointer) and the reply reports the
+// file that was written — which is also exactly what e09b-2's WriteAttempt::file needs.
+[[nodiscard]] Envelope serve_composed_edit(EditorKernel& kernel, const Json& params,
+                                           const bridge::ScopeSet& scopes)
+{
+    // Mode confusion is REFUSED, never guessed: a request carrying both shapes' keys has no single
+    // honest reading, and picking one would write bytes the caller did not ask for.
+    if (params.contains("path") || params.contains("content"))
+        return Envelope::failure("usage.invalid",
+                                 "edit takes EITHER the full-content shape {path, content} or the "
+                                 "composed pointer/value shape {rootScene, idPath, pointer, value} "
+                                 "— never both in one request");
+
+    const std::optional<std::string> root_scene = string_param(params, "rootScene");
+    const std::optional<std::string> id_path_joined = string_param(params, "idPath");
+    const std::optional<std::string> pointer = string_param(params, "pointer");
+    const std::optional<std::string> value_text = string_param(params, "value");
+    if (!root_scene.has_value() || !id_path_joined.has_value() || !pointer.has_value() ||
+        !value_text.has_value())
+        return Envelope::failure("usage.missing_argument",
+                                 "the composed edit mode requires string 'rootScene', 'idPath', "
+                                 "'pointer' and 'value' params ('value' is a JSON literal)");
+    if (pointer->empty())
+        return Envelope::failure("usage.invalid",
+                                 "edit 'pointer' must be a non-empty RFC 6901 JSON pointer naming "
+                                 "the field inside the addressed entity");
+
+    // R-SEC-008, the same lexical pre-check `context set` and `editor.inspect` run. The resolver
+    // jails internally and edit_file re-jails the WRITE TOCTOU-safely against the filesync root, so
+    // this is the early, legible refusal rather than the only guard.
+    if (!filesync::is_inside_jail(".", *root_scene))
+        return Envelope::failure("path.jail_violation", "the scene path `" + *root_scene +
+                                                            "` escapes the project root (R-SEC-008)");
+
+    compose::WriteRequest request;
+    request.root_scene = *root_scene;
+    request.pointer = *pointer;
+    // The wire `idPath` is the SAME joined identity key `editor.inspect` takes and the scene-tree
+    // answers, split through the builders' exported inverse — one encoding, one inverse.
+    if (const std::optional<std::vector<std::string>> segments =
+            gui::panels::builders::split_identity(*id_path_joined))
+        request.id_path = *segments;
+    else
+        return Envelope::failure("usage.invalid",
+                                 "edit 'idPath' is a slash-separated L-35 id-path with no empty "
+                                 "segments; got `" + *id_path_joined + "`");
+
+    request.target = compose::WriteTarget::outermost; // L-35 default: the outermost instancing scene
+    if (const std::optional<std::string> target_token = string_param(params, "target"))
+    {
+        const std::optional<compose::WriteTarget> resolved =
+            compose::parse_write_target(*target_token);
+        if (!resolved.has_value())
+            return Envelope::failure("usage.invalid",
+                                     "edit 'target' is one of outermost | template | at-instance; "
+                                     "got `" + *target_token + "`");
+        request.target = *resolved;
+    }
+
+    const std::optional<std::string> at_instance = string_param(params, "atInstance");
+    if (request.target == compose::WriteTarget::at_instance)
+    {
+        if (!at_instance.has_value())
+            return Envelope::failure("usage.missing_argument",
+                                     "edit target `at-instance` requires the 'atInstance' id-path "
+                                     "prefix naming the mid-level addressing scene");
+        const std::optional<std::vector<std::string>> segments =
+            gui::panels::builders::split_identity(*at_instance);
+        if (!segments.has_value())
+            return Envelope::failure("usage.invalid",
+                                     "edit 'atInstance' is a slash-separated L-35 id-path with no "
+                                     "empty segments; got `" + *at_instance + "`");
+        request.at_instance = *segments;
+    }
+    else if (at_instance.has_value())
+    {
+        // Refused rather than ignored: silently dropping the retarget would write the override to a
+        // DIFFERENT file than the caller named, which is precisely the mistake this write path
+        // exists to make impossible.
+        return Envelope::failure("usage.invalid",
+                                 "edit 'atInstance' is meaningful only with target `at-instance`; "
+                                 "pass both or neither");
+    }
+
+    // The value crosses as its CANONICAL SERIALIZATION (a JSON literal carried in a string) — the
+    // same convention the inspector READ answers with (gui/panels/builders/wire.h) and `context set`
+    // takes on the command line. contract::Json and serializer::JsonValue are different DOMs, and
+    // the canonical byte form is the engine's ONE value identity (R-FILE-001), so this round-trip is
+    // exact by construction and needs no second, hand-rolled DOM converter to drift out of step.
+    serializer::ParseResult parsed_value = serializer::parse_json(*value_text);
+    if (!parsed_value.ok)
+    {
+        const std::string detail = parsed_value.diagnostics.empty()
+                                       ? std::string("malformed JSON")
+                                       : parsed_value.diagnostics.front().code + ": " +
+                                             parsed_value.diagnostics.front().message;
+        return Envelope::failure("file.parse_error",
+                                 "the 'value' param is not valid JSON (" + detail +
+                                     ") — pass a JSON literal, e.g. `[1, 2, 3]` or `\"text\"`");
+    }
+    request.value = std::move(parsed_value.root);
+
+    // Optional R-CLI-006 raw-byte CAS precondition, same decimal-string convention as the
+    // full-content mode (a full-range hash exceeds 2^53).
+    std::optional<std::uint64_t> if_match;
+    if (const std::optional<std::string> raw = string_param(params, "ifMatch"))
+    {
+        if_match = parse_hash_u64(*raw);
+        if (!if_match.has_value())
+            return Envelope::failure(
+                "usage.invalid",
+                "edit 'ifMatch' takes a decimal raw-byte content hash; got `" + *raw + "`");
+    }
+
+    // A FRESH resolver per operation: its cache is a snapshot-per-instance (project_resolver.h), so
+    // reusing one across writes would plan the second write against pre-first-write bytes.
+    const compose::ProjectSceneResolver resolver(kernel.config().project_root);
+    const compose::WritePlan plan = compose::plan_write(request, resolver);
+    if (!plan.ok)
+        return Envelope::failure(plan.error_code, plan.error_message, plan.error_pointer);
+
+    std::string new_bytes;
+    if (!serializer::serialize_canonical(plan.document, new_bytes))
+        return Envelope::failure("internal.error",
+                                 "the mutated scene document could not be canonically serialized");
+
+    // The write itself goes through the SAME daemon path the full-content mode uses: the defensive
+    // file_write scope re-check, the TOCTOU-tight CAS against the daemon's OWN store, filesync
+    // atomic IO, and the derivation ingest. The CAS therefore guards `plan.file` — the file
+    // COMPOSITION chose — which is the right target: the caller's ifMatch token is the raw hash it
+    // read for that file (the `editor.inspect` reply's rawHash), and a concurrent writer that moved
+    // it is refused here with the fresh on-disk state attached, the design 05 §7 rebase input.
+    EditOutcome out = kernel.edit_file(plan.file, new_bytes, scopes, if_match);
+    if (!out.ok)
+        return out.envelope();
+
+    const std::optional<derivation::DerivedSource> observed =
+        kernel.query_after_hash(plan.file, out.ticket.canonical_hash);
+    const bool reflected =
+        observed.has_value() && observed->canonical_hash == out.ticket.canonical_hash;
+
+    Json data = Json::object();
+    // `file`, NOT `path`: here the target is an OUTPUT of the plan (the caller never named it), not
+    // an input echoed back, and `file` is the name design 05 §8, the `context set` envelope, and
+    // e09b-2's WriteAttempt::file all already use. One name, one meaning — a second alias for the
+    // same value would be exactly the drift this module keeps closing elsewhere.
+    data.set("file", Json(plan.file));
+    data.set("pointer", Json(plan.pointer));     // the pointer that actually landed (provenance)
+    data.set("target", Json(std::string(compose::write_target_token(plan.target))));
+    data.set("baseRecorded", Json(plan.base_recorded)); // an override `base` snapshot was recorded
+    // The R-FILE-001 two-hash split, labelled exactly as the full-content mode labels it: rawHash is
+    // on-disk byte identity (the NEXT ifMatch token), canonicalHash the R-CLI-006 barrier key.
+    data.set("rawHash", hash_string(out.ticket.raw_hash));
+    data.set("canonicalHash", hash_string(out.ticket.canonical_hash));
+    data.set("reflected", Json(reflected));
+    data.set("worldEntities", Json(static_cast<std::uint64_t>(kernel.world().alive_count())));
+    data.set("generation", Json(kernel.generation()));
+
+    Envelope env = Envelope::success(std::move(data), kernel.generation());
+    if (!reflected)
+        env.add_warning("the derived world did not reflect the edit within the read barrier bound");
+    return env;
 }
 
 // ---- M9 e08a session-state helpers ---------------------------------------------------------------
@@ -310,6 +506,15 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
     // world already reflects the write (R-CLI-006).
     if (method == "edit")
     {
+        // M9 e09b-1: `edit` serves TWO shapes on one verb. The pointer/value (composed) mode is the
+        // canonical design 05 §8 editor write — the caller addresses a FIELD and composition decides
+        // which file the override lands in. Selected by the presence of its own keys, so the
+        // full-content shape below is byte-for-byte the behaviour e09a shipped. One verb rather than
+        // two because the scope (file_write), the CAS contract, and the read-your-writes barrier are
+        // identical — only the addressing differs.
+        if (is_composed_edit(params))
+            return serve_composed_edit(kernel_, params, session.scopes);
+
         const std::optional<std::string> path = string_param(params, "path");
         const std::optional<std::string> content = string_param(params, "content");
         if (!path.has_value() || !content.has_value())
