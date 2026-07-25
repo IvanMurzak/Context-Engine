@@ -70,6 +70,13 @@ public:
     mutable int reads = 0;
     std::function<void()> on_first_attempt;
     mutable bool fired = false;
+    // Fault injection for the two REFUSAL shapes, which are what distinguish "the write path said
+    // no" (nothing written, the caller keeps its edit) from "a co-writer moved the field" (a drop).
+    // `readable=false` makes every read report the default FieldState every real gateway returns
+    // when it cannot resolve the field — no connection, a refused RPC, a vanished entity.
+    // `refuse_write_code` makes `attempt` refuse WITHOUT a CAS mismatch, the daemon-said-no shape.
+    mutable bool readable = true;
+    std::string refuse_write_code;
 
     inspector::WriteAttempt attempt(const inspector::OverrideWriteRequest& request,
                                     std::uint64_t expected_raw_hash) const override
@@ -81,6 +88,12 @@ public:
             on_first_attempt();
         }
         inspector::WriteAttempt a;
+        if (!refuse_write_code.empty())
+        {
+            a.code = refuse_write_code; // NOT cas_mismatch: a refusal, not a concurrency event
+            a.message = "the write path refused";
+            return a;
+        }
         if (expected_raw_hash == file_hash)
         {
             file_hash += 1; // the write advances the file's raw bytes
@@ -104,6 +117,10 @@ public:
     {
         ++reads;
         inspector::FieldState s;
+        if (!readable)
+        {
+            return s; // present:false + a null value + a 0 token — the "could not read" default
+        }
         s.present = true;
         s.raw_hash = file_hash;
         const auto it = field_values.find(pointer);

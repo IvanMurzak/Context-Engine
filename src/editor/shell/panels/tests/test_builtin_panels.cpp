@@ -5,36 +5,97 @@
 // linked `context_compose`, which the D10 shell-boundary gate forbids) — and pinned it HERE so that
 // e05d3, whose whole job was to make them hostable, saw this test go red in exactly the place that
 // means "you succeeded". e05d3 landed: the kernel-typed builders moved daemon-side, the panel
-// libraries are boundary-clean, and this file now asserts the HOSTED state — all four hostable
-// panels bound, and the Scene tree's selection wired to the Inspector's fetch (R-HUX-011).
+// libraries are boundary-clean, and this file now asserts the HOSTED state — every hostable panel
+// bound, and the Scene tree's selection wired to the Inspector's fetch (R-HUX-011).
+//
+// M9 e09c added the session-undo host to that set, plus the two assertions that keep its wiring
+// honest: the replay reaches the SHARED wire gateway (no second write path), and the journal round
+// trips through a real editor-state file via the two bag seams editor_main.cpp drives.
 
 #include "context/editor/shell/panels/builtin_panels.h"
 
 #include "context/editor/gui/contract/builtin_roster.h"
 #include "context/editor/gui/panels/problems/problems_panel.h"
+#include "context/editor/shell/editor_state.h" // e09c: the store the undo seams publish into
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/inspector_feed.h" // complete feed types: builtin_panels.h only
 #include "context/editor/shell/panels/problems_feed.h"  // forward-declares them, and this file calls
 #include "context/editor/shell/panels/scenetree_feed.h" // methods on the bag's members.
+#include "context/editor/shell/panels/undo_feed.h"      // e09c: the bag's session undo host
 #include "context/editor/shell/panels/wire_override_gateway.h" // e09b-2: the bag's write gateway
 
 #include "context/editor/serializer/json_parse.h"
 
-#include "panels_test.h"
+#include "panels_wire_test.h" // e09c: the shared REAL-client-over-a-scripted-wire fixture
 
+#include <chrono>
+#include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <utility>
 
 namespace shell = context::editor::shell;
 namespace panels = context::editor::shell::panels;
 namespace gc = context::editor::gui::contract;
 namespace scenetree = context::editor::gui::panels::scenetree;
+namespace client = context::editor::client;
 using Json = context::editor::contract::Json;
 
 namespace
 {
+
+using panelstest::make_wired_client;
+using panelstest::Wired;
+
+// The MINIMUM gateway a replay can land through: the field always reads back as the value the
+// checkpoint expects, and the write always applies. Deliberately not a project-file model — what the
+// one case using it tests is the PUMP's reaction to a landed replay, not the write policy
+// (test_undo_feed.cpp owns the L-30 verdicts, test_wire_override_gateway.cpp owns the frame).
+class AlwaysApplies final : public context::editor::gui::panels::inspector::OverrideWriteGateway
+{
+public:
+    explicit AlwaysApplies(context::editor::serializer::JsonValue current)
+        : current_(std::move(current))
+    {
+    }
+
+    context::editor::gui::panels::inspector::WriteAttempt
+    attempt(const context::editor::gui::panels::inspector::OverrideWriteRequest& request,
+            std::uint64_t) const override
+    {
+        context::editor::gui::panels::inspector::WriteAttempt out;
+        out.applied = true;
+        out.file = request.root_scene;
+        out.pointer = request.pointer;
+        out.raw_hash = ++raw_hash_;
+        return out;
+    }
+
+    context::editor::gui::panels::inspector::FieldState
+    read(const std::string&, const std::vector<std::string>&, const std::string&) const override
+    {
+        context::editor::gui::panels::inspector::FieldState out;
+        out.present = true;
+        out.raw_hash = raw_hash_;
+        out.value = current_;
+        return out;
+    }
+
+private:
+    context::editor::serializer::JsonValue current_;
+    mutable std::uint64_t raw_hash_ = 100;
+};
+
+[[nodiscard]] context::editor::serializer::JsonValue jnum(double value)
+{
+    context::editor::serializer::JsonValue v;
+    v.type = context::editor::serializer::JsonValue::Type::number;
+    v.number_value = value;
+    return v;
+}
 
 const Json* find_panel(const Json& listing, const std::string& id)
 {
@@ -62,14 +123,19 @@ void binds_every_hostable_panel_and_nothing_else()
         CHECK(host.hosts(id));
     }
 
-    // FIVE panels, from four different libraries (uitree / problems / the e05d3 pair / the e08b
-    // playbar) — the panel-agnosticism claim exercised across every hosted shape.
-    CHECK(panels::hostable_panel_ids().size() == 5);
+    // SIX panels, from five different libraries (uitree / problems / the e05d3 pair / the e08b
+    // playbar / the e09c session journal) — the panel-agnosticism claim exercised across every
+    // hosted shape.
+    CHECK(panels::hostable_panel_ids().size() == 6);
     CHECK(host.hosts("placeholder"));
     CHECK(host.hosts(context::editor::gui::panels::problems::ProblemsPanel::kContributionId));
     CHECK(host.hosts("builtin.scene-tree"));
     CHECK(host.hosts("builtin.inspector"));
     CHECK(host.hosts("builtin.playbar"));
+    // e09c: rostered since e05b and UNHOSTED until now — which is exactly why the journal's
+    // to_json/load_json had no caller. Hosting it is what gives `session.undo` / `session.redo` a
+    // reachable path (R-CLI-001).
+    CHECK(host.hosts("builtin.session.undo"));
 
     // The feed owners came back, so every provider's captures stay alive.
     CHECK(bound.problems != nullptr);
@@ -83,6 +149,11 @@ void binds_every_hostable_panel_and_nothing_else()
     // It starts UNBOUND: `install_builtin_panels` runs at boot, before any daemon connection exists
     // (editor_main.cpp), and the connection is re-derived every frame through `bind_write_client`.
     CHECK(bound.writes != nullptr && !bound.writes->has_client());
+    // e09c: the session undo host came back, its journal is bound to a gateway, and the Inspector
+    // has somewhere to send its checkpoints.
+    CHECK(bound.undo != nullptr);
+    CHECK(bound.undo != nullptr && bound.undo->has_gateway());
+    CHECK(bound.inspector != nullptr && bound.inspector->has_checkpoint_sink());
 
     // The whole roster is still LISTED — an unhostable panel is visible and honestly flagged, never
     // hidden.
@@ -160,6 +231,126 @@ void the_inspector_gesture_surface_is_live_but_refuses_without_a_daemon()
     // And the write client re-points through the ONE seam, in both directions, with no re-provide.
     panels::bind_write_client(bound, nullptr);
     CHECK(!bound.writes->has_client());
+}
+
+// e09c — NO SECOND WRITE PATH. The DoD's structural half: an undo/redo replay must go out over the
+// SAME `WireOverrideWriteGateway` a live gesture commits through, not through a private in-process
+// writer.
+//
+// PINNED AT THE OBJECT, NOT AT THE CLASS. An earlier form of this test asserted the replay came back
+// carrying `shell.no_daemon` — a code exactly one class in the tree mints. That proved only that
+// SOME `WireOverrideWriteGateway` was reached: a journal handed its OWN second instance would have
+// minted the identical code and passed. The gateway's per-instance counters do not have that hole,
+// because they live on the object `install_builtin_panels` bound. So: bind a client, drive a replay,
+// and assert the counters on `bound.writes` moved. A second gateway leaves them at zero.
+void the_undo_replay_routes_through_the_shared_wire_gateway()
+{
+    namespace undo = context::editor::gui::session::undo;
+    namespace inspector = context::editor::gui::panels::inspector;
+
+    shell::PanelHost host;
+    panels::BuiltinPanels bound = panels::install_builtin_panels(host);
+    CHECK(bound.undo != nullptr);
+    CHECK(bound.writes != nullptr);
+    if (bound.undo == nullptr || bound.writes == nullptr)
+    {
+        return;
+    }
+    undo::FieldEdit edit;
+    edit.root_scene = "scenes/main.scene.json";
+    edit.id_path = {"cam"};
+    edit.pointer = "/components/camera/fov";
+    bound.undo->record(std::move(edit));
+    CHECK(bound.undo->journal().can_undo());
+
+    // (1) NO DAEMON. The replay resolves — a write with nowhere to go is not silently swallowed —
+    // as an ERROR, and the step is KEPT: the human's history must survive the daemon being briefly
+    // gone, which is the difference between a refusal and a drop (undo_journal.h § undo).
+    const undo::ReplayResult refused = bound.undo->replay_undo();
+    CHECK(refused.status == inspector::CommitResult::Status::error);
+    CHECK(!refused.edits.empty());
+    CHECK(!refused.edits.empty() &&
+          refused.edits.front().code == std::string(undo::UndoJournal::kReadUnavailableCode));
+    CHECK(bound.undo->replay_refusals() == 1u);
+    CHECK(bound.undo->replay_drops() == 0u);
+    CHECK(bound.undo->journal().can_undo()); // KEPT — nothing was written, so nothing was lost
+    CHECK(bound.writes->writes_applied() == 0u);
+
+    // (2) A DAEMON. `editor.inspect` is left unscripted, so the mock refuses it and the read fails —
+    // enough to prove WHICH object issued it, which is all this case is about (the full landed-write
+    // frame is test_wire_override_gateway.cpp's `an_undo_replay_sends_the_same_edit_frame…`).
+    Wired wired = make_wired_client();
+    panels::bind_write_client(bound, wired.client.get());
+    CHECK(bound.writes->has_client());
+    const std::size_t reads_before = bound.writes->reads_issued();
+
+    const undo::ReplayResult over_the_wire = bound.undo->replay_undo();
+    CHECK(over_the_wire.status == inspector::CommitResult::Status::error);
+    // THE ASSERTION: the read left its mark on the bag's OWN gateway instance.
+    CHECK(bound.writes->reads_issued() == reads_before + 1);
+    CHECK(bound.writes->writes_applied() == 0u); // the read failed, so nothing was attempted
+    CHECK(bound.undo->journal().can_undo());     // still kept
+
+    panels::bind_write_client(bound, nullptr);
+}
+
+// e09c — THE TWO PERSISTENCE SEAMS, end to end through the BAG, against a REAL editor-state file.
+// This is exactly the path `editor_main.cpp` drives (boot restore + a per-frame publish), and
+// asserting it here is what keeps that wiring from being the only place it is ever exercised — the
+// failure mode being an editor that journals faithfully in memory and persists nothing.
+void the_journal_publishes_to_and_restores_from_the_editor_state_store()
+{
+    namespace undo = context::editor::gui::session::undo;
+
+    const std::filesystem::path root =
+        panelstest::make_temp_project("context-builtin-panels", "undo");
+
+    // ---- session 1: a checkpoint is recorded and published ----
+    {
+        shell::PanelHost host;
+        panels::BuiltinPanels bound = panels::install_builtin_panels(host);
+        CHECK(bound.undo != nullptr);
+        // Contained to this block rather than `return`ed from the whole case: an early return here
+        // would silently skip session 2 AND leak the temp project past the cleanup below.
+        if (bound.undo != nullptr)
+        {
+            shell::EditorStateStore store(root, 0);
+            store.load();
+            // Nothing recorded yet -> nothing to publish. A seam that dirtied the store every frame
+            // would put a file write in an idle editor's loop forever.
+            CHECK(!panels::publish_undo_state(bound, store, 0));
+
+            undo::FieldEdit edit;
+            edit.root_scene = "scenes/main.scene.json";
+            edit.id_path = {"cam"};
+            edit.pointer = "/components/camera/fov";
+            bound.undo->record(std::move(edit));
+
+            CHECK(panels::publish_undo_state(bound, store, 0));
+            CHECK(store.dirty());
+            CHECK(store.flush_now());
+            // The very next frame re-offers the SAME journal — which must cost nothing.
+            CHECK(!panels::publish_undo_state(bound, store, 0));
+        }
+    }
+
+    // ---- session 2: a fresh bag restores it ----
+    {
+        shell::EditorStateStore store(root, 0);
+        store.load();
+        shell::PanelHost host;
+        panels::BuiltinPanels bound = panels::install_builtin_panels(host);
+        CHECK(bound.undo != nullptr);
+        if (bound.undo != nullptr)
+        {
+            CHECK(!bound.undo->journal().can_undo()); // a fresh bag starts empty
+            CHECK(panels::restore_undo_state(bound, store.state()));
+            CHECK(bound.undo->journal().can_undo());
+            CHECK(bound.undo->journal().undo_depth() == 1u);
+        }
+    }
+
+    panelstest::cleanup(root);
 }
 
 void renders_the_hosted_panels_through_the_bridge()
@@ -305,12 +496,88 @@ void a_daemon_selection_schedules_the_inspector_fetch()
     CHECK(!bound.inspector->pending().has_value());
 }
 
+// e09c READ-YOUR-REPLAYS, at the composition root. `pump_panel_feeds` is what turns a landed replay
+// into an Inspector re-read; without it the panel keeps the pre-undo value AND the pre-undo CAS
+// token, so the human's very next edit to that field is dropped as a "concurrent writer" that is
+// really their own Ctrl+Z. Asserted through the flag's CONSUMPTION, which is observable without a
+// hydrated Inspector model: delete the pump's block and the flag is still raised afterwards.
+void the_pump_consumes_a_landed_replay_and_rearms_the_inspector()
+{
+    namespace undo = context::editor::gui::session::undo;
+
+    shell::PanelHost host;
+    panels::BuiltinPanels bound = panels::install_builtin_panels(host);
+    CHECK(bound.undo != nullptr);
+    CHECK(bound.inspector != nullptr);
+    if (bound.undo == nullptr || bound.inspector == nullptr)
+    {
+        return;
+    }
+    // An in-memory gateway in place of the wire one: what is under test here is the PUMP's reaction
+    // to a landed replay, not the wire (test_wire_override_gateway.cpp owns that).
+    const AlwaysApplies store(jnum(75.0));
+    bound.undo->bind_gateway(&store);
+
+    undo::FieldEdit edit;
+    edit.root_scene = "scenes/main.scene.json";
+    edit.id_path = {"cam"};
+    edit.pointer = "/components/camera/fov";
+    edit.before = jnum(60.0);
+    edit.after = jnum(75.0);
+    bound.undo->record(std::move(edit));
+    CHECK(bound.undo->replay_undo().ok());
+
+    Wired wired = make_wired_client();
+    panels::pump_panel_feeds(bound, *wired.client, "scenes/main.scene.json");
+    // CONSUMED by the pump — which it can only be if the pump reached the re-arm block.
+    CHECK(!bound.undo->take_replay_landed());
+
+    bound.undo->bind_gateway(nullptr);
+}
+
+// e09c — a bag with NO undo host: both persistence seams tolerate it, and neither claims to have
+// done work. Reachable in production, not merely defensive: `install_builtin_panels` DROPS the host
+// when `PanelHost::provide` refuses the id, and the host's roster is caller-supplied.
+void the_undo_persistence_seams_tolerate_a_bag_with_no_host()
+{
+    const std::filesystem::path root = panelstest::make_temp_project("context-builtin-panels", "bare");
+    panels::BuiltinPanels bare; // every member null, exactly as a hand-built bag is
+    shell::EditorStateStore store(root, 0);
+    store.load();
+    CHECK(!panels::restore_undo_state(bare, store.state()));
+    CHECK(!panels::publish_undo_state(bare, store, 0));
+    panelstest::cleanup(root);
+}
+
+// e09c — an EMPTY-but-well-formed journal document restores NOTHING, and says so. It parses
+// perfectly, so a seam answering "did the blob load?" would say `true` — and `editor_main.cpp` would
+// then announce "restored the previous session's undo history" for a history that is empty.
+void an_empty_journal_document_restores_nothing()
+{
+    shell::PanelHost host;
+    panels::BuiltinPanels bound = panels::install_builtin_panels(host);
+    CHECK(bound.undo != nullptr);
+    if (bound.undo != nullptr)
+    {
+        shell::EditorState empty_state;
+        empty_state.undo = bound.undo->to_blob(); // a real serialization of an EMPTY journal
+        CHECK(empty_state.undo.is_string() && !empty_state.undo.as_string().empty());
+        CHECK(!panels::restore_undo_state(bound, empty_state));
+        CHECK(!bound.undo->journal().can_undo());
+    }
+}
+
 } // namespace
 
 int main()
 {
     binds_every_hostable_panel_and_nothing_else();
     the_inspector_gesture_surface_is_live_but_refuses_without_a_daemon();
+    the_undo_replay_routes_through_the_shared_wire_gateway();
+    the_journal_publishes_to_and_restores_from_the_editor_state_store();
+    the_pump_consumes_a_landed_replay_and_rearms_the_inspector();
+    the_undo_persistence_seams_tolerate_a_bag_with_no_host();
+    an_empty_journal_document_restores_nothing();
     renders_the_hosted_panels_through_the_bridge();
     a_daemon_event_reaches_the_rendered_panel();
     a_daemon_selection_schedules_the_inspector_fetch();

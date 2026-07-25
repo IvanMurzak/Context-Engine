@@ -186,6 +186,64 @@ void test_an_identical_placement_does_not_dirty_the_store()
     shelltest::cleanup(root);
 }
 
+// M9 e09c — the session undo journal's blob. The Shell owns this file (03 §1 / C-F3), so the journal
+// rides it like `layout`/`panels`: an opaque payload the store round-trips without interpreting.
+void test_the_undo_blob_round_trips_and_follows_the_identical_value_rule()
+{
+    const std::string journal = R"({"redo":[],"undo":[{"edits":[]}],"version":1})";
+
+    EditorState state;
+    state.undo = Json(journal);
+    const EditorState back = EditorState::from_json(state.to_json());
+    CHECK(back.undo.is_string());
+    CHECK(back.undo.as_string() == journal);
+
+    // ABSENT is the honest "no journal yet" a fresh project restores. An EMPTY string is treated the
+    // same on the way out, so the two cannot drift into meaning different things on the way back in.
+    EditorState empty;
+    CHECK(!empty.to_json().contains("undo"));
+    CHECK(EditorState::from_json(empty.to_json()).undo.is_null());
+    EditorState blank;
+    blank.undo = Json(std::string(""));
+    CHECK(!blank.to_json().contains("undo"));
+
+    // A non-string `undo` (a hand-edited document) is NOT adopted — it degrades to "no journal"
+    // rather than travelling one hop further as garbage.
+    Json hostile = Json::object();
+    hostile.set("version", Json(kEditorStateSchemaVersion));
+    hostile.set("undo", Json::object());
+    CHECK(EditorState::from_json(hostile).undo.is_null());
+
+    // Adding the member did NOT bump the schema version: a bump would refuse every editor-state
+    // document already on a user's disk (editor_state.h states the rule).
+    CHECK(kEditorStateSchemaVersion == 1);
+
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "undo");
+    EditorStateStore store(root, 0);
+    store.load();
+    store.set_undo(Json(journal), 0);
+    CHECK(store.dirty());
+    CHECK(store.flush_now());
+    CHECK(store.write_count() == 1);
+
+    // The owner loop re-offers the SAME journal every frame — that must cost nothing.
+    store.set_undo(Json(journal), 0);
+    CHECK(!store.dirty());
+    CHECK(!store.flush_now());
+    CHECK(store.write_count() == 1);
+
+    // A journal that MOVED still lands, and reads back off real disk.
+    const std::string moved = R"({"redo":[],"undo":[],"version":1})";
+    store.set_undo(Json(moved), 0);
+    CHECK(store.dirty());
+    CHECK(store.flush_now());
+    EditorStateStore reopened(root, 0);
+    reopened.load();
+    CHECK(reopened.state().undo.as_string() == moved);
+
+    shelltest::cleanup(root);
+}
+
 void test_flush_now_ignores_the_debounce()
 {
     const fs::path root = shelltest::make_temp_project("context-shell-state", "shutdown");
@@ -518,6 +576,7 @@ int main()
     test_malformed_and_missing_documents_degrade_rather_than_refuse();
     test_writes_are_debounced();
     test_an_identical_placement_does_not_dirty_the_store();
+    test_the_undo_blob_round_trips_and_follows_the_identical_value_rule();
     test_flush_now_ignores_the_debounce();
     test_the_write_is_atomic_and_leaves_no_temp_behind();
     test_a_failed_write_stays_dirty_so_the_next_flush_retries();

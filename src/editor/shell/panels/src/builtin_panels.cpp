@@ -6,10 +6,12 @@
 #include "context/editor/gui/panels/problems/problems_panel.h"
 #include "context/editor/gui/playbar/playbar_model.h"
 #include "context/editor/gui/uitree/builtin.h"
+#include "context/editor/shell/editor_state.h" // EditorState / EditorStateStore (e09c)
 #include "context/editor/shell/panels/inspector_feed.h"
 #include "context/editor/shell/panels/problems_feed.h" // ProblemsFeed complete type (see builtin_panels.h)
 #include "context/editor/shell/panels/scenetree_feed.h"
 #include "context/editor/shell/panels/session_feed.h" // SessionFeed complete type (e08b)
+#include "context/editor/shell/panels/undo_feed.h"    // UndoFeed complete type (e09c)
 #include "context/editor/shell/panels/wire_override_gateway.h" // complete type (e09b-2)
 
 #include <cstdio>
@@ -116,6 +118,33 @@ void bind_write_client(BuiltinPanels& panels, client::Client* client)
     }
 }
 
+bool restore_undo_state(BuiltinPanels& panels, const EditorState& state)
+{
+    // A bag with no undo host (a hand-built one in a test) has nothing to restore INTO — not an
+    // error, just nothing to do.
+    if (panels.undo == nullptr)
+    {
+        return false;
+    }
+    const bool loaded = panels.undo->load_blob(state.undo);
+    // "A STEP CAME BACK", not merely "the blob parsed". A well-formed but EMPTY journal document
+    // loads perfectly and restores nothing, which for a caller (and for the human reading the boot
+    // log) is indistinguishable from a fresh project — so it answers false, exactly as an absent or
+    // corrupt blob does.
+    return loaded && (panels.undo->journal().can_undo() || panels.undo->journal().can_redo());
+}
+
+bool publish_undo_state(BuiltinPanels& panels, EditorStateStore& store, std::uint64_t now_us)
+{
+    if (panels.undo == nullptr || !panels.undo->dirty())
+    {
+        return false; // an idle journal is not re-serialized at all (see the header)
+    }
+    store.set_undo(panels.undo->to_blob(), now_us);
+    panels.undo->mark_clean();
+    return true;
+}
+
 void pump_panel_feeds(BuiltinPanels& panels, client::Client& client, const std::string& scene_path)
 {
     // Scene tree: fetch when due AND a scene is named. The claim precedes the call (header: a
@@ -130,6 +159,15 @@ void pump_panel_feeds(BuiltinPanels& panels, client::Client& client, const std::
         {
             (void)panels.scenetree->apply_result(*reply);
         }
+    }
+
+    // e09c READ-YOUR-REPLAYS (undo_feed.h § take_replay_landed for why the flag exists at all).
+    // Armed BEFORE the fetch below so the SAME frame re-reads, and PULLED here rather than pushed
+    // from the feed so the undo host holds no pointer back to the Inspector — which is declared
+    // after it and therefore destroyed first.
+    if (panels.undo != nullptr && panels.inspector != nullptr && panels.undo->take_replay_landed())
+    {
+        (void)panels.inspector->request_refresh();
     }
 
     // Inspector: fetch the pending selection. `scene_path` addresses the same root scene the tree
@@ -164,6 +202,12 @@ const std::vector<std::string>& hostable_panel_ids()
         // links nothing but the headless uitree (gui/playbar/CMakeLists.txt explains the split), so
         // binding it here adds no weight to `context_editor`'s D10-audited closure.
         gui::playbar::PlaybarModel::kContributionId,
+        // e09c: the session history surface. Rostered since e05b but UNHOSTED until now: with no
+        // provider there was no way to reach `session.undo` / `session.redo` from the renderer at
+        // all, so the journal could be neither driven nor observed (and, having no host, nothing
+        // called its to_json/load_json either). Hosting it is what turns the R-CLI-001
+        // keyboard/CLI path into a real one.
+        undo::UndoJournal::kContributionId,
     };
     return ids;
 }
@@ -296,6 +340,36 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
         {
             out.session->bind_scene_tree(&out.scenetree->panel(),
                                          gui::panels::scenetree::SceneTreePanel::kContributionId);
+        }
+    }
+
+    // --- the session undo journal (M9 e09c, design 03 §1 / 05 §7-§8, R-HUX-001) ------------------
+    // Constructed AFTER the Inspector because it needs the gateway the block above created, and
+    // bound to it: replay therefore goes out over the SAME `WireOverrideWriteGateway` a live gesture
+    // commits through — the ONE L-30 engine over the ONE write path, never a second one. An
+    // undo is not a privileged write; it can hit `cas.mismatch` exactly like a live gesture.
+    {
+        auto undo_feed =
+            std::make_unique<UndoFeed>(host, std::string(undo::UndoJournal::kContributionId));
+        undo_feed->bind_gateway(out.writes.get());
+        if (host.provide(undo::UndoJournal::kContributionId, undo_feed->make_provider()))
+        {
+            ++out.bound;
+            out.undo = std::move(undo_feed);
+        }
+        // A refused binding DROPS the host (the ProblemsFeed rule) — and with it the Inspector's
+        // checkpoint sink below, so commits are simply not journaled rather than accumulating in a
+        // journal no surface can ever replay.
+
+        // The recording loop, wired only when BOTH ends exist. The raw capture is safe by
+        // construction: both live (and die) together in this bag, and `undo` is declared BEFORE
+        // `inspector` (builtin_panels.h documents the sandwich), so the sink's target outlives the
+        // feed holding it.
+        if (out.undo != nullptr && out.inspector != nullptr)
+        {
+            UndoFeed* undo_ptr = out.undo.get();
+            out.inspector->bind_checkpoint_sink([undo_ptr](undo::FieldEdit edit)
+                                                { undo_ptr->record(std::move(edit)); });
         }
     }
 

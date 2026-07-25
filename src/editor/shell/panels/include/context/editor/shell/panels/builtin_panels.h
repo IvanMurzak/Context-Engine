@@ -13,7 +13,9 @@
 // violations by splitting the kernel-typed builders out (gui/panels/builders/, linked daemon-side);
 // this file is the seam that now hosts both.
 //
-// WHAT "HOSTABLE TODAY" MEANS. Four of the rostered panels are hostable in this build:
+// WHAT "HOSTABLE TODAY" MEANS. Six of the rostered panels are hostable in this build
+// (`hostable_panel_ids()` is the ONE enumeration — this list is prose about it, and
+// `editor-shell-test_builtin_panels` asserts the two agree):
 //
 //   * `placeholder`         — `gui/uitree/builtin.h`, in `context_gui_uitree`. Clean.
 //   * `builtin.problems`    — `context_gui_panel_problems` -> uitree + bridge. Clean.
@@ -21,6 +23,10 @@
 //                             split its kernel-typed builder out (gui/panels/builders/).
 //   * `builtin.inspector`   — `context_gui_panel_inspector` -> uitree + serializer. Clean since
 //                             e05d3 (builders split out + the boundary-clean gateway seam).
+//   * `builtin.playbar`     — `context_gui_playbar` -> uitree only. Clean since e08b split its
+//                             runtime-session driving out (gui/playbar/CMakeLists.txt).
+//   * `builtin.session.undo`— `context_gui_undo` -> the inspector panel + uitree + serializer. Clean
+//                             since e09c: every one of those was ALREADY on this target's closure.
 //
 // The rest have no provider yet and are LISTED-BUT-UNHOSTED (panel_host.h explains why that is an
 // honest state rather than a hidden one). The e05d3 pair proves the D10 split end-to-end: both
@@ -43,6 +49,16 @@ namespace context::editor::client
 // and only builtin_panels.cpp needs the complete type.
 class Client;
 } // namespace context::editor::client
+
+namespace context::editor::shell
+{
+// Forward-declared for the SAME reason (M9 e09c): the two undo-persistence seams below take the
+// Shell's editor-state store and its document by reference, and only builtin_panels.cpp needs the
+// complete types. Including `editor_state.h` here would put `render/rhi.h` + the client arbitration
+// header on the include path of every TU that hosts a panel, for two function signatures.
+class EditorStateStore;
+struct EditorState;
+} // namespace context::editor::shell
 
 namespace context::editor::shell::panels
 {
@@ -73,6 +89,10 @@ class SessionFeed;
 // `inspector::OverrideWriteGateway`, so it reaches the panel headers' include chain). Callers holding
 // only the bag re-point its daemon connection through `bind_write_client` below.
 class WireOverrideWriteGateway;
+// The M9 e09c session undo host, forward-declared for the SAME reason (undo_feed.h names
+// `inspector::OverrideWriteGateway`, so it reaches the panel headers' include chain). Callers
+// holding only the bag drive it through the two persistence seams below.
+class UndoFeed;
 // The owner bag, defined below; forward-declared so `bind_write_client` can sit beside the sibling
 // `bind_session_client` seam it mirrors rather than being separated from it by the struct.
 struct BuiltinPanels;
@@ -146,6 +166,30 @@ void bind_session_client(SessionFeed& feed, client::Client* client);
 // because the two writes seams then read identically at the call site.
 void bind_write_client(BuiltinPanels& panels, client::Client* client);
 
+// --- the M9 e09c undo-journal persistence seams (design 03 §1 / C-F3) ---------------------------
+//
+// The journal lives in this library and owns no disk; `.editor/editor-state.json` is the Shell's and
+// the Shell is its SINGLE WRITER. These two functions are the whole bridge between them, and there
+// is deliberately no third: every write of the journal to that file goes through `restore` at boot
+// and `publish` from the owner loop, both landing in `EditorStateStore::set_undo`. Keeping it to one
+// seam is what lets e09d assert the ownership split structurally rather than by inspection.
+//
+// Both take the BAG (not the feed) for the same two reasons `bind_write_client` does: `UndoFeed` is
+// only forward-declared here, and the call sites then read identically.
+
+// Adopt the persisted journal into the live one (boot / restart). Returns true when a STEP actually
+// came back — false for a fresh project, an absent blob, a well-formed but empty journal document
+// (which restores nothing, so it is a fresh project as far as any caller can tell), or a corrupt one
+// (which leaves the journal EMPTY and reports why; a corrupt session file costs the history, never
+// the boot).
+bool restore_undo_state(BuiltinPanels& panels, const EditorState& state);
+
+// Offer the journal to the store IF it has moved since the last publish. Returns true when it was
+// offered. Cheap enough to call every frame: an unmoved journal is not re-serialized at all, and the
+// store's own identical-value rule is the second backstop. The store's debounce + atomic write turn
+// a burst of edits into one crash-safe file per quiet period.
+bool publish_undo_state(BuiltinPanels& panels, EditorStateStore& store, std::uint64_t now_us);
+
 // The roster ids this build can render. Exposed so a caller (and the T1 suite) can assert what was
 // bound WITHOUT restating the list — the one enumeration lives in `install_builtin_panels`.
 [[nodiscard]] const std::vector<std::string>& hostable_panel_ids();
@@ -175,6 +219,12 @@ struct BuiltinPanels
     // tree: it IS the OverrideWriteGateway the Inspector's panel holds a raw pointer to, and a
     // gateway is contractually required to outlive its panel (inspector_panel.h).
     std::unique_ptr<WireOverrideWriteGateway> writes;
+    // The e09c session undo host. DECLARED SECOND — after `writes`, before every panel feed — because
+    // it sits between them in the lifetime order: its journal holds a raw pointer to the gateway
+    // above (so the gateway must outlive it), and the Inspector's checkpoint sink holds a raw
+    // pointer to IT (so it must outlive the Inspector). Members destroy in reverse declaration
+    // order, which makes exactly that sandwich.
+    std::unique_ptr<UndoFeed> undo;
     std::unique_ptr<ProblemsFeed> problems;
     // The e08b daemon-session feed. DECLARED BEFORE THE SCENE TREE so it is destroyed AFTER it
     // (members destroy in reverse order): it IS the SelectionGateway the Scene tree's panel writes
@@ -211,7 +261,11 @@ struct BuiltinPanels
 //     feed. An EMPTY `scene_path` is the honest no-scene state: nothing is fetched and the panel
 //     stays empty (exactly the Problems-without-a-daemon posture).
 //   * Inspector: when the Scene tree's selection left a fetch pending, issue
-//     `editor.inspect {path, idPath}` and hand the reply over.
+//     `editor.inspect {path, idPath}` and hand the reply over. Since e09c a LANDED undo/redo also
+//     arms that fetch (READ-YOUR-REPLAYS): a replay writes through the gateway directly, so the
+//     Inspector's own commit listener never fires and the panel would otherwise keep both the
+//     pre-undo value and the pre-undo CAS token — making the human's next edit to that field drop
+//     as a "concurrent writer" that is really their own Ctrl+Z (undo_feed.h § take_replay_landed).
 //
 // FAILURE POSTURE: a fetch is CLAIMED before its RPC, so a failed call (daemon gone, refused) is
 // reported to stderr and NOT retried until the next settle / selection change — an editor hammering

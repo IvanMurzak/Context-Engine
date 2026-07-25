@@ -194,6 +194,37 @@ void InspectorFeed::bind_gateway(const inspector::OverrideWriteGateway* gateway)
     gateway_bound_ = gateway != nullptr;
 }
 
+void InspectorFeed::bind_checkpoint_sink(CheckpointSink sink)
+{
+    sink_ = std::move(sink);
+}
+
+std::optional<undo::FieldEdit> InspectorFeed::snapshot_checkpoint() const
+{
+    const serializer::JsonValue* after = panel_.staged_value();
+    const serializer::JsonValue* before = panel_.staged_base_value();
+    if (after == nullptr || before == nullptr)
+    {
+        return std::nullopt; // no gesture in flight
+    }
+    const inspector::InspectorModel& model = panel_.model();
+    if (model.root_scene.empty() || panel_.staged_pointer().empty())
+    {
+        return std::nullopt; // unaddressable — see the header on why this is not recorded
+    }
+    undo::FieldEdit edit;
+    edit.root_scene = model.root_scene;
+    edit.id_path = model.id_path;
+    edit.pointer = panel_.staged_pointer();
+    // `before` is the field's value at STAGE time — the same value the L-30 engine uses as this
+    // gesture's collision base, which is exactly what an undo must restore and what a redo must find
+    // the field holding. Reusing it (rather than re-reading) is what keeps the journal's no-clobber
+    // guard and the commit's rebase-or-drop decision judging the same bytes.
+    edit.before = *before;
+    edit.after = *after;
+    return edit;
+}
+
 void InspectorFeed::on_commit(const inspector::CommitResult& result)
 {
     if (result.status == inspector::CommitResult::Status::none)
@@ -215,21 +246,28 @@ void InspectorFeed::on_commit(const inspector::CommitResult& result)
     {
         return;
     }
-    // READ-YOUR-WRITES (05 §7). The panel must observe its own commit; re-arm the pending fetch for
-    // the identity currently inspected so the next `pump_panel_feeds` re-reads `editor.inspect` and
-    // the field comes back with its new value and `overridden:true`. Without this the panel would
-    // wait for the next selection change or `derivation.settled` — i.e. it would render a value it
-    // had already successfully written as if it had not.
+    // READ-YOUR-WRITES (05 §7). The panel must observe its own commit, so the next
+    // `pump_panel_feeds` re-reads `editor.inspect` and the field comes back with its new value and
+    // `overridden:true`. Without this the panel would wait for the next selection change or
+    // `derivation.settled` — i.e. it would render a value it had already successfully written as if
+    // it had not.
+    (void)request_refresh();
+}
+
+bool InspectorFeed::request_refresh()
+{
     const std::string& identity = panel_.model().identity;
-    if (!identity.empty())
+    if (identity.empty())
     {
-        // Through the NAMED seam, not a second `pending_ = ...`: `request` is the one place that
-        // documents the replace-a-pending-fetch rule. (It replaces unconditionally, so a selection
-        // that moved between the gesture and this commit is re-armed onto the OLD identity and its
-        // fetch waits for the next pump-triggering change — narrow, and noted in the PR body.)
-        request(identity);
-        ++rereads_armed_;
+        return false; // nothing inspected — an ordinary state, not a failure
     }
+    // Through the NAMED seam, not a second `pending_ = ...`: `request` is the one place that
+    // documents the replace-a-pending-fetch rule. (It replaces unconditionally, so a selection that
+    // moved between the gesture and this call is re-armed onto the OLD identity and its fetch waits
+    // for the next pump-triggering change — narrow, and noted in the PR body.)
+    request(identity);
+    ++rereads_armed_;
+    return true;
 }
 
 void InspectorFeed::request(const std::string& identity)
@@ -307,10 +345,23 @@ PanelProvider InspectorFeed::make_provider()
                 // GESTURE END = COMMIT (L-20). Everything downstream — CAS on the model's base hash,
                 // the L-30 rebase-or-drop engine, the wire write — is InspectorPanel::commit's, and
                 // the outcome reaches `on_commit` through the listener registered in the ctor.
+                //
+                // e09c: snapshot the reversible before/after pair FIRST. `commit()` consumes the
+                // staged gesture, so the commit LISTENER — which fires inside that call — can no
+                // longer see either value; the checkpoint has to be taken here, on the near side.
+                const std::optional<undo::FieldEdit> checkpoint = snapshot_checkpoint();
                 const inspector::CommitResult result = panel_.commit();
                 if (result.status == inspector::CommitResult::Status::none)
                 {
                     return false; // nothing staged: an ordinary outcome, not a protocol fault
+                }
+                // Journal ONLY a write that actually landed (applied / rebased). A loud L-30 drop
+                // and a write-path error both left the file untouched, so there is nothing to
+                // revert — see inspector_feed.h § CheckpointSink.
+                if (result.ok() && checkpoint.has_value() && sink_)
+                {
+                    sink_(*checkpoint);
+                    ++checkpoints_sent_;
                 }
                 host_.touch(panel_id_);
                 return true;

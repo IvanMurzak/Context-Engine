@@ -39,6 +39,7 @@ import {
     type CommandOutcome,
     type CommandRegistry,
     type EditorCommandActions,
+    type SessionCommandActions,
 } from "./commands.js";
 import { EditorStateClient, LayoutPersistence } from "./editorstate.js";
 import { editorCoreInfo } from "./info.js";
@@ -107,9 +108,10 @@ export interface BootReport {
     /** How many panels PanelHost mounted. 0 when the app layer did not come up. */
     readonly panelsMounted: number;
     /**
-     * Rostered panels this build cannot host (`hosted: false`) — today Scene tree, Inspector and the
-     * six panels with no provider yet. REPORTED rather than silently skipped: "a panel is missing"
-     * must be an observable fact. e05d3 shrinks this list.
+     * Rostered panels this build cannot host (`hosted: false`) — whatever the HOST reports, not a
+     * list maintained here: this comment has already drifted twice (e05d3 hosted Scene tree and
+     * Inspector, e08b the playbar, e09c the session-undo panel). REPORTED rather than silently
+     * skipped: "a panel is missing" must be an observable fact.
      */
     readonly panelsUnavailable: readonly string[];
     /** Populated when the handshake or the app bring-up failed; empty otherwise. */
@@ -637,6 +639,16 @@ export const UI_MIRROR_ATTRIBUTE = "data-editor-uimirror";
  */
 const UI_MIRROR_SMOKE_FLAG = "ctx-smoke-uimirror";
 
+/**
+ * The Shell-hosted session-undo panel (M9 e09c) — the id `session.undo` / `session.redo` dispatch to.
+ *
+ * MIRRORS `UndoJournal::kContributionId` (undo_journal.h) and the `builtin.session.undo` roster entry
+ * (builtin_roster.cpp), exactly as `SETTINGS_PANEL_ID` mirrors its own. Exported so the T1 tier pins
+ * the spelling: a drift here does not fail any build — it silently makes Ctrl+Z dispatch to a panel
+ * that does not exist, and the only symptom is an undo that quietly answers `not dispatched`.
+ */
+export const SESSION_UNDO_PANEL_ID = "builtin.session.undo";
+
 /** How often a window polls for panels moved INTO it (move-to-N + a peer's window-close rehome). */
 const REHOME_POLL_MS = 500;
 
@@ -808,6 +820,7 @@ function startCommandLayer(
     if (roster === null) {
         return;
     }
+    const dispatchPanelCommand = makePanelDispatch(client);
     try {
         const registry = buildCommandRegistry({
             // The daemon RPC fan-in (D19) is a later seam; contract verbs are PROJECTED into the
@@ -818,26 +831,23 @@ function startCommandLayer(
                 note: `daemon RPC fan-in not wired yet (D19): ${method}`,
             }),
             editorActions: makeEditorActions(host, client, windowClient, theme),
-            // Session undo/redo binding + dispatch land here (e07c); the wire REPLAY of the journal is
-            // e09 (undo_journal.h). Executing them is an honest refusal until then.
-            sessionActions: {
-                undo: (): CommandOutcome => ({
-                    ok: false,
-                    note: "session undo replay lands in e09 (undo_journal.h)",
-                }),
-                redo: (): CommandOutcome => ({
-                    ok: false,
-                    note: "session redo replay lands in e09 (undo_journal.h)",
-                }),
-            },
+            // M9 e09c — session undo/redo are REAL now (see `makeSessionActions` below for what
+            // e07c left behind and why the wiring is a named factory). Two facts are local to THIS
+            // call site:
+            //
+            // NOT a duplicate registration: `panel.list` projects a panel's MANIFEST commands, which
+            // are empty for every built-in uitree panel (panel_host.cpp § list) — the journal's
+            // `session.undo` / `session.redo` ride its RENDER instead. So `projectPanelCommands`
+            // contributes nothing here and these two ids stay the registry's only ones, which
+            // matters because `buildCommandRegistry` THROWS on a collision, and a throw here
+            // degrades the whole palette.
+            //
+            // And `dispatched:false` is the honest outcome for all three of nothing-to-undo, a loud
+            // drop, and a refused replay — in every one the file was left exactly as it was.
+            sessionActions: makeSessionActions(dispatchPanelCommand),
             roster,
             // A panel-manifest command dispatches to its panel over the real `panel.command` bridge.
-            panelDispatch: async (panelId, commandId): Promise<CommandOutcome> => {
-                const result = await client.command(panelId, commandId, "");
-                return result !== null && result.dispatched
-                    ? { ok: true, note: `${panelId}/${commandId}` }
-                    : { ok: false, note: `${panelId}/${commandId} not dispatched` };
-            },
+            panelDispatch: dispatchPanelCommand,
         });
 
         const palette = new Palette(registry);
@@ -871,6 +881,45 @@ function startCommandLayer(
             `command layer unavailable: ${error instanceof Error ? error.message : String(error)}`,
         );
     }
+}
+
+/**
+ * The ONE dispatcher for every command that resolves to a panel — the manifest-projected ones AND
+ * (since M9 e09c) the session undo/redo pair.
+ *
+ * Shared rather than written twice so the two cannot drift into different notions of "dispatched":
+ * a panel command that reported success on a `dispatched:false` reply would make an undo that did
+ * nothing look like one that worked.
+ *
+ * Exported so the T1 tier can drive THIS function rather than a copy of it (`commands.test.ts`).
+ */
+export function makePanelDispatch(
+    client: PanelClient,
+): (panelId: string, commandId: string) => Promise<CommandOutcome> {
+    return async (panelId: string, commandId: string): Promise<CommandOutcome> => {
+        const result = await client.command(panelId, commandId, "");
+        return result !== null && result.dispatched
+            ? { ok: true, note: `${panelId}/${commandId}` }
+            : { ok: false, note: `${panelId}/${commandId} not dispatched` };
+    };
+}
+
+/**
+ * The M9 e09c session actions: undo/redo dispatched at the Shell's session-undo host.
+ *
+ * A named factory rather than an object literal at the call site, mirroring `makeEditorActions`
+ * below — and for a reason beyond symmetry. e07c left these an honest refusal ("the wire replay
+ * lands in e09") and e09c replaced it; a test that builds its OWN actions object cannot tell the
+ * two apart, so reverting to the stub would leave every TS test green. Driving this function is
+ * what makes that revert fail.
+ */
+export function makeSessionActions(
+    dispatch: (panelId: string, commandId: string) => Promise<CommandOutcome>,
+): SessionCommandActions {
+    return {
+        undo: (): Promise<CommandOutcome> => dispatch(SESSION_UNDO_PANEL_ID, "session.undo"),
+        redo: (): Promise<CommandOutcome> => dispatch(SESSION_UNDO_PANEL_ID, "session.redo"),
+    };
 }
 
 /**

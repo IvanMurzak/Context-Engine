@@ -142,7 +142,9 @@ Three Win32 decoding traps, each pinned by a test:
   asks the swapchain to reconfigure to nothing, every frame, for as long as it stays minimized.
 
 **Placement + layout persistence.** Window placement, the dock **arrangement** (Dockview's `toJSON`),
-and each panel's D6 state blob are persisted, debounced and crash-safe, to `.editor/editor-state.json`.
+each panel's D6 state blob, the e14b editor **presence marker**, and — since M9 e09c — the **session
+undo journal** are persisted,
+debounced and crash-safe, to `.editor/editor-state.json`.
 The Shell is that file's **single writer**; the daemon is the single writer of `.editor/session.json`
 (03 §1, review C-F3). One writer per file is what removes torn writes without any cross-process
 coordination. The write stages into a sibling temp file and renames it over the target, so a crash
@@ -159,6 +161,43 @@ live: debounced during interaction, a final publish on `pagehide`, and — becau
 are complete atomic files — the last one is a last-known-good a non-graceful exit leaves intact. The
 `editor.state.*` surface is `context_editor_shell/editor_state_bridge.{h,cpp}`, CEF-free and bound to
 the store in `editor_main.cpp` ahead of the browser.
+
+**Session undo (M9 e09c).** The `.editor/editor-state.json` document carries one more thing 03 §1
+assigns to the Shell: the short-horizon session **undo journal** (`gui/session/undo`, R-HUX-001 /
+L-20 / L-21). Six properties are worth stating because each is a place this could have gone wrong:
+
+- **The host is `shell/panels/undo_feed.{h,cpp}`.** Until e09c the journal's `to_json`/`load_json`
+  were called by no host at all — it recorded nothing, replayed nothing, and persisted nothing. The
+  feed records the Inspector's resolved gesture commits (through a checkpoint sink the composition
+  root wires) and hosts the `builtin.session.undo` panel, whose `session.undo` / `session.redo`
+  commands are what the palette and the e07c Ctrl+Z / Ctrl+Y keymap ultimately dispatch to.
+- **Replay is NOT a privileged path.** Undo/redo re-issue their writes through the SAME
+  `WireOverrideWriteGateway` a live gesture commits through — the daemon's `edit` RPC with raw-byte
+  CAS, the same L-30 rebase-or-drop engine. A replayed write can hit `cas.mismatch` exactly like a
+  live one, and then it is DROPPED loudly rather than restoring stale bytes over a co-writer. A
+  "restore the previous bytes" undo is precisely what R-HUX-001 forbids.
+- **Only a write that LANDED becomes a checkpoint.** A loudly-dropped commit wrote nothing, so
+  journaling it would offer a revert of an edit that never happened — which, replayed, would
+  overwrite the co-writer's value.
+- **The blob is the journal's own canonical serialization, carried as a string.** The journal's DOM
+  is `serializer::JsonValue` and the store's is `contract::Json`, whose numbers are all `double`;
+  round-tripping user data through a nested-object conversion would round it. So the ONE journal
+  serializer stays `UndoJournal::to_json` and `EditorState::undo` is its transport — no second
+  serializer, and no second file. `EditorStateStore::set_undo` is the ONE seam it reaches disk
+  through, which is what keeps the C-F3 single-writer split assertable.
+- **A landed replay re-arms the Inspector (read-your-replays).** Because the replay writes through
+  the gateway directly, `InspectorPanel::commit` never runs and the panel's own commit listener —
+  which is what normally re-arms its re-read — never fires. `pump_panel_feeds` consumes the feed's
+  `take_replay_landed` flag and arms the fetch instead. Without it the panel would keep both the
+  pre-undo value *and* the pre-undo CAS token, so the human's very next edit to that field would be
+  dropped as a "concurrent writer" that was really their own Ctrl+Z.
+
+- **A refused replay is not a drop, and is not a loss.** No daemon, or a field that cannot be read at
+  all: nothing was written and no concurrent writer was observed, so it reports `undo.read_unavailable`
+  rather than a fabricated `cas.mismatch`, and the journal **keeps** the step for the human to retry
+  once the project is reachable — the same caller contract the Inspector honours for a refused
+  gesture. Both a drop and a refusal report `dispatched:false`, because that bit is what the command
+  palette shows the human as success.
 
 ## 2. DPI
 
@@ -358,10 +397,14 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
 
 - **The roster is authoritative; the provider table is capability.** Every rostered panel is LISTED;
   one with no provider reports `hosted: false`. That is how the editor shows its whole panel set while
-  Scene tree and Inspector are still boundary-blocked, and why `panel.unknown` and `panel.not_hosted`
-  are different refusals.
-- **Hostable today**: `placeholder` (from `context_gui_uitree`) and `builtin.problems`. Two rather than
-  one deliberately — a single panel would leave panel-agnosticism resting on a claim.
+  the Viewport, Tilemap Painter and Viewport Edit panels still have no provider, and why
+  `panel.unknown` and `panel.not_hosted` are different refusals.
+- **Hostable today**: six — `placeholder` (from `context_gui_uitree`), `builtin.problems`,
+  `builtin.scene-tree` + `builtin.inspector` (e05d3), `builtin.playbar` (e08b) and
+  `builtin.session.undo` (e09c), from five different libraries. More than one deliberately — a single
+  panel would leave panel-agnosticism resting on a claim. `hostable_panel_ids()` is the one
+  enumeration, and `editor-shell-test_builtin_panels` asserts every id in it is hosted and that
+  nothing else is, so this list cannot drift into a claim the bindings do not honour.
 - **The live read path**: the Shell subscribes to the daemon's `diagnostics` + `derivation` topics
   through the SDK's `SubscriptionConsumer` and projects what arrives onto the `ProblemsPanel` model
   (`src/editor/shell/panels/src/problems_feed.cpp`). The projection is pure and unit-tested on all
@@ -391,7 +434,8 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
 | `editor-shell-test_panel_host` | The panel-agnostic surface over SYNTHETIC panels: roster projection (hosted vs listed-but-unhosted), render payload, command dispatch + the stale-command refusal, the four gesture verbs and the refusal of a fifth, the D6 round-trip and all three degrade paths, every `panel.*` binding, and hostile params on every method |
 | `editor-shell-test_editor_state_bridge` | e05d2: the layout/panels publish→store→get round-trip (incl. a restart), all three persistence triggers (debounce, `flush_now`, crash-restore), region parsing (kind tokens, negative-pixel clamp, malformed-element skip) reaching a live `InputArbiter` and routing a pointer, the empty-publish clear, the `not_ready`/`bad_params` degrade paths, and the full `editor.*` JSON-RPC binding over a real router |
 | `editor-shell-test_problems_feed` | The LIVE `diagnostics` projection without a daemon: severity/stability tokens, all three snapshot shapes, every publisher shape the topic carries, hostile/degenerate payloads, R-BRIDGE-008 promotion + settle, and the node-id -> diagnostic-identity mapping |
-| `editor-shell-test_builtin_panels` | The composition root: what binds, that Scene tree + Inspector stay listed-but-unhosted until e05d3, and a daemon event reaching a rendered panel end to end |
+| `editor-shell-test_builtin_panels` | The composition root: that all six hostable panels bind and nothing else does, the Scene tree's selection reaching the Inspector's fetch, a daemon event reaching a rendered panel end to end, and (e09c) that the undo replay left its mark on the bag's OWN wire-gateway instance, that the pump turns a landed replay into an Inspector re-read, and the two undo persistence seams against a real editor-state file |
+| `editor-shell-test_undo_feed` | e09c: the session undo host — a checkpoint recorded and replayed through the BOUND gateway, a co-writer's field DROPPED loudly on undo AND redo (R-HUX-001), a refused replay KEEPING the step while dirtying and touching nothing, the read-your-replays flag raised once then consumed, the provider's honest `dispatched` verdict, and the DoD line: the journal round-trips through a REAL `EditorStateStore` writing a REAL `.editor/editor-state.json`, survives a full teardown/rebuild, and Ctrl+Z still reverts the pre-restart edit |
 | `editor-shell-test_user_config` | e06d: the per-user config store - the total reader (absent / malformed / non-object / oversized), the merge-preserving read-modify-write (a member from a FUTURE build survives), the recents-and-theme co-existence regression, the CLOSED settable vocabulary (`config.unknown_key` / `config.bad_value` / `config.write_failed`), unique staging names, the generation watch (identical rewrite and cosmetic reformat are NOT changes), and the full `config.*` binding over a real router |
 | `editor-shell-config-writers` | e06d: the C-F14 SINGLE-WRITER source gate - exactly one TU writes `~/.context/config.json`, editor-core carries no client-side persistence API, and one module names `config.set` (`tools/check_config_writers.py`) |
 | `editor-cef-smoke-shell` | The LIVE CEF half: a real windowless browser through the real integrated pump, its `OnPaint` frames composited + presented, input round-tripped, a live resize repainted (`editor-cef-smoke` job, Windows/Linux) |

@@ -35,6 +35,12 @@
 // needs an "unreadable" channel on `FieldState` itself, which is a seam change, not a gateway one.
 // Fail-closed is the only acceptable posture on a user-data write path.
 //
+// SINCE e09c THERE IS A SECOND CALLER, and it reads FIRST: `UndoJournal::replay_edit` consults
+// `FieldState::present` before it compares anything, so on the REPLAY path an unreadable field is its
+// own refusal (`undo.read_unavailable`) and `attempt` is never reached — which closes the residual
+// above there. The GESTURE path is unchanged: it still fails closed on the `attempt` refusal, and the
+// residual still applies to it.
+//
 // READ-YOUR-WRITES (05 §7) — WHERE THE BARRIER ACTUALLY IS. The design names an `--after-generation`
 // barrier; in the shipped contract that core flag is RESERVED-but-accepted and inert
 // (`registry.cpp` make_core_flags: "reserved and accepted, replay store lands later"), so SENDING it

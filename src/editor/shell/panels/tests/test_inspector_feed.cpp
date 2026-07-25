@@ -36,6 +36,7 @@ namespace compose = context::editor::compose;
 namespace schema = context::editor::schema;
 namespace gc = context::editor::gui::contract;
 namespace serializer = context::editor::serializer;
+namespace undo = context::editor::gui::session::undo;
 using Json = context::editor::contract::Json;
 
 namespace
@@ -111,6 +112,77 @@ void seed(MapResolver& r)
     const bool oka = serializer::serialize_canonical(a, sa);
     const bool okb = serializer::serialize_canonical(b, sb);
     return oka == okb && sa == sb;
+}
+
+[[nodiscard]] std::string canonical_text(const serializer::JsonValue& value)
+{
+    std::string out;
+    return serializer::serialize_canonical(value, out) ? out : std::string("<uncanonical>");
+}
+
+[[nodiscard]] serializer::JsonValue jstring(const char* text)
+{
+    serializer::JsonValue value;
+    value.type = serializer::JsonValue::Type::string;
+    value.string_value = text;
+    return value;
+}
+
+// A gateway whose ONE outcome is scripted (M9 e09c): either the write lands, or it reports the L-30
+// `cas.mismatch` trigger and the re-read answers a value a CO-WRITER left — which is what makes the
+// engine drop rather than rebase.
+class ScriptedGateway final : public inspector::OverrideWriteGateway
+{
+public:
+    inspector::WriteAttempt attempt(const inspector::OverrideWriteRequest& request,
+                                    std::uint64_t) const override
+    {
+        inspector::WriteAttempt out;
+        if (refuse_with_cas_mismatch)
+        {
+            out.cas_mismatch = true;
+            out.code = "cas.mismatch";
+            out.message = "another writer advanced the file";
+            out.raw_hash = 200;
+            return out;
+        }
+        out.applied = true;
+        out.file = request.root_scene;
+        out.pointer = request.pointer;
+        out.raw_hash = 200;
+        return out;
+    }
+
+    inspector::FieldState read(const std::string&, const std::vector<std::string>&,
+                               const std::string&) const override
+    {
+        inspector::FieldState state;
+        state.present = true;
+        state.raw_hash = 200;
+        state.value = moved_value;
+        return state;
+    }
+
+    bool refuse_with_cas_mismatch = false;
+    serializer::JsonValue moved_value;
+};
+
+// One inspector model with a single editable `/name` field holding `current`.
+[[nodiscard]] inspector::InspectorModel one_field_model(const char* current)
+{
+    inspector::InspectorModel model;
+    model.has_entity = true;
+    model.root_scene = "root.scene.json";
+    model.id_path = {"aaaaaaaaaaaaaaa1", "ccccccccccccccc1"};
+    model.identity = "aaaaaaaaaaaaaaa1/ccccccccccccccc1";
+    inspector::InspectorField editable;
+    editable.pointer = "/name";
+    editable.label = "name";
+    editable.kind = inspector::WidgetKind::text;
+    editable.editable = true;
+    editable.value = jstring(current);
+    model.fields.push_back(editable);
+    return model;
 }
 
 // --- cases ----------------------------------------------------------------------------------------
@@ -362,6 +434,119 @@ void a_feed_without_a_gateway_exposes_no_gesture()
     CHECK(feed.rereads_armed() == 0);
 }
 
+// M9 e09c — `request_refresh` is the ONE home for "the file changed under the panel, re-read it".
+// Two callers route through it: this feed's own commit listener (read-your-writes) and, since e09c,
+// `pump_panel_feeds` after a landed undo/redo replay (read-your-replays, which `InspectorPanel::commit`
+// never runs for). Pinned here so the shared seam has coverage independent of either caller.
+void request_refresh_rearms_the_inspected_identity()
+{
+    shell::PanelHost host;
+    panels::InspectorFeed feed(host, kPanelId);
+
+    // Nothing inspected -> an ordinary false, and nothing armed. A seam that armed an EMPTY identity
+    // would send the pump fetching for no entity, once per frame, forever.
+    CHECK(!feed.request_refresh());
+    CHECK(!feed.pending().has_value());
+    CHECK(feed.rereads_armed() == 0);
+
+    feed.panel().set_model(one_field_model("Before"), 100);
+    CHECK(feed.request_refresh());
+    CHECK(feed.pending() == std::optional<std::string>("aaaaaaaaaaaaaaa1/ccccccccccccccc1"));
+    CHECK(feed.rereads_armed() == 1);
+}
+
+// --- M9 e09c: a resolved gesture commit becomes an undo checkpoint -------------------------------
+//
+// The RECORD half of the session-undo wiring, pinned at the seam that produces it. The part that is
+// easy to get wrong and impossible to notice at runtime: a checkpoint needs the gesture's BEFORE and
+// AFTER values, and `InspectorPanel::commit` CONSUMES the staged edit — so a snapshot taken from the
+// commit LISTENER (which fires inside that call) would see neither, record a null/null pair, and
+// produce an undo that silently reverts nothing. These assertions are what catch that.
+void a_resolved_commit_becomes_an_undo_checkpoint()
+{
+    shell::PanelHost host(roster_with_inspector());
+    panels::InspectorFeed feed(host, kPanelId);
+    ScriptedGateway gateway;
+    feed.bind_gateway(&gateway);
+
+    std::vector<undo::FieldEdit> captured;
+    CHECK(!feed.has_checkpoint_sink());
+    feed.bind_checkpoint_sink([&captured](undo::FieldEdit edit)
+                              { captured.push_back(std::move(edit)); });
+    CHECK(feed.has_checkpoint_sink());
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    feed.panel().set_model(one_field_model("Before"), 100);
+
+    bool dispatched = false;
+    std::string error;
+    Json params = Json::object();
+    params.set("nodeId", Json(std::string("inspector.widget./name")));
+    params.set("value", Json(std::string("\"After\"")));
+    CHECK(host.invoke(kPanelId, inspector::InspectorPanel::kEditCommand, params, dispatched, error));
+    CHECK(dispatched);
+
+    Json gesture = Json::object();
+    gesture.set("nodeId", Json(std::string("inspector.widget./name")));
+    CHECK(host.gesture(kPanelId, shell::GestureVerb::commit, gesture, dispatched, error));
+    CHECK(dispatched);
+    CHECK(feed.last_commit().status == inspector::CommitResult::Status::applied);
+
+    CHECK(feed.checkpoints_sent() == 1u);
+    CHECK(captured.size() == 1u);
+    if (!captured.empty())
+    {
+        // The L-35 addressing a replay needs — without it the checkpoint reverts nothing.
+        CHECK(captured[0].root_scene == "root.scene.json");
+        CHECK(captured[0].id_path.size() == 2u);
+        CHECK(captured[0].id_path.size() == 2u && captured[0].id_path[1] == "ccccccccccccccc1");
+        CHECK(captured[0].pointer == "/name");
+        // THE PAIR — both survived `commit()` consuming the gesture. Compared as CANONICAL bytes,
+        // the one value identity the engine recognizes (R-FILE-001), against a canonicalization of
+        // the expected value rather than a hand-written literal: `serialize_canonical` emits exactly
+        // one trailing newline, so a literal would be asserting the writer's framing, not the value.
+        CHECK(canonical_text(captured[0].before) == canonical_text(jstring("Before")));
+        CHECK(canonical_text(captured[0].after) == canonical_text(jstring("After")));
+        // …and they are genuinely DIFFERENT values: an undo that restored the value already there
+        // would pass a same-string check while reverting nothing.
+        CHECK(!canonical_equal(captured[0].before, captured[0].after));
+    }
+}
+
+// The negative half, and the one that protects the human's data: a LOUD L-30 drop wrote nothing, so
+// it must NOT become an undo step. A journal that recorded it would offer a revert of an edit that
+// never landed — which, replayed, would overwrite the co-writer's value with our stale `before`.
+void a_dropped_commit_records_no_checkpoint()
+{
+    shell::PanelHost host(roster_with_inspector());
+    panels::InspectorFeed feed(host, kPanelId);
+    ScriptedGateway gateway;
+    gateway.refuse_with_cas_mismatch = true;
+    gateway.moved_value = jstring("Someone Else"); // the co-writer's value at the SAME field path
+    feed.bind_gateway(&gateway);
+
+    std::vector<undo::FieldEdit> captured;
+    feed.bind_checkpoint_sink([&captured](undo::FieldEdit edit)
+                              { captured.push_back(std::move(edit)); });
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    feed.panel().set_model(one_field_model("Before"), 100);
+
+    bool dispatched = false;
+    std::string error;
+    Json params = Json::object();
+    params.set("nodeId", Json(std::string("inspector.widget./name")));
+    params.set("value", Json(std::string("\"After\"")));
+    CHECK(host.invoke(kPanelId, inspector::InspectorPanel::kEditCommand, params, dispatched, error));
+    Json gesture = Json::object();
+    gesture.set("nodeId", Json(std::string("inspector.widget./name")));
+    CHECK(host.gesture(kPanelId, shell::GestureVerb::commit, gesture, dispatched, error));
+    CHECK(dispatched); // the gesture RESOLVED — the drop is an outcome, not a protocol fault
+
+    CHECK(feed.last_commit().status == inspector::CommitResult::Status::dropped);
+    CHECK(feed.drops_observed() == 1u);
+    CHECK(feed.checkpoints_sent() == 0u);
+    CHECK(captured.empty());
+}
+
 void selection_fetch_mechanics()
 {
     shell::PanelHost host(roster_with_inspector());
@@ -395,8 +580,11 @@ int main()
     token_parsers_are_total();
     wire_round_trips_the_built_model();
     apply_result_adopts_the_model_and_the_cas_token();
+    request_refresh_rearms_the_inspected_identity();
     edits_stage_through_the_provider();
     a_feed_without_a_gateway_exposes_no_gesture();
+    a_resolved_commit_becomes_an_undo_checkpoint();
+    a_dropped_commit_records_no_checkpoint();
     selection_fetch_mechanics();
     PANELS_TEST_MAIN_END();
 }

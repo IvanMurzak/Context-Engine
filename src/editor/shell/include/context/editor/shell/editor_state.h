@@ -49,6 +49,13 @@ namespace context::editor::shell
 // tolerantly, exactly as before: the guard fires only on a version that is present AND wrong, never
 // on its absence, so a hand-truncated or legacy document keeps degrading to defaults rather than
 // being rejected wholesale.
+//
+// ⚠ AN ADDITIVE OPTIONAL MEMBER DOES NOT BUMP THIS. The guard is symmetric — it refuses a document
+// whose version differs in EITHER direction — so bumping for a member that older builds simply
+// ignore and newer builds default would make every already-written document on every user's disk
+// unreadable, losing exactly the layout this file exists to preserve. `presence` (e14b) and `undo`
+// (e09c) were both added at version 1 for this reason. Bump only for a change that would be
+// MISREAD under the old field meanings.
 inline constexpr int kEditorStateSchemaVersion = 1;
 
 // Where a window was, well enough to put it back: which monitor, the restored rect, and whether it
@@ -79,6 +86,21 @@ struct EditorState
     std::vector<WindowPlacement> windows;
     contract::Json layout;
     contract::Json panels;
+    // The M9 e09c SESSION UNDO JOURNAL, as an opaque blob — the third thing 03 §1 names as the
+    // Shell's to own in this file, and the one that had no home until e09c (`undo_journal.h`'s
+    // to_json/load_json were called by no host at all).
+    //
+    // WHY A STRING AND NOT A NESTED OBJECT. The journal's own DOM is `serializer::JsonValue` (the
+    // engine's authored-value type), not `contract::Json`, and the two disagree on number identity:
+    // contract::Json holds every number as a `double`, so a u64 field value that survives a canonical
+    // round-trip today would come back rounded through a nested-object conversion. The journal
+    // therefore rides here as its CANONICAL serialization (R-FILE-001, `serialize_canonical` — the
+    // engine's one value identity), and the Shell round-trips those bytes without interpreting them,
+    // exactly as it does `layout` / `panels`. That is also why this is not a second serializer: the
+    // ONE journal serializer stays `UndoJournal::to_json`, and this member is its transport.
+    //
+    // Absent / empty string == no journal, which is the honest state for a fresh project.
+    contract::Json undo;
     // The D15/C-F23 editor presence marker (e14b): set while THIS editor process holds the project,
     // cleared on clean exit. An opener (`context edit .`) reads it to decide focus-vs-spawn. Because the
     // Shell is this file's SINGLE WRITER (C-F3), the marker is written ONLY through this store — an
@@ -134,6 +156,17 @@ public:
     // Record an editor-core blob. Same identical-value rule as set_placement.
     void set_layout(contract::Json layout, std::uint64_t now_us);
     void set_panels(contract::Json panels, std::uint64_t now_us);
+
+    // Record the M9 e09c session undo journal blob (see EditorState::undo). Same identical-value
+    // rule: a journal that has not moved does NOT dirty the store, so an owner loop may re-offer it
+    // every frame for free.
+    //
+    // THIS IS THE ONE SHELL-SIDE SEAM THE JOURNAL REACHES THE FILE THROUGH (C-F3 / e09d). The journal
+    // itself lives in `context_editor_panels` and owns no disk; every write of it funnels here, into
+    // the store the Shell is the single writer of. There is deliberately no second call site and no
+    // second path — which is what lets e09d assert the single-writer split structurally rather than
+    // by inspection.
+    void set_undo(contract::Json undo, std::uint64_t now_us);
 
     // Set / clear the D15/C-F23 editor presence marker (e14b). Same identical-value rule: setting the
     // marker already stored, or clearing an already-absent one, does NOT dirty the store. The Shell

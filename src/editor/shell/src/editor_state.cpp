@@ -165,6 +165,13 @@ Json EditorState::to_json() const
     doc.set("windows", array);
     doc.set("layout", layout.is_null() ? Json::object() : layout);
     doc.set("panels", panels.is_null() ? Json::object() : panels);
+    // The e09c session undo journal, as its canonical serialization (see the header). Emitted ONLY
+    // when there is one: an empty key would be indistinguishable from an empty journal for a reader,
+    // and the absence IS the honest "nothing recorded yet" a fresh project restores.
+    if (undo.is_string() && !undo.as_string().empty())
+    {
+        doc.set("undo", undo);
+    }
     // The e14b presence marker: emitted ONLY while an editor holds the project. Its ABSENCE from the
     // document is the honest "no editor present" an opener reads, so a cleared marker drops the key
     // entirely rather than writing an empty object.
@@ -218,6 +225,14 @@ EditorState EditorState::from_json(const Json& json, std::string* schema_diagnos
     }
     state.layout = json.at("layout");
     state.panels = json.at("panels");
+    // e09c: `at()` is total (null when absent). A non-string `undo` — a hand-edited object, say — is
+    // NOT adopted: the loader that consumes it (undo_feed.h) refuses a non-string blob anyway, and
+    // keeping the null here means a corrupt member degrades to "no journal" rather than travelling
+    // one hop further as garbage.
+    if (json.at("undo").is_string())
+    {
+        state.undo = json.at("undo");
+    }
     state.presence = client::PresenceMarker::from_json(json.at("presence"));
     return state;
 }
@@ -311,6 +326,19 @@ void EditorStateStore::set_panels(Json panels, std::uint64_t now_us)
         return;
     }
     state_.panels = std::move(panels);
+    mark_dirty(now_us);
+}
+
+void EditorStateStore::set_undo(Json undo, std::uint64_t now_us)
+{
+    // The ONE seam the journal reaches this file through (see the header). `dump()` comparison, like
+    // set_layout/set_panels: the blob is a canonical string, so identical journals compare equal and
+    // a per-frame re-offer costs nothing.
+    if (state_.undo.dump() == undo.dump())
+    {
+        return;
+    }
+    state_.undo = std::move(undo);
     mark_dirty(now_us);
 }
 
