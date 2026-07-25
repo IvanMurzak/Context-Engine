@@ -77,10 +77,40 @@ deterministic ctest instead of something only a human at a real window can obser
 
 **Per-OS backends.** e04 shipped Windows (`RegisterClassExW`/`CreateWindowExW` + WndProc,
 per-monitor-v2 DPI); **e12a** added Linux (`XCreateWindow` + the Xlib event pump, EWMH placement and
-activation, `Xft.dpi`). macOS (NSWindow/NSView) is **e12b's**, and that remaining gap is REPORTED,
-not silent: `make_window_backend` returns a selection carrying a diagnostic naming e12b, mirroring
-how e03's `make_present_blitter` reports its own missing platforms. A shell that quietly opened no
-window would look identical to one that opened an invisible one.
+activation, `Xft.dpi`); **e12b** added macOS (`NSWindow` + a `CAMetalLayer`-backed `NSView`, the
+`nextEventMatchingMask:` pump, `backingScaleFactor` DPI). All three v1 platforms now have a real
+backend, so `make_window_backend`'s remaining diagnostics report a FAILED creation — no display, no
+GUI session, a refused window — rather than a platform nobody implemented. A shell that quietly
+opened no window would look identical to one that opened an invisible one.
+
+The macOS backend is **CEF-FREE** (e12b's scope): the `.app` bundle, the three per-process-type
+helper bundles and the runtime-loaded framework a CEF browser needs there are **e12c's**, so
+`context_editor` on macOS still builds without a browser in it. Four Cocoa shapes have no Win32 or
+X11 analogue and are therefore decoded by PURE functions in `window.cpp`, executed by
+`editor-shell-test_window` on all three legs — which matters more here than anywhere else in this
+document, because no CI job runs a windowed macOS test at all:
+
+- **The y axis points UP and coordinates are POINTS.** `ns_view_point_to_physical` flips against the
+  VIEW height (not the window's — they differ by the titlebar) and then scales by the backing factor.
+  A missing flip mirrors the UI; a missing scale is invisible at 1x and halves every coordinate on a
+  Retina display.
+- **A modifier key produces no key-down/up at all.** It arrives as `NSEventTypeFlagsChanged`, which
+  says WHICH key moved but not which way; the direction is recovered by diffing the mask. Cocoa's
+  plain mask carries no side, so a second key of the same pair is genuinely unobservable and is
+  reported as nothing rather than as a keydown with no matching keyup.
+- **The virtual key codes are POSITIONAL** — `kVK_ANSI_A` is 0x00 and `kVK_ANSI_S` is 0x01, the
+  physical ASDF row — and `kVK_Delete` is BACKSPACE. `ns_key_code_to_windows_key_code` is a table for
+  that reason, and its traps are the ones the test asserts.
+- **Command is META and Option is ALT.** Option is also a TEXT modifier there (Option+e begins an
+  accent), so the character event is suppressed under Command/Control and deliberately NOT under
+  Option — Windows never needed that rule, because Ctrl+S already produces an uninsertable control
+  code in its `WM_CHAR`.
+
+Window-level facts (resize, move, backing-scale change) are not NSEvents at all but delegate
+callbacks, so the backend POLLS geometry once per pump and diffs it through
+`translate_ns_window_geometry` — the Cocoa counterpart of the X11 ConfigureNotify comparison, and
+pure for the same reason. It compares PHYSICAL pixels rather than points, because a window dragged
+onto a Retina display keeps its point size and doubles its backbuffer.
 
 `make_window_backend` itself lives in the PORTABLE `window.cpp`, not in either platform file. It used
 to sit in `win32_window.cpp`, whose `#else` branch was the honest gap report for both other OSes —
@@ -593,8 +623,20 @@ Named so the gaps are visible rather than assumed:
   so `ShellEventKind::dpi_changed` is unreachable on X11 and a scaling change made while the editor
   is open does not re-inform `input_.set_dpi` / the browser / the compositor until restart. The Win32
   backend does emit it (`WM_DPICHANGED`). Post-e12a.
-- **No macOS window backend** — e12b. `make_window_backend` reports the gap; the app degrades to the
-  honest offscreen backend.
+- ~~**No macOS window backend.**~~ Landed by **e12b**: `cocoa_window.mm` (NSWindow + a
+  `CAMetalLayer`-backed NSView), the pure `translate_ns_event` / `translate_ns_window_geometry`
+  decoders, and the `CALayer.contents` CPU present blitter. What e12b did NOT bring is a live
+  windowed macOS PROOF — the `.app` + helper bundles a CEF smoke needs there are **e12c's**, so the
+  `build (macos-latest)` leg compiles and links the backend and executes the pure decoders, and the
+  ONE place `-[NSWindow initWithContentRect:]` is ever called automatically is
+  `editor-shell-test_window`'s selection assertion (which accepts either outcome, since a runner
+  commonly has no GUI session). Everything downstream of that call — that a window APPEARS, that a
+  presented frame is VISIBLE — rests on e12c.
+- **macOS `WindowPlacement` is in Cocoa POINTS with a bottom-left screen origin**, where the Win32
+  and X11 backends record physical pixels with a top-left one. Deliberate: the document is
+  per-machine session state written and read by one backend, so points round-trip exactly through
+  `apply_placement`, and a conversion would need a screen height that makes the stored value wrong
+  the moment the display arrangement changes. Nothing compares a placement across platforms.
 - **No native viewport consumer.** Region arbitration routes to the native path, but camera controls,
   picking and gizmo gestures over the bridge arrive with **e11**. Viewport layers are rect slots with
   no live content yet.

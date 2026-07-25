@@ -1,14 +1,17 @@
-// The portable half of the window seam: the headless backend, the pure Win32 and X11 event
+// The portable half of the window seam: the headless backend, the pure Win32, X11 and Cocoa event
 // decoders, and the platform CHOICE (make_window_backend). See window.h for why the decoding lives
-// here rather than inside win32_window.cpp / x11_window.cpp.
+// here rather than inside win32_window.cpp / x11_window.cpp / cocoa_window.mm.
 //
 // make_window_backend moved here in e12a. It used to live in win32_window.cpp, whose `#else` branch
 // was the honest "no backend on this platform yet" report for BOTH other OSes. With a second real
 // backend that shape stops working: the choice belongs to neither platform file, and leaving it in
 // one of them would mean the Linux build's selection logic sat inside a file that is entirely
-// `#if defined(_WIN32)`.
+// `#if defined(_WIN32)`. e12b added the third arm, and with it the last of that `#else`.
 
 #include "context/editor/shell/window.h"
+
+#include <algorithm>
+#include <cmath>
 
 namespace context::editor::shell
 {
@@ -811,6 +814,459 @@ DpiScale x11_screen_dpi(std::int32_t pixels, std::int32_t millimetres)
     return make_dpi_scale(static_cast<std::uint32_t>(derived));
 }
 
+// ------------------------------------------------------------------- Cocoa/NSEvent event decoding
+
+namespace
+{
+
+// Round-half-AWAY-from-zero, and NaN/inf safe. `static_cast<int>` truncates toward zero, so a
+// pointer at -0.6 physical pixels would land on 0 while +0.6 lands on 0 too — asymmetric rounding
+// that shifts the whole coordinate space by half a pixel across the origin. The clamp is not
+// paranoia: a Cocoa geometry read during a window teardown can legitimately be inf, and
+// `static_cast<std::int32_t>` of an out-of-range double is UNDEFINED behaviour (a real UBSan finding
+// on the sanitize legs, not a theoretical one).
+[[nodiscard]] std::int32_t ns_round_to_int(double value)
+{
+    if (!std::isfinite(value))
+    {
+        return 0;
+    }
+    const double clamped = std::min(std::max(value, -1.0e9), 1.0e9);
+    return static_cast<std::int32_t>(clamped < 0.0 ? -std::floor(-clamped + 0.5)
+                                                   : std::floor(clamped + 0.5));
+}
+
+// A Cocoa POINT extent -> physical pixels. Zero for anything not strictly positive, which also
+// catches NaN (every comparison against a NaN is false, so the `!(x > 0)` spelling is deliberate —
+// `x <= 0` would let a NaN through).
+[[nodiscard]] std::uint32_t ns_extent_to_physical(double points, DpiScale dpi)
+{
+    if (!(points > 0.0) || !std::isfinite(points))
+    {
+        return 0u;
+    }
+    const std::int32_t scaled = ns_round_to_int(points * static_cast<double>(dpi.factor()));
+    return scaled <= 0 ? 0u : static_cast<std::uint32_t>(scaled);
+}
+
+[[nodiscard]] Modifiers make_ns_modifiers(std::uint64_t flags, std::uint32_t pressed_buttons)
+{
+    Modifiers modifiers;
+    modifiers.shift = (flags & kNsModifierShift) != 0;
+    modifiers.control = (flags & kNsModifierControl) != 0;
+    // Option IS Alt and Command IS Meta. Mapping Command onto `control` — the shape a Windows-first
+    // port reaches for, because Cmd is where Ctrl sits on the other two platforms — makes every
+    // Cmd-shortcut in the editor arrive at the browser as a Ctrl-shortcut.
+    modifiers.alt = (flags & kNsModifierOption) != 0;
+    modifiers.meta = (flags & kNsModifierCommand) != 0;
+    modifiers.left_button_down = (pressed_buttons & kNsPressedButtonLeft) != 0;
+    modifiers.middle_button_down = (pressed_buttons & kNsPressedButtonMiddle) != 0;
+    modifiers.right_button_down = (pressed_buttons & kNsPressedButtonRight) != 0;
+    return modifiers;
+}
+
+// The modifier flag a FlagsChanged key code toggles, or 0 for a key whose flag the Shell does not
+// track. Both the left and right key of a pair map to the SAME flag — Cocoa's plain mask has no
+// side, which is what the "no transition" rule in translate_ns_event is about.
+[[nodiscard]] std::uint64_t ns_modifier_flag_for_key_code(std::uint32_t key_code)
+{
+    switch (key_code)
+    {
+    case kNsVkShift:
+    case kNsVkRightShift:
+        return kNsModifierShift;
+    case kNsVkControl:
+    case kNsVkRightControl:
+        return kNsModifierControl;
+    case kNsVkOption:
+    case kNsVkRightOption:
+        return kNsModifierOption;
+    case kNsVkCommand:
+    case kNsVkRightCommand:
+        return kNsModifierCommand;
+    case kNsVkCapsLock:
+        return kNsModifierCapsLock;
+    case kNsVkFunction:
+        return kNsModifierFunction;
+    default:
+        return 0;
+    }
+}
+
+// One normalized pointer sample from an NSEvent, with the flip + scale already applied.
+[[nodiscard]] ShellEvent make_ns_pointer(PointerAction action, MouseButton button,
+                                          const NsEvent& event, const NsViewGeometry& view)
+{
+    ShellEvent shell_event;
+    shell_event.kind = ShellEventKind::pointer;
+    shell_event.pointer.action = action;
+    shell_event.pointer.button = button;
+    shell_event.pointer.position =
+        ns_view_point_to_physical(event.location_x, event.location_y, view);
+    shell_event.pointer.modifiers =
+        make_ns_modifiers(event.modifier_flags, event.pressed_mouse_buttons);
+    // Cocoa COUNTS clicks for us — unlike Windows, which sends a distinct WM_*BUTTONDBLCLK message,
+    // and unlike X11, which counts nothing at all. A clickCount of 0 arrives on a drag that outlived
+    // its press, and forwarding it would tell CEF "zero clicks", so it floors at 1.
+    shell_event.pointer.click_count = event.click_count > 0 ? event.click_count : 1;
+    return shell_event;
+}
+
+} // namespace
+
+DpiScale ns_dpi_from_backing_scale(double backing_scale)
+{
+    if (!std::isfinite(backing_scale) || !(backing_scale > 0.0))
+    {
+        // A window not yet on a screen reports 0; a torn-down one can report NaN. Neither is a
+        // scale, and multiplying the whole layout by either is how a UI collapses to nothing.
+        return DpiScale{kReferenceDpi};
+    }
+    const std::int32_t dpi =
+        ns_round_to_int(backing_scale * static_cast<double>(kReferenceDpi));
+    if (dpi <= 0)
+    {
+        // TWO REGIMES, deliberately, and the boundary is "did this round to a DPI at all". A scale
+        // that is merely implausible (0.4) still names a DPI, so it is CLAMPED into the supported
+        // band by make_dpi_scale below — that clamp exists precisely to keep a hostile value from
+        // allocating an impossible backbuffer. A scale that rounds to ZERO dpi (1e-3) names no
+        // display at all, which is the same class as the NaN and the 0 handled above, and is
+        // REFUSED to 1x rather than clamped: clamping it would report a 0.5x display that is not
+        // there, where refusing reports the honest "this is not a scale".
+        return DpiScale{kReferenceDpi};
+    }
+    // make_dpi_scale clamps whatever survives into kMinDpi..kMaxDpi.
+    return make_dpi_scale(static_cast<std::uint32_t>(dpi));
+}
+
+PointI ns_view_point_to_physical(double x_points, double y_points, const NsViewGeometry& view)
+{
+    const double factor = static_cast<double>(view.dpi.factor());
+    // THE FLIP. Cocoa's origin is the BOTTOM-left of the view; the region map, CEF and both sibling
+    // backends speak TOP-left. Done BEFORE the scale, against the height in POINTS, because that is
+    // the space the height is expressed in — flipping a scaled y against an unscaled height is the
+    // shape that looks right at 1x and mirrors the pointer on a Retina display.
+    const double flipped_y = view.height_points - y_points;
+    return PointI{ns_round_to_int(x_points * factor), ns_round_to_int(flipped_y * factor)};
+}
+
+std::int32_t ns_key_code_to_windows_key_code(std::uint32_t key_code)
+{
+    // A TABLE, not arithmetic. macOS key codes are POSITIONAL (0x00 is `A`, 0x01 is `S`, 0x06 is
+    // `Z` — the physical ASDF row), so there is no run to index into for the letters, the digits are
+    // transposed at 5/6, and the function keys are scattered across two ranges.
+    switch (key_code)
+    {
+    // --- letters, in macOS key-code order (see above: this order is the KEYBOARD's, not the
+    // alphabet's) -----------------------------------------------------------------------------
+    case kNsVkAnsiA: return 'A';
+    case kNsVkAnsiS: return 'S';
+    case 0x02: return 'D';
+    case 0x03: return 'F';
+    case 0x04: return 'H';
+    case 0x05: return 'G';
+    case kNsVkAnsiZ: return 'Z';
+    case 0x07: return 'X';
+    case 0x08: return 'C';
+    case 0x09: return 'V';
+    case 0x0B: return 'B';
+    case 0x0C: return 'Q';
+    case 0x0D: return 'W';
+    case 0x0E: return 'E';
+    case 0x0F: return 'R';
+    case 0x10: return 'Y';
+    case 0x11: return 'T';
+    case 0x1F: return 'O';
+    case 0x20: return 'U';
+    case 0x22: return 'I';
+    case 0x23: return 'P';
+    case 0x25: return 'L';
+    case 0x26: return 'J';
+    case 0x28: return 'K';
+    case 0x2D: return 'N';
+    case 0x2E: return 'M';
+    // --- digit row. NOT monotonic: 6 (0x16) comes BEFORE 5 (0x17). ------------------------------
+    case 0x12: return '1';
+    case 0x13: return '2';
+    case 0x14: return '3';
+    case 0x15: return '4';
+    case kNsVkAnsi6: return '6';
+    case kNsVkAnsi5: return '5';
+    case 0x19: return '9';
+    case 0x1A: return '7';
+    case 0x1C: return '8';
+    case 0x1D: return '0';
+    // --- punctuation -> the VK_OEM_* codes, which are NOT the ASCII values ------------------------
+    case 0x18: return kVkOemPlus;   // = +
+    case 0x1B: return kVkOemMinus;  // - _
+    case 0x1E: return kVkOem6;      // ] }
+    case 0x21: return kVkOem4;      // [ {
+    case 0x27: return kVkOem7;      // ' "
+    case 0x29: return kVkOem1;      // ; :
+    case 0x2A: return kVkOem5;      // backslash |
+    case 0x2B: return kVkOemComma;  // , <
+    case 0x2C: return kVkOem2;      // / ?
+    case 0x2F: return kVkOemPeriod; // . >
+    case 0x32: return kVkOem3;      // ` ~
+    // --- editing + navigation --------------------------------------------------------------------
+    case kNsVkReturn: return kVkReturn;
+    case kNsVkTab: return kVkTab;
+    case kNsVkSpace: return kVkSpace;
+    // kVK_Delete is the key engraved "delete" ABOVE Return, and it BACKSPACES. VK_DELETE is the
+    // navigation-cluster key, kVK_ForwardDelete. Reading the names the other way round makes
+    // Backspace delete forwards in every text field of the editor.
+    case kNsVkDelete: return kVkBack;
+    case kNsVkForwardDelete: return kVkDelete;
+    case kNsVkEscape: return kVkEscape;
+    case 0x72: return kVkInsert; // kVK_Help occupies the Insert position on an Apple keyboard
+    case 0x73: return kVkHome;
+    case 0x74: return kVkPageUp;
+    case 0x77: return kVkEnd;
+    case 0x79: return kVkPageDown;
+    case kNsVkLeftArrow: return kVkLeft;
+    case kNsVkRightArrow: return kVkRight;
+    case kNsVkDownArrow: return kVkDown;
+    case kNsVkUpArrow: return kVkUp;
+    // --- modifiers. Command is META (VK_LWIN/VK_RWIN) and Option is ALT (VK_MENU); neither is
+    // VK_CONTROL, however much the keycap positions suggest otherwise. --------------------------
+    case kNsVkShift:
+    case kNsVkRightShift: return kVkShift;
+    case kNsVkControl:
+    case kNsVkRightControl: return kVkControl;
+    case kNsVkOption:
+    case kNsVkRightOption: return kVkMenu;
+    case kNsVkCommand: return kVkLwin;
+    case kNsVkRightCommand: return kVkRwin;
+    case kNsVkCapsLock: return kVkCapital;
+    // --- keypad. Its digits are their OWN VK codes; folding them onto the row digits makes a
+    // keypad-specific binding indistinguishable from the row one. AND the keypad codes are
+    // themselves out of order — 8 is 0x5B and 9 is 0x5C, past F20 at 0x5A. -----------------------
+    case kNsVkKeypad0: return kVkNumpad0 + 0;
+    case 0x53: return kVkNumpad0 + 1;
+    case 0x54: return kVkNumpad0 + 2;
+    case 0x55: return kVkNumpad0 + 3;
+    case 0x56: return kVkNumpad0 + 4;
+    case 0x57: return kVkNumpad0 + 5;
+    case 0x58: return kVkNumpad0 + 6;
+    case 0x59: return kVkNumpad0 + 7;
+    case 0x5B: return kVkNumpad0 + 8;
+    case 0x5C: return kVkNumpad0 + 9;
+    case 0x41: return kVkDecimal;
+    case 0x43: return kVkMultiply;
+    case 0x45: return kVkAdd;
+    case 0x4B: return kVkDivide;
+    case 0x4E: return kVkSubtract;
+    case 0x4C: return kVkReturn; // the keypad Enter, exactly as X11 folds XK_KP_Enter
+    // --- function keys. Two scattered ranges, deliberately spelled one per line: F1 is 0x7A while
+    // F5 is 0x60, so no arithmetic covers them. ---------------------------------------------------
+    case kNsVkF1: return kVkF1 + 0;
+    case 0x78: return kVkF1 + 1;
+    case 0x63: return kVkF1 + 2;
+    case 0x76: return kVkF1 + 3;
+    case kNsVkF5: return kVkF1 + 4;
+    case 0x61: return kVkF1 + 5;
+    case 0x62: return kVkF1 + 6;
+    case 0x64: return kVkF1 + 7;
+    case 0x65: return kVkF1 + 8;
+    case 0x6D: return kVkF1 + 9;
+    case 0x67: return kVkF1 + 10;
+    case 0x6F: return kVkF1 + 11;
+    case 0x69: return kVkF1 + 12;
+    case 0x6B: return kVkF1 + 13;
+    case 0x71: return kVkF1 + 14;
+    case 0x6A: return kVkF1 + 15;
+    case 0x40: return kVkF1 + 16;
+    case 0x4F: return kVkF1 + 17;
+    case 0x50: return kVkF1 + 18;
+    case 0x5A: return kVkF1 + 19;
+    default:
+        // No VK equivalent (the JIS-only keys, the media keys, kVK_Function). Honest 0 rather than a
+        // guess: a wrong code is a key that fires the WRONG command, which is worse than none.
+        return 0;
+    }
+}
+
+ShellEventBatch translate_ns_event(const NsEvent& event, const NsViewGeometry& view)
+{
+    ShellEventBatch batch;
+    switch (event.type)
+    {
+    case kNsMouseMoved:
+    case kNsLeftMouseDragged:
+    case kNsRightMouseDragged:
+    case kNsOtherMouseDragged:
+        batch.push(make_ns_pointer(PointerAction::move, MouseButton::none, event, view));
+        return batch;
+    case kNsLeftMouseDown:
+        batch.push(make_ns_pointer(PointerAction::down, MouseButton::left, event, view));
+        return batch;
+    case kNsLeftMouseUp:
+        batch.push(make_ns_pointer(PointerAction::up, MouseButton::left, event, view));
+        return batch;
+    case kNsRightMouseDown:
+        batch.push(make_ns_pointer(PointerAction::down, MouseButton::right, event, view));
+        return batch;
+    case kNsRightMouseUp:
+        batch.push(make_ns_pointer(PointerAction::up, MouseButton::right, event, view));
+        return batch;
+    case kNsOtherMouseDown:
+    case kNsOtherMouseUp:
+    {
+        if (event.button_number != kNsOtherButtonMiddle)
+        {
+            // A thumb (back/forward) or higher button. Dropped rather than routed as a nameless
+            // click — the same choice the X11 decoder makes for buttons 8/9.
+            return batch;
+        }
+        batch.push(make_ns_pointer(event.type == kNsOtherMouseDown ? PointerAction::down
+                                                                   : PointerAction::up,
+                                   MouseButton::middle, event, view));
+        return batch;
+    }
+    case kNsMouseExited:
+    {
+        ShellEvent leave;
+        leave.kind = ShellEventKind::pointer;
+        leave.pointer.action = PointerAction::leave;
+        leave.pointer.modifiers =
+            make_ns_modifiers(event.modifier_flags, event.pressed_mouse_buttons);
+        batch.push(leave);
+        return batch;
+    }
+    case kNsScrollWheel:
+    {
+        ShellEvent wheel = make_ns_pointer(PointerAction::wheel, MouseButton::none, event, view);
+        // A PRECISE delta (trackpad, or a high-resolution wheel) is already a distance in POINTS, so
+        // it is scaled to physical pixels like every other coordinate on this seam. A LINE delta is
+        // a notch count, and one notch is kWheelDelta in the convention the Win32 and X11 decoders
+        // already hand the browser. Multiplying a precise delta by 120 instead is the mistake that
+        // makes a gentle two-finger swipe jump a hundred screens.
+        const double scale = event.has_precise_scrolling_deltas
+                                 ? static_cast<double>(view.dpi.factor())
+                                 : static_cast<double>(kNsLinesToWheelDelta);
+        wheel.pointer.wheel_delta_x = ns_round_to_int(event.scrolling_delta_x * scale);
+        wheel.pointer.wheel_delta_y = ns_round_to_int(event.scrolling_delta_y * scale);
+        if (wheel.pointer.wheel_delta_x == 0 && wheel.pointer.wheel_delta_y == 0)
+        {
+            // A momentum tail decays to sub-pixel deltas that round to nothing. Forwarding them is a
+            // browser wheel event per frame that scrolls zero pixels, for as long as the tail runs.
+            return batch;
+        }
+        batch.push(wheel);
+        return batch;
+    }
+    case kNsKeyDown:
+    case kNsKeyUp:
+    {
+        ShellEvent key;
+        key.kind = ShellEventKind::key;
+        key.key.action =
+            event.type == kNsKeyDown ? KeyAction::raw_key_down : KeyAction::key_up;
+        key.key.windows_key_code = ns_key_code_to_windows_key_code(event.key_code);
+        // CEF's macOS native_key_code IS the NSEvent keyCode.
+        key.key.native_key_code = static_cast<std::int32_t>(event.key_code);
+        key.key.modifiers = make_ns_modifiers(event.modifier_flags, event.pressed_mouse_buttons);
+        // is_system_key is documented by CEF as Windows-only (the WM_SYSKEY* distinction), so it
+        // stays false here rather than being guessed from the Command modifier.
+        key.key.is_system_key = false;
+        batch.push(key);
+
+        // Windows splits the character into its own WM_CHAR; Cocoa does not, so the SECOND event is
+        // synthesized here — the same shape the X11 decoder takes.
+        //
+        // ⚠ COMMAND AND CONTROL SUPPRESS IT, OPTION DOES NOT. -[NSEvent characters] answers "s" for
+        // Cmd+S, so forwarding it unconditionally TYPES an `s` into the focused text field every
+        // time the user saves. Windows never had this problem: Ctrl+S produces a WM_CHAR carrying
+        // the control code 0x13, which no field inserts. Option is the opposite case and must NOT be
+        // suppressed — on macOS it is a TEXT modifier (Option+e begins an accent, Option+2 types a
+        // trademark sign), so suppressing it silently disables dead keys and half the symbol set.
+        const bool command_or_control =
+            (event.modifier_flags & (kNsModifierCommand | kNsModifierControl)) != 0;
+        if (event.type == kNsKeyDown && event.text != 0 && !command_or_control)
+        {
+            ShellEvent character = key;
+            character.key.action = KeyAction::character;
+            character.key.character = event.text;
+            batch.push(character);
+        }
+        return batch;
+    }
+    case kNsFlagsChanged:
+    {
+        // A modifier key produces NO KeyDown/KeyUp on macOS — it arrives here, saying WHICH key
+        // moved but not which WAY. The direction is recovered by diffing the mask.
+        const std::uint64_t flag = ns_modifier_flag_for_key_code(event.key_code);
+        if (flag == 0)
+        {
+            return batch;
+        }
+        const bool now_down = (event.modifier_flags & flag) != 0;
+        const bool was_down = (view.previous_modifier_flags & flag) != 0;
+        if (now_down == was_down)
+        {
+            // No transition of the PAIR. Cocoa's plain modifier mask has no side, so pressing the
+            // right Shift while the left one is already held is genuinely not observable here —
+            // distinguishing them needs the device-dependent bits, which the Shell does not read.
+            // Reporting an event anyway would hand the browser a keydown with no matching keyup.
+            // CAPS LOCK rides the same rule and is a LOCK: its flag follows the toggle state, so a
+            // press reports down, the release reports nothing, and the NEXT press reports up.
+            return batch;
+        }
+        ShellEvent key;
+        key.kind = ShellEventKind::key;
+        key.key.action = now_down ? KeyAction::raw_key_down : KeyAction::key_up;
+        key.key.windows_key_code = ns_key_code_to_windows_key_code(event.key_code);
+        key.key.native_key_code = static_cast<std::int32_t>(event.key_code);
+        key.key.modifiers = make_ns_modifiers(event.modifier_flags, event.pressed_mouse_buttons);
+        batch.push(key);
+        return batch;
+    }
+    default:
+        return batch;
+    }
+}
+
+ShellEventBatch translate_ns_window_geometry(const NsWindowGeometry& previous,
+                                              const NsWindowGeometry& current)
+{
+    ShellEventBatch batch;
+
+    // Compared in PHYSICAL PIXELS, not in points: a window dragged from a 1x to a 2x display keeps
+    // its point size and doubles its backbuffer, so a points-only comparison reports no resize on
+    // exactly the transition that needs one most. Integers, so no float equality is involved.
+    const render::Extent2D previous_size{
+        ns_extent_to_physical(previous.width_points, previous.dpi),
+        ns_extent_to_physical(previous.height_points, previous.dpi)};
+    const render::Extent2D size{ns_extent_to_physical(current.width_points, current.dpi),
+                                ns_extent_to_physical(current.height_points, current.dpi)};
+
+    if (!render::is_empty(size) &&
+        (size.width != previous_size.width || size.height != previous_size.height))
+    {
+        ShellEvent resize;
+        resize.kind = ShellEventKind::resize;
+        resize.size = size;
+        batch.push(resize);
+    }
+    if (current.x != previous.x || current.y != previous.y)
+    {
+        ShellEvent moved;
+        moved.kind = ShellEventKind::moved;
+        moved.position = PointI{current.x, current.y};
+        batch.push(moved);
+    }
+    if (current.dpi != previous.dpi)
+    {
+        ShellEvent dpi_changed;
+        dpi_changed.kind = ShellEventKind::dpi_changed;
+        dpi_changed.dpi = current.dpi;
+        batch.push(dpi_changed);
+    }
+    // A minimized/zero-sized window reports 0x0 every step, exactly as WM_SIZE's minimize carve-out
+    // does; the guard above drops the resize while still letting a move or a scale change through.
+    return batch;
+}
+
 // ------------------------------------------------------------------------------ backend selection
 
 WindowBackendSelection make_window_backend(const WindowDesc& desc)
@@ -830,13 +1286,22 @@ WindowBackendSelection make_window_backend(const WindowDesc& desc)
     {
         selection.diagnostic = "the Linux X11 window backend could not create a window: " + error;
     }
+#elif defined(__APPLE__)
+    selection.backend = make_cocoa_window_backend(desc, error);
+    if (selection.backend == nullptr)
+    {
+        selection.diagnostic = "the macOS Cocoa window backend could not create a window: " + error;
+    }
 #else
+    // Not "nobody has written this one yet" — all three v1 platforms have a backend since e12b.
+    // This arm is what a FOURTH platform (a BSD, a future Wayland-only target) would land on, and it
+    // says so rather than naming a task that has shipped.
     (void)desc;
     (void)error;
     selection.diagnostic =
-        "no native window backend on this platform: the macOS NSWindow/NSView backend lands with "
-        "e12b (design 03 §1). The Shell runs headless here; use HeadlessWindowBackend explicitly to "
-        "make that choice visible.";
+        "no native window backend for this platform: the Shell ships Windows, Linux (X11/XWayland, "
+        "D21) and macOS backends. The Shell runs headless here; use HeadlessWindowBackend explicitly "
+        "to make that choice visible.";
 #endif
     return selection;
 }

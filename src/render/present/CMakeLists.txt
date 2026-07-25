@@ -55,6 +55,31 @@ if(UNIX AND NOT APPLE)
     endif()
 endif()
 
+# The macOS CPU present fallback (M9 e12b): a CGImage assigned to CALayer.contents, the exact
+# counterpart of the gdi32 and libX11 blocks above. QuartzCore + CoreGraphics are the platform's OWN
+# 2D/compositing frameworks — nothing enters src/vcpkg.json or the license allowlist, and the design
+# 08 §3 dependency gate is not reached (the same reasoning both blocks above record).
+#
+# ⚠ THIS IS THE FIRST `.mm` IN A DEFAULT-BUILT TARGET, and it is added by target_sources under an
+# APPLE guard rather than into the add_library() list above for a reason: CMake picks a compiler by
+# file EXTENSION, and OBJCXX is enabled only under `if(APPLE)` in src/CMakeLists.txt. Listing it
+# unconditionally would ask the Windows and Linux legs to compile Objective-C++ with no OBJCXX
+# compiler enabled and fail at GENERATE time. UNCONDITIONAL on Apple, unlike the PROBED X11 block:
+# QuartzCore is not an optional development package the way libx11-dev is on a headless runner. The
+# non-Apple half of make_cocoa_layer_blitter stays in present_blit.cpp, so the off-platform refusal
+# remains a VALUE the render-present-test_present_blit ctest asserts on all three legs.
+if(APPLE)
+    target_sources(context_render_present PRIVATE src/present_blit_mac.mm)
+    target_link_libraries(context_render_present PRIVATE
+        "-framework QuartzCore" "-framework CoreGraphics" "-framework Foundation")
+    # ARC for the .mm TU: the blitter holds a CALayer reference by value in a C++ class, and ARC is
+    # what makes that lifetime correct without a hand-written rule-of-five over an Objective-C
+    # object (mirrors src/render/'s metal_interop.mm and src/editor/shell/'s cocoa_window.mm).
+    set_source_files_properties(src/present_blit_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    message(STATUS "context_render_present: AppKit/QuartzCore found — the macOS CPU present "
+                   "fallback (CALayer.contents) is REAL in this build")
+endif()
+
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) -----------------------------
 # Plain assertion-bearing executables registered with ctest, in the `render-present-*` family. That
 # family is NOT a gate family, so it is auto-run by the build job's general ctest step on all three

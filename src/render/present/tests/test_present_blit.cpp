@@ -298,12 +298,22 @@ void test_platform_selection_is_never_silent()
     CHECK(headless.blitter == nullptr);
     CHECK(!headless.diagnostic.empty());
 
-    // macOS is the ONE window system whose blitter is still owed, and it must report WHY so the
-    // Shell degrades loudly. It now names e12b — the task that owns it — not the retired e12.
+    // macOS (M9 e12b): the CALayer.contents blitter is REAL on an Apple build and an honest,
+    // NAMED refusal everywhere else. Every v1 window system now has an implementation, so the
+    // diagnostic must no longer point at a task that has shipped.
     const BlitterSelection mac_sel =
         make_present_blitter(native_window(NativeWindowKind::MetalLayer, &window));
+#if defined(__APPLE__)
+    // A bogus layer pointer still yields a blitter object — nil-ness is checked at blit() time, a
+    // runtime false rather than a construction failure, exactly as the Win32 arm below treats a
+    // bogus HWND. That keeps the Shell's degrade path one shape on all three platforms.
+    CHECK(mac_sel.blitter != nullptr);
+    CHECK(mac_sel.diagnostic.empty());
+#else
     CHECK(mac_sel.blitter == nullptr);
-    CHECK(mentions(mac_sel.diagnostic, "e12b"));
+    CHECK(!mac_sel.diagnostic.empty());
+    CHECK(!mentions(mac_sel.diagnostic, "e12"));
+#endif
 
     // WAYLAND IS THE REASON THIS SELECTION IS KEYED ON THE WINDOW SYSTEM. It shares
     // PresentPlatform::linux_ with X11, so the old platform-keyed switch would have handed a
@@ -358,9 +368,17 @@ void test_platform_selection_is_never_silent()
     // diagnostic must stop pointing at e12.
     CHECK(!mentions(linux_sel.diagnostic, "e12"));
 #endif
+    // The Cocoa factory has the same shape again. Like the X11 one it is not exercised against a
+    // real layer here — that needs an AppKit window, which no CI leg opens — so what is asserted on
+    // every leg is the off-platform refusal and the null-argument guard.
+#if !defined(__APPLE__)
+    CHECK(make_cocoa_layer_blitter(&window) == nullptr);
+#endif
+
     // Null arguments are refused on every platform, including the one where the factory is real.
     CHECK(make_x11_shm_blitter(nullptr, &window) == nullptr);
     CHECK(make_x11_shm_blitter(&display, nullptr) == nullptr);
+    CHECK(make_cocoa_layer_blitter(nullptr) == nullptr);
 }
 
 } // namespace

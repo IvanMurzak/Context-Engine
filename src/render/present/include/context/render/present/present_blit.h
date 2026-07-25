@@ -7,12 +7,13 @@
 // X11 SHM on Linux, CALayer.contents on macOS), and viewport panels draw their diagnostic
 // placeholder (02 §6).
 //
-// e03 landed the SEAM plus the WINDOWS implementation; e12a adds the LINUX one (X11 MIT-SHM, with a
-// plain XPutImage fallback for a display that cannot share memory). The macOS
-// CALayer.contents implementation is e12b's. That remaining gap is deliberate and REPORTED, never
-// silent: make_present_blitter returns a selection carrying an explicit diagnostic for a platform
-// whose blitter does not exist yet, so a caller degrades loudly instead of quietly presenting
-// nothing.
+// e03 landed the SEAM plus the WINDOWS implementation; e12a added the LINUX one (X11 MIT-SHM, with a
+// plain XPutImage fallback for a display that cannot share memory); e12b adds the macOS one
+// (CALayer.contents). All three v1 window systems now have a real CPU blitter, so
+// make_present_blitter's remaining diagnostics are about a window system this build genuinely has no
+// implementation for — Wayland, or a handle that arrived without its display — never about a
+// platform nobody has written yet. That reporting is deliberate: a caller degrades loudly instead of
+// quietly presenting nothing.
 //
 // The geometry (compute_blit_plan) is pure integer math kept apart from every OS call, which is what
 // lets the letterbox/pillarbox arithmetic be pixel-asserted on all three OSes — including through
@@ -134,6 +135,17 @@ private:
 // Returns nullptr when either is null, or when this translation unit was not built for Linux WITH
 // the X11 development headers.
 [[nodiscard]] std::unique_ptr<IPresentBlitter> make_x11_shm_blitter(void* display, void* window);
+
+// The macOS blitter (a CGImage assigned to CALayer.contents). `layer` is the CAMetalLayer backing
+// the Shell's NSView, matching rhi.h's MetalLayer contract — it is a CALayer, and `contents` is a
+// plain CALayer property, so the CPU fallback needs nothing from Metal itself. Returns nullptr when
+// `layer` is null, or when this build is not for macOS.
+//
+// It composes through MemoryBlitter rather than re-deriving the scale: that is the ORACLE the blit
+// geometry is asserted against on every OS (see blit_source_index above), so the macOS path is
+// pixel-identical to the tested one by CONSTRUCTION rather than by a comment — which matters more
+// here than for the two siblings, because no CI leg runs a windowed macOS test at all.
+[[nodiscard]] std::unique_ptr<IPresentBlitter> make_cocoa_layer_blitter(void* layer);
 
 // What make_present_blitter resolved to, and — when it resolved to nothing — why.
 struct BlitterSelection

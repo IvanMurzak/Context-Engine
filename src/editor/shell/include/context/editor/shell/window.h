@@ -1,29 +1,35 @@
-// The Shell's native-window seam (design 03 §1) — one interface, real Windows and Linux backends,
-// and a portable headless backend.
+// The Shell's native-window seam (design 03 §1) — one interface, real Windows, Linux and macOS
+// backends, and a portable headless backend.
 //
-// e04 shipped the WINDOWS backend; e12a adds the LINUX one (X11/XWayland — native Wayland is
-// post-M9 per D21). macOS (NSWindow/NSView) is e12b's. That remaining gap is REPORTED, not silent:
-// make_window_backend returns a selection carrying a diagnostic that names e12b, mirroring how e03's
-// make_present_blitter reports its own missing platforms. A shell that quietly opened no window
-// would look identical to one that opened an invisible one.
+// e04 shipped the WINDOWS backend; e12a added the LINUX one (X11/XWayland — native Wayland is
+// post-M9 per D21); e12b adds the macOS one (NSWindow/NSView, CEF-free — the .app bundle + helper
+// processes that let CEF run there are e12c's). All three platforms now have a real backend, so
+// make_window_backend's remaining diagnostics are about a FAILED creation (no display, no GUI
+// session, a refused window) rather than about a platform nobody implemented yet — the honest
+// report e03's make_present_blitter established. A shell that quietly opened no window would look
+// identical to one that opened an invisible one.
 //
 // THE PLATFORM BLIND SPOT, AND WHAT IS DONE ABOUT IT. The local dev gate defines _WIN32, so a POSIX
 // branch gets no compile signal at all there, and CI's Windows leg is the only thing that ever runs
-// a WndProc. So EACH native backend is split in two, on the same seam:
+// a WndProc. macOS is worse still: no local gate compiles an `__APPLE__` branch AT ALL and no CI job
+// RUNS a windowed macOS test. So EACH native backend is split in two, on the same seam:
 //
-//   * `translate_win32_message` / `translate_x11_event` — the EVENT DECODING, as pure functions over
-//     plain integers. They include no <windows.h> and no <X11/Xlib.h>, name no HWND and no Display*,
-//     and are compiled and executed by the ctest on all three OSes. This is where the bit-twiddling
-//     that actually goes wrong lives (which half of LPARAM is x, that WM_MOUSEWHEEL's coordinates
-//     are SCREEN-relative while every other mouse message's are client-relative, that X11 encodes
-//     the wheel as buttons 4-7 whose RELEASE must not be counted a second time).
-//   * `win32_window.cpp` / `x11_window.cpp` — the OS calls: RegisterClassExW / XCreateWindow, the
-//     pump, per-monitor DPI. Each is honestly untested off its own platform, exactly as e03 left the
-//     GDI blit body.
+//   * `translate_win32_message` / `translate_x11_event` / `translate_ns_event` — the EVENT DECODING,
+//     as pure functions over plain integers. They include no <windows.h>, no <X11/Xlib.h> and no
+//     <AppKit/AppKit.h>, name no HWND, no Display* and no NSEvent*, and are compiled and executed by
+//     the ctest on all three OSes. This is where the bit-twiddling that actually goes wrong lives
+//     (which half of LPARAM is x, that WM_MOUSEWHEEL's coordinates are SCREEN-relative while every
+//     other mouse message's are client-relative, that X11 encodes the wheel as buttons 4-7 whose
+//     RELEASE must not be counted a second time, that Cocoa's y axis points UP and its virtual key
+//     codes are POSITIONAL — 0x00 is `A` and 0x01 is `S`).
+//   * `win32_window.cpp` / `x11_window.cpp` / `cocoa_window.mm` — the OS calls: RegisterClassExW /
+//     XCreateWindow / [NSWindow initWithContentRect:], the pump, per-monitor DPI. Each is honestly
+//     untested off its own platform, exactly as e03 left the GDI blit body.
 //
-// The WM_* and X11 values below are declared locally so the decoders need no platform header. They
-// are static_assert'ed against the real ones inside win32_window.cpp / x11_window.cpp, so a wrong
-// constant is a COMPILE error on the platform that has the header rather than a runtime mystery.
+// The WM_*, X11 and NSEvent values below are declared locally so the decoders need no platform
+// header. They are static_assert'ed against the real ones inside win32_window.cpp / x11_window.cpp /
+// cocoa_window.mm, so a wrong constant is a COMPILE error on the platform that has the header rather
+// than a runtime mystery.
 
 #pragma once
 
@@ -344,24 +350,32 @@ struct X11WindowGeometry
     std::uint32_t height = 0;
 };
 
-// Up to two ShellEvents from ONE X event. Two X events legitimately carry two facts each:
-// ConfigureNotify can change the size AND the position at once (a maximize does exactly that), and
-// a KeyPress carries both the raw key and the character it produced — where Windows splits the
-// latter into its own WM_CHAR. A fixed pair rather than a vector so decoding stays allocation-free
-// on the pump's hot path.
-struct X11EventBatch
+// Up to three ShellEvents from ONE native event. Several native events legitimately carry more than
+// one fact: an X11 ConfigureNotify alters the size AND the position at once (a maximize does exactly
+// that), an X11 KeyPress / Cocoa NSKeyDown carries both the raw key and the character it produced
+// (where Windows splits the latter into its own WM_CHAR), and a Cocoa window dragged onto a Retina
+// display changes size, position AND backing scale in one step — which is the three. A fixed array
+// rather than a vector so decoding stays allocation-free on the pump's hot path.
+struct ShellEventBatch
 {
-    ShellEvent events[2];
+    static constexpr std::size_t kCapacity = 3;
+
+    ShellEvent events[kCapacity];
     std::size_t count = 0;
 
     void push(const ShellEvent& event)
     {
-        if (count < 2)
+        if (count < kCapacity)
         {
             events[count++] = event;
         }
     }
 };
+
+// The name the X11 decoder was introduced under (e12a). Kept as an alias rather than renamed at
+// every call site: e12b generalised the type for the Cocoa decoder, and a rename would have churned
+// the Linux backend for no behavioural reason.
+using X11EventBatch = ShellEventBatch;
 
 // Map an X keysym to the Windows virtual-key code CEF expects in `windows_key_code`, on every
 // platform (CefKeyEvent's field is named for Windows but is the cross-platform contract). Returns 0
@@ -403,13 +417,216 @@ struct X11EventBatch
 // is deliberately not a dependency of this task.
 [[nodiscard]] DpiScale x11_screen_dpi(std::int32_t pixels, std::int32_t millimetres);
 
+// ------------------------------------------------------------------- Cocoa/NSEvent decoding (pure)
+
+// The subset of NSEventType the Shell decodes (AppKit/NSEvent.h). Declared here so the decoder is
+// <AppKit/AppKit.h>-free and therefore compiled + tested on every OS; asserted against the real
+// values in cocoa_window.mm.
+inline constexpr std::int32_t kNsLeftMouseDown = 1;
+inline constexpr std::int32_t kNsLeftMouseUp = 2;
+inline constexpr std::int32_t kNsRightMouseDown = 3;
+inline constexpr std::int32_t kNsRightMouseUp = 4;
+inline constexpr std::int32_t kNsMouseMoved = 5;
+inline constexpr std::int32_t kNsLeftMouseDragged = 6;
+inline constexpr std::int32_t kNsRightMouseDragged = 7;
+inline constexpr std::int32_t kNsMouseEntered = 8;
+inline constexpr std::int32_t kNsMouseExited = 9;
+inline constexpr std::int32_t kNsKeyDown = 10;
+inline constexpr std::int32_t kNsKeyUp = 11;
+inline constexpr std::int32_t kNsFlagsChanged = 12;
+inline constexpr std::int32_t kNsScrollWheel = 22;
+inline constexpr std::int32_t kNsOtherMouseDown = 25;
+inline constexpr std::int32_t kNsOtherMouseUp = 26;
+inline constexpr std::int32_t kNsOtherMouseDragged = 27;
+
+// NSEventModifierFlags. Note Option is the Alt key and Command is the Meta key — Cocoa names them
+// by their keycaps, and mapping Command onto `control` (the shape a Windows-first port reaches for)
+// makes every Cmd shortcut in the editor fire as a Ctrl shortcut.
+inline constexpr std::uint64_t kNsModifierCapsLock = 1ull << 16;
+inline constexpr std::uint64_t kNsModifierShift = 1ull << 17;
+inline constexpr std::uint64_t kNsModifierControl = 1ull << 18;
+inline constexpr std::uint64_t kNsModifierOption = 1ull << 19;  // Alt
+inline constexpr std::uint64_t kNsModifierCommand = 1ull << 20; // Meta
+inline constexpr std::uint64_t kNsModifierNumericPad = 1ull << 21;
+inline constexpr std::uint64_t kNsModifierFunction = 1ull << 23;
+
+// +[NSEvent pressedMouseButtons] bits. ⚠ Bit 1 is the RIGHT button and bit 2 the MIDDLE one — the
+// inverse of X11's 1/2/3 = left/middle/right, so a port of either backend that carries its
+// neighbour's ordering across swaps the two on every three-button mouse.
+inline constexpr std::uint32_t kNsPressedButtonLeft = 1u << 0;
+inline constexpr std::uint32_t kNsPressedButtonRight = 1u << 1;
+inline constexpr std::uint32_t kNsPressedButtonMiddle = 1u << 2;
+
+// -[NSEvent buttonNumber] for the OtherMouse* family. Left and right have their OWN event types, so
+// the only value the Shell routes here is the middle button's.
+inline constexpr std::int32_t kNsOtherButtonMiddle = 2;
+
+// The macOS virtual key codes the decoder needs to name (Carbon HIToolbox Events.h). Only the ones
+// whose identity is load-bearing are named; the rest go through the table in window.cpp.
+//
+// ⚠ THESE ARE POSITIONAL, NOT ALPHABETICAL. kVK_ANSI_A is 0x00 and kVK_ANSI_S is 0x01 — they follow
+// the physical ASDF row of the original Apple keyboard. `key_code + 'A'` is not merely imprecise, it
+// is wrong for every letter but `A`.
+inline constexpr std::uint32_t kNsVkAnsiA = 0x00;
+inline constexpr std::uint32_t kNsVkAnsiS = 0x01;
+inline constexpr std::uint32_t kNsVkAnsiZ = 0x06;
+inline constexpr std::uint32_t kNsVkAnsi5 = 0x17;
+inline constexpr std::uint32_t kNsVkAnsi6 = 0x16;
+inline constexpr std::uint32_t kNsVkReturn = 0x24;
+inline constexpr std::uint32_t kNsVkTab = 0x30;
+inline constexpr std::uint32_t kNsVkSpace = 0x31;
+// ⚠ NAMED FOR THE KEYCAP, NOT THE BEHAVIOUR. On an Apple keyboard the big key above Return is
+// engraved "delete" and BACKSPACES; the one in the navigation cluster is kVK_ForwardDelete. Mapping
+// kVK_Delete to VK_DELETE (the reading its name invites) makes Backspace delete forwards.
+inline constexpr std::uint32_t kNsVkDelete = 0x33;        // Backspace
+inline constexpr std::uint32_t kNsVkForwardDelete = 0x75; // Delete
+inline constexpr std::uint32_t kNsVkEscape = 0x35;
+inline constexpr std::uint32_t kNsVkCommand = 0x37;
+inline constexpr std::uint32_t kNsVkRightCommand = 0x36;
+inline constexpr std::uint32_t kNsVkShift = 0x38;
+inline constexpr std::uint32_t kNsVkRightShift = 0x3C;
+inline constexpr std::uint32_t kNsVkCapsLock = 0x39;
+inline constexpr std::uint32_t kNsVkOption = 0x3A;
+inline constexpr std::uint32_t kNsVkRightOption = 0x3D;
+inline constexpr std::uint32_t kNsVkControl = 0x3B;
+inline constexpr std::uint32_t kNsVkRightControl = 0x3E;
+inline constexpr std::uint32_t kNsVkFunction = 0x3F;
+inline constexpr std::uint32_t kNsVkKeypad0 = 0x52;
+inline constexpr std::uint32_t kNsVkF1 = 0x7A;
+inline constexpr std::uint32_t kNsVkF5 = 0x60;
+inline constexpr std::uint32_t kNsVkLeftArrow = 0x7B;
+inline constexpr std::uint32_t kNsVkRightArrow = 0x7C;
+inline constexpr std::uint32_t kNsVkDownArrow = 0x7D;
+inline constexpr std::uint32_t kNsVkUpArrow = 0x7E;
+
+// Cocoa's line-based scroll unit. AppKit reports a wheel notch as `scrollingDeltaY == 1` (lines)
+// rather than Windows' 120, so a notch is scaled by kWheelDelta to reach the ONE convention the
+// browser is handed on every platform. A PRECISE (trackpad / high-resolution wheel) delta is
+// already in POINTS and is forwarded as-is — scaling it by 120 would make a two-finger swipe scroll
+// a hundred screens.
+inline constexpr std::int32_t kNsLinesToWheelDelta = kWheelDelta;
+
+// One NSEvent, flattened to plain numbers. The two fields the decoder cannot compute itself are
+// resolved by the backend, which owns the NSView: `location_x/location_y` (converted into VIEW
+// coordinates via -convertPoint:fromView:nil, still in Cocoa POINTS with a BOTTOM-LEFT origin) and
+// `text` (the first code point of -characters, i.e. the input method's result).
+struct NsEvent
+{
+    std::int32_t type = 0;
+    // The modifier mask AS OF this event — unlike X11's `state`, Cocoa reports it AFTER the change.
+    std::uint64_t modifier_flags = 0;
+    // View-relative, Cocoa POINTS, origin BOTTOM-LEFT (see NsViewGeometry for the flip).
+    double location_x = 0.0;
+    double location_y = 0.0;
+    // OtherMouse* only: see kNsOtherButtonMiddle.
+    std::int32_t button_number = 0;
+    // +[NSEvent pressedMouseButtons] — read from the OS by the backend once per event, exactly as
+    // the Win32 backend reads the keyboard modifier state, so the decoder stays pure. It is a CLASS
+    // property on NSEvent rather than a field of the event, so there is nothing to unpack from the
+    // event itself the way WM_MOUSEMOVE's wParam or X11's `state` carry it.
+    std::uint32_t pressed_mouse_buttons = 0;
+    // Cocoa counts clicks for us — there is no separate double-click event type as on Windows.
+    std::int32_t click_count = 1;
+    // ScrollWheel: -scrollingDeltaX / -scrollingDeltaY. Positive Y is a scroll AWAY from the user
+    // and positive X is a scroll to the RIGHT, matching the Win32 and X11 convention.
+    double scrolling_delta_x = 0.0;
+    double scrolling_delta_y = 0.0;
+    // -hasPreciseScrollingDeltas: the deltas are in POINTS, not lines (see kNsLinesToWheelDelta).
+    bool has_precise_scrolling_deltas = false;
+    // KeyDown/KeyUp/FlagsChanged: the LAYOUT-INDEPENDENT hardware key code.
+    std::uint32_t key_code = 0;
+    // KeyDown: the character -characters produced, or 0 when the key produced no text.
+    char32_t text = 0;
+};
+
+// What the decoder needs to know about the view an event landed in.
+struct NsViewGeometry
+{
+    // The view's height in Cocoa POINTS. THE FLIP: Cocoa's origin is the BOTTOM-left of the view
+    // while the region map, CEF and every other backend speak TOP-left, so y_top = height - y.
+    // It must be the VIEW's height, not the WINDOW's — they differ by the titlebar, and using the
+    // window's puts every pointer ~28 points off, which reads as a mis-calibrated screen.
+    double height_points = 0.0;
+    // The backing scale as a DpiScale (backingScaleFactor 2.0 -> 192 dpi). Cocoa reports POINTS and
+    // this seam's contract is PHYSICAL PIXELS, so every position is scaled through it. On a 1x
+    // display the two are equal, which is exactly why a missing scale ships looking correct and
+    // breaks on Retina only.
+    DpiScale dpi;
+    // The modifier mask BEFORE this event, for the FlagsChanged diff (see translate_ns_event).
+    std::uint64_t previous_modifier_flags = 0;
+};
+
+// The Cocoa window geometry a change is compared against. AppKit delivers -windowDidResize: and
+// -windowDidMove: separately, but it also delivers BOTH for one live-resize step and re-delivers an
+// unchanged geometry on a backing-property change — so the "report only what actually changed" rule
+// is the same one the X11 ConfigureNotify path needs, and lives in the same kind of pure function.
+struct NsWindowGeometry
+{
+    // The content view's size in Cocoa POINTS.
+    double width_points = 0.0;
+    double height_points = 0.0;
+    // The window frame's origin in Cocoa SCREEN coordinates. ⚠ Origin BOTTOM-LEFT of the primary
+    // display, and deliberately NOT flipped: `placement()` and `apply_placement()` are the only
+    // consumers, they are the same platform's, and they round-trip exactly. Flipping here would
+    // need the screen height — an OS call — inside a function whose whole point is having none.
+    std::int32_t x = 0;
+    std::int32_t y = 0;
+    // The window's backingScaleFactor as a DpiScale.
+    DpiScale dpi;
+};
+
+// backingScaleFactor -> DpiScale. A non-finite or non-positive factor falls back to 1x rather than
+// scaling the whole editor by a garbage number (the same refusal x11_screen_dpi makes); make_dpi_scale
+// then clamps whatever survives.
+[[nodiscard]] DpiScale ns_dpi_from_backing_scale(double backing_scale);
+
+// A view-relative Cocoa POINT -> the PHYSICAL client pixel the region map speaks: flip the y axis
+// against the view height, then scale both axes by the backing factor. Round-to-nearest, and signed
+// throughout — a captured drag legitimately leaves the view on any edge, and flooring a negative
+// away from zero is how a drag one pixel above the view reads as being 4000 pixels below it.
+[[nodiscard]] PointI ns_view_point_to_physical(double x_points, double y_points,
+                                               const NsViewGeometry& view);
+
+// Map a macOS hardware key code to the Windows virtual-key code CEF expects in `windows_key_code`
+// on every platform (CefKeyEvent's field is named for Windows but is the cross-platform contract).
+// Returns 0 for a key with no VK equivalent, which is the honest "this key is text-only".
+//
+// WHAT IS EASY TO GET WRONG HERE, and is therefore asserted by the tests:
+//   * the codes are POSITIONAL — 0x00 is `A`, 0x01 is `S`, 0x06 is `Z`. Any arithmetic mapping is
+//     wrong; this is a table;
+//   * kVK_Delete (0x33) is BACKSPACE and kVK_ForwardDelete (0x75) is Delete;
+//   * the digit row is not monotonic — 6 is 0x16 and 5 is 0x17, i.e. transposed;
+//   * the function keys are scattered (F1 is 0x7A but F5 is 0x60), so no contiguous run exists;
+//   * Command maps to VK_LWIN/VK_RWIN and Option to VK_MENU — not to VK_CONTROL.
+[[nodiscard]] std::int32_t ns_key_code_to_windows_key_code(std::uint32_t key_code);
+
+// Decode one NSEvent. An empty batch is the decoder's "this event is not one the Shell cares
+// about", which is most of them.
+//
+// WHAT IS EASY TO GET WRONG HERE, and is therefore asserted by the tests:
+//   * the y axis points UP (see NsViewGeometry::height_points);
+//   * coordinates are POINTS, not pixels — correct-looking on a 1x display and half-scale on Retina;
+//   * a modifier key produces NO KeyDown/KeyUp at all: it arrives as NSEventTypeFlagsChanged, which
+//     says WHICH key but not whether it went down or up. That is recovered by diffing the mask
+//     against `view.previous_modifier_flags`;
+//   * NSEventTypeOtherMouse* numbers the MIDDLE button 2 (left and right have their own types), so
+//     the X11 1/2/3 ordering does not transfer;
+//   * a precise (trackpad) scroll delta is already in points and must not be multiplied by 120.
+[[nodiscard]] ShellEventBatch translate_ns_event(const NsEvent& event, const NsViewGeometry& view);
+
+// Decode a window geometry CHANGE into the resize / moved / dpi_changed facts it actually carries.
+// See NsWindowGeometry for why this exists at all rather than being three delegate callbacks.
+[[nodiscard]] ShellEventBatch translate_ns_window_geometry(const NsWindowGeometry& previous,
+                                                            const NsWindowGeometry& current);
+
 // ------------------------------------------------------------------------------ backend selection
 
 struct WindowBackendSelection
 {
     std::unique_ptr<IWindowBackend> backend;
-    // Empty on success; otherwise why no native window could be created — including the honest
-    // "this platform's backend is e12b's" for macOS.
+    // Empty on success; otherwise why no native window could be created. Since e12b every platform
+    // HAS a backend, so this now only ever reports a real creation failure — no display, no GUI
+    // session, a refused window — never "nobody has written this one yet".
     std::string diagnostic;
 };
 
@@ -417,14 +634,18 @@ struct WindowBackendSelection
 // build is not for its platform — mirroring make_win32_gdi_blitter, so the off-platform refusal is
 // assertable by the ctest on every leg — or when window creation failed, in which case `error` says
 // why. `make_x11_window_backend` also returns nullptr (with an error) in a build configured without
-// the X11 development headers, and on a host with no reachable X display.
+// the X11 development headers, and on a host with no reachable X display; `make_cocoa_window_backend`
+// does the same on a macOS box with no GUI (Aqua) session, which is the ordinary state of a build
+// bot running under a plain ssh/launchd context.
 [[nodiscard]] std::unique_ptr<IWindowBackend> make_win32_window_backend(const WindowDesc& desc,
                                                                         std::string& error);
 [[nodiscard]] std::unique_ptr<IWindowBackend> make_x11_window_backend(const WindowDesc& desc,
                                                                       std::string& error);
+[[nodiscard]] std::unique_ptr<IWindowBackend> make_cocoa_window_backend(const WindowDesc& desc,
+                                                                        std::string& error);
 
 // Create the native window backend for the host platform. Returns a null backend plus a diagnostic
-// on a platform whose backend does not exist yet, or when window creation failed.
+// when window creation failed.
 [[nodiscard]] WindowBackendSelection make_window_backend(const WindowDesc& desc);
 
 } // namespace context::editor::shell
