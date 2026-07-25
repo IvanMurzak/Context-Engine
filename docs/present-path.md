@@ -122,9 +122,20 @@ and viewport panels draw their diagnostic placeholder.
 `present/present_blit.h` lands the seam plus the **Windows GDI** implementation (`StretchDIBits` into
 the window DC, top-down DIB, tight repack for a padded stride, bars filled before a letterboxed
 present) and, since **e12a**, the **X11** one (`XShmPutImage` through a MIT-SHM `XImage`, degrading to
-`XPutImage` where the server refuses shared memory). `CALayer.contents` is **e12b's** — and that gap
-is REPORTED, not silent: `make_present_blitter` returns a `BlitterSelection` carrying an explicit
-diagnostic naming e12b, so a caller degrades loudly instead of quietly presenting nothing.
+`XPutImage` where the server refuses shared memory). Since **e12b** it also lands the **macOS** one
+(`present_blit_mac.mm`: a CGImage assigned to `CALayer.contents`, implicit animations disabled by a
+`CATransaction` so a present does not cross-fade into the previous frame). All three v1 window
+systems now have an implementation, so a null `BlitterSelection` reports a window system this build
+genuinely has none for — Wayland, or a handle that arrived without its display — and a caller
+degrades loudly instead of quietly presenting nothing.
+
+The macOS blitter composes THROUGH `MemoryBlitter` rather than re-deriving the scale. That is the
+oracle the blit geometry is asserted against on every OS, so the macOS path is pixel-identical to the
+tested one by CONSTRUCTION — which matters more here than for its two siblings, because no CI leg
+runs a windowed macOS test and a hand-written second copy of the arithmetic would have zero coverage.
+Its `CFDataCreate` COPIES the composed frame: `CGDataProviderCreateWithData` over the blitter's own
+buffer would not, and the CGImage handed to the layer outlives the call, so the next present would
+leave the layer displaying freed memory.
 
 The X11 blitter composes its destination pixels from the **visual's channel masks** rather than
 memcpy'ing BGRA rows. A local 24/32-bit TrueColor visual on a little-endian box really is BGRX in
@@ -218,7 +229,19 @@ Named so the gaps are visible rather than assumed. The first two were **closed b
   rect (and `compute_layer_uv` to extrapolate the UV so the interpolation is correct inside it).
 - ~~**No X11 CPU present blitter.**~~ Landed by **e12a** (MIT-SHM `XShmPutImage`, `XPutImage`
   fallback), proven live against a real X server by the `editor-shell-x11-window` smoke.
-- **No macOS CPU present blitter** — e12b.
+- ~~**No macOS CPU present blitter.**~~ Landed by **e12b** (`CALayer.contents` from a CGImage,
+  composed through `MemoryBlitter`). ⚠ **Be precise about what this is and is not covered by.**
+  COVERED, on all three legs: the blit GEOMETRY, because the class composes through `MemoryBlitter`
+  rather than re-deriving the scale, and `MemoryBlitter` is exercised directly by
+  `render-present-test_present_blit`; plus the factory's null-argument guard, and — off Apple — the
+  named refusal. NOT COVERED ANYWHERE: `CocoaLayerBlitter::blit()` itself. No test on any leg calls
+  it, so the `CFDataCreate` copy, the `CGImage` construction, the byte-order choice, the
+  `CATransaction` implicit-animation suppression and the five early returns have no runtime proof —
+  and neither does the claim that a presented frame becomes VISIBLE. Both need an Objective-C++ test
+  building a real `CALayer` and a real Mac with a real window respectively; the `.app` bundle a
+  windowed macOS smoke would need is **e12c's**. The cross-platform suite deliberately does NOT
+  construct the blitter with a stand-in pointer on Apple: the implementation holds the layer in an
+  ARC-strong member, so a non-object pointer is dereferenced by `objc_retain` at construction.
 - **No Wayland present blitter** — post-M9 (D21 targets X11/XWayland). The selection NAMES the gap
   rather than mis-dispatching a `wl_surface` into the X11 path.
 - **The macOS accelerated path has no runtime CI proof.** It compiles on the `render (macos-latest)`

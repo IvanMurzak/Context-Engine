@@ -622,6 +622,18 @@ std::unique_ptr<IPresentBlitter> make_x11_shm_blitter(void* display, void* windo
 #endif
 }
 
+#if !defined(__APPLE__)
+std::unique_ptr<IPresentBlitter> make_cocoa_layer_blitter(void* layer)
+{
+    // The real one lives in present_blit_mac.mm — Objective-C++ cannot be compiled into this TU, and
+    // CMake picks a compiler by file extension, so the two halves are two files rather than one
+    // `#if`/`#else` pair (the shape the GDI and X11 blitters take above). The refusal is still a
+    // VALUE the ctest asserts on every leg, which is the property that mattered.
+    (void)layer;
+    return nullptr;
+}
+#endif // !__APPLE__
+
 BlitterSelection make_present_blitter(const NativeWindowDesc& native)
 {
     BlitterSelection selection;
@@ -675,8 +687,12 @@ BlitterSelection make_present_blitter(const NativeWindowDesc& native)
                                "post-M9";
         return selection;
     case NativeWindowKind::MetalLayer:
-        selection.diagnostic = "no CALayer.contents present blitter in this build — the macOS CPU "
-                               "present fallback lands in e12b";
+        selection.blitter = make_cocoa_layer_blitter(native.handle);
+        if (selection.blitter == nullptr)
+        {
+            selection.diagnostic = "the CALayer.contents blitter is compiled only on macOS; this "
+                                   "build cannot present on a CAMetalLayer";
+        }
         return selection;
     }
     selection.diagnostic = "unknown native window kind";

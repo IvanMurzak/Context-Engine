@@ -85,10 +85,11 @@ std::optional<std::filesystem::path> native_pick_folder()
 
 std::optional<std::filesystem::path> native_pick_folder()
 {
-    // The packaged macOS (NSOpenPanel) and Linux (XDG portal / GTK) dialogs are e15's, exactly as the
-    // window backend leaves non-Windows an honest gap until e12. Returning nullopt reads on the welcome
-    // screen as "the picker is not available on this platform yet" rather than a silent failure; the
-    // recents list and "New from template" still work everywhere.
+    // The packaged macOS (NSOpenPanel) and Linux (XDG portal / GTK) dialogs are e15's. Both platforms
+    // DO have a window backend now (e12a/e12b), so what is missing here is the dialog alone.
+    // Returning nullopt reads on the welcome screen as "the picker is not available on this platform
+    // yet" rather than a silent failure; the recents list and "New from template" still work
+    // everywhere.
     return std::nullopt;
 }
 

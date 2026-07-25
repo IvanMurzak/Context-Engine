@@ -298,12 +298,27 @@ void test_platform_selection_is_never_silent()
     CHECK(headless.blitter == nullptr);
     CHECK(!headless.diagnostic.empty());
 
-    // macOS is the ONE window system whose blitter is still owed, and it must report WHY so the
-    // Shell degrades loudly. It now names e12b — the task that owns it — not the retired e12.
+    // macOS (M9 e12b): the CALayer.contents blitter is REAL on an Apple build and an honest,
+    // NAMED refusal everywhere else. Every v1 window system now has an implementation, so the
+    // diagnostic must no longer point at a task that has shipped.
+    //
+    // ⚠ DELIBERATELY NOT EXERCISED WITH A STAND-IN POINTER ON APPLE, for the reason
+    // make_cocoa_layer_blitter's contract in present_blit.h states: the layer must be null or a REAL
+    // CALayer, because the implementation holds it in an ARC-strong member and so RETAINS it at
+    // construction. There is no "bogus but survivable" pointer here the way a junk HWND survives
+    // GetDC. Testing the live arm therefore needs a real CALayer, hence an Objective-C++ TU, which
+    // this .cpp is not — that is e12c's, and docs/present-path.md records what stays uncovered
+    // meanwhile (CocoaLayerBlitter::blit() in full). Every leg still asserts the null guard below.
+#if !defined(__APPLE__)
     const BlitterSelection mac_sel =
         make_present_blitter(native_window(NativeWindowKind::MetalLayer, &window));
     CHECK(mac_sel.blitter == nullptr);
-    CHECK(mentions(mac_sel.diagnostic, "e12b"));
+    // NAME the platform rather than merely checking for "some diagnostic". A bare non-emptiness
+    // assertion would pass for any unrelated refusal reaching this arm — exactly the vacuity the
+    // no_handle arm below was already fixed for, and the same trap one step further on.
+    CHECK(mentions(mac_sel.diagnostic, "macOS"));
+    CHECK(!mentions(mac_sel.diagnostic, "e12"));
+#endif
 
     // WAYLAND IS THE REASON THIS SELECTION IS KEYED ON THE WINDOW SYSTEM. It shares
     // PresentPlatform::linux_ with X11, so the old platform-keyed switch would have handed a
@@ -341,7 +356,9 @@ void test_platform_selection_is_never_silent()
     const BlitterSelection win_sel =
         make_present_blitter(native_window(NativeWindowKind::Win32Hwnd, &window));
     CHECK(win_sel.blitter == nullptr);
-    CHECK(!win_sel.diagnostic.empty());
+    // NAMED, not merely non-empty — the same discipline as the no_handle arm above and the macOS one
+    // below. Every refusal on this seam is asserted by the substring that identifies it.
+    CHECK(mentions(win_sel.diagnostic, "Windows"));
 #endif
 
     // The X11 factory has the same shape, and the same off-platform refusal. It is NOT exercised
@@ -353,14 +370,23 @@ void test_platform_selection_is_never_silent()
     const BlitterSelection linux_sel =
         make_present_blitter(native_window(NativeWindowKind::XlibWindow, &window, &display));
     CHECK(linux_sel.blitter == nullptr);
-    CHECK(!linux_sel.diagnostic.empty());
+    // NAMED, as in every other arm of this function.
+    CHECK(mentions(linux_sel.diagnostic, "X11"));
     // The Linux gap is no longer owed to a future task — it is owed to a missing package, and the
     // diagnostic must stop pointing at e12.
     CHECK(!mentions(linux_sel.diagnostic, "e12"));
 #endif
+    // The Cocoa factory has the same shape again. Like the X11 one it is not exercised against a
+    // real layer here — that needs an AppKit window, which no CI leg opens — so what is asserted on
+    // every leg is the off-platform refusal and the null-argument guard.
+#if !defined(__APPLE__)
+    CHECK(make_cocoa_layer_blitter(&window) == nullptr);
+#endif
+
     // Null arguments are refused on every platform, including the one where the factory is real.
     CHECK(make_x11_shm_blitter(nullptr, &window) == nullptr);
     CHECK(make_x11_shm_blitter(&display, nullptr) == nullptr);
+    CHECK(make_cocoa_layer_blitter(nullptr) == nullptr);
 }
 
 } // namespace

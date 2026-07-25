@@ -189,10 +189,16 @@ void WindowCompositor::attach_cpu(std::unique_ptr<render::present::IPresentBlitt
     blitter_ = std::move(blitter);
     size_ = size;
     path_ = PresentPath::cpu_blit;
+    // NAME THE ACTIONABLE CAUSE PER PLATFORM, and never a task id. Since e12b every v1 window system
+    // has a blitter, so "wait for e12b" would now be advice to wait for something that has shipped —
+    // the second generation of exactly the rot test_compositor.cpp documents. On macOS reaching here
+    // no longer means "unimplemented": it means this window carries no CAMetalLayer, which in
+    // practice is the Shell having degraded to the headless backend (no GUI session).
     diagnostic_ = blitter_ == nullptr
                       ? "the CPU present path has no blitter in this build (on Linux: configure "
-                        "with the X11 development headers, libx11-dev + libxext-dev; macOS "
-                        "CALayer.contents lands with e12b); the shell runs but presents nothing"
+                        "with the X11 development headers, libx11-dev + libxext-dev; on macOS: this "
+                        "window has no CAMetalLayer, e.g. the shell degraded to the headless "
+                        "backend); the shell runs but presents nothing"
                       : std::string{};
     damage_.external = true;
 }

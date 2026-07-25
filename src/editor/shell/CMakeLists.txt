@@ -42,9 +42,10 @@ add_library(context_editor_shell STATIC
     src/dpi.cpp           # per-monitor DPI (replaces the spike's DPI-1.0 pin)
     src/input.cpp         # region arbitration + capture stack + focus-class routing (03 §6)
     src/editor_state.cpp  # .editor/editor-state.json — the Shell is its SINGLE writer (03 §1)
-    src/window.cpp        # the seam, headless backend, the PURE Win32 + X11 decoders, the platform choice
+    src/window.cpp        # the seam, headless backend, the PURE Win32/X11/Cocoa decoders, the choice
     src/win32_window.cpp  # the Windows OS calls (early-returns to an honest gap elsewhere)
     src/x11_window.cpp    # e12a: the Linux X11/XWayland OS calls (ditto, off Linux)
+    src/cocoa_window.cpp  # e12b: the OFF-macOS half of the Cocoa backend (.mm is APPLE-only below)
     src/browser.cpp       # the CEF-free browser seam + the scripted host
     src/compositor.cpp    # the layer stack, damage, resize protocol, both present paths (03 §4)
     src/app_scheme.cpp    # e05c: context-editor://app/ resolution + the strict CSP (04 §1)
@@ -167,6 +168,38 @@ if(UNIX AND NOT APPLE)
                        "compiles to its honest missing-headers report (install libx11-dev for the "
                        "real one)")
     endif()
+endif()
+
+# The macOS window backend (M9 e12b): NSWindow + a CAMetalLayer-backed NSView, the NSEvent pump and
+# backingScaleFactor DPI live in AppKit + QuartzCore — the platform's OWN windowing system, the
+# direct analogue of user32 and libX11 above, so nothing enters src/vcpkg.json or
+# tools/license-allowlist.json and the design 08 §3 dependency gate is not reached (the same
+# reasoning the winhttp/ole32 and libX11 notes above record).
+#
+# UNCONDITIONAL on Apple, unlike the two PROBED blocks above: an SDK is not optional there the way an
+# X11 development package is on a headless ubuntu runner, and CGSessionCopyCurrentDictionary already
+# gives the backend a RUNTIME degrade for a box with no GUI session. The `.mm` is added here rather
+# than in the add_library() list because CMake picks a compiler by file EXTENSION, and OBJCXX is
+# enabled only under `if(APPLE)` in src/CMakeLists.txt — every other leg compiles the CEF-free
+# cocoa_window.cpp stub instead, which is what keeps make_cocoa_window_backend a linkable symbol
+# whose off-platform refusal the ctest asserts on all three legs.
+#
+# ⚠ NO CEF, NO .app BUNDLE. Those are e12c's; nothing here fetches or links a CEF prebuilt, and this
+# block leaves `context_editor`'s CEF wiring (Windows/Linux only, further down) byte-identical.
+if(APPLE)
+    target_sources(context_editor_shell PRIVATE src/cocoa_window.mm)
+    # AppKit for NSWindow/NSView/NSEvent, QuartzCore for CAMetalLayer (its class symbol lives there),
+    # CoreGraphics for the CGSession GUI-session probe. Metal is named EXPLICITLY rather than left to
+    # an SDK umbrella so a later GPU present path — which will want MTLDevice, not just the layer —
+    # finds the dependency already declared on the target; the CPU fallback shipped here needs nothing
+    # from it (a CAMetalLayer's `contents` is a plain CALayer property).
+    target_link_libraries(context_editor_shell PRIVATE
+        "-framework AppKit" "-framework QuartzCore" "-framework Metal"
+        "-framework CoreGraphics" "-framework Foundation")
+    # ARC for the .mm TU: the backend holds NSWindow / NSView / CAMetalLayer / delegate references by
+    # value in a C++ class, and ARC is what makes those lifetimes correct without a hand-written
+    # rule-of-five over Objective-C objects (mirrors src/render/'s metal_interop.mm).
+    set_source_files_properties(src/cocoa_window.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 endif()
 
 # Self-contained GCC runtime for every executable below. They use std::filesystem + stream IO, whose
@@ -440,4 +473,29 @@ add_test(NAME editor-shell-config-writers
 # ci.yml --target bookkeeping; its own pytest lives in tools/tests/ (python-tests job).
 add_test(NAME editor-shell-release-request
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_release_request.py"
+            --repo-root "${CMAKE_SOURCE_DIR}/..")
+
+# --- the L-41 external-BeginFrame gate (M9 e12b; cef#4033) ----------------------------------------
+# The SAME source-scan tier as the three lints above, and here for the reason that makes this tier
+# exist at all: THERE IS NO CALL SITE TO ASSERT AGAINST. L-41 forbids `SendExternalBeginFrame`, and
+# nothing in the tree calls it — so no runtime test can fail if one appears, because an assertion can
+# only observe behaviour that EXISTS. The commitment is enforced from the sources instead, which is
+# also what lets it run with no CEF in the build: the API is CEF's, but the rule is ours.
+#
+# It carries a POSITIVE half as well as the two prohibitions, for the same reason: a prohibition
+# passes trivially against a tree that deleted the thing it protects, so the gate also asserts the
+# L-41 pin in compositor/surface.cpp is still there and still `false`.
+#
+# Proven NON-VACUOUS by planting (conventions.md § "Authoring a SOURCE-SCAN gate"): thirteen shapes
+# spanning the call's variant axes — a chained getter, a call split across lines, a member-function
+# POINTER that writes no paren at all, a runtime string, the enabling flag in three spellings, a
+# post-hoc MUTATION of the sanctioned handoff in another file, the pin deleted, the pin flipped, plus
+# the two false-positive controls the LIVE tree already contains (a prose mention and a printf format
+# string). All thirteen matched expectation and the post-restore run came back green on a byte-exact
+# tree; every one is pinned as a regression case in tools/tests/test_check_no_external_begin_frame.py.
+#
+# Registered in the non-gate `editor-shell-` family, so the build job's general ctest step runs it on
+# all three OS legs with no ci.yml --target bookkeeping; its own pytest rides the python-tests job.
+add_test(NAME editor-shell-no-external-begin-frame
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_no_external_begin_frame.py"
             --repo-root "${CMAKE_SOURCE_DIR}/..")

@@ -143,8 +143,9 @@ void EditorWindow::attach_cpu_present()
     render::present::BlitterSelection selection = render::present::make_present_blitter(native);
     if (selection.blitter == nullptr && !selection.diagnostic.empty())
     {
-        // Reported, never silent — the remaining platform gap (CALayer.contents is e12b's) is named
-        // by the selection itself.
+        // Reported, never silent — and since e12b there is no platform GAP left to name: every v1
+        // window system has a blitter, so what the selection reports is a missing X11 build
+        // dependency, a window carrying no presentable surface, or a non-v1 window system.
         diagnostic_ = selection.diagnostic;
     }
     compositor_.attach_cpu(std::move(selection.blitter), backend_->client_size());

@@ -327,7 +327,9 @@ int main(int argc, char** argv)
         shell::WindowBackendSelection selection = shell::make_window_backend(window_desc);
         if (selection.backend == nullptr)
         {
-            // REPORTED, never silent: a platform whose backend is e12's, or a creation failure.
+            // REPORTED, never silent. Since e12b every v1 platform HAS a backend, so reaching here
+            // is a creation FAILURE (no display, no GUI session, a refused window) or a
+            // non-v1 platform — never "nobody implemented this yet".
             // Degrading to headless keeps the editor usable (and diagnosable) instead of exiting.
             std::fprintf(stderr, "context_editor: %s\n", selection.diagnostic.c_str());
             backend = std::make_unique<shell::HeadlessWindowBackend>(window_desc);

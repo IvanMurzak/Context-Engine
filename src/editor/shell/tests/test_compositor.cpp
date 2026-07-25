@@ -568,14 +568,20 @@ void test_cpu_path_without_a_blitter_is_reported_not_silent()
     CHECK(compositor.path() == PresentPath::cpu_blit);
     CHECK(!compositor.diagnostic().empty());
     // The diagnostic must name the ACTIONABLE cause for each platform that can still reach it: on
-    // Linux the missing X11 development headers (a package the reader can install — e12a landed the
-    // blitter itself), and on macOS the task that still owes the CALayer path.
+    // Linux the missing X11 development headers (a package the reader can install), and on macOS a
+    // window carrying no CAMetalLayer. Since e12b, NEITHER platform is owed a blitter by a future
+    // task.
     //
-    // Asserting a bare "e12" here — as this test did until e12a — rots SILENTLY, because "e12" is a
-    // prefix of "e12b": it kept passing while the message went on telling Linux users to wait for a
-    // task that had already shipped. Pin the two substrings that carry the meaning instead.
+    // ⚠ THE ROT HAPPENED TWICE, so the fix is now to assert NO task id at all. Asserting a bare
+    // "e12" — as this test did until e12a — passed silently because "e12" is a prefix of "e12b",
+    // while the message went on telling Linux users to wait for a task that had shipped. Pinning
+    // "e12b" instead fixed that generation and then rotted the SAME WAY the moment e12b itself
+    // shipped: still green, still advising a wait for finished work. Any task id in this string is
+    // therefore the defect, so pin the two substrings that carry meaning AND assert the absence of
+    // the whole "e12" family — that last check is the one that cannot rot with the next milestone.
     CHECK(shelltest::mentions(compositor.diagnostic(), "X11"));
-    CHECK(shelltest::mentions(compositor.diagnostic(), "e12b"));
+    CHECK(shelltest::mentions(compositor.diagnostic(), "macOS"));
+    CHECK(!shelltest::mentions(compositor.diagnostic(), "e12"));
 
     std::vector<std::uint8_t> storage;
     compositor.on_browser_frame(make_view_frame(storage, render::Extent2D{100, 50},

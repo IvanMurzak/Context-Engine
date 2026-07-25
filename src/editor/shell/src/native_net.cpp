@@ -22,9 +22,10 @@
 // a re-introduced header literal or a re-enabled ambient-credential path, so the three bullets above
 // are gates rather than comments.
 //
-// THE UN-WIRED PLATFORMS ARE HONEST, NOT SILENT. macOS/Linux have no Shell yet (e12); rather than
-// pretend, `native_https_get` returns `ran:false` with a legible reason and the banner reports "not
-// checked" — the same honest-gap discipline `native_pick_folder()` and the window backend take.
+// THE UN-WIRED PLATFORMS ARE HONEST, NOT SILENT. macOS/Linux DO have a Shell now (e12a/e12b); what
+// they lack is a platform HTTPS client here. Rather than pretend, `native_https_get` returns
+// `ran:false` with a legible reason and the banner reports "not checked" — the same honest-gap
+// discipline `native_pick_folder()` takes.
 //
 // D10 BOUNDARY-CLEAN: pure OS-SDK calls, no engine-internal link edge.
 
@@ -288,9 +289,9 @@ bool native_open_url(const std::string& url)
 
 #else
 
-// The honest gap until e12 brings the macOS/Linux shells up — the same shape native_pick_folder()
-// takes on these platforms. Reporting "not wired" is what lets the banner say "not checked" instead
-// of silently claiming the build is current.
+// The honest gap on the platforms with no HTTPS client wired here — see the file header for why this
+// is a missing TRANSPORT and not a missing shell. Reporting "not wired" is what lets the banner say
+// "not checked" instead of silently claiming the build is current.
 HttpResponse native_https_get(const HttpRequest&)
 {
     HttpResponse response;
