@@ -142,7 +142,8 @@ Three Win32 decoding traps, each pinned by a test:
   asks the swapchain to reconfigure to nothing, every frame, for as long as it stays minimized.
 
 **Placement + layout persistence.** Window placement, the dock **arrangement** (Dockview's `toJSON`),
-and each panel's D6 state blob are persisted, debounced and crash-safe, to `.editor/editor-state.json`.
+each panel's D6 state blob, and — since M9 e09c — the **session undo journal** are persisted,
+debounced and crash-safe, to `.editor/editor-state.json`.
 The Shell is that file's **single writer**; the daemon is the single writer of `.editor/session.json`
 (03 §1, review C-F3). One writer per file is what removes torn writes without any cross-process
 coordination. The write stages into a sibling temp file and renames it over the target, so a crash
@@ -159,6 +160,30 @@ live: debounced during interaction, a final publish on `pagehide`, and — becau
 are complete atomic files — the last one is a last-known-good a non-graceful exit leaves intact. The
 `editor.state.*` surface is `context_editor_shell/editor_state_bridge.{h,cpp}`, CEF-free and bound to
 the store in `editor_main.cpp` ahead of the browser.
+
+**Session undo (M9 e09c).** The `.editor/editor-state.json` document carries one more thing 03 §1
+assigns to the Shell: the short-horizon session **undo journal** (`gui/session/undo`, R-HUX-001 /
+L-20 / L-21). Four properties are worth stating because each is a place this could have gone wrong:
+
+- **The host is `shell/panels/undo_feed.{h,cpp}`.** Until e09c the journal's `to_json`/`load_json`
+  were called by no host at all — it recorded nothing, replayed nothing, and persisted nothing. The
+  feed records the Inspector's resolved gesture commits (through a checkpoint sink the composition
+  root wires) and hosts the `builtin.session.undo` panel, whose `session.undo` / `session.redo`
+  commands are what the palette and the e07c Ctrl+Z / Ctrl+Y keymap ultimately dispatch to.
+- **Replay is NOT a privileged path.** Undo/redo re-issue their writes through the SAME
+  `WireOverrideWriteGateway` a live gesture commits through — the daemon's `edit` RPC with raw-byte
+  CAS, the same L-30 rebase-or-drop engine. A replayed write can hit `cas.mismatch` exactly like a
+  live one, and then it is DROPPED loudly rather than restoring stale bytes over a co-writer. A
+  "restore the previous bytes" undo is precisely what R-HUX-001 forbids.
+- **Only a write that LANDED becomes a checkpoint.** A loudly-dropped commit wrote nothing, so
+  journaling it would offer a revert of an edit that never happened — which, replayed, would
+  overwrite the co-writer's value.
+- **The blob is the journal's own canonical serialization, carried as a string.** The journal's DOM
+  is `serializer::JsonValue` and the store's is `contract::Json`, whose numbers are all `double`;
+  round-tripping user data through a nested-object conversion would round it. So the ONE journal
+  serializer stays `UndoJournal::to_json` and `EditorState::undo` is its transport — no second
+  serializer, and no second file. `EditorStateStore::set_undo` is the ONE seam it reaches disk
+  through, which is what keeps the C-F3 single-writer split assertable.
 
 ## 2. DPI
 

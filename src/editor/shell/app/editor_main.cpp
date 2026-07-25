@@ -453,6 +453,17 @@ int main(int argc, char** argv)
                      "as unavailable\n",
                      builtin.bound, shell::panels::hostable_panel_ids().size());
     }
+    // e09c: RESTORE the session undo journal from the previous run. `WindowManager`'s constructor
+    // already loaded `.editor/editor-state.json`, so the document is in hand — this adopts its `undo`
+    // blob into the live journal, which is what makes Ctrl+Z on the FIRST gesture after a restart
+    // revert the edit from BEFORE the restart. A fresh project (or a corrupt blob, which
+    // undo_feed.cpp reports) simply restores nothing and starts empty.
+    // (Reported through the free seam alone — `UndoFeed` stays forward-declared here, so this TU
+    // keeps its narrow include set, the discipline builtin_panels.h documents for every feed.)
+    if (shell::panels::restore_undo_state(builtin, manager.state_store().state()))
+    {
+        std::fprintf(stderr, "context_editor: restored the previous session's undo history\n");
+    }
     if (!panel_host.install(bridge))
     {
         std::fprintf(stderr, "context_editor: could not install the panel bridge surface\n");
@@ -1013,6 +1024,12 @@ int main(int argc, char** argv)
         // "we reattached". Re-pointing here is what makes the next commit refuse honestly instead of
         // writing through a freed pointer (wire_override_gateway.h § LIFETIME).
         shell::panels::bind_write_client(builtin, lifecycle.client());
+        // e09c: offer the session undo journal to the editor-state store — the ONE Shell-side seam
+        // that file is written through (C-F3). Free while nothing changed (an unmoved journal is not
+        // even re-serialized), and the store's debounce turns a burst of gestures into one crash-safe
+        // write per quiet period. Placed in the loop rather than at exit deliberately: a crash must
+        // not cost the user their undo history, which is exactly what a save-on-exit-only would do.
+        (void)shell::panels::publish_undo_state(builtin, manager.state_store(), now_us());
         // e10a: keep window 0's reported `origin` in step with the connection it actually has. The
         // primary's client belongs to the lifecycle rather than to a registry session, so the
         // registry is TOLD rather than asking — and a reconnect mints a NEW id (e14a), which is
@@ -1082,6 +1099,11 @@ int main(int argc, char** argv)
     // `shutdown`; an owned daemon other clients still hold is left running; an external daemon is never
     // touched. Runs before the manager/CEF teardown so the daemon call still has a live wire.
     lifecycle.shutdown_at_exit();
+    // e09c: one last journal publish before the store is flushed. The loop's per-frame offer runs at
+    // the TOP of a frame, so a gesture that committed during the final frame would otherwise never
+    // reach disk — and losing the last thing the user did is precisely the failure this whole task
+    // exists to prevent. Idempotent: a journal already published is not dirty and this is a no-op.
+    (void)shell::panels::publish_undo_state(builtin, manager.state_store(), now_us());
     // e14b: retract the presence marker so a later opener spawns a fresh editor instead of trying to
     // focus this process after it is gone. Cleared before manager.shutdown() flushes + closes.
     manager.state_store().clear_presence(now_us());

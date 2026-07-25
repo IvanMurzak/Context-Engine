@@ -10,6 +10,7 @@
 // `handler()` is exactly what `execute` invokes, so routing is proven either way.
 
 import { assert, assertEqual, type TestCase } from "./harness.js";
+import { SESSION_UNDO_PANEL_ID } from "../boot.js";
 import {
     buildCommandRegistry,
     CommandRegistry,
@@ -21,6 +22,7 @@ import {
 } from "../commands.js";
 import type {
     Command,
+    CommandOutcome,
     ContractDispatch,
     EditorCommandActions,
     PanelCommandDispatch,
@@ -340,6 +342,55 @@ export const commandsTests: readonly TestCase[] = [
             void undo?.handler();
             void redo?.handler();
             assertEqual(spy.calls, ["undo", "redo"], "each session command routes to its action");
+        },
+    },
+
+    // M9 e09c — the session actions are no longer a stub, and the id they dispatch AT is pinned.
+    //
+    // Two things this catches that nothing else does. (1) A drift in `SESSION_UNDO_PANEL_ID` fails no
+    // build: Ctrl+Z would simply dispatch to a panel that does not exist and answer `not dispatched`
+    // forever, with no error anywhere. (2) `dispatched:false` (nothing to undo) must NOT report `ok`
+    // — an undo that did nothing looking like one that worked is exactly the dishonest outcome this
+    // whole chain exists to avoid.
+    {
+        name: "session undo/redo dispatch to the Shell's session-undo panel and report its verdict honestly",
+        run: () => {
+            assertEqual(
+                SESSION_UNDO_PANEL_ID,
+                "builtin.session.undo",
+                "mirrors UndoJournal::kContributionId (undo_journal.h) + the builtin roster entry",
+            );
+
+            const seen: string[] = [];
+            let dispatched = true;
+            const dispatch = (panelId: string, commandId: string): CommandOutcome => {
+                seen.push(`${panelId}/${commandId}`);
+                return dispatched
+                    ? { ok: true, note: `${panelId}/${commandId}` }
+                    : { ok: false, note: `${panelId}/${commandId} not dispatched` };
+            };
+            const actions: SessionCommandActions = {
+                undo: () => dispatch(SESSION_UNDO_PANEL_ID, "session.undo"),
+                redo: () => dispatch(SESSION_UNDO_PANEL_ID, "session.redo"),
+            };
+            const byId = new Map(sessionCommands(actions).map((c) => [c.id, c]));
+
+            void byId.get("session.undo")?.handler();
+            void byId.get("session.redo")?.handler();
+            assertEqual(
+                seen,
+                ["builtin.session.undo/session.undo", "builtin.session.undo/session.redo"],
+                "both route to the Shell's session-undo panel over panel.command",
+            );
+
+            // Nothing to undo -> the journal exposes no such command -> `dispatched:false`.
+            dispatched = false;
+            const refused = byId.get("session.undo")?.handler();
+            assertEqual(
+                (refused as CommandOutcome).ok,
+                false,
+                "an undo the host did not dispatch is NOT reported as ok",
+            );
         },
     },
 

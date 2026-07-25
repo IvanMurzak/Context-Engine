@@ -44,6 +44,16 @@ namespace context::editor::client
 class Client;
 } // namespace context::editor::client
 
+namespace context::editor::shell
+{
+// Forward-declared for the SAME reason (M9 e09c): the two undo-persistence seams below take the
+// Shell's editor-state store and its document by reference, and only builtin_panels.cpp needs the
+// complete types. Including `editor_state.h` here would put `render/rhi.h` + the client arbitration
+// header on the include path of every TU that hosts a panel, for two function signatures.
+class EditorStateStore;
+struct EditorState;
+} // namespace context::editor::shell
+
 namespace context::editor::shell::panels
 {
 
@@ -73,6 +83,10 @@ class SessionFeed;
 // `inspector::OverrideWriteGateway`, so it reaches the panel headers' include chain). Callers holding
 // only the bag re-point its daemon connection through `bind_write_client` below.
 class WireOverrideWriteGateway;
+// The M9 e09c session undo host, forward-declared for the SAME reason (undo_feed.h names
+// `inspector::OverrideWriteGateway`, so it reaches the panel headers' include chain). Callers
+// holding only the bag drive it through the two persistence seams below.
+class UndoFeed;
 // The owner bag, defined below; forward-declared so `bind_write_client` can sit beside the sibling
 // `bind_session_client` seam it mirrors rather than being separated from it by the struct.
 struct BuiltinPanels;
@@ -146,6 +160,28 @@ void bind_session_client(SessionFeed& feed, client::Client* client);
 // because the two writes seams then read identically at the call site.
 void bind_write_client(BuiltinPanels& panels, client::Client* client);
 
+// --- the M9 e09c undo-journal persistence seams (design 03 §1 / C-F3) ---------------------------
+//
+// The journal lives in this library and owns no disk; `.editor/editor-state.json` is the Shell's and
+// the Shell is its SINGLE WRITER. These two functions are the whole bridge between them, and there
+// is deliberately no third: every write of the journal to that file goes through `restore` at boot
+// and `publish` from the owner loop, both landing in `EditorStateStore::set_undo`. Keeping it to one
+// seam is what lets e09d assert the ownership split structurally rather than by inspection.
+//
+// Both take the BAG (not the feed) for the same two reasons `bind_write_client` does: `UndoFeed` is
+// only forward-declared here, and the call sites then read identically.
+
+// Adopt the persisted journal into the live one (boot / restart). Returns true when a journal was
+// actually restored — false for a fresh project, an absent blob, or a corrupt one (which leaves the
+// journal EMPTY and reports why; a corrupt session file costs the history, never the boot).
+bool restore_undo_state(BuiltinPanels& panels, const EditorState& state);
+
+// Offer the journal to the store IF it has moved since the last publish. Returns true when it was
+// offered. Cheap enough to call every frame: an unmoved journal is not re-serialized at all, and the
+// store's own identical-value rule is the second backstop. The store's debounce + atomic write turn
+// a burst of edits into one crash-safe file per quiet period.
+bool publish_undo_state(BuiltinPanels& panels, EditorStateStore& store, std::uint64_t now_us);
+
 // The roster ids this build can render. Exposed so a caller (and the T1 suite) can assert what was
 // bound WITHOUT restating the list — the one enumeration lives in `install_builtin_panels`.
 [[nodiscard]] const std::vector<std::string>& hostable_panel_ids();
@@ -175,6 +211,12 @@ struct BuiltinPanels
     // tree: it IS the OverrideWriteGateway the Inspector's panel holds a raw pointer to, and a
     // gateway is contractually required to outlive its panel (inspector_panel.h).
     std::unique_ptr<WireOverrideWriteGateway> writes;
+    // The e09c session undo host. DECLARED SECOND — after `writes`, before every panel feed — because
+    // it sits between them in the lifetime order: its journal holds a raw pointer to the gateway
+    // above (so the gateway must outlive it), and the Inspector's checkpoint sink holds a raw
+    // pointer to IT (so it must outlive the Inspector). Members destroy in reverse declaration
+    // order, which makes exactly that sandwich.
+    std::unique_ptr<UndoFeed> undo;
     std::unique_ptr<ProblemsFeed> problems;
     // The e08b daemon-session feed. DECLARED BEFORE THE SCENE TREE so it is destroyed AFTER it
     // (members destroy in reverse order): it IS the SelectionGateway the Scene tree's panel writes

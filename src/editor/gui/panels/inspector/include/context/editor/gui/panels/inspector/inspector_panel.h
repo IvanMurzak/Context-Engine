@@ -161,6 +161,20 @@ public:
     bool stage_edit(const std::string& pointer, serializer::JsonValue new_value);
     [[nodiscard]] bool has_staged_edit() const noexcept { return staged_.has_value(); }
     [[nodiscard]] const std::string& staged_pointer() const noexcept { return staged_pointer_; }
+    // The staged gesture's NEW value and its L-30 collision BASE (the field's value at stage time) —
+    // both nullptr when nothing is staged. Exposed for the M9 e09c session undo journal, which needs
+    // the before/after PAIR to record a reversible checkpoint: `commit()` CONSUMES the gesture, so a
+    // commit LISTENER (which fires after that) can no longer see either value. A caller that wants
+    // them therefore snapshots BEFORE committing. Read-only views into the staged edit — they dangle
+    // the moment the gesture resolves, exactly like any other pointer into optional storage.
+    [[nodiscard]] const serializer::JsonValue* staged_value() const noexcept
+    {
+        return staged_.has_value() ? &staged_->new_value : nullptr;
+    }
+    [[nodiscard]] const serializer::JsonValue* staged_base_value() const noexcept
+    {
+        return staged_.has_value() ? &staged_->base_value : nullptr;
+    }
     void discard_edit();
 
     // Commit the staged edit at gesture end (L-20): an L-35 outermost override write through the

@@ -41,10 +41,12 @@
 #include "context/editor/contract/json.h"
 #include "context/editor/gui/panels/inspector/inspector_model.h"
 #include "context/editor/gui/panels/inspector/inspector_panel.h"
+#include "context/editor/gui/session/undo/undo_journal.h" // undo::FieldEdit (the checkpoint sink)
 #include "context/editor/shell/panel_host.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 
@@ -52,6 +54,9 @@ namespace context::editor::shell::panels
 {
 
 namespace inspector = gui::panels::inspector;
+// Redeclared alias (undo_feed.h declares the same one to the same namespace — legal, and either
+// header may be included first).
+namespace undo = gui::session::undo;
 
 // --------------------------------------------------------------------------------- pure parsers
 
@@ -137,6 +142,20 @@ public:
     void bind_gateway(const inspector::OverrideWriteGateway* gateway);
     [[nodiscard]] bool has_gateway() const noexcept { return gateway_bound_; }
 
+    // The M9 e09c SESSION UNDO CHECKPOINT SINK. Where a resolved gesture commit goes so it becomes a
+    // reversible undo step; the composition root points it at the `UndoFeed` (undo_feed.h). Erased
+    // through a std::function — like EditorStateBridge's RegionSink — so this feed never names the
+    // journal host, and so the dirty/persist policy lives in exactly one place (the UndoFeed), not
+    // duplicated at this call site.
+    //
+    // ONLY AN APPLIED OR REBASED COMMIT IS SENT. A loudly-dropped one (L-30) wrote nothing, so there
+    // is nothing to revert — recording it would offer the human an undo of an edit that never
+    // landed, which is worse than offering none. An unbound sink is an ordinary state (a bag built
+    // without a journal, as the T1 suites do): the commit still happens, it just is not journaled.
+    using CheckpointSink = std::function<void(undo::FieldEdit)>;
+    void bind_checkpoint_sink(CheckpointSink sink);
+    [[nodiscard]] bool has_checkpoint_sink() const noexcept { return static_cast<bool>(sink_); }
+
     [[nodiscard]] inspector::InspectorPanel& panel() noexcept { return panel_; }
     [[nodiscard]] const inspector::InspectorPanel& panel() const noexcept { return panel_; }
 
@@ -149,6 +168,9 @@ public:
     [[nodiscard]] std::size_t drops_observed() const noexcept { return drops_observed_; }
     // How many applied/rebased commits re-armed the read-your-writes fetch (05 §7).
     [[nodiscard]] std::size_t rereads_armed() const noexcept { return rereads_armed_; }
+    // How many resolved commits were journaled as undo checkpoints (M9 e09c). Strictly <=
+    // `commits_observed()`: a drop, an error, and a commit with no sink bound are all excluded.
+    [[nodiscard]] std::size_t checkpoints_sent() const noexcept { return checkpoints_sent_; }
     [[nodiscard]] const inspector::CommitResult& last_commit() const noexcept
     {
         return last_commit_;
@@ -169,6 +191,15 @@ private:
     // The commit listener body (registered on the panel at construction).
     void on_commit(const inspector::CommitResult& result);
 
+    // Snapshot the in-flight gesture as a reversible undo checkpoint (M9 e09c). nullopt when nothing
+    // is staged, or when the model carries no addressable target — a checkpoint whose `root_scene`
+    // or `pointer` is empty addresses nothing, so its replay could only ever drop, and recording it
+    // would put a permanently-unusable step on the human's undo stack.
+    //
+    // MUST BE CALLED BEFORE `InspectorPanel::commit()`, which consumes the staged edit (and with it
+    // both the `before` and `after` values a checkpoint needs) — see inspector_panel.h's accessors.
+    [[nodiscard]] std::optional<undo::FieldEdit> snapshot_checkpoint() const;
+
     PanelHost& host_;
     std::string panel_id_;
     inspector::InspectorPanel panel_;
@@ -180,6 +211,8 @@ private:
     std::size_t commits_observed_ = 0;
     std::size_t drops_observed_ = 0;
     std::size_t rereads_armed_ = 0;
+    std::size_t checkpoints_sent_ = 0;
+    CheckpointSink sink_;
     inspector::CommitResult last_commit_;
 };
 

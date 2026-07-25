@@ -26,6 +26,7 @@ add_library(context_editor_panels STATIC
     src/inspector_feed.cpp   # e05d3: the `editor.inspect` read -> InspectorPanel projection
     src/session_feed.cpp     # e08b: the `session` topic + the `editor.*` writes <-> panel state
     src/wire_override_gateway.cpp # e09b-2: the Inspector's L-20/L-30 commit over the `edit` RPC
+    src/undo_feed.cpp        # e09c: the session undo HOST (records, replays over the wire, persists)
     src/builtin_panels.cpp)  # the provider bindings + the live-hydration pump
 
 target_include_directories(context_editor_panels PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -34,9 +35,14 @@ target_include_directories(context_editor_panels PUBLIC ${CMAKE_CURRENT_SOURCE_D
 # panels' model types in their public surfaces, so a consumer compiling against them needs every
 # include tree. (context_client arrives transitively PUBLIC via context_editor_shell — the pump's
 # complete-type use is builtin_panels.cpp-local.)
+#
+# e09c adds context_gui_undo (the session journal). It is boundary-clean by inspection AND by the
+# gate: its own PUBLIC closure is context_gui_panel_inspector + context_gui_uitree + context_serializer,
+# every one of which was ALREADY on this target's closure through the inspector panel — so
+# `context_editor`'s D10-audited link closure gains no new library and the FORBIDDEN list is untouched.
 target_link_libraries(context_editor_panels
     PUBLIC context_editor_shell context_gui_panel_problems context_gui_panel_scenetree
-           context_gui_panel_inspector context_gui_playbar
+           context_gui_panel_inspector context_gui_playbar context_gui_undo
     PRIVATE context_warnings)
 
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) ------------------------------
@@ -56,6 +62,7 @@ set(_context_editor_panels_tests
     test_inspector_feed    # e05d3: the inspector wire round-trip, CAS token, edit staging dispatch
     test_session_feed      # e08b: the `session` facts, origin echo suppression, the `editor.*` writes
     test_wire_override_gateway # e09b-2: the `edit` wire shape, the CAS refusal, L-30 over the seam
+    test_undo_feed         # e09c: record -> replay-over-the-wire -> persist -> RESTART -> undo again
     test_builtin_panels)   # the composition root: what binds, what stays unhosted, end to end
 
 # Every test here ALSO links context_gui_panel_builders, and three of them NEED it: the two e05d3

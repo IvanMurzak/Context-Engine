@@ -637,6 +637,16 @@ export const UI_MIRROR_ATTRIBUTE = "data-editor-uimirror";
  */
 const UI_MIRROR_SMOKE_FLAG = "ctx-smoke-uimirror";
 
+/**
+ * The Shell-hosted session-undo panel (M9 e09c) — the id `session.undo` / `session.redo` dispatch to.
+ *
+ * MIRRORS `UndoJournal::kContributionId` (undo_journal.h) and the `builtin.session.undo` roster entry
+ * (builtin_roster.cpp), exactly as `SETTINGS_PANEL_ID` mirrors its own. Exported so the T1 tier pins
+ * the spelling: a drift here does not fail any build — it silently makes Ctrl+Z dispatch to a panel
+ * that does not exist, and the only symptom is an undo that quietly answers `not dispatched`.
+ */
+export const SESSION_UNDO_PANEL_ID = "builtin.session.undo";
+
 /** How often a window polls for panels moved INTO it (move-to-N + a peer's window-close rehome). */
 const REHOME_POLL_MS = 500;
 
@@ -808,6 +818,19 @@ function startCommandLayer(
     if (roster === null) {
         return;
     }
+    // ONE dispatcher for every command that resolves to a panel — the manifest-projected ones AND
+    // (since M9 e09c) the session undo/redo pair. Hoisted so the two cannot drift into different
+    // notions of "dispatched": a panel command that reported success on a `dispatched:false` reply
+    // would make an undo that did nothing look like one that worked.
+    const dispatchPanelCommand = async (
+        panelId: string,
+        commandId: string,
+    ): Promise<CommandOutcome> => {
+        const result = await client.command(panelId, commandId, "");
+        return result !== null && result.dispatched
+            ? { ok: true, note: `${panelId}/${commandId}` }
+            : { ok: false, note: `${panelId}/${commandId} not dispatched` };
+    };
     try {
         const registry = buildCommandRegistry({
             // The daemon RPC fan-in (D19) is a later seam; contract verbs are PROJECTED into the
@@ -818,26 +841,34 @@ function startCommandLayer(
                 note: `daemon RPC fan-in not wired yet (D19): ${method}`,
             }),
             editorActions: makeEditorActions(host, client, windowClient, theme),
-            // Session undo/redo binding + dispatch land here (e07c); the wire REPLAY of the journal is
-            // e09 (undo_journal.h). Executing them is an honest refusal until then.
+            // M9 e09c — SESSION UNDO/REDO ARE REAL NOW. e07c delivered the binding + dispatch and
+            // left the ACTION an honest refusal ("the wire replay lands in e09"); e09c lands it, so
+            // this stub would otherwise keep answering that after the thing it waits for shipped.
+            //
+            // They route over the SAME `panel.command` bridge every other panel command uses, at the
+            // Shell's session-undo host (undo_feed.h), which replays through the ONE
+            // WireOverrideWriteGateway a live gesture commits through. No new wire verb, no second
+            // write path, and Ctrl+Z / Ctrl+Y therefore reach the actual CAS-guarded replay
+            // (R-CLI-001: every affordance has a keyboard/CLI path).
+            //
+            // NOT a duplicate registration: `panel.list` projects a panel's MANIFEST commands, which
+            // are empty for every built-in uitree panel (panel_host.cpp § list) — the journal's
+            // `session.undo` / `session.redo` ride its RENDER instead. So `projectPanelCommands`
+            // contributes nothing here and these two ids stay the registry's only ones, which
+            // matters because `buildCommandRegistry` THROWS on a collision (and a throw here
+            // degrades the whole palette).
+            //
+            // `dispatched:false` is the honest outcome when there is nothing to undo — the journal
+            // exposes a command only when the action is reachable (undo_journal.cpp build_panel).
             sessionActions: {
-                undo: (): CommandOutcome => ({
-                    ok: false,
-                    note: "session undo replay lands in e09 (undo_journal.h)",
-                }),
-                redo: (): CommandOutcome => ({
-                    ok: false,
-                    note: "session redo replay lands in e09 (undo_journal.h)",
-                }),
+                undo: (): Promise<CommandOutcome> =>
+                    dispatchPanelCommand(SESSION_UNDO_PANEL_ID, "session.undo"),
+                redo: (): Promise<CommandOutcome> =>
+                    dispatchPanelCommand(SESSION_UNDO_PANEL_ID, "session.redo"),
             },
             roster,
             // A panel-manifest command dispatches to its panel over the real `panel.command` bridge.
-            panelDispatch: async (panelId, commandId): Promise<CommandOutcome> => {
-                const result = await client.command(panelId, commandId, "");
-                return result !== null && result.dispatched
-                    ? { ok: true, note: `${panelId}/${commandId}` }
-                    : { ok: false, note: `${panelId}/${commandId} not dispatched` };
-            },
+            panelDispatch: dispatchPanelCommand,
         });
 
         const palette = new Palette(registry);
