@@ -269,15 +269,17 @@ protected:
         return true;
     }
 
-    // The REFUSED response. An error page is a document too, and one served without a policy is a
-    // hole that only shows up on the unhappy path — so the refusal carries the SAME CSP the happy
-    // path would have.
+    // The REFUSED response. WHICH headers a refusal carries is policy and lives in the CEF-free
+    // `refusal_headers()` (app_scheme.h), where both scheme suites pin it on all three `build`
+    // legs; this is only the translation into CEF's map.
     void write_refusal(CefRefPtr<CefResponse> response, const char* csp, int64_t& response_length)
     {
         response->SetMimeType("text/plain");
         CefResponse::HeaderMap headers;
-        headers.insert({"Content-Security-Policy", csp});
-        headers.insert({"X-Content-Type-Options", "nosniff"});
+        for (const auto& [name, value] : refusal_headers(csp))
+        {
+            headers.insert({name, value});
+        }
         response->SetHeaderMap(headers);
         response_length = 0;
     }
@@ -304,8 +306,10 @@ protected:
         {
             // CEF derives the Content-Type from the mime type + charset set above; setting it in
             // the map as well makes the response carry it twice, which some parsers treat as a
-            // conflict.
-            if (name == "Content-Type")
+            // conflict. Compared case-INSENSITIVELY (header names are) via the CEF-free, unit-tested
+            // `ascii_iequals` rather than a comparison loop written in this TU, which neither the
+            // local gate nor any unit suite can exercise.
+            if (ascii_iequals(name, "content-type"))
             {
                 continue;
             }
@@ -422,7 +426,16 @@ public:
         {
             // Logged, never sent — a refusal reason is a probe oracle, and this scheme's whole
             // point is that the requester may be hostile.
-            std::fprintf(stderr, "[shell-cef] ext scheme refused <%s>: %s\n", url.c_str(),
+            //
+            // TRUNCATED for the same reason `kExtPackageIdMaxLength` exists: the requester here is
+            // untrusted BY CONSTRUCTION and controls this string, so an unbounded URL is an
+            // unbounded attacker-chosen write into the operator's diagnostic channel on every
+            // refusal. The package id is bounded by the grammar; the path is not.
+            constexpr std::size_t kMaxLoggedUrl = 256;
+            const std::string logged = url.size() <= kMaxLoggedUrl
+                                           ? url
+                                           : url.substr(0, kMaxLoggedUrl) + "...[truncated]";
+            std::fprintf(stderr, "[shell-cef] ext scheme refused <%s>: %s\n", logged.c_str(),
                          resolution_.reason.c_str());
             return true;
         }
@@ -970,10 +983,22 @@ public:
         //                   rather than a special case.
         // NOT set, deliberately: CSP_BYPASSING (the whole point is that the CSP APPLIES) and
         // LOCAL (which would grant file-like privileges — the opposite of what this scheme is for).
-        registrar->AddCustomScheme(kAppScheme, CEF_SCHEME_OPTION_STANDARD |
-                                                   CEF_SCHEME_OPTION_SECURE |
-                                                   CEF_SCHEME_OPTION_CORS_ENABLED |
-                                                   CEF_SCHEME_OPTION_FETCH_ENABLED);
+        //
+        // THE RETURN VALUE IS CHECKED on both schemes below. `AddCustomScheme` returns false if the
+        // name is already registered or registration failed, and the consequence is invisible and
+        // severe: documents on that scheme silently get OPAQUE origins instead of the pinned
+        // semantics. The static_asserts above pin the flag VALUES at compile time; this is the one
+        // runtime step that actually applies them, so a failure must not pass unremarked.
+        if (!registrar->AddCustomScheme(kAppScheme, CEF_SCHEME_OPTION_STANDARD |
+                                                        CEF_SCHEME_OPTION_SECURE |
+                                                        CEF_SCHEME_OPTION_CORS_ENABLED |
+                                                        CEF_SCHEME_OPTION_FETCH_ENABLED))
+        {
+            std::fprintf(stderr,
+                         "[shell-cef] AddCustomScheme(%s) FAILED — documents on this scheme will "
+                         "have opaque origins\n",
+                         kAppScheme);
+        }
 
         // The EXTENSION scheme (M9 e13a-1, design 04 §5 / 08 §1-§2). Registered here, in the same
         // every-process hook and for the same reason: a per-package origin only behaves like an
@@ -990,7 +1015,13 @@ public:
         // NOTE the deliberate difference from the app scheme one line up: NO FETCH_ENABLED (a panel
         // has `connect-src 'none'` and gets no Fetch surface of its own) and, as there, no
         // CSP_BYPASSING and no LOCAL. ext_scheme.h documents each omission.
-        registrar->AddCustomScheme(kExtScheme, static_cast<int>(kExtSchemeOptions));
+        if (!registrar->AddCustomScheme(kExtScheme, static_cast<int>(kExtSchemeOptions)))
+        {
+            std::fprintf(stderr,
+                         "[shell-cef] AddCustomScheme(%s) FAILED — panel documents will have "
+                         "opaque origins, not the pinned STANDARD|SECURE|CORS_ENABLED\n",
+                         kExtScheme);
+        }
     }
 
     // --- the renderer side of the message router --------------------------------------------------
@@ -1498,13 +1529,36 @@ std::unique_ptr<IBrowserHost> make_cef_browser_host(const CefShellOptions& optio
                              package.id.c_str());
             }
         }
+        // PUBLISHED BEFORE the factory is registered, and that ordering is load-bearing rather than
+        // incidental: until `CefRegisterSchemeHandlerFactory` returns there is no factory, so no
+        // handler, so no IO-thread reader of this pointer — the registration call is what carries
+        // the write across to that thread. Do NOT "fix" the failure path below by moving this line
+        // after the registration.
         g_ext_resolver = ext_resolver;
         if (!CefRegisterSchemeHandlerFactory(kExtScheme, /*domain*/ CefString(),
                                              new ExtSchemeFactory()))
         {
+            // UNPUBLISH on failure. Leaving a non-null resolver with no factory registered would
+            // permanently trip the `g_ext_resolver == nullptr` guard above, so a retry would skip
+            // this whole block and leave `context-ext://` handler-less for the process lifetime —
+            // the one state this block exists to make impossible.
+            delete ext_resolver;
+            g_ext_resolver = nullptr;
             error = "CefRegisterSchemeHandlerFactory failed for context-ext://";
             return nullptr;
         }
+    }
+    else if (!options.ext_packages.empty())
+    {
+        // The resolver is PROCESS-GLOBAL while `ext_packages` is a per-call option, so a second
+        // window's package list is silently dropped. Said out loud rather than swallowed: it would
+        // otherwise present as "the second window's panels all 403 and nothing explains why".
+        // See CefShellOptions::ext_packages.
+        std::fprintf(stderr,
+                     "[shell-cef] %zu extension package mount(s) IGNORED: the ext resolver is "
+                     "process-global and was already built by an earlier browser; only the first "
+                     "make_cef_browser_host() call's ext_packages take effect\n",
+                     options.ext_packages.size());
     }
 
     CefRefPtr<ShellCefClient> client(

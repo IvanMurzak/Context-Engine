@@ -10,23 +10,18 @@
 
 #include "shell_test.h"
 
-#include <cstddef>
-#include <fstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace shell = context::editor::shell;
 
 namespace
 {
 
-void write_file(const std::filesystem::path& path, const std::string& content)
-{
-    std::filesystem::create_directories(path.parent_path());
-    // C++ streams, never std::fopen: MSVC /W4 /WX rejects the C stdio family as C4996 and the local
-    // GCC gate cannot see it (conventions.md § Coding conventions).
-    std::ofstream out(path, std::ios::binary);
-    out << content;
-}
+// The shared harness owns the fixture writer — it asserts the write LANDED, which a per-suite copy
+// kept forgetting and which is what stops an adversarial suite from passing vacuously.
+using shelltest::write_file;
 
 // --------------------------------------------------------------------------- percent-decoding
 
@@ -226,13 +221,7 @@ void test_csp_and_headers()
     // And 'unsafe-inline' appears EXACTLY ONCE — the style relaxation above and nowhere else (in
     // particular NOT on script-src). Counted, not eyeballed, so a future widening of any other
     // directive trips this.
-    std::size_t unsafe_inline_count = 0;
-    for (std::size_t at = csp.find("unsafe-inline"); at != std::string::npos;
-         at = csp.find("unsafe-inline", at + 1))
-    {
-        ++unsafe_inline_count;
-    }
-    CHECK(unsafe_inline_count == 1);
+    CHECK(shelltest::count_occurrences(csp, "unsafe-inline") == 1);
     // NO NETWORK — the 08 §2 "token leakage via the web layer" control.
     CHECK(shelltest::mentions(csp, "connect-src 'none'"));
     CHECK(shelltest::mentions(csp, "object-src 'none'"));
@@ -247,37 +236,57 @@ void test_csp_and_headers()
     CHECK(!shelltest::mentions(csp, "frame-src 'none'"));
     // Framing OUT was widened; framing IN was not. The editor window is still never someone else's
     // frame, and nothing else in the policy moved.
-    CHECK(shelltest::mentions(csp, "frame-ancestors 'none'"));
     CHECK(shelltest::mentions(csp, "form-action 'none'"));
-    CHECK(!shelltest::mentions(csp, "http://"));
-    CHECK(!shelltest::mentions(csp, "https://"));
+    // Probed WITHOUT the slashes. A CSP scheme-source is spelled `https:`, never `https://` — the
+    // same shape as the `context-ext:` this widening just added — so a probe for `https://` would
+    // sail straight past a `frame-src context-ext: https:`, which is precisely the over-widening
+    // this assertion exists to catch. `http:` as a substring catches `https:` too.
+    CHECK(!shelltest::mentions(csp, "http:"));
     CHECK(!shelltest::mentions(csp, "*"));
     // `data:` stays confined to images — the widening added a frame source, not a data source.
+    // COUNTED rather than probed for one hand-written spelling: `!mentions("frame-src context-ext:
+    // data:")` passes against `frame-src data: context-ext:`, whereas a count of ONE pins that the
+    // img-src source is still the only `data:` in the policy whatever the order.
     CHECK(shelltest::mentions(csp, "img-src 'self' data:"));
-    CHECK(!shelltest::mentions(csp, "frame-src context-ext: data:"));
+    CHECK(shelltest::count_occurrences(csp, "data:") == 1);
 
-    const auto headers = shell::app_response_headers("text/javascript; charset=utf-8");
-    bool has_type = false;
-    bool has_csp = false;
-    bool has_nosniff = false;
-    for (const auto& [name, value] : headers)
-    {
-        if (name == "Content-Type")
-        {
-            has_type = value == "text/javascript; charset=utf-8";
-        }
-        else if (name == "Content-Security-Policy")
-        {
-            has_csp = value == csp;
-        }
-        else if (name == "X-Content-Type-Options")
-        {
-            has_nosniff = value == "nosniff";
-        }
-    }
-    CHECK(has_type);
-    CHECK(has_csp);
-    CHECK(has_nosniff);
+    // THE WHOLE HEADER SET, EXACTLY AND IN ORDER — values, documented order, and closure in one
+    // comparison. `X-Frame-Options: DENY` is here because THE EDITOR WINDOW IS NEVER FRAMED, and
+    // that is the other half of the extension response's deliberate ABSENCE of the same header
+    // (test_ext_scheme.cpp). The asymmetry IS the claim, so both sides are pinned in the PR that
+    // creates it — before this, deleting the header from app_response_headers failed no test.
+    const std::vector<std::pair<std::string, std::string>> expected_headers = {
+        {"Content-Type", "text/javascript; charset=utf-8"},
+        {"Content-Security-Policy", csp},
+        {"X-Content-Type-Options", "nosniff"},
+        {"X-Frame-Options", "DENY"},
+        {"Referrer-Policy", "no-referrer"},
+        {"Cache-Control", "no-store"},
+    };
+    CHECK(shell::app_response_headers("text/javascript; charset=utf-8") == expected_headers);
+
+    // The REFUSED response's policy, pinned next to the served one — same CSP (an error page is a
+    // document too), no Content-Type (the binding sets `text/plain` itself), and NO
+    // `X-Frame-Options`: a refusal is the one response an attacker can always elicit, so its header
+    // set is worth pinning rather than leaving to the untestable CEF translator.
+    const std::vector<std::pair<std::string, std::string>> expected_refusal = {
+        {"Content-Security-Policy", csp},
+        {"X-Content-Type-Options", "nosniff"},
+        {"Cache-Control", "no-store"},
+        {"Referrer-Policy", "no-referrer"},
+    };
+    CHECK(shell::refusal_headers(shell::app_csp_header()) == expected_refusal);
+
+    // ASCII case-insensitive equality — the CEF binding's header de-duplication rests on it, and
+    // that TU is the one nothing local can build or test.
+    CHECK(shell::ascii_iequals("Content-Type", "content-type"));
+    CHECK(shell::ascii_iequals("CONTENT-TYPE", "content-type"));
+    CHECK(shell::ascii_iequals("", ""));
+    CHECK(!shell::ascii_iequals("Content-Type", "content-typ"));
+    CHECK(!shell::ascii_iequals("Content_Type", "content-type"));
+    // Only ASCII letters fold: a byte 32 apart that is NOT a cased letter pair must not match
+    // (`_` is `[` + 32), which is how a naive `|= 0x20` implementation goes wrong.
+    CHECK(!shell::ascii_iequals("[", "{"));
 }
 
 void test_scheme_constants()

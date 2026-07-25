@@ -564,10 +564,17 @@ Named so the gaps are visible rather than assumed:
   CEF-free `ext_scheme.h`/`.cpp` (ctest `editor-shell-test_ext_scheme`, all three `build` legs).
   That resolver is deny-by-default four times over — a valid package id, a package that is actually
   MOUNTED (never path-joined from the id), a media type on the shared asset allowlist, and canonical
-  containment inside that ONE package's root — and `mount()` additionally refuses overlapping roots,
-  because a package nested inside another's root would be a cross-package read that per-root
-  containment cannot see. With no package mounted (today's state — the install flow is e13b's) every
-  `context-ext://` request is refused, which is the intended configuration and not a gap.
+  containment inside that ONE package's root — and `mount()` additionally refuses overlapping roots
+  (a package nested inside another's root would be a cross-package read that per-root containment
+  cannot see) and a root it cannot canonicalize (the overlap check is lexical, so it establishes
+  disjointness only between canonical paths). With no package mounted (today's state — the install
+  flow is e13b's) every `context-ext://` request is refused, which is the intended configuration and
+  not a gap. Both schemes walk ONE containment chain — declared in `app_scheme.h`, which documents
+  the primitives and why they are shared — so a traversal rejection cannot rot in one copy and ship
+  the hole in the other; a colon is refused ANYWHERE in a path segment, covering both the
+  drive-relative re-root and NTFS alternate data streams. Refusal STATUSES are chosen so the mount
+  table is unobservable: an unmounted package and an absent asset both answer 404, so a response
+  cannot be used to enumerate which packages a user has installed.
   editor-core's own CSP widened `frame-src 'none'` → `frame-src context-ext:` for this, and nothing
   else in that policy moved. The CEF-free `kExtSchemeOptions` pin is `static_assert`ed against CEF's
   own `CEF_SCHEME_OPTION_*` values in `cef_shell.cpp`, so a CEF bump that renumbered them fails the

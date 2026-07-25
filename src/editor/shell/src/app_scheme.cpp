@@ -105,17 +105,58 @@ bool split_safe_path_segments(std::string_view path, std::vector<std::string>& o
             reason = "'..' traversal segment";
             return false;
         }
-        // A drive-relative or UNC-ish segment (`C:`, `C:foo`). On Windows `root / "C:x"` does NOT
-        // append — it re-roots onto that drive, silently leaving the asset root.
-        if (current.size() >= 2 && current[1] == ':')
+        // A COLON ANYWHERE in a segment, which is two distinct escapes in one character:
+        //   * `C:` / `C:foo` — drive-relative. On Windows `root / "C:x"` does NOT append; it
+        //     re-roots onto that drive, silently leaving the asset root.
+        //   * `panel.js:evil` / `x::$DATA` — an NTFS ALTERNATE DATA STREAM. The stream is a byte
+        //     stream hanging off the base file that `directory_iterator` does NOT enumerate, so a
+        //     package whose files were listed, hashed and reviewed can still carry one. MSVC's
+        //     `path::extension()` returns `.js` for `panel.js:evil` (libstdc++ returns `.js:evil`
+        //     and serves `hidden.env:x.js` instead) — so on ONE of the two STLs the media allowlist
+        //     is satisfied by the BASE name while the bytes served are the unreviewed stream. The
+        //     two disagree in OPPOSITE directions, which is exactly why this is refused here,
+        //     textually and before the filesystem is touched, rather than left to `extension()`.
+        // No legitimate web asset filename carries a colon — it is not a legal Windows filename
+        // character at all — so refusing the whole character costs nothing and closes both.
+        if (current.find(':') != std::string::npos)
         {
-            reason = "drive-qualified segment";
+            reason = "colon in path segment";
             return false;
         }
         out.push_back(current);
         current.clear();
     }
     return true;
+}
+
+bool ascii_iequals(std::string_view a, std::string_view b)
+{
+    if (a.size() != b.size())
+    {
+        return false;
+    }
+    for (std::size_t i = 0; i < a.size(); ++i)
+    {
+        const auto ca = static_cast<unsigned char>(a[i]);
+        const auto cb = static_cast<unsigned char>(b[i]);
+        const unsigned char la = (ca >= 'A' && ca <= 'Z') ? static_cast<unsigned char>(ca + 32) : ca;
+        const unsigned char lb = (cb >= 'A' && cb <= 'Z') ? static_cast<unsigned char>(cb + 32) : cb;
+        if (la != lb)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool path_contains_or_equals(const std::filesystem::path& outer, const std::filesystem::path& inner)
+{
+    // `lexically_relative` returns ".." as the first element exactly when `inner` escapes `outer`,
+    // and an EMPTY path when the two carry different root names (a different drive, drive-vs-UNC) —
+    // both are non-containment, so both fail CLOSED. `inner == outer` yields ".", which IS
+    // contained (that is the "or_equals").
+    const std::filesystem::path relative = inner.lexically_relative(outer);
+    return !relative.empty() && *relative.begin() != "..";
 }
 
 int http_status_for(AssetStatus status)
@@ -316,11 +357,10 @@ AssetResolution AppAssetResolver::resolve(std::string_view url) const
         return result;
     }
 
-    // lexically_relative yields a path starting with ".." exactly when `canonical` is outside the
-    // root, which is the containment predicate — and it is a pure path operation, so it cannot be
-    // defeated by a race between the check and the open.
-    const std::filesystem::path relative = canonical.lexically_relative(asset_root_);
-    if (relative.empty() || *relative.begin() == "..")
+    // The containment predicate — a pure path operation, so it cannot be defeated by a race between
+    // the check and the open. Shared with the extension scheme (see the header): ONE spelling, both
+    // suites attack it.
+    if (!path_contains_or_equals(asset_root_, canonical))
     {
         result.status = AssetStatus::forbidden;
         result.reason = "resolved outside the asset root";
@@ -396,6 +436,20 @@ app_response_headers(const std::string& mime_type)
         // These assets are rebuilt with the app; a cached copy across versions would serve a stale
         // bundle against a fresh contract surface.
         {"Cache-Control", "no-store"},
+    };
+}
+
+std::vector<std::pair<std::string, std::string>> refusal_headers(const char* csp)
+{
+    return {
+        // An error page is a document too, and one served without a policy is a hole that only
+        // shows up on the unhappy path — so a refusal carries the SAME CSP the happy path would.
+        {"Content-Security-Policy", csp},
+        {"X-Content-Type-Options", "nosniff"},
+        // Blink's in-memory resource cache is not scheme-limited, so a cached 403/404 can outlive
+        // the package update or asset rebuild that would have fixed it.
+        {"Cache-Control", "no-store"},
+        {"Referrer-Policy", "no-referrer"},
     };
 }
 

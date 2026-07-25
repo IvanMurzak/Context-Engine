@@ -25,6 +25,27 @@
 // independently catches what the textual pass cannot see (a symlink out of the package, a decoder
 // gap, an OS path quirk).
 //
+// ⚠ WHAT CHECK (4) RESTS ON, MEASURED RATHER THAN ASSUMED: it catches a link out of the package
+// only insofar as `std::filesystem::weakly_canonical` RESOLVES that link, and the STLs diverge on
+// Windows. MSVC resolves reparse points through `GetFinalPathNameByHandle` — both symlinks and
+// DIRECTORY JUNCTIONS — so the shipped Windows binary (MSVC on every CI leg and every export) is
+// covered. The MinGW libstdc++ used by the local dev gate does NOT resolve a junction: measured
+// here, `weakly_canonical(<pkg-a>/link-to-b/private.js)` returns the path unchanged, so a junction
+// planted inside a package root would read as contained. That matters because a junction, unlike a
+// symlink, needs NO privilege to create on Windows. It is a dev-toolchain gap rather than a shipped
+// one — but it is why check (4) is not the only line of defence, and it is a hard E13B OBLIGATION:
+// the install path must refuse a package root containing a reparse point it did not create, rather
+// than leaving the property to the STL that happened to compile the resolver.
+//
+// ⚠ E13A-2 OBLIGATION — BIND THE BRIDGE TO A VERIFIED ORIGIN, NOT TO THE FRAME. editor-core's
+// widened `frame-src context-ext:` is a SCHEME-source, so it permits every package; and a
+// `sandbox="allow-scripts"` frame may always navigate ITSELF (sandbox restricts navigating the
+// TOP). Panel A can therefore set `location = 'context-ext://b/index.html'`, and the frame element
+// editor-core believes hosts A now hosts B. No bytes leak today — A's own script is destroyed by
+// the navigation, and this scheme still serves each origin only its own root — but any capability
+// or MessagePort e13a-2 hands to "the A frame" would land in B's document. The bridge must key off
+// the handshake's verified `event.origin`, never off the element it was granted to.
+//
 // CROSS-PACKAGE READS ARE THE AXIS THIS EXISTS TO CLOSE, and containment-per-root is NOT
 // sufficient on its own: if package B's root sat INSIDE package A's root, then
 // `context-ext://a/b/secret.js` would be perfectly contained in A's root and would serve B's bytes
@@ -69,9 +90,9 @@ inline constexpr std::size_t kExtPackageIdMaxLength = 64;
 // ------------------------------------------------------ the pinned CEF scheme-registration options
 //
 // A CEF-FREE MIRROR of CEF's `cef_scheme_options_t` bit values, so the flag set this scheme is
-// PINNED to (design 04 §5 / 08 §2: `STANDARD|SECURE|CORS_ENABLED`) is asserted by a unit test on all
-// three default `build` legs — where CEF is not built at all — instead of only being declared in the
-// one translation unit the local gate cannot compile.
+// PINNED to (design 04 §5 / 08 §2: `STANDARD|SECURE|CORS_ENABLED`) is asserted by a unit test on
+// all three default `build` legs — where CEF is not built at all — instead of only being
+// declared in the one translation unit the local gate cannot compile.
 //
 // The mirror is kept honest at the other end: cef_shell.cpp `static_assert`s each constant below
 // against the real `CEF_SCHEME_OPTION_*` enumerator, so a CEF bump that renumbered them would fail
@@ -108,12 +129,17 @@ inline constexpr unsigned kExtSchemeOptions =
 
 // Is `id` a syntactically valid package id (and therefore usable as this scheme's HOST)?
 //
-//   [a-z0-9] ( [a-z0-9._-]* [a-z0-9] )?   , 1..kExtPackageIdMaxLength bytes, no ".." anywhere
+//   [a-z0-9] ( [a-z0-9._-]* [a-z0-9] )?   , 1..kExtPackageIdMaxLength bytes, no ".." anywhere,
+//   and the last '.'-separated label is not all digits
 //
-// LOWERCASE ONLY, which is a correctness rule and not merely a style one: Chromium canonicalizes a
-// standard URL's host to lower case, so an id registered with an upper-case letter could never be
-// matched by a request again. Refusing it here makes that a loud mount-time failure instead of a
-// package that is silently unreachable.
+// TWO OF THOSE RULES ARE CORRECTNESS, NOT STYLE — both refuse an id that a request could never name
+// again, turning a package that would be SILENTLY unreachable into a loud mount-time failure:
+//   * LOWERCASE ONLY — Chromium canonicalizes a standard URL's host to lower case, so an id
+//     registered with an upper-case letter can never be matched by an incoming request.
+//   * LAST LABEL NOT ALL DIGITS — the URL Standard's "ends in a number" check sends such a host to
+//     the IPv4 parser instead of keeping it a domain, so `12345` arrives back as `0.0.48.57` and
+//     `pkg.2` fails host parsing outright. (`pkg2` and `context.hello-panel_2` are unaffected: the
+//     rule is about a label that is ENTIRELY digits, not about digits appearing in one.)
 //
 // The leading/trailing character rule refuses `.`, `..`, `-x`, `x.` and the empty string, and the
 // `..` rule refuses any dotted spelling that would read as a parent directory if the id ever
@@ -166,6 +192,10 @@ public:
     //   * the id is not a valid package id (see is_valid_package_id);
     //   * the id is already mounted — a second mount would silently shadow the first, and which one
     //     wins is not a question a security boundary should have an answer to;
+    //   * the root cannot be CANONICALIZED. There is deliberately no "fall back to the raw path"
+    //     branch: the overlap refusal below is a LEXICAL comparison, so it establishes disjointness
+    //     only when both sides are canonical, and every containment check afterwards compares
+    //     against this stored value;
     //   * the root does not exist or is not a directory (a package that is not installed is not
     //     mounted — deny-by-default applies to the mount table too);
     //   * the canonical root CONTAINS, IS, or IS CONTAINED BY an already mounted root. See the file
@@ -178,7 +208,16 @@ public:
     // nothing to get wrong. The moment an install path starts producing these mounts, that path
     // owns the missing half: a root must be inside the package store it claims to come from, or a
     // package whose manifest points its asset root at `~/.ssh` gets exactly what it asked for.
-    bool mount(std::string_view package_id, const std::filesystem::path& root, std::string& reason);
+    //
+    // ⚠ SECOND E13B OBLIGATION — CASE. The overlap refusal compares paths with `path::compare`,
+    // which is case-SENSITIVE, while NTFS is not. Canonicalization is what closes the gap in
+    // practice (MSVC's `weakly_canonical` case-normalizes through `GetFinalPathNameByHandle`; the
+    // MinGW libstdc++ used by the local dev gate does NOT), so two differently-cased spellings of
+    // one directory could both mount under a non-MSVC Windows build. Refusing an uncanonicalizable
+    // root above is what keeps this narrow; an install path that can produce two spellings of one
+    // root must dedupe them before mounting.
+    [[nodiscard]] bool mount(std::string_view package_id, const std::filesystem::path& root,
+                             std::string& reason);
 
     [[nodiscard]] ExtResolution resolve(std::string_view url) const;
 
@@ -212,24 +251,65 @@ private:
 //   connect-src 'none'  — NO NETWORK. The 08 §2 "malicious third-party panel exfiltrates project
 //                         data" control: even a panel that got hold of something has nowhere to
 //                         send it. The panel bridge is postMessage, not fetch, so it is unaffected.
+//   child-src / worker-src 'none'
+//                       — SPELLED OUT rather than left to the fallback chain, which does NOT end at
+//                         `default-src` for these: `worker-src` falls back to `child-src` and then
+//                         to `script-src 'self'`, so omitting both would GRANT a panel a Worker and
+//                         a SharedWorker rendezvous on its own origin. Nothing decided that; a
+//                         capability acquired by fallback is not a reviewed one.
 //   frame-src / object-src / base-uri / form-action 'none'
 //                       — a panel may not nest further frames, load plugins, rewrite its module
 //                         base URL, or post a form off-origin.
 //   frame-ancestors context-editor:
-//                       — THE PANEL MAY ONLY BE FRAMED BY THE EDITOR. A scheme-source rather than
-//                         `context-editor://app`, matching the `frame-src context-ext:` form on the
-//                         other side of the same seam: `context-editor` carries exactly one
-//                         document origin (`//app`), so the two spell the same permission, and the
-//                         scheme form cannot be broken by a future origin rename. It is emphatically
-//                         NOT `'none'` (which would block the panel from being framed at all) and
-//                         not `*` (which would let any page that can reach the scheme frame it).
+//                       — THE PANEL MAY ONLY BE FRAMED BY THE EDITOR. It is emphatically NOT
+//                         `'none'` (which would block the panel from being framed at all) and not
+//                         `*` (which would let any page that can reach the scheme frame it).
+//                         ⚠ A SCHEME-source, and the reason is liveness, not tightness. The tighter
+//                         spelling is the host-source `context-editor://app` (= `kAppOrigin`, a
+//                         compile-time constant right here), and the "the scheme carries exactly
+//                         one document origin" symmetry argument that would have justified the
+//                         scheme form does NOT hold: app_scheme.h declares a SECOND host,
+//                         `kIpcHost`, so `context-editor:` also authorizes `context-editor://ipc`
+//                         to frame a panel. That is empty today — only `kAppHost` gets a
+//                         `CefRegisterSchemeHandlerFactory`, so `//ipc` serves no document, and
+//                         `OnBeforeBrowse` independently pins the main frame to `kAppUrlPrefix` —
+//                         but it is breadth nobody asked for. It stays a scheme-source ONLY because
+//                         no live iframe smoke exists yet (that is e13a-2's) to prove the
+//                         host-source form does not silently collapse the directive and block
+//                         panels outright. E13A-2 OBLIGATION: once that smoke exists, tighten this
+//                         to `context-editor://app` and verify against it.
 //
-// ⚠ e13a-2 READ THIS BEFORE DEBUGGING A BLANK PANEL: `'self'` inside a document that editor-core
-// framed with `sandbox="allow-scripts"` is resolved against the RESPONSE URL's origin, not the
-// frame's (opaque) document origin — so it does match `context-ext://<pkg>/…`. If a live smoke ever
-// shows a panel's own module refused, the console message from `OnConsoleMessage` names the
-// directive, and the fix is a REVIEWED policy change here, never an `'unsafe-inline'` sprinkled at
-// the call site. The same discipline the editor-core `style-src` saga above records.
+// ⚠ e13a-2 READ THIS BEFORE DEBUGGING A BLANK PANEL — there are TWO independent hypotheses, and
+// only the first is a CSP question:
+//   (1) `'self'` inside a document that editor-core framed with `sandbox="allow-scripts"` is
+//       resolved against the RESPONSE URL's origin, not the frame's (opaque) document origin — so
+//       it SHOULD match `context-ext://<pkg>/…`. If a live smoke shows a panel's own module
+//       refused, the console message from `OnConsoleMessage` names the directive, and the fix is a
+//       REVIEWED policy change here, never an `'unsafe-inline'` sprinkled at the call site (the
+//       same discipline the editor-core `style-src` saga above records).
+//   (2) The scheme is registered WITHOUT `FETCH_ENABLED` (deliberately — see kExtSchemeOptions),
+//       while the app scheme takes it. Module-graph fetching is not the Fetch API, so
+//       `CORS_ENABLED` alone is expected to suffice, but NOTHING has proven that on a live
+//       browser yet. If the
+//       console blames neither a directive nor a 403, this asymmetry is the second thing to check.
+//
+// ⚠ NOT a `sandbox` directive, deliberately, and this is a REVIEWED omission rather than an
+// oversight: response-enforced `sandbox` would make containment independent of the embedder, but
+// `sandbox allow-scripts` WITHOUT `allow-same-origin` gives the document an opaque origin, and
+// whether `'self'` still matches the response URL then is precisely hypothesis (1) above — unproven
+// until e13a-2's live smoke exists. Adding it blind could brick every panel. E13A-2 OBLIGATION:
+// settle (1) against a real browser, then decide whether `sandbox` belongs in this response.
+//
+// ⚠ THE OTHER EXTENSION CSP IN THIS REPO — read before assuming this is the only one. The M5
+// gui-host tier has `kDefaultExtensionCsp` (`context/editor/gui/contract/sandbox.h`), the default
+// of `SandboxPolicy::csp`, emitted as a `<meta http-equiv>` by `uitree::render_document` for
+// BUILT-IN headless panels. It governs a DIFFERENT document on a DIFFERENT trust tier (first-party
+// panels rendered by the editor's own uitree, not third-party bundles on their own origin), which
+// is why
+// its `connect-src 'self'` does not contradict this policy's `'none'`. They are not
+// interchangeable and neither should be edited to "match" the other by reflex — but a change to the
+// third-party trust model belongs in BOTH or in neither, so reconciling the two (or deleting one)
+// is an explicit e13b obligation once the package install path exists.
 [[nodiscard]] const char* ext_csp_header();
 
 // The full response header set for a served extension asset. Ordered, and returned as a list rather
@@ -240,6 +320,18 @@ private:
 // precisely to BE framed. `frame-ancestors` above is the modern, spec'd control and is what states
 // by WHOM; adding a legacy `X-Frame-Options` alongside it would at best be redundant and at worst
 // (on any consumer that honours the legacy header first) block the panel outright.
+//
+// TWO MORE REVIEWED OMISSIONS, recorded so neither is re-proposed as an easy win:
+//   * `Cross-Origin-Resource-Policy` — it LOOKS like the obvious hardening for an untrusted origin
+//     and it is actively WRONG here. The CORP check runs on no-cors fetches AND on navigation
+//     requests for NESTED browsing contexts, so `same-origin` (or `same-site`) on a panel document
+//     would refuse the very cross-origin framing editor-core exists to do; `cross-origin` is the
+//     only value that does not break it, and it asserts nothing. It is omitted because it cannot
+//     help, not because it was missed.
+//   * `Permissions-Policy` — a CROSS-ORIGIN iframe already gets every powerful feature denied by
+//     default unless the embedder delegates with `allow=`, so the response header would restate a
+//     default. The decision that actually binds is which features e13a-2's embedder delegates, and
+//     that belongs at the iframe element, not here.
 [[nodiscard]] std::vector<std::pair<std::string, std::string>>
 ext_response_headers(const std::string& mime_type);
 

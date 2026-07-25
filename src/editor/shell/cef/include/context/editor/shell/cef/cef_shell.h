@@ -122,6 +122,18 @@ struct CefShellOptions
     // A mount that is refused (invalid id, missing root, a root that overlaps another package's —
     // see ext_scheme.h) is REPORTED on stderr and skipped; the browser still boots and that one
     // origin serves 403. There is deliberately no `file://` fallback for panels either.
+    //
+    // ⚠ NO PRODUCER EXISTS YET — nothing in the repo populates this field, by design: e13a-1 lands
+    // the boundary, e13b lands the install path that will fill it. It is the declared seam, not a
+    // live configuration surface, which is why the semantics below are documented rather than
+    // enforced by a test.
+    //
+    // ⚠ PROCESS-GLOBAL, FIRST CALL WINS. The resolver and its scheme-handler factory are registered
+    // once per process (CEF holds the factory until CefShutdown), so only the FIRST
+    // make_cef_browser_host() call's list is honoured — a second window cannot mount a different
+    // package set, and one that tries has its list ignored with a stderr report rather than
+    // silently. This is therefore a PROCESS-level option that happens to live on a per-window
+    // struct; e13b, which owns the install path, is where a real per-process mount table belongs.
     std::vector<ExtPackageMount> ext_packages;
 };
 

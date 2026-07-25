@@ -15,13 +15,30 @@ bool is_lower_alnum(unsigned char c)
     return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
 }
 
-// Is `inner` the same path as `outer`, or somewhere beneath it? A PURE path operation on two
-// already-canonical paths — `lexically_relative` yields a path starting with ".." exactly when
-// `inner` escapes `outer`, which is the containment predicate the whole scheme rests on.
-bool contains_or_equals(const std::filesystem::path& outer, const std::filesystem::path& inner)
+bool is_ascii_digit(unsigned char c)
 {
-    const std::filesystem::path relative = inner.lexically_relative(outer);
-    return !relative.empty() && *relative.begin() != "..";
+    return c >= '0' && c <= '9';
+}
+
+// Does the id's LAST dot-separated label consist entirely of digits? Per the URL Standard's
+// "ends in a number" check, such a host is handed to the IPv4 parser instead of being kept as a
+// domain — see is_valid_package_id for why that makes the id unusable.
+bool last_label_is_numeric(std::string_view id)
+{
+    const std::size_t dot = id.rfind('.');
+    const std::string_view last = dot == std::string_view::npos ? id : id.substr(dot + 1);
+    if (last.empty())
+    {
+        return false;
+    }
+    for (char ch : last)
+    {
+        if (!is_ascii_digit(static_cast<unsigned char>(ch)))
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -56,7 +73,14 @@ bool is_valid_package_id(std::string_view id)
     }
     // No interior "..", even though an id never becomes a path component: an id that stays safe
     // under that future misuse costs one comparison.
-    return id.find("..") == std::string_view::npos;
+    if (id.find("..") != std::string_view::npos)
+    {
+        return false;
+    }
+    // Refused here so an id a request could never name again is a loud mount-time failure rather
+    // than a silently unreachable package — see last_label_is_numeric and ext_scheme.h for why such
+    // a host does not come back the way it went in.
+    return !last_label_is_numeric(id);
 }
 
 // ------------------------------------------------------------------------------- the mount table
@@ -82,7 +106,13 @@ bool ExtAssetResolver::mount(std::string_view package_id, const std::filesystem:
     std::filesystem::path resolved = std::filesystem::weakly_canonical(root, ec);
     if (ec)
     {
-        resolved = root;
+        // DENY-BY-DEFAULT REACHES CANONICALIZATION ITSELF. Continuing with the raw `root` here — as
+        // an earlier draft did — is the one fallback that silently voids the overlap refusal below:
+        // that refusal is a LEXICAL comparison, so it only establishes disjointness when both sides
+        // are canonical, and a non-canonical root would let a nested package mount and hand its
+        // bytes to its parent. Every later containment check compares against this value too.
+        reason = "package root could not be canonicalized";
+        return false;
     }
     if (!std::filesystem::is_directory(resolved, ec))
     {
@@ -94,8 +124,8 @@ bool ExtAssetResolver::mount(std::string_view package_id, const std::filesystem:
 
     for (const ExtPackageMount& existing : mounts_)
     {
-        if (contains_or_equals(existing.root, resolved) ||
-            contains_or_equals(resolved, existing.root))
+        if (path_contains_or_equals(existing.root, resolved) ||
+            path_contains_or_equals(resolved, existing.root))
         {
             // NESTED ROOTS DEFEAT PER-ROOT CONTAINMENT (see ext_scheme.h): with B under A,
             // `context-ext://a/b/secret.js` is perfectly contained in A's root and would hand B's
@@ -173,11 +203,15 @@ ExtResolution ExtAssetResolver::resolve(std::string_view url) const
     const ExtPackageMount* mount = find(authority);
     if (mount == nullptr)
     {
-        // THE SAME STATUS as an invalid id, deliberately: an unknown package and a malformed one
-        // are indistinguishable from the outside, so the response cannot be used to enumerate which
-        // packages a user has installed. The reason string carries the difference, and it goes to
-        // the log, never to the frame.
-        result.status = AssetStatus::forbidden;
+        // NOT_FOUND, and the status matched here is the one that matters: an ABSENT ASSET inside a
+        // package that IS mounted (below) also answers 404. Matching an unknown package to an
+        // INVALID id instead — as an earlier draft did, with both at 403 — buys nothing, because a
+        // caller can evaluate `is_valid_package_id` for itself without asking us; what it leaks is
+        // the other half, since `context-ext://<id>/definitely-absent.js` would then answer 404 iff
+        // `<id>` were installed. That is a package-enumeration oracle, so the two statuses that
+        // must be equal are THIS one and "no such asset". The reason string carries the difference,
+        // and it goes to the log, never to the frame.
+        result.status = AssetStatus::not_found;
         result.reason = "package is not mounted";
         return result;
     }
@@ -244,7 +278,7 @@ ExtResolution ExtAssetResolver::resolve(std::string_view url) const
         return result;
     }
 
-    if (!contains_or_equals(mount->root, canonical))
+    if (!path_contains_or_equals(mount->root, canonical))
     {
         result.status = AssetStatus::forbidden;
         result.reason = "resolved outside the package root";
@@ -277,6 +311,14 @@ const char* ext_csp_header()
            "font-src 'self'; "
            "connect-src 'none'; "
            "frame-src 'none'; "
+           // SPELLED EXPLICITLY, because the CSP3 fallback chain does NOT reach `default-src` here:
+           // `worker-src` falls back to `child-src` and then to `script-src`, which is `'self'` —
+           // so omitting it silently GRANTS a panel Worker/SharedWorker on its own origin. Nothing
+           // decided that; a capability an untrusted document gets by fallback is not a reviewed
+           // one. `child-src` is spelled too so neither `worker-src` nor `frame-src` can reacquire
+           // it through that link if either is ever edited.
+           "child-src 'none'; "
+           "worker-src 'none'; "
            "object-src 'none'; "
            "base-uri 'none'; "
            "form-action 'none'; "
