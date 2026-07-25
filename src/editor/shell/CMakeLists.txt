@@ -242,6 +242,9 @@ set(_context_shell_tests
     test_window_bridge # e10b: the window.* relay - tear-out/move/seed/rehome parse + the loud-fail path
     test_cross_window_drag  # e10c: the drag session - capture RELEASED on every path + the drag.* relay
     test_ui_mirror     # e10d: the editor.ui cross-window mirror relay - broadcast-to-all incl. sender
+    test_smoke_window  # e12a-x11-legs: the --real-window seam - flag parse, the anti-degrade
+                       # negatives, DIP conversion off 1.0, the keysym sweep (one extra link edge,
+                       # added after context_editor_shell_smoke_support is defined below)
     test_shell)        # the owner loop end to end + the authenticated-attach guard
 
 foreach(_t IN LISTS _context_shell_tests)
@@ -253,6 +256,68 @@ foreach(_t IN LISTS _context_shell_tests)
         ${CMAKE_CURRENT_SOURCE_DIR}/../../render/tests)
     add_test(NAME editor-shell-${_t} COMMAND context_editor_shell_${_t})
 endforeach()
+
+# --- the SMOKE-TIER window seam (M9 e12a-x11-legs, issue #408) ------------------------------------
+# How a live smoke chooses between the honest offscreen shell and a REAL OS window — the seam that
+# lets the nine `editor-cef-smoke-shell*` scenarios run through a real X11 window on Linux instead of
+# each hard-coding HeadlessWindowBackend + MemoryBlitter (and, in two of them, casting the base
+# reference back down to the concrete headless backend to reach `post()`).
+#
+# A SEPARATE LIBRARY, deliberately NOT part of context_editor_shell: it is test-tier code, and
+# issue #408 asks for a seam that does not widen the SHIPPING window contract. Nothing in
+# context_editor_shell links it; only the smokes do. It is CEF-free, so it is compiled and
+# unit-tested (editor-shell-test_smoke_window) on all three default `build` legs — the same
+# discipline the rest of the Shell follows.
+#
+# ⚠ It adds an include ROOT (smoke/include). The pre-push audit's check 9 compiles a changed CEF TU
+# standalone against the pinned CEF headers with a hand-maintained set of roots, so this one is
+# recorded in the profile's `setup.md` § Preconditions (the `src/editor/shell/**` known-good set) —
+# a check-9 `fatal error: context/editor/shell/smoke/smoke_window.h: No such file` is that gap, not
+# a code break.
+add_library(context_editor_shell_smoke_support STATIC smoke/src/smoke_window.cpp)
+target_include_directories(context_editor_shell_smoke_support
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/smoke/include)
+target_link_libraries(context_editor_shell_smoke_support
+    PUBLIC context_editor_shell
+    PRIVATE context_warnings)
+
+# The X11 half (real-mode input injection) rides the SAME probe as the window backend above — and
+# must, for the same reason: a hard requirement would fail CONFIGURE on every ubuntu job that
+# installs no X11 packages. Without the headers `inject_event` compiles to its honest
+# "no real-window injection in this build" refusal, which every caller treats as a failure.
+if(UNIX AND NOT APPLE)
+    # Called HERE rather than relied upon from the window-backend block above: find_package is
+    # cached/idempotent, and depending on a call ~100 lines away would silently disable real-mode
+    # injection if that block were ever reordered or extracted. Same shape as src/render/present/.
+    find_package(X11)
+    if(X11_FOUND AND TARGET X11::X11)
+        target_link_libraries(context_editor_shell_smoke_support PRIVATE X11::X11)
+        target_compile_definitions(context_editor_shell_smoke_support PRIVATE
+            CONTEXT_SHELL_SMOKE_HAS_X11=1)
+        message(STATUS "context_editor_shell_smoke_support: X11 found — --real-window input "
+                       "injection is REAL in this build")
+    else()
+        # Said out loud because the whole anti-degrade thesis rests on telling a compiled-out X11
+        # path from a present one: without this line a build that silently lost X11 looks identical
+        # to one that has it, right up until nine live legs fail at run time.
+        message(STATUS "context_editor_shell_smoke_support: no X11 development headers — "
+                       "--real-window injection compiles to its honest refusal (install libx11-dev "
+                       "for the real one)")
+    endif()
+endif()
+
+# Its own T1 suite is a plain member of the `_context_shell_tests` family above, so the foreach
+# already gave it its executable, its runtime flags, its include dirs and its non-gate
+# `editor-shell-test_smoke_window` registration (`--preset dev` builds it and the general ctest step
+# runs it on all three OS legs, with no ci.yml --target bookkeeping). Staying in the loop is what
+# keeps a future family-wide change — a define, a property, a label — from silently skipping it.
+# The ONE thing the loop cannot know is this extra link edge, which is why only it is spelled here.
+# It asserts the seam's DECISIONS without opening a window or needing a display: the flag parse, the
+# headless construction + present, DIP conversion at a non-identity scale, the keysym sweep, and —
+# the load-bearing ones — that real mode REFUSES a headless backend, and refuses a window with no
+# presentable native surface, rather than degrading onto `post()` / an in-memory present.
+target_link_libraries(context_editor_shell_test_smoke_window
+    PRIVATE context_editor_shell_smoke_support)
 
 # --- the panel composition root (e05d1) ----------------------------------------------------------
 # Added AFTER context_editor_shell (it links it) and BEFORE context_editor + the CEF smoke (they link
@@ -293,9 +358,15 @@ set_tests_properties(editor-shell-smoke-session0 PROPERTIES TIMEOUT 120)
 # It links context_editor_panels (NOT context_editor_shell alone) for the same reason context_editor
 # does: the panel composition root is what binds real providers, and "live panels" is only a checked
 # claim if the real ones render.
+#
+# e12a-x11-legs: it now builds its window + present path through the SHARED smoke-tier seam
+# (smoke/smoke_window.h) instead of its own copy, and asserts a pointer + key round trip through
+# that seam's X-server injection. That is what makes this CEF-FREE, locally-runnable smoke the
+# proving ground for the seam the nine CEF scenarios depend on.
 if(UNIX AND NOT APPLE)
     add_executable(context_editor_shell_x11_smoke smoke/shell_x11_smoke_main.cpp)
     target_link_libraries(context_editor_shell_x11_smoke PRIVATE context_editor_panels
+                                                                 context_editor_shell_smoke_support
                                                                  context_warnings)
     target_link_options(context_editor_shell_x11_smoke PRIVATE ${_context_shell_static_runtime})
     add_test(NAME editor-shell-x11-window COMMAND context_editor_shell_x11_smoke)
@@ -412,6 +483,11 @@ endif()
 # (`editor-shell-cef-staging`), which catches the other half — a re-introduced per-target POST_BUILD
 # copy — and runs on the default CEF-OFF matrix where this block does not exist at all.
 if(CONTEXT_BUILD_GUI_CEF AND (OS_WINDOWS OR OS_LINUX))
+    # ⚠ KEEP THIS COMPLETE. It had already drifted by TWO targets — context_editor_shell_uimirror_smoke
+    # (e10d-drill2) and context_editor_shell_iframe_smoke (e13a-2) both boot from
+    # ${CEF_TARGET_OUT_DIR} and both take the stage dependency, but neither was listed, so the audit
+    # under-covered exactly the way its own FATAL_ERROR below warns a silently skipped consumer would.
+    # Added by e12a-x11-legs while it was touching all nine smokes.
     set(_ctx_cef_stage_consumers
         context_editor
         context_editor_shell_cef_smoke
@@ -420,7 +496,9 @@ if(CONTEXT_BUILD_GUI_CEF AND (OS_WINDOWS OR OS_LINUX))
         context_editor_shell_settings_smoke
         context_editor_shell_multiwindow_smoke
         context_editor_shell_tearout_smoke
-        context_editor_shell_drag_smoke)
+        context_editor_shell_drag_smoke
+        context_editor_shell_uimirror_smoke
+        context_editor_shell_iframe_smoke)
     foreach(_consumer IN LISTS _ctx_cef_stage_consumers)
         if(NOT TARGET ${_consumer})
             message(FATAL_ERROR

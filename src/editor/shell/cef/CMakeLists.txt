@@ -50,6 +50,22 @@ if(OS_WINDOWS OR OS_LINUX)
         ADD_LOGICAL_TARGET("libcef_lib" "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
     endif()
 
+    # --- e12a-x11-legs (#408): the whole family runs through a REAL X11 window on Linux -----------
+    # Attached at REGISTRATION time rather than read from an environment variable, for three
+    # reasons: the Session-0 Windows leg keeps the offscreen backend it requires with no per-smoke
+    # branch; a build that quietly lost its X11 window backend or its X11 present blitter fails
+    # LOUDLY here instead of degrading (smoke_window.h's real mode never falls back); and no
+    # `std::getenv` is needed in nine TUs, which MSVC rejects as C4996 under /W4 /WX.
+    #
+    # NO NEW CTEST NAME and NO ci.yml CHANGE: these are the SAME nine registrations, so the
+    # "Not Run = RED" tripwire (CE #264) is not reached, and the `editor-cef-smoke` Linux job
+    # already runs this family under `xvfb-run` — the display it needs is the one that is already
+    # there for CEF's own ozone/X11 init.
+    set(_ctx_smoke_window_args "")
+    if(OS_LINUX)
+        set(_ctx_smoke_window_args --real-window)
+    endif()
+
     add_executable(context_editor_shell_cef_smoke src/cef_shell_smoke.cpp)
     SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_cef_smoke)
     add_dependencies(context_editor_shell_cef_smoke libcef_dll_wrapper)
@@ -68,7 +84,7 @@ if(OS_WINDOWS OR OS_LINUX)
     # its own (every panel library is CEF-free), so its position relative to the CEF libs is not
     # load-bearing — but keeping it left of them costs nothing and matches the rule above.
     target_link_libraries(context_editor_shell_cef_smoke
-        context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+        context_editor_cef context_editor_shell_smoke_support context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
     target_include_directories(context_editor_shell_cef_smoke PRIVATE "${CEF_ROOT}")
 
     # The libcef binary payload + resources are staged next to the exe by context_editor_cef_stage,
@@ -96,7 +112,8 @@ if(OS_WINDOWS OR OS_LINUX)
     target_compile_definitions(context_editor_shell_cef_smoke PRIVATE
         "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
 
-    add_test(NAME editor-cef-smoke-shell COMMAND context_editor_shell_cef_smoke)
+    add_test(NAME editor-cef-smoke-shell
+        COMMAND context_editor_shell_cef_smoke ${_ctx_smoke_window_args})
     set_tests_properties(editor-cef-smoke-shell PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_cef_smoke>"
         TIMEOUT 180)
@@ -125,7 +142,7 @@ if(OS_WINDOWS OR OS_LINUX)
     # same side — context_common (the hardened std::system runner, issue #146) is what the controller
     # re-launches its two phase children with, and introduces no CEF references of its own.
     target_link_libraries(context_editor_shell_restore_smoke
-        context_editor_cef context_editor_panels context_common
+        context_editor_cef context_editor_shell_smoke_support context_editor_panels context_common
         libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
     target_include_directories(context_editor_shell_restore_smoke PRIVATE "${CEF_ROOT}")
 
@@ -146,7 +163,8 @@ if(OS_WINDOWS OR OS_LINUX)
     target_compile_definitions(context_editor_shell_restore_smoke PRIVATE
         "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
 
-    add_test(NAME editor-cef-smoke-shell-restore COMMAND context_editor_shell_restore_smoke)
+    add_test(NAME editor-cef-smoke-shell-restore
+        COMMAND context_editor_shell_restore_smoke ${_ctx_smoke_window_args})
     set_tests_properties(editor-cef-smoke-shell-restore PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_restore_smoke>"
         TIMEOUT 360)
@@ -168,7 +186,7 @@ if(OS_WINDOWS OR OS_LINUX)
     SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_palette_smoke)
     add_dependencies(context_editor_shell_palette_smoke libcef_dll_wrapper)
     target_link_libraries(context_editor_shell_palette_smoke
-        context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+        context_editor_cef context_editor_shell_smoke_support context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
     target_include_directories(context_editor_shell_palette_smoke PRIVATE "${CEF_ROOT}")
 
     # Same single-staging dependency as the boot smoke above (issue #360).
@@ -188,7 +206,8 @@ if(OS_WINDOWS OR OS_LINUX)
     target_compile_definitions(context_editor_shell_palette_smoke PRIVATE
         "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
 
-    add_test(NAME editor-cef-smoke-shell-palette COMMAND context_editor_shell_palette_smoke)
+    add_test(NAME editor-cef-smoke-shell-palette
+        COMMAND context_editor_shell_palette_smoke ${_ctx_smoke_window_args})
     set_tests_properties(editor-cef-smoke-shell-palette PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_palette_smoke>"
         TIMEOUT 180)
@@ -209,7 +228,7 @@ if(OS_WINDOWS OR OS_LINUX)
     SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_settings_smoke)
     add_dependencies(context_editor_shell_settings_smoke libcef_dll_wrapper)
     target_link_libraries(context_editor_shell_settings_smoke
-        context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+        context_editor_cef context_editor_shell_smoke_support context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
     target_include_directories(context_editor_shell_settings_smoke PRIVATE "${CEF_ROOT}")
 
     # Same single-staging dependency as the sibling smokes above (issue #360).
@@ -226,7 +245,8 @@ if(OS_WINDOWS OR OS_LINUX)
     target_compile_definitions(context_editor_shell_settings_smoke PRIVATE
         "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
 
-    add_test(NAME editor-cef-smoke-shell-settings COMMAND context_editor_shell_settings_smoke)
+    add_test(NAME editor-cef-smoke-shell-settings
+        COMMAND context_editor_shell_settings_smoke ${_ctx_smoke_window_args})
     set_tests_properties(editor-cef-smoke-shell-settings PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_settings_smoke>"
         TIMEOUT 180)
@@ -254,7 +274,7 @@ if(OS_WINDOWS OR OS_LINUX)
     SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_multiwindow_smoke)
     add_dependencies(context_editor_shell_multiwindow_smoke libcef_dll_wrapper)
     target_link_libraries(context_editor_shell_multiwindow_smoke
-        context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+        context_editor_cef context_editor_shell_smoke_support context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
     target_include_directories(context_editor_shell_multiwindow_smoke PRIVATE "${CEF_ROOT}")
 
     # Same single-staging dependency as the sibling smokes above (issue #360).
@@ -273,7 +293,7 @@ if(OS_WINDOWS OR OS_LINUX)
         "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
 
     add_test(NAME editor-cef-smoke-shell-multiwindow
-        COMMAND context_editor_shell_multiwindow_smoke)
+        COMMAND context_editor_shell_multiwindow_smoke ${_ctx_smoke_window_args})
     set_tests_properties(editor-cef-smoke-shell-multiwindow PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_multiwindow_smoke>"
         TIMEOUT 420)
@@ -297,7 +317,7 @@ if(OS_WINDOWS OR OS_LINUX)
     SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_tearout_smoke)
     add_dependencies(context_editor_shell_tearout_smoke libcef_dll_wrapper)
     target_link_libraries(context_editor_shell_tearout_smoke
-        context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+        context_editor_cef context_editor_shell_smoke_support context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
     target_include_directories(context_editor_shell_tearout_smoke PRIVATE "${CEF_ROOT}")
 
     # Same single-staging dependency as the sibling smokes above (issue #360).
@@ -316,7 +336,7 @@ if(OS_WINDOWS OR OS_LINUX)
         "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
 
     add_test(NAME editor-cef-smoke-shell-tearout
-        COMMAND context_editor_shell_tearout_smoke)
+        COMMAND context_editor_shell_tearout_smoke ${_ctx_smoke_window_args})
     set_tests_properties(editor-cef-smoke-shell-tearout PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_tearout_smoke>"
         TIMEOUT 300)
@@ -340,7 +360,7 @@ if(OS_WINDOWS OR OS_LINUX)
     SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_drag_smoke)
     add_dependencies(context_editor_shell_drag_smoke libcef_dll_wrapper)
     target_link_libraries(context_editor_shell_drag_smoke
-        context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+        context_editor_cef context_editor_shell_smoke_support context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
     target_include_directories(context_editor_shell_drag_smoke PRIVATE "${CEF_ROOT}")
 
     # Same single-staging dependency as the sibling smokes above (issue #360).
@@ -359,7 +379,7 @@ if(OS_WINDOWS OR OS_LINUX)
         "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
 
     add_test(NAME editor-cef-smoke-shell-drag
-        COMMAND context_editor_shell_drag_smoke)
+        COMMAND context_editor_shell_drag_smoke ${_ctx_smoke_window_args})
     set_tests_properties(editor-cef-smoke-shell-drag PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_drag_smoke>"
         TIMEOUT 300)
@@ -387,7 +407,7 @@ if(OS_WINDOWS OR OS_LINUX)
     SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_uimirror_smoke)
     add_dependencies(context_editor_shell_uimirror_smoke libcef_dll_wrapper)
     target_link_libraries(context_editor_shell_uimirror_smoke
-        context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+        context_editor_cef context_editor_shell_smoke_support context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
     target_include_directories(context_editor_shell_uimirror_smoke PRIVATE "${CEF_ROOT}")
 
     # Same single-staging dependency as the sibling smokes above (issue #360).
@@ -406,7 +426,7 @@ if(OS_WINDOWS OR OS_LINUX)
         "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
 
     add_test(NAME editor-cef-smoke-shell-uimirror
-        COMMAND context_editor_shell_uimirror_smoke)
+        COMMAND context_editor_shell_uimirror_smoke ${_ctx_smoke_window_args})
     set_tests_properties(editor-cef-smoke-shell-uimirror PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_uimirror_smoke>"
         TIMEOUT 300)
@@ -436,7 +456,7 @@ if(OS_WINDOWS OR OS_LINUX)
     SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_iframe_smoke)
     add_dependencies(context_editor_shell_iframe_smoke libcef_dll_wrapper)
     target_link_libraries(context_editor_shell_iframe_smoke
-        context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+        context_editor_cef context_editor_shell_smoke_support context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
     target_include_directories(context_editor_shell_iframe_smoke PRIVATE "${CEF_ROOT}")
 
     # Same single-staging dependency as the sibling smokes above (issue #360).
@@ -455,7 +475,7 @@ if(OS_WINDOWS OR OS_LINUX)
         "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
 
     add_test(NAME editor-cef-smoke-shell-iframe
-        COMMAND context_editor_shell_iframe_smoke)
+        COMMAND context_editor_shell_iframe_smoke ${_ctx_smoke_window_args})
     set_tests_properties(editor-cef-smoke-shell-iframe PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_iframe_smoke>"
         TIMEOUT 240)

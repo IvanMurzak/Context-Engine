@@ -24,8 +24,11 @@
 // silently executed nothing runs the 30s clock out and the `states_published()` assertion fails as it
 // should (the wait is not vacuous and cannot loop forever).
 //
-// It boots exactly as cef_shell_smoke.cpp does — a windowless browser presenting through e03's
-// MemoryBlitter, hard-exiting on Windows after the verdict to skip CEF's flaky Session-0 teardown — so
+// It boots exactly as cef_shell_smoke.cpp does — including its TWO WINDOW MODES (see that file's
+// header): in the DEFAULT headless mode, which is what the Windows leg runs, a windowless browser
+// presenting through e03's MemoryBlitter; under `--real-window`, which the ctest registration passes
+// on Linux, a REAL X11 window presenting through the REAL X11 blitter. It hard-exits on Windows
+// after the verdict to skip CEF's flaky Session-0 teardown — so
 // it is structurally identical to that proven-green single-boot smoke, and it can only run where CEF
 // links: the per-OS `editor-cef-smoke` CI job (Windows/Linux; macOS's .app packaging is e12's).
 
@@ -50,6 +53,7 @@
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
+#include "context/editor/shell/smoke/smoke_window.h"
 #include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/user_config.h"
 #include "context/editor/shell/welcome.h"
@@ -67,8 +71,8 @@
 #include <vector>
 
 namespace shell = context::editor::shell;
+namespace smoke = context::editor::shell::smoke;
 namespace render = context::render;
-namespace present = context::render::present;
 
 namespace
 {
@@ -191,6 +195,12 @@ int main(int argc, char** argv)
         return subprocess_exit;
     }
 
+    // e12a-x11-legs: `--real-window` (passed by the ctest registration on Linux) runs this whole
+    // scenario over a REAL X11 window + the REAL X11 present blitter, instead of the offscreen
+    // shell. Parsed AFTER the subprocess re-entry above: a CEF renderer/GPU child inherits the flag
+    // on its command line and must never reach this body.
+    const smoke::WindowMode window_mode = smoke::window_mode_from_args(argc, argv);
+
     std::printf("[editor-cef-smoke-shell-palette] live command-driven palette scenario over the real "
                 "CEF pump\n");
     std::fflush(stdout);
@@ -214,8 +224,16 @@ int main(int argc, char** argv)
     shell::WindowDesc desc;
     desc.title = "Context Editor (palette smoke)";
     desc.logical_size = size;
-    desc.visible = false;
-    auto backend = std::make_unique<shell::HeadlessWindowBackend>(desc);
+    smoke::WindowSetup window_setup = smoke::make_smoke_window(desc, window_mode);
+    if (window_setup.backend == nullptr)
+    {
+        std::fprintf(stderr, "[editor-cef-smoke-shell-palette] FAIL: no %s window could be created: %s\n",
+                     smoke::to_string(window_mode), window_setup.diagnostic.c_str());
+        return finish(1);
+    }
+    // The size the WINDOW actually got: a real display's DPI makes it differ from the request, and
+    // CEF's view rect is DIP, so telling the browser the request would lay the document out wrong.
+    const smoke::BrowserGeometry geometry = smoke::browser_geometry(*window_setup.backend);
 
     // --- the privileged bridges (identical set to cef_shell_smoke.cpp) ---------------------------
     // handshake BEFORE bridge (outlives the router that captures it); manager BEFORE the editor-state
@@ -231,9 +249,12 @@ int main(int argc, char** argv)
     SMOKE_CHECK(panel_host.install(bridge), "the panel.* bridge surface installed");
 
     shell::cef::CefShellOptions cef_options;
-    cef_options.native_window = nullptr; // windowless: no native window on a Session-0 runner
-    cef_options.logical_size = size;
-    cef_options.dpi = shell::DpiScale{};
+    // Windowless in BOTH window modes, and not merely for Session 0: cef_shell.cpp reads
+    // `native_window` only under _WIN32, so on Linux CEF stays windowless-OSR either way and the
+    // Shell's own X11 window is purely the PRESENT target.
+    cef_options.native_window = nullptr;
+    cef_options.logical_size = geometry.logical_size;
+    cef_options.dpi = geometry.dpi;
     // THE app scheme (04 §1), carrying the palette-smoke flag so editor-core's boot drives the scripted
     // OPEN -> FILTER -> EXECUTE scenario over the real palette + registry.
     cef_options.url = std::string(shell::kAppEntryUrl) + "?ctx-smoke-palette=1&" +
@@ -264,12 +285,19 @@ int main(int argc, char** argv)
     shell::EditorWindowConfig config;
     config.compositor.import_options.force_software = true; // software OSR — the shipping Windows path
     config.placement_poll_us = 0;
-    auto window = std::make_unique<shell::EditorWindow>(std::move(backend), std::move(browser),
-                                                        config);
+    auto window = std::make_unique<shell::EditorWindow>(std::move(window_setup.backend),
+                                                        std::move(browser), config);
 
-    auto blitter = std::make_unique<present::MemoryBlitter>();
-    present::MemoryBlitter* blitter_raw = blitter.get();
-    window->compositor().attach_cpu(std::move(blitter), size);
+    // e03's portable blitter offscreen; in real mode the REAL OS blitter that
+    // `EditorWindow::attach_cpu_present()` selects from the REAL native window — the same call
+    // `context_editor` makes on a GPU-less boot. Real mode REFUSES the in-memory blitter.
+    const smoke::PresentSetup present_setup = smoke::attach_smoke_present(*window, window_mode);
+    if (!present_setup.ok)
+    {
+        std::fprintf(stderr, "[editor-cef-smoke-shell-palette] FAIL: no %s present path: %s\n",
+                     smoke::to_string(window_mode), present_setup.diagnostic.c_str());
+        return finish(1);
+    }
 
     shell::WindowManager manager(project);
     manager.add(std::move(window));
@@ -389,7 +417,7 @@ int main(int argc, char** argv)
             break;
         }
         if (!presented && editor->compositor().stats().view_frames > 0 &&
-            blitter_raw->blit_count() > 0)
+            editor->compositor().stats().frames_presented > 0)
         {
             presented = true;
         }

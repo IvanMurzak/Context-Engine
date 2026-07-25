@@ -25,9 +25,13 @@
 //      the session instead of freeing it (shell.h), and this exercises that on the REAL CEF path,
 //      on the same Session-0 Windows runner where CE #319 faulted.
 //
-// Headless throughout (windowless browsers, no native window, the C-F2 CPU present path through
-// e03's MemoryBlitter), so it is safe on the Session-0 self-hosted Windows runner: no visible
-// window, no GPU device, no native-render teardown. The Windows hard exit after the verdict mirrors
+// TWO WINDOW MODES, as documented in cef_shell_smoke.cpp's header. By DEFAULT headless throughout
+// (windowless browsers, no native window, the C-F2 CPU present path through e03's MemoryBlitter),
+// so it is safe on the Session-0 self-hosted Windows runner: no visible window, no GPU device, no
+// native-render teardown — that is what the Windows leg runs. Under `--real-window`, which the
+// ctest registration passes on Linux, BOTH windows are real (the second one derives its mode from
+// `WindowSpec::headless`, exercising the factory branch editor_main.cpp honours) and the activating
+// gesture below is a REAL X-server round trip. The Windows hard exit after the verdict mirrors
 // its sibling smokes.
 //
 // ⚠ e10a adds NO boot-time bridge METHOD. Every surface installed below already exists and is
@@ -56,6 +60,7 @@
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/session_bridge.h"
 #include "context/editor/shell/shell.h"
+#include "context/editor/shell/smoke/smoke_window.h"
 #include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/user_config.h"
 #include "context/editor/shell/welcome.h"
@@ -75,8 +80,8 @@
 #include <vector>
 
 namespace shell = context::editor::shell;
+namespace smoke = context::editor::shell::smoke;
 namespace render = context::render;
-namespace present = context::render::present;
 
 namespace
 {
@@ -193,12 +198,18 @@ std::string boot_url()
     return std::string(shell::kAppEntryUrl) + "?" + shell::kThemePinFlag + "=" + kSmokeThemeId;
 }
 
-shell::cef::CefShellOptions make_cef_options(render::Extent2D size, shell::BridgeRouter* bridge)
+shell::cef::CefShellOptions make_cef_options(const smoke::BrowserGeometry& geometry,
+                                             shell::BridgeRouter* bridge)
 {
     shell::cef::CefShellOptions options;
-    options.native_window = nullptr; // windowless: no native window on a Session-0 runner
-    options.logical_size = size;
-    options.dpi = shell::DpiScale{};
+    // Windowless in BOTH window modes, and not merely for Session 0: cef_shell.cpp reads
+    // `native_window` only under _WIN32, so on Linux CEF stays windowless-OSR either way and the
+    // Shell's own X11 window is purely the PRESENT target.
+    options.native_window = nullptr;
+    // The size the WINDOW actually got: a real display's DPI makes it differ from the
+    // request, and CEF's view rect is DIP, so passing the request lays the document out wrong.
+    options.logical_size = geometry.logical_size;
+    options.dpi = geometry.dpi;
     options.url = boot_url();
     options.app_asset_root = CONTEXT_WEBUI_ASSET_DIR;
     options.bridge = bridge;
@@ -230,6 +241,12 @@ int main(int argc, char** argv)
     {
         return subprocess_exit;
     }
+
+    // e12a-x11-legs: `--real-window` (passed by the ctest registration on Linux) runs this whole
+    // scenario over REAL X11 windows — window 0 AND every window the factory creates — presenting
+    // through the REAL X11 blitter. Parsed AFTER the subprocess re-entry above: a CEF renderer/GPU
+    // child inherits the flag on its command line and must never reach this body.
+    const smoke::WindowMode window_mode = smoke::window_mode_from_args(argc, argv);
 
     std::printf("[editor-cef-smoke-shell-multiwindow] N live windows, one editor-core each, "
                 "window.open suppressed\n");
@@ -265,12 +282,18 @@ int main(int argc, char** argv)
         shell::WindowDesc desc;
         desc.title = "Context Editor (multiwindow smoke)";
         desc.logical_size = size;
-        desc.visible = false;
-        auto backend = std::make_unique<shell::HeadlessWindowBackend>(desc);
+        smoke::WindowSetup window_setup = smoke::make_smoke_window(desc, window_mode);
+        if (window_setup.backend == nullptr)
+        {
+            std::fprintf(stderr, "[editor-cef-smoke-shell-multiwindow] FAIL: no %s window 0: %s\n",
+                         smoke::to_string(window_mode), window_setup.diagnostic.c_str());
+            return finish(1);
+        }
+        const smoke::BrowserGeometry geometry = smoke::browser_geometry(*window_setup.backend);
 
         std::string error;
         std::unique_ptr<shell::IBrowserHost> browser =
-            shell::cef::make_cef_browser_host(make_cef_options(size, &primary_bridge), error);
+            shell::cef::make_cef_browser_host(make_cef_options(geometry, &primary_bridge), error);
         if (browser == nullptr)
         {
             std::fprintf(stderr,
@@ -283,9 +306,16 @@ int main(int argc, char** argv)
         shell::EditorWindowConfig config;
         config.compositor.import_options.force_software = true;
         config.placement_poll_us = 0;
-        auto window = std::make_unique<shell::EditorWindow>(std::move(backend), std::move(browser),
-                                                            config);
-        window->compositor().attach_cpu(std::make_unique<present::MemoryBlitter>(), size);
+        auto window = std::make_unique<shell::EditorWindow>(std::move(window_setup.backend),
+                                                            std::move(browser), config);
+        const smoke::PresentSetup present_setup =
+            smoke::attach_smoke_present(*window, window_mode);
+        if (!present_setup.ok)
+        {
+            std::fprintf(stderr, "[editor-cef-smoke-shell-multiwindow] FAIL: no %s present path for window 0: %s\n",
+                         smoke::to_string(window_mode), present_setup.diagnostic.c_str());
+            return finish(1);
+        }
         manager.add(std::move(window));
     }
 
@@ -313,8 +343,18 @@ int main(int argc, char** argv)
             shell::WindowDesc desc;
             desc.title = spec.title;
             desc.logical_size = spec.logical_size;
-            desc.visible = false; // Session-0: never a real OS window in this smoke
-            parts.backend = std::make_unique<shell::HeadlessWindowBackend>(desc);
+            // The per-window real/headless switch editor_main.cpp honours: the SPEC decides,
+            // so the Nth window is a real OS window exactly when this run asked for one. A
+            // create failure is REPORTED (03 §7), never degraded to headless.
+            const smoke::WindowMode child_mode =
+                spec.headless ? smoke::WindowMode::headless : window_mode;
+            smoke::WindowSetup child_setup = smoke::make_smoke_window(desc, child_mode);
+            if (child_setup.backend == nullptr)
+            {
+                error = child_setup.diagnostic;
+                return false;
+            }
+            parts.backend = std::move(child_setup.backend);
 
             // ITS OWN router + ITS OWN surfaces. The window id is not known until the manager adopts
             // it, and region routing needs it — so the surfaces are installed against the id the
@@ -333,7 +373,7 @@ int main(int argc, char** argv)
 
             std::string browser_error;
             parts.browser = shell::cef::make_cef_browser_host(
-                make_cef_options(spec.logical_size, window_bridge.get()), browser_error);
+                make_cef_options(smoke::browser_geometry(*parts.backend), window_bridge.get()), browser_error);
             if (parts.browser == nullptr)
             {
                 error = "the browser did not start: " + browser_error;
@@ -357,7 +397,12 @@ int main(int argc, char** argv)
     {
         if (shell::EditorWindow* window = manager.window(id))
         {
-            window->compositor().attach_cpu(std::make_unique<present::MemoryBlitter>(), size);
+            // `mode_of` and NOT `window_mode`: this window was built by the FACTORY, which
+            // honours the spec's own headless flag — so the present path must match the
+            // window that was actually created rather than the one the run asked for.
+            const smoke::PresentSetup child_present =
+                smoke::attach_smoke_present(*window, smoke::mode_of(window->backend()));
+            SMOKE_CHECK(child_present.ok, "the created window took its present path");
         }
     };
 
@@ -407,7 +452,10 @@ int main(int argc, char** argv)
     shell::WindowSpec spec;
     spec.title = "Context Editor — window 1";
     spec.logical_size = size;
-    spec.headless = true;
+    // e12a-x11-legs: a REAL second window under --real-window, offscreen otherwise. This is
+    // the WindowSpec::headless switch itself, which is why the DoD names it: a run that asks
+    // for real windows must get one HERE too, not only for window 0.
+    spec.headless = window_mode == smoke::WindowMode::headless;
     spec.state_index = 1;
 
     const shell::WindowCreateResult second = manager.create_window(spec, shell::kPrimaryWindowId);
@@ -455,21 +503,51 @@ int main(int argc, char** argv)
     {
         const int browsers_before = shell::cef::browsers_created();
         const int suppressed_before = shell::cef::popups_suppressed();
+        const int pointers_before = primary->input().pointer_dispatches();
 
         shell::ShellEvent click;
         click.kind = shell::ShellEventKind::pointer;
         click.pointer.position = shell::PointI{40, 40};
         click.pointer.action = shell::PointerAction::down;
         click.pointer.button = shell::MouseButton::left;
-        // The primary's backend is the headless one this smoke created; reach it through the window.
-        auto& headless = static_cast<shell::HeadlessWindowBackend&>(primary->backend());
-        headless.post(click);
+        // e12a-x11-legs: through the smoke-tier seam, so the SAME gesture is a queued sample
+        // offscreen and a REAL X-server round trip (client -> server -> client -> the real decoder)
+        // under --real-window. This replaces the `static_cast<HeadlessWindowBackend&>` that used to
+        // sit here — the cast issue #408 asks to REMOVE, not to duplicate onto the real backend.
+        SMOKE_CHECK(smoke::inject_event(primary->backend(), window_mode, click),
+                    "the activating click was injected");
         shell::ShellEvent release = click;
         release.pointer.action = shell::PointerAction::up;
-        headless.post(release);
-        // Tracked, not discarded: a false `pump_once` means no window is left, and `primary` would
-        // then be a dangling pointer for the rest of this block (see the guard after window 0's boot).
+        // X reports the modifier mask BEFORE the event, so a release still carries its own button.
+        release.pointer.modifiers.left_button_down = true;
+        SMOKE_CHECK(smoke::inject_event(primary->backend(), window_mode, release),
+                    "the activating release was injected");
+        // ⚠ WAIT FOR THE GESTURE TO BE ARBITRATED, do not merely pump a fixed number of times.
+        // Offscreen, `inject_event` queues and the very next pump drains it, so any small pump
+        // budget sufficed. In real-window mode the SAME call is a client -> X server -> client round
+        // trip that a loaded runner need not complete inside a fixed budget — and the activation is
+        // load-bearing for the `window.open` below, so losing it would red the popup assertion
+        // instead, pointing the reader at `OnBeforePopup` rather than at the lost gesture. Same
+        // shape as cef_shell_smoke.cpp's own injections. Tracked, not discarded: a false
+        // `pump_once` means no window is left, and `primary` would then be a dangling pointer for
+        // the rest of this block (see the guard after window 0's boot).
         bool pump_alive = true;
+        const auto gesture_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+        while (std::chrono::steady_clock::now() < gesture_deadline)
+        {
+            pump_alive = manager.pump_once(now_us());
+            // Tested AFTER the pump and before the sleep, like every other wait in this file: in
+            // headless mode the first pump already drained both samples, so this costs zero wait.
+            if (!pump_alive || primary->input().pointer_dispatches() >= pointers_before + 2)
+            {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        SMOKE_CHECK(primary->input().pointer_dispatches() >= pointers_before + 2,
+                    "both halves of the activating gesture were arbitrated");
+        // Then let the renderer settle on the transient activation before the script runs: the
+        // arbiter's count says OUR side dispatched the gesture, not that Chromium has processed it.
         for (int i = 0; i < 20 && pump_alive; ++i)
         {
             pump_alive = manager.pump_once(now_us());
@@ -542,7 +620,8 @@ int main(int argc, char** argv)
             shell::ShellEvent resize;
             resize.kind = shell::ShellEventKind::resize;
             resize.size = render::Extent2D{800, 500};
-            static_cast<shell::HeadlessWindowBackend&>(primary->backend()).post(resize);
+            SMOKE_CHECK(smoke::inject_event(primary->backend(), window_mode, resize),
+                        "the repaint-forcing resize was injected");
             const auto repaint_deadline =
                 std::chrono::steady_clock::now() + std::chrono::seconds(20);
             while (std::chrono::steady_clock::now() < repaint_deadline)

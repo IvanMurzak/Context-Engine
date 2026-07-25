@@ -31,7 +31,7 @@
 #include "context/editor/shell/dpi.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
-#include "context/render/present/present_blit.h"
+#include "context/editor/shell/smoke/smoke_window.h"
 
 #include <chrono>
 #include <cstdint>
@@ -46,8 +46,8 @@
 
 namespace shell = context::editor::shell;
 namespace panels = context::editor::shell::panels;
+namespace smoke = context::editor::shell::smoke;
 namespace render = context::render;
-namespace present = context::render::present;
 namespace fs = std::filesystem;
 
 namespace
@@ -204,12 +204,17 @@ int main(int argc, char** argv)
     std::printf("[editor-shell-x11] live windowed Linux smoke: real X11 window + real X11 present\n");
 
     // ------------------------------------------------------- 1. a REAL window, or an honest skip
+    //
+    // Through the SHARED smoke-tier seam (e12a-x11-legs), not a private copy of the construction:
+    // this smoke is the CEF-FREE, locally-runnable proving ground for the seam the nine live
+    // `editor-cef-smoke-shell*` scenarios now depend on, so it must exercise the SAME code they do.
+    // `WindowMode::real` never degrades — a null backend here is a creation failure or a build with
+    // no X11 headers, never a headless substitution.
     shell::WindowDesc desc;
     desc.title = "Context Editor (x11 smoke)";
     desc.logical_size = kWindowSize;
-    desc.visible = true;
 
-    shell::WindowBackendSelection selection = shell::make_window_backend(desc);
+    smoke::WindowSetup selection = smoke::make_smoke_window(desc, smoke::WindowMode::real);
     if (selection.backend == nullptr)
     {
         if (require_x11 || require_display)
@@ -239,25 +244,6 @@ int main(int argc, char** argv)
     X11_CHECK(backend->dpi().dpi >= shell::kMinDpi && backend->dpi().dpi <= shell::kMaxDpi,
               "the X11 DPI lookup produced a clamped, usable scale");
 
-    // ------------------------------------------------------- 2. the REAL X11 present blitter
-    present::BlitterSelection blit = present::make_present_blitter(native);
-    if (blit.blitter == nullptr)
-    {
-        if (require_x11)
-        {
-            std::fprintf(stderr,
-                         "[editor-shell-x11] FAIL: --require-x11 was passed but no X11 present "
-                         "blitter exists in this build: %s\n",
-                         blit.diagnostic.c_str());
-            return 1;
-        }
-        std::printf("[editor-shell-x11] SKIP: %s\n", blit.diagnostic.c_str());
-        return kSkipExitCode;
-    }
-    const std::string blitter_name = blit.blitter->name();
-    X11_CHECK(blitter_name.rfind("x11", 0) == 0,
-              "make_present_blitter resolved to an X11 blitter on Linux");
-
     std::error_code ec;
     const fs::path project = fs::temp_directory_path(ec) / "context-editor-shell-x11-smoke";
     fs::remove_all(project, ec);
@@ -276,7 +262,31 @@ int main(int argc, char** argv)
     const render::Extent2D client = backend->client_size();
     auto window = std::make_unique<shell::EditorWindow>(std::move(selection.backend),
                                                         std::move(browser_owned), config);
-    window->compositor().attach_cpu(std::move(blit.blitter), client);
+
+    // ------------------------------------------------------- 2. the REAL X11 present blitter
+    //
+    // Through the seam again, which routes real mode into `EditorWindow::attach_cpu_present()` —
+    // the SHIPPING call `context_editor` makes on a GPU-less boot. It selects the blitter from the
+    // window's own native handle, so a break there breaks the product and not merely this test, and
+    // it refuses the in-memory blitter outright (the degrade real mode exists to forbid).
+    const smoke::PresentSetup present_setup =
+        smoke::attach_smoke_present(*window, smoke::WindowMode::real);
+    if (!present_setup.ok)
+    {
+        if (require_x11)
+        {
+            std::fprintf(stderr,
+                         "[editor-shell-x11] FAIL: --require-x11 was passed but no X11 present "
+                         "blitter exists in this build: %s\n",
+                         present_setup.diagnostic.c_str());
+            return 1;
+        }
+        std::printf("[editor-shell-x11] SKIP: %s\n", present_setup.diagnostic.c_str());
+        return kSkipExitCode;
+    }
+    const std::string blitter_name = present_setup.blitter_name;
+    X11_CHECK(blitter_name.rfind("x11", 0) == 0,
+              "attach_cpu_present resolved to an X11 blitter on Linux");
     X11_CHECK(window->compositor().path() == shell::PresentPath::cpu_blit,
               "the compositor took the C-F2 CPU present path");
     X11_CHECK(window->compositor().diagnostic().empty(),
@@ -407,6 +417,131 @@ int main(int argc, char** argv)
     X11_CHECK(!render::is_empty(observed.size()), "placement() read a real geometry back");
     X11_CHECK(observed.monitor.rfind("x11:", 0) == 0,
               "placement() names the X screen it read the geometry from");
+
+    // --------------------------------------- 6b. INPUT the server carried back (e12a-x11-legs)
+    //
+    // The half e12a never proved and issue #408 is about: a pointer sample and a key press that
+    // genuinely made the client -> SERVER -> client round trip and came back through
+    // XNextEvent + translate_x11_event, rather than being appended to a queue the test owns.
+    // Nothing here can pass with the decoder's pointer/key arms deleted, with the injection
+    // deleted, or against the headless backend (the seam refuses that outright).
+    //
+    // WHY THE COUNTERS ARE READ AS A DELTA and not against a fixed number: the server is entitled
+    // to have delivered other input already (a LeaveNotify, which the decoder carries as
+    // `PointerAction::leave`), so an absolute count would be asserting whoever's desktop this ran on.
+    // A delta of exactly 3 pins that these three samples arrived and that none of them was
+    // duplicated by the decoder.
+    const int pointer_dispatches_before = editor->input().pointer_dispatches();
+    const int key_dispatches_before = editor->input().key_dispatches();
+
+    shell::ShellEvent move;
+    move.kind = shell::ShellEventKind::pointer;
+    move.pointer.action = shell::PointerAction::move;
+    // Inside the client area and OUTSIDE the "scene" viewport region published above, so the sample
+    // is arbitrated to the browser rather than swallowed by a viewport — the arbitration is not what
+    // this step is proving, but a swallowed sample would still count and hide a real routing break.
+    move.pointer.position = shell::PointI{static_cast<std::int32_t>(client.width) - 20, 30};
+    X11_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, move),
+              "a pointer MOVE was accepted for injection through the X server");
+
+    shell::ShellEvent press = move;
+    press.pointer.action = shell::PointerAction::down;
+    press.pointer.button = shell::MouseButton::left;
+    X11_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, press),
+              "a pointer PRESS was accepted for injection through the X server");
+
+    shell::ShellEvent release = press;
+    release.pointer.action = shell::PointerAction::up;
+    // X reports the mask BEFORE the event, so a release still carries its own button down.
+    release.pointer.modifiers.left_button_down = true;
+    X11_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, release),
+              "a pointer RELEASE was accepted for injection through the X server");
+
+    const bool pointers_arrived = pump_until(manager, clock_us, [&] {
+        return editor->input().pointer_dispatches() >= pointer_dispatches_before + 3;
+    });
+    X11_CHECK(pointers_arrived,
+              "the three injected pointer samples came BACK from the real X server and were "
+              "arbitrated");
+    // ⚠ THE COUNTER IS ASSERTED WITH `>=`, AND THE PRECISION LIVES IN THE BUTTON COUNTS INSTEAD.
+    // A real X server is entitled to deliver input this smoke did not inject — a LeaveNotify, which
+    // `translate_x11_event` carries as `PointerAction::leave`, whenever the pointer leaves the
+    // window (a sibling mapping over it is enough) — so `== before + 3` would be asserting the
+    // state of somebody's desktop and would red at random on a developer box. An EnterNotify is
+    // NOT such a source: the decoder has no arm for it, so a window merely mapping under the
+    // pointer contributes nothing. Button presses and releases have no such source either, so
+    // counting them is BOTH robust and strictly more precise than the total ever was (it pins
+    // WHICH samples arrived, not merely how many).
+    int downs = 0;
+    int ups = 0;
+    for (const shell::PointerEvent& sample : browser->pointers())
+    {
+        if (sample.button != shell::MouseButton::left)
+        {
+            continue;
+        }
+        if (sample.action == shell::PointerAction::down)
+        {
+            ++downs;
+        }
+        else if (sample.action == shell::PointerAction::up)
+        {
+            ++ups;
+        }
+    }
+    X11_CHECK(downs == 1, "exactly one left-button PRESS arrived — no duplicate decode");
+    X11_CHECK(ups == 1, "exactly one left-button RELEASE arrived — no duplicate decode");
+
+    shell::ShellEvent key;
+    key.kind = shell::ShellEventKind::key;
+    key.key.action = shell::KeyAction::raw_key_down;
+    key.key.windows_key_code = 0x09; // VK_TAB — the same key the live CEF boot smoke injects
+    X11_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, key),
+              "a key PRESS was accepted for injection through the X server");
+    const bool key_arrived = pump_until(manager, clock_us, [&] {
+        return editor->input().key_dispatches() > key_dispatches_before;
+    });
+    X11_CHECK(key_arrived,
+              "the injected key came BACK from the real X server and was arbitrated");
+    // ⚠ `>= 1`, deliberately, and NOT `== 1`: X carries no separate character event, so the decoder
+    // SYNTHESIZES one alongside a press that produced text (window.cpp) — a real Tab therefore
+    // yields the raw key AND its '\t'. Demanding exactly one would be asserting that this server's
+    // keymap produces no text, which is a property of the host, not of the Shell.
+    X11_CHECK(editor->input().key_dispatches() >= key_dispatches_before + 1,
+              "the key press produced at least the raw-key dispatch");
+    // THE KEYSYM ROUND TRIP, and the reason this step is not merely "a key arrived": an injection
+    // table entry that is simply WRONG still delivers an event, so a presence-only assertion would
+    // pass while the browser received a completely different key. The keycode this smoke sent was
+    // derived from VK_TAB through smoke_window's inverse table, decoded back by the SHIPPING
+    // `x11_keysym_to_windows_key_code`, and it must arrive as VK_TAB again.
+    X11_CHECK(!browser->keys().empty(), "the browser received the injected key");
+    if (!browser->keys().empty())
+    {
+        X11_CHECK(browser->keys().front().windows_key_code == 0x09,
+                  "the browser was handed VK_TAB — the key that was actually injected");
+        // CEF's Linux native_key_code IS the X11 hardware keycode (window.cpp), so a non-zero value
+        // here is the server's own keycode surviving the whole round trip.
+        X11_CHECK(browser->keys().front().native_key_code != 0,
+                  "the key carried the X server's hardware keycode");
+    }
+
+    // The seam's RESIZE arm, which does not go through XSendEvent at all: it asks the window system
+    // and waits for the server's own ConfigureNotify. Proven here so all three injection arms have
+    // a CEF-free, locally-runnable proof and not just the two the live smokes exercise.
+    const render::Extent2D before_injected_resize = backend->client_size();
+    shell::ShellEvent shrink;
+    shrink.kind = shell::ShellEventKind::resize;
+    shrink.size = render::Extent2D{before_injected_resize.width - 40u,
+                                   before_injected_resize.height - 30u};
+    X11_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, shrink),
+              "a resize REQUEST was accepted for injection");
+    const bool observed_injected_resize = pump_until(manager, clock_us, [&] {
+        const render::Extent2D now = backend->client_size();
+        return now.width != before_injected_resize.width ||
+               now.height != before_injected_resize.height;
+    });
+    X11_CHECK(observed_injected_resize,
+              "the injected resize came back as a real ConfigureNotify, not a synthesized event");
 
     // ------------------------------------------------------- 7. teardown persists the session
     manager.shutdown();

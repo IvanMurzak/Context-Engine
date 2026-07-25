@@ -26,6 +26,7 @@ The load-bearing property, stated first because the module is arranged around it
 | `context_editor_shell` (`src/editor/shell/`) | The Shell proper: window seam + the Win32, X11 and Cocoa backends, DPI, input arbitration, compositor, editor-state persistence, the owner loop. Default-built, CEF-free, GPU-backend-free, fully unit-tested locally and on all three `build` legs. |
 | `context_editor` (`app/editor_main.cpp`) | The app. Default-built everywhere; links the browser binding where one can be hosted. |
 | `context_editor_cef` (`cef/`) | The windowed-OSR CEF binding — the ONE piece that cannot build locally. Behind `CONTEXT_BUILD_GUI_CEF`. |
+| `context_editor_shell_smoke_support` (`smoke/`) | **TEST-TIER ONLY**: the `--real-window` seam the live smokes share (`smoke/smoke_window.h`) — window construction, the CPU present attach, and X-server input injection, in one place instead of nine. CEF-free, so it is unit-tested on all three `build` legs. **Nothing shipping links it** — `context_editor_shell` deliberately does not, which is what keeps the shipping window contract unchanged (#408). |
 
 ## 1. Windows and the owner loop
 
@@ -473,7 +474,8 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
 | `editor-shell-test_user_config` | e06d: the per-user config store - the total reader (absent / malformed / non-object / oversized), the merge-preserving read-modify-write (a member from a FUTURE build survives), the recents-and-theme co-existence regression, the CLOSED settable vocabulary (`config.unknown_key` / `config.bad_value` / `config.write_failed`), unique staging names, the generation watch (identical rewrite and cosmetic reformat are NOT changes), and the full `config.*` binding over a real router |
 | `editor-shell-config-writers` | e06d: the C-F14 SINGLE-WRITER source gate - exactly one TU writes `~/.context/config.json`, editor-core carries no client-side persistence API, and one module names `config.set` (`tools/check_config_writers.py`) |
 | `editor-shell-session-ownership` | e09d: the C-F3 SESSION-FILE OWNERSHIP source gate - one C++ writer per session file (which must still write THAT document, not merely contain write machinery), each owner in its OWN process's subtree, and the in-process override-write gateway named by nothing but its own definition and tests and linked by no Shell target (`tools/check_session_ownership.py`) - see § 14 |
-| `editor-cef-smoke-shell` | The LIVE CEF half: a real windowless browser through the real integrated pump, its `OnPaint` frames composited + presented, input round-tripped, a live resize repainted (`editor-cef-smoke` job, Windows/Linux) |
+| `editor-shell-test_smoke_window` | e12a-x11-legs: the smoke-tier window seam, asserted with no display — the `--real-window` flag parse, headless construction/present/injection, `browser_geometry`'s DIP conversion at a non-identity DPI, the keysym inverse SWEPT back through the shipping decoder map, and the load-bearing negatives: real mode REFUSING a headless backend (pointer, key AND resize) and a window with no presentable native surface, rather than degrading |
+| `editor-cef-smoke-shell` | The LIVE CEF half: a real browser through the real integrated pump, its `OnPaint` frames composited + presented, input round-tripped, a live resize repainted. Windowless on Windows; since e12a-x11-legs the Linux leg runs it through a REAL X11 window and injects its gestures through the X server (`editor-cef-smoke` job, Windows/Linux) |
 | `editor-shell-test_window_registry` | e10a: the registry — window 0 primary, ids minted in order and NEVER reused, all four create-failure classes reported once with the source window (and the registry still usable after four in a row), the live-window cap, per-window `origin` reporting, and the CE #319 lifetime rule in both directions: a destroyed window's browser dies NOW while its session is retired until the manager does, across 25 create/destroy cycles and across `shutdown()` with windows still open |
 | `editor-cef-smoke-shell-multiwindow` | e10a, the LIVE half a fake cannot reach: a SECOND real CEF browser booting its OWN editor-core instance (two DIFFERENT round-tripped handshake nonces), a REAL renderer `window.open` refused by `OnBeforePopup` with NO browser created, and a MID-PROCESS destroy followed by another create (`editor-cef-smoke` job, Windows/Linux) |
 
@@ -483,9 +485,12 @@ That covers `context_editor_panels`' tests too — they register in the same fam
 itself is built transitively by the jobs that build `context_editor` / the CEF smoke, so e05d1 needed
 **no `ci.yml` change at all**.
 `editor-cef-smoke-shell` is the exception and IS on the `editor-cef-smoke` job's hand-maintained
-`--target` list — the "Not Run = RED" tripwire. So are its siblings
-`editor-cef-smoke-shell-restore` (e05d4), `-palette` (e07d), `-settings` (e06d) and
-`-multiwindow` (e10a). `editor-shell-test_window_registry` is NOT: it is a plain
+`--target` list — the "Not Run = RED" tripwire. So are **all eight** of its siblings:
+`editor-cef-smoke-shell-restore` (e05d4), `-palette` (e07d), `-settings` (e06d),
+`-multiwindow` (e10a), `-tearout` (e10b), `-drag` (e10c), `-uimirror` (e10d) and `-iframe` (e13a) —
+**nine** registrations in total, which is the number every statement about this family must use
+(the same miscount §11 corrects, and the one that left `_ctx_cef_stage_consumers` stale).
+`editor-shell-test_window_registry` is NOT: it is a plain
 `editor-shell-*` family member like every other unit suite.
 
 ## 12. The per-user config — `~/.context/config.json` (M9 e06d, C-F14)
@@ -738,11 +743,17 @@ xvfb with `--require-x11 --require-display` in the `editor-cef-smoke` Linux leg,
 `editor-shell-x11-window` ctest registration, which deliberately SKIPs where there is no display —
 opens a REAL X11 window, presents real frames through the real X11 blitter, and asserts a
 server-driven repaint (`XClearArea` → `Expose`) and a server-granted resize (`XMoveResizeWindow` →
-`ConfigureNotify`), plus the placement readback and the session-state flush.
+`ConfigureNotify`), plus the placement readback and the session-state flush. **e12a-x11-legs** (#408)
+added the input half: a pointer move/press/release and a key press INJECTED THROUGH THE X SERVER
+(`XSendEvent` into the smoke's own window) and decoded by the real `translate_x11_event`, asserted
+down to exactly one press and one release and the decoded `windows_key_code`.
 
 It does **not** shrink the table: it links no CEF and drives `ScriptedBrowserHost`, so the
 CEF-dependent rows — including the functional ones (wheel, keyboard, `PET_POPUP`, `window.open`) —
-remain manual on Linux exactly as on Windows and macOS.
+remain manual for their OBSERVABLE outcomes (a hover highlight, DOM focus). What is no longer equal
+across the three OSes is who DELIVERS the gesture: since e12a-x11-legs the Linux `editor-cef-smoke-shell`
+leg drives a real pointer gesture and a real Tab into a LIVE CEF browser through the X server, which
+Windows and macOS still do not.
 
 ## 11. What this does NOT yet do
 
@@ -750,13 +761,34 @@ Named so the gaps are visible rather than assumed:
 
 - ~~**No Linux window backend.**~~ Landed by **e12a**: `x11_window.cpp` (X11/XWayland, D21), the pure
   `translate_x11_event` decoder, the X11-SHM present blitter, and the live `editor-shell-x11-window`
-  smoke that opens a REAL window and asserts a server-driven repaint and resize. What e12a
-  deliberately did NOT do is re-point the eight live `editor-cef-smoke-shell*` scenario smokes at a
-  real window: each drives its scenario by POSTING scripted events into a `HeadlessWindowBackend`,
-  and every one of them also runs on the Session-0 Windows runner where no interactive desktop
-  exists — so a real-window mode is a per-smoke rework with its own per-OS branch, not a
-  constructor swap. Tracked as **#408**; the X11 backend itself is proven windowed by the new
-  smoke.
+  smoke that opens a REAL window and asserts a server-driven repaint and resize.
+- ~~**The live CEF scenario smokes never run through a real window.**~~ Landed by **e12a-x11-legs**
+  (#408). All **nine** `editor-cef-smoke-shell*` smokes now take their window through the shared
+  smoke-tier seam `src/editor/shell/smoke/smoke_window.h`, and the ctest registration passes
+  `--real-window` on **Linux**, where they open a REAL X11 window and present through the REAL X11
+  blitter `EditorWindow::attach_cpu_present()` selects; the **two** of them that drive input take it
+  FROM THE X SERVER (for the other seven the server is the source of `Expose`/`ConfigureNotify`
+  only). The Windows leg keeps the offscreen backend, which is what the Session-0 runner requires. Two earlier
+  claims here were WRONG and are corrected rather than deleted, because both were load-bearing for
+  the "this is not a constructor swap" reading: the count is **nine**, not eight (`-uimirror` and
+  `-iframe` landed after this note was written), and only **two** of them ever `post()`ed at all —
+  the other seven built a `HeadlessWindowBackend` and drove their scenarios entirely through the CEF
+  bridge, so for those it genuinely WAS a construction swap. What was not a swap is INPUT: real mode
+  sends pointer and key events to the smoke's own window through the X server (XSendEvent with an
+  empty event mask, which the protocol delivers back to the creating client), so they re-enter
+  through the real `translate_x11_event`; a `post()`-shaped seam on the real backend would have
+  bypassed the server, the decoder and the window path, and passed with all three broken.
+- **A RETIRED window keeps its OS window until the process exits.** Surfaced by e12a-x11-legs, but a
+  property of the shipping lifecycle rather than of the smokes: `WindowManager::retire()` MOVES the
+  whole `EditorWindow` into `retired_` (the CE #319 rule — the browser dies now, the session lives
+  until the manager does), `finish_close()` detaches the compositor and calls `backend_->close()`,
+  and the X11 `close()` only posts itself a `WM_DELETE_WINDOW`; the window is destroyed in
+  `~X11WindowBackend`, which now runs at `~WindowManager`. Since `pump_once` iterates `windows_`
+  only, a retired backend also never drains its queue again. Offscreen this was invisible; with a
+  real window it means a destroyed (e.g. torn-out-then-closed) window stays MAPPED for the rest of
+  the run. Harmless for the smokes — they assert `retired_session_count()`, not the desktop — and
+  deliberately not changed here, since releasing the backend at retire touches the shipping window
+  contract this task left alone. Named so the e10 tear-out author does not discover it as a surprise.
 - **No live DPI-change event on Linux.** `Xft.dpi` (falling back to the screen derivation) is read
   ONCE, in `X11WindowBackend::create`. Nothing watches `RESOURCE_MANAGER` on the root window for the
   `PropertyNotify` that a desktop scaling change publishes, and RandR is deliberately out of e12a —
