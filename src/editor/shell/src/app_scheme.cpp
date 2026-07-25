@@ -44,10 +44,17 @@ int hex_value(unsigned char c)
     return c - 'A' + 10;
 }
 
+} // namespace
+
 // Split a decoded relative path into segments on '/', rejecting every shape that could escape the
 // root. This runs BEFORE the filesystem is touched, and its refusals are absolute — nothing here
 // "cleans up" a suspicious path, because a cleaning pass is how `....//` becomes `../`.
-bool split_safe_segments(std::string_view path, std::vector<std::string>& out, std::string& reason)
+//
+// PUBLIC since e13a-1 (see app_scheme.h): the `context-ext://` extension scheme walks the SAME
+// containment chain against a different root, and a second copy of this function is a second place
+// for a traversal rejection to rot.
+bool split_safe_path_segments(std::string_view path, std::vector<std::string>& out,
+                              std::string& reason)
 {
     out.clear();
     std::string current;
@@ -111,9 +118,7 @@ bool split_safe_segments(std::string_view path, std::vector<std::string>& out, s
     return true;
 }
 
-} // namespace
-
-int AssetResolution::http_status() const
+int http_status_for(AssetStatus status)
 {
     switch (status)
     {
@@ -127,6 +132,11 @@ int AssetResolution::http_status() const
     default:
         return 404;
     }
+}
+
+int AssetResolution::http_status() const
+{
+    return http_status_for(status);
 }
 
 const std::vector<std::pair<std::string, std::string>>& asset_media_types()
@@ -256,7 +266,7 @@ AssetResolution AppAssetResolver::resolve(std::string_view url) const
 
     std::vector<std::string> segments;
     std::string reason;
-    if (!split_safe_segments(decoded, segments, reason))
+    if (!split_safe_path_segments(decoded, segments, reason))
     {
         // FORBIDDEN, not bad_request: the path parsed fine, it just asked for something outside the
         // asset set. Keeping the two apart is what makes the traversal count in the tests real.
@@ -354,7 +364,14 @@ const char* app_csp_header()
            "img-src 'self' data:; "
            "font-src 'self'; "
            "connect-src 'none'; "
-           "frame-src 'none'; "
+           // THE ONE FRAMING WIDENING (M9 e13a-1) — the reviewed change 04 §5 called for. Sandboxed
+           // third-party panels live on their own `context-ext://<package-id>` origins, so
+           // editor-core must be permitted to frame that SCHEME and nothing else. A scheme-source,
+           // not a per-package host list (which would have to be regenerated on every install), and
+           // deliberately NOT `*` / `http:` / `https:` / `data:`: what a framed panel may READ is
+           // owned by the deny-by-default ExtAssetResolver, but what may be framed AT ALL is owned
+           // here, and it must never include the open web. See app_scheme.h for the full rationale.
+           "frame-src context-ext:; "
            "object-src 'none'; "
            "base-uri 'none'; "
            "form-action 'none'; "

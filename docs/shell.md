@@ -555,6 +555,23 @@ Named so the gaps are visible rather than assumed:
   `editor-cef-smoke-shell` now boots the real bundle over the real scheme and round-trips a handshake
   through it. **Packaging** the asset root install-relative is still **e15**'s: the default is a
   build-tree path compiled in by CMake.
+- **No package panels** — the iframe host, the MessageChannel-port bridge, the capability/consent
+  model, theme-token delivery, the `context new --template extension-panel` scaffold and the demo
+  external package are **e13a-2 / e13b–f**. ✅ **Their SECURITY FOUNDATION landed with e13a-1**:
+  `context-ext` is registered in every process pinned to `STANDARD|SECURE|CORS_ENABLED` (no
+  `CSP_BYPASSING`, no `LOCAL`, and — unlike the app scheme — no `FETCH_ENABLED`), its resource
+  handler is installed **unconditionally**, and `context-ext://<package-id>/…` resolves through the
+  CEF-free `ext_scheme.h`/`.cpp` (ctest `editor-shell-test_ext_scheme`, all three `build` legs).
+  That resolver is deny-by-default four times over — a valid package id, a package that is actually
+  MOUNTED (never path-joined from the id), a media type on the shared asset allowlist, and canonical
+  containment inside that ONE package's root — and `mount()` additionally refuses overlapping roots,
+  because a package nested inside another's root would be a cross-package read that per-root
+  containment cannot see. With no package mounted (today's state — the install flow is e13b's) every
+  `context-ext://` request is refused, which is the intended configuration and not a gap.
+  editor-core's own CSP widened `frame-src 'none'` → `frame-src context-ext:` for this, and nothing
+  else in that policy moved. The CEF-free `kExtSchemeOptions` pin is `static_assert`ed against CEF's
+  own `CEF_SCHEME_OPTION_*` values in `cef_shell.cpp`, so a CEF bump that renumbered them fails the
+  build rather than silently changing the scheme's semantics.
 - **No triple-click.** Double-click works (the window class sets `CS_DBLCLKS` and the decoder reports
   `click_count = 2`), but nothing tracks a click RUN, so `click_count` never reaches 3 and
   triple-click-to-select-line is inert in the browser.

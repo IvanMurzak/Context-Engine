@@ -47,6 +47,7 @@ add_library(context_editor_shell STATIC
     src/browser.cpp       # the CEF-free browser seam + the scripted host
     src/compositor.cpp    # the layer stack, damage, resize protocol, both present paths (03 §4)
     src/app_scheme.cpp    # e05c: context-editor://app/ resolution + the strict CSP (04 §1)
+    src/ext_scheme.cpp    # e13a-1: context-ext://<pkg>/ deny-by-default resolution + CSP (04 §5 / 08)
     src/ipc_bridge.cpp    # e05c: the privileged bridge envelope + token isolation (04 §1 / 08 §1)
     src/panel_host.cpp    # e05d1: the panel-agnostic panel.* surface over the e05b roster (04 §3-§4)
     src/editor_state_bridge.cpp  # e05d2: the editor.state.*/editor.regions.* surface (03 §1 / §6)
@@ -168,6 +169,8 @@ set(_context_shell_tests
     test_window        # the headless backend + the PURE Win32 message decoder (all 3 OSes)
     test_compositor    # layer order, damage, resize protocol, PET_POPUP, both present paths
     test_app_scheme    # e05c: URL->asset resolution, traversal refusal, the strict CSP
+    test_ext_scheme    # e13a-1: the context-ext:// adversarial suite - traversal, cross-package,
+                       #         unknown/invalid package id, the pinned scheme options, the panel CSP
     test_ipc_bridge    # e05c: the T1 adversarial envelope suite + the 3 token-isolation controls
     test_panel_host    # e05d1: the panel-agnostic roster/render/command/gesture/D6-state surface
     test_editor_state_bridge  # e05d2: layout/panels publish+restore round-trip + region-map emission

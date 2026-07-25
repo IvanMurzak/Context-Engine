@@ -238,11 +238,23 @@ void test_csp_and_headers()
     CHECK(shelltest::mentions(csp, "object-src 'none'"));
     CHECK(shelltest::mentions(csp, "base-uri 'none'"));
     CHECK(shelltest::mentions(csp, "frame-ancestors 'none'"));
-    // Third-party panels are not framed yet; when 04 §5 lands, THIS is the line that widens.
-    CHECK(shelltest::mentions(csp, "frame-src 'none'"));
+    // THE ONE FRAMING WIDENING (M9 e13a-1) — the reviewed change this line previously anticipated
+    // as "when 04 §5 lands, THIS is the line that widens". Sandboxed third-party panels live on
+    // their own `context-ext://<package-id>` origins (ext_scheme.h), so editor-core is permitted to
+    // frame that SCHEME. Asserted BOTH ways so a revert to 'none' (which would silently break every
+    // package panel) and an over-widening (`*`, `http:`, `https:`, `data:`) each trip a check.
+    CHECK(shelltest::mentions(csp, "frame-src context-ext:"));
+    CHECK(!shelltest::mentions(csp, "frame-src 'none'"));
+    // Framing OUT was widened; framing IN was not. The editor window is still never someone else's
+    // frame, and nothing else in the policy moved.
+    CHECK(shelltest::mentions(csp, "frame-ancestors 'none'"));
+    CHECK(shelltest::mentions(csp, "form-action 'none'"));
     CHECK(!shelltest::mentions(csp, "http://"));
     CHECK(!shelltest::mentions(csp, "https://"));
     CHECK(!shelltest::mentions(csp, "*"));
+    // `data:` stays confined to images — the widening added a frame source, not a data source.
+    CHECK(shelltest::mentions(csp, "img-src 'self' data:"));
+    CHECK(!shelltest::mentions(csp, "frame-src context-ext: data:"));
 
     const auto headers = shell::app_response_headers("text/javascript; charset=utf-8");
     bool has_type = false;

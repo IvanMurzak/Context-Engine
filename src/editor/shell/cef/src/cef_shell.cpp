@@ -18,6 +18,7 @@
 #include "context/editor/shell/cef/cef_shell.h"
 
 #include "context/editor/shell/app_scheme.h"
+#include "context/editor/shell/ext_scheme.h"
 
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
@@ -52,6 +53,32 @@
 
 namespace context::editor::shell::cef
 {
+
+// THE CEF-FREE SCHEME-OPTION MIRROR, CHECKED AGAINST THE REAL API (M9 e13a-1).
+//
+// ext_scheme.h pins `context-ext://` to STANDARD|SECURE|CORS_ENABLED using its own constants, so
+// that pin is asserted by a unit test on all three default `build` legs — where CEF does not exist.
+// A mirror nothing compares against the API it mirrors is a comment, so these are the comparison:
+// a CEF bump that renumbered `cef_scheme_options_t` fails THIS build loudly instead of quietly
+// registering the extension scheme with different security semantics. All seven are checked, not
+// just the three that are set — the DENY half (CSP_BYPASSING, LOCAL, DISPLAY_ISOLATED,
+// FETCH_ENABLED) is the half whose value being wrong would be invisible.
+static_assert(kSchemeOptionStandard == static_cast<unsigned>(CEF_SCHEME_OPTION_STANDARD),
+              "CEF renumbered CEF_SCHEME_OPTION_STANDARD — update the mirror in ext_scheme.h");
+static_assert(kSchemeOptionLocal == static_cast<unsigned>(CEF_SCHEME_OPTION_LOCAL),
+              "CEF renumbered CEF_SCHEME_OPTION_LOCAL — update the mirror in ext_scheme.h");
+static_assert(kSchemeOptionDisplayIsolated ==
+                  static_cast<unsigned>(CEF_SCHEME_OPTION_DISPLAY_ISOLATED),
+              "CEF renumbered CEF_SCHEME_OPTION_DISPLAY_ISOLATED — update ext_scheme.h");
+static_assert(kSchemeOptionSecure == static_cast<unsigned>(CEF_SCHEME_OPTION_SECURE),
+              "CEF renumbered CEF_SCHEME_OPTION_SECURE — update the mirror in ext_scheme.h");
+static_assert(kSchemeOptionCorsEnabled == static_cast<unsigned>(CEF_SCHEME_OPTION_CORS_ENABLED),
+              "CEF renumbered CEF_SCHEME_OPTION_CORS_ENABLED — update the mirror in ext_scheme.h");
+static_assert(kSchemeOptionCspBypassing == static_cast<unsigned>(CEF_SCHEME_OPTION_CSP_BYPASSING),
+              "CEF renumbered CEF_SCHEME_OPTION_CSP_BYPASSING — update the mirror in ext_scheme.h");
+static_assert(kSchemeOptionFetchEnabled == static_cast<unsigned>(CEF_SCHEME_OPTION_FETCH_ENABLED),
+              "CEF renumbered CEF_SCHEME_OPTION_FETCH_ENABLED — update the mirror in ext_scheme.h");
+
 namespace
 {
 
@@ -69,6 +96,13 @@ constexpr const char* kBridgeCancelFunction = "contextEditorQueryCancel";
 // never mutated afterwards, which is what makes it safe without a lock; `AppAssetResolver::resolve`
 // is const and holds no mutable state, so concurrent resolves are fine.
 const AppAssetResolver* g_asset_resolver = nullptr;
+
+// The extension-scheme resolver (e13a-1), under the same single-assignment / const-resolve
+// discipline as the app one above. UNLIKE the app resolver it is installed UNCONDITIONALLY at boot,
+// even with no package mounted: an `ExtAssetResolver` with an empty mount table refuses every
+// request, and having OUR deny-by-default handler answer a `context-ext://` request is strictly
+// better than leaving the scheme handler-less and inheriting whatever Chromium does with it.
+const ExtAssetResolver* g_ext_resolver = nullptr;
 
 bool g_initialized = false;
 
@@ -158,109 +192,21 @@ cef_key_event_type_t to_cef_key_type(KeyAction action)
     }
 }
 
-// --------------------------------------------------------------- the app-scheme resource handler
+// ------------------------------------------------- the custom-scheme resource handlers (app + ext)
 
-// Serves ONE `context-editor://app/…` request from the built asset set.
+// The BYTE PLUMBING both custom schemes share: buffer a resolved file, hand it to CEF a chunk at a
+// time, and build the two response shapes (refused / served) from a resolution's status + a header
+// list. It holds NO policy — which URLs are in bounds, what a path may contain, which media types
+// exist, what the CSP says all live in the CEF-free resolvers next door, where they are
+// adversarially unit-tested on all three default `build` legs.
 //
-// Every decision worth making — which URLs are in bounds, what a path may contain, which media
-// types exist, what the CSP says — lives in the CEF-free `AppAssetResolver` next door, where it is
-// adversarially unit-tested on all three default `build` legs. This class does exactly three
-// things: ask the resolver, read the bytes, hand them to CEF. Keeping it that thin is the point,
-// because this file is the one the local dev gate cannot build.
-class AppSchemeResourceHandler final : public CefResourceHandler
+// ONE COPY, deliberately: e13a-1 added a second scheme, and a near-verbatim second copy of a
+// security-adjacent buffer/offset loop in the ONE translation unit the local dev gate cannot build
+// is exactly where a divergence would go unseen. The derived handlers below are what remains —
+// `Open` (ask MY resolver) and `GetResponseHeaders` (send MY policy), and nothing else.
+class SchemeResourceHandlerBase : public CefResourceHandler
 {
 public:
-    bool Open(CefRefPtr<CefRequest> request, bool& handle_request,
-              CefRefPtr<CefCallback>) override
-    {
-        // Synchronous: the response is fully decided inside this call, so CEF never has to wait on
-        // a continuation. `handle_request = true` is what says so.
-        handle_request = true;
-
-        const std::string url = request->GetURL().ToString();
-        if (g_asset_resolver == nullptr)
-        {
-            // No asset root was configured. 404 rather than a file:// fallback — see cef_shell.h.
-            resolution_.status = AssetStatus::not_found;
-            return true;
-        }
-
-        resolution_ = g_asset_resolver->resolve(url);
-        if (!resolution_.ok())
-        {
-            // The REASON is logged, never sent: a refusal reason is a probe oracle for anything
-            // that got script running in the renderer.
-            std::fprintf(stderr, "[shell-cef] app scheme refused <%s>: %s\n", url.c_str(),
-                         resolution_.reason.c_str());
-            return true;
-        }
-
-        // Read the whole asset up front. These are the editor's own bundled assets (hundreds of KB,
-        // not media), so streaming would buy nothing and would leave the file handle open across
-        // callbacks for no reason.
-        std::ifstream file(resolution_.file, std::ios::binary);
-        if (!file)
-        {
-            resolution_.status = AssetStatus::not_found;
-            return true;
-        }
-        body_.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
-        // A read that failed PART WAY would otherwise serve a truncated bundle, which presents as a
-        // baffling syntax error in the renderer rather than as an IO failure.
-        if (file.bad())
-        {
-            body_.clear();
-            resolution_.status = AssetStatus::not_found;
-        }
-        return true;
-    }
-
-    void GetResponseHeaders(CefRefPtr<CefResponse> response, int64_t& response_length,
-                            CefString& redirectUrl) override
-    {
-        redirectUrl.clear();
-        response->SetStatus(resolution_.http_status());
-
-        if (!resolution_.ok())
-        {
-            // An error response still carries the CSP: an error page is a document too, and one
-            // served without a policy is a hole that only shows up on the unhappy path.
-            response->SetMimeType("text/plain");
-            CefResponse::HeaderMap headers;
-            headers.insert({"Content-Security-Policy", app_csp_header()});
-            headers.insert({"X-Content-Type-Options", "nosniff"});
-            response->SetHeaderMap(headers);
-            response_length = 0;
-            return;
-        }
-
-        // MIME ESSENCE AND CHARSET ARE TWO SEPARATE FIELDS — see split_media_type() in
-        // app_scheme.h for the full trap. Passing the resolver's `text/css; charset=utf-8` straight
-        // into SetMimeType() makes Chromium's by-essence comparison fail, and with the
-        // `X-Content-Type-Options: nosniff` this response also sets, the stylesheet and the ES
-        // module are then silently refused and the document is not parsed as HTML.
-        const MediaType media = split_media_type(resolution_.mime_type);
-        response->SetMimeType(media.essence);
-        if (!media.charset.empty())
-        {
-            response->SetCharset(media.charset);
-        }
-        CefResponse::HeaderMap headers;
-        for (const auto& [name, value] : app_response_headers(resolution_.mime_type))
-        {
-            // CEF derives the Content-Type from the mime type + charset set above; setting it in
-            // the map as well makes the response carry it twice, which some parsers treat as a
-            // conflict.
-            if (name == "Content-Type")
-            {
-                continue;
-            }
-            headers.insert({name, value});
-        }
-        response->SetHeaderMap(headers);
-        response_length = static_cast<int64_t>(body_.size());
-    }
-
     bool Read(void* data_out, int bytes_to_read, int& bytes_read,
               CefRefPtr<CefResourceReadCallback>) override
     {
@@ -301,10 +247,130 @@ public:
 
     void Cancel() override {}
 
-private:
-    AssetResolution resolution_;
+protected:
+    // Read the whole asset up front. These are bundled UI assets (hundreds of KB, not media), so
+    // streaming would buy nothing and would leave the file handle open across callbacks for no
+    // reason. Returns false when the file could not be read AT ALL or was read only PART WAY — a
+    // truncated bundle otherwise presents as a baffling syntax error in the renderer rather than as
+    // an IO failure, so the caller degrades it to not_found.
+    bool load_body(const std::filesystem::path& file)
+    {
+        std::ifstream stream(file, std::ios::binary);
+        if (!stream)
+        {
+            return false;
+        }
+        body_.assign(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+        if (stream.bad())
+        {
+            body_.clear();
+            return false;
+        }
+        return true;
+    }
+
+    // The REFUSED response. An error page is a document too, and one served without a policy is a
+    // hole that only shows up on the unhappy path — so the refusal carries the SAME CSP the happy
+    // path would have.
+    void write_refusal(CefRefPtr<CefResponse> response, const char* csp, int64_t& response_length)
+    {
+        response->SetMimeType("text/plain");
+        CefResponse::HeaderMap headers;
+        headers.insert({"Content-Security-Policy", csp});
+        headers.insert({"X-Content-Type-Options", "nosniff"});
+        response->SetHeaderMap(headers);
+        response_length = 0;
+    }
+
+    // The SERVED response.
+    //
+    // MIME ESSENCE AND CHARSET ARE TWO SEPARATE FIELDS — see split_media_type() in app_scheme.h for
+    // the full trap. Passing the resolver's `text/css; charset=utf-8` straight into SetMimeType()
+    // makes Chromium's by-essence comparison fail, and with the `X-Content-Type-Options: nosniff`
+    // these responses also set, the stylesheet and the ES module are then silently refused and the
+    // document is not parsed as HTML.
+    void write_asset(CefRefPtr<CefResponse> response, const std::string& mime_type,
+                     const std::vector<std::pair<std::string, std::string>>& header_list,
+                     int64_t& response_length)
+    {
+        const MediaType media = split_media_type(mime_type);
+        response->SetMimeType(media.essence);
+        if (!media.charset.empty())
+        {
+            response->SetCharset(media.charset);
+        }
+        CefResponse::HeaderMap headers;
+        for (const auto& [name, value] : header_list)
+        {
+            // CEF derives the Content-Type from the mime type + charset set above; setting it in
+            // the map as well makes the response carry it twice, which some parsers treat as a
+            // conflict.
+            if (name == "Content-Type")
+            {
+                continue;
+            }
+            headers.insert({name, value});
+        }
+        response->SetHeaderMap(headers);
+        response_length = static_cast<int64_t>(body_.size());
+    }
+
     std::string body_;
     std::size_t offset_ = 0;
+};
+
+// Serves ONE `context-editor://app/…` request from the built asset set.
+class AppSchemeResourceHandler final : public SchemeResourceHandlerBase
+{
+public:
+    bool Open(CefRefPtr<CefRequest> request, bool& handle_request,
+              CefRefPtr<CefCallback>) override
+    {
+        // Synchronous: the response is fully decided inside this call, so CEF never has to wait on
+        // a continuation. `handle_request = true` is what says so.
+        handle_request = true;
+
+        const std::string url = request->GetURL().ToString();
+        if (g_asset_resolver == nullptr)
+        {
+            // No asset root was configured. 404 rather than a file:// fallback — see cef_shell.h.
+            resolution_.status = AssetStatus::not_found;
+            return true;
+        }
+
+        resolution_ = g_asset_resolver->resolve(url);
+        if (!resolution_.ok())
+        {
+            // The REASON is logged, never sent: a refusal reason is a probe oracle for anything
+            // that got script running in the renderer.
+            std::fprintf(stderr, "[shell-cef] app scheme refused <%s>: %s\n", url.c_str(),
+                         resolution_.reason.c_str());
+            return true;
+        }
+
+        if (!load_body(resolution_.file))
+        {
+            resolution_.status = AssetStatus::not_found;
+        }
+        return true;
+    }
+
+    void GetResponseHeaders(CefRefPtr<CefResponse> response, int64_t& response_length,
+                            CefString& redirectUrl) override
+    {
+        redirectUrl.clear();
+        response->SetStatus(resolution_.http_status());
+        if (!resolution_.ok())
+        {
+            write_refusal(response, app_csp_header(), response_length);
+            return;
+        }
+        write_asset(response, resolution_.mime_type, app_response_headers(resolution_.mime_type),
+                    response_length);
+    }
+
+private:
+    AssetResolution resolution_;
 
     IMPLEMENT_REFCOUNTING(AppSchemeResourceHandler);
 };
@@ -320,6 +386,85 @@ public:
 
 private:
     IMPLEMENT_REFCOUNTING(AppSchemeFactory);
+};
+
+// Serves ONE `context-ext://<package-id>/…` request from ONE mounted package (M9 e13a-1).
+//
+// The thinnest possible translator, and for a sharper reason than the app handler's: the code on
+// the other end of this response is UNTRUSTED third-party panel code, so every judgement about it
+// — is that a real package, may that path leave the package root, may that media type be served at
+// all — belongs in `ExtAssetResolver`, which the local dev gate and all three `build` legs
+// adversarially test. Nothing here decides anything.
+//
+// A null `g_ext_resolver` refuses with 403, NOT 404: the resolver is installed unconditionally at
+// boot, so a null one means the Shell is not serving this scheme in this process at all, and
+// "forbidden" is the honest answer. It also keeps the refusal indistinguishable from an unknown
+// package, which is the property `ExtAssetResolver` maintains on purpose.
+class ExtSchemeResourceHandler final : public SchemeResourceHandlerBase
+{
+public:
+    bool Open(CefRefPtr<CefRequest> request, bool& handle_request,
+              CefRefPtr<CefCallback>) override
+    {
+        handle_request = true;
+
+        const std::string url = request->GetURL().ToString();
+        if (g_ext_resolver == nullptr)
+        {
+            resolution_.status = AssetStatus::forbidden;
+            resolution_.reason = "no extension resolver is installed in this process";
+        }
+        else
+        {
+            resolution_ = g_ext_resolver->resolve(url);
+        }
+        if (!resolution_.ok())
+        {
+            // Logged, never sent — a refusal reason is a probe oracle, and this scheme's whole
+            // point is that the requester may be hostile.
+            std::fprintf(stderr, "[shell-cef] ext scheme refused <%s>: %s\n", url.c_str(),
+                         resolution_.reason.c_str());
+            return true;
+        }
+
+        if (!load_body(resolution_.file))
+        {
+            resolution_.status = AssetStatus::not_found;
+        }
+        return true;
+    }
+
+    void GetResponseHeaders(CefRefPtr<CefResponse> response, int64_t& response_length,
+                            CefString& redirectUrl) override
+    {
+        redirectUrl.clear();
+        response->SetStatus(resolution_.http_status());
+        if (!resolution_.ok())
+        {
+            write_refusal(response, ext_csp_header(), response_length);
+            return;
+        }
+        write_asset(response, resolution_.mime_type, ext_response_headers(resolution_.mime_type),
+                    response_length);
+    }
+
+private:
+    ExtResolution resolution_;
+
+    IMPLEMENT_REFCOUNTING(ExtSchemeResourceHandler);
+};
+
+class ExtSchemeFactory final : public CefSchemeHandlerFactory
+{
+public:
+    CefRefPtr<CefResourceHandler> Create(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+                                         const CefString&, CefRefPtr<CefRequest>) override
+    {
+        return new ExtSchemeResourceHandler();
+    }
+
+private:
+    IMPLEMENT_REFCOUNTING(ExtSchemeFactory);
 };
 
 // ------------------------------------------------------------------------- the IPC bridge handler
@@ -487,8 +632,17 @@ public:
         // other origin), so this closes a broken-editor hole rather than a leak; it is cheap, and
         // `kAppUrlPrefix` is already the vocabulary this file routes on.
         //
-        // Sub-frame navigations are not gated here: `frame-src 'none'` already denies them, and the
-        // Shell creates no sub-frames of its own.
+        // Sub-frame navigations are not gated here — but the REASON changed with e13a-1 and the
+        // old one ("`frame-src 'none'` already denies them") is no longer true. editor-core's
+        // policy is now `frame-src context-ext:`, so sub-frames DO exist: sandboxed third-party
+        // panels. What still bounds them is that SAME directive — CSP `frame-src` is re-evaluated
+        // on every navigation of a nested browsing context, not only on its first load, so a panel
+        // that tries to navigate ITSELF anywhere off `context-ext:` is refused by the parent's
+        // policy; and a `sandbox="allow-scripts"` frame without `allow-top-navigation` cannot move
+        // the main frame, which the check just above independently pins to the app origin anyway.
+        // A belt-and-braces sub-frame allowlist here would be a reasonable e13a-2 hardening once a
+        // live iframe smoke exists to prove it does not over-block; adding one blind, in the TU the
+        // local gate cannot build, would be a guess.
         if (frame != nullptr && frame->IsMain() && request != nullptr)
         {
             const std::string url = request->GetURL().ToString();
@@ -820,6 +974,23 @@ public:
                                                    CEF_SCHEME_OPTION_SECURE |
                                                    CEF_SCHEME_OPTION_CORS_ENABLED |
                                                    CEF_SCHEME_OPTION_FETCH_ENABLED);
+
+        // The EXTENSION scheme (M9 e13a-1, design 04 §5 / 08 §1-§2). Registered here, in the same
+        // every-process hook and for the same reason: a per-package origin only behaves like an
+        // origin if the RENDERER agrees it is one, and a sandboxed panel's whole containment story
+        // is origin-based.
+        //
+        // The flag set is `kExtSchemeOptions` from the CEF-free ext_scheme.h rather than a second
+        // spelling of the CEF enumerators here: that constant is what the unit suite asserts on the
+        // three legs where CEF does not exist, and the file-scope static_asserts above are what
+        // keep it equal to CEF's own values. Writing the bits out again here would leave the tested
+        // constant and the registered value free to drift — which, on a security boundary whose
+        // only other witness is one CI job, is precisely the failure worth engineering out.
+        //
+        // NOTE the deliberate difference from the app scheme one line up: NO FETCH_ENABLED (a panel
+        // has `connect-src 'none'` and gets no Fetch surface of its own) and, as there, no
+        // CSP_BYPASSING and no LOCAL. ext_scheme.h documents each omission.
+        registrar->AddCustomScheme(kExtScheme, static_cast<int>(kExtSchemeOptions));
     }
 
     // --- the renderer side of the message router --------------------------------------------------
@@ -1295,6 +1466,47 @@ std::unique_ptr<IBrowserHost> make_cef_browser_host(const CefShellOptions& optio
         }
     }
 
+    // --- the extension scheme (e13a-1) -------------------------------------------------------------
+    // UNCONDITIONAL, unlike the app scheme above: it is installed whether or not any package is
+    // mounted, because an `ExtAssetResolver` with an empty mount table is a complete configuration
+    // that refuses everything. Leaving `context-ext://` handler-less until the first package
+    // installs (e13b+) would mean the deny-by-default answer came from Chromium's unhandled-scheme
+    // path rather than from the boundary this task exists to build — and would make the boundary
+    // untestable in exactly the window where nothing is installed.
+    //
+    // Registered with an EMPTY domain, so it answers for EVERY host under the scheme. That is the
+    // right shape here: the package is the host, hosts are not known at CefInitialize time, and
+    // "which package is real" is the resolver's mount-table decision, not CEF's routing decision.
+    if (g_ext_resolver == nullptr)
+    {
+        // Leaked ON PURPOSE, exactly like the app resolver: the factory CEF holds may answer on the
+        // IO thread at any point up to CefShutdown, so it must outlive every browser. shutdown()
+        // frees it.
+        auto* ext_resolver = new ExtAssetResolver();
+        for (const ExtPackageMount& package : options.ext_packages)
+        {
+            std::string reason;
+            if (!ext_resolver->mount(package.id, package.root, reason))
+            {
+                // REPORTED, not fatal: the editor still boots and every other package still works.
+                // A refused mount means that ONE origin serves 403 — the deny-by-default outcome —
+                // and the operator is told which package and why instead of watching an empty panel.
+                std::fprintf(stderr,
+                             "[shell-cef] extension package NOT mounted: id=<%s> root=<%s>: %s — "
+                             "context-ext://%s/ will refuse every request\n",
+                             package.id.c_str(), package.root.string().c_str(), reason.c_str(),
+                             package.id.c_str());
+            }
+        }
+        g_ext_resolver = ext_resolver;
+        if (!CefRegisterSchemeHandlerFactory(kExtScheme, /*domain*/ CefString(),
+                                             new ExtSchemeFactory()))
+        {
+            error = "CefRegisterSchemeHandlerFactory failed for context-ext://";
+            return nullptr;
+        }
+    }
+
     CefRefPtr<ShellCefClient> client(
         new ShellCefClient(options.logical_size, options.dpi, options.bridge));
 
@@ -1358,6 +1570,8 @@ void shutdown()
     // Freed only now — every browser is gone and no IO-thread request can still be in flight.
     delete g_asset_resolver;
     g_asset_resolver = nullptr;
+    delete g_ext_resolver;
+    g_ext_resolver = nullptr;
 }
 
 } // namespace context::editor::shell::cef
