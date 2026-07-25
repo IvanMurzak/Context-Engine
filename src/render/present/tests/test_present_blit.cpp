@@ -275,23 +275,60 @@ void test_repack_tight_removes_row_padding()
 
 // ------------------------------------------------------------------------- platform selection
 
+// A native window descriptor with stand-in pointers. The branches that refuse never dereference
+// them, and the branches that would are not reachable on a host without that window system.
+NativeWindowDesc native_window(NativeWindowKind kind, void* handle, void* display = nullptr)
+{
+    NativeWindowDesc native;
+    native.kind = kind;
+    native.handle = handle;
+    native.display = display;
+    return native;
+}
+
 void test_platform_selection_is_never_silent()
 {
-    int window = 0; // a stand-in handle; the non-Windows branches never dereference it
+    int window = 0;
+    int display = 0;
 
-    // The platforms whose blitter e12 still owes must report WHY, so the Shell degrades loudly.
-    const BlitterSelection linux_sel = make_present_blitter(PresentPlatform::linux_, &window);
-    CHECK(linux_sel.blitter == nullptr);
-    CHECK(mentions(linux_sel.diagnostic, "e12"));
+    // The headless backend's honest report: kind None is "there is no presentable window here",
+    // which routes the Shell to a null blitter WITH a reason rather than to a crash.
+    const BlitterSelection headless =
+        make_present_blitter(native_window(NativeWindowKind::None, nullptr));
+    CHECK(headless.blitter == nullptr);
+    CHECK(!headless.diagnostic.empty());
 
-    const BlitterSelection mac_sel = make_present_blitter(PresentPlatform::macos, &window);
+    // macOS is the ONE window system whose blitter is still owed, and it must report WHY so the
+    // Shell degrades loudly. It now names e12b — the task that owns it — not the retired e12.
+    const BlitterSelection mac_sel =
+        make_present_blitter(native_window(NativeWindowKind::MetalLayer, &window));
     CHECK(mac_sel.blitter == nullptr);
-    CHECK(mentions(mac_sel.diagnostic, "e12"));
+    CHECK(mentions(mac_sel.diagnostic, "e12b"));
 
-    // No handle at all is also reported, not silently ignored.
-    const BlitterSelection none = make_present_blitter(PresentPlatform::windows, nullptr);
-    CHECK(none.blitter == nullptr);
-    CHECK(!none.diagnostic.empty());
+    // WAYLAND IS THE REASON THIS SELECTION IS KEYED ON THE WINDOW SYSTEM. It shares
+    // PresentPlatform::linux_ with X11, so the old platform-keyed switch would have handed a
+    // wl_surface* to the X11 blitter as if it were a Window. Now it is a named refusal.
+    const BlitterSelection wayland =
+        make_present_blitter(native_window(NativeWindowKind::WaylandSurface, &window, &display));
+    CHECK(wayland.blitter == nullptr);
+    CHECK(mentions(wayland.diagnostic, "Wayland"));
+
+    // No handle at all is reported, not silently ignored — and the diagnostic must NAME the missing
+    // handle. A bare non-emptiness check is vacuous here: with the guard removed, the Win32 arm
+    // still refuses (for the unrelated reason that it is not a Windows build) and still produces a
+    // non-empty string, so "is it non-empty" cannot tell a caught bug from an accident. Found by
+    // planting the guard's removal, which passed a non-emptiness assertion clean.
+    const BlitterSelection no_handle =
+        make_present_blitter(native_window(NativeWindowKind::Win32Hwnd, nullptr));
+    CHECK(no_handle.blitter == nullptr);
+    CHECK(mentions(no_handle.diagnostic, "handle"));
+
+    // X11 needs BOTH halves. A caller that passed only the Window gets a diagnostic naming the
+    // missing connection, never a blitter that cannot draw.
+    const BlitterSelection no_display =
+        make_present_blitter(native_window(NativeWindowKind::XlibWindow, &window, nullptr));
+    CHECK(no_display.blitter == nullptr);
+    CHECK(mentions(no_display.diagnostic, "Display"));
 
     // The Windows factory is compiled only on Windows; off-Windows it must refuse cleanly rather
     // than hand back something that cannot work.
@@ -301,10 +338,29 @@ void test_platform_selection_is_never_silent()
     CHECK(make_win32_gdi_blitter(&window) != nullptr);
 #else
     CHECK(make_win32_gdi_blitter(&window) == nullptr);
-    const BlitterSelection win_sel = make_present_blitter(PresentPlatform::windows, &window);
+    const BlitterSelection win_sel =
+        make_present_blitter(native_window(NativeWindowKind::Win32Hwnd, &window));
     CHECK(win_sel.blitter == nullptr);
     CHECK(!win_sel.diagnostic.empty());
 #endif
+
+    // The X11 factory has the same shape, and the same off-platform refusal. It is NOT exercised
+    // with a real display here: constructing it issues X requests, so a live-server assertion
+    // belongs in the windowed smoke (editor-shell-x11-window), not in a unit suite that must run
+    // headless on three OSes.
+#if !defined(__linux__)
+    CHECK(make_x11_shm_blitter(&display, &window) == nullptr);
+    const BlitterSelection linux_sel =
+        make_present_blitter(native_window(NativeWindowKind::XlibWindow, &window, &display));
+    CHECK(linux_sel.blitter == nullptr);
+    CHECK(!linux_sel.diagnostic.empty());
+    // The Linux gap is no longer owed to a future task — it is owed to a missing package, and the
+    // diagnostic must stop pointing at e12.
+    CHECK(!mentions(linux_sel.diagnostic, "e12"));
+#endif
+    // Null arguments are refused on every platform, including the one where the factory is real.
+    CHECK(make_x11_shm_blitter(nullptr, &window) == nullptr);
+    CHECK(make_x11_shm_blitter(&display, nullptr) == nullptr);
 }
 
 } // namespace

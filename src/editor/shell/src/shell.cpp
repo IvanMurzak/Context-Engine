@@ -137,11 +137,13 @@ PresentPath EditorWindow::attach_present(render::IRhi& rhi)
 void EditorWindow::attach_cpu_present()
 {
     const render::NativeWindowDesc native = backend_->native_window();
-    render::present::BlitterSelection selection =
-        render::present::make_present_blitter(config_.compositor.platform, native.handle);
+    // The WHOLE native-window descriptor, not a platform tag plus a handle (e12a; docs/present-path.md
+    // § the e03 follow-up): a 2D present primitive is window-system-granular, and X11 needs the
+    // Display* alongside the Window.
+    render::present::BlitterSelection selection = render::present::make_present_blitter(native);
     if (selection.blitter == nullptr && !selection.diagnostic.empty())
     {
-        // Reported, never silent — the platform gap (X11 SHM / CALayer.contents are e12's) is named
+        // Reported, never silent — the remaining platform gap (CALayer.contents is e12b's) is named
         // by the selection itself.
         diagnostic_ = selection.diagnostic;
     }

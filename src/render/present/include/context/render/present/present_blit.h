@@ -7,10 +7,12 @@
 // X11 SHM on Linux, CALayer.contents on macOS), and viewport panels draw their diagnostic
 // placeholder (02 §6).
 //
-// This header lands the SEAM plus the WINDOWS implementation; the X11 and macOS implementations are
-// e12's. That gap is deliberate and REPORTED, never silent: make_present_blitter returns a
-// selection carrying an explicit diagnostic for a platform whose blitter does not exist yet, so a
-// caller degrades loudly instead of quietly presenting nothing.
+// e03 landed the SEAM plus the WINDOWS implementation; e12a adds the LINUX one (X11 MIT-SHM, with a
+// plain XPutImage fallback for a display that cannot share memory). The macOS
+// CALayer.contents implementation is e12b's. That remaining gap is deliberate and REPORTED, never
+// silent: make_present_blitter returns a selection carrying an explicit diagnostic for a platform
+// whose blitter does not exist yet, so a caller degrades loudly instead of quietly presenting
+// nothing.
 //
 // The geometry (compute_blit_plan) is pure integer math kept apart from every OS call, which is what
 // lets the letterbox/pillarbox arithmetic be pixel-asserted on all three OSes — including through
@@ -75,6 +77,18 @@ struct BlitPlan
 
 [[nodiscard]] BlitPlan compute_blit_plan(Extent2D src, Extent2D dst);
 
+// The nearest-neighbour source index for one axis: floor(offset * src_extent / plan_extent), clamped
+// to the last source texel. `offset_in_plan` is measured from the plan's origin, so a caller
+// iterating DESTINATION space passes `x - plan.x` while one iterating plan space passes `x`.
+//
+// Shared deliberately, alongside is_blit_source_readable above. MemoryBlitter is the ORACLE the blit
+// geometry is asserted against on every OS, and X11ShmBlitter cannot be unit-tested at all
+// (constructing it issues X requests), so "the X11 path samples exactly what the oracle predicts"
+// was a hand-maintained duplicate of a formula that no test could ever catch drifting. One function
+// makes it structural instead of a comment.
+[[nodiscard]] std::uint32_t blit_source_index(std::uint32_t offset_in_plan, std::uint32_t src_extent,
+                                              std::uint32_t plan_extent);
+
 // An OS-level 2D presentation primitive.
 class IPresentBlitter
 {
@@ -114,6 +128,13 @@ private:
 // or this translation unit was not built for Windows.
 [[nodiscard]] std::unique_ptr<IPresentBlitter> make_win32_gdi_blitter(void* hwnd);
 
+// The Linux X11 blitter (MIT-SHM XShmPutImage, degrading to XPutImage where shared memory is not
+// available — a remote display, or a server built without the extension). `display` is the Display*
+// and `window` is the Window XID widened to a pointer, matching rhi.h's XlibWindow contract.
+// Returns nullptr when either is null, or when this translation unit was not built for Linux WITH
+// the X11 development headers.
+[[nodiscard]] std::unique_ptr<IPresentBlitter> make_x11_shm_blitter(void* display, void* window);
+
 // What make_present_blitter resolved to, and — when it resolved to nothing — why.
 struct BlitterSelection
 {
@@ -121,8 +142,17 @@ struct BlitterSelection
     std::string diagnostic;
 };
 
-// Resolve the OS blitter for `platform`. `native_handle` is the platform's window handle (HWND on
-// Windows). A platform with no implementation yet yields a null blitter plus a diagnostic naming it.
-[[nodiscard]] BlitterSelection make_present_blitter(PresentPlatform platform, void* native_handle);
+// Resolve the OS blitter for a native window. A window system with no implementation yet yields a
+// null blitter plus a diagnostic naming it.
+//
+// KEYED ON NativeWindowDesc, NOT on PresentPlatform — e12a acting on the follow-up e03 recorded in
+// docs/present-path.md. `PresentPlatform` is right for the IMPORT tier, which genuinely is
+// OS-granular (DXGI / IOSurface / dmabuf), but a 2D present primitive is WINDOW-SYSTEM-granular:
+// X11 SHM needs BOTH a `Display*` and a `Window`, and Wayland is an entirely different mechanism on
+// the same `PresentPlatform::linux_`. `NativeWindowDesc` already carries exactly that shape
+// (`kind` + `handle` + `display`, with X11 and Wayland as distinct kinds), so keying on it makes the
+// Wayland case a NAMED refusal instead of a silent mis-dispatch into the X11 blitter — which is what
+// bolting a second `void*` onto the platform-keyed signature would have produced.
+[[nodiscard]] BlitterSelection make_present_blitter(const NativeWindowDesc& native);
 
 } // namespace context::render::present

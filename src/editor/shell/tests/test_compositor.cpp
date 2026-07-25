@@ -563,11 +563,19 @@ void test_cpu_path_composites_the_popup_rather_than_skipping_it()
 void test_cpu_path_without_a_blitter_is_reported_not_silent()
 {
     WindowCompositor compositor(software_config());
-    // A platform whose 2D primitive is e12's: the shell still runs, and says so.
+    // A build with no 2D primitive for this platform: the shell still runs, and says WHY.
     compositor.attach_cpu(nullptr, render::Extent2D{100, 50});
     CHECK(compositor.path() == PresentPath::cpu_blit);
     CHECK(!compositor.diagnostic().empty());
-    CHECK(shelltest::mentions(compositor.diagnostic(), "e12"));
+    // The diagnostic must name the ACTIONABLE cause for each platform that can still reach it: on
+    // Linux the missing X11 development headers (a package the reader can install — e12a landed the
+    // blitter itself), and on macOS the task that still owes the CALayer path.
+    //
+    // Asserting a bare "e12" here — as this test did until e12a — rots SILENTLY, because "e12" is a
+    // prefix of "e12b": it kept passing while the message went on telling Linux users to wait for a
+    // task that had already shipped. Pin the two substrings that carry the meaning instead.
+    CHECK(shelltest::mentions(compositor.diagnostic(), "X11"));
+    CHECK(shelltest::mentions(compositor.diagnostic(), "e12b"));
 
     std::vector<std::uint8_t> storage;
     compositor.on_browser_frame(make_view_frame(storage, render::Extent2D{100, 50},

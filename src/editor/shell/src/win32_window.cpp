@@ -585,37 +585,26 @@ void Win32WindowBackend::apply_placement(const WindowPlacement& placement)
 
 } // namespace
 
-WindowBackendSelection make_window_backend(const WindowDesc& desc)
+std::unique_ptr<IWindowBackend> make_win32_window_backend(const WindowDesc& desc,
+                                                          std::string& error)
 {
-    WindowBackendSelection selection;
     auto backend = std::make_unique<Win32WindowBackend>();
-    std::string error;
     if (!backend->create(desc, error))
     {
-        selection.diagnostic = "the Windows window backend could not create a window: " + error;
-        return selection;
+        return nullptr;
     }
-    selection.backend = std::move(backend);
-    return selection;
+    return backend;
 }
 
 #else // !_WIN32
 
-WindowBackendSelection make_window_backend(const WindowDesc& /*desc*/)
+std::unique_ptr<IWindowBackend> make_win32_window_backend(const WindowDesc& /*desc*/,
+                                                          std::string& error)
 {
-    WindowBackendSelection selection;
-#if defined(__APPLE__)
-    selection.diagnostic =
-        "no native window backend on macOS: the NSWindow/NSView backend lands with e12 "
-        "(design 03 §1). The Shell runs headless here; use HeadlessWindowBackend explicitly to "
-        "make that choice visible.";
-#else
-    selection.diagnostic =
-        "no native window backend on this platform: the Linux X11/XWayland backend lands with e12 "
-        "(design 03 §1, D21). The Shell runs headless here; use HeadlessWindowBackend explicitly "
-        "to make that choice visible.";
-#endif
-    return selection;
+    // Compiled everywhere, real only on Windows — the same shape make_win32_gdi_blitter takes, so
+    // the off-platform refusal is a value the ctest asserts rather than a symbol that is absent.
+    error = "the Win32 window backend is compiled only on Windows";
+    return nullptr;
 }
 
 #endif // _WIN32

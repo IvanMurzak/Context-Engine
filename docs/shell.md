@@ -75,24 +75,61 @@ decouples engine frame rate from CEF's paint rate, which was the only thing the 
 lifecycle — resize, DPI change, focus, input round-trip, popup, placement persistence, teardown — a
 deterministic ctest instead of something only a human at a real window can observe.
 
-**Per-OS backends.** v1 ships Windows (`RegisterClassExW`/`CreateWindowExW` + WndProc, per-monitor-v2
-DPI). macOS (NSWindow/NSView) and Linux (X11/XWayland, D21) are **e12's**, and that gap is REPORTED,
-not silent: `make_window_backend` returns a selection carrying a diagnostic naming e12, mirroring how
-e03's `make_present_blitter` reports its own missing platforms. A shell that quietly opened no window
-would look identical to one that opened an invisible one.
+**Per-OS backends.** e04 shipped Windows (`RegisterClassExW`/`CreateWindowExW` + WndProc,
+per-monitor-v2 DPI); **e12a** added Linux (`XCreateWindow` + the Xlib event pump, EWMH placement and
+activation, `Xft.dpi`). macOS (NSWindow/NSView) is **e12b's**, and that remaining gap is REPORTED,
+not silent: `make_window_backend` returns a selection carrying a diagnostic naming e12b, mirroring
+how e03's `make_present_blitter` reports its own missing platforms. A shell that quietly opened no
+window would look identical to one that opened an invisible one.
+
+`make_window_backend` itself lives in the PORTABLE `window.cpp`, not in either platform file. It used
+to sit in `win32_window.cpp`, whose `#else` branch was the honest gap report for both other OSes —
+a shape that stops working the moment a second real backend exists, because the Linux build's
+selection logic would then sit inside a file that is entirely `#if defined(_WIN32)`. Each platform
+file now exposes a `make_<platform>_window_backend` factory that returns `nullptr` off its own
+platform (mirroring `make_win32_gdi_blitter`), so the off-platform refusal is a VALUE the ctest
+asserts on every leg rather than a symbol that is simply absent.
 
 **The platform blind spot, and what is done about it.** The local dev gate defines `_WIN32`, so a
-POSIX branch gets no compile signal at all. The Win32 backend is therefore split: the MESSAGE
-DECODING is a pure function over plain integers (`translate_win32_message`) that includes no
-`<windows.h>`, names no `HWND`, and is executed by the ctest on every OS — that is where the
-bit-twiddling that actually goes wrong lives. Only the OS calls remain in `win32_window.cpp`,
-Windows-only and honestly untested off-Windows, exactly as e03 left the GDI blit body.
+POSIX branch gets no compile signal at all there — and CI's Windows leg is the only thing that ever
+runs a WndProc. EACH native backend is therefore split on the same seam: the EVENT DECODING is a pure
+function over plain integers (`translate_win32_message`, `translate_x11_event`) that includes no
+`<windows.h>` and no `<X11/Xlib.h>`, names no `HWND` and no `Display*`, and is executed by the ctest
+on every OS — that is where the bit-twiddling that actually goes wrong lives. Only the OS calls
+remain in `win32_window.cpp` / `x11_window.cpp`, each honestly untested off its own platform, exactly
+as e03 left the GDI blit body.
 
-The `WM_*` constants the decoder uses are declared locally and `static_assert`ed against the real ones
-inside `win32_window.cpp`, so a wrong constant is a Windows COMPILE error rather than a message that
-silently decodes as something else at runtime on the one platform that runs it.
+The `WM_*` and X11 constants the decoders use are declared locally and `static_assert`ed against the
+real ones inside `win32_window.cpp` / `x11_window.cpp`, so a wrong constant is a COMPILE error on the
+platform that has the header rather than an event that silently decodes as something else at runtime
+on the one platform that runs it.
 
-Three decoding traps, each pinned by a test:
+Three X11 decoding traps, each pinned by a test in `editor-shell-test_window`:
+
+- **A wheel notch is a ButtonPress/ButtonRelease PAIR on pseudo-buttons 4–7.** The core protocol has
+  no scroll axis. Decoding the release too scrolls exactly twice as far as the user asked — which
+  reads as an over-sensitive mouse rather than as a defect.
+- **X's button order is left / MIDDLE / right.** Button 2 is the middle button, whereas Win32's
+  `MK_MBUTTON` is the third bit, so an index-based port swaps middle and right on every
+  three-button mouse.
+- **`state` is the modifier mask BEFORE the event.** A press must add its own button and a release
+  must clear it, or the very first mousedown of a drag arrives with no button held — which is how a
+  drag never starts.
+
+Two more X11 rules the decoder encodes, for the same reason: a `LeaveNotify`/`FocusOut` whose `mode`
+is not `NotifyNormal` is a GRAB artefact (X synthesizes them around every menu and drag, and
+forwarding them blurs the caret mid-gesture), and an `Expose` with `count > 0` is one of a run —
+repainting per damaged rectangle is a full composite and present for every sliver of a window drag.
+
+**X11 is PROBED, never required.** `find_package(X11)` without `REQUIRED`, in both
+`src/editor/shell/` and `src/render/present/`: every ubuntu CI job configures those directories and
+only two of them install X11 development packages, so a hard requirement would fail CONFIGURE — that
+is, red the whole rollup — on all the others. Without the headers both files compile to their honest
+"configured without the X11 development headers" refusal. The skip is kept non-vacuous at the one
+place it matters: the `editor-cef-smoke` Linux leg runs the live windowed smoke with
+`--require-x11 --require-display`, under which a compiled-out X11 path is a hard failure.
+
+Three Win32 decoding traps, each pinned by a test:
 
 - **LPARAM's coordinate halves are SIGNED 16-bit.** A captured drag left of the client area reports
   −36, which read unsigned becomes 65500 — a position outside every region that silently re-routes
@@ -522,15 +559,42 @@ cmake --build --preset dev --target context_editor    # from src/
 | Minimize/restore | Minimize and restore: no crash, and the content is present again on restore. |
 | `window.open` | A page calling `window.open` produces NO second native window (`OnBeforePopup` suppresses it). |
 
-Automating this is **e12's** (with the mac/Linux backends) plus the interactive-runner provisioning
-the design's gate table tracks.
+Automating this needs an interactive runner, which the design's gate table still tracks as
+unprovisioned — **every row of the table above is still manual, on all three OSes.**
+
+What **e12a** moved onto CI is the layer *underneath* that table, on Linux: the CEF-FREE
+window/present/event spine. The `context_editor_shell_x11_smoke` executable — run directly under
+xvfb with `--require-x11 --require-display` in the `editor-cef-smoke` Linux leg, not via its
+`editor-shell-x11-window` ctest registration, which deliberately SKIPs where there is no display —
+opens a REAL X11 window, presents real frames through the real X11 blitter, and asserts a
+server-driven repaint (`XClearArea` → `Expose`) and a server-granted resize (`XMoveResizeWindow` →
+`ConfigureNotify`), plus the placement readback and the session-state flush.
+
+It does **not** shrink the table: it links no CEF and drives `ScriptedBrowserHost`, so the
+CEF-dependent rows — including the functional ones (wheel, keyboard, `PET_POPUP`, `window.open`) —
+remain manual on Linux exactly as on Windows and macOS.
 
 ## 11. What this does NOT yet do
 
 Named so the gaps are visible rather than assumed:
 
-- **No macOS or Linux window backend** — e12. `make_window_backend` reports the gap; the app degrades
-  to the honest offscreen backend.
+- ~~**No Linux window backend.**~~ Landed by **e12a**: `x11_window.cpp` (X11/XWayland, D21), the pure
+  `translate_x11_event` decoder, the X11-SHM present blitter, and the live `editor-shell-x11-window`
+  smoke that opens a REAL window and asserts a server-driven repaint and resize. What e12a
+  deliberately did NOT do is re-point the eight live `editor-cef-smoke-shell*` scenario smokes at a
+  real window: each drives its scenario by POSTING scripted events into a `HeadlessWindowBackend`,
+  and every one of them also runs on the Session-0 Windows runner where no interactive desktop
+  exists — so a real-window mode is a per-smoke rework with its own per-OS branch, not a
+  constructor swap. Tracked as **#408**; the X11 backend itself is proven windowed by the new
+  smoke.
+- **No live DPI-change event on Linux.** `Xft.dpi` (falling back to the screen derivation) is read
+  ONCE, in `X11WindowBackend::create`. Nothing watches `RESOURCE_MANAGER` on the root window for the
+  `PropertyNotify` that a desktop scaling change publishes, and RandR is deliberately out of e12a —
+  so `ShellEventKind::dpi_changed` is unreachable on X11 and a scaling change made while the editor
+  is open does not re-inform `input_.set_dpi` / the browser / the compositor until restart. The Win32
+  backend does emit it (`WM_DPICHANGED`). Post-e12a.
+- **No macOS window backend** — e12b. `make_window_backend` reports the gap; the app degrades to the
+  honest offscreen backend.
 - **No native viewport consumer.** Region arbitration routes to the native path, but camera controls,
   picking and gizmo gestures over the bridge arrive with **e11**. Viewport layers are rect slots with
   no live content yet.

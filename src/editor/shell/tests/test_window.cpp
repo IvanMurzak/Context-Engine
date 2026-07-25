@@ -1,9 +1,10 @@
-// The window seam: the headless backend's behaviour, and the PURE Win32 message decoder.
+// The window seam: the headless backend's behaviour, and the PURE Win32 and X11 event decoders.
 //
-// The decoder is the point of this file. The local dev gate defines _WIN32 and CI's Windows leg is
-// the only thing that ever runs a real WndProc, so message decoding written inside the OS backend
-// would have exactly one place it could be exercised. Written as a pure function over plain
-// integers, every branch of it runs HERE — on ubuntu, macOS and Windows alike.
+// The decoders are the point of this file. The local dev gate defines _WIN32 and CI's Windows leg is
+// the only thing that ever runs a real WndProc — and the X11 branch is preprocessed out entirely on
+// both — so event decoding written inside either OS backend would have exactly one place it could be
+// exercised, and the Linux one would have NONE locally. Written as pure functions over plain
+// integers, every branch of both runs HERE — on ubuntu, macOS and Windows alike.
 
 #include "context/editor/shell/window.h"
 
@@ -321,13 +322,390 @@ void test_platform_backend_selection_is_never_silent()
         CHECK(selection.backend->native_window().handle != nullptr);
         selection.backend->close();
     }
+#elif defined(__linux__)
+    // On Linux e12a landed the X11 backend, but a CI leg has no display — so BOTH outcomes are
+    // legitimate here and each must be honest about itself. What is asserted is the property that
+    // actually matters: the selection is never silent, and it never again claims the backend is
+    // owed by a future task.
+    if (selection.backend != nullptr)
+    {
+        CHECK(selection.diagnostic.empty());
+        CHECK(selection.backend->native_window().kind == render::NativeWindowKind::XlibWindow);
+        CHECK(selection.backend->native_window().handle != nullptr);
+        CHECK(selection.backend->native_window().display != nullptr);
+        selection.backend->close();
+    }
+    else
+    {
+        CHECK(!selection.diagnostic.empty());
+        CHECK(!shelltest::mentions(selection.diagnostic, "e12"));
+    }
 #else
-    // Elsewhere the backend does not exist YET, and that gap is REPORTED rather than silent: a
-    // shell that quietly opened no window looks identical to one that opened an invisible one.
+    // macOS: the backend does not exist YET, and that gap is REPORTED rather than silent — a shell
+    // that quietly opened no window looks identical to one that opened an invisible one.
     CHECK(selection.backend == nullptr);
     CHECK(!selection.diagnostic.empty());
-    CHECK(shelltest::mentions(selection.diagnostic, "e12"));
+    CHECK(shelltest::mentions(selection.diagnostic, "e12b"));
 #endif
+}
+
+void test_platform_window_factories_refuse_off_their_platform()
+{
+    WindowDesc desc;
+    desc.visible = false;
+    std::string error;
+
+#if !defined(_WIN32)
+    // Compiled everywhere, real only on Windows — mirroring make_win32_gdi_blitter, so the refusal
+    // is a VALUE this suite asserts on every leg rather than a symbol that is simply absent.
+    CHECK(make_win32_window_backend(desc, error) == nullptr);
+    CHECK(!error.empty());
+#endif
+
+#if !defined(__linux__)
+    error.clear();
+    CHECK(make_x11_window_backend(desc, error) == nullptr);
+    CHECK(!error.empty());
+#endif
+}
+
+// ------------------------------------------------------------------------- the X11 event decoder
+
+X11Event x11_event(std::int32_t type)
+{
+    X11Event event;
+    event.type = type;
+    return event;
+}
+
+void test_configure_notify_reports_only_what_actually_changed()
+{
+    const X11WindowGeometry previous{100, 50, 640, 480};
+
+    // A pure MOVE: X sends a ConfigureNotify for every drag step, and reporting an unchanged size
+    // as a resize would reconfigure the swapchain on each one.
+    X11Event moved = x11_event(kX11ConfigureNotify);
+    moved.x = 140;
+    moved.y = 70;
+    moved.width = 640;
+    moved.height = 480;
+    X11EventBatch batch = translate_x11_event(moved, previous);
+    CHECK(batch.count == 1u);
+    CHECK(batch.events[0].kind == ShellEventKind::moved);
+    CHECK(batch.events[0].position == (PointI{140, 70}));
+
+    // A pure RESIZE.
+    X11Event resized = x11_event(kX11ConfigureNotify);
+    resized.x = 100;
+    resized.y = 50;
+    resized.width = 800;
+    resized.height = 600;
+    batch = translate_x11_event(resized, previous);
+    CHECK(batch.count == 1u);
+    CHECK(batch.events[0].kind == ShellEventKind::resize);
+    CHECK(shelltest::extent_eq(batch.events[0].size, render::Extent2D{800, 600}));
+
+    // BOTH at once — what a maximize actually produces. ONE X event, TWO facts.
+    X11Event maximized = x11_event(kX11ConfigureNotify);
+    maximized.x = 0;
+    maximized.y = 0;
+    maximized.width = 1920;
+    maximized.height = 1080;
+    batch = translate_x11_event(maximized, previous);
+    CHECK(batch.count == 2u);
+    CHECK(batch.events[0].kind == ShellEventKind::resize);
+    CHECK(batch.events[1].kind == ShellEventKind::moved);
+
+    // Nothing changed at all: X still sends the event; the Shell must not act on it.
+    X11Event unchanged = x11_event(kX11ConfigureNotify);
+    unchanged.x = 100;
+    unchanged.y = 50;
+    unchanged.width = 640;
+    unchanged.height = 480;
+    CHECK(translate_x11_event(unchanged, previous).count == 0u);
+
+    // A zero-sized configure (an unmapped/withdrawn window) is not a resize, exactly as WM_SIZE's
+    // minimize carve-out is not.
+    X11Event collapsed = x11_event(kX11ConfigureNotify);
+    collapsed.x = 100;
+    collapsed.y = 50;
+    collapsed.width = 0;
+    collapsed.height = 0;
+    CHECK(translate_x11_event(collapsed, previous).count == 0u);
+}
+
+void test_wheel_is_a_button_pair_and_only_the_press_counts()
+{
+    const X11WindowGeometry geometry{0, 0, 640, 480};
+
+    X11Event up = x11_event(kX11ButtonPress);
+    up.detail = kX11ButtonWheelUp;
+    up.x = 12;
+    up.y = 34;
+    X11EventBatch batch = translate_x11_event(up, geometry);
+    CHECK(batch.count == 1u);
+    CHECK(batch.events[0].pointer.action == PointerAction::wheel);
+    CHECK(batch.events[0].pointer.wheel_delta_y == kWheelDelta);
+    CHECK(batch.events[0].pointer.wheel_delta_x == 0);
+    CHECK(batch.events[0].pointer.position == (PointI{12, 34}));
+
+    // THE TRAP: the core protocol sends a ButtonRelease for the same pseudo-button. Decoding it too
+    // scrolls exactly twice as far as the user asked — which reads as an over-sensitive mouse
+    // rather than as a defect, and is the single easiest X11 input bug to ship.
+    X11Event release = x11_event(kX11ButtonRelease);
+    release.detail = kX11ButtonWheelUp;
+    CHECK(translate_x11_event(release, geometry).count == 0u);
+
+    X11Event down = x11_event(kX11ButtonPress);
+    down.detail = kX11ButtonWheelDown;
+    CHECK(translate_x11_event(down, geometry).events[0].pointer.wheel_delta_y == -kWheelDelta);
+
+    // The horizontal pair lands on the OTHER axis, right positive — matching Win32's convention so
+    // the browser sees one sign rule regardless of platform.
+    X11Event right = x11_event(kX11ButtonPress);
+    right.detail = kX11ButtonWheelRight;
+    batch = translate_x11_event(right, geometry);
+    CHECK(batch.events[0].pointer.wheel_delta_x == kWheelDelta);
+    CHECK(batch.events[0].pointer.wheel_delta_y == 0);
+
+    X11Event left = x11_event(kX11ButtonPress);
+    left.detail = kX11ButtonWheelLeft;
+    CHECK(translate_x11_event(left, geometry).events[0].pointer.wheel_delta_x == -kWheelDelta);
+}
+
+void test_x11_button_numbers_are_left_middle_right()
+{
+    const X11WindowGeometry geometry{0, 0, 640, 480};
+
+    // THE TRAP: X's button 2 is MIDDLE and 3 is RIGHT, whereas Win32's MK_MBUTTON is the third bit.
+    // An index-based port swaps middle and right on every three-button mouse.
+    X11Event middle = x11_event(kX11ButtonPress);
+    middle.detail = kX11ButtonMiddle;
+    X11EventBatch batch = translate_x11_event(middle, geometry);
+    CHECK(batch.count == 1u);
+    CHECK(batch.events[0].pointer.button == MouseButton::middle);
+    CHECK(batch.events[0].pointer.action == PointerAction::down);
+    CHECK(batch.events[0].pointer.click_count == 1);
+
+    X11Event right = x11_event(kX11ButtonRelease);
+    right.detail = kX11ButtonRight;
+    batch = translate_x11_event(right, geometry);
+    CHECK(batch.events[0].pointer.button == MouseButton::right);
+    CHECK(batch.events[0].pointer.action == PointerAction::up);
+
+    // Buttons 8/9 are the thumb back/forward keys. Routing them as a nameless click would fire
+    // whatever sits under the cursor; they are dropped instead.
+    X11Event thumb = x11_event(kX11ButtonPress);
+    thumb.detail = 8;
+    CHECK(translate_x11_event(thumb, geometry).count == 0u);
+}
+
+void test_button_state_is_the_mask_before_the_event()
+{
+    const X11WindowGeometry geometry{0, 0, 640, 480};
+
+    // THE TRAP: X reports `state` as it was BEFORE the event. A press whose own button is not added
+    // hands the browser a mousedown with no button held — which is how a drag never starts.
+    X11Event press = x11_event(kX11ButtonPress);
+    press.detail = kX11ButtonLeft;
+    press.state = kX11ShiftMask; // no Button1Mask yet, exactly as X sends it
+    X11EventBatch batch = translate_x11_event(press, geometry);
+    CHECK(batch.events[0].pointer.modifiers.left_button_down);
+    CHECK(batch.events[0].pointer.modifiers.shift);
+    CHECK(!batch.events[0].pointer.modifiers.control);
+
+    // ...and symmetrically, a release must CLEAR its own button, which X still has set.
+    X11Event release = x11_event(kX11ButtonRelease);
+    release.detail = kX11ButtonLeft;
+    release.state = kX11Button1Mask | kX11Button3Mask;
+    batch = translate_x11_event(release, geometry);
+    CHECK(!batch.events[0].pointer.modifiers.left_button_down);
+    CHECK(batch.events[0].pointer.modifiers.right_button_down);
+
+    // Mod1 is Alt and Mod4 is Super — X names its modifier slots by number, not by meaning.
+    X11Event motion = x11_event(kX11MotionNotify);
+    motion.state = kX11ControlMask | kX11Mod1Mask | kX11Mod4Mask | kX11Button2Mask;
+    motion.x = 7;
+    motion.y = 9;
+    batch = translate_x11_event(motion, geometry);
+    CHECK(batch.count == 1u);
+    CHECK(batch.events[0].pointer.action == PointerAction::move);
+    CHECK(batch.events[0].pointer.position == (PointI{7, 9}));
+    CHECK(batch.events[0].pointer.modifiers.control);
+    CHECK(batch.events[0].pointer.modifiers.alt);
+    CHECK(batch.events[0].pointer.modifiers.meta);
+    CHECK(batch.events[0].pointer.modifiers.middle_button_down);
+}
+
+void test_grab_synthesized_crossing_and_focus_events_are_ignored()
+{
+    const X11WindowGeometry geometry{0, 0, 640, 480};
+
+    X11Event leave = x11_event(kX11LeaveNotify);
+    leave.mode = kX11NotifyNormal;
+    CHECK(translate_x11_event(leave, geometry).count == 1u);
+    CHECK(translate_x11_event(leave, geometry).events[0].pointer.action == PointerAction::leave);
+
+    // THE TRAP: X synthesizes Leave/Focus transitions around EVERY grab (opening a menu, starting a
+    // drag). Forwarding them makes the browser drop its hover state and blur the caret mid-gesture.
+    leave.mode = kX11NotifyGrab;
+    CHECK(translate_x11_event(leave, geometry).count == 0u);
+    leave.mode = kX11NotifyUngrab;
+    CHECK(translate_x11_event(leave, geometry).count == 0u);
+
+    X11Event focus_in = x11_event(kX11FocusIn);
+    CHECK(translate_x11_event(focus_in, geometry).events[0].kind == ShellEventKind::focus_gained);
+    focus_in.mode = kX11NotifyGrab;
+    CHECK(translate_x11_event(focus_in, geometry).count == 0u);
+
+    X11Event focus_out = x11_event(kX11FocusOut);
+    CHECK(translate_x11_event(focus_out, geometry).events[0].kind == ShellEventKind::focus_lost);
+    focus_out.mode = kX11NotifyUngrab;
+    CHECK(translate_x11_event(focus_out, geometry).count == 0u);
+
+    // EnterNotify carries no fact the Shell acts on — the following MotionNotify already reports
+    // the position — so it is deliberately not decoded.
+    CHECK(translate_x11_event(x11_event(kX11EnterNotify), geometry).count == 0u);
+}
+
+void test_expose_repaints_once_per_run_and_delete_closes()
+{
+    const X11WindowGeometry geometry{0, 0, 640, 480};
+
+    // X sends one Expose per damaged rectangle and counts DOWN; only the last is worth a frame.
+    X11Event mid_run = x11_event(kX11Expose);
+    mid_run.count = 3;
+    CHECK(translate_x11_event(mid_run, geometry).count == 0u);
+
+    X11Event last = x11_event(kX11Expose);
+    last.count = 0;
+    X11EventBatch batch = translate_x11_event(last, geometry);
+    CHECK(batch.count == 1u);
+    CHECK(batch.events[0].kind == ShellEventKind::paint_requested);
+
+    // A ClientMessage is only a close when it carries WM_DELETE_WINDOW — every other one (a task-bar
+    // command, an XDND handshake) must not tear the editor down.
+    X11Event other = x11_event(kX11ClientMessage);
+    CHECK(translate_x11_event(other, geometry).count == 0u);
+    X11Event close = x11_event(kX11ClientMessage);
+    close.is_delete_window = true;
+    batch = translate_x11_event(close, geometry);
+    CHECK(batch.count == 1u);
+    CHECK(batch.events[0].kind == ShellEventKind::close_requested);
+}
+
+void test_key_press_yields_the_raw_key_and_only_real_text()
+{
+    const X11WindowGeometry geometry{0, 0, 640, 480};
+
+    X11Event press = x11_event(kX11KeyPress);
+    press.detail = 38;   // the hardware keycode for `a` on a typical layout
+    press.keysym = 'a';  // the UNSHIFTED keysym, which is what a VK code is derived from
+    press.text = U'a';
+    X11EventBatch batch = translate_x11_event(press, geometry);
+    // Windows splits the character into its own WM_CHAR; X does not, so the decoder synthesizes the
+    // second event rather than making every consumer special-case Linux.
+    CHECK(batch.count == 2u);
+    CHECK(batch.events[0].key.action == KeyAction::raw_key_down);
+    CHECK(batch.events[0].key.windows_key_code == 'A');
+    CHECK(batch.events[0].key.native_key_code == 38);
+    CHECK(batch.events[0].key.character == 0);
+    CHECK(batch.events[1].key.action == KeyAction::character);
+    CHECK(batch.events[1].key.character == U'a');
+    CHECK(batch.events[1].key.windows_key_code == 'A');
+    // CEF documents is_system_key as the Windows WM_SYSKEY* distinction, so it stays false rather
+    // than being guessed from the Alt modifier.
+    CHECK(!batch.events[0].key.is_system_key);
+
+    // A key that produces NO text (an arrow, a bare modifier) must not emit a character event
+    // carrying 0 — the browser would insert a NUL.
+    X11Event arrow = x11_event(kX11KeyPress);
+    arrow.detail = 111;
+    arrow.keysym = 0xff52; // XK_Up
+    arrow.text = 0;
+    batch = translate_x11_event(arrow, geometry);
+    CHECK(batch.count == 1u);
+    CHECK(batch.events[0].key.windows_key_code == 0x26); // VK_UP
+
+    // A release never carries text, even when the press did.
+    X11Event release = x11_event(kX11KeyRelease);
+    release.detail = 38;
+    release.keysym = 'a';
+    release.text = U'a';
+    batch = translate_x11_event(release, geometry);
+    CHECK(batch.count == 1u);
+    CHECK(batch.events[0].key.action == KeyAction::key_up);
+}
+
+void test_keysym_to_windows_key_code()
+{
+    // THE TRAP: a lowercase latin keysym is 0x61..0x7a but the VK code is the UPPERCASE letter.
+    // Passing the keysym through makes every unshifted letter an unrecognised key in Chromium.
+    CHECK(x11_keysym_to_windows_key_code('a') == 'A');
+    CHECK(x11_keysym_to_windows_key_code('z') == 'Z');
+    CHECK(x11_keysym_to_windows_key_code('A') == 'A');
+    CHECK(x11_keysym_to_windows_key_code('7') == '7');
+
+    // The keypad digits are VK_NUMPAD0..9, NOT the row digits — mapping them together makes a
+    // keypad binding indistinguishable from its row twin.
+    CHECK(x11_keysym_to_windows_key_code(0xffb0) == 0x60); // XK_KP_0  -> VK_NUMPAD0
+    CHECK(x11_keysym_to_windows_key_code(0xffb9) == 0x69); // XK_KP_9  -> VK_NUMPAD9
+    CHECK(x11_keysym_to_windows_key_code(0xff8d) == 0x0D); // XK_KP_Enter -> VK_RETURN
+
+    CHECK(x11_keysym_to_windows_key_code(0xffbe) == 0x70); // XK_F1  -> VK_F1
+    CHECK(x11_keysym_to_windows_key_code(0xffc9) == 0x7B); // XK_F12 -> VK_F12
+
+    CHECK(x11_keysym_to_windows_key_code(0xff08) == 0x08); // XK_BackSpace
+    CHECK(x11_keysym_to_windows_key_code(0xff0d) == 0x0D); // XK_Return
+    CHECK(x11_keysym_to_windows_key_code(0xff1b) == 0x1B); // XK_Escape
+    CHECK(x11_keysym_to_windows_key_code(0xffff) == 0x2E); // XK_Delete
+    CHECK(x11_keysym_to_windows_key_code(0xffe1) == 0x10); // XK_Shift_L   -> VK_SHIFT
+    CHECK(x11_keysym_to_windows_key_code(0xffe4) == 0x11); // XK_Control_R -> VK_CONTROL
+    CHECK(x11_keysym_to_windows_key_code(0xffea) == 0x12); // XK_Alt_R     -> VK_MENU
+    CHECK(x11_keysym_to_windows_key_code(0xffeb) == 0x5B); // XK_Super_L   -> VK_LWIN
+    CHECK(x11_keysym_to_windows_key_code(' ') == 0x20);
+
+    // Punctuation goes to the VK_OEM_* codes, which are NOT the ASCII values.
+    CHECK(x11_keysym_to_windows_key_code(';') == 0xBA);
+    CHECK(x11_keysym_to_windows_key_code('=') == 0xBB);
+    CHECK(x11_keysym_to_windows_key_code(',') == 0xBC);
+    CHECK(x11_keysym_to_windows_key_code('-') == 0xBD);
+    CHECK(x11_keysym_to_windows_key_code('.') == 0xBE);
+    CHECK(x11_keysym_to_windows_key_code('/') == 0xBF);
+    CHECK(x11_keysym_to_windows_key_code('`') == 0xC0);
+    CHECK(x11_keysym_to_windows_key_code('[') == 0xDB);
+    CHECK(x11_keysym_to_windows_key_code('\\') == 0xDC);
+    CHECK(x11_keysym_to_windows_key_code(']') == 0xDD);
+    CHECK(x11_keysym_to_windows_key_code('\'') == 0xDE);
+
+    // An honest 0 for a keysym with no VK equivalent. A guess here fires the WRONG command, which
+    // is strictly worse than firing none.
+    CHECK(x11_keysym_to_windows_key_code(0x20ac) == 0); // the euro sign
+    CHECK(x11_keysym_to_windows_key_code(0) == 0);
+}
+
+void test_x11_dpi_sources()
+{
+    // Xft.dpi is what the desktop's own scaling setting writes, so it wins when it parses.
+    CHECK(x11_parse_xft_dpi("144") == std::optional<std::uint32_t>{144});
+    CHECK(x11_parse_xft_dpi("144.0") == std::optional<std::uint32_t>{144});
+    CHECK(x11_parse_xft_dpi("  96\t") == std::optional<std::uint32_t>{96});
+    CHECK(!x11_parse_xft_dpi("").has_value());
+    CHECK(!x11_parse_xft_dpi("auto").has_value());
+    CHECK(!x11_parse_xft_dpi("96dpi").has_value());
+    CHECK(!x11_parse_xft_dpi("0").has_value());
+    CHECK(!x11_parse_xft_dpi("-96").has_value());
+
+    // The screen derivation, and the two shapes it must REFUSE. A 1-metre-wide screen is what a
+    // server invents when it has no EDID (~33 dpi, which would shrink the UI to unreadable), and a
+    // multi-head X screen sums BOTH axes so its per-axis ratio is plausible but wrong per monitor.
+    CHECK(x11_screen_dpi(1920, 509).dpi == 96);  // a real 23" 1080p panel
+    CHECK(x11_screen_dpi(3840, 600).dpi == 163); // a real 27" 4K panel
+    CHECK(x11_screen_dpi(1920, 1000).dpi == kReferenceDpi); // ~49 dpi: refused
+    CHECK(x11_screen_dpi(1920, 100).dpi == kReferenceDpi);  // ~488 dpi: refused
+    CHECK(x11_screen_dpi(0, 509).dpi == kReferenceDpi);
+    CHECK(x11_screen_dpi(1920, 0).dpi == kReferenceDpi);
+    CHECK(x11_screen_dpi(1920, -1).dpi == kReferenceDpi);
 }
 
 } // namespace
@@ -349,5 +727,15 @@ int main()
     test_headless_backend_close_ends_the_pump();
     test_headless_backend_records_placement_and_redraws();
     test_platform_backend_selection_is_never_silent();
+    test_platform_window_factories_refuse_off_their_platform();
+    test_configure_notify_reports_only_what_actually_changed();
+    test_wheel_is_a_button_pair_and_only_the_press_counts();
+    test_x11_button_numbers_are_left_middle_right();
+    test_button_state_is_the_mask_before_the_event();
+    test_grab_synthesized_crossing_and_focus_events_are_ignored();
+    test_expose_repaints_once_per_run_and_delete_closes();
+    test_key_press_yields_the_raw_key_and_only_real_text();
+    test_keysym_to_windows_key_code();
+    test_x11_dpi_sources();
     SHELL_TEST_MAIN_END();
 }
