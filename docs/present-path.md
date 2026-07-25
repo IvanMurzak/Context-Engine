@@ -230,10 +230,18 @@ Named so the gaps are visible rather than assumed. The first two were **closed b
 - ~~**No X11 CPU present blitter.**~~ Landed by **e12a** (MIT-SHM `XShmPutImage`, `XPutImage`
   fallback), proven live against a real X server by the `editor-shell-x11-window` smoke.
 - ~~**No macOS CPU present blitter.**~~ Landed by **e12b** (`CALayer.contents` from a CGImage,
-  composed through `MemoryBlitter`). ⚠ Its geometry is covered by the shared cross-platform
-  assertions and its selection by `render-present-test_present_blit` on all three legs, but that a
-  presented frame is VISIBLE is asserted NOWHERE: it needs a real Mac with a real window, and the
-  `.app` bundle a windowed macOS smoke would need is **e12c's**.
+  composed through `MemoryBlitter`). ⚠ **Be precise about what this is and is not covered by.**
+  COVERED, on all three legs: the blit GEOMETRY, because the class composes through `MemoryBlitter`
+  rather than re-deriving the scale, and `MemoryBlitter` is exercised directly by
+  `render-present-test_present_blit`; plus the factory's null-argument guard, and — off Apple — the
+  named refusal. NOT COVERED ANYWHERE: `CocoaLayerBlitter::blit()` itself. No test on any leg calls
+  it, so the `CFDataCreate` copy, the `CGImage` construction, the byte-order choice, the
+  `CATransaction` implicit-animation suppression and the five early returns have no runtime proof —
+  and neither does the claim that a presented frame becomes VISIBLE. Both need an Objective-C++ test
+  building a real `CALayer` and a real Mac with a real window respectively; the `.app` bundle a
+  windowed macOS smoke would need is **e12c's**. The cross-platform suite deliberately does NOT
+  construct the blitter with a stand-in pointer on Apple: the implementation holds the layer in an
+  ARC-strong member, so a non-object pointer is dereferenced by `objc_retain` at construction.
 - **No Wayland present blitter** — post-M9 (D21 targets X11/XWayland). The selection NAMES the gap
   rather than mis-dispatching a `wl_surface` into the X11 path.
 - **The macOS accelerated path has no runtime CI proof.** It compiles on the `render (macos-latest)`

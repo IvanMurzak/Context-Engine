@@ -72,7 +72,11 @@ struct ShellEvent
     DpiScale dpi;           // dpi_changed: the new scale
     PointerEvent pointer;   // pointer
     KeyEvent key;           // key
-    PointI position;        // moved: the new top-left, in screen coordinates
+    // moved: the new top-left, in screen coordinates — EXCEPT on macOS, where it is the Cocoa frame
+    // origin (BOTTOM-left, in POINTS), the same space WindowPlacement keeps there and for the same
+    // reason (docs/shell.md). Consumers treat it as an opaque "the window moved" signal and re-read
+    // placement() rather than interpreting it, which is why the exception is survivable.
+    PointI position;
 };
 
 struct WindowDesc
@@ -111,7 +115,8 @@ public:
     // WindowCompositor::render_frame() every iteration and that is damage-gated internally, so a
     // browser paint already gets its frame without one. This is the seam an event-driven loop needs
     // (wait on the OS queue instead of polling — see docs/shell.md §10), and it is implemented by
-    // both backends so that loop can land without touching the interface. Nothing calls it yet.
+    // every native backend so that loop can land without touching the interface. Nothing calls it
+    // yet.
     virtual void request_redraw() = 0;
 
     virtual void set_title(std::string_view title) = 0;
@@ -121,9 +126,10 @@ public:
     // Pure like every other seam on this interface (mirrors request_redraw): each backend states its own
     // answer rather than inheriting a default. The Win32 override does the real OS raise; the headless
     // backend explicitly no-ops (no OS window — the honest behaviour on a box with no interactive
-    // desktop, Session 0 / CI). Keeping it pure means a windowed backend — the X11 one (e12a) and the
-    // macOS one still owed (e12b) — is forced to implement the raise instead of silently no-op-ing the
-    // single-instance focus. The X11 override does the real EWMH activation. Interactive
+    // desktop, Session 0 / CI). Keeping it pure means every windowed backend is forced to implement
+    // the raise instead of silently no-op-ing the single-instance focus: the X11 override (e12a) does
+    // the real EWMH activation and the Cocoa one (e12b) the real deminiaturize +
+    // makeKeyAndOrderFront. Interactive
     // verification rides the deferred interactive-Windows pass (docs/shell.md); the arbitration handshake
     // itself is proven headlessly in the T2 drill.
     virtual void request_activation() = 0;
@@ -362,13 +368,24 @@ struct ShellEventBatch
 
     ShellEvent events[kCapacity];
     std::size_t count = 0;
+    // A push past kCapacity is RECORDED, not merely ignored. The bound is now exactly SATURATED —
+    // translate_ns_window_geometry emits all three of resize + moved + dpi_changed for one Retina
+    // drag — so the next decoder fact added on any platform silently loses an event, and it would do
+    // so most easily on macOS, which produces the most facts per native event and has no windowed CI
+    // coverage at all. The decoders are pure and run on every leg, so their tests assert this stays
+    // false and the invariant is PROVEN rather than assumed. Dropping remains the behaviour (a torn
+    // batch is worse than a missing tail event on the pump's hot path); what changes is that it can
+    // no longer happen unobserved.
+    bool overflowed = false;
 
     void push(const ShellEvent& event)
     {
         if (count < kCapacity)
         {
             events[count++] = event;
+            return;
         }
+        overflowed = true;
     }
 };
 
@@ -442,6 +459,12 @@ inline constexpr std::int32_t kNsOtherMouseDragged = 27;
 // NSEventModifierFlags. Note Option is the Alt key and Command is the Meta key — Cocoa names them
 // by their keycaps, and mapping Command onto `control` (the shape a Windows-first port reaches for)
 // makes every Cmd shortcut in the editor fire as a Ctrl shortcut.
+//
+// The WHOLE mask is pinned here, deliberately, so do not read "no decoder reads this one" as dead
+// code: cocoa_window.mm static_asserts every entry against the real AppKit value, which is what makes
+// this <AppKit/AppKit.h>-free header safe to compile and test on Linux and Windows. Two entries have
+// no decoder reader on purpose — kNsModifierNumericPad, and kNsModifierFunction, which fn
+// deliberately does not toggle (see ns_modifier_flag_for_key_code's default arm for why).
 inline constexpr std::uint64_t kNsModifierCapsLock = 1ull << 16;
 inline constexpr std::uint64_t kNsModifierShift = 1ull << 17;
 inline constexpr std::uint64_t kNsModifierControl = 1ull << 18;
@@ -509,7 +532,9 @@ inline constexpr std::int32_t kNsLinesToWheelDelta = kWheelDelta;
 // One NSEvent, flattened to plain numbers. The two fields the decoder cannot compute itself are
 // resolved by the backend, which owns the NSView: `location_x/location_y` (converted into VIEW
 // coordinates via -convertPoint:fromView:nil, still in Cocoa POINTS with a BOTTOM-LEFT origin) and
-// `text` (the first code point of -characters, i.e. the input method's result).
+// `text` (the first UTF-16 CODE UNIT of -characters, i.e. the input method's result — not a code
+// point: an astral character arrives as its leading surrogate, matching what the Win32 decoder gets
+// from a WM_CHAR pair's first message).
 struct NsEvent
 {
     std::int32_t type = 0;
@@ -576,9 +601,16 @@ struct NsWindowGeometry
 };
 
 // backingScaleFactor -> DpiScale. A non-finite or non-positive factor falls back to 1x rather than
-// scaling the whole editor by a garbage number (the same refusal x11_screen_dpi makes); make_dpi_scale
+// scaling the whole editor by a garbage number (the refusal x11_screen_dpi makes too); make_dpi_scale
 // then clamps whatever survives.
 [[nodiscard]] DpiScale ns_dpi_from_backing_scale(double backing_scale);
+
+// A Cocoa POINT extent -> physical pixels. Zero for anything not strictly positive, which also
+// catches NaN (every comparison against a NaN is false, so the `!(x > 0)` spelling is deliberate —
+// `x <= 0` would let a NaN through). Zero is a MEANINGFUL answer, not a failure: a miniaturized
+// window legitimately measures 0 points, and translate_ns_window_geometry's empty-resize guard
+// depends on getting 0 back rather than the never-collapse clamp dpi.h's to_physical applies.
+[[nodiscard]] std::uint32_t ns_extent_to_physical(double points, DpiScale dpi);
 
 // A view-relative Cocoa POINT -> the PHYSICAL client pixel the region map speaks: flip the y axis
 // against the view height, then scale both axes by the backing factor. Round-to-nearest, and signed

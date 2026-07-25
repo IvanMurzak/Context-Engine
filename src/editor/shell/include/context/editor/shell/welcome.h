@@ -132,9 +132,10 @@ struct WelcomeTemplate
 using FolderPicker = std::function<std::optional<std::filesystem::path>()>;
 
 // The production folder picker. Windows opens a real `IFileOpenDialog` (folder mode); other platforms
-// return nullopt with an honest "not wired on this OS yet" — the packaged macOS/Linux dialogs are e15's,
-// exactly as the window backend leaves non-Windows an honest gap until e12. Boundary-clean: pure OS-SDK
-// calls, no engine-internal link edge.
+// return nullopt with an honest "not wired on this OS yet" — the packaged macOS/Linux dialogs are
+// e15's. This is now a gap in its own right, NOT an instance of a general non-Windows gap: e12a/e12b
+// brought both other v1 platforms' window backends up, so the picker is owed a dialog, not a shell.
+// Boundary-clean: pure OS-SDK calls, no engine-internal link edge.
 [[nodiscard]] std::optional<std::filesystem::path> native_pick_folder();
 
 // ------------------------------------------------------------------------- the CLI subprocess seam

@@ -338,7 +338,17 @@ void test_platform_backend_selection_is_never_silent()
     }
     else
     {
-        CHECK(!selection.diagnostic.empty());
+        // PIN THE SANCTIONED REASONS, for the argument spelled out in the macOS arm below: a bare
+        // non-emptiness check cannot tell an environment fact from a regression, so an XCreateWindow
+        // that started returning nothing would keep this arm green on every runner forever.
+        //
+        // TWO causes are legitimate here, not one, and both must be allowed or this assertion reds a
+        // healthy leg: no reachable X server (the `build` leg — it installs libx11-dev but has no
+        // display), and a build configured without the X11 development headers (the `sanitize` legs,
+        // which run this suite because their ctest step passes no -E, and which do NOT install them).
+        // What is excluded is precisely the regression: "XCreateWindow returned no window".
+        CHECK(shelltest::mentions(selection.diagnostic, "X server")
+              || shelltest::mentions(selection.diagnostic, "development headers"));
         CHECK(!shelltest::mentions(selection.diagnostic, "e12"));
     }
 #elif defined(__APPLE__)
@@ -351,7 +361,14 @@ void test_platform_backend_selection_is_never_silent()
     // macOS test, so if the runner does have a session, this is the one place
     // -[NSWindow initWithContentRect:] is ever called; if it does not, the CGSession probe's refusal
     // is the one place that path is ever taken. It is safe either way because the window is never
-    // shown (`visible = false`), the same reason the Windows arm above is Session-0-safe.
+    // shown (`visible = false`) and is closed immediately.
+    //
+    // ⚠ NOT for the same reason the Windows arm above is Session-0-safe, and the difference is worth
+    // knowing: on a runner that DOES have a session, create() also calls
+    // -[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular] + -finishLaunching, which
+    // registers THIS CTEST PROCESS as a foreground application. The Win32 arm sets no process-wide
+    // state at all. Harmless for a test that exits promptly; it is the reason a future windowed macOS
+    // assertion belongs in its own smoke binary rather than growing here.
     if (selection.backend != nullptr)
     {
         CHECK(selection.diagnostic.empty());
@@ -361,7 +378,14 @@ void test_platform_backend_selection_is_never_silent()
     }
     else
     {
-        CHECK(!selection.diagnostic.empty());
+        // PIN THE SANCTIONED REASON, because "both outcomes are legitimate" must not decay into
+        // "any outcome is legitimate". create() refuses for exactly two reasons, and only ONE of
+        // them is an environment fact: no Aqua session. The other —
+        // "[NSWindow initWithContentRect:] returned nil" — is a genuine regression, and a bare
+        // non-emptiness check cannot tell them apart, so a break that killed window creation on
+        // every macOS runner would keep this, the ONLY automated exercise of the backend, green
+        // forever. Matching on "session" makes any other refusal red.
+        CHECK(shelltest::mentions(selection.diagnostic, "session"));
         CHECK(!shelltest::mentions(selection.diagnostic, "e12"));
     }
 #else
@@ -935,11 +959,18 @@ void test_cocoa_scroll_wheel_units()
 
     // THE TRAP: a PRECISE delta (trackpad, high-resolution wheel) is already a distance in POINTS.
     // Multiplying it by 120 as if it were a notch count makes a gentle two-finger swipe jump a
-    // hundred screens; it is scaled to physical pixels like every other coordinate on this seam.
+    // hundred screens.
+    //
+    // AND THE TRAP ON THE OTHER SIDE, which is why this fixture is deliberately at 2x: the delta is
+    // NOT scaled to physical pixels either. A wheel delta is the one field on this seam that is not a
+    // physical-pixel quantity — both siblings emit a scale-free value and the consumer hands it to
+    // the browser unconverted — so scaling it here would silently double every trackpad scroll on a
+    // Retina display while a 1x fixture stayed green.
     NsEvent swipe = ns_event(kNsScrollWheel);
     swipe.has_precise_scrolling_deltas = true;
     swipe.scrolling_delta_y = 12.0;
-    CHECK(translate_ns_event(swipe, view).events[0].pointer.wheel_delta_y == 24); // 12 pt at 2x
+    CHECK(view.dpi.factor() > 1.0f); // the assertion below is only meaningful at a non-unit scale
+    CHECK(translate_ns_event(swipe, view).events[0].pointer.wheel_delta_y == 12); // points, as-is
 
     // Unlike WM_MOUSEWHEEL — whose lParam is SCREEN-relative, so the Win32 decoder reports no
     // position at all — a Cocoa scroll carries an ordinary view-relative location, so the wheel is
@@ -1019,12 +1050,18 @@ void test_cocoa_key_press_yields_the_raw_key_and_the_character()
     // the symbol set. This is the assertion that stops the fix above from over-reaching.
     NsEvent option_2 = ns_event(kNsKeyDown);
     option_2.key_code = 0x13; // kVK_ANSI_2
-    option_2.text = U'™'; // TRADE MARK SIGN
+    // Spelled as an ESCAPE, never as a literal '™'. This file carries no BOM and the MSVC leg is
+    // given no /utf-8, so MSVC reads the source in the system code page and the three UTF-8 bytes of
+    // a pasted ™ become three characters — `error C2015: too many characters in constant`, which is
+    // a HARD error, not a warning to be waived. Non-ASCII in COMMENTS is fine (the bytes are
+    // skipped, as the rest of this file and win32_window.cpp already rely on); only a character
+    // literal has to be an escape.
+    option_2.text = U'\u2122'; // TRADE MARK SIGN
     option_2.modifier_flags = kNsModifierOption;
     batch = translate_ns_event(option_2, view);
     CHECK(batch.count == 2u);
     CHECK(batch.events[1].key.action == KeyAction::character);
-    CHECK(batch.events[1].key.character == U'™');
+    CHECK(batch.events[1].key.character == U'\u2122');
     CHECK(batch.events[1].key.modifiers.alt);
 }
 
@@ -1129,7 +1166,7 @@ void test_cocoa_key_code_to_windows_key_code()
     CHECK(ns_key_code_to_windows_key_code(0x59) == 0x67);         // VK_NUMPAD7
     CHECK(ns_key_code_to_windows_key_code(0x5B) == 0x68);         // VK_NUMPAD8
     CHECK(ns_key_code_to_windows_key_code(0x5C) == 0x69);         // VK_NUMPAD9
-    CHECK(ns_key_code_to_windows_key_code(0x4C) == 0x0D);         // the keypad Enter folds to VK_RETURN
+    CHECK(ns_key_code_to_windows_key_code(0x4C) == 0x0D);      // the keypad Enter folds to VK_RETURN
 
     // Punctuation goes to the VK_OEM_* codes, which are NOT the ASCII values.
     CHECK(ns_key_code_to_windows_key_code(0x29) == 0xBA); // ; -> VK_OEM_1
@@ -1250,6 +1287,11 @@ void test_cocoa_window_geometry_reports_only_what_changed()
     CHECK(batch.events[0].kind == ShellEventKind::resize);
     CHECK(batch.events[1].kind == ShellEventKind::moved);
     CHECK(batch.events[2].kind == ShellEventKind::dpi_changed);
+    // THE CAPACITY IS NOW EXACTLY SATURATED, so this is the assertion that keeps the NEXT decoder
+    // fact from silently vanishing. `push` drops past kCapacity, which is the right behaviour on the
+    // pump's hot path, but it must never happen unobserved — and this is the one input in the whole
+    // suite that fills the batch.
+    CHECK(!batch.overflowed);
 
     // A miniaturized window reports a 0x0 content size, exactly as WM_SIZE's minimize carve-out
     // does; the resize is dropped while a move still comes through.
@@ -1257,6 +1299,26 @@ void test_cocoa_window_geometry_reports_only_what_changed()
     collapsed.width_points = 0.0;
     collapsed.height_points = 0.0;
     CHECK(translate_ns_window_geometry(previous, collapsed).count == 0u);
+}
+
+// The `!overflowed` assertion above is only worth anything if the flag can actually be set — a flag
+// that never fires is the vacuous-gate failure in miniature. This is the control that proves it.
+void test_shell_event_batch_reports_overflow_rather_than_dropping_silently()
+{
+    ShellEventBatch batch;
+    ShellEvent event;
+    event.kind = ShellEventKind::resize;
+
+    for (std::size_t i = 0; i < ShellEventBatch::kCapacity; ++i)
+    {
+        batch.push(event);
+    }
+    CHECK(batch.count == ShellEventBatch::kCapacity);
+    CHECK(!batch.overflowed); // filling it exactly is not an overflow
+
+    batch.push(event);
+    CHECK(batch.overflowed);
+    CHECK(batch.count == ShellEventBatch::kCapacity); // the tail is dropped, never a torn batch
 }
 
 } // namespace
@@ -1298,5 +1360,6 @@ int main()
     test_cocoa_pointer_leave_and_undecoded_events();
     test_cocoa_backing_scale_to_dpi();
     test_cocoa_window_geometry_reports_only_what_changed();
+    test_shell_event_batch_reports_overflow_rather_than_dropping_silently();
     SHELL_TEST_MAIN_END();
 }

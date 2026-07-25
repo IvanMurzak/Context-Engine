@@ -14,11 +14,18 @@
 // a hand-written second copy of the scale would have exactly zero coverage. The cost is one extra
 // pass over a buffer on the path that exists only because there is no GPU at all.
 //
-// WHAT IS HONESTLY UNVERIFIED. That the composed frame becomes VISIBLE is the one claim no gate in
-// this repo checks — it needs a real Mac with a real window, and `editor-cef-smoke (macos-latest)`
-// deliberately runs no windowed smoke (that is e12c's). Everything up to and including the CGImage
-// is covered by the shared MemoryBlitter assertions and by the make_present_blitter selection test;
-// the final `layer.contents` assignment is not.
+// WHAT IS HONESTLY UNVERIFIED — and it is MORE than the visible frame. No test on any leg calls
+// CocoaLayerBlitter::blit() at all. `test_present_blit.cpp` reaches this file only through
+// make_cocoa_layer_blitter's null-argument guard, so the whole body below — the CFDataCreate copy,
+// the CGImage construction, the kCGImageAlphaPremultipliedLast byte-order choice, the CATransaction
+// implicit-animation suppression, and all five early returns — carries NO runtime coverage. What IS
+// covered, on all three OSes, is the geometry: MemoryBlitter is exercised directly by that same
+// suite, and this class composes through it rather than re-deriving it, so the plan applied here is
+// the tested one by construction. Closing the rest needs an Objective-C++ test that builds a real
+// CALayer (Core Animation needs no Aqua session), plus the windowed proof that a presented frame is
+// VISIBLE — both e12c's, since `editor-cef-smoke (macos-latest)` deliberately runs no windowed
+// smoke. Stated here rather than implied, so the next reader does not mistake the geometry coverage
+// above for coverage of this file.
 
 #include "context/render/present/present_blit.h"
 

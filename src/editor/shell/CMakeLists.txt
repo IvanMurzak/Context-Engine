@@ -42,10 +42,10 @@ add_library(context_editor_shell STATIC
     src/dpi.cpp           # per-monitor DPI (replaces the spike's DPI-1.0 pin)
     src/input.cpp         # region arbitration + capture stack + focus-class routing (03 §6)
     src/editor_state.cpp  # .editor/editor-state.json — the Shell is its SINGLE writer (03 §1)
-    src/window.cpp        # the seam, headless backend, the PURE Win32 + X11 + Cocoa decoders, the platform choice
+    src/window.cpp        # the seam, headless backend, the PURE Win32/X11/Cocoa decoders, the choice
     src/win32_window.cpp  # the Windows OS calls (early-returns to an honest gap elsewhere)
     src/x11_window.cpp    # e12a: the Linux X11/XWayland OS calls (ditto, off Linux)
-    src/cocoa_window.cpp  # e12b: the OFF-macOS half of the Cocoa backend (the .mm is APPLE-only below)
+    src/cocoa_window.cpp  # e12b: the OFF-macOS half of the Cocoa backend (.mm is APPLE-only below)
     src/browser.cpp       # the CEF-free browser seam + the scripted host
     src/compositor.cpp    # the layer stack, damage, resize protocol, both present paths (03 §4)
     src/app_scheme.cpp    # e05c: context-editor://app/ resolution + the strict CSP (04 §1)
@@ -188,9 +188,11 @@ endif()
 # block leaves `context_editor`'s CEF wiring (Windows/Linux only, further down) byte-identical.
 if(APPLE)
     target_sources(context_editor_shell PRIVATE src/cocoa_window.mm)
-    # QuartzCore for CAMetalLayer, CoreGraphics for the CGSession GUI-session probe. Metal is a
-    # transitive need of the CAMetalLayer declaration and is named so the dependency is visible in
-    # the target rather than inherited from an SDK umbrella.
+    # AppKit for NSWindow/NSView/NSEvent, QuartzCore for CAMetalLayer (its class symbol lives there),
+    # CoreGraphics for the CGSession GUI-session probe. Metal is named EXPLICITLY rather than left to
+    # an SDK umbrella so a later GPU present path — which will want MTLDevice, not just the layer —
+    # finds the dependency already declared on the target; the CPU fallback shipped here needs nothing
+    # from it (a CAMetalLayer's `contents` is a plain CALayer property).
     target_link_libraries(context_editor_shell PRIVATE
         "-framework AppKit" "-framework QuartzCore" "-framework Metal"
         "-framework CoreGraphics" "-framework Foundation")

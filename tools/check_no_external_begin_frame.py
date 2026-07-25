@@ -73,7 +73,7 @@ _SOURCE_SUFFIXES = frozenset({".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hh", 
 # `SendExternalBeginFrame` declarations, which are none of this repo's business); a generated CMake
 # binary tree is identified by the CMakeCache.txt at its root, because the repo has a REAL
 # `src/editor/build/` module and pruning by the name "build" would skip it.
-_PRUNED_DIRS = frozenset({"_deps", "_cef", "CMakeFiles", "node_modules", "goldens"})
+_PRUNED_DIRS = frozenset({"_deps", "_cef", "CMakeFiles", "node_modules"})
 
 
 def strip_comments(text: str) -> str:
@@ -103,18 +103,26 @@ def strip_comments(text: str) -> str:
             i = min(i + 2, n)
             continue
         if ch in "\"'":
+            # A LITERAL MUST CLOSE ON ITS OWN LINE, or the quote is not a literal at all. Without
+            # this rule an unpaired quote sends the scan hunting to EOF and the ENTIRE remainder of
+            # the file silently bypasses comment stripping. Real shapes in this tree do that: a C++14
+            # digit separator (`should_pump(4'010)`), an apostrophe inside a JSON description string
+            # or a TS template literal. The failure direction is not a missed violation — literal
+            # content is copied through, so the prohibitions still see an identifier — it is a FALSE
+            # RED on any later comment that merely MENTIONS the API in prose, which this file's own
+            # docstring calls out as the failure mode of a gate nobody can keep green. Measured at 8
+            # files before this guard. A backslash-newline still continues a literal (the newline
+            # lands in the slice, so reported line numbers stay true).
             quote = ch
-            out.append(ch)
-            i += 1
-            while i < n and text[i] != quote:
-                if text[i] == "\\" and i + 1 < n:
-                    out.append(text[i])
-                    i += 1
-                out.append(text[i])
+            end = i + 1
+            while end < n and text[end] != quote and text[end] != "\n":
+                end += 2 if text[end] == "\\" and end + 1 < n else 1
+            if end >= n or text[end] != quote:
+                out.append(ch)  # an ordinary character, not a delimiter
                 i += 1
-            if i < n:
-                out.append(text[i])
-                i += 1
+                continue
+            out.append(text[i : end + 1])
+            i = end + 1
             continue
         out.append(ch)
         i += 1

@@ -149,9 +149,9 @@ public:
     // surface cannot be configured — the caller then takes the CPU path rather than failing.
     bool attach_gpu(render::IDevice& device, render::ISurface& surface, render::Extent2D size);
     // Take the CPU present path with an OS blitter. A null blitter is accepted and reported: the
-    // shell still runs, it just presents nothing, which is the honest state on a platform whose
-    // blitter is still owed (macOS, e12b) or on a Linux build configured without the X11
-    // development headers.
+    // shell still runs, it just presents nothing, which is the honest state on a Linux build
+    // configured without the X11 development headers, or on a window that carries no presentable
+    // surface at all (the headless backend). Every v1 window system HAS a blitter since e12b.
     void attach_cpu(std::unique_ptr<render::present::IPresentBlitter> blitter,
                     render::Extent2D size);
     void detach();

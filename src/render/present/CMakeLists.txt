@@ -76,8 +76,11 @@ if(APPLE)
     # what makes that lifetime correct without a hand-written rule-of-five over an Objective-C
     # object (mirrors src/render/'s metal_interop.mm and src/editor/shell/'s cocoa_window.mm).
     set_source_files_properties(src/present_blit_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
-    message(STATUS "context_render_present: AppKit/QuartzCore found — the macOS CPU present "
-                   "fallback (CALayer.contents) is REAL in this build")
+    # "Apple", not "found": nothing was PROBED here (this block is an unconditional if(APPLE), unlike
+    # the find_package(X11) sibling above), and AppKit is not among the frameworks linked — a CALayer
+    # comes from QuartzCore.
+    message(STATUS "context_render_present: Apple — the macOS CPU present fallback "
+                   "(CALayer.contents) is REAL in this build")
 endif()
 
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) -----------------------------

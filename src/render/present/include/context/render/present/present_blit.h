@@ -141,6 +141,13 @@ private:
 // plain CALayer property, so the CPU fallback needs nothing from Metal itself. Returns nullptr when
 // `layer` is null, or when this build is not for macOS.
 //
+// ⚠ `layer` MUST be null or a REAL CALayer — there is no third case. The implementation holds it in
+// an ARC-strong member, so a non-null argument is RETAINED on the way in: objc_retain dereferences
+// whatever it is handed, and a pointer that is not an Objective-C object crashes HERE, not later at
+// blit(). This is the one place the three platforms genuinely differ — Win32 validates handles, so
+// make_win32_gdi_blitter above survives a junk HWND and reports the failure as a runtime false —
+// and it is why the cross-platform test asserts only the null guard on Apple.
+//
 // It composes through MemoryBlitter rather than re-deriving the scale: that is the ORACLE the blit
 // geometry is asserted against on every OS (see blit_source_index above), so the macOS path is
 // pixel-identical to the tested one by CONSTRUCTION rather than by a comment — which matters more

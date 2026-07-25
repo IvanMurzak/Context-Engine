@@ -820,8 +820,9 @@ namespace
 {
 
 // Round-half-AWAY-from-zero, and NaN/inf safe. `static_cast<int>` truncates toward zero, so a
-// pointer at -0.6 physical pixels would land on 0 while +0.6 lands on 0 too — asymmetric rounding
-// that shifts the whole coordinate space by half a pixel across the origin. The clamp is not
+// pointer at -0.6 physical pixels and one at +0.6 BOTH land on 0: the bucket straddling the origin is
+// twice as wide as every other one, so the coordinate space compresses by half a pixel on each side
+// of it and a slow drag stalls as it crosses zero. The clamp is not
 // paranoia: a Cocoa geometry read during a window teardown can legitimately be inf, and
 // `static_cast<std::int32_t>` of an out-of-range double is UNDEFINED behaviour (a real UBSan finding
 // on the sanitize legs, not a theoretical one).
@@ -834,19 +835,6 @@ namespace
     const double clamped = std::min(std::max(value, -1.0e9), 1.0e9);
     return static_cast<std::int32_t>(clamped < 0.0 ? -std::floor(-clamped + 0.5)
                                                    : std::floor(clamped + 0.5));
-}
-
-// A Cocoa POINT extent -> physical pixels. Zero for anything not strictly positive, which also
-// catches NaN (every comparison against a NaN is false, so the `!(x > 0)` spelling is deliberate —
-// `x <= 0` would let a NaN through).
-[[nodiscard]] std::uint32_t ns_extent_to_physical(double points, DpiScale dpi)
-{
-    if (!(points > 0.0) || !std::isfinite(points))
-    {
-        return 0u;
-    }
-    const std::int32_t scaled = ns_round_to_int(points * static_cast<double>(dpi.factor()));
-    return scaled <= 0 ? 0u : static_cast<std::uint32_t>(scaled);
 }
 
 [[nodiscard]] Modifiers make_ns_modifiers(std::uint64_t flags, std::uint32_t pressed_buttons)
@@ -886,9 +874,17 @@ namespace
         return kNsModifierCommand;
     case kNsVkCapsLock:
         return kNsModifierCapsLock;
-    case kNsVkFunction:
-        return kNsModifierFunction;
     default:
+        // fn IS DELIBERATELY ABSENT, and that is not an oversight. Unlike every flag above,
+        // NSEventModifierFlagFunction is not a modifier-key signal: AppKit sets it on the
+        // modifierFlags of ordinary key events for the F-keys AND the whole navigation set — the
+        // arrows, Home/End, Page Up/Down, Forward Delete. So an arrow-key press alone would latch
+        // the bit in the backend's running mask, and the diff rule in translate_ns_event would then
+        // see "no transition" for the real fn key's own FlagsChanged and DROP its key-down, then
+        // emit an UNPAIRED key-up on release — precisely the stuck-modifier failure that rule exists
+        // to prevent, and intermittently, since the next mouse-move clears the bit again. Returning
+        // 0 means the fn key toggles nothing; it has no Windows virtual-key code either
+        // (ns_key_code_to_windows_key_code answers 0 for it), so nothing downstream loses a signal.
         return 0;
     }
 }
@@ -913,6 +909,21 @@ namespace
 }
 
 } // namespace
+
+// EXPORTED (declared in window.h) rather than file-local, so the Cocoa backend derives its initial
+// client size from the SAME function translate_ns_window_geometry uses for every later resize. It was
+// file-local until the backend was found re-deriving this arithmetic inline: two copies of one
+// conversion feeding one observable (client_size()), with only the copy no CI leg executes able to
+// drift. Same reason ns_dpi_from_backing_scale and ns_view_point_to_physical below are exported.
+std::uint32_t ns_extent_to_physical(double points, DpiScale dpi)
+{
+    if (!(points > 0.0) || !std::isfinite(points))
+    {
+        return 0u;
+    }
+    const std::int32_t scaled = ns_round_to_int(points * static_cast<double>(dpi.factor()));
+    return scaled <= 0 ? 0u : static_cast<std::uint32_t>(scaled);
+}
 
 DpiScale ns_dpi_from_backing_scale(double backing_scale)
 {
@@ -1136,13 +1147,21 @@ ShellEventBatch translate_ns_event(const NsEvent& event, const NsViewGeometry& v
     case kNsScrollWheel:
     {
         ShellEvent wheel = make_ns_pointer(PointerAction::wheel, MouseButton::none, event, view);
-        // A PRECISE delta (trackpad, or a high-resolution wheel) is already a distance in POINTS, so
-        // it is scaled to physical pixels like every other coordinate on this seam. A LINE delta is
-        // a notch count, and one notch is kWheelDelta in the convention the Win32 and X11 decoders
-        // already hand the browser. Multiplying a precise delta by 120 instead is the mistake that
-        // makes a gentle two-finger swipe jump a hundred screens.
+        // A PRECISE delta (trackpad, or a high-resolution wheel) is already a distance in POINTS and
+        // is forwarded AS-IS. A LINE delta is a notch count, and one notch is kWheelDelta in the
+        // convention the Win32 and X11 decoders already hand the browser. Multiplying a precise delta
+        // by 120 instead is the mistake that makes a gentle two-finger swipe jump a hundred screens.
+        //
+        // ⚠ AND IT IS NOT SCALED BY THE DPI FACTOR EITHER — a wheel delta is the ONE field on this
+        // seam that is not a physical-pixel quantity. Both siblings emit a scale-free value (Win32
+        // forwards WM_MOUSEWHEEL's ±120 verbatim, X11 emits ±kWheelDelta), and the consumer forwards
+        // it to the browser UNCONVERTED while converting the position separately
+        // (cef_shell.cpp's SendMouseWheelEvent), so the browser reads the delta in the same
+        // point/DIP space it reads that position in. Scaling here would double every trackpad scroll
+        // on a Retina display and triple it at 3x — invisible at 1x, which is why the assertion in
+        // test_window.cpp uses a 2x fixture.
         const double scale = event.has_precise_scrolling_deltas
-                                 ? static_cast<double>(view.dpi.factor())
+                                 ? 1.0
                                  : static_cast<double>(kNsLinesToWheelDelta);
         wheel.pointer.wheel_delta_x = ns_round_to_int(event.scrolling_delta_x * scale);
         wheel.pointer.wheel_delta_y = ns_round_to_int(event.scrolling_delta_y * scale);

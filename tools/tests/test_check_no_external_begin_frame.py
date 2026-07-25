@@ -194,7 +194,7 @@ def test_a_flipped_pin_is_a_finding(tmp_path: Path) -> None:
     )
     findings = _findings(root)
     assert len(findings) == 2
-    assert any("not\nfalse" in f.replace(", ", ",\n") or "not false" in f for f in findings)
+    assert any("not false" in f for f in findings)
 
 
 def test_a_duplicated_pin_is_a_finding(tmp_path: Path) -> None:
@@ -252,6 +252,50 @@ def test_a_comment_inside_a_string_is_not_stripped(tmp_path: Path) -> None:
     )
     root = _repo(tmp_path, {"src/editor/gui/host/src/editor_host.cpp": body})
     assert len(_findings(root)) == 1
+
+
+@pytest.mark.parametrize(
+    ("label", "prefix"),
+    [
+        # The two shapes that ACTUALLY REGRESS without the same-line rule -- verified by running both
+        # implementations side by side: pre-fix, neither of these files' trailing comment was stripped.
+        ("c++14 digit separator", "int t() { return should_pump(4'010); }\n"),
+        ("apostrophe in a TS template literal", "const s = `it's here`;\n"),
+        # ...and two CONTROLS, which pass either way and are pinned to say WHY: the apostrophe is
+        # already inside a properly-closed double-quoted literal in the first, and in the second the
+        # `//` opens a comment before the scanner ever reaches the quote.
+        ("apostrophe inside a closed string", 'const char* d = "the daemon\'s own pin";\n'),
+        ("apostrophe after a comment opener", "// a stray ' apostrophe in prose\n"),
+    ],
+)
+def test_an_unpaired_quote_does_not_desync_the_stripper(
+    tmp_path: Path, label: str, prefix: str
+) -> None:
+    """AN UNPAIRED QUOTE MUST NOT SWALLOW THE REST OF THE FILE.
+
+    A literal is required to close on its own line; a lone apostrophe is an ordinary character. Before
+    that rule the scan ran to EOF, so everything after such a quote skipped comment stripping and a
+    later PROSE mention of the API false-RED the gate -- measured at 8 real files in this tree. This
+    is the "gate nobody can keep green" mode, so it is pinned per shape.
+    """
+    body = prefix + "// design note: SendExternalBeginFrame is CEF-internal only (L-41).\n"
+    root = _repo(tmp_path, {"src/editor/gui/host/src/editor_host.cpp": body})
+    assert _findings(root) == [], label
+
+
+def test_the_desync_guard_still_sees_a_real_violation_after_an_unpaired_quote(
+    tmp_path: Path,
+) -> None:
+    """The complement of the test above: degrading the quote to an ordinary character must not also
+    degrade the prohibition. Real CODE after an unpaired apostrophe is still caught."""
+    body = (
+        "int t() { return should_pump(4'010); }\n"
+        "void f(Host* h) { h->SendExternalBeginFrame(); }\n"
+    )
+    root = _repo(tmp_path, {"src/editor/gui/host/src/editor_host.cpp": body})
+    findings = _findings(root)
+    assert len(findings) == 1
+    assert ":2:" in findings[0], findings  # and the line number survives the guard
 
 
 # --- scanning surface + configuration -------------------------------------------------------------

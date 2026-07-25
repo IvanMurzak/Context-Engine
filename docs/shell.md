@@ -9,17 +9,21 @@ drives and explicitly deferred the window manager and the `PET_POPUP` layer to h
 
 The load-bearing property, stated first because the module is arranged around it:
 
-> **Almost none of the Shell is platform code.** The OS window is one file, the browser is one file,
-> and everything between them — the layer stack, damage, the resize protocol, input arbitration, DPI,
-> the owner loop — is portable C++ compiled and tested on all three OS legs. That is deliberate: the
-> window backend is Windows-only in v1 and the browser is a CI-only dependency path, so logic written
-> inside either would be exercised by almost nothing.
+> **Almost none of the Shell is platform code.** The OS window is one file per platform, the browser
+> is one file, and everything between them — the layer stack, damage, the resize protocol, input
+> arbitration, DPI, the owner loop — is portable C++ compiled and tested on all three OS legs. That is
+> deliberate, and since e12a/e12b it matters MORE, not less: all three v1 platforms now have a real
+> window backend, but **no CI job opens a window on Linux beyond the one X11 smoke and none opens one
+> on macOS at all**, and the browser is a CI-only dependency path — so logic written inside a backend
+> is exercised by almost nothing. That is why each backend's decisions are hoisted into a PURE
+> decoder (`translate_win32_message` / `translate_x11_event` / `translate_ns_event`) that every leg
+> runs, leaving only OS calls behind the platform `#if`.
 
 ## Layout
 
 | Where | What |
 |---|---|
-| `context_editor_shell` (`src/editor/shell/`) | The Shell proper: window seam + Win32 backend, DPI, input arbitration, compositor, editor-state persistence, the owner loop. Default-built, CEF-free, GPU-backend-free, fully unit-tested locally and on all three `build` legs. |
+| `context_editor_shell` (`src/editor/shell/`) | The Shell proper: window seam + the Win32, X11 and Cocoa backends, DPI, input arbitration, compositor, editor-state persistence, the owner loop. Default-built, CEF-free, GPU-backend-free, fully unit-tested locally and on all three `build` legs. |
 | `context_editor` (`app/editor_main.cpp`) | The app. Default-built everywhere; links the browser binding where one can be hosted. |
 | `context_editor_cef` (`cef/`) | The windowed-OSR CEF binding — the ONE piece that cannot build locally. Behind `CONTEXT_BUILD_GUI_CEF`. |
 
@@ -504,9 +508,10 @@ There is no in-app updater and no download; that is post-M9.
 **No new dependency.** The transport is the platform's own HTTPS client (WinHTTP, Windows SDK):
 nothing is added to `src/vcpkg.json` or `tools/license-allowlist.json`, so design 08 §3's standing
 owner-approval gate for a new dependency is not reached. macOS and Linux report an honest "not wired
-on this platform yet" until e12 brings their shells up — the same gap `native_pick_folder()` and the
-window backend leave — and the banner then says "not checked" rather than implying the build is
-current.
+on this platform yet", and the banner then says "not checked" rather than implying the build is
+current. Note the shape of what is left: e12a/e12b closed the WINDOW-backend gap on both platforms,
+so this and `native_pick_folder()` are now the remaining per-OS gaps in their own right — each owed a
+platform HTTPS client and folder chooser, not a shell.
 
 **Two behaviours that look like omissions and are not.** (1) A FAILED check renders no banner; it is
 reported in Settings § Updates instead, because a strip on every offline launch is how the notice
@@ -623,6 +628,11 @@ Named so the gaps are visible rather than assumed:
   so `ShellEventKind::dpi_changed` is unreachable on X11 and a scaling change made while the editor
   is open does not re-inform `input_.set_dpi` / the browser / the compositor until restart. The Win32
   backend does emit it (`WM_DPICHANGED`). Post-e12a.
+- **No `paint_requested` event on macOS.** Win32 emits it from `WM_PAINT` and X11 from `Expose`;
+  `cocoa_window.mm` has no `drawRect:` analogue, so `ShellEventKind::paint_requested` is unreachable
+  there. Harmless while the owner loop renders every iteration and `render_frame()` is damage-gated
+  internally — it becomes real work only for the event-driven loop of §10, which is exactly when
+  `request_redraw()` gains its first caller. Recorded here so that loop's author finds it.
 - ~~**No macOS window backend.**~~ Landed by **e12b**: `cocoa_window.mm` (NSWindow + a
   `CAMetalLayer`-backed NSView), the pure `translate_ns_event` / `translate_ns_window_geometry`
   decoders, and the `CALayer.contents` CPU present blitter. What e12b did NOT bring is a live

@@ -199,10 +199,20 @@ std::vector<CocoaWindowBackend*>& cocoa_windows()
     return windows;
 }
 
-// Round-half-away-from-zero, NaN/inf safe. The pure decoders have their own copy in window.cpp; this
-// one exists because those are file-local there and a shared one would put arithmetic with no OS
-// content into the header. `static_cast<std::int32_t>` of an out-of-range double is UB, and a Cocoa
-// geometry read during teardown can legitimately be infinite.
+// Round-half-away-from-zero, NaN/inf safe — a verbatim twin of window.cpp's file-local
+// ns_round_to_int. `static_cast<std::int32_t>` of an out-of-range double is UB, and a Cocoa geometry
+// read during teardown can legitimately be infinite.
+//
+// WHY A COPY IS RIGHT HERE, stated precisely, because the obvious reason is wrong: window.h DOES
+// export pure arithmetic (ns_dpi_from_backing_scale, ns_extent_to_physical, ns_view_point_to_physical),
+// so "no arithmetic in the header" is not the rule. The rule is that the header publishes named SEAM
+// CONCEPTS — a Cocoa point extent becoming physical pixels — and not generic numeric primitives.
+// Rounding a double is the latter. The distinction is load-bearing rather than cosmetic: every
+// remaining caller below feeds a value that is only ever compared against other cocoa_round_i32
+// outputs (frame origins in, frame origins out, round-tripping through apply_placement), so this copy
+// is self-consistent by construction. The moment a value crosses into something the pure decoders
+// also compute — as the initial client size did — it must use the EXPORTED function instead, which is
+// exactly why create() no longer rounds inline.
 [[nodiscard]] std::int32_t cocoa_round_i32(double value)
 {
     if (!std::isfinite(value))
@@ -446,13 +456,13 @@ bool CocoaWindowBackend::create(const WindowDesc& desc, std::string& error)
         // reads size_ or geometry_.
         geometry_ = read_geometry();
         [layer_ setContentsScale:static_cast<CGFloat>(geometry_.dpi.factor())];
-        size_ = render::Extent2D{
-            static_cast<std::uint32_t>(std::max(
-                0, cocoa_round_i32(geometry_.width_points *
-                                   static_cast<double>(geometry_.dpi.factor())))),
-            static_cast<std::uint32_t>(std::max(
-                0, cocoa_round_i32(geometry_.height_points *
-                                   static_cast<double>(geometry_.dpi.factor()))))};
+        // ns_extent_to_physical, NOT a hand-inlined copy of it: drain_geometry() below sets this same
+        // size_ from translate_ns_window_geometry, which uses that function. Deriving the INITIAL size
+        // any other way would put two implementations of one conversion behind one observable
+        // (client_size(), read by attach_cpu/attach_gpu on the boot path), and the create()-time copy
+        // is the one no CI leg runs.
+        size_ = render::Extent2D{ns_extent_to_physical(geometry_.width_points, geometry_.dpi),
+                                 ns_extent_to_physical(geometry_.height_points, geometry_.dpi)};
         modifier_flags_ = static_cast<std::uint64_t>([NSEvent modifierFlags]);
     }
 
@@ -471,8 +481,17 @@ void CocoaWindowBackend::destroy()
     {
         // The delegate's mailbox points at a member of THIS object, so it is unhooked before the
         // window can deliver another callback into a dying backend.
+        //
+        // Guarded, unlike the message sends around it: `p->ivar = x` is a PLAIN POINTER
+        // DEREFERENCE, not a message, so it does not get Objective-C's nil-receiver amnesty. The
+        // early return above only proves window_ is non-nil, and window_ is assigned BEFORE the
+        // delegate — so a create() that got a window but a nil delegate would crash here instead of
+        // tearing down.
         [window_ setDelegate:nil];
-        delegate_->mailbox = nullptr;
+        if (delegate_ != nil)
+        {
+            delegate_->mailbox = nullptr;
+        }
         [window_ orderOut:nil];
         [window_ close];
     }
