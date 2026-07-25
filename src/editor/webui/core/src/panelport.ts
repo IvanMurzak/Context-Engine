@@ -104,6 +104,18 @@ export const PANEL_BRIDGE_VERSION = 1;
 export const PANEL_BRIDGE_REFUSALS = Object.freeze({
     /** A well-formed request for a verb this build grants nothing for. THE e13b-1 answer. */
     verbNotGranted: "bridge.verb_not_granted",
+    /**
+     * The verb EXISTS in this build, and THIS PACKAGE holds no grant for the capability it needs
+     * (M9 e13b-2; `ui_events` gating `bridge.ui.subscribe` is the first — C-F18).
+     *
+     * ⚠ ADDED DELIBERATELY, which is what the header above means by "none of them should have to
+     * renegotiate what a refused call looks like": adding a code is a cross-task-visible decision, not
+     * a free move. It earns its place because it is NOT `verb_not_granted` — that one means "this
+     * build has no such verb", this one means "the verb is real and YOUR PACKAGE was not granted it",
+     * and only the second is something an install-consent flow can act on. e13c (scope grants) and
+     * e13d refuse with this same code rather than inventing a third.
+     */
+    capabilityNotGranted: "bridge.capability_not_granted",
     /** The envelope was addressed and correlatable but structurally invalid. */
     malformedRequest: "bridge.malformed_request",
     /** `v` was present and was not `PANEL_BRIDGE_VERSION`. */
@@ -167,17 +179,47 @@ export interface PanelBridgeError {
 }
 
 /**
- * A verb handler. EMPTY in production for e13b-1 — the table exists so the deny-all answer comes from
- * a LOOKUP MISS rather than from a hardcoded refusal, which is what lets a T1 case prove the table is
- * consulted at all (a hardcoded refusal passes every negative test vacuously).
+ * A verb handler.
+ *
+ * The table was EMPTY in production for e13b-1 — it existed so the deny-all answer came from a LOOKUP
+ * MISS rather than from a hardcoded refusal, which is what lets a T1 case prove the table is consulted
+ * at all (a hardcoded refusal passes every negative test vacuously). M9 e13b-2 fills the first
+ * entries (`panelverbs.ts`); every verb still absent from it keeps that same deny-all answer, which is
+ * why e13c's and e13d's verbs still refuse identically.
  */
 export type PanelVerbHandler = (params: unknown) => unknown | Promise<unknown>;
+
+/**
+ * A verb handler's SANCTIONED refusal — the ONE way a handler produces a SPECIFIC refusal code
+ * (M9 e13b-2).
+ *
+ * Without it a handler's only failure channel is an ordinary throw, which `#invoke` deliberately
+ * answers with the generic `malformed_request` / "the verb handler failed" and no detail, because an
+ * ordinary throw's message is HOST STATE and must not reach untrusted code. A refusal the handler
+ * MEANT to send is different in kind: its code and message are authored to be panel-facing, so they
+ * travel back verbatim. Keeping the two apart is what lets `bridge.ui.subscribe` answer
+ * `capability_not_granted` while a genuine host fault still says nothing.
+ */
+export class PanelVerbRefusal extends Error {
+    /** One of `PANEL_BRIDGE_REFUSALS`. */
+    readonly code: string;
+
+    constructor(code: string, message: string) {
+        super(message);
+        this.name = "PanelVerbRefusal";
+        this.code = code;
+    }
+}
 
 export interface PanelPortBridgeOptions {
     /** The panel frame. Listeners are installed on it IMMEDIATELY — construct before setting `src`. */
     readonly frame: HTMLIFrameElement;
     readonly panelId: string;
-    /** The verb table. Absent / empty ⇒ every verb is refused, which is e13b-1's whole surface. */
+    /**
+     * The verb table. Absent / empty ⇒ every verb is refused (e13b-1's whole surface, and still what
+     * a caller that opts into nothing gets). `panelhost.ts` supplies the e13b-2 table built by
+     * `makePanelBridgeVerbs` (panelverbs.ts).
+     */
     readonly verbs?: ReadonlyMap<string, PanelVerbHandler>;
     readonly handshakeTimeoutMs?: number;
     readonly requestTimeoutMs?: number;
@@ -549,7 +591,14 @@ export class PanelPortBridge {
         try {
             const result = await handler(params);
             this.#reply(id, { ok: true, result });
-        } catch {
+        } catch (error) {
+            if (error instanceof PanelVerbRefusal) {
+                // A refusal the handler AUTHORED — panel-facing by construction, so its code and
+                // message pass through verbatim. See `PanelVerbRefusal` for why this is not the
+                // generic path below.
+                this.#refuse(id, error.code, verb, error.message);
+                return;
+            }
             // A handler that threw is a HOST fault, and its message is host state — refused with the
             // generic code and no detail rather than leaking a stack into untrusted code.
             this.#reply(id, refusal(PANEL_BRIDGE_REFUSALS.malformedRequest, verb,

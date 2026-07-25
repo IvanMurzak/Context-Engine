@@ -47,7 +47,12 @@ import { Keymap, KeybindingsClient } from "./keymap.js";
 import { Palette, PALETTE_TOGGLE_COMMAND_ID, paletteCommands } from "./palette.js";
 import { PaletteView } from "./palette_view.js";
 import { PanelClient } from "./panels.js";
-import { PanelHost, type LocalPanelFactory } from "./panelhost.js";
+import { PanelHost, type LocalPanelFactory, type PanelVerbBinding } from "./panelhost.js";
+import {
+    DENY_ALL_CAPABILITY_GRANTS,
+    PANEL_VERB_COMMAND_INVOKE,
+    makePanelBridgeVerbs,
+} from "./panelverbs.js";
 import { WindowClient, type WindowSeed } from "./window.js";
 import { DragClient, makeDropZoneHitTest, pumpCrossWindowDrag } from "./drag.js";
 import { EditorUiBus, UI_TOPIC_THEME_CHANGED } from "./uibus.js";
@@ -349,7 +354,31 @@ async function startPanels(
         // `content.type: "local"` and THIS is the build that knows how to draw it. Nothing else about
         // PanelHost changes — an unregistered local panel is reported unavailable like any other.
         const settings = makeSettingsPanel(bridge, theme, config);
-        const host = new PanelHost({ container, client, localPanels: settings.factories });
+        // The ONE command registry, LATE-BOUND into the panel verb tables (M9 e13b-2). It is built by
+        // `startCommandLayer` further down — after `host.start()` has already created every renderer
+        // and every port — so the tables close over this holder rather than over a value. A package
+        // panel's first verb can only arrive once its document has loaded and handshaken, which is
+        // strictly after that, so the `undefined` window is not reachable by a real panel; the tables
+        // refuse honestly if it ever were.
+        let commandRegistry: CommandRegistry | undefined;
+        const host = new PanelHost({
+            container,
+            client,
+            localPanels: settings.factories,
+            panelVerbs: (binding: PanelVerbBinding) =>
+                makePanelBridgeVerbs({
+                    panelId: binding.panelId,
+                    packageId: binding.packageId,
+                    declaredCapabilities: binding.declaredCapabilities,
+                    manifestCommandIds: binding.manifestCommandIds,
+                    registry: () => commandRegistry,
+                    whenContext,
+                    // THE deny-all grant source. e13c replaces THIS ARGUMENT with install-consent
+                    // grants; nothing else about the gate moves (panelverbs.ts § the capability gate).
+                    grants: DENY_ALL_CAPABILITY_GRANTS,
+                    request: binding.request,
+                }),
+        });
         const report = await host.start(seed !== null ? { only: seed.panelId } : {});
         // Restore the moved panel's D6 state onto the freshly-opened panel — the SAME recreate path
         // (open + panel.state.set + refresh) window-close rehome uses, which is the whole point of D6:
@@ -402,7 +431,7 @@ async function startPanels(
                 // palette over it, and (only under `?ctx-smoke-palette`) drive the T2 command-driven
                 // scenario. Placed AFTER `persistence.attach()` so a palette-driven layout change
                 // publishes over the live editor.state channel — the observable the T2 smoke asserts.
-                startCommandLayer(host, client, windowClient, theme, whenContext);
+                commandRegistry = startCommandLayer(host, client, windowClient, theme, whenContext);
                 // e06d settings-smoke seam: only under `?ctx-smoke-settings`, drive a REAL theme
                 // switch through the Settings panel so the live leg can assert the Shell persisted it.
                 runSettingsSmoke(settings.mount());
@@ -805,6 +834,15 @@ async function startWindowMechanism(
  * NEVER THROWS: like the rest of boot, a failure here degrades to "no command layer" rather than an
  * unhandled rejection in a renderer nobody watches. Placed after `PanelHost.start()` so the roster is
  * known and after `LayoutPersistence.attach()` so a palette-driven layout change actually publishes.
+ *
+ * ⚠ THE "NEVER THROWS" CONTRACT IS NOT WHAT MADE A DUPLICATE COMMAND ID FATAL — the throw was, and it
+ * has been fixed UPSTREAM of this catch (commands.ts § buildCommandRegistry). Degrading a genuine
+ * boot failure to "no command layer" is right; degrading ONE colliding id from ONE package to it was
+ * not, and deleting the catch would have traded a silent palette outage for an unhandled rejection.
+ * The refusals are reported below instead.
+ *
+ * RETURNS THE REGISTRY (M9 e13b-2) so `startPanels` can hand it to the package-panel verb tables —
+ * `undefined` when the layer did not come up, which those tables refuse honestly on.
  */
 function startCommandLayer(
     host: PanelHost,
@@ -812,15 +850,15 @@ function startCommandLayer(
     windowClient: WindowClient,
     theme: ThemeEngine | undefined,
     whenContext: () => WhenContext,
-): void {
+): CommandRegistry | undefined {
     if (typeof document === "undefined") {
-        return;
+        return undefined;
     }
     const roster = host.roster;
     if (roster === null) {
-        return;
+        return undefined;
     }
-    const dispatchPanelCommand = makePanelDispatch(client);
+    const dispatchPanelCommand = makePanelDispatch(client, host);
     try {
         const registry = buildCommandRegistry({
             // The daemon RPC fan-in (D19) is a later seam; contract verbs are PROJECTED into the
@@ -863,7 +901,11 @@ function startCommandLayer(
         view.mount();
         // Register the palette-open command AFTER the view exists, so its handler can reflect the model
         // into the overlay. It is bound to Ctrl+Shift+P in the default keymap (keymap.ts).
-        registry.registerAll(
+        // NON-FATAL, like every other source (commands.ts § tryRegisterAll): the palette's own open
+        // command is registered LAST of all, so a package that somehow held `workbench.palette.toggle`
+        // would cost us this one command — never the palette itself, which is the surface the whole
+        // keyboard path depends on.
+        registry.tryRegisterAll(
             paletteCommands({
                 toggle: (): CommandOutcome => {
                     palette.toggle();
@@ -873,13 +915,33 @@ function startCommandLayer(
             }),
         );
 
+        // ATTRIBUTION, mirrored onto <html> like every other boot state. A refused registration is
+        // now survivable, which is exactly why it must be VISIBLE: the old failure took the whole
+        // palette down and said "duplicate command id", and the new one silently drops one command
+        // unless the collision is reported with the id and both of its sources.
+        reportCommands(
+            registry.rejections.length === 0
+                ? `ready; ${String(registry.size)} commands`
+                : `ready; ${String(registry.size)} commands; ` +
+                      `${String(registry.rejections.length)} REFUSED: ` +
+                      registry.rejections.map((rejection) => rejection.diagnostic).join(" | "),
+        );
+
         void runPaletteSmoke(registry, palette, host, view);
+        return registry;
     } catch (error) {
         // Honest degradation, mirrored onto <html> like the other boot states.
-        document.documentElement.setAttribute(
-            "data-editor-commands",
+        reportCommands(
             `command layer unavailable: ${error instanceof Error ? error.message : String(error)}`,
         );
+        return undefined;
+    }
+}
+
+/** Mirror the command layer's outcome onto `<html data-editor-commands>`. */
+function reportCommands(detail: string): void {
+    if (typeof document !== "undefined") {
+        document.documentElement.setAttribute("data-editor-commands", detail);
     }
 }
 
@@ -891,12 +953,37 @@ function startCommandLayer(
  * a panel command that reported success on a `dispatched:false` reply would make an undo that did
  * nothing look like one that worked.
  *
+ * ⚠ TWO ROUTES SINCE M9 e13b-2, AND THE SECOND ONE FIXES A DEAD END. A `uitree` panel's command goes
+ * over `panel.command` to its C++ model, as it always has. A THIRD-PARTY (`iframe`) panel has no C++
+ * model at all, so that route answered `dispatched:false` for every manifest command a package
+ * declared — the command appeared in the palette, was bound by the keymap, and could never do
+ * anything. When `host` is supplied and the panel has a live port, the command is delivered to the
+ * PACKAGE instead (`commands.invoke`, panelverbs.ts), which is the direction e13b-1 built
+ * `PanelPortBridge.request` for and named e13b-2 as the first consumer of.
+ *
+ * The fallback is deliberate rather than defensive: no `host`, no port, or a package panel whose
+ * document never handshook all resolve back to the `panel.command` route, whose honest
+ * `dispatched:false` is the same answer as before.
+ *
  * Exported so the T1 tier can drive THIS function rather than a copy of it (`commands.test.ts`).
  */
 export function makePanelDispatch(
     client: PanelClient,
+    host?: PanelHost,
 ): (panelId: string, commandId: string) => Promise<CommandOutcome> {
     return async (panelId: string, commandId: string): Promise<CommandOutcome> => {
+        const port = host?.portRequest(panelId);
+        if (port !== undefined) {
+            const reply = await port(PANEL_VERB_COMMAND_INVOKE, { id: commandId });
+            return reply.ok
+                ? { ok: true, note: `${panelId}/${commandId}` }
+                : {
+                      ok: false,
+                      note: `${panelId}/${commandId} not dispatched (${
+                          reply.error?.code ?? "no reply"
+                      })`,
+                  };
+        }
         const result = await client.command(panelId, commandId, "");
         return result !== null && result.dispatched
             ? { ok: true, note: `${panelId}/${commandId}` }

@@ -14,6 +14,7 @@ import { SESSION_UNDO_PANEL_ID, makePanelDispatch, makeSessionActions } from "..
 import { PanelClient } from "../panels.js";
 import {
     buildCommandRegistry,
+    COMMAND_REJECTION_LOG_LIMIT,
     CommandRegistry,
     contractCommandId,
     editorCommands,
@@ -161,7 +162,7 @@ export const commandsTests: readonly TestCase[] = [
         },
     },
     {
-        name: "CommandRegistry: a duplicate id is FAIL-CLOSED (throws), never last-wins",
+        name: "CommandRegistry: a duplicate id is FAIL-CLOSED (throws) on the STRICT path, never last-wins",
         run: () => {
             const registry = new CommandRegistry();
             registry.register(mkCommand("dup"));
@@ -173,6 +174,75 @@ export const commandsTests: readonly TestCase[] = [
             }
             assert(threw, "registering a duplicate id throws");
             assertEqual(registry.get("dup")?.title, "dup", "the original entry is intact");
+        },
+    },
+    {
+        // M9 e13b-2 — the NON-FATAL sibling of the case above, and the one production assembly uses.
+        name: "CommandRegistry: tryRegister is INCUMBENT-WINS and reports an ATTRIBUTABLE refusal",
+        run: () => {
+            const registry = new CommandRegistry();
+            assertEqual(
+                registry.tryRegister(mkCommand("dup", { category: "editor", title: "Toggle Theme" })),
+                null,
+                "the first registration of an id succeeds",
+            );
+            const rejection = registry.tryRegister(
+                mkCommand("dup", { category: "panel", title: "Hijack" }),
+            );
+            assert(rejection !== null, "the second is REFUSED rather than throwing");
+            assertEqual(rejection?.id, "dup", "the refusal names the colliding id");
+            assertEqual(rejection?.category, "panel", "…the source that was refused");
+            assertEqual(rejection?.incumbent, "editor", "…and the source that keeps it");
+            // ATTRIBUTION IS THE DoD LINE, so it is asserted on the STRING a human reads, not only on
+            // the fields: "duplicate command id: dup" — the message this replaced — named neither the
+            // culprit nor what it collided with, which is what made the outage undiagnosable.
+            for (const fragment of ["dup", "Toggle Theme", "Hijack", "editor", "panel"]) {
+                assert(
+                    (rejection?.diagnostic ?? "").includes(fragment),
+                    `the diagnostic names "${fragment}": ${String(rejection?.diagnostic)}`,
+                );
+            }
+            assertEqual(registry.get("dup")?.title, "Toggle Theme", "the INCUMBENT keeps the id");
+            assertEqual(registry.size, 1, "and the registry holds exactly one command");
+            assertEqual(registry.rejections.length, 1, "the refusal is logged for boot to report");
+        },
+    },
+    {
+        name: "CommandRegistry: unregister withdraws exactly one command",
+        run: () => {
+            const registry = new CommandRegistry();
+            registry.tryRegisterAll([mkCommand("a"), mkCommand("b")]);
+            assert(registry.unregister("a"), "an existing id is removed");
+            assert(!registry.unregister("a"), "…and removing it twice reports false");
+            assertEqual(
+                registry.all().map((command) => command.id),
+                ["b"],
+                "the sibling is untouched",
+            );
+            // The id is now FREE — which is the property `bridge.commands.unregister` needs, and the
+            // reason withdrawal cannot be faked by overwriting with a no-op command.
+            assertEqual(registry.tryRegister(mkCommand("a")), null, "the id can be re-registered");
+        },
+    },
+    {
+        name: "CommandRegistry: the rejection log is BOUNDED (untrusted code chooses the refusal rate)",
+        run: () => {
+            const registry = new CommandRegistry();
+            registry.tryRegister(mkCommand("squat"));
+            for (let i = 0; i < COMMAND_REJECTION_LOG_LIMIT + 20; i += 1) {
+                registry.tryRegister(mkCommand("squat", { title: `attempt-${String(i)}` }));
+            }
+            assertEqual(
+                registry.rejections.length,
+                COMMAND_REJECTION_LOG_LIMIT,
+                "the log stops at its cap rather than growing with a panel's retry loop",
+            );
+            // NEWEST-WINS: a repeated refusal repeats, so the recent context is what a diagnosis needs.
+            const last = registry.rejections[registry.rejections.length - 1];
+            assert(
+                (last?.diagnostic ?? "").includes(`attempt-${String(COMMAND_REJECTION_LOG_LIMIT + 19)}`),
+                "the most recent refusal survives; the oldest is dropped",
+            );
         },
     },
     {
@@ -500,26 +570,83 @@ export const commandsTests: readonly TestCase[] = [
         },
     },
     {
-        name: "buildCommandRegistry: a manifest command colliding with a built-in id is FAIL-CLOSED",
+        // ⚠ THE PART-1 GATE (M9 e13b-2). This case REPLACES one that asserted the opposite — that
+        // assembly THROWS on a colliding manifest command — because that throw was the defect: it
+        // propagated to `startCommandLayer`, which catches it into a generic "command layer
+        // unavailable", so ONE colliding id from ONE package disabled the whole palette AND every
+        // keybinding. e13b-2 is the change that makes the collision an EXTERNALLY SUPPLIED input, so
+        // the old behaviour is a package-triggerable editor-wide outage.
+        //
+        // ⚠ NON-VACUITY PROVEN BY PLANTING, three ways, each reverted byte-exact:
+        //   (P1) put the throwing `registerAll` back in `buildCommandRegistry` -> RED here (the
+        //        colliding roster throws out of assembly, exactly as it used to).
+        //   (P2) make `tryRegister` LAST-WINS (overwrite the incumbent) -> RED on the
+        //        `view.theme.toggle` identity assertion below: the package's "Hijack" would answer a
+        //        built-in id, which is the shadowing this rule exists to refuse.
+        //   (P3) drop the rejection from the log (return it without recording) -> RED on the
+        //        `rejections` assertion, i.e. the failure would be survivable but SILENT, which is
+        //        only half the DoD.
+        name: "buildCommandRegistry: a colliding manifest command costs ONE command, never the registry",
         run: () => {
             const collidingRoster = parsePanelRoster({
                 contractMajor: 2,
-                panels: [{ id: "ext.evil", commands: [{ id: "view.theme.toggle", title: "Hijack" }] }],
+                panels: [
+                    {
+                        id: "ext.evil",
+                        commands: [
+                            { id: "view.theme.toggle", title: "Hijack" },
+                            // A SECOND, non-colliding command on the SAME panel. Without it the case
+                            // could not tell "the colliding entry was refused" from "the whole panel
+                            // source was dropped", which is a materially different failure mode.
+                            { id: "evil.ok", title: "Fine" },
+                        ],
+                    },
+                ],
             });
             assert(collidingRoster !== null, "roster parses");
-            let threw = false;
-            try {
-                buildCommandRegistry({
-                    contractDispatch: contractSpy().dispatch,
-                    editorActions: actionSpy().actions,
-                    sessionActions: sessionSpy().actions,
-                    roster: collidingRoster ?? { contractMajor: 2, panels: [] },
-                    panelDispatch: panelSpy().dispatch,
-                });
-            } catch {
-                threw = true;
-            }
-            assert(threw, "a manifest command that shadows an editor/contract id throws");
+            const editor = actionSpy();
+            const panel = panelSpy();
+            const registry = buildCommandRegistry({
+                contractDispatch: contractSpy().dispatch,
+                editorActions: editor.actions,
+                sessionActions: sessionSpy().actions,
+                roster: collidingRoster ?? { contractMajor: 2, panels: [] },
+                panelDispatch: panel.dispatch,
+            });
+
+            // 1. THE PALETTE SURVIVES. Every other source is intact and complete.
+            assertEqual(
+                registry.size,
+                RPC_METHOD_NAMES.length +
+                    editorCommands(editor.actions).length +
+                    sessionCommands(sessionSpy().actions).length +
+                    1, // the panel's non-colliding command
+                "assembly completed: every command except the colliding one is registered",
+            );
+            assert(registry.has(contractCommandId("describe")), "contract commands survive");
+            assert(registry.has("session.undo"), "session commands survive");
+            assert(registry.has("evil.ok"), "the panel's OTHER command survives");
+
+            // 2. THE INCUMBENT KEEPS THE ID — the package did not shadow a built-in.
+            assertEqual(
+                registry.get("view.theme.toggle")?.title,
+                "Toggle Theme",
+                "the EDITOR command keeps view.theme.toggle; the package's Hijack was refused",
+            );
+            void registry.get("view.theme.toggle")?.handler();
+            assertEqual(
+                editor.calls,
+                ["theme"],
+                "…and executing that id runs the EDITOR action, never the package dispatch",
+            );
+            assertEqual(panel.seen, [], "the refused command's dispatch was never reachable");
+
+            // 3. THE REFUSAL IS ATTRIBUTABLE — the DoD's second line.
+            assertEqual(registry.rejections.length, 1, "exactly one refusal was recorded");
+            const rejection = registry.rejections[0];
+            assertEqual(rejection?.id, "view.theme.toggle", "it names the colliding id");
+            assertEqual(rejection?.category, "panel", "…the source that lost");
+            assertEqual(rejection?.incumbent, "editor", "…and the source that won");
         },
     },
 ];
