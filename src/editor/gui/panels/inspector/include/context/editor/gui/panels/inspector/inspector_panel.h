@@ -9,9 +9,10 @@
 // implements it over compose::plan_write + filesync's atomic CAS write (the `context set` path);
 // headless tests inject an in-memory implementation over compose::plan_write. The panel owns NO
 // disk / no filesync / no compose dependency — only the pure BOUNDARY-CLEAN write envelope
-// (OverrideWriteRequest, M9 e05d3) and the L-20/L-30 commit policy. Wiring the gateway to the live
-// daemon write path (a WIRE gateway over RPC `edit` + `--if-match`) is e09's task, out of this
-// headless panel's scope.
+// (OverrideWriteRequest, M9 e05d3) and the L-20/L-30 commit policy. The LIVE Shell's gateway landed
+// with M9 e09b-2 — `shell::panels::WireOverrideWriteGateway`, the daemon's `edit` RPC with raw-byte
+// CAS — and it too is just another implementation of the seam below; nothing about this panel's
+// scope changed to admit it.
 
 #pragma once
 
@@ -83,8 +84,9 @@ struct FieldState
 // The seam the inspector commits override writes through — the SAME `context set` write path (L-35
 // single source of truth). Implemented by the disk-backed gateway (gui/viewport, over
 // compose::plan_write + filesync's atomic CAS write — converting the boundary-clean request via
-// builders::to_write_request) and by headless tests over an in-memory compose::plan_write; a WIRE
-// implementation over the daemon's RPC arrives with e09. Both total (never throw). The request type
+// builders::to_write_request), by headless tests over an in-memory compose::plan_write, and — since
+// M9 e09b-2 — by the Shell's WIRE gateway over the daemon's `edit` RPC
+// (shell/panels/wire_override_gateway.h). All total (never throw). The request type
 // is the boundary-clean OverrideWriteRequest (above), NEVER compose::WriteRequest — that is what
 // keeps this header, and with it the whole panel library, off the kernel's link closure (D10).
 class OverrideWriteGateway

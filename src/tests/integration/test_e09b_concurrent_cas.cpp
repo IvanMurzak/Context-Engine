@@ -90,20 +90,16 @@ void remove_tree(const fs::path& path)
     return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
 
-void write_file(const fs::path& dir, const char* name, const std::string& text)
-{
-    std::ofstream out(dir / name, std::ios::binary | std::ios::trunc);
-    out << text;
-}
-
 // A real two-file composition on real disk: root INSTANCES child, so an `outermost` override lands in
 // root.scene.json — a file the panel never names. That is the whole point of the composed write mode.
+//
+// Seeds through `itest::write_file_raw` (the shared L-19 raw-write helper) rather than a local
+// ofstream: it creates the parent directories AND reports success, so a failed seed reddens here
+// instead of surfacing later as an unexplained empty inspect.
 void seed_project(const fs::path& project)
 {
     const fs::path authored = project / "proj";
-    std::error_code mk;
-    fs::create_directories(authored, mk);
-    write_file(authored, "child.scene.json", R"({
+    CHECK(itest::write_file_raw(authored / "child.scene.json", R"({
       "$schema": "ctx:scene", "version": 1,
       "entities": [
         {"id": "ccccccccccccccc1", "name": "Cam",
@@ -111,11 +107,11 @@ void seed_project(const fs::path& project)
            "transform": {"position": [1, 2, 3]},
            "camera": {"fov": 1.0, "near": 0.1, "far": 500.0}
          }}
-      ]})");
-    write_file(authored, "root.scene.json", R"({
+      ]})"));
+    CHECK(itest::write_file_raw(authored / "root.scene.json", R"({
       "$schema": "ctx:scene", "version": 1,
       "entities": [],
-      "instances": [{"id": "aaaaaaaaaaaaaaa1", "scene": "proj/child.scene.json"}]})");
+      "instances": [{"id": "aaaaaaaaaaaaaaa1", "scene": "proj/child.scene.json"}]})"));
 }
 
 ctest_proc::Process spawn_daemon(const fs::path& project)

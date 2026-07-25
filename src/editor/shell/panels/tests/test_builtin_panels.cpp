@@ -138,9 +138,11 @@ void the_inspector_gesture_surface_is_live_but_refuses_without_a_daemon()
     CHECK(!dispatched);
     CHECK(error_code.empty());
 
-    // Stage a real edit, then commit it with NO client bound: the gateway refuses, the engine reports
-    // an error, and — the point — NOTHING was written and the staged gesture is KEPT for the caller
-    // to retry once the daemon is back.
+    // A freshly installed bag has NO model (nothing has hydrated it), so there is no field to stage
+    // against and the model layer refuses — the guard BEFORE any gateway is consulted. The
+    // no-daemon commit posture itself (the gateway's named refusal, `Status::error`, and the staged
+    // gesture KEPT for a retry) needs a staged edit to exist, so it is asserted where a model does:
+    // `test_wire_override_gateway.cpp`'s L-30 cases and the `editor-session-concurrent-cas-t2` drill.
     context::editor::serializer::ParseResult value =
         context::editor::serializer::parse_json("2.5");
     CHECK(value.ok);

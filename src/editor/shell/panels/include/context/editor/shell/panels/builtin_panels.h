@@ -179,9 +179,9 @@ struct BuiltinPanels
     // The e08b daemon-session feed. DECLARED BEFORE THE SCENE TREE so it is destroyed AFTER it
     // (members destroy in reverse order): it IS the SelectionGateway the Scene tree's panel writes
     // through, and a gateway is contractually required to outlive its panel (scene_tree_panel.h). The
-    // reverse pointer — the
-    // feed's raw `SceneTreePanel*` — is only dereferenced from `apply_event`, which the owner loop
-    // stops calling before teardown, so no fact can arrive at a half-destroyed bag.
+    // reverse pointer — the feed's raw `SceneTreePanel*` — is only dereferenced from `apply_event`,
+    // which the owner loop stops calling before teardown, so no fact can arrive at a half-destroyed
+    // bag.
     std::unique_ptr<SessionFeed> session;
     // The e05d3 live feeds. DECLARATION ORDER IS LOAD-BEARING: `install_builtin_panels` wires the
     // Scene tree's selection listener at the INSPECTOR feed, so the inspector must be destroyed

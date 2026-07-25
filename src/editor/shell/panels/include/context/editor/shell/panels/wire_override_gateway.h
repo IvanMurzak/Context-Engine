@@ -21,8 +21,18 @@
 // write is renderer-driven and can land in that window. The owner therefore re-derives this binding
 // from the lifecycle every frame and clears it with `nullptr` before tearing the lifecycle down — one
 // seam, `panels::bind_write_client` (builtin_panels.h). An UNBOUND gateway is not a silent no-op: every
-// `attempt` refuses with `kNoDaemonCode` and every `read` answers `present:false` with a 0 token, which
-// the L-30 engine reads as "this field cannot be verified" and therefore DROPS rather than overwrites.
+// `attempt` refuses with `kNoDaemonCode` and every `read` answers `present:false` with a 0 token.
+//
+// WHICH OF THOSE TWO ACTUALLY CLOSES THE DOOR IS WORTH STATING EXACTLY, because the obvious reading is
+// wrong: `commit_override_write` (inspector_panel.cpp) never inspects `FieldState::present` — it
+// compares the RE-READ VALUE against the gesture's collision base — so an unreadable field is a DROP
+// only when that base was non-null. What makes the unbound path fail closed is the `attempt` refusal,
+// which fires FIRST (before any re-read) and lands as `Status::error`, keeping the caller's staged
+// gesture for a retry once the daemon is back. The residual worth knowing: a BOUND gateway whose
+// re-read is REFUSED answers a 0 token, and against a null collision base the engine reads that as
+// "unrelated change" and rebases — and a 0 expected hash is `no guard` by the seam's convention
+// (project_override_gateway.h states the same), so that one narrow path retries UNGUARDED. Closing it
+// needs an "unreadable" channel on `FieldState` itself, which is a seam change, not a gateway one.
 // Fail-closed is the only acceptable posture on a user-data write path.
 //
 // READ-YOUR-WRITES (05 §7) — WHERE THE BARRIER ACTUALLY IS. The design names an `--after-generation`

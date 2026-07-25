@@ -5,7 +5,7 @@
 // WHERE THIS SITS. The Shell is an ordinary client (D10/D18): the schema-driven field derivation
 // runs on the daemon (gui/panels/builders/, served by `editor.inspect`), and what arrives here is
 // the boundary-clean panel model AS DATA — plus the root scene's raw-byte CAS token, adopted as the
-// panel's base hash so a future wire write (e09's WireOverrideWriteGateway) guards on live state.
+// panel's base hash so the wire write (e09b-2's WireOverrideWriteGateway) guards on live state.
 // This file is deliberately the ONLY place that wire shape is interpreted; the parsers mirror
 // builders::inspector_to_wire and the feed tests link both halves.
 //
@@ -71,6 +71,19 @@ namespace inspector = gui::panels::inspector;
 // inverse). 0 for absent/garbage — which the panel treats as "no CAS guard", exactly the honest
 // state for an unknown file.
 [[nodiscard]] std::uint64_t parse_raw_hash(const std::string& text);
+
+// One WHOLE `editor.inspect` reply -> the panel model + its CAS token. Resolves the shared envelope
+// `data` level (wire_read.h), then THIS feed's own hop — prefer a nested `inspector` member over the
+// bare data — and reads the sibling `rawHash` from the data level. `raw_hash` is ALWAYS written (0
+// for absent/garbage), including when the model does not parse.
+//
+// Both consumers go through here — the feed's own `apply_result` AND the Shell's wire write gateway's
+// L-30 re-read — deliberately: the value a rebase-or-drop decision compares must be byte-identical to
+// the value the panel is showing, and a second hand-rolled hop is exactly how those two drift. Which
+// key to look for is policy, so it stays in this file (see the WHERE THIS SITS note above), not in
+// the TU-shared wire_read.h.
+[[nodiscard]] std::optional<inspector::InspectorModel> parse_inspect_reply(const contract::Json& reply,
+                                                                          std::uint64_t& raw_hash);
 
 // ---------------------------------------------------------------- the node-id -> field mapping
 

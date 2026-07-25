@@ -406,8 +406,11 @@ void a_non_cas_refusal_is_an_error_not_a_mismatch()
     CHECK(attempt.code == "scope.denied"); // the daemon's code VERBATIM (R-CLI-008 exit classes)
 }
 
-// The FAIL-CLOSED posture: with no daemon bound nothing crosses the wire, the refusal is named, and
-// a re-read reports `present:false` — which the L-30 engine reads as "unverifiable" and drops on.
+// The FAIL-CLOSED posture: with no daemon bound nothing crosses the wire, the refusal is named, and a
+// re-read reports `present:false` with a 0 token. (What closes the door is the `attempt` refusal, not
+// the re-read: `commit_override_write` compares the re-read VALUE against the collision base and never
+// looks at `present` — see wire_override_gateway.h § LIFETIME. The engine never reaches the re-read
+// here at all, which the L-30 case below asserts.)
 void an_unbound_gateway_refuses_and_writes_nothing()
 {
     WireOverrideWriteGateway gateway;
@@ -519,9 +522,11 @@ void a_concurrent_write_to_the_same_field_drops_loudly()
     CHECK(wired.channel->requests_for("edit").size() == 1);
 }
 
-// With NO daemon the re-read cannot verify the field, so the engine drops rather than overwriting —
-// the fail-closed posture stated at the gateway's `read()`.
-void a_lost_daemon_mid_gesture_drops_rather_than_overwrites()
+// With NO daemon the FIRST attempt is refused, so the gesture never reaches the L-30 re-read at all —
+// the fail-closed posture stated at the gateway's `read()`. Note this is an `error`, NOT a `dropped`:
+// a drop CONSUMES the gesture (the field moved under it), while an error KEEPS it, which is the right
+// outcome for "the daemon is momentarily gone" and is what the assertions below pin.
+void a_lost_daemon_mid_gesture_refuses_rather_than_overwrites()
 {
     WireOverrideWriteGateway gateway; // never bound
     const inspector::CommitResult result =
@@ -549,6 +554,6 @@ int main()
     the_reread_resolves_the_field_and_the_cas_token();
     a_concurrent_write_elsewhere_rebases();
     a_concurrent_write_to_the_same_field_drops_loudly();
-    a_lost_daemon_mid_gesture_drops_rather_than_overwrites();
+    a_lost_daemon_mid_gesture_refuses_rather_than_overwrites();
     PANELS_TEST_MAIN_END();
 }

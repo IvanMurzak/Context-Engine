@@ -58,9 +58,12 @@ set(_context_editor_panels_tests
     test_wire_override_gateway # e09b-2: the `edit` wire shape, the CAS refusal, L-30 over the seam
     test_builtin_panels)   # the composition root: what binds, what stays unhosted, end to end
 
-# The two e05d3 feed tests ALSO link context_gui_panel_builders: the round-trip half builds models
-# with the REAL kernel-side builders + wire serializers and asserts the feed parsers reconstruct
-# them (tests are not on any audited closure — reaching compose there is exactly the split's point).
+# Every test here ALSO links context_gui_panel_builders, and three of them NEED it: the two e05d3
+# feed round-trips build models with the REAL kernel-side builders + wire serializers and assert the
+# feed parsers reconstruct them, and the e09b-2 gateway suite pins its two MIRRORED vocabularies
+# (compose::write_target_token / builders::join_identity) against the authorities themselves — which
+# it can only do by linking them. Tests are not on any audited closure, so reaching compose here is
+# exactly the split's point; `context_editor`'s own closure is untouched.
 foreach(_t IN LISTS _context_editor_panels_tests)
     add_executable(context_editor_panels_${_t} tests/${_t}.cpp)
     target_link_libraries(context_editor_panels_${_t}

@@ -19,6 +19,7 @@
 #include "context/editor/client/wire.h"
 #include "context/editor/contract/json.h"
 
+#include <cassert>
 #include <deque>
 #include <functional>
 #include <map>
@@ -84,9 +85,15 @@ public:
     // `cas.mismatch` and a RETRY against the fresh token that SUCCEEDS. Under a permanent failure the
     // retry is refused too, so the engine drops — and a rebase that is never retried is
     // indistinguishable from a drop, which is exactly the distinction the L-30 policy exists to make.
+    //
+    // `times` MUST be >= 1. The retire check is `remaining > 0`, so a non-positive count is the
+    // PERMANENT sentinel `fail_method` installs — i.e. `fail_method_times(m, 0, …)` would fail every
+    // call forever rather than none, the opposite of what the name reads like. Asserted rather than
+    // clamped so the caller's intent is corrected at the call site.
     void fail_method_times(const std::string& method, int times, std::string message,
                            std::string catalog_code = {}, Json detail = {})
     {
+        assert(times >= 1);
         errors_[method] = {std::move(message), std::move(catalog_code), std::move(detail), times};
     }
 

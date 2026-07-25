@@ -151,6 +151,21 @@ std::uint64_t parse_raw_hash(const std::string& text)
     return serializer::parse_hash_string(text).value_or(0);
 }
 
+std::optional<inspector::InspectorModel> parse_inspect_reply(const contract::Json& reply,
+                                                             std::uint64_t& raw_hash)
+{
+    // Envelope tolerance (mirrors SceneTreeFeed::apply_result): the rawHash rides the DATA level,
+    // sibling of `inspector`, so resolve data first (the shared hop — wire_read.h) and read both
+    // from there. Written BEFORE the model parse so a reply whose model does not resolve still
+    // reports the file's token.
+    const contract::Json& data = envelope_data(reply);
+    raw_hash = parse_raw_hash(read_string(data, "rawHash"));
+
+    // The `inspector` hop is this feed's own, because which key to look for is policy.
+    const contract::Json& nested = data.at("inspector");
+    return parse_inspector(nested.is_object() ? nested : data);
+}
+
 std::optional<std::string> inspector_widget_pointer(const std::string& node_id)
 {
     constexpr std::string_view prefix = kInspectorWidgetPrefix;
@@ -208,7 +223,11 @@ void InspectorFeed::on_commit(const inspector::CommitResult& result)
     const std::string& identity = panel_.model().identity;
     if (!identity.empty())
     {
-        pending_ = identity;
+        // Through the NAMED seam, not a second `pending_ = ...`: `request` is the one place that
+        // documents the replace-a-pending-fetch rule. (It replaces unconditionally, so a selection
+        // that moved between the gesture and this commit is re-armed onto the OLD identity and its
+        // fetch waits for the next pump-triggering change — narrow, and noted in the PR body.)
+        request(identity);
         ++rereads_armed_;
     }
 }
@@ -227,23 +246,13 @@ void InspectorFeed::request_clear()
 
 bool InspectorFeed::apply_result(const contract::Json& reply)
 {
-    // Envelope tolerance (mirrors SceneTreeFeed::apply_result): the rawHash rides the DATA level,
-    // sibling of `inspector`, so resolve data first (the shared hop — wire_read.h) and read both
-    // from there. The `inspector` hop below is this feed's own, because which key to look for is
-    // policy.
-    const contract::Json* data = &envelope_data(reply);
-    const contract::Json* wire = data;
-    const contract::Json& nested_inspector = data->at("inspector");
-    if (nested_inspector.is_object())
-    {
-        wire = &nested_inspector;
-    }
-    std::optional<inspector::InspectorModel> model = parse_inspector(*wire);
+    std::uint64_t raw_hash = 0;
+    std::optional<inspector::InspectorModel> model = parse_inspect_reply(reply, raw_hash);
     if (!model.has_value())
     {
         return false;
     }
-    panel_.set_model(std::move(*model), parse_raw_hash(read_string(*data, "rawHash")));
+    panel_.set_model(std::move(*model), raw_hash);
     ++results_applied_;
     host_.touch(panel_id_);
     return true;

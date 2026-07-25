@@ -196,8 +196,10 @@ inspector::FieldState WireOverrideWriteGateway::read(const std::string& root_sce
     if (client_ == nullptr)
     {
         // present:false + a 0 token. The L-30 engine compares this against the gesture's collision
-        // base and — unless the base was itself null — DROPS. Fail-closed by construction: a field
-        // we cannot read is a field we must not overwrite.
+        // base and — unless the base was itself null — DROPS. With NO client the engine never even
+        // reaches here: `attempt` refused first, so the gesture ends as `Status::error` with the
+        // staged edit kept (header § LIFETIME states which of the two closes the door, and the one
+        // residual). A field we cannot read is a field we must not overwrite.
         return out;
     }
 
@@ -217,19 +219,19 @@ inspector::FieldState WireOverrideWriteGateway::read(const std::string& root_sce
         return out;
     }
 
-    // The SAME hop + the SAME parser the Inspector feed hydrates through — deliberately, so the
-    // value this gateway compares against is byte-identical to the value the panel is showing. A
-    // second hand-rolled reader here is exactly how a rebase decision drifts from what the human saw.
-    const contract::Json& data = envelope_data(*reply);
+    // The SAME hop + the SAME parser the Inspector feed hydrates through — literally the same
+    // function (`parse_inspect_reply`), so the value this gateway compares against is byte-identical
+    // to the value the panel is showing. A second hand-rolled reader here is exactly how a rebase
+    // decision drifts from what the human saw.
+    //
     // `editor.inspect`'s rawHash is the ROOT SCENE file's current raw-byte hash — the outermost
-    // target's CAS token, which is what FieldState documents. (`template` / `at-instance` writes
-    // resolve a DIFFERENT file and no read verb reports a token for those; such a retarget takes its
-    // token from the first refusal's payload instead — kernel_server states the same caveat.)
-    out.raw_hash = parse_raw_hash(read_string(data, "rawHash"));
-
-    const contract::Json& nested = data.at("inspector");
-    const std::optional<inspector::InspectorModel> model =
-        parse_inspector(nested.is_object() ? nested : data);
+    // target's CAS token, which is what FieldState documents. A `template` / `at-instance` write
+    // resolves a DIFFERENT file and no read verb reports a token for it, and the L-30 engine rebases
+    // on THIS token unconditionally (inspector_panel.cpp discards the refusal's own `raw_hash`) — so
+    // a retarget would guard the wrong file. Only `outermost` reaches here today, because that is the
+    // one target `InspectorPanel::commit` sends; carrying the resolved target's token is a FieldState
+    // seam change, tracked with the read-refusal residual in this file's header.
+    const std::optional<inspector::InspectorModel> model = parse_inspect_reply(*reply, out.raw_hash);
     if (!model.has_value() || !model->has_entity)
     {
         return out; // present:false — the entity no longer resolves; fail closed.
