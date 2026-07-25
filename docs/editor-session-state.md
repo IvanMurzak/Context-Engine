@@ -141,6 +141,24 @@ The daemon **still boots and serves**. Refusing to start over a convenience file
 worse than forgetting a selection. `editor.session_state_invalid` is its own catalog code, never the
 R-QA-005 `session.state_invalid` of the `session *` file-harness family (C-F4).
 
+### The OTHER half of the split recovers identically (M9 e09d)
+
+`.editor/editor-state.json` — the **Shell's** file (dock layout, window placement, panel state blobs,
+the e09c session undo journal, the e14b presence marker) — is disposable by the same contract, and
+since e09d it recovers the same way: quarantined to `.editor/editor-state.corrupt[-N].json`, replaced
+by defaults, announced under its OWN catalog code `editor.editor_state_invalid` on **stderr** and as a
+`diagnostics` payload in the **Problems panel** (the Shell's equivalent of the daemon's event ring —
+see `shell.md` § 14). It never blocks the boot either.
+
+Two codes, not one, deliberately: a recovery diagnostic that cannot say WHICH session file was reset
+has discarded the only distinction the ownership split created. And the messages differ too — the
+Shell's names the window layout and undo history, because that is what the user actually lost.
+
+**The split itself is mechanised, not documented**: `tools/check_session_ownership.py` (ctest
+`editor-shell-session-ownership`) fails a tree where either file gains a second writer, where an
+owner moves out of its process's subtree, or where the in-process override-write gateway is named
+from product code. See `shell.md` § 14.
+
 ## Driving it from the CLI
 
 `context attach` is a second client like any other:

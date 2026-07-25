@@ -242,6 +242,13 @@ std::filesystem::path editor_state_path(const std::filesystem::path& project_roo
     return project_root / ".editor" / "editor-state.json";
 }
 
+std::filesystem::path editor_state_quarantine_path(const std::filesystem::path& project_root, int n)
+{
+    const std::string name = n == 0 ? "editor-state.corrupt.json"
+                                    : "editor-state.corrupt-" + std::to_string(n) + ".json";
+    return editor_state_path(project_root).parent_path() / name;
+}
+
 EditorStateStore::EditorStateStore(std::filesystem::path project_root, std::uint64_t debounce_us)
     : project_root_(std::move(project_root)), path_(editor_state_path(project_root_)),
       debounce_us_(debounce_us)
@@ -255,32 +262,129 @@ const EditorState& EditorStateStore::load(bool* loaded_existing)
         *loaded_existing = false;
     }
     schema_diagnostic_.clear();
-    std::ifstream in(path_, std::ios::binary);
-    if (!in)
+    restore_report_ = EditorStateRestoreReport{};
+    restore_report_.path = path_.string();
+
+    std::error_code exists_ec;
+    if (!std::filesystem::exists(path_, exists_ec))
     {
+        // FRESH: a first boot on this project. Not an error, and NOT something to announce — the
+        // absence is the honest state, and a diagnostic for it would teach a reader to ignore the
+        // one that matters.
         state_ = EditorState{};
         return state_;
     }
-    std::ostringstream buffer;
-    buffer << in.rdbuf();
-    try
+
+    // From here the file EXISTS, so every remaining path either adopts it or quarantines it. `detail`
+    // accumulates the human-readable reason the quarantine happened; `ok` gates it.
+    std::string detail;
+    bool ok = false;
+    std::ifstream in(path_, std::ios::binary);
+    if (!in)
     {
-        state_ = EditorState::from_json(Json::parse(buffer.str()), &schema_diagnostic_);
-        // A SCHEMA MISMATCH (M9 e10d, T1) is NOT a successful load: from_json returned the null
-        // state and reported why. `loaded_existing` stays false so a caller does not restore the
-        // (empty) layout as if it were the user's, and `schema_diagnostic()` carries the reason so
-        // the loss is REPORTED, never silent. An ordinary versioned/legacy document (empty
-        // diagnostic) loaded normally.
-        if (schema_diagnostic_.empty() && loaded_existing != nullptr)
+        // Present but unopenable (a permission bit, a lock, a directory where a file should be). It
+        // used to be indistinguishable from "fresh" here, which meant the user's layout vanished
+        // with no trace at all.
+        detail = "the editor state file exists but could not be opened for reading";
+    }
+    else
+    {
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        const std::string text = buffer.str();
+        if (text.empty())
+        {
+            detail = "the editor state file is empty";
+        }
+        else
+        {
+            try
+            {
+                const Json doc = Json::parse(text);
+                if (!doc.is_object())
+                {
+                    // Well-formed JSON that is not a document — a top-level array or scalar.
+                    // `from_json` is deliberately tolerant of MISSING/odd members but has no
+                    // meaningful reading of a non-object, and silently taking defaults from one
+                    // would report "restored" for a file we understood nothing of. (The daemon's
+                    // `apply_json` draws the same line for `.editor/session.json`.)
+                    detail = "the editor state file parsed but is not a JSON object";
+                }
+                else
+                {
+                    EditorState parsed = EditorState::from_json(doc, &schema_diagnostic_);
+                    if (schema_diagnostic_.empty())
+                    {
+                        state_ = std::move(parsed);
+                        ok = true;
+                    }
+                    else
+                    {
+                        // A FOREIGN (typically FUTURE) build's document — M9 e10d refused to
+                        // reinterpret it, and e09d moves it aside rather than leaving it in place.
+                        //
+                        // WHY QUARANTINE RATHER THAN LEAVE IT: leaving it is not preservation. The
+                        // store keeps running on defaults and the FIRST dirty flush replaces the
+                        // file, so the newer build's state is destroyed either way — the only
+                        // question is whether a copy survives. It does now.
+                        detail = schema_diagnostic_;
+                    }
+                }
+            }
+            catch (const std::exception& e)
+            {
+                detail = std::string("the editor state file is not well-formed JSON: ") + e.what();
+            }
+        }
+    }
+
+    if (ok)
+    {
+        restore_report_.outcome = EditorStateRestoreOutcome::restored;
+        if (loaded_existing != nullptr)
         {
             *loaded_existing = true;
         }
+        return state_;
     }
-    catch (const std::exception&)
+
+    // CORRUPT (07 §6): move it aside so the next write starts from a clean slate, load defaults, and
+    // hand the caller a report to announce LOUDLY. `loaded_existing` stays false, which is how a
+    // caller distinguishes "fresh" from "salvaged". Recovery NEVER blocks the boot — an editor that
+    // refused to start over a session-convenience file would be strictly worse than one that forgets
+    // a layout. The stream is closed before the rename: on Windows a rename over (or of) a file with
+    // an open handle fails, which would turn every quarantine on this host into the failure branch.
+    in.close();
+    state_ = EditorState{};
+
+    std::filesystem::path quarantine = editor_state_quarantine_path(project_root_);
+    // Pick a FREE quarantine name, bounded so a pathological directory cannot spin; the last
+    // candidate is overwritten. Same convention (and same bound) as the daemon's session half.
+    for (int n = 0; n < 64; ++n)
     {
-        // A malformed document degrades to defaults rather than refusing to boot — see the header.
-        // `loaded_existing` stays false, which is how a caller distinguishes "fresh" from "salvaged".
-        state_ = EditorState{};
+        std::error_code probe_ec;
+        const std::filesystem::path candidate = editor_state_quarantine_path(project_root_, n);
+        if (!std::filesystem::exists(candidate, probe_ec))
+        {
+            quarantine = candidate;
+            break;
+        }
+    }
+
+    std::error_code rename_ec;
+    std::filesystem::rename(path_, quarantine, rename_ec);
+    restore_report_.outcome = EditorStateRestoreOutcome::recovered;
+    restore_report_.detail = detail;
+    if (rename_ec)
+    {
+        // Could not move it aside — say so instead of claiming a quarantine that did not happen.
+        // The file stays put; the next load quarantines it again (still non-blocking).
+        restore_report_.detail += "; the corrupt file could NOT be renamed aside (" +
+                                  rename_ec.message() + ") and remains at " + restore_report_.path;
+    }
+    else
+    {
+        restore_report_.quarantined_path = quarantine.string();
     }
     return state_;
 }

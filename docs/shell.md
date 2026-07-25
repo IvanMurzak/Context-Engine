@@ -472,6 +472,7 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
 | `editor-shell-test_undo_feed` | e09c: the session undo host — a checkpoint recorded and replayed through the BOUND gateway, a co-writer's field DROPPED loudly on undo AND redo (R-HUX-001), a refused replay KEEPING the step while dirtying and touching nothing, the read-your-replays flag raised once then consumed, the provider's honest `dispatched` verdict, and the DoD line: the journal round-trips through a REAL `EditorStateStore` writing a REAL `.editor/editor-state.json`, survives a full teardown/rebuild, and Ctrl+Z still reverts the pre-restart edit |
 | `editor-shell-test_user_config` | e06d: the per-user config store - the total reader (absent / malformed / non-object / oversized), the merge-preserving read-modify-write (a member from a FUTURE build survives), the recents-and-theme co-existence regression, the CLOSED settable vocabulary (`config.unknown_key` / `config.bad_value` / `config.write_failed`), unique staging names, the generation watch (identical rewrite and cosmetic reformat are NOT changes), and the full `config.*` binding over a real router |
 | `editor-shell-config-writers` | e06d: the C-F14 SINGLE-WRITER source gate - exactly one TU writes `~/.context/config.json`, editor-core carries no client-side persistence API, and one module names `config.set` (`tools/check_config_writers.py`) |
+| `editor-shell-session-ownership` | e09d: the C-F3 SESSION-FILE OWNERSHIP source gate - one C++ writer per session file, each owner in its OWN process's subtree, and the in-process override-write gateway named/linked only by tests (`tools/check_session_ownership.py`) - see § 14 |
 | `editor-cef-smoke-shell` | The LIVE CEF half: a real windowless browser through the real integrated pump, its `OnPaint` frames composited + presented, input round-tripped, a live resize repainted (`editor-cef-smoke` job, Windows/Linux) |
 | `editor-shell-test_window_registry` | e10a: the registry — window 0 primary, ids minted in order and NEVER reused, all four create-failure classes reported once with the source window (and the registry still usable after four in a row), the live-window cap, per-window `origin` reporting, and the CE #319 lifetime rule in both directions: a destroyed window's browser dies NOW while its session is retired until the manager does, across 25 create/destroy cycles and across `shutdown()` with windows still open |
 | `editor-cef-smoke-shell-multiwindow` | e10a, the LIVE half a fake cannot reach: a SECOND real CEF browser booting its OWN editor-core instance (two DIFFERENT round-tripped handshake nonces), a REAL renderer `window.open` refused by `OnBeforePopup` with NO browser created, and a MID-PROCESS destroy followed by another create (`editor-cef-smoke` job, Windows/Linux) |
@@ -576,6 +577,79 @@ smokes' strict `bridge.refused() == 0` invariant even though the renderer degrad
 exact regression e06d shipped with its config surface. The smokes bind neither collaborator, so the
 surface honestly reports "no update channel" and a live link: no network call, and no banner painted
 over the surface whose per-pixel coverage those legs assert.
+
+## 14. The session-file ownership split — `.editor/editor-state.json` (M9 e09d, C-F3)
+
+Two session files sit side by side in a project's `.editor/` directory with two DIFFERENT owners
+(design 03 §1, an explicit refinement of L-20's file mapping):
+
+| file | owner | contents |
+|---|---|---|
+| `.editor/session.json` | the **daemon** | selection, cameras, play state (`editor-session-state.md`) |
+| `.editor/editor-state.json` | the **Shell** | dock layout, window placement, panel state blobs, the e09c session undo journal, the e14b presence marker |
+
+**One writer per file is the whole point.** Two processes writing one document is a torn write nobody
+notices until a user's window layout — or, since e09c, their **undo history** — comes back mangled.
+Splitting by file means neither owner ever has to coordinate with the other.
+
+### The rule is MECHANISED, not documented
+
+This is precisely the class of invariant that gets asserted in a header comment and never checked: a
+runtime test passes just as happily against a tree that has grown a second writer, and reproducing the
+real failure needs two processes racing. So `tools/check_session_ownership.py` (ctest
+`editor-shell-session-ownership`, the same tier as § 12's config gate) scans the sources for what a
+second writer would have to make false:
+
+1. exactly **one C++ TU writes each file** (`editor_session_state.cpp` / `editor_state.cpp`);
+2. each owner lives in its **own process's subtree** — one writer per file is not enough, because
+   moving the Shell's writer into the daemon satisfies that and kills the split;
+3. the in-process compose/filesync override-write gateway (`ProjectOverrideWriteGateway`) is **named**
+   by no product source and **linked** by no Shell target — the live editor commits over the daemon's
+   `edit` RPC (e09b-2's `WireOverrideWriteGateway`), and the in-process one is the injected T1 mock's
+   real-disk sibling. The `context_assert_shell_boundary` FORBIDDEN set already forbids its
+   `context_compose`/`context_filesync` dependencies **transitively**; this names the subject;
+4. plus an **anti-vacuity half** — each declared sole writer must still name its document and still
+   contain a write, because every prohibition above is trivially true of a tree that deleted the thing
+   it protects.
+
+A file that legitimately READS a document it does not own while writing its own sibling artifact —
+`arbitration.cpp`, which reads the presence marker and writes `.editor/focus-request` — is listed as a
+DOCUMENTED READER with its reason, and re-checked on every run: the entry is reported stale if it stops
+naming the document, and reported as a violation if it starts naming the owner's store.
+
+**It was verified by PLANTING, not by reading the pattern** (`conventions.md` § "Authoring a
+SOURCE-SCAN gate"), and the round paid for itself: 21 planted shapes plus 5 green controls found FIVE
+real holes in the first revision — three ordinary filename spellings (`".editor/editor-state.json"` as
+one literal, a raw string literal, a Windows separator), an `#include <fstream>` counted as a write,
+and an anti-vacuity half satisfied by the writer's own helper name. Each is now a regression case in
+`tools/tests/test_check_session_ownership.py`.
+
+### Recovery is loud and non-blocking (07 §6)
+
+`editor-state.json` is session state, so a document that will not load must never block the boot — and
+must never be reset **silently** either. Before e09d it was: `EditorStateStore::load()` caught the
+parse error, took the defaults and said nothing, so a user lost their layout and undo history with no
+diagnostic and no bytes to recover from. Now an unusable document (unreadable, empty, malformed,
+not an object, or from a foreign `version`) is:
+
+1. renamed aside to `.editor/editor-state.corrupt.json` (`-1`, `-2`, … if taken — evidence is never
+   clobbered),
+2. replaced by defaults, with `load()` filling an `EditorStateRestoreReport`, and
+3. announced **loudly** by `editor_main.cpp`: a line on stderr *and* an `editor.editor_state_invalid`
+   diagnostic pushed into the **Problems panel** through `report_local_problem` — the same dispatch a
+   daemon diagnostic takes, because a second rendering path for "a problem" is how the two drift.
+
+A **foreign (future) `version` is quarantined too**, which looks wrong and is not: leaving it in place
+is not preservation. The store runs on defaults and the first dirty flush replaces the file, so the
+newer build's state is destroyed either way — quarantining is the only version where a copy survives.
+
+`editor.editor_state_invalid` is its own catalog code, never the daemon's
+`editor.session_state_invalid`: a recovery diagnostic that cannot say WHICH file was reset has thrown
+away the only distinction the split created.
+
+⚠ One thing to know if you add a Shell-local diagnostic: put the path in the payload's **`file`**
+member, not `pointer`. `ProblemsFeed`'s parser reads both, but only `file` is rendered and navigable,
+so a path in `pointer` is invisible in the panel.
 
 ## 9. Why the blocking smoke opens no window
 

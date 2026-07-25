@@ -650,5 +650,29 @@ int main()
         CHECK(find_code("session.state_invalid")->origin == "R-QA-005");
     }
 
+    // --- M9 e09d editor.editor_state_invalid (03 §1 / C-F3, design 07 §6) -----------------------
+    // The SHELL's half of the session-file split: the LOUD corrupt-recovery diagnostic for
+    // `.editor/editor-state.json`. Another additive-only row at the catalog tail. The string is the
+    // source-of-truth in shell::kEditorStateInvalidCode (editor_state.h).
+    {
+        const ErrorCode* invalid = find_code("editor.editor_state_invalid");
+        CHECK(invalid != nullptr);
+        CHECK(invalid->exit_code == 5);     // validation class, like its daemon sibling
+        CHECK(invalid->retriable == false); // deterministic — the same bytes re-fail
+        CHECK(invalid->origin == "R-BRIDGE-008");
+
+        // THE OWNERSHIP SPLIT, asserted at the diagnostic layer: the daemon's file and the Shell's
+        // file report under DIFFERENT codes carrying DIFFERENT messages. Collapsing them would make
+        // a recovery diagnostic unable to say which process reset which file — which is exactly the
+        // distinction C-F3 exists to create, so the two codes are pinned apart here rather than left
+        // to a future tidy-up that would look like a harmless de-duplication.
+        const ErrorCode* daemon_half = find_code("editor.session_state_invalid");
+        CHECK(daemon_half != nullptr);
+        CHECK(invalid->code != daemon_half->code);
+        CHECK(invalid->message != daemon_half->message);
+        CHECK(invalid->message.find("editor-state.json") != std::string::npos);
+        CHECK(daemon_half->message.find("session.json") != std::string::npos);
+    }
+
     CONTRACT_TEST_MAIN_END();
 }

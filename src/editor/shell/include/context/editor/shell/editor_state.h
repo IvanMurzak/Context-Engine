@@ -25,6 +25,16 @@
 // deliberately: the Shell is an ORDINARY CLIENT (D10) and links the published client surface only.
 // Pulling in context_filesync for twenty lines of rename would drag a kernel-internal module across
 // the boundary the `editor-boundary` CI job exists to defend.
+//
+// A third property since M9 e09d:
+//
+//   * DISPOSABLE BY CONTRACT, LOUDLY (07 §6). This file is session state, so a document that will
+//     not load must never block the boot — but it must never be reset SILENTLY either. It is renamed
+//     ASIDE to `.editor/editor-state.corrupt[-N].json`, defaults are loaded, and `load()` hands the
+//     caller a report to announce. The daemon does exactly this for its half of the split
+//     (`editorkernel::restore_session_state` -> `.editor/session.corrupt[-N].json`, announced on the
+//     `diagnostics` topic + stderr under `editor.session_state_invalid`); this is the Shell's half,
+//     and the two files now recover the same way because they are the same KIND of file.
 
 #pragma once
 
@@ -126,6 +136,42 @@ struct EditorState
 // The path this store owns, relative to a project root: `<project>/.editor/editor-state.json`.
 [[nodiscard]] std::filesystem::path editor_state_path(const std::filesystem::path& project_root);
 
+// Where a corrupt document is moved aside to (M9 e09d, 07 §6): `editor-state.corrupt.json`, then
+// `-1`, `-2`, … next to the file it replaced. Exposed so a test — and a human reading a bug report —
+// can name the quarantine without re-deriving the convention. `n == 0` is the unsuffixed name.
+[[nodiscard]] std::filesystem::path editor_state_quarantine_path(
+    const std::filesystem::path& project_root, int n = 0);
+
+// The LOUD corrupt-recovery diagnostic code for `.editor/editor-state.json` (07 §6, M9 e09d). Owned
+// HERE as a string constant — the promote-a-local-string pattern of
+// editorkernel::kEditorSessionStateInvalidCode / bridge::kAttachDeniedCode — and registered with the
+// SAME string by src/editor/contract/src/error_catalog.cpp (append-only tail), asserted by the
+// catalog test. Deliberately its OWN code, NOT the daemon's `editor.session_state_invalid`: the two
+// files have two different owners, and a reader who cannot tell WHICH session file was reset from
+// the diagnostic has lost the only thing the ownership split was for.
+inline constexpr const char* kEditorStateInvalidCode = "editor.editor_state_invalid";
+
+// How a `load()` went. `recovered` is the LOUD path (07 §6): the file existed but was
+// unreadable / malformed / structurally wrong / written by a foreign build, so it was renamed aside
+// and the defaults were loaded.
+enum class EditorStateRestoreOutcome
+{
+    fresh,     // no file on disk — a first boot on this project (not an error)
+    restored,  // the document parsed and was adopted
+    recovered, // the document was unusable: quarantined, defaults loaded (report it LOUDLY)
+};
+
+// What `load()` reports, member-for-member the shape the daemon's `SessionRestoreReport` carries for
+// `.editor/session.json` — deliberately, so the two halves of the split are announced identically.
+struct EditorStateRestoreReport
+{
+    EditorStateRestoreOutcome outcome = EditorStateRestoreOutcome::fresh;
+    std::string path;             // the file the store looked at
+    std::string quarantined_path; // where a corrupt file was moved (empty unless `recovered`, and
+                                  // ALSO empty when the rename itself failed — see `detail`)
+    std::string detail;           // human-readable reason (empty unless `recovered`)
+};
+
 // The debounced, crash-safe writer. Times are microseconds on a monotonic clock the CALLER supplies.
 class EditorStateStore
 {
@@ -144,6 +190,11 @@ public:
     // build's `version`) also loads a defaulted document with `*loaded_existing == false`, but is
     // distinguished by a non-empty `schema_diagnostic()` (M9 e10d, T1): the layout is not lost
     // SILENTLY — the reason is reported and the state is null rather than reinterpreted.
+    //
+    // ⚠ NEVER THROWS AND NEVER BLOCKS (07 §6). Since M9 e09d a document that cannot be adopted is
+    // also moved ASIDE before the defaults are taken — see `restore_report()`. The quarantine is why
+    // "reported, not silent" is more than a log line: a user who lost their layout still HAS the
+    // bytes, and a maintainer reading the bug report can look at exactly what failed.
     const EditorState& load(bool* loaded_existing = nullptr);
 
     [[nodiscard]] const EditorState& state() const { return state_; }
@@ -192,6 +243,10 @@ public:
     // to reinterpret it" signal, so a caller (and the live restore report) can surface it distinctly
     // from an ordinary fresh boot.
     [[nodiscard]] const std::string& schema_diagnostic() const { return schema_diagnostic_; }
+    // How the last `load()` went (M9 e09d, 07 §6). `recovered` is the one the caller must ANNOUNCE:
+    // the user's layout and undo history were reset, and the reason plus the quarantine path are the
+    // only things that make that survivable. Defaults to `fresh` before the first load.
+    [[nodiscard]] const EditorStateRestoreReport& restore_report() const { return restore_report_; }
     [[nodiscard]] const std::filesystem::path& path() const { return path_; }
 
 private:
@@ -210,6 +265,7 @@ private:
     int write_count_ = 0;
     std::string last_error_;
     std::string schema_diagnostic_;
+    EditorStateRestoreReport restore_report_;
 };
 
 } // namespace context::editor::shell

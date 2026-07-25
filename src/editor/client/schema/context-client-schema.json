@@ -2591,6 +2591,13 @@
       "retriable": false,
       "exitCode": 5,
       "origin": "R-BRIDGE-008"
+    },
+    {
+      "code": "editor.editor_state_invalid",
+      "message": "The editor's own session file (.editor/editor-state.json) is malformed, unreadable or an unsupported version; it was renamed aside and the window layout, panel state and session undo history were reset to defaults.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-BRIDGE-008"
     }
   ],
   "largeResult": {

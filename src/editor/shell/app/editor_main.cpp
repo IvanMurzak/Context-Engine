@@ -469,6 +469,31 @@ int main(int argc, char** argv)
     {
         std::fprintf(stderr, "context_editor: restored the previous session's undo history\n");
     }
+    // e09d: ANNOUNCE a corrupt-and-reset `.editor/editor-state.json` (07 §6 — recovery is never
+    // silent and never blocking). `WindowManager`'s constructor already loaded the file; this is the
+    // first point where the Problems panel exists to render the diagnostic in, which is why the
+    // report is carried on the store rather than announced at load time.
+    //
+    // BOTH channels, for the reason the daemon publishes both: stderr so an operator sees it with no
+    // UI attached, and the Problems panel so the human whose layout and undo history just vanished is
+    // told by the editor itself rather than by a terminal they may never look at.
+    {
+        const shell::EditorStateRestoreReport& restore = manager.state_store().restore_report();
+        if (restore.outcome == shell::EditorStateRestoreOutcome::recovered)
+        {
+            const std::string message =
+                "the editor's own session file was unreadable and has been reset to defaults "
+                "(window layout, panel state and session undo history): " +
+                restore.detail +
+                (restore.quarantined_path.empty()
+                     ? std::string()
+                     : "; the corrupt file was moved aside to " + restore.quarantined_path);
+            std::fprintf(stderr, "[editor-state] %s\n", message.c_str());
+            std::fflush(stderr);
+            (void)shell::panels::report_local_problem(builtin, shell::kEditorStateInvalidCode,
+                                                      message, restore.path);
+        }
+    }
     if (!panel_host.install(bridge))
     {
         std::fprintf(stderr, "context_editor: could not install the panel bridge surface\n");

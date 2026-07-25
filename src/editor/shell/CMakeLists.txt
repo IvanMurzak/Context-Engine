@@ -462,6 +462,30 @@ add_test(NAME editor-shell-config-writers
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_config_writers.py"
             --repo-root "${CMAKE_SOURCE_DIR}/..")
 
+# --- the C-F3 SESSION-FILE OWNERSHIP gate (M9 e09d, design 03 §1 / 07 §6) ------------------------
+# The SAME source-scan tier as the config-writers gate above, for the same reason one step further
+# out: `.editor/session.json` is the DAEMON's and `.editor/editor-state.json` is the SHELL's, and a
+# second writer of either is a torn write that needs TWO PROCESSES RACING to be observable at all —
+# so no runtime test in this repo can fail on it, however many are written. The scan answers the
+# questions a second writer would have to make false (one C++ writer per file; each owner in its own
+# process's subtree; the in-process compose/filesync override-write gateway named only by tests) plus
+# an anti-vacuity half, because every one of those prohibitions is trivially satisfied by a tree that
+# deleted the thing it protects.
+#
+# Proven NON-VACUOUS by planting (conventions.md § "Authoring a SOURCE-SCAN gate"): 21 shapes spanning
+# the write-spelling axis (including the six C++ spellings that defeated e06d's equivalent gate), the
+# file-NAME spelling axis, the cross-process direction, the gateway, and the anchors themselves, plus
+# four green controls. The round found FIVE real gaps in the first revision — three ordinary filename
+# spellings (`".editor/editor-state.json"` as one literal, a raw string literal, a Windows separator)
+# and two ways the anti-vacuity half reported a writer that no longer wrote. Each is now a regression
+# case in tools/tests/test_check_session_ownership.py (the python-tests job).
+#
+# Registered in the non-gate `editor-shell-` family, so the build job's general ctest step runs it on
+# all three OS legs with no ci.yml --target bookkeeping.
+add_test(NAME editor-shell-session-ownership
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_session_ownership.py"
+            --repo-root "${CMAKE_SOURCE_DIR}/..")
+
 # --- the e14d update-check PRIVACY gate (08 threat row: no identifiers, no telemetry) -------------
 # The SAME source-scan tier as the two lints above, and here for the sharpest version of their
 # reason: the C++ suite (editor-shell-test_banners) can prove the request VALUE carries no

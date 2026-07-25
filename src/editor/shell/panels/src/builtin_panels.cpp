@@ -72,6 +72,28 @@ bool apply_problems_event(ProblemsFeed& feed, const std::string& topic, const co
     return feed.apply_event(topic, payload, generation);
 }
 
+bool report_local_problem(BuiltinPanels& panels, const std::string& code, const std::string& message,
+                          const std::string& file)
+{
+    if (panels.problems == nullptr)
+    {
+        return false; // no Problems feed in this build — see the header on why that is not fatal
+    }
+    contract::Json payload = contract::Json::object();
+    payload.set("code", contract::Json(code));
+    payload.set("message", contract::Json(message));
+    if (!file.empty())
+    {
+        // `file`, NOT `pointer` — see the header. The parser reads both, but only `file` is rendered
+        // and navigable, so a path in `pointer` is a path nobody in the GUI can see.
+        payload.set("file", contract::Json(file));
+    }
+    // Generation 0: this diagnostic is not derived from a world generation at all (it is a boot-time
+    // fact about a file on disk), and 0 is the same stamp the Shell already uses for its own
+    // snapshot/event dispatch when it has no envelope generation to quote.
+    return apply_problems_event(*panels.problems, kDiagnosticsTopic, payload, 0);
+}
+
 bool apply_scenetree_event(SceneTreeFeed& feed, const std::string& topic,
                            const contract::Json& payload, std::uint64_t generation)
 {

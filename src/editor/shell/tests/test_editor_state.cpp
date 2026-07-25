@@ -1,5 +1,7 @@
 // `.editor/editor-state.json` (03 §1): the round-trip, the debounce, the crash-safe atomic replace,
-// the no-op-on-identical rule, the degrade on a malformed document, and the retry after a failed write.
+// the no-op-on-identical rule, the degrade on a malformed document, the retry after a failed write,
+// and — M9 e09d, design 07 §6 — the LOUD, non-blocking corrupt recovery (quarantine aside + defaults
+// + a report), which is the half of "disposable by contract" that a silent reset would fake.
 
 #include "context/editor/shell/editor_state.h"
 
@@ -565,6 +567,214 @@ void test_presence_marker_is_written_by_the_shell_and_read_back(void)
     shelltest::cleanup(root);
 }
 
+// ------------------------------------------- e09d: LOUD, non-blocking corrupt recovery (07 §6, T1)
+
+// One helper for the shape every recovery case asserts, so a new case cannot forget half of it: the
+// original file is GONE from its own path, its EXACT bytes are at the quarantine, the state is back
+// to defaults, and the report says `recovered` with a reason.
+void check_recovered(EditorStateStore& store, const fs::path& root, const std::string& original,
+                     const fs::path& expected_quarantine)
+{
+    bool loaded = true;
+    store.load(&loaded);
+    CHECK(!loaded); // a recovery is NOT a successful load of the user's state
+    CHECK(store.state().windows.empty());
+    CHECK(store.state().layout.is_null());
+
+    const EditorStateRestoreReport& report = store.restore_report();
+    CHECK(report.outcome == EditorStateRestoreOutcome::recovered);
+    CHECK(!report.detail.empty()); // LOUD means it can say WHY, not just that it happened
+    CHECK(report.path == editor_state_path(root).string());
+    CHECK(report.quarantined_path == expected_quarantine.string());
+
+    // The file is off its own path, so the next write starts clean...
+    CHECK(!fs::exists(editor_state_path(root)));
+    // ...and the bytes are still THERE. "Moved aside" is a salvage claim, and a test that only
+    // checked for a file at the quarantine path would pass against an empty one.
+    CHECK(fs::exists(expected_quarantine));
+    CHECK(read_file(expected_quarantine) == original);
+}
+
+void test_a_corrupt_document_is_quarantined_loudly_and_never_blocks()
+{
+    // THE e09d DoD LINE (07 §6): `.editor/editor-state.json` is disposable BY CONTRACT, so a
+    // document that will not load must never block the boot — and must never be reset SILENTLY
+    // either. Before e09d the malformed path did exactly that: caught the parse error, took the
+    // defaults, and said nothing, so a user lost their window layout AND (since e09c) their undo
+    // history with no diagnostic and no bytes to recover from.
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "recover");
+    const fs::path path = editor_state_path(root);
+    std::error_code ec;
+    fs::create_directories(path.parent_path(), ec);
+
+    const std::string original = "{\"windows\": [ {\"x\": 10,";
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << original;
+    }
+
+    EditorStateStore store(root, 0);
+    check_recovered(store, root, original, editor_state_quarantine_path(root, 0));
+    CHECK(store.restore_report().detail.find("not well-formed JSON") != std::string::npos);
+
+    // NON-BLOCKING, asserted end to end rather than by the absence of a throw: the very same store
+    // goes on to record a placement and write a good document, which a fresh store reads back. A
+    // recovery that left the store unusable would satisfy every assertion above and still be a bug.
+    store.set_placement(0, placement(7, 7, 700, 700), 0);
+    CHECK(store.flush_now());
+    CHECK(store.last_error().empty());
+    EditorStateStore reopened(root);
+    bool reloaded = false;
+    reopened.load(&reloaded);
+    CHECK(reloaded);
+    CHECK(reopened.restore_report().outcome == EditorStateRestoreOutcome::restored);
+    CHECK(reopened.state().windows.size() == 1u);
+    CHECK(reopened.state().windows[0].x == 7);
+
+    shelltest::cleanup(root);
+}
+
+void test_recovery_covers_every_unusable_document_shape()
+{
+    // Four shapes, all of them things a real disk hands back, and NONE of them a "malformed JSON"
+    // the parse would reject: an EMPTY file (an interrupted write, or a filesystem that created the
+    // entry and lost the contents), a top-level ARRAY and a top-level SCALAR (well-formed JSON that
+    // is not a document — `from_json` is deliberately tolerant of odd MEMBERS but has no reading of
+    // a non-object, so before this it reported a clean "restored" for a file it understood nothing
+    // of), and TRAILING GARBAGE after a good document.
+    const char* const shapes[] = {"", "[]", "\"just a string\"", "{\"version\": 1} trailing"};
+    int n = 0;
+    for (const char* shape : shapes)
+    {
+        const std::string tag = "shape" + std::to_string(n++);
+        const fs::path root = shelltest::make_temp_project("context-shell-state", tag.c_str());
+        const fs::path path = editor_state_path(root);
+        std::error_code ec;
+        fs::create_directories(path.parent_path(), ec);
+        {
+            std::ofstream out(path, std::ios::binary);
+            out << shape;
+        }
+        EditorStateStore store(root, 0);
+        check_recovered(store, root, shape, editor_state_quarantine_path(root, 0));
+        shelltest::cleanup(root);
+    }
+}
+
+void test_a_foreign_schema_version_is_moved_aside_rather_than_overwritten_in_place()
+{
+    // A FUTURE build's document is not corrupt — it is unreadable BY THIS BUILD (the e10d guard) —
+    // and the tempting reading is "leave it alone, the newer build will want it". That reading is
+    // wrong, and this test pins why: leaving it is not preservation. The store runs on defaults and
+    // the FIRST dirty flush replaces the file, so the newer build's state is destroyed either way;
+    // quarantining is the only version where a copy survives. Asserted by reading the ORIGINAL bytes
+    // back out of the quarantine AFTER a subsequent write has landed on the real path.
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "foreign");
+    const fs::path path = editor_state_path(root);
+    std::error_code ec;
+    fs::create_directories(path.parent_path(), ec);
+    const std::string future =
+        R"({"version": 42, "windows": [ {"x": 3, "y": 3, "width": 300, "height": 300} ]})";
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << future;
+    }
+
+    EditorStateStore store(root, 0);
+    check_recovered(store, root, future, editor_state_quarantine_path(root, 0));
+    // The e10d signal is PRESERVED, not replaced by the recovery: a caller can still tell "a foreign
+    // build wrote this" from "the bytes were garbage", and the report's detail carries that reason.
+    CHECK(!store.schema_diagnostic().empty());
+    CHECK(store.schema_diagnostic().find("42") != std::string::npos);
+    CHECK(store.restore_report().detail == store.schema_diagnostic());
+
+    store.set_placement(0, placement(1, 1, 100, 100), 0);
+    CHECK(store.flush_now());
+    CHECK(read_file(path) != future);                                        // overwritten, as it would have been anyway
+    CHECK(read_file(editor_state_quarantine_path(root, 0)) == future);        // ...but not LOST
+
+    shelltest::cleanup(root);
+}
+
+void test_quarantine_names_do_not_collide()
+{
+    // A user whose disk is producing torn writes produces SEVERAL of them, and a fixed quarantine
+    // name would mean each recovery destroys the evidence of the last one.
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "collide");
+    const fs::path path = editor_state_path(root);
+    std::error_code ec;
+    fs::create_directories(path.parent_path(), ec);
+
+    for (int n = 0; n < 3; ++n)
+    {
+        const std::string bad = "{ broken " + std::to_string(n);
+        {
+            std::ofstream out(path, std::ios::binary);
+            out << bad;
+        }
+        EditorStateStore store(root, 0);
+        check_recovered(store, root, bad, editor_state_quarantine_path(root, n));
+    }
+    // All three are still on disk, each holding its OWN bytes.
+    CHECK(read_file(editor_state_quarantine_path(root, 0)) == "{ broken 0");
+    CHECK(read_file(editor_state_quarantine_path(root, 1)) == "{ broken 1");
+    CHECK(read_file(editor_state_quarantine_path(root, 2)) == "{ broken 2");
+
+    shelltest::cleanup(root);
+}
+
+void test_fresh_and_restored_are_not_recoveries()
+{
+    // The counter-cases, and the reason they matter: a recovery diagnostic that also fires on an
+    // ordinary first boot is a diagnostic every user learns to ignore, which costs exactly the
+    // loudness 07 §6 asked for. A MISSING file is `fresh` and quarantines nothing; a GOOD file is
+    // `restored`.
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "quiet");
+    {
+        EditorStateStore store(root, 0);
+        store.load();
+        CHECK(store.restore_report().outcome == EditorStateRestoreOutcome::fresh);
+        CHECK(store.restore_report().detail.empty());
+        CHECK(store.restore_report().quarantined_path.empty());
+        CHECK(store.restore_report().path == editor_state_path(root).string());
+        CHECK(!fs::exists(editor_state_quarantine_path(root, 0)));
+
+        store.set_placement(0, placement(4, 4, 400, 400), 0);
+        CHECK(store.flush_now());
+    }
+    EditorStateStore reopened(root);
+    reopened.load();
+    CHECK(reopened.restore_report().outcome == EditorStateRestoreOutcome::restored);
+    CHECK(reopened.restore_report().detail.empty());
+    CHECK(reopened.restore_report().quarantined_path.empty());
+    CHECK(!fs::exists(editor_state_quarantine_path(root, 0)));
+
+    shelltest::cleanup(root);
+}
+
+void test_the_quarantine_path_is_a_sibling_and_not_the_owned_file()
+{
+    // The quarantine must not itself be a second session file: same directory, DIFFERENT name, and
+    // never the document the store owns (a convention slip there would have the recovery rename the
+    // file onto itself, which on POSIX silently succeeds and destroys nothing but is not a
+    // quarantine either).
+    const fs::path root = "/projects/demo";
+    CHECK(editor_state_quarantine_path(root, 0).parent_path() ==
+          editor_state_path(root).parent_path());
+    CHECK(editor_state_quarantine_path(root, 0) != editor_state_path(root));
+    CHECK(editor_state_quarantine_path(root, 0).filename() == "editor-state.corrupt.json");
+    CHECK(editor_state_quarantine_path(root, 7).filename() == "editor-state.corrupt-7.json");
+    // The daemon's file and quarantine are a DIFFERENT pair (03 §1) — neither of these may collide
+    // with `session.json` / `session.corrupt.json`, which the daemon is the single writer of.
+    CHECK(editor_state_quarantine_path(root, 0).filename() != "session.corrupt.json");
+
+    // The catalog string is pinned on BOTH sides of the seam: here, where the constant lives, and in
+    // src/editor/contract/tests/test_error_catalog.cpp against the registered row. The contract
+    // library cannot include a shell header (the dependency runs the other way), so the two literals
+    // agreeing is what makes the promote-a-local-string pattern safe.
+    CHECK(std::string(kEditorStateInvalidCode) == "editor.editor_state_invalid");
+}
+
 } // namespace
 
 int main()
@@ -585,5 +795,11 @@ int main()
     test_schema_version_mismatch_degrades_to_null_state_with_a_diagnostic();
     test_store_load_reports_a_schema_mismatch_without_crashing();
     test_n_window_layout_and_placements_persist_and_restore();
+    test_a_corrupt_document_is_quarantined_loudly_and_never_blocks();
+    test_recovery_covers_every_unusable_document_shape();
+    test_a_foreign_schema_version_is_moved_aside_rather_than_overwritten_in_place();
+    test_quarantine_names_do_not_collide();
+    test_fresh_and_restored_are_not_recoveries();
+    test_the_quarantine_path_is_a_sibling_and_not_the_owned_file();
     SHELL_TEST_MAIN_END();
 }
