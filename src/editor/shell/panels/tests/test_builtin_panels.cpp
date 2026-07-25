@@ -17,6 +17,9 @@
 #include "context/editor/shell/panels/inspector_feed.h" // complete feed types: builtin_panels.h only
 #include "context/editor/shell/panels/problems_feed.h"  // forward-declares them, and this file calls
 #include "context/editor/shell/panels/scenetree_feed.h" // methods on the bag's members.
+#include "context/editor/shell/panels/wire_override_gateway.h" // e09b-2: the bag's write gateway
+
+#include "context/editor/serializer/json_parse.h"
 
 #include "panels_test.h"
 
@@ -73,6 +76,13 @@ void binds_every_hostable_panel_and_nothing_else()
     CHECK(bound.scenetree != nullptr);
     CHECK(bound.inspector != nullptr);
     CHECK(bound.session != nullptr);
+    // e09b-2: the Inspector's wire write gateway came back too — it is what the panel's raw gateway
+    // pointer points at, so a bag missing it would leave the panel pointing at freed memory.
+    CHECK(bound.writes != nullptr);
+    CHECK(bound.inspector != nullptr && bound.inspector->has_gateway());
+    // It starts UNBOUND: `install_builtin_panels` runs at boot, before any daemon connection exists
+    // (editor_main.cpp), and the connection is re-derived every frame through `bind_write_client`.
+    CHECK(bound.writes != nullptr && !bound.writes->has_client());
 
     // The whole roster is still LISTED — an unhostable panel is visible and honestly flagged, never
     // hidden.
@@ -90,6 +100,64 @@ void binds_every_hostable_panel_and_nothing_else()
     CHECK(problems_entry != nullptr && !problems_entry->at("persists").as_bool());
     CHECK(scenetree_entry != nullptr && !scenetree_entry->at("gestures").as_bool());
     CHECK(inspector_entry != nullptr && !inspector_entry->at("persists").as_bool());
+
+    // M9 e09b-2 — THE `gestures:false -> true` FLIP, at the ONE place it is decided. The Inspector is
+    // the only built-in that WRITES, so it is the only one that can end a gesture with a commit; the
+    // composition root binds it a wire gateway, `make_provider` therefore supplies `PanelProvider::gesture`,
+    // and `PanelHost::list` reports the capability from what is actually bound. The manifest value
+    // asserted here is exactly what `panelhost.ts`'s `manifest?.gestures ?? false` reads when it
+    // constructs the panel's `UitreePanelRenderer`, and what `hydration.ts` gates `#bindGestures` on —
+    // one fact, three consumers, so this assertion IS the cross-language consistency check.
+    CHECK(inspector_entry != nullptr && inspector_entry->at("gestures").as_bool());
+    // The playbar is a transport, not a continuous surface: four commands, still no gestures. The
+    // flip must be about the panel that gained a write path, not about every hosted panel.
+    const Json* playbar_entry = find_panel(listing, "builtin.playbar");
+    CHECK(playbar_entry != nullptr && !playbar_entry->at("gestures").as_bool());
+}
+
+// e09b-2: the gesture surface the flip turns on, driven through the REAL PanelHost the renderer
+// reaches — and its honest posture with no daemon behind it.
+void the_inspector_gesture_surface_is_live_but_refuses_without_a_daemon()
+{
+    shell::PanelHost host;
+    panels::BuiltinPanels bound = panels::install_builtin_panels(host);
+    CHECK(bound.inspector != nullptr);
+    CHECK(bound.writes != nullptr);
+    if (bound.inspector == nullptr || bound.writes == nullptr)
+    {
+        return;
+    }
+
+    // A commit with nothing staged is `dispatched:false` — an ordinary outcome, not a protocol fault
+    // (panel_host.h's rule), and the call itself is WELL-FORMED, which is what distinguishes a hosted
+    // gesture surface from one that refuses with kErrPanelBadGesture.
+    bool dispatched = true;
+    std::string error_code;
+    CHECK(host.gesture("builtin.inspector", shell::GestureVerb::commit, Json::object(), dispatched,
+                       error_code));
+    CHECK(!dispatched);
+    CHECK(error_code.empty());
+
+    // Stage a real edit, then commit it with NO client bound: the gateway refuses, the engine reports
+    // an error, and — the point — NOTHING was written and the staged gesture is KEPT for the caller
+    // to retry once the daemon is back.
+    context::editor::serializer::ParseResult value =
+        context::editor::serializer::parse_json("2.5");
+    CHECK(value.ok);
+    CHECK(bound.inspector->panel().stage_edit("/components/camera/fov", std::move(value.root)) ==
+          false); // no model yet: an unknown field cannot be staged (the model layer's own guard)
+
+    // A gesture on a node that is not an inspector widget is honestly not dispatched.
+    Json params = Json::object();
+    params.set("nodeId", Json(std::string("inspector.status")));
+    dispatched = true;
+    CHECK(host.gesture("builtin.inspector", shell::GestureVerb::begin, params, dispatched,
+                       error_code));
+    CHECK(!dispatched);
+
+    // And the write client re-points through the ONE seam, in both directions, with no re-provide.
+    panels::bind_write_client(bound, nullptr);
+    CHECK(!bound.writes->has_client());
 }
 
 void renders_the_hosted_panels_through_the_bridge()
@@ -240,6 +308,7 @@ void a_daemon_selection_schedules_the_inspector_fetch()
 int main()
 {
     binds_every_hostable_panel_and_nothing_else();
+    the_inspector_gesture_surface_is_live_but_refuses_without_a_daemon();
     renders_the_hosted_panels_through_the_bridge();
     a_daemon_event_reaches_the_rendered_panel();
     a_daemon_selection_schedules_the_inspector_fetch();

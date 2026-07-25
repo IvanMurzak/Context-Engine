@@ -9,6 +9,7 @@
 #include "context/editor/shell/panels/scenetree_feed.h" // parse_hex_u64 — the ONE hex-wire parser
 #include "wire_read.h"                                  // read_string / read_bool / envelope_data
 
+#include <cstdio>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -165,6 +166,51 @@ std::optional<std::string> inspector_widget_pointer(const std::string& node_id)
 InspectorFeed::InspectorFeed(PanelHost& host, std::string panel_id)
     : host_(host), panel_id_(std::move(panel_id))
 {
+    // The commit listener is registered ONCE, here, rather than by the composition root: it is the
+    // feed's OWN read-your-writes wiring (05 §7), not a policy a caller chooses. Capturing `this` is
+    // safe by construction — InspectorFeed is non-copyable AND non-movable, so the address is stable
+    // for the object's whole life, and the panel it registers on is a member (destroyed with it).
+    panel_.add_commit_listener([this](const inspector::CommitResult& result) { on_commit(result); });
+}
+
+void InspectorFeed::bind_gateway(const inspector::OverrideWriteGateway* gateway)
+{
+    panel_.set_gateway(gateway);
+    gateway_bound_ = gateway != nullptr;
+}
+
+void InspectorFeed::on_commit(const inspector::CommitResult& result)
+{
+    if (result.status == inspector::CommitResult::Status::none)
+    {
+        return; // nothing was staged / no gateway — not a resolved gesture, so not an observation
+    }
+    ++commits_observed_;
+    last_commit_ = result;
+    if (result.status == inspector::CommitResult::Status::dropped)
+    {
+        // L-30: a concurrent writer moved THIS field under the in-flight gesture, so the write was
+        // refused rather than clobbering it. e09b-3 gives this a human-visible surface; today it is
+        // counted and kept in `last_commit_`, which is the honest extent of the drop path — and
+        // reported to stderr so a drop is never silent even without chrome.
+        ++drops_observed_;
+        std::fprintf(stderr, "context_editor: %s\n", result.message.c_str());
+    }
+    if (!result.ok())
+    {
+        return;
+    }
+    // READ-YOUR-WRITES (05 §7). The panel must observe its own commit; re-arm the pending fetch for
+    // the identity currently inspected so the next `pump_panel_feeds` re-reads `editor.inspect` and
+    // the field comes back with its new value and `overridden:true`. Without this the panel would
+    // wait for the next selection change or `derivation.settled` — i.e. it would render a value it
+    // had already successfully written as if it had not.
+    const std::string& identity = panel_.model().identity;
+    if (!identity.empty())
+    {
+        pending_ = identity;
+        ++rereads_armed_;
+    }
 }
 
 void InspectorFeed::request(const std::string& identity)
@@ -229,6 +275,49 @@ PanelProvider InspectorFeed::make_provider()
         }
         return panel_.stage_edit(*pointer, std::move(value.root));
     };
+
+    // The L-20 gesture, bound ONLY when a write path exists (inspector_feed.h): with no gateway the
+    // manifest reports `gestures:false` and the hydration runtime never installs its pointer
+    // handlers (`hydration.ts` #bindGestures), so the renderer cannot send a verb this build could
+    // only swallow.
+    if (gateway_bound_)
+    {
+        provider.gesture = [this](GestureVerb verb, const contract::Json& params)
+        {
+            switch (verb)
+            {
+            case GestureVerb::begin:
+            case GestureVerb::extend:
+                // A text/number widget has no continuous geometry — the VALUE arrives through the
+                // `inspector.edit` command above, and these two only bracket it. Accepted (so the
+                // renderer's gesture state machine stays in step) but only for a node that really is
+                // an inspector widget: a gesture on a status row is honestly `dispatched:false`.
+                return inspector_widget_pointer(read_string(params, "nodeId")).has_value();
+            case GestureVerb::commit:
+            {
+                // GESTURE END = COMMIT (L-20). Everything downstream — CAS on the model's base hash,
+                // the L-30 rebase-or-drop engine, the wire write — is InspectorPanel::commit's, and
+                // the outcome reaches `on_commit` through the listener registered in the ctor.
+                const inspector::CommitResult result = panel_.commit();
+                if (result.status == inspector::CommitResult::Status::none)
+                {
+                    return false; // nothing staged: an ordinary outcome, not a protocol fault
+                }
+                host_.touch(panel_id_);
+                return true;
+            }
+            case GestureVerb::cancel:
+                if (!panel_.has_staged_edit())
+                {
+                    return false;
+                }
+                panel_.discard_edit();
+                host_.touch(panel_id_);
+                return true;
+            }
+            return false; // unreachable: parse_gesture_verb refuses anything outside the closed set
+        };
+    }
     return provider;
 }
 

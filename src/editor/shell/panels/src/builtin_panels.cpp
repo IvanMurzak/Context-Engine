@@ -10,6 +10,7 @@
 #include "context/editor/shell/panels/problems_feed.h" // ProblemsFeed complete type (see builtin_panels.h)
 #include "context/editor/shell/panels/scenetree_feed.h"
 #include "context/editor/shell/panels/session_feed.h" // SessionFeed complete type (e08b)
+#include "context/editor/shell/panels/wire_override_gateway.h" // complete type (e09b-2)
 
 #include <cstdio>
 #include <string_view>
@@ -103,6 +104,16 @@ void bind_session_client(SessionFeed& feed, client::Client* client)
     // The id comes from the client itself (0 when there is none), so the pointer and the identity
     // cannot disagree — see the header for why a separately-carried id is a stale-id hazard.
     feed.bind_client(client, client != nullptr ? client->client_id() : 0);
+}
+
+void bind_write_client(BuiltinPanels& panels, client::Client* client)
+{
+    // A bag whose gateway was never created (impossible from install_builtin_panels, possible from a
+    // hand-built bag in a test) is not an error to re-point — there is simply nothing to point.
+    if (panels.writes != nullptr)
+    {
+        panels.writes->bind_client(client);
+    }
 }
 
 void pump_panel_feeds(BuiltinPanels& panels, client::Client& client, const std::string& scene_path)
@@ -221,6 +232,16 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
             host, gui::panels::scenetree::SceneTreePanel::kContributionId, out.session.get());
         auto inspector = std::make_unique<InspectorFeed>(
             host, gui::panels::inspector::InspectorPanel::kContributionId);
+
+        // e09b-2: the Inspector's WRITE path. Created here and bound BEFORE `make_provider()`,
+        // because that is what decides the manifest's `gestures` capability — the gesture verb
+        // `commit` IS the write, so a provider bound without a gateway would advertise a gesture that
+        // could only be swallowed (inspector_feed.h). The gateway starts with NO client: it is
+        // re-pointed at the daemon link every frame through `bind_write_client`, exactly like the
+        // session feed's, so a reconnect (a new Client, a new connection) needs no re-binding here
+        // and a lost daemon makes every commit refuse honestly instead of calling a freed pointer.
+        out.writes = std::make_unique<WireOverrideWriteGateway>();
+        inspector->bind_gateway(out.writes.get());
 
         const bool tree_bound =
             host.provide(gui::panels::scenetree::SceneTreePanel::kContributionId,

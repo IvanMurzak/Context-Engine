@@ -74,7 +74,20 @@ public:
     void fail_method(const std::string& method, std::string message, std::string catalog_code = {},
                      Json detail = {})
     {
-        errors_[method] = {std::move(message), std::move(catalog_code), std::move(detail)};
+        errors_[method] = {std::move(message), std::move(catalog_code), std::move(detail), -1};
+    }
+
+    // Make the next `times` calls to `method` fail, then fall through to its ordinary responder — a
+    // TRANSIENT refusal, which `fail_method`'s permanent form cannot express.
+    //
+    // The motivating consumer (M9 e09b-2): the L-30 REBASE path is defined by a first attempt refused
+    // `cas.mismatch` and a RETRY against the fresh token that SUCCEEDS. Under a permanent failure the
+    // retry is refused too, so the engine drops — and a rebase that is never retried is
+    // indistinguishable from a drop, which is exactly the distinction the L-30 policy exists to make.
+    void fail_method_times(const std::string& method, int times, std::string message,
+                           std::string catalog_code = {}, Json detail = {})
+    {
+        errors_[method] = {std::move(message), std::move(catalog_code), std::move(detail), times};
     }
 
     // Queue a server-pushed frame the consumer will read on its next receive().
@@ -130,18 +143,25 @@ public:
         const auto failed = errors_.find(r.method);
         if (failed != errors_.end())
         {
+            const Refusal refusal = failed->second;
+            // A BOUNDED refusal (`fail_method_times`) is consumed here; the permanent form
+            // (`remaining < 0`) is left in place. Retiring it on exhaustion is what lets the SAME
+            // method answer normally afterwards — the whole point of the bounded form.
+            if (failed->second.remaining > 0 && --failed->second.remaining == 0)
+                errors_.erase(failed);
+
             Json err = Json::object();
             err.set("code", Json(-32000)); // the JSON-RPC server-error band the dispatcher uses
-            err.set("message", Json(failed->second.message));
-            if (!failed->second.catalog_code.empty())
+            err.set("message", Json(refusal.message));
+            if (!refusal.catalog_code.empty())
             {
                 // envelope_error_data()'s shape: the R-CLI-008 error object under `error.data`.
                 Json data = Json::object();
-                data.set("code", Json(failed->second.catalog_code));
-                data.set("message", Json(failed->second.message));
+                data.set("code", Json(refusal.catalog_code));
+                data.set("message", Json(refusal.message));
                 data.set("retriable", Json(false));
-                if (!failed->second.detail.is_null())
-                    data.set("data", failed->second.detail); // the nested structured payload
+                if (!refusal.detail.is_null())
+                    data.set("data", refusal.detail); // the nested structured payload
                 err.set("data", std::move(data));
             }
             response.set("error", std::move(err));
@@ -225,6 +245,9 @@ private:
         std::string message;
         std::string catalog_code;
         Json detail; // the nested error.data.data (null = the refusal carried no structured detail)
+        // How many more calls this refusal answers: -1 = forever (`fail_method`), N > 0 = the next N
+        // (`fail_method_times`), after which the entry is retired and the method answers normally.
+        int remaining = -1;
     };
 
     std::map<std::string, Responder> responders_;
