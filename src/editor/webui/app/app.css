@@ -277,6 +277,33 @@ html .dockview-theme-dark {
     line-height: var(--ctx-typography-line-height, 1.5);
 }
 
+/* A THIRD-PARTY package panel's slot (M9 e13a-2) — the same `.ctx-panel-body` slot, minus the two
+ * rules that only make sense for content we lay out ourselves.
+ *
+ * The padding goes because a package's document owns its own margins, and the scrollbar goes because
+ * the frame's own document scrolls: keeping both gives a panel two nested scrollbars and an 8px
+ * border of editor surface around a document that thinks it is full-bleed.
+ *
+ * NO TYPE OR INK RULES, and no `background`: everything above is inherited by the SLOT and stops at
+ * the frame boundary, which is correct — a package panel is styled by the theme TOKENS the editor
+ * hands it (e13d's work), never by cascade leaking across a document boundary that would not exist
+ * once the frame is on its own opaque origin. */
+.ctx-panel-frame {
+    padding: 0;
+    overflow: hidden;
+}
+
+/* Without this the `<iframe>` keeps the UA default `300px × 150px` plus a 2px inset border, so a
+ * package panel renders as a small bordered box in the corner of an otherwise empty docked slot —
+ * neither test tier can see it (T1 asserts attributes, the T2 smoke asserts served bytes), so it is
+ * pinned here in the sheet and nowhere else. */
+.ctx-panel-frame-element {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+}
+
 /* --- the hydration widget layer LIVES IN THE KIT NOW (M9 e06c1) -------------------------------- *
  *
  * The twelve `ctx-widget-*` classes (04 §4 step 4) were declared HERE through e06b. They are now

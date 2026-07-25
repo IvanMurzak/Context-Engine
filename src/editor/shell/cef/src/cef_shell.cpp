@@ -42,6 +42,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -122,6 +123,36 @@ int g_popups_suppressed = 0;
 // The e10a frame-delivery tripwire (cef_shell.h § the containment counters). Written on the same
 // thread as the two above, for the same reason it is a plain int.
 int g_frames_dropped_without_sink = 0;
+
+// The e13a-2 extension-scheme request log (cef_shell.h § the extension-scheme request log).
+//
+// UNLIKE the three counters above this IS cross-thread: a scheme handler's `Open` runs on the CEF
+// IO thread while the smoke reads these from the owner thread between pumps, so the mutex is
+// load-bearing rather than defensive. Bounded, because the requester controls the URL.
+constexpr std::size_t kExtLogMaxEntries = 64;
+constexpr std::size_t kExtLogMaxUrlLength = 256;
+std::mutex g_ext_log_mutex;
+std::vector<std::string> g_ext_served_urls;
+std::vector<std::string> g_ext_refused_urls;
+
+// Truncate an untrusted URL for logging — the same bound the refusal's stderr line applies, for the
+// same reason (an unbounded attacker-chosen string in a diagnostic channel).
+std::string clamp_logged_url(const std::string& url)
+{
+    return url.size() <= kExtLogMaxUrlLength ? url
+                                             : url.substr(0, kExtLogMaxUrlLength) + "...[truncated]";
+}
+
+void record_ext_request(const std::string& url, bool served)
+{
+    const std::lock_guard<std::mutex> lock(g_ext_log_mutex);
+    std::vector<std::string>& log = served ? g_ext_served_urls : g_ext_refused_urls;
+    if (log.size() >= kExtLogMaxEntries)
+    {
+        return;
+    }
+    log.push_back(clamp_logged_url(url));
+}
 
 // --------------------------------------------------------------------------- modifier translation
 
@@ -431,19 +462,24 @@ public:
             // untrusted BY CONSTRUCTION and controls this string, so an unbounded URL is an
             // unbounded attacker-chosen write into the operator's diagnostic channel on every
             // refusal. The package id is bounded by the grammar; the path is not.
-            constexpr std::size_t kMaxLoggedUrl = 256;
-            const std::string logged = url.size() <= kMaxLoggedUrl
-                                           ? url
-                                           : url.substr(0, kMaxLoggedUrl) + "...[truncated]";
+            const std::string logged = clamp_logged_url(url);
             std::fprintf(stderr, "[shell-cef] ext scheme refused <%s>: %s\n", logged.c_str(),
                          resolution_.reason.c_str());
+            record_ext_request(url, /*served*/ false);
             return true;
         }
 
         if (!load_body(resolution_.file))
         {
             resolution_.status = AssetStatus::not_found;
+            record_ext_request(url, /*served*/ false);
+            return true;
         }
+        // Recorded only once the BYTES are in hand, so `ext_served_urls()` means "this asset was
+        // actually delivered" rather than "the resolver approved of it" — the smoke's whole chain of
+        // inference (the document PARSED, therefore its subresources were requested; its module RAN,
+        // therefore its own import resolved) rests on the served list meaning the former.
+        record_ext_request(url, /*served*/ true);
         return true;
     }
 
@@ -1609,6 +1645,18 @@ int frames_dropped_without_sink()
     return g_frames_dropped_without_sink;
 }
 
+std::vector<std::string> ext_served_urls()
+{
+    const std::lock_guard<std::mutex> lock(g_ext_log_mutex);
+    return g_ext_served_urls;
+}
+
+std::vector<std::string> ext_refused_urls()
+{
+    const std::lock_guard<std::mutex> lock(g_ext_log_mutex);
+    return g_ext_refused_urls;
+}
+
 void shutdown()
 {
     if (!g_initialized)
@@ -1626,6 +1674,9 @@ void shutdown()
     g_asset_resolver = nullptr;
     delete g_ext_resolver;
     g_ext_resolver = nullptr;
+    // The request log outlives shutdown deliberately: the smokes read their verdict AFTER calling
+    // shutdown() (the CE #319 lifetime invariant above forces that order), so clearing it here would
+    // erase exactly the evidence they are about to assert on.
 }
 
 } // namespace context::editor::shell::cef

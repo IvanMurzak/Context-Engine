@@ -69,7 +69,9 @@ NODE_MARKERS = ('"node:', "'node:", "#!/usr/bin/env node")
 APP_DOCUMENT = "index.html"
 APP_STYLESHEET = "app.css"
 
-# The four cross-language constants (check 5). Each entry is
+# The cross-language constants (check 5) — deliberately NOT counted in this sentence: the count is
+# `len(SCHEME_CONSTANTS)` three lines down, and a hand-maintained copy of it in prose is a number
+# that rots (it already had, reading "four" while the table held six). Each entry is
 # (human name, C++ file, C++ constant, TS constant) — the VALUE is read from the C++ side, which is
 # the authority: the Shell is what actually registers the scheme and routes the queries.
 SCHEME_CONSTANTS = (
@@ -77,6 +79,14 @@ SCHEME_CONSTANTS = (
     ("origin", "app_scheme.h", "kAppOrigin", "BRIDGE_ORIGIN"),
     ("ipc endpoint", "app_scheme.h", "kIpcEndpoint", "BRIDGE_ENDPOINT"),
     ("theme pin flag", "app_scheme.h", "kThemePinFlag", "THEME_PIN_FLAG"),
+    # The M9 e13a-2 EXTENSION scheme, on exactly the same terms as the app scheme above and for a
+    # sharper reason: editor-core BUILDS an `<iframe src>` from this vocabulary, so a rename on
+    # either side leaves it framing a scheme the Shell does not serve — every package panel comes up
+    # blank, with no build error anywhere and no unit test able to see it (the TS side would still
+    # agree with itself). The C++ value is the authority, as everywhere else here: the Shell is what
+    # actually REGISTERS the scheme.
+    ("ext scheme", "ext_scheme.h", "kExtScheme", "EXT_SCHEME"),
+    ("ext url prefix", "ext_scheme.h", "kExtUrlPrefix", "EXT_URL_PREFIX"),
 )
 
 # --- the M9 e06b THEME contract (check 9) ---------------------------------------------------------
@@ -355,8 +365,8 @@ def _read_cpp_string_constant(source: Path, name: str) -> str:
     """Read a `... name = "value";` C++ string constant. Raises CheckError when absent.
 
     Deliberately a regex over the source rather than anything cleverer: the alternative is
-    generating a shared header, which for four short strings costs more machinery than the drift it
-    prevents. The regex is anchored on the constant NAME, so it cannot silently match a neighbour,
+    generating a shared header, which for a handful of short strings costs more machinery than the
+    drift it prevents. The regex is anchored on the constant NAME, so it cannot silently match a neighbour,
     and a rename that breaks it fails LOUDLY (exit 2) instead of quietly matching nothing.
     """
     try:

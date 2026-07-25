@@ -410,4 +410,53 @@ if(OS_WINDOWS OR OS_LINUX)
     set_tests_properties(editor-cef-smoke-shell-uimirror PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_uimirror_smoke>"
         TIMEOUT 300)
+
+    # --- the LIVE THIRD-PARTY PACKAGE PANEL smoke (ctest editor-cef-smoke-shell-iframe) ------------
+    # M9 e13a-2: the DoD line no other tier can reach — a package panel's document really LOADS,
+    # PARSES and RUNS inside a sandboxed frame over the `context-ext://` scheme, under the strict
+    # panel CSP, while an UNMOUNTED package stays refused. A package panel lives on its own opaque
+    # origin, so neither the Shell nor editor-core can read it; the observable is therefore WHICH
+    # URLs the scheme handler served (`ext_served_urls()` / `ext_refused_urls()`, cef_shell.h), and
+    # the fixture is built so each URL implies a specific earlier step (see the .cpp header).
+    # Its CEF-free siblings are the `webui-ts-unit` `extpanel.test.ts` cases (the entry grammar + the
+    # RENDERED frame's sandbox attributes against real Dockview) and the `editor-shell-test_ext_scheme`
+    # suite (the resolver + the response policy); this proves the whole chain on the real browser.
+    # Same `editor-cef-smoke-` family + the same link recipe as the sibling smokes (context_editor_cef
+    # precedes the CEF libs — the single-left-to-right-pass rule; context_editor_panels binds the real
+    # providers so the built-in half of the roster hydrates, and introduces no CEF refs of its own).
+    #
+    # ⚠ "Not Run = RED" TRIPWIRE: that job builds a hand-maintained --target list, so this executable
+    # is ALSO listed in ci.yml's editor-cef-smoke build step (and mirrored in the profile's test.md
+    # § CI). The regex would otherwise match a test whose executable was never built.
+    #
+    # TIMEOUT covers ONE live browser boot plus the panel's own module-graph round trips (index.html
+    # -> panel.css/panel.js -> its static import -> its dynamic import), each of which is a separate
+    # scheme-handler request; the sibling single-boot smokes budget 180s.
+    add_executable(context_editor_shell_iframe_smoke src/cef_shell_iframe_smoke.cpp)
+    SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_iframe_smoke)
+    add_dependencies(context_editor_shell_iframe_smoke libcef_dll_wrapper)
+    target_link_libraries(context_editor_shell_iframe_smoke
+        context_editor_cef context_editor_panels libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+    target_include_directories(context_editor_shell_iframe_smoke PRIVATE "${CEF_ROOT}")
+
+    # Same single-staging dependency as the sibling smokes above (issue #360).
+    add_dependencies(context_editor_shell_iframe_smoke context_editor_cef_stage)
+
+    # Same webui asset dependency + compiled-in root as the sibling smokes: the window loads
+    # `context-editor://app/index.html`, so editor-core's built asset set must exist when it runs.
+    add_dependencies(context_editor_shell_iframe_smoke context_editor_webui)
+    if(NOT CONTEXT_WEBUI_ASSET_DIR)
+        message(FATAL_ERROR
+            "context_editor_shell_iframe_smoke: CONTEXT_WEBUI_ASSET_DIR is empty — "
+            "src/editor/webui must be added BEFORE src/editor/shell (src/CMakeLists.txt orders it "
+            "so); it publishes the asset root as CACHE INTERNAL.")
+    endif()
+    target_compile_definitions(context_editor_shell_iframe_smoke PRIVATE
+        "CONTEXT_WEBUI_ASSET_DIR=\"${CONTEXT_WEBUI_ASSET_DIR}\"")
+
+    add_test(NAME editor-cef-smoke-shell-iframe
+        COMMAND context_editor_shell_iframe_smoke)
+    set_tests_properties(editor-cef-smoke-shell-iframe PROPERTIES
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:context_editor_shell_iframe_smoke>"
+        TIMEOUT 240)
 endif()

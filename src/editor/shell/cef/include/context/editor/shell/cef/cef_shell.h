@@ -179,6 +179,40 @@ struct CefShellOptions
 // neither is a loss.
 [[nodiscard]] int frames_dropped_without_sink();
 
+// --- the extension-scheme request log (M9 e13a-2) ------------------------------------------------
+//
+// WHAT THE LIVE IFRAME SMOKE CAN ACTUALLY OBSERVE, and why it has to be this and not a frame handle.
+// A third-party panel document is on its OWN opaque-origin sandbox: the Shell cannot read its DOM,
+// editor-core cannot read it either, and e13a-2 ships no bridge into it by design. So "did the panel
+// really load?" is answerable at exactly ONE place — the bytes the scheme handler served — and these
+// two lists are that place.
+//
+// THE ASSERTION THEY MAKE POSSIBLE IS NOT "a request arrived". A blocked frame still fetches its
+// top-level document (CSP `frame-ancestors` is evaluated on the RESPONSE), so counting one served
+// URL proves nothing about rendering. What proves it is WHICH urls: a panel whose own `panel.css`
+// and `panel.js` were requested is a panel whose document was PARSED, which a blocked frame's never
+// is — and a panel whose ES module's own `import` resolved is one whose script actually RAN. That
+// chain is what discharges e13a-1's two open hypotheses (ext_scheme.h) and what verifies the
+// `frame-ancestors` tightening, so the smoke needs the URLs, not a count.
+//
+//   * `ext_served_urls()`  — URLs the resolver answered `ok` for, in order.
+//   * `ext_refused_urls()` — URLs it REFUSED (any non-ok status), in order. The negative half, and
+//     the one that keeps the positive from being vacuous: a smoke that also asks for an UNMOUNTED
+//     package and finds it here has proven the deny-by-default posture is live in the browser, not
+//     merely in the unit suite.
+//
+// THREADING — DIFFERENT FROM THE COUNTERS ABOVE, deliberately so. `browsers_created()` and friends
+// are written on the CEF UI thread, which IS the owner thread here, so they are plain ints. A scheme
+// handler's `Open` runs on the CEF IO THREAD, so this log genuinely is cross-thread and takes a
+// mutex. Do not "harmonize" the two into one style: the lock here is load-bearing and the absence of
+// one there is a documented statement about the design.
+//
+// BOUNDED. The requester is untrusted by construction and controls the URL, so an unbounded log is
+// an unbounded attacker-chosen allocation. Entries past the cap are dropped (the smoke needs the
+// first handful), and each URL is truncated exactly as the refusal log line is.
+[[nodiscard]] std::vector<std::string> ext_served_urls();
+[[nodiscard]] std::vector<std::string> ext_refused_urls();
+
 // Shut CEF down. Call ONCE, after every browser host has been closed. Idempotent.
 //
 // LIFETIME INVARIANT — `shutdown()` must run BEFORE the `bridge` router (and everything its
