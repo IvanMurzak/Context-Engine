@@ -25,9 +25,13 @@
 //      the session instead of freeing it (shell.h), and this exercises that on the REAL CEF path,
 //      on the same Session-0 Windows runner where CE #319 faulted.
 //
-// Headless throughout (windowless browsers, no native window, the C-F2 CPU present path through
-// e03's MemoryBlitter), so it is safe on the Session-0 self-hosted Windows runner: no visible
-// window, no GPU device, no native-render teardown. The Windows hard exit after the verdict mirrors
+// TWO WINDOW MODES, as documented in cef_shell_smoke.cpp's header. By DEFAULT headless throughout
+// (windowless browsers, no native window, the C-F2 CPU present path through e03's MemoryBlitter),
+// so it is safe on the Session-0 self-hosted Windows runner: no visible window, no GPU device, no
+// native-render teardown — that is what the Windows leg runs. Under `--real-window`, which the
+// ctest registration passes on Linux, BOTH windows are real (the second one derives its mode from
+// `WindowSpec::headless`, exercising the factory branch editor_main.cpp honours) and the activating
+// gesture below is a REAL X-server round trip. The Windows hard exit after the verdict mirrors
 // its sibling smokes.
 //
 // ⚠ e10a adds NO boot-time bridge METHOD. Every surface installed below already exists and is
@@ -499,6 +503,7 @@ int main(int argc, char** argv)
     {
         const int browsers_before = shell::cef::browsers_created();
         const int suppressed_before = shell::cef::popups_suppressed();
+        const int pointers_before = primary->input().pointer_dispatches();
 
         shell::ShellEvent click;
         click.kind = shell::ShellEventKind::pointer;
@@ -517,9 +522,32 @@ int main(int argc, char** argv)
         release.pointer.modifiers.left_button_down = true;
         SMOKE_CHECK(smoke::inject_event(primary->backend(), window_mode, release),
                     "the activating release was injected");
-        // Tracked, not discarded: a false `pump_once` means no window is left, and `primary` would
-        // then be a dangling pointer for the rest of this block (see the guard after window 0's boot).
+        // ⚠ WAIT FOR THE GESTURE TO BE ARBITRATED, do not merely pump a fixed number of times.
+        // Offscreen, `inject_event` queues and the very next pump drains it, so any small pump
+        // budget sufficed. In real-window mode the SAME call is a client -> X server -> client round
+        // trip that a loaded runner need not complete inside a fixed budget — and the activation is
+        // load-bearing for the `window.open` below, so losing it would red the popup assertion
+        // instead, pointing the reader at `OnBeforePopup` rather than at the lost gesture. Same
+        // shape as cef_shell_smoke.cpp's own injections. Tracked, not discarded: a false
+        // `pump_once` means no window is left, and `primary` would then be a dangling pointer for
+        // the rest of this block (see the guard after window 0's boot).
         bool pump_alive = true;
+        const auto gesture_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+        while (std::chrono::steady_clock::now() < gesture_deadline)
+        {
+            pump_alive = manager.pump_once(now_us());
+            // Tested AFTER the pump and before the sleep, like every other wait in this file: in
+            // headless mode the first pump already drained both samples, so this costs zero wait.
+            if (!pump_alive || primary->input().pointer_dispatches() >= pointers_before + 2)
+            {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        SMOKE_CHECK(primary->input().pointer_dispatches() >= pointers_before + 2,
+                    "both halves of the activating gesture were arbitrated");
+        // Then let the renderer settle on the transient activation before the script runs: the
+        // arbiter's count says OUR side dispatched the gesture, not that Chromium has processed it.
         for (int i = 0; i < 20 && pump_alive; ++i)
         {
             pump_alive = manager.pump_once(now_us());

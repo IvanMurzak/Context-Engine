@@ -242,6 +242,9 @@ set(_context_shell_tests
     test_window_bridge # e10b: the window.* relay - tear-out/move/seed/rehome parse + the loud-fail path
     test_cross_window_drag  # e10c: the drag session - capture RELEASED on every path + the drag.* relay
     test_ui_mirror     # e10d: the editor.ui cross-window mirror relay - broadcast-to-all incl. sender
+    test_smoke_window  # e12a-x11-legs: the --real-window seam - flag parse, the anti-degrade
+                       # negatives, DIP conversion off 1.0, the keysym sweep (one extra link edge,
+                       # added after context_editor_shell_smoke_support is defined below)
     test_shell)        # the owner loop end to end + the authenticated-attach guard
 
 foreach(_t IN LISTS _context_shell_tests)
@@ -283,26 +286,38 @@ target_link_libraries(context_editor_shell_smoke_support
 # installs no X11 packages. Without the headers `inject_event` compiles to its honest
 # "no real-window injection in this build" refusal, which every caller treats as a failure.
 if(UNIX AND NOT APPLE)
+    # Called HERE rather than relied upon from the window-backend block above: find_package is
+    # cached/idempotent, and depending on a call ~100 lines away would silently disable real-mode
+    # injection if that block were ever reordered or extracted. Same shape as src/render/present/.
+    find_package(X11)
     if(X11_FOUND AND TARGET X11::X11)
         target_link_libraries(context_editor_shell_smoke_support PRIVATE X11::X11)
         target_compile_definitions(context_editor_shell_smoke_support PRIVATE
             CONTEXT_SHELL_SMOKE_HAS_X11=1)
+        message(STATUS "context_editor_shell_smoke_support: X11 found — --real-window input "
+                       "injection is REAL in this build")
+    else()
+        # Said out loud because the whole anti-degrade thesis rests on telling a compiled-out X11
+        # path from a present one: without this line a build that silently lost X11 looks identical
+        # to one that has it, right up until nine live legs fail at run time.
+        message(STATUS "context_editor_shell_smoke_support: no X11 development headers — "
+                       "--real-window injection compiles to its honest refusal (install libx11-dev "
+                       "for the real one)")
     endif()
 endif()
 
-# Its own T1 suite, in the same non-gate `editor-shell-` family as the tests above (so `--preset
-# dev` builds it and the general ctest step runs it on all three OS legs, with no ci.yml --target
-# bookkeeping). It asserts the seam's DECISIONS without opening a window or needing a display: the
-# flag parse, the headless construction + present, the keysym inverse table, and — the load-bearing
-# one — that real mode REFUSES a headless backend rather than degrading onto `post()`.
-add_executable(context_editor_shell_test_smoke_window tests/test_smoke_window.cpp)
+# Its own T1 suite is a plain member of the `_context_shell_tests` family above, so the foreach
+# already gave it its executable, its runtime flags, its include dirs and its non-gate
+# `editor-shell-test_smoke_window` registration (`--preset dev` builds it and the general ctest step
+# runs it on all three OS legs, with no ci.yml --target bookkeeping). Staying in the loop is what
+# keeps a future family-wide change — a define, a property, a label — from silently skipping it.
+# The ONE thing the loop cannot know is this extra link edge, which is why only it is spelled here.
+# It asserts the seam's DECISIONS without opening a window or needing a display: the flag parse, the
+# headless construction + present, DIP conversion at a non-identity scale, the keysym sweep, and —
+# the load-bearing ones — that real mode REFUSES a headless backend, and refuses a window with no
+# presentable native surface, rather than degrading onto `post()` / an in-memory present.
 target_link_libraries(context_editor_shell_test_smoke_window
-    PRIVATE context_editor_shell_smoke_support context_warnings)
-target_link_options(context_editor_shell_test_smoke_window PRIVATE
-    ${_context_shell_static_runtime})
-target_include_directories(context_editor_shell_test_smoke_window PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests)
-add_test(NAME editor-shell-test_smoke_window COMMAND context_editor_shell_test_smoke_window)
+    PRIVATE context_editor_shell_smoke_support)
 
 # --- the panel composition root (e05d1) ----------------------------------------------------------
 # Added AFTER context_editor_shell (it links it) and BEFORE context_editor + the CEF smoke (they link

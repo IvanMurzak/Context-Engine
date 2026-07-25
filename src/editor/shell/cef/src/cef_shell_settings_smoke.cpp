@@ -30,8 +30,11 @@
 // log is where a hang died. A scenario that silently selected nothing runs the 30s clock out and the
 // `writes()` assertion fails as it should.
 //
-// It boots exactly as cef_shell_palette_smoke.cpp does — a windowless browser presenting through e03's
-// MemoryBlitter, hard-exiting on Windows after the verdict to skip CEF's flaky Session-0 teardown — so
+// It boots exactly as cef_shell_palette_smoke.cpp does — including the TWO WINDOW MODES documented
+// in cef_shell_smoke.cpp's header: windowless through e03's MemoryBlitter by DEFAULT (what the
+// Windows leg runs), a REAL X11 window through the REAL X11 blitter under `--real-window` (what the
+// ctest registration passes on Linux). It hard-exits on Windows after the verdict to skip CEF's
+// flaky Session-0 teardown — so
 // it is structurally identical to that proven-green single-boot smoke, and it can only run where CEF
 // links: the per-OS `editor-cef-smoke` CI job (Windows/Linux; macOS's .app packaging is e12's).
 

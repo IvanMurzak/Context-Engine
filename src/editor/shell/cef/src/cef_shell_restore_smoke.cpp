@@ -84,9 +84,12 @@
 // arrangement — so the boolean is FALSE in phase 1 and TRUE in phase 2, which is the property that
 // distinguishes a restore from a fresh boot and which no persistence-path counter can express.
 //
-// Each phase boots exactly as `cef_shell_smoke.cpp` does — a windowless browser, no native window,
-// presenting through e03's MemoryBlitter, hard-exiting on Windows after the verdict to skip CEF's
-// flaky Session-0 teardown. It hydrates the SAME real panel roster (placeholder + Problems + Scene tree
+// Each phase boots exactly as `cef_shell_smoke.cpp` does, including its TWO WINDOW MODES (see that
+// file's header): by DEFAULT a windowless browser with no native window, presenting through e03's
+// MemoryBlitter — what the Windows leg runs; under `--real-window`, which the ctest registration
+// passes on Linux and which the controller FORWARDS to both phase children, a REAL X11 window
+// presenting through the REAL X11 blitter. Every phase hard-exits on Windows after the verdict to
+// skip CEF's flaky Session-0 teardown. It hydrates the SAME real panel roster (placeholder + Problems + Scene tree
 // + Inspector: `hostable_panel_ids()`), so the restart proof covers every hostable panel, not a stub.
 // CAUSE reporting (`OnLoadError` + `OnConsoleMessage`) is built into the shared CefShell client each
 // phase boots through, and a child's stdout/stderr is inherited by the controller, so a page that never

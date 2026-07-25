@@ -24,8 +24,11 @@
 // silently executed nothing runs the 30s clock out and the `states_published()` assertion fails as it
 // should (the wait is not vacuous and cannot loop forever).
 //
-// It boots exactly as cef_shell_smoke.cpp does — a windowless browser presenting through e03's
-// MemoryBlitter, hard-exiting on Windows after the verdict to skip CEF's flaky Session-0 teardown — so
+// It boots exactly as cef_shell_smoke.cpp does — including its TWO WINDOW MODES (see that file's
+// header): in the DEFAULT headless mode, which is what the Windows leg runs, a windowless browser
+// presenting through e03's MemoryBlitter; under `--real-window`, which the ctest registration passes
+// on Linux, a REAL X11 window presenting through the REAL X11 blitter. It hard-exits on Windows
+// after the verdict to skip CEF's flaky Session-0 teardown — so
 // it is structurally identical to that proven-green single-boot smoke, and it can only run where CEF
 // links: the per-OS `editor-cef-smoke` CI job (Windows/Linux; macOS's .app packaging is e12's).
 

@@ -3,6 +3,10 @@
 
 #include "context/editor/shell/smoke/smoke_window.h"
 
+// Named HERE, not in the seam header: `PresentSetup` reports the blitter by NAME and hands back no
+// handle, so the header has no `render::present` type left to declare.
+#include "context/render/present/present_blit.h"
+
 #include <cstring>
 #include <string>
 #include <utility>
@@ -259,7 +263,11 @@ WindowSetup make_smoke_window(WindowDesc desc, WindowMode mode)
     }
     // The anti-degrade guard, and the reason this is not just a call to make_window_backend: a
     // real-window smoke that quietly ran on the headless backend would assert every one of its
-    // claims against no OS at all and stay green forever.
+    // claims against no OS at all and stay green forever. Like the MemoryBlitter guard in
+    // `attach_smoke_present` this is DEFENCE IN DEPTH — today `make_window_backend` returns a
+    // platform backend or nullptr on every arm, never the headless one — so it is the FUTURE
+    // regression it forbids, and `test_real_mode_refuses_the_headless_backend_rather_than_degrading`
+    // reaches it by handing the seam a headless backend the factory would not have produced.
     if (std::strcmp(selection.backend->name(), "headless") == 0)
     {
         setup.diagnostic = "the platform window factory resolved to the HEADLESS backend, which is "
@@ -288,9 +296,8 @@ PresentSetup attach_smoke_present(EditorWindow& window, WindowMode mode)
     PresentSetup setup;
     if (mode == WindowMode::headless)
     {
-        auto blitter = std::make_unique<render::present::MemoryBlitter>();
-        setup.memory = blitter.get();
-        window.compositor().attach_cpu(std::move(blitter), window.backend().client_size());
+        window.compositor().attach_cpu(std::make_unique<render::present::MemoryBlitter>(),
+                                       window.backend().client_size());
         setup.blitter_name = kMemoryBlitterName;
         setup.ok = true;
         return setup;
@@ -303,12 +310,31 @@ PresentSetup attach_smoke_present(EditorWindow& window, WindowMode mode)
     render::present::IPresentBlitter* blitter = window.compositor().blitter();
     if (blitter == nullptr)
     {
-        setup.diagnostic = window.compositor().diagnostic().empty()
-                               ? std::string("the CPU present path attached no OS blitter")
-                               : window.compositor().diagnostic();
+        // The WINDOW's diagnostic first, and it is the one that matters: `attach_cpu_present()`
+        // records what `make_present_blitter` actually refused (no X display connection / no X11
+        // headers in this build / a Wayland surface / no presentable native window), whereas the
+        // compositor's is one fixed string naming every platform's failure at once. On nine
+        // blocking gates the difference is between a log that says WHICH cause fired and one that
+        // makes the reader guess.
+        if (!window.diagnostic().empty())
+        {
+            setup.diagnostic = window.diagnostic();
+        }
+        else if (!window.compositor().diagnostic().empty())
+        {
+            setup.diagnostic = window.compositor().diagnostic();
+        }
+        else
+        {
+            setup.diagnostic = "the CPU present path attached no OS blitter";
+        }
         return setup;
     }
     setup.blitter_name = blitter->name();
+    // DEFENCE IN DEPTH, not a branch the shipping factories can reach today: `make_present_blitter`
+    // returns a win32/X11/Cocoa blitter or nullptr, never a MemoryBlitter. It is kept because the
+    // claim it enforces ("real mode never presents into memory") must survive someone giving that
+    // selection a memory fallback; the null case above is the one a real refusal takes.
     if (setup.blitter_name == kMemoryBlitterName)
     {
         setup.diagnostic = "the CPU present path resolved to the in-memory blitter, which is the "
@@ -352,6 +378,15 @@ bool inject_event(IWindowBackend& backend, WindowMode mode, const ShellEvent& ev
     // the Shell must react to is the one the SERVER grants, which arrives later as a real
     // ConfigureNotify. Handled before the X11 guard below because it needs no Xlib at all — a Win32
     // or Cocoa real window answers `apply_placement` with its own configure notification too.
+    //
+    // ⚠ The read-modify-write carries the CURRENT position and maximized state back in, which is
+    // exactly right under xvfb (no window manager, the CI configuration) but is a known limitation
+    // on a WM'd desktop such as WSLg: `placement()` reports the ROOT-relative origin, and a
+    // reparenting WM reads a move request as the FRAME origin, so a resize also nudges the window
+    // by the frame offset — and a MAXIMIZED window would be un-maximized and re-maximized around
+    // the request (see X11WindowBackend::apply_placement). Neither affects the smokes, which never
+    // maximize and never assert a position; both are why this seam asserts the size the server
+    // GRANTS rather than the one it asked for.
     if (event.kind == ShellEventKind::resize)
     {
         if (render::is_empty(event.size))

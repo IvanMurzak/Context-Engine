@@ -427,8 +427,8 @@ int main(int argc, char** argv)
     // deleted, or against the headless backend (the seam refuses that outright).
     //
     // WHY THE COUNTERS ARE READ AS A DELTA and not against a fixed number: the server is entitled
-    // to have delivered other input already (a crossing event as the window mapped under the
-    // pointer), so an absolute count would be asserting the state of whoever's desktop this ran on.
+    // to have delivered other input already (a LeaveNotify, which the decoder carries as
+    // `PointerAction::leave`), so an absolute count would be asserting whoever's desktop this ran on.
     // A delta of exactly 3 pins that these three samples arrived and that none of them was
     // duplicated by the decoder.
     const int pointer_dispatches_before = editor->input().pointer_dispatches();
@@ -464,12 +464,14 @@ int main(int argc, char** argv)
               "the three injected pointer samples came BACK from the real X server and were "
               "arbitrated");
     // ⚠ THE COUNTER IS ASSERTED WITH `>=`, AND THE PRECISION LIVES IN THE BUTTON COUNTS INSTEAD.
-    // A real X server is entitled to deliver input this smoke did not inject — an EnterNotify the
-    // moment the window maps under wherever the desktop's pointer happens to be decodes to a
-    // pointer sample — so `== before + 3` would be asserting the state of somebody's desktop and
-    // would red at random on a developer box. Button presses and releases have no such source: a
-    // crossing event is never one, so counting them is BOTH robust and strictly more precise than
-    // the total ever was (it pins WHICH samples arrived, not merely how many).
+    // A real X server is entitled to deliver input this smoke did not inject — a LeaveNotify, which
+    // `translate_x11_event` carries as `PointerAction::leave`, whenever the pointer leaves the
+    // window (a sibling mapping over it is enough) — so `== before + 3` would be asserting the
+    // state of somebody's desktop and would red at random on a developer box. An EnterNotify is
+    // NOT such a source: the decoder has no arm for it, so a window merely mapping under the
+    // pointer contributes nothing. Button presses and releases have no such source either, so
+    // counting them is BOTH robust and strictly more precise than the total ever was (it pins
+    // WHICH samples arrived, not merely how many).
     int downs = 0;
     int ups = 0;
     for (const shell::PointerEvent& sample : browser->pointers())

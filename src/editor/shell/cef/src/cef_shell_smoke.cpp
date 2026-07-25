@@ -696,7 +696,9 @@ int main(int argc, char** argv)
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     // DELTAS and `>=`, not absolute equality. In real-window mode the X server is entitled to have
-    // delivered input of its own (a crossing event as the window mapped under the pointer), and a
+    // delivered input of its own: a LeaveNotify, which `translate_x11_event` carries as
+    // `PointerAction::leave`. (An EnterNotify does NOT contribute — the decoder has no arm for it,
+    // so a window merely mapping under the pointer adds nothing.) And a
     // real Tab press yields the raw key AND the character the decoder synthesizes from it — neither
     // of which the offscreen backend can produce. Asserting exact counts would be asserting the
     // state of whatever desktop this ran on; asserting the DELTA still fails at zero, which is the

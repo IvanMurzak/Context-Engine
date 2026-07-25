@@ -46,7 +46,6 @@
 #include "context/editor/shell/dpi.h"
 #include "context/editor/shell/shell.h"
 #include "context/editor/shell/window.h"
-#include "context/render/present/present_blit.h"
 
 #include <cstdint>
 #include <memory>
@@ -124,8 +123,13 @@ struct BrowserGeometry
 
 [[nodiscard]] BrowserGeometry browser_geometry(const IWindowBackend& backend);
 
-// What `attach_smoke_present` resolved to. `ok` is the whole verdict; `memory` is non-null only in
-// headless mode (it is the blitter the pixel assertions read their composed surface out of).
+// What `attach_smoke_present` resolved to. `ok` is the whole verdict.
+//
+// Deliberately NO blitter HANDLE: the compositor owns the blitter and destroys it at `detach()`, so
+// handing one back would re-create exactly the non-owning pointer this task removed from the nine
+// smokes. Callers assert presenting through `compositor().stats().frames_presented`, which advances
+// only when the ATTACHED blitter's `blit()` returned true — the same claim in both modes — and read
+// pixels through `compositor().cpu_surface()`.
 struct PresentSetup
 {
     bool ok = false;
@@ -134,7 +138,6 @@ struct PresentSetup
     // The blitter that actually attached ("memory", "x11-shm", "x11-put-image", "win32-gdi", ...).
     // Recorded so a caller asserts what it GOT rather than what it asked for.
     std::string blitter_name;
-    render::present::MemoryBlitter* memory = nullptr;
 };
 
 // Attach the C-F2 CPU present path for `mode`, at the window's CURRENT client extent.
