@@ -29,6 +29,7 @@ import { windowA11yTests } from "./window_a11y.test.js";
 import { uimirrorBroadcastTests } from "./uimirror_broadcast.test.js";
 import { dragTests } from "./drag.test.js";
 import { extPanelTests } from "./extpanel.test.js";
+import { panelPortTests } from "./panelport.test.js";
 import { bootTests } from "./boot.test.js";
 
 // AWAITED since M9 e08d: `runTests` is async because the e08d boot cases drive the real, async
@@ -59,6 +60,7 @@ void runTests([
     ...uimirrorBroadcastTests,
     ...dragTests,
     ...extPanelTests,
+    ...panelPortTests,
     // LAST, deliberately: the boot cases drive the whole bundle against a mock Shell and leave real
     // boot state on the shared document (`data-editor-*`, the applied theme's custom properties), so
     // running them after every other case keeps that out of the others' way.

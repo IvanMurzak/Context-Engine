@@ -22,6 +22,23 @@
 //   ran.js      the module BODY EXECUTED — a dynamic `import()` at evaluation time. Scripts really
 //               run in a frame whose only sandbox token is `allow-scripts`.
 //
+// M9 e13b-1 EXTENDS THE SAME TECHNIQUE TO THE PORT, which is the only tier that can prove it: a panel
+// port is a `MessagePort` inside an opaque-origin document, so nothing native or TS-side can observe
+// one from outside. Four more URLs, each behind a branch a specific port fact had to satisfy:
+//
+//   .context-panel-port.js  the SHELL SPLICED its bootstrap tag into the package's document bytes and
+//               the browser fetched it — from the package's own origin, out of the scheme itself, with
+//               no such file on disk. (The one link with no unit-tier equivalent at all.)
+//   port-present.js         the bootstrap RAN, and ran BEFORE the package's own module: the module
+//               found `window.contextPanelPort` already published. That ordering is what the one-shot
+//               rests on.
+//   port-refused.js         THE ROUND TRIP. The panel transferred a port up, editor-core accepted it,
+//               the panel sent `bridge.call` over it, and the reply matched the deny-all refusal
+//               exactly — tag, version, id, `ok:false`, `bridge.verb_not_granted`, echoed verb.
+//   one-shot-held.js        the panel offered a SECOND channel and, after a settle window, had
+//               received nothing on it. The failure direction is SAFE: a second port that WAS granted
+//               sets the fixture's flag and this import never fires.
+//
 // AND THE NEGATIVE HALF, which is what keeps the positive from being vacuous: a SECOND iframe panel
 // naming a package that is NOT mounted must be REFUSED. editor-core mounts it (its entry is a
 // well-formed `context-ext://` URL, so refusing it is not editor-core's job), the browser requests
@@ -35,8 +52,14 @@
 //     is about bytes over the scheme and a composited software-OSR frame, none about a real window,
 //     a GPU present, or user input. Nothing here is weaker on Windows and nothing here is claimed
 //     to cover interactive behaviour.
-//   * It says nothing about the panel BRIDGE: there is none yet (e13b), and this smoke asserts
-//     `bridge.refused() == 0` precisely so an accidental early transport would be caught.
+//   * It says nothing about which PACKAGE the document holding the port belongs to. The port is bound
+//     to the FIRST document loaded into the frame (ext_scheme.h § the E13B obligation); that this was
+//     the package the host asked for is a Shell/editor-core agreement, not something the browser
+//     attests, and no assertion here upgrades it.
+//   * The port carries ZERO capability. Every verb answers the same refusal, so `port-refused.js`
+//     proves a transport and an authentication boundary — never a granted capability.
+//   * `bridge.refused() == 0` is still asserted, and still says nothing about the port: the panel
+//     transport rides MessageChannel/postMessage and never reaches the CEF message router.
 //
 // TEST-ONLY MOUNT. `CefShellOptions::ext_packages` has no producer in the tree (the install flow is
 // e13b's), so this smoke IS the first caller: it writes a fixture package into a temp dir and mounts
@@ -192,6 +215,55 @@ bool write_fixture_package(const std::filesystem::path& root)
     {
         return false;
     }
+    // The M9 e13b-1 PORT LEG of the fixture. Each dynamic import below is issued ONLY from inside a
+    // branch that a specific port fact has already satisfied, so its URL appearing in
+    // `ext_served_urls()` IS the assertion — the same inference the css/ready/ran chain above uses,
+    // extended to the transport.
+    //
+    // ⚠ THE WIRE STRINGS ARE SPELLED HERE ON PURPOSE, and only the handshake tag is taken from a
+    // constant (`kExtPortHandshakeTag`, which the Shell itself emits). `context.panel-bridge`, the
+    // envelope version and `bridge.verb_not_granted` are editor-core's (panelport.ts
+    // `PANEL_BRIDGE_TAG` / `PANEL_BRIDGE_VERSION` / `PANEL_BRIDGE_REFUSALS`), and a test that
+    // referenced them through a shared constant would be asserting that the two sides agree with
+    // themselves. A CONTRACT test must restate the contract: if editor-core renames a refusal code,
+    // this smoke must go red, because a shipped panel written against the old spelling would too.
+    const std::string port_js =
+        std::string("var port = window.contextPanelPort;\n"
+                    "if (port) {\n"
+                    // The bootstrap ran BEFORE this module — a classic external script blocks
+                    // parsing, a module is deferred — so the port is already published.
+                    "  void import(\"./port-present.js\");\n"
+                    "  port.onmessage = function (event) {\n"
+                    "    var d = event.data;\n"
+                    "    if (d && d.ctx === \"context.panel-bridge\" && d.v === 1 &&\n"
+                    "        d.kind === \"reply\" && d.id === \"smoke-1\" && d.ok === false &&\n"
+                    "        d.error && d.error.code === \"bridge.verb_not_granted\" &&\n"
+                    "        d.error.verb === \"bridge.call\") {\n"
+                    "      void import(\"./port-refused.js\");\n"
+                    "    }\n"
+                    "  };\n"
+                    "  port.start();\n"
+                    "  port.postMessage({ ctx: \"context.panel-bridge\", v: 1, kind: \"request\",\n"
+                    "                     id: \"smoke-1\", verb: \"bridge.call\" });\n"
+                    // THE ONE-SHOT, LIVE. A second handshake must win nothing. The child cannot
+                    // observe a refusal directly (the host just closes the port it was handed), so it
+                    // observes SILENCE on the second channel after the first channel has demonstrably
+                    // been serviced — and the failure direction is SAFE: a second port that WAS granted
+                    // sets `secondSaw`, the import never fires, and the smoke goes red.
+                    "  var second = new MessageChannel();\n"
+                    "  var secondSaw = false;\n"
+                    "  second.port1.onmessage = function () { secondSaw = true; };\n"
+                    "  second.port1.start();\n"
+                    "  parent.postMessage({ ctx: \"") +
+        shell::kExtPortHandshakeTag +
+        "\" }, \"*\", [second.port2]);\n"
+        "  second.port1.postMessage({ ctx: \"context.panel-bridge\", v: 1, kind: \"request\",\n"
+        "                             id: \"smoke-2\", verb: \"bridge.call\" });\n"
+        "  setTimeout(function () {\n"
+        "    if (!secondSaw) { void import(\"./one-shot-held.js\"); }\n"
+        "  }, 1500);\n"
+        "}\n";
+
     const bool ok =
         write_file(root / "index.html",
                    "<!doctype html>\n"
@@ -205,9 +277,13 @@ bool write_fixture_package(const std::filesystem::path& root)
         // the module BODY evaluated). Two different facts, deliberately kept in two different files.
         write_file(root / "panel.js",
                    "import \"./ready.js\";\n"
-                   "void import(\"./ran.js\");\n") &&
+                   "void import(\"./ran.js\");\n" +
+                       port_js) &&
         write_file(root / "ready.js", "export const ready = true;\n") &&
-        write_file(root / "ran.js", "export const ran = true;\n");
+        write_file(root / "ran.js", "export const ran = true;\n") &&
+        write_file(root / "port-present.js", "export const present = true;\n") &&
+        write_file(root / "port-refused.js", "export const refused = true;\n") &&
+        write_file(root / "one-shot-held.js", "export const held = true;\n");
     return ok;
 }
 
@@ -425,6 +501,13 @@ int main(int argc, char** argv)
     const std::string url_ready = ext_url(kMountedPackage, "ready.js");
     const std::string url_ran = ext_url(kMountedPackage, "ran.js");
     const std::string url_absent = ext_url(kUnmountedPackage, "index.html");
+    // The M9 e13b-1 port chain. `url_bootstrap` is the SYNTHETIC asset the scheme serves out of itself
+    // — its presence is what proves the Shell SPLICED the tag into the package's document and the
+    // browser fetched it; the other three are ordinary package files each guarded by a port fact.
+    const std::string url_bootstrap = ext_url(kMountedPackage, shell::kExtPortBootstrapAsset);
+    const std::string url_port_present = ext_url(kMountedPackage, "port-present.js");
+    const std::string url_port_refused = ext_url(kMountedPackage, "port-refused.js");
+    const std::string url_one_shot = ext_url(kMountedPackage, "one-shot-held.js");
 
     // Drive the pump until the whole chain is observable. The deadline BOUNDS it: a panel that never
     // loads runs the clock out and the assertions below fail with the served list printed, rather
@@ -436,6 +519,7 @@ int main(int argc, char** argv)
     bool traced_handshake = false;
     bool traced_document = false;
     bool traced_module = false;
+    bool traced_port = false;
     auto last_heartbeat = loop_start;
     while (std::chrono::steady_clock::now() < deadline)
     {
@@ -473,7 +557,15 @@ int main(int argc, char** argv)
         // merely NON-EMPTY would also be satisfied by some other refusal landing first (a
         // not-found subresource, say), letting the loop break before the unmounted package's own
         // request has been answered — a red on a perfectly healthy build.
+        if (!traced_port && contains(served, url_port_refused))
+        {
+            traced_port = true;
+            trace("milestone: the panel's PORT round-tripped (it received the deny-all refusal)");
+        }
+        // The LAST fact to arrive is the one-shot verdict (the fixture settles for 1.5s before
+        // deciding), so waiting on it waits on everything.
         if (presented && handshake.complete() && contains(served, url_ran) &&
+            contains(served, url_one_shot) &&
             contains(shell::cef::ext_refused_urls(), url_absent))
         {
             break;
@@ -543,6 +635,31 @@ int main(int argc, char** argv)
                 "attribute would give the frame its real origin, make the module fetches "
                 "same-origin, and leave every URL here served just the same. The attribute's token "
                 "set is pinned on the rendered element by the T1 tier (extpanel.test.ts)");
+
+    // --- the M9 e13b-1 PORT CHAIN, each link its own assertion ------------------------------------
+    SMOKE_CHECK(contains(served, url_bootstrap),
+                "the SHELL-INJECTED PORT BOOTSTRAP was served. This is the one link no other tier can "
+                "reach: `ext_inject_port_bootstrap` spliced a `<script src>` into the package's own "
+                "document bytes, the browser resolved it against the package ORIGIN (an absolute path "
+                "— a relative one would 404 for any entry not at the root), and the scheme answered it "
+                "out of itself with no file on disk. If this is the only failure, look at the splice "
+                "point or the synthetic-asset branch, not at the port");
+    SMOKE_CHECK(contains(served, url_port_present),
+                "the bootstrap RAN, and it ran BEFORE the package's own module: the module found "
+                "`window.contextPanelPort` already published. A classic external script blocks parsing "
+                "and a module is deferred, which is the ordering the whole one-shot rests on — if this "
+                "fails while the bootstrap above was served, the script executed but published nothing");
+    SMOKE_CHECK(contains(served, url_port_refused),
+                "THE PORT ROUND-TRIPPED THROUGH THE REAL CEF PUMP. The panel transferred a port up, "
+                "editor-core accepted it, the panel sent a `bridge.call` request over it, and the reply "
+                "it got back matched the deny-all refusal EXACTLY — tag, version, id, ok:false, "
+                "`bridge.verb_not_granted`, and the echoed verb. This is the e13b-1 deliverable proven "
+                "end to end across an opaque-origin boundary, and no unit tier can produce it");
+    SMOKE_CHECK(contains(served, url_one_shot),
+                "and the grant is ONE-SHOT in the live browser: the panel offered a SECOND channel and "
+                "sent a request over it, and after a settle window had received nothing at all. NOTE "
+                "the failure direction is safe — if a second port HAD been granted, the fixture's flag "
+                "is set and this import never fires, so the wrong outcome reddens rather than passing");
 
     // --- the negative half: deny-by-default is LIVE in the browser, not just in the unit suite ----
     SMOKE_CHECK(contains(refused, url_absent),

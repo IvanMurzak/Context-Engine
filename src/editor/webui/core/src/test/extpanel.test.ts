@@ -38,6 +38,7 @@ import {
     parseExtPanelEntry,
 } from "../extpanel.js";
 import { IFRAME_PANEL_CLASS, PanelHost } from "../panelhost.js";
+import { PANEL_PORT_STATE_ATTRIBUTE } from "../panelport.js";
 import { PANEL_LIST_METHOD, PanelClient, parsePanelManifest } from "../panels.js";
 
 // --------------------------------------------------------------------------- roster + Shell mocks
@@ -635,6 +636,46 @@ export const extPanelTests: readonly TestCase[] = [
                 );
             } finally {
                 drifted.dispose();
+            }
+        },
+    },
+    {
+        // THE e13b-1 WIRING, asserted on the RENDERED element — the same discipline this file applies
+        // to the sandbox attribute, and for the same reason: the bridge's own behaviour is proven in
+        // `panelport.test.ts` against a real opaque-origin child, but that nothing in production
+        // FORGETS to build one (and to build it before `src`) is a property of `IframePanelRenderer`,
+        // and the port state reflected onto the frame is the only thing here that can see it.
+        //
+        // Nothing local can load a `context-ext://` document, so the frame never handshakes — which is
+        // exactly what makes `pending` the right assertion: it can only have been written by a bridge
+        // that was constructed, and it can only be `pending` (rather than absent) if that happened
+        // before the load this frame will never complete.
+        name: "iframe panel: the RENDERED frame carries a port bridge from construction, and loses it on close",
+        run: async () => {
+            const mounted = await mountHost([manifestJson()]);
+            try {
+                const frame = frameFor(mounted, "pkg.hello");
+                assert(frame !== null, "the frame was rendered");
+                const iframe = frame as HTMLIFrameElement;
+                assertEqual(
+                    iframe.getAttribute(PANEL_PORT_STATE_ATTRIBUTE),
+                    "pending",
+                    "a port bridge exists for this frame and is awaiting the Shell-injected " +
+                        "bootstrap's handshake. An ABSENT attribute would mean the renderer built no " +
+                        "bridge at all, so every panel would be silently portless with no local signal",
+                );
+                // CLOSING the panel disposes the renderer, which must dispose the bridge — otherwise a
+                // closed panel leaves a `message` listener on the editor's window for a frame that is
+                // gone.
+                assert(mounted.host.close("pkg.hello"), "the panel closed");
+                assertEqual(
+                    iframe.getAttribute(PANEL_PORT_STATE_ATTRIBUTE),
+                    "revoked",
+                    "and the bridge was DISPOSED with the renderer — asserted on the element captured " +
+                        "before the close, since the element itself is removed from the DOM",
+                );
+            } finally {
+                mounted.dispose();
             }
         },
     },

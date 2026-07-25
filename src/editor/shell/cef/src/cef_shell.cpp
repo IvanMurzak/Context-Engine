@@ -469,11 +469,28 @@ public:
             return true;
         }
 
-        if (!load_body(resolution_.file))
+        if (resolution_.synthetic)
+        {
+            // The ONE asset this scheme serves out of ITSELF (M9 e13b-1): the panel-port bootstrap.
+            // Its bytes are ours, so there is no file to read — ext_scheme.h § the panel-port
+            // bootstrap, and `ExtAssetResolver::resolve` is where the request earned this branch.
+            body_ = ext_port_bootstrap_script();
+        }
+        else if (!load_body(resolution_.file))
         {
             resolution_.status = AssetStatus::not_found;
             record_ext_request(url, /*served*/ false);
             return true;
+        }
+        else
+        {
+            // The e13b-1 bootstrap splice, called UNCONDITIONALLY and with no branch of its own: which
+            // media types are rewritten and where the tag lands are BOTH decided inside the CEF-free
+            // `ext_inject_port_bootstrap`, which the local dev gate and all three `build` legs
+            // unit-test against adversarial document prefixes. A media-type test written HERE would be
+            // policy in the one TU nothing local can compile — the mistake this whole handler is
+            // shaped to avoid.
+            body_ = ext_inject_port_bootstrap(resolution_.mime_type, body_);
         }
         // Recorded only once the BYTES are in hand, so `ext_served_urls()` means "this asset was
         // actually delivered" rather than "the resolver approved of it" — the smoke's whole chain of

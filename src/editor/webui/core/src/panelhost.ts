@@ -23,6 +23,12 @@
 // because `openById` (e10b's seed path) reached `open` without it and a gate one caller can walk
 // past is not a gate. `#renderer` is fail-closed for the same reason.
 //
+// M9 e13b-1 GIVES THAT PANEL A TRANSPORT: one authenticated `MessagePort`, owned by
+// `IframePanelRenderer` and implemented in `panelport.ts`. Nothing about the division of labour moves
+// — the renderer constructs the bridge before `src` and disposes it with itself, and every decision
+// about WHO may hold the port, and what any verb answers, lives in that module where the T1 tier can
+// drive it directly.
+//
 // ⚠ WHAT IS DELIBERATELY NOT HERE: layout PERSISTENCE. `toJSON`/`fromJSON` are exposed
 // (`captureLayout` / `restoreLayout`) because they are geometry operations this class owns, but
 // nothing writes them anywhere. The Shell is the SINGLE WRITER of `.editor/editor-state.json`
@@ -40,6 +46,7 @@ import {
 } from "./extpanel.js";
 import { HydrationRuntime } from "./hydration.js";
 import type { PanelClient, PanelManifest, PanelRoster } from "./panels.js";
+import { PanelPortBridge } from "./panelport.js";
 
 /** Dockview's component name for every uitree panel. One renderer type serves them all — see `#create`. */
 const UITREE_COMPONENT = "context-uitree-panel";
@@ -186,20 +193,24 @@ class LocalPanelRenderer implements PanelRenderer {
  *      `frame-ancestors context-editor://app`) governs the loaded document, and editor-core's own
  *      `frame-src context-ext:` is the embedder-side backstop.
  *
- * ⚠ NO BRIDGE IS HANDED TO THE FRAME — e13a-2 lands the HOST, not the transport. A sandboxed frame
- * has origin `"null"`, so `event.origin` is not authentication and the port must be handed over at
- * creation (B-F6); that is e13b's MessageChannel work. Until it exists this class deliberately
- * installs NO `message` listener: an editor that listened now would be accepting unauthenticated
- * postMessages from untrusted code for no capability in return. `ext_scheme.h`'s e13a-2 note about
- * a frame re-navigating ITSELF to another package's origin is why the eventual port must key off the
- * handshake's verified origin rather than off this element — recorded here so the class that will
- * hold the port carries the warning.
+ * ⚠ EXACTLY ONE PORT, AND THIS CLASS OWNS ITS LIFETIME (M9 e13b-1). e13a-2 handed the frame NO
+ * transport at all; the port now arrives through `PanelPortBridge` (panelport.ts), which is
+ * constructed HERE — once per renderer, before `src` — and disposed with the renderer. The renderer's
+ * one-way `#frame` latch is what makes "exactly one" structural rather than a rule: a second frame is
+ * never built, so a second bridge is never constructed.
+ *
+ * WHAT THIS CLASS DELIBERATELY DOES NOT KNOW. It does not inspect the port, does not authenticate the
+ * handshake, and does not decide what any verb answers — all of that is panelport.ts, for the same
+ * reason `extpanel.ts` holds the entry grammar rather than this file: a security decision inside a
+ * renderer class is a security decision with no unit tests. What lives here is the DOM and the
+ * lifecycle, which is all a renderer should own.
  */
 class IframePanelRenderer implements PanelRenderer {
     readonly element: HTMLElement;
     readonly #url: string;
     readonly #panelId: string;
     #frame: HTMLIFrameElement | undefined;
+    #bridge: PanelPortBridge | undefined;
     #suspended = false;
 
     constructor(panelId: string, url: string) {
@@ -253,6 +264,13 @@ class IframePanelRenderer implements PanelRenderer {
         // editor-core's public surface and no enforcement. `IFRAME_PANEL_CLASS` is a constant only
         // because another MODULE (the T1 tier) selects on it.
         frame.className = "ctx-panel-frame-element";
+        // THE PORT BRIDGE, BEFORE `src` — for the SAME reason the sandbox attribute is set before it,
+        // and it is not merely symmetry. The Shell splices the port bootstrap in as the panel
+        // document's FIRST script, so the handshake can be posted before this method's next statement
+        // has run; a bridge constructed after `src` would miss the one grant a frame ever offers and
+        // the panel would come up portless with nothing naming the cause. `PanelPortBridge`'s
+        // constructor attaches both listeners, which is why constructing it IS the installation.
+        this.#bridge = new PanelPortBridge({ frame, panelId: this.#panelId });
         frame.setAttribute("src", this.#url);
         this.#frame = frame;
         this.element.replaceChildren(frame);
@@ -271,6 +289,13 @@ class IframePanelRenderer implements PanelRenderer {
     }
 
     dispose(): void {
+        // THE BRIDGE FIRST, AND BEFORE THE ELEMENT GOES. Disposing it closes the port and detaches the
+        // window `message` listener; doing it after `replaceChildren` would leave a listener alive for
+        // a frame that is already gone, and — because a detached frame's `contentWindow` becomes
+        // `null` — the bridge's own "is this my frame?" check would start comparing `null` against the
+        // `event.source` of every OTHER panel's messages. `PanelPortBridge.dispose` is idempotent, so
+        // a second dispose (or one after a revocation) is a no-op.
+        this.#bridge?.dispose();
         // Removing the element is what actually tears the package's document down; nulling `src`
         // first would navigate the frame to `about:blank` (a load in a frame we are discarding) for
         // no benefit. `#frame` is deliberately NOT cleared — see `refresh`: leaving it set is what

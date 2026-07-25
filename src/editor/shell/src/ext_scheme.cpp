@@ -3,6 +3,7 @@
 
 #include "context/editor/shell/ext_scheme.h"
 
+#include <algorithm>
 #include <system_error>
 
 namespace context::editor::shell
@@ -242,6 +243,36 @@ ExtResolution ExtAssetResolver::resolve(std::string_view url) const
         return result;
     }
 
+    // THE ONE SYNTHETIC ASSET (M9 e13b-1) — the port bootstrap, whose bytes are OURS rather than a
+    // package file's (ext_scheme.h § the panel-port bootstrap).
+    //
+    // ITS POSITION IN THIS FUNCTION IS THE WHOLE OF ITS SECURITY ARGUMENT. It is reached only after a
+    // valid package id, a MOUNTED package, a query/fragment strip, a successful percent-decode and a
+    // clean `split_safe_path_segments` — so it is not a package-enumeration oracle (an unmounted
+    // package answered 404 four checks up, indistinguishably from an absent asset) and it cannot be
+    // used to walk past the path rules (a request that failed any of them never gets here). Placing
+    // it EARLIER — before the mount lookup, say, since the bytes do not depend on the package —
+    // would answer 200 for every syntactically valid id, which IS that oracle.
+    //
+    // Nothing below runs for it: there is no file to canonicalize, contain, or stat.
+    if (segments.size() == 1 && segments.front() == kExtPortBootstrapAsset)
+    {
+        result.mime_type = media_type_for_extension(".js");
+        if (result.mime_type.empty())
+        {
+            // Unreachable while `.js` is on the shared allowlist, and deliberately not an assert: if
+            // a future edit dropped it, serving a script with no Content-Type under `nosniff` is a
+            // silent blank panel, whereas refusing is the same answer every other unlistable media
+            // type gets.
+            result.status = AssetStatus::forbidden;
+            result.reason = "media type not on the asset allowlist";
+            return result;
+        }
+        result.status = AssetStatus::ok;
+        result.synthetic = true;
+        return result;
+    }
+
     if (segments.empty())
     {
         segments.emplace_back(kExtDefaultDocument);
@@ -401,6 +432,124 @@ std::vector<std::pair<std::string, std::string>> ext_response_headers(const std:
         headers.emplace_back("Access-Control-Allow-Origin", "null");
     }
     return headers;
+}
+
+// ---------------------------------------------------- the e13b-1 panel-port bootstrap (ext_scheme.h)
+
+// A THIRD anonymous block, on the same terms as the second: these three helpers are meaningless away
+// from the two functions below them and nothing here belongs on the library's link surface.
+namespace
+{
+
+bool is_html_media_type(const std::string& mime_type)
+{
+    // Essence only — the allowlist's entry is `text/html; charset=utf-8` and the charset is a separate
+    // response field. Compared against the ALLOWLIST's own spelling, as `is_script_media_type` above
+    // is, so there is one string to agree with rather than a family of guesses.
+    return split_media_type(mime_type).essence == "text/html";
+}
+
+// The HTML spec's ASCII whitespace set — space, tab, LF, FF, CR. NOT `std::isspace`, which is
+// locale-dependent and UB on a negative `char`.
+bool is_ascii_space(char ch)
+{
+    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\f' || ch == '\r';
+}
+
+// The byte offset the bootstrap tag is spliced at. See ext_scheme.h for the RULE and why it is
+// "the doctype must be FIRST for us to go second" rather than "find the doctype".
+std::size_t bootstrap_splice_offset(std::string_view body)
+{
+    std::size_t at = 0;
+    // A UTF-8 BOM, then ASCII whitespace: both may legitimately precede a doctype and neither is
+    // content, so skipping them is what keeps a BOM'd or indented document in standards mode. Any
+    // OTHER leading byte — a comment, a stray tag, a script — means the doctype is not first, and the
+    // fall-through to offset 0 below is the answer that keeps the bootstrap ahead of package code.
+    if (body.size() >= 3 && static_cast<unsigned char>(body[0]) == 0xEF &&
+        static_cast<unsigned char>(body[1]) == 0xBB && static_cast<unsigned char>(body[2]) == 0xBF)
+    {
+        at = 3;
+    }
+    while (at < body.size() && is_ascii_space(body[at]))
+    {
+        ++at;
+    }
+
+    const std::string_view marker = "<!doctype";
+    if (body.size() - at < marker.size() || !ascii_iequals(body.substr(at, marker.size()), marker))
+    {
+        return 0;
+    }
+    // BOUNDED: the body is third-party, so a `<!doctype` with no terminating '>' must not turn every
+    // HTML response into a full-body scan. Giving up splices at 0, which is safe in the direction
+    // that matters (the bootstrap still runs first) and costs only standards mode on a document that
+    // is malformed anyway.
+    const std::size_t limit = std::min(body.size(), at + kExtDoctypeScanLimit);
+    for (std::size_t i = at; i < limit; ++i)
+    {
+        if (body[i] == '>')
+        {
+            return i + 1;
+        }
+    }
+    return 0;
+}
+
+} // namespace
+
+const char* ext_port_bootstrap_script()
+{
+    // ASSEMBLED FROM THE CONSTANTS, never written out as one literal: the tag, the global name and the
+    // target origin each have a second declaration elsewhere (editor-core, and app_scheme.h), and a
+    // hand-copied spelling here is how the served bytes come to name a vocabulary nobody listens on.
+    //
+    // Function-local static: built once, and C++11 makes the initialization thread-safe — which this
+    // needs, because the CEF scheme handler calls it on the IO thread.
+    static const std::string script =
+        std::string("/* Context panel-port bootstrap (M9 e13b-1). Injected by the Shell as the FIRST\n"
+                    "   script in every panel document; see ext_scheme.h for why this code, and not\n"
+                    "   the package's, is what creates the channel. */\n"
+                    "(function () {\n"
+                    "    \"use strict\";\n"
+                    "    /* Not framed: a panel document opened directly mints nothing. */\n"
+                    "    if (window.parent === window) {\n"
+                    "        return;\n"
+                    "    }\n"
+                    "    var channel = new MessageChannel();\n"
+                    "    Object.defineProperty(window, \"") +
+        kExtPortGlobalName +
+        "\", {\n"
+        "        value: channel.port1,\n"
+        "        writable: false,\n"
+        "        configurable: false,\n"
+        "        enumerable: true\n"
+        "    });\n"
+        "    window.parent.postMessage({ ctx: \"" +
+        kExtPortHandshakeTag +
+        "\" }, \"" +
+        kAppOrigin +
+        "\", [channel.port2]);\n"
+        "})();\n";
+    return script.c_str();
+}
+
+std::string ext_inject_port_bootstrap(const std::string& mime_type, std::string_view body)
+{
+    if (!is_html_media_type(mime_type))
+    {
+        // EVERY other media type passes through byte-identical. Stated as the first branch because
+        // "which responses are rewritten at all" is the question a reader of the CEF binding's single
+        // unconditional call has to be able to answer here.
+        return std::string(body);
+    }
+    const std::string tag = std::string("<script src=\"/") + kExtPortBootstrapAsset + "\"></script>";
+    const std::size_t at = bootstrap_splice_offset(body);
+    std::string out;
+    out.reserve(body.size() + tag.size());
+    out.append(body.substr(0, at));
+    out.append(tag);
+    out.append(body.substr(at));
+    return out;
 }
 
 } // namespace context::editor::shell

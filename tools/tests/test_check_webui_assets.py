@@ -223,7 +223,10 @@ GOOD_STYLESHEET = ":root { --editor-bg: #132a44; }\n"
 # The constants the bundle must agree with the Shell about. Since M9 e13a-2 that includes the
 # EXTENSION scheme (`context-ext://`), which editor-core uses to build a third-party panel's
 # `<iframe src>` — a rename there leaves every package panel framing a scheme the Shell does not
-# serve, blank, with no build error anywhere.
+# serve, blank, with no build error anywhere. Since M9 e13b-1 it also includes the PANEL-PORT
+# HANDSHAKE TAG: the Shell BUILDS the injected bootstrap script's bytes from its copy and editor-core
+# refuses any handshake that does not carry it, so a drift makes every package panel portless — the
+# same silence, one layer up.
 SCHEME_BUNDLE = (
     'var BRIDGE_SCHEME = "context-editor";\n'
     'var BRIDGE_ORIGIN = "context-editor://app";\n'
@@ -233,6 +236,7 @@ SCHEME_BUNDLE = (
     'var THEME_PIN_FLAG = "ctx-smoke-theme";\n'
     'var EXT_SCHEME = "context-ext";\n'
     'var EXT_URL_PREFIX = "context-ext://";\n'
+    'var EXT_PORT_HANDSHAKE_TAG = "context.panel-port.v1";\n'
 )
 
 CPP_HEADER = (
@@ -248,6 +252,7 @@ CPP_HEADER = (
 CPP_EXT_HEADER = (
     'inline constexpr const char* kExtScheme = "context-ext";\n'
     'inline constexpr const char* kExtUrlPrefix = "context-ext://";\n'
+    'inline constexpr const char* kExtPortHandshakeTag = "context.panel-port.v1";\n'
 )
 
 CPP_CEF = (
@@ -367,6 +372,13 @@ def test_missing_bundle_fails_the_scheme_gate(tmp_path: Path) -> None:
     # half-applied rename would leave DISAGREEING WITH EACH OTHER while each still looked plausible.
     ("EXT_SCHEME", "context-extension"),
     ("EXT_URL_PREFIX", "context-ext:/"),
+    # M9 e13b-1 — the PANEL-PORT HANDSHAKE TAG. A drift here breaks neither the bridge nor the frame
+    # URL: the panel loads, parses and runs, and only the PORT never arrives, so every future
+    # capability verb is unreachable with nothing naming the cause. The drifted value below is a
+    # VERSION BUMP rather than a typo, deliberately — the tag carries its own protocol version, so
+    # `…v2` is the realistic half-applied rename (one side bumped, the other not) and it must fail
+    # exactly as a misspelling does.
+    ("EXT_PORT_HANDSHAKE_TAG", "context.panel-port.v2"),
 ])
 def test_scheme_vocabulary_drift_fails(tmp_path: Path, ts_name: str, drifted: str) -> None:
     """A rename on either side must RED, not produce a silently unreachable bridge."""
