@@ -687,6 +687,10 @@ def test_two_targets_embedding_into_one_app_bundle_fail(tmp_path: Path) -> None:
     root = _repo(tmp_path, files)
     findings, _ = check.scan(root)
     assert any("targets write into this bundle's Contents/Frameworks" in f for f in findings)
+    # The platform OVERLAP is what decides this check, so the finding must NAME it, the way check 1's
+    # sibling message does. Asserted on the rendered listing rather than on a bare "mac" substring,
+    # which the message's own "the macOS form of issue #360" would satisfy vacuously.
+    assert any("(framework, src/editor/shell, mac)" in f for f in findings)
     assert _run(root) == 1
 
 

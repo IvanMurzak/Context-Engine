@@ -408,6 +408,23 @@ def _platforms(names: frozenset[str]) -> str:
     return "/".join(sorted(names)) if names else "no platform"
 
 
+def _colliding_writers(platforms_by_target: dict[str, frozenset[str]]) -> list[str]:
+    """The target names that write ONE destination on a platform they SHARE, sorted.
+
+    Empty means no two writers' platform sets intersect -- which IS the single-writer invariant, and
+    the reason a macOS-only writer never collides with a Windows/Linux one. Checks 1 and 4 differ only
+    in what a "destination" is (a ${CEF_TARGET_OUT_DIR} vs an .app's Contents/Frameworks), so the
+    pairwise comparison itself lives here once instead of being written twice.
+    """
+    items = sorted(platforms_by_target.items())
+    involved: set[str] = set()
+    for index, (name, platforms) in enumerate(items):
+        for other, other_platforms in items[index + 1 :]:
+            if platforms & other_platforms:
+                involved.update((name, other))
+    return sorted(involved)
+
+
 def scan(repo_root: Path) -> tuple[list[str], int]:
     """Return (findings, files_scanned). Raises SystemExit(2) on a configuration error."""
     src = repo_root / "src"
@@ -503,10 +520,10 @@ def scan(repo_root: Path) -> tuple[list[str], int]:
                 continue
             target = resolve(parts[0], values)
             app = resolve(parts[-1], values).rstrip("/")
-            note_kind = bundle_writers.setdefault(app, {})
-            previous = note_kind.get(target)
+            store = bundle_writers.setdefault(app, {})
+            previous = store.get(target)
             merged = at(start) | (previous[2] if previous else frozenset())
-            note_kind[target] = ("framework", directory, merged)
+            store[target] = ("framework", directory, merged)
             if not app.endswith(f"/{target}.app"):
                 findings.append(
                     f"{directory.relative_to(repo_root).as_posix()}/CMakeLists.txt: "
@@ -533,15 +550,9 @@ def scan(repo_root: Path) -> tuple[list[str], int]:
 
     # --- check 1: one writer per destination ------------------------------------------------------
     for root, by_target in sorted(writers.items()):
-        colliding = [
-            (a, b)
-            for i, a in enumerate(sorted(by_target.items()))
-            for b in sorted(by_target.items())[i + 1 :]
-            if a[1][1] & b[1][1]
-        ]
-        if not colliding:
+        involved = _colliding_writers({n: entry[1] for n, entry in by_target.items()})
+        if not involved:
             continue
-        involved = sorted({name for pair in colliding for name, _ in pair})
         listed = ", ".join(
             f"{name} ({by_target[name][0].relative_to(repo_root).as_posix()}, "
             f"{_platforms(by_target[name][1])})"
@@ -628,17 +639,14 @@ def scan(repo_root: Path) -> tuple[list[str], int]:
 
     # --- check 4: one writer per macOS .app bundle payload ----------------------------------------
     for app, by_target in sorted(bundle_writers.items()):
-        colliding = [
-            (a, b)
-            for i, a in enumerate(sorted(by_target.items()))
-            for b in sorted(by_target.items())[i + 1 :]
-            if a[1][2] & b[1][2]
-        ]
-        if colliding:
-            involved = sorted({name for pair in colliding for name, _ in pair})
+        involved = _colliding_writers({n: entry[2] for n, entry in by_target.items()})
+        if involved:
+            # The platform OVERLAP is what decided this finding, so name it, exactly as check 1's
+            # sibling message does -- "on one platform" without saying which is not actionable.
             listed = ", ".join(
                 f"{name} ({by_target[name][0]}, "
-                f"{by_target[name][1].relative_to(repo_root).as_posix()})"
+                f"{by_target[name][1].relative_to(repo_root).as_posix()}, "
+                f"{_platforms(by_target[name][2])})"
                 for name in involved
             )
             findings.append(

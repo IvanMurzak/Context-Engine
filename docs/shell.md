@@ -736,6 +736,9 @@ GPU present path), which cannot be produced on the local GCC dev gate:
 cmake -S src --preset dev -DCONTEXT_BUILD_GUI_CEF=ON -DCONTEXT_BUILD_RENDER_WGPU=ON
 cmake --build --preset dev --target context_editor    # from src/
 ./build/dev/editor/shell/context_editor --project <a project dir> --url <a page>
+# On macOS that last path does not exist: since e12c-1 a CEF-ON configure makes context_editor an
+# .app (§ 3), so the binary is at
+#   ./build/dev/editor/shell/context_editor.app/Contents/MacOS/context_editor
 ```
 
 | Step | Expected observation |
