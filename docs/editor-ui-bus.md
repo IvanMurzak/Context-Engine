@@ -91,8 +91,14 @@ What exists today:
 
 A sink implementation MUST target a **Shell-local** method. The Shell mirrors chrome between its own
 windows; routing chrome onward to the daemon is the D7 violation the gates above exist to prevent.
-(No daemon-forwarding bridge method exists today — every method the Shell routes is Shell-local — so
-when one is added, `check_ui_bus_boundary.py` should grow a deny-list naming it.)
+
+⚠ **A daemon-forwarding method now EXISTS** — `panel.daemon.call` (M9 e13c-1), which carries a package
+panel's call onto that package's own baseline daemon session. Until e13b-1 this section could argue
+that a sink *could not* reach the daemon because no routed method reached it through; that premise is
+gone. `check_ui_bus_boundary.py` accordingly owes the deny-list naming it, which is **not yet
+implemented** — so today the rule "a sink MUST target a Shell-local method" is enforced by review
+rather than by the gate. Pointing a sink at `panel.daemon.call` would put chrome facts on the daemon
+wire.
 
 ## Publishers today
 

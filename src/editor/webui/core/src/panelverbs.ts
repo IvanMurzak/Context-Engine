@@ -14,10 +14,39 @@
 //   * `bridge.state.get` / `.set` — THIS panel's own opaque blob, the half that makes a reload
 //     preserve panel state (M9 e13d).
 //
-// WHAT IS DELIBERATELY ABSENT. `bridge.call` / `bridge.events.subscribe` are e13c's (they need a
-// per-package scoped DAEMON session, which is the capability model itself). Both are still missing
-// from this table, so both still get the e13b-1 deny-all answer — the property `panelport.test.ts`
-// pins for the verbs that remain parked.
+//   * `bridge.call` — ONE daemon contract verb, forwarded onto THIS package's own BASELINE daemon
+//     session (M9 e13c-1). See the fan-in note below for the two things that makes true and the one
+//     thing it deliberately does not.
+//
+// WHAT IS DELIBERATELY ABSENT. `bridge.events.subscribe` is e13c-2's: it needs a BOUNDED fan-out
+// buffer with an ack cursor, and a subscription with no bound is an unbounded allocation driven by
+// untrusted code. It is still missing from this table, so it still gets the e13b-1 deny-all answer —
+// the property `panelport.test.ts` pins for the verbs that remain parked.
+//
+// ⚠ THE `bridge.call` FAN-IN (M9 e13c-1, design 04 §5 / 08 §2) — WHERE THE ENFORCEMENT IS, AND WHERE
+// IT IS NOT. Three facts, in the order they decide things:
+//
+//   1. THE PACKAGE IDENTITY IS CLOSED OVER, EXACTLY AS `bridge.state.get|set` CLOSE OVER THEIR STORE.
+//      `daemonCall` is supplied PER PANEL by `boot.ts` with this panel's `packageId` already bound,
+//      and the verb takes NO package argument. So there is no member of the request a panel could set
+//      to ride another package's session, and no lookup that could be tricked into one — the same
+//      structural property, for the same reason, as the state blob one bullet up. A `packageId` in
+//      the request payload is IGNORED, and the T1 tier plants one to prove it.
+//
+//   2. THE ALLOWLIST IS THE SHELL'S, NOT THIS FILE'S — deliberately, and it is not an oversight that
+//      no copy of it appears here. The control has to sit at the forwarder that HOLDS THE SESSION
+//      (`panel_callable_daemon_methods()`, package_sessions.h), for the same reason R-SEC-007 puts
+//      scope enforcement in the daemon's dispatcher rather than in an adapter: a check in front of a
+//      credential is only as good as the last hop before it. A second copy here would be a second
+//      thing to keep in sync, would be trivially bypassable by anything that reached the Shell
+//      another way, and would let a drift between the two read as a grant. The method string is
+//      therefore passed through VERBATIM and the Shell's refusal is relayed.
+//
+//   3. `scope.denied` IS THE POINT. Every package session attaches at the `read_query` BASELINE, so a
+//      panel asking for `set` / `build` is refused BY THE DAEMON'S DISPATCHER. That refusal's CODE
+//      travels back in the message rather than being re-worded, because "the scope refused you" and
+//      "the editor refused you" are different facts and only the first is something an install
+//      consent flow could ever change.
 //
 // ⚠ THE CROSS-PACKAGE PROPERTY, FOR e13d's TWO FAMILIES — stated because they are the first verbs
 // that move DATA rather than refusals, and because `event.origin` is `"null"` for every package so no
@@ -119,6 +148,12 @@ export const PANEL_VERB_THEME_TOKENS = "bridge.theme.tokens";
 export const PANEL_VERB_STATE_GET = "bridge.state.get";
 /** Store this panel's own state blob (04 §5 `bridge.state.set`) — M9 e13d. */
 export const PANEL_VERB_STATE_SET = "bridge.state.set";
+/**
+ * Call ONE daemon contract verb on this package's own BASELINE session (04 §5 `bridge.call`) — M9
+ * e13c-1. Scope-checked in the daemon DISPATCHER, never in an adapter; the panel-callable method set
+ * is the SHELL's allowlist. See the file header's fan-in note.
+ */
+export const PANEL_VERB_CALL = "bridge.call";
 
 /**
  * The HOST -> PANEL verb: "run this command of yours".
@@ -406,6 +441,97 @@ export function sanitizePanelState(value: unknown): PanelStateVerdict {
     }
 }
 
+// -------------------------------------------------------------------------- the daemon fan-in (e13c-1)
+
+/**
+ * The longest daemon method name this side will forward.
+ *
+ * BOUNDED for the reason `PANEL_BRIDGE_TOKEN_MAX_LENGTH` is: an untrusted peer chooses the string, it
+ * is echoed in a refusal, and — new here — it travels out of the renderer to the SHELL, where it is
+ * echoed again in that layer's diagnostics. Refusing rather than truncating keeps the forwarded name
+ * byte-identical to the one the panel sent, so a package cannot be refused for a method it did not
+ * ask for. The Shell's allowlist is the decision; this is only a bound on what reaches it.
+ */
+export const PANEL_DAEMON_METHOD_MAX_LENGTH = 128;
+
+/**
+ * What a forwarded `bridge.call` came back as — a VALUE, never a rejection.
+ *
+ * TOTAL BY CONTRACT, like `PanelPortBridge.request`: this table's handlers may throw only
+ * `PanelVerbRefusal`, so a `daemonCall` that rejected would land on `#invoke`'s generic host-fault
+ * path and tell the package nothing at all — least of all the `scope.denied` this whole task exists
+ * to make reachable. `boot.ts` catches at the transport and converts.
+ */
+export interface PanelDaemonOutcome {
+    readonly ok: boolean;
+    /** Present when `ok`. The daemon's `result`, unwrapped by the Shell bridge. */
+    readonly result?: unknown;
+    /**
+     * Present when NOT `ok` — the SHELL's or the DAEMON's own machine-readable code
+     * (`scope.denied`, `panel.daemon.method_not_allowed`, `panel.daemon.capacity`, …), verbatim.
+     */
+    readonly code?: string;
+    /** Present when NOT `ok`. SHELL-AUTHORED prose; the daemon's own message is never relayed. */
+    readonly message?: string;
+}
+
+/**
+ * Forward one daemon call on THIS PANEL's package session (M9 e13c-1).
+ *
+ * TAKES NO PACKAGE ARGUMENT — that is the point (file header, fan-in note 1). `boot.ts` binds one of
+ * these per panel with the package already closed over, exactly as it supplies one `PanelStateStore`
+ * per panel, so the identity is a property of the closure rather than of the request.
+ */
+export type PanelDaemonCall = (method: string, params: unknown) => Promise<PanelDaemonOutcome>;
+
+/**
+ * Map ONE Shell/daemon refusal code onto the CLOSED panel-facing refusal set.
+ *
+ * ⚠ NO NEW CODE IS MINTED, deliberately: `PANEL_BRIDGE_REFUSALS` says adding one is a
+ * cross-task-visible decision, and names `capability_not_granted` as the code "e13c (scope grants)"
+ * should reuse. This is that reuse, made explicit rather than assumed:
+ *
+ *   * `scope.denied` / `scope.insufficient` -> `capability_not_granted`. Its documented meaning is
+ *     "the verb is real and YOUR PACKAGE was not granted it", which is precisely what a baseline
+ *     session being refused `set` means — and precisely what an install-consent flow (e13c-4) will
+ *     one day be able to change.
+ *   * a request FAULT (`panel.daemon.bad_params`, the daemon's own `usage.*` family) ->
+ *     `malformed_request`. The panel asked wrongly; that is not a grant question.
+ *   * everything else — a non-allowlisted method, capacity, no daemon, a transport fault ->
+ *     `verb_not_granted`, whose documented meaning is "this build grants nothing for that". A panel
+ *     cannot act on the difference between them, and inventing distinctions it cannot act on is how a
+ *     refusal set stops being closed.
+ *
+ * The ORIGINATING code is never lost: `daemonRefusalMessage` puts it in the message verbatim.
+ */
+export function daemonRefusalCode(code: string): string {
+    if (code === "scope.denied" || code === "scope.insufficient") {
+        return PANEL_BRIDGE_REFUSALS.capabilityNotGranted;
+    }
+    if (code === "panel.daemon.bad_params" || code.startsWith("usage.")) {
+        return PANEL_BRIDGE_REFUSALS.malformedRequest;
+    }
+    return PANEL_BRIDGE_REFUSALS.verbNotGranted;
+}
+
+/**
+ * The panel-facing message for a refused forward — the ORIGINATING code, verbatim, plus the Shell's
+ * own prose.
+ *
+ * ⚠ RELAYING THE CODE IS THE DELIVERABLE, not a nicety. `daemonRefusalCode` collapses several causes
+ * onto three panel-facing codes, so without this the fact the task exists to establish — that a panel
+ * asking for `file_write` meets `scope.denied` IN THE DISPATCHER — would be unobservable from the
+ * panel, and a future regression that stopped enforcing it would look identical from here.
+ *
+ * Safe to relay because BOTH halves are host-AUTHORED, not host STATE: the code is a catalog
+ * constant, and `message` is the Shell's own wording (package_sessions.cpp never echoes the daemon's
+ * message, precisely so a project path cannot ride out on one).
+ */
+export function daemonRefusalMessage(code: string, message: string): string {
+    const detail = message === "" ? "the daemon call was refused" : message;
+    return code === "" ? detail : `${detail} (${code})`;
+}
+
 // -------------------------------------------------------------------------------- the verb table
 
 /** What one panel's verb table is built over. Everything it may touch, and nothing else. */
@@ -446,6 +572,16 @@ export interface PanelVerbContext {
      * this object IS the scope, so no request can name another package's blob.
      */
     readonly state: PanelStateStore;
+    /**
+     * THIS PANEL's daemon fan-in (M9 e13c-1) — supplied per renderer by `panelhost.ts`, with the
+     * package already closed over.
+     *
+     * A CLOSURE, not a lookup, for the same reason `state` is one: `bridge.call` takes no package
+     * argument precisely because THIS FUNCTION is the scope, so no request can name another
+     * package's session. Which METHODS it may carry is the Shell's allowlist, not this module's —
+     * see the file header's fan-in note.
+     */
+    readonly daemonCall: PanelDaemonCall;
     /** Issue a request DOWN this panel's port (the `commands.invoke` direction). */
     readonly request: (verb: string, params?: unknown) => Promise<PanelBridgeReply>;
 }
@@ -773,6 +909,39 @@ export function makePanelBridgeVerbs(context: PanelVerbContext): PanelVerbTable 
                 return { stored: true, length: verdict.length };
             },
         ],
+        [
+            PANEL_VERB_CALL,
+            async (params: unknown): Promise<unknown> => {
+                // ⚠ NOTE WHAT IS NOT READ HERE: a package id. `context.daemonCall` already IS this
+                // panel's package (file header, fan-in note 1), so a `packageId` member in `params`
+                // is not merely ignored — there is no code path that could consult one. The T1 tier
+                // sends one anyway and asserts the call still lands on the panel's own package.
+                const method = readDaemonMethod(params);
+                if (method === "") {
+                    throw new PanelVerbRefusal(
+                        PANEL_BRIDGE_REFUSALS.malformedRequest,
+                        `bridge.call requires a 'method' string of 1..${String(
+                            PANEL_DAEMON_METHOD_MAX_LENGTH,
+                        )} characters`,
+                    );
+                }
+                // FORWARDED VERBATIM. The panel-callable set is the Shell's allowlist (fan-in note
+                // 2) — filtering here as well would be a second copy to drift, and a drift between
+                // the two reads as a grant.
+                const outcome = await context.daemonCall(method, readDaemonParams(params));
+                if (!outcome.ok) {
+                    const code = outcome.code ?? "";
+                    throw new PanelVerbRefusal(
+                        daemonRefusalCode(code),
+                        daemonRefusalMessage(code, outcome.message ?? ""),
+                    );
+                }
+                // RETURNED WHOLE and UNWRAPPED, like `bridge.theme.tokens`: the daemon's `result` is
+                // the contract's own R-CLI-008 envelope, and re-wrapping or filtering it here would
+                // be a second projection of a surface the contract registry already owns.
+                return outcome.result;
+            },
+        ],
     ]);
 
     return { verbs, dispose };
@@ -879,4 +1048,40 @@ function readId(params: unknown): string {
  */
 function readStateParam(params: unknown): unknown {
     return isRecordValue(params) ? params["state"] : undefined;
+}
+
+/**
+ * Read `{ method }` off a `bridge.call` request (M9 e13c-1). `""` when absent, not a string, empty, or
+ * over `PANEL_DAEMON_METHOD_MAX_LENGTH` — which the handler refuses, so there is no unguarded path.
+ *
+ * DELIBERATELY NOT `boundedString`: that helper is bounded by `PANEL_COMMAND_FIELD_MAX_LENGTH`, whose
+ * subject is a palette row's id/title/when. A daemon method name is a different vocabulary with a
+ * different consumer (the Shell's allowlist, then the wire), and sharing one constant between them
+ * would silently re-bound one when the other was tuned.
+ */
+function readDaemonMethod(params: unknown): string {
+    if (!isRecordValue(params)) {
+        return "";
+    }
+    const method = params["method"];
+    return typeof method === "string" &&
+        method.length > 0 &&
+        method.length <= PANEL_DAEMON_METHOD_MAX_LENGTH
+        ? method
+        : "";
+}
+
+/**
+ * Read `{ params }` off a `bridge.call` request.
+ *
+ * DELIBERATELY UNTYPED AND UNBOUNDED HERE, exactly like `readStateParam`: the arguments belong to the
+ * daemon VERB, whose shape this module does not know and must not second-guess — the contract registry
+ * is the authority on every verb's params, and a shape check here would be a second, drifting copy of
+ * it. The real bounds are downstream and structural: the privileged bridge refuses an inbound message
+ * over `kMaxBridgeMessageBytes` / `kMaxBridgeMessageDepth` before it is even parsed, and the daemon
+ * validates its own arguments. A missing member reads as `undefined`, which is the ordinary
+ * no-argument call.
+ */
+function readDaemonParams(params: unknown): unknown {
+    return isRecordValue(params) ? params["params"] : undefined;
 }

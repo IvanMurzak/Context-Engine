@@ -22,7 +22,12 @@
 
 import { assert, assertEqual, type TestCase } from "./harness.js";
 import { ShellBridge, type BridgeQuery, type BridgeQueryFunction } from "../bridge.js";
-import { SESSION_ATTRIBUTE, bootEditorCore } from "../boot.js";
+import {
+    PANEL_DAEMON_CALL_METHOD,
+    SESSION_ATTRIBUTE,
+    bootEditorCore,
+    makePackageDaemonCall,
+} from "../boot.js";
 import { SESSION_STATE_METHOD } from "../session.js";
 
 /** A mutable answer table so a case can change what the Shell serves mid-run. */
@@ -81,6 +86,84 @@ function clearSessionAttribute(): void {
 }
 
 export const bootTests: readonly TestCase[] = [
+    {
+        // ⚠ THIS CASE EXISTS BECAUSE A PLANT FOUND ITS ABSENCE (M9 e13c-1). `panelverbs.test.ts`
+        // proves the `bridge.call` HANDLER passes no package id — but it drives a fixture stand-in for
+        // `daemonCall`, so it says nothing about the function that actually BUILDS the Shell payload.
+        // A plant that made `makePackageDaemonCall` read `packageId` off the panel-controlled params
+        // therefore stayed GREEN across the whole suite: the closed-over identity was asserted one
+        // layer above the place it could be broken. That is a hole in the TEST TABLE, not in the gate.
+        //
+        // ⚠ PLANT: `packageId: params?.packageId ?? packageId` in `makePackageDaemonCall` — RED here.
+        name: "boot: makePackageDaemonCall closes over the package — a panel cannot name another's session",
+        run: async () => {
+            const forwarded: Record<string, unknown>[] = [];
+            const query: BridgeQueryFunction = (request: BridgeQuery): number => {
+                const parsed = JSON.parse(request.request) as {
+                    id: number;
+                    method: string;
+                    params: Record<string, unknown>;
+                };
+                forwarded.push({ method: parsed.method, params: parsed.params });
+                request.onSuccess(
+                    JSON.stringify({ jsonrpc: "2.0", id: parsed.id, result: { rows: [] } }),
+                );
+                return forwarded.length;
+            };
+            const call = makePackageDaemonCall(new ShellBridge(query), "ext.hello");
+
+            // THE FORGERY, in the one place a panel actually controls: the daemon verb's own params,
+            // which travel through this function verbatim.
+            const outcome = await call("query", { packageId: "ext.evil", q: "*" });
+            assertEqual(outcome.ok, true, "the forward succeeded");
+            assertEqual(forwarded.length, 1, "exactly one Shell call was made");
+            assertEqual(
+                (forwarded[0]?.params as Record<string, unknown>)["packageId"],
+                "ext.hello",
+                "the Shell is told THIS panel's package — the one closed over at binding time — and " +
+                    "never the one the panel put in its own params",
+            );
+            assertEqual(
+                (forwarded[0]?.params as Record<string, unknown>)["method"],
+                "query",
+                "…with the method verbatim (the panel-callable allowlist is the SHELL's)",
+            );
+            assertEqual(
+                forwarded[0]?.method,
+                PANEL_DAEMON_CALL_METHOD,
+                "…over the e13c-1 fan-in route, which mirrors C++ kPanelDaemonCallMethod",
+            );
+
+            // A REFUSAL IS A VALUE, NEVER A REJECTION — `bridge.call`'s handler must be able to turn
+            // every outcome into a PanelVerbRefusal, and an escaping rejection would reach the generic
+            // host-fault path and tell the package nothing, `scope.denied` least of all.
+            const refusing: BridgeQueryFunction = (request: BridgeQuery): number => {
+                const parsed = JSON.parse(request.request) as { id: number };
+                request.onSuccess(
+                    JSON.stringify({
+                        jsonrpc: "2.0",
+                        id: parsed.id,
+                        error: {
+                            code: -32603,
+                            message: "the daemon refused 'set' for package 'ext.hello'",
+                            data: { reason: "scope.denied" },
+                        },
+                    }),
+                );
+                return 1;
+            };
+            const denied = await makePackageDaemonCall(new ShellBridge(refusing), "ext.hello")(
+                "set",
+                {},
+            );
+            assertEqual(denied.ok, false, "the refusal is a VALUE, not a rejection");
+            assertEqual(
+                denied.code,
+                "scope.denied",
+                "…carrying the DAEMON's own catalog code, which is the whole observable of this task",
+            );
+        },
+    },
     {
         name: "boot: the live when-context reads the DAEMON's play state (fails on a frozen stub)",
         run: async () => {

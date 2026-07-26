@@ -21,6 +21,7 @@
 #include "context/editor/shell/keybindings_bridge.h"
 #include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/user_config.h"
+#include "context/editor/shell/package_sessions.h" // e13c-1: per-package BASELINE daemon sessions
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/session_bridge.h"
@@ -748,6 +749,36 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // --- the per-package BASELINE daemon sessions (e13c-1, design 04 §5 / 08 §2) -------------------
+    //
+    // The route a package panel's `bridge.call` lands on. Every session it opens holds the
+    // `read_query` BASELINE and nothing else (package_sessions.h § control 1), which is what makes a
+    // panel's `set` / `build` refused BY THE DISPATCHER — the e13 DoD line — rather than by anything
+    // on this side of the wire.
+    //
+    // ⚠ A SEPARATE `client::Client` PER PACKAGE, deliberately NOT `lifecycle.client()`. That one is
+    // the SHELL's session and carries `kShellScope` ("read,write,session"): forwarding a panel's call
+    // over it would hand untrusted third-party code the Shell's own write + session grants, which is
+    // the whole failure this task exists to prevent. The sessions are LAZY (a package that never calls
+    // costs no connection) and sub-capped at `kMaxPackageSessions` of the daemon's 16 (control 4).
+    //
+    // The factory does NOT attach — PackageSessionHost does, so the scope has exactly one decision
+    // site. `connect_to_project` retains the discovered D20 token, which `attach()` falls back to, so
+    // no credential passes through this lambda.
+    //
+    // Installed even OUTSIDE project mode (like the session bridge above): the welcome screen boots
+    // the same bundle, and an uninstalled method is a deny-by-default `unknown_method` on a channel
+    // whose smokes forbid refusals. With no project the factory simply fails and the call is refused
+    // `panel.daemon.unavailable`, which is the honest state of a Shell with no daemon.
+    shell::PackageSessionHost package_sessions(
+        [project = options.project](std::string& error) -> std::unique_ptr<client::Client>
+        { return client::Client::connect_to_project(project, 5000, error); });
+    if (!package_sessions.install(bridge))
+    {
+        std::fprintf(stderr, "context_editor: could not install the package daemon-session surface\n");
+        return 1;
+    }
+
     lifecycle.set_subscription_topics({shell::panels::kDiagnosticsTopic,
                                        shell::panels::kDerivationTopic,
                                        shell::panels::kSessionTopic});
@@ -1171,6 +1202,26 @@ int main(int argc, char** argv)
     // Inspector's gesture provider and issue a commit. Unbinding first is what makes that commit
     // refuse instead of calling a destroyed Client.
     shell::panels::bind_write_client(builtin, nullptr);
+    // e13c-1: close THIS process's package sessions before the daemon teardown below, the same
+    // ordering rule as the two unbinds above — they are our own connections and the daemon should not
+    // have to reap them from an exiting process.
+    //
+    // ⚠ THIS DOES NOT CORRECT THE EXIT CENSUS, AND MUST NOT BE READ AS DOING SO. Each package session
+    // attached as its own client, so each published `{event:"attached"}` on the `clients` topic that
+    // `ClientCensus` counts, and `others()` is `count_ - 1`. Closing the sockets here makes the daemon
+    // publish `detached`, but `shutdown_at_exit()` reads `census_.others()` SYNCHRONOUSLY on its very
+    // first line (daemon_lifecycle.cpp) and nothing pumps the subscription in between — so the
+    // `detached` events are never observed before the decision is taken. NET EFFECT, MEASURED FROM THE
+    // SOURCE AND NOT YET FIXED: once any package panel has made one `bridge.call`, `others() >= 1`,
+    // `decide_daemon_exit_action` returns `leave_running` instead of `shutdown_owned`, and this
+    // process DETACHES its own spawned daemon rather than shutting it down — one orphaned daemon per
+    // editor session, holding a socket, an instance token and slots out of the 16-connection budget
+    // package_sessions.h § control 4 exists to protect. The fix belongs in the exit policy (teach it
+    // this process's OWN extra client count, e.g. an `others()` subtrahend fed
+    // `package_sessions.sessions_open()`), NOT here: subtracting wrongly would shut down a daemon a
+    // CLI or AI client is still using, which is a worse failure than leaking one. Tracked as e13c-1
+    // follow-up; see the PR body.
+    package_sessions.reset();
     // The exit policy (e14a): an owned daemon this process is the last client of gets a clean in-band
     // `shutdown`; an owned daemon other clients still hold is left running; an external daemon is never
     // touched. Runs before the manager/CEF teardown so the daemon call still has a live wire.

@@ -340,15 +340,21 @@ async function waitForReply(harness: PanelHarness, id: string): Promise<Record<s
  * they can fill verbs without renegotiating the shape" means — and naming them explicitly is what
  * makes the promise checkable rather than rhetorical.
  *
- * ⚠ SHORTER AGAIN SINCE M9 e13d. `bridge.commands.register` / `.unregister` and `bridge.ui.subscribe`
- * left at e13b-2, and `bridge.theme.tokens` / `bridge.state.get` / `bridge.state.set` leave here,
- * because each task FILLED its own (panelverbs.ts): they are no longer parked, and keeping them would
- * assert something false about the shipping build. What remains is e13c's daemon-facing pair. The
- * list is a claim about the PRODUCTION table, so the sibling case `the PRODUCTION verb table…` below
- * drives that table rather than this harness's empty one — this case proves the transport's deny-all,
- * that one proves the build's.
+ * ⚠ SHORTER AGAIN SINCE M9 e13c-1. `bridge.commands.register` / `.unregister` and
+ * `bridge.ui.subscribe` left at e13b-2; `bridge.theme.tokens` / `bridge.state.get` / `bridge.state.set`
+ * left at e13d; and `bridge.call` leaves HERE, because e13c-1 FILLED it (panelverbs.ts
+ * `PANEL_VERB_CALL`). Each is no longer parked, and keeping one would assert something false about the
+ * shipping build. What remains is e13c-2's `bridge.events.subscribe` alone.
+ *
+ * ⚠ AND THIS LIST CANNOT CATCH ITS OWN STALENESS — REMOVE AN ENTRY THE MOMENT ITS VERB IS FILLED.
+ * The list is a claim about the PRODUCTION table, but its only consumer builds `createHarness()` with
+ * NO `verbs` option, i.e. against `PanelPortBridge`'s default EMPTY table, which refuses everything by
+ * construction. So a filled verb left in this list stays GREEN here for as long as it is wrong — the
+ * assertion sits one layer BELOW the layer whose behaviour the constant describes. Measured: e13c-1
+ * filled `bridge.call` and this case did not budge. The sibling case `the PRODUCTION verb table…`
+ * below is the one that drives the real table; this case proves only the transport's deny-all.
  */
-const PARKED_VERBS: readonly string[] = ["bridge.call", "bridge.events.subscribe"];
+const PARKED_VERBS: readonly string[] = ["bridge.events.subscribe"];
 
 // ------------------------------------------------------------------------------------------ cases
 
@@ -754,6 +760,10 @@ export const panelPortTests: readonly TestCase[] = [
                 grants: DENY_ALL_CAPABILITY_GRANTS,
                 themeTokens: () => undefined,
                 state: { read: (): unknown => null, write: (): void => {} },
+                // e13c-1: no daemon in this tier, so the fan-in refuses honestly. The port-level
+                // properties this case pins are unaffected by which verbs answer.
+                daemonCall: () =>
+                    Promise.resolve({ ok: false, code: "panel.daemon.unavailable", message: "no daemon" }),
                 request: () => Promise.resolve({ ok: true, result: null }),
             });
             const harness = createHarness({ verbs: verbs.verbs });
@@ -790,16 +800,24 @@ export const panelPortTests: readonly TestCase[] = [
                 );
 
                 // 3. A STILL-PARKED verb keeps the e13b-1 answer, from the same table.
+                //
+                // ⚠ THE SUBJECT MOVED IN M9 e13c-1, and the move IS the point of keeping this step.
+                // It named `bridge.call`, which e13c-1 has now FILLED — so leaving it would have
+                // asserted the opposite of the truth. `bridge.events.subscribe` is the verb genuinely
+                // still parked (e13c-2's: it needs a BOUNDED fan-out buffer with an ack cursor, and a
+                // subscription with no bound is an unbounded allocation driven by untrusted code).
+                // Re-point this at the next parked verb whenever one is filled; the property under
+                // test — that filling SOME entries did not open the whole table — is what must survive.
                 harness.command({
                     cmd: "send",
                     index: 0,
-                    envelope: requestEnvelope("parked", "bridge.call"),
+                    envelope: requestEnvelope("parked", "bridge.events.subscribe"),
                 });
                 const parked = await waitForReply(harness, "parked");
                 assertEqual(
                     (parked["error"] as Record<string, unknown>)["code"],
                     PANEL_BRIDGE_REFUSALS.verbNotGranted,
-                    "e13c's verb is still refused by lookup miss — filling a table did not open it",
+                    "e13c-2's verb is still refused by lookup miss — filling a table did not open it",
                 );
             } finally {
                 harness.dispose();
@@ -848,6 +866,9 @@ export const panelPortTests: readonly TestCase[] = [
                         store.value = value;
                     },
                 },
+                // e13c-1: as above — this case is about theme + state over the real port.
+                daemonCall: () =>
+                    Promise.resolve({ ok: false, code: "panel.daemon.unavailable", message: "no daemon" }),
                 request: () => Promise.resolve({ ok: true, result: null }),
             });
             const harness = createHarness({ verbs: verbs.verbs });

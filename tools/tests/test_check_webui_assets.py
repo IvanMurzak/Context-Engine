@@ -508,6 +508,8 @@ PANEL_BUNDLE = (
     'var UI_TOPIC_WRITE_NOTICE = "editor.ui.write-notice";\n'
     'var WRITE_NOTICE_KIND_DROP = "drop";\n'
     'var WRITE_NOTICE_KIND_REFUSAL = "refusal";\n'
+    # e13c-1 package daemon fan-in method (boot.ts).
+    'var PANEL_DAEMON_CALL_METHOD = "panel.daemon.call";\n'
 )
 
 # MIRRORS THE REAL HEADER'S SHAPE. The real `panel_host.h` declares the enum and the token
@@ -615,6 +617,16 @@ PANEL_CPP_WRITE_NOTICE = (
     'inline constexpr const char* kWriteNoticeKindRefusal = "refusal";\n'
 )
 
+# The e13c-1 package daemon fan-in lives in its OWN header (package_sessions.h), like the write-notice
+# vocabulary above and unlike the surfaces that ride window_bridge.h. It is the ONLY Shell method that
+# forwards a package panel's call onto a daemon wire, so its drift is the widest of the family: every
+# package panel's `bridge.call` refuses with a code indistinguishable from "this build never
+# implemented it", on a green build and a green suite on both sides.
+PANEL_CPP_PACKAGE_SESSIONS = (
+    'inline constexpr const char* kPanelDaemonCallMethod = "panel.daemon.call";\n'
+    'inline constexpr const char* kPackageSessionScope = "read";\n'
+)
+
 PANEL_DOCUMENT = (
     "<!DOCTYPE html>\n"
     '<html lang="en">\n'
@@ -638,6 +650,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
                    session: str = PANEL_CPP_SESSION,
                    window: str = PANEL_CPP_WINDOW,
                    write_notice: str = PANEL_CPP_WRITE_NOTICE,
+                   package_sessions: str = PANEL_CPP_PACKAGE_SESSIONS,
                    package: dict | None = None,
                    stage_dockview: bool = True) -> tuple[Path, Path, Path, Path, Path]:
     asset_dir = tmp_path / "app"
@@ -658,6 +671,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
     (include_dir / "session_bridge.h").write_text(session, encoding="utf-8")
     (include_dir / "window_bridge.h").write_text(window, encoding="utf-8")
     (include_dir / "write_notice.h").write_text(write_notice, encoding="utf-8")
+    (include_dir / "package_sessions.h").write_text(package_sessions, encoding="utf-8")
 
     contract_dir = tmp_path / "contractinclude"
     contract_dir.mkdir(parents=True, exist_ok=True)
@@ -870,6 +884,40 @@ def test_a_renamed_ui_mirror_cpp_constant_is_a_config_error(tmp_path: Path) -> N
     renamed = PANEL_CPP_WINDOW.replace("kUiMirrorReportMethod", "kUiMirrorAckMethod")
     with pytest.raises(check_webui_assets.CheckError):
         _run_panel(tmp_path, window=renamed)
+
+
+# --- e13c-1: the package daemon fan-in method ----------------------------------------------------
+#
+# The widest-blast-radius pair in this file. `panel.daemon.call` is the ONLY Shell router method that
+# carries a third-party package panel's call onto a daemon wire, and a drift does not degrade the
+# feature — it removes it entirely, while both languages build green and both suites stay green,
+# because the C++ side is pinned to the literal by its own test whereas every TS reader goes through
+# the constant. The refusal a drifted build produces (`verb_not_granted`) is the SAME one a build that
+# never implemented `bridge.call` would produce, so there is no signal anywhere.
+
+
+def test_package_session_method_drift_fails(tmp_path: Path) -> None:
+    """The e13c-1 fan-in: editor-core calling a method the Shell no longer routes means EVERY package
+    panel's `bridge.call` refuses, indistinguishably from the verb not existing."""
+    drifted = re.sub(r'(PANEL_DAEMON_CALL_METHOD = ")[^"]*(")', r"\1panel.daemon.drifted\2",
+                     PANEL_BUNDLE)
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+def test_bundle_missing_the_package_session_constant_fails(tmp_path: Path) -> None:
+    """An ABSENT constant means editor-core cannot be calling the fan-in at all, so no package panel
+    could reach its own baseline daemon session."""
+    stripped = "\n".join(
+        line for line in PANEL_BUNDLE.splitlines() if "PANEL_DAEMON_CALL_METHOD" not in line)
+    assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+def test_a_renamed_package_session_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
+    """Rot-into-a-no-op guard: rename the C++ constant and the gate can verify NOTHING -> exit 2."""
+    renamed = PANEL_CPP_PACKAGE_SESSIONS.replace("kPanelDaemonCallMethod", "kPanelDaemonInvokeMethod")
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, package_sessions=renamed)
 
 
 # --- e09b-3: the LOUD write-notice vocabulary ----------------------------------------------------

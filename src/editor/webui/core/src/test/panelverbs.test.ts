@@ -37,11 +37,14 @@ import {
     PANEL_STATE_MAX_JSON_LENGTH,
     PANEL_VERB_COMMAND_INVOKE,
     PANEL_VERB_STATE_GET,
+    PANEL_DAEMON_METHOD_MAX_LENGTH,
+    PANEL_VERB_CALL,
     PANEL_VERB_STATE_SET,
     PANEL_VERB_THEME_TOKENS,
     PANEL_VERB_UI_SUBSCRIBE,
     RESERVED_COMMAND_PREFIXES,
     capabilityDenial,
+    daemonRefusalCode,
     makePanelBridgeVerbs,
     sanitizePanelState,
     validatePackageCommandId,
@@ -50,6 +53,7 @@ import type {
     PanelCapabilityGrants,
     PanelCommandRejection,
     PanelCommandView,
+    PanelDaemonOutcome,
 } from "../panelverbs.js";
 import type { ThemeChangedPayload } from "../theme.js";
 import type { WhenContext } from "../when.js";
@@ -96,6 +100,15 @@ interface VerbFixture {
     storedState(): unknown;
     /** Every `write` the store saw, in order — the witness that `set` reached the store at all. */
     readonly writes: unknown[];
+    /**
+     * Every daemon forward the table made, in order (M9 e13c-1).
+     *
+     * The witness for the property `bridge.call` exists to establish: the recorded entries carry the
+     * METHOD and PARAMS the panel sent and NOTHING ELSE, because the package is closed over in the
+     * `daemonCall` the fixture supplied. A case that sends `packageId` in its request and finds it
+     * absent here has proved the identity is un-forgeable at this layer.
+     */
+    readonly daemonCalls: { method: string; params: unknown; arity: number }[];
 }
 
 interface FixtureOptions {
@@ -120,6 +133,11 @@ interface FixtureOptions {
     readonly registry?: CommandRegistry;
     /** Panel replies to `commands.invoke` with this. Default: accepted. */
     readonly invokeReply?: PanelBridgeReply;
+    /**
+     * What the Shell answers a forwarded `bridge.call` with (M9 e13c-1). Default: accepted, with the
+     * method echoed back as the result so a case can prove WHICH method landed.
+     */
+    readonly daemonOutcome?: PanelDaemonOutcome;
 }
 
 /**
@@ -182,6 +200,10 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
     };
     const store: { value: unknown } = { value: null };
     const writes: unknown[] = [];
+    // The e13c-1 daemon fan-in. Note the SHAPE of this stand-in: it takes a method and params and no
+    // package — the same signature `makePackageDaemonCall` returns after closing over one — so the
+    // fixture cannot accidentally give the table a wider surface than production has.
+    const daemonCalls: { method: string; params: unknown; arity: number }[] = [];
     const table = makePanelBridgeVerbs({
         panelId: PANEL_ID,
         packageId: PACKAGE_ID,
@@ -198,6 +220,19 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
                 writes.push(value);
             },
         },
+        // ⚠ RECORDS ITS FULL ARITY, and that is precisely what makes the PLANT on the first case real.
+        // A 2-arity arrow silently DISCARDS a third argument, so a recorded `{method, params}` object
+        // literal is the FIXTURE's own shape and no production mutation can change it — the plant
+        // "give `PanelDaemonCall` a package argument at all" would then stay GREEN, a non-vacuity
+        // claim that was itself vacuous. Rest args are what let the fixture OBSERVE the extra argument
+        // the production type promises not to have.
+        daemonCall: (...args: unknown[]): Promise<PanelDaemonOutcome> => {
+            const method = args[0] as string;
+            daemonCalls.push({ method, params: args[1], arity: args.length });
+            return Promise.resolve(
+                options.daemonOutcome ?? { ok: true, result: { echoed: method } },
+            );
+        },
         request: (verb: string, params: unknown): Promise<PanelBridgeReply> => {
             invoked.push(`${verb}:${JSON.stringify(params)}`);
             return Promise.resolve(options.invokeReply ?? { ok: true, result: null });
@@ -207,6 +242,7 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
         registry,
         invoked,
         writes,
+        daemonCalls,
         verbs: table.verbs,
         dispose: table.dispose,
         setContext: (context: WhenContext): void => {
@@ -256,6 +292,168 @@ async function refusalFrom(fx: VerbFixture, verb: string, params?: unknown): Pro
 // ------------------------------------------------------------------------------------------ cases
 
 export const panelVerbsTests: readonly TestCase[] = [
+    // ------------------------------------- the daemon fan-in (M9 e13c-1, design 04 §5 / 08 §2)
+    {
+        // ⚠ PLANT: make the handler read a package id off `params` and hand it to `daemonCall` (i.e.
+        // give `PanelDaemonCall` a package argument at all) — RED here, because the forged id would
+        // then have to appear in the recorded call.
+        name: "panelverbs: bridge.call forwards the method VERBATIM and takes NO package from the payload",
+        run: async (): Promise<void> => {
+            const fx = fixture({});
+
+            const result = await call(fx, PANEL_VERB_CALL, {
+                method: "editor.scene-tree",
+                params: { path: "scenes/main.scene.json" },
+                // ⚠ THE FORGERY. A hostile panel naming another package — the ONE thing the closed-over
+                // identity has to make impossible. It must reach no code that reads it.
+                packageId: "some.other.package",
+            });
+
+            assertEqual(fx.daemonCalls.length, 1, "exactly one forward happened");
+            assertEqual(
+                fx.daemonCalls[0]?.method,
+                "editor.scene-tree",
+                "the method travels VERBATIM — the panel-callable ALLOWLIST is the Shell's, at the " +
+                    "forwarder that holds the session, so a second copy here would only drift",
+            );
+            assertEqual(
+                JSON.stringify(fx.daemonCalls[0]?.params),
+                JSON.stringify({ path: "scenes/main.scene.json" }),
+                "…and so do the verb's own params, unfiltered: the contract registry owns each " +
+                    "verb's shape, and a check here would be a second, drifting copy of it",
+            );
+            assertEqual(
+                JSON.stringify(result),
+                JSON.stringify({ echoed: "editor.scene-tree" }),
+                "the daemon's result is returned WHOLE, not re-projected",
+            );
+            // THE FORGERY LANDED NOWHERE. `daemonCall` takes (method, params) and nothing else, so the
+            // recorded entry is the complete set of what the panel could influence.
+            assertEqual(
+                fx.daemonCalls[0]?.arity,
+                2,
+                "the forward carries ONLY a method and its params — EXACTLY two arguments, so the " +
+                    "package is closed over and a packageId in the request reaches no code that " +
+                    "reads one. Asserted as an ARITY the fixture measures with rest args, not as the " +
+                    "key set of an object the fixture itself built: the latter is a property of the " +
+                    "test and no production change could ever move it",
+            );
+
+            // A no-argument call is ordinary, not malformed: `params` is simply absent.
+            await call(fx, PANEL_VERB_CALL, { method: "describe" });
+            assertEqual(fx.daemonCalls.length, 2, "the second forward happened");
+            assertEqual(fx.daemonCalls[1]?.method, "describe", "…carrying the bare method");
+            assertEqual(
+                fx.daemonCalls[1]?.params,
+                undefined,
+                "…and an absent `params` stays absent rather than being invented as {}",
+            );
+        },
+    },
+    {
+        // ⚠ PLANT: drop the `daemonRefusalMessage` code suffix (return `detail` alone) — RED on the
+        // `scope.denied` assertion below. That is the point of the case: `daemonRefusalCode` collapses
+        // several causes onto three panel-facing codes, so WITHOUT the relayed original the fact this
+        // whole task exists to establish — a panel meets `scope.denied` IN THE DISPATCHER — would be
+        // unobservable from the panel, and a regression that stopped enforcing it would look identical.
+        name: "panelverbs: a daemon scope.denied reaches the panel as capability_not_granted, code intact",
+        run: async (): Promise<void> => {
+            const denied = fixture({
+                daemonOutcome: {
+                    ok: false,
+                    code: "scope.denied",
+                    message: "the daemon refused 'set' for package 'ext.hello'",
+                },
+            });
+            const refusal = await refusalFrom(denied, PANEL_VERB_CALL, { method: "set" });
+            assertEqual(
+                refusal.code,
+                PANEL_BRIDGE_REFUSALS.capabilityNotGranted,
+                "a scope refusal is CAPABILITY-shaped — 'the verb is real and YOUR PACKAGE was not " +
+                    "granted it', the one thing install consent (e13c-4) can act on",
+            );
+            assert(
+                refusal.message.includes("scope.denied"),
+                "…and the DAEMON's own catalog code is relayed verbatim, or the DoD line 'un-granted " +
+                    "file_write is rejected IN THE DISPATCHER' is unobservable from a panel",
+            );
+            // NOT a copy of `daemonRefusalCode`'s table — the mapping is driven directly so a case
+            // cannot re-implement the thing it is checking.
+            assertEqual(
+                daemonRefusalCode("scope.insufficient"),
+                PANEL_BRIDGE_REFUSALS.capabilityNotGranted,
+                "its sibling maps the same way",
+            );
+            assertEqual(
+                daemonRefusalCode("panel.daemon.bad_params"),
+                PANEL_BRIDGE_REFUSALS.malformedRequest,
+                "a REQUEST fault is not a grant question",
+            );
+            assertEqual(
+                daemonRefusalCode("usage.invalid"),
+                PANEL_BRIDGE_REFUSALS.malformedRequest,
+                "…nor is the daemon's own usage family",
+            );
+            assertEqual(
+                daemonRefusalCode("panel.daemon.method_not_allowed"),
+                PANEL_BRIDGE_REFUSALS.verbNotGranted,
+                "a non-allowlisted method is 'this build grants nothing for that'",
+            );
+            assertEqual(
+                daemonRefusalCode("panel.daemon.capacity"),
+                PANEL_BRIDGE_REFUSALS.verbNotGranted,
+                "…as is a transient capacity refusal a panel cannot act on differently",
+            );
+            // NO NEW REFUSAL CODE WAS MINTED. The set is closed and adding to it is a
+            // cross-task-visible decision (panelport.ts § PANEL_BRIDGE_REFUSALS); e13c-1 reuses the
+            // three codes that already carry these meanings.
+            const mapped = [
+                "scope.denied",
+                "panel.daemon.method_not_allowed",
+                "panel.daemon.capacity",
+                "panel.daemon.unavailable",
+                "panel.daemon.bad_params",
+                "bridge.transport",
+                "",
+            ].map((code) => daemonRefusalCode(code));
+            const closed = Object.values(PANEL_BRIDGE_REFUSALS) as string[];
+            assert(
+                mapped.every((code) => closed.includes(code)),
+                "every mapped refusal is already a member of the CLOSED set",
+            );
+        },
+    },
+    {
+        name: "panelverbs: bridge.call refuses an unusable method WITHOUT forwarding it",
+        run: async (): Promise<void> => {
+            const fx = fixture({});
+            for (const params of [
+                undefined,
+                {},
+                { method: "" },
+                { method: 42 },
+                { method: "x".repeat(PANEL_DAEMON_METHOD_MAX_LENGTH + 1) },
+            ]) {
+                const refusal = await refusalFrom(fx, PANEL_VERB_CALL, params);
+                assertEqual(
+                    refusal.code,
+                    PANEL_BRIDGE_REFUSALS.malformedRequest,
+                    "the fault is in the request itself, so no new code is spent on it",
+                );
+            }
+            assertEqual(
+                fx.daemonCalls.length,
+                0,
+                "NOTHING was forwarded — an unbounded attacker-chosen method must not reach the " +
+                    "Shell, which echoes it again in its own diagnostics",
+            );
+            // The bound is INCLUSIVE, pinned on both sides so `>` becoming `>=` cannot pass unnoticed.
+            await call(fx, PANEL_VERB_CALL, {
+                method: "x".repeat(PANEL_DAEMON_METHOD_MAX_LENGTH),
+            });
+            assertEqual(fx.daemonCalls.length, 1, "a method AT the bound is forwarded, not refused");
+        },
+    },
     // ------------------------------------------------- the ui_events gate (C-F18) — the point
     {
         // ⚠ PLANT (a): replace the `requireCapability` call in the `bridge.ui.subscribe` handler with

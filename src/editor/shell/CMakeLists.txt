@@ -52,6 +52,7 @@ add_library(context_editor_shell STATIC
     src/ext_scheme.cpp    # e13a-1: context-ext://<pkg>/ deny-by-default resolution + CSP (04 §5 / 08)
     src/ipc_bridge.cpp    # e05c: the privileged bridge envelope + token isolation (04 §1 / 08 §1)
     src/panel_host.cpp    # e05d1: the panel-agnostic panel.* surface over the e05b roster (04 §3-§4)
+    src/package_sessions.cpp  # e13c-1: per-package BASELINE daemon sessions + panel.daemon.call (04 §5 / 08)
     src/editor_state_bridge.cpp  # e05d2: the editor.state.*/editor.regions.* surface (03 §1 / §6)
     src/keybindings_bridge.cpp   # e07c: the keybindings.get read/watch surface (05 §6 / 03 §6)
     src/user_config.cpp          # e06d: ~/.context/config.json - the SHELL is its single writer (C-F14)
@@ -231,6 +232,8 @@ set(_context_shell_tests
                        #         unknown/invalid package id, the pinned scheme options, the panel CSP
     test_ipc_bridge    # e05c: the T1 adversarial envelope suite + the 3 token-isolation controls
     test_panel_host    # e05d1: the panel-agnostic roster/render/command/gesture/D6-state surface
+    test_package_sessions  # e13c-1: the ALLOWLIST, the hardcoded "read" scope proved against the REAL
+                       #         dispatcher, lazy attach + the per-package pool + the sub-cap
     test_editor_state_bridge  # e05d2: layout/panels publish+restore round-trip + region-map emission
     test_keybindings_bridge   # e07c: file read/watch/generation + keybindings.get over the router
     test_themes_bridge        # e06b: directory watch/generation + themes.get over the router
@@ -254,8 +257,14 @@ foreach(_t IN LISTS _context_shell_tests)
     add_executable(context_editor_shell_${_t} tests/${_t}.cpp)
     target_link_libraries(context_editor_shell_${_t} PRIVATE context_editor_shell context_warnings)
     target_link_options(context_editor_shell_${_t} PRIVATE ${_context_shell_static_runtime})
+    # ../../client/tests supplies `mock_channel.h` — the SCRIPTED WIRE the e13c-1 package-session
+    # suite drives a REAL client::Client over. Reused rather than re-mocked for the reason that header
+    # states itself: a mock more capable than the daemon hides real reader bugs (it hid an empty
+    # granted_scopes() for six tasks), and the flat-attach-reply rule is written down once there.
+    # src/editor/shell/panels/ already reuses it the same way.
     target_include_directories(context_editor_shell_${_t} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/../client/tests
         ${CMAKE_CURRENT_SOURCE_DIR}/../../render/tests)
     add_test(NAME editor-shell-${_t} COMMAND context_editor_shell_${_t})
 endforeach()
