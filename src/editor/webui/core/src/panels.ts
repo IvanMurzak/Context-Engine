@@ -371,18 +371,37 @@ export class PanelClient {
         }
     }
 
-    /** Dispatch a bound command. `nodeId` is the activated node — the panel maps it to its own model. */
+    /**
+     * Dispatch a bound command. `nodeId` is the activated node — the panel maps it to its own model.
+     *
+     * `value` is the OPTIONAL edit payload (M9 e09e-1, design 05 §8's first link). A command bound to
+     * a value-carrying affordance — the Inspector's fields are the shipped case — has to say WHAT the
+     * human entered, and this is the only channel: `PanelHost::invoke` forwards the whole params
+     * object verbatim, so the panel's C++ provider reads it straight off (`inspector_feed.cpp` reads
+     * `params["value"]` and DECLINES a dispatch that carries none — until this parameter existed, a
+     * DOM edit could not reach `inspector.edit` at all).
+     *
+     * THE KEY IS OMITTED ENTIRELY WHEN UNDEFINED, not sent as `null`/`""`. Every valueless dispatch
+     * (every other panel, every non-field affordance in this one) therefore stays byte-identical on
+     * the wire, so no other provider starts seeing a member it never agreed to read — and the
+     * C++ side's "no parseable value" refusal keeps meaning exactly what it meant before.
+     *
+     * WHAT THE STRING IS: a JSON LITERAL, in a string — `"1.5"`, `"true"`, `"\"a name\""` — mirroring
+     * what `context set --value` accepts (`set_command.cpp`: "pass a JSON literal"). It is NOT the
+     * display text. `hydration.ts` § `commandValueFor` owns the DOM -> literal encoding and states why.
+     */
     async command(
         panelId: string,
         commandId: string,
         nodeId: string,
+        value?: string,
     ): Promise<PanelDispatchResult | null> {
         try {
-            const result = await this.#bridge.call(PANEL_COMMAND_METHOD, {
-                panelId,
-                commandId,
-                nodeId,
-            });
+            const params: Record<string, unknown> = { panelId, commandId, nodeId };
+            if (value !== undefined) {
+                params["value"] = value;
+            }
+            const result = await this.#bridge.call(PANEL_COMMAND_METHOD, params);
             if (!isRecord(result)) {
                 return null;
             }

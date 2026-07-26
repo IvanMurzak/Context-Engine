@@ -1,0 +1,581 @@
+// T1 for the HYDRATION RUNTIME's VALUE CHANNEL (M9 e09e-1, design 05 §8 / 04 §4) — the DOM half of
+// the canonical write chain:
+//
+//   DOM input -> hydration -> command "inspector.edit" (WITH its value) -> stage_edit
+//              -> gesture end -> commit -> RPC edit
+//
+// WHY THIS TIER, AND WHAT IT CAN PROVE. The first three links are pure browser behaviour — a real
+// `<input>`, a real `input`/`change` event, real bubbling to a delegated listener, the real
+// `PanelClient` marshalling real JSON onto a real `ShellBridge`. All of that runs here, in the real
+// browser the `webui-ts-unit` tier already provisions, in milliseconds. What it deliberately does NOT
+// claim is the C++ half: the Shell below is a MOCK, written to mirror `inspector_feed.cpp`'s
+// `make_provider()` decisions (a dispatch with no parseable `value` is DECLINED; `commit` with
+// nothing staged reports `dispatched:false`). The live pair is `editor-cef-smoke-shell`'s to prove,
+// and the C++ side of the same seam is already pinned by `test_e09b_concurrent_cas.cpp`, which drives
+// `panel.command inspector.edit` -> `panel.gesture commit` against a REAL daemon and real bytes.
+//
+// THE PROPERTY THAT MADE THIS FILE NECESSARY. Before e09e-1, `PanelClient.command` posted only
+// `{panelId, commandId, nodeId}` and nothing in the runtime listened to `input`/`change` at all — so
+// a human editing an Inspector field could not reach `inspector.edit` in any way, and every layer
+// below it (the L-20 staging, the L-30 rebase-or-drop engine, the wire write) sat unreachable behind
+// a link that was never built. Every case here is written so that removing one of the two halves
+// makes it RED.
+//
+// ⚠ NON-VACUITY PROVEN BY PLANTING (`scripts/plant_and_revert.py`), each plant reverted byte-exact.
+// Recorded inline as `⚠ PLANT (n)` against the case that catches it.
+
+import { assert, assertEqual, delay, waitFor, type TestCase } from "./harness.js";
+import { ShellBridge, type BridgeQuery, type BridgeQueryFunction } from "../bridge.js";
+import { commandValueFor, HydrationRuntime } from "../hydration.js";
+import {
+    PANEL_COMMAND_METHOD,
+    PANEL_GESTURE_METHOD,
+    PanelClient,
+    type PanelRender,
+} from "../panels.js";
+
+// --------------------------------------------------------------------------------- the mock Shell
+
+const PANEL_ID = "builtin.inspector";
+const EDIT_COMMAND = "inspector.edit";
+/** Mirrors `panels::kInspectorWidgetPrefix` — the node-id -> field-pointer mapping's one dependency. */
+const WIDGET_PREFIX = "inspector.widget.";
+
+interface RecordedCall {
+    readonly method: string;
+    readonly params: Record<string, unknown>;
+    readonly dispatched: boolean;
+}
+
+interface MockShell {
+    readonly bridge: ShellBridge;
+    readonly calls: readonly RecordedCall[];
+    /** Every value the mock model has COMMITTED, in order — the "real bytes would have moved" record. */
+    readonly writes: readonly string[];
+    /** The currently staged edit, mirroring `InspectorPanel::staged_`. */
+    readonly staged: string | null;
+    /** Calls to one method, in order. */
+    of(method: string): readonly RecordedCall[];
+}
+
+function parsesAsJson(text: string): boolean {
+    try {
+        JSON.parse(text);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * A Shell that decides `panel.command` / `panel.gesture` the way `inspector_feed.cpp` does.
+ *
+ * FAITHFUL ON THE THREE DECISIONS THAT MATTER HERE, each traceable to a line of C++:
+ *   * `invoke` refuses a command that is not `inspector.edit`, or a node that is not an inspector
+ *     widget (`inspector_widget_pointer` -> nullopt).
+ *   * `invoke` refuses a dispatch whose `value` does not parse as JSON — `contract::Json::at` is
+ *     TOTAL, so a MISSING key arrives as the empty string and `parse_json("")` fails. That is the
+ *     exact behaviour the pre-e09e-1 renderer hit on every edit.
+ *   * `gesture commit` with nothing staged is `Status::none` -> `dispatched:false`, and a resolved
+ *     commit CONSUMES the staged edit (so a second commit writes nothing).
+ */
+function mockShell(): MockShell {
+    const calls: RecordedCall[] = [];
+    const writes: string[] = [];
+    let staged: string | null = null;
+
+    const isWidget = (params: Record<string, unknown>): boolean => {
+        const nodeId = params["nodeId"];
+        return typeof nodeId === "string" && nodeId.startsWith(WIDGET_PREFIX);
+    };
+
+    const query: BridgeQueryFunction = (request: BridgeQuery): number => {
+        const parsed = JSON.parse(request.request) as {
+            id: number;
+            method: string;
+            params: Record<string, unknown>;
+        };
+        const params = parsed.params;
+        let dispatched = false;
+        if (parsed.method === PANEL_COMMAND_METHOD) {
+            const value = params["value"];
+            dispatched =
+                params["commandId"] === EDIT_COMMAND &&
+                isWidget(params) &&
+                typeof value === "string" &&
+                parsesAsJson(value);
+            if (dispatched) {
+                staged = params["value"] as string;
+            }
+        } else if (parsed.method === PANEL_GESTURE_METHOD) {
+            const verb = params["verb"];
+            if (verb === "commit") {
+                dispatched = staged !== null;
+                if (staged !== null) {
+                    writes.push(staged);
+                    staged = null;
+                }
+            } else if (verb === "cancel") {
+                dispatched = staged !== null;
+                staged = null;
+            } else {
+                dispatched = isWidget(params);
+            }
+        }
+        calls.push({ method: parsed.method, params, dispatched });
+        request.onSuccess(
+            JSON.stringify({
+                jsonrpc: "2.0",
+                id: parsed.id,
+                result: { dispatched, revision: 1 },
+            }),
+        );
+        return parsed.id;
+    };
+
+    return {
+        bridge: new ShellBridge(query),
+        calls,
+        writes,
+        get staged(): string | null {
+            return staged;
+        },
+        of(method: string): readonly RecordedCall[] {
+            return calls.filter((call) => call.method === method);
+        },
+    };
+}
+
+// ------------------------------------------------------------------------------- the mounted panel
+
+interface Mounted {
+    readonly shell: MockShell;
+    readonly runtime: HydrationRuntime;
+    readonly container: HTMLElement;
+    /** A mounted node by its MODEL id (what `data-node-id` carries). */
+    node(nodeId: string): HTMLElement;
+    input(nodeId: string): HTMLInputElement;
+    dispose(): void;
+}
+
+/**
+ * The markup below is what `uitree::render_html` actually emits for an Inspector field row: a
+ * `textbox` role becomes a VOID `<input>` whose text rides the `value` attribute, a `checkbox` also
+ * carries `type="checkbox"` and `checked` presence. Hand-written here rather than fetched, because
+ * the C++ renderer's own output is pinned on the C++ side (`test_node.cpp`) and duplicating that
+ * assertion here would test the fixture instead of the runtime.
+ */
+const FIELDS_HTML = [
+    '<section id="inspector.panel" role="region" aria-label="Inspector">',
+    '<ul id="inspector.fields" role="list" aria-label="Component fields">',
+    // a STRING field: `render_value` prints a string's characters BARE
+    '<li id="inspector.field./name" role="listitem">',
+    '<span id="inspector.label./name" role="text">/name</span>',
+    `<input id="${WIDGET_PREFIX}/name" role="textbox" aria-label="/name" tabindex="0"`,
+    ' data-command="inspector.edit" value="Player One">',
+    "</li>",
+    // a NUMBER field: its rendered value IS a JSON literal
+    '<li id="inspector.field./speed" role="listitem">',
+    `<input id="${WIDGET_PREFIX}/speed" role="textbox" aria-label="/speed" tabindex="0"`,
+    ' data-command="inspector.edit" value="1.5">',
+    "</li>",
+    // an EMPTY string field: `render_html` omits `value=` entirely for empty text
+    '<li id="inspector.field./notes" role="listitem">',
+    `<input id="${WIDGET_PREFIX}/notes" role="textbox" aria-label="/notes" tabindex="0"`,
+    ' data-command="inspector.edit">',
+    "</li>",
+    // a TOGGLE field
+    '<li id="inspector.field./visible" role="listitem">',
+    `<input id="${WIDGET_PREFIX}/visible" role="checkbox" type="checkbox" aria-label="/visible"`,
+    ' tabindex="0" data-command="inspector.edit" checked>',
+    "</li>",
+    // a plain, VALUELESS affordance — the "every other dispatch is unchanged" control case
+    '<li id="inspector.field./reset" role="listitem">',
+    '<button id="inspector.action.reset" role="button" aria-label="Reset" tabindex="0"',
+    ' data-command="inspector.edit">Reset</button>',
+    "</li>",
+    "</ul>",
+    "</section>",
+].join("");
+
+function render(): PanelRender {
+    return {
+        panelId: PANEL_ID,
+        revision: 1,
+        html: FIELDS_HTML,
+        focusOrder: [`${WIDGET_PREFIX}/name`, `${WIDGET_PREFIX}/speed`],
+        // The runtime refuses to dispatch a command the render did not declare, so this is
+        // load-bearing rather than decoration.
+        commands: [{ id: EDIT_COMMAND, title: "Edit field" }],
+    };
+}
+
+function mount(gestures = true): Mounted {
+    const shell = mockShell();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const runtime = new HydrationRuntime(container, new PanelClient(shell.bridge), PANEL_ID, {
+        gestures,
+    });
+    runtime.apply(render());
+    const node = (nodeId: string): HTMLElement => {
+        const found = container.querySelector<HTMLElement>(`[data-node-id="${nodeId}"]`);
+        assert(found !== null, `the fixture must mount a node ${nodeId}`);
+        return found as HTMLElement;
+    };
+    return {
+        shell,
+        runtime,
+        container,
+        node,
+        input(nodeId: string): HTMLInputElement {
+            const found = node(nodeId);
+            assert(found instanceof HTMLInputElement, `${nodeId} must mount as an <input>`);
+            return found as HTMLInputElement;
+        },
+        dispose(): void {
+            runtime.dispose();
+            container.remove();
+        },
+    };
+}
+
+/**
+ * Let every pending bridge turn settle, for the cases that assert an ABSENCE.
+ *
+ * `waitFor` cannot express those: its predicate is already true on entry, so it returns without ever
+ * yielding and the assertion passes vacuously — proving nothing about a send that was merely still
+ * queued. A real yield is the only way to give the send a chance to happen and then observe that it
+ * did not.
+ */
+async function settle(): Promise<void> {
+    await delay(25);
+}
+
+/** Type into a control the way a human does: the live value changes, the ATTRIBUTE does not. */
+function type(control: HTMLInputElement, text: string): void {
+    control.value = text;
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/** The browser's "this value is committed now" — Enter or blur on a text field, a toggle's own click. */
+function commitValue(control: HTMLInputElement): void {
+    control.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function pressEnter(control: HTMLInputElement): boolean {
+    const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    control.dispatchEvent(event);
+    return event.defaultPrevented;
+}
+
+/** The `value` member of the LAST `panel.command` recorded, or `undefined` when it carried none. */
+function lastCommandValue(shell: MockShell): unknown {
+    const commands = shell.of(PANEL_COMMAND_METHOD);
+    const last = commands[commands.length - 1];
+    assert(last !== undefined, "expected at least one panel.command");
+    return last?.params["value"];
+}
+
+export const hydrationTests: readonly TestCase[] = [
+    {
+        // ⚠ PLANT (1): drop `value` from `PanelClient.command`'s params -> the edit is REFUSED
+        // (`dispatched:false`, nothing staged, nothing written) and this case reds. That is exactly
+        // the state the shipping build was in before e09e-1.
+        // ⚠ PLANT (2): remove the `change` listener -> the stage lands but no `commit` verb is ever
+        // sent, `writes` stays empty and this case reds.
+        name: "hydration: a typed edit reaches `inspector.edit` WITH its value, and `change` commits it",
+        run: async () => {
+            const panel = mount();
+            try {
+                const field = panel.input(`${WIDGET_PREFIX}/name`);
+                type(field, "Player Two");
+                await waitFor(
+                    "the staged edit to reach the Shell",
+                    () => panel.shell.of(PANEL_COMMAND_METHOD).length === 1,
+                    5_000,
+                    () => `calls=${JSON.stringify(panel.shell.calls)}`,
+                );
+
+                const staged = panel.shell.of(PANEL_COMMAND_METHOD)[0];
+                assertEqual(staged?.params["panelId"], PANEL_ID, "the dispatch names its panel");
+                assertEqual(staged?.params["commandId"], EDIT_COMMAND, "the bound command id");
+                assertEqual(
+                    staged?.params["nodeId"],
+                    `${WIDGET_PREFIX}/name`,
+                    "the widget node the field maps from",
+                );
+                assertEqual(
+                    staged?.params["value"],
+                    '"Player Two"',
+                    "the value the human entered, as the JSON literal the C++ provider parses",
+                );
+                assert(staged?.dispatched === true, "the model must ACCEPT a valued edit");
+                assertEqual(panel.shell.writes, [], "staging alone must write NOTHING (L-20)");
+
+                commitValue(field);
+                await waitFor(
+                    "the gesture end to reach the Shell",
+                    () => panel.shell.of(PANEL_GESTURE_METHOD).length === 1,
+                    5_000,
+                    () => `calls=${JSON.stringify(panel.shell.calls)}`,
+                );
+                const commit = panel.shell.of(PANEL_GESTURE_METHOD)[0];
+                assertEqual(commit?.params["verb"], "commit", "the gesture END is what writes");
+                assert(commit?.dispatched === true, "the commit must resolve the staged edit");
+                assertEqual(
+                    panel.shell.writes,
+                    ['"Player Two"'],
+                    "the committed write carries the human's value, once",
+                );
+                assertEqual(panel.shell.staged, null, "a resolved commit CONSUMES the staged edit");
+            } finally {
+                panel.dispose();
+            }
+        },
+    },
+    {
+        // ⚠ PLANT (3): key `commandValueFor` off the USER's text (parse it, else quote it) instead of
+        // the model's rendered value -> the `42` typed into the STRING field below is staged as a
+        // NUMBER, and this case reds. THAT ORDERING MATTERS: the three obvious inputs (a string field
+        // given prose, a number field given a number, an empty field given prose) agree under BOTH
+        // rules, so a table without a disagreeing pair would pass the plant and prove nothing about
+        // which signal the encoder actually reads. The two that disagree are here and in the
+        // refusal case below — one for each direction of the mis-typing.
+        name: "hydration: the value is typed from the MODEL's rendered value, not from the text typed",
+        run: async () => {
+            const panel = mount();
+            try {
+                // A STRING field: `render_value` printed it bare, so the edit is quoted + escaped.
+                type(panel.input(`${WIDGET_PREFIX}/name`), 'a "quoted" name');
+                await waitFor(
+                    "the string field's edit",
+                    () => panel.shell.of(PANEL_COMMAND_METHOD).length === 1,
+                );
+                assertEqual(
+                    lastCommandValue(panel.shell),
+                    '"a \\"quoted\\" name"',
+                    "a string field's edit is a JSON STRING literal, escaped",
+                );
+
+                // A NUMBER field: its rendered value parses, so the human's literal passes through.
+                type(panel.input(`${WIDGET_PREFIX}/speed`), "2.5");
+                await waitFor(
+                    "the number field's edit",
+                    () => panel.shell.of(PANEL_COMMAND_METHOD).length === 2,
+                );
+                assertEqual(
+                    lastCommandValue(panel.shell),
+                    "2.5",
+                    "a JSON-typed field's edit passes through UNQUOTED",
+                );
+
+                // An EMPTY string field (`render_html` omits `value=`): still a string.
+                type(panel.input(`${WIDGET_PREFIX}/notes`), "now filled");
+                await waitFor(
+                    "the empty field's edit",
+                    () => panel.shell.of(PANEL_COMMAND_METHOD).length === 3,
+                );
+                assertEqual(
+                    lastCommandValue(panel.shell),
+                    '"now filled"',
+                    "an absent `value` attribute reads as an empty STRING field, not as JSON",
+                );
+
+                // THE DISAGREEING PAIR, direction one: a STRING field given text that is itself a
+                // JSON literal. The field's type must survive — writing the bare `42` would silently
+                // turn a string field into a number one on disk.
+                type(panel.input(`${WIDGET_PREFIX}/name`), "42");
+                await waitFor(
+                    "the JSON-shaped text typed into a string field",
+                    () => panel.shell.of(PANEL_COMMAND_METHOD).length === 4,
+                );
+                assertEqual(
+                    lastCommandValue(panel.shell),
+                    '"42"',
+                    "a string field keeps its type even when the text reads as a literal",
+                );
+
+                // A CHECKBOX: its state IS a boolean literal, read off `checked`, not off `value`.
+                const toggle = panel.input(`${WIDGET_PREFIX}/visible`);
+                assertEqual(commandValueFor(toggle), "true", "a checked box encodes to `true`");
+                toggle.checked = false;
+                assertEqual(commandValueFor(toggle), "false", "an unchecked box encodes to `false`");
+            } finally {
+                panel.dispose();
+            }
+        },
+    },
+    {
+        name: "hydration: an edit that cannot be typed to the field is REFUSED, never coerced",
+        run: async () => {
+            const panel = mount();
+            try {
+                // `/speed` is JSON-typed, so `abc` is passed through as written — and refused by the
+                // model. The dangerous alternative (quoting it into a valid string literal) would
+                // have silently changed the field's type on disk.
+                const field = panel.input(`${WIDGET_PREFIX}/speed`);
+                type(field, "abc");
+                await waitFor(
+                    "the refused edit",
+                    () => panel.shell.of(PANEL_COMMAND_METHOD).length === 1,
+                );
+                assertEqual(lastCommandValue(panel.shell), "abc", "sent verbatim, not quoted");
+                assert(
+                    panel.shell.of(PANEL_COMMAND_METHOD)[0]?.dispatched === false,
+                    "an unparseable value must be DECLINED by the model",
+                );
+                assertEqual(panel.shell.staged, null, "nothing may be staged from a refused edit");
+
+                commitValue(field);
+                await waitFor(
+                    "the gesture end",
+                    () => panel.shell.of(PANEL_GESTURE_METHOD).length === 1,
+                );
+                assert(
+                    panel.shell.of(PANEL_GESTURE_METHOD)[0]?.dispatched === false,
+                    "a commit with nothing staged is an ordinary `dispatched:false`",
+                );
+                assertEqual(panel.shell.writes, [], "and NOTHING is written");
+            } finally {
+                panel.dispose();
+            }
+        },
+    },
+    {
+        // THE ONE CASE DRIVEN BY A REAL ACTIVATION rather than by synthesised value events: a click
+        // dispatched at a checkbox runs the browser's own activation behaviour, so the toggle, the
+        // `input` and the `change` below are all the PLATFORM's, in the platform's order — which is
+        // also how this case measured that the activation runs AFTER the click finishes dispatching
+        // (an earlier fixture toggled by hand FIRST and was double-toggled by the click).
+        //
+        // ⚠ PLANT (4): let `#activateFrom` dispatch for a value control as well -> the click's own
+        // handler stages first, for the PRE-toggle state, and the activation's `input` stages again:
+        // two `panel.command` calls instead of one, and this case reds.
+        name: "hydration: a checkbox commits through its OWN activation, and its click stages nothing extra",
+        run: async () => {
+            const panel = mount();
+            try {
+                const toggle = panel.input(`${WIDGET_PREFIX}/visible`);
+                assert(toggle.checked, "the fixture's toggle starts checked");
+                toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+                await waitFor(
+                    "the toggle to stage and commit",
+                    () => panel.shell.writes.length === 1,
+                    5_000,
+                    () => `calls=${JSON.stringify(panel.shell.calls)}`,
+                );
+                await settle();
+                assertEqual(
+                    panel.shell.writes,
+                    ["false"],
+                    "the state the activation left it in is what commits, once",
+                );
+                assertEqual(
+                    panel.shell.of(PANEL_COMMAND_METHOD).length,
+                    1,
+                    "exactly ONE stage — the click must not dispatch a second one",
+                );
+                assertEqual(panel.shell.staged, null, "and nothing is left staged");
+            } finally {
+                panel.dispose();
+            }
+        },
+    },
+    {
+        // ⚠ PLANT (5): drop the Enter branch from `#handleKey` -> Enter no longer commits (the tier
+        // cannot trigger the browser's implicit change-on-Enter with an untrusted event), `writes`
+        // stays empty and this case reds.
+        name: "hydration: Enter is the gesture end, and a `change` after it writes nothing more",
+        run: async () => {
+            const panel = mount();
+            try {
+                const field = panel.input(`${WIDGET_PREFIX}/name`);
+                type(field, "Enter Committed");
+                await waitFor("the stage", () => panel.shell.of(PANEL_COMMAND_METHOD).length === 1);
+
+                assert(pressEnter(field), "Enter must be consumed once it is handled as the commit");
+                await waitFor(
+                    "Enter's commit",
+                    () => panel.shell.writes.length === 1,
+                    5_000,
+                    () => `calls=${JSON.stringify(panel.shell.calls)}`,
+                );
+                assertEqual(panel.shell.writes, ['"Enter Committed"'], "Enter committed the edit");
+
+                // The browser may ALSO fire `change` for the same Enter. It must be harmless.
+                commitValue(field);
+                await waitFor(
+                    "the redundant commit",
+                    () => panel.shell.of(PANEL_GESTURE_METHOD).length === 2,
+                );
+                assert(
+                    panel.shell.of(PANEL_GESTURE_METHOD)[1]?.dispatched === false,
+                    "the second commit finds nothing staged",
+                );
+                assertEqual(panel.shell.writes.length, 1, "so exactly one write happened, not two");
+            } finally {
+                panel.dispose();
+            }
+        },
+    },
+    {
+        name: "hydration: a valueless dispatch is byte-identical to before (no `value` member at all)",
+        run: async () => {
+            const panel = mount();
+            try {
+                panel.node("inspector.action.reset").dispatchEvent(
+                    new MouseEvent("click", { bubbles: true }),
+                );
+                await waitFor(
+                    "the plain command",
+                    () => panel.shell.of(PANEL_COMMAND_METHOD).length === 1,
+                );
+                const params = panel.shell.of(PANEL_COMMAND_METHOD)[0]?.params ?? {};
+                assertEqual(
+                    Object.keys(params).sort(),
+                    ["commandId", "nodeId", "panelId"],
+                    "a non-value affordance must send the pre-e09e-1 params, unchanged",
+                );
+                assert(!("value" in params), "no `value` member may appear for a valueless dispatch");
+            } finally {
+                panel.dispose();
+            }
+        },
+    },
+    {
+        name: "hydration: a panel WITHOUT gestures stages but never sends a verb the Shell would refuse",
+        run: async () => {
+            const panel = mount(false);
+            try {
+                const field = panel.input(`${WIDGET_PREFIX}/name`);
+                type(field, "no gateway here");
+                await waitFor("the stage", () => panel.shell.of(PANEL_COMMAND_METHOD).length === 1);
+                commitValue(field);
+                await settle();
+                assertEqual(
+                    panel.shell.of(PANEL_GESTURE_METHOD).length,
+                    0,
+                    "`gestures:false` must send no gesture verb",
+                );
+                assertEqual(panel.shell.writes, [], "and nothing is written");
+            } finally {
+                panel.dispose();
+            }
+        },
+    },
+    {
+        name: "hydration: dispose releases the value listeners",
+        run: async () => {
+            const panel = mount();
+            const field = panel.input(`${WIDGET_PREFIX}/name`);
+            panel.runtime.dispose();
+            type(field, "after dispose");
+            commitValue(field);
+            await settle();
+            assertEqual(panel.shell.calls.length, 0, "a disposed runtime must send nothing");
+            panel.container.remove();
+        },
+    },
+];

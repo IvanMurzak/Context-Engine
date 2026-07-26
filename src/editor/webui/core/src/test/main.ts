@@ -6,6 +6,7 @@
 
 import { runTests, type TestSummary } from "./harness.js";
 import { panelsTests } from "./panels.test.js";
+import { hydrationTests } from "./hydration.test.js";
 import { editorstateTests } from "./editorstate.test.js";
 import { guardsTests } from "./guards.test.js";
 import { whenTests } from "./when.test.js";
@@ -40,6 +41,7 @@ import { bootTests } from "./boot.test.js";
 // wiring). Every pre-existing case stays synchronous and is unaffected.
 void runTests([
     ...panelsTests,
+    ...hydrationTests,
     ...editorstateTests,
     ...guardsTests,
     ...whenTests,
