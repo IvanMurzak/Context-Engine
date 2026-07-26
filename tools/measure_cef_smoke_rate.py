@@ -31,10 +31,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
+import re
 import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 import time
 from collections import Counter
 from pathlib import Path
@@ -62,10 +66,61 @@ SMOKES: tuple[tuple[str, tuple[str, ...]], ...] = (
 # wedged" from "wedged before doing work" — not to re-assert what each smoke asserts.
 VERDICT_MARKERS = ("booted", "milestone", "rendered", "ok:", "PASS", "verdict")
 
+# Matched on TOKEN boundaries, never as bare substrings. `"PASS"` as a substring also matches
+# `password`, `bypass`, `passed` and `passing` — and most of these smokes run with
+# `verbose_logging = true`, so Chromium's own stderr shares this buffer, including its chatter about
+# the PASSWORD store, which is the very OSCrypt subsystem #437 lives in. A stall BEFORE the smoke's
+# own verdict would then be reported `HUNG_AFTER_VERDICT`, inverting the ONE distinction this tool
+# exists to make (the two "lead to opposite investigations").
+VERDICT_MARKER_RE = re.compile(
+    "|".join(rf"\b{re.escape(m)}" + (r"\b" if m[-1].isalnum() else "") for m in VERDICT_MARKERS),
+    re.IGNORECASE)
+
 # macOS: the process securityd spawns to ASK a human about a keychain ACL. Its presence during a hang
 # is the #437 signature, and it OUTLIVES the client that triggered it, so it is also litter worth
 # reporting.
 SECURITY_AGENT_FRAGMENT = "SecurityAgent.bundle/Contents/MacOS/SecurityAgent"
+
+# A CEF executable is a process TREE (renderer / GPU / zygote helpers), and every child INHERITS the
+# stdout we hand the launcher. Two consequences, both load-bearing here:
+#
+#   * capture to a FILE, never a PIPE. Draining a pipe after killing only the launcher blocks until
+#     EVERY inheritor closes its write end — and the run this tool kills is by definition one whose
+#     browser wedged in `CefShutdown()` and therefore never tore its own helpers down. The measurer
+#     would hang on exactly the hang it exists to measure, with no budget and no diagnostic.
+#   * kill the process GROUP, not the launcher pid, so no helper outlives the run and poisons the
+#     next measurement.
+#
+# `tools/web_golden_run.py` and `tools/webui_test_run.py` already do both for headless Chrome
+# (CE #196 — the teardown race that flaked `render (web, emscripten)`); the same rule binds any
+# harness that reaps a browser. Their `_terminate_browser` is not shared code yet — extracting one
+# would touch two files outside this change — so this is a deliberate third copy of the pattern.
+POSIX_PROCESS_GROUPS = os.name == "posix"
+
+
+def terminate_tree(proc: subprocess.Popen) -> None:
+    """SIGKILL the whole process GROUP, then reap. Best effort — teardown must never raise.
+
+    SIGKILL rather than the graceful SIGTERM-then-SIGKILL ladder the two precedents use: by the time
+    this is called the diagnostics are already captured and the subject is a process that has proven
+    it will not exit on its own. Falls back to the launcher pid where process groups do not exist
+    (Windows), where the file-based capture above is what keeps the drain non-blocking anyway.
+    """
+    if proc.poll() is not None:
+        return
+    killed_group = False
+    if POSIX_PROCESS_GROUPS:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            killed_group = True
+        except (AttributeError, ProcessLookupError, PermissionError, OSError):
+            killed_group = False
+    if not killed_group:
+        proc.kill()
+    try:
+        proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def find_executable(build_dir: Path, patterns: tuple[str, ...]) -> Path | None:
@@ -105,35 +160,42 @@ def sample_stacks(pid: int, seconds: int, out_path: Path) -> bool:
 
 
 def classify(output: str) -> str:
-    low = output.lower()
-    return ("HUNG_AFTER_VERDICT" if any(m.lower() in low for m in VERDICT_MARKERS)
-            else "HUNG_NO_VERDICT")
+    return "HUNG_AFTER_VERDICT" if VERDICT_MARKER_RE.search(output or "") else "HUNG_NO_VERDICT"
 
 
 def run_once(exe: Path, budget: int, extra_args: list[str], diag_dir: Path | None,
              label: str) -> dict:
     """One run. Returns its verdict record; never raises on the executable's own behaviour."""
     started = time.monotonic()
-    proc = subprocess.Popen([str(exe), *extra_args], stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, errors="replace")
-    try:
-        output, _ = proc.communicate(timeout=budget)
+    diagnostics: dict = {}
+    hung = False
+    # A FILE, not a pipe, and its own process group — see POSIX_PROCESS_GROUPS above for why both are
+    # required to measure a hang without becoming one.
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as log:
+        proc = subprocess.Popen([str(exe), *extra_args], stdout=log, stderr=subprocess.STDOUT,
+                                start_new_session=POSIX_PROCESS_GROUPS)
+        try:
+            proc.wait(timeout=budget)
+        except subprocess.TimeoutExpired:
+            hung = True
+            # STILL RUNNING: diagnose BEFORE killing, or the evidence dies with it.
+            diagnostics["security_agents"] = pending_security_agents()
+            if diag_dir is not None:
+                diag_dir.mkdir(parents=True, exist_ok=True)
+                stack_path = diag_dir / f"{label}.sample.txt"
+                if sample_stacks(proc.pid, 2, stack_path):
+                    diagnostics["stacks"] = str(stack_path)
+            terminate_tree(proc)
+        seconds = round(time.monotonic() - started, 2)
+        log.seek(0)
+        output = log.read()
+
+    if hung:
+        record = {"verdict": classify(output), "seconds": seconds, "diagnostics": diagnostics}
+    else:
         record = {"verdict": "PASS" if proc.returncode == 0 else f"FAIL(rc={proc.returncode})",
-                  "seconds": round(time.monotonic() - started, 2)}
-    except subprocess.TimeoutExpired:
-        # STILL RUNNING: diagnose BEFORE killing, or the evidence dies with it.
-        diagnostics: dict = {"security_agents": pending_security_agents()}
-        if diag_dir is not None:
-            diag_dir.mkdir(parents=True, exist_ok=True)
-            stack_path = diag_dir / f"{label}.sample.txt"
-            if sample_stacks(proc.pid, 2, stack_path):
-                diagnostics["stacks"] = str(stack_path)
-        proc.kill()
-        output, _ = proc.communicate()
-        record = {"verdict": classify(output or ""),
-                  "seconds": round(time.monotonic() - started, 2),
-                  "diagnostics": diagnostics}
-    tail = [ln for ln in (output or "").splitlines() if ln.strip()]
+                  "seconds": seconds}
+    tail = [ln for ln in output.splitlines() if ln.strip()]
     record["last_line"] = tail[-1][:160] if tail else ""
     return record
 

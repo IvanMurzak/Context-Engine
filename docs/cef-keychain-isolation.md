@@ -76,9 +76,9 @@ Two shapes, because there are two ways a CEF app here reaches Chromium's command
 * **Standalone CEF apps** that own their own `CefApp` (`src/editor/cef/src/cef_boot_smoke.cpp`,
   `src/editor/gui/host/src/editor_host.cpp`) append the switch directly.
 
-This is the **second** piece of shared machine state a CEF smoke must isolate; `CefShellOptions::
-cache_root`'s per-PID temp dir (the Chromium process singleton) is the first. Same shape, same reason:
-a test may not depend on machine-global state another process — or another build of itself — also owns.
+This is the **second** piece of shared machine state a CEF smoke must isolate; the per-PID temp dir of
+`CefShellOptions::cache_root` (the Chromium process singleton) is the first. Same shape, same reason: a
+test may not depend on machine-global state another process — or another build of itself — also owns.
 
 ### Measured, on one binary, one minute apart
 

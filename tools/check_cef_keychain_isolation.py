@@ -55,10 +55,17 @@ from pathlib import Path
 SHELL_SMOKE_DIR = "src/editor/shell/cef/src"
 SHELL_SOURCE_SUFFIXES = (".cpp", ".mm")
 
-# A source is a Shell-smoke subject when it declares a CefShellOptions VALUE (`CefShellOptions x;`),
-# however namespace-qualified. A by-reference parameter is not a construction, which is why
-# `cef_shell.cpp` — whose `initialize(const CefShellOptions&)` merely receives one — is not a subject.
-SHELL_OPTIONS_CONSTRUCTED = re.compile(r"\bCefShellOptions\s+[A-Za-z_]\w*\s*;")
+# A source is a Shell-smoke subject when it declares a CefShellOptions VALUE, however
+# namespace-qualified, in EITHER spelling of construction — `CefShellOptions x;` or the equally
+# idiomatic brace form `CefShellOptions x{};`. The `[;{]` is not cosmetic: keyed on `;` alone, a new
+# scenario written `CefShellOptions cef_options{};` is not a subject at all and the gate reports it
+# GREEN with no isolation — the same silent-exemption shape the planting round already caught twice
+# (see the two `# FOUND BY PLANTING` cases in the pytest). Every site in the tree today uses the bare
+# `;` form, so accepting `{` changes no present verdict; it closes a future hole.
+# A by-reference parameter is not a construction, which is why `cef_shell.cpp` — whose
+# `initialize(const CefShellOptions&)` merely receives one — is not a subject, and neither is a
+# by-value RETURN type (`CefShellOptions make_cef_options(`), which is followed by `(`.
+SHELL_OPTIONS_CONSTRUCTED = re.compile(r"\bCefShellOptions\s+[A-Za-z_]\w*\s*[;{]")
 
 # Standalone CEF apps that own their own CefApp. The tuple is the KNOWN pair, asserted to exist so a
 # rename is an exit-2 config error rather than a silent pass; the SCAN below is by predicate, over

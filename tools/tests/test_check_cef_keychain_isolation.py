@@ -190,6 +190,40 @@ def test_a_wrapped_assignment_is_accepted(tmp_path):
     assert gate.check(root) == []
 
 
+def test_a_brace_initialized_options_is_a_subject(tmp_path):
+    """`CefShellOptions opts{};` CONSTRUCTS one exactly as `CefShellOptions opts;` does, and the brace
+    form is idiomatic C++. A predicate keyed on the `;` alone exempts it ENTIRELY — not a false pass on
+    a subject, but no subject at all — so a new e12c-2 scenario written that way would be reported
+    GREEN while isolating nothing. Same silent-exemption class as the two plants above."""
+    root = make_tree(tmp_path)
+    write(root, f"{gate.SHELL_SMOKE_DIR}/cef_shell_braced_smoke.cpp",
+          "int main()\n{\n    shell::cef::CefShellOptions opts{};\n    return 0;\n}\n")
+    findings = gate.check(root)
+    assert len(findings) == 1
+    assert "cef_shell_braced_smoke.cpp" in findings[0]
+
+
+def test_a_compliant_brace_initialized_smoke_passes(tmp_path):
+    """The other half of the case above: widening the predicate must not red a compliant brace-init
+    smoke, or the fix would trade a false GREEN for a false RED."""
+    root = make_tree(tmp_path, smokes=0)
+    write(root, f"{gate.SHELL_SMOKE_DIR}/cef_shell_braced_ok_smoke.cpp",
+          "int main()\n{\n    shell::cef::CefShellOptions opts{};\n"
+          "    opts.use_mock_keychain = true;\n    return 0;\n}\n")
+    assert gate.check(root) == []
+
+
+def test_a_by_value_return_type_is_not_a_subject(tmp_path):
+    """`CefShellOptions make_cef_options(...)` is a RETURN type, not a construction — six real smokes
+    declare exactly that helper, and treating the signature line as a subject would be harmless only
+    by accident (the helper's own body constructs one anyway). Pinned so the `[;{]` widening is not
+    mistaken for "anything after the type name"."""
+    root = make_tree(tmp_path)
+    write(root, f"{gate.SHELL_SMOKE_DIR}/cef_shell_factory_decl.cpp",
+          "shell::cef::CefShellOptions make_cef_options(int rate);\n")
+    assert gate.check(root) == []
+
+
 def test_a_by_reference_parameter_is_not_a_subject(tmp_path):
     """`initialize(const CefShellOptions&)` receives options, it does not construct any — treating it
     as a subject would make `cef_shell.cpp` permanently unsatisfiable."""

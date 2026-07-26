@@ -113,6 +113,53 @@ def test_a_silent_hang_is_a_different_verdict(tmp_path):
     assert record["verdict"] == "HUNG_NO_VERDICT"
 
 
+def test_a_password_log_line_is_not_a_verdict(tmp_path):
+    """`PASS` matched as a bare SUBSTRING also matches `password`, `bypass`, `passed` and `passing`.
+    Most of these smokes run `verbose_logging = true`, so Chromium's own stderr shares this buffer —
+    and the subsystem #437 lives in IS Chromium's password store, so this collision lands exactly
+    where the tool is used. A stall before the smoke's own verdict must stay HUNG_NO_VERDICT, or the
+    one distinction the tool exists to make is inverted."""
+    exe = make_stub(tmp_path, FIRST_REL,
+                    "import time\n"
+                    "print('OSCrypt: password store bypass, passing through', flush=True)\n"
+                    "time.sleep(600)\n")
+    record = measure.run_once(exe, budget=2, extra_args=[], diag_dir=None, label="t")
+    assert record["verdict"] == "HUNG_NO_VERDICT"
+
+
+def test_a_standalone_pass_token_is_still_a_verdict(tmp_path):
+    """The other half: tightening to token boundaries must not stop recognising a real verdict."""
+    exe = make_stub(tmp_path, FIRST_REL,
+                    "import time\nprint('scenario PASS', flush=True)\ntime.sleep(600)\n")
+    record = measure.run_once(exe, budget=2, extra_args=[], diag_dir=None, label="t")
+    assert record["verdict"] == "HUNG_AFTER_VERDICT"
+
+
+def test_a_hung_child_holding_a_grandchild_does_not_hang_the_measurer(tmp_path):
+    """THE #437 SHAPE, and why capture is a FILE and the kill is a process GROUP.
+
+    A CEF browser wedged in `CefShutdown()` never tears down its renderer/GPU helpers, and those
+    helpers INHERIT the launcher's stdout. Draining a PIPE after killing only the launcher blocks
+    until every inheritor closes its write end, so the measurer would hang on the very hang it exists
+    to measure. The stub reproduces that exactly: a grandchild that outlives the parent by 30 s while
+    holding the inherited stdout.
+
+    The assertion is on ELAPSED TIME, not just the verdict — a pipe-based drain still returns the
+    right verdict eventually, so only the wall clock discriminates. Post-fix this is ~2 s (the
+    budget); a blocking drain would be ~30 s."""
+    exe = make_stub(tmp_path, FIRST_REL,
+                    "import subprocess, sys, time\n"
+                    "print('[cef-boot] CEF browser booted headless', flush=True)\n"
+                    "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+                    "time.sleep(30)\n")
+    record = measure.run_once(exe, budget=2, extra_args=[], diag_dir=None, label="t")
+    assert record["verdict"] == "HUNG_AFTER_VERDICT"
+    assert "booted" in record["last_line"]
+    assert record["seconds"] < 15, (
+        f"run_once blocked for {record['seconds']}s on a surviving grandchild that holds the "
+        f"inherited stdout — the drain must not wait on it (issue #437)")
+
+
 def test_a_hung_child_is_actually_killed(tmp_path):
     """A rate tool that leaks a hung process per run would poison every later measurement."""
     exe = make_stub(tmp_path, FIRST_REL, HANG_AFTER_VERDICT)
