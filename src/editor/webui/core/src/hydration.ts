@@ -8,6 +8,9 @@
 //        * focusables follow `focus_order`                        -> `#focusOrder`, arrow/Home/End nav
 //        * activation dispatches the node's bound command id      -> `#activate`
 //        * continuous gestures map to begin/extend/commit/cancel  -> `#bindGestures`
+//        * a value control STAGES on `input` and ENDS on `change` -> `#stageFrom` / `#commit`
+//          (M9 e09e-1, design 05 §8 — the DOM half of the write chain; `commandValueFor` encodes
+//           what the human entered as the JSON literal the panel's C++ provider reads)
 //   3. re-renders are INCREMENTAL DOM patches keyed by stable node ids -> `#patchElement`
 //   4. rich widgets are widget classes keyed by node ROLE/TYPE, presentation-only -> `WIDGET_CLASSES`
 //
@@ -108,9 +111,102 @@ function isTextEntry(target: EventTarget | null): boolean {
 }
 
 /**
+ * The VALUE-CARRYING controls a panel model can render (M9 e09e-1).
+ *
+ * `uitree::role_html_tag` maps the `textbox` and `checkbox` roles onto `<input>`, so those are the
+ * only two shapes reachable today; `<textarea>` is accepted alongside them because `isTextEntry`
+ * already recognises one and a future multi-line role would arrive as one.
+ *
+ * ⚠ THAT FUTURE ROLE MUST ALSO NARROW `#handleKey`'S ENTER BRANCH. Enter there is the commit gesture
+ * and is `preventDefault`ed — harmless in a single-line `<input>`, whose Enter has no default action
+ * outside a form, but in a `<textarea>` it is the keystroke that inserts a newline, so a multi-line
+ * field would become unable to hold one. Unreachable today (no role maps to `<textarea>`), and
+ * recorded here rather than pre-decided: whether such a field commits on Enter, Shift+Enter or blur
+ * is that role's design question, not this helper's.
+ *
+ * DELIBERATELY STRUCTURAL, not panel-specific: this file knows no panel id and no field (see the
+ * header), so "does this node carry a value" is asked of the DOM element, never of a roster entry.
+ */
+function valueControl(target: EventTarget | null): HTMLInputElement | HTMLTextAreaElement | null {
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        return target;
+    }
+    return null;
+}
+
+/** Does `text` read as a JSON literal? The one question the encoder below asks of a rendered value. */
+function parsesAsJson(text: string): boolean {
+    try {
+        JSON.parse(text);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Encode a control's CURRENT value as the JSON LITERAL STRING `PanelClient.command` carries
+ * (M9 e09e-1, design 05 §8) — the DOM half of the write chain's first link.
+ *
+ * A checkbox is unambiguous: its state IS a JSON boolean.
+ *
+ * A TEXT CONTROL IS NOT, and the encoding has to decide one thing — whether the human's text is a
+ * JSON *string* (quote + escape it) or some other JSON literal to be passed through (`1.5`, `true`,
+ * `{"a":1}`). The signal used is the MODEL'S OWN RENDERED VALUE — the `value` ATTRIBUTE, which
+ * `uitree::render_html` wrote and which the browser leaves untouched while the user types (that is
+ * `defaultValue`, as against the live `value` property). `inspector_panel.cpp`'s `render_value` (a
+ * file-static, not a member) prints a string's characters BARE and every other type as its canonical
+ * literal, so "the rendered value does not parse as JSON" is exactly "this field currently holds a
+ * string" — and the edit is encoded to the SAME JSON type the field already has.
+ *
+ * EXPORTED so the T1 tier can drive THIS function rather than a copy of it (`hydration.test.ts`),
+ * following `boot.ts`'s precedent. It is not panel-facing API.
+ *
+ * WHY NOT KEY OFF THE USER'S OWN TEXT (parse it, else quote it)? Because that mis-types in the
+ * DANGEROUS direction: typing `abc` into a number field would be quoted into a valid string literal
+ * and staged, silently changing the field's type. Keying off the model instead makes that case
+ * unparseable on the C++ side, so it is REFUSED rather than written — fail-closed, which is the whole
+ * discipline `parse_widget_kind` / `stage_edit` already apply one layer down.
+ *
+ * ⚠ ONE CASE STAYS UNDECIDABLE HERE (#434), and it is NOT a coincidence this runtime merely runs
+ * into — THE WRITE PATH REACHES IT ON ITS OWN, in two ordinary edits, so state it that way rather
+ * than as "a value that happens to look like a literal":
+ *
+ *   1. a STRING field holding `Player One`; the human types `42` -> the rendered value does not
+ *      parse -> staged as the JSON string `"42"`. Correct.
+ *   2. read-your-writes re-reads the model, `render_value` prints that string BARE, and
+ *      `#syncAttributes` copies the new `value="42"` onto the reused element.
+ *   3. the human edits the SAME field again -> `42` now parses -> the next edit is passed through
+ *      BARE, and `stage_edit` type-checks nothing, so the field's stored type flips to number.
+ *
+ * `render_value` is lossy for exactly those values, and NOTHING in the mounted DOM carries the
+ * field's widget kind — `role_for` collapses text/number/json onto `textbox` and no `type` is
+ * emitted. The fix is a kind discriminator in the markup (a `type="number"`, or a `data-kind`),
+ * which is a uitree/panel-model contract change — out of this renderer-only task's scope. FILED as
+ * #434, and the current, known-wrong behaviour is PINNED by a characterization case in
+ * `hydration.test.ts` so the fix flips a RED test instead of changing behaviour silently.
+ */
+export function commandValueFor(control: HTMLInputElement | HTMLTextAreaElement): string {
+    if (control instanceof HTMLInputElement && control.type === "checkbox") {
+        return control.checked ? "true" : "false";
+    }
+    // `defaultValue` IS the `value` content attribute for an `<input>` (and `""` when the attribute is
+    // absent — `render_html` omits `value=` for empty text, and an empty field is an empty STRING
+    // field, which is the right answer). Preferred over `getAttribute("value")` because a
+    // `<textarea>`, which `valueControl` admits, carries NO `value` attribute at all — its default
+    // value is its child text — so the attribute read would be permanently `null` there and every
+    // multi-line edit would be quoted into a string. Identical behaviour for the `<input>` shapes
+    // reachable today.
+    const rendered = control.defaultValue;
+    return parsesAsJson(rendered) ? control.value : JSON.stringify(control.value);
+}
+
+/**
  * What a hydrated panel reports about itself.
  *
- * NO READER EXISTS YET — there is no TypeScript test tier in this workspace, and the live smoke
+ * NO READER EXISTS YET — not for want of a tier. The TypeScript test tier DOES exist (`webui-ts-unit`;
+ * this file's own `hydration.test.ts` runs in it), but its cases assert the WIRE — the calls the mock
+ * Shell recorded — which is the stronger surface, so these counters stay unread; and the live smoke
  * asserts the C++-side counters (`PanelHost::lists_served` / `renders_served`) instead. Recorded
  * honestly rather than described as "the surface a test reads", because the distinction matters:
  * these counters are the read surface a TS test harness WOULD use, and `reused` in particular is
@@ -199,6 +295,16 @@ export class HydrationRuntime {
         if (this.#gestureActive) {
             this.#handlePointer(event, "cancel");
         }
+    };
+    // THE VALUE CHANNEL (M9 e09e-1, design 05 §8). `input` STAGES what the human has entered;
+    // `change` — the browser's own "the value is committed now", i.e. Enter or blur on a text field
+    // and the toggle itself on a checkbox — is the L-20 GESTURE END. Two events, because those are
+    // exactly the two moments the model distinguishes (`stage_edit` then `commit`).
+    readonly #onInput = (event: Event): void => {
+        void this.#stageFrom(event.target);
+    };
+    readonly #onChange = (event: Event): void => {
+        void this.#commitFrom(event.target);
     };
 
     constructor(
@@ -315,6 +421,8 @@ export class HydrationRuntime {
         this.#container.removeEventListener("pointermove", this.#onPointerMove);
         this.#container.removeEventListener("pointerup", this.#onPointerUp);
         this.#container.removeEventListener("pointercancel", this.#onPointerCancel);
+        this.#container.removeEventListener("input", this.#onInput);
+        this.#container.removeEventListener("change", this.#onChange);
         this.#container.replaceChildren();
     }
 
@@ -329,6 +437,12 @@ export class HydrationRuntime {
         // — it dispatches the node's BOUND command (04 §2 / #handleKey), never a global chord bypassing
         // the keymap/command path (05 §6). The `webui-no-raw-key-handlers` T1 lint requires this marker.
         this.#container.addEventListener("keydown", this.#onKeyDown);
+        // BOUND UNCONDITIONALLY, unlike the pointer gestures below. Staging is an ordinary COMMAND
+        // (`inspector.edit`), which any panel declaring one may receive; only the commit half is a
+        // gesture verb, and `#commit` is what gates on the manifest's `gestures` capability. Both
+        // events bubble from the controls, so this stays one delegated pair like the rest.
+        this.#container.addEventListener("input", this.#onInput);
+        this.#container.addEventListener("change", this.#onChange);
         if (this.#gesturesEnabled) {
             // Bound ONLY when the panel's manifest declares gestures. A panel that reports
             // `gestures: false` — Problems, every read-only observer — never even installs these,
@@ -341,10 +455,28 @@ export class HydrationRuntime {
     }
 
     #handleKey(event: KeyboardEvent): void {
-        // ACTIVATION: Enter and Space, the ARIA-standard pair. Together with the click handler this
-        // is what makes every command-bound affordance reachable without a pointer — R-CLI-001
-        // CLI-completeness as a structural accessibility property, which `uitree::audit_a11y`
-        // already asserts on the model side.
+        const control = valueControl(event.target);
+
+        // ENTER IN A TEXT FIELD IS THE GESTURE END (M9 e09e-1, design 05 §8's "gesture end ->
+        // commit"). Sent EXPLICITLY rather than left to the browser's implicit change-on-Enter, so
+        // the commit is deterministic instead of resting on an engine behaviour this tier cannot
+        // assert (an untrusted key event triggers no default text-control action, so no test here
+        // could ever prove it). A `change` that follows anyway is harmless ON EVERY RESOLVED
+        // OUTCOME: `InspectorPanel::commit` consumes the staged gesture for applied / rebased /
+        // dropped, so the second commit finds nothing staged, reports `dispatched:false` and writes
+        // nothing. NOT unconditional, and the exception is deliberate — on `Status::error` the panel
+        // KEEPS the staged gesture "for the caller to fix", so a trailing `change` re-attempts that
+        // same failed write. A retry of a refused write, not a double write; both paths still
+        // coexist, but the property is narrower than "by construction".
+        if (control !== null && isTextEntry(control) && event.key === "Enter") {
+            const node = this.#nodeFrom(control);
+            if (node !== null && node.hasAttribute(COMMAND_ATTRIBUTE)) {
+                event.preventDefault();
+                void this.#commit(node);
+            }
+            return;
+        }
+
         // TEXT ENTRY IS NEVER HIJACKED. `role_html_tag` maps the `textbox` role onto a real
         // `<input>`, so text-entry nodes are ordinary focusables inside this container. Without
         // this bail-out, Home/End/Arrow would move PANEL focus and `preventDefault()` the caret,
@@ -353,7 +485,19 @@ export class HydrationRuntime {
             return;
         }
 
+        // ACTIVATION: Enter and Space, the ARIA-standard pair. Together with the click handler this
+        // is what makes every command-bound affordance reachable without a pointer — R-CLI-001
+        // CLI-completeness as a structural accessibility property, which `uitree::audit_a11y`
+        // already asserts on the model side.
         if (event.key === "Enter" || event.key === " ") {
+            // A NON-TEXT VALUE CONTROL (a checkbox) ACTIVATES THROUGH ITS OWN `change`, so its keys
+            // must reach the browser: `preventDefault()` here would stop Space from toggling it at
+            // all, and the dispatch below would send a command with no value the model can only
+            // decline. Arrow/Home/End navigation below still applies to it — the caret argument that
+            // bails text entry out entirely does not.
+            if (control !== null) {
+                return;
+            }
             const node = this.#nodeFrom(event.target);
             if (node !== null && node.hasAttribute(COMMAND_ATTRIBUTE)) {
                 // Only prevented once we KNOW we are handling it: swallowing Space unconditionally
@@ -421,13 +565,72 @@ export class HydrationRuntime {
     }
 
     async #activateFrom(target: EventTarget | null): Promise<void> {
+        // A VALUE CONTROL IS NOT ACTIVATED BY ITS CLICK (M9 e09e-1). Its edit ALREADY travels on
+        // `input`/`change`, so dispatching from here as well would send the same command TWICE for
+        // one interaction. That is the whole reason, and it is exactly what PLANT (4) reds on — a
+        // second `panel.command`, not a wrong value. The command still reaches the model; it just
+        // reaches it from the one channel that carries the value.
+        //
+        // Deliberately NOT justified by a claim about WHEN the browser toggles. A checkbox's
+        // pre-click behaviour and its activation behaviour run at different points of event
+        // dispatch, and nothing in this tier pins which value a click handler would observe — the
+        // duplicate dispatch is reason enough, and it is the half a test here can actually prove.
+        if (valueControl(target) !== null) {
+            return;
+        }
         const node = this.#nodeFrom(target);
         if (node !== null && node.hasAttribute(COMMAND_ATTRIBUTE)) {
             await this.#activate(node);
         }
     }
 
-    async #activate(node: Element): Promise<void> {
+    /** STAGE a control's current value on the model — 05 §8's `DOM input -> "inspector.edit"`. */
+    async #stageFrom(target: EventTarget | null): Promise<void> {
+        const control = valueControl(target);
+        if (control === null) {
+            return;
+        }
+        const node = this.#nodeFrom(control);
+        if (node !== null && node.hasAttribute(COMMAND_ATTRIBUTE)) {
+            await this.#activate(node, commandValueFor(control));
+        }
+    }
+
+    /** END the gesture on a control whose value the browser just committed (Enter, blur, a toggle). */
+    async #commitFrom(target: EventTarget | null): Promise<void> {
+        const control = valueControl(target);
+        if (control === null) {
+            return;
+        }
+        const node = this.#nodeFrom(control);
+        if (node !== null && node.hasAttribute(COMMAND_ATTRIBUTE)) {
+            await this.#commit(node);
+        }
+    }
+
+    /**
+     * Send the L-20 gesture END for a value control.
+     *
+     * GATED ON THE MANIFEST'S `gestures`, exactly like the pointer handlers: a panel whose provider
+     * bound no write gateway reports `gestures:false` and the Shell REFUSES every verb, so sending
+     * one would only manufacture a refusal. Staging stays available there — it is a declared command,
+     * and whether an unbindable panel wants one is the panel's decision, not this runtime's.
+     *
+     * DELIBERATELY OUTSIDE THE POINTER GESTURE STATE MACHINE: it touches neither `#gestureActive` nor
+     * `#gestureNode`, because a value edit's gesture is opened by `stage_edit` on the MODEL, not by a
+     * `begin` verb from here — there is no local flag to own. The consequence to know is that a
+     * commit sent while a POINTER gesture happens to be open names this field's node while the
+     * runtime still believes that other gesture is in flight. Unreachable today (an Inspector field
+     * is not a drag target), and written down because this file's state reasoning is otherwise total.
+     */
+    async #commit(node: Element): Promise<void> {
+        if (!this.#gesturesEnabled) {
+            return;
+        }
+        await this.#sendGesture("commit", node.getAttribute(NODE_ID_ATTRIBUTE) ?? "", 0, 0);
+    }
+
+    async #activate(node: Element, value?: string): Promise<void> {
         const commandId = node.getAttribute(COMMAND_ATTRIBUTE) ?? "";
         const nodeId = node.getAttribute(NODE_ID_ATTRIBUTE) ?? "";
         if (commandId === "" || nodeId === "") {
@@ -445,7 +648,7 @@ export class HydrationRuntime {
         // this an unexpected transport throw becomes an unhandled promise rejection in a renderer
         // that has no console to report it — the runtime would go quiet with no diagnosis.
         try {
-            const result = await this.#client.command(this.#panelId, commandId, nodeId);
+            const result = await this.#client.command(this.#panelId, commandId, nodeId, value);
             // Counted only when the command ACTUALLY dispatched: a refusal or a transport failure
             // is not a dispatch, and inflating the counter would misreport what the panel did.
             if (result !== null && result.dispatched) {
