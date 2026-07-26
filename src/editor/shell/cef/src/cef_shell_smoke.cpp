@@ -320,6 +320,12 @@ int main(int argc, char** argv)
     cef_options.bridge = &bridge;
     // Keep the paint rate low: this smoke wants a FRAME, not a frame rate.
     cef_options.windowless_frame_rate = 10;
+    // Isolate the OSCrypt profile-encryption key from the MACHINE keychain (issue #437). Without
+    // this, macOS blocks CefShutdown() forever on a SecurityAgent authorization prompt no automated
+    // run can answer, so the smoke prints its whole verdict and then never exits — see
+    // CefShellOptions::use_mock_keychain for the mechanism. EVERY CEF smoke sets it, and
+    // tools/check_cef_keychain_isolation.py fails the build if one stops.
+    cef_options.use_mock_keychain = true;
 
     // The runtime half of the guard the header comment describes: an empty asset root would make
     // every scheme request 404 and the handshake time out 30 seconds later, which reads as a bridge

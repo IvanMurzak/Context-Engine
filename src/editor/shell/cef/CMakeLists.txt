@@ -517,39 +517,33 @@ elseif(OS_MAC)
     # framework search resolves. VERIFIED, not assumed — `editor-cef-smoke-boot` and
     # `cef-substrate-boot` already pass on macOS off exactly this resolution.
     #
-    # ⚠⚠ BOTH macOS REGISTRATIONS ARE `DISABLED` — BUILT AND LINKED, NOT RUN (issue #437) ⚠⚠
+    # ⚠ BOTH macOS REGISTRATIONS RUN AGAIN — the #437 teardown wedge is FIXED at its cause ⚠
     #
-    # The bundles are built on the macOS leg (ci.yml's per-OS `--target` list) because that is what
-    # actually exercises this block: the five helper bundles, the embedded framework, the load-bearing
-    # helper OUTPUT_NAMEs, the link line without `libcef_lib`, and the configure-time audit in the
-    # parent. What is deferred is only the RUN, and only because `CefShutdown()` does not return on
-    # macOS in the Shell's CEF configuration.
+    # HISTORY, kept because the wrong reading of it was expensive and is easy to re-derive. e12c-1
+    # shipped both smokes `DISABLED TRUE` here: on macOS each reached EVERY scenario milestone,
+    # printed `cef::shutdown() (CefShutdown) begin`, and then emitted nothing until ctest killed it
+    # (CI run 30205478538, job 89803256488, commit c286569 — `-shell-restore` finished its pump loop
+    # in 1613 ms and hung for the remaining ~358 s, so no TIMEOUT widening could ever have helped).
+    # That report blamed `CefSettings.external_message_pump` — the one structural difference from the
+    # two macOS CEF apps that shut down cleanly in the same job. **That was wrong**, and the
+    # measurement that refuted it is the useful part: on a macOS 26.5.2 host `cef-substrate-boot` and
+    # `editor-cef-smoke-boot` — neither of which uses an external pump, and neither of which e12c-1
+    # touched — hung 5/5 each too.
     #
-    # THE EVIDENCE, so nobody re-derives it: CI run 30205478538, job 89803256488, on commit c286569
-    # (this task's own branch). BOTH smokes reached EVERY scenario milestone first — `-shell-restore`
-    # composited its first OSR frame, completed the bridge handshake, rendered all hostable panels,
-    # served `editor.state.get`, reported `editor.layout.restored`, exited its pump loop in 1613 ms and
-    # returned from `manager.shutdown()` — then printed `cef::shutdown() (CefShutdown) begin` and
-    # emitted nothing for the remaining ~358 s until ctest killed it. So the HOSTING MODEL this task
-    # ships boots and runs correctly on macOS; teardown alone wedges, and no TIMEOUT widening can fix
-    # a scenario that already finished in 1.6 s.
+    # THE ACTUAL CAUSE (issue #437, measured; the full mechanism lives on
+    # `CefShellOptions::use_mock_keychain`): Chromium reads a MACHINE-GLOBAL
+    # `"<product> Safe Storage"` keychain item on a BLOCK_SHUTDOWN ThreadPool task, macOS binds that
+    # item's ACL to the CREATING executable's cdhash, and every other binary — including the same
+    # target after a rebuild — is off the ACL, so securityd raises a modal SecurityAgent prompt that
+    # no automated run can answer. `CefShutdown()` waits on the ThreadPool shutdown event, so it
+    # never returns. Nothing about the wedge was CEF's, the Shell's, or macOS-version-specific: it is
+    # a test depending on machine state another build of itself owns. Every CEF smoke now sets
+    # `use_mock_keychain = true` (`tools/check_cef_keychain_isolation.py` fails the build if one
+    # stops), which is why these two names carry no `DISABLED` property any more.
     #
-    # WHY IT IS NOT FIXED HERE. The wedge tracks `CefSettings.external_message_pump`, which design
-    # 03 §1 PINS for the Shell (the single-threaded owner loop; see make_cef_browser_host). The two
-    # macOS CEF apps that DO shut down cleanly in the same job — `editor-cef-smoke-boot`
-    # (src/editor/gui/host/) and `cef-substrate-boot` (src/editor/cef/) — both run with
-    # `multi_threaded_message_loop=false` and NO external pump. Changing that setting on macOS would
-    # contradict a locked design decision, and dropping/short-circuiting the `CefShutdown()` call
-    # would silently weaken the CE #319 lifetime invariant that `editor-cef-smoke-shell-restore`
-    # phase 1 asserts THROUGH `CefShutdown()` returning. Both are out of scope for e12c-1.
-    #
-    # `DISABLED` rather than un-registered, deliberately: ctest still PRINTS both names as
-    # `Not Run (Disabled)` on the macOS leg (exit code unaffected), so the deferral is visible in
-    # every run's log instead of being an absence nobody notices — and re-enabling is deleting one
-    # property, with no ctest name, `--target` list or "Not Run = RED" bookkeeping to redo.
-    # e12c-2 (the remaining seven scenarios) and e12c-3 (the live windowed macOS proof) both need
-    # #437 resolved before a macOS shell smoke can RUN, which is exactly what these two names being
-    # loud in the log is for.
+    # Nothing about teardown was weakened to get here: `CefShutdown()` still runs in full and
+    # `-shell-restore` phase 1 still asserts that it RETURNED (`cef_shutdown_returned`), so the
+    # CE #319 lifetime invariant is proven on macOS for the first time rather than skipped there.
 
     # --- the LIVE CEF boot smoke (ctest editor-cef-smoke-shell) ------------------------------------
     add_executable(context_editor_shell_cef_smoke src/cef_shell_smoke.cpp)
@@ -574,10 +568,9 @@ elseif(OS_MAC)
 
     context_shell_cef_mac_bundle(context_editor_shell_cef_smoke "dev.context.editor.shell.smoke")
 
-    # DISABLED pending issue #437 — see the ⚠⚠ block at the top of this branch for the CI evidence and
-    # why the fix is not e12c-1's. TIMEOUT is kept so re-enabling is a one-property deletion.
+    # Runs on macOS since #437 was fixed at its cause — see the ⚠ block at the top of this branch.
     add_test(NAME editor-cef-smoke-shell COMMAND context_editor_shell_cef_smoke)
-    set_tests_properties(editor-cef-smoke-shell PROPERTIES TIMEOUT 180 DISABLED TRUE)
+    set_tests_properties(editor-cef-smoke-shell PROPERTIES TIMEOUT 180)
 
     # --- the LIVE boot -> dock -> restart -> restore smoke (ctest editor-cef-smoke-shell-restore) ---
     # context_common joins the link line for the same reason as on Windows/Linux: the controller
@@ -603,8 +596,9 @@ elseif(OS_MAC)
     context_shell_cef_mac_bundle(context_editor_shell_restore_smoke
                                  "dev.context.editor.shell.restore.smoke")
 
-    # DISABLED pending issue #437, exactly as the boot smoke above — same ⚠⚠ block, same reason. This
-    # is the registration whose CI log carries the wedge evidence quoted there.
+    # Runs on macOS since #437 was fixed at its cause, exactly as the boot smoke above. This is the
+    # registration whose phase 1 asserts `cef_shutdown_returned` — the CE #319 invariant that the
+    # `DISABLED` property had made unfalsifiable on this leg.
     add_test(NAME editor-cef-smoke-shell-restore COMMAND context_editor_shell_restore_smoke)
-    set_tests_properties(editor-cef-smoke-shell-restore PROPERTIES TIMEOUT 360 DISABLED TRUE)
+    set_tests_properties(editor-cef-smoke-shell-restore PROPERTIES TIMEOUT 360)
 endif()

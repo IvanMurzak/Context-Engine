@@ -776,6 +776,27 @@ add_test(NAME editor-shell-config-writers
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_config_writers.py"
             --repo-root "${CMAKE_SOURCE_DIR}/..")
 
+# --- the #437 OSCrypt-keychain isolation gate for every CEF smoke --------------------------------
+# The SAME source-scan tier as the two above, and for the starkest version of the same reason: the
+# rule is ONE line per smoke, and its absence cannot fail any test. Chromium reads a MACHINE-GLOBAL
+# `"<product> Safe Storage"` keychain item on a BLOCK_SHUTDOWN ThreadPool task; macOS binds that
+# item's ACL to the CREATING executable's cdhash, so a smoke built anywhere else — or the SAME smoke
+# after a rebuild — is off the ACL and securityd raises a modal SecurityAgent prompt no automated run
+# can answer. `CefShutdown()` waits on the ThreadPool shutdown event, so the process never exits,
+# AFTER printing its whole success verdict. A hung test asserts nothing, so no runtime assertion can
+# catch the omission; and the hang is host-state-dependent (issue #437 passed on this very host four
+# minutes before the keychain item was created), so CI green proves nothing either. Measured on one
+# binary a minute apart: 5/5 hangs without the isolation, 5/5 passes with it.
+#
+# Registered in the non-gate `editor-shell-` family, so the build job's general ctest step runs it on
+# all three OS legs with no ci.yml `--target` bookkeeping — and it needs NO CEF build, so it also runs
+# on the CEF-OFF legs where the smokes themselves do not exist. Its own pytest lives in tools/tests/
+# (python-tests job) and proves it non-vacuous by planting; that round found TWO real holes in the
+# first revision, both GREEN, both shapes e12c-2 could write — see the test file's docstring.
+add_test(NAME editor-shell-cef-keychain
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_cef_keychain_isolation.py"
+            --repo-root "${CMAKE_SOURCE_DIR}/..")
+
 # --- the C-F3 SESSION-FILE OWNERSHIP gate (M9 e09d, design 03 §1 / 07 §6) ------------------------
 # The SAME source-scan tier as the config-writers gate above, for the same reason one step further
 # out: `.editor/session.json` is the DAEMON's and `.editor/editor-state.json` is the SHELL's, and a

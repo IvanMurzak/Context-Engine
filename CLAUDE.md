@@ -219,7 +219,11 @@ interactive-Windows verification) ·
 fetchable-vs-preinstalled split per v1 target — what `context doctor` validates) ·
 `versioned-install.md` (side-by-side
 `versions/<semver>/` layout — a day-one contract) · `chunk-pack-format.md` (draft pack spec) ·
-`self-hosted-runners.md` · `sanitizer-v8-false-positives.md` · `test-vector-corpus.md` ·
+`self-hosted-runners.md` · `sanitizer-v8-false-positives.md` ·
+`cef-keychain-isolation.md` (why every CEF smoke passes `--use-mock-keychain`: Chromium's OSCrypt reads
+a MACHINE-GLOBAL keychain item on a BLOCK_SHUTDOWN task, macOS binds its ACL to the creating
+executable's cdhash, and the resulting un-answerable prompt wedges `CefShutdown()` forever — issue
+#437) · `test-vector-corpus.md` ·
 `latency-budget-table.md` / `human-latency-budget.md`.
 
 ## Engineering conventions

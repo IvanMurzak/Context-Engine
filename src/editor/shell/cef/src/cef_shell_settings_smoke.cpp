@@ -250,6 +250,12 @@ int main(int argc, char** argv)
     cef_options.app_asset_root = asset_root;
     cef_options.bridge = &bridge;
     cef_options.windowless_frame_rate = 10;
+    // Isolate the OSCrypt profile-encryption key from the MACHINE keychain (issue #437). Without
+    // this, macOS blocks CefShutdown() forever on a SecurityAgent authorization prompt no automated
+    // run can answer, so the smoke prints its whole verdict and then never exits — see
+    // CefShellOptions::use_mock_keychain for the mechanism. EVERY CEF smoke sets it, and
+    // tools/check_cef_keychain_isolation.py fails the build if one stops.
+    cef_options.use_mock_keychain = true;
     // Full verbose CEF logging so a page/console failure names its own cause on stderr (DoD).
     cef_options.verbose_logging = true;
 

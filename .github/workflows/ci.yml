@@ -1890,21 +1890,20 @@ jobs:
       # ⚠ "Not Run = RED" TRIPWIRE: the ctest step below selects the whole `editor-cef-smoke-` family
       # by regex, but this job builds a hand-maintained --target list. Without these steps the regex
       # would find the test and no executable, reporting "Not Run" -> red. macOS needs NO new ctest
-      # registration — the two names are the same ones Windows/Linux already register, and on macOS
-      # both are registered `DISABLED` (issue #437), which ctest reports as "Not Run (Disabled)"
-      # WITHOUT affecting the exit code. The tripwire still binds: the targets must be built anyway,
-      # or re-enabling them later would report the un-built "Not Run" that IS red.
+      # registration — the two names are the same ones Windows/Linux already register, and since
+      # issue #437 was fixed they RUN on macOS too (they were `DISABLED` from e12c-1 until then, which
+      # ctest reports as "Not Run (Disabled)" WITHOUT affecting the exit code — so the assertion inside
+      # could not fail on this leg; see docs/cef-keychain-isolation.md).
       - name: Build the Shell's live CEF boot + restart + palette + settings + multiwindow + tearout + drag + uimirror + iframe smokes (Windows/Linux)
         if: runner.os != 'macOS'
         run: cmake --build --preset dev --target context_editor_shell_cef_smoke context_editor_shell_restore_smoke context_editor_shell_palette_smoke context_editor_shell_settings_smoke context_editor_shell_multiwindow_smoke context_editor_shell_tearout_smoke context_editor_shell_drag_smoke context_editor_shell_uimirror_smoke context_editor_shell_iframe_smoke
         working-directory: src
 
-      # ⚠ On macOS the BUILD is the coverage: both ctests are registered `DISABLED` pending issue #437
-      # (`CefShutdown()` does not return on macOS in the Shell's pinned external-message-pump
-      # configuration — CI run 30205478538 reached every scenario milestone in 1.6 s, then wedged in
-      # teardown). This step is therefore load-bearing on its own: it is what exercises the .app
-      # assembly, the five helper bundles, the embedded framework and the no-`libcef_lib` link line.
-      # `src/editor/shell/cef/CMakeLists.txt`'s macOS branch carries the full evidence.
+      # This step exercises the .app assembly, the five helper bundles, the embedded framework and the
+      # no-`libcef_lib` link line. Both ctests also RUN on macOS now: they were `DISABLED` from e12c-1
+      # until issue #437 was fixed at its cause (Chromium's OSCrypt blocking CefShutdown() on an
+      # un-answerable macOS keychain prompt — NOT the external message pump e12c-1 suspected; see
+      # docs/cef-keychain-isolation.md and the macOS branch of src/editor/shell/cef/CMakeLists.txt).
       - name: Build the Shell's live CEF boot + restart smokes (macOS .app + 5 helper bundles each)
         if: runner.os == 'macOS'
         run: cmake --build --preset dev --target context_editor_shell_cef_smoke context_editor_shell_restore_smoke

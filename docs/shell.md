@@ -103,10 +103,11 @@ renderer duties, while `ShellCefApp` registers `context-editor://` + `context-ex
 and injects `contextEditorQuery` from `OnContextCreated` — so the Shell's helpers hand CEF the real
 app object, and without it no handshake exists and every live smoke fails.
 What e12c-1 deliberately did NOT bring is a WINDOW: macOS's smokes are HEADLESS, exactly as Windows'
-are, and the live windowed macOS proof is **e12c-3**. It also does not RUN those two smokes on the
-macOS leg — both ctests are registered `DISABLED` because `CefShutdown()` does not return there in the
-Shell's pinned pump configuration (issue #437; the evidence, and why the fix is neither e12c-1's nor a
-timeout, are in § 12 and in the macOS branch of `src/editor/shell/cef/CMakeLists.txt`). Four Cocoa
+are, and the live windowed macOS proof is **e12c-3**. e12c-1 also did not RUN those two smokes on the
+macOS leg — both ctests were registered `DISABLED` because `CefShutdown()` never returned there. That is
+FIXED: the cause was neither the pump configuration nor macOS 26, but a machine-global keychain item
+whose ACL no rebuilt binary matches (issue #437, `docs/cef-keychain-isolation.md`), and both smokes now
+run — `-shell` and `-shell-restore` PASS 5/5 each on a macOS 26.5.2 host. Four Cocoa
 shapes have no Win32 or
 X11 analogue and are therefore decoded by PURE functions in `window.cpp`, executed by
 `editor-shell-test_window` on all three legs — which matters more here than anywhere else in this
@@ -492,7 +493,8 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
 | `editor-shell-config-writers` | e06d: the C-F14 SINGLE-WRITER source gate - exactly one TU writes `~/.context/config.json`, editor-core carries no client-side persistence API, and one module names `config.set` (`tools/check_config_writers.py`) |
 | `editor-shell-session-ownership` | e09d: the C-F3 SESSION-FILE OWNERSHIP source gate - one C++ writer per session file (which must still write THAT document, not merely contain write machinery), each owner in its OWN process's subtree, and the in-process override-write gateway named by nothing but its own definition and tests and linked by no Shell target (`tools/check_session_ownership.py`) - see § 14 |
 | `editor-shell-test_smoke_window` | e12a-x11-legs: the smoke-tier window seam, asserted with no display — the `--real-window` flag parse, headless construction/present/injection, `browser_geometry`'s DIP conversion at a non-identity DPI, the keysym inverse SWEPT back through the shipping decoder map, and the load-bearing negatives: real mode REFUSING a headless backend (pointer, key AND resize) and a window with no presentable native surface, rather than degrading |
-| `editor-cef-smoke-shell` | The LIVE CEF half: a real browser through the real integrated pump, its `OnPaint` frames composited + presented, input round-tripped, a live resize repainted. Windowless on Windows and (since e12c-1) on macOS, where it boots from a real `.app` with five helper bundles; since e12a-x11-legs the Linux leg runs it through a REAL X11 window and injects its gestures through the X server (`editor-cef-smoke` job; BUILT on all three OSes, RUN on Windows/Linux — the macOS registration is `DISABLED` pending issue #437, § 12) |
+| `editor-cef-smoke-shell` | The LIVE CEF half: a real browser through the real integrated pump, its `OnPaint` frames composited + presented, input round-tripped, a live resize repainted. Windowless on Windows and (since e12c-1) on macOS, where it boots from a real `.app` with five helper bundles; since e12a-x11-legs the Linux leg runs it through a REAL X11 window and injects its gestures through the X server (`editor-cef-smoke` job; BUILT and RUN on all three OSes — macOS included since issue #437 was fixed at its cause, `docs/cef-keychain-isolation.md`) |
+| `editor-shell-cef-keychain` | #437: the source gate that every CEF smoke isolates Chromium's OSCrypt key from the MACHINE keychain — each source constructing a `CefShellOptions` under `src/editor/shell/cef/src/` sets `use_mock_keychain`, each source defining `OnBeforeCommandLineProcessing` under `src/editor/` names the switch, and the option is still declared/latched/appended (`tools/check_cef_keychain_isolation.py`). Needs no CEF build, so it runs on the CEF-OFF legs too — see `docs/cef-keychain-isolation.md` |
 | `editor-shell-test_window_registry` | e10a: the registry — window 0 primary, ids minted in order and NEVER reused, all four create-failure classes reported once with the source window (and the registry still usable after four in a row), the live-window cap, per-window `origin` reporting, and the CE #319 lifetime rule in both directions: a destroyed window's browser dies NOW while its session is retired until the manager does, across 25 create/destroy cycles and across `shutdown()` with windows still open |
 | `editor-cef-smoke-shell-multiwindow` | e10a, the LIVE half a fake cannot reach: a SECOND real CEF browser booting its OWN editor-core instance (two DIFFERENT round-tripped handshake nonces), a REAL renderer `window.open` refused by `OnBeforePopup` with NO browser created, and a MID-PROCESS destroy followed by another create (`editor-cef-smoke` job, Windows/Linux) |
 
@@ -511,9 +513,14 @@ Since **e12c-1** that list is **PER-OS**: Windows/Linux build all nine, macOS bu
 `.app` hosting model e12c-1 ported (`-shell` and `-shell-restore`). A single shared list would fail the
 macOS build outright, because the other seven are not declared as macOS targets yet — they arrive with
 **e12c-2**, which grows both the CMake branch and that `--target` list together. No new ctest NAME is
-involved on macOS, so the "Not Run = RED" tripwire bites only on the `--target` side — and the two
-macOS registrations are `DISABLED` pending issue #437 (§ 12), which ctest reports as
-`Not Run (Disabled)` without affecting the exit code.
+involved on macOS, so the "Not Run = RED" tripwire bites only on the `--target` side.
+Those two macOS registrations were `DISABLED TRUE` from e12c-1 until issue **#437** was fixed at its
+cause; both now RUN. ⚠ A `DISABLED` ctest reports `Not Run (Disabled)` and leaves ctest's exit code at
+**0**, so for as long as the property was there the CE #319 `cef_shutdown_returned` assertion could not
+fail on this leg — which is what makes `DISABLED` the strongest possible form of a vacuous gate, and why
+re-enabling both had to be proven by PLANTING against the assertion rather than by observing green.
+`docs/cef-keychain-isolation.md` has the mechanism, the k=5 rates on both sides of the switch, and the
+two product exposures that remain open for the owner.
 `editor-shell-test_window_registry` is NOT: it is a plain
 `editor-shell-*` family member like every other unit suite.
 
@@ -837,18 +844,20 @@ Named so the gaps are visible rather than assumed:
   bundles, so the assembly, the load-bearing helper names, the framework embed and the
   no-`libcef_lib` link line all have CI coverage. **e12c-2** fans the recipe out to the remaining
   seven scenarios.
-- **macOS shell smokes BUILD but do not RUN — `CefShutdown()` wedges (issue #437).** Both macOS ctests
-  are registered `DISABLED`, so they print as `Not Run (Disabled)` on that leg. This is a teardown
-  wedge, not a hosting-model failure: on CI run 30205478538 both smokes reached EVERY scenario
-  milestone first (`-shell-restore` composited its first OSR frame, handshook the bridge, rendered all
-  hostable panels, served `editor.state.get`, reported `editor.layout.restored`, left its pump loop in
-  1613 ms and returned from `manager.shutdown()`), then printed `cef::shutdown() (CefShutdown) begin`
-  and emitted nothing further. The wedge tracks `CefSettings.external_message_pump`, which design
-  03 §1 pins for the Shell: the two macOS CEF apps that shut down cleanly in the SAME job
-  (`editor-cef-smoke-boot`, `cef-substrate-boot`) both run without it. Neither changing that setting
-  nor skipping the `CefShutdown()` call is available to e12c-1 — the first contradicts a locked
-  decision, the second would silently weaken the CE #319 invariant `-shell-restore` phase 1 asserts
-  THROUGH `CefShutdown()` returning. **e12c-2 and e12c-3 both need #437 resolved first.**
+- ~~**macOS shell smokes BUILD but do not RUN — `CefShutdown()` wedges (issue #437).**~~ **RESOLVED.**
+  Both macOS ctests were registered `DISABLED` and printed as `Not Run (Disabled)`; both now RUN and
+  PASS. The e12c-1 diagnosis blamed `CefSettings.external_message_pump` because it was the one
+  structural difference from the two macOS CEF apps that shut down cleanly in the same job — and that
+  was WRONG: those two hung 5/5 as well once measured directly. The cause was Chromium's OSCrypt
+  reading a MACHINE-GLOBAL `"<product> Safe Storage"` keychain item on a BLOCK_SHUTDOWN ThreadPool
+  task, whose ACL macOS binds to the CREATING executable's cdhash — so a rebuilt binary raises a modal
+  SecurityAgent prompt nothing can answer, and `CefShutdown()` waits on the ThreadPool shutdown event
+  forever. Every CEF smoke now passes Chromium's `--use-mock-keychain`, enforced by the
+  `editor-shell-cef-keychain` source gate. **Nothing about teardown was bounded or skipped**: the CE
+  #319 `cef_shutdown_returned` assertion now RUNS on macOS, where the `DISABLED` property had made it
+  unfalsifiable. Full mechanism, measurements, and the two remaining PRODUCT exposures (all CEF apps
+  share one keychain item; an unsigned build prompts on every rebuild) are in
+  `docs/cef-keychain-isolation.md`. **e12c-2 and e12c-3 are unblocked.**
 - **No live WINDOWED macOS proof.** macOS runs its two CEF smokes HEADLESS, exactly as Windows does,
   so the `build (macos-latest)` leg compiles and links the Cocoa backend and executes the pure
   decoders, and the ONE place `-[NSWindow initWithContentRect:]` is ever called automatically is
