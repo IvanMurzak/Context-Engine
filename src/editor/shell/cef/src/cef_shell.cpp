@@ -1446,7 +1446,8 @@ int execute_helper_process(int argc, char** argv)
 #if defined(__APPLE__)
     // A helper process must load the framework from the PARENT app's Frameworks dir (the helper
     // variant of the search), before any CEF call. Scoped to this function: `CefExecuteProcess` blocks
-    // for the whole life of the subprocess, so the loader unloads only as the process exits.
+    // for the whole life of the subprocess, so the unload happens as this function returns — which is
+    // BEFORE static teardown, and is why `g_app` is released explicitly below rather than left to it.
     CefScopedLibraryLoader library_loader;
     if (!library_loader.LoadInHelper())
     {
@@ -1464,7 +1465,23 @@ int execute_helper_process(int argc, char** argv)
         g_app = new ShellCefApp;
     }
     CefMainArgs main_args(argc, argv);
-    return CefExecuteProcess(main_args, g_app.get(), nullptr);
+    const int exit_code = CefExecuteProcess(main_args, g_app.get(), nullptr);
+
+    // ⚠ RELEASE THE APP HERE, NOT AT STATIC TEARDOWN — an ordering bug, not tidiness. `g_app` is a
+    // TU-global, so left alone it is released AFTER this function returns, i.e. after
+    // `~CefScopedLibraryLoader` has already called `cef_unload_library()` (dlclose). `~ShellCefApp`
+    // drops `renderer_router_`, and a `CefMessageRouterRendererSide` can still hold library-side
+    // `CefRefPtr`s (the V8 context / callbacks of any query that had not completed) whose `Release()`
+    // is a function pointer INSIDE the image just unmapped. Releasing while the framework is still
+    // loaded makes the order well-defined.
+    //
+    // Neither precedent helper can reach this: both pass `nullptr` and hold no app object at all
+    // (`src/editor/cef/src/cef_boot_smoke_helper_mac.cpp`,
+    // `src/editor/gui/host/src/editor_host_helper_mac.cpp`) — the real `CefApp` this helper must pass
+    // (see cef_shell.h) is exactly what introduces the hazard. The BROWSER process was already safe
+    // the same way: `shutdown()` nulls `g_app` before `CefShutdown()`.
+    g_app = nullptr;
+    return exit_code;
 #else
     (void)argc;
     (void)argv;
