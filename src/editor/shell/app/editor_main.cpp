@@ -1202,6 +1202,26 @@ int main(int argc, char** argv)
     // Inspector's gesture provider and issue a commit. Unbinding first is what makes that commit
     // refuse instead of calling a destroyed Client.
     shell::panels::bind_write_client(builtin, nullptr);
+    // e13c-1: close THIS process's package sessions before the daemon teardown below, the same
+    // ordering rule as the two unbinds above — they are our own connections and the daemon should not
+    // have to reap them from an exiting process.
+    //
+    // ⚠ THIS DOES NOT CORRECT THE EXIT CENSUS, AND MUST NOT BE READ AS DOING SO. Each package session
+    // attached as its own client, so each published `{event:"attached"}` on the `clients` topic that
+    // `ClientCensus` counts, and `others()` is `count_ - 1`. Closing the sockets here makes the daemon
+    // publish `detached`, but `shutdown_at_exit()` reads `census_.others()` SYNCHRONOUSLY on its very
+    // first line (daemon_lifecycle.cpp) and nothing pumps the subscription in between — so the
+    // `detached` events are never observed before the decision is taken. NET EFFECT, MEASURED FROM THE
+    // SOURCE AND NOT YET FIXED: once any package panel has made one `bridge.call`, `others() >= 1`,
+    // `decide_daemon_exit_action` returns `leave_running` instead of `shutdown_owned`, and this
+    // process DETACHES its own spawned daemon rather than shutting it down — one orphaned daemon per
+    // editor session, holding a socket, an instance token and slots out of the 16-connection budget
+    // package_sessions.h § control 4 exists to protect. The fix belongs in the exit policy (teach it
+    // this process's OWN extra client count, e.g. an `others()` subtrahend fed
+    // `package_sessions.sessions_open()`), NOT here: subtracting wrongly would shut down a daemon a
+    // CLI or AI client is still using, which is a worse failure than leaking one. Tracked as e13c-1
+    // follow-up; see the PR body.
+    package_sessions.reset();
     // The exit policy (e14a): an owned daemon this process is the last client of gets a clean in-band
     // `shutdown`; an owned daemon other clients still hold is left running; an external daemon is never
     // touched. Runs before the manager/CEF teardown so the daemon call still has a live wire.

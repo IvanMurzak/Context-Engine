@@ -309,6 +309,17 @@ WRITE_NOTICE_CONSTANTS = (
      "WRITE_NOTICE_KIND_REFUSAL"),
 )
 
+# The M9 e13c-1 PACKAGE DAEMON FAN-IN method (design 04 §5 / 08 §2). The one Shell router method that
+# forwards a package panel's call onto that package's own BASELINE daemon session — so a drift here is
+# not a degraded feature, it is the WHOLE third-party panel-to-daemon surface answering
+# `unknown_method`, which editor-core maps to `verb_not_granted`, which is INDISTINGUISHABLE from "this
+# build does not implement bridge.call". Both sides build green and both suites stay green, because the
+# C++ side is pinned to the literal by its own test while every TS reader goes through the constant.
+PACKAGE_SESSION_CONSTANTS = (
+    ("panel.daemon.call fan-in method", "package_sessions.h", "kPanelDaemonCallMethod",
+     "PANEL_DAEMON_CALL_METHOD"),
+)
+
 # The closed gesture vocabulary (04 §4), compared SET vs SET between the C++ wire tokens and the
 # bundle's own GESTURE_VERBS array, so a verb added on one side without the other — which would be
 # refused at runtime with no build error — fails here instead.
@@ -979,6 +990,26 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
                 f"Shell would publish one spelling and editor-core would expect another, so a refused "
                 f"write would either never reach the human (topic) or reach them mis-hued (kind), "
                 f"with NO error anywhere.")
+
+    # 7a11 — the e13c-1 package daemon fan-in method agrees across the two languages. Same mechanism
+    # as 7a9, and the highest-consequence of the family: this is the ONLY Shell method that carries a
+    # third-party package panel's call to the daemon, so a drift silently removes the entire
+    # `bridge.call` surface — every package panel's daemon call refuses, and the refusal it gets
+    # (`verb_not_granted`) is the same one it would get if the verb had never been implemented.
+    for human, cpp_file, cpp_name, ts_name in PACKAGE_SESSION_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(
+                f"{human}: the bundle does not declare {ts_name} — editor-core cannot be calling the "
+                f"fan-in method the Shell routes, so no package panel could reach its own baseline "
+                f"daemon session at all")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
+                f"Shell would route one name and editor-core would call another, so EVERY package "
+                f"panel's `bridge.call` would refuse with a code indistinguishable from the verb "
+                f"never having been implemented.")
 
     # 7b — the D6 persisted-blob member names agree (gui/contract/panel_state.h is their authority).
     for human, cpp_name, ts_name in PANEL_STATE_CONSTANTS:

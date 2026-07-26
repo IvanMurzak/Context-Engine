@@ -50,11 +50,18 @@
 //           (`kErrPackageCapacity`) rather than attempted: an attach that would answer `daemon.busy`
 //           still costs a connect + handshake round trip, and a Shell-side refusal is the one that
 //           cannot starve anyone.
-//     Sessions are POOLED PER PACKAGE, not per package per window: the router outlives every browser
-//     and is shared by the windows (ipc_bridge.h), so a package with panels in three windows holds one
-//     connection. Pooling by package is strictly finer than the "pool by granted-scope-set" option the
-//     e13c-1 brief names, and today identical to it (every package session holds the same baseline) —
-//     but it keeps the daemon's `clients` topic attributable per package, which a scope-set pool loses.
+//     Sessions are POOLED PER PACKAGE, not per package per window, so a package with panels in three
+//     windows holds one connection. Pooling by package is strictly finer than the "pool by
+//     granted-scope-set" option the e13c-1 brief names, and today identical to it (every package
+//     session holds the same baseline) — but it keeps the daemon's `clients` topic attributable per
+//     package, which a scope-set pool loses.
+//     ⚠ THE POOL IS PER HOST INSTANCE, AND TODAY THAT IS THE PRIMARY WINDOW'S ROUTER ONLY. Each
+//     factory-created window builds its OWN `BridgeRouter` (editor_main.cpp) and
+//     `SecondaryWindowSurfaces::install` does NOT install this method, so a package panel torn out
+//     into a secondary window gets `unknown_method` — fail-closed, and a KNOWN GAP rather than a
+//     design. Do not read the per-package pooling above as a cross-window guarantee it has not yet
+//     had to earn: installing this ONE host on each secondary router is what would make it one, and
+//     giving each window its own host would multiply the sub-cap by window count and break S3.
 //
 // ⚠ NAMED RESIDUAL, NOT CLOSED HERE (S2, design 09 §3). The package -> port -> session chain of custody
 // is entirely TRUSTED-SIDE. `panelport.ts` binds a port to the FIRST DOCUMENT loaded into a frame and

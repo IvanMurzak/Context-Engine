@@ -108,7 +108,7 @@ interface VerbFixture {
      * `daemonCall` the fixture supplied. A case that sends `packageId` in its request and finds it
      * absent here has proved the identity is un-forgeable at this layer.
      */
-    readonly daemonCalls: { method: string; params: unknown }[];
+    readonly daemonCalls: { method: string; params: unknown; arity: number }[];
 }
 
 interface FixtureOptions {
@@ -203,7 +203,7 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
     // The e13c-1 daemon fan-in. Note the SHAPE of this stand-in: it takes a method and params and no
     // package — the same signature `makePackageDaemonCall` returns after closing over one — so the
     // fixture cannot accidentally give the table a wider surface than production has.
-    const daemonCalls: { method: string; params: unknown }[] = [];
+    const daemonCalls: { method: string; params: unknown; arity: number }[] = [];
     const table = makePanelBridgeVerbs({
         panelId: PANEL_ID,
         packageId: PACKAGE_ID,
@@ -220,8 +220,15 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
                 writes.push(value);
             },
         },
-        daemonCall: (method: string, params: unknown): Promise<PanelDaemonOutcome> => {
-            daemonCalls.push({ method, params });
+        // ⚠ RECORDS ITS FULL ARITY, and that is precisely what makes the PLANT on the first case real.
+        // A 2-arity arrow silently DISCARDS a third argument, so a recorded `{method, params}` object
+        // literal is the FIXTURE's own shape and no production mutation can change it — the plant
+        // "give `PanelDaemonCall` a package argument at all" would then stay GREEN, a non-vacuity
+        // claim that was itself vacuous. Rest args are what let the fixture OBSERVE the extra argument
+        // the production type promises not to have.
+        daemonCall: (...args: unknown[]): Promise<PanelDaemonOutcome> => {
+            const method = args[0] as string;
+            daemonCalls.push({ method, params: args[1], arity: args.length });
             return Promise.resolve(
                 options.daemonOutcome ?? { ok: true, result: { echoed: method } },
             );
@@ -323,10 +330,13 @@ export const panelVerbsTests: readonly TestCase[] = [
             // THE FORGERY LANDED NOWHERE. `daemonCall` takes (method, params) and nothing else, so the
             // recorded entry is the complete set of what the panel could influence.
             assertEqual(
-                JSON.stringify(Object.keys(fx.daemonCalls[0] ?? {}).sort()),
-                JSON.stringify(["method", "params"]),
-                "the forward carries ONLY a method and its params — the package is closed over, so " +
-                    "a packageId in the request reaches no code that reads one",
+                fx.daemonCalls[0]?.arity,
+                2,
+                "the forward carries ONLY a method and its params — EXACTLY two arguments, so the " +
+                    "package is closed over and a packageId in the request reaches no code that " +
+                    "reads one. Asserted as an ARITY the fixture measures with rest args, not as the " +
+                    "key set of an object the fixture itself built: the latter is a property of the " +
+                    "test and no production change could ever move it",
             );
 
             // A no-argument call is ordinary, not malformed: `params` is simply absent.

@@ -33,8 +33,16 @@
 //               found `window.contextPanelPort` already published. That ordering is what the one-shot
 //               rests on.
 //   port-refused.js         THE ROUND TRIP. The panel transferred a port up, editor-core accepted it,
-//               the panel sent `bridge.call` over it, and the reply matched the deny-all refusal
+//               the panel sent a STILL-PARKED verb over it, and the reply matched the deny-all refusal
 //               exactly — tag, version, id, `ok:false`, `bridge.verb_not_granted`, echoed verb.
+//               ⚠ THE SUBJECT VERB MOVES AS VERBS ARE FILLED, and re-pointing it is maintenance, not
+//               a weakening. It named `bridge.call` until M9 e13c-1 FILLED that verb, at which point
+//               this step asserted the opposite of the truth and this smoke went red on two legs.
+//               `bridge.events.subscribe` is the verb genuinely still parked (e13c-2's — it needs a
+//               BOUNDED fan-out buffer with an ack cursor). Re-point at the next parked verb whenever
+//               one is filled; the property under test — that filling SOME entries did not open the
+//               whole table — is what must survive. The T1 tier keeps the same step in step
+//               (panelport.test.ts, "A STILL-PARKED verb keeps the e13b-1 answer").
 //   one-shot-held.js        the panel offered a SECOND channel and, after a settle window, had
 //               received nothing on it. The failure direction is SAFE: a second port that WAS granted
 //               sets the fixture's flag and this import never fires.
@@ -56,8 +64,12 @@
 //     to the FIRST document loaded into the frame (ext_scheme.h § the E13B obligation); that this was
 //     the package the host asked for is a Shell/editor-core agreement, not something the browser
 //     attests, and no assertion here upgrades it.
-//   * The port carries ZERO capability. Every verb answers the same refusal, so `port-refused.js`
-//     proves a transport and an authentication boundary — never a granted capability.
+//   * `port-refused.js` proves a TRANSPORT and an AUTHENTICATION boundary — never a granted
+//     capability. It is asserted with a verb the table does not carry, so what it measures is that
+//     an ungranted verb travels and comes back refused INTACT. The port itself is not capability-free
+//     (the table has carried `bridge.commands.*`, `bridge.ui.subscribe`, `bridge.theme.tokens` and
+//     `bridge.state.get|set` since before e13c-1, which added `bridge.call`); no assertion here says
+//     anything about what a GRANTED verb does — that is the T1 tier's and the C++ session tier's.
 //   * `bridge.refused() == 0` is still asserted, and still says nothing about the port: the panel
 //     transport rides MessageChannel/postMessage and never reaches the CEF message router.
 //
@@ -241,13 +253,13 @@ bool write_fixture_package(const std::filesystem::path& root)
                     "    if (d && d.ctx === \"context.panel-bridge\" && d.v === 1 &&\n"
                     "        d.kind === \"reply\" && d.id === \"smoke-1\" && d.ok === false &&\n"
                     "        d.error && d.error.code === \"bridge.verb_not_granted\" &&\n"
-                    "        d.error.verb === \"bridge.call\") {\n"
+                    "        d.error.verb === \"bridge.events.subscribe\") {\n"
                     "      void import(\"./port-refused.js\");\n"
                     "    }\n"
                     "  };\n"
                     "  port.start();\n"
                     "  port.postMessage({ ctx: \"context.panel-bridge\", v: 1, kind: \"request\",\n"
-                    "                     id: \"smoke-1\", verb: \"bridge.call\" });\n"
+                    "                     id: \"smoke-1\", verb: \"bridge.events.subscribe\" });\n"
                     // THE ONE-SHOT, LIVE. A second handshake must win nothing. The child cannot
                     // observe a refusal directly (the host just closes the port it was handed), so it
                     // observes SILENCE on the second channel after the first channel has demonstrably
@@ -261,7 +273,7 @@ bool write_fixture_package(const std::filesystem::path& root)
         shell::kExtPortHandshakeTag +
         "\" }, \"*\", [second.port2]);\n"
         "  second.port1.postMessage({ ctx: \"context.panel-bridge\", v: 1, kind: \"request\",\n"
-        "                             id: \"smoke-2\", verb: \"bridge.call\" });\n"
+        "                             id: \"smoke-2\", verb: \"bridge.events.subscribe\" });\n"
         "  setTimeout(function () {\n"
         "    if (!secondSaw) { void import(\"./one-shot-held.js\"); }\n"
         "  }, 1500);\n"
@@ -678,10 +690,13 @@ int main(int argc, char** argv)
                 "fails while the bootstrap above was served, the script executed but published nothing");
     SMOKE_CHECK(contains(served, url_port_refused),
                 "THE PORT ROUND-TRIPPED THROUGH THE REAL CEF PUMP. The panel transferred a port up, "
-                "editor-core accepted it, the panel sent a `bridge.call` request over it, and the reply "
-                "it got back matched the deny-all refusal EXACTLY — tag, version, id, ok:false, "
-                "`bridge.verb_not_granted`, and the echoed verb. This is the e13b-1 deliverable proven "
-                "end to end across an opaque-origin boundary, and no unit tier can produce it");
+                "editor-core accepted it, the panel sent a request for a STILL-PARKED verb "
+                "(`bridge.events.subscribe`) over it, and the reply it got back matched the deny-all "
+                "refusal EXACTLY — tag, version, id, ok:false, `bridge.verb_not_granted`, and the "
+                "echoed verb. This is the e13b-1 deliverable proven end to end across an "
+                "opaque-origin boundary, and no unit tier can produce it. If a later task FILLS this "
+                "verb, re-point the fixture at the next parked one (file header) — do not delete the "
+                "step, and do not assert a granted verb here");
     SMOKE_CHECK(contains(served, url_one_shot),
                 "and the grant is ONE-SHOT in the live browser: the panel offered a SECOND channel and "
                 "sent a request over it, and after a settle window had received nothing at all. NOTE "

@@ -25,11 +25,18 @@ RULE 2 — NO ui-TOPIC SUBSCRIPTION ANYWHERE REACHES THE EXIT.
 
 WHAT THIS DELIBERATELY DOES NOT FORBID: the cross-window MIRROR seam (`UiMirrorSink`). Mirroring
 chrome facts between the Shell's own windows is the design (05 §5), and e10's sink will legitimately
-call a SHELL-local bridge method. That sink is not a subscription and is not matched here. When a
-daemon-FORWARDING bridge method ever exists (there is none today — every method the Shell routes is
-Shell-local: `panel.*`, `themes.get`, `config.*`, `keybindings.get`, `editor.state.*`, `welcome.*`),
-this gate should grow a deny-list naming it; until then a mirror sink cannot reach the daemon because
-no such method exists to reach it through.
+call a SHELL-local bridge method. That sink is not a subscription and is not matched here.
+
+⚠ THE "NO DAEMON-FORWARDING METHOD EXISTS" PREMISE EXPIRED WITH M9 e13c-1. This docstring used to
+argue that a mirror sink could not reach the daemon because no routed method reached it through —
+every method the Shell routed was Shell-local (`panel.*`, `themes.get`, `config.*`,
+`keybindings.get`, `editor.state.*`, `welcome.*`). `panel.daemon.call` (package_sessions.h
+`kPanelDaemonCallMethod`) is now exactly such a method: it forwards a renderer-supplied method name
+and renderer-supplied params onto a daemon wire. The safety argument therefore no longer rests on
+non-existence, and THIS GATE OWES THE DENY-LIST the old text promised — a sink pointed at
+`panel.daemon.call` would carry chrome facts to the daemon and is precisely the D7 violation this
+file exists to prevent. NOT YET IMPLEMENTED (e13c-1 follow-up): add it with a planted violation
+first, since this file's own regexes have twice passed plants (see the warning below).
 
 It is a SOURCE scan (like tools/check_no_raw_key_handlers.py), so it runs on every default `build` leg
 with no browser — registered as the `webui-uibus-boundary` ctest in the `webui-*` family.
