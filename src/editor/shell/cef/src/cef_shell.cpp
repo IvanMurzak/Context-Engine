@@ -1441,11 +1441,62 @@ private:
 
 } // namespace
 
+int execute_helper_process(int argc, char** argv)
+{
+#if defined(__APPLE__)
+    // A helper process must load the framework from the PARENT app's Frameworks dir (the helper
+    // variant of the search), before any CEF call. Scoped to this function: `CefExecuteProcess` blocks
+    // for the whole life of the subprocess, so the unload happens as this function returns — which is
+    // BEFORE static teardown, and is why `g_app` is released explicitly below rather than left to it.
+    CefScopedLibraryLoader library_loader;
+    if (!library_loader.LoadInHelper())
+    {
+        std::fprintf(stderr, "[shell-cef] helper: LoadInHelper() failed — the Chromium Embedded "
+                             "Framework is not embedded in the parent app bundle's "
+                             "Contents/Frameworks\n");
+        return 1;
+    }
+
+    // The REAL app object, not nullptr — see cef_shell.h's contract for the three renderer-process
+    // duties that would otherwise never run. Same TU-global instance the browser process creates, so
+    // the two halves of `OnRegisterCustomSchemes` and the message router cannot drift.
+    if (g_app == nullptr)
+    {
+        g_app = new ShellCefApp;
+    }
+    CefMainArgs main_args(argc, argv);
+    const int exit_code = CefExecuteProcess(main_args, g_app.get(), nullptr);
+
+    // ⚠ RELEASE THE APP HERE, NOT AT STATIC TEARDOWN — an ordering bug, not tidiness. `g_app` is a
+    // TU-global, so left alone it is released AFTER this function returns, i.e. after
+    // `~CefScopedLibraryLoader` has already called `cef_unload_library()` (dlclose). `~ShellCefApp`
+    // drops `renderer_router_`, and a `CefMessageRouterRendererSide` can still hold library-side
+    // `CefRefPtr`s (the V8 context / callbacks of any query that had not completed) whose `Release()`
+    // is a function pointer INSIDE the image just unmapped. Releasing while the framework is still
+    // loaded makes the order well-defined.
+    //
+    // Neither precedent helper can reach this: both pass `nullptr` and hold no app object at all
+    // (`src/editor/cef/src/cef_boot_smoke_helper_mac.cpp`,
+    // `src/editor/gui/host/src/editor_host_helper_mac.cpp`) — the real `CefApp` this helper must pass
+    // (see cef_shell.h) is exactly what introduces the hazard. The BROWSER process was already safe
+    // the same way: `shutdown()` nulls `g_app` before `CefShutdown()`.
+    g_app = nullptr;
+    return exit_code;
+#else
+    (void)argc;
+    (void)argv;
+    std::fprintf(stderr, "[shell-cef] execute_helper_process() is macOS-only — Windows and Linux "
+                         "re-exec the main binary (execute_subprocess). Refusing.\n");
+    return 1;
+#endif
+}
+
 int execute_subprocess(int argc, char** argv)
 {
 #if defined(__APPLE__)
     // On macOS the framework is LOADED at runtime, never linked, and the helper processes run from
-    // their own bundles — so this entry point is not the subprocess path there.
+    // their own bundles — so this entry point is not the subprocess path there. `execute_helper_process`
+    // above is that path.
     (void)argc;
     (void)argv;
     return -1;

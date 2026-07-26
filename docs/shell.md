@@ -88,9 +88,26 @@ backend, so `make_window_backend`'s remaining diagnostics report a FAILED creati
 GUI session, a refused window — rather than a platform nobody implemented. A shell that quietly
 opened no window would look identical to one that opened an invisible one.
 
-The macOS backend is **CEF-FREE** (e12b's scope): the `.app` bundle, the three per-process-type
-helper bundles and the runtime-loaded framework a CEF browser needs there are **e12c's**, so
-`context_editor` on macOS still builds without a browser in it. Four Cocoa shapes have no Win32 or
+The macOS backend arrived CEF-FREE with e12b; **e12c-1 (issue #436) added the browser**. macOS cannot
+re-exec the main binary as a CEF subprocess the way Windows and Linux do, so a browser there needs an
+`.app` bundle, an embedded Chromium Embedded Framework loaded at runtime (`CefScopedLibraryLoader`),
+and **FIVE** per-process-type helper bundles — the unsuffixed one plus `(Alerts)`, `(GPU)`, `(Plugin)`
+and `(Renderer)`, which is what `CEF_HELPER_APP_SUFFIXES` lists in the pinned distribution. *(This
+sentence said THREE until e12c-1 measured it; the count is CEF's, not ours.)* `context_editor` is
+therefore a real browser-hosting `.app` on macOS in a `CONTEXT_BUILD_GUI_CEF` configure, assembled by
+`context_shell_cef_mac_bundle()` in `src/editor/shell/CMakeLists.txt` and audited at configure time
+there; a CEF-OFF macOS build still produces the plain executable it always did. The ONE piece of new
+logic that is not packaging is `shell::cef::execute_helper_process()` (`cef/cef_shell.h`): the two
+older helper bundles in this repo pass a NULL `CefApp`, which is legal only because their apps have no
+renderer duties, while `ShellCefApp` registers `context-editor://` + `context-ext://` in every process
+and injects `contextEditorQuery` from `OnContextCreated` — so the Shell's helpers hand CEF the real
+app object, and without it no handshake exists and every live smoke fails.
+What e12c-1 deliberately did NOT bring is a WINDOW: macOS's smokes are HEADLESS, exactly as Windows'
+are, and the live windowed macOS proof is **e12c-3**. It also does not RUN those two smokes on the
+macOS leg — both ctests are registered `DISABLED` because `CefShutdown()` does not return there in the
+Shell's pinned pump configuration (issue #437; the evidence, and why the fix is neither e12c-1's nor a
+timeout, are in § 12 and in the macOS branch of `src/editor/shell/cef/CMakeLists.txt`). Four Cocoa
+shapes have no Win32 or
 X11 analogue and are therefore decoded by PURE functions in `window.cpp`, executed by
 `editor-shell-test_window` on all three legs — which matters more here than anywhere else in this
 document, because no CI job runs a windowed macOS test at all:
@@ -475,7 +492,7 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
 | `editor-shell-config-writers` | e06d: the C-F14 SINGLE-WRITER source gate - exactly one TU writes `~/.context/config.json`, editor-core carries no client-side persistence API, and one module names `config.set` (`tools/check_config_writers.py`) |
 | `editor-shell-session-ownership` | e09d: the C-F3 SESSION-FILE OWNERSHIP source gate - one C++ writer per session file (which must still write THAT document, not merely contain write machinery), each owner in its OWN process's subtree, and the in-process override-write gateway named by nothing but its own definition and tests and linked by no Shell target (`tools/check_session_ownership.py`) - see § 14 |
 | `editor-shell-test_smoke_window` | e12a-x11-legs: the smoke-tier window seam, asserted with no display — the `--real-window` flag parse, headless construction/present/injection, `browser_geometry`'s DIP conversion at a non-identity DPI, the keysym inverse SWEPT back through the shipping decoder map, and the load-bearing negatives: real mode REFUSING a headless backend (pointer, key AND resize) and a window with no presentable native surface, rather than degrading |
-| `editor-cef-smoke-shell` | The LIVE CEF half: a real browser through the real integrated pump, its `OnPaint` frames composited + presented, input round-tripped, a live resize repainted. Windowless on Windows; since e12a-x11-legs the Linux leg runs it through a REAL X11 window and injects its gestures through the X server (`editor-cef-smoke` job, Windows/Linux) |
+| `editor-cef-smoke-shell` | The LIVE CEF half: a real browser through the real integrated pump, its `OnPaint` frames composited + presented, input round-tripped, a live resize repainted. Windowless on Windows and (since e12c-1) on macOS, where it boots from a real `.app` with five helper bundles; since e12a-x11-legs the Linux leg runs it through a REAL X11 window and injects its gestures through the X server (`editor-cef-smoke` job; BUILT on all three OSes, RUN on Windows/Linux — the macOS registration is `DISABLED` pending issue #437, § 12) |
 | `editor-shell-test_window_registry` | e10a: the registry — window 0 primary, ids minted in order and NEVER reused, all four create-failure classes reported once with the source window (and the registry still usable after four in a row), the live-window cap, per-window `origin` reporting, and the CE #319 lifetime rule in both directions: a destroyed window's browser dies NOW while its session is retired until the manager does, across 25 create/destroy cycles and across `shutdown()` with windows still open |
 | `editor-cef-smoke-shell-multiwindow` | e10a, the LIVE half a fake cannot reach: a SECOND real CEF browser booting its OWN editor-core instance (two DIFFERENT round-tripped handshake nonces), a REAL renderer `window.open` refused by `OnBeforePopup` with NO browser created, and a MID-PROCESS destroy followed by another create (`editor-cef-smoke` job, Windows/Linux) |
 
@@ -490,6 +507,13 @@ itself is built transitively by the jobs that build `context_editor` / the CEF s
 `-multiwindow` (e10a), `-tearout` (e10b), `-drag` (e10c), `-uimirror` (e10d) and `-iframe` (e13a) —
 **nine** registrations in total, which is the number every statement about this family must use
 (the same miscount §11 corrects, and the one that left `_ctx_cef_stage_consumers` stale).
+Since **e12c-1** that list is **PER-OS**: Windows/Linux build all nine, macOS builds the two whose
+`.app` hosting model e12c-1 ported (`-shell` and `-shell-restore`). A single shared list would fail the
+macOS build outright, because the other seven are not declared as macOS targets yet — they arrive with
+**e12c-2**, which grows both the CMake branch and that `--target` list together. No new ctest NAME is
+involved on macOS, so the "Not Run = RED" tripwire bites only on the `--target` side — and the two
+macOS registrations are `DISABLED` pending issue #437 (§ 12), which ctest reports as
+`Not Run (Disabled)` without affecting the exit code.
 `editor-shell-test_window_registry` is NOT: it is a plain
 `editor-shell-*` family member like every other unit suite.
 
@@ -718,6 +742,9 @@ GPU present path), which cannot be produced on the local GCC dev gate:
 cmake -S src --preset dev -DCONTEXT_BUILD_GUI_CEF=ON -DCONTEXT_BUILD_RENDER_WGPU=ON
 cmake --build --preset dev --target context_editor    # from src/
 ./build/dev/editor/shell/context_editor --project <a project dir> --url <a page>
+# On macOS that last path does not exist: since e12c-1 a CEF-ON configure makes context_editor an
+# .app (§ 3), so the binary is at
+#   ./build/dev/editor/shell/context_editor.app/Contents/MacOS/context_editor
 ```
 
 | Step | Expected observation |
@@ -802,13 +829,33 @@ Named so the gaps are visible rather than assumed:
   `request_redraw()` gains its first caller. Recorded here so that loop's author finds it.
 - ~~**No macOS window backend.**~~ Landed by **e12b**: `cocoa_window.mm` (NSWindow + a
   `CAMetalLayer`-backed NSView), the pure `translate_ns_event` / `translate_ns_window_geometry`
-  decoders, and the `CALayer.contents` CPU present blitter. What e12b did NOT bring is a live
-  windowed macOS PROOF — the `.app` + helper bundles a CEF smoke needs there are **e12c's**, so the
-  `build (macos-latest)` leg compiles and links the backend and executes the pure decoders, and the
-  ONE place `-[NSWindow initWithContentRect:]` is ever called automatically is
+  decoders, and the `CALayer.contents` CPU present blitter.
+- ~~**No macOS CEF hosting.**~~ Landed by **e12c-1** (issue #436): `context_editor` and the two live
+  smokes `editor-cef-smoke-shell` / `-shell-restore` are real `.app` bundles on macOS, each with its
+  five per-process-type helper bundles and its embedded framework, driven by the new
+  `shell::cef::execute_helper_process()` (see § 3). `editor-cef-smoke (macos-latest)` BUILDS all three
+  bundles, so the assembly, the load-bearing helper names, the framework embed and the
+  no-`libcef_lib` link line all have CI coverage. **e12c-2** fans the recipe out to the remaining
+  seven scenarios.
+- **macOS shell smokes BUILD but do not RUN — `CefShutdown()` wedges (issue #437).** Both macOS ctests
+  are registered `DISABLED`, so they print as `Not Run (Disabled)` on that leg. This is a teardown
+  wedge, not a hosting-model failure: on CI run 30205478538 both smokes reached EVERY scenario
+  milestone first (`-shell-restore` composited its first OSR frame, handshook the bridge, rendered all
+  hostable panels, served `editor.state.get`, reported `editor.layout.restored`, left its pump loop in
+  1613 ms and returned from `manager.shutdown()`), then printed `cef::shutdown() (CefShutdown) begin`
+  and emitted nothing further. The wedge tracks `CefSettings.external_message_pump`, which design
+  03 §1 pins for the Shell: the two macOS CEF apps that shut down cleanly in the SAME job
+  (`editor-cef-smoke-boot`, `cef-substrate-boot`) both run without it. Neither changing that setting
+  nor skipping the `CefShutdown()` call is available to e12c-1 — the first contradicts a locked
+  decision, the second would silently weaken the CE #319 invariant `-shell-restore` phase 1 asserts
+  THROUGH `CefShutdown()` returning. **e12c-2 and e12c-3 both need #437 resolved first.**
+- **No live WINDOWED macOS proof.** macOS runs its two CEF smokes HEADLESS, exactly as Windows does,
+  so the `build (macos-latest)` leg compiles and links the Cocoa backend and executes the pure
+  decoders, and the ONE place `-[NSWindow initWithContentRect:]` is ever called automatically is
   `editor-shell-test_window`'s selection assertion (which accepts either outcome, since a runner
   commonly has no GUI session). Everything downstream of that call — that a window APPEARS, that a
-  presented frame is VISIBLE — rests on e12c.
+  presented frame is VISIBLE — rests on **e12c-3**, the exact mirror of the e12a → e12a-x11-legs
+  carve-out: real-mode Cocoa event injection plus a CEF-free windowed Cocoa smoke.
 - **macOS `WindowPlacement` is in Cocoa POINTS with a bottom-left screen origin**, where the Win32
   and X11 backends record physical pixels with a top-left one. Deliberate: the document is
   per-machine session state written and read by one backend, so points round-trip exactly through

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CEF subprocess-helper Info.plist for the Shell's macOS CEF hosting model (M9 e12c-1, issue #436).
+     FIVE helper bundles are built per main app, one per CEF_HELPER_APP_SUFFIXES entry — the unsuffixed
+     one plus (Alerts), (GPU), (Plugin) and (Renderer). That count is CEF's, read from the pinned
+     distribution's cmake/cef_variables.cmake, not a guess: docs/shell.md said THREE until this task
+     measured it.
+
+     CMake substitutes the bundle variables per helper from the properties set in
+     src/editor/shell/cef/CMakeLists.txt — the executable name, the bundle name and the identifier all
+     carry the helper's suffix, and the two version strings come from PROJECT_VERSION there.
+
+     LSUIElement=1 keeps every helper a background process; NSSupportsAutomaticGraphicsSwitching aids
+     the GPU helper. A helper declares no principal class: its whole job is to load the framework for a
+     non-main process and hand control to CefExecuteProcess (src/shell_helper_mac.cpp). Unlike the two
+     older helper plists this one is NOT paired with a nullptr CefApp — the Shell's helper passes the
+     real ShellCefApp, because that object carries renderer-process duties (see
+     shell::cef::execute_helper_process in cef_shell.h). -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>English</string>
+	<key>CFBundleExecutable</key>
+	<string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+	<key>CFBundleIdentifier</key>
+	<string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
+	<key>CFBundleVersion</key>
+	<string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+	<key>LSFileQuarantineEnabled</key>
+	<true/>
+	<key>LSMinimumSystemVersion</key>
+	<string>12.0</string>
+	<key>LSUIElement</key>
+	<string>1</string>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
+</dict>
+</plist>

@@ -54,7 +54,41 @@ namespace context::editor::shell::cef
 // CEF subprocess re-entry. On Windows/Linux the renderer, GPU and utility processes re-exec THIS
 // binary; this returns >= 0 in such a process, and the caller must return that value IMMEDIATELY —
 // before parsing arguments or touching the filesystem, or every subprocess pays for it.
+//
+// On macOS it always returns -1: there is no self-re-exec model there, and every subprocess type runs
+// from its own helper bundle through `execute_helper_process` below.
 [[nodiscard]] int execute_subprocess(int argc, char** argv);
+
+// --- macOS: the per-process-type helper bundle entry point (M9 e12c-1) ---------------------------
+//
+// The `main` of every "<App> Helper*.app" bundle: load the Chromium Embedded Framework for a NON-main
+// process (`CefScopedLibraryLoader::LoadInHelper`), then hand control to `CefExecuteProcess` with the
+// Shell's own `CefApp`. Returns the value the helper's `main` must return. The whole body is one call
+// (`src/shell_helper_mac.cpp`) so a helper bundle needs no CEF knowledge of its own.
+//
+// ⚠ THIS IS WHY IT EXISTS AT ALL, and why it is not simply `CefExecuteProcess(args, nullptr, nullptr)`.
+// The two older helpers in this repo — `src/editor/cef/src/cef_boot_smoke_helper_mac.cpp` and
+// `src/editor/gui/host/src/editor_host_helper_mac.cpp` — pass a NULL `CefApp`, which is legal ONLY
+// because neither of their apps has renderer-process duties. The Shell's app object does, three of
+// them, and all three live in the RENDERER process where a null app means they never run:
+//
+//   * `OnRegisterCustomSchemes` for BOTH `context-editor://` and `context-ext://`. The renderer is
+//     where origin comparisons, CSP evaluation and module loading happen, so a scheme registered only
+//     browser-side leaves editor-core's documents (and every package panel's) on an OPAQUE origin —
+//     the "works until you load a module" failure.
+//   * `OnContextCreated` / `OnContextReleased` / `OnProcessMessageReceived`, the renderer half of the
+//     message router. This is what INJECTS `contextEditorQuery` into a frame; without it the bridge
+//     handshake cannot happen and every live smoke fails with a browser that booted fine.
+//
+// The app object is process-global inside the binding (the same one the browser process creates), so
+// nothing here is a second configuration to keep in sync — that is the point of routing the helper
+// through this function instead of letting each helper build its own.
+//
+// NON-macOS: returns 1 after a diagnostic. There is no helper-bundle process model on Windows/Linux
+// (they re-exec the main binary — see `execute_subprocess`), so reaching this is a build-graph
+// mistake, and 1 is deliberately a FAILING exit code: a helper that silently returned 0 would let a
+// mis-wired subprocess look like a clean one.
+[[nodiscard]] int execute_helper_process(int argc, char** argv);
 
 struct CefShellOptions
 {

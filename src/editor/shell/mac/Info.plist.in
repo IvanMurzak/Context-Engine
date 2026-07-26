@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Main .app bundle Info.plist for the Shell's macOS CEF hosting model (M9 e12c-1, issue #436).
+     Shared by context_editor and by every live editor-cef-smoke-shell* bundle: CEF derives the
+     helper-bundle paths from the MAIN executable's name, so one template that carries no app-specific
+     string is exactly right for all of them. CMake substitutes the bundle variables it is given from
+     the target properties set in src/editor/shell/cef/CMakeLists.txt; the two version strings come
+     from PROJECT_VERSION there, so this file cannot drift from project(... VERSION ...) the way the
+     hardcoded 0.0.1 in the two older plist pairs (src/editor/cef/mac/, src/editor/gui/host/mac/) can.
+
+     LSUIElement=1 keeps this a background agent — no Dock icon, no foreground activation — which is
+     what lets the bundles boot on a windowless CI box, and matches e12c-1's HEADLESS window mode.
+     e12c-3 (the live windowed macOS proof) can still open a real NSWindow from an agent app; the
+     SHIPPING bundle, which does want a Dock icon and an app icon, is e15 packaging's and must not
+     simply inherit this test-tier template.
+     LSMinimumSystemVersion 12.0 matches the deployment target CEF's own bundle targets pin. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>English</string>
+	<key>CFBundleExecutable</key>
+	<string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+	<key>CFBundleIdentifier</key>
+	<string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
+	<key>CFBundleVersion</key>
+	<string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+	<key>LSEnvironment</key>
+	<dict>
+		<key>MallocNanoZone</key>
+		<string>0</string>
+	</dict>
+	<key>LSFileQuarantineEnabled</key>
+	<true/>
+	<key>LSMinimumSystemVersion</key>
+	<string>12.0</string>
+	<key>LSUIElement</key>
+	<string>1</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
+</dict>
+</plist>

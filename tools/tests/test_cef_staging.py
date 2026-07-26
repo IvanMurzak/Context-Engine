@@ -7,6 +7,21 @@ that defect visible at all, the consumer-completeness check, every masking const
 staging implementation, the comment-stripping and non-CEF-destination edge cases, and the
 configuration-error exit -- plus an integration pass over the LIVE tree so the lint stays honest
 against the shipped build files.
+
+M9 e12c-1 (issue #436) added three groups, each pinning something the lint got WRONG before macOS CEF
+targets existed. Every case marked `# FOUND BY PLANTING` was produced by mutating the LIVE build files
+and watching what the lint said (conventions.md, Coding conventions § "Authoring a SOURCE-SCAN gate"):
+
+  * PLATFORM AWARENESS -- `context_cef_stage_payload()` is Windows/Linux-only, so a macOS CEF
+    executable must NOT be required to depend on a stage target that does not exist on its platform.
+    Reading the file as a flat list of call sites demanded exactly that and would have redded
+    `editor-shell-cef-staging` on all three OS legs. Both directions are pinned: the macOS-only exe is
+    CLEAN, and the Windows/Linux exe that drops its edge still FAILS.
+  * `${variable}` NAME RESOLUTION -- the two older macOS branches name every target through a
+    `${var}`, and the original literal-only pattern made them INVISIBLE rather than correct. A name
+    that still cannot be resolved is now REPORTED where a check would have applied to it.
+  * THE macOS APP-BUNDLE HALF (check 4) -- an .app's `Contents/Frameworks` is a staging destination in
+    the same sense check 1 means, so it takes the same single-writer rule.
 """
 
 from __future__ import annotations
@@ -391,6 +406,350 @@ def test_multiline_copy_files_call_is_parsed(tmp_path: Path) -> None:
     assert _run(root) == 1
 
 
+# --- platform awareness (M9 e12c-1) ------------------------------------------------------------------
+# The stage target is created under `if(OS_WINDOWS OR OS_LINUX)`; a macOS CEF bundle embeds its payload
+# instead. These pin BOTH directions, because the fix's whole risk is that it silences check 2.
+
+
+_MAC_AND_DESKTOP_TREE = {
+    "src/editor/shell/CMakeLists.txt": (
+        "context_acquire_cef(context_editor editor-cef-smoke)\n"
+        "if(OS_WINDOWS OR OS_LINUX)\n"
+        '    context_cef_stage_payload(context_editor_cef_stage "${CEF_TARGET_OUT_DIR}")\n'
+        "endif()\n"
+        "add_subdirectory(cef)\n"
+    ),
+    # ⚠ THE macOS EXECUTABLE HAS ITS OWN NAME HERE, and that is the load-bearing part of the fixture.
+    # A macOS branch that re-declares the SAME target as the Windows/Linux branch (which is what the
+    # live tree does for the two shell smokes) is NOT a discriminating case: the shared name picks up
+    # the Windows/Linux branch's own `add_dependencies` edge, so it reads clean whether or not the lint
+    # understands platforms at all. MEASURED — the first version of this fixture reused one name and
+    # stayed GREEN under a plant that disabled platform awareness entirely.
+    "src/editor/shell/cef/CMakeLists.txt": (
+        "if(OS_WINDOWS OR OS_LINUX)\n"
+        "    SET_EXECUTABLE_TARGET_PROPERTIES(context_shell_smoke)\n"
+        "    add_dependencies(context_shell_smoke context_editor_cef_stage)\n"
+        "elseif(OS_MAC)\n"
+        "    SET_EXECUTABLE_TARGET_PROPERTIES(context_shell_smoke_mac)\n"
+        '    COPY_MAC_FRAMEWORK(context_shell_smoke_mac "${CEF_BINARY_DIR}"'
+        ' "${CEF_TARGET_OUT_DIR}/context_shell_smoke_mac.app")\n'
+        "endif()\n"
+    ),
+}
+
+
+def test_macos_only_cef_exe_needs_no_windows_linux_stage_dependency(tmp_path: Path) -> None:
+    """# FOUND BY PLANTING: this is the shape that redded all three legs before e12c-1.
+
+    A macOS-only CEF executable carries its payload inside its own .app; the stage target does not
+    exist on that platform, so requiring an `add_dependencies()` edge onto it is impossible to satisfy.
+    """
+    root = _repo(tmp_path, dict(_MAC_AND_DESKTOP_TREE))
+    findings, _ = check.scan(root)
+    assert findings == []
+    assert _run(root) == 0
+
+
+def test_windows_linux_cef_exe_still_needs_the_stage_dependency(tmp_path: Path) -> None:
+    """Non-vacuity of the case above: dropping the Windows/Linux edge must STILL fail."""
+    files = dict(_MAC_AND_DESKTOP_TREE)
+    files["src/editor/shell/cef/CMakeLists.txt"] = files[
+        "src/editor/shell/cef/CMakeLists.txt"
+    ].replace("    add_dependencies(context_shell_smoke context_editor_cef_stage)\n", "")
+    root = _repo(tmp_path, files)
+    findings, _ = check.scan(root)
+    assert len(findings) == 1
+    assert "does not depend on it there" in findings[0]
+    assert "linux/windows" in findings[0]
+    assert _run(root) == 1
+
+
+def test_a_macos_only_stage_target_is_demanded_of_macos_only_exes(tmp_path: Path) -> None:
+    """The rule is symmetric: it is the INTERSECTION of platform sets that decides, not `mac`."""
+    root = _repo(
+        tmp_path,
+        {
+            "src/editor/shell/CMakeLists.txt": (
+                "context_acquire_cef(context_editor editor-cef-smoke)\n"
+                "if(OS_MAC)\n"
+                '    context_cef_stage_payload(context_mac_stage "${CEF_TARGET_OUT_DIR}")\n'
+                "    SET_EXECUTABLE_TARGET_PROPERTIES(context_mac_exe)\n"
+                "endif()\n"
+            )
+        },
+    )
+    findings, _ = check.scan(root)
+    assert any("context_mac_exe" in f and "mac" in f for f in findings)
+    assert _run(root) == 1
+
+
+def test_a_non_platform_guard_does_not_narrow_anything(tmp_path: Path) -> None:
+    """Behaviour preservation: `if(NOT CONTEXT_BUILD_GUI_CEF)`-style guards say nothing about the
+    platform axis, so everything inside them keeps the full requirement it had before e12c-1."""
+    root = _repo(
+        tmp_path,
+        {
+            "src/editor/shell/CMakeLists.txt": (
+                "context_acquire_cef(context_editor editor-cef-smoke)\n"
+                'context_cef_stage_payload(context_editor_cef_stage "${CEF_TARGET_OUT_DIR}")\n'
+                "if(CONTEXT_BUILD_GUI_CEF)\n"
+                "    SET_EXECUTABLE_TARGET_PROPERTIES(context_guarded_exe)\n"
+                "endif()\n"
+            )
+        },
+    )
+    findings, _ = check.scan(root)
+    assert any("context_guarded_exe" in f for f in findings)
+    assert _run(root) == 1
+
+
+@pytest.mark.parametrize(
+    ("condition", "expected"),
+    [
+        ("APPLE", {"mac"}),
+        ("OS_MAC", {"mac"}),
+        ("OS_WINDOWS OR OS_LINUX", {"windows", "linux"}),
+        ("CONTEXT_BUILD_GUI_CEF AND (OS_WINDOWS OR OS_LINUX)", {"windows", "linux"}),
+        ("UNIX AND NOT APPLE", {"linux"}),
+        ("NOT APPLE", {"windows", "linux"}),
+        ("WIN32", {"windows"}),
+        ("UNIX", {"linux", "mac"}),
+        # A comparison is swallowed whole, so its right-hand side is never read as another atom.
+        ('CMAKE_SYSTEM_NAME STREQUAL "Haiku" AND OS_MAC', {"mac"}),
+        ("TARGET libcef_lib AND OS_MAC", {"mac"}),
+    ],
+)
+def test_platform_conditions_evaluate_to_their_platform_set(condition: str, expected: set) -> None:
+    assert check._eval_condition(condition) == frozenset(expected)
+
+
+@pytest.mark.parametrize(
+    "condition", ["CONTEXT_BUILD_GUI_CEF", "NOT CONTEXT_BUILD_GUI_CEF", "NOT TARGET libcef_lib"]
+)
+def test_conditions_naming_no_platform_narrow_nothing(condition: str) -> None:
+    """None -- NOT the empty set. `if(NOT X)` must not evaluate to "no platform" and silently drop
+    every call site inside it."""
+    assert check._eval_condition(condition) is None
+
+
+def test_else_keeps_the_enclosing_platform_set(tmp_path: Path) -> None:
+    """`else()` deliberately does not invert: over-broad can only ADD a requirement, never hide one."""
+    text = check.strip_comments(
+        "if(OS_WINDOWS OR OS_LINUX)\nA\nelse()\nB\nendif()\nC\n"
+    )
+    offsets = check.platform_map(text)
+    assert check.platform_at(offsets, text.index("A")) == frozenset({"windows", "linux"})
+    assert check.platform_at(offsets, text.index("B")) == check.ALL_PLATFORMS
+    assert check.platform_at(offsets, text.index("C")) == check.ALL_PLATFORMS
+
+
+# --- ${variable} target names (M9 e12c-1) ------------------------------------------------------------
+
+
+def test_a_set_resolved_target_name_is_matched_to_its_dependency(tmp_path: Path) -> None:
+    """The two older macOS branches name their targets this way; before e12c-1 they were INVISIBLE."""
+    root = _repo(
+        tmp_path,
+        {
+            "src/editor/shell/CMakeLists.txt": (
+                "context_acquire_cef(context_editor editor-cef-smoke)\n"
+                'context_cef_stage_payload(context_editor_cef_stage "${CEF_TARGET_OUT_DIR}")\n'
+                "set(_exe context_named_by_variable)\n"
+                "SET_EXECUTABLE_TARGET_PROPERTIES(${_exe})\n"
+                "add_dependencies(${_exe} context_editor_cef_stage)\n"
+            )
+        },
+    )
+    assert _run(root) == 0
+
+
+def test_a_set_resolved_target_name_missing_its_dependency_fails_under_its_real_name(
+    tmp_path: Path,
+) -> None:
+    """Non-vacuity of the case above -- and the finding must name the RESOLVED target, which is the
+    name a reader can act on."""
+    root = _repo(
+        tmp_path,
+        {
+            "src/editor/shell/CMakeLists.txt": (
+                "context_acquire_cef(context_editor editor-cef-smoke)\n"
+                'context_cef_stage_payload(context_editor_cef_stage "${CEF_TARGET_OUT_DIR}")\n'
+                "set(_exe context_named_by_variable)\n"
+                "SET_EXECUTABLE_TARGET_PROPERTIES(${_exe})\n"
+            )
+        },
+    )
+    findings, _ = check.scan(root)
+    assert len(findings) == 1
+    assert "context_named_by_variable" in findings[0]
+    assert "${" not in findings[0]
+    assert _run(root) == 1
+
+
+def test_an_unresolvable_target_name_at_a_staged_destination_is_reported_not_skipped(
+    tmp_path: Path,
+) -> None:
+    """A foreach-composed name cannot be verified -- so say so, rather than dropping it. Silently
+    dropping it is exactly how the macOS half went uncovered."""
+    root = _repo(
+        tmp_path,
+        {
+            "src/editor/shell/CMakeLists.txt": (
+                "context_acquire_cef(context_editor editor-cef-smoke)\n"
+                'context_cef_stage_payload(context_editor_cef_stage "${CEF_TARGET_OUT_DIR}")\n'
+                "set(_base context_helper)\n"
+                'foreach(_suffix "_gpu" "_renderer")\n'
+                '    SET_EXECUTABLE_TARGET_PROPERTIES(${_base}${_suffix})\n'
+                "endforeach()\n"
+            )
+        },
+    )
+    findings, _ = check.scan(root)
+    assert len(findings) == 1
+    assert "cannot resolve" in findings[0]
+    assert "context_helper${_suffix}" in findings[0]
+    assert _run(root) == 1
+
+
+def test_an_unresolvable_name_on_a_platform_with_no_stage_target_is_not_reported(
+    tmp_path: Path,
+) -> None:
+    """The live macOS helper families are exactly this: unresolvable names, but on the platform that
+    has no stage target at all -- so there is nothing to verify and nothing to report."""
+    root = _repo(
+        tmp_path,
+        {
+            "src/editor/shell/CMakeLists.txt": (
+                "context_acquire_cef(context_editor editor-cef-smoke)\n"
+                "if(OS_WINDOWS OR OS_LINUX)\n"
+                '    context_cef_stage_payload(context_editor_cef_stage "${CEF_TARGET_OUT_DIR}")\n'
+                "endif()\n"
+                "if(OS_MAC)\n"
+                "    set(_base context_helper)\n"
+                '    foreach(_suffix "_gpu" "_renderer")\n'
+                "        SET_EXECUTABLE_TARGET_PROPERTIES(${_base}${_suffix})\n"
+                "    endforeach()\n"
+                "endif()\n"
+            )
+        },
+    )
+    assert _run(root) == 0
+
+
+def test_set_variables_reads_only_the_single_value_form() -> None:
+    values = check.set_variables(
+        'set(plain context_editor)\n'
+        'set(quoted "context editor")\n'
+        'set(a_list one two three)\n'
+        'set(composed "${plain}_Helper")\n'
+    )
+    assert values["plain"] == "context_editor"
+    assert values["quoted"] == "context editor"
+    assert "a_list" not in values
+    assert check.resolve("${composed}", values) == "context_editor_Helper"
+    assert check.is_unresolved(check.resolve("${nope}_Helper", values))
+
+
+# --- check 4: the macOS app-bundle payload (M9 e12c-1) -----------------------------------------------
+
+
+_MAC_BUNDLE_TREE = {
+    "src/editor/shell/CMakeLists.txt": (
+        "context_acquire_cef(context_editor editor-cef-smoke)\n"
+        "if(OS_MAC)\n"
+        '    set(_app "${CEF_TARGET_OUT_DIR}/context_editor.app")\n'
+        '    COPY_MAC_FRAMEWORK(context_editor "${CEF_BINARY_DIR}" "${_app}")\n'
+        "    add_custom_command(TARGET context_editor POST_BUILD\n"
+        "        COMMAND ${CMAKE_COMMAND} -E copy_directory\n"
+        '                "$<TARGET_BUNDLE_DIR:context_editor_Helper>"\n'
+        '                "${_app}/Contents/Frameworks/context_editor Helper.app"\n'
+        "        VERBATIM)\n"
+        "endif()\n"
+    )
+}
+
+
+def test_one_owning_target_per_app_bundle_is_clean(tmp_path: Path) -> None:
+    """The shipped shape: the framework embed and every helper copy hang off the app's OWN target, so
+    they serialise inside one POST_BUILD chain."""
+    root = _repo(tmp_path, dict(_MAC_BUNDLE_TREE))
+    assert _run(root) == 0
+
+
+def test_two_targets_embedding_into_one_app_bundle_fail(tmp_path: Path) -> None:
+    """# FOUND BY PLANTING: the macOS form of issue #360 -- two POST_BUILD writers, one directory."""
+    files = dict(_MAC_BUNDLE_TREE)
+    files["src/editor/shell/CMakeLists.txt"] = files["src/editor/shell/CMakeLists.txt"].replace(
+        '    COPY_MAC_FRAMEWORK(context_editor "${CEF_BINARY_DIR}" "${_app}")\n',
+        '    COPY_MAC_FRAMEWORK(context_editor "${CEF_BINARY_DIR}" "${_app}")\n'
+        '    COPY_MAC_FRAMEWORK(context_editor_cef "${CEF_BINARY_DIR}" "${_app}")\n',
+    )
+    root = _repo(tmp_path, files)
+    findings, _ = check.scan(root)
+    assert any("targets write into this bundle's Contents/Frameworks" in f for f in findings)
+    # The platform OVERLAP is what decides this check, so the finding must NAME it, the way check 1's
+    # sibling message does. Asserted on the rendered listing rather than on a bare "mac" substring,
+    # which the message's own "the macOS form of issue #360" would satisfy vacuously.
+    assert any("(framework, src/editor/shell, mac)" in f for f in findings)
+    assert _run(root) == 1
+
+
+def test_a_framework_embedded_into_someone_elses_bundle_fails(tmp_path: Path) -> None:
+    """# FOUND BY PLANTING. The embed must be attached to the target that OWNS the .app; a helper or a
+    sibling doing it is a second writer into a directory it does not own."""
+    files = dict(_MAC_BUNDLE_TREE)
+    files["src/editor/shell/CMakeLists.txt"] = files["src/editor/shell/CMakeLists.txt"].replace(
+        '"${CEF_BINARY_DIR}" "${_app}")', '"${CEF_BINARY_DIR}" "${CEF_TARGET_OUT_DIR}/other.app")'
+    )
+    root = _repo(tmp_path, files)
+    findings, _ = check.scan(root)
+    assert any("is not context_editor's own .app" in f for f in findings)
+    assert _run(root) == 1
+
+
+def test_an_app_bundle_with_helpers_but_no_framework_fails(tmp_path: Path) -> None:
+    """# FOUND BY PLANTING: an .app with helper bundles and no embedded framework cannot boot --
+    CefScopedLibraryLoader finds nothing to load, at run time, on one OS."""
+    files = dict(_MAC_BUNDLE_TREE)
+    files["src/editor/shell/CMakeLists.txt"] = files["src/editor/shell/CMakeLists.txt"].replace(
+        '    COPY_MAC_FRAMEWORK(context_editor "${CEF_BINARY_DIR}" "${_app}")\n', ""
+    )
+    root = _repo(tmp_path, files)
+    findings, _ = check.scan(root)
+    assert any("receives helper bundles but no COPY_MAC_FRAMEWORK" in f for f in findings)
+    assert _run(root) == 1
+
+
+def test_a_malformed_copy_mac_framework_call_is_reported(tmp_path: Path) -> None:
+    root = _repo(
+        tmp_path,
+        {
+            "src/editor/cef/CMakeLists.txt": (
+                "context_acquire_cef(context_cef cef-substrate)\n"
+                "COPY_MAC_FRAMEWORK(context_cef_boot_smoke)\n"
+            )
+        },
+    )
+    findings, _ = check.scan(root)
+    assert any("COPY_MAC_FRAMEWORK takes" in f for f in findings)
+    assert _run(root) == 1
+
+
+def test_balanced_paren_extraction_survives_a_nested_call(tmp_path: Path) -> None:
+    """add_custom_command bodies are long and may carry parentheses; a `[^)]*` body would truncate."""
+    body = next(
+        args
+        for _start, args in check.calls(
+            'add_custom_command(TARGET t POST_BUILD\n'
+            '    COMMAND sh -c "printf (x)"\n'
+            '    COMMAND cmake -E copy_directory "a" "${_app}/Contents/Frameworks/h.app"\n'
+            "    VERBATIM)\n",
+            "add_custom_command",
+        )
+    )
+    assert "Contents/Frameworks" in body
+
+
 # --- configuration errors -----------------------------------------------------------------------------
 
 
@@ -418,7 +777,11 @@ def test_live_repository_is_clean() -> None:
 
 
 def _live_destinations() -> tuple[dict[Path, set[str]], set[Path]]:
-    """(staging destination -> its writer targets, acquire dirs) over the live source tree."""
+    """(staging destination -> its writer targets, acquire dirs) over the live source tree.
+
+    Mirrors `scan()`, INCLUDING the `${var}` resolution e12c-1 added — otherwise this helper would
+    still report the pre-e12c-1 raw names and quietly disagree with the lint it is checking.
+    """
     src = _REPO / "src"
     texts = {
         p.parent: check.strip_comments(p.read_text(encoding="utf-8", errors="replace"))
@@ -430,11 +793,12 @@ def _live_destinations() -> tuple[dict[Path, set[str]], set[Path]]:
         root = check.stage_root(directory, acquire_dirs)
         if root is None:
             continue
+        values = check.set_variables(text)
         for m in check._COPY_FILES.finditer(text):
             if "CEF_TARGET_OUT_DIR" in m.group(2):
-                writers[root].add(m.group(1))
+                writers[root].add(check.resolve(m.group(1), values))
         for m in check._STAGE_CALL.finditer(text):
-            writers[root].add(m.group(1))
+            writers[root].add(check.resolve(m.group(1), values))
     return writers, acquire_dirs
 
 
@@ -457,10 +821,13 @@ def test_live_repository_enumerates_every_cef_staging_destination() -> None:
     }
     # Exactly one writer per destination -- the whole invariant, across the whole sweep. The two
     # single-executable directories still use COPY_FILES() and are CORRECT as they stand: one writer
-    # into a destination nobody else writes cannot race itself. (src/editor/cef/ names its target
-    # through a ${variable}; the writer identity is the call site either way.)
-    assert writers[src / "editor" / "cef"] == {"${_cef_boot_target}"}
-    assert writers[src / "editor" / "gui" / "host"] == {"${_host_target}"}
+    # into a destination nobody else writes cannot race itself.
+    #
+    # ⚠ These two are the ones that used to read `${_cef_boot_target}` / `${_host_target}`, which is the
+    # visible trace of the pre-e12c-1 hole: the lint saw an opaque STRING, not a target, so nothing it
+    # checked applied to those directories' macOS halves. They now resolve to the real target names.
+    assert writers[src / "editor" / "cef"] == {"context_cef_boot_smoke"}
+    assert writers[src / "editor" / "gui" / "host"] == {"context_gui_host"}
     assert writers[src / "editor" / "shell"] == {"context_editor_cef_stage"}
 
 
