@@ -652,6 +652,44 @@ export const themeTests: readonly TestCase[] = [
         },
     },
     {
+        // M9 e13d — the PULL half's source. `bridge.theme.tokens` answers from `last`, which is the
+        // SAME field the late-registration replay above posts from, so the two cannot disagree about
+        // what the current theme is. A second snapshot taken from the engine would be a second source
+        // of truth whose divergence would show up only as a panel styled one switch behind.
+        //
+        // ⚠ PLANT: have `last` return a copy captured at construction (or the FIRST broadcast) — RED
+        //   at the second `apply`, which is precisely the "re-tokens on switch" failure.
+        name: "iframe delivery: `last` is the pushed event, so the pull and the push cannot disagree",
+        run: () => {
+            const channel = new IframeThemeChannel();
+            assertEqual(channel.last, undefined, "before any apply there is nothing to pull");
+
+            const engine = new ThemeEngine({ root: new RecordingRoot(), probe: NULL_PROBE, iframes: channel });
+            const frame = new RecordingFrame();
+            engine.iframes.register(frame);
+            engine.apply(BUILTIN_DARK);
+            assertEqual(
+                channel.last?.payload.themeId,
+                BUILTIN_DARK,
+                "the pull answers with the theme that was pushed",
+            );
+            // IDENTITY (`===`), not `assertEqual`'s deep equality: the claim is "one value, not two
+            // snapshots", and a structurally-equal COPY is exactly the thing being denied — it would
+            // satisfy a deep comparison while reintroducing the second source of truth (a `last`
+            // getter returning `{...this.#last}` passes deep equality and fails this).
+            assert(
+                channel.last === frame.posts[0]?.message,
+                "…and it is the very object the frame was posted — one value, not two snapshots",
+            );
+
+            engine.apply(BUILTIN_LIGHT);
+            assert(
+                channel.last === frame.posts[1]?.message,
+                "after a switch BOTH halves move together",
+            );
+        },
+    },
+    {
         name: "iframe delivery: a throwing/detached frame cannot break the switch for the others",
         run: () => {
             const channel = new IframeThemeChannel();

@@ -35,6 +35,7 @@
 // (C-F3, design 03 §1), and publishing layout to it over the bridge is **e05d2**'s task. A direct
 // write from editor-core would be a defect even if it worked.
 
+import { isRecord } from "./bridge.js";
 import type { DockviewApi, DockviewContentRenderer, DockviewModule } from "./dockview.js";
 import { detectDockview } from "./dockview.js";
 import {
@@ -45,12 +46,22 @@ import {
     parseExtPanelEntry,
 } from "./extpanel.js";
 import { HydrationRuntime } from "./hydration.js";
+// VALUE import for the two D6 member names: they are byte-compared against the C++
+// `kStateSchemaVersionKey` / `kStateDataKey` by `tools/check_webui_assets.py`, so spelling them as
+// literals here would drift SILENTLY past that gate — the gate gets a matching constant, not a
+// matching consumer (editorstate.ts § the same reasoning for its own keys).
+import { STATE_DATA_KEY, STATE_SCHEMA_VERSION_KEY } from "./panels.js";
 import type { PanelClient, PanelManifest, PanelRoster } from "./panels.js";
 import { PANEL_BRIDGE_REFUSALS, PanelPortBridge } from "./panelport.js";
 import type { PanelBridgeReply, PanelVerbHandler } from "./panelport.js";
-// TYPE-ONLY, and the direction is deliberate: `panelverbs.ts` does not import this module, so the
-// table's shape can live with the factory that produces it without creating a cycle.
-import type { PanelVerbTable } from "./panelverbs.js";
+// `panelverbs.ts` does not import this module, so both directions here are acyclic. The TYPE import
+// keeps the table's shape with the factory that produces it; the VALUE import brings in the ONE
+// bound-and-canonicalize gate (M9 e13d), shared with the verb so a blob arriving from PERSISTED
+// BYTES is held to exactly the rule a blob arriving from the panel is.
+import { sanitizePanelState } from "./panelverbs.js";
+import type { PanelStateStore, PanelVerbTable } from "./panelverbs.js";
+// TYPE-ONLY: the theme CHANNEL is injected (see `PanelThemeChannel`), only its target shape travels.
+import type { IframeMessageTarget } from "./theme.js";
 
 /** Dockview's component name for every uitree panel. One renderer type serves them all — see `#create`. */
 const UITREE_COMPONENT = "context-uitree-panel";
@@ -103,13 +114,71 @@ export interface PanelVerbBinding {
     readonly declaredCapabilities: readonly string[];
     readonly manifestCommandIds: readonly string[];
     readonly request: PanelPortRequest;
+    /**
+     * THIS PANEL's state store (M9 e13d) — supplied by the renderer, whose lifetime is the panel's.
+     *
+     * Threaded through the binding rather than created by the factory because the HOST also has to
+     * read and seed it (`portState` / `seedPortState`), and a store the factory minted would be
+     * reachable only from inside the verb table — leaving persistence with nothing to publish.
+     */
+    readonly state: PanelStateStore;
 }
 
 /** Builds one panel's verb table. Absent ⇒ every panel keeps e13b-1's deny-all empty table. */
 export type PanelVerbFactory = (binding: PanelVerbBinding) => PanelVerbTable;
 
-/** The renderer-side half of `PanelVerbFactory`: everything bound except the late `request`. */
-type PanelVerbBinder = (request: PanelPortRequest) => PanelVerbTable;
+/**
+ * The renderer-side half of `PanelVerbFactory`: everything bound except the two things only the
+ * renderer holds — the late `request` on the port it is about to create, and (M9 e13d) the state
+ * store whose LIFETIME IS THE PANEL's.
+ */
+type PanelVerbBinder = (request: PanelPortRequest, state: PanelStateStore) => PanelVerbTable;
+
+/**
+ * The theme-token PUSH channel a package panel's frame registers with (M9 e13d, design 06 §1 "pushed
+ * into panel iframes by the panel host").
+ *
+ * Structurally `IframeThemeChannel` (theme.ts) and nothing else, but named as a two-method interface
+ * for the same reason `PanelClient` is injected rather than constructed here: this module owns DOM
+ * and lifecycle, and a hard dependency on the theme engine would make every PanelHost test drag one
+ * in. `boot.ts` passes the real channel; a host that passes none simply pushes no tokens, which is
+ * what every test that does not opt in should see.
+ */
+export interface PanelThemeChannel {
+    register(target: IframeMessageTarget): void;
+    unregister(target: IframeMessageTarget): void;
+}
+
+/**
+ * The persisted wrapper around one panel's state blob — the D6 shape the C++ models already use
+ * (`{schemaVersion, data}`, editorstate.ts § `PersistedState`).
+ *
+ * REUSED RATHER THAN INVENTED so the editor-state document holds ONE shape for every panel kind: the
+ * Shell stores the map opaquely, and a second wrapper spelling would mean a reader had to know which
+ * kind of panel wrote each entry before it could parse it.
+ */
+export interface PersistedPanelState {
+    readonly schemaVersion: number;
+    readonly data: unknown;
+}
+
+function isPersistedPanelState(value: unknown): value is PersistedPanelState {
+    return (
+        // `isRecord` rather than a fourth inline copy of the plain-object test — the sibling
+        // `editorstate.ts` already imports it from `bridge.js` for exactly this job, and the type
+        // predicate removes the `as Record<string, unknown>` cast an inline test needs to index.
+        isRecord(value) &&
+        typeof value[STATE_SCHEMA_VERSION_KEY] === "number" &&
+        // `data` MUST BE PRESENT, not merely typed — this is the clause that makes the TRUNCATED
+        // WRITE in `seedState`'s contract degrade instead of silently "restoring". A well-formed
+        // entry always carries it: `portState` builds the wrapper from a blob that has already been
+        // through `sanitizePanelState`, which normalizes `undefined` to `null`, so `data` survives
+        // `JSON.stringify` for every value a panel can store. Its ABSENCE therefore means the
+        // document was cut short or hand-edited — the exact case the doc claims degrades, and which
+        // a `schemaVersion`-only guard waved through as a restore of `undefined`.
+        STATE_DATA_KEY in value
+    );
+}
 
 /**
  * A panel editor-core renders ITSELF (M9 e06d, `content.type: "local"`).
@@ -126,6 +195,9 @@ interface HostedPanel {
     readonly manifest: PanelManifest;
     readonly renderer: PanelRenderer;
 }
+
+/** A hosted panel known to be a live third-party (`iframe`) one — see `PanelHost.#portPanel`. */
+type HostedIframePanel = HostedPanel & { readonly renderer: IframePanelRenderer };
 
 /** What PanelHost needs from any content renderer it mounts. */
 interface PanelRenderer extends DockviewContentRenderer {
@@ -195,6 +267,29 @@ class LocalPanelRenderer implements PanelRenderer {
 }
 
 /**
+ * Build the theme-push target for one panel frame (M9 e13d) — the object `IframeThemeChannel` holds.
+ *
+ * ⚠ LAZY BY CONSTRUCTION: the window is resolved at POST time, never captured. A frame that is not in
+ * a document has a `null` `contentWindow`, and the renderer registers BEFORE Dockview mounts its
+ * element, so a captured value would be `null` forever and the panel would never be themed — a
+ * failure that is total, silent, and indistinguishable from "the package ignores theme events".
+ *
+ * EXTRACTED FROM THE RENDERER SO THE LAZINESS IS TESTABLE. Inline, the only witnesses were a real
+ * frame's real `contentWindow` and a channel post that `IframeThemeChannel.#post` swallows on the way
+ * out — so eager capture was a mutation NO assertion could see, which is precisely the shape of a
+ * non-vacuity claim that is itself vacuous. As a pure function of a resolver it is discriminated by
+ * one DOM-free case (`panelstate.test.ts` § the target): resolve `null` first, then a recorder, and
+ * an eager implementation posts to neither.
+ */
+export function makeIframeThemeTarget(resolveWindow: () => Window | null): IframeMessageTarget {
+    return {
+        postMessage: (message: unknown, targetOrigin: string): void => {
+            resolveWindow()?.postMessage(message, targetOrigin);
+        },
+    };
+}
+
+/**
  * The Dockview content renderer for a THIRD-PARTY package panel (M9 e13a-2, `content.type: "iframe"`,
  * design 04 §5 / 08 §1-§2).
  *
@@ -240,21 +335,54 @@ class IframePanelRenderer implements PanelRenderer {
     readonly #url: string;
     readonly #panelId: string;
     readonly #verbs: PanelVerbTable;
+    readonly #themeChannel: PanelThemeChannel | undefined;
+    #themeTarget: IframeMessageTarget | undefined;
     #frame: HTMLIFrameElement | undefined;
     #bridge: PanelPortBridge | undefined;
     #suspended = false;
+    /**
+     * THIS PANEL's opaque state blob (M9 e13d). `null` until the panel stores one or a persisted blob
+     * seeds it.
+     *
+     * HELD ON THE RENDERER, whose lifetime IS the panel's — the same lifetime a `uitree` panel's C++
+     * model has, which is what makes this the port-side ANALOGUE of that model rather than a cache
+     * beside it. It follows that a closed panel's blob is gone from memory exactly when the panel is,
+     * and that what survives is what `LayoutPersistence` already published.
+     */
+    #state: unknown = null;
+    /**
+     * Has the PANEL itself written state? A persisted seed never overwrites a live write.
+     *
+     * THE ORDERING THIS CLOSES. `LayoutPersistence.restore()` seeds after `PanelHost.start()` has
+     * mounted the frame, while the panel's first `bridge.state.set` can only arrive after its
+     * document has loaded over `context-ext://` AND completed the port handshake — so the seed wins
+     * by a wide margin in every real boot. "A wide margin" is not an invariant, though, and the
+     * failure it would leave is silent and total: a seed landing late would overwrite what the user
+     * is already looking at with yesterday's blob. This flag makes the outcome ORDER-INDEPENDENT
+     * instead of merely likely, which is the difference between a race that cannot bite and one that
+     * has not yet.
+     */
+    #stateFromPanel = false;
 
-    constructor(panelId: string, url: string, verbs?: PanelVerbBinder) {
+    constructor(panelId: string, url: string, verbs?: PanelVerbBinder, themeChannel?: PanelThemeChannel) {
         this.#panelId = panelId;
         this.#url = url;
+        this.#themeChannel = themeChannel;
         // THE VERB TABLE IS BUILT HERE, IN THE CONSTRUCTOR, and it is handed a `request` closure that
         // resolves `this.#bridge` LAZILY (through the method below, so there is ONE refusal for a
         // portless panel rather than two spellings of it). The knot it unties is real: the table's
         // `commands.invoke` dispatch needs the bridge, and the bridge needs the table. Deferring
         // through the field means the only way to observe the `undefined` window is to fire a verb
         // before `refresh()` ran — and a verb can only ARRIVE on a port that does not exist yet.
-        this.#verbs = verbs?.((verb: string, params?: unknown): Promise<PanelBridgeReply> =>
-            this.request(verb, params),
+        this.#verbs = verbs?.(
+            (verb: string, params?: unknown): Promise<PanelBridgeReply> => this.request(verb, params),
+            {
+                read: (): unknown => this.#state,
+                write: (value: unknown): void => {
+                    this.#state = value;
+                    this.#stateFromPanel = true;
+                },
+            },
         ) ?? { verbs: new Map<string, PanelVerbHandler>(), dispose: (): void => {} };
         this.element = document.createElement("div");
         this.element.className = `ctx-panel-body ${IFRAME_PANEL_CLASS}`;
@@ -263,6 +391,45 @@ class IframePanelRenderer implements PanelRenderer {
 
     get suspended(): boolean {
         return this.#suspended;
+    }
+
+    /** This panel's current blob (M9 e13d), or `null` when it has none to persist. */
+    get stateBlob(): unknown {
+        return this.#state;
+    }
+
+    /**
+     * Apply a PERSISTED blob to this panel's store (M9 e13d) — the reload half of the round trip.
+     * `true` when the panel now holds usable state, `false` when it was degraded to its defaults.
+     *
+     * DEGRADES, NEVER THROWS, and mirrors the C++ `restore_panel_state` contract clause for clause so
+     * `LayoutPersistence` needs no second notion of what a bad blob is: a wrong `schemaVersion` is a
+     * package that changed its own state shape across versions, and giving it yesterday's data would
+     * hand a package a shape its current code does not parse — the exact bug the version exists to
+     * prevent. A structurally unusable blob (a hand-edited editor-state file, a truncated write)
+     * degrades the same way.
+     *
+     * The blob is RE-SANITIZED rather than trusted because it arrives from a FILE, not from the port:
+     * `.editor/editor-state.json` is editable by a human and by any tool, and a blob restored past
+     * the bound would be re-published at the next layout change — an amplification loop seeded from
+     * disk. One gate, both directions (panelverbs.ts § `sanitizePanelState`).
+     */
+    seedState(persisted: unknown, schemaVersion: number): boolean {
+        if (this.#stateFromPanel) {
+            // The panel already wrote state, so it has restored itself (or moved on). Reported as
+            // restored because the panel IS holding state — see `#stateFromPanel` for why the seed
+            // yields rather than clobbering it.
+            return true;
+        }
+        if (!isPersistedPanelState(persisted) || persisted.schemaVersion !== schemaVersion) {
+            return false;
+        }
+        const verdict = sanitizePanelState(persisted.data);
+        if (verdict.diagnostic !== "") {
+            return false;
+        }
+        this.#state = verdict.state;
+        return true;
     }
 
     /**
@@ -337,6 +504,31 @@ class IframePanelRenderer implements PanelRenderer {
             // e13b-2's verbs, or the empty table (= e13b-1's deny-all) when the host wired none.
             verbs: this.#verbs.verbs,
         });
+        // THE THEME PUSH TARGET (M9 e13d), registered with the frame — the wiring that makes
+        // `IframeThemeChannel` live. Every theme SWITCH from here on re-posts into this frame, which
+        // is the "re-tokened on theme change" half of the task.
+        //
+        // ⚠ WHAT REGISTERING HERE DOES NOT BUY: the channel's LATE-REGISTRATION REPLAY. `register`
+        // does post the current theme immediately, but this method runs before Dockview has mounted
+        // `element`, so at that instant `frame.contentWindow` is `null` and the replay resolves to
+        // nothing (the target is lazy — see `makeIframeThemeTarget`). A mid-session mount is
+        // therefore themed by the PULL (`bridge.theme.tokens`), not by the replay, which is the
+        // concrete reason the pull exists at all rather than a redundancy beside the push
+        // (theme.ts § `last`). Registering early is still right: it is the one place holding the
+        // frame, and it costs a no-op post rather than a missed switch.
+        //
+        // ⚠ AND IT DELIBERATELY DOES NOT FOLLOW THE PORT'S REVOCATION. A `WindowProxy` is stable
+        // across same-slot navigations (panelport.ts § the file header), so a package that
+        // re-navigates its own frame keeps receiving pushes after its PORT has been revoked. That is
+        // correct FOR THIS PAYLOAD AND ONLY FOR IT: the theme is one public, identical value for
+        // every panel in the window, so the second document learns nothing it could not have asked
+        // for by being mounted legitimately. State never travels this way for exactly the reason
+        // this sentence has to be written (panelverbs.ts § the cross-package property).
+        if (this.#themeChannel !== undefined) {
+            const target = makeIframeThemeTarget((): Window | null => frame.contentWindow);
+            this.#themeTarget = target;
+            this.#themeChannel.register(target);
+        }
         frame.setAttribute("src", this.#url);
         this.#frame = frame;
         this.element.replaceChildren(frame);
@@ -362,6 +554,15 @@ class IframePanelRenderer implements PanelRenderer {
         // `event.source` of every OTHER panel's messages. `PanelPortBridge.dispose` is idempotent, so
         // a second dispose (or one after a revocation) is a no-op.
         this.#bridge?.dispose();
+        // THEN THE THEME TARGET. The channel outlives this renderer exactly as the command registry
+        // does below, so a target left registered is a closure holding a dead frame that every future
+        // theme switch posts into — a leak whose only symptom is a slowly growing broadcast fan-out.
+        // Its `postMessage` would not throw either (`contentWindow` is `null` on a detached frame, and
+        // the optional call swallows it), so nothing would ever surface it.
+        if (this.#themeTarget !== undefined) {
+            this.#themeChannel?.unregister(this.#themeTarget);
+            this.#themeTarget = undefined;
+        }
         // THEN THE COMMANDS. The registry outlives this renderer, so anything the panel registered
         // over `bridge.commands.register` has to be withdrawn HERE or it outlives the panel: a ghost
         // palette row dispatching over the port just closed above, and — because a reopened panel
@@ -521,6 +722,14 @@ export interface PanelHostOptions {
      * every test that does not opt in should see. `boot.ts` supplies `makePanelBridgeVerbs`.
      */
     readonly panelVerbs?: PanelVerbFactory;
+    /**
+     * The theme-token push channel every `iframe` panel's frame registers with (M9 e13d).
+     *
+     * OPTIONAL, and its absence is a real configuration: a host with no theme engine (a T1 case, a
+     * harness) pushes no tokens and package panels simply keep whatever their own stylesheet says.
+     * `boot.ts` supplies `ThemeEngine.iframes`.
+     */
+    readonly themeChannel?: PanelThemeChannel;
 }
 
 /** Options for `PanelHost.start`. */
@@ -549,6 +758,7 @@ export class PanelHost {
     readonly #dockview: DockviewModule | undefined;
     readonly #localPanels: ReadonlyMap<string, LocalPanelFactory>;
     readonly #panelVerbs: PanelVerbFactory | undefined;
+    readonly #themeChannel: PanelThemeChannel | undefined;
     readonly #panels = new Map<string, HostedPanel>();
     #api: DockviewApi | null = null;
     #roster: PanelRoster | null = null;
@@ -559,6 +769,73 @@ export class PanelHost {
         this.#dockview = options.dockview ?? detectDockview();
         this.#localPanels = options.localPanels ?? new Map<string, LocalPanelFactory>();
         this.#panelVerbs = options.panelVerbs;
+        this.#themeChannel = options.themeChannel;
+    }
+
+    /**
+     * The persisted-shape state blob for a live third-party (`iframe`) panel (M9 e13d).
+     *
+     * THREE ANSWERS, because the caller has three things to do — and they are in the SIGNATURE, not
+     * only in this paragraph: an `unknown` return would let a caller collapse two of them (exactly
+     * the mutation the tests plant) with no complaint from the compiler. `undefined` = NOT a port panel, so
+     * take the C++ `panel.state.get` route. `null` = a port panel holding nothing, so publish neither
+     * an entry nor a round trip. Otherwise the D6 wrapper to publish. Collapsing the first two onto
+     * `undefined` reads as "ask the Shell" for a panel the Shell has no model for, which is a
+     * guaranteed refusal bought at the price of a bridge round trip (see the `null` arm below).
+     *
+     * WHY THE HOST ANSWERS THIS AT ALL. An iframe panel has no C++ model, so `panel.state.get` has
+     * nothing to ask (`panel_host.cpp` answers for models only). Its state lives on this side of the
+     * bridge, and this is the ONE place holding both the renderer that owns the blob and the manifest
+     * that names its `schemaVersion`.
+     */
+    portState(panelId: string): PersistedPanelState | null | undefined {
+        const hosted = this.#portPanel(panelId);
+        if (hosted === undefined) {
+            return undefined; // not a port panel — the caller's signal to take the C++ route
+        }
+        const data = hosted.renderer.stateBlob;
+        if (data === null || data === undefined) {
+            // NULL, NOT `undefined` — a port panel that simply holds nothing. The two answers are
+            // DIFFERENT INSTRUCTIONS to `LayoutPersistence.#publish`: `undefined` means "ask the
+            // Shell", and answering it here would send a `panel.state.get` for a panel `panel_host.cpp`
+            // can only refuse (an iframe panel has no model, so it is `hosted:false`) — one
+            // guaranteed-refused round trip per stateless package panel per publish, worst on the
+            // `pagehide` flush the gather is ordered to keep short. `null` means "port panel, nothing
+            // to persist": skip it and publish neither entry nor round trip.
+            return null;
+        }
+        return {
+            [STATE_SCHEMA_VERSION_KEY]: hosted.manifest.schemaVersion,
+            [STATE_DATA_KEY]: data,
+        } satisfies PersistedPanelState;
+    }
+
+    /**
+     * The hosted entry for a live third-party (`iframe`) panel, or `undefined` for anything else.
+     *
+     * ONE PREDICATE FOR THE THREE PORT ACCESSORS. `portState`, `seedPortState` and `portRequest` must
+     * agree on what a port panel IS — `LayoutPersistence` routes a whole persisted document on that
+     * one answer, and the two routes are exclusive only for as long as they agree — so the test is
+     * written once rather than three times in three spellings.
+     */
+    #portPanel(panelId: string): HostedIframePanel | undefined {
+        const hosted = this.#panels.get(panelId);
+        return hosted !== undefined && hosted.renderer instanceof IframePanelRenderer
+            ? (hosted as HostedIframePanel)
+            : undefined;
+    }
+
+    /**
+     * Seed a live third-party (`iframe`) panel's blob from persisted state (M9 e13d).
+     *
+     * `undefined` means "not a port panel" — the signal `LayoutPersistence.restore` uses to fall
+     * through to the C++ `panel.state.set` route. The two routes are EXCLUSIVE by construction (a
+     * panel is either an iframe or it is not), so no blob is ever applied twice. `true`/`false` are
+     * the restored / degraded verdict, matching what the C++ route reports.
+     */
+    seedPortState(panelId: string, persisted: unknown): boolean | undefined {
+        const hosted = this.#portPanel(panelId);
+        return hosted?.renderer.seedState(persisted, hosted.manifest.schemaVersion);
     }
 
     /**
@@ -570,12 +847,11 @@ export class PanelHost {
      * renderers.
      */
     portRequest(panelId: string): PanelPortRequest | undefined {
-        const hosted = this.#panels.get(panelId);
-        const renderer = hosted?.renderer;
-        return renderer instanceof IframePanelRenderer
-            ? (verb: string, params?: unknown): Promise<PanelBridgeReply> =>
-                  renderer.request(verb, params)
-            : undefined;
+        const renderer = this.#portPanel(panelId)?.renderer;
+        return renderer === undefined
+            ? undefined
+            : (verb: string, params?: unknown): Promise<PanelBridgeReply> =>
+                  renderer.request(verb, params);
     }
 
     get api(): DockviewApi | null {
@@ -797,6 +1073,28 @@ export class PanelHost {
         const manifest = this.#roster?.panels.find((entry) => entry.id === panelId);
         const renderer = this.#renderer(panelId, manifest);
         if (manifest !== undefined) {
+            // DISPOSE THE ONE BEING REPLACED, IF THERE IS ONE. Dockview calls `init` and NOTHING
+            // else on a content renderer (dockview.ts § the lifecycle note) — it never disposes ours
+            // — so overwriting this map entry WITHOUT disposing would orphan the previous renderer
+            // while every registration it made stayed live: a theme push target holding a dead frame
+            // that each future switch posts into, a window `message` listener, and the panel's
+            // registered commands. None of those surfaces a symptom, which is why the teardown is
+            // written here rather than left to whoever notices.
+            //
+            // ⚠ HONEST SCOPE — NO KNOWN CALLER REACHES IT TODAY, and this note exists so the next
+            // reader does not re-derive that. `#renderer`'s comment names `restoreLayout` →
+            // `fromJSON` → `createComponent` as a real caller of the CONSTRUCTION path, which it is;
+            // it is NOT evidence that Dockview re-creates a component for an id it is ALREADY
+            // hosting. Measured against the pinned 7.0.2 bundle in the T1 tier (M9 e13d refine): a
+            // `restoreLayout` of a captured layout, and of a DONOR host's layout into a host whose
+            // `start()` had already opened the same panel — the real boot shape — each left the
+            // theme channel holding exactly ONE target either way. So this line is a guard on an
+            // unreached path, and DELIBERATELY ships without a test: a case asserting it would be
+            // vacuous, and a vacuous case carrying a non-vacuity claim is worse than no case at all.
+            // Kept because it costs one lookup on a path that runs once per panel creation and is
+            // correct by construction — dropping an entry from `#panels` without disposing it can
+            // never be right — not because a leak was observed.
+            this.#panels.get(panelId)?.renderer.dispose();
             this.#panels.set(panelId, { manifest, renderer });
         }
         return renderer;
@@ -851,7 +1149,7 @@ export class PanelHost {
                 const binder: PanelVerbBinder | undefined =
                     factory === undefined
                         ? undefined
-                        : (request: PanelPortRequest): PanelVerbTable =>
+                        : (request: PanelPortRequest, state: PanelStateStore): PanelVerbTable =>
                               factory({
                                   panelId,
                                   packageId: entry.packageId,
@@ -860,8 +1158,9 @@ export class PanelHost {
                                       (command) => command.id,
                                   ),
                                   request,
+                                  state,
                               });
-                return new IframePanelRenderer(panelId, entry.url, binder);
+                return new IframePanelRenderer(panelId, entry.url, binder, this.#themeChannel);
             }
             case "uitree":
                 return new UitreePanelRenderer(panelId, this.#client, manifest.gestures);

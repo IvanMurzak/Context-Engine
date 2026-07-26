@@ -34,11 +34,16 @@ import {
     PANEL_VERB_COMMANDS_LIST,
     PANEL_VERB_COMMANDS_REGISTER,
     PANEL_VERB_COMMANDS_UNREGISTER,
+    PANEL_STATE_MAX_JSON_LENGTH,
     PANEL_VERB_COMMAND_INVOKE,
+    PANEL_VERB_STATE_GET,
+    PANEL_VERB_STATE_SET,
+    PANEL_VERB_THEME_TOKENS,
     PANEL_VERB_UI_SUBSCRIBE,
     RESERVED_COMMAND_PREFIXES,
     capabilityDenial,
     makePanelBridgeVerbs,
+    sanitizePanelState,
     validatePackageCommandId,
 } from "../panelverbs.js";
 import type {
@@ -46,6 +51,7 @@ import type {
     PanelCommandRejection,
     PanelCommandView,
 } from "../panelverbs.js";
+import type { ThemeChangedPayload } from "../theme.js";
 import type { WhenContext } from "../when.js";
 
 // ------------------------------------------------------------------------------------- the fixture
@@ -84,10 +90,25 @@ interface VerbFixture {
      * would otherwise have read as "the delegation does not work".)
      */
     setContext(context: WhenContext): void;
+    /** Swap the theme provider — a METHOD for the same reason `setContext` is one (M9 e13d). */
+    setTheme(payload: ThemeChangedPayload | undefined): void;
+    /** What the panel's own store currently holds, read from OUTSIDE the verbs (M9 e13d). */
+    storedState(): unknown;
+    /** Every `write` the store saw, in order — the witness that `set` reached the store at all. */
+    readonly writes: unknown[];
 }
 
 interface FixtureOptions {
     readonly grants?: PanelCapabilityGrants;
+    /**
+     * Model "no theme has been applied in this window" — the arm `bridge.theme.tokens` refuses on.
+     *
+     * A BOOLEAN, matching `withoutRegistry` below rather than an optional payload: an optional
+     * `theme?: ThemeChangedPayload | undefined` cannot distinguish "absent" from "explicitly
+     * undefined" without an `"theme" in options` probe, and every case that wants a theme wants the
+     * default one anyway (the ones that need a DIFFERENT theme set it through `fx.setTheme`).
+     */
+    readonly withoutTheme?: boolean;
     readonly declaredCapabilities?: readonly string[];
     readonly manifestCommandIds?: readonly string[];
     /** Replaces the registry with `undefined` — the "command layer never came up" arm. */
@@ -153,6 +174,14 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
     const state: { context: WhenContext } = {
         context: { panelFocus: "", textInputFocus: false },
     };
+    // The e13d halves, held in the fixture so a case can drive them from outside the table: the
+    // theme provider is late-bound in production too (the theme changes under a mounted panel), and
+    // the store is the renderer's in production (its lifetime IS the panel's).
+    const theme: { payload: ThemeChangedPayload | undefined } = {
+        payload: options.withoutTheme === true ? undefined : themePayload(),
+    };
+    const store: { value: unknown } = { value: null };
+    const writes: unknown[] = [];
     const table = makePanelBridgeVerbs({
         panelId: PANEL_ID,
         packageId: PACKAGE_ID,
@@ -161,6 +190,14 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
         registry: () => (options.withoutRegistry === true ? undefined : registry),
         whenContext: () => state.context,
         grants: options.grants ?? DENY_ALL_CAPABILITY_GRANTS,
+        themeTokens: () => theme.payload,
+        state: {
+            read: (): unknown => store.value,
+            write: (value: unknown): void => {
+                store.value = value;
+                writes.push(value);
+            },
+        },
         request: (verb: string, params: unknown): Promise<PanelBridgeReply> => {
             invoked.push(`${verb}:${JSON.stringify(params)}`);
             return Promise.resolve(options.invokeReply ?? { ok: true, result: null });
@@ -169,11 +206,28 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
     return {
         registry,
         invoked,
+        writes,
         verbs: table.verbs,
         dispose: table.dispose,
         setContext: (context: WhenContext): void => {
             state.context = context;
         },
+        setTheme: (payload: ThemeChangedPayload | undefined): void => {
+            theme.payload = payload;
+        },
+        storedState: (): unknown => store.value,
+    };
+}
+
+/** A theme payload shaped exactly like the one `ThemeEngine` broadcasts. */
+function themePayload(themeId = "builtin.dark"): ThemeChangedPayload {
+    return {
+        themeId,
+        name: themeId === "builtin.dark" ? "Dark" : "Light",
+        appearance: themeId === "builtin.dark" ? "dark" : "light",
+        highContrast: false,
+        reducedMotion: false,
+        variables: { "--ctx-colors-panel": themeId === "builtin.dark" ? "#0a0a0a" : "#ffffff" },
     };
 }
 
@@ -827,6 +881,269 @@ export const panelVerbsTests: readonly TestCase[] = [
             );
             const headless = fixture({ withoutRegistry: true });
             headless.dispose();
+        },
+    },
+
+    // ------------------------------------------------------------------- M9 e13d — theme + state
+
+    {
+        // ⚠ PLANT (a): make the handler return a captured snapshot instead of calling the provider
+        //   (`const snapshot = context.themeTokens()` at table-build time) — RED, the second `get`
+        //   still reports Dark. That is the whole failure mode "re-tokens on a theme switch" names:
+        //   a panel opened under Dark would answer Light-era questions with Dark forever, and every
+        //   assertion made at a single point in time would pass.
+        name: "panelverbs: bridge.theme.tokens is LATE-BOUND, so a switch changes what it answers",
+        run: async (): Promise<void> => {
+            const fx = fixture({});
+            const dark = (await call(fx, PANEL_VERB_THEME_TOKENS)) as ThemeChangedPayload;
+            assertEqual(dark.themeId, "builtin.dark", "the current theme is answered");
+            assertEqual(
+                dark.variables["--ctx-colors-panel"],
+                "#0a0a0a",
+                "…with the FULL variable set a panel re-tokens itself from, not just an id",
+            );
+
+            fx.setTheme(themePayload("builtin.light"));
+            const light = (await call(fx, PANEL_VERB_THEME_TOKENS)) as ThemeChangedPayload;
+            assertEqual(light.themeId, "builtin.light", "after a switch the NEW theme is answered");
+            assertEqual(
+                light.variables["--ctx-colors-panel"],
+                "#ffffff",
+                "…and the variables moved with it",
+            );
+        },
+    },
+    {
+        // The honest-refusal arm. A window whose theme engine never came up must NOT hand a panel an
+        // empty token set: a panel that styles itself from `{}` renders invisible and blames its own
+        // stylesheet, which is strictly worse than a refusal it can report.
+        //
+        // ⚠ PLANT (b): answer `{...empty payload}` instead of refusing — RED here.
+        name: "panelverbs: bridge.theme.tokens REFUSES when no theme has been applied",
+        run: async (): Promise<void> => {
+            const fx = fixture({ withoutTheme: true });
+            const refusal = await refusalFrom(fx, PANEL_VERB_THEME_TOKENS);
+            assertEqual(
+                refusal.code,
+                PANEL_BRIDGE_REFUSALS.verbNotGranted,
+                "an absent subsystem refuses like the absent command layer does — no new code spent",
+            );
+            assert(
+                refusal.message.includes("theme"),
+                "…and names the subsystem, so a package author is not left guessing",
+            );
+        },
+    },
+    {
+        // ⚠ PLANT (c): drop `context.state.write(...)` from the set handler (keep the `{stored:true}`
+        //   reply) — RED: the reply still claims success, and `get` answers `null`. That is the exact
+        //   shape a "state round-trips" gate must not pass vacuously, because the SET call's own
+        //   reply is the thing a naive test would assert on.
+        // ⚠ PLANT (d): make `get` re-read the raw params instead of the store — RED for the same case.
+        name: "panelverbs: bridge.state.set stores, and bridge.state.get reads BACK what was stored",
+        run: async (): Promise<void> => {
+            const fx = fixture({});
+            assertEqual(
+                await call(fx, PANEL_VERB_STATE_GET),
+                { state: null },
+                "a panel that never stored anything reads null, not undefined and not a throw",
+            );
+
+            const blob = { filter: "mesh", scroll: 42, open: ["a", "b"] };
+            const stored = (await call(fx, PANEL_VERB_STATE_SET, {
+                state: blob,
+            })) as { stored: boolean; length: number };
+            assertEqual(stored.stored, true, "the set is accepted");
+            assertEqual(
+                stored.length,
+                JSON.stringify(blob).length,
+                "…and reports the MEASURED serialized length — the number a package sizes its own " +
+                    "state against, so any constant would do (a `> 0` assertion accepts `1`)",
+            );
+            assertEqual(fx.writes.length, 1, "the store really saw one write");
+
+            assertEqual(
+                await call(fx, PANEL_VERB_STATE_GET),
+                { state: { filter: "mesh", scroll: 42, open: ["a", "b"] } },
+                "and get answers with the stored blob, unchanged",
+            );
+        },
+    },
+    {
+        // THE PROPERTY THAT MAKES A RELOAD HONEST. The value arrives by structured clone, which
+        // carries shapes JSON does not; what is PERSISTED is JSON. If the store kept the cloned
+        // value, `get` would answer with something a reload could never reproduce and the package
+        // would meet the loss tomorrow instead of now.
+        //
+        // ⚠ PLANT (e): store `value` instead of `verdict.state` (skip the round trip) — RED: the Map
+        //   comes back as a Map in-session and would be `{}` after a reload.
+        name: "panelverbs: a stored blob is CANONICALIZED to what will persist, not to what was sent",
+        run: async (): Promise<void> => {
+            const fx = fixture({});
+            await call(fx, PANEL_VERB_STATE_SET, {
+                state: { when: new Date(0), picked: new Map([["k", "v"]]), keep: 1 },
+            });
+            const read = (await call(fx, PANEL_VERB_STATE_GET)) as { state: unknown };
+            assertEqual(
+                JSON.stringify(read.state),
+                JSON.stringify({ when: "1970-01-01T00:00:00.000Z", picked: {}, keep: 1 }),
+                "the in-session answer is already the post-reload answer — a Date is its ISO string " +
+                    "and a Map is the empty object JSON makes of it",
+            );
+            // ⚠ THE TWO ASSERTIONS BELOW ARE THE DISCRIMINATING ONES, and the one above is not.
+            // `JSON.stringify` erases exactly the difference PLANT (e) introduces — a Date and a Map
+            // serialize to the ISO string and `{}` whether or not they were round-tripped first — so
+            // the comparison above documents the SHAPE while these pin the TYPES.
+            assert(
+                typeof (read.state as Record<string, unknown>)["when"] === "string",
+                "the Date really is a string in memory, not a Date that merely serializes like one",
+            );
+            assert(
+                !(((read.state as Record<string, unknown>)["picked"]) instanceof Map),
+                "…so nothing a reload cannot reproduce survives in memory to mislead the package",
+            );
+        },
+    },
+    {
+        // ⚠ PLANT (f): raise/remove the bound in `sanitizePanelState` — RED (the oversize row is
+        //   accepted). ⚠ PLANT (g): truncate instead of refusing — RED, because the case asserts the
+        //   store was NOT written; a truncated blob is not a smaller blob, it is a corrupt one.
+        name: "panelverbs: bridge.state.set REFUSES an oversize or unserializable blob, storing nothing",
+        run: async (): Promise<void> => {
+            const fx = fixture({});
+            await call(fx, PANEL_VERB_STATE_SET, { state: { keep: "me" } });
+
+            const oversize = await refusalFrom(fx, PANEL_VERB_STATE_SET, {
+                state: { blob: "x".repeat(PANEL_STATE_MAX_JSON_LENGTH + 1) },
+            });
+            assertEqual(
+                oversize.code,
+                PANEL_BRIDGE_REFUSALS.malformedRequest,
+                "an over-budget blob is refused as a malformed REQUEST, not as a host fault",
+            );
+            assert(
+                oversize.message.includes(String(PANEL_STATE_MAX_JSON_LENGTH)),
+                "…naming the bound, so a package can size its state against it",
+            );
+
+            // A cycle is the reachable non-serializable shape: structured clone supports one.
+            const cyclic: Record<string, unknown> = { name: "loop" };
+            cyclic["self"] = cyclic;
+            const cycle = await refusalFrom(fx, PANEL_VERB_STATE_SET, { state: cyclic });
+            assertEqual(
+                cycle.code,
+                PANEL_BRIDGE_REFUSALS.malformedRequest,
+                "so is a cyclic blob — JSON cannot express it, so it could never round-trip",
+            );
+
+            assertEqual(
+                await call(fx, PANEL_VERB_STATE_GET),
+                { state: { keep: "me" } },
+                "and NEITHER refusal disturbed the blob already stored",
+            );
+            assertEqual(fx.writes.length, 1, "the store saw exactly the one accepted write");
+        },
+    },
+    {
+        // THE CROSS-PACKAGE PROPERTY THIS FILE'S HEADER RESTS ON, asserted rather than argued: state
+        // is private to one panel, and there is NO ARGUMENT by which one package could name another's
+        // blob. Both halves are pinned because they fail differently — the first would be a leak
+        // through a shared store, the second a leak through an addressable one.
+        //
+        // ⚠ PLANT: give `bridge.state.get|set` a `panelId` parameter and resolve the store through a
+        //   shared map — RED on the second half (the foreign read starts answering).
+        name: "panelverbs: one panel's state is UNREACHABLE from another panel's table",
+        run: async (): Promise<void> => {
+            const mine = fixture({});
+            const theirs = fixture({});
+            await call(mine, PANEL_VERB_STATE_SET, { state: { secret: "mine" } });
+
+            assertEqual(
+                await call(theirs, PANEL_VERB_STATE_GET),
+                { state: null },
+                "a second panel's table closes over its OWN store, so it sees nothing of the first's",
+            );
+            assertEqual(
+                await call(theirs, PANEL_VERB_STATE_GET, { panelId: PANEL_ID, packageId: PACKAGE_ID }),
+                { state: null },
+                "…and NAMING the first panel changes nothing: the verb takes no id, so the params " +
+                    "are inert — there is no lookup here that could be tricked into resolving one",
+            );
+            await call(theirs, PANEL_VERB_STATE_SET, {
+                state: { secret: "theirs" },
+                panelId: PANEL_ID,
+            });
+            assertEqual(
+                await call(mine, PANEL_VERB_STATE_GET),
+                { state: { secret: "mine" } },
+                "…nor can a WRITE addressed at the first panel reach it — the isolation is not an " +
+                    "id check that could be bypassed, it is the absence of an id to check",
+            );
+            assertEqual(mine.writes.length, 1, "the first panel's store saw only its own write");
+        },
+    },
+    {
+        // `set` with no `state` member is how a panel CLEARS its state. Worth pinning because the
+        // permissive reading — "no state member ⇒ ignore the call" — is one line away and would
+        // leave a package no way to forget anything.
+        name: "panelverbs: bridge.state.set with no state member CLEARS the blob",
+        run: async (): Promise<void> => {
+            const fx = fixture({});
+            await call(fx, PANEL_VERB_STATE_SET, { state: { a: 1 } });
+            await call(fx, PANEL_VERB_STATE_SET, {});
+            assertEqual(
+                await call(fx, PANEL_VERB_STATE_GET),
+                { state: null },
+                "an empty set clears rather than being ignored",
+            );
+            assertEqual(fx.storedState(), null, "…observed on the store itself, not only in the reply");
+        },
+    },
+    {
+        // The sanitizer drives directly too — it is the ONE gate BOTH the verb and the persisted-bytes
+        // path (panelhost.ts `seedState`) go through, so its verdicts are worth pinning without a
+        // table around them.
+        name: "panelverbs: sanitizePanelState is total over every shape a blob can arrive as",
+        run: (): void => {
+            assertEqual(sanitizePanelState(undefined).diagnostic, "", "undefined is a clear, not a fault");
+            assertEqual(sanitizePanelState(undefined).state, null, "…normalized to null");
+            assertEqual(sanitizePanelState(null).diagnostic, "", "null is storable");
+            assertEqual(sanitizePanelState(7).state, 7, "a bare number is a legal JSON document");
+            assertEqual(sanitizePanelState("x").state, "x", "so is a bare string");
+            assertEqual(
+                JSON.stringify(sanitizePanelState([1, { a: 2 }]).state),
+                JSON.stringify([1, { a: 2 }]),
+                "an array survives intact",
+            );
+            const fn = sanitizePanelState(() => 1);
+            assert(fn.diagnostic !== "", "a function is refused (JSON.stringify answers undefined)");
+            assertEqual(fn.state, null, "…and carries no partial value");
+            const big = sanitizePanelState({ b: "y".repeat(PANEL_STATE_MAX_JSON_LENGTH) });
+            assert(big.diagnostic !== "", "an oversize document is refused");
+            assert(
+                big.length > PANEL_STATE_MAX_JSON_LENGTH,
+                "…and reports the length it measured, not the bound",
+            );
+
+            // THE EDGE ITSELF, both sides. Every oversize row above overshoots by ~10 characters or
+            // more, so all of them survive `>` becoming `>=` — i.e. nothing pinned WHICH side of the
+            // bound is inclusive, and a package sizing its state to exactly the documented limit
+            // would have started being refused with no test noticing.
+            // `JSON.stringify({b: "y".repeat(n)})` is `{"b":"…"}`, so its length is n + 8.
+            const exact = sanitizePanelState({ b: "y".repeat(PANEL_STATE_MAX_JSON_LENGTH - 8) });
+            assertEqual(
+                exact.length,
+                PANEL_STATE_MAX_JSON_LENGTH,
+                "the row is built to serialize to EXACTLY the bound",
+            );
+            assertEqual(exact.diagnostic, "", "…and a blob AT the bound is ACCEPTED, not refused");
+            const overByOne = sanitizePanelState({ b: "y".repeat(PANEL_STATE_MAX_JSON_LENGTH - 7) });
+            assertEqual(
+                overByOne.length,
+                PANEL_STATE_MAX_JSON_LENGTH + 1,
+                "…while one character more serializes to one over",
+            );
+            assert(overByOne.diagnostic !== "", "…and THAT is refused — the bound is inclusive");
         },
     },
 ];
