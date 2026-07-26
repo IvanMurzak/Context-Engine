@@ -25,7 +25,7 @@
 // named case here before being reverted byte-exact. Each plant is recorded inline at its own case
 // below as `⚠ PLANT (x)`.
 
-import { assert, assertEqual, AssertionError, type TestCase } from "./harness.js";
+import { assert, assertEqual, delay, waitFor, type TestCase } from "./harness.js";
 import { isRecord } from "../bridge.js";
 import {
     IFRAME_ALLOW,
@@ -54,6 +54,7 @@ import {
     PANEL_VERB_UI_SUBSCRIBE,
     makePanelBridgeVerbs,
 } from "../panelverbs.js";
+import type { ThemeChangedPayload } from "../theme.js";
 
 // --------------------------------------------------------------------------------- the child fixture
 
@@ -225,38 +226,6 @@ function createHarness(options: HarnessOptions = {}): PanelHarness {
             frame.remove();
         },
     };
-}
-
-function delay(ms: number): Promise<void> {
-    return new Promise<void>((resolve) => {
-        setTimeout(resolve, ms);
-    });
-}
-
-/**
- * Poll until `predicate` holds, then return. Polling rather than a one-shot `await` because the facts
- * being waited on arrive from another document's event loop through two different task sources, so
- * "one microtask later" is not a bound the platform gives.
- */
-async function waitFor(
-    what: string,
-    predicate: () => boolean,
-    timeoutMs = 5_000,
-    diagnose?: () => string,
-): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (!predicate()) {
-        if (Date.now() > deadline) {
-            // A TIMEOUT MUST NAME ITS CAUSE. This tier's only channel is the failure string, and a
-            // bare "timed out" here would send the next reader to a full CI-log archaeology pass for
-            // something the bridge's own counters already knew.
-            throw new AssertionError(
-                `timed out after ${String(timeoutMs)}ms waiting for ${what}` +
-                    (diagnose === undefined ? "" : ` — ${diagnose()}`),
-            );
-        }
-        await delay(5);
-    }
 }
 
 /**
@@ -846,7 +815,11 @@ export const panelPortTests: readonly TestCase[] = [
         // arrive mangled) at exactly this hop and nowhere earlier.
         name: "panelport: bridge.theme.tokens + bridge.state.* round-trip over a REAL port (M9 e13d)",
         run: async (): Promise<void> => {
-            const theme: { payload: Record<string, unknown> | undefined } = {
+            // TYPED, not `Record<string, unknown>` + `as never` at the provider below: this case's
+            // whole subject is that the payload SHAPE survives structured clone, and `as never` is
+            // assignable to anything — so a member added to `ThemeChangedPayload` would keep
+            // compiling HERE while every other construction site in the tier went red.
+            const theme: { payload: ThemeChangedPayload | undefined } = {
                 payload: {
                     themeId: "builtin.dark",
                     name: "Dark",
@@ -868,7 +841,7 @@ export const panelPortTests: readonly TestCase[] = [
                 registry: () => undefined,
                 whenContext: () => ({ panelFocus: "", textInputFocus: false }),
                 grants: DENY_ALL_CAPABILITY_GRANTS,
-                themeTokens: () => theme.payload as never,
+                themeTokens: () => theme.payload,
                 state: {
                     read: (): unknown => store.value,
                     write: (value: unknown): void => {

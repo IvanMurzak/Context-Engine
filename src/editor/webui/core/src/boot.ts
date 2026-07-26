@@ -818,7 +818,9 @@ async function startWindowMechanism(
                 }
             }, REHOME_POLL_MS);
         }
-        // A non-primary window rehomes its panels to window 0 when it closes, so nothing is lost.
+        // A non-primary window rehomes its panels to window 0 when it closes, so no PANEL is lost —
+        // and, since M9 e13d, no longer "nothing": a package panel's port blob does not travel this
+        // relay (see `tearOutActivePanel` for why), so it rehomes with its state cleared.
         if (list !== null && windowId !== 0 && typeof window !== "undefined") {
             window.addEventListener("pagehide", (): void => {
                 for (const id of [...host.mounted]) {
@@ -1147,6 +1149,23 @@ function makeEditorActions(
             if (active === undefined) {
                 return { ok: false, note: "no active panel to tear out" };
             }
+            // ⚠ THE C++ ROUTE ONLY, AND THEREFORE NOT A PACKAGE PANEL'S BLOB (M9 e13d). An `iframe`
+            // panel has no model, so `panel.state.get` answers `null` for it and the panel is relayed
+            // with empty state — a real loss, silent today. e13d wired the PORT store
+            // (`host.portState` / `host.seedPortState`) into `LayoutPersistence` ONLY, which is the
+            // RELOAD round trip it owns; the cross-window relay is e10b's mechanism.
+            //
+            // ⚠ AND THE REASON IS SCOPE, NOT IMPOSSIBILITY — said plainly, because "it could not be
+            // done here" would be false and would stop the next reader from doing it. All FIVE sites
+            // could take the port route: the two CAPTURE sites (here and `movePanelToPrimary`) run in
+            // the window where the panel is mounted, and the two APPLY sites (`applyRehomedPanels`
+            // and the boot seed, both above) already `openById`/`start` BEFORE they `setState`, so
+            // the target's store exists by the time they would seed it. What is missing is a drill
+            // that proves a blob survives a real two-window relay — which is e10's kind of test, not
+            // this task's — plus the `pagehide` rehome handler, whose payload would then have to be
+            // gathered while the window is closing. Left as ONE coherent piece of follow-up rather
+            // than three-fifths wired: a half-wired relay loses state on whichever path was skipped
+            // and looks like it works on the others.
             const state = await client.getState(active);
             const result = await windowClient.tearOut(active, state);
             if (result.created) {
@@ -1171,6 +1190,8 @@ function makeEditorActions(
             if (active === undefined) {
                 return { ok: false, note: "no active panel to move" };
             }
+            // Same C++-route-only limit as `tearOutActivePanel` above: a package panel's port blob
+            // does not travel this relay (M9 e13d).
             const state = await client.getState(active);
             const result = await windowClient.moveTo(active, state, 0);
             if (result.moved) {

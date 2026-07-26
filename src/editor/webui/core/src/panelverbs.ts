@@ -28,6 +28,22 @@
 //     read off its own document, which is why the payload may also ride `IframeThemeChannel`'s
 //     UNAUTHENTICATED `targetOrigin:"*"` broadcast (each post still targets ONE `contentWindow`, so
 //     it is a fan-out of one public value, not a shared channel).
+//
+//     ⚠ THAT ARGUMENT COVERS READING, AND ONLY READING — STATED HERE BECAUSE IT DOES NOT COVER
+//     WRITING. A `window.postMessage` broadcast is unauthenticated in BOTH directions, and a
+//     sandboxed package reaches a SIBLING package's `WindowProxy` through the cross-origin surface
+//     (`window.parent.length` / `window.parent[i]` are readable cross-origin, and `postMessage` is
+//     callable on the result). So one package CAN post a fabricated `editor.ui.theme-changed` into
+//     another's frame. What that buys is bounded — the payload is presentation tokens, so the worst
+//     outcome is a panel drawn in the wrong colours; it conveys NO capability, and it is NOT a path
+//     to another package's state (which is why STATE is on the port, next bullet). It is still a
+//     WRITE the editor does not authenticate, and the honest conclusion is that the PORT is what
+//     establishes the cross-package property here and the broadcast is not: a package that must
+//     trust what it is handed should take the tokens from `bridge.theme.tokens` over its own port,
+//     or check `event.source === window.parent` on the pushed event — the editor's own document has
+//     a REAL origin, so a forgery from an opaque-origin sibling is distinguishable, but only by a
+//     panel that looks. Recorded rather than assumed away, because "the port alone is sufficient" is
+//     exactly the claim this bullet cannot make for the push half.
 //   * STATE is a package's PRIVATE data, so it never touches that broadcast. It travels ONLY over the
 //     authenticated per-panel port, and — the structural half — `bridge.state.get|set` take NO panel
 //     or package id: each panel's table closes over ITS OWN store (`PanelVerbContext.state`, supplied
@@ -306,6 +322,15 @@ export const PANEL_STATE_MAX_JSON_LENGTH = 64 * 1024;
 export interface PanelStateStore {
     /** The blob this panel last stored, or what a persisted blob seeded. `null` when it has none. */
     read(): unknown;
+    /**
+     * Store an ALREADY-SANITIZED blob — a `PanelStateVerdict.state`, never a raw panel value.
+     *
+     * The bound and the JSON round trip are `sanitizePanelState`'s and are applied by the CALLER
+     * (the `bridge.state.set` handler below, and panelhost.ts's `seedState` for persisted bytes).
+     * Said here rather than enforced here because sanitizing again inside the store would re-serialize
+     * every write to re-derive a verdict the caller already holds; the cost of that choice is that a
+     * host supplying its OWN `panelVerbs` factory (`PanelHostOptions`) owns this obligation too.
+     */
     write(value: unknown): void;
 }
 
@@ -331,48 +356,54 @@ export interface PanelStateVerdict {
  * the post-reload answer THE SAME VALUE, so a package meets any loss immediately.
  *
  * `undefined` is normalized to `null` and accepted: a `set` carrying no value is how a panel CLEARS
- * its state, and refusing it would leave no way to do so. A function or a symbol cannot survive
- * structured clone at all, so it is unreachable over a real port — it is refused here anyway, because
- * this function is also the gate persisted bytes re-enter through (panelhost.ts `seedState`), and
- * those come off a file a human can edit.
+ * its state, and refusing it would leave no way to do so. A function or a symbol is refused rather
+ * than ignored — NOT because either production caller can produce one (structured clone cannot carry
+ * them over the port, and the persisted path arrives as JSON, which cannot either), but because this
+ * function is EXPORTED and takes `unknown`: the T1 tier drives it directly, and a total function over
+ * `unknown` is cheaper to guarantee than a partial one is to argue safe every time a caller is added.
  */
 export function sanitizePanelState(value: unknown): PanelStateVerdict {
-    let text: string | undefined;
+    // ONE `try` OVER THE WHOLE ROUND TRIP, so this function's TOTALITY is STRUCTURAL rather than
+    // argued. BOTH halves can throw: `JSON.stringify` on a cycle or a throwing `toJSON`, and
+    // `JSON.parse` on a structure too deep to recurse back into. Wrapping only the first would leave
+    // the claim above resting on "anything stringify produced can always be re-parsed", which is not
+    // something the platform promises — and this is the gate a FILE re-enters through (panelhost.ts
+    // `seedState`), whose caller loop is documented to degrade, never abort.
     try {
-        text = JSON.stringify(value === undefined ? null : value) as string | undefined;
+        const text = JSON.stringify(value === undefined ? null : value) as string | undefined;
+        if (text === undefined) {
+            // `JSON.stringify` answers `undefined` — not a string — for a function or a symbol.
+            return {
+                state: null,
+                length: 0,
+                diagnostic: "the state value is not JSON-serializable (a function or a symbol)",
+            };
+        }
+        if (text.length > PANEL_STATE_MAX_JSON_LENGTH) {
+            // REFUSED, never truncated: half a blob is not a smaller blob, it is a corrupt one, and a
+            // panel told "stored" for something it could not read back is worse than a refusal it can
+            // act on. The measured length is reported so a package can size its state against the
+            // bound. Checked BEFORE the parse, so an over-budget blob is never re-materialized.
+            return {
+                state: null,
+                length: text.length,
+                diagnostic:
+                    `the state blob serializes to ${String(text.length)} characters, over the ` +
+                    `${String(PANEL_STATE_MAX_JSON_LENGTH)}-character limit`,
+            };
+        }
+        return { state: JSON.parse(text), length: text.length, diagnostic: "" };
     } catch {
-        // A cycle is the reachable case (structured clone supports one; JSON does not). The thrown
-        // error is deliberately NOT echoed: it is produced by the host's serializer and is therefore
-        // host state, exactly as `PanelPortBridge.#invoke` treats an ordinary throw.
+        // The thrown error is deliberately NOT echoed: it is produced by the host's serializer and is
+        // therefore host state, exactly as `PanelPortBridge.#invoke` treats an ordinary throw.
         return {
             state: null,
             length: 0,
             diagnostic:
-                "the state value is not JSON-serializable (a cycle, or a value whose toJSON threw)",
+                "the state value did not survive a JSON round trip (a cycle, a value whose toJSON " +
+                "threw, or a structure too deeply nested to re-parse)",
         };
     }
-    if (text === undefined) {
-        // `JSON.stringify` answers `undefined` — not a string — for a function or a symbol.
-        return {
-            state: null,
-            length: 0,
-            diagnostic: "the state value is not JSON-serializable (a function or a symbol)",
-        };
-    }
-    if (text.length > PANEL_STATE_MAX_JSON_LENGTH) {
-        // REFUSED, never truncated: half a blob is not a smaller blob, it is a corrupt one, and a
-        // panel told "stored" for something it could not read back is worse than a refusal it can act
-        // on. The measured length is reported so a package can size its own state against the bound.
-        return {
-            state: null,
-            length: text.length,
-            diagnostic:
-                `the state blob serializes to ${String(text.length)} characters, over the ` +
-                `${String(PANEL_STATE_MAX_JSON_LENGTH)}-character limit`,
-        };
-    }
-    // Total: `text` came out of `JSON.stringify`, so it is valid JSON by construction.
-    return { state: JSON.parse(text), length: text.length, diagnostic: "" };
 }
 
 // -------------------------------------------------------------------------------- the verb table

@@ -75,6 +75,44 @@ export function assertNull(actual: unknown, message: string): void {
     }
 }
 
+/** Sleep, as a promise. */
+export function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Poll until `predicate` holds, then return.
+ *
+ * Polling rather than a one-shot `await` because the facts this tier waits on arrive from another
+ * document's event loop through two different task sources, so "one microtask later" is not a bound
+ * the platform gives. It bounds a HANG; it does not measure latency.
+ *
+ * ⚠ LIVES HERE, not in a test file, because two files needed it and the second copy had drifted:
+ * it threw a plain `Error`, which this harness distinguishes from an assertion ONLY by name — so a
+ * timeout was reported as an unexpected runtime error rather than a failed expectation.
+ *
+ * ⚠ A TIMEOUT MUST NAME ITS CAUSE. This tier's only channel is the failure string, and a bare
+ * "timed out" sends the next reader to a full CI-log archaeology pass for something the caller's own
+ * counters already knew — hence `what`, and `diagnose` for the counters.
+ */
+export async function waitFor(
+    what: string,
+    predicate: () => boolean,
+    timeoutMs = 5_000,
+    diagnose?: () => string,
+): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+        if (Date.now() > deadline) {
+            throw new AssertionError(
+                `timed out after ${String(timeoutMs)}ms waiting for ${what}` +
+                    (diagnose === undefined ? "" : ` — ${diagnose()}`),
+            );
+        }
+        await delay(5);
+    }
+}
+
 /**
  * Run every test, isolating failures: one throwing test is recorded and the run continues, so a
  * single break never hides the rest. Returns the verdict rather than reporting it — the entry module

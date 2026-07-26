@@ -349,11 +349,18 @@ export class LayoutPersistence {
             [...this.#panelHost.mounted].map(async (id): Promise<void> => {
                 // The PORT store first (M9 e13d) — a third-party `iframe` panel's blob lives on this
                 // side of the bridge, so asking the Shell for it would answer `null` for every
-                // package panel and the reload would preserve nothing. Synchronous and local, so it
-                // also costs this gather no round trip.
+                // package panel and the reload would preserve nothing. Synchronous and local, so a
+                // package panel costs this gather no round trip AT ALL: `undefined` is the only
+                // answer that falls through to one, and it means "not a port panel".
                 const port = this.#panelHost.portState(id);
                 if (port !== undefined) {
-                    panels[id] = port;
+                    if (port !== null) {
+                        // `null` = a port panel holding nothing. Publishing no entry for it matches
+                        // what the C++ arm below does with a `null` state, and skipping the
+                        // round trip is the whole reason the two are distinguishable at all
+                        // (panelhost.ts § `portState`, the three answers).
+                        panels[id] = port;
+                    }
                     return;
                 }
                 const state = await this.#panelClient.getState(id);

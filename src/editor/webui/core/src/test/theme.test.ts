@@ -673,16 +673,18 @@ export const themeTests: readonly TestCase[] = [
                 BUILTIN_DARK,
                 "the pull answers with the theme that was pushed",
             );
-            assertEqual(
-                channel.last,
-                frame.posts[0]?.message,
+            // IDENTITY (`===`), not `assertEqual`'s deep equality: the claim is "one value, not two
+            // snapshots", and a structurally-equal COPY is exactly the thing being denied — it would
+            // satisfy a deep comparison while reintroducing the second source of truth (a `last`
+            // getter returning `{...this.#last}` passes deep equality and fails this).
+            assert(
+                channel.last === frame.posts[0]?.message,
                 "…and it is the very object the frame was posted — one value, not two snapshots",
             );
 
             engine.apply(BUILTIN_LIGHT);
-            assertEqual(
-                channel.last,
-                frame.posts[1]?.message,
+            assert(
+                channel.last === frame.posts[1]?.message,
                 "after a switch BOTH halves move together",
             );
         },

@@ -100,8 +100,15 @@ interface VerbFixture {
 
 interface FixtureOptions {
     readonly grants?: PanelCapabilityGrants;
-    /** The theme the pull verb answers with. `undefined` ⇒ "no theme applied in this window". */
-    readonly theme?: ThemeChangedPayload | undefined;
+    /**
+     * Model "no theme has been applied in this window" — the arm `bridge.theme.tokens` refuses on.
+     *
+     * A BOOLEAN, matching `withoutRegistry` below rather than an optional payload: an optional
+     * `theme?: ThemeChangedPayload | undefined` cannot distinguish "absent" from "explicitly
+     * undefined" without an `"theme" in options` probe, and every case that wants a theme wants the
+     * default one anyway (the ones that need a DIFFERENT theme set it through `fx.setTheme`).
+     */
+    readonly withoutTheme?: boolean;
     readonly declaredCapabilities?: readonly string[];
     readonly manifestCommandIds?: readonly string[];
     /** Replaces the registry with `undefined` — the "command layer never came up" arm. */
@@ -171,7 +178,7 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
     // theme provider is late-bound in production too (the theme changes under a mounted panel), and
     // the store is the renderer's in production (its lifetime IS the panel's).
     const theme: { payload: ThemeChangedPayload | undefined } = {
-        payload: "theme" in options ? options.theme : themePayload(),
+        payload: options.withoutTheme === true ? undefined : themePayload(),
     };
     const store: { value: unknown } = { value: null };
     const writes: unknown[] = [];
@@ -914,7 +921,7 @@ export const panelVerbsTests: readonly TestCase[] = [
         // ⚠ PLANT (b): answer `{...empty payload}` instead of refusing — RED here.
         name: "panelverbs: bridge.theme.tokens REFUSES when no theme has been applied",
         run: async (): Promise<void> => {
-            const fx = fixture({ theme: undefined });
+            const fx = fixture({ withoutTheme: true });
             const refusal = await refusalFrom(fx, PANEL_VERB_THEME_TOKENS);
             assertEqual(
                 refusal.code,
@@ -942,11 +949,17 @@ export const panelVerbsTests: readonly TestCase[] = [
                 "a panel that never stored anything reads null, not undefined and not a throw",
             );
 
+            const blob = { filter: "mesh", scroll: 42, open: ["a", "b"] };
             const stored = (await call(fx, PANEL_VERB_STATE_SET, {
-                state: { filter: "mesh", scroll: 42, open: ["a", "b"] },
+                state: blob,
             })) as { stored: boolean; length: number };
             assertEqual(stored.stored, true, "the set is accepted");
-            assert(stored.length > 0, "…and reports the measured serialized length");
+            assertEqual(
+                stored.length,
+                JSON.stringify(blob).length,
+                "…and reports the MEASURED serialized length — the number a package sizes its own " +
+                    "state against, so any constant would do (a `> 0` assertion accepts `1`)",
+            );
             assertEqual(fx.writes.length, 1, "the store really saw one write");
 
             assertEqual(
@@ -976,6 +989,14 @@ export const panelVerbsTests: readonly TestCase[] = [
                 JSON.stringify({ when: "1970-01-01T00:00:00.000Z", picked: {}, keep: 1 }),
                 "the in-session answer is already the post-reload answer — a Date is its ISO string " +
                     "and a Map is the empty object JSON makes of it",
+            );
+            // ⚠ THE TWO ASSERTIONS BELOW ARE THE DISCRIMINATING ONES, and the one above is not.
+            // `JSON.stringify` erases exactly the difference PLANT (e) introduces — a Date and a Map
+            // serialize to the ISO string and `{}` whether or not they were round-tripped first — so
+            // the comparison above documents the SHAPE while these pin the TYPES.
+            assert(
+                typeof (read.state as Record<string, unknown>)["when"] === "string",
+                "the Date really is a string in memory, not a Date that merely serializes like one",
             );
             assert(
                 !(((read.state as Record<string, unknown>)["picked"]) instanceof Map),
@@ -1024,6 +1045,44 @@ export const panelVerbsTests: readonly TestCase[] = [
         },
     },
     {
+        // THE CROSS-PACKAGE PROPERTY THIS FILE'S HEADER RESTS ON, asserted rather than argued: state
+        // is private to one panel, and there is NO ARGUMENT by which one package could name another's
+        // blob. Both halves are pinned because they fail differently — the first would be a leak
+        // through a shared store, the second a leak through an addressable one.
+        //
+        // ⚠ PLANT: give `bridge.state.get|set` a `panelId` parameter and resolve the store through a
+        //   shared map — RED on the second half (the foreign read starts answering).
+        name: "panelverbs: one panel's state is UNREACHABLE from another panel's table",
+        run: async (): Promise<void> => {
+            const mine = fixture({});
+            const theirs = fixture({});
+            await call(mine, PANEL_VERB_STATE_SET, { state: { secret: "mine" } });
+
+            assertEqual(
+                await call(theirs, PANEL_VERB_STATE_GET),
+                { state: null },
+                "a second panel's table closes over its OWN store, so it sees nothing of the first's",
+            );
+            assertEqual(
+                await call(theirs, PANEL_VERB_STATE_GET, { panelId: PANEL_ID, packageId: PACKAGE_ID }),
+                { state: null },
+                "…and NAMING the first panel changes nothing: the verb takes no id, so the params " +
+                    "are inert — there is no lookup here that could be tricked into resolving one",
+            );
+            await call(theirs, PANEL_VERB_STATE_SET, {
+                state: { secret: "theirs" },
+                panelId: PANEL_ID,
+            });
+            assertEqual(
+                await call(mine, PANEL_VERB_STATE_GET),
+                { state: { secret: "mine" } },
+                "…nor can a WRITE addressed at the first panel reach it — the isolation is not an " +
+                    "id check that could be bypassed, it is the absence of an id to check",
+            );
+            assertEqual(mine.writes.length, 1, "the first panel's store saw only its own write");
+        },
+    },
+    {
         // `set` with no `state` member is how a panel CLEARS its state. Worth pinning because the
         // permissive reading — "no state member ⇒ ignore the call" — is one line away and would
         // leave a package no way to forget anything.
@@ -1065,6 +1124,26 @@ export const panelVerbsTests: readonly TestCase[] = [
                 big.length > PANEL_STATE_MAX_JSON_LENGTH,
                 "…and reports the length it measured, not the bound",
             );
+
+            // THE EDGE ITSELF, both sides. Every oversize row above overshoots by ~10 characters or
+            // more, so all of them survive `>` becoming `>=` — i.e. nothing pinned WHICH side of the
+            // bound is inclusive, and a package sizing its state to exactly the documented limit
+            // would have started being refused with no test noticing.
+            // `JSON.stringify({b: "y".repeat(n)})` is `{"b":"…"}`, so its length is n + 8.
+            const exact = sanitizePanelState({ b: "y".repeat(PANEL_STATE_MAX_JSON_LENGTH - 8) });
+            assertEqual(
+                exact.length,
+                PANEL_STATE_MAX_JSON_LENGTH,
+                "the row is built to serialize to EXACTLY the bound",
+            );
+            assertEqual(exact.diagnostic, "", "…and a blob AT the bound is ACCEPTED, not refused");
+            const overByOne = sanitizePanelState({ b: "y".repeat(PANEL_STATE_MAX_JSON_LENGTH - 7) });
+            assertEqual(
+                overByOne.length,
+                PANEL_STATE_MAX_JSON_LENGTH + 1,
+                "…while one character more serializes to one over",
+            );
+            assert(overByOne.diagnostic !== "", "…and THAT is refused — the bound is inclusive");
         },
     },
 ];

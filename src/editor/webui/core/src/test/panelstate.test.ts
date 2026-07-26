@@ -26,7 +26,7 @@
 //
 // ⚠ NON-VACUITY PROVEN BY PLANTING, each reverted byte-exact — recorded inline as `⚠ PLANT (x)`.
 
-import { assert, assertEqual, type TestCase } from "./harness.js";
+import { assert, assertEqual, assertNull, waitFor, type TestCase } from "./harness.js";
 import { ShellBridge, type BridgeQuery, type BridgeQueryFunction } from "../bridge.js";
 import { detectDockview } from "../dockview.js";
 import {
@@ -35,12 +35,23 @@ import {
     EditorStateClient,
     LayoutPersistence,
 } from "../editorstate.js";
-import { PanelHost } from "../panelhost.js";
+import { makeIframeThemeTarget, PanelHost } from "../panelhost.js";
 import type { PanelThemeChannel, PanelVerbBinding } from "../panelhost.js";
-import { PANEL_LIST_METHOD, PanelClient } from "../panels.js";
+import {
+    PANEL_LIST_METHOD,
+    PANEL_STATE_GET_METHOD,
+    PANEL_STATE_SET_METHOD,
+    PanelClient,
+} from "../panels.js";
 import type { PanelVerbHandler } from "../panelport.js";
 import type { PanelStateStore, PanelVerbTable } from "../panelverbs.js";
-import { IframeThemeChannel, type IframeMessageTarget } from "../theme.js";
+import { DEFAULT_UI_ORIGIN, UI_TOPIC_THEME_CHANGED } from "../uibus.js";
+import {
+    IFRAME_TARGET_ORIGIN,
+    IframeThemeChannel,
+    type IframeMessageTarget,
+    type ThemeChangedEvent,
+} from "../theme.js";
 
 // ------------------------------------------------------------------------------ the roster fixture
 
@@ -214,6 +225,21 @@ async function mountHost(options: MountOptions = {}): Promise<Mounted> {
     };
 }
 
+/**
+ * The persistence coordinator over a mounted host and the shell it is talking to.
+ *
+ * One helper because all three cases that need persistence build the IDENTICAL three-client literal,
+ * and the options shape is exactly the kind of thing that changes once and then has to be found in
+ * three places.
+ */
+function makePersistence(host: PanelHost, shell: MockShell): LayoutPersistence {
+    return new LayoutPersistence({
+        panelHost: host,
+        panelClient: new PanelClient(shell.bridge),
+        stateClient: new EditorStateClient(shell.bridge),
+    });
+}
+
 /** A theme channel that RECORDS registrations — the witness for the wiring half. */
 class RecordingChannel implements PanelThemeChannel {
     readonly registered: IframeMessageTarget[] = [];
@@ -229,28 +255,18 @@ class RecordingChannel implements PanelThemeChannel {
 }
 
 /**
- * Poll until `predicate` holds, or fail the case naming what was being waited for.
+ * The one `editor.ui.theme-changed` envelope shape the channel broadcasts.
  *
- * The publish path is `void this.#publish()` off a DOM event — genuinely asynchronous, with no
- * promise to await — so a poll is the honest shape rather than a fixed sleep that would either flake
- * or waste time. The budget is generous because this tier shares one document with ~300 earlier cases.
+ * Built from the bus CONSTANTS rather than string literals: `editor.ui` is a closed vocabulary
+ * (`BUILTIN_UI_TOPICS`, which `EditorUiBus.publish` enforces) but `IframeThemeChannel.broadcast`
+ * validates nothing, so a literal here would keep passing against a topic name that no longer
+ * exists — the silent drift the constant is there to prevent, in the one file not using it.
  */
-async function waitFor(what: string, predicate: () => boolean, timeoutMs = 4000): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (!predicate()) {
-        if (Date.now() > deadline) {
-            throw new Error(`timed out after ${String(timeoutMs)}ms waiting for ${what}`);
-        }
-        await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-}
-
-/** The one `editor.ui.theme-changed` envelope shape the channel broadcasts. */
-function themeEvent(themeId: string, panelColour: string): Parameters<IframeThemeChannel["broadcast"]>[0] {
+function themeEvent(themeId: string, panelColour: string): ThemeChangedEvent {
     return {
         seq: 1,
-        topic: "editor.ui.theme-changed",
-        origin: "local",
+        topic: UI_TOPIC_THEME_CHANGED,
+        origin: DEFAULT_UI_ORIGIN,
         payload: {
             themeId,
             name: themeId,
@@ -298,22 +314,67 @@ export const panelStateTests: readonly TestCase[] = [
                 "closing the panel unregisters it — the channel outlives the renderer, so a target " +
                     "left behind is a closure holding a dead frame that every future switch posts into",
             );
-            assertEqual(
-                channel.unregistered[0],
-                channel.registered[0],
-                "…and it is the SAME target, not a look-alike the channel would keep forever",
+            assert(
+                channel.unregistered[0] === channel.registered[0],
+                "…and it is the SAME OBJECT, not a look-alike the channel would keep forever — " +
+                    "identity, because `Set.delete` is identity and a deep-equal twin would leak",
             );
         },
     },
     {
-        // The target must resolve `contentWindow` AT POST TIME. A frame that is not yet in a document
-        // has a `null` contentWindow, and the renderer registers before Dockview has mounted its
-        // element — so a target that captured the value would post to `null` forever and the panel
-        // would never be themed, with nothing anywhere reporting it.
+        // THE LAZINESS ITSELF, discriminated — and the reason `makeIframeThemeTarget` is a named
+        // export rather than an object literal inside `refresh()`.
         //
-        // ⚠ PLANT (b): capture `frame.contentWindow` into a const at registration and post to that —
-        //   RED here (the post never reaches the frame's real window).
-        name: "panelstate: the push target resolves contentWindow LAZILY, so a real frame is posted to",
+        // ⚠ THIS CASE REPLACES A VACUOUS ONE, which is why the shape is worth stating. The previous
+        //   version asserted over a live host that the frame HAS a `contentWindow` and that a
+        //   broadcast completes; it claimed `⚠ PLANT (b): capture contentWindow eagerly — RED`, and
+        //   that plant is GREEN under those assertions. It could not be otherwise: none of them can
+        //   see where the post went, because `IframeThemeChannel.#post` swallows every throw and the
+        //   frame is read from the DOM rather than from the target. An anti-vacuity claim that is
+        //   itself vacuous is worse than none — it retires the question.
+        //
+        //   As a pure function of a RESOLVER the property is exactly expressible: resolve `null`
+        //   first (the state at registration, before Dockview mounts the element), then a recorder.
+        //   An eager implementation captures the `null` and the recorder stays empty.
+        //
+        // ⚠ PLANT (b): make `makeIframeThemeTarget` capture `resolveWindow()` once at construction —
+        //   RED here (`posts` is empty: the target is holding the pre-mount `null` forever).
+        name: "panelstate: makeIframeThemeTarget resolves the window at POST time, not at registration",
+        run: (): void => {
+            const posts: { message: unknown; targetOrigin: string }[] = [];
+            const recorder = {
+                postMessage: (message: unknown, targetOrigin: string): void => {
+                    posts.push({ message, targetOrigin });
+                },
+            };
+            // `null` FIRST — the value `frame.contentWindow` really has at the instant
+            // `IframePanelRenderer.refresh` registers, since Dockview has not mounted `element` yet.
+            let current: Window | null = null;
+            const target = makeIframeThemeTarget((): Window | null => current);
+
+            target.postMessage("before", "*");
+            assertEqual(posts.length, 0, "a post while the frame has no window reaches nothing, and " +
+                "does NOT throw — the renderer registers in exactly this state");
+
+            current = recorder as unknown as Window;
+            target.postMessage("after", IFRAME_TARGET_ORIGIN);
+            assertEqual(posts.length, 1, "…and the SAME target reaches the window once it exists, " +
+                "which an eagerly captured `contentWindow` could never do");
+            assertEqual(posts[0]?.message, "after", "the message travels verbatim");
+            assertEqual(
+                posts[0]?.targetOrigin,
+                IFRAME_TARGET_ORIGIN,
+                "…and so does the targetOrigin the channel chose",
+            );
+        },
+    },
+    {
+        // The live-host half of the same wiring: a REAL channel, a REAL frame. This case deliberately
+        // claims LESS than its predecessor did — that the registration reaches the real channel, that
+        // a broadcast over a mounted frame completes, and that dispose really removes it. Where the
+        // post LANDED is not observable from here (see the case above for why), so it is not asserted
+        // here; the package-side application is `editor-cef-smoke-shell-iframe`'s.
+        name: "panelstate: a mounted frame is registered with the REAL channel and removed on dispose",
         run: async (): Promise<void> => {
             const channel = new IframeThemeChannel();
             const mounted = await mountHost({ themeChannel: channel });
@@ -325,14 +386,12 @@ export const panelStateTests: readonly TestCase[] = [
                 assert(frame !== null, "the panel really rendered a frame");
                 assert(
                     frame?.contentWindow !== null && frame?.contentWindow !== undefined,
-                    "and it is in the document, so it HAS a contentWindow — the value a capturing " +
-                        "target would have missed by registering before Dockview mounted the element",
+                    "and it is in the document, so it HAS a contentWindow by the time a switch is " +
+                        "broadcast — the resolver above is what defers the read until now",
                 );
 
                 // A `context-ext://` document cannot load in this tier (no scheme handler), so what is
-                // asserted is that the broadcast REACHES a live window without throwing — the
-                // property the lazy target exists for. Whether the package's own listener applies it
-                // is `editor-cef-smoke-shell-iframe`'s, and is not claimed here.
+                // asserted is that the broadcast over a live registration completes without throwing.
                 channel.broadcast(themeEvent("builtin.dark", "#0a0a0a"));
                 assertEqual(
                     channel.last?.payload.themeId,
@@ -355,11 +414,11 @@ export const panelStateTests: readonly TestCase[] = [
         run: async (): Promise<void> => {
             const mounted = await mountHost();
             try {
-                assertEqual(
+                assertNull(
                     mounted.host.portState(PANEL_ID),
-                    undefined,
-                    "a panel that stored nothing publishes nothing — the same signal a modelless " +
-                        "C++ panel gives, so persistence needs no second rule",
+                    "a port panel that stored nothing answers NULL — distinct from the `undefined` " +
+                        "that means 'not a port panel', because only the latter may cost a " +
+                        "`panel.state.get` the Shell can answer for",
                 );
                 const store = mounted.stores.get(PANEL_ID);
                 assert(store !== undefined, "the verb factory was handed this panel's store");
@@ -385,8 +444,12 @@ export const panelStateTests: readonly TestCase[] = [
         // `uitree` panel answered anything but `undefined`, its blob would be taken from an empty port
         // store and its REAL C++ state would never be published.
         //
-        // ⚠ PLANT (d): drop the `instanceof IframePanelRenderer` guard from both accessors — RED (the
-        //   uitree panel starts answering, and its C++ route is skipped).
+        // ⚠ PLANT (d): drop the `instanceof IframePanelRenderer` guard from EITHER accessor — RED.
+        //   Each is pinned separately, which the earlier single-value form could not do: while
+        //   `portState` collapsed "no blob" onto `undefined`, dropping ITS guard was GREEN (a
+        //   `UitreePanelRenderer` has no `stateBlob`, so `undefined` arrived either way) and only the
+        //   `seedPortState` half reddened — and even that by `TypeError`, not by the value asserted.
+        //   The `null`/`undefined` split is what makes the `portState` guard observable at all.
         name: "panelstate: a uitree panel is NOT a port panel, so both accessors answer undefined",
         run: async (): Promise<void> => {
             const mounted = await mountHost({
@@ -396,7 +459,8 @@ export const panelStateTests: readonly TestCase[] = [
                 assertEqual(
                     mounted.host.portState("builtin.problems"),
                     undefined,
-                    "a C++-modeled panel has no port store to publish from",
+                    "a C++-modeled panel has no port store to publish from — `undefined`, NOT the " +
+                        "`null` an empty port panel gives, or persistence would skip its C++ route",
                 );
                 assertEqual(
                     mounted.host.seedPortState("builtin.problems", {
@@ -406,7 +470,81 @@ export const panelStateTests: readonly TestCase[] = [
                     undefined,
                     "…and none to seed, so persistence falls through to panel.state.set for it",
                 );
+                assertEqual(
+                    mounted.host.seedPortState("nope.missing", {
+                        schemaVersion: SCHEMA_VERSION,
+                        data: { a: 1 },
+                    }),
+                    undefined,
+                    "an unknown id answers undefined rather than throwing, as portState does",
+                );
             } finally {
+                mounted.dispose();
+            }
+        },
+    },
+    {
+        // THE ROUTING ITSELF, over a MIXED roster — the property the two accessors exist to serve,
+        // and the one no accessor case can reach: that `LayoutPersistence` sends each KIND of panel
+        // down its own route, and sends NEITHER down both.
+        //
+        // ⚠ PLANT (h′): change `#publish`'s `port !== undefined` to `port !== null` — RED (every
+        //   uitree panel is misrouted into the port branch, so `panel.state.get` is never issued).
+        // ⚠ PLANT (i′): change `restore`'s `seeded !== undefined` to `seeded !== null` — RED (the
+        //   C++ panel is pushed onto `degraded` and `panel.state.set` is never issued for it).
+        name: "panelstate: publish and restore route each panel KIND down exactly one route",
+        run: async (): Promise<void> => {
+            const mounted = await mountHost({
+                panels: [iframeManifest(), uitreeManifest("builtin.problems")],
+            });
+            const shell = mounted.shell;
+            const persistence = makePersistence(mounted.host, shell);
+            try {
+                shell.persisted = {
+                    layout: null,
+                    panels: {
+                        [PANEL_ID]: { schemaVersion: SCHEMA_VERSION, data: { scroll: 7 } },
+                        "builtin.problems": { schemaVersion: SCHEMA_VERSION, data: { row: 2 } },
+                    },
+                };
+                shell.methods.length = 0;
+                await persistence.restore();
+                assertEqual(
+                    shell.methods.filter((method) => method === PANEL_STATE_SET_METHOD).length,
+                    1,
+                    "restore issued EXACTLY ONE `panel.state.set` — for the uitree panel only. TWO " +
+                        "would mean the package panel's blob was also pushed at a C++ model that " +
+                        "does not exist; ZERO would mean the uitree panel was routed into a port " +
+                        "store it does not have, and its real state was never restored",
+                );
+                assertEqual(
+                    mounted.stores.get(PANEL_ID)?.read(),
+                    { scroll: 7 },
+                    "…and the package panel's blob went into its PORT store, which is what " +
+                        "`bridge.state.get` answers with after a reload",
+                );
+
+                shell.methods.length = 0; // only what the publish itself issues
+                persistence.attach();
+                window.dispatchEvent(new Event("pagehide"));
+                await waitFor("the publish to reach the Shell", () => shell.published !== null);
+
+                const panels = (shell.published?.["panels"] ?? {}) as Record<string, unknown>;
+                assertEqual(
+                    panels[PANEL_ID],
+                    { schemaVersion: SCHEMA_VERSION, data: { scroll: 7 } },
+                    "the package panel's blob came from the PORT store",
+                );
+                assertEqual(
+                    shell.methods.filter((method) => method === PANEL_STATE_GET_METHOD).length,
+                    1,
+                    "…and EXACTLY ONE `panel.state.get` was issued — for the uitree panel only. " +
+                        "Two would mean the package panel took the C++ route (a guaranteed refusal " +
+                        "bought with a round trip); zero would mean the uitree panel took the port " +
+                        "route and its real C++ state was never read",
+                );
+            } finally {
+                persistence.dispose();
                 mounted.dispose();
             }
         },
@@ -434,6 +572,17 @@ export const panelStateTests: readonly TestCase[] = [
                     false,
                     "so does one with no schemaVersion at all (a hand-edited editor-state file)",
                 );
+                // ⚠ PLANT (j): drop `STATE_DATA_KEY in value` from `isPersistedPanelState` — RED.
+                //   Without it a TRUNCATED write passes the guard, `sanitizePanelState(undefined)`
+                //   normalizes to `null` with an empty diagnostic, and `seedState` answers TRUE:
+                //   the panel is reported RESTORED while being handed nothing. A well-formed entry
+                //   always carries `data` (it is `null` at minimum), so requiring it costs nothing.
+                assertEqual(
+                    mounted.host.seedPortState(PANEL_ID, { schemaVersion: SCHEMA_VERSION }),
+                    false,
+                    "…and one whose `data` member is MISSING — a truncated write degrades rather " +
+                        "than reporting a restore of nothing",
+                );
                 assertEqual(
                     mounted.host.seedPortState(PANEL_ID, "not an envelope"),
                     false,
@@ -449,9 +598,8 @@ export const panelStateTests: readonly TestCase[] = [
                         "be re-published at the next layout change, an amplification loop seeded from " +
                         "a file a human can edit",
                 );
-                assertEqual(
+                assertNull(
                     mounted.host.portState(PANEL_ID),
-                    undefined,
                     "and not one of those degrades left anything in the store",
                 );
 
@@ -529,11 +677,7 @@ export const panelStateTests: readonly TestCase[] = [
             let persistence: LayoutPersistence | undefined;
             try {
                 first.stores.get(PANEL_ID)?.write({ filter: "mesh", scroll: 12 });
-                persistence = new LayoutPersistence({
-                    panelHost: first.host,
-                    panelClient: new PanelClient(shell.bridge),
-                    stateClient: new EditorStateClient(shell.bridge),
-                });
+                persistence = makePersistence(first.host, shell);
                 // THE REAL TRIGGER, not a private method reached through a cast: `attach` registers
                 // the production `pagehide` listener and this dispatches the production event. A
                 // publish forced any other way would prove the gather works and leave the thing that
@@ -565,11 +709,7 @@ export const panelStateTests: readonly TestCase[] = [
                     null,
                     "the fresh panel starts with nothing, as it must before a restore",
                 );
-                persistence = new LayoutPersistence({
-                    panelHost: second.host,
-                    panelClient: new PanelClient(shell.bridge),
-                    stateClient: new EditorStateClient(shell.bridge),
-                });
+                persistence = makePersistence(second.host, shell);
                 const report = await persistence.restore();
                 assertEqual(
                     report.panelsRestored,
