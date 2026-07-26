@@ -61,16 +61,62 @@ export interface CommandQuery {
 }
 
 /**
+ * How many refused registrations the diagnostic log keeps.
+ *
+ * BOUNDED for exactly the reason `UI_REJECTION_LOG_LIMIT` is (uibus.ts): since M9 e13b-2 a THIRD-PARTY
+ * package panel can register commands at runtime over `bridge.commands.register`, so the refusal RATE
+ * is chosen by untrusted code in a process that stays up for days. Oldest dropped first — a repeated
+ * refusal repeats, so recent context is what a diagnosis actually needs.
+ */
+export const COMMAND_REJECTION_LOG_LIMIT = 128;
+
+/**
+ * One REFUSED registration, and why — the ATTRIBUTABLE half of the non-fatal duplicate rule.
+ *
+ * Carries BOTH sides of the collision on purpose. The failure this replaced said only "duplicate
+ * command id: X" and then took the whole palette down with it, naming neither which source shipped
+ * the culprit nor what it collided with; a diagnostic that cannot be acted on is not a diagnostic.
+ */
+export interface CommandRejection {
+    /** The colliding id. */
+    readonly id: string;
+    /** Where the REFUSED command came from. */
+    readonly category: CommandCategory;
+    /** Where the command already holding the id came from. */
+    readonly incumbent: CommandCategory;
+    /** Human/AI-readable, naming the id AND both sources. */
+    readonly diagnostic: string;
+}
+
+/**
  * The command registry.
  *
- * Holds the commands and NOTHING else — no bridge, no palette, no keymap. `register` is FAIL-CLOSED
- * on a duplicate id: two commands sharing an id is a real defect (the id is the execute key), never
- * silently last-wins.
+ * Holds the commands and NOTHING else — no bridge, no palette, no keymap.
+ *
+ * ⚠ TWO REGISTRATION PATHS, AND PRODUCTION ASSEMBLY MUST USE THE NON-FATAL ONE (M9 e13b-2).
+ * `register` / `registerAll` are the STRICT primitives: they throw, because for a caller that owns
+ * both sides of a collision (a hand-written pair of built-ins) a duplicate id IS a build defect and a
+ * loud one is right. `tryRegister` / `tryRegisterAll` are what `buildCommandRegistry` uses, because
+ * the panel source is NOT code-owned — since e13b-2 its ids come from third-party package manifests
+ * and from `bridge.commands.register`.
+ *
+ * The distinction is not stylistic; it is a shipped outage class. A throw out of assembly propagated
+ * to `startCommandLayer`, which catches it into a generic "command layer unavailable" — so ONE
+ * colliding id disabled the WHOLE command palette and EVERY keybinding at once. Non-fatal
+ * registration is INCUMBENT-WINS, so the cost of a collision is exactly one command, refused
+ * attributably, and a late source can never shadow an earlier one.
  */
 export class CommandRegistry {
     readonly #byId = new Map<string, Command>();
+    readonly #rejections: CommandRejection[] = [];
 
-    /** Register one command. Throws on a duplicate id. */
+    /**
+     * Register one command, FAIL-CLOSED. Throws on a duplicate id.
+     *
+     * The STRICT primitive — see the class doc. Correct for a caller that owns every id it passes;
+     * WRONG for assembling a registry from sources that include third-party manifests, which is what
+     * `tryRegister` is for.
+     */
     register(command: Command): void {
         if (this.#byId.has(command.id)) {
             throw new Error(`duplicate command id: ${command.id}`);
@@ -78,11 +124,85 @@ export class CommandRegistry {
         this.#byId.set(command.id, command);
     }
 
-    /** Register many, in order. Throws on the first duplicate id. */
+    /** Register many, in order. Throws on the first duplicate id. The strict variant of `tryRegisterAll`. */
     registerAll(commands: Iterable<Command>): void {
         for (const command of commands) {
             this.register(command);
         }
+    }
+
+    /**
+     * Register one command NON-FATALLY. `null` on success; the refusal otherwise.
+     *
+     * THE PRODUCTION REGISTRATION PATH (see the class doc). INCUMBENT WINS: the first registration of
+     * an id keeps it, so a package panel — registered last, by construction — can never shadow a
+     * contract, editor or session command, and a collision costs exactly the colliding entry.
+     */
+    tryRegister(command: Command): CommandRejection | null {
+        const incumbent = this.#byId.get(command.id);
+        if (incumbent === undefined) {
+            this.#byId.set(command.id, command);
+            return null;
+        }
+        return this.#reject({
+            id: command.id,
+            category: command.category,
+            incumbent: incumbent.category,
+            diagnostic:
+                `command id "${command.id}" is already registered by the ${incumbent.category} ` +
+                `source ("${incumbent.title}"), so the ${command.category} command ` +
+                `"${command.title}" was REFUSED — the incumbent keeps the id`,
+        });
+    }
+
+    /** Register many non-fatally, in order. Returns every refusal, in the order they happened. */
+    tryRegisterAll(commands: Iterable<Command>): readonly CommandRejection[] {
+        const rejections: CommandRejection[] = [];
+        for (const command of commands) {
+            const rejection = this.tryRegister(command);
+            if (rejection !== null) {
+                rejections.push(rejection);
+            }
+        }
+        return rejections;
+    }
+
+    /**
+     * Remove a command by id. `true` when one was removed.
+     *
+     * The withdrawal half of `tryRegister`, and it exists because a package panel can register
+     * commands at RUNTIME (`bridge.commands.register`): without it, a panel whose command set changes
+     * over the life of a window can only ever grow the registry. The caller decides WHICH ids it may
+     * withdraw — this method enforces nothing (panelverbs.ts owns that scoping).
+     */
+    unregister(id: string): boolean {
+        return this.#byId.delete(id);
+    }
+
+    /**
+     * The registrations this registry REFUSED, oldest first — the diagnosability channel.
+     *
+     * Capped at `COMMAND_REJECTION_LOG_LIMIT`. `boot.ts` mirrors the log onto
+     * `<html data-editor-commands>`, so an ASSEMBLY-TIME collision is visible in a `--dump-dom` repro
+     * and in DevTools rather than only in whatever the palette happens to be missing.
+     *
+     * ⚠ THAT MIRROR IS A BOOT-TIME SNAPSHOT, taken once at the end of `startCommandLayer`. A refusal
+     * produced LATER by `bridge.commands.register` is appended here but never reaches the attribute —
+     * and since e13b-2 those are most of them (see `COMMAND_REJECTION_LOG_LIMIT`, whose bound exists
+     * precisely because untrusted code chooses the runtime refusal rate). The runtime channel is the
+     * `register` REPLY, which returns each rejection with its diagnostic to the panel that caused it;
+     * this log is what an operator reads afterwards.
+     */
+    get rejections(): readonly CommandRejection[] {
+        return this.#rejections;
+    }
+
+    #reject(rejection: CommandRejection): CommandRejection {
+        this.#rejections.push(rejection);
+        if (this.#rejections.length > COMMAND_REJECTION_LOG_LIMIT) {
+            this.#rejections.shift();
+        }
+        return rejection;
     }
 
     /** How many commands are registered. */
@@ -437,15 +557,23 @@ export interface RegistrySources {
  * Build a registry from every source, in the (a) contract → (b) editor → (b') session → (c) panel
  * order.
  *
- * A duplicate id across sources throws (via `register`) rather than shadowing — a manifest command
- * that collides with an editor, session or contract id is a defect the build must surface, not
- * swallow.
+ * ⚠ NEVER THROWS ON A COLLISION (M9 e13b-2), and the ORDER above is what makes that safe. Assembly
+ * uses the non-fatal `tryRegisterAll`, which is incumbent-wins, and the panel source runs LAST — so a
+ * manifest command colliding with an editor, session or contract id is REFUSED and recorded in
+ * `registry.rejections` (naming the id and both sources), while every other command survives.
+ *
+ * This used to throw, and the throw is the defect: `startCommandLayer` catches it into a generic
+ * "command layer unavailable", so one colliding id from one package took out the entire palette and
+ * every keybinding, naming neither the id nor its source. Nothing collided in practice only because
+ * built-in `uitree` panels declare no manifest commands — and e13b-2 is the change that opens
+ * registration to third-party packages, i.e. makes the collision an EXTERNALLY SUPPLIED input.
+ * "One command refused, loudly" is the failure mode; "everything silently dies" is not.
  */
 export function buildCommandRegistry(sources: RegistrySources): CommandRegistry {
     const registry = new CommandRegistry();
-    registry.registerAll(projectContractCommands(sources.contractDispatch));
-    registry.registerAll(editorCommands(sources.editorActions));
-    registry.registerAll(sessionCommands(sources.sessionActions));
-    registry.registerAll(projectPanelCommands(sources.roster, sources.panelDispatch));
+    registry.tryRegisterAll(projectContractCommands(sources.contractDispatch));
+    registry.tryRegisterAll(editorCommands(sources.editorActions));
+    registry.tryRegisterAll(sessionCommands(sources.sessionActions));
+    registry.tryRegisterAll(projectPanelCommands(sources.roster, sources.panelDispatch));
     return registry;
 }

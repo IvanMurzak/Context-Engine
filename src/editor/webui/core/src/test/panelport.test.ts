@@ -35,6 +35,7 @@ import {
 } from "../extpanel.js";
 import {
     EXT_PORT_HANDSHAKE_TAG,
+    PANEL_BRIDGE_MAX_PENDING,
     PANEL_BRIDGE_REFUSALS,
     PANEL_BRIDGE_TAG,
     PANEL_BRIDGE_TOKEN_MAX_LENGTH,
@@ -43,6 +44,13 @@ import {
     PanelPortBridge,
     type PanelVerbHandler,
 } from "../panelport.js";
+import { CommandRegistry } from "../commands.js";
+import {
+    DENY_ALL_CAPABILITY_GRANTS,
+    PANEL_VERB_COMMANDS_LIST,
+    PANEL_VERB_UI_SUBSCRIBE,
+    makePanelBridgeVerbs,
+} from "../panelverbs.js";
 
 // --------------------------------------------------------------------------------- the child fixture
 
@@ -356,16 +364,20 @@ async function waitForReply(harness: PanelHarness, id: string): Promise<Record<s
 }
 
 /**
- * The verbs the boundary redraw parked in e13b-2 / e13c / e13d. EVERY one of them must get the SAME
- * refusal today — that is what "so they can fill verbs without renegotiating the shape" means, and
- * naming them explicitly is what makes the promise checkable rather than rhetorical.
+ * The verbs STILL parked, in e13c and e13d. EVERY one of them must get the SAME refusal, which is
+ * what "so they can fill verbs without renegotiating the shape" means — and naming them explicitly is
+ * what makes the promise checkable rather than rhetorical.
+ *
+ * ⚠ SHORTER SINCE M9 e13b-2. `bridge.commands.register` / `.unregister` and `bridge.ui.subscribe`
+ * left this list because e13b-2 FILLED them (panelverbs.ts): they are no longer parked, and keeping
+ * them here would have asserted something false about the shipping build. What remains is e13c's
+ * daemon-facing pair and e13d's theme/state pair. The list is a claim about the PRODUCTION table, so
+ * the sibling case `the PRODUCTION verb table…` below drives that table rather than this harness's
+ * empty one — this case proves the transport's deny-all, that one proves the build's.
  */
 const PARKED_VERBS: readonly string[] = [
     "bridge.call",
     "bridge.events.subscribe",
-    "bridge.commands.register",
-    "bridge.commands.unregister",
-    "bridge.ui.subscribe",
     "bridge.theme.tokens",
     "bridge.state.get",
     "bridge.state.set",
@@ -745,6 +757,87 @@ export const panelPortTests: readonly TestCase[] = [
         },
     },
     {
+        // M9 e13b-2 — the END-TO-END case, and the one thing `panelverbs.test.ts` structurally cannot
+        // do: drive the table THIS BUILD SHIPS over a REAL port, from a REAL opaque-origin document,
+        // through REAL transfer semantics. The unit tier calls the handlers directly, so it proves
+        // what they DECIDE; only this proves the decisions actually reach a package.
+        //
+        // The three verbs below are chosen because each is a different answer shape: one succeeds,
+        // one is refused by the capability gate, and one is still parked. If the table were not wired
+        // through `panelhost.ts` into the bridge, all three would collapse into `verb_not_granted`.
+        name: "panelport: the PRODUCTION verb table answers over a REAL port (M9 e13b-2)",
+        run: async (): Promise<void> => {
+            const registry = new CommandRegistry();
+            registry.tryRegister({
+                id: "pkg.harness.act",
+                title: "Act",
+                category: "panel",
+                when: "",
+                docs: { summary: "act", detail: "act" },
+                handler: () => ({ ok: true, note: "act" }),
+            });
+            const verbs = makePanelBridgeVerbs({
+                panelId: "pkg.harness",
+                packageId: "pkg.harness",
+                // DECLARED but not granted — the exact state a real package ships in today.
+                declaredCapabilities: ["ui_events"],
+                manifestCommandIds: ["pkg.harness.act"],
+                registry: () => registry,
+                whenContext: () => ({ panelFocus: "", textInputFocus: false }),
+                grants: DENY_ALL_CAPABILITY_GRANTS,
+                request: () => Promise.resolve({ ok: true, result: null }),
+            });
+            const harness = createHarness({ verbs: verbs.verbs });
+            try {
+                await waitForGrant(harness);
+
+                // 1. A GRANTED verb answers with real data.
+                harness.command({
+                    cmd: "send",
+                    index: 0,
+                    envelope: requestEnvelope("list", PANEL_VERB_COMMANDS_LIST),
+                });
+                const listed = await waitForReply(harness, "list");
+                assertEqual(listed["ok"], true, "bridge.commands.list is answered, not refused");
+                assertEqual(
+                    listed["result"],
+                    [{ id: "pkg.harness.act", title: "Act", when: "", active: true }],
+                    "…with this panel's own command, over the real port",
+                );
+
+                // 2. THE C-F18 GATE, end to end. A DIFFERENT code from the deny-all, which is what
+                // proves the verb is in the table and the grant lookup ran inside a real reply.
+                harness.command({
+                    cmd: "send",
+                    index: 0,
+                    envelope: requestEnvelope("ui", PANEL_VERB_UI_SUBSCRIBE),
+                });
+                const denied = await waitForReply(harness, "ui");
+                assertEqual(denied["ok"], false, "bridge.ui.subscribe is refused");
+                assertEqual(
+                    (denied["error"] as Record<string, unknown>)["code"],
+                    PANEL_BRIDGE_REFUSALS.capabilityNotGranted,
+                    "…as a CAPABILITY refusal, not the deny-all — the ui_events grant is the gate",
+                );
+
+                // 3. A STILL-PARKED verb keeps the e13b-1 answer, from the same table.
+                harness.command({
+                    cmd: "send",
+                    index: 0,
+                    envelope: requestEnvelope("parked", "bridge.call"),
+                });
+                const parked = await waitForReply(harness, "parked");
+                assertEqual(
+                    (parked["error"] as Record<string, unknown>)["code"],
+                    PANEL_BRIDGE_REFUSALS.verbNotGranted,
+                    "e13c's verb is still refused by lookup miss — filling a table did not open it",
+                );
+            } finally {
+                harness.dispose();
+            }
+        },
+    },
+    {
         name: "panelport: malformed envelopes are refused by shape, and uncorrelatable ones are dropped",
         run: async (): Promise<void> => {
             const harness = createHarness();
@@ -879,6 +972,67 @@ export const panelPortTests: readonly TestCase[] = [
                     0,
                     "and the pending entry is cleaned up, so a silent panel cannot grow the map",
                 );
+            } finally {
+                harness.dispose();
+            }
+        },
+    },
+    {
+        // ⚠ PLANT: remove the `#pending.size >= PANEL_BRIDGE_MAX_PENDING` guard from
+        // `PanelPortBridge.request` and this case goes RED — the map grows past the cap unbounded.
+        //
+        // WHY IT IS NEEDED SINCE e13b-2: in e13b-1 `request` had no production caller, so `#pending`
+        // only ever grew at the HOST's initiative. `bridge.commands.execute` makes it panel-DRIVEN —
+        // each inbound execute of an owned command dispatches one `commands.invoke` back down the
+        // port — so a panel that simply never answers chooses the rate at which host timers accrue.
+        name: "panelport: in-flight host requests are BOUNDED, so a silent panel cannot flood the host",
+        run: async (): Promise<void> => {
+            // A budget long enough that nothing times out while the cap is being probed: this case is
+            // about the CAP, and a short budget would settle entries out from under it.
+            const harness = createHarness({ requestTimeoutMs: 30_000 });
+            try {
+                await waitForGrant(harness);
+                harness.command({ cmd: "silence" });
+                await waitFor(
+                    "the child to confirm it went silent",
+                    () => harness.probes.some((probe) => probe.probe === "silenced"),
+                    LOAD_BOUND_MS,
+                    () => diagnose(harness),
+                );
+
+                // Fill the map to exactly the cap. Deliberately NOT awaited — these stay pending.
+                const inflight: Promise<unknown>[] = [];
+                for (let index = 0; index < PANEL_BRIDGE_MAX_PENDING; index += 1) {
+                    inflight.push(harness.bridge.request(`probe.flood${String(index)}`));
+                }
+                await waitFor(
+                    "the pending map to reach the cap",
+                    () => harness.bridge.stats.pending === PANEL_BRIDGE_MAX_PENDING,
+                    LOAD_BOUND_MS,
+                    () => diagnose(harness),
+                );
+
+                // The one past the cap is refused IMMEDIATELY — as a reply, like every other refusal
+                // on this path, so no caller has to catch.
+                const refused = await harness.bridge.request("probe.overflow");
+                assertEqual(
+                    refused.error?.code,
+                    PANEL_BRIDGE_REFUSALS.timeout,
+                    "the request past the cap is refused rather than queued",
+                );
+                assert(
+                    (refused.error?.message ?? "").includes("in flight"),
+                    `…and says why: ${String(refused.error?.message)}`,
+                );
+                assertEqual(
+                    harness.bridge.stats.pending,
+                    PANEL_BRIDGE_MAX_PENDING,
+                    "the refused request never occupied a correlation slot",
+                );
+
+                // Teardown settles the flood rather than leaving it to the 30s budget.
+                harness.dispose();
+                await Promise.all(inflight);
             } finally {
                 harness.dispose();
             }

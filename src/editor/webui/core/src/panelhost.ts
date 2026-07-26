@@ -46,7 +46,11 @@ import {
 } from "./extpanel.js";
 import { HydrationRuntime } from "./hydration.js";
 import type { PanelClient, PanelManifest, PanelRoster } from "./panels.js";
-import { PanelPortBridge } from "./panelport.js";
+import { PANEL_BRIDGE_REFUSALS, PanelPortBridge } from "./panelport.js";
+import type { PanelBridgeReply, PanelVerbHandler } from "./panelport.js";
+// TYPE-ONLY, and the direction is deliberate: `panelverbs.ts` does not import this module, so the
+// table's shape can live with the factory that produces it without creating a cycle.
+import type { PanelVerbTable } from "./panelverbs.js";
 
 /** Dockview's component name for every uitree panel. One renderer type serves them all — see `#create`. */
 const UITREE_COMPONENT = "context-uitree-panel";
@@ -80,6 +84,32 @@ const UNAVAILABLE_COMPONENT = "context-unavailable-panel";
  * URLs the scheme handler served), so it is deliberately NOT a consumer of this.
  */
 export const IFRAME_PANEL_CLASS = "ctx-panel-frame";
+
+/** Issue a request DOWN one panel's port. A refusal is a reply, never a rejection. */
+export type PanelPortRequest = (verb: string, params?: unknown) => Promise<PanelBridgeReply>;
+
+/**
+ * Everything the e13b-2 verb table for ONE third-party panel is built over (panelverbs.ts).
+ *
+ * Assembled HERE because this is the only place that holds both halves: the manifest (which package,
+ * which declared capabilities, which manifest commands) and the port (`request`). The factory itself
+ * knows nothing about DOM or Dockview, which is the same split `extpanel.ts` has with this file.
+ */
+export interface PanelVerbBinding {
+    readonly panelId: string;
+    /** The `context-ext://<packageId>` authority — `parseExtPanelEntry` validated it. */
+    readonly packageId: string;
+    /** The manifest's `capabilities`. A DECLARATION, never a grant — panelverbs.ts says why. */
+    readonly declaredCapabilities: readonly string[];
+    readonly manifestCommandIds: readonly string[];
+    readonly request: PanelPortRequest;
+}
+
+/** Builds one panel's verb table. Absent ⇒ every panel keeps e13b-1's deny-all empty table. */
+export type PanelVerbFactory = (binding: PanelVerbBinding) => PanelVerbTable;
+
+/** The renderer-side half of `PanelVerbFactory`: everything bound except the late `request`. */
+type PanelVerbBinder = (request: PanelPortRequest) => PanelVerbTable;
 
 /**
  * A panel editor-core renders ITSELF (M9 e06d, `content.type: "local"`).
@@ -209,13 +239,23 @@ class IframePanelRenderer implements PanelRenderer {
     readonly element: HTMLElement;
     readonly #url: string;
     readonly #panelId: string;
+    readonly #verbs: PanelVerbTable;
     #frame: HTMLIFrameElement | undefined;
     #bridge: PanelPortBridge | undefined;
     #suspended = false;
 
-    constructor(panelId: string, url: string) {
+    constructor(panelId: string, url: string, verbs?: PanelVerbBinder) {
         this.#panelId = panelId;
         this.#url = url;
+        // THE VERB TABLE IS BUILT HERE, IN THE CONSTRUCTOR, and it is handed a `request` closure that
+        // resolves `this.#bridge` LAZILY (through the method below, so there is ONE refusal for a
+        // portless panel rather than two spellings of it). The knot it unties is real: the table's
+        // `commands.invoke` dispatch needs the bridge, and the bridge needs the table. Deferring
+        // through the field means the only way to observe the `undefined` window is to fire a verb
+        // before `refresh()` ran — and a verb can only ARRIVE on a port that does not exist yet.
+        this.#verbs = verbs?.((verb: string, params?: unknown): Promise<PanelBridgeReply> =>
+            this.request(verb, params),
+        ) ?? { verbs: new Map<string, PanelVerbHandler>(), dispose: (): void => {} };
         this.element = document.createElement("div");
         this.element.className = `ctx-panel-body ${IFRAME_PANEL_CLASS}`;
         this.element.setAttribute("data-panel-id", panelId);
@@ -223,6 +263,27 @@ class IframePanelRenderer implements PanelRenderer {
 
     get suspended(): boolean {
         return this.#suspended;
+    }
+
+    /**
+     * Issue a bridge request on this panel's port (M9 e13b-2) — the HOST -> PANEL direction.
+     *
+     * Exposed so `PanelHost.portRequest` can route a panel-manifest command to the PACKAGE instead of
+     * to a `panel.command` the Shell has no C++ model to answer. A refusal is a REPLY here, exactly as
+     * it is on `PanelPortBridge.request`, so no caller has to catch.
+     */
+    request(verb: string, params?: unknown): Promise<PanelBridgeReply> {
+        const bridge = this.#bridge;
+        return bridge === undefined
+            ? Promise.resolve({
+                  ok: false,
+                  error: {
+                      code: PANEL_BRIDGE_REFUSALS.portUnavailable,
+                      verb,
+                      message: "this panel has no port",
+                  },
+              })
+            : bridge.request(verb, params);
     }
 
     /**
@@ -270,7 +331,12 @@ class IframePanelRenderer implements PanelRenderer {
         // has run; a bridge constructed after `src` would miss the one grant a frame ever offers and
         // the panel would come up portless with nothing naming the cause. `PanelPortBridge`'s
         // constructor attaches both listeners, which is why constructing it IS the installation.
-        this.#bridge = new PanelPortBridge({ frame, panelId: this.#panelId });
+        this.#bridge = new PanelPortBridge({
+            frame,
+            panelId: this.#panelId,
+            // e13b-2's verbs, or the empty table (= e13b-1's deny-all) when the host wired none.
+            verbs: this.#verbs.verbs,
+        });
         frame.setAttribute("src", this.#url);
         this.#frame = frame;
         this.element.replaceChildren(frame);
@@ -296,6 +362,13 @@ class IframePanelRenderer implements PanelRenderer {
         // `event.source` of every OTHER panel's messages. `PanelPortBridge.dispose` is idempotent, so
         // a second dispose (or one after a revocation) is a no-op.
         this.#bridge?.dispose();
+        // THEN THE COMMANDS. The registry outlives this renderer, so anything the panel registered
+        // over `bridge.commands.register` has to be withdrawn HERE or it outlives the panel: a ghost
+        // palette row dispatching over the port just closed above, and — because a reopened panel
+        // builds a FRESH verb table — an orphan that beats the panel's own re-registration under
+        // incumbent-wins, permanently costing it that command for the life of the window. After the
+        // bridge, so no in-flight invoke can re-enter a half-withdrawn table.
+        this.#verbs.dispose();
         // Removing the element is what actually tears the package's document down; nulling `src`
         // first would navigate the frame to `about:blank` (a load in a frame we are discarding) for
         // no benefit. `#frame` is deliberately NOT cleared — see `refresh`: leaving it set is what
@@ -440,6 +513,14 @@ export interface PanelHostOptions {
      * manifest's back — it only says which of the manifest's panels THIS bundle knows how to draw.
      */
     readonly localPanels?: ReadonlyMap<string, LocalPanelFactory>;
+    /**
+     * Builds the bridge verb table for each THIRD-PARTY (`iframe`) panel's port (M9 e13b-2).
+     *
+     * OPTIONAL, and its absence is a real configuration rather than an oversight: a host that wires no
+     * factory gives every package panel the empty table, i.e. e13b-1's deny-all, which is exactly what
+     * every test that does not opt in should see. `boot.ts` supplies `makePanelBridgeVerbs`.
+     */
+    readonly panelVerbs?: PanelVerbFactory;
 }
 
 /** Options for `PanelHost.start`. */
@@ -467,6 +548,7 @@ export class PanelHost {
     readonly #client: PanelClient;
     readonly #dockview: DockviewModule | undefined;
     readonly #localPanels: ReadonlyMap<string, LocalPanelFactory>;
+    readonly #panelVerbs: PanelVerbFactory | undefined;
     readonly #panels = new Map<string, HostedPanel>();
     #api: DockviewApi | null = null;
     #roster: PanelRoster | null = null;
@@ -476,6 +558,24 @@ export class PanelHost {
         this.#client = options.client;
         this.#dockview = options.dockview ?? detectDockview();
         this.#localPanels = options.localPanels ?? new Map<string, LocalPanelFactory>();
+        this.#panelVerbs = options.panelVerbs;
+    }
+
+    /**
+     * Issue a bridge request on a MOUNTED third-party panel's port (M9 e13b-2).
+     *
+     * `undefined` for anything that is not a live `iframe` panel — which is the signal a caller uses to
+     * fall back to the `panel.command` route a `uitree` panel takes. Kept as a lookup rather than a
+     * dispatch method so `boot.ts` can decide the ROUTE while this class stays the thing that owns the
+     * renderers.
+     */
+    portRequest(panelId: string): PanelPortRequest | undefined {
+        const hosted = this.#panels.get(panelId);
+        const renderer = hosted?.renderer;
+        return renderer instanceof IframePanelRenderer
+            ? (verb: string, params?: unknown): Promise<PanelBridgeReply> =>
+                  renderer.request(verb, params)
+            : undefined;
     }
 
     get api(): DockviewApi | null {
@@ -742,9 +842,26 @@ export class PanelHost {
                 // contradicted `IframePanelRenderer`'s own invariant that a validated
                 // `context-ext://…` URL is the ONLY string it accepts.
                 const entry = parseExtPanelEntry(manifest.contentEntry);
-                return entry === null
-                    ? new UnavailablePanelRenderer(panelId)
-                    : new IframePanelRenderer(panelId, entry.url);
+                if (entry === null) {
+                    return new UnavailablePanelRenderer(panelId);
+                }
+                // Bind everything the verb table needs from the MANIFEST here; the renderer supplies
+                // the one thing only it can (a `request` on the port it is about to create).
+                const factory = this.#panelVerbs;
+                const binder: PanelVerbBinder | undefined =
+                    factory === undefined
+                        ? undefined
+                        : (request: PanelPortRequest): PanelVerbTable =>
+                              factory({
+                                  panelId,
+                                  packageId: entry.packageId,
+                                  declaredCapabilities: manifest.capabilities,
+                                  manifestCommandIds: manifest.commands.map(
+                                      (command) => command.id,
+                                  ),
+                                  request,
+                              });
+                return new IframePanelRenderer(panelId, entry.url, binder);
             }
             case "uitree":
                 return new UitreePanelRenderer(panelId, this.#client, manifest.gestures);

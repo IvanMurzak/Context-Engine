@@ -38,6 +38,7 @@ import {
     parseExtPanelEntry,
 } from "../extpanel.js";
 import { IFRAME_PANEL_CLASS, PanelHost } from "../panelhost.js";
+import type { PanelVerbFactory } from "../panelhost.js";
 import { PANEL_PORT_STATE_ATTRIBUTE } from "../panelport.js";
 import { PANEL_LIST_METHOD, PanelClient, parsePanelManifest } from "../panels.js";
 
@@ -132,7 +133,10 @@ interface Mounted {
  * whether the frame this file asserts on ever exists. A hand-made element would pass while the
  * shipped app failed.
  */
-async function mountHost(panels: readonly Record<string, unknown>[]): Promise<Mounted> {
+async function mountHost(
+    panels: readonly Record<string, unknown>[],
+    panelVerbs?: PanelVerbFactory,
+): Promise<Mounted> {
     const dockview = detectDockview();
     assert(
         dockview !== undefined,
@@ -149,6 +153,7 @@ async function mountHost(panels: readonly Record<string, unknown>[]): Promise<Mo
         container,
         client: new PanelClient(shell.bridge),
         dockview: dv,
+        ...(panelVerbs === undefined ? {} : { panelVerbs }),
     });
     await host.start();
     return {
@@ -673,6 +678,48 @@ export const extPanelTests: readonly TestCase[] = [
                     "revoked",
                     "and the bridge was DISPOSED with the renderer — asserted on the element captured " +
                         "before the close, since the element itself is removed from the DOM",
+                );
+            } finally {
+                mounted.dispose();
+            }
+        },
+    },
+    {
+        // ⚠ PLANT: remove `this.#verbs.dispose()` from `IframePanelRenderer.dispose` (panelhost.ts)
+        // and this case goes RED. It is the ONLY case that pins the WIRING — `panelverbs.test.ts`
+        // proves the table's `dispose()` withdraws its commands, but calls it directly, so without
+        // this the renderer could simply never call it and every suite would stay green.
+        name: "iframe panel: closing the panel disposes its VERB TABLE, so its commands are withdrawn",
+        run: async () => {
+            const disposals: string[] = [];
+            const mounted = await mountHost([manifestJson()], (binding) => {
+                disposals.push(`built:${binding.panelId}`);
+                return {
+                    verbs: new Map(),
+                    dispose: (): void => {
+                        disposals.push(`disposed:${binding.panelId}`);
+                    },
+                };
+            });
+            try {
+                assert(frameFor(mounted, "pkg.hello") !== null, "the frame is up");
+                assertEqual(
+                    JSON.stringify(disposals),
+                    JSON.stringify(["built:pkg.hello"]),
+                    "the host built the panel's verb table and has not torn it down yet",
+                );
+                assert(mounted.host.close("pkg.hello"), "the panel closed");
+                // ⚠ AT LEAST once, not EXACTLY once — measured: `PanelHost.close` reaches
+                // `IframePanelRenderer.dispose` TWICE (Dockview's own `removePanel` teardown, then
+                // the explicit `renderer.dispose()` call), so the count is not the contract. That is
+                // precisely why `PanelPortBridge.dispose` documents itself idempotent, and the verb
+                // table's `dispose` is idempotent for the same reason (it clears `registered`, so the
+                // second pass withdraws nothing). Pinning an exact count here would pin Dockview's
+                // teardown shape, not ours.
+                assert(
+                    disposals.filter((entry) => entry === "disposed:pkg.hello").length >= 1,
+                    "closing the panel disposed its verb table — the hook that withdraws the panel's " +
+                        `runtime commands from the ONE registry, which outlives every panel: ${JSON.stringify(disposals)}`,
                 );
             } finally {
                 mounted.dispose();
