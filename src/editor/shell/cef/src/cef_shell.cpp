@@ -1441,11 +1441,45 @@ private:
 
 } // namespace
 
+int execute_helper_process(int argc, char** argv)
+{
+#if defined(__APPLE__)
+    // A helper process must load the framework from the PARENT app's Frameworks dir (the helper
+    // variant of the search), before any CEF call. Scoped to this function: `CefExecuteProcess` blocks
+    // for the whole life of the subprocess, so the loader unloads only as the process exits.
+    CefScopedLibraryLoader library_loader;
+    if (!library_loader.LoadInHelper())
+    {
+        std::fprintf(stderr, "[shell-cef] helper: LoadInHelper() failed — the Chromium Embedded "
+                             "Framework is not embedded in the parent app bundle's "
+                             "Contents/Frameworks\n");
+        return 1;
+    }
+
+    // The REAL app object, not nullptr — see cef_shell.h's contract for the three renderer-process
+    // duties that would otherwise never run. Same TU-global instance the browser process creates, so
+    // the two halves of `OnRegisterCustomSchemes` and the message router cannot drift.
+    if (g_app == nullptr)
+    {
+        g_app = new ShellCefApp;
+    }
+    CefMainArgs main_args(argc, argv);
+    return CefExecuteProcess(main_args, g_app.get(), nullptr);
+#else
+    (void)argc;
+    (void)argv;
+    std::fprintf(stderr, "[shell-cef] execute_helper_process() is macOS-only — Windows and Linux "
+                         "re-exec the main binary (execute_subprocess). Refusing.\n");
+    return 1;
+#endif
+}
+
 int execute_subprocess(int argc, char** argv)
 {
 #if defined(__APPLE__)
     // On macOS the framework is LOADED at runtime, never linked, and the helper processes run from
-    // their own bundles — so this entry point is not the subprocess path there.
+    // their own bundles — so this entry point is not the subprocess path there. `execute_helper_process`
+    // above is that path.
     (void)argc;
     (void)argv;
     return -1;

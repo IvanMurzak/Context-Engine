@@ -409,9 +409,126 @@ if(CONTEXT_BUILD_GUI_CEF)
     # the evidence, and tools/check_cef_staging.py for the lint that keeps it that way.
     #
     # Windows/Linux only: macOS stages nothing next to the executable (COPY_MAC_FRAMEWORK embeds the
-    # framework into each .app instead), and the Shell has no macOS CEF executable until e12 anyway.
+    # framework into each .app instead — see the macOS block below, which the configure-time audit at
+    # the bottom of this file asserts never grows a stage target).
     if(OS_WINDOWS OR OS_LINUX)
         context_cef_stage_payload(context_editor_cef_stage "${CEF_TARGET_OUT_DIR}")
+    endif()
+
+    # --- macOS: the .app + per-process-type helper-bundle hosting model (M9 e12c-1, issue #436) ----
+    #
+    # WHY THIS EXISTS AT ALL. CEF cannot re-exec the main app as a subprocess on macOS, so every
+    # subprocess type runs from its own "<App> Helper*.app" bundle inside the main app's
+    # Contents/Frameworks, and the framework is LOADED at runtime (CefScopedLibraryLoader) rather than
+    # linked. src/editor/cef/ and src/editor/gui/host/ already assemble exactly this shape and boot
+    # green on `editor-cef-smoke (macos-latest)`; e12c-1 PORTS that proven model to the Shell rather
+    # than inventing one. What it does NOT port is their `nullptr` CefApp — see
+    # shell::cef::execute_helper_process (cef_shell.h) for why the Shell's helpers need the real app.
+    #
+    # DEFINED HERE, ABOVE add_subdirectory(cef), AND CALLED FROM BOTH: the two live smokes are declared
+    # in cef/ and `context_editor` here, and all three need the identical assembly. A CMake function
+    # does not change the directory context, so `add_executable` / `add_custom_command(TARGET ...)`
+    # inside it act on the CALLER's directory — which is required, since add_custom_command(TARGET)
+    # refuses a target created in another directory. The two paths the body needs are therefore
+    # absolute variables rather than ${CMAKE_CURRENT_SOURCE_DIR}-relative literals (cef/ inherits them
+    # as an ordinary subdirectory scope), or each caller would resolve them against its own directory.
+    #
+    # FIVE helper bundles per app, not three: CEF_HELPER_APP_SUFFIXES in the pinned distribution's
+    # cmake/cef_variables.cmake lists the unsuffixed helper plus (Alerts), (GPU), (Plugin) and
+    # (Renderer). docs/shell.md claimed three until this task measured it.
+    #
+    # ⚠ THE FRAMEWORK IS EMBEDDED PER BUNDLE (304 MB apiece, MEASURED). That is the owner's design
+    # ruling: it is the only configuration proven green in CI, and macOS stays scoped to the DoD subset
+    # (two smokes here, the remaining seven in e12c-2) precisely so the cost stays bounded. A symlinked
+    # Versions/A pointing at one staged copy was verified to still boot, but it is held ONLY as an
+    # escape hatch if runner disk ever binds and must stay TEST-TIER: codesigning and notarization
+    # reject a symlinked framework, so e15 packaging must not inherit it.
+    if(OS_MAC)
+        set(CONTEXT_SHELL_MAC_PLIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/mac")
+        set(CONTEXT_SHELL_MAC_HELPER_SOURCE
+            "${CMAKE_CURRENT_SOURCE_DIR}/cef/src/shell_helper_mac.cpp")
+
+        # Assemble ONE macOS CEF app: turn `main_target` into a MACOSX_BUNDLE, build its five helper
+        # bundles, embed the framework, and copy the helpers into Contents/Frameworks.
+        #
+        # `bundle_identifier` is the main bundle's CFBundleIdentifier; each helper takes it plus its own
+        # `.helper<suffix>`, so no two bundles share an identifier.
+        function(context_shell_cef_mac_bundle main_target bundle_identifier)
+            set(_app "${CEF_TARGET_OUT_DIR}/${main_target}.app")
+            set(_helper_targets "")
+
+            foreach(_suffixes ${CEF_HELPER_APP_SUFFIXES})
+                string(REPLACE ":" ";" _suffixes ${_suffixes})
+                list(GET _suffixes 0 _name_suffix)
+                list(GET _suffixes 1 _target_suffix)
+
+                set(_htarget "${main_target}_Helper${_target_suffix}")
+                # ⚠ LOAD-BEARING NAME. CEF resolves the helper executable from the MAIN executable's
+                # own name — "<main exe> Helper<name suffix>" inside Contents/Frameworks — so an
+                # OUTPUT_NAME that does not match makes the browser fail to spawn a renderer at
+                # runtime, with a bundle that built perfectly. The configure-time audit at the bottom
+                # of this file re-asserts this equality against the real target properties.
+                set(_houtput "${main_target} Helper${_name_suffix}")
+
+                add_executable(${_htarget} MACOSX_BUNDLE "${CONTEXT_SHELL_MAC_HELPER_SOURCE}")
+                SET_EXECUTABLE_TARGET_PROPERTIES(${_htarget})
+                add_dependencies(${_htarget} libcef_dll_wrapper)
+                # context_editor_cef FIRST — it holds cef_shell.cpp, which is where
+                # execute_helper_process and the ShellCefApp the helper must hand to CefExecuteProcess
+                # live, and it is an archive whose CEF references have to be resolvable by something
+                # later on the line (the single-left-to-right-pass rule documented in cef/). NO
+                # libcef_lib: on macOS the framework is dlopen'd at runtime, never linked, which is why
+                # the two precedent bundles link only the wrapper + CEF_STANDARD_LIBS too.
+                target_link_libraries(${_htarget}
+                    context_editor_cef libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+                target_include_directories(${_htarget} PRIVATE "${CEF_ROOT}")
+                set_target_properties(${_htarget} PROPERTIES
+                    MACOSX_BUNDLE_INFO_PLIST "${CONTEXT_SHELL_MAC_PLIST_DIR}/helper-Info.plist.in"
+                    MACOSX_BUNDLE_GUI_IDENTIFIER "${bundle_identifier}.helper${_target_suffix}"
+                    MACOSX_BUNDLE_BUNDLE_NAME "${_houtput}"
+                    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+                    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+                    OUTPUT_NAME "${_houtput}")
+                list(APPEND _helper_targets ${_htarget})
+            endforeach()
+
+            # MACOSX_BUNDLE as a PROPERTY, not an add_executable keyword: `context_editor` is declared
+            # unconditionally further down (it must stay a linkable target on every leg, CEF or not),
+            # so its bundle-ness can only be switched on here. CMake reads the property at generate
+            # time, so setting it after the fact is equivalent.
+            #
+            # PROJECT_VERSION feeds both plist version strings — the ONE source of truth
+            # (src/CMakeLists.txt `project(... VERSION ...)`), so the bundles cannot drift from it the
+            # way the hardcoded 0.0.1 in the two older plist pairs can.
+            set_target_properties(${main_target} PROPERTIES
+                MACOSX_BUNDLE TRUE
+                MACOSX_BUNDLE_INFO_PLIST "${CONTEXT_SHELL_MAC_PLIST_DIR}/Info.plist.in"
+                MACOSX_BUNDLE_GUI_IDENTIFIER "${bundle_identifier}"
+                MACOSX_BUNDLE_BUNDLE_NAME "${main_target}"
+                MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+                MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}")
+
+            # The helpers must be BUILT before the app's POST_BUILD copies them in. Also what the
+            # configure-time audit reads back (MANUALLY_ADDED_DEPENDENCIES) to prove no helper was
+            # silently dropped.
+            add_dependencies(${main_target} ${_helper_targets})
+
+            # Embed the framework (with its Versions/A symlink layout) into Contents/Frameworks. ONE
+            # embedding target per app path — the macOS analogue of the issue-#360 single-writer rule,
+            # and what tools/check_cef_staging.py's macOS half enforces from the sources.
+            COPY_MAC_FRAMEWORK(${main_target} "${CEF_BINARY_DIR}" "${_app}")
+
+            # Each helper .app into the main app's Contents/Frameworks. These POST_BUILD commands are
+            # all attached to the SAME target, so ninja serialises them — unlike the per-target copies
+            # into one shared directory that were issue #360 on Windows/Linux.
+            foreach(_htarget ${_helper_targets})
+                add_custom_command(TARGET ${main_target} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_directory
+                            "$<TARGET_BUNDLE_DIR:${_htarget}>"
+                            "${_app}/Contents/Frameworks/$<TARGET_BUNDLE_DIR_NAME:${_htarget}>"
+                    VERBATIM)
+            endforeach()
+        endfunction()
     endif()
 
     add_subdirectory(cef)
@@ -454,12 +571,12 @@ if(TARGET context_render_wgpu)
     target_compile_definitions(context_editor PRIVATE CONTEXT_EDITOR_HAS_WGPU=1)
 endif()
 
-# Link the real browser only where the app can actually HOST one. Windows/Linux use CEF's
-# self-re-exec model (the exe is its own subprocess), which is what src/editor/cef/ and
-# src/editor/gui/host/ already do. macOS needs an .app bundle plus per-process-type helper bundles
-# and the runtime-loaded framework; that packaging is e12's, so `context_editor` there builds
-# CEF-free — the "mac/Linux compile-guarded until e12" DoD line. The BINDING (context_editor_cef)
-# still compiles on macOS, which is what makes that guard a real compile check rather than a skip.
+# Link the real browser everywhere the app can HOST one — since e12c-1 that is all three v1 platforms.
+# Windows/Linux use CEF's self-re-exec model (the exe is its own subprocess), which is what
+# src/editor/cef/ and src/editor/gui/host/ already do. macOS needs an .app bundle plus per-process-type
+# helper bundles and the runtime-loaded framework, which the `elseif(OS_MAC)` branch below assembles
+# through context_shell_cef_mac_bundle() — so `context_editor` is a REAL browser-hosting app on macOS
+# now, and the old "mac builds CEF-free, the binding's compile is the coverage" carve-out is gone.
 if(CONTEXT_BUILD_GUI_CEF AND (OS_WINDOWS OR OS_LINUX))
     if(NOT TARGET libcef_lib)
         ADD_LOGICAL_TARGET("libcef_lib" "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
@@ -482,6 +599,25 @@ if(CONTEXT_BUILD_GUI_CEF AND (OS_WINDOWS OR OS_LINUX))
     # created above (issue #360) — never by a per-target POST_BUILD copy, which raced its three
     # siblings into this same directory.
     add_dependencies(context_editor context_editor_cef_stage)
+elseif(CONTEXT_BUILD_GUI_CEF AND OS_MAC)
+    # The macOS half (M9 e12c-1): the same CEF link, but the payload travels INSIDE the .app rather
+    # than beside the executable, so there is no stage target to depend on — COPY_MAC_FRAMEWORK embeds
+    # the framework and the five helper bundles carry the subprocess entry points.
+    SET_EXECUTABLE_TARGET_PROPERTIES(context_editor)
+    add_dependencies(context_editor libcef_dll_wrapper)
+    # context_editor_cef FIRST, before the CEF libs — the same single-pass-ld archive-ordering rule as
+    # the Windows/Linux branch. NO libcef_lib on macOS: the framework is dlopen'd at runtime.
+    target_link_libraries(context_editor PRIVATE
+        context_editor_cef libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+    target_include_directories(context_editor PRIVATE "${CEF_ROOT}")
+    target_compile_definitions(context_editor PRIVATE CONTEXT_EDITOR_HAS_CEF=1)
+
+    # Turn it into the real .app + its five helper bundles. Note the consequence, deliberately scoped:
+    # `context_editor` is a MACOSX_BUNDLE only in a CEF-ON macOS configure. A CEF-OFF macOS build (the
+    # default `build (macos-latest)` leg and the `editor-boundary` job) keeps the plain executable it
+    # has always produced, because the bundle exists to satisfy CEF's process model — the SHIPPING
+    # bundle, with its own identifier, icon and Dock presence, is e15 packaging's.
+    context_shell_cef_mac_bundle(context_editor "dev.context.editor")
 else()
     target_link_libraries(context_editor PRIVATE context_warnings)
 endif()
@@ -527,6 +663,94 @@ if(CONTEXT_BUILD_GUI_CEF AND (OS_WINDOWS OR OS_LINUX))
                 "the concurrent-copy race of issue #360.")
         endif()
     endforeach()
+endif()
+
+# --- the macOS BUNDLE-COMPLETENESS audit, on the real build graph (M9 e12c-1, issue #436) ----------
+# The macOS analogue of the staging audit above, and it exists for the same reason: the properties a
+# macOS CEF app must carry are trivially assertable from the build graph and genuinely hard to prove
+# from behaviour — a bundle missing one helper boots fine and then fails to spawn exactly one
+# subprocess type, at run time, on one OS. Reading target properties is ground truth about what CMake
+# will generate, which no source scan can be, so this runs at CONFIGURE time and fails a CEF-ON macOS
+# configure before a single object is compiled.
+#
+# ⚠ IT ASSERTS ONLY REAL GRAPH FACTS, never that "the assembly function ran" — a self-declared marker
+# property would pass for a bundle whose framework never got embedded. The two things it cannot see are
+# covered elsewhere: the framework embed is a POST_BUILD command CMake exposes no read-back for, so its
+# single-writer rule is enforced from the SOURCES by tools/check_cef_staging.py and its presence is
+# proven by the live smokes (a bundle with no embedded framework fails LoadInMain and reds).
+if(CONTEXT_BUILD_GUI_CEF AND OS_MAC)
+    # ⚠ KEEP THIS COMPLETE, exactly like its Windows/Linux sibling above — e12c-2 adds the remaining
+    # seven smokes and every one of them belongs here.
+    set(_ctx_cef_mac_bundles
+        context_editor
+        context_editor_shell_cef_smoke
+        context_editor_shell_restore_smoke)
+    foreach(_bundle IN LISTS _ctx_cef_mac_bundles)
+        if(NOT TARGET ${_bundle})
+            message(FATAL_ERROR
+                "macOS CEF bundle audit: expected target ${_bundle} to exist in a "
+                "CONTEXT_BUILD_GUI_CEF macOS configure. If it was renamed or removed, update this "
+                "list — a silently skipped bundle is how a half-assembled .app would ship unnoticed.")
+        endif()
+        get_target_property(_is_bundle ${_bundle} MACOSX_BUNDLE)
+        if(NOT _is_bundle)
+            message(FATAL_ERROR
+                "macOS CEF bundle audit: ${_bundle} is not a MACOSX_BUNDLE. CEF loads its framework "
+                "from <app>/Contents/Frameworks and spawns subprocesses from helper bundles beside it, "
+                "so a bare executable cannot host a browser at all. Call "
+                "context_shell_cef_mac_bundle(${_bundle} <identifier>).")
+        endif()
+        get_target_property(_main_output ${_bundle} OUTPUT_NAME)
+        if(NOT _main_output)
+            set(_main_output "${_bundle}")
+        endif()
+        get_target_property(_manual_deps ${_bundle} MANUALLY_ADDED_DEPENDENCIES)
+        foreach(_suffixes ${CEF_HELPER_APP_SUFFIXES})
+            string(REPLACE ":" ";" _suffixes ${_suffixes})
+            list(GET _suffixes 0 _name_suffix)
+            list(GET _suffixes 1 _target_suffix)
+            set(_htarget "${_bundle}_Helper${_target_suffix}")
+            if(NOT TARGET ${_htarget})
+                message(FATAL_ERROR
+                    "macOS CEF bundle audit: ${_bundle} has no helper target ${_htarget}. CEF needs "
+                    "one helper bundle per CEF_HELPER_APP_SUFFIXES entry (FIVE: the unsuffixed one "
+                    "plus Alerts, GPU, Plugin, Renderer) — a missing one fails to spawn exactly that "
+                    "process type, at run time.")
+            endif()
+            if(NOT _manual_deps OR NOT "${_htarget}" IN_LIST _manual_deps)
+                message(FATAL_ERROR
+                    "macOS CEF bundle audit: ${_bundle} does not depend on its helper ${_htarget}, so "
+                    "the POST_BUILD copy into Contents/Frameworks can run before the helper is "
+                    "linked. Add add_dependencies(${_bundle} ${_htarget}).")
+            endif()
+            # The load-bearing equality: CEF derives the helper executable path from the MAIN
+            # executable's own name. A mismatch builds perfectly and then cannot spawn a renderer.
+            get_target_property(_helper_output ${_htarget} OUTPUT_NAME)
+            if(NOT _helper_output STREQUAL "${_main_output} Helper${_name_suffix}")
+                message(FATAL_ERROR
+                    "macOS CEF bundle audit: helper ${_htarget} has OUTPUT_NAME '${_helper_output}' "
+                    "but CEF will look for '${_main_output} Helper${_name_suffix}' inside "
+                    "${_main_output}.app/Contents/Frameworks. The two must match exactly.")
+            endif()
+        endforeach()
+    endforeach()
+
+    # And the negative half, which keeps the "macOS embeds per bundle" decision from silently acquiring
+    # a second, racing payload writer: nothing may stage the CEF payload NEXT TO a macOS executable.
+    #
+    # ⚠ A SECOND LINE OF DEFENCE, and the planting round says so. Simply dropping the
+    # `if(OS_WINDOWS OR OS_LINUX)` guard above does NOT reach this check —
+    # context_cef_stage_payload() refuses first, because CEF_BINARY_FILES/CEF_RESOURCE_FILES are empty
+    # on macOS (cmake/ContextCef.cmake). What this catches is the shape that refusal cannot see: a
+    # HAND-ROLLED `add_custom_target(context_editor_cef_stage)` (or any other target claiming that
+    # name) in a macOS configure, which is what a future "let me just stage it myself" refactor writes.
+    # That is the plant it was proven non-vacuous against.
+    if(TARGET context_editor_cef_stage)
+        message(FATAL_ERROR
+            "macOS CEF bundle audit: context_editor_cef_stage exists in a macOS configure. macOS "
+            "stages nothing beside the executable — COPY_MAC_FRAMEWORK embeds the framework into each "
+            ".app. Keep context_cef_stage_payload() under its if(OS_WINDOWS OR OS_LINUX) guard.")
+    endif()
 endif()
 
 # --- the source-level companion lint (runs on EVERY default build leg, no CEF required) -----------
