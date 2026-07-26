@@ -21,6 +21,7 @@
 import { assert, assertEqual, assertNull, type TestCase } from "./harness.js";
 import {
     createNotificationHost,
+    MAX_STANDING_NOTICES,
     parseWriteNotice,
     writeNoticeHeadline,
     writeNoticeText,
@@ -34,6 +35,7 @@ import {
     UI_TOPIC_WRITE_NOTICE,
     type EditorUiEvent,
 } from "../uibus.js";
+import { createToastRegion, type KitToastRegion } from "../../../kit/src/index.js";
 
 /** The payload the Shell puts on the wire (write_notice.cpp `write_notice_envelope`). */
 function payload(kind: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -249,20 +251,86 @@ export const notificationTests: TestCase[] = [
         },
     },
 
-    // ------------------------------------- 8. a notice that arrived BEFORE the host still reaches it
+    // ------------------------------------------------------ 8. the standing surface stays BOUNDED
     {
-        name: "notifications: a notice published before the host existed is still shown (snapshot)",
+        name: "notifications: refusals past the cap retire the OLDEST, and never stop being shown",
+        run: () => {
+            // The kit ships no auto-dismiss timer on purpose, so nothing here expires — which makes
+            // this host, the editor's first AUTOMATIC producer on that region, the one that can grow
+            // the DOM without bound. A dead daemon refuses EVERY commit and every replay, so the
+            // pathological run is an ordinary editing session, not an exotic one.
+            const bus = new EditorUiBus({ origin: "0" });
+            const host = createNotificationHost(bus);
+
+            const burst = MAX_STANDING_NOTICES + 5;
+            for (let i = 0; i < burst; i += 1) {
+                bus.receiveMirrored(shellEnvelope(WRITE_NOTICE_KIND_DROP, i + 1));
+            }
+
+            // STILL LOUD: every one was shown and counted — the cap bounds what STANDS, never what
+            // the human was told, which is the record `data-editor-notices` reports.
+            assertEqual(host.shown, burst, "every refusal was shown");
+            // BUT BOUNDED, on both the host's own handle and the real DOM.
+            assertEqual(host.onScreen, MAX_STANDING_NOTICES, "the standing set is capped");
+            assertEqual(
+                toasts(host.element).length,
+                MAX_STANDING_NOTICES,
+                "and the capped ones really left the DOM, rather than only the counter moving",
+            );
+            // The survivors are the NEWEST — the refusals still worth acting on.
+            assertEqual(host.last?.kind, WRITE_NOTICE_KIND_DROP, "the newest notice is retained");
+            host.dispose();
+        },
+    },
+
+    // ------------------------------------- 9. a notice that arrived BEFORE the host still reaches it
+    {
+        name: "notifications: a retained notice renders INTO AN ALREADY-MOUNTED region",
         run: () => {
             // A refused write while the dock is still materialising is not less important than one a
-            // second later. The bus hands a late subscriber its topic's retained envelope immediately
-            // (uibus.ts property 2), and this is the case that keeps that dependency deliberate.
+            // second later, so the host must render the envelope the bus retained before it existed
+            // (uibus.ts property 2). This case keeps that dependency deliberate — and pins the ORDER it
+            // rests on, which is the half that is easy to get wrong and invisible once wrong.
+            //
+            // The retained envelope is delivered SYNCHRONOUSLY inside `subscribe`, so this is the one
+            // path where the toast exists before any caller could have appended the region. Asserting
+            // only "it rendered" would pass identically against a region still DETACHED from the
+            // document — a toast on screen that no screen reader ever announces, because AT begins
+            // observing a live region when it is INSERTED and this one's message would predate the
+            // insert (feedback.ts header). So the region records whether it was connected at show time,
+            // which is the only way this distinction is observable after the fact.
             const bus = new EditorUiBus({ origin: "0" });
             bus.receiveMirrored(shellEnvelope(WRITE_NOTICE_KIND_DROP));
 
-            const host = createNotificationHost(bus);
-            assertEqual(host.shown, 1, "the retained notice was delivered on subscribe");
-            assertEqual(toasts(host.element).length, 1, "and rendered");
-            host.dispose();
+            const inner = createToastRegion();
+            const connectedAtShow: boolean[] = [];
+            const region: KitToastRegion = {
+                element: inner.element,
+                show: (options) => {
+                    connectedAtShow.push(inner.element.isConnected);
+                    return inner.show(options);
+                },
+                get count(): number {
+                    return inner.count;
+                },
+            };
+
+            const mount = document.createElement("div");
+            document.body.append(mount);
+            try {
+                const host = createNotificationHost(bus, { region, mount });
+                assertEqual(host.shown, 1, "the retained notice was delivered on subscribe");
+                assertEqual(toasts(host.element).length, 1, "and rendered");
+                assertEqual(connectedAtShow.length, 1, "rendered exactly once");
+                assert(
+                    connectedAtShow[0] === true,
+                    "the region was ALREADY in the document when the retained notice rendered into " +
+                        "it — a live region inserted with its message already inside is never spoken",
+                );
+                host.dispose();
+            } finally {
+                mount.remove();
+            }
         },
     },
 ];

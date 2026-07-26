@@ -36,7 +36,12 @@
 // would be silence for exactly the users who can least afford it; `ToastOptions.assertive` exists for
 // that reason and this is its first caller.
 
-import { createToastRegion, type KitToastRegion, type SemanticTone } from "../../kit/src/index.js";
+import {
+    createToastRegion,
+    type KitToast,
+    type KitToastRegion,
+    type SemanticTone,
+} from "../../kit/src/index.js";
 import { isRecord } from "./bridge.js";
 import { UI_TOPIC_WRITE_NOTICE, type EditorUiBus, type EditorUiSubscription } from "./uibus.js";
 
@@ -145,12 +150,26 @@ export interface NotificationHost {
     dispose(): void;
 }
 
+/**
+ * How many refused-write toasts stay on screen at once, oldest retired first.
+ *
+ * Sized to be reached only by a genuinely pathological run (a dead daemon refusing every gesture), so
+ * an ordinary burst of two or three collisions is never truncated — the cap is a leak bound, not a
+ * display policy.
+ */
+export const MAX_STANDING_NOTICES = 8;
+
 export interface NotificationHostOptions {
     /**
      * The toast region to render into. Defaults to a fresh one — the ordinary case, since the editor
      * has exactly one notification host. Injectable so a test can drive a region it also inspects.
      */
     readonly region?: KitToastRegion;
+    /**
+     * Where to mount the region. Supplied here rather than appended by the caller afterwards BECAUSE
+     * THE ORDER IS LOAD-BEARING — see `createNotificationHost`.
+     */
+    readonly mount?: HTMLElement;
 }
 
 /**
@@ -161,14 +180,26 @@ export interface NotificationHostOptions {
  * hands a late subscriber its topic's snapshot immediately (uibus.ts property 2), which is exactly
  * right here. A refused write that happened while the dock was still materialising is not less
  * important than one that happens a second later.
+ *
+ * ⚠ THE REGION IS MOUNTED BEFORE `subscribe`, AND THAT ORDER IS THE ONE THING THIS FUNCTION MUST NOT
+ * GET WRONG. `subscribe` delivers the retained envelope SYNCHRONOUSLY, inside the call — so a host
+ * that mounted afterwards would run `region.show()` into a region still detached from the document,
+ * and the caller would then insert a lane that ALREADY CONTAINS its message. feedback.ts's header
+ * names that exact shape as "the single most common way a toast ends up silent": assistive technology
+ * begins observing a live region when it is inserted, so a mutation that happened before the insert is
+ * never announced. The toast would be on screen and unspoken — colour as the only signal, which is
+ * precisely the failure design 10's LOUD invariant forbids. Hence `mount` is an OPTION rather than an
+ * append the caller makes after this returns: the ordering lives with the code that depends on it.
  */
 export function createNotificationHost(
     bus: EditorUiBus,
     options: NotificationHostOptions = {},
 ): NotificationHost {
     const region = options.region ?? createToastRegion();
+    options.mount?.append(region.element);
     let shown = 0;
     let last: WriteNotice | null = null;
+    const standing: KitToast[] = [];
 
     const subscription: EditorUiSubscription = bus.subscribe(
         UI_TOPIC_WRITE_NOTICE,
@@ -177,16 +208,37 @@ export function createNotificationHost(
             if (notice === null) {
                 return; // nothing to show; see parseWriteNotice on why this is not an empty toast
             }
+            standing.push(
+                region.show({
+                    message: writeNoticeText(notice),
+                    tone: writeNoticeTone(notice.kind),
+                    // ALWAYS assertive — see the module header. Both kinds are moments design 10
+                    // makes non-negotiably loud, and the kit's tone-derived default would leave a
+                    // `wait` notice in the polite lane, i.e. silent for a screen-reader user who is
+                    // looking elsewhere.
+                    assertive: true,
+                }),
+            );
+            // BOUNDED. The kit deliberately ships no auto-dismiss TIMER (a toast that vanishes on its
+            // own is unreadable for anyone who reads slowly or looked away — WCAG "enough time"), and
+            // that is untouched here: nothing expires, the human still dismisses. But this host is the
+            // editor's first AUTOMATIC producer on that region — every other caller is user-initiated
+            // — and its worst case is systemic rather than exotic: with the daemon down the gateway
+            // refuses EVERY commit and every replay, so one toast per gesture accumulates for the life
+            // of the window, none of which anyone is likely to dismiss one by one. Retiring the OLDEST
+            // past a cap keeps the surface loud (the newest refusals are the ones still actionable)
+            // without the unbounded DOM growth uibus.ts's own retention note argues against. `shown`
+            // stays cumulative, so the "the editor DID tell them" record is unaffected.
+            while (standing.length > MAX_STANDING_NOTICES) {
+                standing.shift()?.dismiss();
+            }
+            // COUNTED ONLY AFTER THE RENDER RETURNS. `shown` is cumulative precisely so that "the
+            // editor DID tell them" stays answerable once a dismissed toast has left no pixels
+            // (boot.ts NOTICES_ATTRIBUTE) — a tally incremented before the render would answer that
+            // question with a claim it cannot back, since the bus swallows a throwing subscriber
+            // (uibus.ts #invoke) and nothing else would record that the notice never landed.
             last = notice;
             shown += 1;
-            region.show({
-                message: writeNoticeText(notice),
-                tone: writeNoticeTone(notice.kind),
-                // ALWAYS assertive — see the module header. Both kinds are moments design 10 makes
-                // non-negotiably loud, and the kit's tone-derived default would leave a `wait` notice
-                // in the polite lane, i.e. silent for a screen-reader user who is looking elsewhere.
-                assertive: true,
-            });
         },
     );
 

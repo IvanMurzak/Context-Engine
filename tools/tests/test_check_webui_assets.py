@@ -892,12 +892,38 @@ def test_write_notice_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> No
     assert _run_panel(tmp_path, bundle=drifted) == 1
 
 
-@pytest.mark.parametrize("ts_name", ["UI_TOPIC_WRITE_NOTICE", "WRITE_NOTICE_KIND_DROP"])
+@pytest.mark.parametrize(
+    "ts_name",
+    ["UI_TOPIC_WRITE_NOTICE", "WRITE_NOTICE_KIND_DROP", "WRITE_NOTICE_KIND_REFUSAL"])
 def test_bundle_missing_a_write_notice_constant_fails(tmp_path: Path, ts_name: str) -> None:
     """An ABSENT constant means editor-core is not rendering the notices the Shell publishes at all —
-    i.e. the notification host was tree-shaken out or never wired, which looks like a quiet editor."""
+    i.e. the notification host was tree-shaken out or never wired, which looks like a quiet editor.
+
+    `WRITE_NOTICE_KIND_REFUSAL` is the one worth naming explicitly: no PRODUCTION line references it
+    (`writeNoticeTone`/`writeNoticeHeadline` both branch on `_DROP` and let everything else fall
+    through), so it survives into the bundle solely because `index.ts` re-exports the module. That is
+    exactly the shape esbuild tree-shakes away — the reason `WELCOME_MODE_PROJECT` and
+    `DAEMON_OWNERSHIP_EXTERNAL` are deliberately EXCLUDED from their own pin tables above — so this
+    case is what keeps the barrel export from being dropped as dead weight without anyone noticing."""
     stripped = "\n".join(line for line in PANEL_BUNDLE.splitlines() if ts_name not in line)
     assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+def test_a_write_notice_constant_named_in_a_COMMENT_does_not_satisfy_the_pin(
+        tmp_path: Path) -> None:
+    """A comment restating the OLD value must not shadow a drifted declaration.
+
+    `write_notice.h` documents its own vocabulary at length, and the C++ reader takes `re.search`'s
+    FIRST match — so without comment-stripping a line like `// kWriteNoticeKindDrop = "drop" was the
+    original spelling.` left above a renamed value would be compared against TS instead of the real
+    declaration, and the gate would report OK across a live drift. Verifying prose instead of code is
+    the one outcome a cross-language pin must never have."""
+    shadowed = PANEL_CPP_WRITE_NOTICE.replace(
+        'inline constexpr const char* kWriteNoticeKindDrop = "drop";',
+        '// historical note: kWriteNoticeKindDrop = "drop" was the original spelling.\n'
+        'inline constexpr const char* kWriteNoticeKindDrop = "dropped";')
+    assert shadowed != PANEL_CPP_WRITE_NOTICE
+    assert _run_panel(tmp_path, write_notice=shadowed) == 1
 
 
 def test_a_renamed_write_notice_cpp_constant_is_a_config_error(tmp_path: Path) -> None:

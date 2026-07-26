@@ -102,8 +102,12 @@ inline constexpr const char* kWriteNoticeKindRefusal = "refusal";
 // new caller cannot introduce a silent drift by inventing one.
 struct WriteNotice
 {
-    // `kWriteNoticeKindDrop` or `kWriteNoticeKindRefusal`.
-    std::string kind = kWriteNoticeKindDrop;
+    // `kWriteNoticeKindDrop` or `kWriteNoticeKindRefusal`. Defaulted to REFUSAL to agree with every
+    // other unknown-input path in this feature (`notice_kind_for`, and `writeNoticeTone` in
+    // notifications.ts): over-stating severity costs the human a second look, while defaulting to the
+    // gentle "awaiting you" hue would send them re-applying an edit that may not be able to land.
+    // Every producer assigns this explicitly; the default only decides what a hand-built notice means.
+    std::string kind = kWriteNoticeKindRefusal;
     // What the human tried to do, for the message ("edit" / "undo" / "redo").
     std::string action;
     // The catalog code the write path answered with (`cas.mismatch`, `shell.no_daemon`, `compose.*`).
@@ -149,8 +153,13 @@ public:
     [[nodiscard]] bool has_store() const noexcept { return store_ != nullptr; }
 
     // Broadcast `notice` to every live window. Returns how many windows it was queued for (0 when no
-    // store is bound). Total — never throws, and a throwing WindowsProvider degrades to the primary
-    // window rather than taking a write path down with it.
+    // store is bound).
+    //
+    // A throwing WindowsProvider is CONTAINED — it degrades to the primary window instead of taking
+    // down a write path whose whole job at that moment is to fail gracefully. That containment is the
+    // guarantee; this is deliberately NOT documented as `noexcept`, because building the envelope and
+    // enqueueing it still allocate, so an allocation failure does propagate. Claiming otherwise would
+    // invite a caller to treat it as a `noexcept` boundary it is not.
     std::size_t publish(const WriteNotice& notice);
 
     // --- what it saw (the T1/T2 assertion surface) -----------------------------------------------

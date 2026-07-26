@@ -857,6 +857,30 @@ export const kitComponentTests: readonly TestCase[] = [
                 assertEqual(region.count, 2, "dismissing removes exactly one toast");
                 bad.dismiss();
                 assertEqual(region.count, 2, "dismissal is idempotent");
+
+                // THE e09b-3 LANE OVERRIDE, IN BOTH DIRECTIONS. `ToastOptions.assertive` documents
+                // itself as overriding the tone-derived lane "in both directions", but only the
+                // DERIVATION above was ever pinned — so the override could regress to a no-op, or to
+                // one-way, with every existing case still green. `wait` is its first real consumer (a
+                // refused write — the moment design 10 makes non-negotiably LOUD): tone-derived that
+                // lands POLITE, i.e. unspoken for precisely the screen-reader user the invariant
+                // exists to protect, which is why the lane had to become the caller's decision.
+                const wait = region.show({
+                    message: "Re-apply your edit",
+                    tone: "wait",
+                    assertive: true,
+                });
+                assert(
+                    lanes[1]?.contains(wait.element) === true,
+                    "`assertive: true` promotes a non-`bad` tone into the interrupting lane",
+                );
+                const quiet = region.show({ message: "Logged", tone: "bad", assertive: false });
+                assert(
+                    lanes[0]?.contains(quiet.element) === true,
+                    "and `assertive: false` demotes a `bad` one — the override is symmetric, which " +
+                        "is what lets a caller say its error is not urgent",
+                );
+                assertEqual(region.count, 4, "both overrides rendered");
             } finally {
                 host.dispose();
             }

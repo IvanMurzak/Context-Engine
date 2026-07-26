@@ -10,7 +10,7 @@ D7 splits the editor's facts in two:
 | tier | facts | lives | reaches |
 |---|---|---|---|
 | 1 — semantic | selection, cameras, play state | the **daemon** (`docs/editor-session-state.md`, e08a) | every client: CLI, agents, other windows |
-| 2 — chrome | focus, layout, drag, viewport hover, theme, palette | **editor-core**, this bus | this editor's windows, and nothing else |
+| 2 — chrome | focus, layout, drag, viewport hover, theme, palette, refused-write notices | **editor-core**, this bus | this editor's windows, and nothing else |
 
 Selection and camera are answers to "what is the human working on" — an agent needs them, so they are
 daemon state. "Which tab has focus" is not: it is noise to a daemon whose subject is authored data,
@@ -38,8 +38,11 @@ so a consumer written against one reads the other:
   namespaced under its own package id (`acme.tilemap.brush-changed`); anything else is refused with a
   diagnostic. The `ui_events` **capability** — whether the package may ride the bus at all — is
   enforced end to end by **e13**; this module owns the declaration + namespacing half only.
-* **`origin`** — the window that published the fact. What makes a mirrored envelope distinguishable
-  from a local one, and therefore what makes echo suppression possible.
+* **`origin`** — the window that published the fact — *or* the literal `"shell"` on
+  `editor.ui.write-notice`, the one topic published by the C++ Shell rather than by a window (see
+  § Publishers today for why that distinction is load-bearing rather than cosmetic). What makes a
+  mirrored envelope distinguishable from a local one, and therefore what makes echo suppression
+  possible.
 * **Snapshot-on-subscribe** — a subscriber is handed the retained envelope for its topic immediately.
   A panel mounted after a theme switch must not render untokened, and "subscribe, then separately ask
   for current state" is the race that model exists to remove.
@@ -116,7 +119,15 @@ shape is worth knowing because it is the editor's one Shell-to-renderer push pat
   awaiting-human — nothing was lost, re-apply against the current value), `bad` for a refusal
   (nothing was written), always in the kit's **assertive** live region so colour is never the only
   signal. The topic string and the two kind tokens are byte-compared against `write_notice.h` by
-  `tools/check_webui_assets.py --panel-contract`.
+  `tools/check_webui_assets.py --panel-contract`;
+* the **payload** is `{kind, action, code, message, pointer}`, every member always present (an
+  absent-vs-empty distinction would mean nothing here, so the Shell writes all five unconditionally
+  and `parseWriteNotice` stays total). `kind` is one of the two pinned tokens; `action` is free text
+  the Shell composes (`"edit"` / `"undo"` / `"redo"`) and the renderer only displays; `code` is the
+  catalog code the write path answered with; `pointer` is the field the refused write targeted, empty
+  when there was none. Note the MEMBER NAMES themselves are not pinned across the boundary — only the
+  topic and the two kinds are — so a rename on one side degrades through the renderer's total parser
+  rather than failing a gate.
 
 The remaining five topics have no publisher yet — they are the vocabulary the focus / layout / drag /
 viewport / palette surfaces publish onto as each is wired (the when-context sources in `when.ts` are

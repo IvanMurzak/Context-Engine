@@ -352,6 +352,23 @@ struct CapturedNotice
     std::string code;
 };
 
+// ONE capture shape, shared by the cases below. Written once because the two hand-rolled copies it
+// replaces had ALREADY drifted apart: only one of them filled `code`, so the same field meant "the
+// failing edit's code" in one case and "always empty" in the other — and an assertion later added to
+// the wrong one would have read as a product bug rather than as a test that never captured the value.
+// (The anti-vacuity control below deliberately uses a bare counter instead; it wants no capture.)
+[[nodiscard]] auto capture_into(std::vector<CapturedNotice>& out)
+{
+    return [&out](const char* verb, const undo::ReplayResult& result)
+    {
+        CapturedNotice captured;
+        captured.verb = verb;
+        captured.status = result.status;
+        captured.code = result.edits.empty() ? std::string{} : result.edits.front().code;
+        out.push_back(std::move(captured));
+    };
+}
+
 void test_a_dropped_replay_is_handed_to_the_notice_sink()
 {
     FieldStore store;
@@ -362,15 +379,7 @@ void test_a_dropped_replay_is_handed_to_the_notice_sink()
     feed.bind_gateway(&store);
 
     std::vector<CapturedNotice> notices;
-    feed.bind_notice_sink(
-        [&notices](const char* verb, const undo::ReplayResult& result)
-        {
-            CapturedNotice captured;
-            captured.verb = verb;
-            captured.status = result.status;
-            captured.code = result.edits.empty() ? std::string{} : result.edits.front().code;
-            notices.push_back(std::move(captured));
-        });
+    feed.bind_notice_sink(capture_into(notices));
     CHECK(feed.has_notice_sink());
 
     feed.record(fov_edit(60.0, 75.0));
@@ -378,13 +387,19 @@ void test_a_dropped_replay_is_handed_to_the_notice_sink()
 
     CHECK(feed.replay_undo().status == inspector::CommitResult::Status::dropped);
     CHECK(feed.notices_sent() == 1u);
+    // GUARDED: CHECK records a failure but does NOT abort (panels_test.h), so indexing straight after
+    // the size assertion is out of bounds on exactly the run that assertion exists to catch — UB, and
+    // on the ASan leg a heap-buffer-overflow report instead of a legible failure.
     CHECK(notices.size() == 1u);
-    // The VERB is what the human is told they were doing. "undo" and "redo" fail differently only in
-    // the message, so a sink that reported the wrong one would produce a correct-looking toast about
-    // an action the human did not take.
-    CHECK(notices[0].verb == "undo");
-    CHECK(notices[0].status == inspector::CommitResult::Status::dropped);
-    CHECK(notices[0].code == "cas.mismatch");
+    if (notices.size() == 1u)
+    {
+        // The VERB is what the human is told they were doing. "undo" and "redo" fail differently only
+        // in the message, so a sink that reported the wrong one would produce a correct-looking toast
+        // about an action the human did not take.
+        CHECK(notices[0].verb == "undo");
+        CHECK(notices[0].status == inspector::CommitResult::Status::dropped);
+        CHECK(notices[0].code == "cas.mismatch");
+    }
 }
 
 void test_a_refused_replay_reaches_the_sink_as_a_refusal_not_a_drop()
@@ -398,24 +413,20 @@ void test_a_refused_replay_reaches_the_sink_as_a_refusal_not_a_drop()
     feed.bind_gateway(&store);
 
     std::vector<CapturedNotice> notices;
-    feed.bind_notice_sink(
-        [&notices](const char* verb, const undo::ReplayResult& result)
-        {
-            CapturedNotice captured;
-            captured.verb = verb;
-            captured.status = result.status;
-            notices.push_back(std::move(captured));
-        });
+    feed.bind_notice_sink(capture_into(notices));
 
     feed.record(fov_edit(60.0, 75.0));
     CHECK(feed.replay_undo().status == inspector::CommitResult::Status::error);
     CHECK(feed.notices_sent() == 1u);
-    CHECK(notices.size() == 1u);
-    // DISTINGUISHABLE from a drop, which is the whole reason the sink carries the status: a refusal
-    // KEPT the step (retry when the daemon is back) while a drop consumed it. Telling the human the
-    // wrong one sends them looking for a co-writer who does not exist.
-    CHECK(notices[0].status == inspector::CommitResult::Status::error);
-    CHECK(notices[0].status != inspector::CommitResult::Status::dropped);
+    CHECK(notices.size() == 1u); // guarded below — CHECK records, it does not abort
+    if (notices.size() == 1u)
+    {
+        // DISTINGUISHABLE from a drop, which is the whole reason the sink carries the status: a
+        // refusal KEPT the step (retry when the daemon is back) while a drop consumed it. Telling the
+        // human the wrong one sends them looking for a co-writer who does not exist.
+        CHECK(notices[0].status == inspector::CommitResult::Status::error);
+        CHECK(notices[0].status != inspector::CommitResult::Status::dropped);
+    }
 }
 
 // THE ANTI-VACUITY CONTROL. A sink that fired on every replay would satisfy both cases above while

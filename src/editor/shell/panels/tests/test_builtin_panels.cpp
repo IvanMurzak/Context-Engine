@@ -24,6 +24,7 @@
 #include "context/editor/shell/panels/scenetree_feed.h" // methods on the bag's members.
 #include "context/editor/shell/panels/undo_feed.h"      // e09c: the bag's session undo host
 #include "context/editor/shell/panels/wire_override_gateway.h" // e09b-2: the bag's write gateway
+#include "context/editor/shell/write_notice.h" // e09b-3: the LOUD relay the bag's sinks feed
 
 #include "context/editor/serializer/json_parse.h"
 
@@ -36,6 +37,7 @@
 #include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace shell = context::editor::shell;
 namespace panels = context::editor::shell::panels;
@@ -292,6 +294,75 @@ void the_undo_replay_routes_through_the_shared_wire_gateway()
     CHECK(bound.undo->journal().can_undo());     // still kept
 
     panels::bind_write_client(bound, nullptr);
+}
+
+// e09b-3 — THE HUE DECISION, which nothing else in this PR covers.
+//
+// `bind_write_notice_relay` is the ONE place a CommitResult/ReplayResult becomes a WriteNotice, and
+// the KIND it picks is what chooses the human's colour (06 §2: `wait` = a co-writer got there first
+// and nothing was lost, so re-apply; `bad` = the write path refused). Every other test stops on one
+// side of that join — the feed suites assert the RESULT handed to the sink, and test_write_notice.cpp
+// starts from a hand-built WriteNotice — so the mapping itself had no assertion at all: swap the two
+// constants at the translation point and the entire suite stays green while a routine collision tells
+// the human their project is unreachable. The cross-language pins do not close it either; they
+// compare each constant's SPELLING, never which status it is chosen for.
+void a_refused_write_reaches_the_relay_as_a_notice_hued_for_its_status()
+{
+    namespace undo = context::editor::gui::session::undo;
+    namespace inspector = context::editor::gui::panels::inspector;
+
+    shell::PanelHost host;
+    panels::BuiltinPanels bound = panels::install_builtin_panels(host);
+    CHECK(bound.undo != nullptr);
+    CHECK(bound.inspector != nullptr);
+    if (bound.undo == nullptr || bound.inspector == nullptr)
+    {
+        return;
+    }
+
+    shell::UiMirrorStore mirror;
+    shell::WriteNoticeRelay relay;
+    relay.bind_store(&mirror);
+    panels::bind_write_notice_relay(bound, relay);
+
+    // BOTH sinks, not only the one this case drives. The gesture path and the replay path are wired
+    // together here, so a regression binding just one would leave half the editor silent — and the
+    // half still working would keep every other assertion in the suite green.
+    CHECK(bound.inspector->has_notice_sink());
+    CHECK(bound.undo->has_notice_sink());
+
+    undo::FieldEdit edit;
+    edit.root_scene = "scenes/main.scene.json";
+    edit.id_path = {"cam"};
+    edit.pointer = "/components/camera/fov";
+    bound.undo->record(std::move(edit));
+
+    // No daemon: the replay resolves as an ERROR — the write PATH refused and NO concurrency event
+    // was observed — which is `bad`, not `wait`.
+    const undo::ReplayResult refused = bound.undo->replay_undo();
+    CHECK(refused.status == inspector::CommitResult::Status::error);
+
+    CHECK(relay.published() == 1u);
+    CHECK(relay.delivered() == 1u); // no windows provider -> the primary, exactly once
+    const std::vector<Json> queued = mirror.take(shell::kPrimaryWindowId);
+    CHECK(queued.size() == 1u);
+    if (queued.size() == 1u)
+    {
+        CHECK(queued[0].at("topic").as_string() == shell::kUiTopicWriteNotice);
+        CHECK(queued[0].at("origin").as_string() == shell::kWriteNoticeOrigin);
+        // THE ASSERTION THIS CASE EXISTS FOR: an `error` status is hued as a REFUSAL, never a drop.
+        // Stated both ways on purpose — the equality pins the mapping, and the inequality keeps the
+        // case meaningful if the two constants ever collapse to the same string.
+        CHECK(queued[0].at("payload").at("kind").as_string() == shell::kWriteNoticeKindRefusal);
+        CHECK(queued[0].at("payload").at("kind").as_string() != shell::kWriteNoticeKindDrop);
+        // The VERB reaches the human as the action they actually took, not as a generic "write".
+        CHECK(queued[0].at("payload").at("action").as_string() == "undo");
+        CHECK(queued[0].at("payload").at("code").as_string() ==
+              std::string(undo::UndoJournal::kReadUnavailableCode));
+        // And the explanatory edit was lifted rather than left empty (notice_from_replay's
+        // front()-skip), so the toast carries a reason and not just a headline.
+        CHECK(!queued[0].at("payload").at("message").as_string().empty());
+    }
 }
 
 // e09c — THE TWO PERSISTENCE SEAMS, end to end through the BAG, against a REAL editor-state file.
@@ -616,6 +687,7 @@ int main()
     binds_every_hostable_panel_and_nothing_else();
     the_inspector_gesture_surface_is_live_but_refuses_without_a_daemon();
     the_undo_replay_routes_through_the_shared_wire_gateway();
+    a_refused_write_reaches_the_relay_as_a_notice_hued_for_its_status();
     the_journal_publishes_to_and_restores_from_the_editor_state_store();
     the_pump_consumes_a_landed_replay_and_rearms_the_inspector();
     the_undo_persistence_seams_tolerate_a_bag_with_no_host();

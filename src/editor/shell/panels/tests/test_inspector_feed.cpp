@@ -564,17 +564,38 @@ void a_dropped_commit_records_no_checkpoint()
 // Drive ONE gesture commit through the real provider and report which outcomes reached the notice
 // sink. Returns the sink's captures so each case asserts on the SAME driver — a per-case copy of this
 // twelve-line dance is how two of them end up subtly different and one of them stops proving anything.
-[[nodiscard]] std::vector<inspector::CommitResult> commit_and_capture_notices(
-    ScriptedGateway& gateway, std::size_t& notices_sent)
+//
+// It reports the COMMIT as well as the notices, and that is not padding: an assertion that only
+// counts notices is satisfied just as well by a run in which the gesture never reached the gateway at
+// all, which is precisely how the zero-notice CONTROL below could certify a write path that had
+// quietly stopped writing.
+struct CommitNoticeRun
+{
+    std::vector<inspector::CommitResult> notices;
+    std::size_t notices_sent = 0;
+    std::size_t commits_observed = 0;
+    std::size_t drops_observed = 0;
+    inspector::CommitResult last_commit;
+};
+
+// `bind_sink = false` drives the SAME gesture with no sink bound — the ordinary state of every T1 bag,
+// and the one case that must show a refusal is still counted when nobody is listening. It is a
+// parameter rather than a fourth hand-rolled copy of the dance precisely because it differs from the
+// others in ONE line; a copy is how it would quietly stop driving the same path as its siblings.
+[[nodiscard]] CommitNoticeRun commit_and_capture_notices(ScriptedGateway& gateway,
+                                                          bool bind_sink = true)
 {
     shell::PanelHost host(roster_with_inspector());
     panels::InspectorFeed feed(host, kPanelId);
     feed.bind_gateway(&gateway);
 
-    std::vector<inspector::CommitResult> notices;
-    feed.bind_notice_sink([&notices](const inspector::CommitResult& result)
-                          { notices.push_back(result); });
-    CHECK(feed.has_notice_sink());
+    CommitNoticeRun run;
+    if (bind_sink)
+    {
+        feed.bind_notice_sink([&run](const inspector::CommitResult& result)
+                              { run.notices.push_back(result); });
+    }
+    CHECK(feed.has_notice_sink() == bind_sink);
     CHECK(host.provide(kPanelId, feed.make_provider()));
     feed.panel().set_model(one_field_model("Before"), 100);
 
@@ -589,8 +610,11 @@ void a_dropped_commit_records_no_checkpoint()
     CHECK(host.gesture(kPanelId, shell::GestureVerb::commit, gesture, dispatched, error));
     CHECK(dispatched);
 
-    notices_sent = feed.notices_sent();
-    return notices;
+    run.notices_sent = feed.notices_sent();
+    run.commits_observed = feed.commits_observed();
+    run.drops_observed = feed.drops_observed();
+    run.last_commit = feed.last_commit();
+    return run;
 }
 
 // A LOUD L-30 drop reaches the sink, carrying what the human has to be told: which field, and why.
@@ -600,18 +624,22 @@ void a_dropped_commit_is_handed_to_the_notice_sink()
     gateway.refuse_with_cas_mismatch = true;
     gateway.moved_value = jstring("Someone Else"); // the co-writer's value at the SAME field path
 
-    std::size_t sent = 0;
-    const std::vector<inspector::CommitResult> notices =
-        commit_and_capture_notices(gateway, sent);
+    const CommitNoticeRun run = commit_and_capture_notices(gateway);
 
-    CHECK(sent == 1u);
-    CHECK(notices.size() == 1u);
-    CHECK(notices[0].status == inspector::CommitResult::Status::dropped);
-    CHECK(notices[0].code == "cas.mismatch");
-    CHECK(notices[0].pointer == "/name");
-    // The DIAGNOSTIC is non-empty. A notice whose message is "" renders as a toast with a headline
-    // and no reason, which is the shape a "loud" surface degrades into when nobody checks.
-    CHECK(!notices[0].message.empty());
+    CHECK(run.notices_sent == 1u);
+    // GUARDED: CHECK records a failure without aborting (panels_test.h), so indexing on the very run
+    // the size assertion is there to catch would be UB — a heap-buffer-overflow on the ASan leg in
+    // place of a legible failure. (The established shape here; see test_wire_override_gateway.cpp.)
+    CHECK(run.notices.size() == 1u);
+    if (run.notices.size() == 1u)
+    {
+        CHECK(run.notices[0].status == inspector::CommitResult::Status::dropped);
+        CHECK(run.notices[0].code == "cas.mismatch");
+        CHECK(run.notices[0].pointer == "/name");
+        // The DIAGNOSTIC is non-empty. A notice whose message is "" renders as a toast with a headline
+        // and no reason, which is the shape a "loud" surface degrades into when nobody checks.
+        CHECK(!run.notices[0].message.empty());
+    }
 }
 
 // The OTHER non-landing outcome: the write path refused. Also loud, and DISTINGUISHABLE — the
@@ -622,15 +650,16 @@ void a_refused_commit_is_handed_to_the_notice_sink()
     ScriptedGateway gateway;
     gateway.refuse_with_error = true;
 
-    std::size_t sent = 0;
-    const std::vector<inspector::CommitResult> notices =
-        commit_and_capture_notices(gateway, sent);
+    const CommitNoticeRun run = commit_and_capture_notices(gateway);
 
-    CHECK(sent == 1u);
-    CHECK(notices.size() == 1u);
-    CHECK(notices[0].status == inspector::CommitResult::Status::error);
-    CHECK(notices[0].status != inspector::CommitResult::Status::dropped);
-    CHECK(notices[0].code == panels::WireOverrideWriteGateway::kNoDaemonCode);
+    CHECK(run.notices_sent == 1u);
+    CHECK(run.notices.size() == 1u); // guarded below — CHECK records, it does not abort
+    if (run.notices.size() == 1u)
+    {
+        CHECK(run.notices[0].status == inspector::CommitResult::Status::error);
+        CHECK(run.notices[0].status != inspector::CommitResult::Status::dropped);
+        CHECK(run.notices[0].code == panels::WireOverrideWriteGateway::kNoDaemonCode);
+    }
 }
 
 // THE ANTI-VACUITY CONTROL, and the case that makes the two above mean something. A gate that fired
@@ -641,40 +670,35 @@ void an_applied_commit_produces_no_notice()
 {
     ScriptedGateway gateway; // neither refusal flag set — the write lands
 
-    std::size_t sent = 0;
-    const std::vector<inspector::CommitResult> notices =
-        commit_and_capture_notices(gateway, sent);
+    const CommitNoticeRun run = commit_and_capture_notices(gateway);
 
-    CHECK(sent == 0u);
-    CHECK(notices.empty());
+    // FIRST prove a commit actually happened AND landed. Without these two the control is itself
+    // vacuous in the other direction: a regression in STAGING — the gesture never reaching the
+    // gateway, so `commit()` answers `none` and there is nothing to refuse — produces zero notices
+    // just as faithfully, and this case would then certify the silence of a write path that had
+    // stopped writing at all. (The undo twin already proves its replay ran; this is the same rung.)
+    CHECK(run.commits_observed == 1u);
+    CHECK(run.last_commit.status == inspector::CommitResult::Status::applied);
+
+    CHECK(run.notices_sent == 0u);
+    CHECK(run.notices.empty());
 }
 
 // An unbound sink is an ordinary state (every T1 bag builds one) and must not change the drop's own
 // accounting: the refusal is still counted, still kept in `last_commit()`, still reported to stderr.
 void an_unbound_notice_sink_leaves_the_drop_counted()
 {
-    shell::PanelHost host(roster_with_inspector());
-    panels::InspectorFeed feed(host, kPanelId);
     ScriptedGateway gateway;
     gateway.refuse_with_cas_mismatch = true;
     gateway.moved_value = jstring("Someone Else");
-    feed.bind_gateway(&gateway);
-    CHECK(!feed.has_notice_sink());
-    CHECK(host.provide(kPanelId, feed.make_provider()));
-    feed.panel().set_model(one_field_model("Before"), 100);
 
-    bool dispatched = false;
-    std::string error;
-    Json params = Json::object();
-    params.set("nodeId", Json(std::string("inspector.widget./name")));
-    params.set("value", Json(std::string("\"After\"")));
-    CHECK(host.invoke(kPanelId, inspector::InspectorPanel::kEditCommand, params, dispatched, error));
-    Json gesture = Json::object();
-    gesture.set("nodeId", Json(std::string("inspector.widget./name")));
-    CHECK(host.gesture(kPanelId, shell::GestureVerb::commit, gesture, dispatched, error));
+    // THE SAME driver, with the sink left unbound — so this case cannot drift away from the path the
+    // three above drive, which is the whole reason the driver exists.
+    const CommitNoticeRun run = commit_and_capture_notices(gateway, /*bind_sink=*/false);
 
-    CHECK(feed.drops_observed() == 1u);
-    CHECK(feed.notices_sent() == 0u); // counted apart from the drop, so an unbound sink is VISIBLE
+    CHECK(run.drops_observed == 1u);
+    CHECK(run.notices_sent == 0u); // counted apart from the drop, so an unbound sink is VISIBLE
+    CHECK(run.notices.empty());
 }
 
 void selection_fetch_mechanics()

@@ -112,6 +112,12 @@ export const UI_REJECTION_LOG_LIMIT = 128;
  * mirrored envelope be told apart from a locally-published one (echo suppression, 05 §4's `origin`
  * contract applied to tier 2).
  *
+ * ⚠ `origin` IS NOT ALWAYS A WINDOW ID. `editor.ui.write-notice` is published by the C++ Shell, not by
+ * a window, and carries the literal `"shell"` — deliberately, because `receiveMirrored` drops an
+ * envelope whose origin equals the receiving bus's own and every bus origin IS a window id, so a
+ * window-stamped notice would be swallowed by exactly the window it was meant for. Treat this field
+ * as an opaque identity compared for EQUALITY only; parsing it as a number is not sound.
+ *
  * The payload is generic rather than a union of the built-in shapes: a package topic's payload is
  * by definition not in any union this file could write, and a bus that only carried shapes it knew
  * would not be a bus.

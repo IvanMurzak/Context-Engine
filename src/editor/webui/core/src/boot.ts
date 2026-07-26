@@ -701,30 +701,33 @@ function reportWindow(detail: string): void {
 }
 
 /**
- * Mirror the e10d-drill2 cross-window mirror's convergence onto <html> for a --dump-dom repro.
- * FIRE-ON-CHANGE (like the poller's own `report()`): the runtime poll calls this every tick, but the
- * convergence string only moves when `applied` / `suppressed` do, so an idle shipping window (which
- * never publishes) writes the attribute once and then does no per-tick string/DOM work at all.
+ * A FIRE-ON-CHANGE `<html>` attribute reporter, for the poll-driven diagnostics.
+ *
+ * The runtime poll calls these every tick, but their detail strings only move when the thing they
+ * describe does — so an idle shipping window writes each attribute once and never touches the DOM
+ * again. Written as a factory rather than twice over because the memo has to be per-attribute state,
+ * and two copies of it meant two module-level `let`s drifting beside two identical functions.
+ *
+ * NOTE the honest scope of "fire-on-change": the DOM WRITE is gated, the caller's string CONCATENATION
+ * is not — the detail is built at the call site before the comparison can happen. At 2 Hz that is
+ * microseconds and not worth restructuring the call sites for, but it is not literally "no per-tick
+ * work", and claiming so would mislead the next person profiling this loop.
  */
-let lastUiMirrorDetail: string | undefined;
-function reportUiMirror(detail: string): void {
-    if (typeof document !== "undefined" && detail !== lastUiMirrorDetail) {
-        lastUiMirrorDetail = detail;
-        document.documentElement.setAttribute(UI_MIRROR_ATTRIBUTE, detail);
-    }
+function makeChangeReporter(attribute: string): (detail: string) => void {
+    let last: string | undefined;
+    return (detail: string): void => {
+        if (typeof document !== "undefined" && detail !== last) {
+            last = detail;
+            document.documentElement.setAttribute(attribute, detail);
+        }
+    };
 }
 
-/**
- * Mirror the e09b-3 notification host's tally onto <html>. FIRE-ON-CHANGE, like `reportUiMirror`:
- * an editor that has refused nothing writes the attribute once and then does no per-tick work.
- */
-let lastNoticesDetail: string | undefined;
-function reportNotices(detail: string): void {
-    if (typeof document !== "undefined" && detail !== lastNoticesDetail) {
-        lastNoticesDetail = detail;
-        document.documentElement.setAttribute(NOTICES_ATTRIBUTE, detail);
-    }
-}
+/** The e10d-drill2 cross-window mirror's convergence, for a --dump-dom repro and the live smoke. */
+const reportUiMirror = makeChangeReporter(UI_MIRROR_ATTRIBUTE);
+
+/** The e09b-3 notification host's cumulative tally — "the editor DID tell them", after the pixels. */
+const reportNotices = makeChangeReporter(NOTICES_ATTRIBUTE);
 
 /**
  * Open + restore every panel that has rehomed INTO this window (M9 e10b) — the RUNTIME half of the
@@ -810,9 +813,15 @@ async function startWindowMechanism(
             // overlay (components.css), so it costs the docking root no layout — the same reasoning
             // index.html records for the banner strip, which must not change the box Dockview
             // measures or the live smokes' per-pixel background floor.
-            notifications = createNotificationHost(uiBus);
+            //
+            // The mount is handed to the HOST rather than appended here, because it must happen before
+            // the host subscribes (see createNotificationHost); and it is CONSTRUCTED inside the
+            // document guard rather than beside it, because building a toast region touches
+            // `document.createElement` — a throw there is swallowed by this function's outer catch and
+            // would silently take the rehome poll, the cross-window drag pump and the whole ui.mirror
+            // poll down with it, reporting nothing but a string on data-editor-window.
             if (typeof document !== "undefined") {
-                document.body.append(notifications.element);
+                notifications = createNotificationHost(uiBus, { mount: document.body });
             }
         }
         const uiMirrorSmoke =

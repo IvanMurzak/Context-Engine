@@ -20,9 +20,17 @@
 // CEF-FREE and D10 BOUNDARY-CLEAN, like window_bridge.h / cross_window_drag.h: pure data movement, no
 // browser, no window, no bridge, no kernel-internal module — so `tests/test_ui_mirror.cpp` drives the
 // SAME relay the real Shell runs, on all three default `build` legs. The FAN-OUT (which windows an
-// envelope broadcasts to) lives with the `WindowBridge`, which already knows the live window set via
-// its `WindowsProvider`; this store is only the per-window queues that fan-out feeds and each window
+// envelope broadcasts to) lives with its PUBLISHERS, each of which already knows the live window set
+// via a `WindowsProvider`; this store is only the per-window queues a fan-out feeds and each window
 // drains, mirroring how `WindowMoveStore` holds the rehome queues the bridge enqueues into.
+//
+// ⚠ THERE ARE TWO PUBLISHERS, AND THEY CARRY MATCHING COPIES OF THE FAN-OUT. `WindowBridge::ui_mirror`
+// (window_bridge.cpp) broadcasts a window's own `editor.ui` fact; `WriteNoticeRelay` (write_notice.cpp,
+// M9 e09b-3) broadcasts the Shell's refused-write notice. Both dedup through a `std::set`, both seed
+// the set unconditionally (with `self_id_` / `kPrimaryWindowId`), and both enqueue once per target —
+// so a change to WHO an envelope reaches has to be made in BOTH, and they already differ in one
+// respect: the relay CONTAINS a throwing `WindowsProvider` while the bridge lets it propagate. Worth
+// collapsing into one shared helper here the next time either is touched for a reason of its own.
 
 #pragma once
 

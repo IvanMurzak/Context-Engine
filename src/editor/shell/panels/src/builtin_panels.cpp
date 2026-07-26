@@ -144,14 +144,45 @@ void bind_write_client(BuiltinPanels& panels, client::Client* client)
 namespace
 {
 
-// One refused commit -> the notice the human is shown (M9 e09b-3).
+// The hue decision itself, in ONE place and as an exhaustive switch with NO `default:` —
+// deliberately. This repo builds warnings-as-errors (`context_warnings`: `/W4 /WX`, else
+// `-Wall -Wextra -Werror`), so an unhandled enumerator is `-Wswitch` / C4062 and a SIXTH
+// `CommitResult::Status` becomes a build break right here. A ternary or a `default:` would instead
+// map that new status to `refusal` silently, i.e. paint a data-integrity moment the wrong hue — the
+// failure write_notice.h calls harder to notice than a missing notice, because the human is TOLD
+// something, just not the truth.
 //
-// The KIND is the whole judgement, and it is read off the STATUS, never off the code. `dropped` is
-// L-30's concurrent-writer verdict — nothing was lost and nothing was overwritten, the edit simply
-// must be re-made against the value that is there now, which is 06 §2's `wait` ("awaiting-human").
-// Everything else that did not land is a write-PATH refusal (no daemon, an unreadable field, a
-// compose refusal), which is `bad`. Keying on the status rather than on `code == "cas.mismatch"`
-// keeps this correct if the catalog ever grows a second mismatch code.
+// The KIND is read off the STATUS, never off the code. `dropped` is L-30's concurrent-writer verdict
+// — nothing was lost and nothing was overwritten, the edit simply must be re-made against the value
+// that is there now, which is 06 §2's `wait` ("awaiting-human"). Everything else that did not land is
+// a write-PATH refusal (no daemon, an unreadable field, a compose refusal), which is `bad`. Keying on
+// the status rather than on `code == "cas.mismatch"` keeps this correct if the catalog ever grows a
+// second mismatch code.
+[[nodiscard]] const char* notice_kind_for(inspector::CommitResult::Status status)
+{
+    switch (status)
+    {
+    case inspector::CommitResult::Status::dropped:
+        // L-30: a concurrent writer touched THIS field. Nothing was lost -> `wait` (awaiting-human).
+        return shell::kWriteNoticeKindDrop;
+    case inspector::CommitResult::Status::error:
+        // The write path refused the request -> `bad`.
+        break;
+    case inspector::CommitResult::Status::none:
+    case inspector::CommitResult::Status::applied:
+    case inspector::CommitResult::Status::rebased:
+        // Not reachable through either sink — both feeds return before calling it unless the result
+        // is `!ok()` (inspector_feed.cpp / undo_feed.cpp) — but answered rather than defaulted, so the
+        // switch stays exhaustive and the compiler keeps guarding the enumerator set.
+        break;
+    }
+    // The fail-safe answer, and the one every other unknown-input path in this feature also chooses
+    // (`writeNoticeTone`, notifications.ts): over-stating severity costs a second look, while calling
+    // an unreachable project "awaiting you" sends the human re-applying an edit that cannot land.
+    return shell::kWriteNoticeKindRefusal;
+}
+
+// One refused commit -> the notice the human is shown (M9 e09b-3).
 //
 // NO USER-FACING SENTENCE IS COMPOSED HERE. The Shell puts FACTS on the wire (kind / action / code /
 // message / pointer) and the renderer writes the prose (notifications.ts), because that is where the
@@ -161,9 +192,7 @@ namespace
                                                     const char* action)
 {
     shell::WriteNotice notice;
-    notice.kind = result.status == inspector::CommitResult::Status::dropped
-                      ? shell::kWriteNoticeKindDrop
-                      : shell::kWriteNoticeKindRefusal;
+    notice.kind = notice_kind_for(result.status);
     notice.action = action;
     notice.code = result.code;
     notice.message = result.message;
@@ -172,28 +201,40 @@ namespace
 }
 
 // The same, for a replay. `ReplayResult` carries the whole checkpoint's per-field outcomes, so the
-// notice is built from the FIRST edit that did not land — the one that explains the refusal. A
-// multi-edit checkpoint whose SECOND field collided has an `applied` result at `edits.front()`
-// carrying an empty code and message, so taking `front()` would hand the human a notice with nothing
-// in it (the same trap `first_message` in undo_feed.cpp documents). The STATUS still comes from the
+// notice is built from the edit that EXPLAINS the refusal — not `edits.front()`, which on a
+// multi-edit checkpoint whose SECOND field collided is an `applied` result carrying an empty code and
+// message, and would hand the human a notice with nothing in it. The STATUS still comes from the
 // replay as a whole: that is the journal's verdict about the checkpoint, not about one field.
+//
+// THE SELECTION MATCHES `first_message` (undo_feed.cpp) ON PURPOSE — prefer a non-ok edit that has a
+// message, and only fall back to the first non-ok one when none does. The two are the SAME refusal
+// reported on two channels (that stderr line and this toast), so a predicate that drifted between
+// them would let one name one field and the other name a different one, which reads as two failures
+// where there was one. The fallback is what keeps a code-and-pointer-but-no-message edit from
+// producing an empty notice.
 [[nodiscard]] shell::WriteNotice notice_from_replay(const char* verb,
                                                     const undo::ReplayResult& result)
 {
     shell::WriteNotice notice;
-    notice.kind = result.status == inspector::CommitResult::Status::dropped
-                      ? shell::kWriteNoticeKindDrop
-                      : shell::kWriteNoticeKindRefusal;
+    notice.kind = notice_kind_for(result.status);
     notice.action = verb;
+    const inspector::CommitResult* explaining = nullptr;
     for (const inspector::CommitResult& edit : result.edits)
     {
-        if (!edit.ok())
+        if (!edit.ok() && (explaining == nullptr || explaining->message.empty()))
         {
-            notice.code = edit.code;
-            notice.message = edit.message;
-            notice.pointer = edit.pointer;
-            break;
+            explaining = &edit;
+            if (!edit.message.empty())
+            {
+                break;
+            }
         }
+    }
+    if (explaining != nullptr)
+    {
+        notice.code = explaining->code;
+        notice.message = explaining->message;
+        notice.pointer = explaining->pointer;
     }
     return notice;
 }

@@ -114,9 +114,16 @@ void test_a_notice_is_broadcast_to_every_live_window_exactly_once()
     CHECK(mirror.pending(1u) == 1u);
 
     const std::vector<Json> for_window_1 = mirror.take(1u);
+    // GUARDED, and the guard is not ceremony: CHECK only RECORDS a failure (shell_test.h) — it does
+    // not abort — so indexing straight after a size assertion is out of bounds on exactly the run that
+    // assertion exists to catch, trading a legible "size == 1 failed" for UB, and on the ASan leg for
+    // a heap-buffer-overflow report that names the test harness instead of the regression.
     CHECK(for_window_1.size() == 1u);
-    CHECK(for_window_1[0].at("topic").as_string() == kUiTopicWriteNotice);
-    CHECK(for_window_1[0].at("payload").at("code").as_string() == "cas.mismatch");
+    if (for_window_1.size() == 1u)
+    {
+        CHECK(for_window_1[0].at("topic").as_string() == kUiTopicWriteNotice);
+        CHECK(for_window_1[0].at("payload").at("code").as_string() == "cas.mismatch");
+    }
 }
 
 void test_with_no_windows_provider_the_primary_still_receives_it()
@@ -162,8 +169,7 @@ void test_successive_notices_are_drained_in_publish_order()
     WriteNoticeRelay relay;
     relay.bind_store(&mirror);
 
-    WriteNotice first = drop_notice();
-    first.pointer = "/components/camera/fov";
+    WriteNotice first = drop_notice(); // keeps drop_notice()'s pointer — the contrast is on `second`
     WriteNotice second = drop_notice();
     second.kind = kWriteNoticeKindRefusal;
     second.pointer = "/components/light/intensity";
@@ -173,11 +179,14 @@ void test_successive_notices_are_drained_in_publish_order()
     CHECK(relay.seq() == 2u);
 
     const std::vector<Json> drained = mirror.take(kPrimaryWindowId);
-    CHECK(drained.size() == 2u);
-    CHECK(drained[0].at("payload").at("pointer").as_string() == "/components/camera/fov");
-    CHECK(drained[1].at("payload").at("pointer").as_string() == "/components/light/intensity");
-    CHECK(drained[0].at("seq").as_int() == 1);
-    CHECK(drained[1].at("seq").as_int() == 2);
+    CHECK(drained.size() == 2u); // guarded below — CHECK records, it does not abort
+    if (drained.size() == 2u)
+    {
+        CHECK(drained[0].at("payload").at("pointer").as_string() == "/components/camera/fov");
+        CHECK(drained[1].at("payload").at("pointer").as_string() == "/components/light/intensity");
+        CHECK(drained[0].at("seq").as_int() == 1);
+        CHECK(drained[1].at("seq").as_int() == 2);
+    }
 }
 
 } // namespace

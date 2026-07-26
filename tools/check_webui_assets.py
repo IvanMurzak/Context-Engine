@@ -48,6 +48,7 @@ Exit codes (mirrors tools/check_licenses.py / tools/fetch_dockview.py):
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import re
@@ -398,16 +399,25 @@ def _read_cpp_string_constant(source: Path, name: str) -> str:
     generating a shared header, which for a handful of short strings costs more machinery than the
     drift it prevents. The regex is anchored on the constant NAME, so it cannot silently match a neighbour,
     and a rename that breaks it fails LOUDLY (exit 2) instead of quietly matching nothing.
+
+    COMMENTS ARE STRIPPED FIRST, for the same reason `check_theme_contract` strips them: the headers
+    scanned here DOCUMENT the very vocabulary being pinned — `write_notice.h` carries forty-odd lines
+    of prose that name their own constants — so a comment of the form `kFoo = "old"` left above a
+    drifted declaration would be matched INSTEAD of the declaration (`re.search` takes the first hit),
+    and the gate would compare the EXPLANATION against TS and report green across a real drift. That
+    is the one failure this whole family exists to make impossible, so it must not be reachable by
+    writing a sentence.
     """
     try:
-        text = source.read_text(encoding="utf-8")
+        text = _stripped_cpp_source(source)
     except OSError as exc:
         raise CheckError(f"cannot read {source}: {exc}") from exc
     match = re.search(rf"\b{re.escape(name)}\s*=\s*\"([^\"]*)\"", text)
     if match is None:
         raise CheckError(
             f"constant '{name}' not found in {source} — it was renamed or removed, so the "
-            f"cross-language scheme check can no longer verify anything. Update SCHEME_CONSTANTS.")
+            f"cross-language scheme check can no longer verify anything. Update the pin table that "
+            f"names it (SCHEME_CONSTANTS / WRITE_NOTICE_CONSTANTS / … in this file).")
     return match.group(1)
 
 
@@ -612,6 +622,42 @@ def _strip_cpp_comments(text: str) -> str:
     over-strip — which is acceptable here because the only thing looked for is an identifier.
     """
     return re.sub(r"//[^\n]*|/\*.*?\*/", "", text, flags=re.DOTALL)
+
+
+# A C++ string literal, a char literal, a `//` comment, or a `/* */` comment — STRINGS FIRST, so the
+# alternation consumes a literal whole and never mistakes the `//` inside one for a comment start.
+_CPP_LITERAL_OR_COMMENT_RE = re.compile(
+    r'"(?:[^"\\\n]|\\.)*"' r"|'(?:[^'\\\n]|\\.)*'" r"|//[^\n]*" r"|/\*.*?\*/", re.DOTALL)
+
+
+def _strip_cpp_comments_keeping_strings(text: str) -> str:
+    """Drop C++ comments while leaving STRING LITERALS intact.
+
+    Distinct from `_strip_cpp_comments` above, which explicitly does not protect literals because its
+    only caller looks for an identifier. That is exactly wrong for reading a constant's VALUE: several
+    pinned values are URLs (`context-editor://app`, `context-ext://`), so a naive strip eats `//app"`
+    and everything after it, and the gate then reports a DRIFT on a perfectly correct header — a false
+    RED, which is how a trustworthy check gets disabled. Kept as a second function rather than folded
+    into the first so `check_theme_contract`'s identifier probe keeps its own documented semantics.
+    """
+    return _CPP_LITERAL_OR_COMMENT_RE.sub(
+        lambda m: m.group(0) if m.group(0)[0] in "\"'" else "", text)
+
+
+@functools.lru_cache(maxsize=None)
+def _stripped_cpp_source(source: Path) -> str:
+    """`_strip_cpp_comments_keeping_strings` over a file, memoized per path.
+
+    The pin tables name a CONSTANT per row, not a file, so the same header is scanned once per
+    constant: `window_bridge.h` carries eleven rows and `write_notice.h` three. Without the memo each
+    row also pays its own DOTALL pass over the whole file — ~51 reads and 51 regex passes across one
+    `--panel-contract` run where twelve of each would do. Correct either way; the cache is what keeps
+    the comment-stripping that made the pins trustworthy from being charged per row.
+
+    Safe to cache for this process's lifetime: the checker is a short-lived one-shot over a tree
+    nothing mutates while it runs.
+    """
+    return _strip_cpp_comments_keeping_strings(source.read_text(encoding="utf-8"))
 
 
 def check_theme_contract(shell_cef_dir: Path, themes_dir: Path) -> list[str]:
