@@ -21,8 +21,9 @@
 // a link that was never built. Every case here is written so that removing one of the two halves
 // makes it RED.
 //
-// ⚠ NON-VACUITY PROVEN BY PLANTING (`scripts/plant_and_revert.py`), each plant reverted byte-exact.
-// Recorded inline as `⚠ PLANT (n)` against the case that catches it.
+// ⚠ NON-VACUITY PROVEN BY PLANTING, each plant reverted byte-exact. Recorded inline as
+// `⚠ PLANT (n)` against the case that catches it — every plant has a marker, so a case with none is
+// a gap, not a plant that was merely not written down.
 
 import { assert, assertEqual, delay, waitFor, type TestCase } from "./harness.js";
 import { ShellBridge, type BridgeQuery, type BridgeQueryFunction } from "../bridge.js";
@@ -58,6 +59,15 @@ interface MockShell {
     of(method: string): readonly RecordedCall[];
 }
 
+/**
+ * DELIBERATELY A SECOND COPY of `hydration.ts`'s helper rather than an import of it — do not dedupe.
+ *
+ * This one stands in for the C++ `serializer::parse_json` INSIDE the mock Shell: it belongs to the
+ * code under test's COUNTERPARTY, not to the code under test. Importing the renderer's own helper
+ * would make the model's accept/refuse decision derive from the very function the encoder consults,
+ * so a mutation to it would move both sides together and the encoder cases below would quietly stop
+ * discriminating — the duplication is what keeps the two halves independently falsifiable.
+ */
 function parsesAsJson(text: string): boolean {
     try {
         JSON.parse(text);
@@ -78,6 +88,16 @@ function parsesAsJson(text: string): boolean {
  *     exact behaviour the pre-e09e-1 renderer hit on every edit.
  *   * `gesture commit` with nothing staged is `Status::none` -> `dispatched:false`, and a resolved
  *     commit CONSUMES the staged edit (so a second commit writes nothing).
+ *
+ * ⚠ AND DELIBERATELY NOT FAITHFUL BEYOND THEM — read `dispatched:true` here as "the wire carried
+ * something the provider could parse", never as "the model would accept this edit". The real chain
+ * has a FOURTH gate this mock does not model: `inspector_feed.cpp` hands off to
+ * `InspectorPanel::stage_edit`, which additionally refuses an unknown pointer, a non-`editable`
+ * field and a `readonly` kind ("stage_edit's own field/editable checks still apply to the rest", as
+ * that file puts it). There is no field roster and no editable bit here, so any well-prefixed node
+ * id with a parseable value is accepted. Nor can it produce the provider's ERROR-shaped refusals —
+ * `panel.unknown_command`, `panel.bad_gesture`, `panel.bad_params` are BridgeErrors, not
+ * `dispatched:false`, so `PanelClient`'s error->`null` path is not exercised from here.
  */
 function mockShell(): MockShell {
     const calls: RecordedCall[] = [];
@@ -159,41 +179,52 @@ interface Mounted {
 }
 
 /**
- * The markup below is what `uitree::render_html` actually emits for an Inspector field row: a
- * `textbox` role becomes a VOID `<input>` whose text rides the `value` attribute, a `checkbox` also
- * carries `type="checkbox"` and `checked` presence. Hand-written here rather than fetched, because
- * the C++ renderer's own output is pinned on the C++ side (`test_node.cpp`) and duplicating that
- * assertion here would test the fixture instead of the runtime.
+ * The markup below is what `uitree::render_html` actually emits for an Inspector field row —
+ * checked against BOTH halves, since a fixture that drifts from the renderer silently tests a shape
+ * production never mounts. `InspectorPanel::build_panel` emits each row as `Role::group` (NOT a
+ * listitem) inside a `Role::list`, with a `Role::text` label child; `role_html_tag` then maps those
+ * to `<div>` / `<ul>` / `<span>`, and a `textbox` role to a VOID `<input>` whose text rides the
+ * `value` attribute, a `checkbox` additionally carrying `type="checkbox"` and `checked` presence.
+ * Hand-written here rather than fetched, because the C++ renderer's own output is pinned on the C++
+ * side (`test_node.cpp`) and duplicating that assertion here would test the fixture, not the runtime.
  */
 const FIELDS_HTML = [
     '<section id="inspector.panel" role="region" aria-label="Inspector">',
     '<ul id="inspector.fields" role="list" aria-label="Component fields">',
     // a STRING field: `render_value` prints a string's characters BARE
-    '<li id="inspector.field./name" role="listitem">',
+    '<div id="inspector.field./name" role="group">',
     '<span id="inspector.label./name" role="text">/name</span>',
     `<input id="${WIDGET_PREFIX}/name" role="textbox" aria-label="/name" tabindex="0"`,
     ' data-command="inspector.edit" value="Player One">',
-    "</li>",
+    "</div>",
     // a NUMBER field: its rendered value IS a JSON literal
-    '<li id="inspector.field./speed" role="listitem">',
+    '<div id="inspector.field./speed" role="group">',
     `<input id="${WIDGET_PREFIX}/speed" role="textbox" aria-label="/speed" tabindex="0"`,
     ' data-command="inspector.edit" value="1.5">',
-    "</li>",
+    "</div>",
     // an EMPTY string field: `render_html` omits `value=` entirely for empty text
-    '<li id="inspector.field./notes" role="listitem">',
+    '<div id="inspector.field./notes" role="group">',
     `<input id="${WIDGET_PREFIX}/notes" role="textbox" aria-label="/notes" tabindex="0"`,
     ' data-command="inspector.edit">',
-    "</li>",
+    "</div>",
+    // a STRING field whose rendered value LOOKS like a JSON literal — the #434 case. `render_value`
+    // is lossy here, so the encoder cannot tell it from a number field. Pinned, not fixed.
+    '<div id="inspector.field./tag" role="group">',
+    `<input id="${WIDGET_PREFIX}/tag" role="textbox" aria-label="/tag" tabindex="0"`,
+    ' data-command="inspector.edit" value="42">',
+    "</div>",
     // a TOGGLE field
-    '<li id="inspector.field./visible" role="listitem">',
+    '<div id="inspector.field./visible" role="group">',
     `<input id="${WIDGET_PREFIX}/visible" role="checkbox" type="checkbox" aria-label="/visible"`,
     ' tabindex="0" data-command="inspector.edit" checked>',
-    "</li>",
-    // a plain, VALUELESS affordance — the "every other dispatch is unchanged" control case
-    '<li id="inspector.field./reset" role="listitem">',
+    "</div>",
+    // a plain, VALUELESS affordance — the "every other dispatch is unchanged" control case.
+    // ⚠ SYNTHETIC: the real Inspector renders no button node. It stands in for every OTHER panel's
+    // valueless affordance, which is what the byte-identity case below is actually about.
+    '<div id="inspector.field./reset" role="group">',
     '<button id="inspector.action.reset" role="button" aria-label="Reset" tabindex="0"',
     ' data-command="inspector.edit">Reset</button>',
-    "</li>",
+    "</div>",
     "</ul>",
     "</section>",
 ].join("");
@@ -521,6 +552,15 @@ export const hydrationTests: readonly TestCase[] = [
         },
     },
     {
+        // ⚠ PLANT (6): make the key UNCONDITIONAL AND NON-UNDEFINED in `PanelClient.command`
+        // (`params["value"] = value ?? ""`) -> every valueless dispatch in the app grows a member the
+        // C++ side then tries to parse, and this case reds.
+        //
+        // ⚠ AND THE MUTATION THIS CASE CANNOT SEE, written down so no stronger claim gets recorded
+        // than it supports: a bare `params["value"] = value;` with `value === undefined` is
+        // byte-identical on the wire, because `ShellBridge.call` serialises through `JSON.stringify`,
+        // which DROPS an `undefined` member. That variant is not a behaviour change at all — which
+        // is exactly what "byte-identical" asserts — so it is nothing for a guard to catch.
         name: "hydration: a valueless dispatch is byte-identical to before (no `value` member at all)",
         run: async () => {
             const panel = mount();
@@ -545,6 +585,8 @@ export const hydrationTests: readonly TestCase[] = [
         },
     },
     {
+        // ⚠ PLANT (7): drop `#commit`'s `#gesturesEnabled` guard -> a panel whose provider bound no
+        // write gateway starts sending a `commit` verb the Shell can only refuse, and this case reds.
         name: "hydration: a panel WITHOUT gestures stages but never sends a verb the Shell would refuse",
         run: async () => {
             const panel = mount(false);
@@ -566,16 +608,77 @@ export const hydrationTests: readonly TestCase[] = [
         },
     },
     {
+        // ⚠ NO PLANT, DELIBERATELY — this is a CHARACTERIZATION case. It pins behaviour that is
+        // KNOWN WRONG (#434) so the eventual fix flips a RED test instead of changing the write path
+        // silently. It asserts what the code DOES, not what it should do.
+        //
+        // `/tag` is a STRING field whose rendered value is `42`, because `render_value` prints every
+        // string bare. Nothing in the mounted DOM says "string", so the encoder reads the field as
+        // JSON-typed and passes the next edit through UNQUOTED — retyping the field on disk. This is
+        // not a contrived fixture: typing `42` into ANY string field once leaves it rendered exactly
+        // like this, so the write path reaches this state on its own (`commandValueFor`'s ⚠ block).
+        //
+        // WHEN #434 LANDS: INVERT this case to expect `'"7"'`. Do not delete it.
+        name: "hydration: ⚠ KNOWN WRONG (#434) — a string field rendered as a literal is retyped",
+        run: async () => {
+            const panel = mount();
+            try {
+                type(panel.input(`${WIDGET_PREFIX}/tag`), "7");
+                await waitFor(
+                    "the edit to the literal-looking string field",
+                    () => panel.shell.of(PANEL_COMMAND_METHOD).length === 1,
+                );
+                assertEqual(
+                    lastCommandValue(panel.shell),
+                    "7",
+                    "TODAY: sent BARE, so a string field silently becomes a number — the #434 defect",
+                );
+            } finally {
+                panel.dispose();
+            }
+        },
+    },
+    {
+        // ⚠ PLANT (8): drop the `input`/`change` `removeEventListener` calls from `dispose()` -> the
+        // re-attached control's events reach the still-bound delegated listeners and this case reds.
+        //
+        // THE RE-ATTACH IS THE WHOLE CASE, and without it the assertion proves nothing. `dispose()`
+        // also calls `replaceChildren()`, which DETACHES every control from the container — and an
+        // event dispatched on a detached node never reaches a container listener, released or not.
+        // Asserting on the field where dispose left it would therefore stay GREEN under the very
+        // mutation this case names, recording only that `replaceChildren` ran. Putting the control
+        // back is what leaves the listeners as the one thing that can still keep the runtime silent.
+        //
+        // The POSITIVE CONTROL is the other half: "sent nothing" is equally satisfied by a runtime
+        // that bound nothing at all, or by a `type()` helper that stopped working. Proving the same
+        // control was LIVE one line earlier is what excludes both.
         name: "hydration: dispose releases the value listeners",
         run: async () => {
             const panel = mount();
-            const field = panel.input(`${WIDGET_PREFIX}/name`);
-            panel.runtime.dispose();
-            type(field, "after dispose");
-            commitValue(field);
-            await settle();
-            assertEqual(panel.shell.calls.length, 0, "a disposed runtime must send nothing");
-            panel.container.remove();
+            try {
+                const field = panel.input(`${WIDGET_PREFIX}/name`);
+
+                type(field, "before dispose");
+                await waitFor("the LIVE stage", () => panel.shell.calls.length === 1);
+
+                panel.runtime.dispose();
+                panel.container.appendChild(field);
+                assert(
+                    panel.container.contains(field),
+                    "the control must be back INSIDE the container, or the listeners are not under test",
+                );
+                type(field, "after dispose");
+                commitValue(field);
+                assert(!pressEnter(field), "a disposed runtime must not consume Enter either");
+                await settle();
+                assertEqual(
+                    panel.shell.calls.length,
+                    1,
+                    "a disposed runtime must send nothing MORE than the pre-dispose control",
+                );
+            } finally {
+                panel.dispose();
+            }
         },
     },
 ];
