@@ -243,6 +243,28 @@ fetchable-vs-preinstalled split per v1 target — what `context doctor` validate
   `tools/license-allowlist.json` (verified SPDX id — never guessed), or the license gate fails.
   Prefer the standard library; heavyweight prebuilts follow the SHA-pinned fetch + verify-before-use
   pattern (`cmake/ContextDownload.cmake`, `tools/fetch_*.py`).
+  **A from-source CONFIGURE-time fetch must not be single-sourced** (#359): `src/packages/ui/text/`
+  (FreeType + HarfBuzz) sits in nearly every leg's dependency closure, so one host being down reds
+  the ENTIRE rollup at configure time — measured 2026-07-22. Pinned callers use
+  `context_download_from_pin(PIN <tools/*-source.json> PATH <dest>)`, which reads `url`, `sha256`
+  and the ordered `mirrors` out of the pin itself — so a call site cannot silently drop the mirror
+  list — tries each source in turn, and re-checks the SAME pin after every attempt: a mirror serving
+  different bytes is refused and skipped, and the fetch still fails CLOSED (R-SEC-009).
+  `cmake/ContextDownload.cmake`'s header is the canonical statement of why that is safe. Each mirror
+  must be VERIFIED byte-identical (fetch it, compare its SHA-256) before being listed, and sit on an
+  INDEPENDENT domain, since a mirror on the primary's own infrastructure fails in the same outage;
+  the pin records that duty in `$comment_mirrors`. `tools/check_source_pins.py` enforces the pin
+  data offline, but it CANNOT tell that a listed mirror has since 404'd — that check stays with the
+  author, on every bump.
+  **Scope, honestly:** only those two from-source pins are mitigated today. The toggle-gated
+  prebuilts (wgpu-native, CEF, wasmtime, the spikes) are accepted exceptions — opt-in, so an outage
+  costs one job rather than the rollup. But V8 (`tools/v8-prebuilt.json`, auto-ON for all three CI
+  host triples), esbuild and tsgo (`ts-toolchain.json` / `tsc-toolchain.json`) and dockview
+  (`dockview-toolchain.json`) ARE unconditional configure-time fetches in the default closure, three
+  of them behind the same host (`registry.npmjs.org`) — a known UNMITIGATED exposure of exactly the
+  #359 shape, not an exemption. Closing it needs a shared multi-source downloader for the
+  `tools/fetch_*.py` family, which today each carry a private `_download_with_retry`; that is
+  follow-up work this rule does not pretend is done.
 - **No Apache/ASCII-art file headers** — this is a proprietary-EULA repo. Source files carry a
   short one-line descriptive top comment, matching their neighbors.
 - **Conventional commits** (`feat:`, `fix:`, `build:`, `ci:`, `docs:`, `test:`, `chore:` …);

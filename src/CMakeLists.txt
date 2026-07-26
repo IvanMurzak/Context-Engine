@@ -447,9 +447,12 @@ add_test(NAME versioned-install-layout
         -D "CONTEXT_BUILD_CONFIG=$<CONFIG>"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/versioned-install-check.cmake")
 
-# CI proof for the resilient prebuilt downloader (context_download, Context-Engine#129): exercises
-# the success / fail-closed-on-wrong-pin / retry-then-fail paths OFFLINE via file:// URLs, so it
-# runs on the local GCC dev gate AND every OS leg of the CI build matrix (no network, no prebuilt).
+# CI proof for the resilient prebuilt downloader (context_download, Context-Engine#129 + #359):
+# exercises the success / fail-closed-on-wrong-pin / retry-then-fail paths AND the multi-source
+# mirror fallback (fall-through, primary preference, a wrong-bytes mirror skipped but never
+# accepted, the production FATAL_ERROR branch) OFFLINE via file:// URLs, so it runs on the local GCC
+# dev gate AND every OS leg of the CI build matrix (no network, no prebuilt). The script spawns
+# cmake -P children for the cases that are unobservable in-process — no extra ctest registration.
 add_test(NAME download-retry-selfcheck
     COMMAND "${CMAKE_COMMAND}"
         -D "CONTEXT_DOWNLOAD_MODULE=${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextDownload.cmake"

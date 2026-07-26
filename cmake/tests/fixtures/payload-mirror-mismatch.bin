@@ -1,0 +1,3 @@
+context_download self-check fixture #2 - a DIFFERENT deterministic byte payload standing in for a
+mirror that serves something other than the pinned artifact (stale, repacked, or tampered). It must
+never be accepted, and it must never abort the fall-through to a later good source (issue #359).

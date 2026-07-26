@@ -20,14 +20,15 @@ endif()
 include("${CMAKE_CURRENT_LIST_DIR}/ContextDownload.cmake")
 
 # --- read the pin (single source of truth) --------------------------------------------------------
+# Only `version` is read here, because only the local paths below need it: url + sha256 + the
+# ordered fallback mirrors (issue #359) never leave the pin, since context_download_from_pin takes
+# the pin FILE. That is what keeps this call site from being able to drop the mirror list.
 set(_ft_pin "${CMAKE_CURRENT_LIST_DIR}/../tools/freetype-source.json")
 if(NOT EXISTS "${_ft_pin}")
     message(FATAL_ERROR "ContextFreetype: pin file not found at ${_ft_pin}")
 endif()
 file(READ "${_ft_pin}" _ft_pin_json)
 string(JSON _ft_version GET "${_ft_pin_json}" version)
-string(JSON _ft_url     GET "${_ft_pin_json}" url)
-string(JSON _ft_sha     GET "${_ft_pin_json}" sha256)
 
 set(_ft_deps "${CMAKE_BINARY_DIR}/_deps")
 set(_ft_tarball "${_ft_deps}/freetype-${_ft_version}.tar.gz")
@@ -36,11 +37,10 @@ set(_ft_src "${_ft_deps}/freetype-${_ft_version}")
 # --- fetch + verify + extract (idempotent — skip when already extracted) ---------------------------
 if(NOT EXISTS "${_ft_src}/CMakeLists.txt")
     file(MAKE_DIRECTORY "${_ft_deps}")
-    context_download(
-        URL             "${_ft_url}"
-        PATH            "${_ft_tarball}"
-        EXPECTED_SHA256 "${_ft_sha}"
-        DESCRIPTION     "FreeType ${_ft_version} source")
+    context_download_from_pin(
+        PIN         "${_ft_pin}"
+        PATH        "${_ft_tarball}"
+        DESCRIPTION "FreeType ${_ft_version} source")
     message(STATUS "ContextFreetype: extracting FreeType ${_ft_version}")
     file(ARCHIVE_EXTRACT INPUT "${_ft_tarball}" DESTINATION "${_ft_deps}")
 endif()
