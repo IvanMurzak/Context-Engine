@@ -123,6 +123,27 @@ struct CefShellOptions
     // errors are otherwise never surfaced — turning it on makes Chromium name the cause on stderr.
     bool verbose_logging = false;
 
+    // Isolate Chromium's OSCrypt profile-encryption key from the MACHINE keychain, via Chromium's
+    // own `--use-mock-keychain` test switch. OFF by default — a shipped editor keeps the real OS
+    // key store. Every SMOKE turns it ON, and that is not a convenience: on macOS it is the
+    // difference between a test that finishes and one that hangs forever (issue #437).
+    //
+    // WHY (measured, CE #437). Chromium reads the `"<product> Safe Storage"` generic-password
+    // keychain item to derive the profile encryption key, on a base::ThreadPool task posted
+    // BLOCK_SHUTDOWN. macOS binds that item's ACL to the CREATING executable's code signature
+    // (cdhash for an ad-hoc-signed local build), so ANY other binary — including the SAME target
+    // after a rebuild, since the cdhash changes — is off the ACL, and securityd raises a modal
+    // SecurityAgent authorization prompt. `SecItemCopyMatching` then blocks inside
+    // `SecurityServer::ClientSession::decrypt` until a human answers it. Nobody answers on an
+    // unattended host, so the BLOCK_SHUTDOWN task never completes and `CefShutdown()` — which waits
+    // on the ThreadPool shutdown event — never returns. The smoke has already printed its verdict by
+    // then, which is exactly why #437 reads as "passes, then hangs in teardown".
+    //
+    // This is the SECOND piece of shared machine state a CEF smoke must isolate; `cache_root` above
+    // is the first (the Chromium process singleton). Same shape, same reason: a test may not depend
+    // on machine-global state another process — or another build of itself — also owns.
+    bool use_mock_keychain = false;
+
     // --- e05c: the app scheme + the privileged bridge --------------------------------------------
 
     // editor-core's built asset root, served over `context-editor://app/…` (design 04 §1). Empty

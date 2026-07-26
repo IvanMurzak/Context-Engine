@@ -132,6 +132,13 @@ public:
         command_line->AppendSwitch("disable-gpu-compositing");
         command_line->AppendSwitch("disable-software-rasterizer");
         command_line->AppendSwitch("no-sandbox");
+        // Isolate the OSCrypt profile-encryption key from the MACHINE keychain (issue #437), for the
+        // reason src/editor/cef/src/cef_boot_smoke.cpp states in full: macOS binds the
+        // `"<product> Safe Storage"` keychain item's ACL to the creating executable's cdhash, so a
+        // rebuilt binary is off the ACL, securityd raises a modal prompt nothing can answer, and the
+        // BLOCK_SHUTDOWN task holding CefShutdown() open never completes. Measured on this exact
+        // executable: 5/5 hangs without the switch. tools/check_cef_keychain_isolation.py enforces it.
+        command_line->AppendSwitch("use-mock-keychain");
     }
 
 private:

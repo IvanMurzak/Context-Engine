@@ -113,6 +113,12 @@ bool g_initialized = false;
 // it builds from the browser process's, so the whole tree logs to stderr. Never mutated after boot.
 bool g_verbose_logging = false;
 
+// Opt-in OSCrypt keychain isolation (CefShellOptions::use_mock_keychain), latched exactly like
+// g_verbose_logging above: set ONCE in the browser process before CefInitialize and read by
+// OnBeforeCommandLineProcessing. Issue #437 — the field's own comment in cef_shell.h carries the
+// mechanism.
+bool g_use_mock_keychain = false;
+
 // The e10a containment counters (cef_shell.h § the containment counters). Both are written on the
 // CEF UI thread — which IS the owner thread here (`multi_threaded_message_loop=false` + the
 // integrated pump, so every callback runs inside the owner's CefDoMessageLoopWork) — and read by
@@ -1157,6 +1163,15 @@ public:
             command_line->AppendSwitchWithValue("enable-logging", "stderr");
             command_line->AppendSwitchWithValue("v", "1");
         }
+        // Opt-in OSCrypt keychain isolation (CefShellOptions::use_mock_keychain, issue #437). MUST
+        // be a command-line switch rather than a CefSettings field: Chromium's own
+        // chrome_browser_main_mac layer reads it off the command line to install the fake keychain
+        // BEFORE the first OSCrypt use, and there is no CEF API surface for it. Appended for the
+        // whole process tree exactly like the logging switches above.
+        if (g_use_mock_keychain)
+        {
+            command_line->AppendSwitch("use-mock-keychain");
+        }
     }
 
     void OnScheduleMessagePumpWork(int64_t delay_ms) override
@@ -1552,6 +1567,9 @@ std::unique_ptr<IBrowserHost> make_cef_browser_host(const CefShellOptions& optio
         // Latch the opt-in BEFORE CefInitialize: OnBeforeCommandLineProcessing (which reads the flag)
         // runs INSIDE this CefInitialize, and the browser-process log level is a CefSettings field.
         g_verbose_logging = options.verbose_logging;
+        // Same latch-before-CefInitialize reason as the line above: OnBeforeCommandLineProcessing
+        // runs INSIDE this CefInitialize, and it is the only place the switch can be appended.
+        g_use_mock_keychain = options.use_mock_keychain;
         settings.log_severity =
             options.verbose_logging ? LOGSEVERITY_VERBOSE : LOGSEVERITY_WARNING;
         if (options.devtools_enabled && options.remote_debugging_port > 0)

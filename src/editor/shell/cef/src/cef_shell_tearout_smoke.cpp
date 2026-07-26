@@ -233,6 +233,12 @@ shell::cef::CefShellOptions make_cef_options(const smoke::BrowserGeometry& geome
     options.app_asset_root = CONTEXT_WEBUI_ASSET_DIR;
     options.bridge = bridge;
     options.windowless_frame_rate = 10;
+    // Isolate the OSCrypt profile-encryption key from the MACHINE keychain (issue #437). Without
+    // this, macOS blocks CefShutdown() forever on a SecurityAgent authorization prompt no automated
+    // run can answer, so the smoke prints its whole verdict and then never exits — see
+    // CefShellOptions::use_mock_keychain for the mechanism. EVERY CEF smoke sets it, and
+    // tools/check_cef_keychain_isolation.py fails the build if one stops.
+    options.use_mock_keychain = true;
     return options;
 }
 

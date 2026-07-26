@@ -110,6 +110,18 @@ public:
         command_line->AppendSwitch("disable-gpu-compositing");
         command_line->AppendSwitch("disable-software-rasterizer");
         command_line->AppendSwitch("no-sandbox");
+        // Isolate the OSCrypt profile-encryption key from the MACHINE keychain (issue #437), the
+        // second piece of shared machine state this smoke must not share — `root_cache_path` below
+        // is the first. Chromium derives that key from a `"<product> Safe Storage"` keychain item on
+        // a BLOCK_SHUTDOWN ThreadPool task; macOS binds the item's ACL to the CREATING executable's
+        // cdhash, so any other binary — including this one after a rebuild — is off the ACL and
+        // securityd raises a modal SecurityAgent prompt. `SecItemCopyMatching` then blocks forever
+        // on an unattended host, the BLOCK_SHUTDOWN task never finishes, and CefShutdown() (which
+        // waits on the ThreadPool shutdown event) never returns — measured 5/5 hangs vs 5/5 passes
+        // with this switch, on one binary one minute apart. Chromium's own test switch; it is read
+        // off the command line before the first OSCrypt use, so there is no API alternative.
+        // tools/check_cef_keychain_isolation.py fails the build if this line goes away.
+        command_line->AppendSwitch("use-mock-keychain");
     }
 
 private:
