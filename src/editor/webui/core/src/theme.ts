@@ -403,6 +403,25 @@ export class IframeThemeChannel {
         return this.#targets.size;
     }
 
+    /**
+     * The last event broadcast, or `undefined` before the first apply.
+     *
+     * EXPOSED FOR THE PULL HALF (M9 e13d). `bridge.theme.tokens` answers a panel that asks for the
+     * current tokens over its own port, and it MUST answer with the value this channel PUSHES — a
+     * second snapshot taken from the engine would be a second source of truth, free to disagree after
+     * a switch and invisible when it did. This is the field the late-registration replay above
+     * already reads, so the pull and the push are the same value BY CONSTRUCTION rather than by
+     * convention.
+     *
+     * WHY A PULL EXISTS AT ALL, given the replay. `register` posts the current theme immediately, but
+     * a frame's document is not necessarily listening yet: the target is a `contentWindow`, and until
+     * the package's own document has parsed its listener the post lands in whatever document occupies
+     * the slot and is dropped. The pull is the half the PANEL initiates, so it cannot be early.
+     */
+    get last(): ThemeChangedEvent | undefined {
+        return this.#last;
+    }
+
     /** Broadcast a theme change to every registered frame, and remember it for late registrations. */
     broadcast(event: ThemeChangedEvent): void {
         this.#last = event;

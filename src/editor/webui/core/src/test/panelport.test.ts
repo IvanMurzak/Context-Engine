@@ -48,6 +48,9 @@ import { CommandRegistry } from "../commands.js";
 import {
     DENY_ALL_CAPABILITY_GRANTS,
     PANEL_VERB_COMMANDS_LIST,
+    PANEL_VERB_STATE_GET,
+    PANEL_VERB_STATE_SET,
+    PANEL_VERB_THEME_TOKENS,
     PANEL_VERB_UI_SUBSCRIBE,
     makePanelBridgeVerbs,
 } from "../panelverbs.js";
@@ -364,24 +367,19 @@ async function waitForReply(harness: PanelHarness, id: string): Promise<Record<s
 }
 
 /**
- * The verbs STILL parked, in e13c and e13d. EVERY one of them must get the SAME refusal, which is
- * what "so they can fill verbs without renegotiating the shape" means — and naming them explicitly is
- * what makes the promise checkable rather than rhetorical.
+ * The verbs STILL parked, in e13c. EVERY one of them must get the SAME refusal, which is what "so
+ * they can fill verbs without renegotiating the shape" means — and naming them explicitly is what
+ * makes the promise checkable rather than rhetorical.
  *
- * ⚠ SHORTER SINCE M9 e13b-2. `bridge.commands.register` / `.unregister` and `bridge.ui.subscribe`
- * left this list because e13b-2 FILLED them (panelverbs.ts): they are no longer parked, and keeping
- * them here would have asserted something false about the shipping build. What remains is e13c's
- * daemon-facing pair and e13d's theme/state pair. The list is a claim about the PRODUCTION table, so
- * the sibling case `the PRODUCTION verb table…` below drives that table rather than this harness's
- * empty one — this case proves the transport's deny-all, that one proves the build's.
+ * ⚠ SHORTER AGAIN SINCE M9 e13d. `bridge.commands.register` / `.unregister` and `bridge.ui.subscribe`
+ * left at e13b-2, and `bridge.theme.tokens` / `bridge.state.get` / `bridge.state.set` leave here,
+ * because each task FILLED its own (panelverbs.ts): they are no longer parked, and keeping them would
+ * assert something false about the shipping build. What remains is e13c's daemon-facing pair. The
+ * list is a claim about the PRODUCTION table, so the sibling case `the PRODUCTION verb table…` below
+ * drives that table rather than this harness's empty one — this case proves the transport's deny-all,
+ * that one proves the build's.
  */
-const PARKED_VERBS: readonly string[] = [
-    "bridge.call",
-    "bridge.events.subscribe",
-    "bridge.theme.tokens",
-    "bridge.state.get",
-    "bridge.state.set",
-];
+const PARKED_VERBS: readonly string[] = ["bridge.call", "bridge.events.subscribe"];
 
 // ------------------------------------------------------------------------------------------ cases
 
@@ -785,6 +783,8 @@ export const panelPortTests: readonly TestCase[] = [
                 registry: () => registry,
                 whenContext: () => ({ panelFocus: "", textInputFocus: false }),
                 grants: DENY_ALL_CAPABILITY_GRANTS,
+                themeTokens: () => undefined,
+                state: { read: (): unknown => null, write: (): void => {} },
                 request: () => Promise.resolve({ ok: true, result: null }),
             });
             const harness = createHarness({ verbs: verbs.verbs });
@@ -831,6 +831,126 @@ export const panelPortTests: readonly TestCase[] = [
                     (parked["error"] as Record<string, unknown>)["code"],
                     PANEL_BRIDGE_REFUSALS.verbNotGranted,
                     "e13c's verb is still refused by lookup miss — filling a table did not open it",
+                );
+            } finally {
+                harness.dispose();
+            }
+        },
+    },
+    {
+        // M9 e13d, END TO END — the two verbs this task fills, driven from a REAL opaque-origin
+        // document over a REAL transferred port. `panelverbs.test.ts` proves what the handlers
+        // DECIDE; only this proves the decisions survive structured clone and reach a package, which
+        // matters more for these two than for the command verbs: theme tokens and a state blob are
+        // the first DATA to cross this boundary, and a value that cannot be cloned would refuse (or
+        // arrive mangled) at exactly this hop and nowhere earlier.
+        name: "panelport: bridge.theme.tokens + bridge.state.* round-trip over a REAL port (M9 e13d)",
+        run: async (): Promise<void> => {
+            const theme: { payload: Record<string, unknown> | undefined } = {
+                payload: {
+                    themeId: "builtin.dark",
+                    name: "Dark",
+                    appearance: "dark",
+                    highContrast: false,
+                    reducedMotion: false,
+                    variables: { "--ctx-colors-panel": "#0a0a0a" },
+                },
+            };
+            // The store the RENDERER owns in production (panelhost.ts). Held out here so the case can
+            // read it from the host side — the witness that a `set` reached storage rather than only
+            // producing an agreeable reply.
+            const store: { value: unknown } = { value: null };
+            const verbs = makePanelBridgeVerbs({
+                panelId: "pkg.harness",
+                packageId: "pkg.harness",
+                declaredCapabilities: [],
+                manifestCommandIds: [],
+                registry: () => undefined,
+                whenContext: () => ({ panelFocus: "", textInputFocus: false }),
+                grants: DENY_ALL_CAPABILITY_GRANTS,
+                themeTokens: () => theme.payload as never,
+                state: {
+                    read: (): unknown => store.value,
+                    write: (value: unknown): void => {
+                        store.value = value;
+                    },
+                },
+                request: () => Promise.resolve({ ok: true, result: null }),
+            });
+            const harness = createHarness({ verbs: verbs.verbs });
+            try {
+                await waitForGrant(harness);
+
+                // 1. THE PULL. A package asks for the current tokens when IT is ready — the half a
+                //    push cannot cover, because a frame's document is not listening until it has
+                //    parsed its own listener.
+                harness.command({
+                    cmd: "send",
+                    index: 0,
+                    envelope: requestEnvelope("tok", PANEL_VERB_THEME_TOKENS),
+                });
+                const tokens = await waitForReply(harness, "tok");
+                assertEqual(tokens["ok"], true, "bridge.theme.tokens is answered, not refused");
+                const payload = tokens["result"] as Record<string, unknown>;
+                assertEqual(payload["themeId"], "builtin.dark", "…with the applied theme's id");
+                assertEqual(
+                    (payload["variables"] as Record<string, unknown>)["--ctx-colors-panel"],
+                    "#0a0a0a",
+                    "…and the full variable set, structured-cloned intact across the boundary",
+                );
+
+                // 2. RE-TOKENING, at the verb. The provider is late-bound, so a switch is visible to
+                //    a panel that asks again — which is what a package does after a change event.
+                theme.payload = {
+                    themeId: "builtin.light",
+                    name: "Light",
+                    appearance: "light",
+                    highContrast: false,
+                    reducedMotion: false,
+                    variables: { "--ctx-colors-panel": "#ffffff" },
+                };
+                harness.command({
+                    cmd: "send",
+                    index: 0,
+                    envelope: requestEnvelope("tok2", PANEL_VERB_THEME_TOKENS),
+                });
+                const switched = await waitForReply(harness, "tok2");
+                assertEqual(
+                    ((switched["result"] as Record<string, unknown>)["variables"] as Record<
+                        string,
+                        unknown
+                    >)["--ctx-colors-panel"],
+                    "#ffffff",
+                    "after a theme switch the SAME verb answers with the new tokens",
+                );
+
+                // 3. THE STATE ROUND TRIP, over the port. Set, then get, then read the host-side
+                //    store — all three, because the reply alone would pass with no storage at all.
+                harness.command({
+                    cmd: "send",
+                    index: 0,
+                    envelope: requestEnvelope("put", PANEL_VERB_STATE_SET, {
+                        params: { state: { scroll: 12, filter: "mesh" } },
+                    }),
+                });
+                const put = await waitForReply(harness, "put");
+                assertEqual(put["ok"], true, "bridge.state.set is accepted over the real port");
+                assertEqual(
+                    JSON.stringify(store.value),
+                    JSON.stringify({ scroll: 12, filter: "mesh" }),
+                    "…and the blob really reached the host-side store",
+                );
+
+                harness.command({
+                    cmd: "send",
+                    index: 0,
+                    envelope: requestEnvelope("got", PANEL_VERB_STATE_GET),
+                });
+                const got = await waitForReply(harness, "got");
+                assertEqual(
+                    JSON.stringify((got["result"] as Record<string, unknown>)["state"]),
+                    JSON.stringify({ scroll: 12, filter: "mesh" }),
+                    "and the package reads its own blob back, byte-for-byte, through the envelope",
                 );
             } finally {
                 harness.dispose();

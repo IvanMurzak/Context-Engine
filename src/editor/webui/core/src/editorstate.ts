@@ -68,7 +68,10 @@ export interface ShellRegion {
  *
  * `layout` is Dockview's `toJSON()` output — opaque to the Shell, `null` for a fresh project.
  * `panels` maps a panel id to its D6 state blob (`{schemaVersion, data}`), assembled by editor-core
- * FROM `panel.state.get` and applied back via `panel.state.set` on restore.
+ * from TWO sources it deliberately keeps in ONE shape: a C++-modeled panel's blob comes from
+ * `panel.state.get` and is applied back via `panel.state.set`, while a third-party `iframe` panel's
+ * comes from its PORT store (`PanelHost.portState` / `seedPortState`, M9 e13d) because it has no
+ * model to ask. The Shell stores the map opaquely either way, so it never has to know which.
  */
 export interface PersistedState {
     readonly layout: unknown;
@@ -196,8 +199,9 @@ const DEFAULT_DEBOUNCE_MS = 400;
  * Persists the editor's arrangement and republishes its region map, and restores both on boot.
  *
  * Owns NO layout geometry (that is PanelHost's) and NO panel state (that is the C++ models', reached
- * through PanelClient) — it is the coordinator that moves them across the bridge on the three
- * triggers. Every method is failure-tolerant: a persistence error must never undo a working editor.
+ * through PanelClient — or, for a third-party `iframe` panel, its port store, reached through
+ * PanelHost) — it is the coordinator that moves them across the bridge on the three triggers. Every
+ * method is failure-tolerant: a persistence error must never undo a working editor.
  */
 export class LayoutPersistence {
     readonly #panelHost: PanelHost;
@@ -246,6 +250,21 @@ export class LayoutPersistence {
         let panelsRestored = 0;
         const degraded: string[] = [];
         for (const [id, blob] of Object.entries(persisted.panels)) {
+            // A THIRD-PARTY `iframe` PANEL HAS NO C++ MODEL (M9 e13d), so `panel.state.set` has
+            // nothing to apply for it — its blob is seeded into the PORT store instead, which is what
+            // `bridge.state.get` then answers with. `undefined` means this is not a port panel and
+            // the C++ route below is the right one; the two are exclusive by construction, so no blob
+            // is applied twice. The restored/degraded accounting is identical either way, so a
+            // package panel's stale blob shows up in the same `degraded` list a built-in's does.
+            const seeded = this.#panelHost.seedPortState(id, blob);
+            if (seeded !== undefined) {
+                if (seeded) {
+                    panelsRestored += 1;
+                } else {
+                    degraded.push(id);
+                }
+                continue;
+            }
             const result = await this.#panelClient.setState(id, blob);
             if (result === null) {
                 // The panel is unknown to this build or persists no state — an ordinary outcome for a
@@ -328,6 +347,15 @@ export class LayoutPersistence {
         const panels: Record<string, unknown> = {};
         await Promise.all(
             [...this.#panelHost.mounted].map(async (id): Promise<void> => {
+                // The PORT store first (M9 e13d) — a third-party `iframe` panel's blob lives on this
+                // side of the bridge, so asking the Shell for it would answer `null` for every
+                // package panel and the reload would preserve nothing. Synchronous and local, so it
+                // also costs this gather no round trip.
+                const port = this.#panelHost.portState(id);
+                if (port !== undefined) {
+                    panels[id] = port;
+                    return;
+                }
                 const state = await this.#panelClient.getState(id);
                 if (state !== null && state !== undefined) {
                     panels[id] = state;

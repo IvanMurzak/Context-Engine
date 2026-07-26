@@ -366,6 +366,12 @@ async function startPanels(
             container,
             client,
             localPanels: settings.factories,
+            // THE THEME PUSH CHANNEL (M9 e13d) — `ThemeEngine` already broadcasts every apply into
+            // it (theme.ts, the constructor's bus subscription); this is the wiring that finally
+            // gives it real frames to push to. A window with no theme engine OMITS the option (the
+            // spread, required by `exactOptionalPropertyTypes`) and package panels are simply never
+            // re-tokened, which is the honest degraded state.
+            ...(theme === undefined ? {} : { themeChannel: theme.iframes }),
             panelVerbs: (binding: PanelVerbBinding) =>
                 makePanelBridgeVerbs({
                     panelId: binding.panelId,
@@ -377,6 +383,12 @@ async function startPanels(
                     // THE deny-all grant source. e13c replaces THIS ARGUMENT with install-consent
                     // grants; nothing else about the gate moves (panelverbs.ts § the capability gate).
                     grants: DENY_ALL_CAPABILITY_GRANTS,
+                    // THE PULL half of theme delivery, read from the SAME field the push replays
+                    // from — so `bridge.theme.tokens` cannot answer with a theme the channel is not
+                    // pushing (theme.ts § `IframeThemeChannel.last`). LATE-BOUND through the closure
+                    // because the active theme changes under a mounted panel.
+                    themeTokens: () => theme?.iframes.last?.payload,
+                    state: binding.state,
                     request: binding.request,
                 }),
         });

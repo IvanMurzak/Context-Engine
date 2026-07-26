@@ -9,10 +9,31 @@
 //     and the keymap already read. Nothing new is built here; the delegation IS the design.
 //   * `bridge.ui.subscribe` — ships HARD-DENIED, at the ONE named enforcement point below.
 //
+//   * `bridge.theme.tokens` — the current design tokens, PULLED over the port (M9 e13d). Its PUSH
+//     half is `IframeThemeChannel` (theme.ts), wired to real frames by `panelhost.ts`.
+//   * `bridge.state.get` / `.set` — THIS panel's own opaque blob, the half that makes a reload
+//     preserve panel state (M9 e13d).
+//
 // WHAT IS DELIBERATELY ABSENT. `bridge.call` / `bridge.events.subscribe` are e13c's (they need a
-// per-package scoped DAEMON session, which is the capability model itself); `bridge.theme.tokens` /
-// `bridge.state.get|set` are e13d's. Each is still missing from this table, so each still gets the
-// e13b-1 deny-all answer — the property `panelport.test.ts` pins for the verbs that remain parked.
+// per-package scoped DAEMON session, which is the capability model itself). Both are still missing
+// from this table, so both still get the e13b-1 deny-all answer — the property `panelport.test.ts`
+// pins for the verbs that remain parked.
+//
+// ⚠ THE CROSS-PACKAGE PROPERTY, FOR e13d's TWO FAMILIES — stated because they are the first verbs
+// that move DATA rather than refusals, and because `event.origin` is `"null"` for every package so no
+// origin string can be used to establish it (panelport.ts § the file header).
+//
+//   * THEME is public and IDENTICAL for every panel: one applied theme, one variable set, no
+//     per-package content. So a package learning another's theme tokens learns nothing it could not
+//     read off its own document, which is why the payload may also ride `IframeThemeChannel`'s
+//     UNAUTHENTICATED `targetOrigin:"*"` broadcast (each post still targets ONE `contentWindow`, so
+//     it is a fan-out of one public value, not a shared channel).
+//   * STATE is a package's PRIVATE data, so it never touches that broadcast. It travels ONLY over the
+//     authenticated per-panel port, and — the structural half — `bridge.state.get|set` take NO panel
+//     or package id: each panel's table closes over ITS OWN store (`PanelVerbContext.state`, supplied
+//     per renderer by panelhost.ts), so there is no argument by which one package could name
+//     another's blob and no lookup that could be tricked into returning it. The verbs are not an
+//     oracle for which panels exist either, for the same reason.
 //
 // ⚠ THE `ui_events` GATE IS THE POINT OF THIS TASK, AND ITS SHAPE IS LOAD-BEARING. C-F18's threat is
 // "a sandboxed panel observes editor telemetry / builds a cross-package channel via `editor.ui`", and
@@ -47,6 +68,11 @@
 import type { Command, CommandOutcome, CommandRegistry } from "./commands.js";
 import { PANEL_BRIDGE_REFUSALS, PanelVerbRefusal } from "./panelport.js";
 import type { PanelBridgeReply, PanelVerbHandler } from "./panelport.js";
+// TYPE-ONLY, so this module still imports no theme CODE: `bridge.theme.tokens` hands back whatever
+// the injected provider gives it, and the provider is `boot.ts`'s (`IframeThemeChannel.last`). The
+// direction is the same one this file already has with `commands.ts` — the shape travels, the
+// subsystem does not.
+import type { ThemeChangedPayload } from "./theme.js";
 import { evaluateWhen } from "./when.js";
 import type { WhenContext } from "./when.js";
 
@@ -71,6 +97,12 @@ export const PANEL_VERB_COMMANDS_UNREGISTER = "bridge.commands.unregister";
 export const PANEL_VERB_COMMANDS_EXECUTE = "bridge.commands.execute";
 /** Subscribe to `editor.ui` facts — requires the `ui_events` grant (04 §5, C-F18). DENIED here. */
 export const PANEL_VERB_UI_SUBSCRIBE = "bridge.ui.subscribe";
+/** Read the CURRENT design tokens (04 §5 `bridge.theme.tokens`; 06 §1). The PULL half — M9 e13d. */
+export const PANEL_VERB_THEME_TOKENS = "bridge.theme.tokens";
+/** Read back this panel's own state blob (04 §5 `bridge.state.get`, "its own blob") — M9 e13d. */
+export const PANEL_VERB_STATE_GET = "bridge.state.get";
+/** Store this panel's own state blob (04 §5 `bridge.state.set`) — M9 e13d. */
+export const PANEL_VERB_STATE_SET = "bridge.state.set";
 
 /**
  * The HOST -> PANEL verb: "run this command of yours".
@@ -244,6 +276,105 @@ export function validatePackageCommandId(packageId: string, commandId: string): 
     return "";
 }
 
+// ------------------------------------------------------------------------- the panel state blob
+
+/**
+ * The longest JSON text ONE panel's state blob may serialize to (M9 e13d).
+ *
+ * BOUNDED FOR A SHARPER REASON THAN THE FIELDS ABOVE. A registered command id is echoed; a state blob
+ * is WRITTEN TO DISK — `LayoutPersistence` folds it into `.editor/editor-state.json`, which the Shell
+ * is the single writer of and rewrites on every layout change. Unbounded, `bridge.state.set` is a
+ * disk-fill primitive reachable from sandboxed third-party code at whatever rate it likes, in a
+ * process designed to stay up for days. 64 KiB is far above any plausible panel's UI state (a
+ * selection, a scroll offset, a filter string) and far below anything that matters on disk.
+ *
+ * Measured in UTF-16 code units of the SERIALIZED text, not bytes: the value that matters is the one
+ * that leaves this process, and counting the string the serializer produced needs no `TextEncoder`
+ * and therefore no environment branch this tier could not reach.
+ */
+export const PANEL_STATE_MAX_JSON_LENGTH = 64 * 1024;
+
+/**
+ * ONE panel's state blob, as the verb table reads and writes it.
+ *
+ * A two-method store with no persistence in it, exactly like `PanelCapabilityGrants` above: WHERE the
+ * blob ends up (an in-memory field on the renderer, folded into the editor-state document by
+ * `LayoutPersistence`) is panelhost.ts's and editorstate.ts's business, and this module must stay
+ * ignorant of it. What matters here is that the store is supplied PER PANEL — see the file header on
+ * why that, and not a lookup by id, is the cross-package boundary.
+ */
+export interface PanelStateStore {
+    /** The blob this panel last stored, or what a persisted blob seeded. `null` when it has none. */
+    read(): unknown;
+    write(value: unknown): void;
+}
+
+/** The verdict of `sanitizePanelState`. `diagnostic` is `""` exactly when the value is storable. */
+export interface PanelStateVerdict {
+    /** The value AS IT WILL PERSIST — a JSON round trip of the input. `null` when refused. */
+    readonly state: unknown;
+    /** The serialized length that was measured against `PANEL_STATE_MAX_JSON_LENGTH`. */
+    readonly length: number;
+    readonly diagnostic: string;
+}
+
+/**
+ * Bound and CANONICALIZE one panel-supplied state blob. Pure and total, so the T1 tier drives it
+ * directly rather than only through a port round trip.
+ *
+ * ⚠ THE JSON ROUND TRIP IS THE POINT, not a formality. The value arrives by STRUCTURED CLONE, which
+ * carries shapes JSON does not: a cycle (JSON throws), a `Map` or `Set` (JSON silently yields `{}`),
+ * a `Date` (JSON yields a string). What is persisted is JSON, so a store that kept the cloned value
+ * would answer `bridge.state.get` with something a RELOAD could never reproduce — the panel would see
+ * its `Map` survive all session and find it empty tomorrow, which is the worst possible place to
+ * discover the conversion. Storing the round-tripped value instead makes the in-session answer and
+ * the post-reload answer THE SAME VALUE, so a package meets any loss immediately.
+ *
+ * `undefined` is normalized to `null` and accepted: a `set` carrying no value is how a panel CLEARS
+ * its state, and refusing it would leave no way to do so. A function or a symbol cannot survive
+ * structured clone at all, so it is unreachable over a real port — it is refused here anyway, because
+ * this function is also the gate persisted bytes re-enter through (panelhost.ts `seedState`), and
+ * those come off a file a human can edit.
+ */
+export function sanitizePanelState(value: unknown): PanelStateVerdict {
+    let text: string | undefined;
+    try {
+        text = JSON.stringify(value === undefined ? null : value) as string | undefined;
+    } catch {
+        // A cycle is the reachable case (structured clone supports one; JSON does not). The thrown
+        // error is deliberately NOT echoed: it is produced by the host's serializer and is therefore
+        // host state, exactly as `PanelPortBridge.#invoke` treats an ordinary throw.
+        return {
+            state: null,
+            length: 0,
+            diagnostic:
+                "the state value is not JSON-serializable (a cycle, or a value whose toJSON threw)",
+        };
+    }
+    if (text === undefined) {
+        // `JSON.stringify` answers `undefined` — not a string — for a function or a symbol.
+        return {
+            state: null,
+            length: 0,
+            diagnostic: "the state value is not JSON-serializable (a function or a symbol)",
+        };
+    }
+    if (text.length > PANEL_STATE_MAX_JSON_LENGTH) {
+        // REFUSED, never truncated: half a blob is not a smaller blob, it is a corrupt one, and a
+        // panel told "stored" for something it could not read back is worse than a refusal it can act
+        // on. The measured length is reported so a package can size its own state against the bound.
+        return {
+            state: null,
+            length: text.length,
+            diagnostic:
+                `the state blob serializes to ${String(text.length)} characters, over the ` +
+                `${String(PANEL_STATE_MAX_JSON_LENGTH)}-character limit`,
+        };
+    }
+    // Total: `text` came out of `JSON.stringify`, so it is valid JSON by construction.
+    return { state: JSON.parse(text), length: text.length, diagnostic: "" };
+}
+
 // -------------------------------------------------------------------------------- the verb table
 
 /** What one panel's verb table is built over. Everything it may touch, and nothing else. */
@@ -266,6 +397,24 @@ export interface PanelVerbContext {
     readonly whenContext: () => WhenContext;
     /** The capability GRANT source. `DENY_ALL_CAPABILITY_GRANTS` until e13c. */
     readonly grants: PanelCapabilityGrants;
+    /**
+     * The CURRENT theme payload (M9 e13d) — LATE-BOUND for the same reason `registry` is: the theme
+     * can change under a mounted panel, and a value captured when the table was built would answer
+     * `bridge.theme.tokens` with the theme that was active when the panel OPENED. `undefined` means
+     * no theme has been applied in this window, which is an honest refusal rather than a reason to
+     * invent an empty token set (a panel handed `{}` would style itself invisible and blame itself).
+     *
+     * `boot.ts` binds it to `IframeThemeChannel.last` — the SAME field the push replays from, so the
+     * pull and the push cannot disagree (theme.ts § `last`).
+     */
+    readonly themeTokens: () => ThemeChangedPayload | undefined;
+    /**
+     * THIS PANEL's state store (M9 e13d) — supplied per renderer by `panelhost.ts`.
+     *
+     * A store, not a lookup: see the file header. `bridge.state.get|set` take no id precisely because
+     * this object IS the scope, so no request can name another package's blob.
+     */
+    readonly state: PanelStateStore;
     /** Issue a request DOWN this panel's port (the `commands.invoke` direction). */
     readonly request: (verb: string, params?: unknown) => Promise<PanelBridgeReply>;
 }
@@ -538,6 +687,61 @@ export function makePanelBridgeVerbs(context: PanelVerbContext): PanelVerbTable 
                 );
             },
         ],
+        [
+            PANEL_VERB_THEME_TOKENS,
+            (): ThemeChangedPayload => {
+                const tokens = context.themeTokens();
+                if (tokens === undefined) {
+                    // The same shape `requireRegistry` uses for an absent subsystem, and the same
+                    // code: `verb_not_granted` means "this build cannot answer that", which is
+                    // exactly true of a window whose theme engine never came up. Inventing a code
+                    // here would spend a cross-task-visible decision (panelport.ts § the refusal set)
+                    // on a state no shipped window reaches — `boot.ts` applies a theme before it
+                    // starts panels at all.
+                    throw new PanelVerbRefusal(
+                        PANEL_BRIDGE_REFUSALS.verbNotGranted,
+                        "no theme has been applied in this window",
+                    );
+                }
+                // RETURNED WHOLE, and deliberately the same object the PUSH carries as its
+                // `payload`: a package writes ONE applier and feeds it from the pull at startup and
+                // from every pushed `editor.ui.theme-changed` afterwards. Nothing is filtered out —
+                // every member is public presentation data (06 §1), and a subset here would be a
+                // second token vocabulary drifting against the pushed one.
+                return tokens;
+            },
+        ],
+        [
+            PANEL_VERB_STATE_GET,
+            (): { state: unknown } => ({
+                // NO PARAMETERS, so there is nothing to validate and nothing to scope: this table
+                // belongs to one panel and closes over one store. Wrapped in an object rather than
+                // returned bare so `null` state and a future sibling field are both expressible —
+                // the reply's own `result` is already the unwrapping layer.
+                state: context.state.read(),
+            }),
+        ],
+        [
+            PANEL_VERB_STATE_SET,
+            (params: unknown): { stored: boolean; length: number } => {
+                const verdict = sanitizePanelState(readStateParam(params));
+                if (verdict.diagnostic !== "") {
+                    // A REFUSAL the panel can act on (shrink the blob, drop the cycle), so it is a
+                    // `PanelVerbRefusal` and not an ordinary throw — the latter would reach the
+                    // generic host-fault path and tell the package nothing (panelport.ts
+                    // § `PanelVerbRefusal`). `malformed_request` because the fault is in the request
+                    // itself; no new code is spent on it.
+                    throw new PanelVerbRefusal(
+                        PANEL_BRIDGE_REFUSALS.malformedRequest,
+                        verdict.diagnostic,
+                    );
+                }
+                context.state.write(verdict.state);
+                // The measured length is reported so a package can watch its own headroom against
+                // `PANEL_STATE_MAX_JSON_LENGTH` instead of discovering the bound by hitting it.
+                return { stored: true, length: verdict.length };
+            },
+        ],
     ]);
 
     return { verbs, dispose };
@@ -631,4 +835,17 @@ function readIdList(params: unknown): readonly string[] {
 /** Read `{ id }`. `""` when absent — which `owns("")` refuses, so there is no unguarded path. */
 function readId(params: unknown): string {
     return isRecordValue(params) ? (boundedString(params["id"]) ?? "") : "";
+}
+
+/**
+ * Read `{ state }` off a `bridge.state.set` request (M9 e13d).
+ *
+ * DELIBERATELY UNTYPED AND UNBOUNDED HERE — the blob is OPAQUE to the editor by design ("its own
+ * blob", 04 §5), so there is no shape to validate against. Every constraint that does apply (JSON
+ * serializability, the length bound) is `sanitizePanelState`'s, in one place, shared with the
+ * persisted-bytes path. A request that is not an object, or carries no `state` member, reads as
+ * `undefined` and the sanitizer normalizes that to `null` — which is how a panel CLEARS its state.
+ */
+function readStateParam(params: unknown): unknown {
+    return isRecordValue(params) ? params["state"] : undefined;
 }
