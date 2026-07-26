@@ -65,6 +65,7 @@ add_library(context_editor_shell STATIC
     src/window_registry.cpp  # e10a: the N-window vocabulary + the 03 §7 create-failure report
     src/window_bridge.cpp    # e10b: the window.* tear-out/move/seed/rehome surface (+ e10c drag.* surface)
     src/cross_window_drag.cpp # e10c: the Shell-mediated cross-window drag session + the RAII cursor capture
+    src/write_notice.cpp     # e09b-3: a refused write -> an editor.ui fact in every window (05 §8)
     src/shell.cpp)        # WindowManager / EditorWindow / the single-threaded owner loop
 
 # The version the e14d update banner reports as "running". PROJECT_VERSION is the ONE source of
@@ -242,6 +243,8 @@ set(_context_shell_tests
     test_window_bridge # e10b: the window.* relay - tear-out/move/seed/rehome parse + the loud-fail path
     test_cross_window_drag  # e10c: the drag session - capture RELEASED on every path + the drag.* relay
     test_ui_mirror     # e10d: the editor.ui cross-window mirror relay - broadcast-to-all incl. sender
+    test_write_notice  # e09b-3: the LOUD write-notice relay - envelope shape, broadcast, the
+                       #         never-a-window-id origin, and the honest unbound/throwing-provider paths
     test_smoke_window  # e12a-x11-legs: the --real-window seam - flag parse, the anti-degrade
                        # negatives, DIP conversion off 1.0, the keysym sweep (one extra link edge,
                        # added after context_editor_shell_smoke_support is defined below)

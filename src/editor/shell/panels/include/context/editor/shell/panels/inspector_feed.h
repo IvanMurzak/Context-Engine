@@ -30,11 +30,14 @@
 // daemon's own — see `wire_override_gateway.h` § READ-YOUR-WRITES for why it is `--after-hash` inside
 // `edit`, and not the inert reserved `--after-generation` core flag.
 //
-// A LOUD DROP IS NOT THIS TASK'S (e09b-3). An L-30 drop reaches the listener and is COUNTED here
-// (`drops_observed()` / `last_commit()`); the human-visible notification host, the `editor.ui`
-// notification topic and the wait-hue surface are e09b-3. A drop with no chrome yet is an honest
-// state — the write was refused rather than silently overwriting a concurrent editor's value, which
-// is the guarantee that actually protects the human's data.
+// THE LOUD DROP LANDED IN e09b-3. An L-30 drop reaches the listener, is COUNTED here
+// (`drops_observed()` / `last_commit()`) — and now goes out through the NOTICE SINK below, which the
+// composition root points at the Shell's `WriteNoticeRelay` (write_notice.h). That relay turns it
+// into an `editor.ui` fact in every window, where editor-core's notification host renders it as a
+// wait-hued toast: the three sinks design 05 §8 names ("drop LOUDLY + notification + editor.ui
+// fact"). Counting a refusal and writing it to stderr — the state this feed shipped in until now — is
+// indistinguishable from silence in a GUI, which is what design 10's non-negotiable "LOUD, never
+// silent" invariant forbids.
 
 #pragma once
 
@@ -166,6 +169,21 @@ public:
     void bind_checkpoint_sink(CheckpointSink sink);
     [[nodiscard]] bool has_checkpoint_sink() const noexcept { return static_cast<bool>(sink_); }
 
+    // The M9 e09b-3 LOUD WRITE-NOTICE SINK — where a REFUSED commit goes so the human is told.
+    //
+    // ONLY A DROP OR AN ERROR IS SENT, which is the exact complement of the checkpoint sink above:
+    // that one takes the commits that LANDED, this one takes the commits that did not. An applied or
+    // rebased commit is not a notice — the write is on disk and the panel re-reads it
+    // (READ-YOUR-WRITES), so toasting it would train the human to ignore the channel that matters.
+    //
+    // Erased through a std::function for the same reason the checkpoint sink is: this feed must not
+    // name `shell::WriteNoticeRelay`, so the notice TRANSPORT stays in the composition root and this
+    // library keeps holding no store, no window set and no bridge. An unbound sink is an ordinary
+    // state (every T1 bag builds one), and the drop is still counted and still reported to stderr.
+    using NoticeSink = std::function<void(const inspector::CommitResult&)>;
+    void bind_notice_sink(NoticeSink sink);
+    [[nodiscard]] bool has_notice_sink() const noexcept { return static_cast<bool>(notice_sink_); }
+
     [[nodiscard]] inspector::InspectorPanel& panel() noexcept { return panel_; }
     [[nodiscard]] const inspector::InspectorPanel& panel() const noexcept { return panel_; }
 
@@ -173,9 +191,14 @@ public:
     // Every resolved gesture commit the panel reported (applied / rebased / dropped / error).
     [[nodiscard]] std::size_t commits_observed() const noexcept { return commits_observed_; }
     // The L-30 LOUD drops among them — a concurrent writer touched the same field path, so the
-    // gesture was refused rather than overwriting it. The human-visible surface is e09b-3; the COUNT
-    // is what makes a drop assertable today instead of invisible.
+    // gesture was refused rather than overwriting it. Since e09b-3 each one ALSO goes out through
+    // `bind_notice_sink`; the COUNT is what makes a drop assertable without a renderer.
     [[nodiscard]] std::size_t drops_observed() const noexcept { return drops_observed_; }
+    // How many refused commits (drop OR error) were handed to the notice sink (M9 e09b-3). Strictly
+    // <= `commits_observed()`: an applied/rebased commit and a refusal with no sink bound are both
+    // excluded. This is the count that makes "the human was told" assertable at T1 — without it a
+    // regression that unbound the sink would look exactly like a run in which nothing was refused.
+    [[nodiscard]] std::size_t notices_sent() const noexcept { return notices_sent_; }
     // How many times a re-read was armed by `request_refresh` — an applied/rebased commit
     // (read-your-writes, 05 §7) or, since e09c, a landed undo/redo replay (read-your-replays). NOT
     // selection changes, which arm through `request` directly.
@@ -224,7 +247,9 @@ private:
     std::size_t drops_observed_ = 0;
     std::size_t rereads_armed_ = 0;
     std::size_t checkpoints_sent_ = 0;
+    std::size_t notices_sent_ = 0;
     CheckpointSink sink_;
+    NoticeSink notice_sink_;
     inspector::CommitResult last_commit_;
 };
 

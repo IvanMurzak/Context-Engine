@@ -27,6 +27,7 @@ import { sessionTests } from "./session.test.js";
 import { windowTests } from "./window.test.js";
 import { windowA11yTests } from "./window_a11y.test.js";
 import { uimirrorBroadcastTests } from "./uimirror_broadcast.test.js";
+import { notificationTests } from "./notifications.test.js";
 import { dragTests } from "./drag.test.js";
 import { extPanelTests } from "./extpanel.test.js";
 import { panelPortTests } from "./panelport.test.js";
@@ -60,6 +61,7 @@ void runTests([
     ...windowTests,
     ...windowA11yTests,
     ...uimirrorBroadcastTests,
+    ...notificationTests,
     ...dragTests,
     ...extPanelTests,
     ...panelPortTests,

@@ -48,6 +48,7 @@ Exit codes (mirrors tools/check_licenses.py / tools/fetch_dockview.py):
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import re
@@ -288,6 +289,26 @@ UI_MIRROR_CONSTANTS = (
     ("ui.mirror-report", "window_bridge.h", "kUiMirrorReportMethod", "UI_MIRROR_REPORT_METHOD"),
 )
 
+# The M9 e09b-3 LOUD WRITE-NOTICE vocabulary (design 05 §8, 10 § Non-negotiable UX invariants), whose
+# C++ side lives in write_notice.h and whose TS mirrors are uibus.ts (the topic) + notifications.ts
+# (the two kinds). This one is NOT a method name, and its two failure modes are worse than the
+# siblings' above precisely because neither produces an `unknown_method`:
+#
+#   * THE TOPIC — the Shell broadcasts an `editor.ui` envelope naming it, and editor-core's bus is a
+#     CLOSED set. A drift makes `receiveMirrored` refuse every notice as an unknown topic, so a
+#     refused write goes back to being invisible to the human — the exact regression this task
+#     existed to end, restored by a typo, with a GREEN build and a green mirror on both sides.
+#   * THE TWO KINDS — they choose the HUE (06 §2: `wait` = awaiting-human, `bad` = error). A drift
+#     does not hide the notice; it MIS-STATES it, telling the human their project is unreachable when
+#     a colleague merely edited the same field. A wrong message is harder to notice than a missing one.
+WRITE_NOTICE_CONSTANTS = (
+    ("editor.ui write-notice topic", "write_notice.h", "kUiTopicWriteNotice",
+     "UI_TOPIC_WRITE_NOTICE"),
+    ("write-notice drop kind", "write_notice.h", "kWriteNoticeKindDrop", "WRITE_NOTICE_KIND_DROP"),
+    ("write-notice refusal kind", "write_notice.h", "kWriteNoticeKindRefusal",
+     "WRITE_NOTICE_KIND_REFUSAL"),
+)
+
 # The closed gesture vocabulary (04 §4), compared SET vs SET between the C++ wire tokens and the
 # bundle's own GESTURE_VERBS array, so a verb added on one side without the other — which would be
 # refused at runtime with no build error — fails here instead.
@@ -378,16 +399,25 @@ def _read_cpp_string_constant(source: Path, name: str) -> str:
     generating a shared header, which for a handful of short strings costs more machinery than the
     drift it prevents. The regex is anchored on the constant NAME, so it cannot silently match a neighbour,
     and a rename that breaks it fails LOUDLY (exit 2) instead of quietly matching nothing.
+
+    COMMENTS ARE STRIPPED FIRST, for the same reason `check_theme_contract` strips them: the headers
+    scanned here DOCUMENT the very vocabulary being pinned — `write_notice.h` carries forty-odd lines
+    of prose that name their own constants — so a comment of the form `kFoo = "old"` left above a
+    drifted declaration would be matched INSTEAD of the declaration (`re.search` takes the first hit),
+    and the gate would compare the EXPLANATION against TS and report green across a real drift. That
+    is the one failure this whole family exists to make impossible, so it must not be reachable by
+    writing a sentence.
     """
     try:
-        text = source.read_text(encoding="utf-8")
+        text = _stripped_cpp_source(source)
     except OSError as exc:
         raise CheckError(f"cannot read {source}: {exc}") from exc
     match = re.search(rf"\b{re.escape(name)}\s*=\s*\"([^\"]*)\"", text)
     if match is None:
         raise CheckError(
             f"constant '{name}' not found in {source} — it was renamed or removed, so the "
-            f"cross-language scheme check can no longer verify anything. Update SCHEME_CONSTANTS.")
+            f"cross-language scheme check can no longer verify anything. Update the pin table that "
+            f"names it (SCHEME_CONSTANTS / WRITE_NOTICE_CONSTANTS / … in this file).")
     return match.group(1)
 
 
@@ -592,6 +622,42 @@ def _strip_cpp_comments(text: str) -> str:
     over-strip — which is acceptable here because the only thing looked for is an identifier.
     """
     return re.sub(r"//[^\n]*|/\*.*?\*/", "", text, flags=re.DOTALL)
+
+
+# A C++ string literal, a char literal, a `//` comment, or a `/* */` comment — STRINGS FIRST, so the
+# alternation consumes a literal whole and never mistakes the `//` inside one for a comment start.
+_CPP_LITERAL_OR_COMMENT_RE = re.compile(
+    r'"(?:[^"\\\n]|\\.)*"' r"|'(?:[^'\\\n]|\\.)*'" r"|//[^\n]*" r"|/\*.*?\*/", re.DOTALL)
+
+
+def _strip_cpp_comments_keeping_strings(text: str) -> str:
+    """Drop C++ comments while leaving STRING LITERALS intact.
+
+    Distinct from `_strip_cpp_comments` above, which explicitly does not protect literals because its
+    only caller looks for an identifier. That is exactly wrong for reading a constant's VALUE: several
+    pinned values are URLs (`context-editor://app`, `context-ext://`), so a naive strip eats `//app"`
+    and everything after it, and the gate then reports a DRIFT on a perfectly correct header — a false
+    RED, which is how a trustworthy check gets disabled. Kept as a second function rather than folded
+    into the first so `check_theme_contract`'s identifier probe keeps its own documented semantics.
+    """
+    return _CPP_LITERAL_OR_COMMENT_RE.sub(
+        lambda m: m.group(0) if m.group(0)[0] in "\"'" else "", text)
+
+
+@functools.lru_cache(maxsize=None)
+def _stripped_cpp_source(source: Path) -> str:
+    """`_strip_cpp_comments_keeping_strings` over a file, memoized per path.
+
+    The pin tables name a CONSTANT per row, not a file, so the same header is scanned once per
+    constant: `window_bridge.h` carries eleven rows and `write_notice.h` three. Without the memo each
+    row also pays its own DOTALL pass over the whole file — ~51 reads and 51 regex passes across one
+    `--panel-contract` run where twelve of each would do. Correct either way; the cache is what keeps
+    the comment-stripping that made the pins trustworthy from being charged per row.
+
+    Safe to cache for this process's lifetime: the checker is a short-lived one-shot over a tree
+    nothing mutates while it runs.
+    """
+    return _strip_cpp_comments_keeping_strings(source.read_text(encoding="utf-8"))
 
 
 def check_theme_contract(shell_cef_dir: Path, themes_dir: Path) -> list[str]:
@@ -893,6 +959,26 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
                 f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
                 f"Shell would route one name and editor-core would call another, so the cross-window "
                 f"editor.ui mirror would silently stop propagating with NO error anywhere.")
+
+    # 7a10 — the e09b-3 LOUD write-notice vocabulary agrees across the two languages. NOT a method
+    # name, so neither drift produces an `unknown_method`: a topic drift makes editor-core's CLOSED
+    # bus refuse every notice (a refused write becomes invisible again), and a kind drift mis-hues a
+    # data-integrity moment (the human is told the wrong thing, which is worse than being told
+    # nothing). Both are green on every build and on both sides of the wire.
+    for human, cpp_file, cpp_name, ts_name in WRITE_NOTICE_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(
+                f"{human}: the bundle does not declare {ts_name} — editor-core cannot be rendering "
+                f"the refused-write notices the Shell publishes, so an L-30 drop would be silent to "
+                f"the human (design 10: LOUD, never silent)")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
+                f"Shell would publish one spelling and editor-core would expect another, so a refused "
+                f"write would either never reach the human (topic) or reach them mis-hued (kind), "
+                f"with NO error anywhere.")
 
     # 7b — the D6 persisted-blob member names agree (gui/contract/panel_state.h is their authority).
     for human, cpp_name, ts_name in PANEL_STATE_CONSTANTS:

@@ -88,8 +88,11 @@ keyboard and semantic contract, and each one is asserted in the browser tier:
   keyboard or touch user), dismissible with Escape (WCAG 1.4.13), and hoverable because the bubble
   lives inside the hover host rather than behind a timer. `aria-describedby`, never `aria-labelledby`.
 - **toasts** — two permanently-mounted live lanes, `polite` (`role="status"`) and `assertive`
-  (`role="alert"`), because a live region must exist *before* its content arrives. Only the `bad` tone
-  interrupts: `warn` means ACTIVE WORK in this design language (06 §2), not danger.
+  (`role="alert"`), because a live region must exist *before* its content arrives. By default only the
+  `bad` tone interrupts: `warn` means ACTIVE WORK in this design language (06 §2), not danger. Since
+  M9 e09b-3 a caller may override that lane in **either** direction with `ToastOptions.assertive` —
+  the kit cannot tell an "awaiting you" `wait` (a refused write, which design 10 requires be LOUD)
+  from a queued build, so the urgency is the caller's call while the appearance stays the tone's.
 - **tables** — a real `<table>` with a `<caption>`, `scope`d column *and row* headers, and `aria-sort`
   on every sortable column (`none` while unsorted, so a sortable column stays distinguishable from a
   fixed one). The sort control is a real `<button>`.

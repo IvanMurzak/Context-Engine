@@ -36,6 +36,22 @@ export interface ToastOptions {
     readonly tone?: SemanticTone;
     /** An inline action ("Undo", "Show log"). Rendered as a kit button, so it is keyboard-reachable. */
     readonly action?: ButtonOptions;
+    /**
+     * Force the lane instead of deriving it from `tone` (M9 e09b-3).
+     *
+     * THE DEFAULT DERIVATION IS RIGHT FOR APPEARANCE AND WRONG FOR SOME MEANINGS. `show` puts only
+     * `bad` in the assertive lane, because in this design system `warn` means ACTIVE WORK (06 §2) and
+     * an assertive announcement per build step would make the editor unusable with a screen reader.
+     * But `wait` means AWAITING-HUMAN — the editor is blocked on the person — and the first real
+     * consumer of that hue is a refused write (design 10: "Destructive/lossy moments … are LOUD
+     * (wait/bad hues), never silent"). A polite announcement a screen-reader user may never hear would
+     * make exactly that surface silent for them, which is the failure the invariant names.
+     *
+     * So the LANE is the caller's decision, like dismissal is — this kit does not know whether a given
+     * `wait` is "your edit needs re-doing" or "a build is queued". Omitted (the default) keeps the
+     * tone-derived behaviour every existing caller has today, unchanged.
+     */
+    readonly assertive?: boolean;
 }
 
 export interface KitToast {
@@ -97,10 +113,13 @@ export function createToastRegion(): KitToastRegion {
         close.element.classList.add("ctx-toast__close");
         toast.append(close.element);
 
-        // The severity split: only `bad` interrupts. `warn` means ACTIVE WORK in this design system
-        // (06 §2), not danger, so it stays polite — an assertive announcement for every build step
-        // would make the editor unusable with a screen reader.
-        (tone === "bad" ? assertive : polite).append(toast);
+        // The severity split: by default only `bad` interrupts. `warn` means ACTIVE WORK in this
+        // design system (06 §2), not danger, so it stays polite — an assertive announcement for every
+        // build step would make the editor unusable with a screen reader. An explicit
+        // `assertive` OVERRIDES that derivation in both directions (see ToastOptions.assertive for
+        // why the lane has to be the caller's call, not the tone's).
+        const interrupts = options.assertive ?? tone === "bad";
+        (interrupts ? assertive : polite).append(toast);
         count += 1;
 
         let dismissed = false;

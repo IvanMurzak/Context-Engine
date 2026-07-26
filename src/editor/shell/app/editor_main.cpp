@@ -28,6 +28,7 @@
 #include "context/editor/shell/welcome.h"
 #include "context/editor/shell/window.h"
 #include "context/editor/shell/window_bridge.h"
+#include "context/editor/shell/write_notice.h" // e09b-3: the LOUD refused-write relay (05 §8)
 #include "context/render/rhi.h"
 
 #if defined(CONTEXT_EDITOR_HAS_CEF)
@@ -251,7 +252,8 @@ struct SecondaryWindowSurfaces
 
     [[nodiscard]] bool install(shell::BridgeRouter& router, shell::WindowManager& manager,
                                shell::WindowMoveStore& store, shell::CrossWindowDragStore& drag_store,
-                               shell::WindowId window_id, bool headless)
+                               shell::UiMirrorStore& mirror_store, shell::WindowId window_id,
+                               bool headless)
     {
         bool ok = handshake.install(router);
         ok = panel_host.install(router) && ok;
@@ -279,6 +281,10 @@ struct SecondaryWindowSurfaces
         // e10c: this window can be a cross-window drag TARGET, so it answers `drag.probe` / `drag.
         // report-zone` off the SHARED relay — the same store window 0 and the drag session use.
         window_bridge.bind_drag_store(&drag_store);
+        // e10d/e09b-3: and off the SHARED `editor.ui` mirror relay, so a fact broadcast by the Shell
+        // — or published by a peer window — reaches THIS window's editor-core too. A secondary window
+        // that did not drain the queue would be the one place a loud write notice never appeared.
+        window_bridge.bind_ui_mirror_store(&mirror_store);
         ok = window_bridge.install(router) && ok;
         return ok;
     }
@@ -393,6 +399,17 @@ int main(int argc, char** argv)
     // window's WindowBridge and by the drag session below; declared with `move_store` so it OUTLIVES
     // every window's bridge — including the retired ones the manager frees in ~WindowManager.
     shell::CrossWindowDragStore drag_store;
+    // e10d: the cross-window `editor.ui` MIRROR relay. Declared with the two stores above and for the
+    // same lifetime reason — every window's WindowBridge references it, retired sessions included.
+    //
+    // ⚠ e09b-3 IS WHAT FIRST BINDS IT IN THE SHIPPING EDITOR. e10d landed the relay and wired it only
+    // in its own live smoke, so `ui.mirror` / `ui.mirror-poll` were ROUTED but inert here: editor-core
+    // polled an empty queue forever. That was harmless while nothing published — the built-in
+    // focus/layout/palette publishers are later seams — and it is exactly the channel a loud write
+    // notice needs (write_notice.h § WHY IT RIDES THE `ui.mirror` RELAY), so binding it is the whole
+    // transport half of this task. Cross-window chrome mirroring becomes live as a side effect, which
+    // is the behaviour e10d specified in the first place.
+    shell::UiMirrorStore mirror_store;
     shell::WindowManager manager(options.project);
 
     // --- the editor presence marker + the single-instance focus watcher (e14b, D15/C-F23) ---------
@@ -445,7 +462,19 @@ int main(int argc, char** argv)
     // implicit-destruction order is therefore never load-bearing here — unlike `handshake`/`bridge`
     // above, where it is, because those two carry no such explicit shutdown between them.
     shell::PanelHost panel_host;
+    // e09b-3: the LOUD write-notice relay. Declared BEFORE `builtin` so it OUTLIVES it — the sinks
+    // `bind_write_notice_relay` installs on the two feeds capture a raw pointer to it, and members
+    // (and locals) destroy in reverse declaration order, so a relay declared after the bag would die
+    // while those sinks were still reachable.
+    shell::WriteNoticeRelay notice_relay;
+    notice_relay.bind_store(&mirror_store);
+    notice_relay.bind_windows([&manager]() -> std::vector<shell::WindowId>
+                              { return manager.window_ids(); });
     shell::panels::BuiltinPanels builtin = shell::panels::install_builtin_panels(panel_host);
+    // A refused write (an L-30 drop, or a write path that said no) now reaches the human: the relay
+    // turns it into an `editor.ui` fact in EVERY live window, where editor-core's notification host
+    // renders it (design 05 §8's three sinks; design 10's non-negotiable "LOUD, never silent").
+    shell::panels::bind_write_notice_relay(builtin, notice_relay);
     if (builtin.bound != shell::panels::hostable_panel_ids().size())
     {
         // REPORTED, not fatal: an editor that refused to start because one panel could not bind
@@ -709,6 +738,10 @@ int main(int argc, char** argv)
     // e10c: window 0 answers the cross-window drag probe off the shared relay too — the primary is a
     // valid drop target like any peer (a panel dragged out of window 1 can rehome back into it).
     window_bridge.bind_drag_store(&drag_store);
+    // e10d/e09b-3: window 0 drains its `editor.ui` mirror queue off the shared relay. Without this
+    // bind the method routes but answers an empty batch forever — which is how a loud write notice
+    // would reach the browser side and be silently discarded one hop short of the human.
+    window_bridge.bind_ui_mirror_store(&mirror_store);
     if (!window_bridge.install(bridge))
     {
         std::fprintf(stderr, "context_editor: could not install the window bridge surface\n");
@@ -880,7 +913,7 @@ int main(int argc, char** argv)
     // Ownership of both is handed to the manager, which retires rather than frees them (shell.h) —
     // the CE #319 rule, now applying to a MID-PROCESS destroy as well as the process-wide one.
     manager.bind_window_factory(
-        [&options, project_mode, &manager, &move_store, &drag_store](
+        [&options, project_mode, &manager, &move_store, &drag_store, &mirror_store](
             const shell::WindowSpec& spec, shell::WindowSessionParts& parts,
             std::string& error) -> bool
         {
@@ -917,8 +950,8 @@ int main(int argc, char** argv)
             const shell::WindowId expected_id =
                 static_cast<shell::WindowId>(manager.last_minted_id() + 1u);
             auto surfaces = std::make_shared<SecondaryWindowSurfaces>(expected_id, move_store);
-            if (!surfaces->install(*window_bridge_router, manager, move_store, drag_store, expected_id,
-                                   spec.headless))
+            if (!surfaces->install(*window_bridge_router, manager, move_store, drag_store,
+                                   mirror_store, expected_id, spec.headless))
             {
                 error = "a bridge surface refused to install on the new window";
                 return false;

@@ -54,9 +54,28 @@ export const UI_TOPIC_VIEWPORT = "editor.ui.viewport";
 export const UI_TOPIC_THEME_CHANGED = "editor.ui.theme-changed";
 /** The command palette opened, filtered, or closed. */
 export const UI_TOPIC_PALETTE = "editor.ui.palette";
+/**
+ * A WRITE THE EDITOR REFUSED (M9 e09b-3): an L-30 concurrent-writer DROP, or a write-path refusal.
+ *
+ * ⚠ THE SEVENTH MEMBER OF A SET §5 NAMES AS SIX, ADDED DELIBERATELY. Design 05 §5 enumerates the
+ * built-in topics and this is not among them — but §8's canonical write flow ends
+ * `drop LOUDLY + notification + editor.ui fact`, which REQUIRES a topic to carry that fact, and 10
+ * § Non-negotiable UX invariants makes it binding ("Destructive/lossy moments (gesture drop, daemon
+ * lost, panel crash) are LOUD (wait/bad hues), never silent"). §5's list predates §8's requirement
+ * rather than excluding it. The set stays CLOSED — this is one more declared member, not a door left
+ * open, and `publish` still refuses any `editor.ui.*` name nobody declared.
+ *
+ * ⚠ ITS PUBLISHER IS THE SHELL, NOT THIS WINDOW. Unlike its six siblings, a write notice is a fact
+ * only the C++ side knows (the gesture commits through the daemon RPC there), so it arrives over the
+ * `ui.mirror` relay and enters this bus through `receiveMirrored` — which is why it must be a KNOWN
+ * topic here or every notice would be refused as an unknown mirrored envelope. The C++ spelling is
+ * `shell::kUiTopicWriteNotice` (write_notice.h), byte-compared against this constant out of the built
+ * bundle by `tools/check_webui_assets.py --panel-contract`.
+ */
+export const UI_TOPIC_WRITE_NOTICE = "editor.ui.write-notice";
 
 /**
- * The CLOSED built-in topic set (05 §5).
+ * The CLOSED built-in topic set (05 §5, extended by 05 §8's write-notice requirement).
  *
  * Closed on purpose, exactly like `GESTURE_VERBS` and the panel content-type vocabulary: a topic
  * nobody declared is a typo, and silently accepting it would produce a subscription that can never
@@ -69,6 +88,7 @@ export const BUILTIN_UI_TOPICS = [
     UI_TOPIC_VIEWPORT,
     UI_TOPIC_THEME_CHANGED,
     UI_TOPIC_PALETTE,
+    UI_TOPIC_WRITE_NOTICE,
 ] as const;
 
 /** The origin stamped on an envelope published by a bus that was given no window id. */
@@ -92,7 +112,13 @@ export const UI_REJECTION_LOG_LIMIT = 128;
  * mirrored envelope be told apart from a locally-published one (echo suppression, 05 §4's `origin`
  * contract applied to tier 2).
  *
- * The payload is generic rather than a union of the six built-in shapes: a package topic's payload is
+ * ⚠ `origin` IS NOT ALWAYS A WINDOW ID. `editor.ui.write-notice` is published by the C++ Shell, not by
+ * a window, and carries the literal `"shell"` — deliberately, because `receiveMirrored` drops an
+ * envelope whose origin equals the receiving bus's own and every bus origin IS a window id, so a
+ * window-stamped notice would be swallowed by exactly the window it was meant for. Treat this field
+ * as an opaque identity compared for EQUALITY only; parsing it as a number is not sound.
+ *
+ * The payload is generic rather than a union of the built-in shapes: a package topic's payload is
  * by definition not in any union this file could write, and a bus that only carried shapes it knew
  * would not be a bus.
  */
