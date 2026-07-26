@@ -58,6 +58,7 @@ import { WindowClient, type WindowSeed } from "./window.js";
 import { DragClient, makeDropZoneHitTest, pumpCrossWindowDrag } from "./drag.js";
 import { EditorUiBus, UI_TOPIC_THEME_CHANGED } from "./uibus.js";
 import { wireUiMirror, type UiMirrorWiring } from "./uimirror.js";
+import { createNotificationHost, type NotificationHost } from "./notifications.js";
 import {
     SETTINGS_PANEL_ID,
     mountSettings,
@@ -662,6 +663,16 @@ export const WINDOW_ATTRIBUTE = "data-editor-window";
 export const UI_MIRROR_ATTRIBUTE = "data-editor-uimirror";
 
 /**
+ * The <html> attribute the e09b-3 notification host reports on (for --dump-dom + a live smoke).
+ *
+ * It exists for the same reason every other `data-editor-*` boot report does: the renderer's only
+ * out-of-band diagnostic channel is the document. Here it also answers the one question a screenshot
+ * cannot — a toast the human dismissed leaves no pixels, but `shown` is cumulative, so "the editor
+ * DID tell them" stays observable after the evidence is off screen.
+ */
+export const NOTICES_ATTRIBUTE = "data-editor-notices";
+
+/**
  * The e10d-drill2 mirror-smoke boot flag — a NO-OP unless the boot URL carries it. Under it, window 0
  * (the publisher) re-publishes an `editor.ui` fact on every poll tick, so once the SECOND window is up
  * and polling the broadcast reaches it. Every other window just drains + applies + reports, exactly as
@@ -700,6 +711,18 @@ function reportUiMirror(detail: string): void {
     if (typeof document !== "undefined" && detail !== lastUiMirrorDetail) {
         lastUiMirrorDetail = detail;
         document.documentElement.setAttribute(UI_MIRROR_ATTRIBUTE, detail);
+    }
+}
+
+/**
+ * Mirror the e09b-3 notification host's tally onto <html>. FIRE-ON-CHANGE, like `reportUiMirror`:
+ * an editor that has refused nothing writes the attribute once and then does no per-tick work.
+ */
+let lastNoticesDetail: string | undefined;
+function reportNotices(detail: string): void {
+    if (typeof document !== "undefined" && detail !== lastNoticesDetail) {
+        lastNoticesDetail = detail;
+        document.documentElement.setAttribute(NOTICES_ATTRIBUTE, detail);
     }
 }
 
@@ -769,9 +792,28 @@ async function startWindowMechanism(
         // transport is live and ready but idle — the mirror smoke drives the one fact that exercises it.
         let uiMirror: UiMirrorWiring | null = null;
         let uiBus: EditorUiBus | null = null;
+        let notifications: NotificationHost | null = null;
         if (list !== null) {
             uiBus = new EditorUiBus({ origin: String(windowId) });
             uiMirror = wireUiMirror(bridge, uiBus);
+            // M9 e09b-3 — THE LOUD SURFACE. The editor's ONE notification host, attached to this
+            // window's bus. Every refused write the Shell publishes (an L-30 drop, a write-path
+            // refusal) arrives over the mirror poll below, lands on the bus, and is rendered here as
+            // a wait/bad-hued, assertively-announced toast (design 05 §8 / 10 § UX invariants).
+            //
+            // ATTACHED BEFORE THE POLL LOOP STARTS, deliberately: a notice already queued Shell-side
+            // when this window booted is drained by the FIRST tick, and a host created after that tick
+            // would miss it. (The bus's snapshot-on-subscribe would still deliver a retained one, but
+            // relying on that ordering to be safe is how it stops being safe.)
+            //
+            // Mounted on <body>, not into #editor-root: `.ctx-toast-region` is a fixed-position
+            // overlay (components.css), so it costs the docking root no layout — the same reasoning
+            // index.html records for the banner strip, which must not change the box Dockview
+            // measures or the live smokes' per-pixel background floor.
+            notifications = createNotificationHost(uiBus);
+            if (typeof document !== "undefined") {
+                document.body.append(notifications.element);
+            }
         }
         const uiMirrorSmoke =
             typeof location !== "undefined" && location.search.includes(UI_MIRROR_SMOKE_FLAG);
@@ -796,11 +838,21 @@ async function startWindowMechanism(
                 }
                 if (uiMirror !== null) {
                     const poller = uiMirror.poller;
+                    const notices = notifications;
                     void poller.poll().then(() => {
                         reportUiMirror(
                             `window ${windowId} (origin "${windowId}"): applied ${poller.applied}, ` +
                                 `suppressed ${poller.suppressed}`,
                         );
+                        // e09b-3: the drained batch has already been applied to the bus and, for a
+                        // write notice, already rendered — the subscription is synchronous. So this
+                        // reports a settled tally, never a pending one.
+                        if (notices !== null) {
+                            reportNotices(
+                                `shown ${notices.shown}; on screen ${notices.onScreen}` +
+                                    (notices.last === null ? "" : `; last ${notices.last.kind}`),
+                            );
+                        }
                         return poller.report();
                     });
                 }

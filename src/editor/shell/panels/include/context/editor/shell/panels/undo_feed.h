@@ -42,6 +42,7 @@
 #include "context/editor/shell/panel_host.h"
 
 #include <cstddef>
+#include <functional>
 #include <string>
 
 namespace context::editor::shell::panels
@@ -98,6 +99,22 @@ public:
     // provider reports the command as not dispatched, and nothing is recorded as replayed.
     void bind_gateway(const inspector::OverrideWriteGateway* gateway);
     [[nodiscard]] bool has_gateway() const noexcept { return gateway_bound_; }
+
+    // The M9 e09b-3 LOUD WRITE-NOTICE SINK — the same seam `InspectorFeed` takes, for the same
+    // reason and with the same erasure (this feed must not name `shell::WriteNoticeRelay`).
+    //
+    // A REPLAY IS A WRITE, so its refusals are exactly as loud as a gesture's — and arguably louder,
+    // because the human pressed Ctrl+Z and a silent refusal reads as "undo worked" while the file
+    // still holds the value they were trying to revert. Both non-landing outcomes are sent, and the
+    // sink is told which: a DROP (a co-writer moved the field; the checkpoint is consumed and cannot
+    // be retried) and a REFUSAL (the write path said no; the checkpoint is KEPT for a retry) mean
+    // different things to the human, so they take different hues on the other end.
+    //
+    // `verb` is "undo" or "redo" — the Shell's own prose, not a pinned token (write_notice.h § the
+    // WriteNotice struct explains why the action crosses as prose).
+    using NoticeSink = std::function<void(const char* verb, const undo::ReplayResult& result)>;
+    void bind_notice_sink(NoticeSink sink);
+    [[nodiscard]] bool has_notice_sink() const noexcept { return static_cast<bool>(notice_sink_); }
 
     [[nodiscard]] undo::UndoJournal& journal() noexcept { return journal_; }
     [[nodiscard]] const undo::UndoJournal& journal() const noexcept { return journal_; }
@@ -157,6 +174,11 @@ public:
     // the step is KEPT, so this is the count that makes "a daemon blip does not cost the human
     // their history" assertable, as distinct from a drop.
     [[nodiscard]] std::size_t replay_refusals() const noexcept { return replay_refusals_; }
+    // How many refused replays (drop OR refusal) were handed to the notice sink (M9 e09b-3), i.e.
+    // how many times the human was actually TOLD their undo did not land. Zero with no sink bound —
+    // which is why it is counted separately from `replay_drops` + `replay_refusals` rather than
+    // inferred from them: a regression that unbound the sink is otherwise invisible.
+    [[nodiscard]] std::size_t notices_sent() const noexcept { return notices_sent_; }
 
     // The provider to bind on the PanelHost. Captures `this` — the feed must OUTLIVE the binding.
     // `build` renders the journal's own headless a11y-clean panel; `invoke` dispatches the two
@@ -185,6 +207,8 @@ private:
     std::size_t replays_run_ = 0;
     std::size_t replay_drops_ = 0;
     std::size_t replay_refusals_ = 0;
+    std::size_t notices_sent_ = 0;
+    NoticeSink notice_sink_;
 };
 
 } // namespace context::editor::shell::panels

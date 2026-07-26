@@ -13,6 +13,7 @@
 #include "context/editor/shell/panels/session_feed.h" // SessionFeed complete type (e08b)
 #include "context/editor/shell/panels/undo_feed.h"    // UndoFeed complete type (e09c)
 #include "context/editor/shell/panels/wire_override_gateway.h" // complete type (e09b-2)
+#include "context/editor/shell/write_notice.h" // WriteNoticeRelay complete type (e09b-3)
 
 #include <cstdio>
 #include <string_view>
@@ -137,6 +138,84 @@ void bind_write_client(BuiltinPanels& panels, client::Client* client)
     if (panels.writes != nullptr)
     {
         panels.writes->bind_client(client);
+    }
+}
+
+namespace
+{
+
+// One refused commit -> the notice the human is shown (M9 e09b-3).
+//
+// The KIND is the whole judgement, and it is read off the STATUS, never off the code. `dropped` is
+// L-30's concurrent-writer verdict — nothing was lost and nothing was overwritten, the edit simply
+// must be re-made against the value that is there now, which is 06 §2's `wait` ("awaiting-human").
+// Everything else that did not land is a write-PATH refusal (no daemon, an unreadable field, a
+// compose refusal), which is `bad`. Keying on the status rather than on `code == "cas.mismatch"`
+// keeps this correct if the catalog ever grows a second mismatch code.
+//
+// NO USER-FACING SENTENCE IS COMPOSED HERE. The Shell puts FACTS on the wire (kind / action / code /
+// message / pointer) and the renderer writes the prose (notifications.ts), because that is where the
+// copy, the translation and the a11y naming live — a sentence assembled in C++ would be a second
+// place user-facing text has to be reviewed.
+[[nodiscard]] shell::WriteNotice notice_from_commit(const inspector::CommitResult& result,
+                                                    const char* action)
+{
+    shell::WriteNotice notice;
+    notice.kind = result.status == inspector::CommitResult::Status::dropped
+                      ? shell::kWriteNoticeKindDrop
+                      : shell::kWriteNoticeKindRefusal;
+    notice.action = action;
+    notice.code = result.code;
+    notice.message = result.message;
+    notice.pointer = result.pointer;
+    return notice;
+}
+
+// The same, for a replay. `ReplayResult` carries the whole checkpoint's per-field outcomes, so the
+// notice is built from the FIRST edit that did not land — the one that explains the refusal. A
+// multi-edit checkpoint whose SECOND field collided has an `applied` result at `edits.front()`
+// carrying an empty code and message, so taking `front()` would hand the human a notice with nothing
+// in it (the same trap `first_message` in undo_feed.cpp documents). The STATUS still comes from the
+// replay as a whole: that is the journal's verdict about the checkpoint, not about one field.
+[[nodiscard]] shell::WriteNotice notice_from_replay(const char* verb,
+                                                    const undo::ReplayResult& result)
+{
+    shell::WriteNotice notice;
+    notice.kind = result.status == inspector::CommitResult::Status::dropped
+                      ? shell::kWriteNoticeKindDrop
+                      : shell::kWriteNoticeKindRefusal;
+    notice.action = verb;
+    for (const inspector::CommitResult& edit : result.edits)
+    {
+        if (!edit.ok())
+        {
+            notice.code = edit.code;
+            notice.message = edit.message;
+            notice.pointer = edit.pointer;
+            break;
+        }
+    }
+    return notice;
+}
+
+} // namespace
+
+void bind_write_notice_relay(BuiltinPanels& panels, WriteNoticeRelay& relay)
+{
+    // Raw-pointer capture, not a reference capture, for the reason the header states: the sinks
+    // outlive this call and the relay is guaranteed (by the composition root's declaration order) to
+    // outlive the bag.
+    WriteNoticeRelay* const target = &relay;
+    if (panels.inspector != nullptr)
+    {
+        panels.inspector->bind_notice_sink(
+            [target](const inspector::CommitResult& result)
+            { (void)target->publish(notice_from_commit(result, "edit")); });
+    }
+    if (panels.undo != nullptr)
+    {
+        panels.undo->bind_notice_sink([target](const char* verb, const undo::ReplayResult& result)
+                                      { (void)target->publish(notice_from_replay(verb, result)); });
     }
 }
 

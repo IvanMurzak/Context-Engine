@@ -102,6 +102,11 @@ void UndoFeed::bind_gateway(const inspector::OverrideWriteGateway* gateway)
     gateway_bound_ = gateway != nullptr;
 }
 
+void UndoFeed::bind_notice_sink(NoticeSink sink)
+{
+    notice_sink_ = std::move(sink);
+}
+
 void UndoFeed::record(undo::FieldEdit edit)
 {
     // `capture` auto-checkpoints a lone edit as its own gesture (L-20) — the Inspector's shape, one
@@ -140,9 +145,9 @@ undo::ReplayResult UndoFeed::run_replay(bool redo)
     {
         ++replay_drops_;
         // R-HUX-001: the field moved under us, so the revert was REFUSED rather than clobbering a
-        // co-writer, and the checkpoint is consumed (it can never be replayed now). e09b-3 owns the
-        // human-visible chrome; reporting it here is what keeps the drop from being silent in the
-        // meantime (the same posture inspector_feed.cpp takes).
+        // co-writer, and the checkpoint is consumed (it can never be replayed now). The stderr line
+        // is the LAST-RESORT channel (a headless run, a build with no renderer); the human-visible
+        // one is the notice sink below (M9 e09b-3).
         std::fprintf(stderr, "context_editor: %s dropped: %s\n", verb, first_message(result));
     }
     else if (result.status == Status::error)
@@ -153,6 +158,14 @@ undo::ReplayResult UndoFeed::run_replay(bool redo)
         // the project is reachable again (undo_journal.h § undo). Reported for the same reason a
         // drop is — a refusal the human never hears about looks exactly like an undo that worked.
         std::fprintf(stderr, "context_editor: %s refused: %s\n", verb, first_message(result));
+    }
+    // M9 e09b-3 — THE LOUD SURFACE. Both non-landing outcomes go out, and only those: an
+    // applied/rebased replay DID what the human asked, so it is not a notice. Placed after the two
+    // branches so the sink sees the same classification the counters recorded.
+    if (!result.ok() && notice_sink_)
+    {
+        ++notices_sent_;
+        notice_sink_(verb, result);
     }
     // DIRTY IFF THE STACKS ACTUALLY MOVED — read off the journal rather than inferred from the
     // status, so this stays correct however the journal's keep-vs-consume policy evolves. A refusal

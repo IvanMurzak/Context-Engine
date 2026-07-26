@@ -58,6 +58,11 @@ namespace context::editor::shell
 // header on the include path of every TU that hosts a panel, for two function signatures.
 class EditorStateStore;
 struct EditorState;
+// Forward-declared for the SAME reason (M9 e09b-3): `bind_write_notice_relay` below takes the
+// Shell's loud-write-notice relay by reference, and only builtin_panels.cpp needs the complete type.
+// Including `write_notice.h` here would put the mirror store + the window registry on the include
+// path of every TU that hosts a panel — including the `-fno-rtti` CEF smokes — for one signature.
+class WriteNoticeRelay;
 } // namespace context::editor::shell
 
 namespace context::editor::shell::panels
@@ -186,6 +191,22 @@ void bind_session_client(SessionFeed& feed, client::Client* client);
 // It takes the BAG, not the gateway, because the gateway type is only forward-declared here — and
 // because the two writes seams then read identically at the call site.
 void bind_write_client(BuiltinPanels& panels, client::Client* client);
+
+// Point every REFUSED write in this bag at the Shell's loud-notice relay (M9 e09b-3, design 05 §8).
+//
+// ONE seam for BOTH refusal sites — the Inspector's gesture commit and the undo/redo replay — because
+// the human does not care which of them refused; they care that the editor said so. Keeping the
+// message COMPOSITION here (in builtin_panels.cpp, the one TU that sees both feeds AND the relay) is
+// what stops two hand-rolled `WriteNotice` builders drifting into two different vocabularies for the
+// same event, and is why the feeds themselves hold only an erased `std::function` and never name the
+// relay (inspector_feed.h / undo_feed.h § the notice sink).
+//
+// `relay` must OUTLIVE the bag: the sinks capture a raw pointer to it, exactly as the checkpoint sink
+// captures the UndoFeed. The composition root declares it before the bag for that reason.
+//
+// Calling it twice REPLACES the sinks rather than adding a second one — a notice must reach the human
+// once. Safe on any subset of the feeds.
+void bind_write_notice_relay(BuiltinPanels& panels, WriteNoticeRelay& relay);
 
 // --- the M9 e09c undo-journal persistence seams (design 03 §1 / C-F3) ---------------------------
 //

@@ -27,8 +27,14 @@ so a consumer written against one reads the other:
 
 * **`seq`** — monotonic and totally ordered *within one bus* (one window), exactly as the daemon's is
   within one incarnation. A refused publish consumes none.
-* **`topic`** — the built-in six are closed: `editor.ui.focus`, `.layout`, `.drag`, `.viewport`,
-  `.theme-changed`, `.palette`. A package may publish only topics it **declared in its manifest**,
+* **`topic`** — the built-in **seven** are closed: `editor.ui.focus`, `.layout`, `.drag`,
+  `.viewport`, `.theme-changed`, `.palette`, and — since M9 e09b-3 — `.write-notice` (a write the
+  editor REFUSED: an L-30 concurrent-writer drop, or a write-path refusal). Design 05 §5 enumerates
+  the first six; the seventh is required by §8's canonical write flow, which ends *"drop LOUDLY +
+  notification + `editor.ui` fact"*, and by design 10's non-negotiable *"Destructive/lossy moments …
+  are LOUD (wait/bad hues), never silent"*. The set is still CLOSED — adding a member is a
+  deliberate act with an authority, not a door left open. A package may publish only topics it
+  **declared in its manifest**,
   namespaced under its own package id (`acme.tilemap.brush-changed`); anything else is refused with a
   diagnostic. The `ui_events` **capability** — whether the package may ride the bus at all — is
   enforced end to end by **e13**; this module owns the declaration + namespacing half only.
@@ -92,6 +98,25 @@ when one is added, `check_ui_bus_boundary.py` should grow a deny-list naming it.
 placeholder to fossilize, and no consumer changed: `ThemeEngineOptions.bus`, `ThemeEngine.bus` and
 `IframeThemeChannel` all kept their shapes, and the iframe channel is now simply the bus's first
 subscriber instead of a second hand-rolled fan-out.
+
+`editor.ui.write-notice` (e09b-3) is the **only topic whose publisher is the C++ Shell**, and the
+shape is worth knowing because it is the editor's one Shell-to-renderer push path:
+
+* the Shell's `WriteNoticeRelay` (`src/editor/shell/include/context/editor/shell/write_notice.h`)
+  turns a refused write into a `{seq, topic, origin: "shell", payload}` envelope and queues it for
+  **every live window** through the SAME `UiMirrorStore` the cross-window mirror uses. No second poll
+  surface was invented: the e05c bridge accepts no persistent queries, so `ui.mirror-poll` is the one
+  channel available, and re-using it also meant the nine live `editor-cef-smoke-shell*` scenarios
+  needed no edit (a new boot-time method would be an `unknown_method` refusal in each);
+* the `origin` is `"shell"`, **never a window id** — `receiveMirrored` drops an envelope whose origin
+  equals the receiving bus's own, and every bus origin *is* a window id, so a window-stamped notice
+  would be swallowed by exactly the window it was meant for;
+* editor-core's `UiMirrorPoller` applies it to the bus like any mirrored fact, and
+  `createNotificationHost` (`notifications.ts`) renders it: `wait` hue for a drop (06 §2's
+  awaiting-human — nothing was lost, re-apply against the current value), `bad` for a refusal
+  (nothing was written), always in the kit's **assertive** live region so colour is never the only
+  signal. The topic string and the two kind tokens are byte-compared against `write_notice.h` by
+  `tools/check_webui_assets.py --panel-contract`.
 
 The remaining five topics have no publisher yet — they are the vocabulary the focus / layout / drag /
 viewport / palette surfaces publish onto as each is wired (the when-context sources in `when.ts` are

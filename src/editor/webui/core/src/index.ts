@@ -31,6 +31,12 @@ export * from "./config.js";
 export * from "./settings.js";
 export * from "./palette.js";
 export * from "./palette_view.js";
+// M9 e09b-3 — the LOUD refused-write surface. Re-exported for the same load-bearing build reason the
+// rest of this barrel is: `webui-assets` asserts the entry's symbols survive into the bundle, and the
+// `webui-panel-contract` gate re-reads `WRITE_NOTICE_KIND_*` out of that bundle to compare them
+// against write_notice.h — a symbol the entry does not name could be tree-shaken away, which would
+// turn a drift check into a check that silently stopped running.
+export * from "./notifications.js";
 export * from "./boot.js";
 
 import { bootEditorCore } from "./boot.js";

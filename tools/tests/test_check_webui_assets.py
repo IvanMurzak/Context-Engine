@@ -504,6 +504,10 @@ PANEL_BUNDLE = (
     'var UI_MIRROR_METHOD = "ui.mirror";\n'
     'var UI_MIRROR_POLL_METHOD = "ui.mirror-poll";\n'
     'var UI_MIRROR_REPORT_METHOD = "ui.mirror-report";\n'
+    # e09b-3 LOUD write-notice vocabulary (uibus.ts topic + notifications.ts kinds).
+    'var UI_TOPIC_WRITE_NOTICE = "editor.ui.write-notice";\n'
+    'var WRITE_NOTICE_KIND_DROP = "drop";\n'
+    'var WRITE_NOTICE_KIND_REFUSAL = "refusal";\n'
 )
 
 # MIRRORS THE REAL HEADER'S SHAPE. The real `panel_host.h` declares the enum and the token
@@ -599,6 +603,18 @@ PANEL_CPP_WINDOW = (
     'inline constexpr const char* kUiMirrorReportMethod = "ui.mirror-report";\n'
 )
 
+# The e09b-3 LOUD write-notice vocabulary lives in its OWN header (write_notice.h), unlike the drag /
+# mirror surfaces that ride window_bridge.h — it is a write-path concern, not a window-management one.
+# Neither of its drifts produces an `unknown_method`, which is what makes pinning it worth a test: a
+# topic drift makes editor-core's CLOSED bus refuse every notice (a refused write goes back to being
+# invisible), and a kind drift mis-hues it (the human is told the wrong thing).
+PANEL_CPP_WRITE_NOTICE = (
+    'inline constexpr const char* kUiTopicWriteNotice = "editor.ui.write-notice";\n'
+    'inline constexpr const char* kWriteNoticeOrigin = "shell";\n'
+    'inline constexpr const char* kWriteNoticeKindDrop = "drop";\n'
+    'inline constexpr const char* kWriteNoticeKindRefusal = "refusal";\n'
+)
+
 PANEL_DOCUMENT = (
     "<!DOCTYPE html>\n"
     '<html lang="en">\n'
@@ -621,6 +637,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
                    config: str = PANEL_CPP_CONFIG,
                    session: str = PANEL_CPP_SESSION,
                    window: str = PANEL_CPP_WINDOW,
+                   write_notice: str = PANEL_CPP_WRITE_NOTICE,
                    package: dict | None = None,
                    stage_dockview: bool = True) -> tuple[Path, Path, Path, Path, Path]:
     asset_dir = tmp_path / "app"
@@ -640,6 +657,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
     (include_dir / "user_config.h").write_text(config, encoding="utf-8")
     (include_dir / "session_bridge.h").write_text(session, encoding="utf-8")
     (include_dir / "window_bridge.h").write_text(window, encoding="utf-8")
+    (include_dir / "write_notice.h").write_text(write_notice, encoding="utf-8")
 
     contract_dir = tmp_path / "contractinclude"
     contract_dir.mkdir(parents=True, exist_ok=True)
@@ -852,6 +870,44 @@ def test_a_renamed_ui_mirror_cpp_constant_is_a_config_error(tmp_path: Path) -> N
     renamed = PANEL_CPP_WINDOW.replace("kUiMirrorReportMethod", "kUiMirrorAckMethod")
     with pytest.raises(check_webui_assets.CheckError):
         _run_panel(tmp_path, window=renamed)
+
+
+# --- e09b-3: the LOUD write-notice vocabulary ----------------------------------------------------
+#
+# Each case below was verified by PLANTING the drift against the REAL tree first (the P8/P9 plants of
+# this task's anti-vacuity round) and watching `webui-panel-contract` go red; they are kept here as
+# regressions so the gate cannot rot back into a no-op.
+
+
+@pytest.mark.parametrize(
+    "ts_name", ["UI_TOPIC_WRITE_NOTICE", "WRITE_NOTICE_KIND_DROP", "WRITE_NOTICE_KIND_REFUSAL"])
+def test_write_notice_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> None:
+    """A drift here is SILENT in a way the sibling method surfaces are not — no `unknown_method` is
+    ever produced. The topic drifting makes editor-core's CLOSED bus refuse every notice, so a refused
+    write becomes invisible to the human again (the exact defect e09b-3 exists to end); a KIND drifting
+    mis-hues it, telling the human their project is unreachable when a colleague merely edited the same
+    field. Both leave a green build on both sides of the wire."""
+    drifted = re.sub(rf'({ts_name} = ")[^"]*(")', r"\1drifted\2", PANEL_BUNDLE)
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+@pytest.mark.parametrize("ts_name", ["UI_TOPIC_WRITE_NOTICE", "WRITE_NOTICE_KIND_DROP"])
+def test_bundle_missing_a_write_notice_constant_fails(tmp_path: Path, ts_name: str) -> None:
+    """An ABSENT constant means editor-core is not rendering the notices the Shell publishes at all —
+    i.e. the notification host was tree-shaken out or never wired, which looks like a quiet editor."""
+    stripped = "\n".join(line for line in PANEL_BUNDLE.splitlines() if ts_name not in line)
+    assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+def test_a_renamed_write_notice_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
+    """Rot-into-a-no-op guard: rename the C++ constant and the gate can verify NOTHING -> exit 2.
+
+    This is the failure the gate must NOT swallow: with the anchor gone the regex matches nothing, and
+    a check that silently verifies nothing is worse than no check, because it keeps reporting OK."""
+    renamed = PANEL_CPP_WRITE_NOTICE.replace("kWriteNoticeKindDrop", "kWriteNoticeKindDropped")
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, write_notice=renamed)
 
 
 @pytest.mark.parametrize(

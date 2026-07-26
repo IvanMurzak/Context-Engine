@@ -199,6 +199,11 @@ void InspectorFeed::bind_checkpoint_sink(CheckpointSink sink)
     sink_ = std::move(sink);
 }
 
+void InspectorFeed::bind_notice_sink(NoticeSink sink)
+{
+    notice_sink_ = std::move(sink);
+}
+
 std::optional<undo::FieldEdit> InspectorFeed::snapshot_checkpoint() const
 {
     const serializer::JsonValue* after = panel_.staged_value();
@@ -236,14 +241,24 @@ void InspectorFeed::on_commit(const inspector::CommitResult& result)
     if (result.status == inspector::CommitResult::Status::dropped)
     {
         // L-30: a concurrent writer moved THIS field under the in-flight gesture, so the write was
-        // refused rather than clobbering it. e09b-3 gives this a human-visible surface; today it is
-        // counted and kept in `last_commit_`, which is the honest extent of the drop path — and
-        // reported to stderr so a drop is never silent even without chrome.
+        // refused rather than clobbering it. Counted, kept in `last_commit_`, and reported to stderr
+        // — the stderr line is the LAST-RESORT channel (a headless run, a build with no renderer),
+        // not the human-visible one. That is the sink below.
         ++drops_observed_;
         std::fprintf(stderr, "context_editor: %s\n", result.message.c_str());
     }
     if (!result.ok())
     {
+        // M9 e09b-3 — THE LOUD SURFACE. A refused write (an L-30 drop OR a write-path error) is a
+        // moment design 10 makes non-negotiably loud, so it goes out to the notice sink here, at the
+        // ONE place that knows the outcome. Deliberately BEFORE the early return the applied path
+        // never reaches: `ok()` is false for exactly `dropped` and `error`, which is exactly the set
+        // the human must be told about.
+        if (notice_sink_)
+        {
+            ++notices_sent_;
+            notice_sink_(result);
+        }
         return;
     }
     // READ-YOUR-WRITES (05 §7). The panel must observe its own commit, so the next

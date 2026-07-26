@@ -337,6 +337,140 @@ void test_a_replay_whose_field_a_co_writer_moved_drops_loudly()
     CHECK(!result.edits.empty() && result.edits.front().code == "cas.mismatch");
 }
 
+// ------------------------------------------------- M9 e09b-3: the LOUD notice sink (design 05 §8)
+//
+// A REPLAY IS A WRITE, so its refusals are as loud as a gesture's — and arguably louder: the human
+// pressed Ctrl+Z, and an undo that silently did nothing reads as an undo that worked while the file
+// still holds the value they were trying to revert. These four cases pin what reaches the sink, what
+// does NOT, and that the two non-landing outcomes stay distinguishable on the way out.
+
+// One capture of what the sink was handed.
+struct CapturedNotice
+{
+    std::string verb;
+    inspector::CommitResult::Status status = inspector::CommitResult::Status::none;
+    std::string code;
+};
+
+void test_a_dropped_replay_is_handed_to_the_notice_sink()
+{
+    FieldStore store;
+    store.seed(jnum(75.0));
+
+    PanelHost host;
+    panels::UndoFeed feed(host, kPanelId);
+    feed.bind_gateway(&store);
+
+    std::vector<CapturedNotice> notices;
+    feed.bind_notice_sink(
+        [&notices](const char* verb, const undo::ReplayResult& result)
+        {
+            CapturedNotice captured;
+            captured.verb = verb;
+            captured.status = result.status;
+            captured.code = result.edits.empty() ? std::string{} : result.edits.front().code;
+            notices.push_back(std::move(captured));
+        });
+    CHECK(feed.has_notice_sink());
+
+    feed.record(fov_edit(60.0, 75.0));
+    store.external_write(jnum(120.0)); // a co-writer takes the field
+
+    CHECK(feed.replay_undo().status == inspector::CommitResult::Status::dropped);
+    CHECK(feed.notices_sent() == 1u);
+    CHECK(notices.size() == 1u);
+    // The VERB is what the human is told they were doing. "undo" and "redo" fail differently only in
+    // the message, so a sink that reported the wrong one would produce a correct-looking toast about
+    // an action the human did not take.
+    CHECK(notices[0].verb == "undo");
+    CHECK(notices[0].status == inspector::CommitResult::Status::dropped);
+    CHECK(notices[0].code == "cas.mismatch");
+}
+
+void test_a_refused_replay_reaches_the_sink_as_a_refusal_not_a_drop()
+{
+    FieldStore store;
+    store.seed(jnum(75.0));
+    store.readable = false; // the write path cannot even read the field
+
+    PanelHost host;
+    panels::UndoFeed feed(host, kPanelId);
+    feed.bind_gateway(&store);
+
+    std::vector<CapturedNotice> notices;
+    feed.bind_notice_sink(
+        [&notices](const char* verb, const undo::ReplayResult& result)
+        {
+            CapturedNotice captured;
+            captured.verb = verb;
+            captured.status = result.status;
+            notices.push_back(std::move(captured));
+        });
+
+    feed.record(fov_edit(60.0, 75.0));
+    CHECK(feed.replay_undo().status == inspector::CommitResult::Status::error);
+    CHECK(feed.notices_sent() == 1u);
+    CHECK(notices.size() == 1u);
+    // DISTINGUISHABLE from a drop, which is the whole reason the sink carries the status: a refusal
+    // KEPT the step (retry when the daemon is back) while a drop consumed it. Telling the human the
+    // wrong one sends them looking for a co-writer who does not exist.
+    CHECK(notices[0].status == inspector::CommitResult::Status::error);
+    CHECK(notices[0].status != inspector::CommitResult::Status::dropped);
+}
+
+// THE ANTI-VACUITY CONTROL. A sink that fired on every replay would satisfy both cases above while
+// toasting the human on every successful Ctrl+Z — noise, and noise is exactly how the drop that
+// matters goes unread.
+void test_a_landed_replay_produces_no_notice()
+{
+    FieldStore store;
+    store.seed(jnum(75.0));
+
+    PanelHost host;
+    panels::UndoFeed feed(host, kPanelId);
+    feed.bind_gateway(&store);
+
+    std::size_t calls = 0;
+    feed.bind_notice_sink([&calls](const char*, const undo::ReplayResult&) { ++calls; });
+
+    feed.record(fov_edit(60.0, 75.0));
+    CHECK(feed.replay_undo().ok()); // it LANDED
+    CHECK(feed.replay_redo().ok()); // and so did the redo
+    CHECK(calls == 0u);
+    CHECK(feed.notices_sent() == 0u);
+
+    // A replay that never RAN (nothing to undo) is not a notice either — there was no refusal to
+    // report, and telling the human "your undo was refused" when they had nothing to undo is a lie.
+    CHECK(feed.replay_undo().ok()); // undo the redo, so the stack is walkable
+    while (feed.journal().can_undo())
+    {
+        (void)feed.replay_undo();
+    }
+    const undo::ReplayResult none = feed.replay_undo();
+    CHECK(none.status == inspector::CommitResult::Status::none);
+    CHECK(calls == 0u);
+}
+
+void test_an_unbound_notice_sink_leaves_the_replay_accounting_intact()
+{
+    FieldStore store;
+    store.seed(jnum(75.0));
+
+    PanelHost host;
+    panels::UndoFeed feed(host, kPanelId);
+    feed.bind_gateway(&store);
+    CHECK(!feed.has_notice_sink());
+
+    feed.record(fov_edit(60.0, 75.0));
+    store.external_write(jnum(120.0));
+
+    CHECK(feed.replay_undo().status == inspector::CommitResult::Status::dropped);
+    CHECK(feed.replay_drops() == 1u);
+    // Counted APART from the drop, so "the human was told" and "a drop happened" are two facts a
+    // regression cannot collapse into one.
+    CHECK(feed.notices_sent() == 0u);
+}
+
 void test_an_unbound_feed_replays_nothing_rather_than_pretending()
 {
     PanelHost host;
@@ -640,6 +774,10 @@ int main()
     test_a_replay_whose_field_a_co_writer_moved_drops_loudly();
     test_a_redo_whose_field_a_co_writer_moved_drops_loudly_too();
     test_a_replay_the_write_path_refuses_keeps_the_step_and_dirties_nothing();
+    test_a_dropped_replay_is_handed_to_the_notice_sink();
+    test_a_refused_replay_reaches_the_sink_as_a_refusal_not_a_drop();
+    test_a_landed_replay_produces_no_notice();
+    test_an_unbound_notice_sink_leaves_the_replay_accounting_intact();
     test_a_landed_replay_raises_the_read_your_replays_flag_once();
     test_the_touch_seam_repaints_the_surface_on_every_move();
     test_an_unbound_feed_replays_nothing_rather_than_pretending();

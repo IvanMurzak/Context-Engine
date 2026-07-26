@@ -288,6 +288,26 @@ UI_MIRROR_CONSTANTS = (
     ("ui.mirror-report", "window_bridge.h", "kUiMirrorReportMethod", "UI_MIRROR_REPORT_METHOD"),
 )
 
+# The M9 e09b-3 LOUD WRITE-NOTICE vocabulary (design 05 §8, 10 § Non-negotiable UX invariants), whose
+# C++ side lives in write_notice.h and whose TS mirrors are uibus.ts (the topic) + notifications.ts
+# (the two kinds). This one is NOT a method name, and its two failure modes are worse than the
+# siblings' above precisely because neither produces an `unknown_method`:
+#
+#   * THE TOPIC — the Shell broadcasts an `editor.ui` envelope naming it, and editor-core's bus is a
+#     CLOSED set. A drift makes `receiveMirrored` refuse every notice as an unknown topic, so a
+#     refused write goes back to being invisible to the human — the exact regression this task
+#     existed to end, restored by a typo, with a GREEN build and a green mirror on both sides.
+#   * THE TWO KINDS — they choose the HUE (06 §2: `wait` = awaiting-human, `bad` = error). A drift
+#     does not hide the notice; it MIS-STATES it, telling the human their project is unreachable when
+#     a colleague merely edited the same field. A wrong message is harder to notice than a missing one.
+WRITE_NOTICE_CONSTANTS = (
+    ("editor.ui write-notice topic", "write_notice.h", "kUiTopicWriteNotice",
+     "UI_TOPIC_WRITE_NOTICE"),
+    ("write-notice drop kind", "write_notice.h", "kWriteNoticeKindDrop", "WRITE_NOTICE_KIND_DROP"),
+    ("write-notice refusal kind", "write_notice.h", "kWriteNoticeKindRefusal",
+     "WRITE_NOTICE_KIND_REFUSAL"),
+)
+
 # The closed gesture vocabulary (04 §4), compared SET vs SET between the C++ wire tokens and the
 # bundle's own GESTURE_VERBS array, so a verb added on one side without the other — which would be
 # refused at runtime with no build error — fails here instead.
@@ -893,6 +913,26 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
                 f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
                 f"Shell would route one name and editor-core would call another, so the cross-window "
                 f"editor.ui mirror would silently stop propagating with NO error anywhere.")
+
+    # 7a10 — the e09b-3 LOUD write-notice vocabulary agrees across the two languages. NOT a method
+    # name, so neither drift produces an `unknown_method`: a topic drift makes editor-core's CLOSED
+    # bus refuse every notice (a refused write becomes invisible again), and a kind drift mis-hues a
+    # data-integrity moment (the human is told the wrong thing, which is worse than being told
+    # nothing). Both are green on every build and on both sides of the wire.
+    for human, cpp_file, cpp_name, ts_name in WRITE_NOTICE_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(
+                f"{human}: the bundle does not declare {ts_name} — editor-core cannot be rendering "
+                f"the refused-write notices the Shell publishes, so an L-30 drop would be silent to "
+                f"the human (design 10: LOUD, never silent)")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
+                f"Shell would publish one spelling and editor-core would expect another, so a refused "
+                f"write would either never reach the human (topic) or reach them mis-hued (kind), "
+                f"with NO error anywhere.")
 
     # 7b — the D6 persisted-blob member names agree (gui/contract/panel_state.h is their authority).
     for human, cpp_name, ts_name in PANEL_STATE_CONSTANTS:
