@@ -754,6 +754,10 @@ export const panelPortTests: readonly TestCase[] = [
                 grants: DENY_ALL_CAPABILITY_GRANTS,
                 themeTokens: () => undefined,
                 state: { read: (): unknown => null, write: (): void => {} },
+                // e13c-1: no daemon in this tier, so the fan-in refuses honestly. The port-level
+                // properties this case pins are unaffected by which verbs answer.
+                daemonCall: () =>
+                    Promise.resolve({ ok: false, code: "panel.daemon.unavailable", message: "no daemon" }),
                 request: () => Promise.resolve({ ok: true, result: null }),
             });
             const harness = createHarness({ verbs: verbs.verbs });
@@ -790,16 +794,24 @@ export const panelPortTests: readonly TestCase[] = [
                 );
 
                 // 3. A STILL-PARKED verb keeps the e13b-1 answer, from the same table.
+                //
+                // ⚠ THE SUBJECT MOVED IN M9 e13c-1, and the move IS the point of keeping this step.
+                // It named `bridge.call`, which e13c-1 has now FILLED — so leaving it would have
+                // asserted the opposite of the truth. `bridge.events.subscribe` is the verb genuinely
+                // still parked (e13c-2's: it needs a BOUNDED fan-out buffer with an ack cursor, and a
+                // subscription with no bound is an unbounded allocation driven by untrusted code).
+                // Re-point this at the next parked verb whenever one is filled; the property under
+                // test — that filling SOME entries did not open the whole table — is what must survive.
                 harness.command({
                     cmd: "send",
                     index: 0,
-                    envelope: requestEnvelope("parked", "bridge.call"),
+                    envelope: requestEnvelope("parked", "bridge.events.subscribe"),
                 });
                 const parked = await waitForReply(harness, "parked");
                 assertEqual(
                     (parked["error"] as Record<string, unknown>)["code"],
                     PANEL_BRIDGE_REFUSALS.verbNotGranted,
-                    "e13c's verb is still refused by lookup miss — filling a table did not open it",
+                    "e13c-2's verb is still refused by lookup miss — filling a table did not open it",
                 );
             } finally {
                 harness.dispose();
@@ -848,6 +860,9 @@ export const panelPortTests: readonly TestCase[] = [
                         store.value = value;
                     },
                 },
+                // e13c-1: as above — this case is about theme + state over the real port.
+                daemonCall: () =>
+                    Promise.resolve({ ok: false, code: "panel.daemon.unavailable", message: "no daemon" }),
                 request: () => Promise.resolve({ ok: true, result: null }),
             });
             const harness = createHarness({ verbs: verbs.verbs });

@@ -53,6 +53,8 @@ import {
     DENY_ALL_CAPABILITY_GRANTS,
     PANEL_VERB_COMMAND_INVOKE,
     makePanelBridgeVerbs,
+    type PanelDaemonCall,
+    type PanelDaemonOutcome,
 } from "./panelverbs.js";
 import { WindowClient, type WindowSeed } from "./window.js";
 import { DragClient, makeDropZoneHitTest, pumpCrossWindowDrag } from "./drag.js";
@@ -390,6 +392,10 @@ async function startPanels(
                     // because the active theme changes under a mounted panel.
                     themeTokens: () => theme?.iframes.last?.payload,
                     state: binding.state,
+                    // THE e13c-1 DAEMON FAN-IN, with THIS panel's package closed over. Built here
+                    // per binding — never handed a package id at call time — so `bridge.call` has no
+                    // argument by which one package could ride another's baseline session.
+                    daemonCall: makePackageDaemonCall(bridge, binding.packageId),
                     request: binding.request,
                 }),
         });
@@ -1119,6 +1125,54 @@ export function makePanelDispatch(
         return result !== null && result.dispatched
             ? { ok: true, note: `${panelId}/${commandId}` }
             : { ok: false, note: `${panelId}/${commandId} not dispatched` };
+    };
+}
+
+/**
+ * The Shell method the package daemon fan-in lands on (M9 e13c-1).
+ *
+ * MIRRORS C++ `kPanelDaemonCallMethod` (package_sessions.h). Kept beside its one caller rather than
+ * in `panelverbs.js`, which is transport-free by construction and must stay so.
+ */
+export const PANEL_DAEMON_CALL_METHOD = "panel.daemon.call";
+
+/**
+ * Bind ONE package's daemon fan-in (M9 e13c-1, design 04 §5 / 08 §2).
+ *
+ * ⚠ `packageId` IS AN ARGUMENT OF THIS FACTORY, NOT OF THE RETURNED FUNCTION. That single fact is the
+ * cross-package boundary at this layer: the returned `PanelDaemonCall` takes only a method and its
+ * params, so `bridge.call`'s handler has nothing to pass that could name another package, and a
+ * `packageId` in a panel's request payload reaches no code that reads one. Same shape as the
+ * per-panel `PanelStateStore` (panelverbs.ts § the file header), and for the same reason: every
+ * package reports `event.origin === "null"`, so a closure is the only thing that can carry identity.
+ *
+ * ⚠ NO ALLOWLIST HERE. The panel-callable method set lives at the SHELL, which holds the session
+ * (package_sessions.h § control 2). This function forwards the method verbatim and relays the answer.
+ *
+ * TOTAL — it never rejects, because `bridge.call`'s handler must be able to turn every outcome into a
+ * `PanelVerbRefusal`; an escaping rejection would reach `PanelPortBridge.#invoke`'s generic host-fault
+ * path and tell the package nothing, `scope.denied` least of all. A `BridgeError` carries the Shell's
+ * machine-readable `reason` (the handler's own `error_code`, e.g. `scope.denied`), which is exactly
+ * what the panel-facing refusal relays; anything else is a transport fault with no code to relay.
+ */
+export function makePackageDaemonCall(bridge: ShellBridge, packageId: string): PanelDaemonCall {
+    return async (method: string, params: unknown): Promise<PanelDaemonOutcome> => {
+        try {
+            const result = await bridge.call(PANEL_DAEMON_CALL_METHOD, {
+                packageId,
+                method,
+                params,
+            });
+            return { ok: true, result };
+        } catch (error) {
+            if (error instanceof BridgeError) {
+                return { ok: false, code: error.reason, message: error.message };
+            }
+            // Not a refusal the Shell authored — a client-side parse/shape fault. Its message is
+            // renderer state, so it is NOT echoed (the discipline `PanelPortBridge.#invoke` applies
+            // to an ordinary throw); the code says what class it is and nothing more.
+            return { ok: false, code: "bridge.transport", message: "the Shell could not be reached" };
+        }
     };
 }
 

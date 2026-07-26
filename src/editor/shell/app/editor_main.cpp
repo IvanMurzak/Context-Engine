@@ -21,6 +21,7 @@
 #include "context/editor/shell/keybindings_bridge.h"
 #include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/user_config.h"
+#include "context/editor/shell/package_sessions.h" // e13c-1: per-package BASELINE daemon sessions
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/session_bridge.h"
@@ -745,6 +746,36 @@ int main(int argc, char** argv)
     if (!window_bridge.install(bridge))
     {
         std::fprintf(stderr, "context_editor: could not install the window bridge surface\n");
+        return 1;
+    }
+
+    // --- the per-package BASELINE daemon sessions (e13c-1, design 04 §5 / 08 §2) -------------------
+    //
+    // The route a package panel's `bridge.call` lands on. Every session it opens holds the
+    // `read_query` BASELINE and nothing else (package_sessions.h § control 1), which is what makes a
+    // panel's `set` / `build` refused BY THE DISPATCHER — the e13 DoD line — rather than by anything
+    // on this side of the wire.
+    //
+    // ⚠ A SEPARATE `client::Client` PER PACKAGE, deliberately NOT `lifecycle.client()`. That one is
+    // the SHELL's session and carries `kShellScope` ("read,write,session"): forwarding a panel's call
+    // over it would hand untrusted third-party code the Shell's own write + session grants, which is
+    // the whole failure this task exists to prevent. The sessions are LAZY (a package that never calls
+    // costs no connection) and sub-capped at `kMaxPackageSessions` of the daemon's 16 (control 4).
+    //
+    // The factory does NOT attach — PackageSessionHost does, so the scope has exactly one decision
+    // site. `connect_to_project` retains the discovered D20 token, which `attach()` falls back to, so
+    // no credential passes through this lambda.
+    //
+    // Installed even OUTSIDE project mode (like the session bridge above): the welcome screen boots
+    // the same bundle, and an uninstalled method is a deny-by-default `unknown_method` on a channel
+    // whose smokes forbid refusals. With no project the factory simply fails and the call is refused
+    // `panel.daemon.unavailable`, which is the honest state of a Shell with no daemon.
+    shell::PackageSessionHost package_sessions(
+        [project = options.project](std::string& error) -> std::unique_ptr<client::Client>
+        { return client::Client::connect_to_project(project, 5000, error); });
+    if (!package_sessions.install(bridge))
+    {
+        std::fprintf(stderr, "context_editor: could not install the package daemon-session surface\n");
         return 1;
     }
 
