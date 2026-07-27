@@ -12,6 +12,7 @@
 // than an `#if` in this file because CMake picks a compiler by file extension — see its own header.
 #include "smoke_inject_cocoa.h"
 
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <utility>
@@ -609,6 +610,31 @@ NsViewPointPoints ns_view_point_for_physical(PointI position, double height_poin
     // and mirrors the pointer on a Retina display, so the two orderings must stay mirror images.
     const double y_in_points = static_cast<double>(position.y) / factor;
     return NsViewPointPoints{static_cast<double>(position.x) / factor, height_points - y_in_points};
+}
+
+NsDeliveredShift ns_delivered_shift_for_window_move(PointI origin_at_post_points,
+                                                    PointI origin_at_delivery_points, DpiScale dpi)
+{
+    // Same 0-guard and same source-of-truth choice as ns_view_point_for_physical above: `dpi.dpi` is
+    // authoritative and `factor()` derived, and only a hand-constructed 0 needs defending against.
+    const double factor = dpi.dpi == 0u ? 1.0
+                                        : static_cast<double>(dpi.dpi) /
+                                              static_cast<double>(kReferenceDpi);
+    // A delivered locationInWindow gains (post - delivery) on BOTH axes. x reaches Shell space
+    // unflipped, so it keeps that sign; y is subtracted from the view height by the decoder, so its
+    // Shell-space displacement is the NEGATION — (delivery - post). See the header for why only a
+    // non-zero delta can distinguish the two spellings.
+    const double dx_points = static_cast<double>(origin_at_post_points.x) -
+                             static_cast<double>(origin_at_delivery_points.x);
+    const double dy_points = static_cast<double>(origin_at_delivery_points.y) -
+                             static_cast<double>(origin_at_post_points.y);
+    // Round-half-AWAY-from-zero, matching the shipping decoder's own `ns_round_to_int` (window.cpp)
+    // rather than `static_cast`'s truncate-toward-zero: a displacement of -0.6 and one of +0.6 must
+    // not both land on 0, or the correction's bucket straddling the origin is twice as wide as every
+    // other one. Both inputs are integer points and the factor is bounded, so no isfinite guard is
+    // needed here — unlike in `ns_round_to_int`, which also sees live Cocoa geometry reads.
+    return NsDeliveredShift{static_cast<std::int32_t>(std::lround(dx_points * factor)),
+                            static_cast<std::int32_t>(std::lround(dy_points * factor))};
 }
 
 render::Extent2D placement_extent_for_physical(const IWindowBackend& backend,
