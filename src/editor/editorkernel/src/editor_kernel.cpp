@@ -202,6 +202,29 @@ std::vector<serializer::Diagnostic> migrate_and_stamp_for_save(derivation::Canon
     }
     return findings;
 }
+
+// The `files` topic's advertised change vocabulary, in the REGISTRY's spelling — so `created` maps to
+// `added` (registry.cpp: "The change class: added | modified | removed."). A publisher that emitted
+// its own enum's token would ship a fact no schema describes.
+//
+// Named and file-local, per this module's own enum->wire-token shape (`selection_mode_token` /
+// `play_state_token` in editor_session_state.cpp, `stability_name` in the bridge's event_stream.cpp),
+// rather than an assign-then-break switch inside the publisher: returning per case leaves the
+// compiler's -Wswitch exhaustiveness check as the only thing standing between a new `ChangeType` and
+// an undescribed token, where a seeded default would silently ship a plausible "modified" instead.
+[[nodiscard]] const char* change_class_token(filesync::ChangeType type)
+{
+    switch (type)
+    {
+    case filesync::ChangeType::created:
+        return "added";
+    case filesync::ChangeType::modified:
+        return "modified";
+    case filesync::ChangeType::removed:
+        return "removed";
+    }
+    return "modified"; // unreachable: the switch above is exhaustive over the closed enum
+}
 } // namespace
 
 EditorKernel::EditorKernel(filesync::FileStore& fs, filesync::Watcher& watcher,
@@ -325,6 +348,14 @@ EditOutcome EditorKernel::edit_file(std::string_view path, std::string_view data
     std::vector<serializer::Diagnostic> migration_findings =
         migrate_and_stamp_for_save(form, migrations_for(config_), config_.migration_runner);
 
+    // The `files.changed` CLASS this write will report is decided HERE, BEFORE the bytes land —
+    // afterwards the file exists either way. Without it the registry's advertised `added` class would
+    // be unreachable from RPC `edit`, the editor's ONLY write path: every creation would be announced
+    // as `modified`, and a client maintaining a file list could not tell one from an update. The probe
+    // is a stat on a path this call is already about to canonicalize, L-37-migrate and atomically
+    // rewrite, so it is not measurable against the rest of the path.
+    const bool existed = fs_.exists(key);
+
     // Write THROUGH filesync atomic-IO (temp+fsync+rename, R-FILE-004). apply_write registers the
     // write as self-echo, so the reconcile crawl will NOT re-surface our own write as external.
     if (!reconciler_.apply_write(key, form.bytes))
@@ -338,9 +369,14 @@ EditOutcome EditorKernel::edit_file(std::string_view path, std::string_view data
     // the bytes just written, and the canonical hash the own-write read barrier keys on
     // (R-CLI-006). The graph's parse node re-canonicalizes the already-canonical bytes — a
     // deliberate fixpoint no-op that keeps the seam single-sourced.
-    const filesync::ReconcileChange change{key, filesync::ChangeType::modified,
-                                           filesync::content_hash(form.bytes)};
+    const filesync::ReconcileChange change{
+        key, existed ? filesync::ChangeType::modified : filesync::ChangeType::created,
+        filesync::content_hash(form.bytes)};
     out.ticket = graph_.apply(change, form.bytes);
+    // Design 05 §8's `files.changed`, published at the ONE seam every change enters the derived world
+    // through (M9 x9 / CE #449). BEFORE the caller's settle, so the chain the design specifies —
+    // `files.changed -> derivation.settled{gen}` — holds by construction rather than by convention.
+    publish_file_change(change);
     // Only JSON content carries envelope findings (the encoding heals + the L-37 migration
     // findings from stamping this save). A non-JSON payload's parse-failure diagnostic is NOT a
     // finding — sidecars/TS text are legal non-JSON kinds, and whether a path SHOULD be JSON is
@@ -379,6 +415,14 @@ EditBatchOutcome EditorKernel::edit_files(const std::vector<BatchEdit>& edits,
     // CAS hash of each target (R-FILE-004 — a resume never clobbers a file that moved on).
     std::vector<filesync::PlannedWrite> writes;
     writes.reserve(edits.size());
+    // Index-parallel to `writes`: the `files.changed` class each write will report, decided from the
+    // target's PRE-batch existence while the planning read below still has it. Same rule as
+    // `edit_file` — after `write_queue_->execute` every path exists, so `added` would be unreachable —
+    // and it rides a read the CAS planning already performs, so it costs no extra I/O. Not a
+    // `PlannedWrite` member: that type is the intent log's crash-recovery record (R-FILE-004) and has
+    // no business carrying a client-facing wire vocabulary.
+    std::vector<filesync::ChangeType> change_classes;
+    change_classes.reserve(edits.size());
     std::unordered_set<std::string> planned_paths;
     planned_paths.reserve(edits.size());
     for (const BatchEdit& e : edits)
@@ -416,6 +460,8 @@ EditBatchOutcome EditorKernel::edit_files(const std::vector<BatchEdit>& edits,
         w.target_hash = filesync::content_hash(form.bytes);
         w.data = std::move(form.bytes);
         writes.push_back(std::move(w));
+        change_classes.push_back(current ? filesync::ChangeType::modified
+                                        : filesync::ChangeType::created);
 
         // R-CLI-006 raw-byte CAS (`--if-match`), per file: collect every target whose CURRENT bytes
         // no longer hash to its precondition. Collected (not early-returned) so the reply names ALL
@@ -450,14 +496,40 @@ EditBatchOutcome EditorKernel::edit_files(const std::vector<BatchEdit>& edits,
     // Ingest each write into the derivation graph (the WriteQueue path does not register reconciler
     // self-echo; a later crawl re-hash of these paths memoizes to a no-op, so no double-derive).
     out.tickets.reserve(writes.size());
-    for (const filesync::PlannedWrite& w : writes)
+    for (std::size_t i = 0; i < writes.size(); ++i)
     {
-        const filesync::ReconcileChange change{w.path, filesync::ChangeType::modified,
-                                               w.target_hash};
+        const filesync::PlannedWrite& w = writes[i];
+        const filesync::ReconcileChange change{w.path, change_classes[i], w.target_hash};
         out.tickets.push_back(graph_.apply(change, w.data));
+        publish_file_change(change); // one `files.changed` per file, then ONE settle for the batch
     }
     out.ok = true;
     return out;
+}
+
+void EditorKernel::publish_file_change(const filesync::ReconcileChange& change)
+{
+    if (!running())
+        return; // a kernel that was never start()ed: no daemon, so no client stream to publish onto
+
+    // THE payload is exactly the two advertised fields — deliberately NO `event` member. Design 05 §8
+    // names this fact `files.changed`, but the `files` topic carries exactly ONE event class (a
+    // project file changed, discriminated by `change`), so there is nothing for an `event` member to
+    // discriminate; the multi-class topics (`derivation` / `session` / `clients`) stamp one and the
+    // single-class ones (`diagnostics` / `log`) do not. Adding a field the registry does not advertise
+    // would be contract drift in the R-CLI-014 introspection surface — which is the same reason the
+    // token vocabulary is the registry's (`change_class_token`).
+    //
+    // THE MEMBER IS NAMED `path`, AND THAT IS MECHANICAL, not cosmetic. `edit-batch`'s reply
+    // deliberately says `file` instead (kernel_server.cpp — there the target is an OUTPUT of the plan
+    // the caller never named), so the next reader will be tempted to "align" this one. Do not:
+    // `Subscriber::accepts` implements R-CLI-015 path-scoped delivery by reading the payload member
+    // literally called `path` (event_stream.cpp), so a `files` fact keyed `file` would be treated as a
+    // PATHLESS lifecycle event and bypass every subscriber's subtree filter.
+    Json fact = Json::object();
+    fact.set("path", Json(change.path));
+    fact.set("change", Json(std::string(change_class_token(change.type))));
+    (void)daemon_.events().publish("files", std::move(fact));
 }
 
 void EditorKernel::ingest_change(const filesync::ReconcileChange& change)
@@ -467,11 +539,13 @@ void EditorKernel::ingest_change(const filesync::ReconcileChange& change)
         // A removal carries no content: content_hash is 0 by the ReconcileChange contract and the
         // derivation graph ignores it for removals, so forward the change as-is.
         graph_.apply(change, std::string_view{});
+        publish_file_change(change);
         return;
     }
     // Content hash is authoritative (R-FILE-002): read the path's CURRENT bytes and derive from them.
     const std::optional<std::string> bytes = fs_.read(change.path);
     graph_.apply(change, bytes ? std::string_view(*bytes) : std::string_view{});
+    publish_file_change(change);
 }
 
 std::vector<filesync::ReconcileChange> EditorKernel::ingest_external(CrawlMode mode)
@@ -527,15 +601,15 @@ std::uint64_t EditorKernel::settle()
     const std::uint64_t generation = graph_.generation();
 
     // Forward the derived-world generation onto the client-facing event stream as the R-BRIDGE-008
-    // quiescence fact. (The bridge's own EventStream generation counter is a distinct concept driven
-    // by pure-bridge tests; the composition point is carrying the DERIVED-WORLD generation here.)
+    // quiescence fact — through `EventStream::settle`, which ADOPTS it.
+    //
+    // ⚠ M9 x9 (CE #449) COLLAPSED TWO PUBLISHERS INTO ONE: this site used to hand-roll the same
+    // payload with `publish("derivation", …)` because the stream's settle took no argument. Passing
+    // the generation in is what makes the wire ENVELOPE's `generation` honest, not just the payload's,
+    // and the Shell's feeds read their stamp from the envelope. The full account of what that split
+    // cost lives at ONE canonical site — event_stream.h § settle — so the two cannot drift.
     if (running())
-    {
-        Json settled = Json::object();
-        settled.set("event", Json(std::string("derivation.settled")));
-        settled.set("generation", Json(generation));
-        daemon_.events().publish("derivation", std::move(settled));
-    }
+        (void)daemon_.events().settle(generation);
     return generation;
 }
 

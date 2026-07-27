@@ -108,9 +108,11 @@ std::string edit_req(std::int64_t id, const std::string& path, const std::string
     return rpc(id, "edit", std::move(p));
 }
 
-// A single-file `edit-batch` request. Unlike a plain `edit`, a batch runs a settle() that publishes a
-// `derivation` event — so a burst of these produces a burst of pushed events (used to overflow a slow
-// subscriber's queue deterministically).
+// A single-file `edit-batch` request. Like a plain `edit` since M9 x9, a batch settles and publishes
+// a `derivation` event (plus one `files` fact per file) — so a burst of these produces a burst of
+// pushed events (used to overflow a slow subscriber's queue deterministically). Being single-file it
+// publishes exactly what a plain `edit` would; it stays an `edit-batch` because that is the shape its
+// one caller (the gap-marker burst) has always used and the burst needs no other property from it.
 std::string editbatch_req(std::int64_t id, const std::string& path, const std::string& content)
 {
     Json f = Json::object();
@@ -1382,6 +1384,174 @@ int main()
             std::error_code ecG;
             fs::remove_all(projectG, ecG);
         }
+    }
+
+    // ---- M9 x9 (CE #449): A PLAIN `edit` PUBLISHES design 05 §8's BOTH facts ---------------------
+    //
+    // §8 specifies `RPC edit -> ... -> events: files.changed -> derivation.settled{gen} -> all
+    // subscribed clients update`. Before x9 the `edit` verb published NEITHER: `derivation.settled`
+    // came only from `edit-batch` / `reconcile` / the two await barriers, and `files.changed` had no
+    // producer at all — so the one path a real client actually takes (the Shell's ONLY write is RPC
+    // `edit`) emitted nothing and the fan-out reader shipped in e09e-2 had no live producer.
+    //
+    // ⚠ THIS SECTION IS DELIBERATELY ROUTED THROUGH `edit` AND NOTHING ELSE. No `edit-batch`, no
+    // `reconcile`, no `await_hash` / `await_generation` — those were exactly the paths whose coverage
+    // made the gap invisible, so a test reaching the events through any of them would reproduce the
+    // original mistake rather than catch it.
+    {
+        const fs::path projectP = make_temp_project();
+        MemoryFileStore storeP;
+        NullWatcher watcherP;
+        context::kernel::ManualClock clockP;
+        context::kernel::InlineTaskRunner tasksP;
+
+        EditorKernelConfig cfgP;
+        cfgP.project_root = projectP;
+        cfgP.filesync_root = "proj";
+        cfgP.index_path = "proj/.editor/index";
+
+        EditorKernel kernelP(storeP, watcherP, clockP, tasksP, cfgP);
+        KernelServer serverP(kernelP);
+        CHECK(kernelP.start(ScopeSet::all()) == StartOutcome::booted);
+
+        TransportServer transportP(endpoint_for(
+            "ctx-ks-publish-" +
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())));
+        CHECK(transportP.listen());
+        std::thread srvP([&serverP, &transportP]() { serverP.serve(transportP); });
+
+        {
+            TransportClient c(transportP.endpoint());
+            CHECK(c.connect(3000));
+            CHECK(c.request(rpc(1, "attach", attach_params("write,session"))).has_value());
+            // Subscribe to EVERY topic, so "exactly two events" below is a claim about the whole
+            // stream and not about a filter we chose. From here on the client MUST demux (req_demux),
+            // never request().
+            CHECK(c.request(subscribe_all(2)).has_value());
+
+            // Pull the two facts of ONE plain edit out of the frames that arrived alongside its reply.
+            const auto facts_of = [](const std::vector<Json>& frames, const char* topic)
+            {
+                std::vector<Json> out;
+                for (const Json& f : frames)
+                {
+                    if (!is_event_frame(f))
+                        continue;
+                    const Json& inner = f.at("params").at("event");
+                    if (inner.at("topic").as_string() == topic)
+                        out.push_back(inner);
+                }
+                return out;
+            };
+
+            // --- the edit, and the two facts it published ------------------------------------------
+            std::vector<Json> frames;
+            const std::optional<Json> reply =
+                req_demux(c, 3, edit_req(3, "proj/pub.scene", "entity: 1"), frames);
+            CHECK(reply.has_value());
+            if (reply.has_value())
+            {
+                CHECK(reply->at("result").at("ok").as_bool());
+                const std::uint64_t reply_generation = static_cast<std::uint64_t>(
+                    reply->at("result").at("data").at("generation").as_int());
+                CHECK(reply_generation > 0); // the SETTLED generation, as `edit-batch` already reports
+
+                // FAN-OUT COST / storm check: one logical edit is TWO events, never more. A single
+                // write that published twice would double every subscriber's traffic, and this is the
+                // assertion that would catch it — the count is over EVERY topic (see subscribe_all).
+                std::size_t pushed = 0;
+                for (const Json& f : frames)
+                    if (is_event_frame(f))
+                        ++pushed;
+                CHECK(pushed == 2u);
+
+                const std::vector<Json> files = facts_of(frames, "files");
+                const std::vector<Json> derivation = facts_of(frames, "derivation");
+                CHECK(files.size() == 1u);
+                CHECK(derivation.size() == 1u);
+
+                if (files.size() == 1u && derivation.size() == 1u)
+                {
+                    // `files.changed`: the two fields the registry advertises for this topic, nothing
+                    // more — `path` (project-relative) and the `change` CLASS in the registry's own
+                    // vocabulary (added | modified | removed), not ChangeType's `created` spelling.
+                    //
+                    // `added`, because `proj/pub.scene` did not exist in this store until this edit.
+                    // That is the point of the assertion, not incidental: the write path decides the
+                    // class from the target's PRE-write existence, so all three advertised classes are
+                    // reachable from RPC `edit`. Pin it against the second edit below, which reports
+                    // `modified` on the very same path — a producer that hardcoded either token would
+                    // satisfy one of these two and fail the other.
+                    const Json& changed = files[0].at("payload");
+                    CHECK(changed.at("path").as_string() == "proj/pub.scene");
+                    CHECK(changed.at("change").as_string() == "added");
+
+                    // §8's ORDER: `files.changed` BEFORE `derivation.settled`. Asserted on the wire
+                    // `seq`, which is the stream's total order — not on delivery order, which a
+                    // future transport could batch.
+                    CHECK(files[0].at("seq").as_int() < derivation[0].at("seq").as_int());
+
+                    const Json& settled = derivation[0].at("payload");
+                    CHECK(settled.at("event").as_string() == "derivation.settled");
+                    CHECK(static_cast<std::uint64_t>(settled.at("generation").as_int()) ==
+                          reply_generation);
+                    // The ENVELOPE stamp agrees with the payload — the registry advertises this field
+                    // as "the derived-world generation the event reflects", and until x9 gave
+                    // `EventStream::settle` the derived generation to adopt it was 0 on every event a
+                    // live daemon ever pushed.
+                    CHECK(static_cast<std::uint64_t>(derivation[0].at("generation").as_int()) ==
+                          reply_generation);
+                }
+            }
+
+            // --- a SECOND edit publishes AGAIN (per-edit, not once per daemon lifetime) ------------
+            std::vector<Json> frames2;
+            const std::optional<Json> reply2 =
+                req_demux(c, 4, edit_req(4, "proj/pub.scene", "entity: 2"), frames2);
+            CHECK(reply2.has_value());
+            const std::vector<Json> files2 = facts_of(frames2, "files");
+            CHECK(files2.size() == 1u);
+            CHECK(facts_of(frames2, "derivation").size() == 1u);
+            // …and NOW the same path is `modified`, because it exists. The pair of assertions is what
+            // makes the class meaningful to a client maintaining a file list: create and update are
+            // distinguishable on the `files` topic, not collapsed into one token.
+            if (files2.size() == 1u)
+            {
+                CHECK(files2[0].at("payload").at("change").as_string() == "modified");
+            }
+
+            // --- THE NEGATIVE: a REFUSED edit publishes NOTHING ------------------------------------
+            // The publisher sits on the success path only. Without this, a producer that fired before
+            // the CAS check — announcing a change that never happened — would pass every assertion
+            // above, and a client would re-read on a write that was rejected.
+            std::vector<Json> frames3;
+            Json refused = Json::object();
+            refused.set("path", Json(std::string("proj/pub.scene")));
+            refused.set("content", Json(std::string("entity: 3")));
+            refused.set("ifMatch", Json(std::string("12345"))); // not the file's raw hash
+            const std::optional<Json> reply3 =
+                req_demux(c, 5, rpc(5, "edit", std::move(refused)), frames3);
+            CHECK(reply3.has_value());
+            if (reply3.has_value())
+            {
+                CHECK(reply3->contains("error"));
+                CHECK(reply3->at("error").at("data").at("code").as_string() == "cas.mismatch");
+            }
+            std::size_t pushed_on_refusal = 0;
+            for (const Json& f : frames3)
+                if (is_event_frame(f))
+                    ++pushed_on_refusal;
+            CHECK(pushed_on_refusal == 0u);
+
+            std::vector<Json> tail;
+            CHECK(req_demux(c, 6, rpc(6, "shutdown", Json::object()), tail).has_value());
+            c.close();
+        }
+
+        srvP.join();
+        kernelP.stop();
+        std::error_code ecP;
+        fs::remove_all(projectP, ecP);
     }
 
     EDITORKERNEL_TEST_MAIN_END();

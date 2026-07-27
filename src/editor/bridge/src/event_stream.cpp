@@ -180,9 +180,12 @@ std::uint64_t EventStream::publish(const std::string& topic, Json payload,
     return emit(topic, std::move(payload));
 }
 
-std::uint64_t EventStream::settle()
+std::uint64_t EventStream::settle(std::uint64_t derived_generation)
 {
-    ++generation_;
+    // ADOPT, never increment (see the header). The derived world owns this number; this stream only
+    // stamps it, so the envelope's `generation` and the payload's agree by construction rather than
+    // by two publishers happening to be called in the right order.
+    generation_ = derived_generation;
     Json payload = Json::object();
     payload.set("event", Json(std::string("derivation.settled")));
     payload.set("generation", Json(generation_));

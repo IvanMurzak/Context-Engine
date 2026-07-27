@@ -164,7 +164,9 @@ std::optional<std::uint64_t> parse_hash_u64(const std::string& text)
     return std::nullopt;
 }
 
-// The tail BOTH `edit` shapes end in: the R-CLI-006 read-your-writes barrier, the R-FILE-001
+// The tail BOTH `edit` shapes end in: the R-CLI-006 read-your-writes barrier, the R-BRIDGE-008
+// settle that publishes design 05 §8's `derivation.settled{gen}` to every subscribed client (M9 x9 —
+// this tail has SIDE EFFECTS on the client event stream, not only on the reply), the R-FILE-001
 // two-hash split (rawHash = on-disk byte identity and the NEXT ifMatch token; canonicalHash = the
 // barrier key), the world stamps, and the not-yet-reflected warning. `data` arrives carrying only
 // the shape-specific ADDRESSING keys, the one thing the two shapes genuinely disagree about — the
@@ -177,13 +179,46 @@ std::optional<std::uint64_t> parse_hash_u64(const std::string& text)
         kernel.query_after_hash(file, ticket.canonical_hash);
     const bool reflected = observed.has_value() && observed->canonical_hash == ticket.canonical_hash;
 
+    // M9 x9 (CE #449): PUBLISH THE SETTLE. Design 05 §8's write→propagate chain ends in
+    // `files.changed -> derivation.settled{gen} -> all subscribed clients update`, and until now the
+    // `edit` verb — the ONLY write the Shell issues (wire_override_gateway.cpp) — published NEITHER:
+    // it ran this read-your-writes barrier alone, so `derivation.settled` was reachable only from
+    // `edit-batch`, `reconcile` and the two await barriers, none of which a real editor client takes.
+    // `files.changed` is published one layer down, at `EditorKernel`'s ingest seam, so it has ALREADY
+    // gone out by the time we get here — which is the order §8 specifies.
+    //
+    // WHY HERE and not in each `edit` branch: this function IS the shared tail of both `edit` shapes
+    // (the e09a full-content one and e09b-1's composed pointer/value one), so one call covers the
+    // whole verb and cannot drift between them. `edit-batch` keeps its own settle (kernel_server.cpp's
+    // batch branch) because it settles ONCE for N files, deliberately, rather than per file.
+    //
+    // COST, read off the code rather than assumed — and stated with its worst case, not just its
+    // common one. `query_after_hash` above has already pumped passes until THIS path reflects its
+    // write OR the pending set emptied, so on an otherwise idle project the drain inside `settle()`
+    // is a no-op and the generation read below simply reports the settled generation, matching what
+    // `edit-batch` already reports.
+    //
+    // ⚠ THE WORST CASE IS NOT THAT. `query_after_hash` exits on the FIRST of those two conditions and
+    // is itself bounded by `barrier_max_passes`, so it can legitimately return with the pending set
+    // arbitrarily large (that bound is the R-FILE-013 load-shed valve). `EditorKernel::settle` then
+    // drains with NO budget at all, and every `handle()` runs under the one `dispatch_mu` that
+    // serializes all clients — so under sustained write load an `edit` now pays a full project drain
+    // inside that lock. Concretely, the bound moved from `barrier_max_passes` × `max_batch_per_pass`
+    // (256 × 32 = at most ~8k non-visible nodes) to ALL of them. That is the honest price
+    // of a quiescence fact that is actually true when published, and it is deliberate: a budgeted
+    // settle would publish `derivation.settled` while work was still pending, which is precisely the
+    // lie R-BRIDGE-008 readers must not be told. If it ever shows against the `inspector commit`
+    // p95 in docs/human-latency-budget.md, the fix is a settle that reports `stability: settling`
+    // when its budget expires — never a silent partial one.
+    const std::uint64_t settled_generation = kernel.settle();
+
     data.set("rawHash", hash_string(ticket.raw_hash));
     data.set("canonicalHash", hash_string(ticket.canonical_hash));
     data.set("reflected", Json(reflected));
     data.set("worldEntities", Json(static_cast<std::uint64_t>(kernel.world().alive_count())));
-    data.set("generation", Json(kernel.generation()));
+    data.set("generation", Json(settled_generation));
 
-    Envelope env = Envelope::success(std::move(data), kernel.generation());
+    Envelope env = Envelope::success(std::move(data), settled_generation);
     if (!reflected)
         env.add_warning("the derived world did not reflect the edit within the read barrier bound");
     return env;

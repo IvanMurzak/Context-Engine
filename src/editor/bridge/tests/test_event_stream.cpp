@@ -31,26 +31,63 @@ int main()
         CHECK(s.last_seq() == 2);
     }
 
-    // --- generation counter + derivation.settled{generation} quiescence event -------------------
+    // --- generation ADOPTION + derivation.settled{generation} quiescence event -------------------
+    //
+    // M9 x9 (CE #449): settle() takes the DERIVED-WORLD generation and adopts it, rather than
+    // incrementing a counter of its own. The values here are deliberately NOT 1, 2, … — a test whose
+    // expected generations happen to equal the seq cannot tell adoption from incrementing, and that
+    // coincidence is exactly what let the old signature's "returns the new generation" doc-bug and
+    // its permanently-0 envelope stamp go unnoticed.
     {
         EventStream s("inc-test");
         CHECK(s.generation() == 0);
         Subscriber sub({"derivation"}, 8);
         s.add_subscriber(&sub);
-        const std::uint64_t g1 = s.settle();
-        CHECK(g1 == 1);
-        CHECK(s.generation() == 1);
-        const std::uint64_t g2 = s.settle();
-        CHECK(g2 == 2);
+        const std::uint64_t seq1 = s.settle(7);
+        CHECK(seq1 == 1); // the assigned SEQ, not the generation
+        CHECK(s.generation() == 7);
+        const std::uint64_t seq2 = s.settle(9);
+        CHECK(seq2 == 2);
+        CHECK(s.generation() == 9);
 
         auto events = sub.drain();
         CHECK(events.size() == 2);
         CHECK(events[0].topic == "derivation");
         CHECK(events[0].payload.at("event").as_string() == "derivation.settled");
-        CHECK(events[0].payload.at("generation").as_int() == 1);
-        CHECK(events[0].generation == 1); // the event is stamped with the post-settle generation
-        CHECK(events[1].payload.at("generation").as_int() == 2);
+        CHECK(events[0].payload.at("generation").as_int() == 7);
+        CHECK(events[0].generation == 7); // the ENVELOPE is stamped with the adopted generation
+        CHECK(events[1].payload.at("generation").as_int() == 9);
+        CHECK(events[1].generation == 9);
         CHECK(events[0].incarnation_id == "inc-test");
+    }
+
+    // --- the adopted generation stamps EVERY LATER event, on every topic ------------------------
+    //
+    // This is the assertion the Shell actually depends on and the one nothing covered before: the
+    // envelope's `generation` is what the contract registry advertises as "the derived-world generation
+    // the event reflects", and ProblemsFeed / SceneTreeFeed take their `on_derivation_settled` +
+    // diagnostic stamps from THERE, not from the payload. With the old self-incrementing settle() —
+    // which no daemon path ever called — this field was 0 on every event a live daemon pushed, so the
+    // R-BRIDGE-008 stale-provisional discrimination could never fire.
+    {
+        EventStream s("inc-gen");
+        Subscriber sub({}, 16); // every topic
+        s.add_subscriber(&sub);
+        s.publish("diagnostics", Json::object()); // BEFORE any settle: generation still 0
+        (void)s.settle(42);
+        s.publish("diagnostics", Json::object()); // AFTER: carries the adopted generation
+        s.publish("files", Json::object());
+
+        auto events = sub.drain();
+        CHECK(events.size() == 4);
+        CHECK(events[0].topic == "diagnostics");
+        CHECK(events[0].generation == 0);
+        CHECK(events[1].topic == "derivation");
+        CHECK(events[1].generation == 42);
+        CHECK(events[2].topic == "diagnostics");
+        CHECK(events[2].generation == 42);
+        CHECK(events[3].topic == "files");
+        CHECK(events[3].generation == 42);
     }
 
     // --- stability field on diagnostics ---------------------------------------------------------
@@ -135,10 +172,10 @@ int main()
     {
         EventStream s("inc-test");
         s.publish("files", Json::object());
-        s.settle();
+        (void)s.settle(3);
         const Json snap = s.snapshot();
         CHECK(snap.at("incarnationId").as_string() == "inc-test");
-        CHECK(snap.at("generation").as_int() == 1);
+        CHECK(snap.at("generation").as_int() == 3); // the ADOPTED derived-world generation
         CHECK(snap.at("lastSeq").as_int() == 2);
     }
 

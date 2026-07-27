@@ -312,6 +312,43 @@ public:
 
 private:
     void ingest_change(const filesync::ReconcileChange& change);
+
+    // Publish design 05 §8's `files.changed` fact on the client-facing `files` topic (M9 x9, CE #449).
+    //
+    // THE ONE PRODUCER, and it sits at the ONE seam every CLIENT-VISIBLE change enters the derived
+    // world through — `edit_file`, each write of `edit_files`, and `ingest_change` (the external crawl
+    // / watcher hints). Placing it at the ingest boundary rather than in a verb handler buys two
+    // things: a handler-side producer would leave `edit-batch` and `reconcile` silent about the files
+    // they changed, and every call site here publishes BEFORE its settle, so the ORDER design 05 §8
+    // specifies — `files.changed -> derivation.settled{gen}` — holds by construction rather than by
+    // convention.
+    //
+    // ⚠ PRECISELY WHICH HALF OF THE TOPIC'S CHARTER THAT BUYS. The registry advertises this topic as
+    // "post-derivation file change facts, never raw filesystem noise". A `ReconcileChange` reaching
+    // here has already passed the content-hash reconcile, which is what makes the SECOND half true (it
+    // is not raw filesystem noise). It does NOT make the fact post-derivation: `graph_.apply` only
+    // parses and coalesces into the pending set, and the derived World moves when a pass RUNS, so this
+    // fact is emitted post-reconcile and PRE-derivation. That is deliberate and it is exactly why §8
+    // pairs it with the settle — a subscriber that wants derived state waits for the
+    // `derivation.settled{gen}` that follows, and the two together are the fact. One consequence to
+    // know before reading the wire: `EventStream::emit` stamps the envelope `generation` from the last
+    // ADOPTED settle, so a `files.changed` carries the generation BEFORE the write it announces (0 on
+    // a daemon's first edit) while its paired settle carries the one after.
+    //
+    // The write paths decide `added` vs `modified` from the target's PRE-write existence, so the
+    // registry's `added` class is reachable from RPC `edit` and not only from the crawl.
+    //
+    // A no-op on a kernel that was never start()ed (a unit test, pre-boot): there is no daemon and so
+    // no client stream. An in-process CLI kernel IS running and DOES publish — a subscriber-less stream
+    // still costs one bounded ring push.
+    // FAN-OUT COST: one fact per WRITE — one logical `edit` is one `files.changed` + one
+    // `derivation.settled`, and note that the write path has no same-bytes check, so an idempotent
+    // re-save of identical content publishes too. A bulk `reconcile` is one per genuinely-changed path
+    // (an already-current path yields no ReconcileChange at all). A subscriber that cannot keep up gets
+    // the bounded-queue gap marker it already gets for any burst — the stream never blocks on a slow
+    // client.
+    void publish_file_change(const filesync::ReconcileChange& change);
+
     [[nodiscard]] std::string editor_dir() const;
 
     filesync::FileStore& fs_;

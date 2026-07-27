@@ -695,9 +695,9 @@ int main(int argc, char** argv)
     // e08b: the daemon session feed (selection / play). Same forward-declared-pointer discipline.
     shell::panels::SessionFeed* session_feed = builtin.session.get();
     // e09e-2: the Inspector rides the SAME `derivation` stream, so design 05 §8's fan-out tail — a
-    // landed write reaching every subscribed client — reaches this panel too. Same discipline. (Which
-    // client actions actually PUBLISH that settle today is narrower than §8 specifies: a plain `edit`
-    // publishes nothing, so the cross-window case is not live yet — inspector_feed.h § SCOPE.)
+    // landed write reaching every subscribed client — reaches this panel too. Same discipline. (Since
+    // M9 x9 a plain `edit` PUBLISHES that settle, so the cross-window case is live: any client's write,
+    // including this window's own, arrives here — inspector_feed.h § THE PUBLISHER HALF.)
     shell::panels::InspectorFeed* inspector_feed = builtin.inspector.get();
 
     // --- the daemon SESSION read surface for editor-core (e08d, design 05 §4 / §6) ---------------

@@ -3,7 +3,9 @@
 // the mock and the daemon actually agree, which no amount of mocking can.
 //
 //   1. attach + subscribe + snapshot-then-delta: a real edit over the wire produces real events that
-//      the consumer applies, with real ack cursors.
+//      the consumer applies, with real ack cursors. Since M9 x9 (CE #449) the events come from the
+//      PLAIN `edit` alone — design 05 §8's `files.changed` then `derivation.settled{gen}` — with no
+//      `reconcile` chaser, so this case proves the write path a real editor client actually takes.
 //   2. D20 enforcement (default ON): an attach carrying NO token is REFUSED by the live daemon, and
 //      the same attach WITH the discovered token succeeds.
 //
@@ -129,19 +131,37 @@ void test_live_subscription_receives_real_events()
     CHECK(!consumer.incarnation_id().empty());
     CHECK(consumer.states()[0].live);
 
-    // Drive REAL work through the daemon: the edit lands on disk, then `reconcile` folds it in and
-    // SETTLES — advancing the derived-world generation and publishing the `derivation.settled`
-    // quiescence event. (A bare `edit` deliberately does not settle, so it publishes nothing; the
-    // events this subscription is here to observe come from the settle.)
+    // Drive REAL work through the daemon: ONE plain `edit`. It lands on disk, publishes design 05
+    // §8's `files.changed` at the derivation ingest seam and then `derivation.settled{gen}` from the
+    // settle its read-your-writes tail runs (M9 x9 / CE #449).
+    //
+    // ⚠ NOTHING ELSE IS CALLED HERE, AND THAT IS THE POINT. This test used to follow the edit with a
+    // `reconcile`, because before x9 a bare `edit` published nothing and the settle had to come from
+    // somewhere — which meant the assertions below were satisfied by a path no editor client ever
+    // takes. The `reconcile` is gone: if the `edit` publisher regresses, the pump below finds nothing
+    // and this test REDS instead of quietly proving `reconcile` still works.
     Json edit_params = Json::object();
     edit_params.set("path", Json(std::string("proj/e2e.scene")));
     edit_params.set("content", Json(std::string("entity: 1")));
-    CHECK(client.call("edit", std::move(edit_params), error).has_value());
-    CHECK(client.call("reconcile", Json::object(), error).has_value());
+    const std::optional<Json> edited = client.call("edit", std::move(edit_params), error);
+    CHECK(edited.has_value());
+    const std::uint64_t edit_generation =
+        edited.has_value()
+            ? static_cast<std::uint64_t>(edited->at("data").at("generation").as_int())
+            : 0;
+    CHECK(edit_generation > 0);
 
-    // Pump until the events the edit produced have been applied (bounded, so CI never hangs).
+    // Pump until BOTH of §8's facts have been applied (bounded, so CI never hangs).
+    const auto has_fact = [&seen](const char* topic)
+    {
+        for (const ClientEvent& e : seen)
+            if (e.topic == topic)
+                return true;
+        return false;
+    };
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
-    while (seen.empty() && std::chrono::steady_clock::now() < deadline)
+    while ((!has_fact("files") || !has_fact("derivation")) &&
+           std::chrono::steady_clock::now() < deadline)
         CHECK(consumer.pump(error));
 
     CHECK(!seen.empty());
@@ -153,6 +173,30 @@ void test_live_subscription_receives_real_events()
         CHECK(seen.front().incarnation_id == consumer.incarnation_id());
         CHECK(!seen.front().topic.empty());
         CHECK(consumer.states()[0].last_seq >= seen.front().seq);
+    }
+
+    // §8's chain, over the REAL wire from a REAL daemon process, produced by a plain `edit` alone.
+    CHECK(has_fact("files"));
+    CHECK(has_fact("derivation"));
+    for (const ClientEvent& e : seen)
+    {
+        if (e.topic == "files")
+        {
+            CHECK(e.payload.at("path").as_string() == "proj/e2e.scene");
+            // `added`, not `modified`: the edit above CREATED this path in the seeded project, and the
+            // write path classifies from pre-write existence, so the registry's `added` class is
+            // reachable over the real wire from a plain `edit` (test_kernel_server.cpp pins the
+            // `added`-then-`modified` pair on one path in-process).
+            CHECK(e.payload.at("change").as_string() == "added");
+        }
+        if (e.topic == "derivation")
+        {
+            CHECK(e.payload.at("event").as_string() == "derivation.settled");
+            CHECK(static_cast<std::uint64_t>(e.payload.at("generation").as_int()) ==
+                  edit_generation);
+            // The envelope stamp the contract advertises as the derived-world generation — real, not 0.
+            CHECK(e.generation == edit_generation);
+        }
     }
 
     // Acks reached the daemon (the retention floor advances off the client's cursor).
