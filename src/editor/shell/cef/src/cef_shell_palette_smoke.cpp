@@ -30,7 +30,8 @@
 // on Linux, a REAL X11 window presenting through the REAL X11 blitter. It hard-exits on Windows
 // after the verdict to skip CEF's flaky Session-0 teardown — so
 // it is structurally identical to that proven-green single-boot smoke, and it can only run where CEF
-// links: the per-OS `editor-cef-smoke` CI job (Windows/Linux; macOS's .app packaging is e12's).
+// links: the `editor-cef-smoke` CI job, on all three OSes since M9 e12c-2 (macOS boots it from a real
+// `.app` carrying its five per-process-type helper bundles).
 
 #if defined(_WIN32)
 #ifndef NOMINMAX

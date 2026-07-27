@@ -68,8 +68,11 @@ endif()
 #     a `${var}` name through file-local `set()`, but a function PARAMETER is unresolvable by
 #     construction, and the lint (correctly) refuses to skip a name it cannot resolve — it reports the
 #     stage dependency as UNVERIFIED rather than assuming it. Keeping this call literal keeps all nine
-#     executables visible to the lint. It also has to precede the macOS bundle assembly, which this
-#     function performs.
+#     executables visible to the lint. The lint is the WHOLE reason: there is no ORDERING requirement
+#     against the bundle assembly — SET_EXECUTABLE_TARGET_PROPERTIES only sets order-independent
+#     target properties (compile options/definitions, include dirs, LINK_FLAGS, Xcode attributes; see
+#     the pinned distribution's cmake/cef_macros.cmake) and context_shell_cef_mac_bundle() reads none
+#     of them. What must precede this function is add_executable(), which its own TARGET guard reports.
 #   * add_dependencies(<exe> context_editor_cef_stage) — the same lint reads this edge LITERALLY to
 #     prove every executable booting out of the shared ${CEF_TARGET_OUT_DIR} depends on the ONE stage
 #     target (issue #360). Nine literal lines under one platform guard below say exactly that.
@@ -209,7 +212,10 @@ endif()
 # ==================================================================================================
 # The TIMEOUT column is the only budget knob and it tracks the number of sequential live browser
 # boots a scenario performs: a single-boot smoke budgets 180, two boots plus their round-trip waits
-# 300, three boots 420, and the two-CHILD-PROCESS restore controller 360.
+# 300, three boots 420, and the two-CHILD-PROCESS restore controller 360. ONE row the column makes
+# explicit does not follow from boot count alone: `-iframe` is a SINGLE-boot smoke at 240, because its
+# budget covers the panel's own module-graph round trips (index.html -> panel.css/panel.js -> a static
+# then a dynamic import), each a separate scheme-handler request, rather than a second boot.
 
 # --- the LIVE CEF boot smoke (ctest editor-cef-smoke-shell) ---------------------------------------
 # Boots a REAL windowless CEF browser through the REAL integrated pump and asserts its OnPaint frames
@@ -357,7 +363,7 @@ context_configure_shell_cef_smoke(
 #
 # ⚠ SPELLED OUT PER TARGET ON PURPOSE — see the function's ⚠ note. tools/check_cef_staging.py reads
 # this edge from the SOURCES with the executable named literally; the configure-time audit in the
-# parent (`_ctx_cef_stage_consumers`) re-asserts the same nine off the real build graph. macOS has no
+# parent (over `_ctx_cef_shell_executables`) re-asserts the same nine off the real build graph. macOS has no
 # stage target at all (COPY_MAC_FRAMEWORK embeds the payload inside each .app), and the parent's
 # macOS audit asserts one never appears.
 if(OS_WINDOWS OR OS_LINUX)

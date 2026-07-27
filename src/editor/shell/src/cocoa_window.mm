@@ -8,10 +8,11 @@
 // windowed macOS test (the `build (macos-latest)` leg compiles and links this file and executes the
 // pure decoders; it opens no window unless the runner has a GUI session).
 //
-// CEF-FREE BY CONSTRUCTION (e12b's scope). A CEF browser on macOS needs an `.app` bundle, three
-// per-process-type helper bundles and the runtime-loaded framework; that packaging is e12c's. Nothing
-// here includes a CEF header, exactly as nothing in `context_editor_shell` does on the other two
-// platforms.
+// CEF-FREE BY CONSTRUCTION (e12b's scope). A CEF browser on macOS needs an `.app` bundle, FIVE
+// per-process-type helper bundles and the runtime-loaded framework; that packaging LANDED in e12c-1
+// (issue #436) for `context_editor` + two smokes and in e12c-2 for the remaining seven — see
+// src/editor/shell/CMakeLists.txt's `context_shell_cef_mac_bundle()`. Nothing here includes a CEF
+// header, exactly as nothing in `context_editor_shell` does on the other two platforms.
 //
 // FIVE COCOA SHAPES THAT DIFFER FROM WIN32/X11 AND ARE EASY TO GET WRONG:
 //

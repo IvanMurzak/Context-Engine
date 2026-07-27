@@ -1789,7 +1789,18 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
-    timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
+    # 60, up from the 45 this job shared with the heavy build/sanitize legs, and DERIVED not picked: the ten ctests this
+    # job runs declare TIMEOUT budgets summing to 2640 s = 44 min (180x4 + 240 + 300x3 + 360 + 420),
+    # ctest runs them SERIALLY here (no `execution.jobs` in CMakePresets.json, no -j on the ctest steps
+    # below), and nothing may make these live browsers concurrent — sharing ${CEF_TARGET_OUT_DIR}
+    # concurrently is exactly issue #360. So 45 left only ~60 s for checkout, the CEF cache, configure
+    # and six build steps: a systemic hang (the #437 HUNG_AFTER_VERDICT mode, once observed 16/16 on one
+    # host) would be killed by GitHub at the JOB level, burning the full budget on the priciest runner
+    # class AND discarding the ctest summary that says WHICH tests hung. At 60 the per-test TIMEOUTs fire
+    # first and the failure stays legible. Typical green wall-clock is unaffected — the whole family
+    # measures ~8.6 s. M9 e12c-2 is what made this tight on macOS (worst case 720 s -> 2640 s when the
+    # seven fanned-out smokes joined that leg; Windows/Linux already carried the full sum).
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
