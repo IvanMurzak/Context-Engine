@@ -6,6 +6,12 @@
 // + the engine ctx:scene schema -> builders::build_inspector_model -> builders::inspector_to_wire)
 // and asserts the feed's parsers reconstruct the model — value identity by CANONICAL bytes
 // (R-FILE-001), the one equality the engine recognizes.
+//
+// M9 e09e-2 adds the FAN-OUT half: `apply_event` on `derivation.settled`, and — the part worth having
+// coverage for at all — the fact that it must NOT serve that refresh while a gesture is staged,
+// because doing so silently re-bases the L-30 collision guard. The cross-process proof over a REAL
+// daemon with a REAL second client lives in `src/tests/integration/test_e09b_concurrent_cas.cpp`;
+// these cases pin the DECISION, which is pure over the feed's own state.
 
 #include "context/editor/shell/panels/inspector_feed.h"
 
@@ -18,6 +24,8 @@
 #include "context/editor/serializer/canonical.h"
 #include "context/editor/serializer/json_parse.h"
 #include "context/editor/shell/panel_host.h"
+#include "context/editor/shell/panels/builtin_panels.h" // kDerivationTopic (the subscriber's spelling)
+#include "context/editor/shell/panels/problems_feed.h"  // kDerivationSettledEvent
 #include "context/editor/shell/panels/wire_override_gateway.h" // kNoDaemonCode (the refusal shape)
 
 #include "panels_test.h"
@@ -701,6 +709,252 @@ void an_unbound_notice_sink_leaves_the_drop_counted()
     CHECK(run.notices.empty());
 }
 
+// ------------------------------------------- M9 e09e-2: the FAN-OUT half (design 05 §8's tail)
+//
+// The daemon's `derivation.settled` payload, in the shape `EditorKernel::settle` publishes it
+// (editor_kernel.cpp — `event` + `generation` on the `derivation` topic). Built from the real
+// members rather than hand-spelled per case so no case can quietly assert against a shape the daemon
+// does not send.
+[[nodiscard]] Json settled_payload(std::uint64_t generation)
+{
+    Json payload = Json::object();
+    payload.set("event", Json(std::string(panels::kDerivationSettledEvent)));
+    payload.set("generation", Json(generation));
+    return payload;
+}
+
+// A settle with NOTHING staged re-reads the inspected entity — the ordinary fan-out: another window,
+// a CLI or an agent wrote, so what this panel is showing may be stale.
+void a_settle_rearms_the_inspected_identity()
+{
+    shell::PanelHost host(roster_with_inspector());
+    panels::InspectorFeed feed(host, kPanelId);
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    feed.panel().set_model(one_field_model("Before"), 100);
+    CHECK(!feed.pending().has_value()); // adopting a model arms nothing — only a request does
+
+    CHECK(feed.apply_event(panels::kDerivationTopic, settled_payload(7)));
+    CHECK(feed.events_applied() == 1u);
+    CHECK(feed.rereads_armed() == 1u);
+    CHECK(feed.pending() == std::optional<std::string>("aaaaaaaaaaaaaaa1/ccccccccccccccc1"));
+    CHECK(!feed.refresh_deferred()); // served immediately, so nothing is owed
+
+    // Tolerance, and the anti-vacuity floor for every case below: a foreign topic and a DIFFERENT
+    // `derivation` event are both ignored WITHOUT counting, so `events_applied()` is a truthful
+    // "the settle was recognized" and not just "apply_event was called".
+    feed.mark_fetched();
+    CHECK(!feed.apply_event("files", settled_payload(8)));
+    CHECK(!feed.apply_event("session", settled_payload(8)));
+    Json other = Json::object();
+    other.set("event", Json(std::string("derivation.started")));
+    CHECK(!feed.apply_event(panels::kDerivationTopic, other));
+    CHECK(!feed.apply_event(panels::kDerivationTopic, Json::object()));
+    CHECK(feed.events_applied() == 1u);
+    CHECK(feed.rereads_armed() == 1u);
+    CHECK(!feed.pending().has_value());
+
+    // Nothing INSPECTED: recognized, but there is no identity to re-read, so nothing is armed and
+    // nothing is owed — a settle on an empty panel must not arm an empty-identity fetch forever.
+    shell::PanelHost empty_host(roster_with_inspector());
+    panels::InspectorFeed empty(empty_host, kPanelId);
+    CHECK(!empty.apply_event(panels::kDerivationTopic, settled_payload(9)));
+    CHECK(empty.events_applied() == 1u);
+    CHECK(!empty.pending().has_value());
+    CHECK(!empty.refresh_deferred());
+}
+
+// ⚠⚠ THE CASE THIS TASK EXISTS FOR. A settle arriving while a gesture is STAGED must be DEFERRED,
+// because serving it would run `set_model` — which discards the in-flight edit AND adopts the fresh
+// file as the gesture's CAS base, silently re-basing the L-30 collision guard. The failure is
+// SILENT: no crash, no error status, just a compare-and-swap that can no longer detect the writer it
+// is racing. So the assertions here are the NEGATIVE ones, and `events_applied()` is what stops them
+// from passing vacuously on a feed that never saw the event at all.
+void a_settle_during_a_gesture_is_deferred_not_served()
+{
+    shell::PanelHost host(roster_with_inspector());
+    panels::InspectorFeed feed(host, kPanelId);
+    ScriptedGateway gateway;
+    feed.bind_gateway(&gateway);
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    feed.panel().set_model(one_field_model("Before"), 100);
+
+    bool dispatched = false;
+    std::string error;
+    Json params = Json::object();
+    params.set("nodeId", Json(std::string("inspector.widget./name")));
+    params.set("value", Json(std::string("\"Mine\"")));
+    CHECK(host.invoke(kPanelId, inspector::InspectorPanel::kEditCommand, params, dispatched, error));
+    CHECK(dispatched);
+    CHECK(feed.panel().has_staged_edit());
+
+    // The settle lands mid-gesture. RECOGNIZED (so this is not a topic-filter no-op) and WITHHELD.
+    CHECK(!feed.apply_event(panels::kDerivationTopic, settled_payload(11)));
+    CHECK(feed.events_applied() == 1u);
+    CHECK(feed.refresh_deferred());
+    CHECK(!feed.pending().has_value()); // NOT armed -> the pump cannot re-read behind the gesture
+    CHECK(feed.rereads_armed() == 0u);
+    // The two things a served refresh would have destroyed, asserted directly rather than implied.
+    CHECK(feed.panel().has_staged_edit());
+    CHECK(feed.panel().base_raw_hash() == 100u); // the collision guard was NOT re-based
+    CHECK(feed.results_applied() == 0u);
+
+    // Repeated settles collapse into the ONE owed re-read (a busy co-writer must not queue N fetches).
+    CHECK(!feed.apply_event(panels::kDerivationTopic, settled_payload(12)));
+    CHECK(feed.events_applied() == 2u);
+    CHECK(feed.refresh_deferred());
+    CHECK(!feed.pending().has_value());
+
+    // THE GESTURE RESOLVES — a DROP, which is the case that matters: the co-writer moved this very
+    // field, so the panel is rendering a value that is no longer on disk and the deferred re-read is
+    // exactly what makes "re-make your edit against what is there now" actionable.
+    gateway.refuse_with_cas_mismatch = true;
+    gateway.moved_value = jstring("Someone Else");
+    Json gesture = Json::object();
+    gesture.set("nodeId", Json(std::string("inspector.widget./name")));
+    CHECK(host.gesture(kPanelId, shell::GestureVerb::commit, gesture, dispatched, error));
+    CHECK(dispatched);
+    CHECK(feed.last_commit().status == inspector::CommitResult::Status::dropped);
+    CHECK(feed.drops_observed() == 1u);
+    // …and NOW it refreshes. ONE re-read, not two: the deferral is released, not replayed per settle.
+    CHECK(!feed.refresh_deferred());
+    CHECK(feed.rereads_armed() == 1u);
+    CHECK(feed.pending() == std::optional<std::string>("aaaaaaaaaaaaaaa1/ccccccccccccccc1"));
+}
+
+// The OTHER resolution shape, and the one an outcome-based release gets wrong: a write-path ERROR
+// deliberately KEEPS the staged gesture (inspector_panel.h), so the human's edit is STILL in flight
+// and the deferral must SURVIVE that commit. Releasing on "a commit listener fired" would refresh
+// here and destroy the very edit the error was careful not to discard.
+void a_settle_deferred_across_an_error_stays_deferred()
+{
+    shell::PanelHost host(roster_with_inspector());
+    panels::InspectorFeed feed(host, kPanelId);
+    ScriptedGateway gateway;
+    gateway.refuse_with_error = true;
+    feed.bind_gateway(&gateway);
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    feed.panel().set_model(one_field_model("Before"), 100);
+
+    bool dispatched = false;
+    std::string error;
+    Json params = Json::object();
+    params.set("nodeId", Json(std::string("inspector.widget./name")));
+    params.set("value", Json(std::string("\"Mine\"")));
+    CHECK(host.invoke(kPanelId, inspector::InspectorPanel::kEditCommand, params, dispatched, error));
+    CHECK(!feed.apply_event(panels::kDerivationTopic, settled_payload(21)));
+    CHECK(feed.refresh_deferred());
+
+    Json gesture = Json::object();
+    gesture.set("nodeId", Json(std::string("inspector.widget./name")));
+    CHECK(host.gesture(kPanelId, shell::GestureVerb::commit, gesture, dispatched, error));
+    CHECK(dispatched);
+    CHECK(feed.last_commit().status == inspector::CommitResult::Status::error);
+    CHECK(feed.panel().has_staged_edit()); // the edit survived the refusal — the premise of this case
+    // STILL deferred, and still nothing armed: the gesture is in flight, so the guard still binds.
+    CHECK(feed.refresh_deferred());
+    CHECK(feed.rereads_armed() == 0u);
+    CHECK(!feed.pending().has_value());
+    CHECK(feed.panel().base_raw_hash() == 100u);
+
+    // CANCEL is the other way a gesture ends, and `discard_edit` fires NO commit listener — so this
+    // is the only path that can release the deferral. Without it the panel would render pre-write
+    // state until the next selection change.
+    CHECK(host.gesture(kPanelId, shell::GestureVerb::cancel, gesture, dispatched, error));
+    CHECK(dispatched);
+    CHECK(!feed.panel().has_staged_edit());
+    CHECK(!feed.refresh_deferred());
+    CHECK(feed.rereads_armed() == 1u);
+    CHECK(feed.pending() == std::optional<std::string>("aaaaaaaaaaaaaaa1/ccccccccccccccc1"));
+}
+
+// An APPLIED commit already re-reads its own write (read-your-writes, 05 §7), so a settle deferred
+// during it must be SUBSUMED rather than flushed on top — otherwise the same fetch is armed twice and
+// `rereads_armed()` double-counts, which is the accounting a later task would read as two round trips.
+void a_settle_deferred_across_an_applied_commit_is_subsumed()
+{
+    shell::PanelHost host(roster_with_inspector());
+    panels::InspectorFeed feed(host, kPanelId);
+    ScriptedGateway gateway; // neither refusal flag — the write lands
+    feed.bind_gateway(&gateway);
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    feed.panel().set_model(one_field_model("Before"), 100);
+
+    bool dispatched = false;
+    std::string error;
+    Json params = Json::object();
+    params.set("nodeId", Json(std::string("inspector.widget./name")));
+    params.set("value", Json(std::string("\"Mine\"")));
+    CHECK(host.invoke(kPanelId, inspector::InspectorPanel::kEditCommand, params, dispatched, error));
+    CHECK(!feed.apply_event(panels::kDerivationTopic, settled_payload(31)));
+    CHECK(feed.refresh_deferred());
+
+    Json gesture = Json::object();
+    gesture.set("nodeId", Json(std::string("inspector.widget./name")));
+    CHECK(host.gesture(kPanelId, shell::GestureVerb::commit, gesture, dispatched, error));
+    CHECK(dispatched);
+    CHECK(feed.last_commit().status == inspector::CommitResult::Status::applied);
+    CHECK(!feed.refresh_deferred());
+    CHECK(feed.rereads_armed() == 1u); // ONE, not two
+    CHECK(feed.pending() == std::optional<std::string>("aaaaaaaaaaaaaaa1/ccccccccccccccc1"));
+}
+
+// A deferral is owed to the ENTITY that was inspected. Clearing the selection retires it (there is
+// nothing left to re-read), and an adopted read discharges it (the panel just got fresh state) — so a
+// stale deferral cannot outlive either and fire against whatever is selected next.
+void a_deferral_does_not_outlive_its_selection_or_its_read()
+{
+    {
+        shell::PanelHost host(roster_with_inspector());
+        panels::InspectorFeed feed(host, kPanelId);
+        ScriptedGateway gateway;
+        feed.bind_gateway(&gateway);
+        CHECK(host.provide(kPanelId, feed.make_provider()));
+        feed.panel().set_model(one_field_model("Before"), 100);
+        bool dispatched = false;
+        std::string error;
+        Json params = Json::object();
+        params.set("nodeId", Json(std::string("inspector.widget./name")));
+        params.set("value", Json(std::string("\"Mine\"")));
+        CHECK(host.invoke(kPanelId, inspector::InspectorPanel::kEditCommand, params, dispatched,
+                          error));
+        CHECK(!feed.apply_event(panels::kDerivationTopic, settled_payload(41)));
+        CHECK(feed.refresh_deferred());
+
+        feed.request_clear();
+        CHECK(!feed.refresh_deferred());
+        CHECK(!feed.pending().has_value());
+    }
+    {
+        shell::PanelHost host(roster_with_inspector());
+        panels::InspectorFeed feed(host, kPanelId);
+        ScriptedGateway gateway;
+        feed.bind_gateway(&gateway);
+        CHECK(host.provide(kPanelId, feed.make_provider()));
+        feed.panel().set_model(one_field_model("Before"), 100);
+        bool dispatched = false;
+        std::string error;
+        Json params = Json::object();
+        params.set("nodeId", Json(std::string("inspector.widget./name")));
+        params.set("value", Json(std::string("\"Mine\"")));
+        CHECK(host.invoke(kPanelId, inspector::InspectorPanel::kEditCommand, params, dispatched,
+                          error));
+        CHECK(!feed.apply_event(panels::kDerivationTopic, settled_payload(42)));
+        CHECK(feed.refresh_deferred());
+
+        // A fetch armed by something ELSE (a selection change) lands: the panel now holds fresh
+        // state, which IS what the deferral was owed.
+        Json data = Json::object();
+        data.set("inspector", builders::inspector_to_wire(one_field_model("Fresh")));
+        data.set("rawHash", Json(std::string("777")));
+        Json envelope = Json::object();
+        envelope.set("ok", Json(true));
+        envelope.set("data", std::move(data));
+        CHECK(feed.apply_result(envelope));
+        CHECK(!feed.refresh_deferred());
+        CHECK(feed.panel().base_raw_hash() == 777u);
+    }
+}
+
 void selection_fetch_mechanics()
 {
     shell::PanelHost host(roster_with_inspector());
@@ -743,6 +997,11 @@ int main()
     a_refused_commit_is_handed_to_the_notice_sink();
     an_applied_commit_produces_no_notice();
     an_unbound_notice_sink_leaves_the_drop_counted();
+    a_settle_rearms_the_inspected_identity();
+    a_settle_during_a_gesture_is_deferred_not_served();
+    a_settle_deferred_across_an_error_stays_deferred();
+    a_settle_deferred_across_an_applied_commit_is_subsumed();
+    a_deferral_does_not_outlive_its_selection_or_its_read();
     selection_fetch_mechanics();
     PANELS_TEST_MAIN_END();
 }

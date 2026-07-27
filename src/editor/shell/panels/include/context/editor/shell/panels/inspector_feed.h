@@ -30,6 +30,13 @@
 // daemon's own — see `wire_override_gateway.h` § READ-YOUR-WRITES for why it is `--after-hash` inside
 // `edit`, and not the inert reserved `--after-generation` core flag.
 //
+// THE FAN-OUT HALF LANDED IN e09e-2 (design 05 §8's tail: "events: files.changed ->
+// derivation.settled{gen} -> all subscribed clients update"). `apply_event` consumes the daemon's
+// `derivation.settled` quiescence fact and re-reads the inspected entity, so a write by ANOTHER
+// window / CLI / agent shows up here without the human touching the selection. Its whole difficulty
+// is the one thing it must NOT do — refresh while a gesture is staged, which would silently re-base
+// the L-30 collision guard the two paragraphs above exist to enforce. See `apply_event`.
+//
 // THE LOUD DROP LANDED IN e09b-3. An L-30 drop reaches the listener, is COUNTED here
 // (`drops_observed()` / `last_commit()`) — and now goes out through the NOTICE SINK below, which the
 // composition root points at the Shell's `WriteNoticeRelay` (write_notice.h). That relay turns it
@@ -146,6 +153,27 @@ public:
     // Adopts the model AND the rawHash CAS token via set_model. Returns true when adopted.
     bool apply_result(const contract::Json& reply);
 
+    // Consume one subscription event — the FAN-OUT half of design 05 §8's chain (M9 e09e-2).
+    // `derivation.settled` says the derived world moved: SOMEBODY's write landed and was folded in —
+    // another editor window's, a CLI's, an agent's, or our own — so the value this panel is showing
+    // may no longer be the value on disk. It arms a re-read of the inspected identity through
+    // `request_refresh` (the pump performs the RPC, exactly as for a selection change). Returns true
+    // when a re-read was ARMED. Unknown topics and other `derivation` events are ignored, like the
+    // scenetree feed's; unlike it, there is no generation/stability line to advance — the Inspector
+    // has no status row, so the re-read IS the whole response.
+    //
+    // ⚠⚠ IT MUST NOT REFRESH WHILE A GESTURE IS STAGED, and that is the whole reason this is not a
+    // one-liner. `InspectorPanel::set_model` — which the re-read's own `apply_result` calls —
+    // DISCARDS the in-flight staged edit AND adopts the fresh file as the new `base_raw_hash`.
+    // Doing that mid-gesture would silently RE-BASE the L-30 collision guard: the following commit
+    // would CAS against the concurrent writer's own post-write state, find no mismatch, and
+    // OVERWRITE the value the guard exists to protect. There is no crash and nothing returns an
+    // error — a lost write and a defeated compare-and-swap look exactly like a successful edit,
+    // which is why the assertion that matters (test_e09b_concurrent_cas.cpp) is the NEGATIVE one.
+    // So a settle arriving during a gesture is DEFERRED, not served, and released the moment the
+    // gesture is actually gone (see `refresh_deferred()` and `flush_deferred_refresh`).
+    bool apply_event(const std::string& topic, const contract::Json& payload);
+
     // Bind the L-20/L-30 write path (M9 e09b-2); `nullptr` detaches. MUST be called BEFORE
     // `make_provider()` — the manifest's `gestures` capability is decided at binding time and a
     // PanelHost refuses a second `provide()` for the same id, so a gateway arriving afterwards could
@@ -206,6 +234,17 @@ public:
     // How many resolved commits were journaled as undo checkpoints (M9 e09c). Strictly <=
     // `commits_observed()`: a drop, an error, and a commit with no sink bound are all excluded.
     [[nodiscard]] std::size_t checkpoints_sent() const noexcept { return checkpoints_sent_; }
+    // How many `derivation.settled` facts `apply_event` RECOGNIZED (M9 e09e-2) — counted BEFORE the
+    // staged-gesture guard, so it climbs whether the settle was served or deferred. That is
+    // deliberate and it is what keeps the deferral assertions non-vacuous: "no re-read was armed" is
+    // satisfied just as well by a topic-filter regression that dropped the fact entirely, and this
+    // counter is how a test tells the two apart.
+    [[nodiscard]] std::size_t events_applied() const noexcept { return events_applied_; }
+    // Whether a settle-driven re-read is currently OWED but withheld because a gesture is staged
+    // (M9 e09e-2 — see `apply_event` on why serving it would re-base the L-30 guard). Exposed
+    // because the alternative reading of a withheld refresh — that the feed simply ignored the
+    // event — is indistinguishable from outside without it.
+    [[nodiscard]] bool refresh_deferred() const noexcept { return refresh_deferred_; }
     [[nodiscard]] const inspector::CommitResult& last_commit() const noexcept
     {
         return last_commit_;
@@ -225,6 +264,18 @@ public:
 private:
     // The commit listener body (registered on the panel at construction).
     void on_commit(const inspector::CommitResult& result);
+
+    // Release a settle-driven re-read that `apply_event` deferred, now that the gesture protecting it
+    // is over (M9 e09e-2). Returns true when a re-read was armed.
+    //
+    // THE PREDICATE IS `has_staged_edit()`, NOT "a commit listener fired", and the difference is
+    // load-bearing: a write-path ERROR deliberately KEEPS the staged gesture (inspector_panel.h — so
+    // the human's in-flight edit is not silently discarded by a daemon outage), so the edit is STILL
+    // in flight after that commit resolved and the deferral must SURVIVE it. Only a gesture that is
+    // genuinely gone — consumed by an applied / rebased / dropped commit, or discarded by `cancel` —
+    // releases the refresh. Called from the two places a gesture can end, since `discard_edit` fires
+    // no commit listener and `cancel` would otherwise leave the deferral stranded forever.
+    bool flush_deferred_refresh();
 
     // Snapshot the in-flight gesture as a reversible undo checkpoint (M9 e09c). nullopt when nothing
     // is staged, or when the model carries no addressable target — a checkpoint whose `root_scene`
@@ -248,6 +299,10 @@ private:
     std::size_t rereads_armed_ = 0;
     std::size_t checkpoints_sent_ = 0;
     std::size_t notices_sent_ = 0;
+    // e09e-2: `derivation.settled` facts recognized, and whether one is owed but withheld behind an
+    // in-flight gesture (see apply_event / flush_deferred_refresh).
+    std::size_t events_applied_ = 0;
+    bool refresh_deferred_ = false;
     CheckpointSink sink_;
     NoticeSink notice_sink_;
     inspector::CommitResult last_commit_;

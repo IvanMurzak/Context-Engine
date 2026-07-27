@@ -101,6 +101,12 @@ bool apply_scenetree_event(SceneTreeFeed& feed, const std::string& topic,
     return feed.apply_event(topic, payload, generation);
 }
 
+bool apply_inspector_event(InspectorFeed& feed, const std::string& topic,
+                           const contract::Json& payload)
+{
+    return feed.apply_event(topic, payload);
+}
+
 // The e08b seams. The topic string is declared in BOTH headers for the RTTI/CEF reason builtin_panels.h
 // documents; this is the one TU that sees both, so it is where the two spellings are pinned together.
 static_assert(std::string_view(kSessionTopic) == std::string_view(kSessionTopicName),

@@ -154,6 +154,21 @@ bool report_local_problem(BuiltinPanels& panels, const std::string& code, const 
 bool apply_scenetree_event(SceneTreeFeed& feed, const std::string& topic,
                            const contract::Json& payload, std::uint64_t generation);
 
+// The same seam for the e09e-2 INSPECTOR FAN-OUT — design 05 §8's tail, where a landed write reaches
+// every subscribed client. Forward one event off the SAME `derivation` stream the Scene tree and
+// Problems already ride; the feed re-reads the inspected entity so a write by another window / CLI /
+// agent appears without touching the selection. Returns true when a re-read was ARMED.
+//
+// It takes NO generation, unlike the scenetree seam: the Inspector has no generation/stability status
+// line to advance, so the parameter would be received and dropped — and a seam that accepts a value it
+// ignores invites a caller to believe it matters.
+//
+// ⚠ The feed WITHHOLDS the re-read while a gesture is staged (inspector_feed.h § apply_event — a
+// mid-gesture refresh silently re-bases the L-30 collision guard), so a `false` return is an ordinary,
+// correct outcome here and NOT a signal that the event was unrecognized.
+bool apply_inspector_event(InspectorFeed& feed, const std::string& topic,
+                           const contract::Json& payload);
+
 // The same seam for the e08b Session feed. `apply_session_event` forwards one `session` fact (the
 // feed itself drops our own echo — see session_feed.h). Both defined in builtin_panels.cpp.
 bool apply_session_event(SessionFeed& feed, const std::string& topic, const contract::Json& payload);
@@ -308,6 +323,9 @@ struct BuiltinPanels
 //     Inspector's own commit listener never fires and the panel would otherwise keep both the
 //     pre-undo value and the pre-undo CAS token — making the human's next edit to that field drop
 //     as a "concurrent writer" that is really their own Ctrl+Z (undo_feed.h § take_replay_landed).
+//     Since e09e-2 a `derivation.settled` arms it too (`apply_inspector_event`), which is the
+//     cross-client FAN-OUT — with the deliberate exception of a settle arriving mid-gesture, which
+//     the feed DEFERS rather than serving (inspector_feed.h § apply_event).
 //
 // FAILURE POSTURE: a fetch is CLAIMED before its RPC, so a failed call (daemon gone, refused) is
 // reported to stderr and NOT retried until the next settle / selection change — an editor hammering
