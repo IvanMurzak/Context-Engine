@@ -197,7 +197,7 @@ struct PresentSetup
 //   * real, macOS — a genuine AppKit queue round trip: a synthesized NSEvent posted with
 //     `-[NSApplication postEvent:atStart:]`, dequeued by the backend's own
 //     `nextEventMatchingMask` pump and decoded by the real `translate_ns_event` (see the header
-//     preamble for why this needs no TCC grant, and for the two fidelity limits it carries).
+//     preamble for why this needs no TCC grant, and for the THREE fidelity limits it carries).
 //   * real, either — resize: `apply_placement()`, so the new geometry is the window system's own
 //     configure/geometry change.
 //     ⚠ That makes a real-mode resize ASYNCHRONOUS: the caller must pump until
@@ -322,7 +322,14 @@ struct NsViewPointPoints
 // location it was handed.
 //
 // MEASURED on the macOS host with a standalone AppKit probe (a 380x240-point window, 2x, posting the
-// smoke's own two samples and then moving the window before draining):
+// smoke's own two samples and then moving the window before draining).
+//
+// ⚠ EVERY FIGURE IN THIS TABLE IS IN COCOA POINTS — including the derived "Shell-space y" column,
+// which is taken against the 240-POINT height (240 - 292.9 = -52.9). The probe worked in the window's
+// own point space. Shell space in the SHIPPING code is PHYSICAL PIXELS, and so is what this function
+// returns, so at the probe's 2x the corresponding physical figure is TWICE the one shown here
+// (-52.9 points = -105.8 physical px). Do not mix the two units when re-deriving any of this; the
+// unit test below pins the function in physical pixels, which is why it must carry the dpi factor.
 //
 //   * no move       -> delivered y 211.4 / 28.0 for posted 210 / 30, i.e. faithful to ~2 points;
 //   * moved DOWN 80 -> delivered y 292.9 / 109.5, so the TOP sample flips to a NEGATIVE Shell-space
@@ -350,6 +357,11 @@ struct NsViewPointPoints
 // case — both spellings are a no-op, so only a test with a non-zero origin delta can tell them
 // apart. That is why this is a named, unit-tested function and not arithmetic inlined at its one
 // call site.
+// A DISPLACEMENT, which is why this is not the otherwise identically-shaped `PointI`: every claim
+// about it is about a difference (it is zero when nothing moved, and it is SUBTRACTED from a delivered
+// coordinate), and naming it as a position invites exactly the "corrected by adding an origin" misread
+// the opposite-sign paragraph above exists to prevent. Same reasoning as the sibling
+// `NsViewPointPoints`, which is likewise a bespoke pair rather than a reused point type.
 struct NsDeliveredShift
 {
     std::int32_t dx = 0;

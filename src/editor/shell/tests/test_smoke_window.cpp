@@ -653,7 +653,9 @@ void test_ns_delivered_shift_for_window_move_corrects_a_moved_window_at_a_non_id
         smoke::ns_delivered_shift_for_window_move(PointI{0, 0}, PointI{10, 10}, DpiScale{96});
     CHECK(diagonal.dx == -10);
     CHECK(diagonal.dy == 10);
-    // Pinned as literal NON-values so the same-sign mutation cannot pass.
+    // The two equalities above are what catch the same-sign mutation; these restate the wrong answer
+    // explicitly so a reader sees WHICH mutation is being excluded without recomputing it. They are
+    // redundant by construction, and deliberately so — documentation, not extra discrimination.
     CHECK(diagonal.dy != -10);
     CHECK(diagonal.dx != 10);
 

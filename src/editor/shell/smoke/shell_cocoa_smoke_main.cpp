@@ -67,6 +67,7 @@
 #include <cstring>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -202,6 +203,63 @@ bool pump_until(shell::WindowManager& manager, std::uint64_t& clock_us, Predicat
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     return predicate();
+}
+
+// Pump until `read()` yields the SAME value on `required` CONSECUTIVE pumps — "this quantity has come
+// to rest". Lives here, next to `pump_until`, because the hazard it exists to avoid is `pump_until`'s
+// own contract:
+//
+// ⚠ THE FIRST READ IS SEEDED INSIDE THE PREDICATE, AND THAT IS LOAD-BEARING. `pump_until` evaluates
+// its predicate BEFORE the first `pump_once`, so seeding from a read taken before the loop would make
+// the FIRST of the comparisons span ZERO pumps — and two live geometry reads with no run-loop turn
+// between them are identical by construction, so that first "stable" observation would be free and an
+// N-interval claim would silently rest on N-1. The `std::optional` is what makes the seed a state the
+// caller cannot forget rather than a comment asking the next reader not to break it.
+template <typename Read>
+bool pump_until_stable(shell::WindowManager& manager, std::uint64_t& clock_us, Read read,
+                       int required = 2)
+{
+    std::optional<decltype(read())> previous;
+    int stable = 0;
+    return pump_until(manager, clock_us, [&] {
+        auto now = read();
+        stable = (previous && *previous == now) ? stable + 1 : 0;
+        previous = std::move(now);
+        return stable >= required;
+    });
+}
+
+// THE INJECTED-SAMPLE MARKER: Shift+Control+Option, set on the way out and tested on the way back.
+// The pair lives in ONE place so "these exact flags round-tripped" is structurally true rather than
+// true only while two literal lists happen to agree.
+//
+// WHY A MARKER AT ALL. The position claims below name their samples ("the FIRST move", "the SECOND
+// move"), but the stream they are read out of is the desktop's, not this smoke's — the same reason the
+// dispatch counters are read as a delta and the log is scanned as a tail. A MouseExited was already
+// anticipated there; a foreign MouseMoved is the shape that was not, and it is indistinguishable from
+// an injected one by position alone (MEASURED: a probe of this exact injection channel folded a real
+// cursor-derived move in as "the first move" and compared a desktop coordinate against an injected
+// one). These flags travel ON the event — the injectable half of the modifier inverse
+// (smoke_inject_cocoa.mm, shape 2) — so they survive the AppKit round trip and come back through the
+// SHIPPING `make_ns_modifiers`, which makes the identification positive rather than positional AND
+// strengthens the modifier claim from "flags are encodable" to "these exact flags round-tripped".
+//
+// ⚠ WHY THIS MASK, AND WHY IT IS NOT REUSABLE BLIND. Command is out because a Cmd-click carries
+// app-level meaning AppKit would be entitled to act on. Control is NOT inert either: Control-click is
+// macOS's canonical SECONDARY-click chord, so as far as AppKit is concerned the marked press below is
+// a context-menu gesture. It is harmless HERE for a checked reason and not by luck — this smoke's
+// content view carries no `menu`, so `-menuForEvent:` yields nil and nothing opens. A view that DOES
+// carry one would need a chord-free mask (Shift+Option alone).
+void apply_marker(shell::Modifiers& modifiers)
+{
+    modifiers.shift = true;
+    modifiers.control = true;
+    modifiers.alt = true;
+}
+
+[[nodiscard]] bool has_marker(const shell::Modifiers& modifiers)
+{
+    return modifiers.shift && modifiers.control && modifiers.alt;
 }
 
 bool has_flag(int argc, char** argv, const char* flag)
@@ -463,18 +521,13 @@ int main(int argc, char** argv)
     // CORRECTNESS step, not tidiness. A posted location is resolved against the frame origin at
     // DEQUEUE time (smoke_window.h, Cocoa limit 3), so a window that is still coming to rest after
     // the granted resize above displaces every queued sample by the remainder of its own movement.
-    // The predicate is the geometry itself — `placement()` unchanged across two CONSECUTIVE pumps,
-    // which is what "at rest" means here — and never a sleep, which would assert the runner's speed.
-    shell::WindowPlacement settle_previous = backend->placement();
-    int settle_stable_pumps = 0;
-    const bool window_settled = pump_until(manager, clock_us, [&] {
-        const shell::WindowPlacement now = backend->placement();
-        const bool same = now.x == settle_previous.x && now.y == settle_previous.y &&
-                          now.width == settle_previous.width && now.height == settle_previous.height;
-        settle_previous = now;
-        settle_stable_pumps = same ? settle_stable_pumps + 1 : 0;
-        return settle_stable_pumps >= 2;
-    });
+    // The predicate is the geometry itself — the WHOLE `placement()`, compared with its own
+    // `operator==` so the EXTENT, the monitor and the maximized flag are all in scope rather than just
+    // the origin. That breadth is deliberate: the decoder flips y against the view HEIGHT, so a height
+    // still settling displaces a delivered sample exactly as a moving origin does. Never a sleep,
+    // which would assert the runner's speed. `pump_until_stable` owns the seeding subtlety.
+    const bool window_settled =
+        pump_until_stable(manager, clock_us, [&] { return backend->placement(); });
     COCOA_CHECK(window_settled, "the window geometry came to rest before any event was injected");
 
     // The counters are read as a DELTA, never against a fixed number: AppKit is entitled to have
@@ -486,9 +539,10 @@ int main(int argc, char** argv)
     // ⚠ THE BROWSER'S SAMPLE LOG IS SCANNED AS A TAIL, for exactly the reason the dispatch counters
     // are read as a delta one line up. Everything before this index belongs to whatever the desktop
     // delivered earlier — a MouseExited during the up-to-10 s resize pump above is the realistic
-    // case — and the position claims below identify their samples by ORDER, so folding a hardware
-    // sample in as "the first move" would compare it against an injected one and red on a clean
-    // tree.
+    // case. ⚠ SAMPLE IDENTITY IS NO LONGER POSITIONAL — the four samples below carry a modifier
+    // MARKER and are selected by it (see the injection), so this tail is now a NARROWING rather than
+    // the whole guard it used to be: it keeps the unmarked-sample counters below scoped to this
+    // smoke's own window of time instead of to everything the desktop ever delivered.
     const std::size_t pointers_before = browser->pointers().size();
 
     // TWO moves, at the TOP and the BOTTOM of the right half. Two rather than one because the strong
@@ -502,31 +556,18 @@ int main(int argc, char** argv)
     const std::int32_t low_in_shell_space = static_cast<std::int32_t>(live.height) -
                                             static_cast<std::int32_t>(live.height / 8u);
 
-    // The frame origin the four samples below are ENCODED AGAINST. Read after the settle and before
-    // the first post, because a posted location is resolved against the origin at DEQUEUE time
-    // (smoke_window.h, Cocoa limit 3) and this is the other half of that correction.
+    // The frame origin the four samples below are ENCODED AGAINST — read after the settle and before
+    // the first post. The first half of the limit-3 correction the range claim below applies.
     const shell::WindowPlacement placement_at_post = backend->placement();
 
     shell::ShellEvent move_high;
     move_high.kind = shell::ShellEventKind::pointer;
     move_high.pointer.action = shell::PointerAction::move;
     move_high.pointer.position = shell::PointI{x_in_browser_half, high_in_shell_space};
-    // ⚠ THE MARKER, AND WHY THE SAMPLES ARE NO LONGER IDENTIFIED BY ORDINAL POSITION. The claims
-    // below name their samples ("the FIRST move", "the SECOND move"), but the stream they are read
-    // out of is the desktop's, not this smoke's — the same reason the dispatch counters one screen up
-    // are read as a delta and the log is scanned as a tail. A MouseExited was already anticipated
-    // there; a foreign MouseMoved is the shape that was not, and it is indistinguishable from an
-    // injected one by position alone (MEASURED: a probe of this exact injection channel folded a real
-    // cursor-derived move in as "the first move" and compared a desktop coordinate against an
-    // injected one). Shift+Control+Option travels ON the event — the injectable half of the modifier
-    // inverse (smoke_inject_cocoa.mm, shape 2) — so it survives the AppKit round trip and comes back
-    // through the SHIPPING `make_ns_modifiers`. Filtering on it makes the identification positive
-    // rather than positional, and it strengthens the modifier claim from "flags are encodable" to
-    // "these exact flags round-tripped". Command is deliberately NOT in the mask: a Cmd-click is a
-    // system-meaningful chord, and Control is enough on its own to make the mask unusual.
-    move_high.pointer.modifiers.shift = true;
-    move_high.pointer.modifiers.control = true;
-    move_high.pointer.modifiers.alt = true;
+    // The marker the delivered-sample loop below selects on — the mask, and why the samples are no
+    // longer identified by their ORDINAL position, are `apply_marker`'s own comment. The three
+    // remaining samples inherit it by copy-construction from this one.
+    apply_marker(move_high.pointer.modifiers);
     COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, move_high),
                 "a pointer MOVE near the TOP was accepted for injection through AppKit");
 
@@ -561,21 +602,30 @@ int main(int argc, char** argv)
     // state of somebody's desktop. Presses and releases have no such source, so counting them is BOTH
     // robust and strictly more precise than the total ever was.
 
-    // The frame origin the samples were actually DELIVERED against, read as close to the drain as
-    // this smoke can get. Together with `placement_at_post` it gives the displacement AppKit imposed
-    // on every already-queued sample (smoke_window.h, Cocoa limit 3). It is ZERO on a window that did
-    // not move — the ordinary case, and the case in which every claim below is bit-identical to what
-    // it was before this correction existed.
+    // The frame origin the samples were actually DELIVERED against — the second half. Read here and
+    // not later because `pump()` drains the WHOLE AppKit queue in one call and there is no run-loop
+    // turn between that drain and this read, so `[window frame]` cannot move in the gap: one uniform
+    // `shift` really does describe all four samples. It is ZERO on a window that did not move — the
+    // ordinary case, in which every claim below is bit-identical to what it was before this existed.
     const shell::WindowPlacement placement_at_delivery = backend->placement();
     const smoke::NsDeliveredShift shift = smoke::ns_delivered_shift_for_window_move(
         shell::PointI{placement_at_post.x, placement_at_post.y},
         shell::PointI{placement_at_delivery.x, placement_at_delivery.y}, backend->dpi());
-    const bool window_held_still = shift.dx == 0 && shift.dy == 0;
+    // ⚠ "HELD STILL" IS THE WHOLE PLACEMENT, NOT JUST THE ORIGIN `shift` CORRECTS FOR. The decoder
+    // flips y against the view HEIGHT, so a height that changed between the post and the delivery
+    // displaces every delivered y by that change — and in Cocoa a window can GROW with its bottom-left
+    // origin untouched, which would leave `shift` at (0,0) and that displacement both uncorrected AND
+    // invisible. Rather than invent a second correction for a case the settle predicate already
+    // prevents, the extent enters the PREMISE: any placement change at all makes this false, so the
+    // report below fires and the run says out loud which axis moved. Same `operator==` the settle
+    // predicate uses, for the same reason — one definition of "the geometry is at rest" per file.
+    const bool window_held_still = placement_at_post == placement_at_delivery;
 
     int downs = 0;
     int ups = 0;
     int moves = 0;
     int unmarked_moves = 0;
+    int unmarked_others = 0;
     std::int32_t first_move_y = 0;
     std::int32_t second_move_y = 0;
     std::int32_t move_x = 0;
@@ -583,16 +633,19 @@ int main(int argc, char** argv)
     for (std::size_t i = pointers_before; i < all_pointers.size(); ++i)
     {
         const shell::PointerEvent& pointer = all_pointers[i];
-        // THE MARKER FILTER (see the injection above). A sample this smoke did not inject is counted
-        // separately rather than dropped silently: `unmarked_moves` is reported below, so a desktop
-        // that really is delivering its own input stays VISIBLE instead of being quietly excluded.
-        const bool marked = pointer.modifiers.shift && pointer.modifiers.control &&
-                            pointer.modifiers.alt;
-        if (!marked)
+        // THE MARKER FILTER (`apply_marker`). EVERY unmarked sample is COUNTED rather than dropped
+        // silently, and both counts are reported below, so a desktop delivering its own input stays
+        // VISIBLE. Split so a foreign MOVE — the shape the old positional identification could have
+        // confused with one of ours — stays legible separately from the already-anticipated `leave`.
+        if (!has_marker(pointer.modifiers))
         {
             if (pointer.action == shell::PointerAction::move)
             {
                 ++unmarked_moves;
+            }
+            else
+            {
+                ++unmarked_others;
             }
             continue;
         }
@@ -650,8 +703,10 @@ int main(int argc, char** argv)
     // ZERO whenever the window held still, which is the ordinary case.
     //
     // ⚠ AND IT IS NOW TWO-SIDED. `>= 0` alone passes a sample delivered BELOW the window in silence,
-    // which is exactly what the opposite-direction window move produces (MEASURED: a window moved UP
-    // 80 points delivered y = height + 53). The upper bound is the half of this claim that the shape
+    // which is exactly what the opposite-direction window move produces — see the moved-UP-80 row of
+    // smoke_window.h's Cocoa limit 3 for the measurement. (Read that table's units note before
+    // comparing its figures against anything here: it is in Cocoa POINTS, while the `height` below is
+    // `live.height` in PHYSICAL PIXELS.) The upper bound is the half of this claim that the shape
     // which reddened `main` happened not to exercise.
     if (moves >= 2)
     {
@@ -686,15 +741,22 @@ int main(int argc, char** argv)
     // that is silent when it fires is a correction nobody can audit, and "the window held still" is
     // the premise the two-sided range claim above is cheapest to read under. Neither line is an
     // assertion: a desktop is allowed to move our window and to deliver its own input — what is not
-    // allowed is doing either INVISIBLY.
-    if (!window_held_still || unmarked_moves > 0)
+    // allowed is doing either INVISIBLY. The geometry is printed as BOTH endpoints (origin AND
+    // extent, in the Cocoa POINTS `placement()` speaks) rather than only the derived `shift`, because
+    // the extent half is deliberately uncorrected — see `window_held_still` — so a reader has to be
+    // able to see WHICH axis moved, not just that something did.
+    if (!window_held_still || unmarked_moves > 0 || unmarked_others > 0)
     {
-        std::printf("[editor-shell-cocoa]   note: window moved between post and delivery by "
-                    "(%d,%d) physical px (origin %d,%d -> %d,%d points); %d unmarked move(s) from "
-                    "the desktop were excluded; delivered y %d / %d, client %ux%u\n",
-                    shift.dx, shift.dy, placement_at_post.x, placement_at_post.y,
-                    placement_at_delivery.x, placement_at_delivery.y, unmarked_moves, first_move_y,
-                    second_move_y, live.width, live.height);
+        std::printf("[editor-shell-cocoa]   note: geometry between post and delivery: origin "
+                    "%d,%d -> %d,%d points, extent %ux%u -> %ux%u points => corrected samples by "
+                    "(%d,%d) physical px (origin term only); excluded %d unmarked move(s) and %d "
+                    "other unmarked sample(s) from the desktop; delivered y %d / %d, client %ux%u "
+                    "physical px\n",
+                    placement_at_post.x, placement_at_post.y, placement_at_delivery.x,
+                    placement_at_delivery.y, placement_at_post.width, placement_at_post.height,
+                    placement_at_delivery.width, placement_at_delivery.height, shift.dx, shift.dy,
+                    unmarked_moves, unmarked_others, first_move_y, second_move_y, live.width,
+                    live.height);
     }
 
     shell::ShellEvent key;

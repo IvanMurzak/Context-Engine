@@ -37,6 +37,19 @@ namespace
 // dynamic_cast here would not compile where it matters most.
 constexpr const char* kMemoryBlitterName = "memory";
 
+// The EXACT dpi factor, shared by every smoke-side conversion below that needs one. `dpi.dpi` is the
+// source of truth and `DpiScale::factor()` the derived value (dpi.h) — the smoke side needs the
+// double rather than that float so its inverses round-trip at 1.25x / 1.5x. `make_dpi_scale` clamps
+// into kMinDpi..kMaxDpi, so the only value worth guarding is a HAND-CONSTRUCTED 0, which would
+// otherwise divide the whole location away; a unit test pins that refuse-to-1x behaviour. No
+// isfinite check: an integer dpi cannot be NaN. Kept in ONE place deliberately — `window.cpp`'s own
+// header records the hazard for exactly this shape, two copies of one conversion feeding one
+// observable, where the copy no CI leg executes is the one free to drift.
+[[nodiscard]] double ns_exact_dpi_factor(DpiScale dpi)
+{
+    return dpi.dpi == 0u ? 1.0 : static_cast<double>(dpi.dpi) / static_cast<double>(kReferenceDpi);
+}
+
 #if defined(CONTEXT_SHELL_SMOKE_HAS_X11)
 
 struct X11Target
@@ -597,12 +610,7 @@ std::uint32_t ns_extent_to_points(std::uint32_t physical, DpiScale dpi)
 
 NsViewPointPoints ns_view_point_for_physical(PointI position, double height_points, DpiScale dpi)
 {
-    // `dpi.dpi` is the source of truth and `factor()` the derived value (dpi.h), and make_dpi_scale
-    // clamps it into kMinDpi..kMaxDpi — so the only value worth guarding is a hand-constructed 0,
-    // which would divide the whole location away. No isfinite check: an integer dpi cannot be NaN.
-    const double factor = dpi.dpi == 0u ? 1.0
-                                        : static_cast<double>(dpi.dpi) /
-                                              static_cast<double>(kReferenceDpi);
+    const double factor = ns_exact_dpi_factor(dpi);
     // ⚠ THE SCALE COMES OFF FIRST, AND THE FLIP IS AGAINST THE UNSCALED HEIGHT — the mirror image
     // of the ordering `ns_view_point_to_physical` documents ("Done BEFORE the scale, against the
     // height in POINTS, because that is the space the height is expressed in"). Flipping against a
@@ -615,11 +623,7 @@ NsViewPointPoints ns_view_point_for_physical(PointI position, double height_poin
 NsDeliveredShift ns_delivered_shift_for_window_move(PointI origin_at_post_points,
                                                     PointI origin_at_delivery_points, DpiScale dpi)
 {
-    // Same 0-guard and same source-of-truth choice as ns_view_point_for_physical above: `dpi.dpi` is
-    // authoritative and `factor()` derived, and only a hand-constructed 0 needs defending against.
-    const double factor = dpi.dpi == 0u ? 1.0
-                                        : static_cast<double>(dpi.dpi) /
-                                              static_cast<double>(kReferenceDpi);
+    const double factor = ns_exact_dpi_factor(dpi);
     // A delivered locationInWindow gains (post - delivery) on BOTH axes. x reaches Shell space
     // unflipped, so it keeps that sign; y is subtracted from the view height by the decoder, so its
     // Shell-space displacement is the NEGATION — (delivery - post). See the header for why only a
