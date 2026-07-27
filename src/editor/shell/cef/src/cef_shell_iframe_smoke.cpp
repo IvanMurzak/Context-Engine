@@ -84,8 +84,8 @@
 // Windows leg runs), a REAL X11 window through the REAL X11 blitter under `--real-window` (what the
 // ctest registration passes on Linux). It hard-exits on Windows after the verdict to skip CEF's
 // flaky Session-0 teardown — so it is structurally identical to that proven-green smoke, and can only
-// run where CEF links: the per-OS `editor-cef-smoke` CI job (Windows/Linux; macOS's .app packaging
-// is e12's).
+// run where CEF links: the `editor-cef-smoke` CI job, on all three OSes since M9 e12c-2 (macOS boots
+// it from a real `.app` carrying its five per-process-type helper bundles).
 
 #if defined(_WIN32)
 #ifndef NOMINMAX

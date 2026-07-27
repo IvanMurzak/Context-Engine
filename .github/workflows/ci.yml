@@ -1789,7 +1789,18 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
-    timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
+    # 60, up from the 45 this job shared with the heavy build/sanitize legs, and DERIVED not picked: the ten ctests this
+    # job runs declare TIMEOUT budgets summing to 2640 s = 44 min (180x4 + 240 + 300x3 + 360 + 420),
+    # ctest runs them SERIALLY here (no `execution.jobs` in CMakePresets.json, no -j on the ctest steps
+    # below), and nothing may make these live browsers concurrent — sharing ${CEF_TARGET_OUT_DIR}
+    # concurrently is exactly issue #360. So 45 left only ~60 s for checkout, the CEF cache, configure
+    # and six build steps: a systemic hang (the #437 HUNG_AFTER_VERDICT mode, once observed 16/16 on one
+    # host) would be killed by GitHub at the JOB level, burning the full budget on the priciest runner
+    # class AND discarding the ctest summary that says WHICH tests hung. At 60 the per-test TIMEOUTs fire
+    # first and the failure stays legible. Typical green wall-clock is unaffected — the whole family
+    # measures ~8.6 s. M9 e12c-2 is what made this tight on macOS (worst case 720 s -> 2640 s when the
+    # seven fanned-out smokes joined that leg; Windows/Linux already carried the full sum).
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
@@ -1878,35 +1889,23 @@ jobs:
       # The LIVE CEF smokes. A real windowless browser driven by the real integrated pump, its
       # OnPaint frames composited by the real compositor and presented.
       #
-      # ⚠ PER-OS --target LISTS, NOT ONE SHARED LIST (M9 e12c-1). Windows/Linux build all NINE
-      # scenarios; macOS builds the TWO that e12c-1 ported to the .app + helper-bundle hosting model
-      # (boot and restart — restart because it is the only scenario whose mechanism differs: it
-      # re-launches ITSELF as two `--ctx-restore-phase` children, which is what proves a bundled
-      # executable re-launches correctly from inside its .app). The remaining seven do not EXIST as
-      # macOS targets yet (src/editor/shell/cef/CMakeLists.txt declares them under
-      # `if(OS_WINDOWS OR OS_LINUX)`), so a single shared list would fail the macOS build outright —
-      # e12c-2 fans the recipe out and grows this list.
+      # ⚠ ONE SHARED --target LIST AGAIN (M9 e12c-2). e12c-1 had SPLIT this step per OS because macOS
+      # had only TWO of the nine smokes as targets at all — the remaining seven were declared under
+      # `if(OS_WINDOWS OR OS_LINUX)` in src/editor/shell/cef/CMakeLists.txt, so a shared list would
+      # have failed the macOS build outright. e12c-2 fanned the .app + 5-helper-bundle recipe out to
+      # all nine, so all nine now exist (and RUN) on all three legs and the split has no reason to
+      # exist. On macOS this one step therefore also exercises the .app assembly, the five helper
+      # bundles per app, the embedded framework and the no-`libcef_lib` link line, nine times over.
       #
       # ⚠ "Not Run = RED" TRIPWIRE: the ctest step below selects the whole `editor-cef-smoke-` family
-      # by regex, but this job builds a hand-maintained --target list. Without these steps the regex
-      # would find the test and no executable, reporting "Not Run" -> red. macOS needs NO new ctest
-      # registration — the two names are the same ones Windows/Linux already register, and since
-      # issue #437 was fixed they RUN on macOS too (they were `DISABLED` from e12c-1 until then, which
-      # ctest reports as "Not Run (Disabled)" WITHOUT affecting the exit code — so the assertion inside
-      # could not fail on this leg; see docs/cef-keychain-isolation.md).
-      - name: Build the Shell's live CEF boot + restart + palette + settings + multiwindow + tearout + drag + uimirror + iframe smokes (Windows/Linux)
-        if: runner.os != 'macOS'
+      # by regex, but this job builds a hand-maintained --target list. Without this step the regex
+      # would find the test and no executable, reporting "Not Run" -> red. macOS needed NO new ctest
+      # registration for e12c-2 either — the nine names are the same ones every leg registers, and
+      # since issue #437 was fixed they RUN on macOS too (the first two were `DISABLED` from e12c-1
+      # until then, which ctest reports as "Not Run (Disabled)" WITHOUT affecting the exit code — so
+      # the assertions inside could not fail on this leg; see docs/cef-keychain-isolation.md).
+      - name: Build the Shell's live CEF boot + restart + palette + settings + multiwindow + tearout + drag + uimirror + iframe smokes
         run: cmake --build --preset dev --target context_editor_shell_cef_smoke context_editor_shell_restore_smoke context_editor_shell_palette_smoke context_editor_shell_settings_smoke context_editor_shell_multiwindow_smoke context_editor_shell_tearout_smoke context_editor_shell_drag_smoke context_editor_shell_uimirror_smoke context_editor_shell_iframe_smoke
-        working-directory: src
-
-      # This step exercises the .app assembly, the five helper bundles, the embedded framework and the
-      # no-`libcef_lib` link line. Both ctests also RUN on macOS now: they were `DISABLED` from e12c-1
-      # until issue #437 was fixed at its cause (Chromium's OSCrypt blocking CefShutdown() on an
-      # un-answerable macOS keychain prompt — NOT the external message pump e12c-1 suspected; see
-      # docs/cef-keychain-isolation.md and the macOS branch of src/editor/shell/cef/CMakeLists.txt).
-      - name: Build the Shell's live CEF boot + restart smokes (macOS .app + 5 helper bundles each)
-        if: runner.os == 'macOS'
-        run: cmake --build --preset dev --target context_editor_shell_cef_smoke context_editor_shell_restore_smoke
         working-directory: src
 
       # The SHIPPING editor binary, in its CEF-linked configuration — on ALL THREE legs since M9

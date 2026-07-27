@@ -400,11 +400,11 @@ if(CONTEXT_BUILD_GUI_CEF)
     # --- ONE staging of the CEF payload for this whole directory tree (issue #360) ----------------
     # CEF_TARGET_OUT_DIR is set by SET_CEF_TARGET_OUT_DIR() inside the macro above, in THIS directory
     # scope — so it resolves to build/<preset>/editor/shell/<config>, and the cef/ subdirectory added
-    # below inherits that same value. FOUR executables therefore share one staging destination:
-    # context_editor here, plus the three live smokes in cef/. Each used to attach its OWN POST_BUILD
+    # below inherits that same value. TEN executables therefore share one staging destination:
+    # context_editor here, plus the nine live smokes in cef/. Each used to attach its OWN POST_BUILD
     # COPY_FILES() of the identical payload, which ninja then ran concurrently as it linked them in
     # parallel — a Windows sharing violation whenever two collided (issue #360; the CI job that builds
-    # all three smokes in one ninja invocation is where it bites). One stage target, and every consumer
+    # all nine smokes in one ninja invocation is where it bites). One stage target, and every consumer
     # depends on it, removes the race by construction. See cmake/ContextCef.cmake for the mechanism +
     # the evidence, and tools/check_cef_staging.py for the lint that keeps it that way.
     #
@@ -425,8 +425,8 @@ if(CONTEXT_BUILD_GUI_CEF)
     # than inventing one. What it does NOT port is their `nullptr` CefApp — see
     # shell::cef::execute_helper_process (cef_shell.h) for why the Shell's helpers need the real app.
     #
-    # DEFINED HERE, ABOVE add_subdirectory(cef), AND CALLED FROM BOTH: the two live smokes are declared
-    # in cef/ and `context_editor` here, and all three need the identical assembly. A CMake function
+    # DEFINED HERE, ABOVE add_subdirectory(cef), AND CALLED FROM BOTH: the nine live smokes are
+    # declared in cef/ and `context_editor` here, and all ten need the identical assembly. A CMake function
     # does not change the directory context, so `add_executable` / `add_custom_command(TARGET ...)`
     # inside it act on the CALLER's directory — which is required, since add_custom_command(TARGET)
     # refuses a target created in another directory. The two paths the body needs are therefore
@@ -438,11 +438,16 @@ if(CONTEXT_BUILD_GUI_CEF)
     # (Renderer). docs/shell.md claimed three until this task measured it.
     #
     # ⚠ THE FRAMEWORK IS EMBEDDED PER BUNDLE (304 MB apiece, MEASURED). That is the owner's design
-    # ruling: it is the only configuration proven green in CI, and macOS stays scoped to the DoD subset
-    # (two smokes here, the remaining seven in e12c-2) precisely so the cost stays bounded. A symlinked
-    # Versions/A pointing at one staged copy was verified to still boot, but it is held ONLY as an
-    # escape hatch if runner disk ever binds and must stay TEST-TIER: codesigning and notarization
-    # reject a symlinked framework, so e15 packaging must not inherit it.
+    # ruling: it is the only configuration proven green in CI. Since e12c-2 fanned the recipe out to
+    # all nine smokes the Shell's own share is TEN bundles (the app + nine smokes) at 309 MB apiece —
+    # that is each FINISHED .app, i.e. the 304 MB framework above plus its own binaries and five
+    # helpers — MEASURED on an arm64 macOS host at 3.1 GB for this directory's Release output, inside a
+    # WHOLE CEF-ON `src/build/dev` of 8.0 GB. docs/shell.md § 3 owns the runner-headroom comparison and
+    # is the one place to RE-MEASURE if this list grows again; it is not restated here, because a figure
+    # written down twice is a figure that drifts.
+    # A symlinked Versions/A pointing at one staged copy was verified to still boot, but it
+    # is held ONLY as an escape hatch if runner disk ever binds and must stay TEST-TIER: codesigning and
+    # notarization reject a symlinked framework, so e15 packaging must not inherit it.
     if(OS_MAC)
         set(CONTEXT_SHELL_MAC_PLIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/mac")
         set(CONTEXT_SHELL_MAC_HELPER_SOURCE
@@ -622,6 +627,34 @@ else()
     target_link_libraries(context_editor PRIVATE context_warnings)
 endif()
 
+# --- THE ONE ROSTER of CEF-hosting executables in this tree, read by BOTH configure-time audits -----
+# ⚠ KEEP THIS COMPLETE. Both audits below iterate THE LIST, so a target missing from it is silently
+# UNDER-AUDITED rather than caught — and that has already happened: context_editor_shell_uimirror_smoke
+# (e10d-drill2) and context_editor_shell_iframe_smoke (e13a-2) both boot from ${CEF_TARGET_OUT_DIR} and
+# both take the stage dependency, but neither was listed until e12a-x11-legs noticed. A new smoke
+# belongs here, ONCE — e12c-2 collapsed two hand-maintained ten-name copies into this one list.
+#
+# WHY ONE LIST IS SOUND for two audits with different charters (Windows/Linux staging vs macOS bundle):
+# every CEF-hosting Shell executable needs BOTH, on whichever platform it is configured for. For the
+# NINE smokes that holds by construction — context_configure_shell_cef_smoke() calls
+# context_shell_cef_mac_bundle() unconditionally under its own if(OS_MAC), and requires BUNDLE_ID on
+# every platform so a Windows-only author cannot skip macOS silently (see cef/CMakeLists.txt). For
+# `context_editor`, member #1, it holds by HAND: its bundle comes from the OS_MAC branch above with a
+# hand-written identifier, not through that function. So nine are locked together; the tenth is a
+# maintained invariant — if a future executable is ever deliberately one-platform-only, this list is
+# what has to split again.
+set(_ctx_cef_shell_executables
+    context_editor
+    context_editor_shell_cef_smoke
+    context_editor_shell_restore_smoke
+    context_editor_shell_palette_smoke
+    context_editor_shell_settings_smoke
+    context_editor_shell_multiwindow_smoke
+    context_editor_shell_tearout_smoke
+    context_editor_shell_drag_smoke
+    context_editor_shell_uimirror_smoke
+    context_editor_shell_iframe_smoke)
+
 # --- the CEF single-staging invariant, enforced on the real build graph (issue #360) --------------
 # Every executable that boots out of the shared ${CEF_TARGET_OUT_DIR} must depend on the ONE stage
 # target — that dependency is the entire fix, and it is exactly the sort of thing a new smoke exe
@@ -631,28 +664,13 @@ endif()
 # (`editor-shell-cef-staging`), which catches the other half — a re-introduced per-target POST_BUILD
 # copy — and runs on the default CEF-OFF matrix where this block does not exist at all.
 if(CONTEXT_BUILD_GUI_CEF AND (OS_WINDOWS OR OS_LINUX))
-    # ⚠ KEEP THIS COMPLETE. It had already drifted by TWO targets — context_editor_shell_uimirror_smoke
-    # (e10d-drill2) and context_editor_shell_iframe_smoke (e13a-2) both boot from
-    # ${CEF_TARGET_OUT_DIR} and both take the stage dependency, but neither was listed, so the audit
-    # under-covered exactly the way its own FATAL_ERROR below warns a silently skipped consumer would.
-    # Added by e12a-x11-legs while it was touching all nine smokes.
-    set(_ctx_cef_stage_consumers
-        context_editor
-        context_editor_shell_cef_smoke
-        context_editor_shell_restore_smoke
-        context_editor_shell_palette_smoke
-        context_editor_shell_settings_smoke
-        context_editor_shell_multiwindow_smoke
-        context_editor_shell_tearout_smoke
-        context_editor_shell_drag_smoke
-        context_editor_shell_uimirror_smoke
-        context_editor_shell_iframe_smoke)
-    foreach(_consumer IN LISTS _ctx_cef_stage_consumers)
+    foreach(_consumer IN LISTS _ctx_cef_shell_executables)
         if(NOT TARGET ${_consumer})
             message(FATAL_ERROR
                 "CEF staging audit: expected target ${_consumer} to exist in a CONTEXT_BUILD_GUI_CEF "
-                "Windows/Linux configure. If it was renamed or removed, update this list — a silently "
-                "skipped consumer is how issue #360 would come back unnoticed.")
+                "Windows/Linux configure. If it was renamed or removed, update "
+                "_ctx_cef_shell_executables — a silently skipped consumer is how issue #360 would come "
+                "back unnoticed.")
         endif()
         get_target_property(_manual_deps ${_consumer} MANUALLY_ADDED_DEPENDENCIES)
         if(NOT _manual_deps OR NOT "context_editor_cef_stage" IN_LIST _manual_deps)
@@ -679,18 +697,14 @@ endif()
 # single-writer rule is enforced from the SOURCES by tools/check_cef_staging.py and its presence is
 # proven by the live smokes (a bundle with no embedded framework fails LoadInMain and reds).
 if(CONTEXT_BUILD_GUI_CEF AND OS_MAC)
-    # ⚠ KEEP THIS COMPLETE, exactly like its Windows/Linux sibling above — e12c-2 adds the remaining
-    # seven smokes and every one of them belongs here.
-    set(_ctx_cef_mac_bundles
-        context_editor
-        context_editor_shell_cef_smoke
-        context_editor_shell_restore_smoke)
-    foreach(_bundle IN LISTS _ctx_cef_mac_bundles)
+    set(_ctx_cef_bundle_ids "")
+    foreach(_bundle IN LISTS _ctx_cef_shell_executables)
         if(NOT TARGET ${_bundle})
             message(FATAL_ERROR
                 "macOS CEF bundle audit: expected target ${_bundle} to exist in a "
-                "CONTEXT_BUILD_GUI_CEF macOS configure. If it was renamed or removed, update this "
-                "list — a silently skipped bundle is how a half-assembled .app would ship unnoticed.")
+                "CONTEXT_BUILD_GUI_CEF macOS configure. If it was renamed or removed, update "
+                "_ctx_cef_shell_executables — a silently skipped bundle is how a half-assembled .app "
+                "would ship unnoticed.")
         endif()
         get_target_property(_is_bundle ${_bundle} MACOSX_BUNDLE)
         if(NOT _is_bundle)
@@ -700,6 +714,27 @@ if(CONTEXT_BUILD_GUI_CEF AND OS_MAC)
                 "so a bare executable cannot host a browser at all. Call "
                 "context_shell_cef_mac_bundle(${_bundle} <identifier>).")
         endif()
+        # NO TWO BUNDLES MAY SHARE A CFBundleIdentifier. context_shell_cef_mac_bundle()'s header
+        # promises this, but it can only keep the promise WITHIN one app (each helper takes the main id
+        # plus its own `.helper<suffix>`); nothing stopped two MAIN bundles being handed the same
+        # BUNDLE_ID, and e12c-2 took the hand-written identifiers from three to ten. macOS keys
+        # LaunchServices on the identifier, so a collision builds and installs perfectly and then
+        # misbehaves at RUN time on ONE OS — the class this audit exists to move to configure time.
+        get_target_property(_bundle_id ${_bundle} MACOSX_BUNDLE_GUI_IDENTIFIER)
+        if(NOT _bundle_id)
+            message(FATAL_ERROR
+                "macOS CEF bundle audit: ${_bundle} has no MACOSX_BUNDLE_GUI_IDENTIFIER. Every bundle "
+                "needs its own CFBundleIdentifier — pass BUNDLE_ID to "
+                "context_configure_shell_cef_smoke() (scheme dev.context.editor.shell.<scenario>.smoke).")
+        endif()
+        if("${_bundle_id}" IN_LIST _ctx_cef_bundle_ids)
+            message(FATAL_ERROR
+                "macOS CEF bundle audit: ${_bundle} reuses CFBundleIdentifier '${_bundle_id}', which "
+                "another bundle in this configure already claims. Every one must be distinct, since "
+                "macOS keys LaunchServices on it and a collision fails only at run time. Give this one "
+                "its own BUNDLE_ID (scheme dev.context.editor.shell.<scenario>.smoke).")
+        endif()
+        list(APPEND _ctx_cef_bundle_ids "${_bundle_id}")
         get_target_property(_main_output ${_bundle} OUTPUT_NAME)
         if(NOT _main_output)
             set(_main_output "${_bundle}")
@@ -792,7 +827,9 @@ add_test(NAME editor-shell-config-writers
 # all three OS legs with no ci.yml `--target` bookkeeping — and it needs NO CEF build, so it also runs
 # on the CEF-OFF legs where the smokes themselves do not exist. Its own pytest lives in tools/tests/
 # (python-tests job) and proves it non-vacuous by planting; that round found TWO real holes in the
-# first revision, both GREEN, both shapes e12c-2 could write — see the test file's docstring.
+# first revision, both GREEN, both shapes the next live scenario could write (e12c-2 fanned the
+# EXISTING nine out to macOS and added no source; e12c-3 and every later T2 scenario will) — see the
+# test file's docstring.
 add_test(NAME editor-shell-cef-keychain
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/../tools/check_cef_keychain_isolation.py"
             --repo-root "${CMAKE_SOURCE_DIR}/..")

@@ -114,10 +114,17 @@ there.
   cannot tell apart, and conflating them is what made #437 hard — and on a hang it captures `sample(1)`
   stacks plus any pending `SecurityAgent`. Use it after any change in this area:
 
+  Since M9 e12c-2 the Shell has NINE live smokes on every OS, so build all of them — a recipe that
+  names only the two e12c-1 ported would silently measure a quarter of the surface:
+
   ```sh
   cmake -S src --preset dev -DCONTEXT_BUILD_GUI_CEF=ON
   cmake --build src/build/dev --target context_cef_boot_smoke context_gui_host \
-      context_editor_shell_cef_smoke context_editor_shell_restore_smoke
+      context_editor_shell_cef_smoke context_editor_shell_restore_smoke \
+      context_editor_shell_palette_smoke context_editor_shell_settings_smoke \
+      context_editor_shell_multiwindow_smoke context_editor_shell_tearout_smoke \
+      context_editor_shell_drag_smoke context_editor_shell_uimirror_smoke \
+      context_editor_shell_iframe_smoke
   python3 tools/measure_cef_smoke_rate.py --build-dir src/build/dev -k 5
   ```
 

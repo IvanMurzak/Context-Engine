@@ -49,7 +49,8 @@ from pathlib import Path
 # Where the Shell's smokes live. Every source here that CONSTRUCTS a CefShellOptions is a subject —
 # keyed on the CONSTRUCTION, not on a `*_smoke.cpp` filename. FOUND BY PLANTING: a filename-keyed
 # scan let a new CEF file in this very directory named anything else (e.g. `cef_shell_scenarios.cpp`)
-# through GREEN, which is exactly the shape e12c-2's seven added scenarios could take. The production
+# through GREEN, which is exactly the shape the next live scenario could take (e12c-2 fanned the
+# EXISTING nine out to macOS and added no source; e12c-3 and every later T2 scenario will). The production
 # editor also constructs these options (`src/editor/shell/app/editor_main.cpp`) and must NOT mock the
 # keychain, which is why the subject set is this DIRECTORY rather than the type tree-wide.
 SHELL_SMOKE_DIR = "src/editor/shell/cef/src"
