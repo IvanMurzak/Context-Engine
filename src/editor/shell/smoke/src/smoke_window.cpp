@@ -12,6 +12,7 @@
 // than an `#if` in this file because CMake picks a compiler by file extension — see its own header.
 #include "smoke_inject_cocoa.h"
 
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <utility>
@@ -35,6 +36,19 @@ namespace
 // rather than by RTTI: the CEF-linking smoke targets compile under CEF's `-fno-rtti` dialect, so a
 // dynamic_cast here would not compile where it matters most.
 constexpr const char* kMemoryBlitterName = "memory";
+
+// The EXACT dpi factor, shared by every smoke-side conversion below that needs one. `dpi.dpi` is the
+// source of truth and `DpiScale::factor()` the derived value (dpi.h) — the smoke side needs the
+// double rather than that float so its inverses round-trip at 1.25x / 1.5x. `make_dpi_scale` clamps
+// into kMinDpi..kMaxDpi, so the only value worth guarding is a HAND-CONSTRUCTED 0, which would
+// otherwise divide the whole location away; a unit test pins that refuse-to-1x behaviour. No
+// isfinite check: an integer dpi cannot be NaN. Kept in ONE place deliberately — `window.cpp`'s own
+// header records the hazard for exactly this shape, two copies of one conversion feeding one
+// observable, where the copy no CI leg executes is the one free to drift.
+[[nodiscard]] double ns_exact_dpi_factor(DpiScale dpi)
+{
+    return dpi.dpi == 0u ? 1.0 : static_cast<double>(dpi.dpi) / static_cast<double>(kReferenceDpi);
+}
 
 #if defined(CONTEXT_SHELL_SMOKE_HAS_X11)
 
@@ -596,12 +610,7 @@ std::uint32_t ns_extent_to_points(std::uint32_t physical, DpiScale dpi)
 
 NsViewPointPoints ns_view_point_for_physical(PointI position, double height_points, DpiScale dpi)
 {
-    // `dpi.dpi` is the source of truth and `factor()` the derived value (dpi.h), and make_dpi_scale
-    // clamps it into kMinDpi..kMaxDpi — so the only value worth guarding is a hand-constructed 0,
-    // which would divide the whole location away. No isfinite check: an integer dpi cannot be NaN.
-    const double factor = dpi.dpi == 0u ? 1.0
-                                        : static_cast<double>(dpi.dpi) /
-                                              static_cast<double>(kReferenceDpi);
+    const double factor = ns_exact_dpi_factor(dpi);
     // ⚠ THE SCALE COMES OFF FIRST, AND THE FLIP IS AGAINST THE UNSCALED HEIGHT — the mirror image
     // of the ordering `ns_view_point_to_physical` documents ("Done BEFORE the scale, against the
     // height in POINTS, because that is the space the height is expressed in"). Flipping against a
@@ -609,6 +618,27 @@ NsViewPointPoints ns_view_point_for_physical(PointI position, double height_poin
     // and mirrors the pointer on a Retina display, so the two orderings must stay mirror images.
     const double y_in_points = static_cast<double>(position.y) / factor;
     return NsViewPointPoints{static_cast<double>(position.x) / factor, height_points - y_in_points};
+}
+
+NsDeliveredShift ns_delivered_shift_for_window_move(PointI origin_at_post_points,
+                                                    PointI origin_at_delivery_points, DpiScale dpi)
+{
+    const double factor = ns_exact_dpi_factor(dpi);
+    // A delivered locationInWindow gains (post - delivery) on BOTH axes. x reaches Shell space
+    // unflipped, so it keeps that sign; y is subtracted from the view height by the decoder, so its
+    // Shell-space displacement is the NEGATION — (delivery - post). See the header for why only a
+    // non-zero delta can distinguish the two spellings.
+    const double dx_points = static_cast<double>(origin_at_post_points.x) -
+                             static_cast<double>(origin_at_delivery_points.x);
+    const double dy_points = static_cast<double>(origin_at_delivery_points.y) -
+                             static_cast<double>(origin_at_post_points.y);
+    // Round-half-AWAY-from-zero, matching the shipping decoder's own `ns_round_to_int` (window.cpp)
+    // rather than `static_cast`'s truncate-toward-zero: a displacement of -0.6 and one of +0.6 must
+    // not both land on 0, or the correction's bucket straddling the origin is twice as wide as every
+    // other one. Both inputs are integer points and the factor is bounded, so no isfinite guard is
+    // needed here — unlike in `ns_round_to_int`, which also sees live Cocoa geometry reads.
+    return NsDeliveredShift{static_cast<std::int32_t>(std::lround(dx_points * factor)),
+                            static_cast<std::int32_t>(std::lround(dy_points * factor))};
 }
 
 render::Extent2D placement_extent_for_physical(const IWindowBackend& backend,

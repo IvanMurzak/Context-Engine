@@ -1,6 +1,6 @@
 // The macOS half of the smoke-tier real-mode injection arm (M9 e12c-3) — the Cocoa counterpart of
 // smoke_window.cpp's X11 encoder. See smoke_window.h for the contract, the measured no-TCC-grant
-// result, and the two Cocoa fidelity limits; see smoke_inject_cocoa.h for why this is a TU pair.
+// result, and the THREE Cocoa fidelity limits; see smoke_inject_cocoa.h for why this is a TU pair.
 //
 // WHAT MAKES THIS NON-VACUOUS, stated as the X11 arm states it. Nothing here posts into a queue the
 // smoke owns. A synthesized NSEvent goes onto the APPLICATION's queue via

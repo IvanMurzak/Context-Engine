@@ -918,12 +918,24 @@ Named so the gaps are visible rather than assumed:
   synthesized move + press + release + key still round-tripped 5/5 out of the backend's own
   `nextEventMatchingMask` pump. It is also the closer analogue of the X11 arm, which sends to the
   smoke's OWN window rather than driving the server globally.
-  **Two Cocoa fidelity limits the X11 arm does not have** (both in `smoke_window.h`, both measured):
+  **Three Cocoa fidelity limits the X11 arm does not have** (all in `smoke_window.h`, all measured):
   the delivered `locationInWindow` is NOT the requested one — AppKit returns it scaled about the
   window's centre, ~1.4% on the reproduction host, so ~4.5 points at a 640-point window's edge — so
-  the smoke asserts the Y-FLIP DIRECTION, the SEPARATION and a HALF-PLANE rather than an equality; and
+  the smoke asserts the Y-FLIP DIRECTION, the SEPARATION and a HALF-PLANE rather than an equality;
   the pressed-BUTTON mask cannot be injected at all, because the backend reads it from
-  `+[NSEvent pressedMouseButtons]`, a live HID query. The modifier FLAGS do travel.
+  `+[NSEvent pressedMouseButtons]`, a live HID query (the modifier FLAGS do travel); and — the one
+  that reddened `main` on both macOS jobs — **a posted location is resolved against the window's
+  frame origin at DEQUEUE time, not at post time**, so a window AppKit moved after the post delivers
+  displaced samples and the shipping decoder correctly reports what it was handed. The smoke answers
+  that one in two places: it settles the window on a real predicate (the whole `placement()`
+  unchanged across two consecutive pumps, never a sleep) before anything is posted, and it corrects
+  its range claim by the frame-origin displacement through the pure, unit-tested
+  `ns_delivered_shift_for_window_move` seam — a no-op whenever the window held still. That claim is
+  also now TWO-sided (`0 <= y < height`): a one-sided `y >= 0` passed a sample delivered BELOW the
+  window in silence. And because a delivered sample can no longer be identified by its ORDER in the
+  stream (the desktop is entitled to deliver moves of its own), the four injected samples carry a
+  modifier MARKER (Shift+Control+Option) and are selected by it, with unmarked samples counted and
+  reported rather than silently dropped.
   **Still deliberately open:** the nine `editor-cef-smoke-shell*` smokes run HEADLESS on macOS — see
   the next bullet, which carries the mechanism and the tracking issue.
 - **The nine live CEF smokes are still HEADLESS on macOS.** e12c-3 closed the DoD line above with a

@@ -621,6 +621,78 @@ void test_ns_view_point_for_physical_inverts_the_shipping_decoder_at_a_non_ident
     CHECK(degenerate.y_points == 80.0);
 }
 
+// The DELIVERY-TIME correction, and the case with the sharpest provenance in this suite after the
+// one above: it is the arithmetic that was missing when `main` went red on both macOS jobs.
+//
+// ⚠ WHY THE LIVE SMOKE CANNOT PIN THIS EITHER, which is the same argument the sweep above makes.
+// `editor-shell-cocoa-window` exercises this function with a ZERO origin delta on every run where
+// the window holds still — and at a zero delta EVERY spelling of it is a no-op, including the two
+// wrong ones that matter: dropping the dpi scale, and giving the two axes the SAME sign instead of
+// opposite ones. So the live gate can only ever see this correct by accident. The two conditions
+// below are exactly the two no CI runner reliably exercises: a NON-IDENTITY scale (the runner's
+// virtual display is 1x, where the scale is invisible) and a NON-ZERO screen origin with a non-zero
+// delta between the post and the delivery (this Mac's window holds still, where the delta is 0).
+void test_ns_delivered_shift_for_window_move_corrects_a_moved_window_at_a_non_identity_dpi()
+{
+    // 1. THE ORDINARY CASE IS A NO-OP, at every scale. This is what makes the correction safe to
+    //    apply unconditionally in the live smoke: a window that did not move changes no claim.
+    for (const std::uint32_t dpi_value : {96u, 144u, 192u, 288u})
+    {
+        const smoke::NsDeliveredShift still = smoke::ns_delivered_shift_for_window_move(
+            PointI{640, 480}, PointI{640, 480}, DpiScale{dpi_value});
+        CHECK(still.dx == 0);
+        CHECK(still.dy == 0);
+    }
+
+    // 2. THE SIGN ASYMMETRY, worked by hand at 1x so a reader can check it: the window moved RIGHT 10
+    //    points and UP 10 points. A delivered locationInWindow gains (post - delivery) on BOTH axes,
+    //    but the decoder subtracts y from the view height and passes x through, so the Shell-space
+    //    displacements come out with OPPOSITE signs. Giving both axes the same sign would DOUBLE the
+    //    error it is meant to cancel, and at a zero delta the two spellings are indistinguishable.
+    const smoke::NsDeliveredShift diagonal =
+        smoke::ns_delivered_shift_for_window_move(PointI{0, 0}, PointI{10, 10}, DpiScale{96});
+    CHECK(diagonal.dx == -10);
+    CHECK(diagonal.dy == 10);
+    // The two equalities above are what catch the same-sign mutation; these restate the wrong answer
+    // explicitly so a reader sees WHICH mutation is being excluded without recomputing it. They are
+    // redundant by construction, and deliberately so — documentation, not extra discrimination.
+    CHECK(diagonal.dy != -10);
+    CHECK(diagonal.dx != 10);
+
+    // 3. THE SCALE, driven off 1.0. A 2x window moved DOWN 80 POINTS displaces its already-queued
+    //    samples by 160 PHYSICAL PIXELS, and the measured failure was exactly this shape. At 1.0 a
+    //    dropped scale is a literal no-op, so only a non-identity case can catch it.
+    const smoke::NsDeliveredShift moved_down_two_x = smoke::ns_delivered_shift_for_window_move(
+        PointI{100, 300}, PointI{100, 220}, DpiScale{192});
+    CHECK(moved_down_two_x.dx == 0);
+    CHECK(moved_down_two_x.dy == -160);
+    CHECK(moved_down_two_x.dy != -80); // the scale-dropped answer
+
+    // 4. IT DEPENDS ON THE DELTA ALONE, NEVER ON THE ABSOLUTE SCREEN ORIGIN — the second condition
+    //    neither host exercises. A window near the screen origin and one 800 points away must be
+    //    corrected identically for the same movement, which is what makes the correction a property
+    //    of the window rather than of the display arrangement. (The forward conversion
+    //    `ns_view_point_to_physical` takes no screen origin at all, by construction; this is where a
+    //    screen origin actually enters the round trip, so this is where it has to be pinned.)
+    const smoke::NsDeliveredShift near_origin = smoke::ns_delivered_shift_for_window_move(
+        PointI{0, 40}, PointI{-24, 8}, DpiScale{192});
+    const smoke::NsDeliveredShift far_from_origin = smoke::ns_delivered_shift_for_window_move(
+        PointI{800, 840}, PointI{776, 808}, DpiScale{192});
+    CHECK(near_origin.dx == far_from_origin.dx);
+    CHECK(near_origin.dy == far_from_origin.dy);
+    // ...and the shared answer is the RIGHT one, not merely a consistent one: moved LEFT 24 points
+    // and DOWN 32 points, at 2x.
+    CHECK(near_origin.dx == 48);
+    CHECK(near_origin.dy == -64);
+
+    // 5. A hand-constructed 0 dpi is treated as 1x rather than scaling the correction away — the same
+    //    refuse-to-1x regime `ns_view_point_for_physical` and `ns_dpi_from_backing_scale` use.
+    const smoke::NsDeliveredShift degenerate =
+        smoke::ns_delivered_shift_for_window_move(PointI{0, 0}, PointI{-5, -7}, DpiScale{0});
+    CHECK(degenerate.dx == 5);
+    CHECK(degenerate.dy == -7);
+}
+
 int main()
 {
     test_flag_parsing();
@@ -638,5 +710,6 @@ int main()
     test_ns_extent_to_points_inverts_the_shipping_physical_conversion();
     test_placement_extent_for_physical_leaves_a_non_cocoa_backend_alone();
     test_ns_view_point_for_physical_inverts_the_shipping_decoder_at_a_non_identity_dpi();
+    test_ns_delivered_shift_for_window_move_corrects_a_moved_window_at_a_non_identity_dpi();
     SHELL_TEST_MAIN_END();
 }

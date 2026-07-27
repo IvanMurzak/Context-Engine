@@ -197,7 +197,7 @@ struct PresentSetup
 //   * real, macOS — a genuine AppKit queue round trip: a synthesized NSEvent posted with
 //     `-[NSApplication postEvent:atStart:]`, dequeued by the backend's own
 //     `nextEventMatchingMask` pump and decoded by the real `translate_ns_event` (see the header
-//     preamble for why this needs no TCC grant, and for the two fidelity limits it carries).
+//     preamble for why this needs no TCC grant, and for the THREE fidelity limits it carries).
 //   * real, either — resize: `apply_placement()`, so the new geometry is the window system's own
 //     configure/geometry change.
 //     ⚠ That makes a real-mode resize ASYNCHRONOUS: the caller must pump until
@@ -309,5 +309,67 @@ struct NsViewPointPoints
 // the `.mm`, which is the same split `ns_extent_to_physical` and the key tables already use.
 [[nodiscard]] NsViewPointPoints ns_view_point_for_physical(PointI position, double height_points,
                                                            DpiScale dpi);
+
+// ⚠ THE THIRD COCOA FIDELITY LIMIT, and the one that cost a red `main`: A POSTED LOCATION IS
+// RESOLVED AGAINST THE WINDOW'S FRAME ORIGIN AT DEQUEUE TIME, NOT AT POST TIME.
+//
+// `+[NSEvent mouseEventWithType:location:...windowNumber:]` stores its `location` GLOBALLY (screen
+// space) — it adds the window's frame origin as it is when the event is CREATED — while
+// `-locationInWindow` subtracts the frame origin as it is when the event is READ. So if anything
+// moves the window between `-[NSApplication postEvent:atStart:]` and the
+// `-nextEventMatchingMask:` that dequeues it, EVERY already-queued sample arrives displaced by
+// exactly the negation of that move, and the shipping decoder — correctly — reports the displaced
+// location it was handed.
+//
+// MEASURED on the macOS host with a standalone AppKit probe (a 380x240-point window, 2x, posting the
+// smoke's own two samples and then moving the window before draining).
+//
+// ⚠ EVERY FIGURE IN THIS TABLE IS IN COCOA POINTS — including the derived "Shell-space y" column,
+// which is taken against the 240-POINT height (240 - 292.9 = -52.9). The probe worked in the window's
+// own point space. Shell space in the SHIPPING code is PHYSICAL PIXELS, and so is what this function
+// returns, so at the probe's 2x the corresponding physical figure is TWICE the one shown here
+// (-52.9 points = -105.8 physical px). Do not mix the two units when re-deriving any of this; the
+// unit test below pins the function in physical pixels, which is why it must carry the dpi factor.
+//
+//   * no move       -> delivered y 211.4 / 28.0 for posted 210 / 30, i.e. faithful to ~2 points;
+//   * moved DOWN 80 -> delivered y 292.9 / 109.5, so the TOP sample flips to a NEGATIVE Shell-space
+//                      y (-52.9) while the order, the separation and the half-plane all still hold —
+//                      exactly ONE failing assertion, which is bit-for-bit the CI signature;
+//   * moved UP 80   -> delivered y 129.9 / -53.5, i.e. a sample BELOW the window that a one-sided
+//                      `y >= 0` range check passes in silence.
+//
+// The clean, no-move distortion was measured in the same probe and is a ~1.9% scale about (roughly)
+// the view centre — about 2 points at these sample positions, and INDEPENDENT of where the window
+// sits on screen. It therefore cannot produce the ~35-point displacement the failure needs, which is
+// what rules the conversion arithmetic out as the cause and rules a window move in.
+//
+// This function is the correction: the PHYSICAL-PIXEL, Shell-space (TOP-left) displacement that a
+// frame-origin change from `origin_at_post` to `origin_at_delivery` imposes on every sample posted
+// before the move. Both origins are COCOA POINTS with Cocoa's BOTTOM-left screen origin — i.e.
+// exactly what `CocoaWindowBackend::placement()` reports (see its "⚠ IN COCOA POINTS" note) — so a
+// caller reads them straight off `placement()` and needs no AppKit and no screen height.
+//
+// ⚠ THE TWO AXES CARRY OPPOSITE SIGNS, and that asymmetry is the y-flip itself rather than a typo:
+// a delivered `locationInWindow` gains `origin_at_post - origin_at_delivery` on BOTH axes, but x
+// passes through the decoder unflipped while y is subtracted from the view height, so the Shell-space
+// y displacement comes out as `origin_at_delivery.y - origin_at_post.y`. Subtracting a value with
+// the wrong sign would DOUBLE the error instead of cancelling it, and at a zero delta — the ordinary
+// case — both spellings are a no-op, so only a test with a non-zero origin delta can tell them
+// apart. That is why this is a named, unit-tested function and not arithmetic inlined at its one
+// call site.
+// A DISPLACEMENT, which is why this is not the otherwise identically-shaped `PointI`: every claim
+// about it is about a difference (it is zero when nothing moved, and it is SUBTRACTED from a delivered
+// coordinate), and naming it as a position invites exactly the "corrected by adding an origin" misread
+// the opposite-sign paragraph above exists to prevent. Same reasoning as the sibling
+// `NsViewPointPoints`, which is likewise a bespoke pair rather than a reused point type.
+struct NsDeliveredShift
+{
+    std::int32_t dx = 0;
+    std::int32_t dy = 0;
+};
+
+[[nodiscard]] NsDeliveredShift ns_delivered_shift_for_window_move(PointI origin_at_post_points,
+                                                                  PointI origin_at_delivery_points,
+                                                                  DpiScale dpi);
 
 } // namespace context::editor::shell::smoke
