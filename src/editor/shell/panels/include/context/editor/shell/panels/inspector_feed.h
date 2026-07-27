@@ -38,15 +38,18 @@
 // do — refresh while a gesture is staged, which would silently re-base the L-30 collision guard the
 // WRITES-GO-OVER-THE-WIRE paragraph above exists to enforce. See `apply_event`.
 //
-// ⚠ SCOPE, MEASURED (do NOT read the paragraph above as "cross-window propagation is live today").
-// e09e-2 landed the READER half; the PUBLISHER half of §8 is NOT wired. `derivation.settled` has ONE
-// producer — `EditorKernel::settle` (editor_kernel.cpp) — reached from the `reconcile` and
-// `edit-batch` verbs and the two await barriers. The `edit` verb, which is the ONLY write the Shell
-// issues (wire_override_gateway.cpp), runs `query_after_hash` alone and publishes NOTHING; and §8's
-// `files.changed` has no producer at all. So TODAY a second window's inspector edit emits no event,
-// the only client-reachable trigger is `context attach --reconcile`, and no daemon timer drives the
-// R-FILE-002 crawl. Closing the publisher half is e09e-3's business — a live two-window smoke driven
-// by `edit` alone would observe nothing.
+// ✅ THE PUBLISHER HALF LANDED IN M9 x9 (CE #449) — cross-window propagation IS live now, and the
+// paragraph that used to sit here (saying it was not) is retired. A plain RPC `edit` now publishes
+// BOTH of §8's facts: `files.changed` from `EditorKernel`'s ingest seam (`publish_file_change`, the
+// topic's one producer) and then `derivation.settled{gen}` from the settle `kernel_server`'s
+// `finish_edit` runs for both `edit` shapes. So the Shell's ONLY write path
+// (wire_override_gateway.cpp) reaches this feed's `apply_event` in every OTHER attached client — and
+// in this one, which is the feedback loop the deferral below now genuinely guards rather than
+// hypothetically. Still true, and still not this feed's business: no daemon TIMER drives the
+// R-FILE-002 crawl, so an edit made OUTSIDE any client (a git checkout, a text editor) is folded in
+// only by an explicit `reconcile` (`context attach --reconcile`) — which does publish, through the
+// same one producer. What remains for e09e-3 is the live two-window CEF smoke; the cross-CLIENT model
+// propagation is proven CEF-free by `m9-e09b-concurrent-cas` (§ 5), driven by a plain `edit` alone.
 //
 // THE LOUD DROP LANDED IN e09b-3. An L-30 drop reaches the listener, is COUNTED here
 // (`drops_observed()` / `last_commit()`) — and now goes out through the NOTICE SINK below, which the

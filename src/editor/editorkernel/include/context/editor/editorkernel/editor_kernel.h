@@ -312,6 +312,25 @@ public:
 
 private:
     void ingest_change(const filesync::ReconcileChange& change);
+
+    // Publish design 05 §8's `files.changed` fact on the client-facing `files` topic (M9 x9, CE #449).
+    //
+    // THE ONE PRODUCER, and it sits at the ONE seam every change enters the derived world through —
+    // `edit_file`, each write of `edit_files`, and `ingest_change` (the external crawl / watcher
+    // hints). Placing it at the ingest boundary rather than in a verb handler is what makes the
+    // registry's own charter for this topic true ("post-derivation file change facts, never raw
+    // filesystem noise"): a `ReconcileChange` has already passed the content-hash reconcile, and a
+    // handler-side producer would leave `edit-batch` and `reconcile` silent about the files they
+    // changed. It also fixes the ORDER design 05 §8 specifies — every call site publishes BEFORE its
+    // settle, so `files.changed -> derivation.settled{gen}` holds by construction.
+    //
+    // A no-op when not running(): an in-process CLI kernel has no client stream to publish onto.
+    // FAN-OUT COST: one fact per changed file, so one logical `edit` is one `files.changed` + one
+    // `derivation.settled`, and a bulk `reconcile` is one per genuinely-changed path (an already-current
+    // path yields no ReconcileChange at all). A subscriber that cannot keep up gets the bounded-queue
+    // gap marker it already gets for any burst — the stream never blocks on a slow client.
+    void publish_file_change(const filesync::ReconcileChange& change);
+
     [[nodiscard]] std::string editor_dir() const;
 
     filesync::FileStore& fs_;

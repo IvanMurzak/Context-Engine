@@ -30,6 +30,16 @@
 // while its own gesture is staged, so the L-30 collision base cannot be silently re-based under the
 // human's in-flight edit. Two live CEF windows are still e09e-3's smoke; the cross-CLIENT model
 // propagation is proven here, CEF-free, on all three default `build` legs.
+//
+// SINCE M9 x9 (CE #449) THE PUBLISHER IS LIVE, AND THAT CHANGED THIS FILE IN TWO WAYS.
+//   * § 5's settle is now produced by the racer's PLAIN `edit` alone. It used to need a `reconcile`
+//     chaser, because a bare `edit` published nothing — so every fan-out assertion here was reached
+//     through a path no editor client takes. The chaser is gone (see the note where `force_settle`
+//     used to live), which is what makes these sections fail if the publisher regresses.
+//   * § 5d is NEW, and the hazard it covers is one x9 CREATED: an applied commit now publishes an
+//     event the committing window itself receives, so a window can re-base its OWN gesture with no
+//     concurrency involved at all. It also asserts §8's FIRST fact — `files.changed`, which had no
+//     producer whatsoever before x9 — over the same real wire.
 
 #include "context/editor/client/client.h"
 #include "context/editor/client/subscription.h" // e09e-2: the REAL `derivation` fan-out consumer
@@ -80,6 +90,10 @@ const std::string kRoot = "proj/root.scene.json";
 const std::string kIdentity = "aaaaaaaaaaaaaaa1/ccccccccccccccc1";
 const std::string kFovPointer = "/components/camera/fov";
 const std::string kNearPointer = "/components/camera/near";
+// Design 05 §8's FIRST fact rides the core `files` topic (M9 x9 / CE #449). Spelled here rather than
+// pulled from `panels::` because no FEED consumes it — the Inspector rides `derivation` — so there is
+// no panels-side constant to share, and inventing one would advertise a consumer that does not exist.
+const std::string kFilesTopic = "files";
 
 void remove_tree(const fs::path& path)
 {
@@ -251,24 +265,23 @@ void commit_gesture(shell::PanelHost& host)
     return builtin.inspector->panel().last_result();
 }
 
-// Make the daemon SETTLE, so it publishes the R-BRIDGE-008 `derivation.settled` quiescence fact the
-// e09e-2 fan-out rides. A bare `edit` deliberately does NOT settle — it runs only the
-// read-your-writes barrier (`query_after_hash`), which publishes nothing — so the fact comes from a
-// `reconcile`, exactly as `test_client_e2e` drives it and exactly what `context attach --reconcile`
-// does in the field. Measured, so no reader over-reads this: `reconcile` and `edit-batch` (plus the
-// two await barriers) are the ONLY callers of `EditorKernel::settle`, and no daemon timer drives the
-// R-FILE-002 crawl — `ingest_external` is reached only from `reconcile` (CrawlMode::force, which
-// bypasses the cadence) and the in-process CLI driver. So this call is not a stand-in for a
-// background crawl that would fire on its own; it IS the trigger a client has today.
-[[nodiscard]] bool force_settle(client::Client& c)
-{
-    std::string error;
-    const bool ok = c.call("reconcile", Json::object(), error).has_value();
-    if (!ok)
-        std::fprintf(stderr, "reconcile refused: %s (%s)\n", c.last_error_code().c_str(),
-                     error.c_str());
-    return ok;
-}
+// ⚠ THERE IS DELIBERATELY NO `force_settle` HELPER HERE ANY MORE (M9 x9, CE #449). This drill used to
+// carry one, calling `reconcile` after every `race_write`, because a bare `edit` published NOTHING: it
+// ran only the read-your-writes barrier (`query_after_hash`), and `derivation.settled` was reachable
+// only from `edit-batch` / `reconcile` / the two await barriers — none of which a real editor client
+// takes, since the Shell's ONLY write is RPC `edit` (wire_override_gateway.cpp). Every fan-out
+// assertion below was therefore reached through a path no user ever walks: the events were real, but
+// the TRIGGER was a stand-in.
+//
+// x9 wired the publisher half, so `race_write`'s plain composed `edit` now publishes `files.changed`
+// (from `EditorKernel`'s ingest seam) and then `derivation.settled{gen}` (from the settle its
+// `finish_edit` tail runs) all by itself. Removing the chaser is what makes these sections
+// NON-VACUOUS: if the `edit` publisher regresses, `pump_until_settle` finds nothing and this drill
+// REDS, where before it would have gone on proving `reconcile` still works.
+//
+// Still measured and still true: no daemon TIMER drives the R-FILE-002 crawl, so an edit made outside
+// every client (a git checkout) is folded in only by an explicit `reconcile` — which publishes through
+// the same one producer.
 
 // Pump a REAL subscription until one more `derivation` fact has been applied, bounded so a regression
 // surfaces as a legible failure instead of hanging the CI job. Returns false when none arrived —
@@ -281,7 +294,8 @@ void commit_gesture(shell::PanelHost& host)
     // (kSanitizerTimeoutScale is 4, so 40s each, on top of this drill's 80s boot wait and its
     // attaches). A budget that can overrun the cap would surface a regression as a bare ctest
     // timeout — exactly the illegible failure the bound above exists to avoid. The happy path is
-    // sub-second: the settle is already published before the first pump (`force_settle` returned).
+    // sub-second: the settle is already published before the first pump (the `edit` that produced it
+    // had returned its reply, and the publish happens inside that call).
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(itest::scaled_timeout_ms(10000));
     std::string error;
@@ -521,9 +535,20 @@ void a_gesture_commits_over_the_wire_and_survives_a_concurrent_writer()
     consumer_options.poll_timeout_ms = 100;
     client::SubscriptionConsumer settles(*observer, observer_attach, consumer_options);
     std::size_t settles_seen = 0;
+    // M9 x9: §8's FIRST fact. `files.changed` had no producer at all before x9, so this counter and
+    // `last_file_changed` are what make "the plain `edit` published BOTH facts" assertable here rather
+    // than only at the kernel tier — and they are read over the REAL wire, from the REAL daemon.
+    std::size_t files_seen = 0;
+    std::string last_file_changed;
     settles.on_event(
-        [&observed, &settles_seen](const std::string&, const client::ClientEvent& event)
+        [&observed, &settles_seen, &files_seen, &last_file_changed](
+            const std::string&, const client::ClientEvent& event)
         {
+            if (event.topic == kFilesTopic)
+            {
+                ++files_seen;
+                last_file_changed = event.payload.at("path").as_string();
+            }
             // Count the SETTLE specifically, not merely the topic: every assertion downstream reads
             // `events_applied()`, which counts only `derivation.settled`. The two coincide today (the
             // topic carries exactly one event kind), so this is forward-proofing rather than a live
@@ -542,7 +567,7 @@ void a_gesture_commits_over_the_wire_and_survives_a_concurrent_writer()
             // deliberately says nothing about cross-feed interactions on the same event.
             (void)panels::apply_inspector_event(*observed.inspector, event.topic, event.payload);
         });
-    settles.add(client::SubscriptionSpec{{std::string(panels::kDerivationTopic)}, ""});
+    settles.add(client::SubscriptionSpec{{std::string(panels::kDerivationTopic), kFilesTopic}, ""});
     CHECK(settles.start(observer_error));
     CHECK(settles.states().size() == 1u);
     CHECK(settles.states().size() == 1u && settles.states()[0].live);
@@ -554,12 +579,23 @@ void a_gesture_commits_over_the_wire_and_survives_a_concurrent_writer()
     CHECK(field_value(observed.inspector->panel(), kFovPointer, overridden) == "7.25");
 
     // --- 5a. THE PLAIN FAN-OUT: idle panel, someone else writes, the settle re-reads it -----------
+    //
+    // ⚠ THE RACER'S PLAIN `edit` IS THE ONLY TRIGGER (M9 x9). No `reconcile` chaser, no `edit-batch`,
+    // no `await_*` — see the note where `force_settle` used to live. So this is the §8 chain reached by
+    // the exact call a second editor window / agent / CLI makes.
     {
         const std::size_t settles_before = settles_seen;
+        const std::size_t files_before = files_seen;
         const std::size_t rereads_before = observed.inspector->rereads_armed();
         CHECK(race_write(*racer, kFovPointer, "5.5")); // window 2 is not editing; a co-writer moves it
-        CHECK(force_settle(*racer));
         CHECK(pump_until_settle(settles, settles_seen, settles_before));
+
+        // §8's chain, in §8's order, from ONE plain edit: `files.changed` for the file COMPOSITION
+        // chose (the caller named a FIELD, never this path), then exactly ONE settle. The count is the
+        // storm check — an edit that published two settles would double every client's traffic.
+        CHECK(files_seen == files_before + 1);
+        CHECK(last_file_changed == kRoot);
+        CHECK(settles_seen == settles_before + 1);
 
         CHECK(observed.inspector->events_applied() >= 1u); // the settle was RECOGNIZED, not ignored
         CHECK(observed.inspector->rereads_armed() > rereads_before); // …and it armed the re-read
@@ -584,10 +620,11 @@ void a_gesture_commits_over_the_wire_and_survives_a_concurrent_writer()
 
     {
         const std::size_t settles_before = settles_seen;
+        const std::size_t files_before = files_seen;
         const std::size_t events_before = observed.inspector->events_applied();
         CHECK(race_write(*racer, kFovPointer, "6.5")); // the racer moves THE SAME FIELD, mid-gesture
-        CHECK(force_settle(*racer));
-        CHECK(pump_until_settle(settles, settles_seen, settles_before));
+        CHECK(pump_until_settle(settles, settles_seen, settles_before)); // its OWN plain edit settles
+        CHECK(files_seen == files_before + 1);
 
         // RECOGNIZED — so the four negatives below cannot pass merely because the fact was dropped by
         // a topic filter, which is the one way this whole section could read green while proving
@@ -646,6 +683,82 @@ void a_gesture_commits_over_the_wire_and_survives_a_concurrent_writer()
     CHECK(observed.inspector->results_applied() == results_before + 1);
     CHECK(field_value(observed.inspector->panel(), kFovPointer, overridden) == "6.5");
     CHECK(observed.inspector->panel().base_raw_hash() != observer_base); // now guarding live state
+
+    // --- 5d. THE SELF-ECHO (M9 x9): a window's OWN edit must not re-base its OWN next gesture ------
+    //
+    // THE HAZARD THIS SECTION EXISTS FOR IS CREATED BY x9 ITSELF. Until the publisher half landed, the
+    // editor's writes emitted nothing, so a window could never receive an event caused by its own
+    // `edit` — the deferral proven in 5b only ever had to survive a FOREIGN writer, and the self-echo
+    // path was unreachable. Now every applied commit publishes a settle that comes straight back to the
+    // window that made it, on its own subscription, one pump later. If that echo were served while the
+    // human's NEXT gesture is in flight, `set_model` would discard the staged edit AND adopt a new CAS
+    // base — the same silent re-base 5b guards, except triggered by the user's own keystrokes rather
+    // than by a race, which makes it reachable with no concurrency at all.
+    //
+    // The shape is the ordinary one: commit, keep typing, and the echo lands mid-next-gesture.
+    {
+        const std::size_t settles_before = settles_seen;
+        const std::size_t files_before = files_seen;
+
+        // 1) Window 2's OWN write, through its OWN gateway — the real `edit` RPC, which now publishes.
+        //    A DIFFERENT field from 5b's, so nothing here can pass on leftover state from that section.
+        const inspector::CommitResult self_applied =
+            stage_and_commit(observer_host, observed, kNearPointer, "0.25");
+        CHECK(self_applied.status == inspector::CommitResult::Status::applied);
+
+        // 2) Read-your-writes: the commit armed its own re-read and the owner loop serves it in the
+        //    same frame. Afterwards nothing is staged and nothing is pending, so every negative below
+        //    is about the ECHO and not about leftover bookkeeping.
+        CHECK(observed.inspector->pending().has_value());
+        panels::pump_panel_feeds(observed, *observer, kRoot);
+        CHECK(!observed.inspector->pending().has_value());
+        CHECK(!observed.inspector->panel().has_staged_edit());
+        CHECK(!observed.inspector->refresh_deferred());
+        const std::uint64_t self_base = observed.inspector->panel().base_raw_hash();
+        CHECK(self_base != 0);
+
+        // 3) The human keeps working. The echo has been queued on the client since step 1 (Client::call
+        //    parks pushed frames; only the consumer's pump dispatches them), so it arrives DURING this
+        //    gesture — which is exactly the interleaving a real owner loop produces.
+        stage_only(observer_host, kFovPointer, "11.5");
+        CHECK(observed.inspector->panel().has_staged_edit());
+        const std::size_t rereads_at_stage = observed.inspector->rereads_armed();
+        const std::size_t events_at_stage = observed.inspector->events_applied();
+        const std::size_t results_at_stage = observed.inspector->results_applied();
+
+        CHECK(pump_until_settle(settles, settles_seen, settles_before));
+        // ONE logical edit -> ONE settle + ONE files fact, self-published. If a single write ever
+        // published twice, this window would receive its own echo twice per keystroke.
+        CHECK(settles_seen == settles_before + 1);
+        CHECK(files_seen == files_before + 1);
+        CHECK(last_file_changed == kRoot);
+
+        // THE ASSERTIONS THAT MATTER, and they are the negative ones: the echo was RECOGNIZED (so a
+        // topic-filter regression cannot pass this by dropping it) and DEFERRED, and the human's
+        // in-flight gesture plus its L-30 collision base are untouched — across the pump that would
+        // actually perform the damaging re-read.
+        CHECK(observed.inspector->events_applied() > events_at_stage);
+        CHECK(observed.inspector->refresh_deferred());
+        CHECK(!observed.inspector->pending().has_value());
+        CHECK(observed.inspector->rereads_armed() == rereads_at_stage);
+        CHECK(observed.inspector->panel().has_staged_edit());
+        CHECK(observed.inspector->panel().base_raw_hash() == self_base);
+        panels::pump_panel_feeds(observed, *observer, kRoot);
+        CHECK(observed.inspector->results_applied() == results_at_stage);
+        CHECK(observed.inspector->panel().has_staged_edit());
+        CHECK(observed.inspector->panel().base_raw_hash() == self_base);
+
+        // 4) …and the gesture still lands. NOBODY moved the file since `self_base` was adopted, so the
+        //    CAS matches and the commit APPLIES. This is the other half of "the self-echo is harmless":
+        //    a guard that turned an uncontested own-edit into a spurious DROP would be its own defect,
+        //    and it would look identical to correctness if only the negatives above were asserted.
+        const std::size_t drops_before = observed.inspector->drops_observed();
+        commit_gesture(observer_host);
+        const inspector::CommitResult second = observed.inspector->panel().last_result();
+        CHECK(second.status == inspector::CommitResult::Status::applied);
+        CHECK(observed.inspector->drops_observed() == drops_before);
+        CHECK(mentions(read_authored(project, "root.scene.json"), "11.5"));
+    }
 
     settles.stop();
     panels::bind_write_client(observed, nullptr);

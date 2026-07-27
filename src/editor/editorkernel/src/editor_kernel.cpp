@@ -341,6 +341,10 @@ EditOutcome EditorKernel::edit_file(std::string_view path, std::string_view data
     const filesync::ReconcileChange change{key, filesync::ChangeType::modified,
                                            filesync::content_hash(form.bytes)};
     out.ticket = graph_.apply(change, form.bytes);
+    // Design 05 §8's `files.changed`, published at the ONE seam every change enters the derived world
+    // through (M9 x9 / CE #449). BEFORE the caller's settle, so the chain the design specifies —
+    // `files.changed -> derivation.settled{gen}` — holds by construction rather than by convention.
+    publish_file_change(change);
     // Only JSON content carries envelope findings (the encoding heals + the L-37 migration
     // findings from stamping this save). A non-JSON payload's parse-failure diagnostic is NOT a
     // finding — sidecars/TS text are legal non-JSON kinds, and whether a path SHOULD be JSON is
@@ -455,9 +459,45 @@ EditBatchOutcome EditorKernel::edit_files(const std::vector<BatchEdit>& edits,
         const filesync::ReconcileChange change{w.path, filesync::ChangeType::modified,
                                                w.target_hash};
         out.tickets.push_back(graph_.apply(change, w.data));
+        publish_file_change(change); // one `files.changed` per file, then ONE settle for the batch
     }
     out.ok = true;
     return out;
+}
+
+void EditorKernel::publish_file_change(const filesync::ReconcileChange& change)
+{
+    if (!running())
+        return; // no client stream yet (an in-process CLI kernel, or a test that never started)
+
+    // The `change` class vocabulary is the REGISTRY's, not ChangeType's spelling: the `files` topic's
+    // advertised payload schema (registry.cpp) says `added | modified | removed`, so `created` maps to
+    // `added`. A publisher that emitted its own enum's token would ship a fact no schema describes.
+    const char* klass = "modified";
+    switch (change.type)
+    {
+    case filesync::ChangeType::created:
+        klass = "added";
+        break;
+    case filesync::ChangeType::modified:
+        klass = "modified";
+        break;
+    case filesync::ChangeType::removed:
+        klass = "removed";
+        break;
+    }
+
+    // THE payload is exactly the two advertised fields — deliberately NO `event` member. Design 05 §8
+    // names this fact `files.changed`, but the `files` topic carries exactly ONE event class (a
+    // project file changed, discriminated by `change`), so there is nothing for an `event` member to
+    // discriminate; the multi-class topics (`derivation` / `session` / `clients`) stamp one and the
+    // single-class ones (`diagnostics` / `log`) do not. Adding a field the registry does not advertise
+    // would be contract drift in the R-CLI-014 introspection surface — which is the same reason the
+    // token vocabulary above is the registry's.
+    Json fact = Json::object();
+    fact.set("path", Json(change.path));
+    fact.set("change", Json(std::string(klass)));
+    (void)daemon_.events().publish("files", std::move(fact));
 }
 
 void EditorKernel::ingest_change(const filesync::ReconcileChange& change)
@@ -467,11 +507,13 @@ void EditorKernel::ingest_change(const filesync::ReconcileChange& change)
         // A removal carries no content: content_hash is 0 by the ReconcileChange contract and the
         // derivation graph ignores it for removals, so forward the change as-is.
         graph_.apply(change, std::string_view{});
+        publish_file_change(change);
         return;
     }
     // Content hash is authoritative (R-FILE-002): read the path's CURRENT bytes and derive from them.
     const std::optional<std::string> bytes = fs_.read(change.path);
     graph_.apply(change, bytes ? std::string_view(*bytes) : std::string_view{});
+    publish_file_change(change);
 }
 
 std::vector<filesync::ReconcileChange> EditorKernel::ingest_external(CrawlMode mode)
@@ -527,15 +569,18 @@ std::uint64_t EditorKernel::settle()
     const std::uint64_t generation = graph_.generation();
 
     // Forward the derived-world generation onto the client-facing event stream as the R-BRIDGE-008
-    // quiescence fact. (The bridge's own EventStream generation counter is a distinct concept driven
-    // by pure-bridge tests; the composition point is carrying the DERIVED-WORLD generation here.)
+    // quiescence fact — through `EventStream::settle`, which ADOPTS it.
+    //
+    // ⚠ M9 x9 (CE #449) COLLAPSED TWO PUBLISHERS INTO ONE. This site used to hand-roll the payload
+    // with `publish("derivation", …)` because `EventStream::settle()` took no argument and advanced a
+    // generation counter of its OWN — a different number from the derived world's, which is why the
+    // comment here previously called them "a distinct concept". They are not two concepts: the
+    // registry advertises the wire envelope's `generation` as "the derived-world generation the event
+    // reflects", and hand-rolling the payload left that envelope field at 0 forever (nothing else
+    // ever advanced `generation_`). Passing the generation into the stream's own settle is what makes
+    // the envelope honest for the Shell feeds that read their stamp from it.
     if (running())
-    {
-        Json settled = Json::object();
-        settled.set("event", Json(std::string("derivation.settled")));
-        settled.set("generation", Json(generation));
-        daemon_.events().publish("derivation", std::move(settled));
-    }
+        (void)daemon_.events().settle(generation);
     return generation;
 }
 

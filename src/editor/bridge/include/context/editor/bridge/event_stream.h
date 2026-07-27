@@ -6,9 +6,10 @@
 // the bridge. Every event carries a monotonic, totally-ordered `seq` and the current INCARNATION
 // epoch id (so a client can tell one daemon lifetime from the next) plus the derived-world
 // GENERATION counter. The core topics mirror the contract registry's advertised set
-// (files/derivation/diagnostics/session/clients/log). settle() advances the generation and emits the
-// `derivation.settled{generation}` quiescence event; diagnostics carry a `stability` field; and the
-// kernel `log` topic is FORWARDED here (kept a separate stream, never the same object). Slow
+// (files/derivation/diagnostics/session/clients/log). settle(generation) ADOPTS the derived-world
+// generation and emits the `derivation.settled{generation}` quiescence event; diagnostics carry a
+// `stability` field; and the kernel `log` topic is FORWARDED here (kept a separate stream, never the
+// same object). Slow
 // subscribers get a bounded queue and, on overflow, an explicit gap marker instructing a re-snapshot
 // — the stream never blocks on a slow client.
 
@@ -112,9 +113,23 @@ public:
     std::uint64_t publish(const std::string& topic, contract::Json payload,
                           std::optional<Stability> stability = std::nullopt);
 
-    // Advance the derived-world generation counter and emit the `derivation.settled{generation}`
-    // quiescence event on the `derivation` topic. Returns the new generation.
-    std::uint64_t settle();
+    // ADOPT `derived_generation` as this stream's generation stamp, then emit the
+    // `derivation.settled{generation}` quiescence event on the `derivation` topic. Returns the
+    // assigned seq (like every other emitter here) — NOT the generation, which is the caller's own
+    // input and needs no echo.
+    //
+    // ⚠ THE PARAMETER IS THE WHOLE POINT, and it is what turned this from a shape with no non-test
+    // caller into the ONE settle publisher (M9 x9, CE #449). It used to `++generation_` — a counter
+    // of its OWN, unrelated to the derived world — so `EditorKernel::settle` could not use it and
+    // hand-rolled the same payload with the DERIVED-WORLD generation instead. The cost of that split
+    // was not the duplication: it was that nothing ever advanced `generation_`, so the wire envelope
+    // field the contract registry advertises as "the derived-world generation the event reflects"
+    // (`describe`'s eventEnvelope) was permanently **0** on every event a live daemon ever pushed —
+    // and the Shell's ProblemsFeed / SceneTreeFeed read their `on_derivation_settled(generation)`
+    // stamp from THAT envelope, so the R-BRIDGE-008 stale-provisional discrimination was inert by
+    // construction. Adopting the caller's generation here makes one number mean one thing on both
+    // the envelope and the payload.
+    std::uint64_t settle(std::uint64_t derived_generation);
 
     // Forward a kernel-internal LogEvent onto this stream's `log` topic (kept a distinct stream).
     // Returns the assigned seq.
