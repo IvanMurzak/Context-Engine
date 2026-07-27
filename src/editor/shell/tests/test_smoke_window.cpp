@@ -9,16 +9,20 @@
 // task exists to close. So the load-bearing cases here are the NEGATIVE ones — real mode refusing a
 // headless backend rather than falling back onto `post()`.
 //
-// The keysym half is the other thing that cannot be caught live: an injection table entry that is
+// The key-table half is the other thing that cannot be caught live: an injection table entry that is
 // merely WRONG still sends an event, so the smoke sees a key arrive and passes while the browser
-// receives a different key. It is pinned by SWEEPING the whole single-byte VK range back through the
-// SHIPPING decoder map (`x11_keysym_to_windows_key_code`), so the two cannot drift apart silently —
-// including for a code a LATER task adds to the table, which a hand-listed sample set would miss.
+// receives a different key. BOTH tables — X11 keysyms and (since M9 e12c-3) macOS virtual keys — are
+// pinned by SWEEPING the whole single-byte VK range back through their SHIPPING decoder map
+// (`x11_keysym_to_windows_key_code` / `ns_key_code_to_windows_key_code`), so neither can drift from
+// its decoder silently, including for a code a LATER task adds, which a hand-listed sample set would
+// miss. A third sweep pins the two tables to EACH OTHER: a VK the Linux arm accepts and the macOS arm
+// refuses is a smoke that works on one platform and silently cannot inject on the other.
 //
-// WHAT THIS SUITE DELIBERATELY DOES NOT COVER. The X11 encoder's own refusals (a wheel or leave
-// sample, a press carrying MouseButton::none, a `character` key action, an uncovered keysym) live
-// behind `CONTEXT_SHELL_SMOKE_HAS_X11` and need a display, so they belong to the live
-// `editor-shell-x11-window` smoke, not here. Recorded so the gap is visible rather than assumed
+// WHAT THIS SUITE DELIBERATELY DOES NOT COVER. Each platform encoder's own refusals (a wheel or leave
+// sample, a press carrying MouseButton::none or MouseButton::middle on Cocoa, a `character` key
+// action) are reached only with a real window — they live behind `CONTEXT_SHELL_SMOKE_HAS_X11` or
+// inside the Objective-C++ TU — so they belong to the live `editor-shell-x11-window` /
+// `editor-shell-cocoa-window` smokes, not here. Recorded so the gap is visible rather than assumed
 // covered by `test_headless_injection_carries_what_the_x11_encoder_would_refuse`, which pins the
 // opposite asymmetry.
 
@@ -360,6 +364,90 @@ void test_keysym_table_round_trips_through_the_shipping_decoder_map()
     CHECK(smoke::x11_keysym_for_windows_key_code(-1) == 0u);
 }
 
+// The macOS twin of the sweep above (M9 e12c-3), and it matters MORE than its X11 sibling for one
+// structural reason: the macOS virtual key codes are POSITIONAL, so the inverse is a hand-written
+// table all the way down with no run to fall back on — 0x00 is `A`, 0x06 is `Z`, and the digit row is
+// TRANSPOSED at 5/6. A single transposed entry is exactly the defect that delivers an event carrying a
+// different key, and only the round trip through the SHIPPING decoder can catch it.
+void test_ns_virtual_key_table_round_trips_through_the_shipping_decoder_map()
+{
+    int covered_count = 0;
+    for (std::int32_t code = 0; code <= 0xFF; ++code)
+    {
+        const smoke::NsVirtualKey key = smoke::ns_virtual_key_for_windows_key_code(code);
+        if (!key.covered)
+        {
+            continue;
+        }
+        ++covered_count;
+        CHECK(ns_key_code_to_windows_key_code(key.key_code) == code);
+    }
+    // A FLOOR, so the sweep cannot go vacuously green on a table that lost entries — and so that
+    // ADDING one never reds this line (the round trip above is what polices an addition).
+    CHECK(covered_count >= 45); // 9 named + 26 letters + 10 digits as of e12c-3
+
+    // ⚠ THE SENTINEL CASE, and the whole reason NsVirtualKey carries a `covered` FLAG instead of
+    // overloading a zero return the way the X11 table legitimately can: macOS key code 0x00 IS a real
+    // key. So `covered` must be TRUE for VK_A while its `key_code` is 0 — a reader that treated 0 as
+    // "not in the table" would refuse to inject `A` forever, silently.
+    const smoke::NsVirtualKey letter_a = smoke::ns_virtual_key_for_windows_key_code('A');
+    CHECK(letter_a.covered);
+    CHECK(letter_a.key_code == 0u);
+
+    // The two positional hazards, pinned explicitly. "It round-trips" would ALSO hold for a table that
+    // had swapped a pair consistently in both directions, and the decoder is the shipping side — so
+    // these name the actual macOS codes rather than deriving them.
+    CHECK(smoke::ns_virtual_key_for_windows_key_code('Z').key_code == 0x06u); // the ASDF row, not Z=25
+    CHECK(smoke::ns_virtual_key_for_windows_key_code('5').key_code == 0x17u); // 5 AFTER 6...
+    CHECK(smoke::ns_virtual_key_for_windows_key_code('6').key_code == 0x16u); // ...which is 0x16
+
+    // The `text` column. A wrong character still delivers an event, so it is pinned separately — and
+    // in macOS's OWN spellings, which are not the Windows VK intuition: Backspace produces U+007F
+    // (NSDeleteCharacter), Return U+000D, and an arrow key its AppKit private-use function-key code
+    // point. The letters inject the UNSHIFTED (lowercase) character, exactly as an unmodified press
+    // produces — the same claim the X11 sweep makes about the lowercase keysym.
+    CHECK(smoke::ns_virtual_key_for_windows_key_code(0x09).text == U'\t');     // VK_TAB
+    CHECK(smoke::ns_virtual_key_for_windows_key_code(0x0D).text == U'\r');     // VK_RETURN
+    CHECK(smoke::ns_virtual_key_for_windows_key_code(0x08).text == U'\u007F'); // VK_BACK -> DELETE
+    CHECK(smoke::ns_virtual_key_for_windows_key_code(0x25).text == U'\uF702'); // NSLeftArrowFunctionKey
+    CHECK(smoke::ns_virtual_key_for_windows_key_code('A').text == U'a');
+    CHECK(smoke::ns_virtual_key_for_windows_key_code('Z').text == U'z');
+    CHECK(smoke::ns_virtual_key_for_windows_key_code('7').text == U'7');
+
+    // Uncovered codes report `covered == false` so `inject_event` fails LOUDLY. VK_F1 and VK_NUMPAD0
+    // are real keys the decoder maps in the OTHER direction — they are simply not in the injection
+    // table yet, and a smoke that needs one is told so rather than injecting nothing.
+    CHECK(!smoke::ns_virtual_key_for_windows_key_code(0x70).covered); // VK_F1
+    CHECK(!smoke::ns_virtual_key_for_windows_key_code(0x60).covered); // VK_NUMPAD0
+    CHECK(!smoke::ns_virtual_key_for_windows_key_code(0).covered);
+    CHECK(!smoke::ns_virtual_key_for_windows_key_code(-1).covered);
+}
+
+// ⚠ THE CROSS-ARM CONSISTENCY SWEEP — the case neither per-arm sweep above can make, and the one that
+// catches the most likely FUTURE defect in this seam. Both real-mode arms exist to serve the SAME
+// smokes, so a VK the X11 arm accepts and the Cocoa arm refuses (or vice versa) is a smoke that
+// injects fine on one OS and silently cannot on the other — a per-platform capability gap that no
+// single-platform test and no live smoke can see, because each live smoke only ever runs on its own
+// OS. Sweeping the whole VK range pins the two tables to each other, so extending one without the
+// other reds HERE, on all three legs, instead of on somebody's next macOS-only CI round.
+void test_both_real_mode_arms_accept_exactly_the_same_key_codes()
+{
+    int agreed = 0;
+    for (std::int32_t code = 0; code <= 0xFF; ++code)
+    {
+        const bool x11_covers = smoke::x11_keysym_for_windows_key_code(code) != 0;
+        const bool cocoa_covers = smoke::ns_virtual_key_for_windows_key_code(code).covered;
+        CHECK(x11_covers == cocoa_covers);
+        if (x11_covers && cocoa_covers)
+        {
+            ++agreed;
+        }
+    }
+    // The floor again, so a pair of tables that BOTH lost their entries cannot pass this vacuously
+    // (two empty tables agree perfectly).
+    CHECK(agreed >= 45);
+}
+
 } // namespace
 
 int main()
@@ -374,5 +462,7 @@ int main()
     test_headless_injection_carries_what_the_x11_encoder_would_refuse();
     test_mode_of_reports_what_a_backend_actually_is();
     test_keysym_table_round_trips_through_the_shipping_decoder_map();
+    test_ns_virtual_key_table_round_trips_through_the_shipping_decoder_map();
+    test_both_real_mode_arms_accept_exactly_the_same_key_codes();
     SHELL_TEST_MAIN_END();
 }

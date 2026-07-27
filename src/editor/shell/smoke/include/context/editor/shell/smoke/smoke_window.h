@@ -36,6 +36,32 @@
 // client -> server -> client round trip through the real decoder; the one thing it cannot claim is
 // `send_event == False`, which nothing in the Shell inspects.
 //
+// WHY -[NSApplication postEvent:atStart:] RATHER THAN CGEventPost ON macOS (M9 e12c-3). The X11
+// choice above has a direct macOS analogue and the same reasoning decides it, but there the stakes
+// are higher: `CGEventPost` / `CGEventTapCreate` cross the HID/system boundary, so macOS gates them
+// behind a TCC **Accessibility** grant that a human must give in System Settings — un-grantable on a
+// GitHub-hosted runner, which would make a CGEventPost-based design worthless as a CI gate.
+// `postEvent:` is IN-PROCESS: the event goes onto the app's own queue and comes back out of
+// `-[NSApplication nextEventMatchingMask:]`, exactly the pump `CocoaWindowBackend::pump()` runs, so
+// nothing crosses that boundary. MEASURED rather than assumed, and measured in the direction that
+// makes it decisive: on the reproduction host `CGPreflightPostEventAccess()` and
+// `AXIsProcessTrusted()` are BOTH false — no grant is held — and a synthesized move + press +
+// release + key still round-tripped 5/5 through `nextEventMatchingMask` with `[event window]`
+// resolving to the smoke's own window. It is also the closer analogue of the X11 path, which sends
+// to the smoke's OWN window rather than driving the server globally.
+//
+// ⚠ TWO MEASURED COCOA LIMITS THE X11 ARM DOES NOT HAVE, both documented at the injection site:
+//   1. The delivered `locationInWindow` is NOT the requested one. AppKit round-trips a posted mouse
+//      location through the window server and returns it scaled about the window's centre — MEASURED
+//      ~1.4% on the reproduction host (a 640-point-wide window's edges came back 4.5 points out,
+//      linear in the offset from centre, on an exact-2x non-scaled display). So a real-mode smoke
+//      must NOT assert an exact position round trip on macOS; assert ORDER and SEPARATION (which no
+//      such scaling can invert) or region membership with margin.
+//   2. The pressed-BUTTON mask cannot be injected at all. `CocoaWindowBackend::handle` reads it from
+//      `+[NSEvent pressedMouseButtons]`, a live HID query, not from the event — so an injected press
+//      arrives with `Modifiers::left_button_down` false. The modifier FLAGS (shift/control/alt/meta)
+//      DO travel, because those come off the event.
+//
 // NOTHING HERE LINKS CEF. It is compiled + unit-tested on all three default `build` legs
 // (`editor-shell-test_smoke_window`), which is the same layering the rest of the Shell follows: the
 // CEF smokes are the only place this seam is exercised in `real` mode, so everything ABOUT the seam
@@ -153,12 +179,23 @@ struct PresentSetup
 // X11 development headers. A false is ALWAYS a smoke failure; nothing here degrades quietly.
 //
 //   * headless — `HeadlessWindowBackend::post()`, delivered by the next `pump()`.
-//   * real — a genuine X server round trip:
+//   * real, Linux — a genuine X server round trip:
 //       - pointer + key: XSendEvent to the smoke's own window, decoded by the real
 //         `translate_x11_event` on the way back in;
-//       - resize: `apply_placement()`, so the new geometry is the server's ConfigureNotify.
-//         ⚠ That makes a real-mode resize ASYNCHRONOUS: the caller must pump until
-//         `backend.client_size()` changes rather than asserting straight after the call.
+//   * real, macOS — a genuine AppKit queue round trip: a synthesized NSEvent posted with
+//     `-[NSApplication postEvent:atStart:]`, dequeued by the backend's own
+//     `nextEventMatchingMask` pump and decoded by the real `translate_ns_event` (see the header
+//     preamble for why this needs no TCC grant, and for the two fidelity limits it carries).
+//   * real, either — resize: `apply_placement()`, so the new geometry is the window system's own
+//     configure/geometry change.
+//     ⚠ That makes a real-mode resize ASYNCHRONOUS: the caller must pump until
+//     `backend.client_size()` changes rather than asserting straight after the call.
+//
+// ⚠ A real-mode pointer PRESS must be followed by its RELEASE. The Shell's pump forwards every
+// dequeued event to AppKit (`cocoa_window.mm` shape 4), and a burst of unpaired synthesized
+// LeftMouseDowns drove AppKit into a nested mouse-tracking loop that never returned (MEASURED: a
+// 60 s hang in an e12c-3 probe). Injecting down/up in pairs — which every smoke already does — is
+// the whole discipline.
 bool inject_event(IWindowBackend& backend, WindowMode mode, const ShellEvent& event);
 
 // The X keysym `inject_event` sends for a CEF `windows_key_code`, or 0 when this table does not
@@ -167,5 +204,31 @@ bool inject_event(IWindowBackend& backend, WindowMode mode, const ShellEvent& ev
 // false, so a future smoke that injects a new key is told to extend the table instead of silently
 // injecting nothing.
 [[nodiscard]] std::uint32_t x11_keysym_for_windows_key_code(std::int32_t windows_key_code);
+
+// The macOS side of the same idea (M9 e12c-3): the virtual key code AND the `-[NSEvent characters]`
+// code unit `inject_event` synthesizes for a CEF `windows_key_code`. The inverse of
+// `ns_key_code_to_windows_key_code` over the keys the smokes actually inject — deliberately NARROW
+// and deliberately loud, exactly like the keysym table above.
+//
+// ⚠ WHY THIS IS A STRUCT WHERE THE X11 SIDE RETURNS A BARE VALUE, and it is not stylistic: macOS
+// virtual key code **0x00 is a real key** (`kVK_ANSI_A`), so zero cannot double as the
+// not-in-the-table sentinel the way X11's `NoSymbol` legitimately does. An `covered` flag is the
+// only honest encoding. The struct also carries `text` because a synthesized NSEvent must be handed
+// its `characters:` string — macOS puts the character IN the key event rather than in a separate one
+// (`translate_ns_event` reads it from there), so the character is part of the injection contract and
+// not an afterthought a caller could be expected to supply.
+struct NsVirtualKey
+{
+    // kVK_* — meaningless unless `covered`.
+    std::uint32_t key_code = 0;
+    // The FIRST UTF-16 code unit `-[NSEvent characters]` must carry, or 0 for a key that produces no
+    // text. NOTE macOS's own spellings, which are NOT the Windows VK intuition: Backspace produces
+    // U+007F (DELETE, not U+0008), Return produces U+000D, and an arrow key produces its AppKit
+    // private-use `NS*ArrowFunctionKey` code point.
+    char32_t text = 0;
+    bool covered = false;
+};
+
+[[nodiscard]] NsVirtualKey ns_virtual_key_for_windows_key_code(std::int32_t windows_key_code);
 
 } // namespace context::editor::shell::smoke
