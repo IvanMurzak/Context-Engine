@@ -10,22 +10,25 @@
 // WHY IT COMPOSES THROUGH MemoryBlitter. MemoryBlitter is the ORACLE the blit geometry is asserted
 // against on all three OSes; running the real macOS present THROUGH it makes the letterbox/pillarbox
 // arithmetic and the nearest-neighbour sampling pixel-identical to the tested path by CONSTRUCTION.
-// That matters more here than on the two sibling platforms: no CI job runs a windowed macOS test, so
-// a hand-written second copy of the scale would have exactly zero coverage. The cost is one extra
-// pass over a buffer on the path that exists only because there is no GPU at all.
+// That matters more here than on the two sibling platforms: until M9 e12c-3 no CI job ran a
+// windowed macOS test at all, so a hand-written second copy of the scale would have had exactly
+// zero coverage. The cost is one extra pass over a buffer on the path that exists only because
+// there is no GPU at all.
 //
-// WHAT IS HONESTLY UNVERIFIED — and it is MORE than the visible frame. No test on any leg calls
-// CocoaLayerBlitter::blit() at all. `test_present_blit.cpp` reaches this file only through
-// make_cocoa_layer_blitter's null-argument guard, so the whole body below — the CFDataCreate copy,
-// the CGImage construction, the kCGImageAlphaPremultipliedLast byte-order choice, the CATransaction
-// implicit-animation suppression, and all five early returns — carries NO runtime coverage. What IS
-// covered, on all three OSes, is the geometry: MemoryBlitter is exercised directly by that same
-// suite, and this class composes through it rather than re-deriving it, so the plan applied here is
-// the tested one by construction. Closing the rest needs an Objective-C++ test that builds a real
-// CALayer (Core Animation needs no Aqua session), plus the windowed proof that a presented frame is
-// VISIBLE — both e12c's, since `editor-cef-smoke (macos-latest)` deliberately runs no windowed
-// smoke. Stated here rather than implied, so the next reader does not mistake the geometry coverage
-// above for coverage of this file.
+// WHAT IS COVERED, AND WHAT IS STILL HONESTLY UNVERIFIED. `test_present_blit.cpp` reaches this file
+// only through make_cocoa_layer_blitter's null-argument guard, so through e12b the whole body below
+// carried NO runtime coverage. Since M9 e12c-3 the `editor-shell-cocoa-window` smoke RUNS it: on
+// the macos-latest leg it attaches this blitter over a REAL NSWindow's layer (asserting the
+// resolved name is `cocoa-calayer`, so no fallback can satisfy it) and then asserts
+// frames_presented >= 1, a counter that advances only when the ATTACHED blitter's blit() returned
+// true. So the CFDataCreate copy, the CGImage construction, the CATransaction suppression and the
+// early returns are executed code now — on ONE leg. The GEOMETRY stays covered on all three OSes
+// for the separate reason above: MemoryBlitter is exercised directly by that suite, and this class
+// composes through it. STILL UNVERIFIED: that the presented frame is VISIBLE ON SCREEN. A blit()
+// that returned true with the wrong kCGImageAlphaPremultipliedLast byte order, or that the window
+// server never composited, satisfies every assertion above — nothing reads pixels back OUT of the
+// window server, which would need a screen capture no hosted runner offers. Stated here rather than
+// implied, so the next reader does not mistake "blit() runs" for "the frame is on screen".
 
 #include "context/render/present/present_blit.h"
 

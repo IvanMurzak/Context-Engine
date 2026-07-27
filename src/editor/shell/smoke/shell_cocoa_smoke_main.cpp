@@ -39,10 +39,12 @@
 //      a property of the Shell and not one a CI runner owes us. Asserting it would be the flaky
 //      blocking gate e12a already shipped once.
 //
-// EXIT CODES. 0 = pass. 1 = a real failure. 77 = ctest's SKIP: no GUI (Aqua) session, which is the
-// ordinary state of the default `build`/`sanitize` legs. The skip is non-vacuous because the CI job
-// that DOES have a session runs this with --require-cocoa --require-display, under which a missing
-// session, a refused window and a missing OS blitter are all hard failures.
+// EXIT CODES. 0 = pass. 1 = a real failure. 77 = ctest's SKIP: no GUI (Aqua) session. That is the
+// ordinary state of the `build (macos-latest)` leg — the ONLY default leg this target exists on at
+// all, since it is created inside `if(APPLE)` while both `sanitize` legs are ubuntu. The skip is
+// non-vacuous because the CI job that DOES have a session runs this with --require-cocoa
+// --require-display, under which a missing session, a refused window and a missing OS blitter are
+// all hard failures.
 
 #include "context/editor/shell/dpi.h"
 #include "context/editor/shell/panels/builtin_panels.h"
@@ -50,6 +52,7 @@
 #include "context/editor/shell/smoke/smoke_window.h"
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -381,8 +384,9 @@ int main(int argc, char** argv)
     //
     // Cocoa has no ConfigureNotify: geometry is POLLED once per pump and diffed by
     // translate_ns_window_geometry (cocoa_window.mm shape 2). So this asks the window system for a
-    // new frame and waits for the size to come back through THAT diff — the size the server GRANTED,
-    // which a WM or a screen constraint is entitled to adjust, never the one we asked for.
+    // new frame and waits for the size to come back through THAT diff — the size the window server
+    // GRANTED, which `constrainFrameRect:toScreen:` or a screen constraint is entitled to adjust
+    // (there is no window manager on macOS), never the one we asked for.
     const render::Extent2D before_resize = backend->client_size();
     // The size the browser was last told about BEFORE the resize. It is already non-zero — the owner
     // loop syncs it on the very first pump_once (the browser_size_synced_ latch) — so asserting
@@ -390,14 +394,29 @@ int main(int argc, char** argv)
     // deleted from the resize arm. The claim is that it CHANGED.
     const render::Extent2D browser_size_before = browser->last_logical_size();
     shell::WindowPlacement resized = backend->placement();
-    resized.width = before_resize.width + 120u;
-    resized.height = before_resize.height + 80u;
+    // ⚠ THE PHYSICAL-PIXELS -> COCOA-POINTS CONVERSION IS LOAD-BEARING HERE, not decoration.
+    // `client_size()` is PHYSICAL PIXELS; `placement()` is COCOA POINTS (smoke_window.h states the
+    // rule and why). Assigning `before_resize.width + 120` straight into `resized` — which this
+    // smoke did until e12c-3's review — asked a 2x window for ~2.4x its size while reading as
+    // "+120", and read as exactly right on a 1x display, so no assertion here could have caught it.
+    const render::Extent2D grown = smoke::placement_extent_for_physical(
+        *backend, render::Extent2D{before_resize.width + 120u, before_resize.height + 80u});
+    resized.width = grown.width;
+    resized.height = grown.height;
     backend->apply_placement(resized);
+    // ⚠ THE PREDICATE IS DIRECTIONAL (`>`), NOT MERELY "CHANGED" (`!=`), and that is the assertion
+    // that pins the physical-pixels -> points conversion above. A `!=` is satisfied by a resize
+    // that went the WRONG WAY by a factor of the DPI scale, which is exactly how the unit-mismatch
+    // this review fixed stayed invisible on a green gate. Both dimensions, because a one-axis clamp
+    // must not be able to satisfy it either. The size is still the GRANTED one, never the requested
+    // one — this claims the direction the window server moved in, not the magnitude.
     const bool observed_resize = pump_until(manager, clock_us, [&] {
         const render::Extent2D now = backend->client_size();
-        return now.width != before_resize.width || now.height != before_resize.height;
+        return now.width > before_resize.width && now.height > before_resize.height;
     });
-    COCOA_CHECK(observed_resize, "AppKit's own geometry reported the granted resize to the shell");
+    COCOA_CHECK(observed_resize,
+                "AppKit's own geometry reported the granted resize to the shell, and it GREW as "
+                "requested");
     if (observed_resize)
     {
         COCOA_CHECK(editor->compositor().size().width == backend->client_size().width &&
@@ -437,6 +456,13 @@ int main(int argc, char** argv)
     const render::Extent2D live = backend->client_size();
     const int pointer_dispatches_before = editor->input().pointer_dispatches();
     const int key_dispatches_before = editor->input().key_dispatches();
+    // ⚠ THE BROWSER'S SAMPLE LOG IS SCANNED AS A TAIL, for exactly the reason the dispatch counters
+    // are read as a delta one line up. Everything before this index belongs to whatever the desktop
+    // delivered earlier — a MouseExited during the up-to-10 s resize pump above is the realistic
+    // case — and the position claims below identify their samples by ORDER, so folding a hardware
+    // sample in as "the first move" would compare it against an injected one and red on a clean
+    // tree.
+    const std::size_t pointers_before = browser->pointers().size();
 
     // TWO moves, at the TOP and the BOTTOM of the right half. Two rather than one because the strong
     // position claim available here is a RELATIVE one: an exact equality is impossible (file header,
@@ -489,11 +515,13 @@ int main(int argc, char** argv)
     int downs = 0;
     int ups = 0;
     int moves = 0;
-    std::int32_t first_move_y = -1;
-    std::int32_t second_move_y = -1;
-    std::int32_t move_x = -1;
-    for (const shell::PointerEvent& pointer : browser->pointers())
+    std::int32_t first_move_y = 0;
+    std::int32_t second_move_y = 0;
+    std::int32_t move_x = 0;
+    const std::vector<shell::PointerEvent>& all_pointers = browser->pointers();
+    for (std::size_t i = pointers_before; i < all_pointers.size(); ++i)
     {
+        const shell::PointerEvent& pointer = all_pointers[i];
         if (pointer.action == shell::PointerAction::move)
         {
             ++moves;
@@ -530,8 +558,17 @@ int main(int argc, char** argv)
     // SMALLER y. `ns_view_point_to_physical` is what flips Cocoa's bottom-left origin into the
     // Shell's top-left one; drop that flip and these two swap. The separation floor rules out both
     // samples collapsing onto one point (which an ignored location would do).
-    if (moves >= 2 && first_move_y >= 0 && second_move_y >= 0)
+    //
+    // ⚠ THE ONLY GUARD IS `moves >= 2`, which the CHECK above already asserts — so this block
+    // cannot be SKIPPED on a passing run. It previously also required both delivered y values to be
+    // `>= 0`, which meant a negative delivered coordinate (the one shape that says the flip or the
+    // scaling went wrong) silently dropped the whole flip claim while the smoke still reported
+    // PASS. A coordinate out of range is something to FAIL on, never a reason to stop asserting.
+    if (moves >= 2)
     {
+        COCOA_CHECK(first_move_y >= 0 && second_move_y >= 0,
+                    "both delivered sample positions are inside the window - a negative y means "
+                    "the flip or the location round trip is broken");
         COCOA_CHECK(first_move_y < second_move_y,
                     "the TOP-injected sample arrived above the BOTTOM-injected one - the Cocoa "
                     "bottom-left -> Shell top-left flip survived the round trip");
@@ -543,7 +580,7 @@ int main(int argc, char** argv)
     // The x coordinate is asserted as a HALF-PLANE, never an equality: the delivered location is
     // scaled about the window centre (file header, claim 2), and a half-plane is what the region
     // arbitration above actually depends on.
-    if (moves >= 1 && move_x >= 0)
+    if (moves >= 1)
     {
         COCOA_CHECK(move_x > static_cast<std::int32_t>(live.width / 2u),
                     "the sample arrived in the RIGHT half, outside the published viewport region");
@@ -578,6 +615,11 @@ int main(int argc, char** argv)
     // The seam's RESIZE arm, which posts no NSEvent at all: it asks the window system and waits for
     // the geometry diff. Proven here so all three injection arms have a CEF-free, locally-runnable
     // macOS proof and not just the two the live CEF smokes exercise.
+    //
+    // `shrink.size` is PHYSICAL PIXELS, like every other `ShellEvent` extent; `inject_event`
+    // converts it to the backend's placement units itself (smoke_window.h), so this really does ask
+    // for a SMALLER window rather than — as it did before e12c-3's review — a near-doubled one that
+    // only satisfied the "geometry changed" predicate by accident.
     const render::Extent2D before_injected_resize = backend->client_size();
     shell::ShellEvent shrink;
     shrink.kind = shell::ShellEventKind::resize;
@@ -585,14 +627,18 @@ int main(int argc, char** argv)
                                    before_injected_resize.height - 30u};
     COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, shrink),
                 "a resize REQUEST was accepted for injection");
+    // Directional for the same reason as step 6, and here it is the seam's OWN conversion under
+    // test: a resize arm that wrote physical pixels into a points-valued placement would GROW this
+    // window while the smoke asked it to SHRINK, and a `!=` predicate would have called that a
+    // pass.
     const bool observed_injected_resize = pump_until(manager, clock_us, [&] {
         const render::Extent2D now = backend->client_size();
-        return now.width != before_injected_resize.width ||
-               now.height != before_injected_resize.height;
+        return now.width < before_injected_resize.width &&
+               now.height < before_injected_resize.height;
     });
     COCOA_CHECK(observed_injected_resize,
                 "the injected resize came back through AppKit's own geometry, not a synthesized "
-                "event");
+                "event, and the window really SHRANK");
 
     // ----------------------------------------------------- 7. teardown persists the session
     manager.shutdown();

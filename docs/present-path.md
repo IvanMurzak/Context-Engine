@@ -131,8 +131,11 @@ degrades loudly instead of quietly presenting nothing.
 
 The macOS blitter composes THROUGH `MemoryBlitter` rather than re-deriving the scale. That is the
 oracle the blit geometry is asserted against on every OS, so the macOS path is pixel-identical to the
-tested one by CONSTRUCTION — which matters more here than for its two siblings, because no CI leg
-runs a windowed macOS test and a hand-written second copy of the arithmetic would have zero coverage.
+tested one by CONSTRUCTION — which mattered more here than for its two siblings, because until M9
+e12c-3 no CI leg ran a windowed macOS test at all and a hand-written second copy of the arithmetic
+would have had zero coverage. (`editor-shell-cocoa-window` now runs one on `macos-latest`; composing
+through `MemoryBlitter` is still the right call, and is still what makes the geometry claim
+cross-platform rather than resting on that single leg.)
 Its `CFDataCreate` COPIES the composed frame: `CGDataProviderCreateWithData` over the blitter's own
 buffer would not, and the CGImage handed to the layer outlives the call, so the next present would
 leave the layer displaying freed memory.
@@ -234,12 +237,20 @@ Named so the gaps are visible rather than assumed. The first two were **closed b
   COVERED, on all three legs: the blit GEOMETRY, because the class composes through `MemoryBlitter`
   rather than re-deriving the scale, and `MemoryBlitter` is exercised directly by
   `render-present-test_present_blit`; plus the factory's null-argument guard, and — off Apple — the
-  named refusal. NOT COVERED ANYWHERE: `CocoaLayerBlitter::blit()` itself. No test on any leg calls
-  it, so the `CFDataCreate` copy, the `CGImage` construction, the byte-order choice, the
-  `CATransaction` implicit-animation suppression and the five early returns have no runtime proof —
-  and neither does the claim that a presented frame becomes VISIBLE. Both need an Objective-C++ test
-  building a real `CALayer` and a real Mac with a real window respectively; the `.app` bundle a
-  windowed macOS smoke would need is **e12c's**. The cross-platform suite deliberately does NOT
+  named refusal. COVERED SINCE M9 e12c-3, on the `macos-latest` leg only:
+  `CocoaLayerBlitter::blit()` is really CALLED and really returns true.
+  `editor-shell-cocoa-window` attaches the real blitter over a real `NSWindow`'s layer (asserting the
+  resolved name is `cocoa-calayer`, so no fallback can satisfy it), then asserts
+  `compositor().stats().frames_presented >= 1` — a counter that advances only when the ATTACHED
+  blitter's `blit()` returned true — and reads the composed surface back to prove no texel of the
+  padded allocation's margin reached it. So the `CFDataCreate` copy, the `CGImage` construction, the
+  `CATransaction` suppression and the early returns are no longer un-executed code. It needed no
+  `.app` bundle in the end: the landed smoke is CEF-free and a plain `add_executable`.
+  STILL NOT COVERED: that a presented frame becomes VISIBLE **on screen**. A `blit()` that returned
+  true with the wrong `kCGImageAlphaPremultipliedLast` byte order, or that the window server never
+  composited, would satisfy every assertion above — nothing reads pixels back OUT of the window
+  server. That needs a screen capture, which no hosted runner offers; it is deliberately still open.
+  The cross-platform suite deliberately does NOT
   construct the blitter with a stand-in pointer on Apple: the implementation holds the layer in an
   ARC-strong member, so a non-object pointer is dereferenced by `objc_retain` at construction.
 - **No Wayland present blitter** — post-M9 (D21 targets X11/XWayland). The selection NAMES the gap

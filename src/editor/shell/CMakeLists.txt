@@ -248,9 +248,11 @@ set(_context_shell_tests
     test_ui_mirror     # e10d: the editor.ui cross-window mirror relay - broadcast-to-all incl. sender
     test_write_notice  # e09b-3: the LOUD write-notice relay - envelope shape, broadcast, the
                        #         never-a-window-id origin, and the honest unbound/throwing-provider paths
-    test_smoke_window  # e12a-x11-legs: the --real-window seam - flag parse, the anti-degrade
-                       # negatives, DIP conversion off 1.0, the keysym sweep (one extra link edge,
-                       # added after context_editor_shell_smoke_support is defined below)
+    test_smoke_window  # e12a-x11-legs + e12c-3: the --real-window seam - flag parse, the
+                       # anti-degrade negatives, DIP conversion off 1.0, the THREE key-table sweeps
+                       # (X11 keysyms, macOS virtual keys, and the cross-arm agreement), and the
+                       # physical-pixels <-> Cocoa-points inverses (one extra link edge, added after
+                       # context_editor_shell_smoke_support is defined below)
     test_shell)        # the owner loop end to end + the authenticated-attach guard
 
 foreach(_t IN LISTS _context_shell_tests)
@@ -357,9 +359,11 @@ endif()
 # keeps a future family-wide change — a define, a property, a label — from silently skipping it.
 # The ONE thing the loop cannot know is this extra link edge, which is why only it is spelled here.
 # It asserts the seam's DECISIONS without opening a window or needing a display: the flag parse, the
-# headless construction + present, DIP conversion at a non-identity scale, the keysym sweep, and —
-# the load-bearing ones — that real mode REFUSES a headless backend, and refuses a window with no
-# presentable native surface, rather than degrading onto `post()` / an in-memory present.
+# headless construction + present, DIP conversion at a non-identity scale, the three key-table
+# sweeps, the physical-pixels <-> Cocoa-points inverses (which the live macOS smoke provably CANNOT
+# catch a wrong SCALE in — see smoke_window.h), and — the load-bearing ones — that real mode REFUSES
+# a headless backend, and refuses a window with no presentable native surface, rather than degrading
+# onto `post()` / an in-memory present.
 target_link_libraries(context_editor_shell_test_smoke_window
     PRIVATE context_editor_shell_smoke_support)
 
@@ -431,7 +435,9 @@ endif()
 # in seconds instead of a CI round.
 #
 # macOS-only by construction, and it SKIPS (ctest SKIP_RETURN_CODE 77) when there is no GUI (Aqua)
-# session — the ordinary state of the default `build`/`sanitize` legs, where it must not fail. That
+# session — the ordinary state of the `build (macos-latest)` leg, the only default leg this target is
+# configured on at all (it lives inside `if(APPLE)`; both sanitize legs are ubuntu), where it must not
+# fail. That
 # skip is NOT allowed to become permanent: the editor-cef-smoke macOS leg runs the executable DIRECTLY
 # with --require-cocoa --require-display, under which a missing session, a refused window and a missing
 # OS blitter are all hard failures. The `ctest`-reports-a-SKIP-as-a-PASS trap e12a paid for applies

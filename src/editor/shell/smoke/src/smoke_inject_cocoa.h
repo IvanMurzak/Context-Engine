@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include "context/editor/shell/shell.h"
+// `window.h` alone: this header names only IWindowBackend and ShellEvent, both defined there.
 #include "context/editor/shell/window.h"
 
 namespace context::editor::shell::smoke

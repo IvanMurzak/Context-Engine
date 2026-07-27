@@ -450,6 +450,177 @@ void test_both_real_mode_arms_accept_exactly_the_same_key_codes()
 
 } // namespace
 
+// THE UNIT BOUNDARY THE RESIZE ARM CROSSES, asserted where it can actually FAIL — and it could not,
+// until e12c-3's review. `inject_event`'s resize arm writes a PHYSICAL-PIXEL `event.size` into a
+// `WindowPlacement`, which is physical pixels on X11/Win32 but COCOA POINTS on macOS
+// (`CocoaWindowBackend::placement()`'s own "⚠ IN COCOA POINTS" note). The seam assigned it straight
+// through, so on a 2x display it asked for TWICE the requested size.
+//
+// ⚠ WHY THIS IS A UNIT TEST AND NOT A LIVE-SMOKE ASSERTION, which is the whole reason the defect
+// survived a green live gate: `editor-shell-cocoa-window` only asserts that the granted geometry
+// CHANGED, which a 2x-too-large request satisfies just as well as a correct one. And at scale 1.0 —
+// what a non-Retina runner reports — the conversion is a literal no-op, so no assertion on such a
+// host can distinguish a present divide from a missing one. So the DPI is driven off 1.0 here and
+// the expected values are spelled as LITERALS, the same discipline
+// `test_browser_geometry_converts_the_client_extent_at_a_non_identity_dpi` above records.
+void test_ns_extent_to_points_inverts_the_shipping_physical_conversion()
+{
+    // Identity at the reference DPI — the case that must NOT change, since it is every non-Retina
+    // display and every X11/Win32 backend.
+    CHECK(smoke::ns_extent_to_points(640, DpiScale{96}) == 640u);
+
+    // 2x: the case a pass-through gets wrong by a factor of two.
+    CHECK(smoke::ns_extent_to_points(640, DpiScale{192}) == 320u);
+    CHECK(smoke::ns_extent_to_points(400, DpiScale{192}) == 200u);
+    // 1.25x and 1.5x — factors that are not exactly representable as a binary float, which is why
+    // the implementation divides by `dpi.dpi` (the source of truth) rather than multiplying by
+    // 1/factor().
+    CHECK(smoke::ns_extent_to_points(800, DpiScale{120}) == 640u);
+    CHECK(smoke::ns_extent_to_points(960, DpiScale{144}) == 640u);
+    // 0.5x, the other side of 1.0: fewer physical pixels than points.
+    CHECK(smoke::ns_extent_to_points(320, DpiScale{48}) == 640u);
+
+    // ROUND TRIP against the SHIPPING forward conversion, so the two can never drift: the same
+    // single-source-of-truth discipline the key tables get, one axis over.
+    //
+    // ⚠ THE EXACTNESS CLAIM IS CONDITIONAL, and stating it loosely would have been the vacuous
+    // version. `ns_extent_to_physical` ROUNDS, so at a factor below 1.0 it is not injective — at
+    // 0.5x both 17 and 18 points map to 9 physical pixels, and no inverse can recover which. (Found
+    // by this very sweep over-claiming: 1@48 and 17@48 failed an unconditional equality.) So: EXACT
+    // wherever the forward direction lost nothing, within ONE point everywhere else, and a counted
+    // floor so the exact arm cannot quietly stop running.
+    int exact_cases = 0;
+    for (const std::uint32_t dpi_value : {48u, 96u, 120u, 144u, 192u, 288u})
+    {
+        const DpiScale dpi{dpi_value};
+        for (const std::uint32_t points : {1u, 17u, 320u, 480u, 640u, 1440u})
+        {
+            const std::uint32_t physical = ns_extent_to_physical(static_cast<double>(points), dpi);
+            CHECK(physical != 0u);
+            const std::uint32_t back = smoke::ns_extent_to_points(physical, dpi);
+            if ((points * dpi_value) % kReferenceDpi == 0u)
+            {
+                // The forward conversion was exact, so the inverse must recover `points` exactly.
+                CHECK(back == points);
+                ++exact_cases;
+            }
+            else
+            {
+                const std::uint32_t drift = back > points ? back - points : points - back;
+                CHECK(drift <= 1u);
+            }
+        }
+    }
+    // Non-vacuity floor: 30 of the 36 pairs above have an exact forward conversion today. If a
+    // future edit turned the exact arm off, this reds instead of silently degrading to the ±1
+    // claim.
+    CHECK(exact_cases >= 30);
+
+    // A non-empty extent NEVER becomes empty. `apply_placement` refuses an empty rect outright, so
+    // rounding 1 physical pixel at 10x down to 0 points would turn a resize REQUEST into a silent
+    // no-op — the shape this seam exists to make impossible.
+    CHECK(smoke::ns_extent_to_points(1, DpiScale{960}) == 1u);
+    // ...but a genuinely empty input stays empty, so `is_empty` still discriminates upstream.
+    CHECK(smoke::ns_extent_to_points(0, DpiScale{192}) == 0u);
+}
+
+// The OTHER half of the same rule, and the more dangerous direction: converting for a backend whose
+// placement is ALREADY physical pixels would break the Linux `editor-shell-x11-window` gate and the
+// nine CEF smokes. The discrimination is on the published native window KIND, so a headless backend
+// must come back UNCHANGED even at a non-identity DPI — which is exactly what this asserts, on all
+// three legs, with no display and no Cocoa.
+//
+// Honest scope: the `MetalLayer` arm's BRANCH SELECTION is reachable only with a real NSWindow, so
+// it belongs to the live `editor-shell-cocoa-window` smoke. Its ARITHMETIC is
+// `ns_extent_to_points`, swept above on every leg — so the part that can silently drift is fully
+// covered here.
+void test_placement_extent_for_physical_leaves_a_non_cocoa_backend_alone()
+{
+    smoke::WindowSetup setup = smoke::make_smoke_window(desc_640x480(), smoke::WindowMode::headless);
+    CHECK(setup.backend != nullptr);
+    if (setup.backend == nullptr)
+    {
+        return;
+    }
+    IWindowBackend& backend = *setup.backend;
+
+    ShellEvent dpi_changed;
+    dpi_changed.kind = ShellEventKind::dpi_changed;
+    dpi_changed.dpi = DpiScale{192}; // 2x — where an unwanted conversion HALVES the request
+    CHECK(smoke::inject_event(backend, smoke::WindowMode::headless, dpi_changed));
+    std::vector<ShellEvent> drained;
+    CHECK(backend.pump(drained));
+    CHECK(backend.dpi() == DpiScale{192});
+    // The premise: this backend publishes no layer, so it must take the identity arm.
+    CHECK(backend.native_window().kind != render::NativeWindowKind::MetalLayer);
+
+    const render::Extent2D asked{640, 400};
+    const render::Extent2D got = smoke::placement_extent_for_physical(backend, asked);
+    // 640x400, NOT 320x200 — a `#if defined(__APPLE__)` implementation would report the latter on
+    // this very leg when built on macOS, which is the reason the discriminator is the window kind.
+    CHECK(shelltest::extent_eq(got, asked));
+    CHECK(!shelltest::extent_eq(got, render::Extent2D{320, 200}));
+}
+
+// The COORDINATE inverse, swept back through the shipping decoder — the sibling of the extent sweep
+// above, and the case with the sharpest provenance in this suite.
+//
+// ⚠ THIS EXISTS BECAUSE THE LIVE SMOKE PROVABLY CANNOT CATCH IT. `editor-shell-cocoa-window`
+// asserts the flip DIRECTION, a separation floor and a half-plane — never an equality, because
+// AppKit scales the delivered location about the window centre (smoke_window.h, Cocoa limit 1).
+// MEASURED during e12c-3's review: mutating the inverse to divide AFTER the flip rather than before
+// — the exact error `ns_view_point_to_physical` warns about — left that live gate GREEN on a 2x
+// host, because all three of its claims survive a uniformly wrong scale. At 1.0 the mutation is a
+// literal no-op, so a 1x runner cannot see it either. Hence: driven off 1.0, round-tripped against
+// the SHIPPING decoder.
+void test_ns_view_point_for_physical_inverts_the_shipping_decoder_at_a_non_identity_dpi()
+{
+    // 2x, worked by hand so a reader can check the arithmetic without running it: a 400-point-tall
+    // view is 800 physical pixels. Shell-space y=100 (near the TOP) must become 400 - 50 = 350
+    // points (near Cocoa's TOP, which is the HIGH point value), and x=600 physical is 300 points.
+    const NsViewGeometry two_x{400.0, DpiScale{192}, 0u};
+    const smoke::NsViewPointPoints high =
+        smoke::ns_view_point_for_physical(PointI{600, 100}, two_x.height_points, two_x.dpi);
+    CHECK(high.x_points == 300.0);
+    CHECK(high.y_points == 350.0);
+    // Divide-after-flip would give (400 - 100) / 2 = 150. Pinned as a literal NON-value so that
+    // specific mutation cannot pass.
+    CHECK(high.y_points != 150.0);
+
+    // ROUND TRIP against the shipping decoder, at four scales including 1.0 as a control. Every
+    // coordinate is chosen to be exactly divisible by the scale, so the decoder's round-to-nearest
+    // cannot blur the claim (the extent sweep above records why that matters).
+    int non_identity_cases = 0;
+    for (const std::uint32_t dpi_value : {96u, 144u, 192u, 288u})
+    {
+        const DpiScale dpi{dpi_value};
+        const NsViewGeometry view{300.0, dpi, 0u}; // a 300-point-tall view at every scale
+        for (const PointI position : {PointI{0, 0}, PointI{144, 288}, PointI{288, 144},
+                                      PointI{576, 576}})
+        {
+            const smoke::NsViewPointPoints in_points =
+                smoke::ns_view_point_for_physical(position, view.height_points, dpi);
+            const PointI back =
+                ns_view_point_to_physical(in_points.x_points, in_points.y_points, view);
+            CHECK(back == position);
+            if (dpi_value != 96u)
+            {
+                ++non_identity_cases;
+            }
+        }
+    }
+    // Non-vacuity floor: the 1.0 control alone would pass with the scale dropped entirely, so the
+    // sweep is only meaningful if the non-identity scales really ran.
+    CHECK(non_identity_cases >= 12);
+
+    // A hand-constructed 0 dpi is treated as 1x rather than dividing the location away — the same
+    // refuse-to-1x regime `ns_dpi_from_backing_scale` uses for a scale that names no display.
+    const smoke::NsViewPointPoints degenerate =
+        smoke::ns_view_point_for_physical(PointI{10, 20}, 100.0, DpiScale{0});
+    CHECK(degenerate.x_points == 10.0);
+    CHECK(degenerate.y_points == 80.0);
+}
+
 int main()
 {
     test_flag_parsing();
@@ -464,5 +635,8 @@ int main()
     test_keysym_table_round_trips_through_the_shipping_decoder_map();
     test_ns_virtual_key_table_round_trips_through_the_shipping_decoder_map();
     test_both_real_mode_arms_accept_exactly_the_same_key_codes();
+    test_ns_extent_to_points_inverts_the_shipping_physical_conversion();
+    test_placement_extent_for_physical_leaves_a_non_cocoa_backend_alone();
+    test_ns_view_point_for_physical_inverts_the_shipping_decoder_at_a_non_identity_dpi();
     SHELL_TEST_MAIN_END();
 }

@@ -1964,15 +1964,20 @@ jobs:
       #
       # ⚠ NON-VACUITY, and why this is a direct run rather than a `ctest -R` line — the same trap the
       # X11 step documents. The ctest registration deliberately SKIPS (SKIP_RETURN_CODE 77) with no GUI
-      # session so the same executable can ride the default `build`/`sanitize` legs harmlessly, and a
-      # `ctest` invocation here would report that skip as a PASS. `--require-cocoa --require-display`
-      # turns a missing window-server session, a refused window and a missing OS blitter into hard
-      # failures, so this step fails if the window, the blitter or the session is not really there.
+      # session so the same executable can ride the `build (macos-latest)` leg harmlessly (the only
+      # default leg it is configured on: it lives inside `if(APPLE)` and both sanitize legs are ubuntu),
+      # and a `ctest` invocation here would report that skip as a PASS.
+      # `--require-cocoa --require-display` turns a missing window-server session, a refused window and
+      # a missing OS blitter into hard failures, so this step fails if the window, the blitter or the
+      # session is not really there.
       #
       # THE TWO `launchctl`/`/dev/console` lines are the measured answer to "does a GitHub-hosted macOS
       # runner even have a window-server session", printed rather than assumed: `Aqua` + a non-root
-      # console owner IS a GUI session. They are kept permanently because the smoke's verdict alone
-      # cannot distinguish "no session" from "the Cocoa backend broke", and this is a zero-cost tell.
+      # console owner IS a GUI session. ANSWERED, in CI, on this task's own PR: run 30238034460 /
+      # job 89889609193 printed `launchctl managername: Aqua` and `/dev/console owner: runner`, and the
+      # smoke then PASSED under both --require flags. The lines are kept permanently because the
+      # smoke's verdict alone cannot distinguish "no session" from "the Cocoa backend broke", and this
+      # is a zero-cost tell.
       - name: Live windowed Cocoa Shell smoke (macOS, real NSWindow — M9 e12c-3)
         if: runner.os == 'macOS'
         run: |

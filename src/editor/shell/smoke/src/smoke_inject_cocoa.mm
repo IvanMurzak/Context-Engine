@@ -45,8 +45,6 @@
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
 
-#include <cmath>
-
 namespace context::editor::shell::smoke
 {
 namespace
@@ -108,16 +106,31 @@ namespace
 
 // The window-space Cocoa point for a Shell-space physical position — the exact inverse of
 // ns_view_point_to_physical, with the view->window step left to AppKit (file header, shape 1).
-[[nodiscard]] NSPoint window_point_for(NSWindow* window, const IWindowBackend& backend, PointI position)
+//
+// The ARITHMETIC is `ns_view_point_for_physical` in the portable seam TU, where every leg compiles
+// it and a round-trip sweep pins it against the shipping decoder (see its header comment for why
+// that matters: the live smoke's flip/separation/half-plane claims cannot catch a wrong SCALE).
+// Only the two AppKit reads it needs are here.
+//
+// REFUSES rather than approximating when the window carries no contentView. Returning a fabricated
+// location would make the smoke fail later on a wrong delivered POSITION instead of here on the
+// honest "there is no view to inject into" — and every other guard in this file refuses (file
+// header, shape 4). Unreachable today (`cocoa_window.mm` always sets a contentView), so this is
+// defence in depth, not a live path.
+[[nodiscard]] bool window_point_for(NSWindow* window, const IWindowBackend& backend,
+                                    PointI position, NSPoint* out_location)
 {
     NSView* view = [window contentView];
-    const double factor = static_cast<double>(backend.dpi().factor());
-    const double safe_factor = (std::isfinite(factor) && factor > 0.0) ? factor : 1.0;
-    const double height_points = view != nil ? static_cast<double>([view bounds].size.height) : 0.0;
-    const double x_points = static_cast<double>(position.x) / safe_factor;
-    const double y_points = height_points - static_cast<double>(position.y) / safe_factor;
-    const NSPoint in_view = NSMakePoint(static_cast<CGFloat>(x_points), static_cast<CGFloat>(y_points));
-    return view != nil ? [view convertPoint:in_view toView:nil] : in_view;
+    if (view == nil || out_location == nullptr)
+    {
+        return false;
+    }
+    const NsViewPointPoints in_points = ns_view_point_for_physical(
+        position, static_cast<double>([view bounds].size.height), backend.dpi());
+    const NSPoint in_view = NSMakePoint(static_cast<CGFloat>(in_points.x_points),
+                                        static_cast<CGFloat>(in_points.y_points));
+    *out_location = [view convertPoint:in_view toView:nil];
+    return true;
 }
 
 [[nodiscard]] bool inject_pointer_cocoa(NSWindow* window, const IWindowBackend& backend,
@@ -161,7 +174,11 @@ namespace
         return false;
     }
 
-    const NSPoint location = window_point_for(window, backend, pointer.position);
+    NSPoint location = NSZeroPoint;
+    if (!window_point_for(window, backend, pointer.position, &location))
+    {
+        return false;
+    }
     NSEvent* event = [NSEvent mouseEventWithType:type
                                        location:location
                                   modifierFlags:ns_modifier_mask(pointer.modifiers)

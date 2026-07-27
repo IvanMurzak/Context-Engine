@@ -399,8 +399,14 @@ bool inject_event(IWindowBackend& backend, WindowMode mode, const ShellEvent& ev
             return false;
         }
         WindowPlacement placement = backend.placement();
-        placement.width = event.size.width;
-        placement.height = event.size.height;
+        // ⚠ UNIT CONVERSION, NOT A NO-OP. `event.size` is PHYSICAL PIXELS (see the header) while
+        // `placement()` is physical pixels on X11/Win32 and COCOA POINTS on macOS. Assigning
+        // `event.size` straight through — which this seam did until M9 e12c-3's review — asked a
+        // Retina window for twice the size the caller meant, and asked for exactly the right size
+        // at 1x, so no assertion on a 1x runner could see it.
+        const render::Extent2D requested = placement_extent_for_physical(backend, event.size);
+        placement.width = requested.width;
+        placement.height = requested.height;
         backend.apply_placement(placement);
         return true;
     }
@@ -483,8 +489,8 @@ NsVirtualKey ns_virtual_key_for_windows_key_code(std::int32_t windows_key_code)
     //
     // ⚠ A TABLE ALL THE WAY DOWN — no arithmetic anywhere, unlike the X11 inverse, whose letters and
     // digits ARE runs. macOS virtual key codes are POSITIONAL (0x00 is `A`, 0x01 is `S`, 0x06 is
-    // `Z` —
-    // the physical ASDF row) and the digit row is TRANSPOSED at 5/6 (`6` is 0x16, `5` is 0x17). The
+    // `Z` — the physical ASDF row) and the digit row is TRANSPOSED at 5/6 (`6` is 0x16, `5` is
+    // 0x17). The
     // values are spelled numerically rather than via <Carbon/HIToolbox/Events.h> so this table
     // compiles — and is unit-tested — on every leg, including the two with no Carbon at all; the
     // window.h `kNsVk*` constants are used wherever one already exists.
@@ -567,6 +573,57 @@ NsVirtualKey ns_virtual_key_for_windows_key_code(std::int32_t windows_key_code)
         break;
     }
     return NsVirtualKey{};
+}
+
+std::uint32_t ns_extent_to_points(std::uint32_t physical, DpiScale dpi)
+{
+    if (physical == 0u || dpi.dpi == 0u)
+    {
+        return 0u;
+    }
+    // INTEGER round-to-nearest, deliberately: `ns_extent_to_physical` multiplies by the float
+    // `factor()`, and inverting through the same float would make the round trip lossy at scales
+    // whose factor is not exactly representable (1.25x, 1.5x). `dpi` IS the source of truth —
+    // `factor()` is the derived value (dpi.h) — so dividing by it recovers the points exactly
+    // wherever the forward direction was exact. u64 intermediate so a large extent cannot overflow
+    // the *96.
+    const std::uint64_t scaled = static_cast<std::uint64_t>(physical) * kReferenceDpi;
+    const std::uint64_t rounded = (scaled + dpi.dpi / 2u) / dpi.dpi;
+    // A non-empty extent never becomes empty: `apply_placement` refuses an empty rect outright, so
+    // a 1px-tall window at 10x must still ask for 1 point rather than silently asking for nothing.
+    return rounded == 0u ? 1u : static_cast<std::uint32_t>(rounded);
+}
+
+NsViewPointPoints ns_view_point_for_physical(PointI position, double height_points, DpiScale dpi)
+{
+    // `dpi.dpi` is the source of truth and `factor()` the derived value (dpi.h), and make_dpi_scale
+    // clamps it into kMinDpi..kMaxDpi — so the only value worth guarding is a hand-constructed 0,
+    // which would divide the whole location away. No isfinite check: an integer dpi cannot be NaN.
+    const double factor = dpi.dpi == 0u ? 1.0
+                                        : static_cast<double>(dpi.dpi) /
+                                              static_cast<double>(kReferenceDpi);
+    // ⚠ THE SCALE COMES OFF FIRST, AND THE FLIP IS AGAINST THE UNSCALED HEIGHT — the mirror image
+    // of the ordering `ns_view_point_to_physical` documents ("Done BEFORE the scale, against the
+    // height in POINTS, because that is the space the height is expressed in"). Flipping against a
+    // height in one space while the coordinate is in another is the shape that reads correct at 1x
+    // and mirrors the pointer on a Retina display, so the two orderings must stay mirror images.
+    const double y_in_points = static_cast<double>(position.y) / factor;
+    return NsViewPointPoints{static_cast<double>(position.x) / factor, height_points - y_in_points};
+}
+
+render::Extent2D placement_extent_for_physical(const IWindowBackend& backend,
+                                               render::Extent2D physical)
+{
+    // Identified by the published native window KIND, the same discriminator every other Cocoa arm
+    // of this seam uses — never `#if defined(__APPLE__)`, which would wrongly convert for a
+    // headless or X11 backend that happens to have been built on macOS.
+    if (backend.native_window().kind != render::NativeWindowKind::MetalLayer)
+    {
+        return physical;
+    }
+    const DpiScale dpi = backend.dpi();
+    return render::Extent2D{ns_extent_to_points(physical.width, dpi),
+                            ns_extent_to_points(physical.height, dpi)};
 }
 
 } // namespace context::editor::shell::smoke

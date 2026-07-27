@@ -151,7 +151,8 @@ private:
 // It composes through MemoryBlitter rather than re-deriving the scale: that is the ORACLE the blit
 // geometry is asserted against on every OS (see blit_source_index above), so the macOS path is
 // pixel-identical to the tested one by CONSTRUCTION rather than by a comment — which matters more
-// here than for the two siblings, because no CI leg runs a windowed macOS test at all.
+// here than for the two siblings, because until M9 e12c-3 no CI leg ran a windowed macOS test at
+// all.
 [[nodiscard]] std::unique_ptr<IPresentBlitter> make_cocoa_layer_blitter(void* layer);
 
 // What make_present_blitter resolved to, and — when it resolved to nothing — why.
