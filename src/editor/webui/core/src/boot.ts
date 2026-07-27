@@ -850,6 +850,16 @@ async function startWindowMechanism(
         // mirror (e10d-drill2), whose poll drains a peer's chrome facts and reports convergence.
         if (list !== null && typeof setInterval === "function") {
             setInterval((): void => {
+                // M9 e09e-3 — THE MODEL-CHANGE REFRESH DRIVER, and design 05 §8's tail on the only
+                // surface a human looks at. Every other re-render in this build is driven by a LOCAL
+                // interaction (mount, becoming visible, a command this window sent), so a fact
+                // arriving from the DAEMON moved the C++ panel model and changed NOTHING on screen
+                // until the user next clicked — worst in a secondary window, which sends no commands
+                // at all. `pollRevisions` costs ONE `panel.list` round trip per tick (the revision
+                // rides the roster; nothing is built Shell-side) and issues a `panel.render` only for
+                // a panel whose model actually moved — see `PanelHost.pollRevisions` on why the
+                // unconditional `refreshAll` must NOT be what a tick calls.
+                void host.pollRevisions();
                 void windowClient.rehomed().then((seeds) => {
                     if (seeds.length > 0) {
                         void applyRehomedPanels(host, client, seeds);

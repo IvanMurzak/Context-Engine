@@ -40,7 +40,12 @@ import {
 import { IFRAME_PANEL_CLASS, PanelHost } from "../panelhost.js";
 import type { PanelVerbFactory } from "../panelhost.js";
 import { PANEL_PORT_STATE_ATTRIBUTE } from "../panelport.js";
-import { PANEL_LIST_METHOD, PanelClient, parsePanelManifest } from "../panels.js";
+import {
+    PANEL_LIST_METHOD,
+    PANEL_RENDER_METHOD,
+    PanelClient,
+    parsePanelManifest,
+} from "../panels.js";
 
 // --------------------------------------------------------------------------- roster + Shell mocks
 
@@ -90,18 +95,26 @@ interface MockShell {
     readonly bridge: ShellBridge;
     /** Every method the host actually called, in order — the non-vacuity witness. */
     readonly methods: string[];
+    /**
+     * Start refusing `panel.list` too, from the next call on — a Shell that has stopped answering
+     * (a window tearing down, a daemon that went away). Off by default, so every case above is
+     * unaffected. It cannot be a constructor argument: the roster must SUCCEED for `start()` to mount
+     * anything, and the whole point is to fail a read that happens AFTER a panel is mounted.
+     */
+    refuseList(refuse: boolean): void;
 }
 
 /** A mock Shell serving one roster; every other method is refused as the real router's default does. */
 function mockShell(panels: readonly Record<string, unknown>[]): MockShell {
     const methods: string[] = [];
     let served = 0;
+    let listRefused = false;
     const query: BridgeQueryFunction = (request: BridgeQuery): number => {
         const parsed = JSON.parse(request.request) as { id: number; method: string };
         methods.push(parsed.method);
         served += 1;
         const envelope =
-            parsed.method === PANEL_LIST_METHOD
+            parsed.method === PANEL_LIST_METHOD && !listRefused
                 ? { jsonrpc: "2.0", id: parsed.id, result: { contractMajor: 2, panels } }
                 : {
                       jsonrpc: "2.0",
@@ -115,7 +128,13 @@ function mockShell(panels: readonly Record<string, unknown>[]): MockShell {
         request.onSuccess(JSON.stringify(envelope));
         return served;
     };
-    return { bridge: new ShellBridge(query), methods };
+    return {
+        bridge: new ShellBridge(query),
+        methods,
+        refuseList: (refuse: boolean): void => {
+            listRefused = refuse;
+        },
+    };
 }
 
 interface Mounted {
@@ -720,6 +739,136 @@ export const extPanelTests: readonly TestCase[] = [
                     disposals.filter((entry) => entry === "disposed:pkg.hello").length >= 1,
                     "closing the panel disposed its verb table — the hook that withdraws the panel's " +
                         `runtime commands from the ONE registry, which outlives every panel: ${JSON.stringify(disposals)}`,
+                );
+            } finally {
+                mounted.dispose();
+            }
+        },
+    },
+    // ------------------------------------------------------------- the MODEL-CHANGE REFRESH DRIVER
+    //
+    // M9 e09e-3's `PanelHost.pollRevisions`, and it lives in THIS file for one reason: `mountHost`
+    // above is the tier's only REAL-Dockview PanelHost harness, and the driver's whole subject is a
+    // MOUNTED panel's renderer. Duplicating the harness for one concern would be worse than the
+    // topical mismatch. Nothing here is iframe-specific — the subject is a `uitree` panel.
+    //
+    // WHAT THE OBSERVABLE IS, and why it needs no `panel.render` support in the mock: a refresh is a
+    // `HydrationRuntime.refresh()`, which ISSUES a `panel.render` over the bridge. The mock refuses
+    // that method (as the real router refuses an unknown one), and the refusal is irrelevant — the
+    // recorded METHOD is the proof the driver asked. So `shell.methods` counts refreshes directly.
+    {
+        // ⚠ PLANT (a): drop `hosted.renderer.refresh()` from `pollRevisions`' loop, keeping the
+        // counter -> the driver REPORTS a refresh it never issued, no `panel.render` follows, and the
+        // first `renders() > rendersAfterMount` assertion reds. Deliberately planted as the
+        // count-without-the-call rather than as an early return: the early return also satisfies the
+        // two zero-count assertions, so it is the weaker mutation of the two.
+        // ⚠ PLANT (b): drop the `#revisions.get(...) === manifest.revision` skip -> the driver
+        // refreshes on EVERY tick and the "an unchanged model costs no render" assertion reds. That
+        // half is what keeps a live editor from paying a full Shell-side panel build per panel per
+        // 500 ms tick, so it is the half worth pinning.
+        name: "panel refresh driver: the first poll refreshes, an unchanged model costs nothing, a moved revision refreshes again",
+        run: async () => {
+            // Held by reference so the case can MOVE the served revision — which is exactly what a
+            // C++ `PanelHost::touch` does when a daemon fact lands in a feed.
+            const roster = [uitreeManifestJson("builtin.inspector")];
+            const mounted = await mountHost(roster);
+            try {
+                const renders = (): number =>
+                    mounted.shell.methods.filter((m) => m === PANEL_RENDER_METHOD).length;
+
+                // The panel is mounted, so `init` already pulled one render. The FIRST poll refreshes
+                // anyway (the driver has recorded no revision yet) — the fix for a mount that
+                // rendered before the model had data.
+                const rendersAfterMount = renders();
+                assertEqual(await mounted.host.pollRevisions(), 1, "the first poll refreshes the mounted panel");
+                assert(
+                    renders() > rendersAfterMount,
+                    `the refresh ISSUED a ${PANEL_RENDER_METHOD}: ${JSON.stringify(mounted.shell.methods)}`,
+                );
+
+                // An UNCHANGED model must cost exactly one `panel.list` and no render at all.
+                const settled = renders();
+                assertEqual(await mounted.host.pollRevisions(), 0, "an unchanged revision refreshes nothing");
+                assertEqual(renders(), settled, "…and issues no render");
+
+                // The model MOVES — a daemon fact landed, so the Shell's roster reports a new revision.
+                const manifest = roster[0];
+                assert(manifest !== undefined, "the fixture roster must carry its one manifest");
+                (manifest as Record<string, unknown>)["revision"] = 2;
+                assertEqual(await mounted.host.pollRevisions(), 1, "a moved revision refreshes the panel");
+                assert(
+                    renders() > settled,
+                    `the second refresh ISSUED a ${PANEL_RENDER_METHOD}: ${JSON.stringify(mounted.shell.methods)}`,
+                );
+            } finally {
+                mounted.dispose();
+            }
+        },
+    },
+    {
+        // The driver's FAILURE path, and it exists because `pollRevisions`' one production caller is a
+        // bare `void host.pollRevisions()` on editor-core's 500 ms tick (boot.ts). `PanelClient.list`
+        // rethrows `BridgeError` on a transport failure rather than returning `null` — unlike `render`
+        // and `rehomed`, which swallow it — so an unguarded `await` there is an unhandled rejection
+        // EVERY TICK, forever, in a renderer whose only diagnostic channel is a DOM attribute. That is
+        // the one outcome the method's "never rejects for a roster it cannot read" contract exists to
+        // rule out, and no `roster === null` check can reach it: a throw produces no value to test.
+        //
+        // ⚠ THE MODEL MOVES WHILE THE SHELL IS DOWN, deliberately. A first draft of this case refused
+        // the read WITHOUT moving the revision — and every assertion passed for the WRONG reason: an
+        // unchanged model makes `pollRevisions` answer 0 whether the roster read was refused or served,
+        // so the case could not tell a handled failure from an ordinary quiet tick. Moving the revision
+        // first makes 0-vs-1 the difference between "refused" and "served", which is the only shape in
+        // which the refusal itself is observable.
+        //
+        // ⚠ PLANT (a): delete the `catch`/`instanceof BridgeError` guard from `pollRevisions` and await
+        // the roster read bare (the pre-review code verbatim) -> the refused poll REJECTS instead of
+        // resolving, and this case reds on that `await` before any assertion runs.
+        // ⚠ PLANT (b): call `refuseList(false)` below instead of `(true)`, so the Shell keeps ANSWERING
+        // -> the poll then sees the moved revision and returns 1, and the "even though the model MOVED"
+        // assertion reds. That half proves the hostile condition is REAL: without it the case would be
+        // asserting against a Shell that never refused anything, which is the vacuity the note above
+        // describes. (Both plants keep every symbol used, so a RED is the assertion and never a
+        // build break.)
+        name: "panel refresh driver: a Shell that refuses the roster read reports 0, it does not reject",
+        run: async () => {
+            const roster = [uitreeManifestJson("builtin.inspector")];
+            const mounted = await mountHost(roster);
+            try {
+                const lists = (): number =>
+                    mounted.shell.methods.filter((m) => m === PANEL_LIST_METHOD).length;
+                assertEqual(
+                    await mounted.host.pollRevisions(),
+                    1,
+                    "the panel is mounted and the first poll refreshes it (the driver is live)",
+                );
+
+                // The model MOVES — and the Shell stops answering, exactly as it does while a window
+                // tears down. A SERVED read would refresh here; a refused one must not.
+                const manifest = roster[0];
+                assert(manifest !== undefined, "the fixture roster must carry its one manifest");
+                (manifest as Record<string, unknown>)["revision"] = 2;
+                mounted.shell.refuseList(true);
+                const before = lists();
+                assertEqual(
+                    await mounted.host.pollRevisions(),
+                    0,
+                    "a refused roster read RESOLVES to 0 refreshed — even though the model MOVED — " +
+                        "rather than rejecting into an unhandled rejection on the tick",
+                );
+                assertEqual(
+                    lists(),
+                    before + 1,
+                    "…and it genuinely ASKED the Shell",
+                );
+
+                // RECOVERY: a transient bridge failure must not retire the driver for the life of the
+                // window, and the move it could not see the first time is still owed.
+                mounted.shell.refuseList(false);
+                assertEqual(
+                    await mounted.host.pollRevisions(),
+                    1,
+                    "the next tick refreshes the panel whose model moved while the Shell was down",
                 );
             } finally {
                 mounted.dispose();

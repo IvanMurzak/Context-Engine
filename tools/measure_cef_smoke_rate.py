@@ -59,6 +59,11 @@ SMOKES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("editor-cef-smoke-shell-iframe", ("editor/shell/**/context_editor_shell_iframe_smoke",)),
     ("editor-cef-smoke-shell-settings", ("editor/shell/**/context_editor_shell_settings_smoke",)),
     ("editor-cef-smoke-shell-uimirror", ("editor/shell/**/context_editor_shell_uimirror_smoke",)),
+    # M9 e09e-3 — the FIRST smoke here that spawns a daemon (through DaemonLifecycle, which needs the
+    # `context` binary its CMake target depends on). Nothing else about it is special to this tool: it
+    # narrates a `PASS`, and the hang classes it is measured for are CEF's, not the daemon's.
+    ("editor-cef-smoke-shell-inspector-fanout",
+     ("editor/shell/**/context_editor_shell_inspector_fanout_smoke",)),
 )
 
 # A smoke "reached its verdict" when its output carries one of these. Deliberately generic: every one

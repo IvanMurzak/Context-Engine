@@ -707,13 +707,13 @@ endif()
 #
 # WHY ONE LIST IS SOUND for two audits with different charters (Windows/Linux staging vs macOS bundle):
 # every CEF-hosting Shell executable needs BOTH, on whichever platform it is configured for. For the
-# NINE smokes that holds by construction — context_configure_shell_cef_smoke() calls
+# SMOKES that holds by construction — context_configure_shell_cef_smoke() calls
 # context_shell_cef_mac_bundle() unconditionally under its own if(OS_MAC), and requires BUNDLE_ID on
 # every platform so a Windows-only author cannot skip macOS silently (see cef/CMakeLists.txt). For
 # `context_editor`, member #1, it holds by HAND: its bundle comes from the OS_MAC branch above with a
-# hand-written identifier, not through that function. So nine are locked together; the tenth is a
-# maintained invariant — if a future executable is ever deliberately one-platform-only, this list is
-# what has to split again.
+# hand-written identifier, not through that function. So every SMOKE is locked together; `context_editor`
+# alone is a maintained invariant — if a future executable is ever deliberately one-platform-only, this
+# list is what has to split again.
 set(_ctx_cef_shell_executables
     context_editor
     context_editor_shell_cef_smoke
@@ -724,7 +724,8 @@ set(_ctx_cef_shell_executables
     context_editor_shell_tearout_smoke
     context_editor_shell_drag_smoke
     context_editor_shell_uimirror_smoke
-    context_editor_shell_iframe_smoke)
+    context_editor_shell_iframe_smoke
+    context_editor_shell_inspector_fanout_smoke)
 
 # --- the CEF single-staging invariant, enforced on the real build graph (issue #360) --------------
 # Every executable that boots out of the shared ${CEF_TARGET_OUT_DIR} must depend on the ONE stage

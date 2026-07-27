@@ -1904,8 +1904,14 @@ jobs:
       # since issue #437 was fixed they RUN on macOS too (the first two were `DISABLED` from e12c-1
       # until then, which ctest reports as "Not Run (Disabled)" WITHOUT affecting the exit code — so
       # the assertions inside could not fail on this leg; see docs/cef-keychain-isolation.md).
-      - name: Build the Shell's live CEF boot + restart + palette + settings + multiwindow + tearout + drag + uimirror + iframe smokes
-        run: cmake --build --preset dev --target context_editor_shell_cef_smoke context_editor_shell_restore_smoke context_editor_shell_palette_smoke context_editor_shell_settings_smoke context_editor_shell_multiwindow_smoke context_editor_shell_tearout_smoke context_editor_shell_drag_smoke context_editor_shell_uimirror_smoke context_editor_shell_iframe_smoke
+      # ⚠ M9 e09e-3 added the TENTH name below (`..._inspector_fanout_smoke`). It is the first smoke in
+      # the family that SPAWNS A DAEMON, so it also needs the `context` CLI to exist — which this job
+      # builds nothing of. That edge is expressed in CMake instead of here
+      # (`add_dependencies(context_editor_shell_inspector_fanout_smoke context)`), deliberately: a
+      # second hand-maintained name in this list is a second thing to forget, and the dependency
+      # travels with the target the way the webui asset root already does.
+      - name: Build the Shell's live CEF boot + restart + palette + settings + multiwindow + tearout + drag + uimirror + iframe + inspector-fanout smokes
+        run: cmake --build --preset dev --target context_editor_shell_cef_smoke context_editor_shell_restore_smoke context_editor_shell_palette_smoke context_editor_shell_settings_smoke context_editor_shell_multiwindow_smoke context_editor_shell_tearout_smoke context_editor_shell_drag_smoke context_editor_shell_uimirror_smoke context_editor_shell_iframe_smoke context_editor_shell_inspector_fanout_smoke
         working-directory: src
 
       # The SHIPPING editor binary, in its CEF-linked configuration — on ALL THREE legs since M9

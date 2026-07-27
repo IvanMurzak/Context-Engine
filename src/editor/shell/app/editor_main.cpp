@@ -228,10 +228,30 @@ void bind_window_bridge_handlers(shell::WindowBridge& wb, shell::WindowManager& 
 // it without knowing its shape; member order puts `handshake` first so it is destroyed LAST (the
 // router's handlers captured it), and the router lives in the session, outside this object.
 //
-// The daemon FEED is deliberately NOT wired here — only window 0's builtins are fed by the app's
-// lifecycle. A factory window's panels render their default state, and the moved panel's PRESERVED
-// content is its restored D6 state, which is exactly what tear-out must carry (04 §3). Cross-window
-// live-feed mirroring is e10c/e10d.
+// THE DAEMON FEED IS WIRED HERE SINCE M9 e09e-3 — and the sentence that used to sit in this comment
+// ("deliberately NOT wired; only window 0's builtins are fed by the app's lifecycle... cross-window
+// live-feed mirroring is e10c/e10d") is RETIRED, because it had become false in both halves. e10c
+// (drag) and e10d (the `editor.ui` mirror) landed and neither touched the DAEMON feed: e10d mirrors
+// D7 tier-2 CHROME facts between windows, which is a different stream from the derived-world facts a
+// panel model is built out of. So the deferral pointed at tasks that were never going to satisfy it,
+// and the consequence was structural: design 05 §8's tail — "events: files.changed ->
+// derivation.settled{gen} -> all subscribed clients (window 1, window 2, CLI, agents) update" — was
+// UNREACHABLE for every window but the first. A secondary window's Scene tree and Inspector rendered
+// their empty default state for the life of the process, and its Inspector could not write at all (a
+// gateway with no client refuses, honestly but permanently).
+//
+// What is wired, and where: `secondary_feeds` below records every live window's bag + its OWN daemon
+// connection, `lifecycle.on_event` / `on_snapshot` dispatch each fact into EVERY bag, and the owner
+// loop re-derives each bag's non-owning client views and pumps its due hydration work per frame —
+// the same four seams window 0 has always used, in the same order. The live proof is
+// `editor-cef-smoke-shell-inspector-fanout` (M9 e09e-3), which composes two windows exactly this way.
+//
+// WHY THE EVENTS COME FROM THE ONE LIFECYCLE SUBSCRIPTION AND NOT FROM EACH WINDOW'S OWN. A settle is
+// a GLOBAL fact about the derived world; it says nothing about who is listening, so N subscriptions
+// would deliver N identical copies of it at N times the daemon's fan-out cost. What each window DOES
+// need of its own is its `origin` — and it has that already: the factory gives every window its own
+// wire connection (`parts.daemon_client`), so `bind_session_client` gives each feed its own
+// daemon-minted id and per-window echo suppression stays correct.
 struct SecondaryWindowSurfaces
 {
     shell::ShellHandshake handshake{shell::make_handshake_nonce()};
@@ -463,6 +483,31 @@ int main(int argc, char** argv)
     // implicit-destruction order is therefore never load-bearing here — unlike `handshake`/`bridge`
     // above, where it is, because those two carry no such explicit shutdown between them.
     shell::PanelHost panel_host;
+    // --- e09e-3: the live SECONDARY windows the daemon feed fans out to ---------------------------
+    //
+    // Declared HERE, ahead of the daemon lifecycle's handlers (which iterate it) and of the window
+    // factory (which appends to it), because both need to name it.
+    //
+    // WHY A LOCAL REGISTRY AND NOT AN ACCESSOR ON `WindowManager`. The registry stores a session's
+    // surfaces TYPE-ERASED (`std::vector<std::shared_ptr<void>>`, window_registry.h) and its daemon
+    // client behind a `unique_ptr` it owns, and exposes neither — deliberately, so the registry stays
+    // ignorant of what a window's surfaces are. The factory is the one place that knows BOTH concrete
+    // types, so it records them here on the way past.
+    //
+    // LIFETIMES, both of them safe and for different reasons: the surfaces are held WEAKLY, so a
+    // window whose session the manager eventually frees (only in ~WindowManager) cannot be fed through
+    // a dangling pointer; the client is a RAW pointer into a session the registry RETIRES rather than
+    // frees on a mid-process destroy (the CE #319 rule), so it stays valid for the life of the
+    // process. Every use below is additionally gated on the window still being LIVE
+    // (`manager.window(id) != nullptr`), so a destroyed window stops being fed and pumped even though
+    // its bag is still allocated.
+    struct SecondaryFeed
+    {
+        shell::WindowId id = shell::kInvalidWindowId;
+        std::weak_ptr<SecondaryWindowSurfaces> surfaces;
+        client::Client* client = nullptr;
+    };
+    std::vector<SecondaryFeed> secondary_feeds;
     // e09b-3: the LOUD write-notice relay. Declared BEFORE `builtin` so it OUTLIVES it — the sinks
     // `bind_write_notice_relay` installs on the two feeds capture a raw pointer to it, and members
     // (and locals) destroy in reverse declaration order, so a relay declared after the bag would die
@@ -805,15 +850,38 @@ int main(int argc, char** argv)
         });
     // 0 is only the FALLBACK generation stamp for a snapshot that carries none of its own; the real
     // cursor snapshot always does and apply_snapshot prefers it.
+    // e09e-3: ONE fact -> EVERY live window's bag. Both handlers below dispatch window 0's bag first
+    // (it is a local, always present) and then each live secondary window's, through the SAME free
+    // seams — see SecondaryWindowSurfaces' header for why the deferral that used to live there is
+    // retired and why the events come from this ONE subscription rather than from each window's own.
+    const auto for_each_secondary_bag = [&secondary_feeds, &manager](auto&& visit)
+    {
+        for (const SecondaryFeed& entry : secondary_feeds)
+        {
+            // LIVE only: a destroyed window's session is retired rather than freed, so its bag is
+            // still allocated and would otherwise keep being fed after the window is gone.
+            if (manager.window(entry.id) == nullptr)
+                continue;
+            if (const std::shared_ptr<SecondaryWindowSurfaces> surfaces = entry.surfaces.lock())
+                visit(*surfaces, entry.client);
+        }
+    };
     lifecycle.on_snapshot(
-        [feed](const std::string&, const contract::Json& snapshot)
+        [feed, &for_each_secondary_bag](const std::string&, const contract::Json& snapshot)
         {
             if (feed != nullptr)
                 shell::panels::apply_problems_snapshot(*feed, snapshot, 0);
+            for_each_secondary_bag(
+                [&snapshot](SecondaryWindowSurfaces& surfaces, client::Client*)
+                {
+                    if (surfaces.builtin.problems != nullptr)
+                        shell::panels::apply_problems_snapshot(*surfaces.builtin.problems, snapshot,
+                                                               0);
+                });
         });
     lifecycle.on_event(
-        [feed, tree_feed, session_feed, inspector_feed](const std::string&,
-                                                        const client::ClientEvent& event)
+        [feed, tree_feed, session_feed, inspector_feed, &for_each_secondary_bag](
+            const std::string&, const client::ClientEvent& event)
         {
             if (feed != nullptr)
                 (void)shell::panels::apply_problems_event(*feed, event.topic, event.payload,
@@ -831,6 +899,26 @@ int main(int argc, char** argv)
             // drops the echo of our own writes, so nothing here needs to know about `origin`.
             if (session_feed != nullptr)
                 (void)shell::panels::apply_session_event(*session_feed, event.topic, event.payload);
+            // …and the same four, for every OTHER live window. This is design 05 §8's tail: a fact is
+            // a fact, so each window's own feeds decide what to do with it (the Inspector's
+            // mid-gesture deferral is per-bag state, which is exactly why it must be asked per bag).
+            for_each_secondary_bag(
+                [&event](SecondaryWindowSurfaces& surfaces, client::Client*)
+                {
+                    shell::panels::BuiltinPanels& bag = surfaces.builtin;
+                    if (bag.problems != nullptr)
+                        (void)shell::panels::apply_problems_event(*bag.problems, event.topic,
+                                                                  event.payload, event.generation);
+                    if (bag.scenetree != nullptr)
+                        (void)shell::panels::apply_scenetree_event(*bag.scenetree, event.topic,
+                                                                   event.payload, event.generation);
+                    if (bag.inspector != nullptr)
+                        (void)shell::panels::apply_inspector_event(*bag.inspector, event.topic,
+                                                                   event.payload);
+                    if (bag.session != nullptr)
+                        (void)shell::panels::apply_session_event(*bag.session, event.topic,
+                                                                 event.payload);
+                });
         });
 
     // START the spine: attach to a live daemon, else spawn `context daemon` as a child and read the D20
@@ -956,9 +1044,9 @@ int main(int argc, char** argv)
     // Ownership of both is handed to the manager, which retires rather than frees them (shell.h) —
     // the CE #319 rule, now applying to a MID-PROCESS destroy as well as the process-wide one.
     manager.bind_window_factory(
-        [&options, project_mode, &manager, &move_store, &drag_store, &mirror_store](
-            const shell::WindowSpec& spec, shell::WindowSessionParts& parts,
-            std::string& error) -> bool
+        [&options, project_mode, &manager, &move_store, &drag_store, &mirror_store,
+         &secondary_feeds](const shell::WindowSpec& spec, shell::WindowSessionParts& parts,
+                           std::string& error) -> bool
         {
             shell::WindowDesc desc;
             desc.title = spec.title;
@@ -1038,6 +1126,13 @@ int main(int argc, char** argv)
 #else
             parts.browser = std::make_unique<shell::ScriptedBrowserHost>();
 #endif
+            // e09e-3: record this window's bag + its own daemon connection so the lifecycle's event
+            // dispatch and the owner loop reach it (see `secondary_feeds`). Taken BEFORE the two moves
+            // below, which is the only point both concrete types are in hand — and the raw client
+            // pointer is read off the unique_ptr the session is ABOUT to own, whose object the registry
+            // retires rather than frees.
+            secondary_feeds.push_back(
+                SecondaryFeed{expected_id, surfaces, parts.daemon_client.get()});
             // The full surface bundle goes in as ONE type-erased surface (it owns the handshake +
             // panel host + every bridge, incl. this window's WindowBridge); it must outlive the router
             // that captured it, which WindowSessionParts' member order guarantees (window_registry.h
@@ -1174,6 +1269,25 @@ int main(int argc, char** argv)
             // picked up automatically. Synchronous on the owner loop; a no-op when nothing is due.
             shell::panels::pump_panel_feeds(builtin, *live_client, options.scene);
         }
+        // e09e-3: the SAME three per-frame steps for every OTHER live window — its bag's non-owning
+        // client views re-derived, then its due hydration work drained. Each secondary window reads and
+        // writes over its OWN connection (`entry.client`, the one the factory gave it), so its `origin`
+        // and its writes are genuinely its own; only the EVENTS are shared, from the one subscription
+        // above. Cost while nothing is due is a claimed-fetch check per window, the same as window 0's.
+        //
+        // A window with NO connection of its own (`attach_to_project` failed — 03 §7's read-only
+        // degrade, which the factory reports rather than treating as a create failure) is UNBOUND here
+        // rather than skipped: leaving a stale client bound is what turns a lost daemon into a
+        // use-after-free, and an unbound gateway refuses honestly (wire_override_gateway.h § LIFETIME).
+        for_each_secondary_bag(
+            [&options](SecondaryWindowSurfaces& surfaces, client::Client* window_client)
+            {
+                shell::panels::bind_write_client(surfaces.builtin, window_client);
+                if (surfaces.builtin.session != nullptr)
+                    shell::panels::bind_session_client(*surfaces.builtin.session, window_client);
+                if (window_client != nullptr)
+                    shell::panels::pump_panel_feeds(surfaces.builtin, *window_client, options.scene);
+            });
         // e07c: watch the per-user keybindings file. A cheap stat gates the re-read, so an unchanged
         // file costs one stat per loop; a change bumps the generation editor-core re-reads over the
         // bridge (the hot-reload trigger). The return is intentionally discarded here — the renderer
@@ -1214,6 +1328,28 @@ int main(int argc, char** argv)
     // Inspector's gesture provider and issue a commit. Unbinding first is what makes that commit
     // refuse instead of calling a destroyed Client.
     shell::panels::bind_write_client(builtin, nullptr);
+    // e09e-3: the SAME unbind for every OTHER window's bag, BEFORE the same call and for the same
+    // reason. A secondary window's Inspector can commit too since this task wired its gateway, so it
+    // has exactly window 0's exposure to a renderer message queued before exit.
+    //
+    // ⚠ DELIBERATELY NOT `for_each_secondary_bag`, which is LIVE-gated. That gate is right for feeding
+    // and pumping — a destroyed window must stop being fed — but WRONG here: a mid-process destroy
+    // RETIRES a session rather than freeing it (the CE #319 rule, shell.h § RetiredSession), and retire
+    // clears the compositor sink WITHOUT touching the bag, so a retired window's Inspector gateway is
+    // still bound to its still-live `Client`. Skipping it would leave exactly the binding these two
+    // calls exist to remove, on the one bag nobody will look at again, across `manager.shutdown()`'s
+    // all-closing CEF drain. Before this task secondary bags were bound to no client at all, so this
+    // exposure is one THIS task introduced; the unbind is idempotent, so covering live and retired
+    // windows alike is strictly safer and costs a pointer store each.
+    for (const SecondaryFeed& entry : secondary_feeds)
+    {
+        if (const std::shared_ptr<SecondaryWindowSurfaces> surfaces = entry.surfaces.lock())
+        {
+            shell::panels::bind_write_client(surfaces->builtin, nullptr);
+            if (surfaces->builtin.session != nullptr)
+                shell::panels::bind_session_client(*surfaces->builtin.session, nullptr);
+        }
+    }
     // e13c-1: close THIS process's package sessions before the daemon teardown below, the same
     // ordering rule as the two unbinds above — they are our own connections and the daemon should not
     // have to reap them from an exiting process.

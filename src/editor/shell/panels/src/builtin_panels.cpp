@@ -6,7 +6,8 @@
 #include "context/editor/gui/panels/problems/problems_panel.h"
 #include "context/editor/gui/playbar/playbar_model.h"
 #include "context/editor/gui/uitree/builtin.h"
-#include "context/editor/shell/editor_state.h" // EditorState / EditorStateStore (e09c)
+#include "context/editor/serializer/canonical.h" // the ONE value identity the observe seam reports (R-FILE-001)
+#include "context/editor/shell/editor_state.h"   // EditorState / EditorStateStore (e09c)
 #include "context/editor/shell/panels/inspector_feed.h"
 #include "context/editor/shell/panels/problems_feed.h" // ProblemsFeed complete type (see builtin_panels.h)
 #include "context/editor/shell/panels/scenetree_feed.h"
@@ -105,6 +106,122 @@ bool apply_inspector_event(InspectorFeed& feed, const std::string& topic,
                            const contract::Json& payload)
 {
     return feed.apply_event(topic, payload);
+}
+
+// --- the e09e-3 Inspector drive + observe seams ---------------------------------------------------
+//
+// The three re-declared spellings, pinned to their owners here for the SAME reason `kSessionTopic` is
+// pinned below: this is the one TU that sees both sides, so a rename cannot silently desynchronise a
+// `-fno-rtti` caller's DOM selector from the node ids `build_panel` actually emits.
+static_assert(std::string_view(kInspectorPanelId) ==
+                  std::string_view(inspector::InspectorPanel::kContributionId),
+              "the -fno-rtti caller's panel id and the panel's own must be the same string");
+static_assert(std::string_view(kInspectorEditCommand) ==
+                  std::string_view(inspector::InspectorPanel::kEditCommand),
+              "the -fno-rtti caller's edit command and the panel's own must be the same string");
+static_assert(std::string_view(kInspectorWidgetNodePrefix) ==
+                  std::string_view(kInspectorWidgetPrefix),
+              "the -fno-rtti caller's widget node prefix and the feed's must be the same string");
+
+bool request_inspector(BuiltinPanels& panels, const std::string& identity)
+{
+    return panels.inspector != nullptr && panels.inspector->request(identity);
+}
+
+namespace
+{
+
+// The CommitResult::Status vocabulary as tokens. Named here rather than inlined so a failure message
+// can say WHICH way a commit resolved — the distinction between `dropped` (the L-30 guard held) and
+// `none` (nothing was staged, i.e. a served refresh had already discarded the gesture) is exactly the
+// one a fan-out assertion turns on, and a bare boolean cannot carry it.
+[[nodiscard]] const char* commit_status_token(inspector::CommitResult::Status status) noexcept
+{
+    switch (status)
+    {
+    case inspector::CommitResult::Status::applied:
+        return "applied";
+    case inspector::CommitResult::Status::rebased:
+        return "rebased";
+    case inspector::CommitResult::Status::dropped:
+        return "dropped";
+    case inspector::CommitResult::Status::error:
+        return "error";
+    case inspector::CommitResult::Status::none:
+        break;
+    }
+    return "none";
+}
+
+// One JsonValue -> its canonical serialization (R-FILE-001), newline-stripped. "" when it does not
+// serialize, which for a value that came out of the model means only that the model holds nothing.
+[[nodiscard]] std::string canonical_or_empty(const serializer::JsonValue& value)
+{
+    std::string out;
+    if (!serializer::serialize_canonical(value, out))
+    {
+        return {};
+    }
+    if (!out.empty() && out.back() == '\n')
+    {
+        out.pop_back();
+    }
+    return out;
+}
+
+} // namespace
+
+InspectorObservation observe_inspector(const BuiltinPanels& panels)
+{
+    InspectorObservation out;
+    if (panels.inspector == nullptr)
+    {
+        return out; // `present` stays false — see the header on why that is not "an idle Inspector"
+    }
+    const InspectorFeed& feed = *panels.inspector;
+    const inspector::InspectorPanel& panel = feed.panel();
+    out.present = true;
+    out.has_selection = panel.has_selection();
+    out.has_staged_edit = panel.has_staged_edit();
+    out.refresh_deferred = feed.refresh_deferred();
+    out.fetch_pending = feed.pending().has_value();
+    out.base_raw_hash = panel.base_raw_hash();
+    out.results_applied = feed.results_applied();
+    out.events_applied = feed.events_applied();
+    out.rereads_armed = feed.rereads_armed();
+    out.commits_observed = feed.commits_observed();
+    out.drops_observed = feed.drops_observed();
+    out.writes_applied = panels.writes != nullptr ? panels.writes->writes_applied() : 0u;
+    out.last_commit_status = commit_status_token(feed.last_commit().status);
+    out.last_commit_code = feed.last_commit().code;
+    if (panel.has_staged_edit())
+    {
+        out.staged_pointer = panel.staged_pointer();
+        if (const serializer::JsonValue* staged = panel.staged_value())
+        {
+            out.staged_value = canonical_or_empty(*staged);
+        }
+    }
+    return out;
+}
+
+std::string inspector_field_value(const BuiltinPanels& panels, const std::string& pointer,
+                                  bool& overridden)
+{
+    overridden = false;
+    if (panels.inspector == nullptr)
+    {
+        return {};
+    }
+    for (const inspector::InspectorField& field : panels.inspector->panel().model().fields)
+    {
+        if (field.pointer == pointer)
+        {
+            overridden = field.overridden;
+            return canonical_or_empty(field.value);
+        }
+    }
+    return {};
 }
 
 // The e08b seams. The topic string is declared in BOTH headers for the RTTI/CEF reason builtin_panels.h
