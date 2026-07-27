@@ -95,18 +95,26 @@ interface MockShell {
     readonly bridge: ShellBridge;
     /** Every method the host actually called, in order — the non-vacuity witness. */
     readonly methods: string[];
+    /**
+     * Start refusing `panel.list` too, from the next call on — a Shell that has stopped answering
+     * (a window tearing down, a daemon that went away). Off by default, so every case above is
+     * unaffected. It cannot be a constructor argument: the roster must SUCCEED for `start()` to mount
+     * anything, and the whole point is to fail a read that happens AFTER a panel is mounted.
+     */
+    refuseList(refuse: boolean): void;
 }
 
 /** A mock Shell serving one roster; every other method is refused as the real router's default does. */
 function mockShell(panels: readonly Record<string, unknown>[]): MockShell {
     const methods: string[] = [];
     let served = 0;
+    let listRefused = false;
     const query: BridgeQueryFunction = (request: BridgeQuery): number => {
         const parsed = JSON.parse(request.request) as { id: number; method: string };
         methods.push(parsed.method);
         served += 1;
         const envelope =
-            parsed.method === PANEL_LIST_METHOD
+            parsed.method === PANEL_LIST_METHOD && !listRefused
                 ? { jsonrpc: "2.0", id: parsed.id, result: { contractMajor: 2, panels } }
                 : {
                       jsonrpc: "2.0",
@@ -120,7 +128,13 @@ function mockShell(panels: readonly Record<string, unknown>[]): MockShell {
         request.onSuccess(JSON.stringify(envelope));
         return served;
     };
-    return { bridge: new ShellBridge(query), methods };
+    return {
+        bridge: new ShellBridge(query),
+        methods,
+        refuseList: (refuse: boolean): void => {
+            listRefused = refuse;
+        },
+    };
 }
 
 interface Mounted {
@@ -785,6 +799,76 @@ export const extPanelTests: readonly TestCase[] = [
                 assert(
                     renders() > settled,
                     `the second refresh ISSUED a ${PANEL_RENDER_METHOD}: ${JSON.stringify(mounted.shell.methods)}`,
+                );
+            } finally {
+                mounted.dispose();
+            }
+        },
+    },
+    {
+        // The driver's FAILURE path, and it exists because `pollRevisions`' one production caller is a
+        // bare `void host.pollRevisions()` on editor-core's 500 ms tick (boot.ts). `PanelClient.list`
+        // rethrows `BridgeError` on a transport failure rather than returning `null` — unlike `render`
+        // and `rehomed`, which swallow it — so an unguarded `await` there is an unhandled rejection
+        // EVERY TICK, forever, in a renderer whose only diagnostic channel is a DOM attribute. That is
+        // the one outcome the method's "never rejects for a roster it cannot read" contract exists to
+        // rule out, and no `roster === null` check can reach it: a throw produces no value to test.
+        //
+        // ⚠ THE MODEL MOVES WHILE THE SHELL IS DOWN, deliberately. A first draft of this case refused
+        // the read WITHOUT moving the revision — and every assertion passed for the WRONG reason: an
+        // unchanged model makes `pollRevisions` answer 0 whether the roster read was refused or served,
+        // so the case could not tell a handled failure from an ordinary quiet tick. Moving the revision
+        // first makes 0-vs-1 the difference between "refused" and "served", which is the only shape in
+        // which the refusal itself is observable.
+        //
+        // ⚠ PLANT (a): delete the `catch`/`instanceof BridgeError` guard from `pollRevisions` and await
+        // the roster read bare (the pre-review code verbatim) -> the refused poll REJECTS instead of
+        // resolving, and this case reds on that `await` before any assertion runs.
+        // ⚠ PLANT (b): call `refuseList(false)` below instead of `(true)`, so the Shell keeps ANSWERING
+        // -> the poll then sees the moved revision and returns 1, and the "even though the model MOVED"
+        // assertion reds. That half proves the hostile condition is REAL: without it the case would be
+        // asserting against a Shell that never refused anything, which is the vacuity the note above
+        // describes. (Both plants keep every symbol used, so a RED is the assertion and never a
+        // build break.)
+        name: "panel refresh driver: a Shell that refuses the roster read reports 0, it does not reject",
+        run: async () => {
+            const roster = [uitreeManifestJson("builtin.inspector")];
+            const mounted = await mountHost(roster);
+            try {
+                const lists = (): number =>
+                    mounted.shell.methods.filter((m) => m === PANEL_LIST_METHOD).length;
+                assertEqual(
+                    await mounted.host.pollRevisions(),
+                    1,
+                    "the panel is mounted and the first poll refreshes it (the driver is live)",
+                );
+
+                // The model MOVES — and the Shell stops answering, exactly as it does while a window
+                // tears down. A SERVED read would refresh here; a refused one must not.
+                const manifest = roster[0];
+                assert(manifest !== undefined, "the fixture roster must carry its one manifest");
+                (manifest as Record<string, unknown>)["revision"] = 2;
+                mounted.shell.refuseList(true);
+                const before = lists();
+                assertEqual(
+                    await mounted.host.pollRevisions(),
+                    0,
+                    "a refused roster read RESOLVES to 0 refreshed — even though the model MOVED — " +
+                        "rather than rejecting into an unhandled rejection on the tick",
+                );
+                assertEqual(
+                    lists(),
+                    before + 1,
+                    "…and it genuinely ASKED the Shell",
+                );
+
+                // RECOVERY: a transient bridge failure must not retire the driver for the life of the
+                // window, and the move it could not see the first time is still owed.
+                mounted.shell.refuseList(false);
+                assertEqual(
+                    await mounted.host.pollRevisions(),
+                    1,
+                    "the next tick refreshes the panel whose model moved while the Shell was down",
                 );
             } finally {
                 mounted.dispose();

@@ -35,7 +35,7 @@
 // (C-F3, design 03 §1), and publishing layout to it over the bridge is **e05d2**'s task. A direct
 // write from editor-core would be a defect even if it worked.
 
-import { isRecord } from "./bridge.js";
+import { BridgeError, isRecord } from "./bridge.js";
 import type { DockviewApi, DockviewContentRenderer, DockviewModule } from "./dockview.js";
 import { detectDockview } from "./dockview.js";
 import {
@@ -1055,14 +1055,39 @@ export class PanelHost {
      * A SUSPENDED (tabbed-away) panel is skipped AND NOT RECORDED, so it refreshes on the first poll
      * after `onShow` puts it back on screen rather than staying stale behind its own tab.
      *
-     * NEVER THROWS and never rejects: an unreadable roster is `0`, exactly as everywhere else in this
-     * class, because its caller is a `setInterval` tick in a renderer with no console.
+     * NEVER REJECTS FOR A ROSTER IT CANNOT READ: an unreadable roster is `0`, exactly as everywhere
+     * else in this class, because its caller is a `setInterval` tick in a renderer with no console.
+     * That covers BOTH shapes the read can fail in — see the guard in the body for why the `await`
+     * is not enough on its own. A genuine programming error still propagates, as it does from every
+     * other method here.
      */
     async pollRevisions(): Promise<number> {
         if (this.#api === null || this.#panels.size === 0) {
             return 0;
         }
-        const roster = await this.#client.list();
+        // GUARDED, not merely awaited. `PanelClient.list` is the one panel verb that does NOT swallow
+        // a transport failure the way `render` and `WindowClient.rehomed` do — it rethrows
+        // `BridgeError` (panels.ts § render states the rule: a refusal is returned, a transport
+        // failure throws) — and this method's only caller is a bare `void host.pollRevisions()` on
+        // editor-core's 500 ms tick. An unguarded reject there is an unhandled rejection EVERY TICK,
+        // in a renderer whose only diagnostic channel is a DOM attribute: precisely the outcome the
+        // contract above exists to rule out, and unreachable by the `roster === null` check because
+        // a throw never produces a value to test. A bridge that cannot answer is an ORDINARY state
+        // here (a window tearing down, a daemon that went away), so report 0 refreshed and ask again
+        // next tick — the same bargain `rehomed()` strikes when it reports `[]`.
+        //
+        // Folded onto the EXISTING `null` channel rather than given its own `return 0`: both mean
+        // "no usable roster this tick", and one exit is one thing to keep correct. The guard stays
+        // HERE rather than inside `PanelClient.list` deliberately — panels.ts documents the
+        // distinction it draws on purpose ("A REFUSAL IS RETURNED, NOT THROWN ... A transport failure
+        // still rejects — that is not an ordinary state"), and `list`'s other caller, `start`, wants
+        // exactly that. This tick is the one place where it IS ordinary.
+        const roster = await this.#client.list().catch((error: unknown): null => {
+            if (error instanceof BridgeError) {
+                return null;
+            }
+            throw error;
+        });
         if (roster === null) {
             return 0;
         }

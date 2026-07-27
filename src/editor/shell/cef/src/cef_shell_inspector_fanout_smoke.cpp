@@ -72,12 +72,27 @@
 // WHAT THIS SMOKE DELIBERATELY DOES NOT CLAIM. It proves the chain for the panel bags this process
 // FEEDS. Feeding EVERY window's bag from the one daemon link is a property of the composition root,
 // and `editor_main.cpp` gained it in this same PR (its `SecondaryWindowSurfaces` used to be wired to
-// nothing daemon-side, so §8's tail was unreachable for any window but the first). This file composes
-// both windows exactly as `editor_main.cpp` now does — same seams, same order, same per-frame pump —
-// so a regression that unwires THIS file's secondary fan-out reds here. Stated precisely because the
-// difference matters: that is a MIRROR of the composition root, not a test OF it. `editor_main.cpp`
-// has no test tier at all (it is a `main()`), so its own wiring is compile-checked and reviewed, and
-// the honest claim is that the seams this file drives are the ones it calls.
+// nothing daemon-side, so §8's tail was unreachable for any window but the first). This file drives
+// the same four per-window seams in the same order and pumps them per frame, so a regression that
+// unwires THIS file's secondary fan-out reds here. Stated precisely because the difference matters:
+// that is a MIRROR of the composition root, not a test OF it. `editor_main.cpp` has no test tier at
+// all (it is a `main()`), so its own wiring is compile-checked and reviewed, and the honest claim is
+// that the seams this file drives are the ones it calls.
+//
+// ⚠ AND THE MIRROR IS NOT EXACT IN ONE NAMED RESPECT — do not read the paragraph above as more than
+// it says. `editor_main.cpp`'s factory gives every secondary window its OWN wire connection
+// (`parts.daemon_client`, one `attach_to_project` per window) and binds/pumps that window's bag
+// against it, so N windows are genuinely N daemon-minted `origin`s (window_registry.h: ids are minted
+// per WIRE CONNECTION). This file sets no `parts.daemon_client` at all: `pump_once` binds BOTH bags to
+// the single `lifecycle.client()`. So window B here reads and writes over window A's connection and
+// shares its `origin`, and §6's L-30 race is single-connection where production is two. That does not
+// weaken any assertion below — the `edit` CAS is keyed on the `ifMatch` RAW HASH, which no `origin`
+// participates in, and the on-disk pair at the end is byte evidence either way — but the PER-WINDOW
+// connection, the PER-WINDOW `origin`, and per-window echo suppression are NOT covered here. Their
+// coverage is the CEF-free sibling named above, `editor-session-concurrent-cas-t2`, which attaches
+// three SEPARATE clients and asserts their daemon-minted ids differ
+// (test_e09b_concurrent_cas.cpp § `shell_client` / `racer` / `observer`); making this smoke
+// cross-connection too is CE #455, not a property to assume from the word "mirror".
 //
 // TWO WINDOW MODES, as documented in cef_shell_smoke.cpp's header: headless by default (safe on the
 // Session-0 Windows runner), REAL windows under `--real-window`, which the ctest registration passes
@@ -501,6 +516,13 @@ int main(int argc, char** argv)
     // destroys no window at all.
     std::vector<WindowSurfaces*> fed;
 
+    // ⚠ WIRING PARITY ONLY — this handler is NOT exercised by this scenario, and saying so is cheaper
+    // than letting a future reader infer coverage from its presence. `fed` is still EMPTY when
+    // `spawn_or_attach` below delivers the initial subscription snapshot (window A is appended after
+    // it, window B later still), and nothing here forces a reconnect, so the body never runs. It
+    // mirrors `editor_main.cpp`, where window 0's bag IS a captured pointer that is live at attach
+    // time and so does receive it. Reordering the smoke to cover this would mean building a window
+    // before the daemon exists; the snapshot path's coverage is the Problems feed's own tier.
     lifecycle.on_snapshot(
         [&fed](const std::string&, const context::editor::contract::Json& snapshot)
         {
@@ -565,6 +587,14 @@ int main(int argc, char** argv)
     // declared before the manager so its bridge outlives every handler AND the manager's own
     // teardown — `shell::cef::shutdown()` below runs while both are still in scope, which is the
     // CE #319 invariant `cef_shell.h` states.
+    // The window factory's two out-params, declared HERE — ahead of `manager` — deliberately. The
+    // factory lambda captures them by REFERENCE and is STORED INSIDE `manager`, so a declaration after
+    // `manager` would let the referents die first at scope exit. Benign today (nothing invokes the
+    // factory after window B is created, and ~WindowManager creates no window), but this file is
+    // meticulous about exactly this class of ordering everywhere else, and a latent one is still worth
+    // not having.
+    WindowSurfaces* created_surfaces = nullptr;
+    shell::BridgeRouter* created_bridge = nullptr;
     shell::WindowMoveStore move_store;
     shell::BridgeRouter primary_bridge;
     WindowSurfaces primary_surfaces;
@@ -626,8 +656,7 @@ int main(int argc, char** argv)
     }
 
     // --- the window factory: how window B is built (the same shape editor_main.cpp binds) ---------
-    WindowSurfaces* created_surfaces = nullptr;
-    shell::BridgeRouter* created_bridge = nullptr;
+    // Its two out-params are declared above `manager`, on purpose — see there.
     manager.bind_window_factory(
         [&](const shell::WindowSpec& spec, shell::WindowSessionParts& parts,
             std::string& error) -> bool
@@ -880,8 +909,15 @@ int main(int argc, char** argv)
     spec.state_index = 1;
     const shell::WindowCreateResult second = manager.create_window(spec, shell::kPrimaryWindowId);
     SMOKE_CHECK(second.ok(), "the registry created window B");
-    SMOKE_CHECK(created_surfaces != nullptr && created_bridge != &primary_bridge,
-                "window B got its OWN bridge router and its OWN panel bag");
+    // The factory RAN and handed back both out-params. Deliberately NOT phrased as
+    // `created_bridge != &primary_bridge`, which was the original wording and CANNOT FAIL: a live heap
+    // address can never equal the address of the live stack local `primary_bridge`, so that conjunct
+    // was structurally incapable of reporting anything, and neither conjunct established the "its OWN
+    // panel bag" half it claimed. What actually proves window B's router and bag are its own is that
+    // they SERVED window B's own traffic — asserted on the counters after §5, once there is traffic to
+    // count.
+    SMOKE_CHECK(created_surfaces != nullptr && created_bridge != nullptr,
+                "the factory produced window B's own bridge router and panel bag");
     if (!second.ok() || created_surfaces == nullptr)
     {
         return finish(1);
@@ -1061,6 +1097,15 @@ int main(int argc, char** argv)
         SMOKE_CHECK(b.staged_value == kTypedValue,
                     "window B's LIVE DOM is displaying the value window A typed");
         SMOKE_CHECK(b.staged_pointer == kFovPointer, "…on the field window A edited");
+        // …AND IT WAS WINDOW B'S OWN HOST THAT DID THE WORK — the assertion the can't-fail pointer
+        // comparison at window B's creation was reaching for. Both counters belong to window B's own
+        // `PanelHost` and start at 0; `drive_dom`'s failure diagnostic prints exactly these two BECAUSE
+        // a 0 discriminates "the panel never rendered" and "no `panel.command` ever reached this host",
+        // so a wiring bug that pointed window B's browser at window A's router leaves them at 0 here.
+        SMOKE_CHECK(b_surfaces.panel_host.renders_served() > 0,
+                    "window B's OWN PanelHost served the renders its DOM was built from");
+        SMOKE_CHECK(b_surfaces.panel_host.commands_dispatched() > 0,
+                    "…and dispatched window B's own `inspector.edit`, on its own router");
     }
     // Discard it: a read-back must leave no gesture behind, and `cancel` is the verb that fires no
     // commit listener (which is exactly why `flush_deferred_refresh` has a call site there).

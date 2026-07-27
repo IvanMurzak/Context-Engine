@@ -1328,16 +1328,28 @@ int main(int argc, char** argv)
     // Inspector's gesture provider and issue a commit. Unbinding first is what makes that commit
     // refuse instead of calling a destroyed Client.
     shell::panels::bind_write_client(builtin, nullptr);
-    // e09e-3: the SAME unbind for every OTHER live window's bag, BEFORE the same call and for the same
+    // e09e-3: the SAME unbind for every OTHER window's bag, BEFORE the same call and for the same
     // reason. A secondary window's Inspector can commit too since this task wired its gateway, so it
     // has exactly window 0's exposure to a renderer message queued before exit.
-    for_each_secondary_bag(
-        [](SecondaryWindowSurfaces& surfaces, client::Client*)
+    //
+    // ⚠ DELIBERATELY NOT `for_each_secondary_bag`, which is LIVE-gated. That gate is right for feeding
+    // and pumping — a destroyed window must stop being fed — but WRONG here: a mid-process destroy
+    // RETIRES a session rather than freeing it (the CE #319 rule, shell.h § RetiredSession), and retire
+    // clears the compositor sink WITHOUT touching the bag, so a retired window's Inspector gateway is
+    // still bound to its still-live `Client`. Skipping it would leave exactly the binding these two
+    // calls exist to remove, on the one bag nobody will look at again, across `manager.shutdown()`'s
+    // all-closing CEF drain. Before this task secondary bags were bound to no client at all, so this
+    // exposure is one THIS task introduced; the unbind is idempotent, so covering live and retired
+    // windows alike is strictly safer and costs a pointer store each.
+    for (const SecondaryFeed& entry : secondary_feeds)
+    {
+        if (const std::shared_ptr<SecondaryWindowSurfaces> surfaces = entry.surfaces.lock())
         {
-            shell::panels::bind_write_client(surfaces.builtin, nullptr);
-            if (surfaces.builtin.session != nullptr)
-                shell::panels::bind_session_client(*surfaces.builtin.session, nullptr);
-        });
+            shell::panels::bind_write_client(surfaces->builtin, nullptr);
+            if (surfaces->builtin.session != nullptr)
+                shell::panels::bind_session_client(*surfaces->builtin.session, nullptr);
+        }
+    }
     // e13c-1: close THIS process's package sessions before the daemon teardown below, the same
     // ordering rule as the two unbinds above — they are our own connections and the daemon should not
     // have to reap them from an exiting process.

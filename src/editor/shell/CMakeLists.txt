@@ -707,7 +707,7 @@ endif()
 #
 # WHY ONE LIST IS SOUND for two audits with different charters (Windows/Linux staging vs macOS bundle):
 # every CEF-hosting Shell executable needs BOTH, on whichever platform it is configured for. For the
-# NINE smokes that holds by construction — context_configure_shell_cef_smoke() calls
+# SMOKES that holds by construction — context_configure_shell_cef_smoke() calls
 # context_shell_cef_mac_bundle() unconditionally under its own if(OS_MAC), and requires BUNDLE_ID on
 # every platform so a Windows-only author cannot skip macOS silently (see cef/CMakeLists.txt). For
 # `context_editor`, member #1, it holds by HAND: its bundle comes from the OS_MAC branch above with a
