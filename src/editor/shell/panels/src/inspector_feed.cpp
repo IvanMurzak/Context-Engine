@@ -5,9 +5,11 @@
 #include "context/editor/shell/panels/inspector_feed.h"
 
 #include "context/editor/serializer/json_parse.h"
-#include "context/editor/serializer/sidecar_ref.h"      // parse_hash_string — the decimal-u64 inverse
-#include "context/editor/shell/panels/scenetree_feed.h" // parse_hex_u64 — the ONE hex-wire parser
-#include "wire_read.h"                                  // read_string / read_bool / envelope_data
+#include "context/editor/serializer/sidecar_ref.h"       // parse_hash_string — the decimal-u64 inverse
+#include "context/editor/shell/panels/builtin_panels.h"  // kDerivationTopic
+#include "context/editor/shell/panels/problems_feed.h"   // kDerivationSettledEvent
+#include "context/editor/shell/panels/scenetree_feed.h"  // parse_hex_u64 — the ONE hex-wire parser
+#include "wire_read.h"                                   // read_string / read_bool / envelope_data
 
 #include <cstdio>
 #include <string_view>
@@ -259,6 +261,15 @@ void InspectorFeed::on_commit(const inspector::CommitResult& result)
             ++notices_sent_;
             notice_sink_(result);
         }
+        // e09e-2: a refusal wrote nothing, so there is no read-your-writes barrier to honour here —
+        // but a `derivation.settled` that arrived WHILE this gesture was staged was deferred rather
+        // than served, and it is still owed. For a DROP that settle is precisely the concurrent write
+        // that caused the drop, so the panel is currently rendering a value that is no longer on
+        // disk: without this release the human is told "re-make your edit against what is there now"
+        // while still being shown what WAS there, which makes the instruction unactionable. The
+        // flush's own `has_staged_edit()` guard is what keeps an `error` — which KEEPS the gesture —
+        // deferred instead.
+        (void)flush_deferred_refresh();
         return;
     }
     // READ-YOUR-WRITES (05 §7). The panel must observe its own commit, so the next
@@ -266,7 +277,44 @@ void InspectorFeed::on_commit(const inspector::CommitResult& result)
     // `overridden:true`. Without this the panel would wait for the next selection change or
     // `derivation.settled` — i.e. it would render a value it had already successfully written as if
     // it had not.
+    //
+    // This re-read SUBSUMES any deferred settle refresh: it re-requests the same identity, which is
+    // exactly what the deferral was owed, so the flag is cleared rather than flushed (flushing would
+    // arm the same fetch twice and double-count `rereads_armed`).
+    refresh_deferred_ = false;
     (void)request_refresh();
+}
+
+bool InspectorFeed::flush_deferred_refresh()
+{
+    if (!refresh_deferred_ || panel_.has_staged_edit())
+    {
+        return false; // nothing owed, or the gesture it protects is still in flight
+    }
+    refresh_deferred_ = false;
+    return request_refresh();
+}
+
+bool InspectorFeed::apply_event(const std::string& topic, const contract::Json& payload)
+{
+    if (topic != kDerivationTopic || read_string(payload, "event") != kDerivationSettledEvent)
+    {
+        return false; // another feed's topic, or another `derivation` event — not ours to interpret
+    }
+    // Counted BEFORE the guard below, deliberately: it is what distinguishes "recognized the settle
+    // and withheld the re-read" from "never saw the settle at all" (inspector_feed.h § events_applied).
+    ++events_applied_;
+    if (panel_.has_staged_edit())
+    {
+        // ⚠⚠ THE L-30 GUARD. Serving the re-read here would let `apply_result` -> `set_model` discard
+        // the human's in-flight edit AND adopt the concurrent writer's post-write raw hash as this
+        // gesture's CAS base — so the commit would guard against the very state it is racing, find no
+        // mismatch, and overwrite it. Nothing would report an error. Defer; `flush_deferred_refresh`
+        // releases it the moment the gesture is genuinely gone.
+        refresh_deferred_ = true;
+        return false;
+    }
+    return request_refresh();
 }
 
 bool InspectorFeed::request_refresh()
@@ -293,6 +341,10 @@ void InspectorFeed::request(const std::string& identity)
 void InspectorFeed::request_clear()
 {
     pending_.reset();
+    // e09e-2: a deferred settle refresh was owed to an ENTITY that is no longer inspected, so it dies
+    // with the selection. Leaving it set would arm a re-read of whatever gets selected NEXT the first
+    // time a gesture there resolves — harmless in effect, dishonest in bookkeeping.
+    refresh_deferred_ = false;
     panel_.clear();
     host_.touch(panel_id_);
 }
@@ -307,6 +359,10 @@ bool InspectorFeed::apply_result(const contract::Json& reply)
     }
     panel_.set_model(std::move(*model), raw_hash);
     ++results_applied_;
+    // e09e-2: the panel just adopted fresh state, which IS what a deferred settle refresh was owed —
+    // so nothing is outstanding any more, whichever caller armed this fetch (a selection change, a
+    // read-your-writes re-request, or the deferral's own release).
+    refresh_deferred_ = false;
     host_.touch(panel_id_);
     return true;
 }
@@ -387,6 +443,11 @@ PanelProvider InspectorFeed::make_provider()
                     return false;
                 }
                 panel_.discard_edit();
+                // e09e-2: the gesture is over and `discard_edit` fires NO commit listener, so this is
+                // the only place a settle deferred during an abandoned gesture can be released. Miss
+                // it and the panel silently keeps rendering pre-write state until the next selection
+                // change — the exact staleness this task exists to remove.
+                (void)flush_deferred_refresh();
                 host_.touch(panel_id_);
                 return true;
             }

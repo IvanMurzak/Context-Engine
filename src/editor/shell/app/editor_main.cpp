@@ -694,6 +694,11 @@ int main(int argc, char** argv)
     shell::panels::SceneTreeFeed* tree_feed = builtin.scenetree.get();
     // e08b: the daemon session feed (selection / play). Same forward-declared-pointer discipline.
     shell::panels::SessionFeed* session_feed = builtin.session.get();
+    // e09e-2: the Inspector rides the SAME `derivation` stream, so design 05 §8's fan-out tail — a
+    // landed write reaching every subscribed client — reaches this panel too. Same discipline. (Which
+    // client actions actually PUBLISH that settle today is narrower than §8 specifies: a plain `edit`
+    // publishes nothing, so the cross-window case is not live yet — inspector_feed.h § SCOPE.)
+    shell::panels::InspectorFeed* inspector_feed = builtin.inspector.get();
 
     // --- the daemon SESSION read surface for editor-core (e08d, design 05 §4 / §6) ---------------
     // The Shell subscribes to the `session` topic below and `SessionFeed` holds the resulting L-51
@@ -807,7 +812,8 @@ int main(int argc, char** argv)
                 shell::panels::apply_problems_snapshot(*feed, snapshot, 0);
         });
     lifecycle.on_event(
-        [feed, tree_feed, session_feed](const std::string&, const client::ClientEvent& event)
+        [feed, tree_feed, session_feed, inspector_feed](const std::string&,
+                                                        const client::ClientEvent& event)
         {
             if (feed != nullptr)
                 (void)shell::panels::apply_problems_event(*feed, event.topic, event.payload,
@@ -815,6 +821,12 @@ int main(int argc, char** argv)
             if (tree_feed != nullptr)
                 (void)shell::panels::apply_scenetree_event(*tree_feed, event.topic, event.payload,
                                                            event.generation);
+            // e09e-2: the fan-out half. A `false` here is ordinary — the feed WITHHOLDS the re-read
+            // while a gesture is staged, so the human's in-flight edit and its L-30 CAS base survive
+            // a concurrent writer's settle (inspector_feed.h § apply_event).
+            if (inspector_feed != nullptr)
+                (void)shell::panels::apply_inspector_event(*inspector_feed, event.topic,
+                                                           event.payload);
             // e08b: the `session` facts (another client's selection / play state). The feed itself
             // drops the echo of our own writes, so nothing here needs to know about `origin`.
             if (session_feed != nullptr)

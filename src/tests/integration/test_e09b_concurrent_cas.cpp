@@ -21,22 +21,32 @@
 //
 // It also covers the canonical 05 §8 flow's editor half end to end — `panel.command inspector.edit`
 // (stage) -> `panel.gesture commit` -> RPC `edit` -> real bytes on real disk -> the R-CLI-006
-// READ-YOUR-WRITES re-read that makes the panel show what it just wrote. The cross-WINDOW tail of
-// that sequence (the fan-out reaching a second editor window) is e10d's live smoke; this drill owns
-// the write half.
+// READ-YOUR-WRITES re-read that makes the panel show what it just wrote.
+//
+// SINCE M9 e09e-2 IT ALSO OWNS THE FAN-OUT HALF (§ 5) — the OTHER end of that same 05 §8 chain,
+// where `derivation.settled{gen}` reaches every subscribed client. A SECOND `BuiltinPanels` bag on
+// its OWN client, fed by a REAL `SubscriptionConsumer` over the REAL `derivation` topic, refreshes
+// from a write it did not make; and — the assertion the task actually turns on — does NOT refresh
+// while its own gesture is staged, so the L-30 collision base cannot be silently re-based under the
+// human's in-flight edit. Two live CEF windows are still e09e-3's smoke; the cross-CLIENT model
+// propagation is proven here, CEF-free, on all three default `build` legs.
 
 #include "context/editor/client/client.h"
+#include "context/editor/client/subscription.h" // e09e-2: the REAL `derivation` fan-out consumer
 #include "context/editor/gui/panels/inspector/inspector_panel.h"
 #include "context/editor/serializer/canonical.h" // the ONE value identity (R-FILE-001)
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/panels/inspector_feed.h"
+#include "context/editor/shell/panels/problems_feed.h" // kDerivationSettledEvent (the settle's spelling)
 #include "context/editor/shell/panels/wire_override_gateway.h"
 #include "context/editor/shell/shell.h" // kShellScope — attach with the REAL Shell's scope request
 
 #include "integration_test.h"
 #include "process_util.h"
 
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -200,12 +210,11 @@ void hydrate_inspector(panels::BuiltinPanels& builtin, client::Client& c)
     return {};
 }
 
-// Stage a value on the field through the REAL `panel.command` seam the renderer uses, then end the
-// gesture through the REAL `panel.gesture` seam. Returns the panel's resolved commit outcome.
-[[nodiscard]] inspector::CommitResult stage_and_commit(shell::PanelHost& host,
-                                                       panels::BuiltinPanels& builtin,
-                                                       const std::string& pointer,
-                                                       const std::string& value)
+// Stage a value on the field through the REAL `panel.command` seam the renderer uses, WITHOUT ending
+// the gesture — the L-20 in-flight state (no write yet). Separate from the commit below because
+// several scenarios need something to happen INSIDE that window, which is the only window L-30 is
+// about.
+void stage_only(shell::PanelHost& host, const std::string& pointer, const std::string& value)
 {
     Json edit = Json::object();
     edit.set("nodeId", Json(std::string(panels::kInspectorWidgetPrefix) + pointer));
@@ -214,14 +223,77 @@ void hydrate_inspector(panels::BuiltinPanels& builtin, client::Client& c)
     std::string code;
     CHECK(host.invoke(inspector::InspectorPanel::kContributionId,
                       inspector::InspectorPanel::kEditCommand, edit, dispatched, code));
-    CHECK(dispatched); // the staged gesture (L-20: no write yet)
-    CHECK(builtin.inspector->panel().has_staged_edit());
+    CHECK(dispatched);
+}
 
-    dispatched = false;
+// End the gesture through the REAL `panel.gesture` seam (L-20: gesture end IS the commit). The
+// `dispatched` CHECK is load-bearing rather than ceremonial: a provider that found NOTHING staged
+// answers `Status::none` and reports `dispatched:false`, which is exactly what a lost gesture looks
+// like from here.
+void commit_gesture(shell::PanelHost& host)
+{
+    bool dispatched = false;
+    std::string code;
     CHECK(host.gesture(inspector::InspectorPanel::kContributionId, shell::GestureVerb::commit,
                        Json::object(), dispatched, code));
     CHECK(dispatched);
+}
+
+// Stage then immediately commit — the uninterrupted gesture. Returns the panel's resolved outcome.
+[[nodiscard]] inspector::CommitResult stage_and_commit(shell::PanelHost& host,
+                                                       panels::BuiltinPanels& builtin,
+                                                       const std::string& pointer,
+                                                       const std::string& value)
+{
+    stage_only(host, pointer, value);
+    CHECK(builtin.inspector->panel().has_staged_edit());
+    commit_gesture(host);
     return builtin.inspector->panel().last_result();
+}
+
+// Make the daemon SETTLE, so it publishes the R-BRIDGE-008 `derivation.settled` quiescence fact the
+// e09e-2 fan-out rides. A bare `edit` deliberately does NOT settle — it runs only the
+// read-your-writes barrier (`query_after_hash`), which publishes nothing — so the fact comes from a
+// `reconcile`, exactly as `test_client_e2e` drives it and exactly what `context attach --reconcile`
+// does in the field. Measured, so no reader over-reads this: `reconcile` and `edit-batch` (plus the
+// two await barriers) are the ONLY callers of `EditorKernel::settle`, and no daemon timer drives the
+// R-FILE-002 crawl — `ingest_external` is reached only from `reconcile` (CrawlMode::force, which
+// bypasses the cadence) and the in-process CLI driver. So this call is not a stand-in for a
+// background crawl that would fire on its own; it IS the trigger a client has today.
+[[nodiscard]] bool force_settle(client::Client& c)
+{
+    std::string error;
+    const bool ok = c.call("reconcile", Json::object(), error).has_value();
+    if (!ok)
+        std::fprintf(stderr, "reconcile refused: %s (%s)\n", c.last_error_code().c_str(),
+                     error.c_str());
+    return ok;
+}
+
+// Pump a REAL subscription until one more `derivation` fact has been applied, bounded so a regression
+// surfaces as a legible failure instead of hanging the CI job. Returns false when none arrived —
+// which every caller CHECKs, because every assertion about what the fan-out DID is vacuous if the
+// fan-out never happened at all.
+[[nodiscard]] bool pump_until_settle(client::SubscriptionConsumer& consumer,
+                                     const std::size_t& settles_seen, std::size_t before)
+{
+    // 10s base, so BOTH calls together stay inside the ctest TIMEOUT even on the sanitize/tsan legs
+    // (kSanitizerTimeoutScale is 4, so 40s each, on top of this drill's 80s boot wait and its
+    // attaches). A budget that can overrun the cap would surface a regression as a bare ctest
+    // timeout — exactly the illegible failure the bound above exists to avoid. The happy path is
+    // sub-second: the settle is already published before the first pump (`force_settle` returned).
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(itest::scaled_timeout_ms(10000));
+    std::string error;
+    while (settles_seen == before && std::chrono::steady_clock::now() < deadline)
+    {
+        if (!consumer.pump(error))
+        {
+            std::fprintf(stderr, "subscription pump failed: %s\n", error.c_str());
+            return false;
+        }
+    }
+    return settles_seen > before;
 }
 
 [[nodiscard]] bool mentions(const std::string& haystack, const std::string& needle)
@@ -350,24 +422,9 @@ void a_gesture_commits_over_the_wire_and_survives_a_concurrent_writer()
     // The staged gesture's collision base is the value at STAGE time, so the racer must write
     // BETWEEN the stage and the commit — which is precisely the window L-30 exists for. Stage first,
     // by hand, so the race lands inside it.
-    {
-        Json edit = Json::object();
-        edit.set("nodeId", Json(std::string(panels::kInspectorWidgetPrefix) + kFovPointer));
-        edit.set("value", Json(std::string("9.5")));
-        bool dispatched = false;
-        std::string code;
-        CHECK(host.invoke(inspector::InspectorPanel::kContributionId,
-                          inspector::InspectorPanel::kEditCommand, edit, dispatched, code));
-        CHECK(dispatched);
-    }
+    stage_only(host, kFovPointer, "9.5");
     CHECK(race_write(*racer, kFovPointer, "7.25")); // THE SAME FIELD, under the in-flight gesture
-    {
-        bool dispatched = false;
-        std::string code;
-        CHECK(host.gesture(inspector::InspectorPanel::kContributionId, shell::GestureVerb::commit,
-                           Json::object(), dispatched, code));
-        CHECK(dispatched);
-    }
+    commit_gesture(host);
     const inspector::CommitResult dropped = builtin.inspector->panel().last_result();
     CHECK(dropped.status == inspector::CommitResult::Status::dropped);
     CHECK(dropped.code == "cas.mismatch");
@@ -391,20 +448,8 @@ void a_gesture_commits_over_the_wire_and_survives_a_concurrent_writer()
     panels::bind_write_client(builtin, nullptr);
     CHECK(!builtin.writes->has_client());
     const std::size_t writes_before = builtin.writes->writes_issued();
-    {
-        Json edit = Json::object();
-        edit.set("nodeId", Json(std::string(panels::kInspectorWidgetPrefix) + kFovPointer));
-        edit.set("value", Json(std::string("42.0")));
-        bool dispatched = false;
-        std::string code;
-        CHECK(host.invoke(inspector::InspectorPanel::kContributionId,
-                          inspector::InspectorPanel::kEditCommand, edit, dispatched, code));
-        CHECK(dispatched);
-        dispatched = false;
-        CHECK(host.gesture(inspector::InspectorPanel::kContributionId, shell::GestureVerb::commit,
-                           Json::object(), dispatched, code));
-        CHECK(dispatched);
-    }
+    stage_only(host, kFovPointer, "42.0");
+    commit_gesture(host);
     const inspector::CommitResult refused = builtin.inspector->panel().last_result();
     CHECK(refused.status == inspector::CommitResult::Status::error);
     CHECK(refused.code == std::string(panels::WireOverrideWriteGateway::kNoDaemonCode));
@@ -412,6 +457,198 @@ void a_gesture_commits_over_the_wire_and_survives_a_concurrent_writer()
     // An error KEEPS the staged gesture, so the human's in-flight edit is not silently discarded.
     CHECK(builtin.inspector->panel().has_staged_edit());
     CHECK(!mentions(read_authored(project, "root.scene.json"), "42"));
+
+    // === 5. THE FAN-OUT HALF (M9 e09e-2) — a SECOND bag, on its OWN client ========================
+    //
+    // Design 05 §8's tail: `derivation.settled{gen}` reaches "all subscribed clients (window 1,
+    // window 2, CLI, agents)". So this section boots a SECOND, INDEPENDENT `BuiltinPanels` bag — the
+    // panel composition a second editor window runs — over its OWN `client::Client` with its OWN
+    // daemon-minted id, fed by a REAL `SubscriptionConsumer` on the REAL `derivation` topic through
+    // the REAL `apply_inspector_event` seam `editor_main.cpp` calls. Nothing here synthesizes a
+    // settle payload: the fact asserted on is the one the daemon actually published, which is the
+    // only way the READER is proven against the wire rather than against our idea of it.
+    //
+    // ⚠⚠ THE ASSERTIONS THAT MATTER ARE THE NEGATIVE ONES. Refreshing on every settle is the easy
+    // implementation and the WRONG one: `set_model` discards the staged gesture AND adopts the fresh
+    // file as its CAS base. Nothing errors, nothing crashes — a defeated compare-and-swap looks
+    // exactly like a successful edit. So the drill stages a gesture, lets the racer move the SAME
+    // field, delivers the REAL settle, PUMPS (as the owner loop does in that same frame), and then
+    // requires the commit to STILL DROP.
+    //
+    // The damage takes TWO steps, and 5b covers both, because the first alone is not the data loss:
+    // a served refresh clears `staged_`, so an IMMEDIATE commit would answer `none` and write nothing
+    // (loud enough to catch). The silent overwrite needs the human to keep typing — the next
+    // `inspector.edit` re-stages, and `stage_edit` takes its base_value from the model the refresh
+    // just replaced while `base_raw_hash_` is the racer's post-write token, so the commit CASes
+    // against the very state it is racing, finds no mismatch, APPLIES, and clobbers the racer with no
+    // drop and no notice. 5b therefore re-stages before committing, which is what makes the on-disk
+    // assertions below detectors rather than decoration: with the guard they are unchanged (the model
+    // never moved, so the same base is recorded and the commit still drops), and without it `9.75`
+    // lands on disk.
+    std::string observer_error;
+    const std::unique_ptr<client::Client> observer = attach_client(project, observer_error);
+    CHECK(observer != nullptr);
+    if (observer == nullptr)
+    {
+        std::fprintf(stderr, "observer attach failed: %s\n", observer_error.c_str());
+        reap(daemon);
+        remove_tree(project);
+        return;
+    }
+    // A THIRD real connection: three distinct daemon-minted ids. A second bag sharing window 1's
+    // client would prove nothing about fan-out — it would be one client talking to itself.
+    CHECK(observer->client_id() > 0);
+    CHECK(observer->client_id() != shell_client->client_id());
+    CHECK(observer->client_id() != racer->client_id());
+
+    shell::PanelHost observer_host;
+    panels::BuiltinPanels observed = panels::install_builtin_panels(observer_host);
+    CHECK(observed.inspector != nullptr);
+    CHECK(observed.writes != nullptr);
+    if (observed.inspector == nullptr || observed.writes == nullptr)
+    {
+        reap(daemon);
+        remove_tree(project);
+        return;
+    }
+    panels::bind_write_client(observed, observer.get());
+    CHECK(observed.writes->has_client());
+
+    client::AttachOptions observer_attach;
+    observer_attach.scope = shell::kShellScope;
+    observer_attach.token = observer->instance().token; // the D20 token replayed on a reconnect
+    client::SubscriptionConsumer::Options consumer_options;
+    consumer_options.poll_timeout_ms = 100;
+    client::SubscriptionConsumer settles(*observer, observer_attach, consumer_options);
+    std::size_t settles_seen = 0;
+    settles.on_event(
+        [&observed, &settles_seen](const std::string&, const client::ClientEvent& event)
+        {
+            // Count the SETTLE specifically, not merely the topic: every assertion downstream reads
+            // `events_applied()`, which counts only `derivation.settled`. The two coincide today (the
+            // topic carries exactly one event kind), so this is forward-proofing rather than a live
+            // fix — but the T1 sibling already uses `derivation.started` as its negative case, and the
+            // day such an event ships, a topic-only predicate would let `pump_until_settle` return
+            // before the settle arrived and red the assertions below spuriously.
+            if (event.topic == panels::kDerivationTopic &&
+                event.payload.at("event").as_string() == panels::kDerivationSettledEvent)
+            {
+                ++settles_seen;
+            }
+            // The inspector leg of the dispatch the live Shell makes (editor_main.cpp's `on_event`),
+            // argument for argument: nothing is pre-sorted, because topic filtering is the feed's own
+            // job. The live lambda also drives the problems / scenetree / session seams; only the
+            // inspector one is wired here, so this drill proves the derivation -> Inspector path and
+            // deliberately says nothing about cross-feed interactions on the same event.
+            (void)panels::apply_inspector_event(*observed.inspector, event.topic, event.payload);
+        });
+    settles.add(client::SubscriptionSpec{{std::string(panels::kDerivationTopic)}, ""});
+    CHECK(settles.start(observer_error));
+    CHECK(settles.states().size() == 1u);
+    CHECK(settles.states().size() == 1u && settles.states()[0].live);
+
+    // Hydrate the second window's Inspector on the SAME entity, through its own live read path.
+    hydrate_inspector(observed, *observer);
+    CHECK(observed.inspector->results_applied() == 1);
+    CHECK(observed.inspector->panel().base_raw_hash() != 0);
+    CHECK(field_value(observed.inspector->panel(), kFovPointer, overridden) == "7.25");
+
+    // --- 5a. THE PLAIN FAN-OUT: idle panel, someone else writes, the settle re-reads it -----------
+    {
+        const std::size_t settles_before = settles_seen;
+        const std::size_t rereads_before = observed.inspector->rereads_armed();
+        CHECK(race_write(*racer, kFovPointer, "5.5")); // window 2 is not editing; a co-writer moves it
+        CHECK(force_settle(*racer));
+        CHECK(pump_until_settle(settles, settles_seen, settles_before));
+
+        CHECK(observed.inspector->events_applied() >= 1u); // the settle was RECOGNIZED, not ignored
+        CHECK(observed.inspector->rereads_armed() > rereads_before); // …and it armed the re-read
+        CHECK(!observed.inspector->refresh_deferred());
+        CHECK(observed.inspector->pending().has_value());
+        panels::pump_panel_feeds(observed, *observer, kRoot);
+        CHECK(observed.inspector->results_applied() == 2);
+        // THE FAN-OUT: window 2 shows a value it never wrote and never re-selected for.
+        CHECK(field_value(observed.inspector->panel(), kFovPointer, overridden) == "5.5");
+    }
+
+    // --- 5b. THE GUARD: a settle arriving MID-GESTURE must not re-base the L-30 collision base ----
+    const std::uint64_t observer_base = observed.inspector->panel().base_raw_hash();
+    CHECK(observer_base != 0);
+    observed.inspector->mark_fetched(); // claim anything armed, so "nothing armed" below is meaningful
+    CHECK(!observed.inspector->pending().has_value());
+    const std::size_t results_before = observed.inspector->results_applied();
+    const std::size_t rereads_before = observed.inspector->rereads_armed();
+
+    stage_only(observer_host, kFovPointer, "9.75"); // the human is mid-edit in window 2
+    CHECK(observed.inspector->panel().has_staged_edit());
+
+    {
+        const std::size_t settles_before = settles_seen;
+        const std::size_t events_before = observed.inspector->events_applied();
+        CHECK(race_write(*racer, kFovPointer, "6.5")); // the racer moves THE SAME FIELD, mid-gesture
+        CHECK(force_settle(*racer));
+        CHECK(pump_until_settle(settles, settles_seen, settles_before));
+
+        // RECOGNIZED — so the four negatives below cannot pass merely because the fact was dropped by
+        // a topic filter, which is the one way this whole section could read green while proving
+        // nothing.
+        CHECK(observed.inspector->events_applied() > events_before);
+        CHECK(observed.inspector->refresh_deferred());       // owed, and knowingly withheld
+        CHECK(!observed.inspector->pending().has_value());   // NOT armed
+        CHECK(observed.inspector->rereads_armed() == rereads_before);
+        CHECK(observed.inspector->panel().has_staged_edit()); // the human's edit survived
+        CHECK(observed.inspector->panel().base_raw_hash() == observer_base); // NOT re-based
+
+        // The owner loop pumps in the SAME frame it dispatches events, so pump here too: this is the
+        // step that would actually destroy the gesture if the settle had armed the fetch, and it is
+        // what makes the assertions above load-bearing rather than merely early.
+        panels::pump_panel_feeds(observed, *observer, kRoot);
+        CHECK(observed.inspector->results_applied() == results_before);
+        CHECK(observed.inspector->panel().has_staged_edit());
+        CHECK(observed.inspector->panel().base_raw_hash() == observer_base);
+    }
+
+    // THE PAYOFF: the L-30 guarantee is intact at the second bag too. The gesture's base is still the
+    // pre-race token and its collision base is still 5.5, so the commit CAS-fails, re-reads, sees the
+    // field MOVED, and DROPS — the racer's 6.5 survives and 9.75 is never written.
+    //
+    // The human keeps typing before ending the gesture — the ordinary shape, and the step that makes
+    // the on-disk assertions below discriminating (see the section preamble). Under the correct code
+    // the model is untouched, so this re-records the SAME base and changes nothing; with the guard
+    // removed it re-bases onto the racer's post-write state and the commit applies instead of
+    // dropping.
+    stage_only(observer_host, kFovPointer, "9.75");
+    CHECK(observed.inspector->panel().has_staged_edit());
+    commit_gesture(observer_host);
+    const inspector::CommitResult observer_dropped = observed.inspector->panel().last_result();
+    CHECK(observer_dropped.status == inspector::CommitResult::Status::dropped);
+    // Deliberately NOT redundant with the line above, because CHECK is non-fatal: `none` is the
+    // specific status a served settle produces (nothing staged left to commit), so naming it makes a
+    // failure say WHICH way it broke instead of just "not dropped". Do not simplify this away.
+    CHECK(observer_dropped.status != inspector::CommitResult::Status::none);
+    CHECK(observer_dropped.code == "cas.mismatch");
+    CHECK(mentions(observer_dropped.message, kFovPointer));
+    CHECK(observed.inspector->drops_observed() == 1);
+    {
+        const std::string on_disk = read_authored(project, "root.scene.json");
+        CHECK(mentions(on_disk, "6.5"));
+        CHECK(!mentions(on_disk, "9.75"));
+    }
+
+    // --- 5c. …AND IT DOES REFRESH ONCE THE GESTURE RESOLVES ---------------------------------------
+    // The drop consumed the gesture, so the withheld re-read is released — which is what makes the
+    // loud "re-make your edit against what is there now" actionable instead of leaving the human
+    // staring at the value that is no longer on disk. ONE re-read, not one per deferred settle.
+    CHECK(!observed.inspector->refresh_deferred());
+    CHECK(observed.inspector->rereads_armed() == rereads_before + 1);
+    CHECK(observed.inspector->pending().has_value());
+    panels::pump_panel_feeds(observed, *observer, kRoot);
+    CHECK(observed.inspector->results_applied() == results_before + 1);
+    CHECK(field_value(observed.inspector->panel(), kFovPointer, overridden) == "6.5");
+    CHECK(observed.inspector->panel().base_raw_hash() != observer_base); // now guarding live state
+
+    settles.stop();
+    panels::bind_write_client(observed, nullptr);
 
     std::string shutdown_error;
     (void)shell_client->call("shutdown", Json::object(), shutdown_error);
