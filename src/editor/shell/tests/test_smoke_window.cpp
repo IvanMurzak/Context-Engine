@@ -9,16 +9,20 @@
 // task exists to close. So the load-bearing cases here are the NEGATIVE ones — real mode refusing a
 // headless backend rather than falling back onto `post()`.
 //
-// The keysym half is the other thing that cannot be caught live: an injection table entry that is
+// The key-table half is the other thing that cannot be caught live: an injection table entry that is
 // merely WRONG still sends an event, so the smoke sees a key arrive and passes while the browser
-// receives a different key. It is pinned by SWEEPING the whole single-byte VK range back through the
-// SHIPPING decoder map (`x11_keysym_to_windows_key_code`), so the two cannot drift apart silently —
-// including for a code a LATER task adds to the table, which a hand-listed sample set would miss.
+// receives a different key. BOTH tables — X11 keysyms and (since M9 e12c-3) macOS virtual keys — are
+// pinned by SWEEPING the whole single-byte VK range back through their SHIPPING decoder map
+// (`x11_keysym_to_windows_key_code` / `ns_key_code_to_windows_key_code`), so neither can drift from
+// its decoder silently, including for a code a LATER task adds, which a hand-listed sample set would
+// miss. A third sweep pins the two tables to EACH OTHER: a VK the Linux arm accepts and the macOS arm
+// refuses is a smoke that works on one platform and silently cannot inject on the other.
 //
-// WHAT THIS SUITE DELIBERATELY DOES NOT COVER. The X11 encoder's own refusals (a wheel or leave
-// sample, a press carrying MouseButton::none, a `character` key action, an uncovered keysym) live
-// behind `CONTEXT_SHELL_SMOKE_HAS_X11` and need a display, so they belong to the live
-// `editor-shell-x11-window` smoke, not here. Recorded so the gap is visible rather than assumed
+// WHAT THIS SUITE DELIBERATELY DOES NOT COVER. Each platform encoder's own refusals (a wheel or leave
+// sample, a press carrying MouseButton::none or MouseButton::middle on Cocoa, a `character` key
+// action) are reached only with a real window — they live behind `CONTEXT_SHELL_SMOKE_HAS_X11` or
+// inside the Objective-C++ TU — so they belong to the live `editor-shell-x11-window` /
+// `editor-shell-cocoa-window` smokes, not here. Recorded so the gap is visible rather than assumed
 // covered by `test_headless_injection_carries_what_the_x11_encoder_would_refuse`, which pins the
 // opposite asymmetry.
 
@@ -360,7 +364,262 @@ void test_keysym_table_round_trips_through_the_shipping_decoder_map()
     CHECK(smoke::x11_keysym_for_windows_key_code(-1) == 0u);
 }
 
+// The macOS twin of the sweep above (M9 e12c-3), and it matters MORE than its X11 sibling for one
+// structural reason: the macOS virtual key codes are POSITIONAL, so the inverse is a hand-written
+// table all the way down with no run to fall back on — 0x00 is `A`, 0x06 is `Z`, and the digit row is
+// TRANSPOSED at 5/6. A single transposed entry is exactly the defect that delivers an event carrying a
+// different key, and only the round trip through the SHIPPING decoder can catch it.
+void test_ns_virtual_key_table_round_trips_through_the_shipping_decoder_map()
+{
+    int covered_count = 0;
+    for (std::int32_t code = 0; code <= 0xFF; ++code)
+    {
+        const smoke::NsVirtualKey key = smoke::ns_virtual_key_for_windows_key_code(code);
+        if (!key.covered)
+        {
+            continue;
+        }
+        ++covered_count;
+        CHECK(ns_key_code_to_windows_key_code(key.key_code) == code);
+    }
+    // A FLOOR, so the sweep cannot go vacuously green on a table that lost entries — and so that
+    // ADDING one never reds this line (the round trip above is what polices an addition).
+    CHECK(covered_count >= 45); // 9 named + 26 letters + 10 digits as of e12c-3
+
+    // ⚠ THE SENTINEL CASE, and the whole reason NsVirtualKey carries a `covered` FLAG instead of
+    // overloading a zero return the way the X11 table legitimately can: macOS key code 0x00 IS a real
+    // key. So `covered` must be TRUE for VK_A while its `key_code` is 0 — a reader that treated 0 as
+    // "not in the table" would refuse to inject `A` forever, silently.
+    const smoke::NsVirtualKey letter_a = smoke::ns_virtual_key_for_windows_key_code('A');
+    CHECK(letter_a.covered);
+    CHECK(letter_a.key_code == 0u);
+
+    // The two positional hazards, pinned explicitly. "It round-trips" would ALSO hold for a table that
+    // had swapped a pair consistently in both directions, and the decoder is the shipping side — so
+    // these name the actual macOS codes rather than deriving them.
+    CHECK(smoke::ns_virtual_key_for_windows_key_code('Z').key_code == 0x06u); // the ASDF row, not Z=25
+    CHECK(smoke::ns_virtual_key_for_windows_key_code('5').key_code == 0x17u); // 5 AFTER 6...
+    CHECK(smoke::ns_virtual_key_for_windows_key_code('6').key_code == 0x16u); // ...which is 0x16
+
+    // The `text` column. A wrong character still delivers an event, so it is pinned separately — and
+    // in macOS's OWN spellings, which are not the Windows VK intuition: Backspace produces U+007F
+    // (NSDeleteCharacter), Return U+000D, and an arrow key its AppKit private-use function-key code
+    // point. The letters inject the UNSHIFTED (lowercase) character, exactly as an unmodified press
+    // produces — the same claim the X11 sweep makes about the lowercase keysym.
+    CHECK(smoke::ns_virtual_key_for_windows_key_code(0x09).text == U'\t');     // VK_TAB
+    CHECK(smoke::ns_virtual_key_for_windows_key_code(0x0D).text == U'\r');     // VK_RETURN
+    CHECK(smoke::ns_virtual_key_for_windows_key_code(0x08).text == U'\u007F'); // VK_BACK -> DELETE
+    CHECK(smoke::ns_virtual_key_for_windows_key_code(0x25).text == U'\uF702'); // NSLeftArrowFunctionKey
+    CHECK(smoke::ns_virtual_key_for_windows_key_code('A').text == U'a');
+    CHECK(smoke::ns_virtual_key_for_windows_key_code('Z').text == U'z');
+    CHECK(smoke::ns_virtual_key_for_windows_key_code('7').text == U'7');
+
+    // Uncovered codes report `covered == false` so `inject_event` fails LOUDLY. VK_F1 and VK_NUMPAD0
+    // are real keys the decoder maps in the OTHER direction — they are simply not in the injection
+    // table yet, and a smoke that needs one is told so rather than injecting nothing.
+    CHECK(!smoke::ns_virtual_key_for_windows_key_code(0x70).covered); // VK_F1
+    CHECK(!smoke::ns_virtual_key_for_windows_key_code(0x60).covered); // VK_NUMPAD0
+    CHECK(!smoke::ns_virtual_key_for_windows_key_code(0).covered);
+    CHECK(!smoke::ns_virtual_key_for_windows_key_code(-1).covered);
+}
+
+// ⚠ THE CROSS-ARM CONSISTENCY SWEEP — the case neither per-arm sweep above can make, and the one that
+// catches the most likely FUTURE defect in this seam. Both real-mode arms exist to serve the SAME
+// smokes, so a VK the X11 arm accepts and the Cocoa arm refuses (or vice versa) is a smoke that
+// injects fine on one OS and silently cannot on the other — a per-platform capability gap that no
+// single-platform test and no live smoke can see, because each live smoke only ever runs on its own
+// OS. Sweeping the whole VK range pins the two tables to each other, so extending one without the
+// other reds HERE, on all three legs, instead of on somebody's next macOS-only CI round.
+void test_both_real_mode_arms_accept_exactly_the_same_key_codes()
+{
+    int agreed = 0;
+    for (std::int32_t code = 0; code <= 0xFF; ++code)
+    {
+        const bool x11_covers = smoke::x11_keysym_for_windows_key_code(code) != 0;
+        const bool cocoa_covers = smoke::ns_virtual_key_for_windows_key_code(code).covered;
+        CHECK(x11_covers == cocoa_covers);
+        if (x11_covers && cocoa_covers)
+        {
+            ++agreed;
+        }
+    }
+    // The floor again, so a pair of tables that BOTH lost their entries cannot pass this vacuously
+    // (two empty tables agree perfectly).
+    CHECK(agreed >= 45);
+}
+
 } // namespace
+
+// THE UNIT BOUNDARY THE RESIZE ARM CROSSES, asserted where it can actually FAIL — and it could not,
+// until e12c-3's review. `inject_event`'s resize arm writes a PHYSICAL-PIXEL `event.size` into a
+// `WindowPlacement`, which is physical pixels on X11/Win32 but COCOA POINTS on macOS
+// (`CocoaWindowBackend::placement()`'s own "⚠ IN COCOA POINTS" note). The seam assigned it straight
+// through, so on a 2x display it asked for TWICE the requested size.
+//
+// ⚠ WHY THIS IS A UNIT TEST AND NOT A LIVE-SMOKE ASSERTION, which is the whole reason the defect
+// survived a green live gate: `editor-shell-cocoa-window` only asserts that the granted geometry
+// CHANGED, which a 2x-too-large request satisfies just as well as a correct one. And at scale 1.0 —
+// what a non-Retina runner reports — the conversion is a literal no-op, so no assertion on such a
+// host can distinguish a present divide from a missing one. So the DPI is driven off 1.0 here and
+// the expected values are spelled as LITERALS, the same discipline
+// `test_browser_geometry_converts_the_client_extent_at_a_non_identity_dpi` above records.
+void test_ns_extent_to_points_inverts_the_shipping_physical_conversion()
+{
+    // Identity at the reference DPI — the case that must NOT change, since it is every non-Retina
+    // display and every X11/Win32 backend.
+    CHECK(smoke::ns_extent_to_points(640, DpiScale{96}) == 640u);
+
+    // 2x: the case a pass-through gets wrong by a factor of two.
+    CHECK(smoke::ns_extent_to_points(640, DpiScale{192}) == 320u);
+    CHECK(smoke::ns_extent_to_points(400, DpiScale{192}) == 200u);
+    // 1.25x and 1.5x — factors that are not exactly representable as a binary float, which is why
+    // the implementation divides by `dpi.dpi` (the source of truth) rather than multiplying by
+    // 1/factor().
+    CHECK(smoke::ns_extent_to_points(800, DpiScale{120}) == 640u);
+    CHECK(smoke::ns_extent_to_points(960, DpiScale{144}) == 640u);
+    // 0.5x, the other side of 1.0: fewer physical pixels than points.
+    CHECK(smoke::ns_extent_to_points(320, DpiScale{48}) == 640u);
+
+    // ROUND TRIP against the SHIPPING forward conversion, so the two can never drift: the same
+    // single-source-of-truth discipline the key tables get, one axis over.
+    //
+    // ⚠ THE EXACTNESS CLAIM IS CONDITIONAL, and stating it loosely would have been the vacuous
+    // version. `ns_extent_to_physical` ROUNDS, so at a factor below 1.0 it is not injective — at
+    // 0.5x both 17 and 18 points map to 9 physical pixels, and no inverse can recover which. (Found
+    // by this very sweep over-claiming: 1@48 and 17@48 failed an unconditional equality.) So: EXACT
+    // wherever the forward direction lost nothing, within ONE point everywhere else, and a counted
+    // floor so the exact arm cannot quietly stop running.
+    int exact_cases = 0;
+    for (const std::uint32_t dpi_value : {48u, 96u, 120u, 144u, 192u, 288u})
+    {
+        const DpiScale dpi{dpi_value};
+        for (const std::uint32_t points : {1u, 17u, 320u, 480u, 640u, 1440u})
+        {
+            const std::uint32_t physical = ns_extent_to_physical(static_cast<double>(points), dpi);
+            CHECK(physical != 0u);
+            const std::uint32_t back = smoke::ns_extent_to_points(physical, dpi);
+            if ((points * dpi_value) % kReferenceDpi == 0u)
+            {
+                // The forward conversion was exact, so the inverse must recover `points` exactly.
+                CHECK(back == points);
+                ++exact_cases;
+            }
+            else
+            {
+                const std::uint32_t drift = back > points ? back - points : points - back;
+                CHECK(drift <= 1u);
+            }
+        }
+    }
+    // Non-vacuity floor: 30 of the 36 pairs above have an exact forward conversion today. If a
+    // future edit turned the exact arm off, this reds instead of silently degrading to the ±1
+    // claim.
+    CHECK(exact_cases >= 30);
+
+    // A non-empty extent NEVER becomes empty. `apply_placement` refuses an empty rect outright, so
+    // rounding 1 physical pixel at 10x down to 0 points would turn a resize REQUEST into a silent
+    // no-op — the shape this seam exists to make impossible.
+    CHECK(smoke::ns_extent_to_points(1, DpiScale{960}) == 1u);
+    // ...but a genuinely empty input stays empty, so `is_empty` still discriminates upstream.
+    CHECK(smoke::ns_extent_to_points(0, DpiScale{192}) == 0u);
+}
+
+// The OTHER half of the same rule, and the more dangerous direction: converting for a backend whose
+// placement is ALREADY physical pixels would break the Linux `editor-shell-x11-window` gate and the
+// nine CEF smokes. The discrimination is on the published native window KIND, so a headless backend
+// must come back UNCHANGED even at a non-identity DPI — which is exactly what this asserts, on all
+// three legs, with no display and no Cocoa.
+//
+// Honest scope: the `MetalLayer` arm's BRANCH SELECTION is reachable only with a real NSWindow, so
+// it belongs to the live `editor-shell-cocoa-window` smoke. Its ARITHMETIC is
+// `ns_extent_to_points`, swept above on every leg — so the part that can silently drift is fully
+// covered here.
+void test_placement_extent_for_physical_leaves_a_non_cocoa_backend_alone()
+{
+    smoke::WindowSetup setup = smoke::make_smoke_window(desc_640x480(), smoke::WindowMode::headless);
+    CHECK(setup.backend != nullptr);
+    if (setup.backend == nullptr)
+    {
+        return;
+    }
+    IWindowBackend& backend = *setup.backend;
+
+    ShellEvent dpi_changed;
+    dpi_changed.kind = ShellEventKind::dpi_changed;
+    dpi_changed.dpi = DpiScale{192}; // 2x — where an unwanted conversion HALVES the request
+    CHECK(smoke::inject_event(backend, smoke::WindowMode::headless, dpi_changed));
+    std::vector<ShellEvent> drained;
+    CHECK(backend.pump(drained));
+    CHECK(backend.dpi() == DpiScale{192});
+    // The premise: this backend publishes no layer, so it must take the identity arm.
+    CHECK(backend.native_window().kind != render::NativeWindowKind::MetalLayer);
+
+    const render::Extent2D asked{640, 400};
+    const render::Extent2D got = smoke::placement_extent_for_physical(backend, asked);
+    // 640x400, NOT 320x200 — a `#if defined(__APPLE__)` implementation would report the latter on
+    // this very leg when built on macOS, which is the reason the discriminator is the window kind.
+    CHECK(shelltest::extent_eq(got, asked));
+    CHECK(!shelltest::extent_eq(got, render::Extent2D{320, 200}));
+}
+
+// The COORDINATE inverse, swept back through the shipping decoder — the sibling of the extent sweep
+// above, and the case with the sharpest provenance in this suite.
+//
+// ⚠ THIS EXISTS BECAUSE THE LIVE SMOKE PROVABLY CANNOT CATCH IT. `editor-shell-cocoa-window`
+// asserts the flip DIRECTION, a separation floor and a half-plane — never an equality, because
+// AppKit scales the delivered location about the window centre (smoke_window.h, Cocoa limit 1).
+// MEASURED during e12c-3's review: mutating the inverse to divide AFTER the flip rather than before
+// — the exact error `ns_view_point_to_physical` warns about — left that live gate GREEN on a 2x
+// host, because all three of its claims survive a uniformly wrong scale. At 1.0 the mutation is a
+// literal no-op, so a 1x runner cannot see it either. Hence: driven off 1.0, round-tripped against
+// the SHIPPING decoder.
+void test_ns_view_point_for_physical_inverts_the_shipping_decoder_at_a_non_identity_dpi()
+{
+    // 2x, worked by hand so a reader can check the arithmetic without running it: a 400-point-tall
+    // view is 800 physical pixels. Shell-space y=100 (near the TOP) must become 400 - 50 = 350
+    // points (near Cocoa's TOP, which is the HIGH point value), and x=600 physical is 300 points.
+    const NsViewGeometry two_x{400.0, DpiScale{192}, 0u};
+    const smoke::NsViewPointPoints high =
+        smoke::ns_view_point_for_physical(PointI{600, 100}, two_x.height_points, two_x.dpi);
+    CHECK(high.x_points == 300.0);
+    CHECK(high.y_points == 350.0);
+    // Divide-after-flip would give (400 - 100) / 2 = 150. Pinned as a literal NON-value so that
+    // specific mutation cannot pass.
+    CHECK(high.y_points != 150.0);
+
+    // ROUND TRIP against the shipping decoder, at four scales including 1.0 as a control. Every
+    // coordinate is chosen to be exactly divisible by the scale, so the decoder's round-to-nearest
+    // cannot blur the claim (the extent sweep above records why that matters).
+    int non_identity_cases = 0;
+    for (const std::uint32_t dpi_value : {96u, 144u, 192u, 288u})
+    {
+        const DpiScale dpi{dpi_value};
+        const NsViewGeometry view{300.0, dpi, 0u}; // a 300-point-tall view at every scale
+        for (const PointI position : {PointI{0, 0}, PointI{144, 288}, PointI{288, 144},
+                                      PointI{576, 576}})
+        {
+            const smoke::NsViewPointPoints in_points =
+                smoke::ns_view_point_for_physical(position, view.height_points, dpi);
+            const PointI back =
+                ns_view_point_to_physical(in_points.x_points, in_points.y_points, view);
+            CHECK(back == position);
+            if (dpi_value != 96u)
+            {
+                ++non_identity_cases;
+            }
+        }
+    }
+    // Non-vacuity floor: the 1.0 control alone would pass with the scale dropped entirely, so the
+    // sweep is only meaningful if the non-identity scales really ran.
+    CHECK(non_identity_cases >= 12);
+
+    // A hand-constructed 0 dpi is treated as 1x rather than dividing the location away — the same
+    // refuse-to-1x regime `ns_dpi_from_backing_scale` uses for a scale that names no display.
+    const smoke::NsViewPointPoints degenerate =
+        smoke::ns_view_point_for_physical(PointI{10, 20}, 100.0, DpiScale{0});
+    CHECK(degenerate.x_points == 10.0);
+    CHECK(degenerate.y_points == 80.0);
+}
 
 int main()
 {
@@ -374,5 +633,10 @@ int main()
     test_headless_injection_carries_what_the_x11_encoder_would_refuse();
     test_mode_of_reports_what_a_backend_actually_is();
     test_keysym_table_round_trips_through_the_shipping_decoder_map();
+    test_ns_virtual_key_table_round_trips_through_the_shipping_decoder_map();
+    test_both_real_mode_arms_accept_exactly_the_same_key_codes();
+    test_ns_extent_to_points_inverts_the_shipping_physical_conversion();
+    test_placement_extent_for_physical_leaves_a_non_cocoa_backend_alone();
+    test_ns_view_point_for_physical_inverts_the_shipping_decoder_at_a_non_identity_dpi();
     SHELL_TEST_MAIN_END();
 }

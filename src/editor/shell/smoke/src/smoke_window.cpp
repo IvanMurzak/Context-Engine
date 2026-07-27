@@ -7,6 +7,11 @@
 // handle, so the header has no `render::present` type left to declare.
 #include "context/render/present/present_blit.h"
 
+// The Cocoa injection arm (M9 e12c-3). An INTERNAL header, so no smoke can call the platform half
+// directly and bypass the anti-degrade guards `inject_event` applies first. It is a TU pair rather
+// than an `#if` in this file because CMake picks a compiler by file extension — see its own header.
+#include "smoke_inject_cocoa.h"
+
 #include <cstring>
 #include <string>
 #include <utility>
@@ -394,8 +399,14 @@ bool inject_event(IWindowBackend& backend, WindowMode mode, const ShellEvent& ev
             return false;
         }
         WindowPlacement placement = backend.placement();
-        placement.width = event.size.width;
-        placement.height = event.size.height;
+        // ⚠ UNIT CONVERSION, NOT A NO-OP. `event.size` is PHYSICAL PIXELS (see the header) while
+        // `placement()` is physical pixels on X11/Win32 and COCOA POINTS on macOS. Assigning
+        // `event.size` straight through — which this seam did until M9 e12c-3's review — asked a
+        // Retina window for twice the size the caller meant, and asked for exactly the right size
+        // at 1x, so no assertion on a 1x runner could see it.
+        const render::Extent2D requested = placement_extent_for_physical(backend, event.size);
+        placement.width = requested.width;
+        placement.height = requested.height;
         backend.apply_placement(placement);
         return true;
     }
@@ -416,10 +427,13 @@ bool inject_event(IWindowBackend& backend, WindowMode mode, const ShellEvent& ev
         return false;
     }
 #else
-    (void)event;
-    // No X11 development headers in this build (or not Linux at all): real-mode injection has no
-    // implementation, and saying so is the honest answer. Every caller treats false as a failure.
-    return false;
+    // Every non-X11 build routes to the Cocoa arm, which is a REAL AppKit injection on macOS
+    // (smoke_inject_cocoa.mm) and an honest refusal everywhere else (smoke_inject_cocoa.cpp) — the
+    // always-linkable-symbol shape make_cocoa_window_backend uses. So on Windows, and on a Linux
+    // build configured without the X11 development headers, this still answers the same honest
+    // "real-mode injection has no implementation here" it always did, and every caller treats that
+    // false as a failure.
+    return inject_cocoa_event(backend, event);
 #endif
 }
 
@@ -465,6 +479,151 @@ std::uint32_t x11_keysym_for_windows_key_code(std::int32_t windows_key_code)
         return static_cast<std::uint32_t>(windows_key_code);
     }
     return 0;
+}
+
+NsVirtualKey ns_virtual_key_for_windows_key_code(std::int32_t windows_key_code)
+{
+    // Kept NARROW on purpose, and covering exactly the same VK set as the keysym table above so the
+    // two real-mode arms accept the same injections: an uncovered code leaves `covered` false and
+    // `inject_event` fails loudly instead of injecting nothing.
+    //
+    // ⚠ A TABLE ALL THE WAY DOWN — no arithmetic anywhere, unlike the X11 inverse, whose letters and
+    // digits ARE runs. macOS virtual key codes are POSITIONAL (0x00 is `A`, 0x01 is `S`, 0x06 is
+    // `Z` — the physical ASDF row) and the digit row is TRANSPOSED at 5/6 (`6` is 0x16, `5` is
+    // 0x17). The
+    // values are spelled numerically rather than via <Carbon/HIToolbox/Events.h> so this table
+    // compiles — and is unit-tested — on every leg, including the two with no Carbon at all; the
+    // window.h `kNsVk*` constants are used wherever one already exists.
+    //
+    // ⚠ THE `text` COLUMN IS macOS's SPELLING, NOT THE WINDOWS VK INTUITION, because
+    // `translate_ns_event` forwards it verbatim to CEF: Backspace produces U+007F (NSDeleteCharacter,
+    // where Windows would say U+0008), Return U+000D, Escape U+001B, and an arrow key its AppKit
+    // private-use NS*ArrowFunctionKey code point. The letters inject the UNSHIFTED (lowercase)
+    // character, exactly as an unmodified key press produces.
+    switch (windows_key_code)
+    {
+    // WARNING every non-printable / non-ASCII `text` below is a UNIVERSAL-CHARACTER-NAME ESCAPE with
+    // the character's NAME in a trailing comment, never the raw glyph. This repo ships no UTF-8 BOM
+    // and passes no `/utf-8`, so MSVC decodes the source in the system code page and ONE non-ASCII
+    // code point inside a `U'...'` constant arrives as several chars — C2015 "too many characters in
+    // constant", a HARD error on `build (windows-latest)` that GCC and Apple Clang both accept
+    // silently, so neither local host can see it. The landed precedent is
+    // `src/editor/shell/tests/test_window.cpp`. (The rule binds CHARACTER literals only; non-ASCII in
+    // a comment or a string literal is established house style here.)
+    case 0x08: // VK_BACK -> the key engraved "delete" ABOVE Return, which backspaces
+        return NsVirtualKey{kNsVkDelete, U'\u007F', true}; // DELETE (NSDeleteCharacter)
+    case 0x09: // VK_TAB
+        return NsVirtualKey{kNsVkTab, U'\t', true}; // CHARACTER TABULATION
+    case 0x0D: // VK_RETURN
+        // CARRIAGE RETURN (NSCarriageReturnCharacter) — not U+000A
+        return NsVirtualKey{kNsVkReturn, U'\r', true};
+    case 0x1B: // VK_ESCAPE
+        return NsVirtualKey{kNsVkEscape, U'\u001B', true}; // ESCAPE
+    case 0x20: // VK_SPACE
+        return NsVirtualKey{kNsVkSpace, U' ', true};
+    // The arrows carry AppKit's private-use function-key code points (NSLeftArrowFunctionKey and
+    // friends), which is what a real arrow press puts in -characters.
+    case 0x25: // VK_LEFT
+        return NsVirtualKey{kNsVkLeftArrow, U'\uF702', true}; // NSLeftArrowFunctionKey
+    case 0x26: // VK_UP
+        return NsVirtualKey{kNsVkUpArrow, U'\uF700', true}; // NSUpArrowFunctionKey
+    case 0x27: // VK_RIGHT
+        return NsVirtualKey{kNsVkRightArrow, U'\uF703', true}; // NSRightArrowFunctionKey
+    case 0x28: // VK_DOWN
+        return NsVirtualKey{kNsVkDownArrow, U'\uF701', true}; // NSDownArrowFunctionKey
+    // --- the letter row, in VK order; the macOS codes are the KEYBOARD's order, not the alphabet's
+    case 'A': return NsVirtualKey{kNsVkAnsiA, U'a', true};
+    case 'B': return NsVirtualKey{0x0B, U'b', true};
+    case 'C': return NsVirtualKey{0x08, U'c', true};
+    case 'D': return NsVirtualKey{0x02, U'd', true};
+    case 'E': return NsVirtualKey{0x0E, U'e', true};
+    case 'F': return NsVirtualKey{0x03, U'f', true};
+    case 'G': return NsVirtualKey{0x05, U'g', true};
+    case 'H': return NsVirtualKey{0x04, U'h', true};
+    case 'I': return NsVirtualKey{0x22, U'i', true};
+    case 'J': return NsVirtualKey{0x26, U'j', true};
+    case 'K': return NsVirtualKey{0x28, U'k', true};
+    case 'L': return NsVirtualKey{0x25, U'l', true};
+    case 'M': return NsVirtualKey{0x2E, U'm', true};
+    case 'N': return NsVirtualKey{0x2D, U'n', true};
+    case 'O': return NsVirtualKey{0x1F, U'o', true};
+    case 'P': return NsVirtualKey{0x23, U'p', true};
+    case 'Q': return NsVirtualKey{0x0C, U'q', true};
+    case 'R': return NsVirtualKey{0x0F, U'r', true};
+    case 'S': return NsVirtualKey{kNsVkAnsiS, U's', true};
+    case 'T': return NsVirtualKey{0x11, U't', true};
+    case 'U': return NsVirtualKey{0x20, U'u', true};
+    case 'V': return NsVirtualKey{0x09, U'v', true};
+    case 'W': return NsVirtualKey{0x0D, U'w', true};
+    case 'X': return NsVirtualKey{0x07, U'x', true};
+    case 'Y': return NsVirtualKey{0x10, U'y', true};
+    case 'Z': return NsVirtualKey{kNsVkAnsiZ, U'z', true};
+    // --- the digit row. NOT monotonic: `6` (0x16) comes BEFORE `5` (0x17).
+    case '0': return NsVirtualKey{0x1D, U'0', true};
+    case '1': return NsVirtualKey{0x12, U'1', true};
+    case '2': return NsVirtualKey{0x13, U'2', true};
+    case '3': return NsVirtualKey{0x14, U'3', true};
+    case '4': return NsVirtualKey{0x15, U'4', true};
+    case '5': return NsVirtualKey{kNsVkAnsi5, U'5', true};
+    case '6': return NsVirtualKey{kNsVkAnsi6, U'6', true};
+    case '7': return NsVirtualKey{0x1A, U'7', true};
+    case '8': return NsVirtualKey{0x1C, U'8', true};
+    case '9': return NsVirtualKey{0x19, U'9', true};
+    default:
+        break;
+    }
+    return NsVirtualKey{};
+}
+
+std::uint32_t ns_extent_to_points(std::uint32_t physical, DpiScale dpi)
+{
+    if (physical == 0u || dpi.dpi == 0u)
+    {
+        return 0u;
+    }
+    // INTEGER round-to-nearest, deliberately: `ns_extent_to_physical` multiplies by the float
+    // `factor()`, and inverting through the same float would make the round trip lossy at scales
+    // whose factor is not exactly representable (1.25x, 1.5x). `dpi` IS the source of truth —
+    // `factor()` is the derived value (dpi.h) — so dividing by it recovers the points exactly
+    // wherever the forward direction was exact. u64 intermediate so a large extent cannot overflow
+    // the *96.
+    const std::uint64_t scaled = static_cast<std::uint64_t>(physical) * kReferenceDpi;
+    const std::uint64_t rounded = (scaled + dpi.dpi / 2u) / dpi.dpi;
+    // A non-empty extent never becomes empty: `apply_placement` refuses an empty rect outright, so
+    // a 1px-tall window at 10x must still ask for 1 point rather than silently asking for nothing.
+    return rounded == 0u ? 1u : static_cast<std::uint32_t>(rounded);
+}
+
+NsViewPointPoints ns_view_point_for_physical(PointI position, double height_points, DpiScale dpi)
+{
+    // `dpi.dpi` is the source of truth and `factor()` the derived value (dpi.h), and make_dpi_scale
+    // clamps it into kMinDpi..kMaxDpi — so the only value worth guarding is a hand-constructed 0,
+    // which would divide the whole location away. No isfinite check: an integer dpi cannot be NaN.
+    const double factor = dpi.dpi == 0u ? 1.0
+                                        : static_cast<double>(dpi.dpi) /
+                                              static_cast<double>(kReferenceDpi);
+    // ⚠ THE SCALE COMES OFF FIRST, AND THE FLIP IS AGAINST THE UNSCALED HEIGHT — the mirror image
+    // of the ordering `ns_view_point_to_physical` documents ("Done BEFORE the scale, against the
+    // height in POINTS, because that is the space the height is expressed in"). Flipping against a
+    // height in one space while the coordinate is in another is the shape that reads correct at 1x
+    // and mirrors the pointer on a Retina display, so the two orderings must stay mirror images.
+    const double y_in_points = static_cast<double>(position.y) / factor;
+    return NsViewPointPoints{static_cast<double>(position.x) / factor, height_points - y_in_points};
+}
+
+render::Extent2D placement_extent_for_physical(const IWindowBackend& backend,
+                                               render::Extent2D physical)
+{
+    // Identified by the published native window KIND, the same discriminator every other Cocoa arm
+    // of this seam uses — never `#if defined(__APPLE__)`, which would wrongly convert for a
+    // headless or X11 backend that happens to have been built on macOS.
+    if (backend.native_window().kind != render::NativeWindowKind::MetalLayer)
+    {
+        return physical;
+    }
+    const DpiScale dpi = backend.dpi();
+    return render::Extent2D{ns_extent_to_points(physical.width, dpi),
+                            ns_extent_to_points(physical.height, dpi)};
 }
 
 } // namespace context::editor::shell::smoke

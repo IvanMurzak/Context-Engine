@@ -1951,6 +1951,44 @@ jobs:
           xvfb-run -a "$smoke_exe" --require-x11 --require-display
         working-directory: src
 
+      # M9 e12c-3: the LIVE WINDOWED macOS proof — the exact twin of the X11 step above, and the
+      # closing half of e12/e12b's own DoD line ("Editor boots windowed with live panels on the macOS
+      # GH runner"). Until this step existed macOS ran all nine CEF smokes HEADLESS, so nothing in the
+      # tree asserted that a real macOS window ever appears; e12b's record says so in as many words.
+      # A REAL NSWindow through the real make_window_backend, the real owner loop + compositor, the
+      # real e05d1 panel models, software-OSR frames presented through the real CALayer.contents
+      # blitter, and the REAL AppKit queue as the event source (the pointer + key samples it asserts
+      # come BACK out of the backend's own nextEventMatchingMask pump). CEF-FREE, so it costs this job
+      # only a build and is unaffected by the CEF keychain class (issue #437); it rides HERE rather
+      # than in `build (macos-latest)` purely to keep the windowed proofs of both platforms in one job.
+      #
+      # ⚠ NON-VACUITY, and why this is a direct run rather than a `ctest -R` line — the same trap the
+      # X11 step documents. The ctest registration deliberately SKIPS (SKIP_RETURN_CODE 77) with no GUI
+      # session so the same executable can ride the `build (macos-latest)` leg harmlessly (the only
+      # default leg it is configured on: it lives inside `if(APPLE)` and both sanitize legs are ubuntu),
+      # and a `ctest` invocation here would report that skip as a PASS.
+      # `--require-cocoa --require-display` turns a missing window-server session, a refused window and
+      # a missing OS blitter into hard failures, so this step fails if the window, the blitter or the
+      # session is not really there.
+      #
+      # THE TWO `launchctl`/`/dev/console` lines are the measured answer to "does a GitHub-hosted macOS
+      # runner even have a window-server session", printed rather than assumed: `Aqua` + a non-root
+      # console owner IS a GUI session. ANSWERED, in CI, on this task's own PR: run 30238034460 /
+      # job 89889609193 printed `launchctl managername: Aqua` and `/dev/console owner: runner`, and the
+      # smoke then PASSED under both --require flags. The lines are kept permanently because the
+      # smoke's verdict alone cannot distinguish "no session" from "the Cocoa backend broke", and this
+      # is a zero-cost tell.
+      - name: Live windowed Cocoa Shell smoke (macOS, real NSWindow — M9 e12c-3)
+        if: runner.os == 'macOS'
+        run: |
+          echo "launchctl managername: $(launchctl managername || echo '<unavailable>')"
+          echo "/dev/console owner: $(stat -f '%Su' /dev/console || echo '<unavailable>')"
+          cmake --build --preset dev --target context_editor_shell_cocoa_smoke
+          smoke_exe="$(find build/dev -type f -name context_editor_shell_cocoa_smoke | head -n1)"
+          test -n "$smoke_exe" || { echo "context_editor_shell_cocoa_smoke was not built"; exit 1; }
+          "$smoke_exe" --require-cocoa --require-display
+        working-directory: src
+
       - name: Editor-host boot smoke ctest (macOS / Windows)
         if: runner.os != 'Linux'
         run: ctest --preset dev -R "^editor-cef-smoke-" --output-on-failure

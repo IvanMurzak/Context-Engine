@@ -4,9 +4,10 @@
 // This file is the OS-call half of the macOS seam, the exact counterpart of win32_window.cpp and
 // x11_window.cpp. All of the event DECODING lives in window.cpp as pure functions compiled and
 // tested on every OS — see window.h for why. What remains here is genuinely AppKit-only and honestly
-// untested off macOS: NO local gate compiles an `__APPLE__` branch at all, and no CI job RUNS a
-// windowed macOS test (the `build (macos-latest)` leg compiles and links this file and executes the
-// pure decoders; it opens no window unless the runner has a GUI session).
+// untested off macOS: NO local gate compiles an `__APPLE__` branch at all, and until M9 e12c-3 no
+// CI job RAN a windowed macOS test (the `build (macos-latest)` leg compiles and links this file and
+// executes the pure decoders; it opens no window unless the runner has a GUI session — the windowed
+// proof is `editor-shell-cocoa-window`, in the `editor-cef-smoke (macos-latest)` job).
 //
 // CEF-FREE BY CONSTRUCTION (e12b's scope). A CEF browser on macOS needs an `.app` bundle, FIVE
 // per-process-type helper bundles and the runtime-loaded framework; that packaging LANDED in e12c-1

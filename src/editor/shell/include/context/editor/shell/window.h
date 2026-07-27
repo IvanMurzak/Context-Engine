@@ -11,8 +11,9 @@
 //
 // THE PLATFORM BLIND SPOT, AND WHAT IS DONE ABOUT IT. The local dev gate defines _WIN32, so a POSIX
 // branch gets no compile signal at all there, and CI's Windows leg is the only thing that ever runs
-// a WndProc. macOS is worse still: no local gate compiles an `__APPLE__` branch AT ALL and no CI job
-// RUNS a windowed macOS test. So EACH native backend is split in two, on the same seam:
+// a WndProc. macOS is worse still: no local gate compiles an `__APPLE__` branch AT ALL, and until
+// M9 e12c-3 no CI job RAN a windowed macOS test (`editor-shell-cocoa-window` now does, on that ONE
+// leg). So EACH native backend is split in two, on the same seam:
 //
 //   * `translate_win32_message` / `translate_x11_event` / `translate_ns_event` — the EVENT DECODING,
 //     as pure functions over plain integers. They include no <windows.h>, no <X11/Xlib.h> and no

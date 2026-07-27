@@ -248,9 +248,11 @@ set(_context_shell_tests
     test_ui_mirror     # e10d: the editor.ui cross-window mirror relay - broadcast-to-all incl. sender
     test_write_notice  # e09b-3: the LOUD write-notice relay - envelope shape, broadcast, the
                        #         never-a-window-id origin, and the honest unbound/throwing-provider paths
-    test_smoke_window  # e12a-x11-legs: the --real-window seam - flag parse, the anti-degrade
-                       # negatives, DIP conversion off 1.0, the keysym sweep (one extra link edge,
-                       # added after context_editor_shell_smoke_support is defined below)
+    test_smoke_window  # e12a-x11-legs + e12c-3: the --real-window seam - flag parse, the
+                       # anti-degrade negatives, DIP conversion off 1.0, the THREE key-table sweeps
+                       # (X11 keysyms, macOS virtual keys, and the cross-arm agreement), and the
+                       # physical-pixels <-> Cocoa-points inverses (one extra link edge, added after
+                       # context_editor_shell_smoke_support is defined below)
     test_shell)        # the owner loop end to end + the authenticated-attach guard
 
 foreach(_t IN LISTS _context_shell_tests)
@@ -286,7 +288,14 @@ endforeach()
 # recorded in the profile's `setup.md` § Preconditions (the `src/editor/shell/**` known-good set) —
 # a check-9 `fatal error: context/editor/shell/smoke/smoke_window.h: No such file` is that gap, not
 # a code break.
-add_library(context_editor_shell_smoke_support STATIC smoke/src/smoke_window.cpp)
+#
+# smoke_inject_cocoa.cpp is in the UNCONDITIONAL source list and the `.mm` is added under if(APPLE)
+# below — the always-linkable-symbol pair make_cocoa_window_backend uses, for the same reason: CMake
+# picks a compiler by file EXTENSION and OBJCXX is enabled only on Apple, so Objective-C++ cannot hide
+# behind a preprocessor guard in a `.cpp` every leg compiles.
+add_library(context_editor_shell_smoke_support STATIC
+    smoke/src/smoke_window.cpp
+    smoke/src/smoke_inject_cocoa.cpp)
 target_include_directories(context_editor_shell_smoke_support
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/smoke/include)
 target_link_libraries(context_editor_shell_smoke_support
@@ -318,6 +327,31 @@ if(UNIX AND NOT APPLE)
     endif()
 endif()
 
+# The macOS half (M9 e12c-3): real-mode injection through -[NSApplication postEvent:atStart:], which
+# is IN-PROCESS and therefore needs no TCC/Accessibility grant a GitHub runner could not hold (see
+# smoke_window.h for the measurement). UNCONDITIONAL on Apple, exactly like the window backend block
+# above and for the same reason: an SDK is not optional there the way an X11 development package is on
+# a headless ubuntu runner, and the Cocoa backend's CGSessionCopyCurrentDictionary probe already gives
+# the RUNTIME degrade for a box with no GUI session.
+#
+# AppKit for NSEvent/NSApplication/NSWindow, QuartzCore for CALayer (the injection recovers the window
+# by matching the backend's published CAMetalLayer against each NSWindow's contentView layer), and
+# Foundation for NSString/NSProcessInfo. NO CEF, and nothing new in src/vcpkg.json or
+# tools/license-allowlist.json — the platform's own windowing system, the same reasoning the AppKit
+# block above records.
+if(APPLE)
+    target_sources(context_editor_shell_smoke_support PRIVATE smoke/src/smoke_inject_cocoa.mm)
+    target_link_libraries(context_editor_shell_smoke_support PRIVATE
+        "-framework AppKit" "-framework QuartzCore" "-framework Foundation")
+    # ARC for the .mm TU, mirroring src/editor/shell/'s cocoa_window.mm and src/render/'s
+    # metal_interop.mm. It holds NO Obj-C pointer members (only locals), which is why its __bridge of
+    # the backend's layer handle is guarded by the native-kind check rather than by a lifetime rule —
+    # see the file's own header.
+    set_source_files_properties(smoke/src/smoke_inject_cocoa.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    message(STATUS "context_editor_shell_smoke_support: AppKit — --real-window input injection is "
+                   "REAL in this build (macOS)")
+endif()
+
 # Its own T1 suite is a plain member of the `_context_shell_tests` family above, so the foreach
 # already gave it its executable, its runtime flags, its include dirs and its non-gate
 # `editor-shell-test_smoke_window` registration (`--preset dev` builds it and the general ctest step
@@ -325,9 +359,11 @@ endif()
 # keeps a future family-wide change — a define, a property, a label — from silently skipping it.
 # The ONE thing the loop cannot know is this extra link edge, which is why only it is spelled here.
 # It asserts the seam's DECISIONS without opening a window or needing a display: the flag parse, the
-# headless construction + present, DIP conversion at a non-identity scale, the keysym sweep, and —
-# the load-bearing ones — that real mode REFUSES a headless backend, and refuses a window with no
-# presentable native surface, rather than degrading onto `post()` / an in-memory present.
+# headless construction + present, DIP conversion at a non-identity scale, the three key-table
+# sweeps, the physical-pixels <-> Cocoa-points inverses (which the live macOS smoke provably CANNOT
+# catch a wrong SCALE in — see smoke_window.h), and — the load-bearing ones — that real mode REFUSES
+# a headless backend, and refuses a window with no presentable native surface, rather than degrading
+# onto `post()` / an in-memory present.
 target_link_libraries(context_editor_shell_test_smoke_window
     PRIVATE context_editor_shell_smoke_support)
 
@@ -383,6 +419,41 @@ if(UNIX AND NOT APPLE)
     target_link_options(context_editor_shell_x11_smoke PRIVATE ${_context_shell_static_runtime})
     add_test(NAME editor-shell-x11-window COMMAND context_editor_shell_x11_smoke)
     set_tests_properties(editor-shell-x11-window PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+endif()
+
+# --- the LIVE WINDOWED macOS smoke (M9 e12c-3) ----------------------------------------------------
+# The macOS twin of the X11 smoke above, and for the same reason: e12b landed the whole Cocoa backend
+# but its own record states that "a window appears / a frame is visible is asserted NOWHERE", because
+# macOS runs all nine `editor-cef-smoke-shell*` smokes HEADLESS. This is the DoD proof that the editor
+# boots WINDOWED with live panels on macOS — a REAL NSWindow through the REAL make_window_backend, the
+# REAL CALayer.contents present blitter, the REAL e05d1 panel models, and the REAL AppKit queue as the
+# event source (the pointer + key samples it asserts come BACK out of the backend's own
+# nextEventMatchingMask pump).
+#
+# CEF-FREE, deliberately: it is therefore unaffected by the CEF keychain class (issue #437 / x7), it
+# rides the plain `build (macos-latest)` leg for its compile, and it runs on the local macOS dev host
+# in seconds instead of a CI round.
+#
+# macOS-only by construction, and it SKIPS (ctest SKIP_RETURN_CODE 77) when there is no GUI (Aqua)
+# session — the ordinary state of the `build (macos-latest)` leg, the only default leg this target is
+# configured on at all (it lives inside `if(APPLE)`; both sanitize legs are ubuntu), where it must not
+# fail. That
+# skip is NOT allowed to become permanent: the editor-cef-smoke macOS leg runs the executable DIRECTLY
+# with --require-cocoa --require-display, under which a missing session, a refused window and a missing
+# OS blitter are all hard failures. The `ctest`-reports-a-SKIP-as-a-PASS trap e12a paid for applies
+# verbatim here, which is why that step is a direct run and not a `ctest -R` line.
+#
+# It links context_editor_panels (NOT context_editor_shell alone) for the same reason context_editor
+# does: the panel composition root is what binds real providers, and "live panels" is only a checked
+# claim if the real ones render.
+if(APPLE)
+    add_executable(context_editor_shell_cocoa_smoke smoke/shell_cocoa_smoke_main.cpp)
+    target_link_libraries(context_editor_shell_cocoa_smoke PRIVATE context_editor_panels
+                                                                   context_editor_shell_smoke_support
+                                                                   context_warnings)
+    target_link_options(context_editor_shell_cocoa_smoke PRIVATE ${_context_shell_static_runtime})
+    add_test(NAME editor-shell-cocoa-window COMMAND context_editor_shell_cocoa_smoke)
+    set_tests_properties(editor-shell-cocoa-window PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 endif()
 
 # --- the windowed-OSR CEF binding (CI-only dependency path) --------------------------------------
