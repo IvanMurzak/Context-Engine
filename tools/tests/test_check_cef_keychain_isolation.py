@@ -151,8 +151,9 @@ def test_a_new_cef_source_not_named_smoke_is_caught(tmp_path):
     """FOUND BY PLANTING — the first revision reported this GREEN.
 
     Rule 1 keyed on a `*_smoke.cpp` filename, so a new CEF source in the very same directory named
-    anything else was exempt. e12c-2 adds seven more scenarios to this directory, so the shape is not
-    hypothetical. The predicate is now "constructs a CefShellOptions"."""
+    anything else was exempt. This directory gains a source whenever a new live scenario lands (e12c-2
+    fanned the EXISTING nine out to macOS without adding one, but e12c-3 and every later T2 scenario
+    will), so the shape is not hypothetical. The predicate is now "constructs a CefShellOptions"."""
     root = make_tree(tmp_path)
     write(root, f"{gate.SHELL_SMOKE_DIR}/cef_shell_scenarios.cpp",
           GOOD_SHELL_SMOKE.replace("    cef_options.use_mock_keychain = true;\n", ""))
@@ -193,7 +194,7 @@ def test_a_wrapped_assignment_is_accepted(tmp_path):
 def test_a_brace_initialized_options_is_a_subject(tmp_path):
     """`CefShellOptions opts{};` CONSTRUCTS one exactly as `CefShellOptions opts;` does, and the brace
     form is idiomatic C++. A predicate keyed on the `;` alone exempts it ENTIRELY — not a false pass on
-    a subject, but no subject at all — so a new e12c-2 scenario written that way would be reported
+    a subject, but no subject at all — so a new scenario written that way would be reported
     GREEN while isolating nothing. Same silent-exemption class as the two plants above."""
     root = make_tree(tmp_path)
     write(root, f"{gate.SHELL_SMOKE_DIR}/cef_shell_braced_smoke.cpp",
@@ -337,8 +338,9 @@ def test_live_repository_has_every_anchor_where_the_tool_believes():
     subjects = [rel for rel, text in
                 gate.iter_sources(REPO_ROOT, gate.SHELL_SMOKE_DIR, gate.SHELL_SOURCE_SUFFIXES)
                 if gate.SHELL_OPTIONS_CONSTRUCTED.search(text)]
-    # Nine as of M9 e12c-1; e12c-2 adds more. A FLOOR keeps the check meaningful (the predicate found
-    # real subjects) without making every new smoke edit this test.
+    # Nine as of M9 e12c-2, which fanned those same nine out to macOS rather than adding sources; a
+    # later scenario adds more. A FLOOR keeps the check meaningful (the predicate found real subjects)
+    # without making every new smoke edit this test.
     assert len(subjects) >= 9
     hooks = [rel for rel, text in gate.iter_sources(REPO_ROOT, gate.EDITOR_ROOT, gate.HOOK_SUFFIXES)
              if gate.COMMANDLINE_HOOK.search(text)]

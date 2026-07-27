@@ -400,11 +400,11 @@ if(CONTEXT_BUILD_GUI_CEF)
     # --- ONE staging of the CEF payload for this whole directory tree (issue #360) ----------------
     # CEF_TARGET_OUT_DIR is set by SET_CEF_TARGET_OUT_DIR() inside the macro above, in THIS directory
     # scope — so it resolves to build/<preset>/editor/shell/<config>, and the cef/ subdirectory added
-    # below inherits that same value. FOUR executables therefore share one staging destination:
-    # context_editor here, plus the three live smokes in cef/. Each used to attach its OWN POST_BUILD
+    # below inherits that same value. TEN executables therefore share one staging destination:
+    # context_editor here, plus the nine live smokes in cef/. Each used to attach its OWN POST_BUILD
     # COPY_FILES() of the identical payload, which ninja then ran concurrently as it linked them in
     # parallel — a Windows sharing violation whenever two collided (issue #360; the CI job that builds
-    # all three smokes in one ninja invocation is where it bites). One stage target, and every consumer
+    # all nine smokes in one ninja invocation is where it bites). One stage target, and every consumer
     # depends on it, removes the race by construction. See cmake/ContextCef.cmake for the mechanism +
     # the evidence, and tools/check_cef_staging.py for the lint that keeps it that way.
     #
@@ -438,11 +438,15 @@ if(CONTEXT_BUILD_GUI_CEF)
     # (Renderer). docs/shell.md claimed three until this task measured it.
     #
     # ⚠ THE FRAMEWORK IS EMBEDDED PER BUNDLE (304 MB apiece, MEASURED). That is the owner's design
-    # ruling: it is the only configuration proven green in CI, and macOS stays scoped to the DoD subset
-    # (two smokes here, the remaining seven in e12c-2) precisely so the cost stays bounded. A symlinked
-    # Versions/A pointing at one staged copy was verified to still boot, but it is held ONLY as an
-    # escape hatch if runner disk ever binds and must stay TEST-TIER: codesigning and notarization
-    # reject a symlinked framework, so e15 packaging must not inherit it.
+    # ruling: it is the only configuration proven green in CI. Since e12c-2 fanned the recipe out to
+    # all nine smokes the Shell's own share is TEN bundles (the app + nine smokes) at 309 MB apiece —
+    # MEASURED on an arm64 macOS host at 3.1 GB for this directory's Release output, inside a WHOLE
+    # CEF-ON `src/build/dev` of 8.0 GB (a conservative upper bound for the `editor-cef-smoke` job,
+    # which builds a --target list rather than the whole tree) against the documented 14 GB free on
+    # `macos-latest`. That is the standing headroom figure to RE-MEASURE if this list grows again.
+    # A symlinked Versions/A pointing at one staged copy was verified to still boot, but it
+    # is held ONLY as an escape hatch if runner disk ever binds and must stay TEST-TIER: codesigning and
+    # notarization reject a symlinked framework, so e15 packaging must not inherit it.
     if(OS_MAC)
         set(CONTEXT_SHELL_MAC_PLIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/mac")
         set(CONTEXT_SHELL_MAC_HELPER_SOURCE
@@ -679,12 +683,20 @@ endif()
 # single-writer rule is enforced from the SOURCES by tools/check_cef_staging.py and its presence is
 # proven by the live smokes (a bundle with no embedded framework fails LoadInMain and reds).
 if(CONTEXT_BUILD_GUI_CEF AND OS_MAC)
-    # ⚠ KEEP THIS COMPLETE, exactly like its Windows/Linux sibling above — e12c-2 adds the remaining
-    # seven smokes and every one of them belongs here.
+    # ⚠ KEEP THIS COMPLETE, exactly like its Windows/Linux sibling above. e12c-2 fanned the recipe out
+    # to the remaining seven smokes, so this list and `_ctx_cef_stage_consumers` now name the SAME ten
+    # targets — the app plus all nine live smokes. A new smoke belongs in BOTH.
     set(_ctx_cef_mac_bundles
         context_editor
         context_editor_shell_cef_smoke
-        context_editor_shell_restore_smoke)
+        context_editor_shell_restore_smoke
+        context_editor_shell_palette_smoke
+        context_editor_shell_settings_smoke
+        context_editor_shell_multiwindow_smoke
+        context_editor_shell_tearout_smoke
+        context_editor_shell_drag_smoke
+        context_editor_shell_uimirror_smoke
+        context_editor_shell_iframe_smoke)
     foreach(_bundle IN LISTS _ctx_cef_mac_bundles)
         if(NOT TARGET ${_bundle})
             message(FATAL_ERROR
