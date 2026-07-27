@@ -295,9 +295,13 @@ void ProblemsFeed::apply_snapshot(const contract::Json& snapshot, std::uint64_t 
 {
     // The snapshot's OWN generation wins when it carries one. The real subscription snapshot is a
     // cursor that always does (`EventStream::snapshot()` sets it), and stamping the diagnostics it
-    // recovers with a caller-guessed 0 would mark every one of them stale-by-construction: the
-    // stream never settles below generation 1, so the first `derivation.settled` would discard
-    // every provisional row the snapshot had just restored.
+    // recovers with a caller-guessed 0 would mark every one of them stale-by-construction against
+    // any later settle, while the snapshot's own value is by definition the generation those rows
+    // were observed under. (This used to be argued from "the stream never settles below generation
+    // 1" — true only while `EventStream::settle()` incremented a counter of its own. Since M9 x9 it
+    // ADOPTS the derived-world generation, which is 0 until a derivation pass runs, so a `reconcile`
+    // on a freshly booted daemon can settle at 0. The choice above is unaffected; the old reason
+    // was not.)
     const std::uint64_t stamp = read_generation(snapshot, generation);
     if (std::optional<std::vector<problems::ProblemDiagnostic>> parsed =
             parse_diagnostics_snapshot(snapshot, stamp))

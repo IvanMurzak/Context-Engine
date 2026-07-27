@@ -99,6 +99,38 @@ private:
     return v;
 }
 
+// A one-node scene tree holding `identity`. `identity_hash` is explicit because a case about a REFETCH
+// needs the hash to be able to RE-RESOLVE to a different value — left at the model's 0 default, a
+// vanished node resolves to 0 as well and the panel notifies nobody.
+[[nodiscard]] scenetree::SceneTreeModel tree_with_one_node(const char* identity,
+                                                          std::uint64_t identity_hash = 0)
+{
+    scenetree::SceneTreeModel model;
+    scenetree::SceneTreeNode node;
+    node.identity = identity;
+    node.display_name = "Player";
+    node.identity_hash = identity_hash;
+    model.roots.push_back(std::move(node));
+    return model;
+}
+
+// The daemon's `selection-changed` session fact for `ids`, from a FOREIGN client (origin 7) so echo
+// suppression passes it through. ONE spelling of this payload for every case that drives it — three
+// hand-rolled copies would drift from the wire shape independently.
+[[nodiscard]] Json selection_fact(const std::vector<std::string>& ids)
+{
+    Json fact = Json::object();
+    fact.set("event", Json(std::string("selection-changed")));
+    fact.set("origin", Json(std::uint64_t{7}));
+    Json list = Json::array();
+    for (const std::string& id : ids)
+    {
+        list.push_back(Json(id));
+    }
+    fact.set("ids", std::move(list));
+    return fact;
+}
+
 const Json* find_panel(const Json& listing, const std::string& id)
 {
     const Json& list = listing.at("panels");
@@ -576,30 +608,16 @@ void a_daemon_selection_schedules_the_inspector_fetch()
         return;
     }
 
-    scenetree::SceneTreeModel model;
-    scenetree::SceneTreeNode node;
-    node.identity = "inst1/ent1";
-    node.display_name = "Player";
-    model.roots.push_back(std::move(node));
-    bound.scenetree->panel().set_model(std::move(model));
+    bound.scenetree->panel().set_model(tree_with_one_node("inst1/ent1"));
 
     CHECK(!bound.inspector->pending().has_value());
 
-    Json fact = Json::object();
-    fact.set("event", Json(std::string("selection-changed")));
-    fact.set("origin", Json(std::uint64_t{7})); // another client — not this Shell
-    Json ids = Json::array();
-    ids.push_back(Json(std::string("inst1/ent1")));
-    fact.set("ids", std::move(ids));
-    CHECK(panels::apply_session_event(*bound.session, panels::kSessionTopic, fact));
+    CHECK(panels::apply_session_event(*bound.session, panels::kSessionTopic,
+                                      selection_fact({"inst1/ent1"})));
     CHECK(bound.inspector->pending() == std::optional<std::string>("inst1/ent1"));
 
     // A cleared selection (an empty id list) clears the panel and drops the pending fetch.
-    Json cleared = Json::object();
-    cleared.set("event", Json(std::string("selection-changed")));
-    cleared.set("origin", Json(std::uint64_t{7}));
-    cleared.set("ids", Json::array());
-    CHECK(panels::apply_session_event(*bound.session, panels::kSessionTopic, cleared));
+    CHECK(panels::apply_session_event(*bound.session, panels::kSessionTopic, selection_fact({})));
     CHECK(!bound.inspector->pending().has_value());
     CHECK(!bound.inspector->panel().has_selection());
 
@@ -607,6 +625,118 @@ void a_daemon_selection_schedules_the_inspector_fetch()
     // change a selection it does not own (and the composition root leaves it honestly read-only).
     CHECK(!bound.scenetree->panel().select("inst1/ent1"));
     CHECK(!bound.inspector->pending().has_value());
+}
+
+// M9 x9 (CE #449) — THE L-30 GUARD ON THE PATH THAT NEVER TOUCHES `InspectorFeed::apply_event`.
+//
+// x9 made a plain `edit` publish `derivation.settled`, so the settle now reaches EVERY feed on this
+// bag rather than one — and it reaches the Inspector's staged gesture through the SCENE TREE, by a
+// door `apply_event`'s own L-30 guard does not watch. The full causal chain, and why the deferral
+// therefore lives in `InspectorFeed::request` where BOTH doors pass, is stated once at its canonical
+// site: inspector_feed.h § request.
+//
+// WHAT THIS CASE PINS, and why it is driven through `pump_panel_feeds` over a real client rather than
+// by poking the panels: the damage would be done by an `editor.inspect` RPC that the pump issues LATER
+// IN THE SAME CALL that refetched the tree, so the honest assertion is that the RPC never went out —
+// `requests_for("editor.inspect")` — not the proxy `!pending()`. Asserting the tree refetch DID happen
+// is what keeps that negative non-vacuous: a regression that simply stopped refetching would satisfy
+// "no inspect request" trivially. The tail matters as much as the guard — a guard that turned this
+// into a PERMANENT refusal would look identical if only the negatives were asserted — so the release
+// is driven and the RPC is then observed to go out.
+//
+// ⚠ PLANT: delete the `has_staged_edit()` branch in `InspectorFeed::request` and this REDS — the
+// `editor.inspect` request goes out during the first pump and the staged edit is gone.
+void a_settle_driven_tree_refetch_does_not_rebase_a_staged_gesture()
+{
+    namespace inspector = context::editor::gui::panels::inspector;
+
+    shell::PanelHost host;
+    panels::BuiltinPanels bound = panels::install_builtin_panels(host); // non-const: the pump mutates it
+    CHECK(bound.scenetree != nullptr);
+    CHECK(bound.inspector != nullptr);
+    CHECK(bound.session != nullptr);
+    if (bound.scenetree == nullptr || bound.inspector == nullptr || bound.session == nullptr)
+    {
+        return;
+    }
+
+    // The tree holds the entity with a NON-ZERO identity hash — the trigger IS that hash re-resolving.
+    bound.scenetree->panel().set_model(tree_with_one_node("inst1/ent1", 0xAAAA));
+
+    // The DAEMON's selection (e08b truth), which also arms the first Inspector fetch through the very
+    // listener under test. Claim it the way the pump does, so the assertions below are unambiguous.
+    CHECK(panels::apply_session_event(*bound.session, panels::kSessionTopic,
+                                      selection_fact({"inst1/ent1"})));
+    CHECK(bound.inspector->pending() == std::optional<std::string>("inst1/ent1"));
+    bound.inspector->mark_fetched();
+
+    // Hydrate the Inspector on that identity with the CAS base the gesture will guard against, then
+    // stage the gesture — the human is mid-edit.
+    inspector::InspectorModel inspected;
+    inspected.has_entity = true;
+    inspected.root_scene = "root.scene.json";
+    inspected.id_path = {"inst1", "ent1"};
+    inspected.identity = "inst1/ent1";
+    inspector::InspectorField editable;
+    editable.pointer = "/components/camera/fov";
+    editable.label = "fov";
+    editable.kind = inspector::WidgetKind::number;
+    editable.editable = true;
+    editable.value = jnum(6.5);
+    inspected.fields.push_back(editable);
+    bound.inspector->panel().set_model(std::move(inspected), 0x1234);
+    CHECK(bound.inspector->panel().stage_edit("/components/camera/fov", jnum(9.75)));
+    CHECK(bound.inspector->panel().has_staged_edit());
+
+    // The wire: the tree refetch comes back with the entity GONE — what another window's full-content
+    // `edit` looks like from here. `editor.inspect` is scripted too, so that if the guard regresses the
+    // failure is a REQUEST THAT WENT OUT rather than a transport error that could be mistaken for one.
+    Wired wired = make_wired_client();
+    wired.channel->on("editor.scene-tree",
+                      [](const clientmock::Request&)
+                      {
+                          Json tree = Json::object();
+                          tree.set("roots", Json::array()); // an EMPTY tree, not an absent one
+                          return clientmock::MockChannel::ok_envelope(std::move(tree));
+                      });
+    wired.channel->on("editor.inspect", [](const clientmock::Request&)
+                      { return clientmock::MockChannel::ok_envelope(Json::object()); });
+
+    // A settle arrives and marks the tree's fetch due (claim it first — a feed is born due for its
+    // initial hydration, so without this the pump would refetch for the wrong reason).
+    bound.scenetree->mark_fetched();
+    CHECK(!bound.scenetree->fetch_due());
+    Json settled = Json::object();
+    settled.set("event", Json(std::string("derivation.settled")));
+    settled.set("generation", Json(std::uint64_t{7}));
+    CHECK(panels::apply_scenetree_event(*bound.scenetree, panels::kDerivationTopic, settled, 7));
+    CHECK(bound.scenetree->fetch_due());
+
+    // ONE pump — the same call that refetches the tree is the one that would serve the re-read.
+    panels::pump_panel_feeds(bound, *wired.client, "root.scene.json");
+
+    // THE ASSERTIONS. The tree WAS refetched (so the trigger really fired and the negative below is
+    // not vacuous), no `editor.inspect` went out, the re-read is OWED rather than dropped, and both
+    // halves the gesture depends on survive: the staged edit and the CAS base it will commit against.
+    CHECK(wired.channel->requests_for("editor.scene-tree").size() == 1);
+    CHECK(wired.channel->requests_for("editor.inspect").empty());
+    CHECK(bound.inspector->refresh_deferred());
+    CHECK(bound.inspector->panel().has_staged_edit());
+    CHECK(bound.inspector->panel().base_raw_hash() == 0x1234u);
+    CHECK(bound.inspector->rereads_armed() == 0); // deferred is NOT armed, and is not counted as one
+
+    // AND IT IS A DEFERRAL, NOT A REFUSAL. End the gesture through the real seam, pump again, and the
+    // re-read the guard withheld now actually goes out over the wire.
+    bool dispatched = false;
+    std::string error_code;
+    CHECK(host.gesture("builtin.inspector", shell::GestureVerb::cancel, Json::object(), dispatched,
+                       error_code));
+    CHECK(dispatched);
+    CHECK(!bound.inspector->panel().has_staged_edit());
+    CHECK(!bound.inspector->refresh_deferred());
+    CHECK(bound.inspector->rereads_armed() == 1);
+    panels::pump_panel_feeds(bound, *wired.client, "root.scene.json");
+    CHECK(wired.channel->requests_for("editor.inspect").size() == 1);
 }
 
 // e09c READ-YOUR-REPLAYS, at the composition root. `pump_panel_feeds` is what turns a landed replay
@@ -696,5 +826,6 @@ int main()
     a_daemon_event_reaches_the_rendered_panel();
     a_shell_local_problem_reaches_the_rendered_panel();
     a_daemon_selection_schedules_the_inspector_fetch();
+    a_settle_driven_tree_refetch_does_not_rebase_a_staged_gesture();
     PANELS_TEST_MAIN_END();
 }

@@ -38,7 +38,7 @@
 // do — refresh while a gesture is staged, which would silently re-base the L-30 collision guard the
 // WRITES-GO-OVER-THE-WIRE paragraph above exists to enforce. See `apply_event`.
 //
-// ✅ THE PUBLISHER HALF LANDED IN M9 x9 (CE #449) — cross-window propagation IS live now, and the
+// THE PUBLISHER HALF LANDED IN M9 x9 (CE #449) — cross-window propagation IS live now, and the
 // paragraph that used to sit here (saying it was not) is retired. A plain RPC `edit` now publishes
 // BOTH of §8's facts: `files.changed` from `EditorKernel`'s ingest seam (`publish_file_change`, the
 // topic's one producer) and then `derivation.settled{gen}` from the settle `kernel_server`'s
@@ -49,7 +49,8 @@
 // R-FILE-002 crawl, so an edit made OUTSIDE any client (a git checkout, a text editor) is folded in
 // only by an explicit `reconcile` (`context attach --reconcile`) — which does publish, through the
 // same one producer. What remains for e09e-3 is the live two-window CEF smoke; the cross-CLIENT model
-// propagation is proven CEF-free by `m9-e09b-concurrent-cas` (§ 5), driven by a plain `edit` alone.
+// propagation is proven CEF-free by the ctest `editor-session-concurrent-cas-t2`
+// (src/tests/integration/test_e09b_concurrent_cas.cpp § 5), driven by a plain `edit` alone.
 //
 // THE LOUD DROP LANDED IN e09b-3. An L-30 drop reaches the listener, is COUNTED here
 // (`drops_observed()` / `last_commit()`) — and now goes out through the NOTICE SINK below, which the
@@ -141,8 +142,36 @@ public:
     InspectorFeed& operator=(InspectorFeed&&) = delete;
 
     // Selection moved -> a fetch for `identity` is pending (the pump performs it). A later request
-    // REPLACES a pending one — only the latest selection matters.
-    void request(const std::string& identity);
+    // REPLACES a pending one — only the latest selection matters. Returns true when the fetch was
+    // ARMED, false when the L-30 guard below DEFERRED it instead.
+    //
+    // ⚠⚠ THE SECOND HOME OF THE L-30 GUARD `apply_event` documents — load-bearing, not
+    // belt-and-braces, because a re-read of the entity a gesture is staged ON is reachable WITHOUT
+    // passing through `apply_event` at all. The same `derivation.settled` also makes `SceneTreeFeed`
+    // refetch the tree, and `SceneTreePanel::set_model` notifies its selection listeners whenever the
+    // selected row's L-37 identity hash RE-RESOLVES — which is exactly what another window's write
+    // does when it removes or re-identifies that entity (a row that is now missing resolves to 0).
+    // The composition root's listener (builtin_panels.cpp) then arms THIS fetch, and
+    // `pump_panel_feeds` serves it later in the SAME call, so `apply_result` ->
+    // `InspectorPanel::set_model` would discard the human's staged edit and adopt the other writer's
+    // raw hash as its CAS base, with nothing reporting an error. That is the identical silent re-base
+    // `apply_event` refuses, arriving by the one door it does not watch; deferring HERE puts every
+    // caller of the re-read seam under one rule.
+    //
+    // SCOPE, precisely — only a re-read of the SAME identity defers, and that is exactly
+    // co-extensive with the door x9 opened: `SceneTreePanel::set_model` re-resolves
+    // `selection_.identity_hash` and never touches `selection_.identity`, so a settle-driven refetch
+    // can only ever re-request the identity already inspected.
+    //
+    // A selection that MOVED to a DIFFERENT identity still proceeds, and still discards a staged
+    // gesture. That is a PRE-EXISTING hole on a DIFFERENT path — the `session` `selection-changed`
+    // fact, which reaches `SceneTreePanel::apply_selection`, and whose EMPTY id list routes to
+    // `request_clear` and discards the gesture outright. Do NOT read it as a human-navigation-only
+    // case: selection has been DAEMON state since e08b, so another client or an agent can move it.
+    // It is deliberately NOT widened here (this guard closes the door THIS task opened) and it is not
+    // covered by e09b-3's loud-drop machinery either, which reports a REFUSED WRITE rather than an
+    // abandoned gesture. Recorded as a follow-up in the CE #449 PR body.
+    bool request(const std::string& identity);
 
     // Selection cleared -> clear the panel NOW (no RPC needed to render the placeholder) and drop
     // any pending fetch.

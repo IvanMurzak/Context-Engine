@@ -110,9 +110,9 @@ std::string edit_req(std::int64_t id, const std::string& path, const std::string
 
 // A single-file `edit-batch` request. Like a plain `edit` since M9 x9, a batch settles and publishes
 // a `derivation` event (plus one `files` fact per file) — so a burst of these produces a burst of
-// pushed events (used to overflow a slow subscriber's queue deterministically). It is kept here rather
-// than switched to `edit` because a batch is still the shape that publishes N file facts for ONE
-// settle, which is what fills a tiny outbound budget fastest.
+// pushed events (used to overflow a slow subscriber's queue deterministically). Being single-file it
+// publishes exactly what a plain `edit` would; it stays an `edit-batch` because that is the shape its
+// one caller (the gap-marker burst) has always used and the burst needs no other property from it.
 std::string editbatch_req(std::int64_t id, const std::string& path, const std::string& content)
 {
     Json f = Json::object();
@@ -1475,9 +1475,16 @@ int main()
                     // `files.changed`: the two fields the registry advertises for this topic, nothing
                     // more — `path` (project-relative) and the `change` CLASS in the registry's own
                     // vocabulary (added | modified | removed), not ChangeType's `created` spelling.
+                    //
+                    // `added`, because `proj/pub.scene` did not exist in this store until this edit.
+                    // That is the point of the assertion, not incidental: the write path decides the
+                    // class from the target's PRE-write existence, so all three advertised classes are
+                    // reachable from RPC `edit`. Pin it against the second edit below, which reports
+                    // `modified` on the very same path — a producer that hardcoded either token would
+                    // satisfy one of these two and fail the other.
                     const Json& changed = files[0].at("payload");
                     CHECK(changed.at("path").as_string() == "proj/pub.scene");
-                    CHECK(changed.at("change").as_string() == "modified");
+                    CHECK(changed.at("change").as_string() == "added");
 
                     // §8's ORDER: `files.changed` BEFORE `derivation.settled`. Asserted on the wire
                     // `seq`, which is the stream's total order — not on delivery order, which a
@@ -1502,8 +1509,16 @@ int main()
             const std::optional<Json> reply2 =
                 req_demux(c, 4, edit_req(4, "proj/pub.scene", "entity: 2"), frames2);
             CHECK(reply2.has_value());
-            CHECK(facts_of(frames2, "files").size() == 1u);
+            const std::vector<Json> files2 = facts_of(frames2, "files");
+            CHECK(files2.size() == 1u);
             CHECK(facts_of(frames2, "derivation").size() == 1u);
+            // …and NOW the same path is `modified`, because it exists. The pair of assertions is what
+            // makes the class meaningful to a client maintaining a file list: create and update are
+            // distinguishable on the `files` topic, not collapsed into one token.
+            if (files2.size() == 1u)
+            {
+                CHECK(files2[0].at("payload").at("change").as_string() == "modified");
+            }
 
             // --- THE NEGATIVE: a REFUSED edit publishes NOTHING ------------------------------------
             // The publisher sits on the success path only. Without this, a producer that fired before

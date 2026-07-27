@@ -159,9 +159,11 @@ bool apply_scenetree_event(SceneTreeFeed& feed, const std::string& topic,
 // Problems already ride; the feed re-reads the inspected entity so a landed write appears without
 // touching the selection. Returns true when a re-read was ARMED.
 //
-// ⚠ This is the READER half only. No shipped client path publishes `derivation.settled` after a plain
-// `edit`, so the cross-window case is not live yet — inspector_feed.h § SCOPE has the measured
-// producer list and names e09e-3 as the owner of closing it.
+// ⚠ SINCE M9 x9 (CE #449) THE PUBLISHER HALF IS WIRED, so the cross-window case IS live: a plain
+// `edit` — the Shell's only write — publishes `files.changed` and then `derivation.settled{gen}`, and
+// this seam is how that reaches the Inspector in every attached client INCLUDING the one that wrote.
+// inspector_feed.h § THE PUBLISHER HALF carries the producer list; what remains for e09e-3 is the
+// two-window CEF smoke, not the plumbing.
 //
 // It takes NO generation, unlike the scenetree seam: the Inspector has no generation/stability status
 // line to advance, so the parameter would be received and dropped — and a seam that accepts a value it
@@ -329,8 +331,10 @@ struct BuiltinPanels
 //     as a "concurrent writer" that is really their own Ctrl+Z (undo_feed.h § take_replay_landed).
 //     Since e09e-2 a `derivation.settled` arms it too (`apply_inspector_event`) — the cross-client
 //     FAN-OUT path, with the deliberate exception of a settle arriving mid-gesture, which the feed
-//     DEFERS rather than serving (inspector_feed.h § apply_event). Which client actions actually
-//     PRODUCE that settle today is a narrower set than the path implies: inspector_feed.h § SCOPE.
+//     DEFERS rather than serving (inspector_feed.h § apply_event). Since M9 x9 a plain `edit`
+//     PRODUCES that settle, so every client write drives this path (inspector_feed.h § THE PUBLISHER
+//     HALF) — and the tree refetch the same settle triggers can re-arm the Inspector's fetch through
+//     the selection listener, which the feed defers under the same L-30 rule (§ request).
 //
 // FAILURE POSTURE: a fetch is CLAIMED before its RPC, so a failed call (daemon gone, refused) is
 // reported to stderr and NOT retried until the next settle / selection change — an editor hammering

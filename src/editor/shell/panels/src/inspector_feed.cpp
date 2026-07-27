@@ -311,6 +311,14 @@ bool InspectorFeed::apply_event(const std::string& topic, const contract::Json& 
         // gesture's CAS base — so the commit would guard against the very state it is racing, find no
         // mismatch, and overwrite it. Nothing would report an error. Defer; `flush_deferred_refresh`
         // releases it the moment the gesture is genuinely gone.
+        //
+        // ⚠ THIS IS NOT REDUNDANT WITH `request`'s COPY OF THE SAME RULE (M9 x9), even though every
+        // path out of here reaches it. `request_refresh` returns EARLY when nothing is inspected
+        // (`model().identity` empty), BEFORE `request` is ever called — so on that one path this guard
+        // is the only thing that records the settle as owed. Deleting it in the name of
+        // single-sourcing would silently drop the deferral there. The two are also different rules on
+        // purpose: this one is identity-FREE (any settle while staged is owed), `request`'s is
+        // identity-SCOPED (only a re-read of the staged entity defers, so navigation still works).
         refresh_deferred_ = true;
         return false;
     }
@@ -328,14 +336,32 @@ bool InspectorFeed::request_refresh()
     // documents the replace-a-pending-fetch rule. (It replaces unconditionally, so a selection that
     // moved between the gesture and this call is re-armed onto the OLD identity and its fetch waits
     // for the next pump-triggering change — narrow, and noted in the PR body.)
-    request(identity);
+    if (!request(identity))
+    {
+        // The L-30 guard inside `request` DEFERRED it: nothing was armed, so counting a re-read here
+        // would make `rereads_armed()` claim a fetch that no pump will perform. Reachable from the
+        // e09c READ-YOUR-REPLAYS caller (`pump_panel_feeds`), which — unlike `apply_event` and
+        // `flush_deferred_refresh` — does not itself check for a staged gesture first.
+        return false;
+    }
     ++rereads_armed_;
     return true;
 }
 
-void InspectorFeed::request(const std::string& identity)
+bool InspectorFeed::request(const std::string& identity)
 {
+    if (panel_.has_staged_edit() && identity == panel_.model().identity)
+    {
+        // ⚠⚠ THE L-30 GUARD, at the entry point `apply_event`'s copy cannot cover — inspector_feed.h
+        // § request names the path that reaches here without it (a settle -> tree refetch -> the
+        // selected row's identity hash re-resolves -> the composition root's selection listener).
+        // Owe the re-read rather than serve it, exactly as `apply_event` does; `flush_deferred_refresh`
+        // releases it the moment the gesture is genuinely gone.
+        refresh_deferred_ = true;
+        return false;
+    }
     pending_ = identity;
+    return true;
 }
 
 void InspectorFeed::request_clear()

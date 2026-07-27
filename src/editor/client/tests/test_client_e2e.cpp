@@ -183,7 +183,11 @@ void test_live_subscription_receives_real_events()
         if (e.topic == "files")
         {
             CHECK(e.payload.at("path").as_string() == "proj/e2e.scene");
-            CHECK(e.payload.at("change").as_string() == "modified");
+            // `added`, not `modified`: the edit above CREATED this path in the seeded project, and the
+            // write path classifies from pre-write existence, so the registry's `added` class is
+            // reachable over the real wire from a plain `edit` (test_kernel_server.cpp pins the
+            // `added`-then-`modified` pair on one path in-process).
+            CHECK(e.payload.at("change").as_string() == "added");
         }
         if (e.topic == "derivation")
         {

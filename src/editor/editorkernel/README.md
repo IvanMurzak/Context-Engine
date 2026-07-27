@@ -39,7 +39,11 @@ Two write paths reach the derived World:
   (`filesync::NativeFileStore`, rooted at `project_root`) they **coincide on one on-disk directory** —
   the whole loop then runs against real files.
 - The composition forwards the **derived-world generation** onto the client event stream as
-  `derivation.settled{generation}`. Cross-process transport and an OS watcher are follow-ups (the
+  `derivation.settled{generation}` (through `EventStream::settle`, which ADOPTS it — so the wire
+  envelope's `generation` and the payload's are one number). Since M9 x9 it also publishes design 05
+  §8's other fact, `files.changed`, from `EditorKernel::publish_file_change` — the topic's ONE
+  producer, at the ingest seam every client-visible change passes through, and always BEFORE the
+  settle that follows it. Cross-process transport and an OS watcher are follow-ups (the
   merged components ship a `NullWatcher` seam at M1; correctness comes from the re-hash crawl).
 
 Tests: `tests/test_editor_kernel.cpp` — the composed-loop integration smoke over `MemoryFileStore`

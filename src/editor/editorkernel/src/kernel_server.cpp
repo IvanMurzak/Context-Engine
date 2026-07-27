@@ -164,7 +164,9 @@ std::optional<std::uint64_t> parse_hash_u64(const std::string& text)
     return std::nullopt;
 }
 
-// The tail BOTH `edit` shapes end in: the R-CLI-006 read-your-writes barrier, the R-FILE-001
+// The tail BOTH `edit` shapes end in: the R-CLI-006 read-your-writes barrier, the R-BRIDGE-008
+// settle that publishes design 05 §8's `derivation.settled{gen}` to every subscribed client (M9 x9 —
+// this tail has SIDE EFFECTS on the client event stream, not only on the reply), the R-FILE-001
 // two-hash split (rawHash = on-disk byte identity and the NEXT ifMatch token; canonicalHash = the
 // barrier key), the world stamps, and the not-yet-reflected warning. `data` arrives carrying only
 // the shape-specific ADDRESSING keys, the one thing the two shapes genuinely disagree about — the
@@ -190,11 +192,24 @@ std::optional<std::uint64_t> parse_hash_u64(const std::string& text)
     // whole verb and cannot drift between them. `edit-batch` keeps its own settle (kernel_server.cpp's
     // batch branch) because it settles ONCE for N files, deliberately, rather than per file.
     //
-    // COST, measured against the code rather than assumed: `query_after_hash` above has already
-    // pumped passes until THIS path reflects its write or the pending set emptied, so the drain inside
-    // `settle()` is normally a no-op — it only keeps pumping when OTHER nodes are still pending, which
-    // is exactly the quiescence the settle fact claims. The generation read below therefore reports
-    // the SETTLED generation, matching what `edit-batch` already reports.
+    // COST, read off the code rather than assumed — and stated with its worst case, not just its
+    // common one. `query_after_hash` above has already pumped passes until THIS path reflects its
+    // write OR the pending set emptied, so on an otherwise idle project the drain inside `settle()`
+    // is a no-op and the generation read below simply reports the settled generation, matching what
+    // `edit-batch` already reports.
+    //
+    // ⚠ THE WORST CASE IS NOT THAT. `query_after_hash` exits on the FIRST of those two conditions and
+    // is itself bounded by `barrier_max_passes`, so it can legitimately return with the pending set
+    // arbitrarily large (that bound is the R-FILE-013 load-shed valve). `EditorKernel::settle` then
+    // drains with NO budget at all, and every `handle()` runs under the one `dispatch_mu` that
+    // serializes all clients — so under sustained write load an `edit` now pays a full project drain
+    // inside that lock. Concretely, the bound moved from `barrier_max_passes` × `max_batch_per_pass`
+    // (256 × 32 = at most ~8k non-visible nodes) to ALL of them. That is the honest price
+    // of a quiescence fact that is actually true when published, and it is deliberate: a budgeted
+    // settle would publish `derivation.settled` while work was still pending, which is precisely the
+    // lie R-BRIDGE-008 readers must not be told. If it ever shows against the `inspector commit`
+    // p95 in docs/human-latency-budget.md, the fix is a settle that reports `stability: settling`
+    // when its budget expires — never a silent partial one.
     const std::uint64_t settled_generation = kernel.settle();
 
     data.set("rawHash", hash_string(ticket.raw_hash));

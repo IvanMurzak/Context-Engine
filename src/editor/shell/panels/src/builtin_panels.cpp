@@ -466,7 +466,11 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
                     }
                     else
                     {
-                        inspector_ptr->request(selection.identity);
+                        // A false return is the L-30 deferral, not a failure: this listener also fires
+                        // when a settle-driven tree refetch RE-RESOLVES the selected row's identity
+                        // hash, and re-reading the entity a gesture is staged on would silently
+                        // re-base it (inspector_feed.h § request).
+                        (void)inspector_ptr->request(selection.identity);
                     }
                 });
         }

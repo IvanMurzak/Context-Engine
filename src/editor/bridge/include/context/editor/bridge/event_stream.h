@@ -9,9 +9,8 @@
 // (files/derivation/diagnostics/session/clients/log). settle(generation) ADOPTS the derived-world
 // generation and emits the `derivation.settled{generation}` quiescence event; diagnostics carry a
 // `stability` field; and the kernel `log` topic is FORWARDED here (kept a separate stream, never the
-// same object). Slow
-// subscribers get a bounded queue and, on overflow, an explicit gap marker instructing a re-snapshot
-// — the stream never blocks on a slow client.
+// same object). Slow subscribers get a bounded queue and, on overflow, an explicit gap marker
+// instructing a re-snapshot — the stream never blocks on a slow client.
 
 #pragma once
 
@@ -129,6 +128,15 @@ public:
     // stamp from THAT envelope, so the R-BRIDGE-008 stale-provisional discrimination was inert by
     // construction. Adopting the caller's generation here makes one number mean one thing on both
     // the envelope and the payload.
+    //
+    // PRECONDITION, and it is the caller's because adoption moved it there: `derived_generation` must
+    // be NON-DECREASING across calls. It is assigned, not clamped — deliberately, since a `max()` here
+    // would silently paper over a mis-ordered caller while still corrupting nothing visibly, and the
+    // stream is not the component that can tell a rewind from a legitimate value. Today's one non-test
+    // caller (`EditorKernel::settle` -> `DerivationGraph::generation()`) satisfies it by construction
+    // and every settle is serialized under the server's single dispatch mutex. A regressing value
+    // would rewind BOTH the envelope stamp on every later event and `snapshot()`'s R-BRIDGE-008
+    // reconnect cursor, which is what makes this a precondition rather than a preference.
     std::uint64_t settle(std::uint64_t derived_generation);
 
     // Forward a kernel-internal LogEvent onto this stream's `log` topic (kept a distinct stream).
