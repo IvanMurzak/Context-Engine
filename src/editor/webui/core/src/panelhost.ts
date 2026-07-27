@@ -760,6 +760,17 @@ export class PanelHost {
     readonly #panelVerbs: PanelVerbFactory | undefined;
     readonly #themeChannel: PanelThemeChannel | undefined;
     readonly #panels = new Map<string, HostedPanel>();
+    /**
+     * The panel revision each mounted panel was last REFRESHED for (M9 e09e-3) — `pollRevisions`'
+     * whole state, and deliberately not the roster's own numbers: what matters is what this host has
+     * already acted on, not what the Shell last said.
+     *
+     * Empty at start, so the first poll refreshes every mounted panel exactly once. That is not
+     * waste, it is the fix for a REAL race: `UitreePanelRenderer.init` renders the moment Dockview
+     * materialises the slot, which can be BEFORE the panel's C++ model has any data (an Inspector
+     * whose selection arrives a frame later), and until this driver existed nothing ever asked again.
+     */
+    readonly #revisions = new Map<string, number>();
     #api: DockviewApi | null = null;
     #roster: PanelRoster | null = null;
 
@@ -1011,19 +1022,73 @@ export class PanelHost {
         }
         this.#api.removePanel(panel);
         this.#panels.get(panelId)?.renderer.dispose();
+        // FORGET THE REVISION TOO (e09e-3). A reopened panel gets a FRESH renderer whose mounted
+        // revision is `-1`, so a remembered number here would make `pollRevisions` skip it until the
+        // model happened to move again — the reopened panel would sit on whatever its own `init`
+        // render caught, which is the very race this driver exists to close.
+        this.#revisions.delete(panelId);
         return this.#panels.delete(panelId);
     }
 
     /**
-     * Re-render every mounted, non-suspended panel.
+     * THE MODEL-CHANGE REFRESH DRIVER (M9 e09e-3): re-render exactly the mounted panels whose C++
+     * model has MOVED since this host last rendered them. Returns how many it refreshed.
      *
-     * NOTHING CALLS THIS YET — stated plainly rather than described as "the host's poll tick",
-     * which would claim a driver that does not exist. Re-renders today are event-driven per panel:
-     * `onDispatched` after a local command, and `onShow` when a panel becomes visible. So a change
-     * arriving from the daemon (a diagnostic landing in the live feed) reaches the C++ model and
-     * moves its revision, but no DOM update follows until the user next interacts. Wiring a driver
-     * — a tick, or a bridge-side change event — is a later task; this method is the seam it will
-     * call, and it is already correct for that use.
+     * WHY THIS EXISTS AT ALL — the gap it closes was a structural hole in design 05 §8's tail. Before
+     * it, re-renders were driven only by LOCAL interaction: `UitreePanelRenderer.init` on mount,
+     * `onShow` on becoming visible, and `onDispatched` after a command this window sent. So a fact
+     * arriving from the DAEMON — a diagnostic landing in the Problems feed, or the
+     * `derivation.settled` that carries another window's edit — reached the C++ model and moved its
+     * revision, and the human saw NOTHING until they happened to click. §8's "all subscribed clients
+     * (window 1, window 2, CLI, agents) update" was therefore false of the only surface a human
+     * looks at, and the effect was worst in a SECONDARY window, which sends no commands at all.
+     *
+     * WHY IT POLLS `panel.list` RATHER THAN RE-RENDERING EVERYTHING. `panel.render` makes the Shell
+     * BUILD the panel (`entry->provider.build()` + `render_html`) on every call — for a Scene tree
+     * over a large project that is real work, and a blind `refreshAll` on a tick would pay it for
+     * every panel forever. `panel.list` builds nothing: the revision rides the ROSTER (panel_host.cpp
+     * § `list`), which is why it is there. So the steady-state cost of this driver is ONE round trip
+     * per tick no matter how many panels are open, and a `panel.render` + DOM patch only when a model
+     * genuinely changed. That is the same bargain `HydrationRuntime.apply`'s revision no-op strikes
+     * one layer down, moved to where it can also skip the round trip.
+     *
+     * A SUSPENDED (tabbed-away) panel is skipped AND NOT RECORDED, so it refreshes on the first poll
+     * after `onShow` puts it back on screen rather than staying stale behind its own tab.
+     *
+     * NEVER THROWS and never rejects: an unreadable roster is `0`, exactly as everywhere else in this
+     * class, because its caller is a `setInterval` tick in a renderer with no console.
+     */
+    async pollRevisions(): Promise<number> {
+        if (this.#api === null || this.#panels.size === 0) {
+            return 0;
+        }
+        const roster = await this.#client.list();
+        if (roster === null) {
+            return 0;
+        }
+        let refreshed = 0;
+        for (const manifest of roster.panels) {
+            const hosted = this.#panels.get(manifest.id);
+            if (hosted === undefined || hosted.renderer.suspended) {
+                continue;
+            }
+            if (this.#revisions.get(manifest.id) === manifest.revision) {
+                continue;
+            }
+            this.#revisions.set(manifest.id, manifest.revision);
+            hosted.renderer.refresh();
+            refreshed += 1;
+        }
+        return refreshed;
+    }
+
+    /**
+     * Re-render every mounted, non-suspended panel, unconditionally.
+     *
+     * The UNGATED sibling of `pollRevisions` above, which is the actual driver since M9 e09e-3. Kept
+     * as the seam for a caller that must force a re-render without a revision having moved (a
+     * post-restore repaint); nothing calls it today, and a tick MUST NOT — see `pollRevisions` on why
+     * an unconditional refresh pays for a full Shell-side panel build per panel per tick.
      */
     async refreshAll(): Promise<void> {
         await Promise.all(
@@ -1060,6 +1125,7 @@ export class PanelHost {
             panel.renderer.dispose();
         }
         this.#panels.clear();
+        this.#revisions.clear();
         this.#api?.dispose();
         this.#api = null;
     }

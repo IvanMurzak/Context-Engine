@@ -175,6 +175,79 @@ bool apply_scenetree_event(SceneTreeFeed& feed, const std::string& topic,
 bool apply_inspector_event(InspectorFeed& feed, const std::string& topic,
                            const contract::Json& payload);
 
+// --- the e09e-3 INSPECTOR DRIVE + OBSERVE seams (a `-fno-rtti` caller's whole view of the feed) ---
+//
+// WHY THESE EXIST AT ALL, and why they are not a test backdoor. `inspector_feed.h` reaches the
+// `typeid` chain (see the forward-declaration note above), so a CEF-linking TU — every live smoke
+// under `src/editor/shell/cef/src/**`, which CEF mandates be compiled `-fno-rtti` — physically cannot
+// include it and therefore cannot call ONE member function on the feed. The existing
+// `apply_inspector_event` / `session_play_state` / `session_facts_applied` seams are the same
+// construct for the same reason; these three complete the set the live two-window fan-out smoke
+// (e09e-3, ctest `editor-cef-smoke-shell-inspector-fanout`) needs to say anything at all about what
+// the Inspector did.
+//
+// They are READ-ONLY apart from `request_inspector`, and none of them can manufacture the outcome a
+// caller asserts: every counter below is incremented ONLY by the feed's own production paths.
+
+// Arm a fetch for `identity` (L-35 id-path) — the seam behind `InspectorFeed::request`.
+//
+// The PRODUCTION driver is the Scene tree's selection listener (install_builtin_panels wires it), and
+// this is deliberately NOT a second policy: it forwards to the same one function, so the L-30
+// mid-gesture deferral documented on `InspectorFeed::request` binds a caller here exactly as it binds
+// the listener. Returns what `request` returns — true when the fetch was ARMED, false when the guard
+// DEFERRED it (an ordinary outcome, not a failure). False also when this bag has no Inspector feed.
+bool request_inspector(BuiltinPanels& panels, const std::string& identity);
+
+// One read-only snapshot of a bag's Inspector — every observable the feed and its panel expose, as
+// plain data, so a `-fno-rtti` caller can assert on them.
+//
+// `present` is false when the bag has no Inspector feed at all (a partial `install_builtin_panels`),
+// which is an ordinary state and NOT the same as "an Inspector that has done nothing" — a caller
+// asserting on counters must check it first, or a missing feed reads as a feed that stayed idle.
+struct InspectorObservation
+{
+    bool present = false;
+    bool has_selection = false;
+    bool has_staged_edit = false;
+    // A settle-driven re-read is OWED but withheld behind an in-flight gesture (e09e-2).
+    bool refresh_deferred = false;
+    bool fetch_pending = false;
+    // The L-30 collision base the NEXT commit will CAS against. 0 = no CAS guard.
+    std::uint64_t base_raw_hash = 0;
+    std::size_t results_applied = 0;
+    // `derivation.settled` facts RECOGNIZED — counted before the staged-gesture guard, so it climbs
+    // whether the settle was served or deferred (inspector_feed.h § events_applied).
+    std::size_t events_applied = 0;
+    std::size_t rereads_armed = 0;
+    std::size_t commits_observed = 0;
+    std::size_t drops_observed = 0;
+    // Override writes this bag's gateway actually applied over the wire (0 when it has none).
+    std::size_t writes_applied = 0;
+    // The last resolved commit, as tokens: `applied` / `rebased` / `dropped` / `error` / `none`.
+    std::string last_commit_status;
+    std::string last_commit_code;
+    // The in-flight gesture, canonically serialized (R-FILE-001) — "" when nothing is staged.
+    std::string staged_pointer;
+    std::string staged_value;
+};
+[[nodiscard]] InspectorObservation observe_inspector(const BuiltinPanels& panels);
+
+// The CURRENT composed value of one field as the panel model holds it, canonically serialized;
+// `overridden` reports the model's own flag. "" when the field does not resolve (or there is no feed)
+// — indistinguishable from an empty value only for a field that cannot exist, since `render_value`
+// never yields "" for a present field.
+[[nodiscard]] std::string inspector_field_value(const BuiltinPanels& panels,
+                                                const std::string& pointer, bool& overridden);
+
+// The Inspector's contribution id, its edit command, and the node-id prefix `build_panel` gives every
+// editable widget — RE-DECLARED here for exactly the reason `kSessionTopic` above is: a `-fno-rtti`
+// caller cannot include the header that owns them, and a live smoke needs all three to address the
+// rendered DOM element (`<prefix><pointer>`) and to drive `panel.command` / `panel.gesture`.
+// builtin_panels.cpp static_asserts each against its owning spelling, so the two cannot drift.
+inline constexpr const char* kInspectorPanelId = "builtin.inspector";
+inline constexpr const char* kInspectorEditCommand = "inspector.edit";
+inline constexpr const char* kInspectorWidgetNodePrefix = "inspector.widget.";
+
 // The same seam for the e08b Session feed. `apply_session_event` forwards one `session` fact (the
 // feed itself drops our own echo — see session_feed.h). Both defined in builtin_panels.cpp.
 bool apply_session_event(SessionFeed& feed, const std::string& topic, const contract::Json& payload);

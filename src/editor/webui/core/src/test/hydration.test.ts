@@ -229,6 +229,24 @@ const FIELDS_HTML = [
     "</section>",
 ].join("");
 
+/**
+ * The SAME panel, one revision later: `/speed` moved, and a field APPEARED.
+ *
+ * Both halves matter to the patch case below. The moved value proves the incoming tree was actually
+ * READ (an attribute sync happened); the new row proves an INSERT happened, which "nothing was
+ * removed" alone cannot show.
+ */
+const PATCHED_HTML = FIELDS_HTML.replace(' value="1.5"', ' value="2.5"').replace(
+    "</ul>",
+    [
+        '<div id="inspector.field./fresh" role="group">',
+        `<input id="${WIDGET_PREFIX}/fresh" role="textbox" aria-label="/fresh" tabindex="0"`,
+        ' data-command="inspector.edit" value="7">',
+        "</div>",
+        "</ul>",
+    ].join(""),
+);
+
 function render(): PanelRender {
     return {
         panelId: PANEL_ID,
@@ -675,6 +693,70 @@ export const hydrationTests: readonly TestCase[] = [
                     panel.shell.calls.length,
                     1,
                     "a disposed runtime must send nothing MORE than the pre-dispose control",
+                );
+            } finally {
+                panel.dispose();
+            }
+        },
+    },
+    {
+        // THE PATCH PATH, which until M9 e09e-3 nothing here ever entered: every other case in this
+        // file applies exactly ONE revision, so `apply` took its `#adoptAll` branch and the whole
+        // incremental patcher — the thing 04 §4 step 3 is about — ran in no test at all. It was
+        // broken the entire time: `apply` handed `#patchElement` the `<template>` ELEMENT, whose own
+        // `children` is always empty (a template's parsed markup lives in `content`), so the patch
+        // read an EMPTY source and its trailing-removal loop deleted every mounted child. The wipe
+        // was survivable-looking because it leaves `childElementCount === 0`, so the NEXT render
+        // re-mounts — which is why a panel that re-renders TWICE healed and only a panel that
+        // re-renders ONCE stayed blank. `editor-cef-smoke-shell-inspector-fanout` is what found it.
+        //
+        // ⚠ PLANT (9): pass `incoming` instead of `incoming.content` in `apply` (the defect verbatim)
+        // -> the container is emptied and `panel.node` reds on the FIRST assertion below.
+        // ⚠ PLANT (10): drop `"value"` from `SYNCED_ATTRIBUTES` -> the tree survives and the identity
+        // holds, but the moved value never lands and the third assertion reds.
+        name: "hydration: a second revision PATCHES the mounted tree in place (it must not wipe it)",
+        run: async () => {
+            const panel = mount();
+            try {
+                const speed = panel.input(`${WIDGET_PREFIX}/speed`);
+                assertEqual(speed.value, "1.5", "the fixture's authored value, before the patch");
+                const mountedBefore =
+                    panel.container.querySelectorAll("[data-node-id]").length;
+                assert(mountedBefore > 1, "the fixture must mount a tree worth patching");
+
+                panel.runtime.apply({
+                    panelId: PANEL_ID,
+                    revision: 2,
+                    html: PATCHED_HTML,
+                    focusOrder: [`${WIDGET_PREFIX}/name`],
+                    commands: [{ id: EDIT_COMMAND, title: "Edit field" }],
+                });
+
+                // 1. THE TREE SURVIVED. `node()` throws when the id is not mounted, so this is the
+                //    assertion the wipe reds on — and it is first deliberately.
+                panel.node("inspector.panel");
+                panel.node(`${WIDGET_PREFIX}/name`);
+                assert(
+                    panel.container.querySelectorAll("[data-node-id]").length > mountedBefore,
+                    "the patched tree must keep every node it had and gain the new one",
+                );
+                // 2. …AS THE SAME ELEMENTS. A patch that re-imported everything would satisfy (1)
+                //    while losing exactly what keying by node id exists to preserve (focus, scroll,
+                //    selection, transition state).
+                assert(
+                    panel.input(`${WIDGET_PREFIX}/speed`) === speed,
+                    "the re-rendered field must be the SAME element, reused",
+                );
+                // 3. …CARRYING THE NEW VALUE. Read off the attribute as well as the property: the
+                //    property reflects the attribute only while the control is not dirty, and the
+                //    attribute is what `#syncAttributes` actually writes.
+                assertEqual(speed.getAttribute("value"), "2.5", "the moved value reached the DOM");
+                assertEqual(speed.value, "2.5", "…and the control displays it");
+                // 4. …AND THE NEW ROW WAS INSERTED.
+                assertEqual(
+                    panel.input(`${WIDGET_PREFIX}/fresh`).value,
+                    "7",
+                    "a field the new revision added must be mounted",
                 );
             } finally {
                 panel.dispose();

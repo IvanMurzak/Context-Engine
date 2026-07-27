@@ -391,7 +391,22 @@ export class HydrationRuntime {
             // during the patch are deliberately absent (a duplicate model id can therefore never
             // re-claim a just-inserted element — strictly safer than the live lookup, see
             // #patchElement's reuse-hazard note).
-            this.#patchElement(this.#container, incoming, this.#indexMounted());
+            //
+            // ⚠ `.content`, NOT the template ELEMENT (M9 e09e-3, and it was a real defect for as long
+            // as this method has existed). `#parse` returns an `HTMLTemplateElement`, and a template's
+            // parsed markup lives in its `content` DocumentFragment — its own `children` is ALWAYS
+            // empty. Passing the element gave `#patchElement` an EMPTY source: every incoming node
+            // loop body was skipped and its trailing-removal loop then deleted every child of the
+            // panel body, so a patch WIPED the panel instead of updating it. It looked survivable
+            // because the wipe leaves `childElementCount === 0`, so the NEXT render re-mounts through
+            // `#adoptAll` — a panel whose model changes twice in a row therefore healed itself and
+            // only a panel that re-renders ONCE and is not refreshed again stayed blank. Nothing
+            // caught it: `#adoptAll` (which does use `.content`) covers the first render, every unit
+            // test here applies a single revision, and the C++ suites drive the Shell side of the
+            // seam, never this runtime. `editor-cef-smoke-shell-inspector-fanout` is what found it —
+            // its window B staged one DOM edit, the resulting refresh emptied the Inspector, and with
+            // no field left to type into nothing could ever refresh it again.
+            this.#patchElement(this.#container, incoming.content, this.#indexMounted());
             this.#patches += 1;
             if (focusedNodeId !== null) {
                 this.#element(focusedNodeId)?.focus();

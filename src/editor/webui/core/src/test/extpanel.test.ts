@@ -40,7 +40,12 @@ import {
 import { IFRAME_PANEL_CLASS, PanelHost } from "../panelhost.js";
 import type { PanelVerbFactory } from "../panelhost.js";
 import { PANEL_PORT_STATE_ATTRIBUTE } from "../panelport.js";
-import { PANEL_LIST_METHOD, PanelClient, parsePanelManifest } from "../panels.js";
+import {
+    PANEL_LIST_METHOD,
+    PANEL_RENDER_METHOD,
+    PanelClient,
+    parsePanelManifest,
+} from "../panels.js";
 
 // --------------------------------------------------------------------------- roster + Shell mocks
 
@@ -720,6 +725,66 @@ export const extPanelTests: readonly TestCase[] = [
                     disposals.filter((entry) => entry === "disposed:pkg.hello").length >= 1,
                     "closing the panel disposed its verb table — the hook that withdraws the panel's " +
                         `runtime commands from the ONE registry, which outlives every panel: ${JSON.stringify(disposals)}`,
+                );
+            } finally {
+                mounted.dispose();
+            }
+        },
+    },
+    // ------------------------------------------------------------- the MODEL-CHANGE REFRESH DRIVER
+    //
+    // M9 e09e-3's `PanelHost.pollRevisions`, and it lives in THIS file for one reason: `mountHost`
+    // above is the tier's only REAL-Dockview PanelHost harness, and the driver's whole subject is a
+    // MOUNTED panel's renderer. Duplicating the harness for one concern would be worse than the
+    // topical mismatch. Nothing here is iframe-specific — the subject is a `uitree` panel.
+    //
+    // WHAT THE OBSERVABLE IS, and why it needs no `panel.render` support in the mock: a refresh is a
+    // `HydrationRuntime.refresh()`, which ISSUES a `panel.render` over the bridge. The mock refuses
+    // that method (as the real router refuses an unknown one), and the refusal is irrelevant — the
+    // recorded METHOD is the proof the driver asked. So `shell.methods` counts refreshes directly.
+    {
+        // ⚠ PLANT (a): drop `hosted.renderer.refresh()` from `pollRevisions`' loop, keeping the
+        // counter -> the driver REPORTS a refresh it never issued, no `panel.render` follows, and the
+        // first `renders() > rendersAfterMount` assertion reds. Deliberately planted as the
+        // count-without-the-call rather than as an early return: the early return also satisfies the
+        // two zero-count assertions, so it is the weaker mutation of the two.
+        // ⚠ PLANT (b): drop the `#revisions.get(...) === manifest.revision` skip -> the driver
+        // refreshes on EVERY tick and the "an unchanged model costs no render" assertion reds. That
+        // half is what keeps a live editor from paying a full Shell-side panel build per panel per
+        // 500 ms tick, so it is the half worth pinning.
+        name: "panel refresh driver: the first poll refreshes, an unchanged model costs nothing, a moved revision refreshes again",
+        run: async () => {
+            // Held by reference so the case can MOVE the served revision — which is exactly what a
+            // C++ `PanelHost::touch` does when a daemon fact lands in a feed.
+            const roster = [uitreeManifestJson("builtin.inspector")];
+            const mounted = await mountHost(roster);
+            try {
+                const renders = (): number =>
+                    mounted.shell.methods.filter((m) => m === PANEL_RENDER_METHOD).length;
+
+                // The panel is mounted, so `init` already pulled one render. The FIRST poll refreshes
+                // anyway (the driver has recorded no revision yet) — the fix for a mount that
+                // rendered before the model had data.
+                const rendersAfterMount = renders();
+                assertEqual(await mounted.host.pollRevisions(), 1, "the first poll refreshes the mounted panel");
+                assert(
+                    renders() > rendersAfterMount,
+                    `the refresh ISSUED a ${PANEL_RENDER_METHOD}: ${JSON.stringify(mounted.shell.methods)}`,
+                );
+
+                // An UNCHANGED model must cost exactly one `panel.list` and no render at all.
+                const settled = renders();
+                assertEqual(await mounted.host.pollRevisions(), 0, "an unchanged revision refreshes nothing");
+                assertEqual(renders(), settled, "…and issues no render");
+
+                // The model MOVES — a daemon fact landed, so the Shell's roster reports a new revision.
+                const manifest = roster[0];
+                assert(manifest !== undefined, "the fixture roster must carry its one manifest");
+                (manifest as Record<string, unknown>)["revision"] = 2;
+                assertEqual(await mounted.host.pollRevisions(), 1, "a moved revision refreshes the panel");
+                assert(
+                    renders() > settled,
+                    `the second refresh ISSUED a ${PANEL_RENDER_METHOD}: ${JSON.stringify(mounted.shell.methods)}`,
                 );
             } finally {
                 mounted.dispose();
