@@ -31,11 +31,22 @@
 // `edit`, and not the inert reserved `--after-generation` core flag.
 //
 // THE FAN-OUT HALF LANDED IN e09e-2 (design 05 §8's tail: "events: files.changed ->
-// derivation.settled{gen} -> all subscribed clients update"). `apply_event` consumes the daemon's
-// `derivation.settled` quiescence fact and re-reads the inspected entity, so a write by ANOTHER
-// window / CLI / agent shows up here without the human touching the selection. Its whole difficulty
-// is the one thing it must NOT do — refresh while a gesture is staged, which would silently re-base
-// the L-30 collision guard the two paragraphs above exist to enforce. See `apply_event`.
+// derivation.settled{gen} -> ... -> all subscribed clients update"; the elided step is
+// `diagnostics (stability)`, which this panel does not consume). `apply_event` consumes the daemon's
+// `derivation.settled` quiescence fact and re-reads the inspected entity, so a landed write shows up
+// here without the human touching the selection. Its whole difficulty is the one thing it must NOT
+// do — refresh while a gesture is staged, which would silently re-base the L-30 collision guard the
+// WRITES-GO-OVER-THE-WIRE paragraph above exists to enforce. See `apply_event`.
+//
+// ⚠ SCOPE, MEASURED (do NOT read the paragraph above as "cross-window propagation is live today").
+// e09e-2 landed the READER half; the PUBLISHER half of §8 is NOT wired. `derivation.settled` has ONE
+// producer — `EditorKernel::settle` (editor_kernel.cpp) — reached from the `reconcile` and
+// `edit-batch` verbs and the two await barriers. The `edit` verb, which is the ONLY write the Shell
+// issues (wire_override_gateway.cpp), runs `query_after_hash` alone and publishes NOTHING; and §8's
+// `files.changed` has no producer at all. So TODAY a second window's inspector edit emits no event,
+// the only client-reachable trigger is `context attach --reconcile`, and no daemon timer drives the
+// R-FILE-002 crawl. Closing the publisher half is e09e-3's business — a live two-window smoke driven
+// by `edit` alone would observe nothing.
 //
 // THE LOUD DROP LANDED IN e09b-3. An L-30 drop reaches the listener, is COUNTED here
 // (`drops_observed()` / `last_commit()`) — and now goes out through the NOTICE SINK below, which the
@@ -273,8 +284,12 @@ private:
     // the human's in-flight edit is not silently discarded by a daemon outage), so the edit is STILL
     // in flight after that commit resolved and the deferral must SURVIVE it. Only a gesture that is
     // genuinely gone — consumed by an applied / rebased / dropped commit, or discarded by `cancel` —
-    // releases the refresh. Called from the two places a gesture can end, since `discard_edit` fires
-    // no commit listener and `cancel` would otherwise leave the deferral stranded forever.
+    // releases the refresh. Called from the two gesture-ends that leave the panel holding STALE
+    // state: a resolved refusal, and an explicit `cancel` (whose `discard_edit` fires no commit
+    // listener, so without that call site the deferral would strand forever). A staged gesture can
+    // end in FOUR places — those two, plus `set_model` via `apply_result` and `clear` via
+    // `request_clear` — and the other two need no flush precisely because they discharge the deferral
+    // by CLEARING the flag, the panel having just adopted fresh state or lost its selection.
     bool flush_deferred_refresh();
 
     // Snapshot the in-flight gesture as a reversible undo checkpoint (M9 e09c). nullopt when nothing

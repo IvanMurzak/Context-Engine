@@ -156,8 +156,12 @@ bool apply_scenetree_event(SceneTreeFeed& feed, const std::string& topic,
 
 // The same seam for the e09e-2 INSPECTOR FAN-OUT — design 05 §8's tail, where a landed write reaches
 // every subscribed client. Forward one event off the SAME `derivation` stream the Scene tree and
-// Problems already ride; the feed re-reads the inspected entity so a write by another window / CLI /
-// agent appears without touching the selection. Returns true when a re-read was ARMED.
+// Problems already ride; the feed re-reads the inspected entity so a landed write appears without
+// touching the selection. Returns true when a re-read was ARMED.
+//
+// ⚠ This is the READER half only. No shipped client path publishes `derivation.settled` after a plain
+// `edit`, so the cross-window case is not live yet — inspector_feed.h § SCOPE has the measured
+// producer list and names e09e-3 as the owner of closing it.
 //
 // It takes NO generation, unlike the scenetree seam: the Inspector has no generation/stability status
 // line to advance, so the parameter would be received and dropped — and a seam that accepts a value it
@@ -323,9 +327,10 @@ struct BuiltinPanels
 //     Inspector's own commit listener never fires and the panel would otherwise keep both the
 //     pre-undo value and the pre-undo CAS token — making the human's next edit to that field drop
 //     as a "concurrent writer" that is really their own Ctrl+Z (undo_feed.h § take_replay_landed).
-//     Since e09e-2 a `derivation.settled` arms it too (`apply_inspector_event`), which is the
-//     cross-client FAN-OUT — with the deliberate exception of a settle arriving mid-gesture, which
-//     the feed DEFERS rather than serving (inspector_feed.h § apply_event).
+//     Since e09e-2 a `derivation.settled` arms it too (`apply_inspector_event`) — the cross-client
+//     FAN-OUT path, with the deliberate exception of a settle arriving mid-gesture, which the feed
+//     DEFERS rather than serving (inspector_feed.h § apply_event). Which client actions actually
+//     PRODUCE that settle today is a narrower set than the path implies: inspector_feed.h § SCOPE.
 //
 // FAILURE POSTURE: a fetch is CLAIMED before its RPC, so a failed call (daemon gone, refused) is
 // reported to stderr and NOT retried until the next settle / selection change — an editor hammering

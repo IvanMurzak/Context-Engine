@@ -711,16 +711,84 @@ void an_unbound_notice_sink_leaves_the_drop_counted()
 
 // ------------------------------------------- M9 e09e-2: the FAN-OUT half (design 05 §8's tail)
 //
+// PLANTED-VIOLATION VERIFICATION (conventions.md — "a gate that cannot fail is worse than no gate").
+// The e09c block above scopes itself to the e09c cases; these e09e-2 cases carry their own round, since
+// their whole claim is a NEGATIVE one ("the refresh was withheld") and such a claim is exactly the kind
+// that passes whether or not the guard works. Two rounds, both through `scripts/plant_and_revert.py`
+// (out-of-tree byte backups, md5-verified restores, each round closed by a GREEN full `ctest` on the
+// byte-exact tree):
+//
+// Round 1, as implemented — six plants, 6/6 RED: `apply_event` refreshes unconditionally; the deferral
+// is never released after a refusal; it is released while the gesture is STILL staged; `cancel` leaves
+// it stranded; `derivation.settled` is ignored entirely; a deferral is double-served across an applied
+// commit.
+//
+// Round 2, on the STRENGTHENED § 5b of `../../../../tests/integration/test_e09b_concurrent_cas.cpp`
+// (the refine pass re-staged before the commit there, which is what turned that section's on-disk
+// assertions from decoration into detectors) — 2/2 RED, each attributed to a NAMED assertion:
+//
+//   * `apply_event` refreshes UNCONDITIONALLY (the `has_staged_edit()` guard neutered) reddens, in the
+//     drill, `!mentions(on_disk, "9.75")` AND `mentions(on_disk, "6.5")` — the racer's value provably
+//     clobbered on real disk — plus `base_raw_hash() == observer_base` (the L-30 re-base OBSERVED, not
+//     argued), `has_staged_edit()`, and `status == dropped`; and here, `feed.refresh_deferred()` in
+//     every case below that defers one.
+//   * a refused commit never RELEASES the deferral (the flush dropped from `on_commit`'s refusal
+//     branch) reddens `!feed.refresh_deferred()` in the error/cancel case below, and the drill's § 5c.
+//
+// ⚠ Read the deferral cases' `has_staged_edit()` / `base_raw_hash()` / `results_applied()` assertions
+// as regression fencing only: nothing in a T1 case pumps, so they hold even with the guard removed.
+// The re-base is observable ONLY in the drill's § 5b (see the note at that case).
+//
 // The daemon's `derivation.settled` payload, in the shape `EditorKernel::settle` publishes it
 // (editor_kernel.cpp — `event` + `generation` on the `derivation` topic). Built from the real
-// members rather than hand-spelled per case so no case can quietly assert against a shape the daemon
-// does not send.
+// members rather than hand-spelled per case, so no case here drifts from its siblings.
+//
+// ⚠ WHAT THIS DOES *NOT* PIN. The payload is built from the same two panels-side constants
+// `apply_event` compares against, and the daemon spells its literals independently, so a drift
+// between the two would leave every case below GREEN. The only thing that pins the spelling is the
+// T2 drill (`src/tests/integration/test_e09b_concurrent_cas.cpp` § 5), which feeds the payload the
+// REAL daemon published and requires `events_applied()` to climb. There is no `static_assert`
+// available here — unlike the session topic, whose two spellings meet in one TU (builtin_panels.cpp)
+// — because the daemon-side strings are inline literals, not a shared constant.
+//
+// `generation` is carried only to match the wire shape: `apply_event` deliberately ignores it (the
+// Inspector has no generation/stability status line — builtin_panels.h), so the varying values below
+// are documentation, and no case asserts on them.
 [[nodiscard]] Json settled_payload(std::uint64_t generation)
 {
     Json payload = Json::object();
     payload.set("event", Json(std::string(panels::kDerivationSettledEvent)));
     payload.set("generation", Json(generation));
     return payload;
+}
+
+// Stage a value on the one editable field through the REAL `panel.command` seam the renderer drives
+// (L-20: the gesture is in flight, nothing written). Extracted for the same reason the T2 drill
+// extracted its own `stage_only`: every case below needs a gesture IN FLIGHT, and all that differs is
+// what happens inside that window.
+void stage_name_edit(shell::PanelHost& host)
+{
+    bool dispatched = false;
+    std::string error;
+    Json params = Json::object();
+    params.set("nodeId", Json(std::string("inspector.widget./name")));
+    params.set("value", Json(std::string("\"Mine\"")));
+    CHECK(host.invoke(kPanelId, inspector::InspectorPanel::kEditCommand, params, dispatched, error));
+    CHECK(dispatched);
+}
+
+// End that gesture through the REAL `panel.gesture` seam (L-20: the gesture end IS the commit). The
+// `dispatched` CHECK is load-bearing rather than ceremonial: a provider that found NOTHING staged
+// answers `Status::none` and reports `dispatched:false`, which is exactly what a lost gesture looks
+// like from here.
+void end_name_gesture(shell::PanelHost& host, shell::GestureVerb verb)
+{
+    bool dispatched = false;
+    std::string error;
+    Json gesture = Json::object();
+    gesture.set("nodeId", Json(std::string("inspector.widget./name")));
+    CHECK(host.gesture(kPanelId, verb, gesture, dispatched, error));
+    CHECK(dispatched);
 }
 
 // A settle with NOTHING staged re-reads the inspected entity — the ordinary fan-out: another window,
@@ -778,13 +846,7 @@ void a_settle_during_a_gesture_is_deferred_not_served()
     CHECK(host.provide(kPanelId, feed.make_provider()));
     feed.panel().set_model(one_field_model("Before"), 100);
 
-    bool dispatched = false;
-    std::string error;
-    Json params = Json::object();
-    params.set("nodeId", Json(std::string("inspector.widget./name")));
-    params.set("value", Json(std::string("\"Mine\"")));
-    CHECK(host.invoke(kPanelId, inspector::InspectorPanel::kEditCommand, params, dispatched, error));
-    CHECK(dispatched);
+    stage_name_edit(host);
     CHECK(feed.panel().has_staged_edit());
 
     // The settle lands mid-gesture. RECOGNIZED (so this is not a topic-filter no-op) and WITHHELD.
@@ -793,9 +855,13 @@ void a_settle_during_a_gesture_is_deferred_not_served()
     CHECK(feed.refresh_deferred());
     CHECK(!feed.pending().has_value()); // NOT armed -> the pump cannot re-read behind the gesture
     CHECK(feed.rereads_armed() == 0u);
-    // The two things a served refresh would have destroyed, asserted directly rather than implied.
+    // The panel state `apply_event` must leave untouched when it withholds. Read these as regression
+    // fencing, NOT as the proof that the CAS base survives: nothing here pumps or calls
+    // `apply_result`, and `apply_event` never touches the model on any code path, so they would hold
+    // even with the guard removed. The re-base is only OBSERVABLE where a fetch actually lands, which
+    // is `test_e09b_concurrent_cas.cpp` § 5b (`base_raw_hash() == observer_base` after the pump).
     CHECK(feed.panel().has_staged_edit());
-    CHECK(feed.panel().base_raw_hash() == 100u); // the collision guard was NOT re-based
+    CHECK(feed.panel().base_raw_hash() == 100u);
     CHECK(feed.results_applied() == 0u);
 
     // Repeated settles collapse into the ONE owed re-read (a busy co-writer must not queue N fetches).
@@ -809,10 +875,7 @@ void a_settle_during_a_gesture_is_deferred_not_served()
     // exactly what makes "re-make your edit against what is there now" actionable.
     gateway.refuse_with_cas_mismatch = true;
     gateway.moved_value = jstring("Someone Else");
-    Json gesture = Json::object();
-    gesture.set("nodeId", Json(std::string("inspector.widget./name")));
-    CHECK(host.gesture(kPanelId, shell::GestureVerb::commit, gesture, dispatched, error));
-    CHECK(dispatched);
+    end_name_gesture(host, shell::GestureVerb::commit);
     CHECK(feed.last_commit().status == inspector::CommitResult::Status::dropped);
     CHECK(feed.drops_observed() == 1u);
     // …and NOW it refreshes. ONE re-read, not two: the deferral is released, not replayed per settle.
@@ -835,19 +898,11 @@ void a_settle_deferred_across_an_error_stays_deferred()
     CHECK(host.provide(kPanelId, feed.make_provider()));
     feed.panel().set_model(one_field_model("Before"), 100);
 
-    bool dispatched = false;
-    std::string error;
-    Json params = Json::object();
-    params.set("nodeId", Json(std::string("inspector.widget./name")));
-    params.set("value", Json(std::string("\"Mine\"")));
-    CHECK(host.invoke(kPanelId, inspector::InspectorPanel::kEditCommand, params, dispatched, error));
+    stage_name_edit(host);
     CHECK(!feed.apply_event(panels::kDerivationTopic, settled_payload(21)));
     CHECK(feed.refresh_deferred());
 
-    Json gesture = Json::object();
-    gesture.set("nodeId", Json(std::string("inspector.widget./name")));
-    CHECK(host.gesture(kPanelId, shell::GestureVerb::commit, gesture, dispatched, error));
-    CHECK(dispatched);
+    end_name_gesture(host, shell::GestureVerb::commit);
     CHECK(feed.last_commit().status == inspector::CommitResult::Status::error);
     CHECK(feed.panel().has_staged_edit()); // the edit survived the refusal — the premise of this case
     // STILL deferred, and still nothing armed: the gesture is in flight, so the guard still binds.
@@ -859,8 +914,7 @@ void a_settle_deferred_across_an_error_stays_deferred()
     // CANCEL is the other way a gesture ends, and `discard_edit` fires NO commit listener — so this
     // is the only path that can release the deferral. Without it the panel would render pre-write
     // state until the next selection change.
-    CHECK(host.gesture(kPanelId, shell::GestureVerb::cancel, gesture, dispatched, error));
-    CHECK(dispatched);
+    end_name_gesture(host, shell::GestureVerb::cancel);
     CHECK(!feed.panel().has_staged_edit());
     CHECK(!feed.refresh_deferred());
     CHECK(feed.rereads_armed() == 1u);
@@ -879,19 +933,11 @@ void a_settle_deferred_across_an_applied_commit_is_subsumed()
     CHECK(host.provide(kPanelId, feed.make_provider()));
     feed.panel().set_model(one_field_model("Before"), 100);
 
-    bool dispatched = false;
-    std::string error;
-    Json params = Json::object();
-    params.set("nodeId", Json(std::string("inspector.widget./name")));
-    params.set("value", Json(std::string("\"Mine\"")));
-    CHECK(host.invoke(kPanelId, inspector::InspectorPanel::kEditCommand, params, dispatched, error));
+    stage_name_edit(host);
     CHECK(!feed.apply_event(panels::kDerivationTopic, settled_payload(31)));
     CHECK(feed.refresh_deferred());
 
-    Json gesture = Json::object();
-    gesture.set("nodeId", Json(std::string("inspector.widget./name")));
-    CHECK(host.gesture(kPanelId, shell::GestureVerb::commit, gesture, dispatched, error));
-    CHECK(dispatched);
+    end_name_gesture(host, shell::GestureVerb::commit);
     CHECK(feed.last_commit().status == inspector::CommitResult::Status::applied);
     CHECK(!feed.refresh_deferred());
     CHECK(feed.rereads_armed() == 1u); // ONE, not two
@@ -910,13 +956,7 @@ void a_deferral_does_not_outlive_its_selection_or_its_read()
         feed.bind_gateway(&gateway);
         CHECK(host.provide(kPanelId, feed.make_provider()));
         feed.panel().set_model(one_field_model("Before"), 100);
-        bool dispatched = false;
-        std::string error;
-        Json params = Json::object();
-        params.set("nodeId", Json(std::string("inspector.widget./name")));
-        params.set("value", Json(std::string("\"Mine\"")));
-        CHECK(host.invoke(kPanelId, inspector::InspectorPanel::kEditCommand, params, dispatched,
-                          error));
+        stage_name_edit(host);
         CHECK(!feed.apply_event(panels::kDerivationTopic, settled_payload(41)));
         CHECK(feed.refresh_deferred());
 
@@ -931,18 +971,19 @@ void a_deferral_does_not_outlive_its_selection_or_its_read()
         feed.bind_gateway(&gateway);
         CHECK(host.provide(kPanelId, feed.make_provider()));
         feed.panel().set_model(one_field_model("Before"), 100);
-        bool dispatched = false;
-        std::string error;
-        Json params = Json::object();
-        params.set("nodeId", Json(std::string("inspector.widget./name")));
-        params.set("value", Json(std::string("\"Mine\"")));
-        CHECK(host.invoke(kPanelId, inspector::InspectorPanel::kEditCommand, params, dispatched,
-                          error));
+        stage_name_edit(host);
         CHECK(!feed.apply_event(panels::kDerivationTopic, settled_payload(42)));
         CHECK(feed.refresh_deferred());
 
         // A fetch armed by something ELSE (a selection change) lands: the panel now holds fresh
         // state, which IS what the deferral was owed.
+        //
+        // ⚠ Note what this case does NOT bless. `set_model` also discards the staged gesture and
+        // re-bases the CAS token here (100 -> 777) — the very damage `apply_event`'s guard exists to
+        // prevent. It is asserted as correct because e09e-2's deferral guards the SETTLE path only:
+        // a fetch armed by a selection change (or by an undo/redo replay) still lands mid-gesture,
+        // which is PRE-EXISTING `apply_result` behaviour and out of this task's scope. So the
+        // invariant is "a settle never re-bases a staged gesture", not "nothing ever does".
         Json data = Json::object();
         data.set("inspector", builders::inspector_to_wire(one_field_model("Fresh")));
         data.set("rawHash", Json(std::string("777")));

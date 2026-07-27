@@ -38,6 +38,7 @@
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/panels/inspector_feed.h"
+#include "context/editor/shell/panels/problems_feed.h" // kDerivationSettledEvent (the settle's spelling)
 #include "context/editor/shell/panels/wire_override_gateway.h"
 #include "context/editor/shell/shell.h" // kShellScope — attach with the REAL Shell's scope request
 
@@ -253,8 +254,12 @@ void commit_gesture(shell::PanelHost& host)
 // Make the daemon SETTLE, so it publishes the R-BRIDGE-008 `derivation.settled` quiescence fact the
 // e09e-2 fan-out rides. A bare `edit` deliberately does NOT settle — it runs only the
 // read-your-writes barrier (`query_after_hash`), which publishes nothing — so the fact comes from a
-// `reconcile`, exactly as `test_client_e2e` drives it and exactly what the daemon's own R-FILE-002
-// crawl does on its cadence when a file moves underneath it.
+// `reconcile`, exactly as `test_client_e2e` drives it and exactly what `context attach --reconcile`
+// does in the field. Measured, so no reader over-reads this: `reconcile` and `edit-batch` (plus the
+// two await barriers) are the ONLY callers of `EditorKernel::settle`, and no daemon timer drives the
+// R-FILE-002 crawl — `ingest_external` is reached only from `reconcile` (CrawlMode::force, which
+// bypasses the cadence) and the in-process CLI driver. So this call is not a stand-in for a
+// background crawl that would fire on its own; it IS the trigger a client has today.
 [[nodiscard]] bool force_settle(client::Client& c)
 {
     std::string error;
@@ -272,8 +277,13 @@ void commit_gesture(shell::PanelHost& host)
 [[nodiscard]] bool pump_until_settle(client::SubscriptionConsumer& consumer,
                                      const std::size_t& settles_seen, std::size_t before)
 {
+    // 10s base, so BOTH calls together stay inside the ctest TIMEOUT even on the sanitize/tsan legs
+    // (kSanitizerTimeoutScale is 4, so 40s each, on top of this drill's 80s boot wait and its
+    // attaches). A budget that can overrun the cap would surface a regression as a bare ctest
+    // timeout — exactly the illegible failure the bound above exists to avoid. The happy path is
+    // sub-second: the settle is already published before the first pump (`force_settle` returned).
     const auto deadline = std::chrono::steady_clock::now() +
-                          std::chrono::milliseconds(itest::scaled_timeout_ms(20000));
+                          std::chrono::milliseconds(itest::scaled_timeout_ms(10000));
     std::string error;
     while (settles_seen == before && std::chrono::steady_clock::now() < deadline)
     {
@@ -460,11 +470,21 @@ void a_gesture_commits_over_the_wire_and_survives_a_concurrent_writer()
     //
     // ⚠⚠ THE ASSERTIONS THAT MATTER ARE THE NEGATIVE ONES. Refreshing on every settle is the easy
     // implementation and the WRONG one: `set_model` discards the staged gesture AND adopts the fresh
-    // file as its CAS base, so the observer's commit would then guard against the racer's OWN
-    // post-write state, find no mismatch, and overwrite it. Nothing errors, nothing crashes — a
-    // defeated compare-and-swap looks exactly like a successful edit. So the drill stages a gesture,
-    // lets the racer move the SAME field, delivers the REAL settle, PUMPS (as the owner loop does in
-    // that same frame), and then requires the commit to STILL DROP.
+    // file as its CAS base. Nothing errors, nothing crashes — a defeated compare-and-swap looks
+    // exactly like a successful edit. So the drill stages a gesture, lets the racer move the SAME
+    // field, delivers the REAL settle, PUMPS (as the owner loop does in that same frame), and then
+    // requires the commit to STILL DROP.
+    //
+    // The damage takes TWO steps, and 5b covers both, because the first alone is not the data loss:
+    // a served refresh clears `staged_`, so an IMMEDIATE commit would answer `none` and write nothing
+    // (loud enough to catch). The silent overwrite needs the human to keep typing — the next
+    // `inspector.edit` re-stages, and `stage_edit` takes its base_value from the model the refresh
+    // just replaced while `base_raw_hash_` is the racer's post-write token, so the commit CASes
+    // against the very state it is racing, finds no mismatch, APPLIES, and clobbers the racer with no
+    // drop and no notice. 5b therefore re-stages before committing, which is what makes the on-disk
+    // assertions below detectors rather than decoration: with the guard they are unchanged (the model
+    // never moved, so the same base is recorded and the commit still drops), and without it `9.75`
+    // lands on disk.
     std::string observer_error;
     const std::unique_ptr<client::Client> observer = attach_client(project, observer_error);
     CHECK(observer != nullptr);
@@ -504,12 +524,22 @@ void a_gesture_commits_over_the_wire_and_survives_a_concurrent_writer()
     settles.on_event(
         [&observed, &settles_seen](const std::string&, const client::ClientEvent& event)
         {
-            if (event.topic == panels::kDerivationTopic)
+            // Count the SETTLE specifically, not merely the topic: every assertion downstream reads
+            // `events_applied()`, which counts only `derivation.settled`. The two coincide today (the
+            // topic carries exactly one event kind), so this is forward-proofing rather than a live
+            // fix — but the T1 sibling already uses `derivation.started` as its negative case, and the
+            // day such an event ships, a topic-only predicate would let `pump_until_settle` return
+            // before the settle arrived and red the assertions below spuriously.
+            if (event.topic == panels::kDerivationTopic &&
+                event.payload.at("event").as_string() == panels::kDerivationSettledEvent)
             {
                 ++settles_seen;
             }
-            // The SAME dispatch the live Shell makes (editor_main.cpp's `on_event`) — topic filtering
-            // is the feed's own job, so nothing is pre-sorted for it here.
+            // The inspector leg of the dispatch the live Shell makes (editor_main.cpp's `on_event`),
+            // argument for argument: nothing is pre-sorted, because topic filtering is the feed's own
+            // job. The live lambda also drives the problems / scenetree / session seams; only the
+            // inspector one is wired here, so this drill proves the derivation -> Inspector path and
+            // deliberately says nothing about cross-feed interactions on the same event.
             (void)panels::apply_inspector_event(*observed.inspector, event.topic, event.payload);
         });
     settles.add(client::SubscriptionSpec{{std::string(panels::kDerivationTopic)}, ""});
@@ -580,11 +610,21 @@ void a_gesture_commits_over_the_wire_and_survives_a_concurrent_writer()
 
     // THE PAYOFF: the L-30 guarantee is intact at the second bag too. The gesture's base is still the
     // pre-race token and its collision base is still 5.5, so the commit CAS-fails, re-reads, sees the
-    // field MOVED, and DROPS — the racer's 6.5 survives and 9.75 is never written. Had the settle been
-    // served, `commit()` would have found nothing staged and answered `none`.
+    // field MOVED, and DROPS — the racer's 6.5 survives and 9.75 is never written.
+    //
+    // The human keeps typing before ending the gesture — the ordinary shape, and the step that makes
+    // the on-disk assertions below discriminating (see the section preamble). Under the correct code
+    // the model is untouched, so this re-records the SAME base and changes nothing; with the guard
+    // removed it re-bases onto the racer's post-write state and the commit applies instead of
+    // dropping.
+    stage_only(observer_host, kFovPointer, "9.75");
+    CHECK(observed.inspector->panel().has_staged_edit());
     commit_gesture(observer_host);
     const inspector::CommitResult observer_dropped = observed.inspector->panel().last_result();
     CHECK(observer_dropped.status == inspector::CommitResult::Status::dropped);
+    // Deliberately NOT redundant with the line above, because CHECK is non-fatal: `none` is the
+    // specific status a served settle produces (nothing staged left to commit), so naming it makes a
+    // failure say WHICH way it broke instead of just "not dropped". Do not simplify this away.
     CHECK(observer_dropped.status != inspector::CommitResult::Status::none);
     CHECK(observer_dropped.code == "cas.mismatch");
     CHECK(mentions(observer_dropped.message, kFovPointer));
