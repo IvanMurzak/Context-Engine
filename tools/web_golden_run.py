@@ -127,10 +127,17 @@ class GoldenCollector:
                         collector.harness_exit = int(query.get("exit", ["1"])[0])
                     except ValueError:
                         collector.harness_exit = 1
-                    # Respond FIRST, release the wait SECOND — and that order is load-bearing:
+                    # Respond FIRST, release the wait SECOND — a deliberate order, not an accident:
                     # main() reaps the whole browser process group the moment `done` fires, so
                     # setting the event before the response is flushed would let teardown kill the
                     # peer mid-write and raise BrokenPipeError out of this handler thread.
+                    #
+                    # ⚠ Honest scope: no test PINS that failure mode (reproducing it needs the real
+                    # browser + the reap race, so swapping these two lines keeps the suite green).
+                    # Treat the ordering as REASONED, not as regression-protected — and see
+                    # tools/webui_test_run.py, the near-identical sibling driver, which currently does
+                    # the OPPOSITE and documents the opposite rationale. Reconciling the two is
+                    # tracked follow-up work, not something to "fix" by copying either comment.
                     #
                     # The consequence for every caller: a 200 on /done does NOT imply `done` is set
                     # yet. WAIT on the event (`done.wait(timeout)`, as main() does), never sample it

@@ -100,7 +100,8 @@ def test_collector_receives_frames_and_done(tmp_path):
         # synchronisation point and still FAILS if the handler never sets the event.
         assert not collector.done.is_set()
         assert post(f"{base}/done?exit=0", b"") == 200
-        assert collector.done.wait(timeout=10)
+        assert collector.done.wait(timeout=10), \
+            "the /done handler never set `done` — see the ordering note in tools/web_golden_run.py"
         assert collector.harness_exit == 0
 
 

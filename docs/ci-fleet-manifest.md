@@ -192,7 +192,11 @@ rollup, while `python-tests` gates nothing):
 
 ```bash
 python3 tools/check_fleet_manifest.py --repo-root .
+python3 tools/check_ci_gating.py --repo-root .      # the ci-gating-topology row (issue #459)
 ```
+
+Both R-QA-012 rows in the table above live in that one job: `fleet-manifest-validation` is the first
+command, `ci-gating-topology` the second (which jobs may front the rollup via `needs:`).
 
 That is the whole invocation: the gate resolves the manifest and BOTH workflow files from
 `--repo-root` itself (per-PR gates live in `ci.yml`, the nightly benchmark gates in

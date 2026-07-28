@@ -21,18 +21,32 @@
 # the clang-cl follow-up lands.
 #
 # Fail-fast gating (reshaped 2026-07-27, issue #459): the ~10-second gates that front the heavyweight
-# build/spike/bench jobs via `needs:` are `license-gate` and `ci-config-gate` — a red gate stops ~12
+# build/spike/bench jobs via `needs:` are `license-gate` and `ci-config-gate` — a red gate stops ~39
 # heavy legs before they start, at the cost of a short serialization on green runs.
 #
 # `python-tests` is deliberately NOT one of them, and that is the point of the split. A `needs:` edge
-# does not merely red the rollup: it SKIPS every dependent job, so the only recovery is a full ~41-job
+# does not merely red the rollup: it SKIPS every dependent job, so the only recovery is a full ~39-job
 # rerun. The pytest suite binds ephemeral ports, spawns real subprocesses, waits on threading Events
 # and reaps process groups — genuine timing flake surface — and ONE racy assertion in it
 # (test_collector_receives_frames_and_done) skipped the entire rollup repeatedly this milestone, each
 # time looking cheap because a rerun cleared it. It stays a BLOCKING required check, so a red still
-# reds the run; it just gates nothing, and a flake now costs a 1-job rerun instead of 41.
+# reds the run; it just gates nothing, and a flake now costs a 1-job rerun instead of 39.
+#
+# Counts, recounted against this file's own `jobs:` list (2026-07-27): 24 job definitions — 3 that
+# gate nothing behind them (`license-gate`, `ci-config-gate`, `python-tests`) + 21 fronted heavyweight
+# definitions, which expand through the OS matrices to 39 of the rollup's 42 checks. Keep these two
+# figures in step with CLAUDE.md § CI structure and tools/check_ci_gating.py's docstring when a job
+# or a matrix leg is added.
 #
 # Only DETERMINISTIC checks — no network, no subprocess, no timing, no ports — may sit in a gate job.
+#
+# ⚠ Scoped honestly: that property holds of the CHECKS these gate jobs RUN (check_licenses.py,
+# check_fleet_manifest.py, check_ci_gating.py are all stdlib-only reads of committed files). It is NOT
+# true of `license-gate` the JOB end to end — it finishes with an `upload-artifact` SBOM step, which is
+# a network call, so a transient upload failure can still red a gate and skip the rollup. That is the
+# one residual way a gate can skip ~39 legs without a real defect; it predates #459 and is left as-is
+# deliberately (the SBOM is wanted on every run). Do not read the determinism claim as broader than
+# "the checks", and do not add a NEW network/timing step to either gate job.
 # tools/check_ci_gating.py enforces the resulting topology in BOTH directions: it reds if a
 # timing-dependent job re-enters a `needs:` list, AND it reds if the retained fail-fast is quietly
 # deleted from a job (deleting gating is the opposite failure, and the gating is here for a reason).
@@ -94,7 +108,7 @@ jobs:
 
   # The SECOND fail-fast gate (issue #459). Everything here is a DETERMINISTIC read of committed
   # files — stdlib-only parsing, no network, no subprocess, no ports, no timing — which is the
-  # property that makes it safe to put ~41 jobs behind it via `needs:`. Do not add a check with
+  # property that makes it safe to put ~39 jobs behind it via `needs:`. Do not add a check with
   # timing or network dependence to this job; put it in `python-tests` (which gates nothing) instead.
   ci-config-gate:
     name: CI config gate (fleet manifest + gating topology)
@@ -121,7 +135,7 @@ jobs:
   #
   # ⚠ This job gates NOTHING on purpose — no other job may list it in `needs:` (enforced by
   # tools/check_ci_gating.py, rationale in the header comment). It is a blocking required check, so a
-  # red here still reds the run; it simply cannot SKIP the other ~41 jobs any more. It also declares
+  # red here still reds the run; it simply cannot SKIP the other ~39 jobs any more. It also declares
   # no `needs:` itself, so it runs in parallel with the gates rather than behind them.
   python-tests:
     name: python tests (tools/ gate scripts + corpus generator)
@@ -883,8 +897,10 @@ jobs:
       # CONTEXT_WASM_REQUIRE_RUNTIME). The probe's own failure reason lives ONLY in
       # CMakeConfigureLog.yaml, which nothing captured — so the cause had to be inferred from a
       # one-line `- failed` and a rerun that passed. Keep it for the operator. Position matters: this
-      # step sits directly after the configure, so `failure()` here means the CONFIGURE failed — a
-      # later build/test failure never reaches it, and a green configure uploads nothing.
+      # step sits directly after the configure, so a later build/test failure never reaches it and a
+      # green configure uploads nothing. (`failure()` is JOB-scoped, not previous-step-scoped, so an
+      # earlier checkout/toolchain failure also triggers it — harmless, since the build dir will not
+      # exist and `if-no-files-found: warn` keeps that from becoming a second red.)
       - name: Upload CMake configure log (ABI-probe diagnosis, #460)
         if: failure()
         uses: actions/upload-artifact@v7

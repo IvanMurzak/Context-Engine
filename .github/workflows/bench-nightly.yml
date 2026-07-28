@@ -12,7 +12,8 @@
 # manifest rows flip to blocking and this workflow moves onto that runner class.
 #
 # Registered in docs/ci-fleet-manifest.json (job id `bench-100k-nightly`), which the per-PR
-# python-tests job validates against BOTH workflows (tools/check_fleet_manifest.py).
+# ci-config-gate job validates against BOTH workflows (tools/check_fleet_manifest.py — moved there
+# from python-tests by issue #459).
 
 name: bench-nightly
 

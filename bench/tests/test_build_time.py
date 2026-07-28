@@ -22,7 +22,9 @@ import pytest
 # test_measure_writes_result failed outright, and test_measure_reports_failed_phase_command PASSED
 # VACUOUSLY — it asserts "a failing phase command surfaces as rc 2" and got rc 2 from the missing
 # interpreter rather than from the `sys.exit(3)` it means to observe, so it could not have detected a
-# regression in the failure path. shlex.quote keeps a path containing spaces intact.
+# regression in the failure path. shlex.quote keeps a POSIX path containing spaces intact; these phase
+# commands run through `shell=True`, so on Windows/cmd.exe (which does not treat `'` as quoting) a
+# spaced interpreter path would need subprocess.list2cmdline instead. CI runs this on ubuntu.
 PY = shlex.quote(sys.executable)
 
 BENCH_DIR = Path(__file__).resolve().parents[1]
@@ -236,11 +238,15 @@ def test_measure_refuses_duplicate_category(tmp_path):
     assert rc == 2
 
 
-def test_measure_reports_failed_phase_command(tmp_path):
+def test_measure_reports_failed_phase_command(tmp_path, capsys):
     rc = build_time.main(["measure", "--runs", "1",
                           "--phase", f"transcode::boom::{PY} -c \"import sys; sys.exit(3)\"",
                           "--out", str(tmp_path / "m")])
     assert rc == 2
+    # ATTRIBUTED, not just `rc == 2`: EVERY refusal in measure() returns 2, so `rc == 2` alone passes
+    # for any neighbouring reason — which is exactly how this case stayed green while observing a
+    # missing interpreter (rc 127) instead of the sys.exit(3) it names. Pin the phase's OWN rc.
+    assert "rc=3" in capsys.readouterr().err
 
 
 def test_measure_reset_for_unknown_category_errors(tmp_path):
