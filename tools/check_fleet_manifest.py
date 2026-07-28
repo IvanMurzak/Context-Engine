@@ -34,7 +34,7 @@ import re
 import sys
 from pathlib import Path
 
-from _ci_common import load_json_or_exit
+from _ci_common import load_json_or_exit, strip_comments
 
 RED_X_POLICIES = {"blocking", "advisory", "quarantine-with-issue"}
 TIERS = {"per-PR", "nightly"}
@@ -116,6 +116,14 @@ def ctest_registrations(src: Path) -> tuple[set[str], set[str]]:
     NAMES a test is cross-checked only when that name is literally registered; otherwise the check
     falls back to "some test in this tree must really be disabled", which is precisely what made the
     measured claim false — x7 removed the last two DISABLED properties, leaving zero.
+
+    COMMENTS ARE STRIPPED FIRST, and that is not cosmetic: this repository documents its `DISABLED
+    TRUE` history IN CMake comments (src/editor/shell/cef/CMakeLists.txt records e12c-1's two disabled
+    macOS smokes in prose, and a comment there also spells `add_test(COMMAND ...)`). Since
+    `_SET_TESTS_PROPERTIES` scans to the next `)`, a comment sitting inside a real
+    `set_tests_properties(...)` call would otherwise put a live test into `disabled` — and a non-empty
+    `disabled` is exactly what silences claim C's tree-wide branch, turning rule 8 quiet rather than
+    wrong. Reading prose as CMake is the same class of defect rule 8 exists to catch.
     """
     names: set[str] = set()
     disabled: set[str] = set()
@@ -130,7 +138,8 @@ def ctest_registrations(src: Path) -> tuple[set[str], set[str]]:
         ]
         if "CMakeLists.txt" not in filenames:
             continue
-        text = (directory / "CMakeLists.txt").read_text(encoding="utf-8", errors="replace")
+        text = strip_comments(
+            (directory / "CMakeLists.txt").read_text(encoding="utf-8", errors="replace"))
         names.update(n for n in _ADD_TEST_NAME.findall(text) if "${" not in n)
         for match in _SET_TESTS_PROPERTIES.finditer(text):
             body = match.group(1)
@@ -219,8 +228,13 @@ def validate(
     """Return a list of human-readable violations (empty == valid).
 
     `workflows` maps a TIER to the text of the workflow file that tier's jobs must live in, which is
-    what makes rule 6 tier-aware; `workflow_text` is the legacy tier-BLIND form (a job may live in
-    any of the concatenated texts) and is what an explicit --ci-workflow list still produces.
+    what makes rule 6 tier-aware; `workflow_text` is the legacy tier-BLIND form (a job may live
+    anywhere in the one concatenated text), retained for DIRECT callers such as
+    tools/tests/test_check_fleet_manifest.py. `main()` no longer produces it at all — it always passes
+    `workflows`, and an explicit --ci-workflow file SUPPLEMENTS the tier it is attributed to rather
+    than every tier at once, so the tier↔workflow split stays asserted under the invocation shapes the
+    docs advertise. A file whose basename matches no default is the ONE remaining tier-blind case, by
+    construction: naming an unknown workflow says nothing about which tier owns its jobs.
     `registrations` is `ctest_registrations()`'s pair, required by rule 8's claim C.
     """
     errors: list[str] = []
@@ -361,7 +375,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[fleet-manifest] ERROR: --repo-root {root} is not a directory", file=sys.stderr)
         return 2
 
-    manifest_path = Path(args.manifest) if args.manifest else root / "docs/ci-fleet-manifest.json"
+    # A RELATIVE --manifest resolves against --repo-root, like every other input here; an absolute one
+    # is honoured as given. Reading it from the CWD instead would validate one repo's manifest against
+    # another repo's workflows and src/ tree, and report the mismatch as manifest drift.
+    manifest_path = root / args.manifest if args.manifest else root / "docs/ci-fleet-manifest.json"
     manifest = load_json_or_exit(manifest_path, tag="fleet-manifest")
 
     # The DEFAULT set is ALWAYS loaded, and an explicit --ci-workflow list SUPPLEMENTS it rather than
@@ -385,8 +402,18 @@ def main(argv: list[str] | None = None) -> int:
         except OSError as exc:
             print(f"[fleet-manifest] ERROR: cannot read workflow {wf}: {exc}", file=sys.stderr)
             return 2
-        for tier in workflows:
+        # ATTRIBUTE the extra to ONE tier when its basename is one of the defaults. Appending every
+        # extra to every tier instead re-opens the pool rule 6 was tightened to close — MEASURED: with
+        # `--ci-workflow .github/workflows/bench-nightly.yml`, a per-PR row pointing at the
+        # nightly-only `bench-100k-nightly` job passed, while the bare default set correctly reported
+        # it. An UNRECOGNISED file keeps the tier-blind escape hatch (it goes to every tier), because
+        # a caller naming some third workflow has told us nothing about which tier owns it.
+        owner = next((tier for tier, relative in WORKFLOW_DEFAULTS.items()
+                      if Path(relative).name == Path(wf).name), None)
+        for tier in (tuple(workflows) if owner is None else (owner,)):
             workflows[tier] = f"{workflows[tier]}\n{extra}"
+    # Never the tier-BLIND form from here: `workflows` above always carries the per-tier mapping, so
+    # rule 6 stays tier-aware even when --ci-workflow supplemented it. Only direct callers pass it.
     workflow_text = None
 
     src = root / "src"

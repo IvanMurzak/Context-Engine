@@ -814,7 +814,18 @@ function(context_shell_target_hosts_cef _target _out_var)
 
         foreach(_edge IN LISTS _edges)
             if(_edge MATCHES "\\$<")
-                continue()  # a generator expression names no target this walk can follow
+                # A KNOWN BLIND SPOT, stated rather than implied: a generator expression names no
+                # target this walk can follow, so a marker reached ONLY through one (or only through
+                # an ALIAS, whose own LINK_LIBRARIES is empty) derives as CEF-FREE. That is
+                # under-derivation — the very silence this block exists to remove — and it would be
+                # PARTIAL, so neither the empty-set guard nor the floor direction below catches it.
+                # WHY IT IS UNREACHABLE TODAY, and the condition to preserve: every one of the eleven
+                # hosts also takes a PLAIN `add_dependencies(<exe> libcef_dll_wrapper)` — unconditional
+                # in context_configure_shell_cef_smoke() for all ten smokes, and on both platform
+                # branches for context_editor — so the manual half marks them hosting regardless of how
+                # the link edge is spelled. A hand-rolled CEF host WITHOUT that plain manual edge is
+                # what would expose this; give it one, or teach this walk to read inside genexes.
+                continue()
             endif()
             if("${_edge}" IN_LIST CONTEXT_SHELL_CEF_MARKER_LIBS)
                 set(_hosts TRUE)
@@ -826,6 +837,14 @@ function(context_shell_target_hosts_cef _target _out_var)
     set(${_out_var} ${_hosts} PARENT_SCOPE)
 endfunction()
 
+# ⚠ POSITIONAL REQUIREMENT, and it is load-bearing: BUILDSYSTEM_TARGETS is populated AS targets are
+# declared, so this block only sees what already exists when it runs. It must therefore stay AFTER
+# every add_executable()/add_subdirectory() in this subtree (today: `panels` and `cef` are added
+# above, and `context_editor` is the last executable declared). A CEF-hosting executable declared
+# BELOW this point would be invisible to the derivation, and — being absent from the literal roster
+# too — the set-equality check would pass, silently re-opening the exact hole this block closes. The
+# source tier (tools/check_cef_staging.py check 5) is what still catches that case, because it scans
+# the sources rather than the graph; do not rely on it by moving this block up.
 if(CONTEXT_BUILD_GUI_CEF)
     context_shell_collect_subtree_targets("${CMAKE_CURRENT_SOURCE_DIR}" _ctx_shell_subtree_targets)
 
@@ -852,6 +871,9 @@ if(CONTEXT_BUILD_GUI_CEF)
             set(_owner_output "${_owner}")
         endif()
         get_target_property(_owner_manual ${_owner} MANUALLY_ADDED_DEPENDENCIES)
+        if(NOT _owner_manual)
+            continue()  # else `_owner_manual-NOTFOUND` is iterated as a one-item list
+        endif()
         foreach(_dependency IN LISTS _owner_manual)
             if(NOT "${_dependency}" IN_LIST _ctx_cef_hosting_candidates)
                 continue()

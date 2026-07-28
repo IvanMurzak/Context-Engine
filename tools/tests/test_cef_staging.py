@@ -988,6 +988,31 @@ def test_live_repository_declares_exactly_one_non_empty_roster() -> None:
     assert all("${" not in name for name in roster)
 
 
+def test_live_repository_still_carries_the_graph_tier_derivation() -> None:
+    """THE STANDING EXISTENCE GUARD FOR THE GRAPH TIER — the direct mirror of
+    `test_live_repository_declares_exactly_one_non_empty_roster` above, which exists so a RENAMED
+    roster cannot become how check 5 passes.
+
+    Without this, the derivation block is asserted by NOTHING: it lives only under
+    CONTEXT_BUILD_GUI_CEF, no ctest or lint names any of its symbols, so changing its guard to
+    `if(FALSE)` or deleting it outright reds nothing at all — the CEF-ON legs merely stop printing a
+    STATUS line. The 17-plant round proved it worked at one moment; that is not a standing invariant.
+    PLANT: delete any one of the anchors below (or flip the guard to `if(FALSE)`) and this must RED."""
+    text = check.strip_comments(
+        (_REPO / "src/editor/shell/CMakeLists.txt").read_text(encoding="utf-8"))
+    for anchor, why in (
+        ("function(context_shell_target_hosts_cef", "the link-closure predicate"),
+        ("function(context_shell_collect_subtree_targets", "the subtree target enumeration"),
+        ("if(CONTEXT_BUILD_GUI_CEF)", "the guard the derivation runs under"),
+        ("if(NOT _ctx_cef_derived_executables)", "the empty-derived-set anti-vacuity error"),
+        ("IN_LIST _ctx_cef_shell_executables", "the derived-but-UNLISTED direction"),
+        ("IN_LIST _ctx_cef_derived_executables", "the listed-but-NOT-derived FLOOR direction"),
+    ):
+        assert anchor in text, (
+            f"src/editor/shell/CMakeLists.txt no longer contains {anchor!r} ({why}). The graph tier "
+            f"of the CEF roster audit is gone or disabled, and NOTHING else would have reported it.")
+
+
 def test_live_repository_roster_equals_its_stage_consumers() -> None:
     """The live tie check 5 enforces, asserted directly so a regression names the roster rather than
     arriving as a generic lint finding."""

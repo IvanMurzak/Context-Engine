@@ -26,7 +26,7 @@ The load-bearing property, stated first because the module is arranged around it
 | `context_editor_shell` (`src/editor/shell/`) | The Shell proper: window seam + the Win32, X11 and Cocoa backends, DPI, input arbitration, compositor, editor-state persistence, the owner loop. Default-built, CEF-free, GPU-backend-free, fully unit-tested locally and on all three `build` legs. |
 | `context_editor` (`app/editor_main.cpp`) | The app. Default-built everywhere; links the browser binding where one can be hosted. |
 | `context_editor_cef` (`cef/`) | The windowed-OSR CEF binding — the ONE piece that cannot build locally. Behind `CONTEXT_BUILD_GUI_CEF`. |
-| `context_editor_shell_smoke_support` (`smoke/`) | **TEST-TIER ONLY**: the `--real-window` seam the live smokes share (`smoke/smoke_window.h`) — window construction, the CPU present attach, and real-mode input injection, in one place instead of nine. TWO injection arms behind one entry point: X-server `XSendEvent` on Linux (#408) and, since e12c-3 (#442), in-process `-[NSApplication postEvent:atStart:]` on macOS (`smoke/src/smoke_inject_cocoa.mm` / `.cpp`, the always-linkable pair `make_cocoa_window_backend` uses). CEF-free, so it is unit-tested on all three `build` legs. **Nothing shipping links it** — `context_editor_shell` deliberately does not, which is what keeps the shipping window contract unchanged (#408). |
+| `context_editor_shell_smoke_support` (`smoke/`) | **TEST-TIER ONLY**: the `--real-window` seam the live smokes share (`smoke/smoke_window.h`) — window construction, the CPU present attach, and real-mode input injection, in one place instead of ten. TWO injection arms behind one entry point: X-server `XSendEvent` on Linux (#408) and, since e12c-3 (#442), in-process `-[NSApplication postEvent:atStart:]` on macOS (`smoke/src/smoke_inject_cocoa.mm` / `.cpp`, the always-linkable pair `make_cocoa_window_backend` uses). CEF-free, so it is unit-tested on all three `build` legs. **Nothing shipping links it** — `context_editor_shell` deliberately does not, which is what keeps the shipping window contract unchanged (#408). |
 
 ## 1. Windows and the owner loop
 
@@ -104,15 +104,18 @@ and injects `contextEditorQuery` from `OnContextCreated` — so the Shell's help
 app object, and without it no handshake exists and every live smoke fails.
 e12c-1 proved that hosting model on **two** smokes and **e12c-2** fanned it out to all **nine**, so the
 macOS leg now builds and runs the whole `editor-cef-smoke-shell*` family out of real `.app` bundles —
-ten bundles counting `context_editor`, each with its five helpers and its own embedded framework
+**eleven** bundles counting `context_editor`, each with its five helpers and its own embedded framework
 (309 MB apiece ⇒ **3.1 GB** for `editor/shell/Release`, inside a whole CEF-ON `src/build/dev` of
-**8.0 GB**, both MEASURED on an arm64 macOS host — the headroom figure to re-check before that list
-grows again, against the ~14 GB free that GitHub's `macos-latest` runner-image spec publishes — an
-upstream figure this repo does not own, so re-check it there rather than trusting this line).
+**8.0 GB**, both MEASURED on an arm64 macOS host at **ten** bundles — against the ~14 GB free that
+GitHub's `macos-latest` runner-image spec publishes, an upstream figure this repo does not own, so
+re-check it there rather than trusting this line). ⚠ **That list HAS grown since the measurement** —
+e09e-3's `-inspector-fanout` is the eleventh bundle, so the same 309 MB apiece puts
+`editor/shell/Release` near **3.4 GB** today. The figure is a re-measurement waiting to happen, and it
+is the one this document asks to be re-checked before the list grows again.
 What e12c-1 deliberately did NOT bring is a WINDOW: macOS's CEF smokes are HEADLESS, exactly as
 Windows' are, and they still are. The live windowed macOS proof landed with **e12c-3** (#442) as a
 CEF-FREE smoke instead — deliberately, so the windowed claim does not depend on the CEF keychain
-class (#437) and rides the plain build legs; taking the nine CEF smokes through real NSWindows is
+class (#437) and rides the plain build legs; taking the ten CEF smokes through real NSWindows is
 tracked separately (§ 11). e12c-1 also did not RUN its two smokes on the
 macOS leg — both ctests were registered `DISABLED` because `CefShutdown()` never returned there. That is
 FIXED: the cause was neither the pump configuration nor macOS 26, but a machine-global keychain item
@@ -126,7 +129,7 @@ prompt. Four Cocoa
 shapes have no Win32 or
 X11 analogue and are therefore decoded by PURE functions in `window.cpp`, executed by
 `editor-shell-test_window` on all three legs — which matters more here than anywhere else in this
-document, because until M9 e12c-3 no CI job ran a windowed macOS test at all, and the nine live CEF
+document, because until M9 e12c-3 no CI job ran a windowed macOS test at all, and the ten live CEF
 smokes still do not (#443): `editor-shell-cocoa-window` is the ONE windowed macOS leg, so the
 pure-function split is still what gives these four shapes coverage on ubuntu and windows too:
 
@@ -564,7 +567,7 @@ tiers now close it, because neither is sufficient alone:
   tier exists; and the claim that this repo declares exactly one non-empty roster is asserted in
   `tools/tests/test_cef_staging.py`, so a RENAMED roster cannot become how check 5 passes.
 The two macOS registrations e12c-1 landed were `DISABLED TRUE` until issue **#437** was fixed at its
-cause; all nine now RUN there. ⚠ A `DISABLED` ctest reports `Not Run (Disabled)` and leaves ctest's
+cause; all ten now RUN there. ⚠ A `DISABLED` ctest reports `Not Run (Disabled)` and leaves ctest's
 exit code at
 **0**, so for as long as the property was there the CE #319 `cef_shutdown_returned` assertion could not
 fail on this leg — which is what makes `DISABLED` the strongest possible form of a vacuous gate, and why
@@ -858,16 +861,17 @@ Named so the gaps are visible rather than assumed:
   `translate_x11_event` decoder, the X11-SHM present blitter, and the live `editor-shell-x11-window`
   smoke that opens a REAL window and asserts a server-driven repaint and resize.
 - ~~**The live CEF scenario smokes never run through a real window.**~~ Landed by **e12a-x11-legs**
-  (#408). All **nine** `editor-cef-smoke-shell*` smokes now take their window through the shared
+  (#408). All **ten** `editor-cef-smoke-shell*` smokes now take their window through the shared
   smoke-tier seam `src/editor/shell/smoke/smoke_window.h`, and the ctest registration passes
   `--real-window` on **Linux**, where they open a REAL X11 window and present through the REAL X11
   blitter `EditorWindow::attach_cpu_present()` selects; the **two** of them that drive input take it
-  FROM THE X SERVER (for the other seven the server is the source of `Expose`/`ConfigureNotify`
+  FROM THE X SERVER (for the other eight the server is the source of `Expose`/`ConfigureNotify`
   only). The Windows leg keeps the offscreen backend, which is what the Session-0 runner requires. Two earlier
   claims here were WRONG and are corrected rather than deleted, because both were load-bearing for
-  the "this is not a constructor swap" reading: the count is **nine**, not eight (`-uimirror` and
-  `-iframe` landed after this note was written), and only **two** of them ever `post()`ed at all —
-  the other seven built a `HeadlessWindowBackend` and drove their scenarios entirely through the CEF
+  the "this is not a constructor swap" reading: the count is **ten**, not eight (`-uimirror`,
+  `-iframe` and `-inspector-fanout` landed after this note was written), and only **two** of them ever
+  `post()`ed at all —
+  the other eight built a `HeadlessWindowBackend` and drove their scenarios entirely through the CEF
   bridge, so for those it genuinely WAS a construction swap. What was not a swap is INPUT: real mode
   sends pointer and key events to the smoke's own window through the X server (XSendEvent with an
   empty event mask, which the protocol delivers back to the creating client), so they re-enter
@@ -899,11 +903,11 @@ Named so the gaps are visible rather than assumed:
   `CAMetalLayer`-backed NSView), the pure `translate_ns_event` / `translate_ns_window_geometry`
   decoders, and the `CALayer.contents` CPU present blitter.
 - ~~**No macOS CEF hosting.**~~ Landed by **e12c-1** (issue #436) and completed by **e12c-2**:
-  `context_editor` and ALL NINE live smokes are real `.app` bundles on macOS, each with its five
+  `context_editor` and ALL TEN live smokes are real `.app` bundles on macOS, each with its five
   per-process-type helper bundles and its embedded framework, driven by
-  `shell::cef::execute_helper_process()` (see § 3). `editor-cef-smoke (macos-latest)` BUILDS all ten
-  bundles — the nine smokes off ONE shared `--target` list, plus `context_editor` on its own step — and
-  RUNS the nine, so the assembly, the load-bearing helper names, the framework embed and the
+  `shell::cef::execute_helper_process()` (see § 3). `editor-cef-smoke (macos-latest)` BUILDS all eleven
+  bundles — the ten smokes off ONE shared `--target` list, plus `context_editor` on its own step — and
+  RUNS the ten, so the assembly, the load-bearing helper names, the framework embed and the
   no-`libcef_lib` link line have CI coverage on every scenario rather than on the two e12c-1 ported.
   (`context_editor` itself stays build-only on every leg: no ctest names it, and the family's
   `ctest -R "^editor-cef-smoke-"` step cannot match it — see § 9.)
@@ -958,15 +962,15 @@ Named so the gaps are visible rather than assumed:
   stream (the desktop is entitled to deliver moves of its own), the four injected samples carry a
   modifier MARKER (Shift+Control+Option) and are selected by it, with unmarked samples counted and
   reported rather than silently dropped.
-  **Still deliberately open:** the nine `editor-cef-smoke-shell*` smokes run HEADLESS on macOS — see
+  **Still deliberately open:** the ten `editor-cef-smoke-shell*` smokes run HEADLESS on macOS — see
   the next bullet, which carries the mechanism and the tracking issue.
-- **The nine live CEF smokes are still HEADLESS on macOS.** e12c-3 closed the DoD line above with a
+- **The ten live CEF smokes are still HEADLESS on macOS.** e12c-3 closed the DoD line above with a
   CEF-free smoke, which is what makes the windowed proof independent of the CEF keychain class
   (#437); the CEF legs themselves keep the offscreen backend on macOS exactly as Windows does. The
   work is the direct macOS twin of what e12a-x11-legs did for Linux: pass `--real-window` from
   `context_configure_shell_cef_smoke`'s `add_test` on macOS, set `WindowSpec::headless = false` on
   the four multi-window smokes' SECOND window, and forward the flag from the restore smoke to its two
-  phase children. It is a distinct mechanism class (nine live CEF legs, each a real browser plus a
+  phase children. It is a distinct mechanism class (ten live CEF legs, each a real browser plus a
   real NSWindow) and is scheduled separately as **#443**.
 - **macOS `WindowPlacement` is in Cocoa POINTS with a bottom-left screen origin**, where the Win32
   and X11 backends record physical pixels with a top-left one. Deliberate: the document is

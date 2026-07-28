@@ -240,6 +240,28 @@ def test_main_given_only_ci_yml_no_longer_reports_the_seven(capsys):
     assert "bench-100k-nightly" not in capsys.readouterr().err
 
 
+def test_explicit_ci_workflow_cannot_collapse_the_tier_split(tmp_path, capsys):
+    """A NAMED --ci-workflow must not re-open the pool rule 6 was tightened to close. MEASURED before
+    the fix: every extra was appended to EVERY tier, so passing bench-nightly.yml let a per-PR row
+    point at the nightly-only bench-100k-nightly job and pass — while the bare default set reported it.
+    PLANT: append each extra to every tier again and this must RED."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "docs").mkdir()
+    m = base_manifest()
+    m["gates"][0]["ci_job_id"] = "bench-100k-nightly"  # a per-PR row naming a NIGHTLY-only job
+    (tmp_path / "docs" / "ci-fleet-manifest.json").write_text(json.dumps(m), encoding="utf-8")
+    per_pr = tmp_path / check_fleet_manifest.WORKFLOW_DEFAULTS["per-PR"]
+    nightly = tmp_path / check_fleet_manifest.WORKFLOW_DEFAULTS["nightly"]
+    for path in (per_pr, nightly):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    per_pr.write_text(WORKFLOW, encoding="utf-8")
+    nightly.write_text("jobs:\n  bench-100k-nightly:\n", encoding="utf-8")
+
+    rc = check_fleet_manifest.main(["--repo-root", str(tmp_path), "--ci-workflow", str(nightly)])
+    assert rc == 1
+    assert "has no matching job in the per-PR workflow" in capsys.readouterr().err
+
+
 def test_main_default_workflow_set_missing_file_is_config_error(tmp_path):
     """A default that resolved nothing would look exactly like a manifest whose every job exists, so
     a missing DEFAULT workflow is exit 2 — never a silent skip."""
@@ -383,10 +405,20 @@ def test_historical_narrative_about_a_removed_disabled_property_stays_green():
 
 def test_rule_8_skips_claim_c_when_registrations_were_not_supplied():
     """Claim C needs the sources; the legacy two-argument validate() call has none. A and B still run
-    — which is why main() always supplies registrations rather than letting C be skipped in CI."""
+    — which is why main() always supplies registrations rather than letting C be skipped in CI.
+
+    ⚠ The `errors == []` half of this ALONE was VACUOUS: it stayed green under 'delete claim C' and
+    even under 'delete status_claim_errors and its call site entirely'. The second half is what makes
+    it discriminate — the SAME description also parks on an issue the row does not name, so rule 8
+    must still report exactly that one violation with claim C skipped."""
     errors = check_fleet_manifest.validate(
         _with_description("Its registration ships DISABLED on macOS."), WORKFLOW)
-    assert errors == []
+    assert errors == [], "claim C must be SKIPPED, not crash, when registrations are absent"
+
+    errors = check_fleet_manifest.validate(
+        _with_description("Its registration ships DISABLED on macOS, pending #437."), WORKFLOW)
+    assert len(errors) == 1 and "does not name #437" in errors[0], (
+        f"claims A and B must still run without registrations, got {errors}")
 
 
 def test_live_manifest_has_no_status_claim_drift():
@@ -407,3 +439,26 @@ def test_ctest_registrations_reads_the_live_tree():
     assert "editor-shell-cef-staging" in registered
     assert len(registered) > 100
     assert disabled == set(), "no ctest carries a DISABLED property today (x7 removed the last two)"
+
+
+def test_ctest_registrations_ignores_cmake_comments(tmp_path):
+    """A COMMENT IS PROSE, NOT CMAKE — and this repo documents its `DISABLED TRUE` history inside CMake
+    comments (src/editor/shell/cef/CMakeLists.txt), so reading them as source is a live risk, not a
+    hypothetical one. `_SET_TESTS_PROPERTIES` scans to the next `)`, so a comment sitting INSIDE a real
+    `set_tests_properties(...)` call would put a live test into `disabled` — and a non-empty `disabled`
+    is precisely what silences claim C's tree-wide branch, making rule 8 go QUIET rather than wrong.
+
+    PLANT: drop the `strip_comments(...)` call in `ctest_registrations()` and this must RED (it reds on
+    both assertions — the commented registration is collected AND the live test is marked disabled)."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "CMakeLists.txt").write_text(
+        "add_test(NAME real-test COMMAND real_exe)\n"
+        "# add_test(NAME commented-test COMMAND x)\n"
+        "set_tests_properties(real-test PROPERTIES\n"
+        "    # e12c-1 shipped its two macOS smokes DISABLED TRUE; x7 removed both\n"
+        "    TIMEOUT 30)\n",
+        encoding="utf-8")
+    registered, disabled = check_fleet_manifest.ctest_registrations(src)
+    assert registered == {"real-test"}, "a commented-out add_test() is not a registration"
+    assert disabled == set(), "a commented-out DISABLED TRUE does not disable a live test"

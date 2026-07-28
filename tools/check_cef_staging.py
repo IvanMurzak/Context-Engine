@@ -176,26 +176,10 @@ _IF_LINE = re.compile(r"^[ \t]*(if|elseif|else|endif)\s*\((.*)\)[ \t]*$", re.IGN
 _CONDITION_TOKEN = re.compile(r'\(|\)|"[^"]*"|[^\s()]+')
 
 
-def strip_comments(text: str) -> str:
-    """Remove CMake `#` comments, honouring double-quoted strings (which may contain `#`)."""
-    out: list[str] = []
-    for line in text.splitlines():
-        in_quotes = False
-        cut = len(line)
-        i = 0
-        while i < len(line):
-            ch = line[i]
-            if ch == "\\":
-                i += 2
-                continue
-            if ch == '"':
-                in_quotes = not in_quotes
-            elif ch == "#" and not in_quotes:
-                cut = i
-                break
-            i += 1
-        out.append(line[:cut])
-    return "\n".join(out)
+# `strip_comments` now lives in _ci_common so this lint and check_fleet_manifest.py's rule-8 ctest
+# scan cannot disagree about what is CMake and what is prose. Re-exported, so `strip_comments(...)`
+# here — and `check.strip_comments` in tools/tests/test_cef_staging.py — keep resolving unchanged.
+from _ci_common import strip_comments  # noqa: E402  (grouped with this file's own helpers)
 
 
 # --- name resolution ------------------------------------------------------------------------------
@@ -709,7 +693,18 @@ def roster_findings(
     stages: dict[Path, tuple[str, Path, frozenset[str]]],
     deps: dict[str, dict[str, frozenset[str]]],
 ) -> list[str]:
-    """Check 5 -- see the module docstring. The roster and the stage-edge consumers must be EQUAL."""
+    """Check 5 -- see the module docstring. The roster and the stage-edge consumers must be EQUAL.
+
+    ⚠ PLATFORM-BLIND, unlike checks 1/2/4: `consumers` below is read from `deps` with no platform
+    intersection, so this equality is really a claim about the Windows/Linux stage consumers. That is
+    exact today -- all ten smokes are declared unconditionally and macOS has no stage target at all --
+    but it is a TRAP for the one-platform-only executable the parent CMakeLists explicitly anticipates
+    ("if a future executable is ever deliberately one-platform-only, this list is what has to split
+    again"). A macOS-ONLY CEF host takes no stage edge by design, so check 5 would demand it be OUT of
+    the roster while the graph tier FATAL_ERRORs for it being derived-but-unlisted: two tiers making
+    mutually unsatisfiable demands. Whoever splits the roster must give check 5 the platform sets it
+    already computes (`stages[...][2]`, and the per-edge platforms in `deps[consumer][stage_target]`).
+    """
     if not rosters:
         # NO ROSTER, NO CHECK -- and the anti-vacuity guard for that lives one tier out, deliberately.
         # This lint is generic over trees and its own pytest builds a dozen synthetic ones with no

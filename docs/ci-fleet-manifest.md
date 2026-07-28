@@ -200,20 +200,27 @@ FALSE violations (the seven nightly-tier rows), and a gate that cries wolf gets 
 own silent-failure mode. It fails the build (exit 1) when the manifest drifts out of
 self-consistency, and exit 2 on a config error. It enforces:
 
-1. Every gate references a **declared runner class**.
-2. Every `red_x_policy` is one of the three taxonomy values; every `tier` is `per-PR` or `nightly`.
-3. **Advisory-until-provisioned**: a gate whose runner class has `provisioned: false` MUST be
+⚠ These numbers are the ones the gate's own failure messages cite (`… (rule 8, status-claim drift)`),
+so they must stay aligned with the `Checks:` list in `tools/check_fleet_manifest.py`'s module
+docstring — including the structural rule 1, which this list used to omit, leaving every number here
+one behind the message a reader was following.
+
+1. **Structural**: `manifest_version`, `runner_classes` and `gates` are present and well-typed.
+2. Every gate references a **declared runner class**.
+3. Every `red_x_policy` is one of the three taxonomy values; every `tier` is `per-PR` or `nightly`.
+4. **Advisory-until-provisioned**: a gate whose runner class has `provisioned: false` MUST be
    `advisory` (never blocking, never silently green).
-4. Every `quarantine-with-issue` gate **names an `issue`**.
-5. Every gate with a non-null `ci_job_id` maps to a **real job** in the workflow **its TIER lives
+5. Every `quarantine-with-issue` gate **names an `issue`**.
+6. Every gate with a non-null `ci_job_id` maps to a **real job** in the workflow **its TIER lives
    in** — a per-PR row's job in `ci.yml`, a nightly row's in `bench-nightly.yml`. Reading the two
    files as one pool left that split unasserted, so a nightly row could point at a per-PR job and
-   pass.
-6. The **R-QA-007 `minspec_floors` table** is present and well-formed: every v1 platform row names
+   pass. An explicit `--ci-workflow` file is attributed to the tier its basename names, so naming a
+   file cannot collapse that split back into one pool either.
+7. The **R-QA-007 `minspec_floors` table** is present and well-formed: every v1 platform row names
    a non-empty reference device, exactly one positive target rate, and a declared runner class,
    and the Android/iOS N/A scope notes stay stated.
-7. **Prose status-claim drift (M9 x11)** — a `description` may not make a status claim the
-   machine-readable truth contradicts. Rules 1-6 read the FIELDS and never the prose, and the cost
+8. **Prose status-claim drift (M9 x11)** — a `description` may not make a status claim the
+   machine-readable truth contradicts. Rules 1-7 read the FIELDS and never the prose, and the cost
    was measured: after x7 fixed #437 and e12c-1 landed, the `editor-shell-cef-smoke` row still
    asserted *"macOS ctest registration DISABLED pending #437"*, so a **false status claim survived a
    full task cycle inside a CI-validated file with CI green throughout**. Three claim classes, each
@@ -226,9 +233,13 @@ self-consistency, and exit 2 on a config error. It enforces:
    - a row claiming a **registration is DISABLED** must correspond to a ctest that really carries a
      `DISABLED` property in the CMake sources.
 
-   What rule 7 deliberately cannot see: the second half of that measured defect was prose repeating
+   What rule 8 deliberately cannot see: the second half of that measured defect was prose repeating
    a root cause x7 had already disproved. No machine-readable field records "the reason we once
-   believed", so that half stays a review responsibility.
+   believed", so that half stays a review responsibility. The third class also has a PRECONDITION
+   worth stating: a `DISABLED` claim that names no *literally registered* ctest is caught only while
+   NO test in the tree carries a `DISABLED` property, so one future legitimate quarantine restores the
+   false green for exactly the row this rule was written for. `test_ctest_registrations_reads_the_live_tree`
+   pins that precondition (`disabled == set()`) so it fails loudly rather than lapsing quietly.
 
 `tools/tests/test_check_fleet_manifest.py` is the R-QA-013 coverage for the validator itself.
 
