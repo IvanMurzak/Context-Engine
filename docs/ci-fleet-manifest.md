@@ -188,26 +188,47 @@ live in [`density-targets.md`](density-targets.md); the machine-readable copy is
 `tools/check_fleet_manifest.py` runs in the `python-tests` job on every PR:
 
 ```bash
-python3 tools/check_fleet_manifest.py --manifest docs/ci-fleet-manifest.json \
-    --ci-workflow .github/workflows/ci.yml \
-    --ci-workflow .github/workflows/bench-nightly.yml
+python3 tools/check_fleet_manifest.py --repo-root .
 ```
 
-(`--ci-workflow` is repeatable: per-PR gates live in `ci.yml`, the nightly benchmark gates in
-`bench-nightly.yml`; a `ci_job_id` must exist in at least one given workflow.) It fails the build
-(exit 1) when the manifest drifts out of self-consistency, and exit 2 on a config error. It
-enforces:
+That is the whole invocation: the gate resolves the manifest and BOTH workflow files from
+`--repo-root` itself (per-PR gates live in `ci.yml`, the nightly benchmark gates in
+`bench-nightly.yml`), and a default it cannot read is a hard configuration error rather than a silent
+skip. `--ci-workflow` remains available and repeatable, but it now SUPPLEMENTS that default set
+instead of replacing it — naming only `ci.yml` used to make the gate report seven confident-looking
+FALSE violations (the seven nightly-tier rows), and a gate that cries wolf gets ignored, which is its
+own silent-failure mode. It fails the build (exit 1) when the manifest drifts out of
+self-consistency, and exit 2 on a config error. It enforces:
 
 1. Every gate references a **declared runner class**.
 2. Every `red_x_policy` is one of the three taxonomy values; every `tier` is `per-PR` or `nightly`.
 3. **Advisory-until-provisioned**: a gate whose runner class has `provisioned: false` MUST be
    `advisory` (never blocking, never silently green).
 4. Every `quarantine-with-issue` gate **names an `issue`**.
-5. Every gate with a non-null `ci_job_id` maps to a **real job** in the live workflow (the
-   consumption/sync check — the manifest cannot claim a CI job that does not exist).
+5. Every gate with a non-null `ci_job_id` maps to a **real job** in the workflow **its TIER lives
+   in** — a per-PR row's job in `ci.yml`, a nightly row's in `bench-nightly.yml`. Reading the two
+   files as one pool left that split unasserted, so a nightly row could point at a per-PR job and
+   pass.
 6. The **R-QA-007 `minspec_floors` table** is present and well-formed: every v1 platform row names
    a non-empty reference device, exactly one positive target rate, and a declared runner class,
    and the Android/iOS N/A scope notes stay stated.
+7. **Prose status-claim drift (M9 x11)** — a `description` may not make a status claim the
+   machine-readable truth contradicts. Rules 1-6 read the FIELDS and never the prose, and the cost
+   was measured: after x7 fixed #437 and e12c-1 landed, the `editor-shell-cef-smoke` row still
+   asserted *"macOS ctest registration DISABLED pending #437"*, so a **false status claim survived a
+   full task cycle inside a CI-validated file with CI green throughout**. Three claim classes, each
+   an assertion SHAPE rather than a keyword (e12c-2's corrected text mentions `DISABLED` while
+   claiming the opposite and must stay green):
+   - a row saying it is **pending / awaiting / blocked on `#N`** must record that issue in its own
+     `issue` field;
+   - a row saying something is **advisory until `<runner class>` is provisioned** must name a
+     declared class that really is unprovisioned;
+   - a row claiming a **registration is DISABLED** must correspond to a ctest that really carries a
+     `DISABLED` property in the CMake sources.
+
+   What rule 7 deliberately cannot see: the second half of that measured defect was prose repeating
+   a root cause x7 had already disproved. No machine-readable field records "the reason we once
+   believed", so that half stays a review responsibility.
 
 `tools/tests/test_check_fleet_manifest.py` is the R-QA-013 coverage for the validator itself.
 

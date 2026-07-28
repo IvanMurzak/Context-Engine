@@ -727,6 +727,194 @@ set(_ctx_cef_shell_executables
     context_editor_shell_iframe_smoke
     context_editor_shell_inspector_fanout_smoke)
 
+# --- DERIVING that roster from the real build graph, literal list as a FLOOR (M9 x11) -------------
+# The comment above says "KEEP THIS COMPLETE" and names the two times it was not. This block is what
+# makes the instruction ENFORCED rather than merely written down: a hand-maintained list cannot fail,
+# and the failure mode is SILENCE — a target absent from it is not flagged, it is skipped, so both
+# audits below simply never look at it. That is how uimirror and iframe went unaudited for two tasks.
+#
+# So the roster is cross-checked against the set of CEF-hosting executables DERIVED from the graph
+# CMake is about to generate, and the two must be EQUAL:
+#   * derived-but-NOT-listed  -> the omission this block exists for. A HARD, NAMED FATAL_ERROR.
+#   * listed-but-NOT-derived  -> the FLOOR. Deleting a name from the literal list does not quietly
+#     reduce the audited set, because the target it named is still derived; and a stale entry (a
+#     target renamed, or that stopped hosting CEF) is equally loud instead of rotting in place.
+#
+# WHY A GRAPH FACT AND NOT A SOURCE SCAN. Target properties are ground truth about what CMake will
+# generate — the same reason the two audits below read MANUALLY_ADDED_DEPENDENCIES rather than
+# grepping the sources. The source-level companion, tools/check_cef_staging.py, ties the literal
+# roster to the literal stage-consumer edges and runs on every default (CEF-free) `build` leg; each
+# tier catches what the other structurally cannot, which is the same division of labour the staging
+# audit and its lint already have.
+#
+# WHAT COUNTS AS CEF-HOSTING: an executable in this directory subtree that reaches a CEF library on
+# its link closure, or takes one as a direct manual dependency. The second half is required because
+# macOS never LINKS libcef — the framework is dlopen'd at runtime (CefScopedLibraryLoader) — so a
+# link-only predicate would derive nothing there and the floor direction would red all eleven.
+#
+# THE ONE EXCLUSION is CEF's per-process-type helper bundles. They are executables and they do link
+# the CEF wrapper, but they host a SUBPROCESS, not a browser: five of them exist per app on macOS
+# (55 targets), and they must not be audited as apps. They are identified by the SAME equality the
+# macOS audit below already asserts — a helper is a manual dependency of its owner whose OUTPUT_NAME
+# is "<owner> Helper<suffix>" — deliberately NOT by a name pattern alone, so that a future smoke
+# declared as a child of another smoke would NOT be excluded and would fail loudly instead.
+set(CONTEXT_SHELL_CEF_MARKER_LIBS context_editor_cef libcef_lib libcef_dll_wrapper)
+
+# Every target declared in `dir` and, recursively, in the directories added beneath it.
+function(context_shell_collect_subtree_targets _dir _out_var)
+    get_property(_found DIRECTORY "${_dir}" PROPERTY BUILDSYSTEM_TARGETS)
+    get_property(_subs DIRECTORY "${_dir}" PROPERTY SUBDIRECTORIES)
+    foreach(_sub IN LISTS _subs)
+        context_shell_collect_subtree_targets("${_sub}" _child)
+        list(APPEND _found ${_child})
+    endforeach()
+    set(${_out_var} "${_found}" PARENT_SCOPE)
+endfunction()
+
+# TRUE when `target` reaches a CEF library transitively on its link closure, or names one directly as
+# a manual dependency.
+function(context_shell_target_hosts_cef _target _out_var)
+    set(_pending "${_target}")
+    set(_seen "")
+    set(_hosts FALSE)
+    set(_steps 0)
+    while(_pending)
+        math(EXPR _steps "${_steps} + 1")
+        if(_steps GREATER 4096)
+            # A walk that did not terminate must not be reported as "no CEF found": that is the silent
+            # under-derivation this whole block exists to remove.
+            message(FATAL_ERROR
+                "CEF roster derivation: the link-closure walk from ${_target} exceeded 4096 steps "
+                "without terminating. Fix the walk — do NOT widen the bound and do NOT let it fall "
+                "through, because an unfinished walk reports a target as CEF-free.")
+        endif()
+        list(POP_FRONT _pending _node)
+        if("${_node}" IN_LIST _seen)
+            continue()
+        endif()
+        list(APPEND _seen "${_node}")
+
+        set(_edges "")
+        if(TARGET ${_node})
+            foreach(_property LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+                get_target_property(_value ${_node} ${_property})
+                if(_value)
+                    list(APPEND _edges ${_value})
+                endif()
+            endforeach()
+        endif()
+        if("${_node}" STREQUAL "${_target}")
+            # Only the target's OWN manual dependencies: this is the macOS dlopen case (every CEF
+            # host takes add_dependencies(<exe> libcef_dll_wrapper)), not a second closure to walk.
+            get_target_property(_manual ${_node} MANUALLY_ADDED_DEPENDENCIES)
+            if(_manual)
+                list(APPEND _edges ${_manual})
+            endif()
+        endif()
+
+        foreach(_edge IN LISTS _edges)
+            if(_edge MATCHES "\\$<")
+                continue()  # a generator expression names no target this walk can follow
+            endif()
+            if("${_edge}" IN_LIST CONTEXT_SHELL_CEF_MARKER_LIBS)
+                set(_hosts TRUE)
+            elseif(TARGET ${_edge})
+                list(APPEND _pending "${_edge}")
+            endif()
+        endforeach()
+    endwhile()
+    set(${_out_var} ${_hosts} PARENT_SCOPE)
+endfunction()
+
+if(CONTEXT_BUILD_GUI_CEF)
+    context_shell_collect_subtree_targets("${CMAKE_CURRENT_SOURCE_DIR}" _ctx_shell_subtree_targets)
+
+    set(_ctx_cef_hosting_candidates "")
+    foreach(_candidate IN LISTS _ctx_shell_subtree_targets)
+        if(NOT TARGET ${_candidate})
+            continue()
+        endif()
+        get_target_property(_type ${_candidate} TYPE)
+        if(NOT _type STREQUAL "EXECUTABLE")
+            continue()
+        endif()
+        context_shell_target_hosts_cef(${_candidate} _hosts)
+        if(_hosts)
+            list(APPEND _ctx_cef_hosting_candidates ${_candidate})
+        endif()
+    endforeach()
+
+    # Separate the CEF per-process-type helper bundles from the apps that own them.
+    set(_ctx_cef_subprocess_helpers "")
+    foreach(_owner IN LISTS _ctx_cef_hosting_candidates)
+        get_target_property(_owner_output ${_owner} OUTPUT_NAME)
+        if(NOT _owner_output)
+            set(_owner_output "${_owner}")
+        endif()
+        get_target_property(_owner_manual ${_owner} MANUALLY_ADDED_DEPENDENCIES)
+        foreach(_dependency IN LISTS _owner_manual)
+            if(NOT "${_dependency}" IN_LIST _ctx_cef_hosting_candidates)
+                continue()
+            endif()
+            get_target_property(_dependency_output ${_dependency} OUTPUT_NAME)
+            if(NOT _dependency_output)
+                set(_dependency_output "${_dependency}")
+            endif()
+            string(FIND "${_dependency_output}" "${_owner_output} Helper" _helper_at)
+            if(_helper_at EQUAL 0)
+                list(APPEND _ctx_cef_subprocess_helpers ${_dependency})
+            endif()
+        endforeach()
+    endforeach()
+
+    set(_ctx_cef_derived_executables ${_ctx_cef_hosting_candidates})
+    if(_ctx_cef_subprocess_helpers)
+        list(REMOVE_ITEM _ctx_cef_derived_executables ${_ctx_cef_subprocess_helpers})
+    endif()
+    list(REMOVE_DUPLICATES _ctx_cef_derived_executables)
+    list(SORT _ctx_cef_derived_executables)
+
+    # ANTI-VACUITY. A derivation that found nothing would satisfy the derived-but-unlisted direction
+    # trivially, which is precisely the shape of assertion this milestone keeps producing. The floor
+    # direction below would catch it too, but not legibly — so say it here, first and by name.
+    if(NOT _ctx_cef_derived_executables)
+        message(FATAL_ERROR
+            "CEF roster derivation: derived NO CEF-hosting executable from the build graph in a "
+            "CONTEXT_BUILD_GUI_CEF configure, which cannot be true — context_editor alone hosts one. "
+            "The enumeration (BUILDSYSTEM_TARGETS/SUBDIRECTORIES) or the marker set "
+            "(CONTEXT_SHELL_CEF_MARKER_LIBS) is broken, and a broken derivation reports every "
+            "omission as clean.")
+    endif()
+
+    foreach(_derived IN LISTS _ctx_cef_derived_executables)
+        if(NOT "${_derived}" IN_LIST _ctx_cef_shell_executables)
+            message(FATAL_ERROR
+                "CEF roster audit: target ${_derived} HOSTS CEF (it reaches "
+                "${CONTEXT_SHELL_CEF_MARKER_LIBS} on its link closure or as a manual dependency) but "
+                "is MISSING from _ctx_cef_shell_executables, so neither the staging audit nor the "
+                "macOS bundle audit below ever examines it — it would be silently UNDER-AUDITED, "
+                "which is exactly how context_editor_shell_uimirror_smoke and "
+                "context_editor_shell_iframe_smoke went unchecked for two tasks. Add ${_derived} to "
+                "_ctx_cef_shell_executables (once — the one list drives both audits).")
+        endif()
+    endforeach()
+
+    foreach(_listed IN LISTS _ctx_cef_shell_executables)
+        if(NOT "${_listed}" IN_LIST _ctx_cef_derived_executables)
+            message(FATAL_ERROR
+                "CEF roster audit: _ctx_cef_shell_executables names ${_listed}, but the build graph "
+                "does not show it as a CEF-hosting executable in this subtree (derived: "
+                "${_ctx_cef_derived_executables}). Either it was renamed/removed — update the list — "
+                "or it stopped linking CEF, in which case say so deliberately. This direction is the "
+                "FLOOR: it is what stops the literal list from silently shrinking.")
+        endif()
+    endforeach()
+
+    message(STATUS
+        "CEF roster audit: ${_ctx_cef_derived_executables} derived from the build graph and matched "
+        "against _ctx_cef_shell_executables")
+endif()
+
 # --- the CEF single-staging invariant, enforced on the real build graph (issue #360) --------------
 # Every executable that boots out of the shared ${CEF_TARGET_OUT_DIR} must depend on the ONE stage
 # target — that dependency is the entire fix, and it is exactly the sort of thing a new smoke exe

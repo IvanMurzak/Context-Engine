@@ -199,14 +199,211 @@ def test_live_manifest_nightly_jobs_not_in_ci_yml_alone():
 
 
 def test_live_main_exit_zero_with_both_workflows():
-    rc = check_fleet_manifest.main(["--manifest", str(LIVE_MANIFEST),
+    rc = check_fleet_manifest.main(["--repo-root", str(REPO_ROOT),
+                                    "--manifest", str(LIVE_MANIFEST),
                                     "--ci-workflow", str(LIVE_WORKFLOW),
                                     "--ci-workflow", str(LIVE_NIGHTLY)])
     assert rc == 0
 
 
 def test_main_multiple_workflows_missing_file_is_config_error(tmp_path):
-    rc = check_fleet_manifest.main(["--manifest", str(LIVE_MANIFEST),
+    rc = check_fleet_manifest.main(["--repo-root", str(REPO_ROOT),
+                                    "--manifest", str(LIVE_MANIFEST),
                                     "--ci-workflow", str(LIVE_WORKFLOW),
                                     "--ci-workflow", str(tmp_path / "nope.yml")])
     assert rc == 2
+
+
+# --- the --repo-root friction, and the second workflow file the gate now resolves itself (M9 x11) --
+# MEASURED before the fix: `--repo-root .` was an argparse error (the flag did not exist), and given
+# only ci.yml the gate reported SEVEN confident-looking FALSE violations — the seven nightly-tier
+# gates, whose jobs live in bench-nightly.yml. A gate that cries wolf gets ignored.
+
+
+def test_main_accepts_repo_root():
+    """PLANT (c): delete the --repo-root argument from main() and this must RED."""
+    assert check_fleet_manifest.main(["--repo-root", str(REPO_ROOT)]) == 0
+
+
+def test_main_bare_run_resolves_both_default_workflows(monkeypatch):
+    """No flags at all: the default set covers BOTH workflows, so the nightly gates verify."""
+    monkeypatch.chdir(REPO_ROOT)
+    assert check_fleet_manifest.main([]) == 0
+
+
+def test_main_given_only_ci_yml_no_longer_reports_the_seven(capsys):
+    """The measured friction: naming ONLY ci.yml must not manufacture the seven nightly violations,
+    because the gate resolves bench-nightly.yml from its own default set."""
+    rc = check_fleet_manifest.main(["--repo-root", str(REPO_ROOT),
+                                    "--ci-workflow", str(LIVE_WORKFLOW)])
+    assert rc == 0
+    assert "bench-100k-nightly" not in capsys.readouterr().err
+
+
+def test_main_default_workflow_set_missing_file_is_config_error(tmp_path):
+    """A default that resolved nothing would look exactly like a manifest whose every job exists, so
+    a missing DEFAULT workflow is exit 2 — never a silent skip."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "ci-fleet-manifest.json").write_text(
+        json.dumps(base_manifest()), encoding="utf-8")
+    assert check_fleet_manifest.main(["--repo-root", str(tmp_path)]) == 2
+
+
+def test_main_missing_src_tree_is_config_error(tmp_path):
+    """Rule 8's claim C reads the ctest registrations from src/; no src/ is a config error, not a
+    pass — a gate that cannot run must not report success."""
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "ci-fleet-manifest.json").write_text(
+        json.dumps(base_manifest()), encoding="utf-8")
+    for relative in check_fleet_manifest.WORKFLOW_DEFAULTS.values():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(WORKFLOW, encoding="utf-8")
+    assert check_fleet_manifest.main(["--repo-root", str(tmp_path)]) == 2
+
+
+# --- rule 6, now TIER-AWARE -----------------------------------------------------------------------
+
+
+def test_nightly_gate_pointing_at_a_per_pr_job_is_flagged():
+    """A nightly gate whose ci_job_id names a REAL job that lives in the PER-PR workflow used to pass
+    (the two files were read as one pool). The tier decides which file must carry it."""
+    m = base_manifest()
+    m["gates"][1]["ci_job_id"] = "build"  # a real ci.yml job, but this row is tier=nightly
+    errors = check_fleet_manifest.validate(
+        m, workflows={"per-PR": WORKFLOW, "nightly": "jobs:\n  bench-100k-nightly:\n"})
+    assert any("has no matching job in the nightly workflow" in e for e in errors)
+
+
+def test_tier_aware_rule_6_accepts_a_correctly_placed_nightly_job():
+    m = base_manifest()
+    m["gates"][1]["ci_job_id"] = "bench-100k-nightly"
+    assert check_fleet_manifest.validate(
+        m, workflows={"per-PR": WORKFLOW, "nightly": "jobs:\n  bench-100k-nightly:\n"}) == []
+
+
+# --- rule 8: the prose STATUS-CLAIM drift gate (M9 x11) -------------------------------------------
+# The shape that actually bit us: after x7 fixed #437 and e12c-1 landed, the editor-shell-cef-smoke
+# row still asserted "macOS ctest registration DISABLED pending #437" while CI stayed green — a FALSE
+# status claim that survived a FULL TASK CYCLE inside a CI-validated file.
+
+REGISTRATIONS_NONE_DISABLED = ({"editor-shell-cef-staging", "editor-shell-smoke"}, set())
+REGISTRATIONS_ONE_DISABLED = (
+    {"editor-shell-cef-staging", "editor-shell-smoke"}, {"editor-shell-smoke"})
+
+
+def _with_description(text: str, **fields) -> dict:
+    m = base_manifest()
+    m["gates"][0]["description"] = text
+    m["gates"][0].update(fields)
+    return m
+
+
+def test_claim_parked_on_issue_must_be_recorded_in_the_issue_field():
+    """THE MEASURED DEFECT, reconstructed: a blocking row claiming it is pending an issue it does not
+    name."""
+    errors = check_fleet_manifest.validate(
+        _with_description("macOS ctest registration DISABLED pending #437."), WORKFLOW,
+        registrations=REGISTRATIONS_NONE_DISABLED)
+    assert any("does not name #437" in e for e in errors)
+
+
+def test_claim_parked_on_issue_is_clean_when_the_row_records_it():
+    errors = check_fleet_manifest.validate(
+        _with_description("Quarantined awaiting #437.",
+                          red_x_policy="quarantine-with-issue", issue="#437"),
+        WORKFLOW, registrations=REGISTRATIONS_NONE_DISABLED)
+    assert errors == []
+
+
+def test_claim_awaiting_provision_of_an_already_provisioned_class():
+    errors = check_fleet_manifest.validate(
+        _with_description("Numbers advisory until gh-ubuntu-shared is provisioned."), WORKFLOW,
+        registrations=REGISTRATIONS_NONE_DISABLED)
+    assert any("already declared provisioned=True" in e for e in errors)
+
+
+def test_claim_awaiting_provision_of_an_undeclared_class():
+    errors = check_fleet_manifest.validate(
+        _with_description("Advisory until perf-box-typo is provisioned."), WORKFLOW,
+        registrations=REGISTRATIONS_NONE_DISABLED)
+    assert any("is not declared in runner_classes" in e for e in errors)
+
+
+def test_claim_awaiting_provision_is_clean_for_an_unprovisioned_class():
+    errors = check_fleet_manifest.validate(
+        _with_description("Advisory until perf-box is provisioned."), WORKFLOW,
+        registrations=REGISTRATIONS_NONE_DISABLED)
+    assert errors == []
+
+
+def test_claim_awaiting_provision_ignores_the_bare_words_runner_and_class():
+    """FALSE-POSITIVE CONTROL, from the live measurement: 4 of the 8 live matches capture the bare
+    word `class` or `runner` out of 'until the runner class is provisioned'. Neither is a runner-class
+    id, and flagging them would make this rule cry wolf on correct prose."""
+    for text in ("Advisory until the runner class is provisioned.",
+                 "The floor gate activates when its runner class is provisioned."):
+        assert check_fleet_manifest.validate(
+            _with_description(text), WORKFLOW,
+            registrations=REGISTRATIONS_NONE_DISABLED) == []
+
+
+def test_claim_disabled_naming_a_registered_ctest_that_is_not_disabled():
+    errors = check_fleet_manifest.validate(
+        _with_description("The ctest editor-shell-cef-staging is currently DISABLED."), WORKFLOW,
+        registrations=REGISTRATIONS_NONE_DISABLED)
+    assert any("no such ctest carries a DISABLED property" in e for e in errors)
+
+
+def test_claim_disabled_naming_a_registered_ctest_that_really_is_disabled():
+    errors = check_fleet_manifest.validate(
+        _with_description("The ctest editor-shell-smoke is currently DISABLED."), WORKFLOW,
+        registrations=REGISTRATIONS_ONE_DISABLED)
+    assert errors == []
+
+
+def test_claim_disabled_with_no_named_ctest_falls_back_to_the_whole_tree():
+    errors = check_fleet_manifest.validate(
+        _with_description("Its registration ships DISABLED on macOS."), WORKFLOW,
+        registrations=REGISTRATIONS_NONE_DISABLED)
+    assert any("NO ctest in the tree carries a DISABLED property" in e for e in errors)
+
+
+def test_historical_narrative_about_a_removed_disabled_property_stays_green():
+    """THE LOAD-BEARING FALSE-POSITIVE CONTROL. e12c-2's CORRECTED text mentions DISABLED while
+    claiming the OPPOSITE, so a keyword match here would fail the very row that was fixed — the
+    patterns are ASSERTION shapes, not keywords."""
+    errors = check_fleet_manifest.validate(
+        _with_description(
+            "M9 x7 (issue #437) removed the two DISABLED properties it had shipped them with."),
+        WORKFLOW, registrations=REGISTRATIONS_NONE_DISABLED)
+    assert errors == []
+
+
+def test_rule_8_skips_claim_c_when_registrations_were_not_supplied():
+    """Claim C needs the sources; the legacy two-argument validate() call has none. A and B still run
+    — which is why main() always supplies registrations rather than letting C be skipped in CI."""
+    errors = check_fleet_manifest.validate(
+        _with_description("Its registration ships DISABLED on macOS."), WORKFLOW)
+    assert errors == []
+
+
+def test_live_manifest_has_no_status_claim_drift():
+    """The committed manifest must be clean under rule 8 — measured over all 94 rows before the rule
+    was enabled (claims A and C hit zero rows, B hits eight, all consistent)."""
+    manifest = json.loads(LIVE_MANIFEST.read_text(encoding="utf-8"))
+    registrations = check_fleet_manifest.ctest_registrations(REPO_ROOT / "src")
+    workflows = {tier: (REPO_ROOT / relative).read_text(encoding="utf-8")
+                 for tier, relative in check_fleet_manifest.WORKFLOW_DEFAULTS.items()}
+    assert check_fleet_manifest.validate(
+        manifest, workflows=workflows, registrations=registrations) == []
+
+
+def test_ctest_registrations_reads_the_live_tree():
+    """Anti-vacuity for rule 8's own input: an empty registration set would make every claim-C check
+    on a NAMED ctest fall through to the tree-wide branch."""
+    registered, disabled = check_fleet_manifest.ctest_registrations(REPO_ROOT / "src")
+    assert "editor-shell-cef-staging" in registered
+    assert len(registered) > 100
+    assert disabled == set(), "no ctest carries a DISABLED property today (x7 removed the last two)"

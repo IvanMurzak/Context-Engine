@@ -521,12 +521,13 @@ That covers `context_editor_panels`' tests too — they register in the same fam
 itself is built transitively by the jobs that build `context_editor` / the CEF smoke, so e05d1 needed
 **no `ci.yml` change at all**.
 `editor-cef-smoke-shell` is the exception and IS on the `editor-cef-smoke` job's hand-maintained
-`--target` list — the "Not Run = RED" tripwire. So are **all eight** of its siblings:
+`--target` list — the "Not Run = RED" tripwire. So are **all nine** of its siblings:
 `editor-cef-smoke-shell-restore` (e05d4), `-palette` (e07d), `-settings` (e06d),
-`-multiwindow` (e10a), `-tearout` (e10b), `-drag` (e10c), `-uimirror` (e10d) and `-iframe` (e13a) —
-**nine** registrations in total, which is the number every statement about this family must use
-(the same miscount §11 corrects, and the one that once left the parent's configure-time staging roster
-two targets short).
+`-multiwindow` (e10a), `-tearout` (e10b), `-drag` (e10c), `-uimirror` (e10d), `-iframe` (e13a) and
+`-inspector-fanout` (e09e-3) — **ten** registrations in total, which is the number every statement
+about this family must use (the same miscount §11 corrects, and the one that once left the parent's
+configure-time staging roster two targets short). The roster itself therefore names **eleven**
+targets: `context_editor` plus those ten.
 **e12c-1** had made that list **PER-OS** (Windows/Linux all nine, macOS the two whose `.app` hosting
 model it ported) because the other seven were declared only under `if(OS_WINDOWS OR OS_LINUX)` and a
 shared list would have failed the macOS build outright. **e12c-2** fanned the recipe out to all nine, so
@@ -540,7 +541,28 @@ function: `SET_EXECUTABLE_TARGET_PROPERTIES(<exe>)` and `add_dependencies(<exe> 
 `tools/check_cef_staging.py` reads both from the SOURCES with the executable named LITERALLY; it resolves
 a `${var}` through file-local `set()` but a function PARAMETER is unresolvable by construction, and the
 lint correctly refuses to skip a name it cannot resolve — it reports the stage dependency as UNVERIFIED
-instead. Hiding either behind the function would have traded ~18 lines for nine unaudited executables.
+instead. Hiding either behind the function would have traded ~18 lines for ten unaudited executables.
+
+⚠ **THE ROSTER IS NO LONGER TRUSTED TO BE COMPLETE — it is DERIVED and cross-checked (M9 x11).**
+`_ctx_cef_shell_executables` is what both configure-time audits ITERATE, so a target missing from it
+was never flagged, only SKIPPED — and that had already happened twice (`-uimirror`, `-iframe`). Two
+tiers now close it, because neither is sufficient alone:
+
+- **Graph tier** (`src/editor/shell/CMakeLists.txt`, CEF-ON configures on all three legs): the set of
+  CEF-hosting executables is derived from the real build graph — an executable in this subtree that
+  reaches `context_editor_cef` / `libcef_lib` / `libcef_dll_wrapper` on its link closure or as a direct
+  manual dependency — and must EQUAL the literal roster. Derived-but-unlisted is a hard, NAMED
+  `FATAL_ERROR`; listed-but-not-derived is the FLOOR, so the literal list cannot silently shrink
+  either. The manual-dependency half is required because macOS never LINKS libcef (the framework is
+  dlopen'd), and the ONE exclusion is CEF's per-process-type helper bundles — 55 of them on macOS —
+  identified by the same owner + `OUTPUT_NAME` `"<owner> Helper<suffix>"` equality the macOS bundle
+  audit already asserts, deliberately not by a name pattern, so a smoke declared as a child of another
+  smoke would fail loudly rather than be excluded. An EMPTY derived set is itself an error.
+- **Source tier** (`tools/check_cef_staging.py` check 5, every default CEF-FREE `build` leg): the
+  literal roster must equal the literal `add_dependencies(<exe> context_editor_cef_stage)` consumer
+  set. It can only read literal names — the `${var}` limitation above — which is exactly why the graph
+  tier exists; and the claim that this repo declares exactly one non-empty roster is asserted in
+  `tools/tests/test_cef_staging.py`, so a RENAMED roster cannot become how check 5 passes.
 The two macOS registrations e12c-1 landed were `DISABLED TRUE` until issue **#437** was fixed at its
 cause; all nine now RUN there. ⚠ A `DISABLED` ctest reports `Not Run (Disabled)` and leaves ctest's
 exit code at

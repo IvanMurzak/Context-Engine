@@ -862,3 +862,138 @@ def test_live_repository_has_exactly_one_shell_stage_writer() -> None:
         "context_editor_shell_palette_smoke",
     ):
         assert "context_editor_cef_stage" in deps.get(consumer, set()), consumer
+
+
+# --- check 5: the hand-written CEF-hosting roster (M9 x11) -----------------------------------------
+# `_ctx_cef_shell_executables` is what BOTH configure-time CEF audits iterate, so a target missing
+# from it is not flagged -- it is SKIPPED. That has already happened twice
+# (context_editor_shell_uimirror_smoke, context_editor_shell_iframe_smoke). Check 5 ties the literal
+# roster to the literal stage-consumer edges; its graph-tier companion in
+# src/editor/shell/CMakeLists.txt derives the same roster from target properties under a CEF-ON
+# configure. Cases marked `# FOUND BY PLANTING` came from mutating the live build files.
+
+_ROSTER_SHELL = """
+context_acquire_cef(context_editor editor-cef-smoke)
+context_cef_stage_payload(context_editor_cef_stage "${CEF_TARGET_OUT_DIR}")
+add_executable(context_editor app/editor_main.cpp)
+SET_EXECUTABLE_TARGET_PROPERTIES(context_editor)
+add_dependencies(context_editor context_editor_cef_stage)
+add_executable(context_editor_shell_cef_smoke src/cef_shell_smoke.cpp)
+SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_cef_smoke)
+add_dependencies(context_editor_shell_cef_smoke context_editor_cef_stage)
+set(_ctx_cef_shell_executables
+    context_editor
+    context_editor_shell_cef_smoke)
+"""
+
+
+def _roster_tree(tmp_path: Path, body: str) -> Path:
+    return _repo(tmp_path, {"src/editor/shell/CMakeLists.txt": body})
+
+
+def test_roster_matching_the_stage_consumers_is_clean(tmp_path: Path) -> None:
+    findings, _ = check.scan(_roster_tree(tmp_path, _ROSTER_SHELL))
+    assert findings == []
+
+
+def test_a_stage_consumer_missing_from_the_roster_is_reported(tmp_path: Path) -> None:
+    """THE HISTORICAL DEFECT, reconstructed: uimirror and iframe both took the stage edge and were
+    both absent from the roster, so both configure-time audits skipped them for two tasks."""
+    body = _ROSTER_SHELL.replace(
+        "set(_ctx_cef_shell_executables\n    context_editor\n    context_editor_shell_cef_smoke)",
+        "set(_ctx_cef_shell_executables\n    context_editor)")
+    findings, _ = check.scan(_roster_tree(tmp_path, body))
+    assert any("context_editor_shell_cef_smoke takes the CEF stage dependency but is MISSING"
+               in f for f in findings)
+
+
+def test_a_roster_entry_with_no_stage_edge_is_reported(tmp_path: Path) -> None:
+    """The other direction -- a renamed or removed target left rotting in the list."""
+    body = _ROSTER_SHELL.replace(
+        "    context_editor_shell_cef_smoke)",
+        "    context_editor_shell_cef_smoke\n    context_editor_shell_ghost_smoke)")
+    findings, _ = check.scan(_roster_tree(tmp_path, body))
+    assert any("names context_editor_shell_ghost_smoke, but no" in f for f in findings)
+
+
+def test_an_empty_roster_is_reported(tmp_path: Path) -> None:
+    """The VACUOUS direction: an empty list makes 'every listed target is a consumer' trivially true
+    while auditing nothing."""
+    body = _ROSTER_SHELL.replace(
+        "set(_ctx_cef_shell_executables\n    context_editor\n    context_editor_shell_cef_smoke)",
+        "set(_ctx_cef_shell_executables)")
+    findings, _ = check.scan(_roster_tree(tmp_path, body))
+    assert any("is EMPTY" in f for f in findings)
+
+
+def test_two_roster_declarations_are_reported(tmp_path: Path) -> None:
+    """Two lists is how the pre-e12c-2 duplicates drifted apart; there is THE ONE roster."""
+    findings, _ = check.scan(_roster_tree(
+        tmp_path, _ROSTER_SHELL + "\nset(_ctx_cef_shell_executables context_editor)\n"))
+    assert any("declarations of _ctx_cef_shell_executables" in f for f in findings)
+
+
+def test_an_unresolvable_roster_entry_is_reported(tmp_path: Path) -> None:
+    """FOUND BY PLANTING: a `${var}`-named roster member would be compared under its raw spelling and
+    silently never match a consumer, so it is named as unresolvable instead."""
+    body = _ROSTER_SHELL.replace(
+        "    context_editor_shell_cef_smoke)", "    ${_some_loop_var}_smoke)")
+    findings, _ = check.scan(_roster_tree(tmp_path, body))
+    assert any("cannot resolve" in f for f in findings)
+
+
+def test_a_commented_out_roster_declaration_does_not_count(tmp_path: Path) -> None:
+    """Comment stripping applies here as everywhere else in this lint: prose about the roster is not
+    a second declaration."""
+    body = _ROSTER_SHELL + "\n# set(_ctx_cef_shell_executables context_editor)\n"
+    findings, _ = check.scan(_roster_tree(tmp_path, body))
+    assert findings == []
+
+
+def test_a_tree_with_no_roster_is_not_penalised(tmp_path: Path) -> None:
+    """Check 5 is generic over trees: a repo with no Shell has no roster to check, and the live-tree
+    assertion below is what stops that from being how a RENAMED roster passes."""
+    root = _repo(tmp_path, {
+        "src/editor/cef/CMakeLists.txt": (
+            "context_acquire_cef(context_cef cef-substrate)\n"
+            "add_executable(context_cef_boot_smoke src/boot.cpp)\n"
+            "SET_EXECUTABLE_TARGET_PROPERTIES(context_cef_boot_smoke)\n"
+            'COPY_FILES(context_cef_boot_smoke "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}"'
+            ' "${CEF_TARGET_OUT_DIR}")\n'
+        )
+    })
+    findings, _ = check.scan(root)
+    assert findings == []
+
+
+def _live_roster() -> list[str]:
+    """The live roster, or a clean ASSERTION failure. FOUND BY PLANTING: indexing the match list
+    directly made the rename plant red through an `IndexError` instead — a crash reads as a red but
+    names nothing, which is the weak half of clause (2b)'s three outcomes."""
+    text = check.strip_comments(
+        (_REPO / "src/editor/shell/CMakeLists.txt").read_text(encoding="utf-8"))
+    matches = check._ROSTER_SET.findall(text)
+    assert len(matches) == 1, (
+        f"expected exactly one {check._ROSTER_VAR} declaration in src/editor/shell/CMakeLists.txt, "
+        f"got {len(matches)} — a renamed or deleted roster would leave check 5 nothing to compare")
+    return matches[0].split()
+
+
+def test_live_repository_declares_exactly_one_non_empty_roster() -> None:
+    """THE ANTI-VACUITY GUARD for check 5, held here rather than in the lint (which must stay generic
+    over trees): if the roster is renamed or deleted, check 5 would find nothing to compare and pass.
+    PLANT: rename `_ctx_cef_shell_executables` in src/editor/shell/CMakeLists.txt and this must RED."""
+    roster = _live_roster()
+    assert len(roster) >= 11, f"the live roster shrank to {len(roster)}: {roster}"
+    assert all("${" not in name for name in roster)
+
+
+def test_live_repository_roster_equals_its_stage_consumers() -> None:
+    """The live tie check 5 enforces, asserted directly so a regression names the roster rather than
+    arriving as a generic lint finding."""
+    findings, _ = check.scan(_REPO)
+    assert findings == []
+    roster = set(_live_roster())
+    assert "context_editor" in roster
+    assert "context_editor_shell_uimirror_smoke" in roster, "the e10d-drill2 omission must stay fixed"
+    assert "context_editor_shell_iframe_smoke" in roster, "the e13a-2 omission must stay fixed"
