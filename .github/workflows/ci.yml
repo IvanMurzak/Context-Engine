@@ -95,13 +95,13 @@ jobs:
         run: python3 -m pytest tools/tests bench/tests -v
 
       # R-QA-012: CI CONSUMES the fleet manifest — validate it against the live workflows every run
-      # (self-consistency + the advisory-until-provisioned rule + ci_job_id sync across BOTH the
-      # per-PR rollup and the nightly benchmark workflow). See docs/ci-fleet-manifest.md.
+      # (self-consistency + the advisory-until-provisioned rule + tier-aware ci_job_id sync across
+      # BOTH the per-PR rollup and the nightly benchmark workflow + the M9 x11 prose status-claim
+      # drift rule). The gate resolves both workflow files and the manifest from --repo-root itself,
+      # so this invocation no longer hand-lists them — and a default that cannot be read is a hard
+      # configuration error, never a silent skip. See docs/ci-fleet-manifest.md.
       - name: Validate CI fleet manifest (R-QA-012)
-        run: >
-          python3 tools/check_fleet_manifest.py --manifest docs/ci-fleet-manifest.json
-          --ci-workflow .github/workflows/ci.yml
-          --ci-workflow .github/workflows/bench-nightly.yml
+        run: python3 tools/check_fleet_manifest.py --repo-root .
 
   build:
     name: build (${{ matrix.os }})

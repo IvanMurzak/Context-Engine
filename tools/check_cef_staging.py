@@ -45,6 +45,20 @@ the same tier as tools/check_no_raw_key_handlers.py / tools/check_webui_assets.p
      rather than by a helper or a sibling, and no bundle carrying helpers but no framework — which
      cannot boot, because `CefScopedLibraryLoader` finds nothing to load.
 
+  5. THE ROSTER IS COMPLETE (M9 x11). `_ctx_cef_shell_executables` in src/editor/shell/CMakeLists.txt
+     is the ONE hand-written list of CEF-hosting Shell executables, and BOTH configure-time audits
+     there iterate THE LIST — so a target missing from it is not flagged, it is SKIPPED, and that has
+     already happened twice (uimirror, iframe). This check ties the list to the LITERAL
+     `add_dependencies(<exe> <stage target>)` edges check 2 already reads, and requires the two sets
+     to be EQUAL: a stage consumer absent from the roster is under-audited, and a roster entry that
+     takes no stage edge is stale. That the roster is non-EMPTY is asserted too — an empty list would
+     satisfy "every listed target is a consumer" trivially, which is the vacuous direction.
+     Its GRAPH-tier companion lives in src/editor/shell/CMakeLists.txt and derives the same roster
+     from target properties under a CEF-ON configure. Two tiers, because neither is sufficient alone:
+     this one runs on every default CEF-FREE `build` leg but can only read LITERAL names (see the
+     `${variable}` lesson below), while the graph tier sees what CMake will really generate but exists
+     only where CEF is ON.
+
 TWO THINGS THIS FILE LEARNED THE HARD WAY, both from e12c-1, and both about the checks ABOVE being
 silently INAPPLICABLE rather than wrong:
 
@@ -90,6 +104,17 @@ _ADD_DEPENDENCIES = re.compile(rf"\badd_dependencies\s*\(\s*({_NAME})([^)]*)\)",
 
 # `set(<var> <value>)` — only the single-value form is resolvable, which is all a target name ever is.
 _SET_CALL = re.compile(r"^[ \t]*set\s*\(\s*([A-Za-z_]\w*)\s+([^\n]*?)\s*\)[ \t]*$", re.MULTILINE)
+
+# --- check 5: the hand-written CEF-hosting roster --------------------------------------------------
+# The variable name is the contract between this lint and src/editor/shell/CMakeLists.txt. It is a
+# MULTI-VALUE set() spanning many lines, so `_SET_CALL` above (deliberately single-value, because a
+# target name is never a list) cannot read it and this pattern exists alongside it.
+_ROSTER_VAR = "_ctx_cef_shell_executables"
+# `\b\s*` and NOT `\s+`: an EMPTIED roster is spelled `set(_ctx_cef_shell_executables)` with no
+# whitespace at all, and requiring some made that exact shape INVISIBLE to this check -- so the one
+# mutation the "is EMPTY" finding exists for would have passed vacuously. Found by writing that case.
+# The `\b` is what still keeps a longer identifier (`..._executables_old`) from matching.
+_ROSTER_SET = re.compile(rf"\bset\s*\(\s*{_ROSTER_VAR}\b\s*([^)]*)\)", re.DOTALL)
 
 _STAGE_FUNCTION = re.compile(
     r"\bfunction\s*\(\s*context_cef_stage_payload\b.*?\bendfunction\s*\(", re.DOTALL
@@ -151,26 +176,10 @@ _IF_LINE = re.compile(r"^[ \t]*(if|elseif|else|endif)\s*\((.*)\)[ \t]*$", re.IGN
 _CONDITION_TOKEN = re.compile(r'\(|\)|"[^"]*"|[^\s()]+')
 
 
-def strip_comments(text: str) -> str:
-    """Remove CMake `#` comments, honouring double-quoted strings (which may contain `#`)."""
-    out: list[str] = []
-    for line in text.splitlines():
-        in_quotes = False
-        cut = len(line)
-        i = 0
-        while i < len(line):
-            ch = line[i]
-            if ch == "\\":
-                i += 2
-                continue
-            if ch == '"':
-                in_quotes = not in_quotes
-            elif ch == "#" and not in_quotes:
-                cut = i
-                break
-            i += 1
-        out.append(line[:cut])
-    return "\n".join(out)
+# `strip_comments` now lives in _ci_common so this lint and check_fleet_manifest.py's rule-8 ctest
+# scan cannot disagree about what is CMake and what is prose. Re-exported, so `strip_comments(...)`
+# here — and `check.strip_comments` in tools/tests/test_cef_staging.py — keep resolving unchanged.
+from _ci_common import strip_comments  # noqa: E402  (grouped with this file's own helpers)
 
 
 # --- name resolution ------------------------------------------------------------------------------
@@ -440,6 +449,9 @@ def scan(repo_root: Path) -> tuple[list[str], int]:
 
     findings: list[str] = []
 
+    # check 5's subject: the hand-written roster, and where it was declared.
+    rosters: list[tuple[Path, list[str]]] = []
+
     # Per staging destination: its writers, its stage target, and its CEF executables. Each entry
     # carries the union of the platform sets its call sites were attributed to.
     writers: dict[Path, dict[str, tuple[Path, frozenset[str]]]] = {}
@@ -508,6 +520,9 @@ def scan(repo_root: Path) -> tuple[list[str], int]:
             for dependency in match.group(2).split():
                 resolved = resolve(dependency, values)
                 consumer[resolved] = consumer.get(resolved, frozenset()) | platforms
+
+        for match in _ROSTER_SET.finditer(text):
+            rosters.append((directory, match.group(1).split()))
 
         # --- macOS app-bundle payload writers (check 4) --------------------------------------------
         for start, args in calls(text, "COPY_MAC_FRAMEWORK"):
@@ -666,7 +681,93 @@ def scan(repo_root: Path) -> tuple[list[str], int]:
                 f"load -- and the failure is a runtime one, on one OS."
             )
 
+    # --- check 5: the hand-written roster equals the literal stage-consumer set --------------------
+    findings.extend(roster_findings(repo_root, rosters, stages, deps))
+
     return findings, len(lists)
+
+
+def roster_findings(
+    repo_root: Path,
+    rosters: list[tuple[Path, list[str]]],
+    stages: dict[Path, tuple[str, Path, frozenset[str]]],
+    deps: dict[str, dict[str, frozenset[str]]],
+) -> list[str]:
+    """Check 5 -- see the module docstring. The roster and the stage-edge consumers must be EQUAL.
+
+    ⚠ PLATFORM-BLIND, unlike checks 1/2/4: `consumers` below is read from `deps` with no platform
+    intersection, so this equality is really a claim about the Windows/Linux stage consumers. That is
+    exact today -- all ten smokes are declared unconditionally and macOS has no stage target at all --
+    but it is a TRAP for the one-platform-only executable the parent CMakeLists explicitly anticipates
+    ("if a future executable is ever deliberately one-platform-only, this list is what has to split
+    again"). A macOS-ONLY CEF host takes no stage edge by design, so check 5 would demand it be OUT of
+    the roster while the graph tier FATAL_ERRORs for it being derived-but-unlisted: two tiers making
+    mutually unsatisfiable demands. Whoever splits the roster must give check 5 the platform sets it
+    already computes (`stages[...][2]`, and the per-edge platforms in `deps[consumer][stage_target]`).
+    """
+    if not rosters:
+        # NO ROSTER, NO CHECK -- and the anti-vacuity guard for that lives one tier out, deliberately.
+        # This lint is generic over trees and its own pytest builds a dozen synthetic ones with no
+        # Shell, so a finding here would be noise on every one of them. But "no roster found" must not
+        # be how a RENAMED or DELETED roster passes, so the claim that the LIVE tree declares exactly
+        # one non-empty `_ctx_cef_shell_executables` is asserted in the live-tree half of
+        # tools/tests/test_cef_staging.py -- itself a blocking gate (the python-tests job), and the
+        # right home for a claim about THIS repository rather than about any repository.
+        return []
+    if len(rosters) > 1:
+        where = ", ".join(
+            f"{directory.relative_to(repo_root).as_posix()}/CMakeLists.txt" for directory, _ in rosters
+        )
+        return [
+            f"{where}: {len(rosters)} declarations of {_ROSTER_VAR}. It is THE ONE roster -- two of "
+            f"them is how the pre-e12c-2 duplicate lists drifted apart."
+        ]
+
+    directory, roster = rosters[0]
+    where = f"{directory.relative_to(repo_root).as_posix()}/CMakeLists.txt"
+    findings: list[str] = []
+
+    unresolved = sorted(name for name in roster if is_unresolved(name))
+    if unresolved:
+        findings.append(
+            f"{where}: {_ROSTER_VAR} contains name(s) this lint cannot resolve ({', '.join(unresolved)}). "
+            f"Both audits iterate the list literally, so name every member literally too."
+        )
+    if not roster:
+        return findings + [
+            f"{where}: {_ROSTER_VAR} is EMPTY. Both configure-time CEF audits iterate it, so an empty "
+            f"roster audits nothing while every check over it passes -- the vacuous direction."
+        ]
+
+    stage_targets = {stage_target for stage_target, _dir, _platforms in stages.values()}
+    if not stage_targets:
+        return findings + [
+            f"{where}: {_ROSTER_VAR} names {len(roster)} target(s) but no context_cef_stage_payload() "
+            f"stage target exists under src/ to cross-check them against."
+        ]
+
+    consumers = {
+        consumer
+        for consumer, dependencies in deps.items()
+        if stage_targets & set(dependencies)
+    }
+
+    for listed in sorted(set(roster)):
+        if listed not in consumers:
+            findings.append(
+                f"{where}: {_ROSTER_VAR} names {listed}, but no "
+                f"`add_dependencies({listed} <stage target>)` edge exists in the sources. Either the "
+                f"target was renamed/removed -- update the roster -- or it lost the issue-#360 "
+                f"staging edge, which check 2 covers only for executables it can SEE."
+            )
+    for consumer in sorted(consumers - set(roster)):
+        findings.append(
+            f"{where}: {consumer} takes the CEF stage dependency but is MISSING from {_ROSTER_VAR}, "
+            f"so BOTH configure-time audits skip it -- silently UNDER-AUDITED rather than caught. "
+            f"That is exactly how context_editor_shell_uimirror_smoke and "
+            f"context_editor_shell_iframe_smoke went unchecked for two tasks. Add it to the roster."
+        )
+    return findings
 
 
 def main(argv: list[str] | None = None) -> int:
