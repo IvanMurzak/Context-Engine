@@ -508,6 +508,8 @@ PANEL_BUNDLE = (
     'var UI_TOPIC_WRITE_NOTICE = "editor.ui.write-notice";\n'
     'var WRITE_NOTICE_KIND_DROP = "drop";\n'
     'var WRITE_NOTICE_KIND_REFUSAL = "refusal";\n'
+    # x10 abandoned-gesture kind (notifications.ts).
+    'var WRITE_NOTICE_KIND_ABANDONED = "abandoned";\n'
     # e13c-1 package daemon fan-in method (boot.ts).
     'var PANEL_DAEMON_CALL_METHOD = "panel.daemon.call";\n'
 )
@@ -615,6 +617,7 @@ PANEL_CPP_WRITE_NOTICE = (
     'inline constexpr const char* kWriteNoticeOrigin = "shell";\n'
     'inline constexpr const char* kWriteNoticeKindDrop = "drop";\n'
     'inline constexpr const char* kWriteNoticeKindRefusal = "refusal";\n'
+    'inline constexpr const char* kWriteNoticeKindAbandoned = "abandoned";\n'
 )
 
 # The e13c-1 package daemon fan-in lives in its OWN header (package_sessions.h), like the write-notice
@@ -928,7 +931,9 @@ def test_a_renamed_package_session_cpp_constant_is_a_config_error(tmp_path: Path
 
 
 @pytest.mark.parametrize(
-    "ts_name", ["UI_TOPIC_WRITE_NOTICE", "WRITE_NOTICE_KIND_DROP", "WRITE_NOTICE_KIND_REFUSAL"])
+    "ts_name",
+    ["UI_TOPIC_WRITE_NOTICE", "WRITE_NOTICE_KIND_DROP", "WRITE_NOTICE_KIND_REFUSAL",
+     "WRITE_NOTICE_KIND_ABANDONED"])
 def test_write_notice_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> None:
     """A drift here is SILENT in a way the sibling method surfaces are not — no `unknown_method` is
     ever produced. The topic drifting makes editor-core's CLOSED bus refuse every notice, so a refused
@@ -942,7 +947,8 @@ def test_write_notice_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> No
 
 @pytest.mark.parametrize(
     "ts_name",
-    ["UI_TOPIC_WRITE_NOTICE", "WRITE_NOTICE_KIND_DROP", "WRITE_NOTICE_KIND_REFUSAL"])
+    ["UI_TOPIC_WRITE_NOTICE", "WRITE_NOTICE_KIND_DROP", "WRITE_NOTICE_KIND_REFUSAL",
+     "WRITE_NOTICE_KIND_ABANDONED"])
 def test_bundle_missing_a_write_notice_constant_fails(tmp_path: Path, ts_name: str) -> None:
     """An ABSENT constant means editor-core is not rendering the notices the Shell publishes at all —
     i.e. the notification host was tree-shaken out or never wired, which looks like a quiet editor.

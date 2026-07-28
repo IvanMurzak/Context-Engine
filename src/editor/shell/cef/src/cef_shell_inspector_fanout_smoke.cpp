@@ -36,15 +36,21 @@
 //      DOM — which is the only way to assert "window B's Inspector reflects it" about the surface a
 //      human would actually look at, rather than about the model behind it.
 //
-// TWO KNOWN OPEN DEFECTS BOUND THIS SMOKE'S SHAPE, and neither is fixed here:
+// TWO KNOWN DEFECTS BOUND THIS SMOKE'S SHAPE. One is now FIXED elsewhere; the other is still open.
 //
-//   * **CE #452** — a staged gesture is silently discarded when another client moves the SHARED
-//     selection (daemon state since e08b). This smoke therefore NEVER moves the selection while a
-//     gesture is staged: both windows are armed on the same identity up front (§1) and every later
-//     step edits a VALUE, which `identity_hash_of` does not depend on. That is a deliberate
-//     avoidance, stated so a future reader does not "simplify" a selection move into §5 and get an
-//     unexplained lost gesture. #452 needs an owner policy call (defer, or make the abandonment
-//     loud); it is not this task's to make.
+//   * **CE #452 — FIXED by M9 x10, but the avoidance below STAYS, for a different reason.** A staged
+//     gesture used to be silently discarded when another client moved the SHARED selection (daemon
+//     state since e08b). x10 closed both doors (`InspectorFeed::request` / `request_clear` now DEFER
+//     any selection-driven read behind an in-flight gesture) and made a genuinely-undeferrable
+//     abandonment LOUD through the write-notice relay. This smoke still NEVER moves the selection while
+//     a gesture is staged — both windows are armed on the same identity up front (§1) and every later
+//     step edits a VALUE, which `identity_hash_of` does not depend on — but the reason is now
+//     STRUCTURAL rather than a bug-avoidance: this file binds BOTH windows to ONE daemon connection
+//     (see the MIRROR IS NOT EXACT note below), so every `selection-changed` fact it could provoke
+//     carries its OWN `origin` and is dropped by echo suppression BY DESIGN. A foreign selection move
+//     needs two connections, which is **CE #455**. x10's proof therefore lives in the CEF-free sibling
+//     `editor-session-concurrent-cas-t2` (§ 5e), which holds three separately-attached clients. Do not
+//     "simplify" a selection move into §5 expecting it to exercise x10 — here it would be a self-echo.
 //   * **CE #451** — the settle on `edit` is unbounded under `dispatch_mu`, a LOAD-only latency
 //     exposure. Idle cost is nil and this smoke is idle, so it does not appear here; a mysterious
 //     stall under a loaded runner would be #451, not this file.
@@ -1108,7 +1114,7 @@ int main(int argc, char** argv)
                     "…and dispatched window B's own `inspector.edit`, on its own router");
     }
     // Discard it: a read-back must leave no gesture behind, and `cancel` is the verb that fires no
-    // commit listener (which is exactly why `flush_deferred_refresh` has a call site there).
+    // commit listener (which is exactly why `flush_deferred` has a call site there).
     {
         bool dispatched = false;
         std::string code;

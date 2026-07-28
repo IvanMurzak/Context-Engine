@@ -15,6 +15,12 @@
 //     colour is provably NOT the only signal: the same element's TEXT states what happened, and it
 //     lands in the ASSERTIVE live region so a screen-reader user is told at the same moment.
 //
+// M9 x10 (CE #452) ADDS A THIRD KIND — an ABANDONED gesture, where no write was ever attempted because
+// the Inspector had to load a different model mid-edit. It shares the drop's `wait` hue (the human is
+// who must act) and has its OWN sentence (the drop's would be false in every clause), so the cases
+// below assert BOTH: the shared hue, and that the drop's story appears nowhere in it. A kind whose only
+// distinguishing test was its own token would be a vocabulary entry, not a behaviour.
+//
 // The last one is the a11y coverage this task owes: `wait` had no production consumer before e09b-3,
 // so its accessible behaviour is net-new and is asserted here rather than assumed from the token.
 
@@ -26,6 +32,7 @@ import {
     writeNoticeHeadline,
     writeNoticeText,
     writeNoticeTone,
+    WRITE_NOTICE_KIND_ABANDONED,
     WRITE_NOTICE_KIND_DROP,
     WRITE_NOTICE_KIND_REFUSAL,
 } from "../notifications.js";
@@ -42,7 +49,17 @@ function payload(kind: string, overrides: Record<string, unknown> = {}): Record<
     return {
         kind,
         action: "edit",
-        code: kind === WRITE_NOTICE_KIND_DROP ? "cas.mismatch" : "shell.no_daemon",
+        // Each kind carries the code its own producer actually mints — `cas.mismatch` from the L-30
+        // engine, `shell.no_daemon` from the wire gateway, and the Shell-minted
+        // `shell.gesture_abandoned` (inspector_feed.h) for an abandonment, which is deliberately NOT a
+        // contract-catalog entry because no daemon verb was called at all. A fixture that gave all
+        // three the same code would let a renderer that keyed on the CODE instead of the KIND pass.
+        code:
+            kind === WRITE_NOTICE_KIND_DROP
+                ? "cas.mismatch"
+                : kind === WRITE_NOTICE_KIND_ABANDONED
+                  ? "shell.gesture_abandoned"
+                  : "shell.no_daemon",
         message: "another writer advanced the file",
         pointer: "/components/camera/fov",
         ...overrides,
@@ -95,6 +112,25 @@ export const notificationTests: TestCase[] = [
             // a rename that slipped past the gate still reds here.
             assertEqual(WRITE_NOTICE_KIND_DROP, "drop", "the C++ drop token");
             assertEqual(WRITE_NOTICE_KIND_REFUSAL, "refusal", "the C++ refusal token");
+            // M9 x10 (CE #452): an ABANDONMENT shares the `wait` hue with a drop — the write path is
+            // healthy and the human is who must act — while being a DISTINCT kind, because the
+            // sentence differs (case 3 below). Both facts are asserted: the shared hue, so a future
+            // refactor cannot quietly demote it to `bad` ("the project is unreachable", which would be
+            // a lie), and the distinct token, so it cannot collapse into `drop`.
+            assertEqual(
+                writeNoticeTone(WRITE_NOTICE_KIND_ABANDONED),
+                "wait",
+                "an abandoned gesture awaits the human too",
+            );
+            assertEqual(WRITE_NOTICE_KIND_ABANDONED, "abandoned", "the C++ abandoned token");
+            // ⚠ NO `WRITE_NOTICE_KIND_ABANDONED !== WRITE_NOTICE_KIND_DROP` ASSERTION HERE, and the
+            // reason is worth recording: tsgo REFUSES it (TS2367 — "the types '\"abandoned\"' and
+            // '\"drop\"' have no overlap"), because both are literal-typed `const`s, so the comparison
+            // is decided at COMPILE time and could never fail at runtime. It is exactly the
+            // assertion-that-cannot-fail class this milestone keeps shipping, and the typechecker
+            // catches it here. The two `assertEqual`s above already pin the distinctness, at the only
+            // place a drift could actually occur — the VALUES.
+            // The behavioural distinction (they produce different SENTENCES) is case 3's.
             // An unknown kind takes the SEVERE hue, not the gentle one: over-stating costs a second
             // look, under-stating sends the human re-applying an edit that cannot land.
             assertEqual(writeNoticeTone("something-new"), "bad", "an unknown kind is not soothing");
@@ -129,6 +165,35 @@ export const notificationTests: TestCase[] = [
             assert(
                 !refusalHeadline.includes("re-apply"),
                 "and does NOT tell the human to re-apply — the project is unreachable, not contended",
+            );
+
+            // AND AN ABANDONMENT READS DIFFERENTLY AGAIN (M9 x10, CE #452) — the assertion that makes
+            // the third kind worth having. Sharing the drop's hue is fine; sharing its SENTENCE would
+            // be a confident falsehood, because there was no compare-and-swap, no co-writer need
+            // exist, and the field it names is no longer the one on screen.
+            const abandoned = parseWriteNotice(payload(WRITE_NOTICE_KIND_ABANDONED));
+            assert(abandoned !== null, "the fixture parses");
+            const abandonedHeadline = writeNoticeHeadline(abandoned!);
+            // WHAT ACTUALLY HAPPENED — the cause the human cannot guess, since the selection may well
+            // have been moved by another window, a CLI or an agent (it is daemon state since e08b).
+            assert(
+                abandonedHeadline.includes("selection changed"),
+                "the abandonment names the selection change as the cause",
+            );
+            assert(abandonedHeadline.includes("Nothing was written"), "and that nothing was written");
+            // WHAT TO DO — go BACK to the entity, which is different advice from the drop's.
+            assert(abandonedHeadline.includes("re-select"), "and tells them to re-select it");
+            // AND IT MUST NOT INHERIT THE DROP'S STORY. This is the discriminating pair: without it, a
+            // regression that routed `abandoned` through the drop branch (or dropped the branch
+            // altogether, falling through to the refusal text) would leave every assertion above
+            // satisfiable by the wrong sentence.
+            assert(
+                !abandonedHeadline.includes("someone else changed that field first"),
+                "it does NOT claim a co-writer collision that never happened",
+            );
+            assert(
+                !abandonedHeadline.includes("could not be saved"),
+                "nor does it fall through to the refusal text — the write path was never asked",
             );
         },
     },
@@ -211,6 +276,38 @@ export const notificationTests: TestCase[] = [
             const toast = toasts(host.element)[0];
             assertEqual(toast?.getAttribute("data-tone"), "bad", "a refusal is an error hue");
             // Still assertive — both kinds are moments design 10 makes non-negotiably loud.
+            assertEqual(lane(toast!)?.getAttribute("role"), "alert", "and still interrupts");
+            host.dispose();
+        },
+    },
+
+    // ------------------------------- 6b. an ABANDONED gesture takes `wait` and says its own thing
+    {
+        name: "notifications: an abandoned gesture renders the wait hue with its OWN sentence",
+        run: () => {
+            // The end-to-end half of case 3, over the REAL arrival path a Shell publish takes. It
+            // matters because the two halves fail independently: the pure functions could be right
+            // while the host mis-hues (it reads `notice.kind`, which a parser regression can blank),
+            // and the DOM could carry the right tone while showing the drop's sentence.
+            const bus = new EditorUiBus({ origin: "0" });
+            const host = createNotificationHost(bus);
+            bus.receiveMirrored(shellEnvelope(WRITE_NOTICE_KIND_ABANDONED));
+
+            assertEqual(host.shown, 1, "the abandonment was shown at all");
+            const toast = toasts(host.element)[0];
+            assert(toast !== undefined, "a toast is in the DOM");
+            assertEqual(toast?.getAttribute("data-tone"), "wait", "an abandonment awaits the human");
+            // Colour is NEVER the only signal (R-A11Y-001): the element's own text says what happened,
+            // and it is the ABANDONMENT text rather than the drop's.
+            assert(
+                (toast?.textContent ?? "").includes("selection changed"),
+                "and the text names the cause, not just the hue",
+            );
+            assert(
+                !(toast?.textContent ?? "").includes("someone else changed that field first"),
+                "with the drop's story nowhere in it",
+            );
+            // Still assertive — design 10's LOUD invariant does not soften for the gentler hue.
             assertEqual(lane(toast!)?.getAttribute("role"), "alert", "and still interrupts");
             host.dispose();
         },

@@ -211,6 +211,20 @@ struct InspectorObservation
     bool has_staged_edit = false;
     // A settle-driven re-read is OWED but withheld behind an in-flight gesture (e09e-2).
     bool refresh_deferred = false;
+    // The SELECTION-driven half of that deferral (M9 x10, CE #452): a move to another entity — or a
+    // clear — is owed but withheld behind an in-flight gesture. `deferred_selection` is the identity
+    // that will be adopted when the gesture ends, and "" means either nothing is owed OR the withheld
+    // fact was a CLEAR: read `selection_deferred` first to tell those apart (that is the same
+    // present-vs-empty discipline `present` itself documents above).
+    bool selection_deferred = false;
+    std::string deferred_selection;
+    // Selection-driven reads RECOGNIZED and withheld — the counter that keeps the x10 negatives
+    // ("the staged edit survived", "nothing was armed") from passing on a feed that never saw the
+    // selection change at all.
+    std::size_t selections_deferred = 0;
+    // Staged gestures ABANDONED at the one undeferrable door (x10 — `InspectorFeed::apply_result`).
+    // Must stay 0 on every path the deferral covers; non-zero is a reported data-loss event.
+    std::size_t abandons_observed = 0;
     bool fetch_pending = false;
     // The L-30 collision base the NEXT commit will CAS against. 0 = no CAS guard.
     std::uint64_t base_raw_hash = 0;
@@ -286,10 +300,12 @@ void bind_session_client(SessionFeed& feed, client::Client* client);
 // because the two writes seams then read identically at the call site.
 void bind_write_client(BuiltinPanels& panels, client::Client* client);
 
-// Point every REFUSED write in this bag at the Shell's loud-notice relay (M9 e09b-3, design 05 §8).
+// Point every REFUSED write in this bag at the Shell's loud-notice relay (M9 e09b-3, design 05 §8) —
+// and, since M9 x10 (CE #452), every ABANDONED Inspector gesture as well.
 //
-// ONE seam for BOTH refusal sites — the Inspector's gesture commit and the undo/redo replay — because
-// the human does not care which of them refused; they care that the editor said so. Keeping the
+// ONE seam for ALL THREE loss sites — the Inspector's gesture commit, the undo/redo replay, and the
+// Inspector's undeferrable gesture abandonment — because
+// the human does not care which of them lost their work; they care that the editor said so. Keeping the
 // message COMPOSITION here (in builtin_panels.cpp, the one TU that sees both feeds AND the relay) is
 // what stops two hand-rolled `WriteNotice` builders drifting into two different vocabularies for the
 // same event, and is why the feeds themselves hold only an erased `std::function` and never name the

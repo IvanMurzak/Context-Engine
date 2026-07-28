@@ -298,15 +298,23 @@ UI_MIRROR_CONSTANTS = (
 #     CLOSED set. A drift makes `receiveMirrored` refuse every notice as an unknown topic, so a
 #     refused write goes back to being invisible to the human — the exact regression this task
 #     existed to end, restored by a typo, with a GREEN build and a green mirror on both sides.
-#   * THE TWO KINDS — they choose the HUE (06 §2: `wait` = awaiting-human, `bad` = error). A drift
-#     does not hide the notice; it MIS-STATES it, telling the human their project is unreachable when
-#     a colleague merely edited the same field. A wrong message is harder to notice than a missing one.
+#   * THE THREE KINDS — they choose the HUE (06 §2: `wait` = awaiting-human, `bad` = error) AND, since
+#     M9 x10, the SENTENCE. A drift does not hide the notice; it MIS-STATES it, telling the human their
+#     project is unreachable when a colleague merely edited the same field, or telling them to re-apply
+#     against the current value of a field the selection has already moved away from. A wrong message is
+#     harder to notice than a missing one.
 WRITE_NOTICE_CONSTANTS = (
     ("editor.ui write-notice topic", "write_notice.h", "kUiTopicWriteNotice",
      "UI_TOPIC_WRITE_NOTICE"),
     ("write-notice drop kind", "write_notice.h", "kWriteNoticeKindDrop", "WRITE_NOTICE_KIND_DROP"),
     ("write-notice refusal kind", "write_notice.h", "kWriteNoticeKindRefusal",
      "WRITE_NOTICE_KIND_REFUSAL"),
+    # M9 x10 (CE #452): the ABANDONED-gesture kind. Pinned for the same reason its two siblings are —
+    # a drift makes every abandonment fall through to the renderer's unknown-kind default, which hues
+    # it `bad` and words it "could not be saved", i.e. reports a healthy write path as broken and
+    # says nothing about the selection change that actually destroyed the edit.
+    ("write-notice abandoned kind", "write_notice.h", "kWriteNoticeKindAbandoned",
+     "WRITE_NOTICE_KIND_ABANDONED"),
 )
 
 # The M9 e13c-1 PACKAGE DAEMON FAN-IN method (design 04 §5 / 08 §2). The one Shell router method that

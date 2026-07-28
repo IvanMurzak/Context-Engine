@@ -29,7 +29,8 @@ so a consumer written against one reads the other:
   within one incarnation. A refused publish consumes none.
 * **`topic`** — the built-in **seven** are closed: `editor.ui.focus`, `.layout`, `.drag`,
   `.viewport`, `.theme-changed`, `.palette`, and — since M9 e09b-3 — `.write-notice` (a write the
-  editor REFUSED: an L-30 concurrent-writer drop, or a write-path refusal). Design 05 §5 enumerates
+  editor REFUSED: an L-30 concurrent-writer drop, or a write-path refusal; and, since M9 x10, an
+  Inspector gesture the editor ABANDONED, where no write was attempted at all). Design 05 §5 enumerates
   the first six; the seventh is required by §8's canonical write flow, which ends *"drop LOUDLY +
   notification + `editor.ui` fact"*, and by design 10's non-negotiable *"Destructive/lossy moments …
   are LOUD (wait/bad hues), never silent"*. The set is still CLOSED — adding a member is a
@@ -123,16 +124,22 @@ shape is worth knowing because it is the editor's one Shell-to-renderer push pat
 * editor-core's `UiMirrorPoller` applies it to the bus like any mirrored fact, and
   `createNotificationHost` (`notifications.ts`) renders it: `wait` hue for a drop (06 §2's
   awaiting-human — nothing was lost, re-apply against the current value), `bad` for a refusal
-  (nothing was written), always in the kit's **assertive** live region so colour is never the only
-  signal. The topic string and the two kind tokens are byte-compared against `write_notice.h` by
-  `tools/check_webui_assets.py --panel-contract`;
+  (nothing was written), and — since M9 x10 (CE #452) — `wait` again for an **abandoned** gesture, with
+  its own sentence: no write was attempted at all, the Inspector had to load a different model while an
+  edit was in flight, so the human is told the SELECTION changed and to re-select that entity. Sharing
+  the drop's hue is right (the human is who must act); sharing its sentence would not be — there was no
+  compare-and-swap and no co-writer need exist. Always in the kit's **assertive** live region so colour
+  is never the only signal. The topic string and all THREE kind tokens are byte-compared against
+  `write_notice.h` by `tools/check_webui_assets.py --panel-contract`;
 * the **payload** is `{kind, action, code, message, pointer}`, every member always present (an
   absent-vs-empty distinction would mean nothing here, so the Shell writes all five unconditionally
-  and `parseWriteNotice` stays total). `kind` is one of the two pinned tokens; `action` is free text
+  and `parseWriteNotice` stays total). `kind` is one of the three pinned tokens; `action` is free text
   the Shell composes (`"edit"` / `"undo"` / `"redo"`) and the renderer only displays; `code` is the
-  catalog code the write path answered with; `pointer` is the field the refused write targeted, empty
+  catalog code the write path answered with — or, for an abandoned gesture, the host-minted
+  `shell.gesture_abandoned`, deliberately NOT a catalog entry because no daemon verb was called;
+  `pointer` is the field the refused (or abandoned) write targeted, empty
   when there was none. Note the MEMBER NAMES themselves are not pinned across the boundary — only the
-  topic and the two kinds are — so a rename on one side degrades through the renderer's total parser
+  topic and the three kinds are — so a rename on one side degrades through the renderer's total parser
   rather than failing a gate.
 
 The remaining five topics have no publisher yet — they are the vocabulary the focus / layout / drag /

@@ -60,6 +60,42 @@
 // fact"). Counting a refusal and writing it to stderr — the state this feed shipped in until now — is
 // indistinguishable from silence in a GUI, which is what design 10's non-negotiable "LOUD, never
 // silent" invariant forbids.
+//
+// THE SELECTION DOOR WAS CLOSED IN M9 x10 (CE #452), BOTH WAYS — and this is the paragraph to read
+// before touching `request` / `request_clear` / `apply_result`.
+//
+// e09e-2 and x9 both deferred a re-read of the entity a gesture is staged ON. Neither covered a
+// selection that MOVED, and SELECTION HAS BEEN DAEMON STATE SINCE e08b — so "the human navigated
+// away" was never a safe reading of it: a FOREIGN `session` `selection-changed` fact (another window,
+// a CLI, an AI agent) survives echo suppression (session_feed.cpp), reaches
+// `SceneTreePanel::apply_selection`, and the composition root's selection listener then took ONE of
+// two doors, each of which destroyed the human's in-flight edit with NOTHING reported anywhere:
+//
+//   * `request(other_identity)` — the x9 guard MISSED, because it only deferred a SAME-identity
+//     re-read. The pump served the fetch and `InspectorPanel::set_model` discarded `staged_` AND
+//     adopted the other writer's raw hash as the L-30 CAS base.
+//   * `request_clear()` — an EMPTY id list ran `panel_.clear()`, dropping the staged edit AND the
+//     owed deferral outright. (The easier arm to forget, and the one that also loses the deferral.)
+//
+// The OWNER RULED BOTH REMEDIES, not one, and they are belt-and-braces on purpose:
+//
+//   1. DEFER. `request` and `request_clear` now withhold under ONE rule — a staged gesture withholds
+//      EVERY selection-driven read, whatever identity it names — and the withheld selection is
+//      REMEMBERED (`deferred_selection()`) so it is served the moment the gesture is genuinely gone.
+//      A deferral that forgot the selection would trade a lost edit for a window permanently out of
+//      sync with the daemon's selection, which is a different silent wrongness, not a fix.
+//   2. BE LOUD when an abandonment genuinely CANNOT be deferred. Exactly one path survives remedy 1:
+//      a fetch armed BEFORE the gesture was staged and served after it (the pump claimed it, the RPC
+//      ran, the reply is in hand). `apply_result` must adopt that reply — refusing it would strand a
+//      claimed fetch nothing re-arms — so the staged edit dies there, and the human is TOLD through
+//      the ABANDON SINK below. It is a THIRD notice kind (`kWriteNoticeKindAbandoned`), not e09b-3's
+//      drop or refusal: no write was ever attempted, so calling it a refused write would be a lie
+//      about what happened, and design 10's LOUD invariant is about telling the truth loudly.
+//
+// So after x10 there is NO path on which a staged gesture disappears without either being deferred or
+// being reported. That is the property to preserve; if a future task adds a fourth caller of
+// `set_model`, it inherits the report by construction (the check lives in `apply_result`, at the point
+// of loss, not at each door).
 
 #pragma once
 
@@ -126,6 +162,46 @@ inline constexpr const char* kInspectorWidgetPrefix = "inspector.widget.";
 // for a node that is not an inspector widget.
 [[nodiscard]] std::optional<std::string> inspector_widget_pointer(const std::string& node_id);
 
+// --------------------------------------------------------------- the x10 ABANDONED-GESTURE surface
+
+// The code an ABANDONED-gesture notice carries (M9 x10, CE #452).
+//
+// HOST-MINTED AND DELIBERATELY UNCATALOGUED, exactly like `WireOverrideWriteGateway::kNoDaemonCode`
+// and `UndoJournal::kReadUnavailableCode` (undo_journal.h records the same rationale): NO daemon verb
+// refused anything here — nothing was even sent — so there is no contract error to quote.
+// `contract::error_catalog` describes what the ENGINE answers, and registering a Shell-local UI event
+// there would advertise a code the daemon can never emit.
+inline constexpr const char* kGestureAbandonedCode = "shell.gesture_abandoned";
+
+// One ABANDONED gesture: a staged edit destroyed by an incoming model the feed could NOT withhold
+// (see the header's § THE SELECTION DOOR, remedy 2 — `apply_result` is the one such path).
+//
+// THE FACTS ONLY. The sentence the human reads is composed renderer-side (notifications.ts), which is
+// the same split e09b-3's refused-write notice takes and for the same reason: user-facing copy lives
+// where the translation and the a11y naming already are, not in two places.
+struct AbandonedGesture
+{
+    // The field the gesture was staged on (its RFC 6901 pointer), and the entity it was staged on.
+    std::string pointer;
+    std::string identity;
+    // The identity the panel adopted INSTEAD. Empty when the panel was cleared rather than re-pointed
+    // — which is information, not absence of it: "your edit was lost because the selection went away"
+    // and "…because it moved to X" are different things to be told.
+    std::string replaced_by;
+    // Always `kGestureAbandonedCode` from a production producer; carried as a member (rather than
+    // implied) so the notice shape stays uniform with `CommitResult`'s and the relay needs no special
+    // case.
+    //
+    // ⚠ DEFAULTED EMPTY, NOT to that constant, and deliberately: `InspectorFeed::last_abandon()`
+    // returns a default-constructed one before anything has been abandoned, so a pre-filled code would
+    // make `last_abandon().code == kGestureAbandonedCode` hold on a feed that never abandoned
+    // anything — an assertion that cannot fail. The producer assigns it.
+    std::string code;
+    // The diagnostic, composed here exactly as the L-30 drop's is (inspector_panel.cpp) — the engine's
+    // own words about what happened, shown as supporting detail under the renderer's headline.
+    std::string message;
+};
+
 // ------------------------------------------------------------------------------------ the feed
 
 // Owns an InspectorPanel and drives it from the Scene tree's selection + the daemon's
@@ -158,24 +234,40 @@ public:
     // `apply_event` refuses, arriving by the one door it does not watch; deferring HERE puts every
     // caller of the re-read seam under one rule.
     //
-    // SCOPE, precisely — only a re-read of the SAME identity defers, and that is exactly
-    // co-extensive with the door x9 opened: `SceneTreePanel::set_model` re-resolves
-    // `selection_.identity_hash` and never touches `selection_.identity`, so a settle-driven refetch
-    // can only ever re-request the identity already inspected.
+    // SCOPE, WIDENED BY M9 x10 (CE #452) — a staged gesture now withholds EVERY selection-driven
+    // read, not only a SAME-identity one. The two shapes are still tracked apart, because they are
+    // owed different things:
     //
-    // A selection that MOVED to a DIFFERENT identity still proceeds, and still discards a staged
-    // gesture. That is a PRE-EXISTING hole on a DIFFERENT path — the `session` `selection-changed`
-    // fact, which reaches `SceneTreePanel::apply_selection`, and whose EMPTY id list routes to
-    // `request_clear` and discards the gesture outright. Do NOT read it as a human-navigation-only
-    // case: selection has been DAEMON state since e08b, so another client or an agent can move it.
-    // It is deliberately NOT widened here (this guard closes the door THIS task opened) and it is not
-    // covered by e09b-3's loud-drop machinery either, which reports a REFUSED WRITE rather than an
-    // abandoned gesture. Recorded as a follow-up in the CE #449 PR body.
+    //   * SAME identity (the x9 door — `SceneTreePanel::set_model` re-resolves
+    //     `selection_.identity_hash` and never touches `selection_.identity`, so a settle-driven
+    //     refetch can only ever re-request the identity already inspected) => `refresh_deferred()`.
+    //     What is owed is a RE-READ of what is already on screen.
+    //   * a DIFFERENT identity (the x10 door — a FOREIGN `session` `selection-changed` fact moved the
+    //     shared selection) => `deferred_selection()`. What is owed is a MOVE, so the identity has to
+    //     be remembered; serving it later re-points the panel where the daemon says it is.
+    //
+    // Before x10 the second case PROCEEDED and destroyed the staged edit + the L-30 CAS base silently.
+    // Do NOT re-narrow this to the same-identity test: selection is DAEMON state (e08b), so the mover
+    // is as likely to be another client or an agent as the human at this keyboard.
+    //
+    // Returns true when the fetch was ARMED, false when it was DEFERRED — an ordinary outcome, not a
+    // failure. A later `request` REPLACES a pending fetch (only the latest selection matters) and,
+    // symmetrically, a later deferred selection replaces an earlier one.
     bool request(const std::string& identity);
 
     // Selection cleared -> clear the panel NOW (no RPC needed to render the placeholder) and drop
     // any pending fetch.
-    void request_clear();
+    //
+    // ⚠⚠ IT WITHHOLDS UNDER THE SAME x10 RULE AS `request` (CE #452), and this arm is the one that
+    // used to lose the MOST: `panel_.clear()` discards the staged edit AND resets the owed deferral,
+    // so an empty-id-list `selection-changed` from another client erased both at once. A staged
+    // gesture therefore defers the CLEAR as well, remembering it (`deferred_selection()`), and
+    // `flush_deferred` performs it once the gesture is genuinely gone.
+    //
+    // Returns true when the panel was actually CLEARED, false when the clear was DEFERRED (or when
+    // there was nothing to do). Deliberately not `[[nodiscard]]`: the composition root's selection
+    // listener legitimately ignores it, exactly as it ignores `request`'s.
+    bool request_clear();
 
     // Re-arm a re-read of the entity CURRENTLY inspected, because the file changed under the panel:
     // its own commit landed (READ-YOUR-WRITES, 05 §7) or an undo/redo replay wrote the field behind
@@ -194,6 +286,16 @@ public:
 
     // Adopt one `editor.inspect` reply (envelope / bare-data tolerance, like the scenetree feed).
     // Adopts the model AND the rawHash CAS token via set_model. Returns true when adopted.
+    //
+    // ⚠⚠ THIS IS THE ONE UNDEFERRABLE DOOR, and since M9 x10 (CE #452) it is LOUD rather than silent.
+    // The fetch was already CLAIMED (`mark_fetched`) and its RPC already ran, so the reply must be
+    // adopted — withholding it would strand a claimed fetch that nothing re-arms, leaving the panel
+    // rendering an entity the selection has moved past. `set_model` therefore still discards a staged
+    // gesture here (the narrow reachable interleaving: a fetch armed BEFORE the gesture was staged,
+    // served after). What changed is that the abandonment is now REPORTED — counted
+    // (`abandons_observed()`), kept (`last_abandon()`), written to stderr, and handed to the ABANDON
+    // SINK so the human is told. Any deferred selection is then released, because the gesture that was
+    // holding it back is gone.
     bool apply_result(const contract::Json& reply);
 
     // Consume one subscription event — the FAN-OUT half of design 05 §8's chain (M9 e09e-2).
@@ -214,7 +316,7 @@ public:
     // error — a lost write and a defeated compare-and-swap look exactly like a successful edit,
     // which is why the assertion that matters (test_e09b_concurrent_cas.cpp) is the NEGATIVE one.
     // So a settle arriving during a gesture is DEFERRED, not served, and released the moment the
-    // gesture is actually gone (see `refresh_deferred()` and `flush_deferred_refresh`).
+    // gesture is actually gone (see `refresh_deferred()` and `flush_deferred`).
     bool apply_event(const std::string& topic, const contract::Json& payload);
 
     // Bind the L-20/L-30 write path (M9 e09b-2); `nullptr` detaches. MUST be called BEFORE
@@ -255,6 +357,26 @@ public:
     void bind_notice_sink(NoticeSink sink);
     [[nodiscard]] bool has_notice_sink() const noexcept { return static_cast<bool>(notice_sink_); }
 
+    // The M9 x10 LOUD ABANDON SINK (CE #452) — where an UNDEFERRABLE gesture abandonment goes so the
+    // human is told. The SECOND sink, not a widening of the first, and the split is deliberate:
+    //
+    //   * `NoticeSink` carries a `CommitResult` — a write that was ATTEMPTED and did not land.
+    //   * `AbandonSink` carries an `AbandonedGesture` — an edit that was never sent at all, destroyed
+    //     because the panel had to adopt a model it could not withhold.
+    //
+    // Flattening them would mean synthesising a fake `CommitResult` for an event with no commit in it
+    // (what status? what code? there was no gateway call), and the renderer would then hue and word it
+    // as a refused write — the exact category error the third notice kind exists to avoid. They meet
+    // ONE layer up, in `bind_write_notice_relay`, which turns BOTH into a `WriteNotice` on the SAME
+    // `editor.ui` topic: reusing the SINK, not inventing a parallel channel.
+    //
+    // Erased through a std::function for the same reason the two sinks above are: this feed must not
+    // name `shell::WriteNoticeRelay`. An unbound sink is an ordinary state (every T1 bag builds one),
+    // and the abandonment is still counted and still reported to stderr.
+    using AbandonSink = std::function<void(const AbandonedGesture&)>;
+    void bind_abandon_sink(AbandonSink sink);
+    [[nodiscard]] bool has_abandon_sink() const noexcept { return static_cast<bool>(abandon_sink_); }
+
     [[nodiscard]] inspector::InspectorPanel& panel() noexcept { return panel_; }
     [[nodiscard]] const inspector::InspectorPanel& panel() const noexcept { return panel_; }
 
@@ -288,6 +410,45 @@ public:
     // because the alternative reading of a withheld refresh — that the feed simply ignored the
     // event — is indistinguishable from outside without it.
     [[nodiscard]] bool refresh_deferred() const noexcept { return refresh_deferred_; }
+    // Whether a SELECTION-driven read (a move to another identity, or a clear) is currently OWED but
+    // withheld because a gesture is staged (M9 x10, CE #452). The sibling of `refresh_deferred()`, and
+    // separate from it for the reason § request states: one owes a re-read of what is on screen, the
+    // other owes a MOVE somewhere else.
+    [[nodiscard]] bool selection_deferred() const noexcept
+    {
+        return deferred_selection_.has_value();
+    }
+    // The withheld selection, or nullopt when none is owed. `identity` empty == the selection was
+    // CLEARED (the `request_clear` arm). Exposed so a test can assert the WITHHELD VALUE and not
+    // merely that something was withheld: "the move was remembered" and "the move was dropped on the
+    // floor" are indistinguishable from a boolean.
+    struct DeferredSelection
+    {
+        // The identity to inspect when the selection MOVED; empty when it was CLEARED. There is no
+        // separate flag: `request` never accepts an empty identity from any producer (the composition
+        // root's listener routes the empty-id-list case to `request_clear`, and `request_refresh`
+        // returns early on an empty model identity), so emptiness carries the distinction without a
+        // second member that could disagree with it.
+        std::string identity;
+    };
+    [[nodiscard]] const std::optional<DeferredSelection>& deferred_selection() const noexcept
+    {
+        return deferred_selection_;
+    }
+    // How many selection-driven reads were RECOGNIZED and withheld (M9 x10). The exact counterpart of
+    // `events_applied()` and it earns its keep the same way: every x10 assertion is a NEGATIVE one
+    // ("the staged edit survived", "nothing was armed"), and those pass just as well on a feed that
+    // never saw the selection change at all. This counter is what tells the two apart.
+    [[nodiscard]] std::size_t selections_deferred() const noexcept { return selections_deferred_; }
+    // How many staged gestures were ABANDONED at the one undeferrable door (M9 x10 — see
+    // `apply_result`). Non-zero is a data-loss event the human was told about; it must stay 0 on every
+    // path remedy 1 covers, which is what makes the deferral assertions worth anything.
+    [[nodiscard]] std::size_t abandons_observed() const noexcept { return abandons_observed_; }
+    // How many of those were handed to the abandon sink. Strictly <= `abandons_observed()`: an
+    // abandonment with no sink bound is excluded, so "nobody was listening" is distinguishable from
+    // "nothing happened" — the same reason `notices_sent()` is counted apart from `drops_observed()`.
+    [[nodiscard]] std::size_t abandon_notices_sent() const noexcept { return abandon_notices_sent_; }
+    [[nodiscard]] const AbandonedGesture& last_abandon() const noexcept { return last_abandon_; }
     [[nodiscard]] const inspector::CommitResult& last_commit() const noexcept
     {
         return last_commit_;
@@ -308,21 +469,26 @@ private:
     // The commit listener body (registered on the panel at construction).
     void on_commit(const inspector::CommitResult& result);
 
-    // Release a settle-driven re-read that `apply_event` deferred, now that the gesture protecting it
-    // is over (M9 e09e-2). Returns true when a re-read was armed.
+    // Release whatever a staged gesture was withholding, now that the gesture is over — a
+    // settle-driven RE-READ (M9 e09e-2) or, since M9 x10 (CE #452), a selection-driven MOVE/CLEAR.
+    // Returns true when a fetch was armed (a clear arms none, and answers false).
     //
     // THE PREDICATE IS `has_staged_edit()`, NOT "a commit listener fired", and the difference is
     // load-bearing: a write-path ERROR deliberately KEEPS the staged gesture (inspector_panel.h — so
     // the human's in-flight edit is not silently discarded by a daemon outage), so the edit is STILL
     // in flight after that commit resolved and the deferral must SURVIVE it. Only a gesture that is
     // genuinely gone — consumed by an applied / rebased / dropped commit, or discarded by `cancel` —
-    // releases the refresh. Called from the two gesture-ends that leave the panel holding STALE
-    // state: a resolved refusal, and an explicit `cancel` (whose `discard_edit` fires no commit
-    // listener, so without that call site the deferral would strand forever). A staged gesture can
-    // end in FOUR places — those two, plus `set_model` via `apply_result` and `clear` via
-    // `request_clear` — and the other two need no flush precisely because they discharge the deferral
-    // by CLEARING the flag, the panel having just adopted fresh state or lost its selection.
-    bool flush_deferred_refresh();
+    // releases anything. Called from the two gesture-ends that leave the panel holding STALE state (a
+    // resolved refusal, and an explicit `cancel`, whose `discard_edit` fires no commit listener so
+    // without that call site the deferral would strand forever) and — since x10 — from `apply_result`,
+    // the one door that ends a gesture by destroying it.
+    //
+    // A DEFERRED SELECTION WINS over a deferred refresh, and that ordering is a correctness rule
+    // rather than a preference: the refresh was owed to the entity the gesture was staged on, and the
+    // selection has moved AWAY from it, so serving the refresh would re-read an entity nobody is
+    // looking at AND leave the daemon's selection unrendered. Adopting the selection discharges both,
+    // a fetch of the new identity being strictly more current than a re-read of the old one.
+    bool flush_deferred();
 
     // Snapshot the in-flight gesture as a reversible undo checkpoint (M9 e09c). nullopt when nothing
     // is staged, or when the model carries no addressable target — a checkpoint whose `root_scene`
@@ -347,11 +513,20 @@ private:
     std::size_t checkpoints_sent_ = 0;
     std::size_t notices_sent_ = 0;
     // e09e-2: `derivation.settled` facts recognized, and whether one is owed but withheld behind an
-    // in-flight gesture (see apply_event / flush_deferred_refresh).
+    // in-flight gesture (see apply_event / flush_deferred).
     std::size_t events_applied_ = 0;
     bool refresh_deferred_ = false;
+    // x10 (CE #452): the selection-driven read withheld behind an in-flight gesture, and how many were
+    // (see request / request_clear / flush_deferred).
+    std::optional<DeferredSelection> deferred_selection_;
+    std::size_t selections_deferred_ = 0;
+    // x10: the undeferrable abandonments at `apply_result`, and the last one — the LOUD half.
+    std::size_t abandons_observed_ = 0;
+    std::size_t abandon_notices_sent_ = 0;
+    AbandonedGesture last_abandon_;
     CheckpointSink sink_;
     NoticeSink notice_sink_;
+    AbandonSink abandon_sink_;
     inspector::CommitResult last_commit_;
 };
 
