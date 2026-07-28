@@ -28,6 +28,13 @@
 //   * a REFUSAL is `bad` — the write path said no (no daemon, an unreadable field). Nothing was
 //     written, and the thing to do about it is not "re-apply" but "wait for the project to be
 //     reachable".
+//   * an ABANDONMENT (M9 x10, CE #452) is `wait` too — no write was ever attempted; the Inspector had
+//     to replace the model under an in-flight edit (the shared selection moved, OR the same entity was
+//     re-read from disk), so the staged value was discarded. Same hue as a drop for 06 §2's stated
+//     reason (the human is who must act), DIFFERENT headline, because the drop's advice ("re-apply
+//     against the current value") points at a field that may no longer be on screen. The hue answers
+//     "whose turn is it"; the sentence answers "what happened" — and, because a notice sees only
+//     `kind`, that sentence names no single CAUSE (see `writeNoticeHeadline`).
 //
 // ⚠ COLOUR IS NEVER THE ONLY SIGNAL (R-A11Y-001). Every notice carries its meaning in TEXT — the
 // headline names what was refused and why — and is announced through the kit's ASSERTIVE live region
@@ -56,14 +63,33 @@ import { UI_TOPIC_WRITE_NOTICE, type EditorUiBus, type EditorUiSubscription } fr
 export const WRITE_NOTICE_KIND_DROP = "drop";
 /** A write-PATH refusal: no daemon, an unreadable field, a compose refusal. Nothing was written. */
 export const WRITE_NOTICE_KIND_REFUSAL = "refusal";
+/**
+ * An ABANDONED gesture (M9 x10, CE #452): NO write was ever attempted. The Inspector had to replace
+ * the model under the human's in-flight edit — the shared selection moved, or the same entity was
+ * re-read from disk — and could not withhold it, so the staged value was discarded.
+ *
+ * A THIRD kind rather than a re-use of `WRITE_NOTICE_KIND_DROP`, because the drop's sentence would be
+ * FALSE here in every clause: nobody "changed that field first", there was no compare-and-swap, and
+ * there need not be a second writer at all. Sending the human to re-apply against "the current value"
+ * of a field that is no longer even on screen is worse than saying nothing, and it is the one thing a
+ * notice about lost work must not do.
+ */
+export const WRITE_NOTICE_KIND_ABANDONED = "abandoned";
 
-/** One refused write, as the Shell put it on the wire. */
+/** One refused write — or, since M9 x10, one abandoned gesture — as the Shell put it on the wire. */
 export interface WriteNotice {
-    /** `WRITE_NOTICE_KIND_DROP` or `WRITE_NOTICE_KIND_REFUSAL`; anything else reads as a refusal. */
+    /**
+     * `WRITE_NOTICE_KIND_DROP`, `WRITE_NOTICE_KIND_REFUSAL` or `WRITE_NOTICE_KIND_ABANDONED`;
+     * anything else reads as a refusal.
+     */
     readonly kind: string;
     /** What the human tried to do — "edit", "undo", "redo". Free prose from the Shell. */
     readonly action: string;
-    /** The catalog code the write path answered with (`cas.mismatch`, `shell.no_daemon`, …). */
+    /**
+     * The catalog code the write path answered with (`cas.mismatch`, `shell.no_daemon`, …) — or, for an
+     * abandoned gesture, the Shell-minted `shell.gesture_abandoned`, which is deliberately not a
+     * catalog entry because no daemon verb was called at all.
+     */
     readonly code: string;
     /** The engine's own diagnostic, shown as supporting detail. */
     readonly message: string;
@@ -106,9 +132,14 @@ export function parseWriteNotice(value: unknown): WriteNotice | null {
  * over-state the severity: telling a human their write hit an error when it was really a co-writer
  * collision costs them a second look, while telling them "awaiting you" when the project is actually
  * unreachable sends them re-applying an edit that cannot land.
+ *
+ * A DROP and an ABANDONMENT share the `wait` hue, and that is not a shortcut: 06 §2 reserves `wait`
+ * for "awaiting human", and in BOTH cases the write path is healthy and the action required is the
+ * human's — re-make the edit. They differ in what to SAY, not in what to do next, so the headline
+ * below distinguishes them while the hue does not.
  */
 export function writeNoticeTone(kind: string): SemanticTone {
-    return kind === WRITE_NOTICE_KIND_DROP ? "wait" : "bad";
+    return kind === WRITE_NOTICE_KIND_DROP || kind === WRITE_NOTICE_KIND_ABANDONED ? "wait" : "bad";
 }
 
 /**
@@ -126,6 +157,27 @@ export function writeNoticeHeadline(notice: WriteNotice): string {
         return (
             `Your ${what}${where} was not applied — someone else changed that field first. ` +
             `Nothing was overwritten; re-apply it against the current value.`
+        );
+    }
+    if (notice.kind === WRITE_NOTICE_KIND_ABANDONED) {
+        // ⚠⚠ CAUSE-NEUTRAL ON PURPOSE, and this sentence was WRONG until it was: it used to assert
+        // "the Inspector's selection changed" and tell the human to "re-select that entity". A notice
+        // renders from `kind` alone, and `abandoned` covers MORE than a selection move — the commonest
+        // producer is the opposite one, `on_commit`'s READ-YOUR-WRITES re-read of the SAME entity
+        // landing on a gesture the human started while it was in flight (measured over the real wire
+        // in test_e09b_concurrent_cas.cpp § 5e). On that path the selection never moved and the field
+        // is still on screen, so naming a selection change was a confident falsehood and "re-select
+        // that entity" was an instruction with nothing to do. Design 10's LOUD invariant is about
+        // telling the truth loudly, so the headline states only what is true of EVERY abandonment —
+        // the Inspector replaced the content under the edit — and the Shell's own diagnostic
+        // (`notice.message`, rendered right after by `writeNoticeText`) supplies the specific cause,
+        // which is the only layer that knows both identities (inspector_feed.cpp).
+        //
+        // It still deliberately does NOT say "re-apply against the current value" — the drop's advice —
+        // because there was no compare-and-swap and the field may no longer be on screen at all.
+        return (
+            `Your ${what}${where} was discarded — the Inspector replaced the content you were ` +
+            `editing. Nothing was written; re-open the field and re-apply your value.`
         );
     }
     return `Your ${what}${where} could not be saved. Nothing was written.`;
@@ -212,7 +264,7 @@ export function createNotificationHost(
                 region.show({
                     message: writeNoticeText(notice),
                     tone: writeNoticeTone(notice.kind),
-                    // ALWAYS assertive — see the module header. Both kinds are moments design 10
+                    // ALWAYS assertive — see the module header. All three kinds are moments design 10
                     // makes non-negotiably loud, and the kit's tone-derived default would leave a
                     // `wait` notice in the polite lane, i.e. silent for a screen-reader user who is
                     // looking elsewhere.

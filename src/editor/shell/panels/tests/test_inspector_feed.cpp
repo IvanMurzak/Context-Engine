@@ -960,9 +960,28 @@ void a_deferral_does_not_outlive_its_selection_or_its_read()
         CHECK(!feed.apply_event(panels::kDerivationTopic, settled_payload(41)));
         CHECK(feed.refresh_deferred());
 
-        feed.request_clear();
+        // ⚠ AMENDED BY M9 x10 (CE #452), and the amendment IS the fix. A clear arriving mid-gesture is
+        // now WITHHELD, so it retires nothing: the entity is still inspected, so the re-read owed to it
+        // is still owed. Before x10 this call ran `panel_.clear()` straight through and dropped BOTH the
+        // human's staged edit and this deferral — which is why the old assertions here read
+        // `!refresh_deferred()`; they were pinning the defect.
+        CHECK(!feed.request_clear());
+        CHECK(feed.selection_deferred());
+        CHECK(feed.selections_deferred() == 1u);
+        CHECK(feed.panel().has_staged_edit());  // the edit SURVIVED the clear
+        CHECK(feed.panel().has_selection());    // …and so did the model
+        CHECK(feed.refresh_deferred());         // the settle is still owed to the still-inspected entity
+        CHECK(!feed.pending().has_value());
+
+        // Once the gesture ends, the clear is performed AND the refresh dies with the selection —
+        // exactly what this case originally asserted, one gesture-end later.
+        end_name_gesture(host, shell::GestureVerb::cancel);
+        CHECK(!feed.panel().has_staged_edit());
+        CHECK(!feed.selection_deferred());
+        CHECK(!feed.panel().has_selection());
         CHECK(!feed.refresh_deferred());
         CHECK(!feed.pending().has_value());
+        CHECK(feed.rereads_armed() == 0u); // a clear arms no fetch
     }
     {
         shell::PanelHost host(roster_with_inspector());
@@ -978,12 +997,12 @@ void a_deferral_does_not_outlive_its_selection_or_its_read()
         // A fetch armed by something ELSE (a selection change) lands: the panel now holds fresh
         // state, which IS what the deferral was owed.
         //
-        // ⚠ Note what this case does NOT bless. `set_model` also discards the staged gesture and
-        // re-bases the CAS token here (100 -> 777) — the very damage `apply_event`'s guard exists to
-        // prevent. It is asserted as correct because e09e-2's deferral guards the SETTLE path only:
-        // a fetch armed by a selection change (or by an undo/redo replay) still lands mid-gesture,
-        // which is PRE-EXISTING `apply_result` behaviour and out of this task's scope. So the
-        // invariant is "a settle never re-bases a staged gesture", not "nothing ever does".
+        // ⚠ AMENDED BY M9 x10 (CE #452). `set_model` STILL discards the staged gesture and re-bases the
+        // CAS token here (100 -> 777) — that is the one UNDEFERRABLE door, because this fetch was
+        // already claimed and its RPC already ran, so refusing the reply would strand it. What x10
+        // changes is that the loss is no longer SILENT: it is counted, kept, and reported. The old form
+        // of this case asserted the re-base as correct and said nothing about the human being told;
+        // that silence was CE #452.
         Json data = Json::object();
         data.set("inspector", builders::inspector_to_wire(one_field_model("Fresh")));
         data.set("rawHash", Json(std::string("777")));
@@ -993,7 +1012,519 @@ void a_deferral_does_not_outlive_its_selection_or_its_read()
         CHECK(feed.apply_result(envelope));
         CHECK(!feed.refresh_deferred());
         CHECK(feed.panel().base_raw_hash() == 777u);
+        CHECK(!feed.panel().has_staged_edit());
+        // THE LOUD HALF (see `an_undeferrable_abandonment_is_reported_loudly` for the sink assertions).
+        CHECK(feed.abandons_observed() == 1u);
+        CHECK(feed.last_abandon().pointer == "/name");
+        // ⚠⚠ AND IT MUST NOT CALL THIS A SELECTION MOVE (review finding). This reply names the SAME
+        // identity the panel already holds — a RE-READ, which is the commonest producer of an
+        // abandonment (read-your-writes landing on a gesture the human started meanwhile), not a move.
+        // Reporting a selection change here would be a confident falsehood about a selection that never
+        // moved, and it is what the renderer's cause-neutral headline exists to avoid.
+        CHECK(feed.last_abandon().replaced_by == feed.last_abandon().identity);
+        CHECK(panelstest::mentions(feed.last_abandon().message, "re-read this entity"));
+        // ⚠ PLANT: drop the `reloaded_same_entity` branch in `apply_result` and this REDS — the message
+        // falls back to "had to load `<the same identity>`", which reads as a move that did not happen.
+        CHECK(!panelstest::mentions(feed.last_abandon().message, "had to load"));
     }
+}
+
+// ------------------------------- M9 x10 (CE #452): the SELECTION door, both arms + the LOUD half
+//
+// THE DEFECT, precisely. A FOREIGN `session` `selection-changed` fact (another client, an agent)
+// survives echo suppression, reaches `SceneTreePanel::apply_selection`, and the composition root's
+// selection listener then calls either `request(other_identity)` — which x9's SAME-identity guard let
+// through — or, for an EMPTY id list, `request_clear()`. Both destroyed the human's staged edit, and
+// the first also re-based the L-30 CAS base onto the mover's post-write state, with nothing reported
+// anywhere. Selection is DAEMON state (e08b), so this is not "the human navigated away".
+//
+// ⚠⚠ WHY THESE CASES PUMP, AND WHY THAT IS THE WHOLE POINT. The e09e-2 block above says plainly that
+// its `has_staged_edit()` / `base_raw_hash()` assertions are "regression fencing only: nothing in a T1
+// case pumps, so they hold even with the guard removed". That is exactly the vacuity trap this
+// milestone has now hit eight times, so every case below runs `pump_once` — the inspector arm of
+// `pump_panel_feeds`, verbatim in behaviour — over whatever the door armed. With the deferral in place
+// NOTHING is pending, so nothing is served; with the deferral REMOVED the fetch is armed, `pump_once`
+// serves it, `set_model` runs, and the staged edit and the CAS base BOTH move. The negatives are
+// therefore detectors here, not decoration, and the round below measured that.
+//
+// PLANTED-VIOLATION VERIFICATION (conventions.md; recorded per the profile's success bar). Every plant
+// ran through `scripts/plant_and_revert.py` (out-of-tree byte backups, md5-verified restores, mtime
+// bumps, a GREEN full gate after the final restore) — see the PR body for the table and its verdicts.
+
+// Hand the feed one `editor.inspect` reply for `identity`, as the daemon would answer it. Split out of
+// `pump_once` so a case can model the pump's two halves SEPARATELY — claim now, reply later — which is
+// the only way to build the one interleaving that is genuinely undeferrable (a fetch already CLAIMED
+// when the gesture was staged; see `an_undeferrable_abandonment_is_reported_loudly`).
+[[nodiscard]] bool apply_reply(panels::InspectorFeed& feed, const std::string& identity,
+                               const char* value, std::uint64_t raw_hash)
+{
+    inspector::InspectorModel model = one_field_model(value);
+    model.identity = identity; // the daemon answers about what was requested, not about what was shown
+    Json data = Json::object();
+    data.set("inspector", builders::inspector_to_wire(model));
+    data.set("rawHash", Json(std::to_string(raw_hash)));
+    Json envelope = Json::object();
+    envelope.set("ok", Json(true));
+    envelope.set("data", std::move(data));
+    return feed.apply_result(envelope);
+}
+
+// Serve a pending fetch the way `pump_panel_feeds`'s inspector arm does: claim it, then hand the feed
+// a reply for the identity that was ASKED for. Answers false when nothing was pending — which is the
+// correct-behaviour case, and is asserted rather than ignored at every call site.
+[[nodiscard]] bool pump_once(panels::InspectorFeed& feed, const char* value, std::uint64_t raw_hash)
+{
+    if (!feed.pending().has_value())
+    {
+        return false;
+    }
+    const std::string identity = *feed.pending();
+    feed.mark_fetched(); // claim-before-RPC, exactly as the real pump does
+    return apply_reply(feed, identity, value, raw_hash);
+}
+
+constexpr const char* kOtherIdentity = "aaaaaaaaaaaaaaa1/ccccccccccccccc2";
+
+// ⚠⚠ DoD ITEM 1. A staged gesture SURVIVES a foreign selection move, with the L-30 CAS base INTACT —
+// and the move is not forgotten: it is served the moment the gesture is genuinely gone.
+void a_foreign_selection_move_defers_and_is_served_later()
+{
+    shell::PanelHost host(roster_with_inspector());
+    panels::InspectorFeed feed(host, kPanelId);
+    ScriptedGateway gateway;
+    feed.bind_gateway(&gateway);
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    feed.panel().set_model(one_field_model("Before"), 100);
+
+    stage_name_edit(host);
+    CHECK(feed.panel().has_staged_edit());
+
+    // The foreign move lands mid-gesture — a DIFFERENT identity, which is exactly the shape x9's guard
+    // let through. RECOGNIZED (the counter climbs, so a regression that dropped the request entirely
+    // cannot pass the negatives below) and WITHHELD.
+    CHECK(!feed.request(kOtherIdentity));
+    CHECK(feed.selections_deferred() == 1u);
+    CHECK(feed.selection_deferred());
+    CHECK(feed.deferred_selection().has_value());
+    CHECK(feed.deferred_selection().has_value() &&
+          feed.deferred_selection()->identity == kOtherIdentity);
+    CHECK(!feed.pending().has_value()); // NOT armed -> no pump can serve it behind the gesture
+    CHECK(feed.rereads_armed() == 0u);
+    CHECK(!feed.refresh_deferred()); // a MOVE is not a re-read: the two are tracked apart
+
+    // THE STEP THAT MAKES ALL OF THIS LOAD-BEARING. With the guard removed the fetch WOULD be pending,
+    // this pump WOULD serve it, and the two assertions after it would flip.
+    CHECK(!pump_once(feed, "Foreign", 777));
+    CHECK(feed.results_applied() == 0u);
+    CHECK(feed.panel().has_staged_edit());          // the human's edit survived
+    CHECK(feed.panel().base_raw_hash() == 100u);    // and its L-30 CAS base was NOT re-based
+    CHECK(feed.abandons_observed() == 0u);          // nothing was lost, so nothing was reported
+    CHECK(feed.panel().model().identity == "aaaaaaaaaaaaaaa1/ccccccccccccccc1");
+
+    // A SECOND move REPLACES the first (only the latest selection matters), still without arming.
+    CHECK(!feed.request("aaaaaaaaaaaaaaa1/ccccccccccccccc3"));
+    CHECK(feed.selections_deferred() == 2u);
+    CHECK(feed.deferred_selection().has_value() &&
+          feed.deferred_selection()->identity == "aaaaaaaaaaaaaaa1/ccccccccccccccc3");
+    CHECK(!feed.pending().has_value());
+
+    // THE GESTURE RESOLVES. A cancel, because it fires no commit listener — the path that would strand
+    // the deferral forever if `flush_deferred` were not called from there.
+    end_name_gesture(host, shell::GestureVerb::cancel);
+    CHECK(!feed.panel().has_staged_edit());
+    CHECK(!feed.selection_deferred());
+    // …and NOW the withheld selection is served: the panel follows the daemon, one gesture-end late.
+    CHECK(feed.pending() == std::optional<std::string>("aaaaaaaaaaaaaaa1/ccccccccccccccc3"));
+    // Through `request`, NOT `request_refresh` — a selection change is not a re-read, and counting it
+    // as one would make `rereads_armed()` claim a round trip nobody asked for.
+    CHECK(feed.rereads_armed() == 0u);
+    CHECK(pump_once(feed, "Foreign", 777));
+    CHECK(feed.panel().model().identity == "aaaaaaaaaaaaaaa1/ccccccccccccccc3");
+    CHECK(feed.abandons_observed() == 0u); // nothing was staged by then, so this is not a loss
+}
+
+// ⚠⚠ DoD ITEM 2 — THE `request_clear()` ARM, the one the brief warns is easiest to leave uncovered,
+// and the only one that used to drop the owed DEFERRAL as well as the edit.
+void a_foreign_selection_clear_defers_and_keeps_the_owed_deferral()
+{
+    shell::PanelHost host(roster_with_inspector());
+    panels::InspectorFeed feed(host, kPanelId);
+    ScriptedGateway gateway;
+    feed.bind_gateway(&gateway);
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    feed.panel().set_model(one_field_model("Before"), 100);
+
+    stage_name_edit(host);
+    // A settle is owed BEFORE the clear arrives, which is what makes the "and the owed deferral"
+    // half of the DoD observable at all: the old code reset it inside `panel_.clear()`.
+    CHECK(!feed.apply_event(panels::kDerivationTopic, settled_payload(51)));
+    CHECK(feed.refresh_deferred());
+
+    // The EMPTY id list. Withheld, remembered as a CLEAR (an empty identity), and — the second half —
+    // the settle stays owed, because the entity is still inspected.
+    CHECK(!feed.request_clear());
+    CHECK(feed.selections_deferred() == 1u);
+    CHECK(feed.selection_deferred());
+    CHECK(feed.deferred_selection().has_value() && feed.deferred_selection()->identity.empty());
+    CHECK(feed.refresh_deferred());
+    CHECK(feed.panel().has_staged_edit());
+    CHECK(feed.panel().has_selection());
+    CHECK(feed.panel().base_raw_hash() == 100u);
+    CHECK(!feed.pending().has_value());
+    CHECK(!pump_once(feed, "Foreign", 777)); // nothing armed -> nothing served
+    CHECK(feed.panel().has_staged_edit());
+    CHECK(feed.panel().base_raw_hash() == 100u);
+    CHECK(feed.abandons_observed() == 0u);
+
+    // THE GESTURE RESOLVES as a DROP (the co-writer moved this field) — the resolution that also
+    // releases the withheld reads. The CLEAR wins over the still-owed refresh, and it must: there is
+    // nothing left to re-read once the selection is gone.
+    gateway.refuse_with_cas_mismatch = true;
+    gateway.moved_value = jstring("Someone Else");
+    end_name_gesture(host, shell::GestureVerb::commit);
+    CHECK(feed.last_commit().status == inspector::CommitResult::Status::dropped);
+    CHECK(!feed.panel().has_selection()); // the clear was PERFORMED
+    CHECK(!feed.selection_deferred());
+    CHECK(!feed.refresh_deferred());
+    CHECK(!feed.pending().has_value()); // a clear arms no fetch, and the refresh died with it
+    CHECK(feed.rereads_armed() == 0u);
+}
+
+// ⚠⚠ DoD ITEM 3 — THE LOUD HALF. The one abandonment remedy 1 cannot defer: a fetch armed BEFORE the
+// gesture was staged, served after it. `apply_result` must adopt the reply (the fetch was claimed and
+// its RPC already ran), so the edit dies — and the human is TOLD, with a reason that is NOT e09b-3's
+// refused write.
+void an_undeferrable_abandonment_is_reported_loudly()
+{
+    shell::PanelHost host(roster_with_inspector());
+    panels::InspectorFeed feed(host, kPanelId);
+    ScriptedGateway gateway;
+    feed.bind_gateway(&gateway);
+    std::vector<panels::AbandonedGesture> abandoned;
+    feed.bind_abandon_sink([&abandoned](const panels::AbandonedGesture& record)
+                           { abandoned.push_back(record); });
+    CHECK(feed.has_abandon_sink());
+    // The REFUSED-write sink is bound too, and asserted SILENT below: the two must not be confused,
+    // and a regression that routed an abandonment through the e09b-3 sink would otherwise look like
+    // success (a notice DID reach the relay — just the wrong one, hued and worded as a refusal).
+    std::vector<inspector::CommitResult> refusals;
+    feed.bind_notice_sink([&refusals](const inspector::CommitResult& result)
+                          { refusals.push_back(result); });
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    feed.panel().set_model(one_field_model("Before"), 100);
+
+    // The interleaving: the fetch is armed with NOTHING staged (so no door defers it), and only then
+    // does the human start typing.
+    CHECK(feed.request(kOtherIdentity));
+    CHECK(feed.pending() == std::optional<std::string>(kOtherIdentity));
+    stage_name_edit(host);
+    CHECK(feed.panel().has_staged_edit());
+
+    // The pump serves the claimed fetch. This is the loss — undeferrable, and now loud.
+    CHECK(pump_once(feed, "Foreign", 777));
+    CHECK(!feed.panel().has_staged_edit());
+    CHECK(feed.panel().base_raw_hash() == 777u);
+    CHECK(feed.abandons_observed() == 1u);
+    CHECK(feed.abandon_notices_sent() == 1u);
+    CHECK(abandoned.size() == 1u); // guarded below — CHECK records, it does not abort
+    if (abandoned.size() == 1u)
+    {
+        CHECK(abandoned[0].pointer == "/name");
+        CHECK(abandoned[0].identity == "aaaaaaaaaaaaaaa1/ccccccccccccccc1");
+        CHECK(abandoned[0].replaced_by == kOtherIdentity);
+        // THE REASON, and the assertion that distinguishes this from e09b-3: a Shell-minted
+        // abandonment code, never the L-30 `cas.mismatch` a refused write carries.
+        CHECK(abandoned[0].code == std::string(panels::kGestureAbandonedCode));
+        CHECK(abandoned[0].code != std::string("cas.mismatch"));
+        // A notice whose message is empty renders as a headline with no reason — the shape a "loud"
+        // surface degrades into when nobody checks. It must name the field, too.
+        CHECK(!abandoned[0].message.empty());
+        CHECK(panelstest::mentions(abandoned[0].message, "/name"));
+        // THIS one really was a MOVE, so the diagnostic names the entity that displaced it — the half
+        // the renderer's cause-neutral headline cannot say, and the reason the Shell composes a message
+        // at all. Its twin assertion (a same-identity RE-READ must NOT read as a move) lives in
+        // `a_deferral_does_not_outlive_its_selection_or_its_read`.
+        CHECK(panelstest::mentions(abandoned[0].message, kOtherIdentity));
+        CHECK(!panelstest::mentions(abandoned[0].message, "re-read this entity"));
+    }
+    CHECK(feed.last_abandon().pointer == "/name");
+    // NOT a refused write: no commit ran, so the e09b-3 sink stayed silent and no commit was observed.
+    CHECK(refusals.empty());
+    CHECK(feed.notices_sent() == 0u);
+    CHECK(feed.commits_observed() == 0u);
+    CHECK(feed.drops_observed() == 0u);
+
+    // AND THE ABANDONMENT MUST NOT ALSO STRAND A WITHHELD SELECTION. The two x10 halves meet here:
+    // the gesture that was holding a deferred move back is gone (this abandonment consumed it), so
+    // `apply_result` releases it. Without that release the panel would sit on the entity the ALREADY
+    // CLAIMED fetch happened to name while the daemon's selection points somewhere else — a second,
+    // quieter way to be out of sync, and the one nothing else in this suite reaches.
+    //
+    // ⚠ THE CLAIM MUST COME BEFORE THE MOVE, and that ordering is the whole scenario rather than
+    // set-up detail. A deferral DROPS an unsent `pending_` fetch (inspector_feed.h § request), so if the
+    // move arrived first there would be nothing left to serve and no abandonment at all — which is the
+    // CORRECT behaviour and is pinned by `an_unsent_fetch_dies_with_a_deferred_selection`. Only a fetch
+    // the pump had already claimed (`mark_fetched` ran, the RPC is out) is undeferrable, so this case
+    // models the pump's two halves apart.
+    shell::PanelHost both_host(roster_with_inspector());
+    panels::InspectorFeed both(both_host, kPanelId);
+    ScriptedGateway both_gateway;
+    both.bind_gateway(&both_gateway);
+    CHECK(both_host.provide(kPanelId, both.make_provider()));
+    both.panel().set_model(one_field_model("Before"), 100);
+    CHECK(both.request(kOtherIdentity)); // armed with nothing staged
+    both.mark_fetched();                 // …and CLAIMED by the pump: the RPC is out, unrecallable
+    CHECK(!both.pending().has_value());
+    stage_name_edit(both_host);
+    CHECK(!both.request("aaaaaaaaaaaaaaa1/ccccccccccccccc7")); // a move arrives, withheld
+    CHECK(both.selection_deferred());
+    // The claimed reply lands -> the gesture is abandoned (undeferrable), and the move is released.
+    CHECK(apply_reply(both, kOtherIdentity, "Foreign", 777));
+    CHECK(both.abandons_observed() == 1u);
+    CHECK(!both.selection_deferred());
+    CHECK(both.pending() == std::optional<std::string>("aaaaaaaaaaaaaaa1/ccccccccccccccc7"));
+}
+
+// ⚠⚠ REVIEW FINDING (M9 x10). A deferral that leaves an UNSENT fetch armed is decorative: the pump
+// serves that stale read, `set_model` destroys the staged edit, and the human loses the gesture anyway
+// — merely LOUDLY, through the abandon door. Both doors therefore drop an unclaimed `pending_`.
+//
+// ⚠ PLANT: delete either `pending_.reset()` from `request`/`request_clear`'s staged branch and the
+// matching arm below REDS on `has_staged_edit` + `abandons_observed`.
+void an_unsent_fetch_dies_with_a_deferred_selection()
+{
+    // THE MOVE ARM.
+    {
+        shell::PanelHost host(roster_with_inspector());
+        panels::InspectorFeed feed(host, kPanelId);
+        ScriptedGateway gateway;
+        feed.bind_gateway(&gateway);
+        CHECK(host.provide(kPanelId, feed.make_provider()));
+        feed.panel().set_model(one_field_model("Before"), 100);
+
+        // A read-your-writes / replay refresh is armed and NOT yet claimed by the pump…
+        CHECK(feed.request_refresh());
+        CHECK(feed.pending() == std::optional<std::string>("aaaaaaaaaaaaaaa1/ccccccccccccccc1"));
+        // …the human starts typing, and only THEN does another client move the selection.
+        stage_name_edit(host);
+        CHECK(!feed.request(kOtherIdentity));
+        CHECK(feed.selection_deferred());
+        CHECK(!feed.pending().has_value()); // THE ASSERTION: the unsent read was dropped, not left armed
+
+        // So the pump has nothing to serve, and the gesture survives with its CAS base intact.
+        CHECK(!pump_once(feed, "Foreign", 777));
+        CHECK(feed.panel().has_staged_edit());
+        CHECK(feed.panel().base_raw_hash() == 100u);
+        CHECK(feed.abandons_observed() == 0u); // nothing was lost, so nothing was reported
+
+        // …and the withheld move is what gets served once the gesture ends.
+        end_name_gesture(host, shell::GestureVerb::cancel);
+        CHECK(feed.pending() == std::optional<std::string>(kOtherIdentity));
+    }
+    // THE CLEAR ARM — same rule, the door that used to lose the most.
+    {
+        shell::PanelHost host(roster_with_inspector());
+        panels::InspectorFeed feed(host, kPanelId);
+        ScriptedGateway gateway;
+        feed.bind_gateway(&gateway);
+        CHECK(host.provide(kPanelId, feed.make_provider()));
+        feed.panel().set_model(one_field_model("Before"), 100);
+
+        CHECK(feed.request_refresh());
+        CHECK(feed.pending().has_value());
+        stage_name_edit(host);
+        CHECK(!feed.request_clear());
+        CHECK(feed.selection_deferred());
+        CHECK(!feed.pending().has_value());
+        CHECK(!pump_once(feed, "Foreign", 777));
+        CHECK(feed.panel().has_staged_edit());
+        CHECK(feed.panel().base_raw_hash() == 100u);
+        CHECK(feed.abandons_observed() == 0u);
+    }
+}
+
+// ⚠⚠ REVIEW FINDING (M9 x10). A REMEMBERED move goes STALE when the selection comes BACK to the entity
+// being edited — a second foreign move, or the human clicking that row (`apply_selection` re-notifies
+// whenever the identity OR its hash changes). Following the stale move when the gesture ended left the
+// Inspector on an entity NOBODY had selected: the same "window out of sync with the daemon" wrongness
+// remedy 1 exists to prevent, arrived at from the other side.
+//
+// ⚠ PLANT: delete `deferred_selection_.reset()` from `request`'s same-identity staged arm and this REDS
+// on the pending identity after the gesture ends.
+void a_selection_returning_to_the_edited_entity_discharges_a_stale_move()
+{
+    shell::PanelHost host(roster_with_inspector());
+    panels::InspectorFeed feed(host, kPanelId);
+    ScriptedGateway gateway;
+    feed.bind_gateway(&gateway);
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    feed.panel().set_model(one_field_model("Before"), 100);
+    const std::string edited = "aaaaaaaaaaaaaaa1/ccccccccccccccc1";
+
+    stage_name_edit(host);
+    // The selection moves AWAY — withheld and remembered.
+    CHECK(!feed.request(kOtherIdentity));
+    CHECK(feed.deferred_selection().has_value() &&
+          feed.deferred_selection()->identity == kOtherIdentity);
+
+    // …and then comes BACK to the entity under the human's fingers. Still withheld (the gesture is
+    // live), but what is owed is now a RE-READ of what is on screen, not a move away from it.
+    CHECK(!feed.request(edited));
+    CHECK(!feed.selection_deferred()); // THE ASSERTION: the stale move was discharged
+    CHECK(feed.refresh_deferred());    // …and re-modelled as the re-read it now is
+    CHECK(feed.panel().has_staged_edit());
+    CHECK(feed.panel().base_raw_hash() == 100u);
+
+    // THE PAYOFF: the gesture ends and the panel stays on the entity the daemon actually has selected,
+    // rather than following a move that was superseded while the human typed.
+    end_name_gesture(host, shell::GestureVerb::cancel);
+    CHECK(!feed.panel().has_staged_edit());
+    CHECK(feed.pending() == std::optional<std::string>(edited));
+    CHECK(feed.rereads_armed() == 1u); // released as a RE-READ, which is what was owed
+    CHECK(pump_once(feed, "Fresh", 900));
+    CHECK(feed.panel().model().identity == edited);
+    CHECK(feed.abandons_observed() == 0u);
+}
+
+// A RE-READ must NOT discharge a withheld move — the mirror of the case above, and the reason
+// `request_refresh` owns its own guard instead of borrowing `request`'s. A settle-driven or
+// replay-driven re-read says nothing about where the selection is.
+void a_rereads_deferral_leaves_a_withheld_move_alone()
+{
+    shell::PanelHost host(roster_with_inspector());
+    panels::InspectorFeed feed(host, kPanelId);
+    ScriptedGateway gateway;
+    feed.bind_gateway(&gateway);
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    feed.panel().set_model(one_field_model("Before"), 100);
+
+    stage_name_edit(host);
+    CHECK(!feed.request(kOtherIdentity));
+    CHECK(feed.selection_deferred());
+
+    // The e09c READ-YOUR-REPLAYS caller does not check for a staged gesture first, so this is the real
+    // shape: `request_refresh` defers on its own and leaves the move standing.
+    CHECK(!feed.request_refresh());
+    CHECK(feed.refresh_deferred());
+    CHECK(feed.selection_deferred()); // THE ASSERTION: the move SURVIVED an unrelated re-read
+    CHECK(feed.deferred_selection().has_value() &&
+          feed.deferred_selection()->identity == kOtherIdentity);
+    CHECK(feed.rereads_armed() == 0u);
+    CHECK(!feed.pending().has_value());
+
+    // …and the move still outranks the refresh when the gesture ends.
+    end_name_gesture(host, shell::GestureVerb::cancel);
+    CHECK(feed.pending() == std::optional<std::string>(kOtherIdentity));
+    CHECK(!feed.refresh_deferred());
+}
+
+// THE ANTI-VACUITY CONTROL for the case above, and the one that makes it mean something. A gate that
+// reported an abandonment on EVERY adopted read would pass it while toasting the human after every
+// ordinary selection change — noise, which is how a real loss goes unnoticed. So the SAME driver, with
+// nothing staged, must report NOTHING.
+void an_ordinary_read_reports_no_abandonment()
+{
+    shell::PanelHost host(roster_with_inspector());
+    panels::InspectorFeed feed(host, kPanelId);
+    std::vector<panels::AbandonedGesture> abandoned;
+    feed.bind_abandon_sink([&abandoned](const panels::AbandonedGesture& record)
+                           { abandoned.push_back(record); });
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    feed.panel().set_model(one_field_model("Before"), 100);
+
+    CHECK(feed.request(kOtherIdentity));
+    // FIRST prove the read actually happened. Without this the control is vacuous in the other
+    // direction: a regression that stopped serving fetches at all reports zero abandonments just as
+    // faithfully, and this case would certify the silence of a panel that had stopped reading.
+    CHECK(pump_once(feed, "Foreign", 777));
+    CHECK(feed.results_applied() == 1u);
+    CHECK(feed.panel().model().identity == kOtherIdentity);
+
+    CHECK(feed.abandons_observed() == 0u);
+    CHECK(feed.abandon_notices_sent() == 0u);
+    CHECK(abandoned.empty());
+    // An UNBOUND sink is an ordinary state and must not change the accounting — the same rung the
+    // e09b-3 suite has for its notice sink.
+    shell::PanelHost bare_host(roster_with_inspector());
+    panels::InspectorFeed bare(bare_host, kPanelId);
+    ScriptedGateway bare_gateway;
+    bare.bind_gateway(&bare_gateway);
+    CHECK(bare_host.provide(kPanelId, bare.make_provider()));
+    CHECK(!bare.has_abandon_sink());
+    bare.panel().set_model(one_field_model("Before"), 100);
+    CHECK(bare.request(kOtherIdentity));
+    stage_name_edit(bare_host);
+    CHECK(pump_once(bare, "Foreign", 777));
+    CHECK(bare.abandons_observed() == 1u);      // still COUNTED
+    CHECK(bare.abandon_notices_sent() == 0u);   // but nobody was listening, and that is VISIBLE
+}
+
+// A withheld SELECTION outranks a withheld REFRESH, because the refresh is owed to an entity the
+// selection has moved away from. Serving the refresh instead would re-read something nobody is looking
+// at AND leave the daemon's selection unrendered — two wrongs where the ordering gives none.
+void a_deferred_selection_outranks_a_deferred_refresh()
+{
+    shell::PanelHost host(roster_with_inspector());
+    panels::InspectorFeed feed(host, kPanelId);
+    ScriptedGateway gateway;
+    feed.bind_gateway(&gateway);
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    feed.panel().set_model(one_field_model("Before"), 100);
+
+    stage_name_edit(host);
+    // BOTH are owed, in the order a real frame produces them: the settle arrives, the tree refetches,
+    // and the selection listener then reports a move.
+    CHECK(!feed.apply_event(panels::kDerivationTopic, settled_payload(61)));
+    CHECK(feed.refresh_deferred());
+    CHECK(!feed.request(kOtherIdentity));
+    CHECK(feed.selection_deferred());
+    CHECK(feed.refresh_deferred()); // still owed — the two coexist while the gesture is in flight
+
+    // The gesture resolves as an APPLIED commit, whose read-your-writes re-read would ordinarily
+    // re-request the OLD identity. It must yield: the write is on disk either way, and reading it back
+    // into a panel that is about to inspect something else discharges nothing.
+    end_name_gesture(host, shell::GestureVerb::commit);
+    CHECK(feed.last_commit().status == inspector::CommitResult::Status::applied);
+    CHECK(!feed.selection_deferred());
+    CHECK(!feed.refresh_deferred());
+    // THE ASSERTION: the pending fetch is the MOVE, not the read-your-writes re-read.
+    CHECK(feed.pending() == std::optional<std::string>(kOtherIdentity));
+    CHECK(feed.rereads_armed() == 0u); // …and it was not counted as a re-read
+    CHECK(pump_once(feed, "Foreign", 777));
+    CHECK(feed.panel().model().identity == kOtherIdentity);
+}
+
+// A write-path ERROR deliberately KEEPS the staged gesture (inspector_panel.h), so a withheld
+// selection must SURVIVE it — the same rule the e09e-2 refresh case pins, on the x10 slot. Releasing
+// on "a commit listener fired" would re-point the panel and destroy the very edit the error preserved.
+void a_deferred_selection_survives_a_write_path_error()
+{
+    shell::PanelHost host(roster_with_inspector());
+    panels::InspectorFeed feed(host, kPanelId);
+    ScriptedGateway gateway;
+    gateway.refuse_with_error = true;
+    feed.bind_gateway(&gateway);
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    feed.panel().set_model(one_field_model("Before"), 100);
+
+    stage_name_edit(host);
+    CHECK(!feed.request(kOtherIdentity));
+    CHECK(feed.selection_deferred());
+
+    end_name_gesture(host, shell::GestureVerb::commit);
+    CHECK(feed.last_commit().status == inspector::CommitResult::Status::error);
+    CHECK(feed.panel().has_staged_edit()); // the edit survived the refusal — the premise of this case
+    CHECK(feed.selection_deferred());      // …so the move is STILL withheld
+    CHECK(!feed.pending().has_value());
+    CHECK(!pump_once(feed, "Foreign", 777));
+    CHECK(feed.panel().has_staged_edit());
+    CHECK(feed.panel().base_raw_hash() == 100u);
+    CHECK(feed.abandons_observed() == 0u);
+
+    // Cancel genuinely ends it, and the move is served.
+    end_name_gesture(host, shell::GestureVerb::cancel);
+    CHECK(!feed.panel().has_staged_edit());
+    CHECK(feed.pending() == std::optional<std::string>(kOtherIdentity));
 }
 
 void selection_fetch_mechanics()
@@ -1043,6 +1574,15 @@ int main()
     a_settle_deferred_across_an_error_stays_deferred();
     a_settle_deferred_across_an_applied_commit_is_subsumed();
     a_deferral_does_not_outlive_its_selection_or_its_read();
+    a_foreign_selection_move_defers_and_is_served_later();
+    a_foreign_selection_clear_defers_and_keeps_the_owed_deferral();
+    an_undeferrable_abandonment_is_reported_loudly();
+    an_unsent_fetch_dies_with_a_deferred_selection();
+    a_selection_returning_to_the_edited_entity_discharges_a_stale_move();
+    a_rereads_deferral_leaves_a_withheld_move_alone();
+    an_ordinary_read_reports_no_abandonment();
+    a_deferred_selection_outranks_a_deferred_refresh();
+    a_deferred_selection_survives_a_write_path_error();
     selection_fetch_mechanics();
     PANELS_TEST_MAIN_END();
 }

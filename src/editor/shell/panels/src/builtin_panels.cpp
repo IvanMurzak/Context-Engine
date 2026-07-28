@@ -184,6 +184,15 @@ InspectorObservation observe_inspector(const BuiltinPanels& panels)
     out.has_selection = panel.has_selection();
     out.has_staged_edit = panel.has_staged_edit();
     out.refresh_deferred = feed.refresh_deferred();
+    // x10 (CE #452): the selection-driven half of the same deferral, plus the LOUD abandonment counter.
+    // Carried here so the `-fno-rtti` view of the feed stays COMPLETE — the header claims this struct
+    // is "every observable the feed and its panel expose", and a claim like that decays the moment a
+    // new observable is left out of it.
+    out.selection_deferred = feed.selection_deferred();
+    out.deferred_selection =
+        feed.deferred_selection().has_value() ? feed.deferred_selection()->identity : std::string();
+    out.selections_deferred = feed.selections_deferred();
+    out.abandons_observed = feed.abandons_observed();
     out.fetch_pending = feed.pending().has_value();
     out.base_raw_hash = panel.base_raw_hash();
     out.results_applied = feed.results_applied();
@@ -362,6 +371,28 @@ namespace
     return notice;
 }
 
+// One ABANDONED gesture -> the notice the human is shown (M9 x10, CE #452).
+//
+// THE THIRD KIND, ASSIGNED UNCONDITIONALLY, and that is the whole point of the function. There is no
+// status to switch on — an abandonment IS the outcome — so unlike `notice_kind_for` above there is
+// nothing to get wrong at runtime; what there was to get wrong is the CATEGORY, and it is fixed here:
+// an abandoned gesture is neither a co-writer DROP (no CAS, no collision, possibly no second writer at
+// all) nor a write-path REFUSAL (nothing was ever sent). Hueing it as either would hand the human a
+// confidently wrong explanation of how their typing disappeared — see write_notice.h § the three kinds.
+//
+// The `action` is `edit`, matching the gesture sink above: from the human's side the thing they were
+// doing is the same, and only the outcome differs.
+[[nodiscard]] shell::WriteNotice notice_from_abandon(const AbandonedGesture& abandoned)
+{
+    shell::WriteNotice notice;
+    notice.kind = shell::kWriteNoticeKindAbandoned;
+    notice.action = "edit";
+    notice.code = abandoned.code;
+    notice.message = abandoned.message;
+    notice.pointer = abandoned.pointer;
+    return notice;
+}
+
 } // namespace
 
 void bind_write_notice_relay(BuiltinPanels& panels, WriteNoticeRelay& relay)
@@ -375,6 +406,13 @@ void bind_write_notice_relay(BuiltinPanels& panels, WriteNoticeRelay& relay)
         panels.inspector->bind_notice_sink(
             [target](const inspector::CommitResult& result)
             { (void)target->publish(notice_from_commit(result, "edit")); });
+        // M9 x10 (CE #452) — the ABANDONED-gesture arm of the same relay. Bound HERE, alongside the
+        // refused-write sinks, because the human does not care WHICH mechanism lost their edit; they
+        // care that the editor said so. Reusing the one relay is also what keeps the transport,
+        // the topic and the broadcast-to-every-window behaviour identical for all three kinds instead
+        // of growing a second, subtly different notice path.
+        panels.inspector->bind_abandon_sink([target](const AbandonedGesture& abandoned)
+                                           { (void)target->publish(notice_from_abandon(abandoned)); });
     }
     if (panels.undo != nullptr)
     {
@@ -579,14 +617,21 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
                 {
                     if (selection.identity.empty())
                     {
-                        inspector_ptr->request_clear();
+                        // ⚠ A false return is the M9 x10 DEFERRAL, not a failure (CE #452): an EMPTY
+                        // id list on a FOREIGN `session` `selection-changed` used to run
+                        // `panel_.clear()` straight through, discarding the human's in-flight edit AND
+                        // the owed settle deferral. The feed now withholds the clear behind a staged
+                        // gesture and performs it when the gesture ends (inspector_feed.h §
+                        // request_clear).
+                        (void)inspector_ptr->request_clear();
                     }
                     else
                     {
-                        // A false return is the L-30 deferral, not a failure: this listener also fires
+                        // A false return is the L-30 deferral, not a failure: this listener fires both
                         // when a settle-driven tree refetch RE-RESOLVES the selected row's identity
-                        // hash, and re-reading the entity a gesture is staged on would silently
-                        // re-base it (inspector_feed.h § request).
+                        // hash (re-reading the entity a gesture is staged on would silently re-base
+                        // it) and — since x10 — when the selection MOVED to another entity, which used
+                        // to discard the gesture outright (inspector_feed.h § request).
                         (void)inspector_ptr->request(selection.identity);
                     }
                 });

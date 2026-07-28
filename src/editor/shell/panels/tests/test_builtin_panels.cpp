@@ -739,6 +739,234 @@ void a_settle_driven_tree_refetch_does_not_rebase_a_staged_gesture()
     CHECK(wired.channel->requests_for("editor.inspect").size() == 1);
 }
 
+// ------------------------ M9 x10 (CE #452): the SELECTION door, at the composition root, over a wire
+//
+// THE DEFECT x9's guard did not cover. The same FOREIGN `selection-changed` fact the case above rides
+// can carry a DIFFERENT identity, or NO identities at all — and the composition root's selection
+// listener then took a door the SAME-identity guard let straight through, so the pump's
+// `editor.inspect` landed, `set_model` discarded the human's staged edit AND re-based the L-30 CAS base
+// onto the mover's post-write state. Silently, because a defeated compare-and-swap is
+// indistinguishable from a successful edit.
+//
+// DRIVEN THE SAME WAY x9's case is, and for the same reason: the damage would be done by an
+// `editor.inspect` RPC the pump issues, so the honest assertion is that the RPC NEVER WENT OUT
+// (`requests_for("editor.inspect")`), never the proxy `!pending()`. Asserting that the FACT was applied
+// is what keeps that negative non-vacuous — a regression that stopped applying session facts at all
+// would satisfy "no inspect request" trivially.
+
+// The inspected entity + its editable field, hydrated the way a landed `editor.inspect` leaves the
+// panel. One spelling for the three cases below, so none of them can drift into staging a different
+// gesture from its siblings.
+[[nodiscard]] context::editor::gui::panels::inspector::InspectorModel inspected_camera()
+{
+    namespace inspector = context::editor::gui::panels::inspector;
+    inspector::InspectorModel model;
+    model.has_entity = true;
+    model.root_scene = "root.scene.json";
+    model.id_path = {"inst1", "ent1"};
+    model.identity = "inst1/ent1";
+    inspector::InspectorField editable;
+    editable.pointer = "/components/camera/fov";
+    editable.label = "fov";
+    editable.kind = inspector::WidgetKind::number;
+    editable.editable = true;
+    editable.value = jnum(6.5);
+    model.fields.push_back(editable);
+    return model;
+}
+
+// ⚠ PLANT: narrow `InspectorFeed::request`'s guard back to the SAME-identity test and this REDS — the
+// `editor.inspect` request goes out during the pump and the staged edit and CAS base are gone.
+void a_foreign_selection_move_does_not_rebase_a_staged_gesture()
+{
+    shell::PanelHost host;
+    panels::BuiltinPanels bound = panels::install_builtin_panels(host); // non-const: the pump mutates it
+    CHECK(bound.scenetree != nullptr);
+    CHECK(bound.inspector != nullptr);
+    CHECK(bound.session != nullptr);
+    if (bound.scenetree == nullptr || bound.inspector == nullptr || bound.session == nullptr)
+    {
+        return;
+    }
+
+    bound.scenetree->panel().set_model(tree_with_one_node("inst1/ent1", 0xAAAA));
+    CHECK(panels::apply_session_event(*bound.session, panels::kSessionTopic,
+                                      selection_fact({"inst1/ent1"})));
+    CHECK(bound.inspector->pending() == std::optional<std::string>("inst1/ent1"));
+    bound.inspector->mark_fetched();
+
+    bound.inspector->panel().set_model(inspected_camera(), 0x1234);
+    CHECK(bound.inspector->panel().stage_edit("/components/camera/fov", jnum(9.75)));
+    CHECK(bound.inspector->panel().has_staged_edit());
+
+    Wired wired = make_wired_client();
+    // `editor.inspect` is SCRIPTED so that a guard regression shows up as a REQUEST THAT WENT OUT
+    // rather than as a transport error somebody could mistake for one.
+    wired.channel->on("editor.inspect", [](const clientmock::Request&)
+                      { return clientmock::MockChannel::ok_envelope(Json::object()); });
+
+    // ANOTHER CLIENT MOVES THE SHARED SELECTION, mid-gesture. Applied (so the negatives below are not
+    // vacuous) and, since x10, WITHHELD rather than served.
+    CHECK(panels::apply_session_event(*bound.session, panels::kSessionTopic,
+                                      selection_fact({"inst1/ent2"})));
+    CHECK(bound.inspector->selections_deferred() == 1u);
+    CHECK(bound.inspector->selection_deferred());
+    CHECK(!bound.inspector->pending().has_value());
+
+    // THE PUMP — the call that would actually destroy the gesture.
+    panels::pump_panel_feeds(bound, *wired.client, "root.scene.json");
+    CHECK(wired.channel->requests_for("editor.inspect").empty());
+    CHECK(bound.inspector->panel().has_staged_edit());
+    CHECK(bound.inspector->panel().base_raw_hash() == 0x1234u);
+    CHECK(bound.inspector->abandons_observed() == 0u); // nothing was lost, so nothing was reported
+
+    // AND IT IS A DEFERRAL, NOT A REFUSAL: the move is served once the gesture ends, so the panel
+    // follows the daemon's selection rather than sitting on a stale one forever. A guard that turned
+    // this into a permanent refusal would look identical if only the negatives above were asserted.
+    bool dispatched = false;
+    std::string error_code;
+    CHECK(host.gesture("builtin.inspector", shell::GestureVerb::cancel, Json::object(), dispatched,
+                       error_code));
+    CHECK(dispatched);
+    CHECK(!bound.inspector->selection_deferred());
+    CHECK(bound.inspector->pending() == std::optional<std::string>("inst1/ent2"));
+    panels::pump_panel_feeds(bound, *wired.client, "root.scene.json");
+    CHECK(wired.channel->requests_for("editor.inspect").size() == 1);
+}
+
+// The OTHER arm, and the one the brief flags as easiest to leave uncovered: an EMPTY id list routes to
+// `request_clear`, which ran `panel_.clear()` — discarding the staged edit AND the owed settle deferral
+// outright, with not even a pump involved.
+//
+// ⚠ PLANT: delete `request_clear`'s `has_staged_edit()` branch and this REDS on the staged edit, the
+// model, and the still-owed refresh — all three, without any RPC.
+void a_foreign_selection_clear_does_not_discard_a_staged_gesture()
+{
+    shell::PanelHost host;
+    panels::BuiltinPanels bound = panels::install_builtin_panels(host);
+    CHECK(bound.scenetree != nullptr);
+    CHECK(bound.inspector != nullptr);
+    CHECK(bound.session != nullptr);
+    if (bound.scenetree == nullptr || bound.inspector == nullptr || bound.session == nullptr)
+    {
+        return;
+    }
+
+    bound.scenetree->panel().set_model(tree_with_one_node("inst1/ent1", 0xAAAA));
+    CHECK(panels::apply_session_event(*bound.session, panels::kSessionTopic,
+                                      selection_fact({"inst1/ent1"})));
+    bound.inspector->mark_fetched();
+    bound.inspector->panel().set_model(inspected_camera(), 0x1234);
+    CHECK(bound.inspector->panel().stage_edit("/components/camera/fov", jnum(9.75)));
+
+    // A settle is ALSO owed, which is what makes the "and the owed deferral" half observable: the old
+    // `panel_.clear()` reset it, so the release after the gesture ended had nothing to release.
+    Json settled = Json::object();
+    settled.set("event", Json(std::string("derivation.settled")));
+    settled.set("generation", Json(std::uint64_t{9}));
+    CHECK(!panels::apply_inspector_event(*bound.inspector, panels::kDerivationTopic, settled));
+    CHECK(bound.inspector->refresh_deferred());
+
+    // THE FOREIGN CLEAR. Applied by the session feed (the scene tree's rendered selection really does
+    // go empty), and withheld by the Inspector.
+    CHECK(panels::apply_session_event(*bound.session, panels::kSessionTopic, selection_fact({})));
+    // The TREE really did go empty — so the Inspector's survival below is a DECISION it made, not a
+    // fact that never reached it.
+    CHECK(bound.scenetree->panel().selection().identity.empty());
+    CHECK(bound.inspector->selections_deferred() == 1u);
+    CHECK(bound.inspector->panel().has_staged_edit());
+    CHECK(bound.inspector->panel().has_selection());        // the Inspector did NOT
+    CHECK(bound.inspector->panel().base_raw_hash() == 0x1234u);
+    CHECK(bound.inspector->refresh_deferred());             // and the settle is still owed
+    CHECK(bound.inspector->abandons_observed() == 0u);
+
+    // Ending the gesture performs the clear — and the refresh dies with the selection rather than
+    // arming a re-read of an entity nothing is inspecting.
+    bool dispatched = false;
+    std::string error_code;
+    CHECK(host.gesture("builtin.inspector", shell::GestureVerb::cancel, Json::object(), dispatched,
+                       error_code));
+    CHECK(dispatched);
+    CHECK(!bound.inspector->panel().has_selection());
+    CHECK(!bound.inspector->selection_deferred());
+    CHECK(!bound.inspector->refresh_deferred());
+    CHECK(!bound.inspector->pending().has_value());
+    CHECK(bound.inspector->rereads_armed() == 0);
+}
+
+// x10 — THE HUE/CATEGORY DECISION for an ABANDONMENT, the exact sibling of e09b-3's
+// `a_refused_write_reaches_the_relay_as_a_notice_hued_for_its_status`.
+//
+// `bind_write_notice_relay` is the ONE place an `AbandonedGesture` becomes a `WriteNotice`, and the KIND
+// it picks decides both the human's colour and their SENTENCE. Every other test stops on one side of
+// that join — the feed suite asserts the record handed to the sink, notifications.test.ts starts from a
+// hand-built notice — so swapping the constant at the translation point would leave both suites green
+// while telling the human a co-writer changed their field, which in this case is simply untrue.
+void an_abandoned_gesture_reaches_the_relay_as_its_own_notice_kind()
+{
+    shell::PanelHost host;
+    panels::BuiltinPanels bound = panels::install_builtin_panels(host);
+    CHECK(bound.inspector != nullptr);
+    if (bound.inspector == nullptr)
+    {
+        return;
+    }
+
+    shell::UiMirrorStore mirror;
+    shell::WriteNoticeRelay relay;
+    relay.bind_store(&mirror);
+    panels::bind_write_notice_relay(bound, relay);
+    CHECK(bound.inspector->has_abandon_sink());
+
+    // The one undeferrable interleaving: a fetch armed with nothing staged, the human then types, and
+    // the pump serves the claimed fetch. Everything here goes through the REAL seams the live Shell
+    // drives — `request_inspector`, `pump_panel_feeds`, and a real client over the scripted wire.
+    bound.inspector->panel().set_model(inspected_camera(), 0x1234);
+    CHECK(panels::request_inspector(bound, "inst1/ent2"));
+    CHECK(bound.inspector->panel().stage_edit("/components/camera/fov", jnum(9.75)));
+    CHECK(bound.inspector->panel().has_staged_edit());
+
+    Wired wired = make_wired_client();
+    wired.channel->on("editor.inspect",
+                      [](const clientmock::Request&)
+                      {
+                          Json data = Json::object();
+                          Json model = Json::object();
+                          model.set("present", Json(true));
+                          model.set("rootScene", Json(std::string("root.scene.json")));
+                          model.set("identity", Json(std::string("inst1/ent2")));
+                          data.set("inspector", std::move(model));
+                          data.set("rawHash", Json(std::string("777")));
+                          return clientmock::MockChannel::ok_envelope(std::move(data));
+                      });
+    panels::pump_panel_feeds(bound, *wired.client, "root.scene.json");
+
+    // The loss happened (so the assertions below are about a real event) and it was REPORTED.
+    CHECK(!bound.inspector->panel().has_staged_edit());
+    CHECK(bound.inspector->abandons_observed() == 1u);
+    CHECK(relay.published() == 1u);
+    CHECK(relay.delivered() == 1u); // no windows provider -> the primary, exactly once
+    const std::vector<Json> queued = mirror.take(shell::kPrimaryWindowId);
+    CHECK(queued.size() == 1u);
+    if (queued.size() == 1u)
+    {
+        CHECK(queued[0].at("topic").as_string() == shell::kUiTopicWriteNotice);
+        CHECK(queued[0].at("origin").as_string() == shell::kWriteNoticeOrigin);
+        // THE ASSERTION THIS CASE EXISTS FOR. Stated three ways on purpose: the equality pins the
+        // mapping, and the two inequalities keep the case meaningful — an abandonment routed through
+        // either e09b-3 kind would hand the human a confidently wrong story about how their typing
+        // disappeared, and both mis-routings are one edited constant away.
+        CHECK(queued[0].at("payload").at("kind").as_string() == shell::kWriteNoticeKindAbandoned);
+        CHECK(queued[0].at("payload").at("kind").as_string() != shell::kWriteNoticeKindDrop);
+        CHECK(queued[0].at("payload").at("kind").as_string() != shell::kWriteNoticeKindRefusal);
+        CHECK(queued[0].at("payload").at("action").as_string() == "edit");
+        CHECK(queued[0].at("payload").at("code").as_string() ==
+              std::string(panels::kGestureAbandonedCode));
+        CHECK(queued[0].at("payload").at("pointer").as_string() == "/components/camera/fov");
+        CHECK(!queued[0].at("payload").at("message").as_string().empty());
+    }
+}
+
 // e09c READ-YOUR-REPLAYS, at the composition root. `pump_panel_feeds` is what turns a landed replay
 // into an Inspector re-read; without it the panel keeps the pre-undo value AND the pre-undo CAS
 // token, so the human's very next edit to that field is dropped as a "concurrent writer" that is
@@ -827,5 +1055,8 @@ int main()
     a_shell_local_problem_reaches_the_rendered_panel();
     a_daemon_selection_schedules_the_inspector_fetch();
     a_settle_driven_tree_refetch_does_not_rebase_a_staged_gesture();
+    a_foreign_selection_move_does_not_rebase_a_staged_gesture();
+    a_foreign_selection_clear_does_not_discard_a_staged_gesture();
+    an_abandoned_gesture_reaches_the_relay_as_its_own_notice_kind();
     PANELS_TEST_MAIN_END();
 }

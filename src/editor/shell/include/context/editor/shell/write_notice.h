@@ -79,7 +79,7 @@ inline constexpr const char* kUiTopicWriteNotice = "editor.ui.write-notice";
 // must not be a window id.
 inline constexpr const char* kWriteNoticeOrigin = "shell";
 
-// The two notice KINDS, and the whole reason they are distinguished: they mean different things to
+// The three notice KINDS, and the whole reason they are distinguished: they mean different things to
 // the human and therefore take different hues (06 §2 binds the hues 1:1 to semantics).
 //
 //   * DROP — the L-30 rebase-or-drop engine refused the write because a CONCURRENT WRITER moved this
@@ -88,21 +88,35 @@ inline constexpr const char* kWriteNoticeOrigin = "shell";
 //     "awaiting-human" — not an error.
 //   * REFUSAL — the write PATH refused (no daemon, an unreadable field, a compose refusal). Nothing
 //     was written and no concurrency event was observed. That is `bad`.
+//   * ABANDONED (M9 x10, CE #452) — NO WRITE WAS EVER ATTEMPTED. A staged Inspector gesture was
+//     destroyed because the panel had to adopt an incoming model it could not withhold — the shared
+//     selection moved under an in-flight edit, OR the same entity was re-read from disk under one
+//     (`InspectorFeed::apply_result`, which is why the renderer's headline names no single cause and
+//     the Shell's `message` supplies the specific one). It is a THIRD kind and
+//     not a re-use of DROP, because DROP's whole sentence is a lie here: nobody "changed that field
+//     first", there was no CAS, and no concurrent writer need exist at all. Telling the human to
+//     "re-apply against the current value" when the field they were editing is no longer even on
+//     screen sends them looking for a collision that never happened. Hue is `wait`, like DROP and for
+//     06 §2's stated reason (`awaiting human`): the write path is healthy and the thing to do IS to
+//     re-make the edit — which is exactly what `bad` ("wait for the project to be reachable") would
+//     mis-state.
 //
-// Both are pinned against their TS twins by the `webui-panel-contract` gate: a drift makes every
+// All three are pinned against their TS twins by the `webui-panel-contract` gate: a drift makes every
 // notice fall through to the renderer's unknown-kind default, which would silently mis-hue a
 // data-integrity moment.
 inline constexpr const char* kWriteNoticeKindDrop = "drop";
 inline constexpr const char* kWriteNoticeKindRefusal = "refusal";
+inline constexpr const char* kWriteNoticeKindAbandoned = "abandoned";
 
-// One refused write, in the shape the renderer renders.
+// One refused write — or, since M9 x10, one ABANDONED gesture — in the shape the renderer renders.
 //
 // `action` is FREE TEXT the Shell composes ("edit", "undo", "redo") and the renderer only displays,
 // deliberately: it crosses the boundary as prose rather than as a token, so it needs no pin and a
 // new caller cannot introduce a silent drift by inventing one.
 struct WriteNotice
 {
-    // `kWriteNoticeKindDrop` or `kWriteNoticeKindRefusal`. Defaulted to REFUSAL to agree with every
+    // `kWriteNoticeKindDrop`, `kWriteNoticeKindRefusal` or `kWriteNoticeKindAbandoned`. Defaulted to
+    // REFUSAL to agree with every
     // other unknown-input path in this feature (`notice_kind_for`, and `writeNoticeTone` in
     // notifications.ts): over-stating severity costs the human a second look, while defaulting to the
     // gentle "awaiting you" hue would send them re-applying an edit that may not be able to land.
@@ -110,11 +124,14 @@ struct WriteNotice
     std::string kind = kWriteNoticeKindRefusal;
     // What the human tried to do, for the message ("edit" / "undo" / "redo").
     std::string action;
-    // The catalog code the write path answered with (`cas.mismatch`, `shell.no_daemon`, `compose.*`).
+    // The catalog code the write path answered with (`cas.mismatch`, `shell.no_daemon`, `compose.*`) —
+    // or, for an ABANDONED gesture, the host-minted `panels::kGestureAbandonedCode`, which is
+    // deliberately not a catalog entry because no daemon verb was called at all (inspector_feed.h).
     std::string code;
     // The human/AI-readable detail the L-30 engine or the write path produced.
     std::string message;
-    // The field pointer the refused write targeted. Empty when the caller had none.
+    // The field pointer the refused write — or the abandoned gesture — targeted. Empty when the caller
+    // had none.
     std::string pointer;
 };
 
