@@ -376,6 +376,27 @@ void test_mount_refuses_os_links()
     // existing-directory check is what refuses it).
     CHECK(!shell::path_is_os_link(store / "no-such-entry"));
 
+    // ⚠ "ABSENT" AND "COULD NOT DECIDE" ARE DIFFERENT ANSWERS. Both return false, so ONLY the
+    // out-param separates them — and conflating them was a FAIL-OPEN in exactly the case this suite
+    // discriminates: for a link pointing INSIDE the store, canonical containment PASSES, so a query
+    // failure that read as "not a link" would have been admitted by every later layer.
+    bool queried_absent = true;
+    CHECK(!shell::path_is_os_link(store / "no-such-entry", &queried_absent));
+    CHECK(!queried_absent); // absent is a real answer, not a failed query
+    bool queried_real = true;
+    CHECK(!shell::path_is_os_link(real_pkg, &queried_real));
+    CHECK(!queried_real);
+#ifndef _WIN32
+    // A component longer than the filesystem allows cannot be answered at all — `lstat` gives
+    // ENAMETOOLONG, which is neither ENOENT nor ENOTDIR. This is the locally reachable stand-in for the
+    // case the split actually exists for: on Windows `GetFileAttributesW` fails past MAX_PATH in a
+    // process with no long-path manifest, while MSVC's `std::filesystem` keeps working — so every other
+    // check succeeds and only this walk would go blind. No local host can reach that arm.
+    bool queried_toolong = false;
+    CHECK(!shell::path_is_os_link(store / std::string(600, 'x'), &queried_toolong));
+    CHECK(queried_toolong);
+#endif
+
     std::error_code ec;
     // Three links: one AT a package root pointing OUT of the store, one AT a package root pointing
     // INSIDE it (the discriminating case), and one INTERMEDIATE component.
@@ -389,13 +410,29 @@ void test_mount_refuses_os_links()
     CHECK(!ec);
     CHECK(!ec_in);
     CHECK(!ec_mid);
+    // ⚠ THE TRUE DIRECTION, PINNED UNCONDITIONALLY — and it is the half that matters. The FALSE
+    // assertions above only refuse a predicate that answers `true` to everything; a predicate that
+    // answered FALSE to everything would satisfy all three of them, skip every guarded block below,
+    // and — because the fixtures still created, so no `ec` is set — never even print the SKIPPED
+    // notice. The link refusal would be dead code and this suite would stay green and silent. These
+    // three lines are what make that mutation red.
+    CHECK(shell::path_is_os_link(store / "link-out"));
+    CHECK(shell::path_is_os_link(store / "link-inside"));
+    CHECK(shell::path_is_os_link(store / "link-mid"));
 #endif
 
     std::filesystem::path canonical;
     std::string code;
     std::string message;
+    // The blocks below are gated on an INDEPENDENT AUTHORITY (`std::filesystem::is_symlink`), never on
+    // `path_is_os_link` — the function under test. Gating a test on its own subject is how the subject
+    // silently switches the test off: this is the same "two arms from two authorities" independence
+    // ext_scheme.h argues for, applied to the guard rather than the predicate. (`is_symlink` is the
+    // right authority for these three fixtures because all three ARE symlinks; a Windows JUNCTION is
+    // not a symlink, which is exactly why the junction arm has no fixture here — see the note below.)
+    std::error_code ec_probe;
 
-    if (!ec && shell::path_is_os_link(store / "link-out"))
+    if (!ec && std::filesystem::is_symlink(store / "link-out", ec_probe))
     {
         CHECK(!shell::package_root_provenance_ok(store, store / "link-out", canonical, code,
                                                 message));
@@ -405,7 +442,7 @@ void test_mount_refuses_os_links()
         CHECK(shelltest::mentions(message, "link-out"));
     }
 
-    if (!ec_in && shell::path_is_os_link(store / "link-inside"))
+    if (!ec_in && std::filesystem::is_symlink(store / "link-inside", ec_probe))
     {
         // ⭐ THE DISCRIMINATING CASE. Its target is `store/real` — INSIDE the store, so a
         // `weakly_canonical` containment compare admits it. Refused here.
@@ -421,7 +458,7 @@ void test_mount_refuses_os_links()
               std::filesystem::weakly_canonical(real_pkg));
     }
 
-    if (!ec_mid && shell::path_is_os_link(store / "link-mid"))
+    if (!ec_mid && std::filesystem::is_symlink(store / "link-mid", ec_probe))
     {
         // An INTERMEDIATE component: the candidate's own last component is a real directory, and the
         // walk still refuses because the path REACHES it through a link.

@@ -15,8 +15,9 @@
 //
 //  1. ONE CANONICAL ROOT, DERIVED, NEVER CONFIGURED BY A PACKAGE. `<home>/.context/packages` — the
 //     fourth member of a family the Shell already owns (`config.json`, `keybindings.json`,
-//     `themes/`), resolved through the SAME `home_directory()` every one of those uses. A package
-//     cannot influence it, an environment variable cannot redirect it, and a manifest cannot name an
+//     `themes/`), resolved through the SAME `home_directory()` every one of those uses — i.e. through
+//     the same `HOME` / `USERPROFILE` lookup, which IS an environment variable; what cannot redirect
+//     it is a PACKAGE. A package cannot influence it, and a manifest cannot name an
 //     asset root anywhere else: a package's root IS `<store>/<package-id>`, computed by
 //     ENUMERATION, and the manifest is never consulted for a path. That is the difference between
 //     this and the design the E13B obligation warned about, where "a package whose manifest points
@@ -52,6 +53,26 @@
 //     READ here; whatever writes it (a CLI verb, an AI agent, a human copying a directory) is out of
 //     scope, which is why the scan treats the whole store as untrusted input rather than as
 //     something it produced itself.
+//
+// ⚠ THE RESIDUALS — what a provenance-checked ROOT does NOT imply about its CONTENTS. Recorded here
+// because the next task inherits these, and "provenance established" is exactly the phrase that would
+// let it assume otherwise:
+//   * A PROVENANCE-CHECKED ROOT IS NOT A PROVENANCE-CHECKED SUBTREE. The mount walk refuses an OS link
+//     anywhere from the store root down to the package root INCLUSIVE, and stops there. A link planted
+//     INSIDE an accepted root is caught only by the resolver's per-request canonical containment pass
+//     (`ext_scheme.h` § the resolver) — which is `weakly_canonical`-dependent, i.e. the layer whose
+//     MinGW behaviour motivated `path_is_os_link` in the first place. The ONE file this module itself
+//     opens, `context-package.json`, IS link-refused by name (`read_package_manifest`); nothing else
+//     under the root is. A recursive subtree walk is deliberately NOT the answer — it is unbounded work
+//     over untrusted input on a path the scan takes at every editor start.
+//   * HARD LINKS ARE INVISIBLE TO EVERY LAYER HERE, and unavoidably so: a hard link has no name-level
+//     target, so `lstat` / `GetFileAttributesW` / canonicalization all correctly report an ordinary
+//     file. Only whatever WRITES the store can close that, which is the install path's job.
+//   * A DIRECTORY NAMED FOR A FIRST-PARTY NAMESPACE IS NOT REFUSED. `builtin` is a legal package id, so
+//     `<store>/builtin/` satisfies rule (a)'s namespacing check for a contribution id like
+//     `builtin.inspector` — byte-identical to a first-party panel's. Inert today (nothing is
+//     registered), but it means rule (a) does not by itself deliver the shadowing refusal its rationale
+//     describes; reserving the first-party namespaces belongs with registration, in e13c-4.
 
 #pragma once
 
@@ -59,6 +80,7 @@
 #include "context/editor/shell/ext_scheme.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -74,7 +96,8 @@ inline constexpr const char* kPackageStoreDirName = "packages";
 // The manifest file every installed package must carry at its root.
 //
 // NAMED `context-package.json`, NOT `package.json`: the repo already reads a `package.json` — the
-// npm manifest of the TS scripting tier (`src/editor/pkg/`, `install_command.cpp`) — and an editor
+// npm manifest of the TS scripting tier (`src/editor/pkg/`'s `lockfile.cpp` / `npm_install.cpp`, and
+// `src/cli/src/install_command.cpp`) — and an editor
 // package will frequently BE an npm package too, so a package that carried both under one name could
 // not have both. The `context-` prefix also makes a store directory self-describing to a human who
 // finds one, and keeps `check_licenses.py`'s tree-wide `package.json` scan away from it.
@@ -85,10 +108,17 @@ inline constexpr const char* kPackageManifestFileName = "context-package.json";
 // document. Untrusted input with no bound is an allocation an attacker chooses.
 inline constexpr std::uintmax_t kMaxPackageManifestBytes = 256u * 1024u;
 
-// How many package directories one scan will consider. A bound rather than a `directory_iterator`
-// run to exhaustion, for the same reason: the store is untrusted input, and 512 installed editor
-// packages is already far past any plausible use. Directories past the cap are reported as a refusal
-// (`kErrPackageStoreTooManyEntries`) rather than silently ignored.
+// How many store ENTRIES one scan will consider — every directory entry, loose files included, not
+// only package directories. A bound rather than a `directory_iterator` run to exhaustion, for the same
+// reason: the store is untrusted input, and 512 installed editor packages is already far past any
+// plausible use. Entries past the cap are reported as a refusal (`kErrPackageStoreTooManyEntries`)
+// rather than silently ignored.
+//
+// ⚠ WHICH entries survive the cap is ARBITRARY, and deliberately so. The cap is applied DURING
+// enumeration and the sort runs after it, so past 512 entries the surviving SET is
+// `directory_iterator` order — which is what bounds the work on untrusted input, and is why it is not
+// deferred until after a full read. The sort's determinism guarantee therefore covers the ORDER of
+// what was considered, not the CHOICE of it; a store that large is already a reported fault.
 inline constexpr std::size_t kMaxPackageStoreEntries = 512;
 
 // `<home>/.context/packages`, or an EMPTY path when the home directory cannot be resolved.
@@ -173,6 +203,7 @@ struct PackageStoreScan
 // languages. Per contribution:
 //
 //     { "id": "<pkg>.<name>", "kind": "panel", "title": "...", "icon": "...",
+//       "target": "",            // parsed, NOT projected — see the note under rule (e)
 //       "contractVersion": 2,
 //       "dock":    { "zone": "left|right|top|bottom|center", "singleton": bool,
 //                    "minWidth": int, "minHeight": int },
@@ -206,7 +237,18 @@ struct PackageStoreScan
 // Everything else is read permissively with a default (title defaults to the id, icon/`when` to
 // empty, dock to `center`), matching `parsePanelManifest`: the cost of a wrong default there is
 // cosmetic, and a parser that refuses a manifest over a missing `icon` is a parser package authors
-// route around.
+// route around. `kind` is matched against `gc::contribution_kind_token` itself rather than a second
+// hand-written table, so the accepted tokens are exactly the ones the projection emits
+// (`panel` / `inspector` / `gizmo` / `asset-kind-editor` — note the HYPHENS).
+//
+// ⚠ `target` IS THE ONE FIELD READ HERE THAT THE PROJECTION DOES NOT WRITE, so this parser is the
+// inverse of `PanelHost::list` for every field EXCEPT that one, and saying so is the point: `target`
+// is only meaningful for the `inspector` / `gizmo` / `asset-kind-editor` kinds, `ExtensionRegistry`
+// resolves those by matching the FIRST contribution with a given `(kind, target)`, and there is no
+// duplicate-target refusal anywhere. So a package declaring `{"kind":"inspector","target":"Transform"}`
+// would be resolved by REGISTRATION ORDER — the same ordering-is-not-a-control hazard rule (a) rejects
+// for ids. Nothing is live today (this file registers nothing), and validating it belongs with the
+// consent + registration surface that will: e13c-4 must not inherit this as settled.
 [[nodiscard]] bool read_package_manifest(const std::filesystem::path& manifest_file,
                                          const std::string& expected_package_id,
                                          const std::filesystem::path& package_root,

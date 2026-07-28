@@ -231,14 +231,16 @@ set(_context_shell_tests
     test_app_scheme    # e05c: URL->asset resolution, traversal refusal, the strict CSP
     test_ext_scheme    # e13a-1: the context-ext:// adversarial suite - traversal, cross-package,
                        #         unknown/invalid package id, the pinned scheme options, the panel CSP
+                       # + e13c-3: the adversarial mount-PROVENANCE suite (.. traversal,
+                       #         absolute-outside, symlink in/out, link AT the root) incl. the case
+                       #         that DISCRIMINATES our link refusal from a weakly_canonical-only one
     test_ipc_bridge    # e05c: the T1 adversarial envelope suite + the 3 token-isolation controls
     test_panel_host    # e05d1: the panel-agnostic roster/render/command/gesture/D6-state surface
     test_package_sessions  # e13c-1: the ALLOWLIST, the hardcoded "read" scope proved against the REAL
                        #         dispatcher, lazy attach + the per-package pool + the sub-cap
-    test_package_store # e13c-3: the store scan + manifest->Contribution + the ADVERSARIAL provenance
-                       #         suite (.. traversal, absolute-outside, symlink in/out, link AT the
-                       #         root) incl. the case that DISCRIMINATES our link refusal from a
-                       #         weakly_canonical-only one
+    test_package_store # e13c-3: the store scan + manifest->Contribution + the scan's INHERITANCE of
+                       #         the mount provenance check. NOTE the adversarial provenance suite
+                       #         itself lives next door in test_ext_scheme, not here.
     test_editor_state_bridge  # e05d2: layout/panels publish+restore round-trip + region-map emission
     test_keybindings_bridge   # e07c: file read/watch/generation + keybindings.get over the router
     test_themes_bridge        # e06b: directory watch/generation + themes.get over the router

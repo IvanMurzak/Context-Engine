@@ -4,6 +4,7 @@
 #include "context/editor/shell/ext_scheme.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <system_error>
 
 // The OS-level link query of `path_is_os_link` — see ext_scheme.h § mount PROVENANCE for why this is
@@ -103,8 +104,12 @@ bool is_valid_package_id(std::string_view id)
 
 // ------------------------------------------------------------- mount PROVENANCE (M9 e13c-3)
 
-bool path_is_os_link(const std::filesystem::path& path)
+bool path_is_os_link(const std::filesystem::path& path, bool* query_failed)
 {
+    if (query_failed != nullptr)
+    {
+        *query_failed = false;
+    }
 #if defined(_WIN32)
     // THE BRANCH THE WHOLE FUNCTION EXISTS FOR (ext_scheme.h § mount PROVENANCE). The reparse-point
     // BIT is read straight off the directory entry, and the reparse TAG is deliberately not
@@ -115,9 +120,24 @@ bool path_is_os_link(const std::filesystem::path& path)
     const DWORD attributes = ::GetFileAttributesW(path.c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES)
     {
-        // Absent or inaccessible — FALSE, never true. See the header: the caller's own
-        // existing-directory and canonical-containment checks still run, so nothing is admitted by
-        // this answer, whereas TRUE here would refuse an installed package on a transient stat blip.
+        // ⚠ "ABSENT" AND "COULD NOT DECIDE" ARE DIFFERENT ANSWERS, and conflating them is a
+        // FAIL-OPEN. Absent is a normal answer the caller's own existing-directory check refuses. But
+        // a query that FAILED for any other reason tells us nothing, and returning plain `false` there
+        // reads as "not a link" — which the walk would accept. That is not covered by the later
+        // checks: for a link pointing INSIDE the store (the case this whole function exists for) the
+        // canonical containment check PASSES, because the target really is contained. On Windows this
+        // is reachable with no privilege at all: `GetFileAttributesW` fails with
+        // `ERROR_PATH_NOT_FOUND` on a path at or past `MAX_PATH` unless the process is long-path
+        // aware — and this one ships no such manifest — while MSVC's `std::filesystem` handles long
+        // paths internally, so every OTHER check keeps succeeding and only the link walk goes blind.
+        const DWORD error = ::GetLastError();
+        if (query_failed != nullptr && error != ERROR_FILE_NOT_FOUND &&
+            error != ERROR_INVALID_NAME && error != ERROR_BAD_NETPATH)
+        {
+            // Deliberately NOT ERROR_PATH_NOT_FOUND: that is the long-path symptom above, i.e. exactly
+            // the case that must fail CLOSED rather than read as absent.
+            *query_failed = true;
+        }
         return false;
     }
     return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
@@ -126,6 +146,13 @@ bool path_is_os_link(const std::filesystem::path& path)
     struct ::stat info{};
     if (::lstat(path.c_str(), &info) != 0)
     {
+        // Same split as the Windows arm: ENOENT/ENOTDIR are "absent" (a normal answer); anything else
+        // — EACCES on a parent directory, ELOOP, ENAMETOOLONG, EIO — is "could not decide" and must
+        // not read as "not a link".
+        if (query_failed != nullptr && errno != ENOENT && errno != ENOTDIR)
+        {
+            *query_failed = true;
+        }
         return false;
     }
     return S_ISLNK(info.st_mode) != 0;
@@ -191,14 +218,22 @@ bool package_root_provenance_ok(const std::filesystem::path& store_root,
         }
     }
 
-    // A TRAILING SEPARATOR IS STRIPPED FROM BOTH SIDES, and on the candidate side it is a correctness
-    // requirement rather than tidiness: a trailing slash DEFEATS THE LINK CHECK, because `lstat` on
-    // `<path>/` resolves the directory the link points at instead of reporting the link, so a walk that
-    // kept the separator would report a symlinked package root as an ordinary directory. On the store
-    // side it removes a surprising fail-closed refusal instead: `lexically_relative` against a base
-    // whose last element is empty yields a `..`-leading result, so a caller who spelled the store root
-    // with a trailing slash would have had every mount refused. `parent_path()` is the idiomatic strip
-    // for a path whose filename is empty.
+    // A TRAILING SEPARATOR IS STRIPPED FROM BOTH SIDES, and the two sides are stripped for DIFFERENT
+    // reasons — which is worth stating exactly, because an earlier version of this comment gave the
+    // candidate side a hazard it does not actually have, and a reader who believed it could "simplify"
+    // away the one guard that does the work.
+    //   * THE STORE SIDE IS THE LOAD-BEARING ONE: `lexically_relative` against a base whose last element
+    //     is empty yields a `..`-leading result, so a caller who spelled the store root with a trailing
+    //     slash would have had EVERY mount refused. The suite pins that case.
+    //   * THE CANDIDATE SIDE IS BELT-AND-BRACES. It is true in general that `lstat`/`GetFileAttributesW`
+    //     on `<path>/` resolves the directory a link points at instead of reporting the link — but that
+    //     cannot reach the walk below, because `probe` is rebuilt COMPONENT BY COMPONENT from the
+    //     canonical store and the walk SKIPS EMPTY COMPONENTS, so no OS query ever sees a trailing
+    //     separator. MEASURED: with this strip removed a symlinked root spelled `<store>/linkpkg/` is
+    //     still refused as `kErrMountRootLink`. ⚠ So the `part.empty()` skip in the walk is NOT
+    //     redundant with this strip — it is the guard that actually holds the property. Do not delete
+    //     either one on the theory that the other covers it.
+    // `parent_path()` is the idiomatic strip for a path whose filename is empty.
     const auto strip_trailing_separator = [](std::filesystem::path path) {
         return path.has_filename() ? path : path.parent_path();
     };
@@ -243,13 +278,32 @@ bool package_root_provenance_ok(const std::filesystem::path& store_root,
             continue;
         }
         probe /= part;
-        if (path_is_os_link(probe))
+        bool link_query_failed = false;
+        if (path_is_os_link(probe, &link_query_failed))
         {
             error_code = kErrMountRootLink;
             message = "the package root '" + package_root.string() +
                       "' is reached through an OS link at '" + probe.string() +
                       "'; a package store may contain only real directories";
             return false;
+        }
+        // FAIL CLOSED WHEN THE ANSWER IS UNKNOWN. `path_is_os_link` returns false both for "absent"
+        // and — before this branch existed — for "the query failed", and the second is not covered by
+        // any later check: a link pointing INSIDE the store passes canonical containment, which is the
+        // very case the walk exists to refuse. So an UNDECIDED component on a path that nonetheless
+        // EXISTS is refused rather than admitted. Absent is left to the caller's existing-directory
+        // refusal, so a genuinely missing package still reports as missing rather than as a link.
+        if (link_query_failed)
+        {
+            std::error_code exists_ec;
+            if (std::filesystem::exists(probe, exists_ec))
+            {
+                error_code = kErrMountRootLink;
+                message = "the package root '" + package_root.string() +
+                          "' could not be checked for an OS link at '" + probe.string() +
+                          "'; a component that cannot be examined is refused rather than trusted";
+                return false;
+            }
         }
     }
 

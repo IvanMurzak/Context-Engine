@@ -290,6 +290,10 @@ void test_manifest_refusals()
     // A directory with no manifest at all. `stage_package` is not used: that is the point.
     std::error_code ec;
     std::filesystem::create_directories(store / "bare", ec);
+    // THE FIXTURE ASSERTS ITSELF — the one fixture in this suite that `write_file`/`stage_package` do
+    // not cover. `kErrManifestMissing` is ALSO what an absent DIRECTORY yields, so a silently-failed
+    // `create_directories` would leave this case passing while testing nothing.
+    CHECK(std::filesystem::is_directory(store / "bare"));
     CHECK(!read_staged(store, "bare", package, code, message));
     CHECK(code == shell::kErrManifestMissing);
 
@@ -517,6 +521,133 @@ void test_manifest_refusals()
 
 // ------------------------------------------------------------------------------------------ the scan
 
+// ----------------------------------------- HOSTILE NUMBERS + the manifest's OWN link provenance (03)
+//
+// Every numeric case in this suite previously stopped at `minWidth: -8`, so the whole class below was
+// unreachable — and three of these five were real defects. Their failure mode is NOT a wrong default
+// (that is `test_manifest_defaults_are_permissive`'s subject): it is a value that passes a guard and
+// then MEANS SOMETHING ELSE after the cast, which is invisible to any test that only feeds sane numbers.
+void test_manifest_hostile_numbers_and_links()
+{
+    const std::filesystem::path root = shelltest::make_temp_project("ctx-pkg-store", "hostile");
+    const std::filesystem::path store = root / "packages";
+
+    shell::InstalledPackage package;
+    std::string code;
+    std::string message;
+
+    // (a) OUTSIDE int64 — UNDEFINED BEHAVIOUR before the range guard. `Json::parse` accepts `1e300`
+    // happily, and `Json::as_int()` is a bare `static_cast<std::int64_t>` of the stored double, which
+    // the blocking `sanitize (ASan+UBSan, ubuntu)` leg reports as `float-cast-overflow`. Reads as
+    // "unstated" now, via the Shell's one range-guarded numeric read.
+    write_file(store / "big" / shell::kPackageManifestFileName,
+               R"({ "id": "big", "contributions": [ { "id": "big.p", "kind": "panel",
+      "dock": { "minWidth": 1e300, "minHeight": -1e300 },
+      "content": { "type": "iframe", "entry": "context-ext://big/p.html" } } ] })");
+    CHECK(read_staged(store, "big", package, code, message));
+    CHECK(package.contributions.size() == 1);
+    if (package.contributions.size() == 1)
+    {
+        CHECK(package.contributions.front().dock.min_width == 0);
+        CHECK(package.contributions.front().dock.min_height == 0);
+    }
+
+    // (b) INSIDE int64 BUT OUTSIDE int — an EXACT integer, so no UB is involved at all and no range
+    // guard on the double would have caught it. `4294967295` survived `std::max<std::int64_t>(0, …)`
+    // and then NARROWED TO -1 on the cast; `registry.cpp` refuses a negative `dock.minSize`, so the
+    // scan would have reported as ACCEPTED a package the registry then rejects — exactly what
+    // package_store.h § the scan promises never happens.
+    write_file(store / "narrow" / shell::kPackageManifestFileName,
+               R"({ "id": "narrow", "contributions": [ { "id": "narrow.p", "kind": "panel",
+      "dock": { "minWidth": 4294967295, "minHeight": 2147483648 },
+      "content": { "type": "iframe", "entry": "context-ext://narrow/p.html" } } ] })");
+    CHECK(read_staged(store, "narrow", package, code, message));
+    CHECK(package.contributions.size() == 1);
+    if (package.contributions.size() == 1)
+    {
+        // NEVER NEGATIVE, and specifically "unstated" — the property registry.cpp depends on.
+        CHECK(package.contributions.front().dock.min_width == 0);
+        CHECK(package.contributions.front().dock.min_height == 0);
+    }
+
+    // (c) `state.schemaVersion` PAST u32 — likewise exact, likewise no UB. It passed the `>= 1` test
+    // and then narrowed to 0, the one value `registry.cpp` names in so many words. REFUSED now rather
+    // than silently defaulted, because a package whose state version means something other than what it
+    // wrote down is not a package this scan may report as installed.
+    write_file(store / "sv" / shell::kPackageManifestFileName,
+               R"({ "id": "sv", "contributions": [ { "id": "sv.p", "kind": "panel",
+      "state": { "schemaVersion": 4294967296 },
+      "content": { "type": "iframe", "entry": "context-ext://sv/p.html" } } ] })");
+    CHECK(!read_staged(store, "sv", package, code, message));
+    CHECK(code == shell::kErrManifestInvalid);
+    // NON-VACUITY: the same manifest one below the boundary is ACCEPTED, so this refuses a RANGE and
+    // not the member.
+    write_file(store / "sv-ok" / shell::kPackageManifestFileName,
+               R"({ "id": "sv-ok", "contributions": [ { "id": "sv-ok.p", "kind": "panel",
+      "state": { "schemaVersion": 4294967295 },
+      "content": { "type": "iframe", "entry": "context-ext://sv-ok/p.html" } } ] })");
+    CHECK(read_staged(store, "sv-ok", package, code, message));
+
+    // (d) THE KIND TOKEN IS THE ONE THE PROJECTION EMITS. `contribution_kind_token` spells this
+    // `asset-kind-editor`, with HYPHENS; the first draft of this parser's inverse matched the C++
+    // ENUMERATOR spelling `asset_kind_editor`, so a manifest written against the editor's own
+    // `panel.list` output silently read as `panel`. Asserted against the forward table itself rather
+    // than a literal, so reader and writer cannot drift apart again.
+    const std::string kind_token =
+        gc::contribution_kind_token(gc::ContributionKind::asset_kind_editor);
+    write_file(store / "kinds" / shell::kPackageManifestFileName,
+               R"({ "id": "kinds", "contributions": [ { "id": "kinds.a", "kind": ")" + kind_token +
+                   R"(",
+      "content": { "type": "iframe", "entry": "context-ext://kinds/a.html" } } ] })");
+    CHECK(read_staged(store, "kinds", package, code, message));
+    CHECK(package.contributions.size() == 1);
+    if (package.contributions.size() == 1)
+    {
+        CHECK(package.contributions.front().kind == gc::ContributionKind::asset_kind_editor);
+    }
+
+    // (e) THE MANIFEST ITSELF MUST NOT BE AN OS LINK. The mount provenance walk stops AT the package
+    // root, so nothing above it covers a link INSIDE the root — and both `is_regular_file` and
+    // `std::ifstream` follow links. Without this refusal a package shipping
+    // `context-package.json -> <somewhere outside>` had up to the manifest cap of an arbitrary readable
+    // file pulled into the process, with derived content handed to the operator channel.
+    //
+    // The pinned CODE is what makes this non-vacuous: the linked target below carries an EMPTY
+    // `contributions` array, so if the link refusal were removed the file would be READ and refused as
+    // `kErrManifestInvalid`. Only the link check produces `kErrManifestMissing` here.
+    const std::filesystem::path outside = root / "outside.json";
+    write_file(outside, R"({ "id": "linked", "contributions": [] })");
+    std::error_code dir_ec;
+    std::filesystem::create_directories(store / "linked", dir_ec);
+    CHECK(std::filesystem::is_directory(store / "linked"));
+    std::error_code link_ec;
+    std::filesystem::create_symlink(outside, store / "linked" / shell::kPackageManifestFileName,
+                                    link_ec);
+#ifndef _WIN32
+    CHECK(!link_ec);
+#endif
+    // Gated on an INDEPENDENT authority, never on the predicate under test (the discipline
+    // test_ext_scheme.cpp's OS-link suite states).
+    std::error_code probe_ec;
+    if (!link_ec &&
+        std::filesystem::is_symlink(store / "linked" / shell::kPackageManifestFileName, probe_ec))
+    {
+        CHECK(!read_staged(store, "linked", package, code, message));
+        CHECK(code == shell::kErrManifestMissing);
+        CHECK(shelltest::mentions(message, "OS link"));
+    }
+    else
+    {
+        // NEVER SILENT — the ctest log must say the gate did not run on this leg.
+        std::fprintf(stderr,
+                     "[test_package_store] SKIPPED the linked-manifest case (%s) — the manifest OS-link "
+                     "refusal is UNCOVERED on this leg\n",
+                     link_ec.message().c_str());
+    }
+
+    shelltest::cleanup(root);
+}
+
 void test_scan_empty_and_absent()
 {
     // An EMPTY store root is the no-home-directory case: no packages, no refusals, no diagnostics.
@@ -543,6 +674,12 @@ void test_scan_empty_and_absent()
     const shell::PackageStoreScan as_file = shell::scan_package_store(root / "file-store");
     CHECK(as_file.packages.empty());
     CHECK(as_file.refusals.size() == 1);
+    if (as_file.refusals.size() == 1)
+    {
+        // PIN THE CODE, like every other refusal in this suite: "not a directory" must report the
+        // first-run state, NOT the unreadable-store fault the scan now distinguishes from it.
+        CHECK(as_file.refusals.front().error_code == shell::kErrPackageStoreAbsent);
+    }
 
     // An EXISTING but empty store yields nothing at all — no packages AND no refusals. An installed
     // editor with no packages is the common case and must be quiet.
@@ -667,8 +804,15 @@ void test_scan_refuses_linked_entries()
     std::filesystem::create_directory_symlink(outside_pkg, store / "linked", ec);
 #ifndef _WIN32
     CHECK(!ec);
+    // The TRUE direction, pinned — see test_ext_scheme.cpp's OS-link suite: without it a
+    // `path_is_os_link` that answered FALSE to everything would skip the block below, and the `else`
+    // would report an EMPTY reason (`ec` is clear) rather than the real one.
+    CHECK(shell::path_is_os_link(store / "linked"));
 #endif
-    if (!ec && shell::path_is_os_link(store / "linked"))
+    // Gated on an INDEPENDENT authority, never on the function under test (same reason as
+    // test_ext_scheme.cpp's OS-link suite).
+    std::error_code ec_probe;
+    if (!ec && std::filesystem::is_symlink(store / "linked", ec_probe))
     {
         const shell::PackageStoreScan scan = shell::scan_package_store(store);
         // The real package is still accepted — one hostile entry does not disable the store.
@@ -739,6 +883,7 @@ int main()
     test_manifest_happy_path();
     test_manifest_defaults_are_permissive();
     test_manifest_refusals();
+    test_manifest_hostile_numbers_and_links();
     test_scan_empty_and_absent();
     test_scan_accepts_and_refuses();
     test_scan_refuses_linked_entries();

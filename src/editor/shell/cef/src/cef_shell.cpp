@@ -1693,8 +1693,11 @@ std::unique_ptr<IBrowserHost> make_cef_browser_host(const CefShellOptions& optio
             return nullptr;
         }
     }
-    else if (!options.ext_packages.empty())
+    else if (!options.ext_packages.empty() || !options.ext_store_root.empty())
     {
+        // ⚠ THE STORE ROOT COUNTS TOO, now that it exists: the two fields are one decision
+        // (editor_main.cpp says so), so a second window that differs in EITHER is being ignored, and a
+        // caller who passed only a store root would otherwise be dropped in total silence.
         // The resolver is PROCESS-GLOBAL while `ext_packages` is a per-call option, so a second
         // window's package list is silently dropped. Said out loud rather than swallowed: it would
         // otherwise present as "the second window's panels all 403 and nothing explains why".

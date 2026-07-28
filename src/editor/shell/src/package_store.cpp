@@ -5,6 +5,8 @@
 
 #include "context/editor/shell/package_store.h"
 
+#include "json_number_read.h" // the shared range-guarded numeric read (float-cast-overflow UB guard)
+
 #include "context/editor/contract/json.h"
 #include "context/editor/gui/contract/panel_state.h" // kStateSchemaVersionKey — the D6 state key
 #include "context/editor/shell/keybindings_bridge.h" // home_directory() — the ONE home resolver
@@ -28,9 +30,12 @@ namespace
 // Read a small file into `out`. False on any IO error OR when the file exceeds the cap — an oversized
 // manifest is treated as unreadable rather than loaded (package_store.h: untrusted input with no
 // bound is an allocation an attacker chooses). Mirrors the sibling readers in user_config.cpp /
-// themes_bridge.cpp / keybindings_bridge.cpp; not shared because each carries its OWN cap, and a
-// shared helper with a caller-supplied cap is the shape in which one caller's cap silently becomes
-// every caller's.
+// themes_bridge.cpp / keybindings_bridge.cpp — and it is the FOURTH copy of those ~20 lines, which is
+// worth naming rather than justifying. The per-module cap is NOT the reason it cannot be shared: a
+// caller-supplied bound is exactly the shape `json_number_read.h` uses one directory over, for the same
+// three-copies-drifted problem, and each caller still names its own `kMax…Bytes` at the call site. The
+// honest reason is scope — unifying the family touches three TUs outside this change. Recorded as
+// follow-up work, not as a rule.
 [[nodiscard]] bool read_small_file(const fs::path& path, std::uintmax_t size, std::string& out)
 {
     if (size > kMaxPackageManifestBytes)
@@ -73,14 +78,21 @@ namespace
            source.at(key).as_bool();
 }
 
-[[nodiscard]] std::int64_t read_int(const Json& source, const char* key, std::int64_t fallback = 0)
+// RANGE-GUARDED, through the Shell's ONE numeric reader (json_number_read.h) — never `as_int()`
+// directly. `Json::as_int()` is an unguarded `static_cast<std::int64_t>` of the stored double, and a
+// package manifest is the most untrusted input this file has: `Json::parse` accepts `1e300` happily,
+// and casting that to an integral type is UNDEFINED BEHAVIOUR, which the blocking
+// `sanitize (ASan+UBSan, ubuntu)` leg reports as `float-cast-overflow`. The check runs on the DOUBLE
+// before any cast, so guarding cannot happen after the UB. Each caller passes the bounds of the type
+// it casts to, which is what makes ITS cast defined; absent / non-number / NaN / out-of-range all read
+// the same permissive way — "no usable number" — and take `fallback`, so every caller's own
+// downstream refusal keeps deciding, and none of them is made unreachable by this guard.
+[[nodiscard]] std::int64_t read_int(const Json& source, const char* key, std::int64_t lo,
+                                   std::int64_t hi, std::int64_t fallback = 0)
 {
-    if (!source.is_object() || !source.contains(key))
-    {
-        return fallback;
-    }
-    const Json& value = source.at(key);
-    return value.is_number() ? value.as_int() : fallback;
+    const std::optional<double> raw =
+        detail::number_in_range(source, key, static_cast<double>(lo), static_cast<double>(hi));
+    return raw ? static_cast<std::int64_t>(*raw) : fallback;
 }
 
 [[nodiscard]] const Json& read_object(const Json& source, const char* key)
@@ -93,29 +105,27 @@ namespace
     return source.at(key);
 }
 
-// The manifest's `dock.zone` token -> DockZone. An unrecognised zone falls back to `center`, exactly
-// as `readDock` in panels.ts does: the vocabulary is closed, so anything else is drift rather than a
-// new zone, and the cost of the fallback is cosmetic (where a panel first appears). Contrast
-// `content.type` below, which fails CLOSED because the cost there is not cosmetic.
+// The manifest's `dock.zone` token -> DockZone.
+// DERIVED FROM THE FORWARD TABLE, for the same reason `read_kind` below is: a hand-written second copy
+// of a closed vocabulary is a copy that can drift, and one of the two copies in the first draft of this
+// file already had. The tokens happen to agree today, so this is not a bug fix — it is removing the
+// only way it could become one (a renamed token, or a new `DockZone` enumerator, silently mapping to
+// `center`). `panels.ts` reaches its own inverse the same way, by searching the closed list.
 [[nodiscard]] gc::DockZone read_dock_zone(const Json& dock)
 {
     const std::string token = read_string(dock, "zone", "center");
-    if (token == "left")
+    for (const gc::DockZone zone : {gc::DockZone::left, gc::DockZone::right, gc::DockZone::top,
+                                    gc::DockZone::bottom, gc::DockZone::center})
     {
-        return gc::DockZone::left;
+        if (token == gc::dock_zone_token(zone))
+        {
+            return zone;
+        }
     }
-    if (token == "right")
-    {
-        return gc::DockZone::right;
-    }
-    if (token == "top")
-    {
-        return gc::DockZone::top;
-    }
-    if (token == "bottom")
-    {
-        return gc::DockZone::bottom;
-    }
+    // An unrecognised zone falls back to `center`, exactly as `readDock` in panels.ts does: the
+    // vocabulary is closed, so anything else is drift rather than a new zone, and the cost of the
+    // fallback is cosmetic (where a panel first appears). Contrast `content.type`, which fails CLOSED
+    // because the cost there is not cosmetic.
     return gc::DockZone::center;
 }
 
@@ -123,21 +133,27 @@ namespace
 // inspector or a gizmo is a designed part of the R-EDIT-001 contract (extension.h), so the vocabulary
 // is read rather than pinned to panels — but an unrecognised token becomes `panel`, the kind with no
 // `target` semantics, rather than being trusted into a target-keyed lookup.
+// DERIVED FROM THE FORWARD TABLE, never restated. This function is only an INVERSE if it accepts
+// exactly the tokens `gc::contribution_kind_token` emits, and a hand-written second table does not
+// stay an inverse: the first draft of this one matched `asset_kind_editor` (the C++ enumerator's
+// spelling) while the projection emits `asset-kind-editor` (extension.cpp), so a manifest written
+// against the editor's OWN output silently read as `panel`. Comparing against the forward table makes
+// that class of drift unrepresentable — and `panels.ts` reaches its inverse the same way, by searching
+// the closed token list rather than repeating it.
 [[nodiscard]] gc::ContributionKind read_kind(const Json& source)
 {
     const std::string token = read_string(source, "kind", "panel");
-    if (token == "inspector")
+    for (const gc::ContributionKind kind :
+         {gc::ContributionKind::panel, gc::ContributionKind::inspector, gc::ContributionKind::gizmo,
+          gc::ContributionKind::asset_kind_editor})
     {
-        return gc::ContributionKind::inspector;
+        if (token == gc::contribution_kind_token(kind))
+        {
+            return kind;
+        }
     }
-    if (token == "gizmo")
-    {
-        return gc::ContributionKind::gizmo;
-    }
-    if (token == "asset_kind_editor")
-    {
-        return gc::ContributionKind::asset_kind_editor;
-    }
+    // An unrecognised token becomes `panel` — the kind with no `target` semantics — rather than being
+    // trusted into a target-keyed lookup.
     return gc::ContributionKind::panel;
 }
 
@@ -199,7 +215,22 @@ bool read_package_manifest(const fs::path& manifest_file, const std::string& exp
     error_code.clear();
     message.clear();
 
+    // ⚠ THE MANIFEST MUST NOT BE AN OS LINK — the SAME refusal the package root itself gets
+    // (ext_scheme.h § mount PROVENANCE), applied to the one file this module actually OPENS. The mount
+    // provenance walk stops AT the package root, so nothing above covers a link INSIDE it, and both
+    // `is_regular_file` and `std::ifstream` follow links: a package shipping
+    // `context-package.json -> /etc/passwd` would otherwise have up to `kMaxPackageManifestBytes` of an
+    // arbitrary readable file read into this process, with derived content handed back to the operator
+    // channel (the id-mismatch message echoes the target's `id` verbatim, and a parse failure reports a
+    // byte offset — a weak content oracle). Refused by NAME, before anything follows it.
     std::error_code ec;
+    if (path_is_os_link(manifest_file))
+    {
+        error_code = kErrManifestMissing;
+        message = std::string(kPackageManifestFileName) +
+                  " is an OS link; a package's manifest must be a real file inside its own root";
+        return false;
+    }
     if (!fs::is_regular_file(manifest_file, ec))
     {
         error_code = kErrManifestMissing;
@@ -259,6 +290,10 @@ bool read_package_manifest(const fs::path& manifest_file, const std::string& exp
 
     const Json& contributions = document.at("contributions");
     std::vector<gc::Contribution> parsed;
+    // The final size is known EXACTLY (the loop fills all of them or returns false), and a
+    // `Contribution` holds five strings plus two vectors, so each reallocation move-constructs every
+    // one accepted so far. `package_mounts` below already reserves for the same reason.
+    parsed.reserve(contributions.size());
     for (std::size_t index = 0; index < contributions.size(); ++index)
     {
         const Json& source = contributions.at(index);
@@ -303,7 +338,10 @@ bool read_package_manifest(const fs::path& manifest_file, const std::string& exp
         // because the compatibility window is a single major (extension.h).
         if (source.contains("contractVersion"))
         {
-            const std::int64_t stated = read_int(source, "contractVersion", -1);
+            // Bounded to the i32 range the field casts to; an out-of-range or non-numeric value takes
+            // the -1 fallback and so lands on the mismatch refusal below — fail-CLOSED.
+            const std::int64_t stated = read_int(source, "contractVersion", -2147483648LL,
+                                                 2147483647LL, -1);
             if (stated != static_cast<std::int64_t>(gc::kContractMajor))
             {
                 error_code = kErrManifestInvalid;
@@ -325,16 +363,28 @@ bool read_package_manifest(const fs::path& manifest_file, const std::string& exp
         // Clamped at 0 rather than refused: `DockDefaults` documents 0 as "no minimum stated" and
         // negatives as refused, so a negative arriving from a manifest becomes "unstated" — the
         // permissive-default half of the rule, since the cost is cosmetic.
-        contribution.dock.min_width = static_cast<int>(std::max<std::int64_t>(0, read_int(dock, "minWidth")));
+        // BOUNDED TO THE i32 RANGE THE FIELD CASTS TO, and that bound is the correctness half rather
+        // than tidiness: the clamp runs on the `int64`, so before the guard existed a manifest saying
+        // `"minWidth": 4294967295` survived `std::max(0, …)` and then NARROWED to -1 — and
+        // `registry.cpp` refuses a negative min size, so the scan would have reported as ACCEPTED a
+        // package the registry then rejects, breaking this file's own promise (package_store.h § the
+        // scan) that it never does that. Out of range now reads as "unstated" (0), the same permissive
+        // direction a negative already took.
+        contribution.dock.min_width =
+            static_cast<int>(std::max<std::int64_t>(0, read_int(dock, "minWidth", -2147483648LL,
+                                                               2147483647LL)));
         contribution.dock.min_height =
-            static_cast<int>(std::max<std::int64_t>(0, read_int(dock, "minHeight")));
+            static_cast<int>(std::max<std::int64_t>(0, read_int(dock, "minHeight", -2147483648LL,
+                                                               2147483647LL)));
 
         // (b) content.type FAILS CLOSED, and only `iframe` is legal for a package. `uitree` and
         // `local` both mean "the editor renders this from its own code", which a third-party package
         // does not have — accepting either would be accepting a claim the package cannot back.
         const Json& content = read_object(source, "content");
         const std::string content_type = read_string(content, "type");
-        if (content_type != "iframe")
+        // The accepted token comes from the FORWARD table too, so "what the editor emits" and "what this
+        // parser accepts" cannot drift apart (see read_kind / read_dock_zone).
+        if (content_type != gc::content_type_token(gc::ContentType::iframe))
         {
             error_code = kErrManifestInvalid;
             message = at + " declares content.type '" + content_type +
@@ -355,12 +405,29 @@ bool read_package_manifest(const fs::path& manifest_file, const std::string& exp
         }
 
         const Json& state = read_object(source, "state");
-        const std::int64_t schema_version = read_int(state, gc::kStateSchemaVersionKey, 1);
+        // The guard bounds here are deliberately WIDER than the u32 the field casts to, so that 0 and
+        // negatives still REACH the `< 1` refusal below and it stays a live assertion instead of
+        // becoming unreachable. Bounding at ±2^53 is what keeps read_int's own cast defined.
+        const std::int64_t schema_version = read_int(state, gc::kStateSchemaVersionKey,
+                                                    -9007199254740992LL, 9007199254740992LL, 1);
         if (schema_version < 1)
         {
             error_code = kErrManifestInvalid;
             message = at + " declares state." + std::string(gc::kStateSchemaVersionKey) + " " +
                       std::to_string(schema_version) + "; the D6 state contract starts at 1";
+            return false;
+        }
+        // ⚠ THE UPPER BOUND IS ITS OWN REFUSAL, and it is not tidiness. `4294967296` is an EXACT
+        // integer — no UB, and it sails past `>= 1` — and then NARROWS TO 0 on the cast below, which is
+        // precisely the value `registry.cpp` refuses (`"state.schemaVersion is 0"`). Without this the
+        // scan would report as ACCEPTED a package the registry then rejects, breaking this file's own
+        // promise (package_store.h § the scan) that it never reports a package the Shell would refuse.
+        if (schema_version > 4294967295LL)
+        {
+            error_code = kErrManifestInvalid;
+            message = at + " declares state." + std::string(gc::kStateSchemaVersionKey) + " " +
+                      std::to_string(schema_version) +
+                      "; the D6 state contract stops at 4294967295";
             return false;
         }
         contribution.state.schema_version = static_cast<std::uint32_t>(schema_version);
@@ -448,11 +515,25 @@ PackageStoreScan scan_package_store(const fs::path& store_root)
     std::error_code ec;
     if (!fs::is_directory(store_root, ec))
     {
-        // A first-run machine. REPORTED rather than silent so "no third-party panels" always has a
-        // stated reason, but it is an ordinary state and not an error the user can act on.
+        // ⚠ `ec` DECIDES WHICH FAULT THIS IS, and reading it is the point. "Not a directory" has two
+        // very different causes: the store has not been created yet (a first-run machine — reported so
+        // that "no third-party panels" always has a stated reason, but an ordinary state), or the store
+        // could not be EXAMINED at all because something ABOVE it is unreadable (a mode-000 `~/.context`
+        // from a restored backup or a hardening mistake). Reporting the second as "does not exist yet" —
+        // a code this file documents as "NOT an error" — tells a user whose packages are all present
+        // that they have none, which is exactly the diagnosis-defeating silence decision 3 forbids. The
+        // enumeration below already distinguishes the same two cases one level down; this is that fix
+        // applied one level UP.
+        // ⚠ A TRUTHY `ec` IS NOT BY ITSELF "UNREADABLE" — the ERRNO VALUE is the discriminator.
+        // MEASURED: libc++ sets `ec` to ENOENT from `is_directory` for a path that simply does not
+        // exist, so testing `ec` alone reported every first-run machine as an unreadable store. The
+        // suite's pre-existing `kErrPackageStoreAbsent` assertion is what caught that.
+        const bool unreadable = ec && ec != std::errc::no_such_file_or_directory &&
+                                ec != std::errc::not_a_directory;
         scan.refusals.push_back(PackageRefusal{
-            "", store_root, kErrPackageStoreAbsent,
-            "the package store does not exist yet, so no packages are installed"});
+            "", store_root, unreadable ? kErrPackageStoreUnreadable : kErrPackageStoreAbsent,
+            unreadable ? "the package store could not be examined: " + ec.message()
+                       : "the package store does not exist yet, so no packages are installed"});
         return scan;
     }
 

@@ -969,18 +969,24 @@ int main(int argc, char** argv)
     const shell::PackageStoreScan package_scan = shell::scan_package_store(package_store);
     for (const shell::PackageRefusal& refusal : package_scan.refusals)
     {
-        std::fprintf(stderr, "context_editor: package store: %s%s%s: %s\n",
-                     refusal.id.empty() ? "" : "'", refusal.id.c_str(),
-                     refusal.id.empty() ? "" : "'", refusal.message.c_str());
+        // ONE label, and it NAMES THE PATH: three of the refusals (store absent, store unreadable,
+        // manifest missing) carry no path in their message, so without this an operator is told which
+        // package failed but never which directory — and a store-level refusal, whose `id` is empty by
+        // construction, rendered as a bare `package store: : <message>`.
+        const std::string where = refusal.id.empty()
+                                      ? refusal.path.string()
+                                      : "'" + refusal.id + "' (" + refusal.path.string() + ")";
+        std::fprintf(stderr, "context_editor: package store: %s: %s\n", where.c_str(),
+                     refusal.message.c_str());
     }
-    if (!package_scan.packages.empty())
+    for (const shell::InstalledPackage& package : package_scan.packages)
     {
-        for (const shell::InstalledPackage& package : package_scan.packages)
-        {
-            std::printf("context_editor: package '%s' (%zu contribution(s)) mounted from %s\n",
-                        package.id.c_str(), package.contributions.size(),
-                        package.root.string().c_str());
-        }
+        // "installed at", NOT "mounted from": no mount has been attempted at this point, and on a
+        // CEF-free build none ever will be. Claiming a mount here would mislead exactly the
+        // "my panel did not appear" investigation this block exists to serve.
+        std::printf("context_editor: package '%s' v%s (%zu contribution(s)) installed at %s\n",
+                    package.id.c_str(), package.version.c_str(), package.contributions.size(),
+                    package.root.string().c_str());
     }
     // ⚠ THE CONTRIBUTIONS ARE READ AND REPORTED, NOT REGISTERED — see package_store.h's boundary
     // note. Appending one to the built-in roster below would red the blocking `gui-a11y-coverage`
