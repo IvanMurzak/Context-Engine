@@ -61,6 +61,13 @@ option(CONTEXT_WASM_REQUIRE_RUNTIME
 # MSVC import library the MinGW/Strawberry-GCC dev toolchain cannot link (setup.md § Preconditions
 # — the V8 pattern); linux-x64 GCC/Clang and macos-arm64 AppleClang both link the static
 # libwasmtime.a (CI-proven by the spike-wasm job).
+#
+# ⚠ CMAKE_SIZEOF_VOID_P below is PROBE-DERIVED, not ambient: a failed CXX compiler ABI probe leaves it
+# EMPTY and every branch here then falls through to "unsupported platform" — a silent capability
+# downgrade that reads as a legitimately unsupported host (#460, measured on the self-hosted Windows
+# runner). src/CMakeLists.txt now refuses to configure at all in that state, so reaching this code
+# with an empty value should be impossible; the gate below still prints the value so the next
+# unresolved key names its own cause.
 set(_ctx_wasm_plat "")
 if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8
    AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64|X86_64")
@@ -79,11 +86,21 @@ if(_ctx_wasm_plat STREQUAL "" OR CONTEXT_WASM_FORCE_STUB)
     set(_ctx_wasm_runtime OFF)
 endif()
 if(NOT _ctx_wasm_runtime AND CONTEXT_WASM_REQUIRE_RUNTIME)
+    # The message MUST name every input the resolution above consumed, sizeof_void_p included.
+    # MEASURED (#460): the earlier form printed system name, processor, MSVC and force_stub — ALL
+    # FOUR CORRECT — and omitted CMAKE_SIZEOF_VOID_P, which was the one that decided (empty, because
+    # the runner's CXX ABI probe had failed). A red listing only correct-looking fields sent the
+    # diagnosis to "the wasmtime prebuilt did not resolve" when nothing had ever been fetched. The
+    # top-level guard in src/CMakeLists.txt now catches that class first; this stays exhaustive so a
+    # future unresolved key names itself.
     message(FATAL_ERROR "context_wasm_runner: CONTEXT_WASM_REQUIRE_RUNTIME=ON but the resolved "
                         "backend is the STUB (platform ${CMAKE_SYSTEM_NAME}/"
                         "${CMAKE_SYSTEM_PROCESSOR}, MSVC=${MSVC}, "
+                        "sizeof_void_p='${CMAKE_SIZEOF_VOID_P}', platform_key='${_ctx_wasm_plat}', "
                         "force_stub=${CONTEXT_WASM_FORCE_STUB}). This CI leg must gate the real "
-                        "VM — fix the runner/toolchain instead of shipping a vacuous pass.")
+                        "VM — fix the runner/toolchain instead of shipping a vacuous pass. An EMPTY "
+                        "sizeof_void_p means the CXX compiler ABI probe failed (see #460), NOT that "
+                        "this platform lacks a prebuilt.")
 endif()
 
 if(_ctx_wasm_runtime)
@@ -143,7 +160,8 @@ if(_ctx_wasm_runtime)
 else()
     message(STATUS "context_wasm_runner: STUB backend (no linkable wasmtime prebuilt for this "
                    "toolchain — platform ${CMAKE_SYSTEM_NAME}/${CMAKE_SYSTEM_PROCESSOR}, "
-                   "MSVC=${MSVC}, force_stub=${CONTEXT_WASM_FORCE_STUB}); nothing fetched, no wasm "
+                   "MSVC=${MSVC}, sizeof_void_p='${CMAKE_SIZEOF_VOID_P}', "
+                   "force_stub=${CONTEXT_WASM_FORCE_STUB}); nothing fetched, no wasm "
                    "executes. The 3-OS wasm-runner CI job gates the real VM.")
 endif()
 

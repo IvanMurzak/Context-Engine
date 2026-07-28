@@ -110,9 +110,22 @@ general step's `-E` gate-exclusion regex, so they auto-run there, and the `build
 
 ## CI structure (`.github/workflows/ci.yml`)
 
-Two ~10-second gates front everything via `needs:`: `license-gate` (deny-by-default dependency
-license check + CycloneDX SBOM artifact, `tools/check_licenses.py`) and `python-tests` (pytest over
-`tools/tests` + `bench/tests` + fleet-manifest validation). Then, in one rollup (~34 checks):
+Two ~10-second **deterministic** gates front everything via `needs:`: `license-gate` (deny-by-default
+dependency license check + CycloneDX SBOM artifact, `tools/check_licenses.py`) and `ci-config-gate`
+(fleet-manifest validation + the gating-topology gate, `tools/check_fleet_manifest.py` +
+`tools/check_ci_gating.py`). Every check they run is a pure read of committed files — no network, no
+subprocess, no timing — which is exactly what makes it safe to put ~39 jobs behind them. (Scoped to the
+CHECKS: `license-gate` the job also uploads an SBOM artifact, a network step, so it is not literally
+flake-free end to end — that is the one residual way a gate can skip the rollup without a real defect.)
+
+**`python-tests` (pytest over `tools/tests` + `bench/tests`) deliberately gates NOTHING** (issue
+#459). A `needs:` edge does not merely red the rollup, it SKIPS every dependent job, so the only
+recovery is a full ~39-job rerun — and that suite binds ephemeral ports, spawns subprocesses and waits
+on threading Events, so it has real timing flake surface. It stays a blocking required check (a red
+still reds the run) but no job may depend on it; `tools/check_ci_gating.py` enforces that in both
+directions, so neither re-adding it nor deleting the retained fail-fast can pass review silently. Then,
+in one rollup (42 checks — 24 job definitions, of which the 21 fronted ones expand through the OS
+matrices to 39):
 
 - **`build` (ubuntu / macos / windows)** — blocking. Dev-preset build + the general ctest step +
   the named gate steps (M1/M2/M4/M5/M6/M7/M8 exit, determinism, samples-corpus) on every leg.

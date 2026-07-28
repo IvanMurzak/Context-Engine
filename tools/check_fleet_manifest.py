@@ -3,7 +3,9 @@
 
 The manifest (docs/ci-fleet-manifest.json) maps every CI-enforced requirement to the named runner
 class that enforces it, its tier, and its red-X policy. This gate keeps the manifest honest and in
-sync with the live workflow; it runs in the python-tests CI job every PR.
+sync with the live workflow; it runs in the ci-config-gate CI job every PR (it moved out of
+python-tests in issue #459 — ci-config-gate is one of the two DETERMINISTIC gates that front the
+rollup, so this validator must stay stdlib-only and free of network/subprocess/timing dependence).
 
 Checks:
   1. Structural: manifest_version, runner_classes, gates present and well-typed.

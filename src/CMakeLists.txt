@@ -60,6 +60,80 @@ if(APPLE)
     set(CMAKE_OBJCXX_EXTENSIONS OFF)
 endif()
 
+# --- compiler-ABI-probe guard (issue #460) --------------------------------------------------------
+# CMAKE_SIZEOF_VOID_P is NOT ambient truth about the host: CMake DERIVES it from the per-language
+# compiler ABI probe. CMakeDetermineCompilerABI.cmake sets CMAKE_<LANG>_SIZEOF_DATA_PTR only inside
+# `if(CMAKE_<LANG>_ABI_COMPILED)`, and CMakeCXXCompiler.cmake then copies that into
+# CMAKE_SIZEOF_VOID_P. So when `-- Detecting CXX compiler ABI info` prints `- failed`, CMake does NOT
+# stop — it falls back to the legacy `Check for working CXX compiler` try_compile and carries on — but
+# it leaves CMAKE_SIZEOF_VOID_P EMPTY, and every consumer below silently reads that empty value.
+#
+# EVERY prebuilt/toolchain platform-key resolution in this repo gates on `CMAKE_SIZEOF_VOID_P EQUAL 8`
+# (src/runtime/js, src/runtime/wasm, src/runtime/ts x3, src/editor/schedule x2, src/editor/system x2,
+# src/render, ../cmake/ContextCef.cmake, plus the spikes). Stated as an ENUMERATION and deliberately
+# NOT as a count: the list is the load-bearing part (it makes the blast radius auditable) while a
+# hand-kept integer drifts silently — an earlier draft of this comment said "NINE" while its own list
+# summed to ten and the tree held eleven. With the value empty EVERY one of them
+# resolves to "unsupported platform", and — MEASURED site by site, because the two halves differ —
+# they then split:
+#
+#   * some are FATAL but MISATTRIBUTE. The esbuild/tsgo keys (src/runtime/ts, src/editor/schedule,
+#     src/editor/system) stop with "no pinned esbuild prebuilt for host 'Darwin/arm64'" — for a host
+#     that IS pinned. That sends the reader off to add a pin that already exists, and is where a whole
+#     diagnosis cycle went for #460. src/render and ../cmake/ContextCef.cmake belong in THIS bucket
+#     too — not the silent one — and PLATFORM-DEPENDENTLY so: only their WIN32 branches test
+#     CMAKE_SIZEOF_VOID_P (ContextCef's Linux branch tests it as well), while their APPLE branches do
+#     not test it at all. So with an empty value both still resolve correctly on macOS and die with a
+#     misleading "no wgpu-native / no CEF prebuilt pinned for this platform" FATAL on Windows.
+#   * others downgrade SILENTLY: src/runtime/js leaves _ctx_js_v8 OFF (V8 stub) and src/runtime/wasm
+#     builds its stub backend, as do the _ctx_js_v8 mirrors gating reduced-assertion test branches.
+#     Nothing reds — the leg goes GREEN while testing less than it claims. Only the wasm tier has an
+#     anti-vacuity gate (CONTEXT_WASM_REQUIRE_RUNTIME), set on ONE CI leg, which is the only reason
+#     this surfaced at all instead of passing quietly.
+#
+# So the guard is not redundant with the fatal sites: it fires FIRST, and names the actual cause
+# instead of a missing pin — and it closes the silent half, which nothing else does.
+#
+# ⚠ POSITION IS LOAD-BEARING, and it is why this block sits HERE rather than up beside `project()`.
+# `enable_language()` re-runs the ABI probe for the new language, and CMakeOBJCXXCompiler.cmake /
+# CMakeCCompiler.cmake then do `if(CMAKE_<LANG>_SIZEOF_DATA_PTR) set(CMAKE_SIZEOF_VOID_P ...)` — so on
+# Apple the unconditional `enable_language(OBJCXX)` above REPAIRS an empty value that a failed CXX
+# probe left behind. MEASURED on the macOS host: with the guard placed before that block, emptying the
+# value made the guard fire while the tree below still resolved `darwin-arm64` correctly — a false red
+# for a configure that would have been fine. Placed here, the guard checks the value its
+# consumers actually read. It also explains why #460 reproduced on WINDOWS and not macOS: there, C is
+# enabled only when the spike/CEF toggles are on, and the text packages' mid-tree `enable_language(C)`
+# lands in a SUBDIRECTORY scope, so nothing repairs the top-level value.
+#
+# MEASURED (#460): run 30322675129 on the self-hosted Windows runner failed exactly this way and
+# PASSED on a rerun of the SAME commit, so the probe failure is intermittent runner state. Fail CLOSED
+# and NAME the real cause, because the downstream symptom does not: the wasm gate's own message
+# printed four inputs that were all correct and omitted the one that decided.
+#
+# Predicate note: this asserts the probe COMPLETED, not that the host is 64-bit — a legitimate 32-bit
+# value (4) passes and the per-site `EQUAL 8` guards still decide bitness. The Emscripten legs
+# configure spikes/webgpu and src/render/web, never `-S src`, so they never reach this.
+#
+# ⚠ COVERAGE, stated rather than implied: this guard protects `-S src` configures only. The NATIVE
+# spike-webgpu leg configures `-S spikes/webgpu` on the SAME self-hosted Windows pool where #460 was
+# measured, and spikes/webgpu/CMakeLists.txt carries its own `CMAKE_SIZEOF_VOID_P EQUAL 8` key with its
+# own misattributing FATAL ("add the asset + SHA256"). A failed probe there still misdiagnoses. Lifting
+# this block into a cmake/ module included by each configure root is the fix; it is deliberately NOT
+# done here (out of scope for a CI-fragility change) so the gap is recorded, not hidden.
+if(NOT CMAKE_SIZEOF_VOID_P)
+    message(FATAL_ERROR
+        "CMAKE_SIZEOF_VOID_P is empty, which means the compiler ABI probe did NOT complete — "
+        "look for '-- Detecting CXX compiler ABI info - failed' above, and the reason in "
+        "${CMAKE_BINARY_DIR}/CMakeFiles/CMakeConfigureLog.yaml (CMake >= 3.26; on the declared 3.25 "
+        "floor read CMakeFiles/CMakeError.log instead). Only the wasm-runner CI job uploads that log "
+        "as an artifact — elsewhere read it on the runner. This is a TOOLCHAIN / RUNNER-STATE "
+        "failure, NOT a missing prebuilt: every platform-key resolution gating on "
+        "'CMAKE_SIZEOF_VOID_P EQUAL 8' would resolve to 'unsupported platform' — four of them dying "
+        "with a misleading \"no pinned esbuild prebuilt\" and the rest silently building stub "
+        "backends — so we refuse to configure against an unknown pointer size. The failure is "
+        "intermittent — re-run the job, and see Context-Engine#460.")
+endif()
+
 # Warnings-as-errors baseline: the `context_warnings` interface target (../cmake/ContextWarnings.cmake).
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextWarnings.cmake)
 

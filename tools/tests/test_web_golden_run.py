@@ -89,9 +89,19 @@ def test_collector_receives_frames_and_done(tmp_path):
         assert "short" not in collector.frames and "bad" not in collector.frames
 
         # /done carries the harness exit code and releases the wait.
+        #
+        # WAIT on the event, never sample it. The handler flushes the 200 BEFORE calling
+        # done.set() — a deliberate order, documented at the /done branch in web_golden_run.py —
+        # and end_headers() writes straight to the socket (wbufsize = 0), so the client can read
+        # the response while the handler thread has not yet reached done.set(). There is no
+        # happens-before edge between the two, which is exactly what made the old
+        # `assert collector.done.is_set()` here race the handler and flake this job (and, through
+        # the python-tests `needs:` edge, skip whole CI rollups). A bounded wait() is the real
+        # synchronisation point and still FAILS if the handler never sets the event.
         assert not collector.done.is_set()
         assert post(f"{base}/done?exit=0", b"") == 200
-        assert collector.done.is_set()
+        assert collector.done.wait(timeout=10), \
+            "the /done handler never set `done` — see the ordering note in tools/web_golden_run.py"
         assert collector.harness_exit == 0
 
 
