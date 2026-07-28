@@ -29,10 +29,12 @@
 //     written, and the thing to do about it is not "re-apply" but "wait for the project to be
 //     reachable".
 //   * an ABANDONMENT (M9 x10, CE #452) is `wait` too — no write was ever attempted; the Inspector had
-//     to load a different model while an edit was in flight, so the staged value was discarded. Same
-//     hue as a drop for 06 §2's stated reason (the human is who must act), DIFFERENT headline, because
-//     the drop's advice ("re-apply against the current value") points at a field that is no longer on
-//     screen. The hue answers "whose turn is it"; the sentence answers "what happened".
+//     to replace the model under an in-flight edit (the shared selection moved, OR the same entity was
+//     re-read from disk), so the staged value was discarded. Same hue as a drop for 06 §2's stated
+//     reason (the human is who must act), DIFFERENT headline, because the drop's advice ("re-apply
+//     against the current value") points at a field that may no longer be on screen. The hue answers
+//     "whose turn is it"; the sentence answers "what happened" — and, because a notice sees only
+//     `kind`, that sentence names no single CAUSE (see `writeNoticeHeadline`).
 //
 // ⚠ COLOUR IS NEVER THE ONLY SIGNAL (R-A11Y-001). Every notice carries its meaning in TEXT — the
 // headline names what was refused and why — and is announced through the kit's ASSERTIVE live region
@@ -62,9 +64,9 @@ export const WRITE_NOTICE_KIND_DROP = "drop";
 /** A write-PATH refusal: no daemon, an unreadable field, a compose refusal. Nothing was written. */
 export const WRITE_NOTICE_KIND_REFUSAL = "refusal";
 /**
- * An ABANDONED gesture (M9 x10, CE #452): NO write was ever attempted. The Inspector had to load a
- * different model — the shared selection moved under the human's in-flight edit — and could not
- * withhold it, so the staged value was discarded.
+ * An ABANDONED gesture (M9 x10, CE #452): NO write was ever attempted. The Inspector had to replace
+ * the model under the human's in-flight edit — the shared selection moved, or the same entity was
+ * re-read from disk — and could not withhold it, so the staged value was discarded.
  *
  * A THIRD kind rather than a re-use of `WRITE_NOTICE_KIND_DROP`, because the drop's sentence would be
  * FALSE here in every clause: nobody "changed that field first", there was no compare-and-swap, and
@@ -158,14 +160,24 @@ export function writeNoticeHeadline(notice: WriteNotice): string {
         );
     }
     if (notice.kind === WRITE_NOTICE_KIND_ABANDONED) {
-        // NAMES THE CAUSE the human could not otherwise guess: the selection moved, and it may well
-        // have been moved by another window, a CLI or an agent rather than by them (selection is daemon
-        // state since e08b). It deliberately does NOT say "re-apply against the current value" — the
-        // drop's advice — because the field they were editing is no longer the one on screen; the
-        // actionable instruction is to go back to it.
+        // ⚠⚠ CAUSE-NEUTRAL ON PURPOSE, and this sentence was WRONG until it was: it used to assert
+        // "the Inspector's selection changed" and tell the human to "re-select that entity". A notice
+        // renders from `kind` alone, and `abandoned` covers MORE than a selection move — the commonest
+        // producer is the opposite one, `on_commit`'s READ-YOUR-WRITES re-read of the SAME entity
+        // landing on a gesture the human started while it was in flight (measured over the real wire
+        // in test_e09b_concurrent_cas.cpp § 5e). On that path the selection never moved and the field
+        // is still on screen, so naming a selection change was a confident falsehood and "re-select
+        // that entity" was an instruction with nothing to do. Design 10's LOUD invariant is about
+        // telling the truth loudly, so the headline states only what is true of EVERY abandonment —
+        // the Inspector replaced the content under the edit — and the Shell's own diagnostic
+        // (`notice.message`, rendered right after by `writeNoticeText`) supplies the specific cause,
+        // which is the only layer that knows both identities (inspector_feed.cpp).
+        //
+        // It still deliberately does NOT say "re-apply against the current value" — the drop's advice —
+        // because there was no compare-and-swap and the field may no longer be on screen at all.
         return (
-            `Your ${what}${where} was discarded — the Inspector's selection changed while you were ` +
-            `editing. Nothing was written; re-select that entity and re-apply it.`
+            `Your ${what}${where} was discarded — the Inspector replaced the content you were ` +
+            `editing. Nothing was written; re-open the field and re-apply your value.`
         );
     }
     return `Your ${what}${where} could not be saved. Nothing was written.`;

@@ -304,8 +304,8 @@ void bind_write_client(BuiltinPanels& panels, client::Client* client);
 // and, since M9 x10 (CE #452), every ABANDONED Inspector gesture as well.
 //
 // ONE seam for ALL THREE loss sites — the Inspector's gesture commit, the undo/redo replay, and the
-// Inspector's undeferrable gesture abandonment — because
-// the human does not care which of them lost their work; they care that the editor said so. Keeping the
+// Inspector's undeferrable gesture abandonment — because the human does not care which of them lost
+// their work; they care that the editor said so. Keeping the
 // message COMPOSITION here (in builtin_panels.cpp, the one TU that sees both feeds AND the relay) is
 // what stops two hand-rolled `WriteNotice` builders drifting into two different vocabularies for the
 // same event, and is why the feeds themselves hold only an erased `std::function` and never name the

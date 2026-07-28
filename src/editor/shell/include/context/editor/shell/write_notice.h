@@ -89,8 +89,10 @@ inline constexpr const char* kWriteNoticeOrigin = "shell";
 //   * REFUSAL — the write PATH refused (no daemon, an unreadable field, a compose refusal). Nothing
 //     was written and no concurrency event was observed. That is `bad`.
 //   * ABANDONED (M9 x10, CE #452) — NO WRITE WAS EVER ATTEMPTED. A staged Inspector gesture was
-//     destroyed because the panel had to adopt an incoming model it could not withhold (the shared
-//     selection moved under an in-flight edit — `InspectorFeed::apply_result`). It is a THIRD kind and
+//     destroyed because the panel had to adopt an incoming model it could not withhold — the shared
+//     selection moved under an in-flight edit, OR the same entity was re-read from disk under one
+//     (`InspectorFeed::apply_result`, which is why the renderer's headline names no single cause and
+//     the Shell's `message` supplies the specific one). It is a THIRD kind and
 //     not a re-use of DROP, because DROP's whole sentence is a lie here: nobody "changed that field
 //     first", there was no CAS, and no concurrent writer need exist at all. Telling the human to
 //     "re-apply against the current value" when the field they were editing is no longer even on

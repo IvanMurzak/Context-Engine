@@ -83,14 +83,19 @@
 //      EVERY selection-driven read, whatever identity it names — and the withheld selection is
 //      REMEMBERED (`deferred_selection()`) so it is served the moment the gesture is genuinely gone.
 //      A deferral that forgot the selection would trade a lost edit for a window permanently out of
-//      sync with the daemon's selection, which is a different silent wrongness, not a fix.
-//   2. BE LOUD when an abandonment genuinely CANNOT be deferred. Exactly one path survives remedy 1:
-//      a fetch armed BEFORE the gesture was staged and served after it (the pump claimed it, the RPC
-//      ran, the reply is in hand). `apply_result` must adopt that reply — refusing it would strand a
+//      sync with the daemon's selection, which is a different silent wrongness, not a fix. Withholding
+//      also DROPS an unsent `pending_` fetch, without which the deferral is decorative: the pump would
+//      serve that stale read and destroy the very gesture the door just protected.
+//   2. BE LOUD when an abandonment genuinely CANNOT be deferred. Exactly one path survives remedy 1: a
+//      fetch the pump had ALREADY CLAIMED when the gesture was staged (`mark_fetched` ran, the RPC is
+//      out, the reply is in hand). `apply_result` must adopt that reply — refusing it would strand a
 //      claimed fetch nothing re-arms — so the staged edit dies there, and the human is TOLD through
-//      the ABANDON SINK below. It is a THIRD notice kind (`kWriteNoticeKindAbandoned`), not e09b-3's
-//      drop or refusal: no write was ever attempted, so calling it a refused write would be a lie
-//      about what happened, and design 10's LOUD invariant is about telling the truth loudly.
+//      the ABANDON SINK below. ⚠ THAT PATH IS NOT ONLY A SELECTION MOVE, and the notice must not claim
+//      it is: its commonest producer is `on_commit`'s READ-YOUR-WRITES re-read of the SAME entity
+//      landing on a gesture the human began while it was in flight (measured over the real wire in
+//      test_e09b_concurrent_cas.cpp § 5e). It is a THIRD notice kind (`kWriteNoticeKindAbandoned`),
+//      not e09b-3's drop or refusal: no write was ever attempted, so calling it a refused write would
+//      be a lie about what happened, and design 10's LOUD invariant is about telling the truth loudly.
 //
 // So after x10 there is NO path on which a staged gesture disappears without either being deferred or
 // being reported. That is the property to preserve; if a future task adds a fourth caller of
@@ -238,13 +243,27 @@ public:
     // read, not only a SAME-identity one. The two shapes are still tracked apart, because they are
     // owed different things:
     //
-    //   * SAME identity (the x9 door — `SceneTreePanel::set_model` re-resolves
-    //     `selection_.identity_hash` and never touches `selection_.identity`, so a settle-driven
-    //     refetch can only ever re-request the identity already inspected) => `refresh_deferred()`.
-    //     What is owed is a RE-READ of what is already on screen.
+    //   * SAME identity => `refresh_deferred()`. What is owed is a RE-READ of what is already on
+    //     screen, so there is nothing to remember. This is ALSO where a selection that came BACK to
+    //     the edited entity lands (`SceneTreePanel::apply_selection` re-notifies whenever the identity
+    //     OR its hash changes, so a second foreign move — or the human clicking that row — reaches
+    //     here), which is why this arm DISCHARGES any move remembered earlier: that move is stale, and
+    //     following it when the gesture ended would take the panel to an entity nobody has selected.
     //   * a DIFFERENT identity (the x10 door — a FOREIGN `session` `selection-changed` fact moved the
     //     shared selection) => `deferred_selection()`. What is owed is a MOVE, so the identity has to
     //     be remembered; serving it later re-points the panel where the daemon says it is.
+    //
+    // ⚠⚠ EVERY CALLER OF THIS SEAM IS A SELECTION FACT, and the deferral logic above DEPENDS on that.
+    // `request_refresh` owns its own x9 guard and never reaches the staged branch here (see there).
+    // Route a NEW re-read caller through `request_refresh`, never through this — a re-read arriving
+    // here would be read as "the selection is on this entity" and would wrongly discharge a withheld
+    // move.
+    //
+    // ⚠ A DEFERRAL ALSO DROPS AN UNSENT `pending_` FETCH. A read armed BEFORE the gesture and not yet
+    // claimed by the pump is still withholdable, and leaving it armed defeats the deferral entirely:
+    // the pump serves it, `set_model` destroys the staged edit, and the gesture is lost anyway — just
+    // loudly, through `apply_result`. (A CLAIMED fetch cannot be reached: `mark_fetched` already reset
+    // `pending_`. That one is genuinely undeferrable, and is the LOUD half's whole subject.)
     //
     // Before x10 the second case PROCEEDED and destroyed the staged edit + the L-30 CAS base silently.
     // Do NOT re-narrow this to the same-identity test: selection is DAEMON state (e08b), so the mover
@@ -262,7 +281,8 @@ public:
     // used to lose the MOST: `panel_.clear()` discards the staged edit AND resets the owed deferral,
     // so an empty-id-list `selection-changed` from another client erased both at once. A staged
     // gesture therefore defers the CLEAR as well, remembering it (`deferred_selection()`), and
-    // `flush_deferred` performs it once the gesture is genuinely gone.
+    // `flush_deferred` performs it once the gesture is genuinely gone. A withheld clear ALSO drops an
+    // unsent `pending_` fetch, for the reason § request states.
     //
     // Returns true when the panel was actually CLEARED, false when the clear was DEFERRED (or when
     // there was nothing to do). Deliberately not `[[nodiscard]]`: the composition root's selection
@@ -277,6 +297,12 @@ public:
     //
     // THE ONE HOME for that rule: `on_commit` and `pump_panel_feeds` both route through it, so
     // "which identity, and when is it empty" is not spelled out in two places that can drift.
+    //
+    // ⚠⚠ AND IT OWNS THE x9 GUARD FOR THE RE-READ ROUTE (moved here in review of M9 x10). A staged
+    // gesture defers the re-read as `refresh_deferred()` and leaves any withheld SELECTION untouched —
+    // a re-read says nothing about where the selection is, so it must not discharge one. That
+    // separation is what lets `request`'s staged branch treat its caller as a selection FACT; sharing
+    // one guard is what let a stale withheld move survive a selection coming back.
     bool request_refresh();
 
     // The pump's contract (mirrors SceneTreeFeed): the pending identity to fetch, claimed via

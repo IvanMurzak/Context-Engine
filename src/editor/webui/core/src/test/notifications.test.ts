@@ -16,10 +16,14 @@
 //     lands in the ASSERTIVE live region so a screen-reader user is told at the same moment.
 //
 // M9 x10 (CE #452) ADDS A THIRD KIND — an ABANDONED gesture, where no write was ever attempted because
-// the Inspector had to load a different model mid-edit. It shares the drop's `wait` hue (the human is
+// the Inspector had to replace the model mid-edit. It shares the drop's `wait` hue (the human is
 // who must act) and has its OWN sentence (the drop's would be false in every clause), so the cases
 // below assert BOTH: the shared hue, and that the drop's story appears nowhere in it. A kind whose only
 // distinguishing test was its own token would be a vocabulary entry, not a behaviour.
+//
+// That sentence is also CAUSE-NEUTRAL, and the cases below pin that too — as a NEGATIVE, because it was
+// wrong before review: a notice sees only `kind`, and an abandonment comes from a foreign selection move
+// OR from a same-entity re-read, so asserting "the selection changed" was false on the commoner one.
 //
 // The last one is the a11y coverage this task owes: `wait` had no production consumer before e09b-3,
 // so its accessible behaviour is net-new and is asserted here rather than assumed from the token.
@@ -174,15 +178,29 @@ export const notificationTests: TestCase[] = [
             const abandoned = parseWriteNotice(payload(WRITE_NOTICE_KIND_ABANDONED));
             assert(abandoned !== null, "the fixture parses");
             const abandonedHeadline = writeNoticeHeadline(abandoned!);
-            // WHAT ACTUALLY HAPPENED — the cause the human cannot guess, since the selection may well
-            // have been moved by another window, a CLI or an agent (it is daemon state since e08b).
+            // WHAT ACTUALLY HAPPENED, stated CAUSE-NEUTRALLY — see `writeNoticeHeadline`. A notice
+            // renders from `kind` alone, and `abandoned` is produced both by a foreign selection move
+            // AND by a same-entity re-read (read-your-writes landing on a gesture begun meanwhile), so
+            // the headline may not assert either. The specific cause rides in `notice.message`.
             assert(
-                abandonedHeadline.includes("selection changed"),
-                "the abandonment names the selection change as the cause",
+                abandonedHeadline.includes("replaced the content you were editing"),
+                "the abandonment says the Inspector replaced what was under the edit",
             );
             assert(abandonedHeadline.includes("Nothing was written"), "and that nothing was written");
-            // WHAT TO DO — go BACK to the entity, which is different advice from the drop's.
-            assert(abandonedHeadline.includes("re-select"), "and tells them to re-select it");
+            // WHAT TO DO — go back to the field, which is different advice from the drop's.
+            assert(abandonedHeadline.includes("re-open the field"), "and tells them to re-open it");
+            // ⚠ AND IT MUST NOT NAME A CAUSE IT CANNOT KNOW. This is the discriminating negative for
+            // the review finding that removed the old wording: the sentence used to assert "the
+            // Inspector's selection changed" and tell the human to "re-select that entity", which is
+            // false and unactionable on the re-read path.
+            assert(
+                !abandonedHeadline.includes("selection changed"),
+                "it does NOT assert a selection change it cannot know happened",
+            );
+            assert(
+                !abandonedHeadline.includes("re-select"),
+                "nor tell them to re-select an entity that may never have been deselected",
+            );
             // AND IT MUST NOT INHERIT THE DROP'S STORY. This is the discriminating pair: without it, a
             // regression that routed `abandoned` through the drop branch (or dropped the branch
             // altogether, falling through to the refusal text) would leave every assertion above
@@ -300,8 +318,8 @@ export const notificationTests: TestCase[] = [
             // Colour is NEVER the only signal (R-A11Y-001): the element's own text says what happened,
             // and it is the ABANDONMENT text rather than the drop's.
             assert(
-                (toast?.textContent ?? "").includes("selection changed"),
-                "and the text names the cause, not just the hue",
+                (toast?.textContent ?? "").includes("replaced the content you were editing"),
+                "and the text says what happened, not just the hue",
             );
             assert(
                 !(toast?.textContent ?? "").includes("someone else changed that field first"),

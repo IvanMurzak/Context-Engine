@@ -125,12 +125,17 @@ shape is worth knowing because it is the editor's one Shell-to-renderer push pat
   `createNotificationHost` (`notifications.ts`) renders it: `wait` hue for a drop (06 §2's
   awaiting-human — nothing was lost, re-apply against the current value), `bad` for a refusal
   (nothing was written), and — since M9 x10 (CE #452) — `wait` again for an **abandoned** gesture, with
-  its own sentence: no write was attempted at all, the Inspector had to load a different model while an
-  edit was in flight, so the human is told the SELECTION changed and to re-select that entity. Sharing
-  the drop's hue is right (the human is who must act); sharing its sentence would not be — there was no
-  compare-and-swap and no co-writer need exist. Always in the kit's **assertive** live region so colour
-  is never the only signal. The topic string and all THREE kind tokens are byte-compared against
-  `write_notice.h` by `tools/check_webui_assets.py --panel-contract`;
+  its own sentence: no write was attempted at all, the Inspector had to replace the model under an
+  in-flight edit, so the human is told their edit was discarded and to re-open the field and re-apply
+  it. That sentence names no CAUSE, deliberately: a notice renders from `kind` alone, and an
+  abandonment is produced BOTH by a foreign selection move AND by a same-entity re-read (the
+  read-your-writes path — see `inspector_feed.cpp`), so asserting "the selection changed" would be
+  false on the commoner of the two. The specific cause travels in `message`, which the Shell composes
+  where both identities are known. Sharing the drop's hue is right (the human is who must act); sharing
+  its sentence would not be — there was no compare-and-swap and no co-writer need exist. Always in the
+  kit's **assertive** live region so colour is never the only signal. The topic string and all THREE
+  kind tokens are byte-compared against `write_notice.h` by
+  `tools/check_webui_assets.py --panel-contract`;
 * the **payload** is `{kind, action, code, message, pointer}`, every member always present (an
   absent-vs-empty distinction would mean nothing here, so the Shell writes all five unconditionally
   and `parseWriteNotice` stays total). `kind` is one of the three pinned tokens; `action` is free text

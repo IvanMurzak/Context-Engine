@@ -61,6 +61,9 @@
 #include "context/editor/shell/panels/scenetree_feed.h" // x10 § 5e: the TREE's rendered selection, to
                                                         // prove the foreign fact really landed there
                                                         // (builtin_panels.h only forward-declares it)
+#include "context/editor/shell/panels/session_feed.h" // kSelectionChangedEvent (the fact's spelling, so
+                                                      // § 5e's wait counts the SELECTION fact and not
+                                                      // whatever else the `session` topic carries)
 #include "context/editor/shell/panels/wire_override_gateway.h"
 #include "context/editor/shell/shell.h" // kShellScope — attach with the REAL Shell's scope request
 
@@ -605,14 +608,23 @@ void a_gesture_commits_over_the_wire_and_survives_a_concurrent_writer()
     // M9 x10 (CE #452): `session` facts, so § 5e can drive a REAL foreign selection move. Counted here
     // rather than read off the feed because the feed's own `session_facts_applied` counts only facts it
     // APPLIED, and the wait below must not depend on the very decision under test.
-    std::size_t session_facts_seen = 0;
+    //
+    // ⚠ COUNTED PER `selection-changed`, NOT PER `session` FACT, and for exactly the reason
+    // `settles_seen` counts `derivation.settled` specifically (see its note below): the `session` topic
+    // carries other facts too, so a topic-only counter would let `pump_until_selection` return before
+    // the SELECTION arrived and red § 5e's successors for the wrong reason.
+    std::size_t selection_facts_seen = 0;
     settles.on_event(
-        [&observed, &settles_seen, &files_seen, &last_file_changed, &session_facts_seen](
+        [&observed, &settles_seen, &files_seen, &last_file_changed, &selection_facts_seen](
             const std::string&, const client::ClientEvent& event)
         {
             if (event.topic == panels::kSessionTopic)
             {
-                ++session_facts_seen;
+                if (event.payload.contains("event") &&
+                    event.payload.at("event").as_string() == panels::kSelectionChangedEvent)
+                {
+                    ++selection_facts_seen;
+                }
                 // The session leg of the live Shell's dispatch (editor_main.cpp's `on_event`), which
                 // is what carries a foreign `selection-changed` into the Scene tree and, through the
                 // composition root's selection listener, at the Inspector's staged gesture.
@@ -865,13 +877,20 @@ void a_gesture_commits_over_the_wire_and_survives_a_concurrent_writer()
     // what the door needs.
     {
         const std::string other_identity = "aaaaaaaaaaaaaaa1/ccccccccccccccc2";
-        // CLEAN SLATE, and the pump is load-bearing rather than tidy-up. § 5d's final commit APPLIED, so
-        // read-your-writes armed a fetch that is still PENDING here — exactly as it is in a real owner
-        // loop between the commit and the next frame. Serving it now is what the owner loop does; NOT
-        // serving it would leave § 5e measuring x10's LOUD path (a pre-armed fetch landing on a staged
-        // gesture — an abandonment) instead of its DEFERRAL path. Measured: without this pump the
-        // section reds on `results_applied`/`has_staged_edit`/`abandons_observed`, which is the code
-        // behaving correctly against a mis-staged scenario.
+        // CLEAN SLATE. § 5d's final commit APPLIED, so read-your-writes armed a fetch that is still
+        // PENDING here — exactly as it is in a real owner loop between the commit and the next frame —
+        // and serving it now is what that loop does. It also pins a known `base_raw_hash` for the
+        // negatives below to compare against.
+        //
+        // ⚠ IT IS NO LONGER LOAD-BEARING FOR THE SCENARIO, and this note used to claim otherwise. It
+        // recorded a MEASURED red — that without this pump the section fell onto x10's LOUD path (the
+        // pre-armed fetch landing on the staged gesture) and reddened
+        // `results_applied`/`has_staged_edit`/`abandons_observed`. Review of x10 removed that failure
+        // mode at the source: a deferral now DROPS an unsent `pending_` fetch (inspector_feed.h
+        // § request), because leaving it armed made the deferral decorative — the pump would serve the
+        // stale read and destroy the very gesture the door had just protected. So the un-pumped variant
+        // would now DEFER too. Kept for the owner-loop fidelity and the hash baseline, not to dodge a
+        // mis-staged scenario. `an_unsent_fetch_dies_with_a_deferred_selection` (T1) pins the new rule.
         panels::pump_panel_feeds(observed, *observer, kRoot);
         CHECK(!observed.inspector->panel().has_staged_edit());
         CHECK(!observed.inspector->pending().has_value());
@@ -880,7 +899,7 @@ void a_gesture_commits_over_the_wire_and_survives_a_concurrent_writer()
         CHECK(selection_base != 0);
         const std::size_t results_at_stage = observed.inspector->results_applied();
         const std::size_t abandons_before = observed.inspector->abandons_observed();
-        const std::size_t facts_before = session_facts_seen;
+        const std::size_t facts_before = selection_facts_seen;
 
         // The human is mid-edit in window 2.
         stage_only(observer_host, kFovPointer, "13.5");
@@ -888,7 +907,7 @@ void a_gesture_commits_over_the_wire_and_survives_a_concurrent_writer()
 
         // …and the racer moves the shared selection out from under them, over the real wire.
         CHECK(race_select(*racer, other_identity));
-        CHECK(pump_until_selection(settles, session_facts_seen, facts_before));
+        CHECK(pump_until_selection(settles, selection_facts_seen, facts_before));
 
         // The fact was APPLIED by the session feed — the tree's rendered selection really moved — so
         // the negatives below cannot pass merely because the fact was dropped in transit or swallowed

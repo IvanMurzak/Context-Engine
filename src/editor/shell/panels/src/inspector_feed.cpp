@@ -370,17 +370,36 @@ bool InspectorFeed::request_refresh()
     {
         return false; // nothing inspected — an ordinary state, not a failure
     }
+    // ⚠⚠ THE x9 GUARD FOR THE RE-READ ROUTE, OWNED HERE rather than borrowed from `request`.
+    //
+    // It used to live in `request`'s staged branch and be shared with the selection listener. That
+    // sharing was the bug x10 shipped: `request`'s staged branch could not tell a SELECTION FACT from
+    // a RE-READ, so it had to treat a same-identity call as "nothing to remember" — and a same-identity
+    // SELECTION fact (the selection coming BACK to the entity being edited, by a second foreign move
+    // or by the human clicking that row: `SceneTreePanel::apply_selection` re-notifies whenever the
+    // identity OR its hash changes) then left an earlier withheld MOVE standing. The panel followed
+    // that stale move when the gesture ended and landed on an entity nobody had selected.
+    //
+    // Guarding HERE fixes it by construction: `request`'s staged branch is now reached only by a
+    // selection fact (the composition-root listener, `request_inspector`, `hydrate_inspector`), so it
+    // may treat a same-identity call as the selection ARRIVING here and discharge the stale move.
+    // Reachable from the e09c READ-YOUR-REPLAYS caller (`pump_panel_feeds`), which — unlike
+    // `apply_event` and `flush_deferred` — does not itself check for a staged gesture first.
+    if (panel_.has_staged_edit())
+    {
+        // Nothing was armed, so counting a re-read here would make `rereads_armed()` claim a fetch no
+        // pump will perform. A withheld SELECTION is deliberately untouched: this re-read is not a
+        // statement about where the selection is, so it must not discharge one.
+        refresh_deferred_ = true;
+        return false;
+    }
     // Through the NAMED seam, not a second `pending_ = ...`: `request` is the one place that
     // documents the replace-a-pending-fetch rule. (It replaces unconditionally, so a selection that
     // moved between the gesture and this call is re-armed onto the OLD identity and its fetch waits
     // for the next pump-triggering change — narrow, and noted in the PR body.)
     if (!request(identity))
     {
-        // The L-30 guard inside `request` DEFERRED it: nothing was armed, so counting a re-read here
-        // would make `rereads_armed()` claim a fetch that no pump will perform. Reachable from the
-        // e09c READ-YOUR-REPLAYS caller (`pump_panel_feeds`), which — unlike `apply_event` and
-        // `flush_deferred` — does not itself check for a staged gesture first.
-        return false;
+        return false; // defensive: no staged gesture, so the only refusal left is an empty identity
     }
     ++rereads_armed_;
     return true;
@@ -395,11 +414,29 @@ bool InspectorFeed::request(const std::string& identity)
         // selected row's identity hash re-resolves -> the composition root's selection listener).
         // Owe the read rather than serve it, exactly as `apply_event` does; `flush_deferred` releases
         // it the moment the gesture is genuinely gone.
+        //
+        // EVERY CALL THAT REACHES HERE IS A SELECTION FACT — the composition-root listener,
+        // `request_inspector`, or the drill's `hydrate_inspector`. `request_refresh` owns its own x9
+        // guard and returns before this (see there for why that separation is load-bearing), so this
+        // branch may read the identity as "where the daemon says the selection now IS".
+        //
+        // ⚠ AND AN UNSENT FETCH DIES WITH IT, both arms. `pending_` may still hold a read that was
+        // armed BEFORE the gesture and NOT yet claimed by the pump (`mark_fetched` resets it, so a
+        // claimed fetch cannot be reached here). Leaving it armed defeats the whole deferral: the pump
+        // serves that stale read, `set_model` destroys the staged edit, and the human loses the gesture
+        // anyway — merely loudly, through `apply_result`'s abandon door. The read it names is
+        // superseded by this very fact, so dropping it loses nothing and `flush_deferred` re-arms
+        // whatever is actually owed once the gesture ends.
+        pending_.reset();
         if (identity == panel_.model().identity)
         {
-            // The x9 shape: a RE-READ of the entity already inspected. `refresh_deferred_` models it
-            // because there is nothing to remember — the identity is the one on screen.
+            // THE SELECTION IS (BACK) ON THE ENTITY BEING EDITED. `refresh_deferred_` models what is
+            // owed — a re-read of what is already on screen, there being nothing to remember — and any
+            // MOVE remembered earlier is now STALE and must be discharged: the daemon's selection is
+            // here, so following that move when the gesture ended would take the panel to an entity
+            // nobody has selected. This is the x9 shape as seen from the selection seam.
             refresh_deferred_ = true;
+            deferred_selection_.reset();
             return false;
         }
         // ⚠⚠ THE x10 SHAPE (CE #452), and the one this used to serve: the selection MOVED to another
@@ -435,8 +472,14 @@ bool InspectorFeed::request_clear()
         // deferral records "the selection went away" rather than "it moved to X".
         //
         // `refresh_deferred_` is deliberately LEFT AS IT IS: the entity is still inspected (we did not
-        // clear), so a re-read owed to it is still owed. `flush_deferred` discharges both, the clear
-        // first.
+        // clear), so a re-read owed to it is still owed. `flush_deferred` then performs the clear and
+        // RETIRES that refresh — a re-read owed to an entity no longer inspected dies with the
+        // selection, exactly as the undeferred path below retires it.
+        //
+        // ⚠ An UNSENT fetch dies here too, for the reason `request`'s staged branch states: left armed,
+        // the pump would serve it and `set_model` would destroy the very gesture this clear was
+        // withheld to protect.
+        pending_.reset();
         deferred_selection_ = DeferredSelection{};
         ++selections_deferred_;
         return false;
@@ -476,11 +519,27 @@ bool InspectorFeed::apply_result(const contract::Json& reply)
         record.code = kGestureAbandonedCode;
         // The DIAGNOSTIC, composed here for the same reason the L-30 drop's is composed in
         // inspector_panel.cpp: the engine states the fact, the renderer writes the human's sentence.
-        record.message = "your in-flight edit to `" + record.pointer +
-                         "` was discarded because the Inspector had to load " +
-                         (record.replaced_by.empty() ? std::string("another selection")
-                                                     : "`" + record.replaced_by + "`") +
-                         "; nothing was written — re-open the field and re-apply the value";
+        //
+        // ⚠⚠ THREE CASES, NOT ONE, AND THE DISTINCTION IS NOT COSMETIC. The undeferrable interleaving
+        // is "a fetch armed BEFORE the gesture, served after it", and NOTHING in that sentence says
+        // the fetch was a selection MOVE. The commonest producer is the opposite: `on_commit`'s
+        // READ-YOUR-WRITES re-read arms a fetch for the SAME identity, the human resumes typing, and
+        // that reply lands on the new gesture — measured over the real wire in
+        // test_e09b_concurrent_cas.cpp § 5e, whose own comment records that WITHOUT its clean-slate
+        // pump the section reds on `abandons_observed`. Reporting that as "the selection moved" would
+        // be a confident falsehood about a selection that never moved, and design 10's LOUD invariant
+        // is about telling the truth loudly — so the RELOAD case says so, and only a genuinely
+        // different identity is described as a move. The renderer's headline stays cause-neutral for
+        // the same reason (notifications.ts): it sees only `kind`, so it cannot tell these apart.
+        const bool reloaded_same_entity =
+            !record.replaced_by.empty() && record.replaced_by == record.identity;
+        record.message =
+            "your in-flight edit to `" + record.pointer + "` was discarded because the Inspector had to " +
+            (reloaded_same_entity
+                 ? std::string("re-read this entity from disk")
+                 : "load " + (record.replaced_by.empty() ? std::string("another selection")
+                                                         : "`" + record.replaced_by + "`")) +
+            "; nothing was written — re-open the field and re-apply the value";
         abandoned = std::move(record);
     }
 
