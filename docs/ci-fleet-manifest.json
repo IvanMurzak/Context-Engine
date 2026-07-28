@@ -129,7 +129,7 @@
       "tier": "per-PR",
       "red_x_policy": "blocking",
       "ci_job_id": "python-tests",
-      "description": "pytest over tools/tests + bench/tests (license gate, toolchain gate, corpus generator, perf gate, bench harness + daemons orchestration, budget-table extractor, fleet-manifest validator)."
+      "description": "pytest over tools/tests + bench/tests (license gate, toolchain gate, corpus generator, perf gate, bench harness + daemons orchestration, budget-table extractor, fleet-manifest validator, gating-topology gate). Blocking, but fronts NOTHING: issue #459 removed it from every needs: list because the suite binds ports, spawns subprocesses and waits on threading Events, so one racy assertion in it used to SKIP the whole ~41-job rollup. tools/check_ci_gating.py keeps it out of the gating position."
     },
     {
       "id": "build-ubuntu",
@@ -888,8 +888,18 @@
       "build_flavor": "n/a",
       "tier": "per-PR",
       "red_x_policy": "blocking",
-      "ci_job_id": "python-tests",
-      "description": "CI consumes this manifest: tools/check_fleet_manifest.py validates it against the live workflow every run (self-consistency + advisory-until-provisioned rule)."
+      "ci_job_id": "ci-config-gate",
+      "description": "CI consumes this manifest: tools/check_fleet_manifest.py validates it against the live workflow every run (self-consistency + advisory-until-provisioned rule). Runs in the ci-config-gate job, one of the two deterministic fail-fast gates fronting the rollup (moved out of python-tests by issue #459 so a timing-dependent pytest flake can no longer skip ~41 jobs)."
+    },
+    {
+      "id": "ci-gating-topology",
+      "requirement": "R-QA-012",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "n/a",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "ci-config-gate",
+      "description": "tools/check_ci_gating.py pins WHICH jobs may front the rollup via needs: (issue #459). Reds in both directions - if a timing-dependent job such as python-tests re-enters a needs: list, and if the retained deterministic fail-fast is deleted from a heavy job."
     },
     {
       "id": "perf-filesync-attach-100k",

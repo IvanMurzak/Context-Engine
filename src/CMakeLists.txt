@@ -60,6 +60,64 @@ if(APPLE)
     set(CMAKE_OBJCXX_EXTENSIONS OFF)
 endif()
 
+# --- compiler-ABI-probe guard (issue #460) --------------------------------------------------------
+# CMAKE_SIZEOF_VOID_P is NOT ambient truth about the host: CMake DERIVES it from the per-language
+# compiler ABI probe. CMakeDetermineCompilerABI.cmake sets CMAKE_<LANG>_SIZEOF_DATA_PTR only inside
+# `if(CMAKE_<LANG>_ABI_COMPILED)`, and CMakeCXXCompiler.cmake then copies that into
+# CMAKE_SIZEOF_VOID_P. So when `-- Detecting CXX compiler ABI info` prints `- failed`, CMake does NOT
+# stop — it falls back to the legacy `Check for working CXX compiler` try_compile and carries on — but
+# it leaves CMAKE_SIZEOF_VOID_P EMPTY, and every consumer below silently reads that empty value.
+#
+# NINE prebuilt/toolchain platform-key resolutions in this repo gate on `CMAKE_SIZEOF_VOID_P EQUAL 8`
+# (src/runtime/js, src/runtime/wasm, src/runtime/ts x2, src/editor/schedule x2, src/editor/system x2,
+# src/render, ../cmake/ContextCef.cmake, plus the spikes). With the value empty EVERY one of them
+# resolves to "unsupported platform", and — MEASURED site by site, because the two halves differ —
+# they then split:
+#
+#   * FOUR fatal but MISATTRIBUTE (the esbuild/tsgo keys in src/runtime/ts, src/editor/schedule,
+#     src/editor/system): the configure stops with "no pinned esbuild prebuilt for host
+#     'Darwin/arm64'" — for a host that IS pinned. That sends the reader off to add a pin that already
+#     exists, and is where a whole diagnosis cycle went for #460.
+#   * the REST downgrade SILENTLY: src/runtime/js leaves _ctx_js_v8 OFF (V8 stub), src/runtime/wasm
+#     builds its stub backend, and src/render / ContextCef do the same when their toggles are ON.
+#     Nothing reds — the leg goes GREEN while testing less than it claims. Only the wasm tier has an
+#     anti-vacuity gate (CONTEXT_WASM_REQUIRE_RUNTIME), set on ONE CI leg, which is the only reason
+#     this surfaced at all instead of passing quietly.
+#
+# So the guard is not redundant with the four fatal sites: it fires FIRST, and names the actual cause
+# instead of a missing pin — and it closes the silent half, which nothing else does.
+#
+# ⚠ POSITION IS LOAD-BEARING, and it is why this block sits HERE rather than up beside `project()`.
+# `enable_language()` re-runs the ABI probe for the new language, and CMakeOBJCXXCompiler.cmake /
+# CMakeCCompiler.cmake then do `if(CMAKE_<LANG>_SIZEOF_DATA_PTR) set(CMAKE_SIZEOF_VOID_P ...)` — so on
+# Apple the unconditional `enable_language(OBJCXX)` above REPAIRS an empty value that a failed CXX
+# probe left behind. MEASURED on the macOS host: with the guard placed before that block, emptying the
+# value made the guard fire while the tree below still resolved `darwin-arm64` correctly — a false red
+# for a configure that would have been fine. Placed here, the guard checks the value its NINE
+# consumers actually read. It also explains why #460 reproduced on WINDOWS and not macOS: there, C is
+# enabled only when the spike/CEF toggles are on, and the text packages' mid-tree `enable_language(C)`
+# lands in a SUBDIRECTORY scope, so nothing repairs the top-level value.
+#
+# MEASURED (#460): run 30322675129 on the self-hosted Windows runner failed exactly this way and
+# PASSED on a rerun of the SAME commit, so the probe failure is intermittent runner state. Fail CLOSED
+# and NAME the real cause, because the downstream symptom does not: the wasm gate's own message
+# printed four inputs that were all correct and omitted the one that decided.
+#
+# Predicate note: this asserts the probe COMPLETED, not that the host is 64-bit — a legitimate 32-bit
+# value (4) passes and the per-site `EQUAL 8` guards still decide bitness. The Emscripten legs
+# configure spikes/webgpu and src/render/web, never `-S src`, so they never reach this.
+if(NOT CMAKE_SIZEOF_VOID_P)
+    message(FATAL_ERROR
+        "CMAKE_SIZEOF_VOID_P is empty, which means the compiler ABI probe did NOT complete — "
+        "look for '-- Detecting CXX compiler ABI info - failed' above, and the reason in "
+        "${CMAKE_BINARY_DIR}/CMakeFiles/CMakeConfigureLog.yaml. This is a TOOLCHAIN / RUNNER-STATE "
+        "failure, NOT a missing prebuilt: every platform-key resolution gating on "
+        "'CMAKE_SIZEOF_VOID_P EQUAL 8' would resolve to 'unsupported platform' — four of them dying "
+        "with a misleading \"no pinned esbuild prebuilt\" and the rest silently building stub "
+        "backends — so we refuse to configure against an unknown pointer size. The failure is "
+        "intermittent — re-run the job, and see Context-Engine#460.")
+endif()
+
 # Warnings-as-errors baseline: the `context_warnings` interface target (../cmake/ContextWarnings.cmake).
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextWarnings.cmake)
 

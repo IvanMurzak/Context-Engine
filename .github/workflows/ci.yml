@@ -20,9 +20,22 @@
 # generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER, and sccache+MSVC is not worth fighting until
 # the clang-cl follow-up lands.
 #
-# Fail-fast gating: the two ~10-second gates (license-gate, python-tests) front the heavyweight
-# build/spike/bench jobs via `needs:` — a red gate stops ~12 heavy legs before they start, at
-# the cost of a short serialization on green runs.
+# Fail-fast gating (reshaped 2026-07-27, issue #459): the ~10-second gates that front the heavyweight
+# build/spike/bench jobs via `needs:` are `license-gate` and `ci-config-gate` — a red gate stops ~12
+# heavy legs before they start, at the cost of a short serialization on green runs.
+#
+# `python-tests` is deliberately NOT one of them, and that is the point of the split. A `needs:` edge
+# does not merely red the rollup: it SKIPS every dependent job, so the only recovery is a full ~41-job
+# rerun. The pytest suite binds ephemeral ports, spawns real subprocesses, waits on threading Events
+# and reaps process groups — genuine timing flake surface — and ONE racy assertion in it
+# (test_collector_receives_frames_and_done) skipped the entire rollup repeatedly this milestone, each
+# time looking cheap because a rerun cleared it. It stays a BLOCKING required check, so a red still
+# reds the run; it just gates nothing, and a flake now costs a 1-job rerun instead of 41.
+#
+# Only DETERMINISTIC checks — no network, no subprocess, no timing, no ports — may sit in a gate job.
+# tools/check_ci_gating.py enforces the resulting topology in BOTH directions: it reds if a
+# timing-dependent job re-enters a `needs:` list, AND it reds if the retained fail-fast is quietly
+# deleted from a job (deleting gating is the opposite failure, and the gating is here for a reason).
 
 name: CI
 
@@ -79,20 +92,15 @@ jobs:
           path: sbom.json
           if-no-files-found: error
 
-  # Fast pytest gate over the repo's Python tooling (R-QA-013 retroactive coverage):
-  # tools/tests (license gate + toolchain-manifest gate) + bench/tests (seeded corpus
-  # generator).
-  python-tests:
-    name: python tests (license gate + toolchain gate + corpus generator)
+  # The SECOND fail-fast gate (issue #459). Everything here is a DETERMINISTIC read of committed
+  # files — stdlib-only parsing, no network, no subprocess, no ports, no timing — which is the
+  # property that makes it safe to put ~41 jobs behind it via `needs:`. Do not add a check with
+  # timing or network dependence to this job; put it in `python-tests` (which gates nothing) instead.
+  ci-config-gate:
+    name: CI config gate (fleet manifest + gating topology)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
-      - name: Install pytest
-        run: python3 -m pip install pytest
-
-      - name: Run Python test suites
-        run: python3 -m pytest tools/tests bench/tests -v
 
       # R-QA-012: CI CONSUMES the fleet manifest — validate it against the live workflows every run
       # (self-consistency + the advisory-until-provisioned rule + tier-aware ci_job_id sync across
@@ -103,9 +111,33 @@ jobs:
       - name: Validate CI fleet manifest (R-QA-012)
         run: python3 tools/check_fleet_manifest.py --repo-root .
 
+      # Issue #459: pin WHICH jobs may front the rollup. Reds if a timing-dependent job re-enters a
+      # `needs:` list, and equally if the retained fail-fast is deleted from a heavy job.
+      - name: Validate CI gating topology
+        run: python3 tools/check_ci_gating.py --repo-root .
+
+  # Pytest over the repo's Python tooling (R-QA-013 retroactive coverage): tools/tests (the gate
+  # scripts) + bench/tests (seeded corpus generator).
+  #
+  # ⚠ This job gates NOTHING on purpose — no other job may list it in `needs:` (enforced by
+  # tools/check_ci_gating.py, rationale in the header comment). It is a blocking required check, so a
+  # red here still reds the run; it simply cannot SKIP the other ~41 jobs any more. It also declares
+  # no `needs:` itself, so it runs in parallel with the gates rather than behind them.
+  python-tests:
+    name: python tests (tools/ gate scripts + corpus generator)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install pytest
+        run: python3 -m pip install pytest
+
+      - name: Run Python test suites
+        run: python3 -m pytest tools/tests bench/tests -v
+
   build:
     name: build (${{ matrix.os }})
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     strategy:
       fail-fast: false
       matrix:
@@ -356,7 +388,7 @@ jobs:
   # matrix + self-hosted-Windows/MSVC setup as `build`. Gated behind the cheap gates like the others.
   deterministic:
     name: deterministic (${{ matrix.os }})
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     strategy:
       fail-fast: false
       matrix:
@@ -410,7 +442,7 @@ jobs:
   # scheduler).
   sanitize:
     name: ${{ matrix.name }}
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     strategy:
       fail-fast: false
       matrix:
@@ -460,7 +492,7 @@ jobs:
   # build matrix above stays vcpkg-free.
   bench-baseline:
     name: bench baseline (10k corpus, ubuntu)
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     env:
@@ -592,7 +624,7 @@ jobs:
   # which keeps the M0 parse-bench FILE-FORMAT baseline + canonical-fixpoint smoke.
   bench-attach-10k:
     name: bench attach proxy (10k, real pipeline, ubuntu)
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -670,7 +702,7 @@ jobs:
   # floor (docs/build-time-budget-table.md; docs/ci-fleet-manifest.json build-time-budget gate).
   build-time-bench:
     name: build-time bench (warm cache, ubuntu)
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -741,7 +773,7 @@ jobs:
   # spikes/wasm/FINDINGS.md).
   spike-wasm:
     name: spike-wasm (${{ matrix.os }})
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     strategy:
       fail-fast: false
       matrix:
@@ -813,7 +845,7 @@ jobs:
   # executable to the build step below too, or the new test reports "Not Run" -> RED here.
   wasm-runner:
     name: wasm-runner (${{ matrix.os }})
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     strategy:
       fail-fast: false
       matrix:
@@ -845,6 +877,22 @@ jobs:
       - name: Configure (dev preset + WASM runner tier, real backend required)
         run: cmake -S src --preset dev -DCONTEXT_BUILD_WASM=ON -DCONTEXT_WASM_REQUIRE_RUNTIME=ON
 
+      # Issue #460: this leg's one observed red was a FAILED CXX compiler ABI probe on the
+      # self-hosted Windows runner, which empties CMAKE_SIZEOF_VOID_P and so silently resolves every
+      # prebuilt platform key to "unsupported" (here: the stub backend, correctly refused by
+      # CONTEXT_WASM_REQUIRE_RUNTIME). The probe's own failure reason lives ONLY in
+      # CMakeConfigureLog.yaml, which nothing captured — so the cause had to be inferred from a
+      # one-line `- failed` and a rerun that passed. Keep it for the operator. Position matters: this
+      # step sits directly after the configure, so `failure()` here means the CONFIGURE failed — a
+      # later build/test failure never reaches it, and a green configure uploads nothing.
+      - name: Upload CMake configure log (ABI-probe diagnosis, #460)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: wasm-runner-cmake-configure-log-${{ matrix.os }}
+          path: src/build/dev/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: warn
+
       - name: Build the WasmRunner tests
         run: cmake --build --preset dev --target context_wasm_test_wasm_runner context_wasm_test_wasm_fuel context_wasm_test_wasm_migrate_document context_wasm_test_wasm_fail_closed context_wasm_test_wasm_determinism
         working-directory: src
@@ -869,7 +917,7 @@ jobs:
   # run on all three OS legs of the `build` job — this job adds the clean-host tarball boot.
   linux-export:
     name: linux-export (both flavors, clean-host boot)
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -943,7 +991,7 @@ jobs:
   # links only the GPU-free render abstraction (CONTEXT_BUILD_RENDER_WGPU stays OFF).
   windows-export:
     name: windows-export (both flavors, clean-host boot + signing report)
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || 'windows-latest' }}
     timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -1050,7 +1098,7 @@ jobs:
   # (CONTEXT_BUILD_RENDER_WGPU stays OFF). Blocking, per PR.
   macos-export:
     name: macos-export (both flavors, clean-host boot + signing report)
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     runs-on: macos-latest
     timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -1116,7 +1164,7 @@ jobs:
   # windows, the paravirtual Metal device on macos) and SKIPs cleanly (exit 77) where none does.
   spike-webgpu:
     name: spike webgpu (${{ matrix.os }})
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     strategy:
       fail-fast: false
       matrix:
@@ -1219,7 +1267,7 @@ jobs:
   # staged follow-up that lands with the first non-spike web build target.
   spike-webgpu-web:
     name: spike webgpu (web, emscripten)
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -1274,7 +1322,7 @@ jobs:
   # dependency path.
   render:
     name: render (${{ matrix.os }})
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     strategy:
       fail-fast: false
       matrix:
@@ -1389,7 +1437,7 @@ jobs:
   # the spike-webgpu-web leg — pinning emsdk is a staged follow-up.
   render-web:
     name: render (web, emscripten)
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -1488,7 +1536,7 @@ jobs:
   # (its --target list) AND runs `ctest -R "^webui-ts-"` (its named step) — both halves are load-bearing.
   webui-tests:
     name: webui-tests (editor-core TS T1, headless Chromium)
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -1536,7 +1584,7 @@ jobs:
   # the PR. Default-OFF means the main `build` matrix + the local dev gate never resolve this toolchain.
   shader-crosscompile:
     name: shader-crosscompile (${{ matrix.os }})
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     strategy:
       fail-fast: false
       matrix:
@@ -1693,7 +1741,7 @@ jobs:
   # (version-keyed cache) so CI cost stays bounded — the download hardening the issue asks for.
   cef-substrate:
     name: cef-substrate (${{ matrix.os }})
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     strategy:
       fail-fast: false
       matrix:
@@ -1783,7 +1831,7 @@ jobs:
   # per-PID root_cache_path + version-keyed cache), so the two jobs share the fetched CEF cache.
   editor-cef-smoke:
     name: editor-cef-smoke (${{ matrix.os }})
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     strategy:
       fail-fast: false
       matrix:
@@ -2028,7 +2076,7 @@ jobs:
   # this job is careful to avoid). The consumer target grows as e04/e05 land; e17 asserts its final shape.
   editor-boundary:
     name: editor-boundary (out-of-tree consumer + include-graph)
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -2125,7 +2173,7 @@ jobs:
   # blocking flip is a FUTURE step gated on ops1.
   density-bench:
     name: density bench (packed instances, ubuntu)
-    needs: [license-gate, python-tests]
+    needs: [license-gate, ci-config-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:

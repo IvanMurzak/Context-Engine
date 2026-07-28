@@ -110,9 +110,19 @@ general step's `-E` gate-exclusion regex, so they auto-run there, and the `build
 
 ## CI structure (`.github/workflows/ci.yml`)
 
-Two ~10-second gates front everything via `needs:`: `license-gate` (deny-by-default dependency
-license check + CycloneDX SBOM artifact, `tools/check_licenses.py`) and `python-tests` (pytest over
-`tools/tests` + `bench/tests` + fleet-manifest validation). Then, in one rollup (~34 checks):
+Two ~10-second **deterministic** gates front everything via `needs:`: `license-gate` (deny-by-default
+dependency license check + CycloneDX SBOM artifact, `tools/check_licenses.py`) and `ci-config-gate`
+(fleet-manifest validation + the gating-topology gate, `tools/check_fleet_manifest.py` +
+`tools/check_ci_gating.py`). Both are pure reads of committed files — no network, no subprocess, no
+timing — which is exactly what makes it safe to put ~41 jobs behind them.
+
+**`python-tests` (pytest over `tools/tests` + `bench/tests`) deliberately gates NOTHING** (issue
+#459). A `needs:` edge does not merely red the rollup, it SKIPS every dependent job, so the only
+recovery is a full ~41-job rerun — and that suite binds ephemeral ports, spawns subprocesses and waits
+on threading Events, so it has real timing flake surface. It stays a blocking required check (a red
+still reds the run) but no job may depend on it; `tools/check_ci_gating.py` enforces that in both
+directions, so neither re-adding it nor deleting the retained fail-fast can pass review silently. Then,
+in one rollup (~34 checks):
 
 - **`build` (ubuntu / macos / windows)** — blocking. Dev-preset build + the general ctest step +
   the named gate steps (M1/M2/M4/M5/M6/M7/M8 exit, determinism, samples-corpus) on every leg.

@@ -2,7 +2,7 @@
 
 > Design authority: `.claude/design/context-engine/core/REQUIREMENTS.md` **R-QA-012** (normative), `ROADMAP.md` §6 CI
 > tiering. The machine-readable manifest is `docs/ci-fleet-manifest.json`; **CI consumes it** via
-> `tools/check_fleet_manifest.py` (run in the `python-tests` job every PR). This document is the
+> `tools/check_fleet_manifest.py` (run in the `ci-config-gate` job every PR). This document is the
 > human-readable companion.
 
 ## What the manifest is
@@ -87,7 +87,8 @@ Every gate carries exactly one written red-X policy:
 | `minspec-floor-linux-server` | R-QA-007 | perf-linux-bare-metal | nightly | **advisory** ⏳ | — |
 | `minspec-floor-web` | R-QA-007 | minspec-web-proxy | nightly | **advisory** ⏳ | — |
 | `shader-crosscompile` | R-REND-005 | gh-ubuntu-shared | per-PR | blocking | `shader-crosscompile` |
-| `fleet-manifest-validation` | R-QA-012 | gh-ubuntu-shared | per-PR | blocking | `python-tests` |
+| `fleet-manifest-validation` | R-QA-012 | gh-ubuntu-shared | per-PR | blocking | `ci-config-gate` |
+| `ci-gating-topology` | R-QA-012 | gh-ubuntu-shared | per-PR | blocking | `ci-config-gate` |
 | `perf-filesync-attach-100k` | R-FILE-011 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
 | `bench-query-p99` | R-BRIDGE-008 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
 | `bench-sustained-backpressure` | R-FILE-013 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
@@ -185,7 +186,9 @@ live in [`density-targets.md`](density-targets.md); the machine-readable copy is
 
 ## How CI consumes it (the R-QA-012 tie)
 
-`tools/check_fleet_manifest.py` runs in the `python-tests` job on every PR:
+`tools/check_fleet_manifest.py` runs in the `ci-config-gate` job on every PR (it moved out of
+`python-tests` in issue #459 — `ci-config-gate` is one of the two deterministic gates that front the
+rollup, while `python-tests` gates nothing):
 
 ```bash
 python3 tools/check_fleet_manifest.py --repo-root .
