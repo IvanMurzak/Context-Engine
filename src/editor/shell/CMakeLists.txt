@@ -53,6 +53,7 @@ add_library(context_editor_shell STATIC
     src/ipc_bridge.cpp    # e05c: the privileged bridge envelope + token isolation (04 §1 / 08 §1)
     src/panel_host.cpp    # e05d1: the panel-agnostic panel.* surface over the e05b roster (04 §3-§4)
     src/package_sessions.cpp  # e13c-1: per-package BASELINE daemon sessions + panel.daemon.call (04 §5 / 08)
+    src/package_store.cpp     # e13c-3: ~/.context/packages - manifest->Contribution + mount PROVENANCE (04 §3/§5 / 08)
     src/editor_state_bridge.cpp  # e05d2: the editor.state.*/editor.regions.* surface (03 §1 / §6)
     src/keybindings_bridge.cpp   # e07c: the keybindings.get read/watch surface (05 §6 / 03 §6)
     src/user_config.cpp          # e06d: ~/.context/config.json - the SHELL is its single writer (C-F14)
@@ -234,6 +235,10 @@ set(_context_shell_tests
     test_panel_host    # e05d1: the panel-agnostic roster/render/command/gesture/D6-state surface
     test_package_sessions  # e13c-1: the ALLOWLIST, the hardcoded "read" scope proved against the REAL
                        #         dispatcher, lazy attach + the per-package pool + the sub-cap
+    test_package_store # e13c-3: the store scan + manifest->Contribution + the ADVERSARIAL provenance
+                       #         suite (.. traversal, absolute-outside, symlink in/out, link AT the
+                       #         root) incl. the case that DISCRIMINATES our link refusal from a
+                       #         weakly_canonical-only one
     test_editor_state_bridge  # e05d2: layout/panels publish+restore round-trip + region-map emission
     test_keybindings_bridge   # e07c: file read/watch/generation + keybindings.get over the router
     test_themes_bridge        # e06b: directory watch/generation + themes.get over the router

@@ -152,51 +152,302 @@ void test_mount_table()
         CHECK(shelltest::mentions(r.reason, "not mounted"));
     }
 
-    CHECK(resolver.mount("pkg-a", pkg_a, reason));
+    CHECK(resolver.mount("pkg-a", pkg_a, root, reason));
     CHECK(reason.empty());
     CHECK(resolver.is_mounted("pkg-a"));
     CHECK(resolver.mounts().size() == 1);
 
     // A syntactically invalid id never enters the table.
-    CHECK(!resolver.mount("Pkg-A", pkg_b, reason));
+    CHECK(!resolver.mount("Pkg-A", pkg_b, root, reason));
     CHECK(!reason.empty());
-    CHECK(!resolver.mount("..", pkg_b, reason));
+    CHECK(!resolver.mount("..", pkg_b, root, reason));
     CHECK(resolver.mounts().size() == 1);
 
     // A second mount of the SAME id is refused — which one would win is not a question a security
     // boundary should have an answer to.
-    CHECK(!resolver.mount("pkg-a", pkg_b, reason));
+    CHECK(!resolver.mount("pkg-a", pkg_b, root, reason));
     CHECK(shelltest::mentions(reason, "already mounted"));
     CHECK(resolver.mounts().size() == 1);
 
     // A root that does not exist is not mounted (deny-by-default reaches the mount table too).
-    CHECK(!resolver.mount("pkg-missing", root / "no" / "such" / "dir", reason));
+    CHECK(!resolver.mount("pkg-missing", root / "no" / "such" / "dir", root, reason));
     CHECK(!resolver.mounts().empty());
     CHECK(!resolver.is_mounted("pkg-missing"));
     // Nor is a FILE masquerading as a package root.
-    CHECK(!resolver.mount("pkg-file", pkg_a / "index.html", reason));
+    CHECK(!resolver.mount("pkg-file", pkg_a / "index.html", root, reason));
     CHECK(!resolver.is_mounted("pkg-file"));
 
     // NESTED ROOTS, both directions plus identity. This is the shape per-root containment does NOT
     // close by itself: with `nested` under pkg-a's root, `context-ext://pkg-a/inner/index.html`
     // would be perfectly contained in pkg-a AND would be pkg-nested's bytes.
-    CHECK(!resolver.mount("pkg-nested", nested, reason));
+    CHECK(!resolver.mount("pkg-nested", nested, root, reason));
     CHECK(shelltest::mentions(reason, "overlaps"));
     CHECK(!resolver.is_mounted("pkg-nested"));
-    CHECK(!resolver.mount("pkg-same", pkg_a, reason));
+    CHECK(!resolver.mount("pkg-same", pkg_a, root, reason));
     CHECK(shelltest::mentions(reason, "overlaps"));
-    CHECK(!resolver.mount("pkg-parent", root, reason));
-    CHECK(shelltest::mentions(reason, "overlaps"));
+    // THE STORE ROOT ITSELF is refused as a package — and note WHICH gate answers: since M9 e13c-3
+    // this is a PROVENANCE refusal, not the overlap refusal it used to be (the store is not a package
+    // in itself, and that fires before any overlap comparison). The distinction is the point of
+    // pinning the reason: `!mount(...)` alone would have stayed green through the change and told
+    // nobody that a different layer is now deciding.
+    CHECK(!resolver.mount("pkg-parent", root, root, reason));
+    CHECK(shelltest::mentions(reason, shell::kErrMountRootOutsideStore));
     CHECK(!resolver.is_mounted("pkg-parent"));
 
     // A DISJOINT sibling still mounts — the overlap rule refuses nesting, not every second package.
-    CHECK(resolver.mount("pkg-b", pkg_b, reason));
+    CHECK(resolver.mount("pkg-b", pkg_b, root, reason));
     CHECK(resolver.mounts().size() == 2);
 
     // The stored root is CANONICAL, so every later containment check compares canonical against
     // canonical. A `.`-laden spelling of the same directory is therefore still an overlap.
-    CHECK(!resolver.mount("pkg-c", pkg_b / "." , reason));
+    CHECK(!resolver.mount("pkg-c", pkg_b / "." , root, reason));
     CHECK(shelltest::mentions(reason, "overlaps"));
+
+    shelltest::cleanup(root);
+}
+
+// --------------------------------------------------------- mount PROVENANCE (M9 e13c-3, e13B) ----
+//
+// THE ADVERSARIAL SUITE for `package_root_provenance_ok` — the check that discharges e13a-1's E13B
+// obligation ("a root must be inside the package store it claims to come from"). Every case pins the
+// grep-stable CODE, not merely `!mount(...)`: the six refusals overlap by design (a `..` spelling is
+// also outside the store; a link out is also an escape), so a bare `!ok()` block would stay GREEN with
+// any single layer deleted and would report a gate that no longer exists. That is the same reasoning
+// `test_traversal_refused` records for the resolver's four gates, applied to the mount's six.
+
+void test_mount_provenance_refusals()
+{
+    const std::filesystem::path root = shelltest::make_temp_project("ctx-ext-scheme", "provenance");
+    const std::filesystem::path store = root / "store";
+    const std::filesystem::path pkg = store / "pkg";
+    const std::filesystem::path outside = root / "outside";
+    write_file(pkg / "index.html", "<!DOCTYPE html>");
+    write_file(outside / "index.html", "<!DOCTYPE html>");
+
+    std::filesystem::path canonical;
+    std::string code;
+    std::string message;
+
+    // NON-VACUITY FIRST, so every refusal below is about the boundary and not about an input nothing
+    // could accept: a real directory one level under the store is ACCEPTED, and the canonical root it
+    // hands back is inside the store.
+    CHECK(shell::package_root_provenance_ok(store, pkg, canonical, code, message));
+    CHECK(code.empty() && message.empty());
+    CHECK(!canonical.empty());
+    CHECK(shell::path_contains_or_equals(std::filesystem::weakly_canonical(store), canonical));
+
+    // (1) FAIL-CLOSED on an unbound store. This is the direction that matters: a caller who forgets
+    // the store root gets every mount refused, never every mount admitted unchecked.
+    CHECK(!shell::package_root_provenance_ok({}, pkg, canonical, code, message));
+    CHECK(code == shell::kErrMountStoreRootUnset);
+    CHECK(canonical.empty());
+
+    // (2) A store root that is not an existing directory vouches for nothing.
+    CHECK(!shell::package_root_provenance_ok(root / "no-such-store", pkg, canonical, code, message));
+    CHECK(code == shell::kErrMountStoreRootInvalid);
+    // ...including one that exists as a FILE.
+    write_file(root / "store-file", "not a directory");
+    CHECK(!shell::package_root_provenance_ok(root / "store-file", pkg, canonical, code, message));
+    CHECK(code == shell::kErrMountStoreRootInvalid);
+
+    // (3a) A RELATIVE root is refused before the filesystem is touched — a relative path's meaning
+    // depends on a working directory the store has no control over.
+    CHECK(!shell::package_root_provenance_ok(store, std::filesystem::path("pkg"), canonical, code,
+                                            message));
+    CHECK(code == shell::kErrMountRootTraversal);
+
+    // (3a) `..` TRAVERSAL, and BOTH shapes, because only the second is caught by containment alone:
+    //   * one that normalizes back INSIDE the store — proving the textual rule fires on the RAW path
+    //     rather than after a `lexically_normal()` that would have hidden it;
+    //   * one that escapes.
+    CHECK(!shell::package_root_provenance_ok(store, store / "a" / ".." / "pkg", canonical, code,
+                                            message));
+    CHECK(code == shell::kErrMountRootTraversal);
+    CHECK(!shell::package_root_provenance_ok(store, store / ".." / "outside", canonical, code,
+                                            message));
+    CHECK(code == shell::kErrMountRootTraversal);
+
+    // (3b) An ABSOLUTE path outside the store — `~/.ssh` is the worked example e13a-1's obligation
+    // names, and `outside` is its stand-in: a real, readable directory that is simply not in the
+    // store. It is READABLE, which is what makes the refusal about provenance and not about access.
+    CHECK(std::filesystem::is_directory(outside));
+    CHECK(!shell::package_root_provenance_ok(store, outside, canonical, code, message));
+    CHECK(code == shell::kErrMountRootOutsideStore);
+
+    // (3b) The STORE ITSELF is not a package.
+    CHECK(!shell::package_root_provenance_ok(store, store, canonical, code, message));
+    CHECK(code == shell::kErrMountRootOutsideStore);
+
+    // A DEEPER root inside the store is fine — the rule is "inside the store", not "exactly one level
+    // down". (The mount's own overlap refusal is what forbids a package nested in another package.)
+    write_file(store / "group" / "deep" / "index.html", "<!DOCTYPE html>");
+    CHECK(shell::package_root_provenance_ok(store, store / "group" / "deep", canonical, code,
+                                           message));
+
+    // --- THE TWO SPELLING CASES, both of which a canonical-only containment test would REFUSE ------
+    //
+    // (i) A store root written with a TRAILING SEPARATOR is the same store. Without the strip,
+    // `lexically_relative` against a base whose last element is empty yields a `..`-leading tail and
+    // this would answer `kErrMountRootOutsideStore` for a perfectly ordinary package.
+    CHECK(shell::package_root_provenance_ok(store / "", pkg, canonical, code, message));
+
+    // (ii) ⭐ THE STORE ROOT SPELLING NEED NOT BE CANONICAL — and on THIS host it usually is not:
+    // macOS's `temp_directory_path()` is `/var/folders/…` whose canonical form is
+    // `/private/var/folders/…`. That is not a fixture curiosity; it is MEASURED to be the live
+    // `editor-cef-smoke-shell-iframe`'s own situation, so a canonical-ONLY form of the containment
+    // test refuses that smoke's own package. A store spelled EITHER way therefore accepts a candidate
+    // spelled the SAME way — which is the whole contract, because every producer BUILDS the candidate
+    // as `store_root / <id>` and so cannot mix them.
+    const std::filesystem::path store_canonical = std::filesystem::weakly_canonical(store);
+    CHECK(shell::package_root_provenance_ok(store_canonical, store_canonical / "pkg", canonical, code,
+                                           message));
+    // ...and a MIXED pair — a canonical store with a candidate carrying the OTHER spelling — is
+    // REFUSED, not silently accepted. That is the deliberate direction (see ext_scheme.h § mount
+    // PROVENANCE (3b) on why the candidate must NOT be canonicalized to make it fit: canonicalizing it
+    // would resolve the very link check (4) exists to see, and would take the link refusal with it).
+    // Asserted rather than left implicit precisely because "the paths denote the same directory" makes
+    // a REFUSAL look like a bug — it is fail-CLOSED, and no producer in the tree can reach it.
+    if (store_canonical != store)
+    {
+        CHECK(!shell::package_root_provenance_ok(store_canonical, pkg, canonical, code, message));
+        CHECK(code == shell::kErrMountRootOutsideStore);
+    }
+    else
+    {
+        // NEVER SILENT: on a host where the two spellings coincide, case (ii) is exercised by nothing
+        // here, and the log must say so rather than let a passing suite imply it.
+        std::fprintf(stderr,
+                     "[test_ext_scheme] NOTE: the store spelling is already canonical on this host, "
+                     "so the NON-canonical store-root anchor and the mixed-spelling refusal are "
+                     "UNEXERCISED here (both are exercised on macOS, where temp_directory_path() "
+                     "reaches through /var -> private/var)\n");
+    }
+
+    // And the refusals reach `mount()` with the code IN the reason, which is the string the CEF
+    // binding prints and an operator reads.
+    shell::ExtAssetResolver resolver;
+    std::string reason;
+    CHECK(!resolver.mount("pkg", outside, store, reason));
+    CHECK(shelltest::mentions(reason, shell::kErrMountRootOutsideStore));
+    CHECK(!resolver.is_mounted("pkg"));
+    CHECK(!resolver.mount("pkg", pkg, {}, reason));
+    CHECK(shelltest::mentions(reason, shell::kErrMountStoreRootUnset));
+    CHECK(!resolver.is_mounted("pkg"));
+    // NON-VACUITY at the mount too: the same package, with its own store named, mounts.
+    CHECK(resolver.mount("pkg", pkg, store, reason));
+    CHECK(resolver.is_mounted("pkg"));
+
+    shelltest::cleanup(root);
+}
+
+// THE CASE THE WHOLE `path_is_os_link` DESIGN EXISTS FOR, and the one that DISCRIMINATES our refusal
+// from the STL's canonicalization.
+//
+// ⚠ READ THIS BEFORE "SIMPLIFYING" ANYTHING BELOW. Three of the four link cases here are ALSO caught
+// by a plain `weakly_canonical` containment compare, so a suite made only of those would be measuring
+// the STL and would keep passing with `path_is_os_link` deleted — precisely the vacuity the e13c-3
+// brief demanded be ruled out. The discriminating case is `link-inside`: a package root that is a
+// symlink to a directory INSIDE the store. Canonicalization resolves it to a contained path and calls
+// it fine; this check refuses it, because a link's TARGET is not a stable fact (whoever can write the
+// link can repoint it afterwards with no further consent) — see ext_scheme.h § mount PROVENANCE (4).
+// MEASURED: replacing the link walk with a canonical containment compare leaves every other case in
+// this function GREEN and turns `link-inside` RED.
+//
+// A WINDOWS JUNCTION is the same class and needs no privilege to create, which is why e13a-1's own
+// suite could not test one (`weakly_canonical` resolves a junction on MSVC and NOT on MinGW, so the
+// assertion would have inverted per toolchain). It is testable NOW — `GetFileAttributesW`'s
+// reparse-point bit is set for a junction on every toolchain — but creating one needs a Win32 call
+// (`DeviceIoControl`/`FSCTL_SET_REPARSE_POINT`, no STL spelling), so this suite still exercises the
+// SYMLINK arm and the Windows arm is covered by the shared, platform-independent walk it feeds.
+void test_mount_refuses_os_links()
+{
+    const std::filesystem::path root = shelltest::make_temp_project("ctx-ext-scheme", "links");
+    const std::filesystem::path store = root / "store";
+    const std::filesystem::path real_pkg = store / "real";
+    const std::filesystem::path elsewhere = root / "elsewhere";
+    write_file(real_pkg / "index.html", "<!DOCTYPE html>");
+    write_file(elsewhere / "index.html", "<!DOCTYPE html>");
+
+    // A REAL directory is NOT a link. Asserted first and unconditionally, so the predicate cannot
+    // pass this suite by answering `true` to everything.
+    CHECK(!shell::path_is_os_link(store));
+    CHECK(!shell::path_is_os_link(real_pkg));
+    // Nor is an absent path (the header's stated direction: FALSE, so the caller's own
+    // existing-directory check is what refuses it).
+    CHECK(!shell::path_is_os_link(store / "no-such-entry"));
+
+    std::error_code ec;
+    // Three links: one AT a package root pointing OUT of the store, one AT a package root pointing
+    // INSIDE it (the discriminating case), and one INTERMEDIATE component.
+    std::filesystem::create_directory_symlink(elsewhere, store / "link-out", ec);
+    std::error_code ec_in;
+    std::filesystem::create_directory_symlink(real_pkg, store / "link-inside", ec_in);
+    std::error_code ec_mid;
+    std::filesystem::create_directory_symlink(store, store / "link-mid", ec_mid);
+#ifndef _WIN32
+    // On POSIX the link ALWAYS creates, so the gate can never quietly stop running here.
+    CHECK(!ec);
+    CHECK(!ec_in);
+    CHECK(!ec_mid);
+#endif
+
+    std::filesystem::path canonical;
+    std::string code;
+    std::string message;
+
+    if (!ec && shell::path_is_os_link(store / "link-out"))
+    {
+        CHECK(!shell::package_root_provenance_ok(store, store / "link-out", canonical, code,
+                                                message));
+        CHECK(code == shell::kErrMountRootLink);
+        // The message NAMES the offending component, which is what makes an operator's stderr line
+        // actionable rather than "your package was refused".
+        CHECK(shelltest::mentions(message, "link-out"));
+    }
+
+    if (!ec_in && shell::path_is_os_link(store / "link-inside"))
+    {
+        // ⭐ THE DISCRIMINATING CASE. Its target is `store/real` — INSIDE the store, so a
+        // `weakly_canonical` containment compare admits it. Refused here.
+        CHECK(!shell::package_root_provenance_ok(store, store / "link-inside", canonical, code,
+                                                message));
+        CHECK(code == shell::kErrMountRootLink);
+        // ...and the proof that the refusal is about the LINK rather than about the target being
+        // unreachable: the SAME target, named directly, is accepted.
+        CHECK(shell::package_root_provenance_ok(store, real_pkg, canonical, code, message));
+        // Stated as a MEASUREMENT, not an inference: a canonical compare cannot tell these two apart,
+        // because both canonicalize to the same contained directory.
+        CHECK(std::filesystem::weakly_canonical(store / "link-inside") ==
+              std::filesystem::weakly_canonical(real_pkg));
+    }
+
+    if (!ec_mid && shell::path_is_os_link(store / "link-mid"))
+    {
+        // An INTERMEDIATE component: the candidate's own last component is a real directory, and the
+        // walk still refuses because the path REACHES it through a link.
+        CHECK(!shell::package_root_provenance_ok(store, store / "link-mid" / "real", canonical, code,
+                                                message));
+        CHECK(code == shell::kErrMountRootLink);
+        CHECK(shelltest::mentions(message, "link-mid"));
+    }
+
+    if (ec || ec_in || ec_mid)
+    {
+        // NEVER SILENT — the ctest log must say the gate did not run on this leg (the discipline
+        // `test_traversal_refused` established for the same privilege gap: creating a symlink needs
+        // `WinError 1314` on a default Windows host).
+        std::fprintf(stderr,
+                     "[test_ext_scheme] SKIPPED part of the OS-link provenance suite (%s / %s / %s) "
+                     "— the mount link refusal is UNDER-COVERED on this leg\n",
+                     ec.message().c_str(), ec_in.message().c_str(), ec_mid.message().c_str());
+    }
+
+    // A package that is a real directory still mounts with all three links present, so the refusals
+    // above are about the links and not about the store having become unusable.
+    shell::ExtAssetResolver resolver;
+    std::string reason;
+    CHECK(resolver.mount("real", real_pkg, store, reason));
+    CHECK(resolver.is_mounted("real"));
 
     shelltest::cleanup(root);
 }
@@ -214,7 +465,7 @@ void test_resolution_happy_paths()
 
     shell::ExtAssetResolver resolver;
     std::string reason;
-    CHECK(resolver.mount("hello-panel", pkg, reason));
+    CHECK(resolver.mount("hello-panel", pkg, root, reason));
 
     {
         const shell::ExtResolution r = resolver.resolve("context-ext://hello-panel/panel.js");
@@ -255,7 +506,7 @@ void test_bad_urls()
 
     shell::ExtAssetResolver resolver;
     std::string reason;
-    CHECK(resolver.mount("pkg", pkg, reason));
+    CHECK(resolver.mount("pkg", pkg, root, reason));
 
     // Not a context-ext:// URL at all => bad_request. Note the app scheme and a `file://` URL are
     // both in here: neither may be served by THIS resolver.
@@ -292,7 +543,7 @@ void test_package_denial_is_indistinguishable()
 
     shell::ExtAssetResolver resolver;
     std::string reason;
-    CHECK(resolver.mount("pkg", pkg, reason));
+    CHECK(resolver.mount("pkg", pkg, root, reason));
 
     // A syntactically INVALID package id => forbidden. Nothing is leaked by that: a caller can
     // evaluate `is_valid_package_id` for itself without asking us.
@@ -348,7 +599,7 @@ void test_traversal_refused()
 
     shell::ExtAssetResolver resolver;
     std::string reason;
-    CHECK(resolver.mount("pkg", pkg, reason));
+    CHECK(resolver.mount("pkg", pkg, root, reason));
 
     // EACH CASE PINS THE GATE THAT MUST FIRE — status AND reason — not merely `!ok()`.
     //
@@ -422,7 +673,11 @@ void test_traversal_refused()
     // package that is mounted. So the refusals are about the boundary, not about the bytes being
     // unreachable in principle.
     shell::ExtAssetResolver sibling;
-    CHECK(sibling.mount("outer", root, reason));
+    // The store root here is the directory CONTAINING `root`, because since M9 e13c-3 a mount must
+    // name the store its root came from and the store itself may not be mounted as a package. So this
+    // resolver treats `root` as one installed package inside the temp directory that holds it — the
+    // URL, the file and the bytes asserted below are byte-for-byte the ones this block always used.
+    CHECK(sibling.mount("outer", root, root.parent_path(), reason));
     CHECK(sibling.resolve("context-ext://outer/secret.js").ok());
 
     shelltest::cleanup(root);
@@ -439,8 +694,8 @@ void test_cross_package_refused()
 
     shell::ExtAssetResolver resolver;
     std::string reason;
-    CHECK(resolver.mount("pkg-a", pkg_a, reason));
-    CHECK(resolver.mount("pkg-b", pkg_b, reason));
+    CHECK(resolver.mount("pkg-a", pkg_a, root, reason));
+    CHECK(resolver.mount("pkg-b", pkg_b, root, reason));
 
     // NON-VACUITY FIRST: pkg-b's own asset IS servable, from pkg-b's own origin. Everything below
     // therefore proves a boundary rather than an absent file.
@@ -533,7 +788,7 @@ void test_media_allowlist_and_absent()
 
     shell::ExtAssetResolver resolver;
     std::string reason;
-    CHECK(resolver.mount("pkg", pkg, reason));
+    CHECK(resolver.mount("pkg", pkg, root, reason));
 
     // The SAME deny-by-default allowlist the first-party bundle is held to: an extension may serve
     // nothing editor-core's own asset set could not.
@@ -596,7 +851,7 @@ void test_alternate_data_stream_refused()
 
     shell::ExtAssetResolver resolver;
     std::string reason;
-    CHECK(resolver.mount("pkg", pkg, reason));
+    CHECK(resolver.mount("pkg", pkg, root, reason));
 
     // NON-VACUITY: the base file IS servable, so the refusals below are about the STREAM spelling.
     CHECK(resolver.resolve("context-ext://pkg/panel.js").ok());
@@ -937,7 +1192,7 @@ void test_port_bootstrap_asset()
 
     shell::ExtAssetResolver resolver;
     std::string reason;
-    CHECK(resolver.mount("hello-panel", pkg, reason));
+    CHECK(resolver.mount("hello-panel", pkg, root, reason));
 
     const std::string asset = std::string("context-ext://hello-panel/") + shell::kExtPortBootstrapAsset;
     {
@@ -1305,6 +1560,8 @@ int main()
 {
     test_package_id_grammar();
     test_mount_table();
+    test_mount_provenance_refusals();
+    test_mount_refuses_os_links();
     test_resolution_happy_paths();
     test_bad_urls();
     test_package_denial_is_indistinguishable();

@@ -168,20 +168,20 @@ struct CefShellOptions
     // The third-party packages whose assets may be served over `context-ext://<package-id>/…`
     // (design 04 §5). Each entry is one package id and the directory its bundled assets live in.
     //
-    // EMPTY IS THE DEFAULT AND IS FULLY SUPPORTED — it is in fact today's only state, since the
-    // install path is e13b's. The scheme is registered in every process and its handler is
-    // installed REGARDLESS: an `ExtAssetResolver` with no mounts refuses every request, which is
-    // the deny-by-default posture this scheme exists to have. Nothing here is a way to turn the
-    // boundary off.
+    // EMPTY IS THE DEFAULT AND IS FULLY SUPPORTED: the scheme is registered in every process and its
+    // handler is installed REGARDLESS — an `ExtAssetResolver` with no mounts refuses every request,
+    // which is the deny-by-default posture this scheme exists to have. Nothing here is a way to turn
+    // the boundary off.
     //
-    // A mount that is refused (invalid id, missing root, a root that overlaps another package's —
-    // see ext_scheme.h) is REPORTED on stderr and skipped; the browser still boots and that one
-    // origin serves 403. There is deliberately no `file://` fallback for panels either.
+    // A mount that is refused (invalid id, missing root, a root that overlaps another package's, or a
+    // root that fails the PROVENANCE check against `ext_store_root` — see ext_scheme.h) is REPORTED
+    // on stderr and skipped; the browser still boots and that one origin serves 403. There is
+    // deliberately no `file://` fallback for panels either.
     //
-    // ⚠ NO PRODUCER EXISTS YET — nothing in the repo populates this field, by design: e13a-1 lands
-    // the boundary, e13b lands the install path that will fill it. It is the declared seam, not a
-    // live configuration surface, which is why the semantics below are documented rather than
-    // enforced by a test.
+    // ✅ A REAL PRODUCER EXISTS SINCE M9 e13c-3 — `editor_main.cpp` fills this from
+    // `package_mounts(scan_package_store(package_store_root()))`, so what a user has installed in
+    // `~/.context/packages` is what gets mounted. The field is no longer a declared-only seam, which
+    // is why `ext_store_root` below is now REQUIRED alongside it rather than implied.
     //
     // ⚠ PROCESS-GLOBAL, FIRST CALL WINS. The resolver and its scheme-handler factory are registered
     // once per process (CEF holds the factory until CefShutdown), so only the FIRST
@@ -190,6 +190,18 @@ struct CefShellOptions
     // silently. This is therefore a PROCESS-level option that happens to live on a per-window
     // struct; e13b, which owns the install path, is where a real per-process mount table belongs.
     std::vector<ExtPackageMount> ext_packages;
+
+    // The PACKAGE STORE every entry in `ext_packages` must have come from (M9 e13c-3) — the canonical
+    // `~/.context/packages` in production (`package_store_root()`), or a smoke's own temp fixture
+    // directory, which IS that smoke's package store.
+    //
+    // ⚠ EMPTY REFUSES EVERY MOUNT, and that is the point rather than a rough edge. `mount()` takes
+    // this as a REQUIRED argument and answers `package.store_root_unset` for an empty one, so a
+    // caller who populates `ext_packages` and forgets this field gets every package refused with a
+    // named reason on stderr — never every package admitted with its provenance unchecked. That
+    // direction is what discharges e13a-1's E13B obligation at the API rather than by convention:
+    // there is no spelling of "mount these packages" that does not also state where they came from.
+    std::filesystem::path ext_store_root;
 };
 
 // Initialize CEF (once per process) and create the windowed-OSR browser. Returns nullptr plus

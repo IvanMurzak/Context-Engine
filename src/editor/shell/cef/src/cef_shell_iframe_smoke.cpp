@@ -73,11 +73,15 @@
 //   * `bridge.refused() == 0` is still asserted, and still says nothing about the port: the panel
 //     transport rides MessageChannel/postMessage and never reaches the CEF message router.
 //
-// TEST-ONLY MOUNT. `CefShellOptions::ext_packages` has no producer in the tree (the install flow is
-// e13b's), so this smoke IS the first caller: it writes a fixture package into a temp dir and mounts
-// it. That is the sanctioned way to reach the boundary end to end without building an install flow
-// e13b owns, and it weakens nothing — the resolver's rules are unchanged and the fixture is just a
-// directory.
+// TEST-OWNED STORE, no longer a test-only SEAM. When this smoke was written `CefShellOptions::
+// ext_packages` had no producer at all and this was its first caller. M9 e13c-3 gave it a real one
+// (`editor_main.cpp`, out of `~/.context/packages`) and made `mount()` check every root's PROVENANCE
+// against a store root — so what this smoke does now is stage a fixture package inside its OWN temp
+// package store and name that store, which is byte-for-byte the shape production takes. It is
+// therefore no longer a weaker path than the real one: the same six provenance refusals apply to this
+// fixture as to an installed package, and the fixture passes them because it genuinely is a real
+// directory one level under a real store root. (Compare the settings smoke, which binds a TEMP
+// `config.json` rather than the runner's own for exactly the same reason.)
 //
 // It boots exactly as cef_shell_settings_smoke.cpp does — including the TWO WINDOW MODES documented
 // in cef_shell_smoke.cpp's header: windowless through e03's MemoryBlitter by DEFAULT (what the
@@ -371,7 +375,14 @@ int main(int argc, char** argv)
     std::filesystem::remove_all(project, ec);
     std::filesystem::create_directories(project, ec);
 
-    const std::filesystem::path package_root = project / "packages" / kMountedPackage;
+    // `<project>/packages` IS this smoke's package store (M9 e13c-3) — the fixture already had the
+    // shape, so naming it is the whole migration: the store root is what `mount()` now checks every
+    // root's PROVENANCE against, and a fixture package one level under it passes for the same reason a
+    // really-installed one does. Kept as a temp dir rather than pointed at the runner's real
+    // `~/.context/packages`, exactly as the settings smoke binds a TEMP config file rather than the
+    // runner's own `~/.context/config.json`.
+    const std::filesystem::path package_store = project / "packages";
+    const std::filesystem::path package_root = package_store / kMountedPackage;
     if (!write_fixture_package(package_root))
     {
         std::fprintf(stderr,
@@ -448,13 +459,17 @@ int main(int argc, char** argv)
     // client's OnConsoleMessage reports the CSP directive by name, which is what turns a blank panel
     // from an archaeology exercise into a one-line diagnosis (DoD: a live smoke reports a CAUSE).
     cef_options.verbose_logging = true;
-    // THE TEST-ONLY MOUNT. One package, its own disjoint root. The second package is deliberately
-    // absent from this list.
+    // THE TEST-ONLY MOUNT. One package, its own disjoint root, under the store above. The second
+    // package is deliberately absent from this list — which since e13c-3 is a mount-table fact AND a
+    // store fact: `kUnmountedPackage` has no directory in `package_store` either, so the refusal the
+    // NEGATIVE half asserts is what a genuinely-uninstalled package produces.
     cef_options.ext_packages = {shell::ExtPackageMount{kMountedPackage, package_root}};
+    cef_options.ext_store_root = package_store;
 
-    std::printf("[editor-cef-smoke-shell-iframe] serving %s from %s; package %s mounted at %s\n",
+    std::printf("[editor-cef-smoke-shell-iframe] serving %s from %s; package %s mounted at %s "
+                "(store %s)\n",
                 cef_options.url.c_str(), cef_options.app_asset_root.string().c_str(),
-                kMountedPackage, package_root.string().c_str());
+                kMountedPackage, package_root.string().c_str(), package_store.string().c_str());
     std::fflush(stdout);
 
     std::string error;

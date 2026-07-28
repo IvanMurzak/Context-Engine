@@ -22,6 +22,7 @@
 #include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/user_config.h"
 #include "context/editor/shell/package_sessions.h" // e13c-1: per-package BASELINE daemon sessions
+#include "context/editor/shell/package_store.h"    // e13c-3: ~/.context/packages — the mount producer
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/session_bridge.h"
@@ -954,6 +955,39 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // --- the installed packages (M9 e13c-3) -------------------------------------------------------
+    // THE FIRST REAL PRODUCER of `CefShellOptions::ext_packages`. Scanned unconditionally, outside the
+    // CEF guard, so a CEF-free build still REPORTS what it found: the store is a real user-facing
+    // directory, and "my panel did not appear" must have an answer on every build rather than only on
+    // the one that could have shown it.
+    //
+    // Every refusal is printed. A silent skip here is the failure mode a user cannot diagnose and a
+    // reviewer cannot distinguish from an absent check (package_store.h, decision 3) — and it is why
+    // the scan returns refusals rather than logging them itself: the policy about WHERE a diagnostic
+    // goes belongs to the composition root, not to the reader.
+    const std::filesystem::path package_store = shell::package_store_root();
+    const shell::PackageStoreScan package_scan = shell::scan_package_store(package_store);
+    for (const shell::PackageRefusal& refusal : package_scan.refusals)
+    {
+        std::fprintf(stderr, "context_editor: package store: %s%s%s: %s\n",
+                     refusal.id.empty() ? "" : "'", refusal.id.c_str(),
+                     refusal.id.empty() ? "" : "'", refusal.message.c_str());
+    }
+    if (!package_scan.packages.empty())
+    {
+        for (const shell::InstalledPackage& package : package_scan.packages)
+        {
+            std::printf("context_editor: package '%s' (%zu contribution(s)) mounted from %s\n",
+                        package.id.c_str(), package.contributions.size(),
+                        package.root.string().c_str());
+        }
+    }
+    // ⚠ THE CONTRIBUTIONS ARE READ AND REPORTED, NOT REGISTERED — see package_store.h's boundary
+    // note. Appending one to the built-in roster below would red the blocking `gui-a11y-coverage`
+    // gate (which asserts roster == coverage.manifest.jsonl in BOTH directions) and would be wrong
+    // anyway: a package panel is not covered by the first-party a11y scan, and nothing has asked the
+    // user to consent to it yet. e13c-4 owns the consent surface and the registration that follows it.
+
     // --- the browser ------------------------------------------------------------------------------
     std::unique_ptr<shell::IBrowserHost> browser;
 #if defined(CONTEXT_EDITOR_HAS_CEF)
@@ -966,6 +1000,11 @@ int main(int argc, char** argv)
         cef_options.devtools_enabled = options.devtools;
         cef_options.app_asset_root = options.app_root;
         cef_options.bridge = &bridge;
+        // e13c-3: what the user has actually installed, plus the store it came from. BOTH, always
+        // together — an empty store root refuses every mount by design, so these two lines are one
+        // decision and must not drift apart.
+        cef_options.ext_packages = shell::package_mounts(package_scan);
+        cef_options.ext_store_root = package_store;
         std::string error;
         browser = shell::cef::make_cef_browser_host(cef_options, error);
         if (browser == nullptr)

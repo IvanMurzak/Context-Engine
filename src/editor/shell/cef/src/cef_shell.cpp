@@ -1658,7 +1658,11 @@ std::unique_ptr<IBrowserHost> make_cef_browser_host(const CefShellOptions& optio
         for (const ExtPackageMount& package : options.ext_packages)
         {
             std::string reason;
-            if (!ext_resolver->mount(package.id, package.root, reason))
+            // The store root is passed on EVERY mount (M9 e13c-3): `mount()` refuses a root that did
+            // not come from it, and refuses everything when it is empty. See
+            // CefShellOptions::ext_store_root on why that is a required argument and not a member the
+            // resolver could be left holding.
+            if (!ext_resolver->mount(package.id, package.root, options.ext_store_root, reason))
             {
                 // REPORTED, not fatal: the editor still boots and every other package still works.
                 // A refused mount means that ONE origin serves 403 — the deny-by-default outcome —
