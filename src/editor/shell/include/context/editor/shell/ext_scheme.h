@@ -33,9 +33,33 @@
 // here, `weakly_canonical(<pkg-a>/link-to-b/private.js)` returns the path unchanged, so a junction
 // planted inside a package root would read as contained. That matters because a junction, unlike a
 // symlink, needs NO privilege to create on Windows. It is a dev-toolchain gap rather than a shipped
-// one — but it is why check (4) is not the only line of defence, and it is a hard E13B OBLIGATION:
+// one — but it is why check (4) is not the only line of defence, and it was a hard E13B OBLIGATION:
 // the install path must refuse a package root containing a reparse point it did not create, rather
 // than leaving the property to the STL that happened to compile the resolver.
+//
+// ✅ PARTLY DISCHARGED IN M9 e13c-3 — and the SCOPE is stated here rather than left to be inferred,
+// because the obligation as worded above says "a package root CONTAINING a reparse point" and what
+// landed is narrower than that sentence. See § mount PROVENANCE below. `path_is_os_link` asks the OS
+// for the reparse-point bit (`GetFileAttributesW`) / the symlink type (`lstat`) instead of asking a
+// canonicalizer, so the property no longer varies by STL, and a JUNCTION becomes a testable case rather
+// than one this file had to talk about — the refusal is the same on MinGW and MSVC, which is exactly
+// what `test_traversal_refused` says it could not assert while the answer came from `weakly_canonical`.
+//
+// ⚠ WHAT IS AND IS NOT CLOSED, precisely:
+//   * CLOSED — the path FROM the store root TO the package root, inclusive. `mount()` refuses a root
+//     REACHED THROUGH any link, and a root that IS a link, whether it leads out of the store or stays
+//     inside it. That covers the `~/.ssh`-by-symlink case and the DoD's "a link AT the root".
+//   * STILL OPEN — a reparse point planted INSIDE an already-accepted package root
+//     (`<store>/pkg-a/link-to-b`, the worked example above). The provenance walk stops AT the root, and
+//     nothing here descends into it; the one file this module opens itself, `context-package.json`, IS
+//     link-refused by name (`read_package_manifest`), but nothing else under the root is. Such a path is
+//     caught only by resolver check (4) — i.e. still by `weakly_canonical`, so still MSVC-yes /
+//     MinGW-junction-no, which is the dev-toolchain gap measured above, unchanged.
+//     A recursive subtree walk is deliberately NOT the fix: it is unbounded work over untrusted input on
+//     a path taken at every editor start. Closing it belongs to whatever WRITES the store (e13c-4's
+//     install + consent surface), which is also the only layer that can see a HARD link
+//     (package_store.h § THE RESIDUALS).
+// Check (4) remains in the resolver, unchanged and still not alone.
 //
 // ⚠ E13B OBLIGATION — DISCHARGED IN M9 e13b-1. Recorded in full because the SHAPE of the answer is
 // the reviewable part, and because the obligation as originally written names a control that does
@@ -254,6 +278,156 @@ inline constexpr unsigned kExtSchemeOptions =
 // but an id that is safe under that misuse costs nothing and removes a whole class of future bug.
 [[nodiscard]] bool is_valid_package_id(std::string_view id);
 
+// -------------------------------------------------------------------- mount PROVENANCE (M9 e13c-3)
+//
+// THE HALF e13a-1 DECLARED MISSING, and the reason it could not be written there: "a root must be
+// inside the package store it claims to come from" needs a package store, and e13a-1 had none. It
+// does now (package_store.h), so `mount()` below takes the store root and this section is what it
+// enforces. The whole point is that the ANSWER IS OURS: every refusal here is decided by code in
+// this file, and NOT ONE of them is delegated to `std::filesystem::weakly_canonical`.
+//
+// ⚠ WHY THAT MATTERS, RESTATED FROM THE MEASUREMENT IN THE FILE HEADER. Canonicalization resolves a
+// reparse point only on the STLs that choose to: MSVC does (`GetFinalPathNameByHandle`), the MinGW
+// libstdc++ of the local dev gate does NOT, and a DIRECTORY JUNCTION needs no privilege to create on
+// Windows. A containment check built on canonicalization therefore holds a different property per
+// toolchain — which is not a property at all. `path_is_os_link` asks the OS directly instead, so the
+// refusal is identical on every build of every toolchain.
+//
+// GREP-STABLE LOCAL CODES, not R-CLI-008 catalog rows (the discipline `registry.h` states for the
+// same reason): a mount refusal is reported to the operator on stderr and asserted in this module's
+// own suite, it never crosses the CLI/protocol surface, so protocolMajor and the contract-freeze
+// gate stay untouched. SIX distinct codes because they are six distinct FAULTS, and a package
+// author (or an operator reading stderr) must be able to tell them apart — the same reasoning
+// `package_sessions.h` records for its four.
+
+/** No store root was supplied. FAIL-CLOSED: an unbound store cannot vouch for any root. */
+inline constexpr const char* kErrMountStoreRootUnset = "package.store_root_unset";
+/** The store root itself does not resolve to an existing directory. */
+inline constexpr const char* kErrMountStoreRootInvalid = "package.store_root_invalid";
+/** The candidate root is relative, or carries a `..` component — refused TEXTUALLY (`.` is not). */
+inline constexpr const char* kErrMountRootTraversal = "package.root_traversal";
+/** The candidate root is not lexically beneath the store root (an absolute path elsewhere). */
+inline constexpr const char* kErrMountRootOutsideStore = "package.root_outside_store";
+/** A path component from the store root down to the candidate IS AN OS LINK — see path_is_os_link. */
+inline constexpr const char* kErrMountRootLink = "package.root_link";
+/** The canonical form of the candidate escapes the store root — the second, independent line. */
+inline constexpr const char* kErrMountRootEscapesStore = "package.root_escapes_store";
+
+// Is `path` an OS-level LINK — something whose name resolves to bytes stored under another name?
+//
+// ASKED OF THE OS, NEVER OF THE STL'S CANONICALIZER. That is the entire reason this function exists,
+// and the two platform answers are deliberately different questions:
+//
+//   * WINDOWS — `GetFileAttributesW` and the `FILE_ATTRIBUTE_REPARSE_POINT` bit. TRUE for a symlink,
+//     TRUE for a DIRECTORY JUNCTION (`IO_REPARSE_TAG_MOUNT_POINT`), and true for every other reparse
+//     tag, because the tag is NOT inspected: an install path has no business accepting a package root
+//     that is any kind of indirection it did not create, and enumerating "safe" tags would be a
+//     denylist over a set Microsoft extends. This is the branch where the STLs diverge, so it is the
+//     branch that had to stop being the STL's.
+//   * POSIX — `::lstat` and `S_ISLNK`. A raw `lstat`, not `std::filesystem::symlink_status`, for
+//     symmetry of provenance rather than necessity: libc++ and libstdc++ agree here, so the STL call
+//     would have been correct — but a security predicate whose two arms come from two different
+//     authorities is one arm away from a silent divergence, and the cost of the raw call is one
+//     `#include`.
+//
+// FALSE when the path does not exist. FALSE ALSO when the query itself failed — but that case sets
+// `*query_failed` (when a pointer is given), and the CALLER MUST FAIL CLOSED ON IT.
+//
+// ⚠ THE TWO ARE NOT INTERCHANGEABLE, and an earlier draft of this comment claimed they were — that
+// "a link this cannot see is not thereby admitted, because the caller also requires an existing
+// directory and canonical containment". That argument is FALSE, and this file's own suite is what
+// disproves it: for a link pointing INSIDE the store, canonical containment PASSES (the target really
+// is contained), which is precisely why `test_ext_scheme.cpp` treats that case as the one that
+// discriminates this predicate from a canonical compare. So a query failure that read as "not a link"
+// would be a FAIL-OPEN in exactly the case the predicate exists for. It is also reachable on Windows
+// with no privilege: `GetFileAttributesW` fails on a path at or past `MAX_PATH` unless the process is
+// long-path aware (this one ships no such manifest), while MSVC's `std::filesystem` handles long paths
+// internally — so every other check keeps working and only this walk goes blind.
+//
+// Hence the split: ABSENT stays FALSE with `*query_failed` clear, so a missing package is still
+// refused as missing by the caller's existing-directory check and a transient blip never mislabels one
+// as a link; UNDECIDED sets `*query_failed`, and `package_root_provenance_ok` refuses the component
+// (`kErrMountRootLink`) when the path nonetheless EXISTS. A caller passing `nullptr` gets the old
+// two-valued answer and MUST NOT be a security decision.
+[[nodiscard]] bool path_is_os_link(const std::filesystem::path& path, bool* query_failed = nullptr);
+
+// May `package_root` be mounted as a package installed in `store_root`? The PROVENANCE check —
+// "where did this root come from" — as opposed to `mount()`'s existing "what SHAPE is this root".
+//
+// Sets `error_code` (one of the constants above) + a human `message` and returns false on refusal.
+// SIX CODES AT FIVE REFUSAL POINTS, IN THIS ORDER (item 5 below is deliberately NOT a refusal of this
+// function — `mount()` keeps its own), and the order is part of the contract: each fault is reported by
+// the FIRST layer that can see it, so a diagnostic never blames a later layer for an earlier layer's
+// input.
+//
+//   1. `store_root` EMPTY -> `kErrMountStoreRootUnset`. Fail-closed, and it is the DEFAULT state of a
+//      `CefShellOptions` that names no store: a caller who forgets the store root gets every mount
+//      refused, never every mount admitted. This is why the store root is a REQUIRED PARAMETER of
+//      `mount()` rather than a member with a setter — a member can be left unset, and the failure
+//      mode of an unset member is only fail-closed until someone "helpfully" defaults it.
+//   2. `store_root` does not canonicalize to an existing directory -> `kErrMountStoreRootInvalid`.
+//      The store root IS canonicalized (and this is the ONLY canonicalization in the function that
+//      participates in a decision): it is the editor's OWN configuration — `~/.context/packages`, or
+//      a smoke's temp fixture dir — not an attacker-influenced value, and on macOS the system temp
+//      dir genuinely reaches through a `/var -> private/var` symlink, so refusing a link ABOVE the
+//      store would refuse every test fixture and every default install on that OS. What a package
+//      author can influence is everything BELOW it, and that is what step 4 walks.
+//   3. `package_root` is relative, or carries a `..` component -> `kErrMountRootTraversal`, BEFORE the
+//      filesystem is touched (a `.` component is NOT an escape and is normalized away instead). Then a
+//      LEXICAL containment test -> `kErrMountRootOutsideStore`, which is what refuses an absolute path
+//      pointing anywhere else (`~/.ssh` is the worked example e13a-1's obligation names). Equality with
+//      the store root is ALSO refused: the store is not a package.
+//      ⚠ THE CANDIDATE IS NEVER CANONICALIZED TO MAKE IT FIT, and that is load-bearing rather than an
+//      omission: canonicalizing it would resolve the very link step 4 exists to SEE, and the link
+//      refusal would go with it. So the containment test is lexical, and it is tried against the store
+//      root AS GIVEN and against its canonical form — either spelling is a correct anchor, and trying
+//      both is what lets a caller pass an UNCANONICAL store root (measured: `temp_directory_path()` on
+//      macOS is `/var/folders/…` whose canonical form is `/private/var/…`, which is the live
+//      `editor-cef-smoke-shell-iframe`'s own situation).
+//      ⚠ MIXED PAIRS — a store root in one spelling with a candidate in the other — are NOT symmetric,
+//      and the REAL producer relies on that. An AS-GIVEN store root with a CANONICAL candidate is
+//      ACCEPTED, by the second `lexically_relative` attempt; only the inverse fails CLOSED
+//      (`kErrMountRootOutsideStore`). The accepted direction is exactly what production produces:
+//      `package_mounts` hands out `InstalledPackage::root`, which is the CANONICAL root the scan
+//      recorded, while `editor_main.cpp` passes `package_store_root()` as given. So both anchors are
+//      load-bearing — dropping the as-given attempt breaks a store root spelled non-canonically
+//      (macOS `/var`, and an 8.3-expanded path on the MSVC leg), and dropping the canonical attempt
+//      breaks the scan→mount producer itself. (An earlier version of this note claimed a mixed pair was
+//      simply unreachable "because every producer BUILDS the candidate as `store_root / <id>`"; that is
+//      not what `package_mounts` does.)
+//   4. ANY path component from the store root (exclusive) down to `package_root` (INCLUSIVE) is an OS
+//      link -> `kErrMountRootLink`. THE SECURITY CORE, and it is refuse-by-construction rather than
+//      refuse-if-it-escapes: a link is refused whether it points outside the store or inside it.
+//      TWO reasons, and the second is why the weaker rule would be a bug rather than a taste:
+//        (a) A link's TARGET is not a stable fact. A check that admits `<store>/a -> <store>/b`
+//            because b is contained has admitted a NAME whose bytes whoever can write that link may
+//            repoint afterwards, at any time, with no further consent. The mount decision would then
+//            be about a state of the world that no longer holds.
+//        (b) It is what makes the property TESTABLE at all, and testable IDENTICALLY on every leg.
+//            A refuse-if-it-escapes rule is exactly what `weakly_canonical` already gives you where
+//            it resolves links — so a test of it measures the STL on POSIX and MSVC, and measures
+//            NOTHING on MinGW. A link INSIDE the store discriminates: canonicalization calls it
+//            contained, this rule refuses it. `test_ext_scheme.cpp` asserts precisely that case, and
+//            that is the assertion which would go GREEN — i.e. red as a test — if this check were
+//            ever replaced by a canonical compare.
+//      The walk starts BELOW the canonical store root for the reason step 2 gives, and INCLUDES the
+//      candidate itself, which is the DoD's "a link AT the root" case (`<store>/pkg` is a symlink).
+//   5. `package_root` must be an existing DIRECTORY -> `kErrMountStoreRootInvalid` is NOT reused;
+//      `mount()` keeps its own pre-existing "not an existing directory" refusal for that, so this
+//      function is purely about provenance and the shape checks stay where they were.
+//   6. The canonical form of `package_root` must STILL be inside the canonical store root ->
+//      `kErrMountRootEscapesStore`. REDUNDANT WITH 3+4 ON EVERY TOOLCHAIN WE KNOW OF, and kept
+//      deliberately, exactly as the resolver keeps its textual and canonical passes both: this one
+//      catches what a decoder gap or an OS path quirk could smuggle past a lexical comparison, and
+//      it is the only layer that would notice a link the OS declined to report.
+//
+// `out_canonical` receives the canonical root on success — the value `mount()` stores, so the
+// canonicalization is not paid twice and cannot disagree between the check and the record.
+[[nodiscard]] bool package_root_provenance_ok(const std::filesystem::path& store_root,
+                                              const std::filesystem::path& package_root,
+                                              std::filesystem::path& out_canonical,
+                                              std::string& error_code, std::string& message);
+
 // ------------------------------------------------------------------------------------- resolution
 
 // The outcome of resolving one `context-ext://…` URL. Mirrors `AssetResolution` (app_scheme.h) and
@@ -304,36 +478,49 @@ class ExtAssetResolver
 public:
     ExtAssetResolver() = default;
 
-    // Mount `root` as `package_id`. Returns false with `reason` set, and mounts nothing, when:
+    // Mount `root` as `package_id`, having come from the package store at `store_root`. Returns
+    // false with `reason` set, and mounts nothing, when:
     //   * the id is not a valid package id (see is_valid_package_id);
     //   * the id is already mounted — a second mount would silently shadow the first, and which one
     //     wins is not a question a security boundary should have an answer to;
-    //   * the root cannot be CANONICALIZED. There is deliberately no "fall back to the raw path"
+    //   * the root FAILS THE PROVENANCE CHECK against `store_root` — see
+    //     `package_root_provenance_ok` above for all six refusals, which include the canonicalization
+    //     failure this list used to name (there is deliberately no "fall back to the raw path"
     //     branch: the overlap refusal below is a LEXICAL comparison, so it establishes disjointness
     //     only when both sides are canonical, and every containment check afterwards compares
-    //     against this stored value;
+    //     against the stored value);
     //   * the root does not exist or is not a directory (a package that is not installed is not
     //     mounted — deny-by-default applies to the mount table too);
     //   * the canonical root CONTAINS, IS, or IS CONTAINED BY an already mounted root. See the file
     //     header: nested roots turn per-root containment into a cross-package read.
     //
-    // ⚠ E13B OBLIGATION — WHERE THE ROOT CAME FROM IS NOT CHECKED HERE, AND MUST BE CHECKED THERE.
-    // This function validates the id and the SHAPE of the root; it cannot validate the root's
-    // PROVENANCE, because e13a-1 has no package store to validate it against (the install flow is
-    // e13b's). Today the only caller is the Shell's own options and the list is empty, so there is
-    // nothing to get wrong. The moment an install path starts producing these mounts, that path
-    // owns the missing half: a root must be inside the package store it claims to come from, or a
-    // package whose manifest points its asset root at `~/.ssh` gets exactly what it asked for.
+    // `reason` is `"<code>: <message>"` for a provenance refusal, so the grep-stable code is in the
+    // string the CEF binding prints to stderr and the suite asserts on; the four pre-existing
+    // refusals keep their prose spellings byte-for-byte, so no existing assertion moves.
     //
-    // ⚠ SECOND E13B OBLIGATION — CASE. The overlap refusal compares paths with `path::compare`,
-    // which is case-SENSITIVE, while NTFS is not. Canonicalization is what closes the gap in
-    // practice (MSVC's `weakly_canonical` case-normalizes through `GetFinalPathNameByHandle`; the
-    // MinGW libstdc++ used by the local dev gate does NOT), so two differently-cased spellings of
-    // one directory could both mount under a non-MSVC Windows build. Refusing an uncanonicalizable
-    // root above is what keeps this narrow; an install path that can produce two spellings of one
-    // root must dedupe them before mounting.
+    // ✅ E13B OBLIGATION — DISCHARGED IN M9 e13c-3. `store_root` is that discharge, and it is a
+    // REQUIRED PARAMETER rather than a constructor argument or a settable member ON PURPOSE: the
+    // obligation was that a root must be inside the package store it claims to come from, and a
+    // parameter is the only spelling of that which a caller cannot forget. An EMPTY `store_root`
+    // refuses every mount (`kErrMountStoreRootUnset`), so the fail-closed direction needs no
+    // discipline either. A package whose manifest points its asset root at `~/.ssh` — the worked
+    // example the obligation named — is now refused by `kErrMountRootOutsideStore`, and one that
+    // tries to get there through a symlink or a Windows junction by `kErrMountRootLink`.
+    //
+    // ✅ SECOND E13B OBLIGATION — CASE — ALSO DISCHARGED, and NOT here: it is discharged where the
+    // obligation said it had to be, in the install path. The overlap refusal below still compares
+    // with `path::compare`, which is case-SENSITIVE while NTFS is not, so two differently-cased
+    // spellings of one directory could still both mount under a non-MSVC Windows build if a caller
+    // offered both. `scan_package_store` (package_store.h) is what makes sure no caller does, and it
+    // needs NO dedupe step to do it: roots are BUILT from enumerated directory names, so each arrives
+    // in exactly the one spelling the filesystem reports, and `is_valid_package_id` accepts LOWER CASE
+    // ONLY — so a directory named `Pkg` is refused outright (`kErrPackageIdInvalid`, package_store.h)
+    // and two ACCEPTED ids cannot differ by case at all. That argument's authority is
+    // package_store.h § the scan; it is deliberately NOT restated here, so the two cannot drift.
+    // ⚠ There is NO case-collision error code, and adding one would be dead code: an explicit
+    // collision refusal was written during e13c-3 and REMOVED once review showed it could never fire.
     [[nodiscard]] bool mount(std::string_view package_id, const std::filesystem::path& root,
-                             std::string& reason);
+                             const std::filesystem::path& store_root, std::string& reason);
 
     [[nodiscard]] ExtResolution resolve(std::string_view url) const;
 

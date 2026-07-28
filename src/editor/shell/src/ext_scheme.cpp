@@ -4,7 +4,25 @@
 #include "context/editor/shell/ext_scheme.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <system_error>
+
+// The OS-level link query of `path_is_os_link` — see ext_scheme.h § mount PROVENANCE for why this is
+// asked of the OS rather than of `std::filesystem::weakly_canonical`.
+#if defined(_WIN32)
+// NOMINMAX / WIN32_LEAN_AND_MEAN for the reasons win32_window.cpp records: <windows.h> otherwise
+// macro-defines min/max (mangling std::min/std::max at every later include) and drags in the
+// winsock/OLE headers this file has no use for. Only GetFileAttributesW is wanted here.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <sys/stat.h>
+#endif
 
 namespace context::editor::shell
 {
@@ -84,10 +102,234 @@ bool is_valid_package_id(std::string_view id)
     return !last_label_is_numeric(id);
 }
 
+// ------------------------------------------------------------- mount PROVENANCE (M9 e13c-3)
+
+bool path_is_os_link(const std::filesystem::path& path, bool* query_failed)
+{
+    if (query_failed != nullptr)
+    {
+        *query_failed = false;
+    }
+#if defined(_WIN32)
+    // THE BRANCH THE WHOLE FUNCTION EXISTS FOR (ext_scheme.h § mount PROVENANCE). The reparse-point
+    // BIT is read straight off the directory entry, and the reparse TAG is deliberately not
+    // inspected: a symlink, a junction (`IO_REPARSE_TAG_MOUNT_POINT`) and every other tag Microsoft
+    // ships or adds are all "this name resolves to bytes stored under another name", which is exactly
+    // what an install path must not accept for a package root. Enumerating safe tags would be a
+    // denylist over an extensible set.
+    const DWORD attributes = ::GetFileAttributesW(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES)
+    {
+        // ⚠ "ABSENT" AND "COULD NOT DECIDE" ARE DIFFERENT ANSWERS, and conflating them is a
+        // FAIL-OPEN. Absent is a normal answer the caller's own existing-directory check refuses. But
+        // a query that FAILED for any other reason tells us nothing, and returning plain `false` there
+        // reads as "not a link" — which the walk would accept. That is not covered by the later
+        // checks: for a link pointing INSIDE the store (the case this whole function exists for) the
+        // canonical containment check PASSES, because the target really is contained. On Windows this
+        // is reachable with no privilege at all: `GetFileAttributesW` fails with
+        // `ERROR_PATH_NOT_FOUND` on a path at or past `MAX_PATH` unless the process is long-path
+        // aware — and this one ships no such manifest — while MSVC's `std::filesystem` handles long
+        // paths internally, so every OTHER check keeps succeeding and only the link walk goes blind.
+        const DWORD error = ::GetLastError();
+        if (query_failed != nullptr && error != ERROR_FILE_NOT_FOUND &&
+            error != ERROR_INVALID_NAME && error != ERROR_BAD_NETPATH)
+        {
+            // Deliberately NOT ERROR_PATH_NOT_FOUND: that is the long-path symptom above, i.e. exactly
+            // the case that must fail CLOSED rather than read as absent.
+            *query_failed = true;
+        }
+        return false;
+    }
+    return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+#else
+    // `lstat`, not `stat`: the whole question is what the NAME is, not what it leads to.
+    struct ::stat info{};
+    if (::lstat(path.c_str(), &info) != 0)
+    {
+        // Same split as the Windows arm: ENOENT/ENOTDIR are "absent" (a normal answer); anything else
+        // — EACCES on a parent directory, ELOOP, ENAMETOOLONG, EIO — is "could not decide" and must
+        // not read as "not a link".
+        if (query_failed != nullptr && errno != ENOENT && errno != ENOTDIR)
+        {
+            *query_failed = true;
+        }
+        return false;
+    }
+    return S_ISLNK(info.st_mode) != 0;
+#endif
+}
+
+bool package_root_provenance_ok(const std::filesystem::path& store_root,
+                                const std::filesystem::path& package_root,
+                                std::filesystem::path& out_canonical, std::string& error_code,
+                                std::string& message)
+{
+    out_canonical.clear();
+    error_code.clear();
+    message.clear();
+
+    // (1) FAIL-CLOSED on an unbound store. A store that does not exist cannot vouch for anything.
+    if (store_root.empty())
+    {
+        error_code = kErrMountStoreRootUnset;
+        message = "no package store root was supplied, so no root's provenance can be established";
+        return false;
+    }
+
+    // (2) The store root, canonicalized — the ONE canonicalization in this function that decides
+    // anything. It is the editor's own configuration rather than an attacker-influenced value, and on
+    // macOS the system temp directory really does reach through a `/var -> private/var` symlink, so
+    // refusing a link ABOVE the store would refuse every fixture and every default install there.
+    std::error_code ec;
+    const std::filesystem::path store = std::filesystem::weakly_canonical(store_root, ec);
+    if (ec || store.empty())
+    {
+        error_code = kErrMountStoreRootInvalid;
+        message = "the package store root '" + store_root.string() + "' could not be canonicalized";
+        return false;
+    }
+    ec.clear();
+    if (!std::filesystem::is_directory(store, ec))
+    {
+        error_code = kErrMountStoreRootInvalid;
+        message = "the package store root '" + store_root.string() + "' is not an existing directory";
+        return false;
+    }
+
+    // (3a) TEXTUAL refusals, BEFORE the filesystem is touched. `..` is refused on the RAW path — a
+    // `lexically_normal()` first would COLLAPSE the traversal and hide exactly what is being looked
+    // for. `.` is NOT refused: it is not an escape, so it is normalized away below instead (which is
+    // what keeps a `<root>/.` spelling reaching the overlap refusal it always reached).
+    if (!package_root.is_absolute())
+    {
+        error_code = kErrMountRootTraversal;
+        message = "the package root '" + package_root.string() + "' is not an absolute path";
+        return false;
+    }
+    for (const std::filesystem::path& part : package_root)
+    {
+        if (part == "..")
+        {
+            error_code = kErrMountRootTraversal;
+            message = "the package root '" + package_root.string() +
+                      "' carries a '..' component, so it names a path outside the directory it "
+                      "appears to name";
+            return false;
+        }
+    }
+
+    // A TRAILING SEPARATOR IS STRIPPED FROM BOTH SIDES, and the two sides are stripped for DIFFERENT
+    // reasons — which is worth stating exactly, because an earlier version of this comment gave the
+    // candidate side a hazard it does not actually have, and a reader who believed it could "simplify"
+    // away the one guard that does the work.
+    //   * THE STORE SIDE IS THE LOAD-BEARING ONE: `lexically_relative` against a base whose last element
+    //     is empty yields a `..`-leading result, so a caller who spelled the store root with a trailing
+    //     slash would have had EVERY mount refused. The suite pins that case.
+    //   * THE CANDIDATE SIDE IS BELT-AND-BRACES. It is true in general that `lstat`/`GetFileAttributesW`
+    //     on `<path>/` resolves the directory a link points at instead of reporting the link — but that
+    //     cannot reach the walk below, because `probe` is rebuilt COMPONENT BY COMPONENT from the
+    //     canonical store and the walk SKIPS EMPTY COMPONENTS, so no OS query ever sees a trailing
+    //     separator. MEASURED: with this strip removed a symlinked root spelled `<store>/linkpkg/` is
+    //     still refused as `kErrMountRootLink`. ⚠ So the `part.empty()` skip in the walk is NOT
+    //     redundant with this strip — it is the guard that actually holds the property. Do not delete
+    //     either one on the theory that the other covers it.
+    // `parent_path()` is the idiomatic strip for a path whose filename is empty.
+    const auto strip_trailing_separator = [](std::filesystem::path path) {
+        return path.has_filename() ? path : path.parent_path();
+    };
+    const std::filesystem::path normalized =
+        strip_trailing_separator(package_root.lexically_normal());
+    const std::filesystem::path store_as_given =
+        strip_trailing_separator(store_root.lexically_normal());
+
+    // (3b) LEXICAL containment: the candidate must be BENEATH the store, and must not BE it.
+    //
+    // The tail is taken against the store root AS GIVEN first, then against its canonical form. Both
+    // spell the SAME directory, so either is a correct anchor — and trying both is what lets a caller
+    // build `store_root / <id>` from an uncanonicalized store root (the macOS `/var` temp path again)
+    // without every mount failing closed. MEASURED: `editor-cef-smoke-shell-iframe` stages its fixture
+    // under `temp_directory_path()`, which on macOS is `/var/folders/...` while its canonical form is
+    // `/private/var/folders/...` — so the canonical-only form of this check refuses that live smoke's
+    // own package. The walk below always anchors at the CANONICAL `store`, so whichever spelling
+    // matched, the path examined on disk and the root recorded are canonical.
+    std::filesystem::path relative = normalized.lexically_relative(store_as_given);
+    if (relative.empty() || *relative.begin() == "..")
+    {
+        relative = normalized.lexically_relative(store);
+    }
+    if (relative.empty() || *relative.begin() == ".." || relative == ".")
+    {
+        error_code = kErrMountRootOutsideStore;
+        message = "the package root '" + package_root.string() +
+                  "' is not a directory inside the package store '" + store_root.string() + "'";
+        return false;
+    }
+
+    // (4) THE SECURITY CORE — no OS link anywhere from the store root down to the candidate,
+    // INCLUSIVE. Refuse-by-construction: a link is refused whether it leads out of the store or
+    // stays inside it (ext_scheme.h explains both reasons — a link's target is not a stable fact,
+    // and the inside-the-store case is the one that discriminates this check from a canonical
+    // compare). Nothing here consults `weakly_canonical`.
+    std::filesystem::path probe = store;
+    for (const std::filesystem::path& part : relative)
+    {
+        if (part.empty())
+        {
+            continue;
+        }
+        probe /= part;
+        bool link_query_failed = false;
+        if (path_is_os_link(probe, &link_query_failed))
+        {
+            error_code = kErrMountRootLink;
+            message = "the package root '" + package_root.string() +
+                      "' is reached through an OS link at '" + probe.string() +
+                      "'; a package store may contain only real directories";
+            return false;
+        }
+        // FAIL CLOSED WHEN THE ANSWER IS UNKNOWN. `path_is_os_link` returns false both for "absent"
+        // and — before this branch existed — for "the query failed", and the second is not covered by
+        // any later check: a link pointing INSIDE the store passes canonical containment, which is the
+        // very case the walk exists to refuse. So an UNDECIDED component on a path that nonetheless
+        // EXISTS is refused rather than admitted. Absent is left to the caller's existing-directory
+        // refusal, so a genuinely missing package still reports as missing rather than as a link.
+        if (link_query_failed)
+        {
+            std::error_code exists_ec;
+            if (std::filesystem::exists(probe, exists_ec))
+            {
+                error_code = kErrMountRootLink;
+                message = "the package root '" + package_root.string() +
+                          "' could not be checked for an OS link at '" + probe.string() +
+                          "'; a component that cannot be examined is refused rather than trusted";
+                return false;
+            }
+        }
+    }
+
+    // (6) The canonical containment check — REDUNDANT with (3b)+(4) on every toolchain we know of,
+    // and kept for the same reason the resolver keeps its textual and canonical passes both: it is
+    // the only layer that would notice a link the OS declined to report, or an OS path quirk a
+    // lexical comparison cannot see. The value it produces is what the mount table stores, so the
+    // canonicalization is paid once and the check and the record cannot disagree.
+    ec.clear();
+    const std::filesystem::path canonical = std::filesystem::weakly_canonical(probe, ec);
+    if (ec || canonical.empty() || !path_contains_or_equals(store, canonical))
+    {
+        error_code = kErrMountRootEscapesStore;
+        message = "the package root '" + package_root.string() +
+                  "' resolves outside the package store '" + store_root.string() + "'";
+        return false;
+    }
+
+    out_canonical = canonical;
+    return true;
+}
+
 // ------------------------------------------------------------------------------- the mount table
 
 bool ExtAssetResolver::mount(std::string_view package_id, const std::filesystem::path& root,
-                             std::string& reason)
+                             const std::filesystem::path& store_root, std::string& reason)
 {
     reason.clear();
     if (!is_valid_package_id(package_id))
@@ -103,18 +345,23 @@ bool ExtAssetResolver::mount(std::string_view package_id, const std::filesystem:
         return false;
     }
 
-    std::error_code ec;
-    std::filesystem::path resolved = std::filesystem::weakly_canonical(root, ec);
-    if (ec)
+    // PROVENANCE (M9 e13c-3) — the E13B obligation, discharged at the one choke point every mount
+    // passes through. It replaces this function's own former `weakly_canonical` + no-fallback branch:
+    // the check performs that canonicalization itself and hands back the value, so DENY-BY-DEFAULT
+    // still reaches canonicalization (an uncanonicalizable root is `kErrMountRootEscapesStore`) and
+    // the overlap refusal below still compares canonical against canonical.
+    std::filesystem::path resolved;
+    std::string provenance_code;
+    std::string provenance_message;
+    if (!package_root_provenance_ok(store_root, root, resolved, provenance_code, provenance_message))
     {
-        // DENY-BY-DEFAULT REACHES CANONICALIZATION ITSELF. Continuing with the raw `root` here — as
-        // an earlier draft did — is the one fallback that silently voids the overlap refusal below:
-        // that refusal is a LEXICAL comparison, so it only establishes disjointness when both sides
-        // are canonical, and a non-canonical root would let a nested package mount and hand its
-        // bytes to its parent. Every later containment check compares against this value too.
-        reason = "package root could not be canonicalized";
+        // The grep-stable code goes INTO the reason, so the string the CEF binding prints to stderr
+        // and the string this module's suite asserts on are the same string.
+        reason = provenance_code + ": " + provenance_message;
         return false;
     }
+
+    std::error_code ec;
     if (!std::filesystem::is_directory(resolved, ec))
     {
         // Deny-by-default reaches the mount table too: a package that is not installed is not
