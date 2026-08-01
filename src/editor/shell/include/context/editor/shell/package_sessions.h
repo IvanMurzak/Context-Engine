@@ -213,6 +213,23 @@ inline constexpr std::size_t kMaxPackageSessions = 4;
 //   * `resource.read`, `snapshot`, `validate`, `reconcile`, `doctor` are simply not needed yet. Adding
 //     one is a reviewed one-line change to this list, which is the shape a capability surface should
 //     have.
+//
+// ⚠ M9 e13c-4 CHANGED WHAT THE ABSENCES ARE WORTH - READ THIS BEFORE ADDING A NAME.
+// Two things that were true when the list above was written are no longer true, and BOTH of them
+// concern exactly the write verbs:
+//   1. THE "REFUSED BY THE DISPATCHER ANYWAY" REDUNDANCY IS GONE FOR A GRANTED PACKAGE. It held while
+//      every package session was the `read_query` baseline. Since e13c-4 a consented package attaches
+//      with a DERIVED scope (`package_grants.h` § attach_scope_spec_for), so a session really can
+//      carry `file_write` / `session_control` / `build_install` - and the dispatcher would then ADMIT
+//      `set` / `edit` / `build` / `package.add`. For those methods this allowlist is now the ONLY
+//      control, not the redundant second one.
+//   2. ADDING A WRITE VERB HERE ALSO ARMS `package.grants.decide`. That route writes the consent
+//      DOCUMENT and is installed on the privileged bridge, whose own threat model (`ipc_bridge.h`)
+//      treats every inbound message as untrusted renderer content. It is harmless today only because
+//      nothing a renderer can reach through THIS list can act on a grant it wrote. A write verb here
+//      closes that loop: renderer -> `decide` -> a grant it chose -> this list -> the authored file.
+// So a name added here is no longer "a reviewed one-line change"; it is a change to the sandbox
+// boundary, and it needs the consent-write route re-examined in the same review.
 [[nodiscard]] const std::vector<std::string>& panel_callable_daemon_methods();
 
 /** Is `method` on the allowlist? EXACT match only — no prefix rule, no normalization. */

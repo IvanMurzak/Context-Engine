@@ -146,7 +146,7 @@ bool read_entry(const std::string& package_id, const contract::Json& value,
 // `manifest_defect` satisfiable when e13f finally registers these contributions; it is not a second
 // enforcement point, and there is no live consumer of `Contribution::sandbox.granted_scopes` yet.
 // Making it a real boundary means keying the grant lookup on contribution id, which is a design
-// question, not a rewording — tracked as a follow-up on the PR rather than changed here.
+// question, not a rewording, so it is deliberately left as it stands here.
 std::vector<std::string> declared_capabilities(const InstalledPackage& package)
 {
     std::vector<std::string> declared;

@@ -817,7 +817,8 @@ int main(int argc, char** argv)
     // grant document indexed by this scan (`PackageGrantHost` below), so the scan must exist before
     // the host is constructed. Nothing about the scan itself changed, and the CEF options below still
     // read the same object.
-    std::filesystem::path package_store = shell::package_store_root();
+    const std::filesystem::path package_store = shell::package_store_root();
+    // NOT const: `PackageGrantHost` takes `PackageStoreScan&` and rewrites `sandbox.granted_scopes`.
     shell::PackageStoreScan package_scan = shell::scan_package_store(package_store);
     for (const shell::PackageRefusal& refusal : package_scan.refusals)
     {

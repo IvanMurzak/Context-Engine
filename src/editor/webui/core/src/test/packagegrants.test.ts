@@ -472,9 +472,10 @@ export const packageGrantsTests: readonly TestCase[] = [
         // takes the `#busSubscriptions.has(topic)` snapshot arm, which replays the SAME retained
         // envelope the `#attach` arm would have. Released and retained-but-orphaned are
         // indistinguishable through `EditorUiBus`'s public surface, which exposes `mirrorCount` but no
-        // listener count. Closing it needs a `listenerCount(topic)` accessor on `EditorUiBus` (an
-        // out-of-diff module) or a counting decorator around `bus.subscribe` — tracked as a follow-up
-        // on the PR. What this case DOES prove is everything below: the package is dropped, delivery
+        // listener count. Closing it needs a `listenerCount(topic)` accessor on `EditorUiBus`
+        // (`uibus.ts`) or a counting decorator around `bus.subscribe`; neither exists today, so this
+        // case asserts what it can observe. What this case DOES prove is everything below: the
+        // package is dropped, delivery
         // to it stops, a sibling package is unaffected, and a re-subscribe works and replays.
         name: "packageui: dispose releases the package and is re-subscribable (listener release NOT asserted)",
         run: () => {

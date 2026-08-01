@@ -3,7 +3,7 @@
 //
 // WHAT THIS SUITE IS FOR. This module is the sandbox CAPABILITY BOUNDARY: a silently-passing assertion
 // here means third-party package code holds scopes nobody granted. So three disciplines bind every
-// case below, each of which has cost this repo a round when it was skipped:
+// case below, each of which has previously shipped a silently-passing assertion in this subsystem:
 //
 //   (1) ASSERT THE POSITIVE ARTIFACT, NEVER AN ABSENCE. "the write did not happen" is satisfied for
 //       free by a request that never arrived, a fixture that failed to write, or an unrelated error.
@@ -749,6 +749,50 @@ void test_a_grant_exceeding_the_manifest_is_clamped_off_the_attach_path()
     // the baseline: a grant left behind for a package that is gone is not a pre-authorization for the
     // next directory to claim that name.
     CHECK(host.attach_scope_spec_for("never-installed").empty());
+
+    // ⚠ THE SECOND CONSUMER OF THE SAME STALE DOCUMENT, and it is a SEPARATE clamp call site
+    // (`package_consent_requests`) from the attach path's above. Both must be pinned HERE because
+    // this is the only fixture whose store genuinely EXCEEDS the manifest - the other consent-surface
+    // cases record only declared capabilities, so their clamp is the IDENTITY and cannot fail.
+    // Without these lines, deleting the clamp in `package_consent_requests` leaves every assertion in
+    // this suite green while `list()` reports a grant the manifest never backed - which editor-core
+    // consumes VERBATIM (`packagegrants.ts`: it never decides a grant), so the excess would reach
+    // `requireCapability` and past it.
+    // ⚠ PLANT: drop the `clamp_to_declared(...)` in `package_consent_requests` and return
+    // `grants.granted_capabilities(package.id)` raw - `quiet-panel` then lists `file_write`.
+    const BridgeResult listed = host.list();
+    CHECK(listed.error_code.empty());
+    const Json& packages = listed.value.at("packages");
+    CHECK(packages.size() == 2);
+    // BY ID, never by index: the assertion must not silently pass by reading the other package's row
+    // if the scan order ever changes.
+    const Json* quiet = nullptr;
+    const Json* writer = nullptr;
+    for (std::size_t i = 0; i < packages.size(); ++i)
+    {
+        const Json& row = packages.at(i);
+        if (row.at("id").as_string() == "quiet-panel")
+        {
+            quiet = &row;
+        }
+        else if (row.at("id").as_string() == "writer-panel")
+        {
+            writer = &row;
+        }
+    }
+    CHECK(quiet != nullptr);
+    CHECK(writer != nullptr);
+    if (quiet == nullptr || writer == nullptr)
+    {
+        shelltest::cleanup(root);
+        return;
+    }
+    // THE NEGATIVE: undeclared, so the consent surface reports it granted NOTHING...
+    CHECK(quiet->at("granted").is_array() && quiet->at("granted").size() == 0);
+    // ...and THE POSITIVE COUNTERPART in the same reply, so the negative above cannot be satisfied
+    // for free by a clamp that empties every row.
+    CHECK(writer->at("granted").is_array() && writer->at("granted").size() == 1);
+    CHECK(writer->at("granted").at(std::size_t{0}).as_string() == gc::kCapabilityFileWrite);
 
     shelltest::cleanup(root);
 }

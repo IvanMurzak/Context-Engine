@@ -334,7 +334,7 @@ public:
     // bundle inherits the previous occupant's answer up to its own declaration. Nothing here prunes or
     // re-validates on reinstall. Closing it means binding the record to package IDENTITY (version
     // and/or a manifest hash) and reporting `decided = false` when the identity changed — a shape
-    // change to the document, so it is tracked as a follow-up on the PR rather than done here.
+    // change to the document, so it is deliberately NOT done here.
     [[nodiscard]] std::string attach_scope_spec_for(const std::string& package_id) const;
 
     [[nodiscard]] const PackageGrantStore& grants() const { return grants_; }
