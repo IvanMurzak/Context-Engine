@@ -223,15 +223,34 @@ Registry::Registry()
         "protocol) as JSON.",
         /*params=*/{}, /*flags=*/{}, /*implemented=*/true));
 
+    // `--template` is declared BOTH as the optional second positional and as a flag, and both
+    // spellings are live (app.cpp prefers the flag). The positional is the M1 grammar and stays
+    // supported; the flag is what a reader expects of an option and what the M9 e13e
+    // `extension-panel` template is documented under, so withholding it would make the documented
+    // invocation fail `usage.unknown_flag`. Additive: no existing spelling changes meaning.
+    //
+    // ⚠ This makes `template` the ONLY name in the registry that is both a param and a flag on one
+    // verb. Harmless on the CLI (`dispatch` keeps positionals and flags in separate maps and the
+    // flag wins) and on MCP (`inputSchema` projects the two as separate arrays), but the RPC surface
+    // passes ONE FLAT params object per method — so when `new`'s bridge backing lands there is
+    // exactly ONE `template` input, and it carries the FLAG's semantics. Do not re-derive a
+    // precedence rule there; there is only one slot.
     verbs_.push_back(make_verb(
         "", "", "new",
-        "Scaffold a new project from a template. The default template is a minimal RUNNABLE "
-        "skeleton (a scene, a camera, a startable session) — R-QA-006.",
+        "Scaffold a new project or editor package from a template. `default` is a minimal RUNNABLE "
+        "project skeleton (a scene, a camera, a startable session) — R-QA-006; `extension-panel` is "
+        "a minimal editor package (an R-EDIT-001 manifest + a hello iframe panel) that installs by "
+        "being scaffolded into the package store.",
         /*params=*/
-        {{"directory", "path", true, "Target directory to scaffold the project into."},
+        {{"directory", "path", true, "Target directory to scaffold into."},
          {"template", "string", false,
           "Template name; defaults to the runnable default template."}},
-        /*flags=*/{}, /*implemented=*/true));
+        /*flags=*/
+        {{"template", "string",
+          "Template name (`default` | `extension-panel`); the same value the optional second "
+          "positional takes, and the spelling that wins when both are given.",
+          false}},
+        /*implemented=*/true));
 
     // The composed WRITE path (M2, R-CLI-006 / L-35): `context set` writes a value onto a composed
     // entity — an override entry in the OUTERMOST (root) instancing scene by default, the defining

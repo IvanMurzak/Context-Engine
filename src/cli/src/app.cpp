@@ -122,9 +122,19 @@ Envelope dispatch(const VerbSpec& verb, const std::vector<std::string>& position
     if (verb.noun.empty() && verb.verb == "new")
     {
         const std::string directory = bound.count("directory") ? bound.at("directory") : "";
-        const std::string tmpl = bound.count("template") ? bound.at("template") : "default";
+        // `--template <name>` WINS over the optional second positional. Both are registered (see
+        // registry.cpp) and both work; the flag is the documented spelling for the M9 e13e
+        // `extension-panel` template, and when a caller supplies both, the one they had to name
+        // explicitly is the one they meant.
+        std::string tmpl = kDefaultTemplate;
+        if (bound.count("template"))
+            tmpl = bound.at("template");
+        if (const auto flag = flags.find("template"); flag != flags.end())
+            tmpl = flag->second;
+        // `scaffold_dry_run`, not `scaffold_plan`: the plan alone DESCRIBES without deciding, so it
+        // would report a confident file list for an input the apply below refuses.
         if (dry_run)
-            return Envelope::success(scaffold_plan(directory, tmpl));
+            return scaffold_dry_run(directory, tmpl);
         return scaffold_project(directory, tmpl);
     }
 

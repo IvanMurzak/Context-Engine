@@ -113,7 +113,7 @@ export const RPC_METHODS: { readonly [M in RpcMethod]: RpcMethodDescriptor } = {
         stability: "stable",
         deprecated: false,
         params: ["directory", "template"],
-        flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
+        flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan", "template"],
     },
     "set": {
         method: "set",
