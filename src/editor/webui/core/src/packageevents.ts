@@ -93,10 +93,18 @@ export function parsePackageEventBatch(value: unknown): PackageEventBatch | null
 /**
  * Drain each mounted package's Shell-side buffer once per tick and push the batch into its frames.
  *
- * NEVER THROWS out of `poll()`: it runs on a `setInterval` in a renderer whose only diagnostic channel
- * is a DOM attribute, so an escaping rejection is an unhandled error nobody sees. A `BridgeError` (an
- * older Shell with no `panel.events.poll` route) ends that package's poll for this tick — the fan-out
- * is ABSENT, not broken, and every other panel keeps working.
+ * NEVER THROWS OUT OF `poll()` FOR A BRIDGE FAULT: it runs on a `setInterval` in a renderer whose only
+ * diagnostic channel is a DOM attribute, so an escaping rejection is an unhandled error nobody sees.
+ * The `PackageEventTargets` seam is trusted to be TOTAL rather than guarded — `PanelHost` is (its
+ * `deliver` catches its own `postMessage`) — and any other implementation must be, for the same reason.
+ *
+ * A `BridgeError` ends that package's poll for this tick — the fan-out is ABSENT, not broken, and every
+ * other panel keeps working. ⚠ THE LIVE IN-TREE CAUSE IS NOT VERSION SKEW: `SecondaryWindowSurfaces`
+ * does not install the package session host (package_sessions.h § the pool is per host instance), so a
+ * package panel torn out into a secondary window is refused on EVERY tick for the life of that window.
+ * An older Shell with no route at all is the other cause. Both are counted in `refused`, because a
+ * fan-out that silently never arrives is the failure this module's `panel.events.poll` mirror-note
+ * exists to prevent.
  */
 export class PackageEventPump {
     readonly #bridge: ShellBridge;
@@ -105,6 +113,8 @@ export class PackageEventPump {
     #dropped = 0;
     #gaps = 0;
     #polls = 0;
+    #refused = 0;
+    #faults = 0;
 
     constructor(bridge: ShellBridge, targets: PackageEventTargets) {
         this.#bridge = bridge;
@@ -132,6 +142,23 @@ export class PackageEventPump {
     }
 
     /**
+     * Polls the SHELL refused (`BridgeError`) — a missing route or a refused package.
+     *
+     * ⚠ NON-ZERO AND CLIMBING IS A WIRING FAULT, NOT NOISE, and it is the one signal that tells a
+     * broken fan-out from an idle one. The in-tree cause today is a SECONDARY WINDOW: the package
+     * session host is installed on the primary router only (package_sessions.h § the pool is per host
+     * instance), so a package panel torn out into another window is refused on every tick.
+     */
+    get refused(): number {
+        return this.#refused;
+    }
+
+    /** Polls that failed WITHOUT a Shell answer — a transport fault. The next tick retries. */
+    get faults(): number {
+        return this.#faults;
+    }
+
+    /**
      * One round: poll every mounted package's buffer and deliver what came back. Returns how many
      * events were pushed into a frame in THIS round.
      *
@@ -152,9 +179,18 @@ export class PackageEventPump {
             try {
                 reply = await this.#bridge.call(PANEL_EVENTS_POLL_METHOD, { packageId });
             } catch (error) {
+                // COUNTED, NOT MERELY SWALLOWED. Both arms continue — a degraded poll must never stop
+                // the other packages — but a build where EVERY poll refuses used to be
+                // indistinguishable from an idle editor from every observable this class exposes,
+                // which is precisely the silent-freeze this module's own header warns about two
+                // paragraphs up. Splitting the count is what makes the `instanceof` mean something:
+                // `refused` is a Shell that answered "no" (no route — see the secondary-window note
+                // above — or a refused package), `faults` is a call that never got an answer.
                 if (error instanceof BridgeError) {
-                    continue; // no route / a refused package — absent, not broken
+                    this.#refused += 1;
+                    continue; // the fan-out is ABSENT, not broken
                 }
+                this.#faults += 1;
                 continue; // a transport fault; the next tick tries again
             }
             const batch = parsePackageEventBatch(reply);

@@ -199,6 +199,20 @@ interface HostedPanel {
 /** A hosted panel known to be a live third-party (`iframe`) one — see `PanelHost.#portPanel`. */
 type HostedIframePanel = HostedPanel & { readonly renderer: IframePanelRenderer };
 
+/**
+ * The outcome of one `PanelHost.deliverToPackage` fan-out (M9 e13c-2).
+ *
+ * TWO NUMBERS, NOT ONE, because they answer different questions and only the first can be asserted in
+ * a tier that cannot grant a port: `addressed` is WHO the host decided belongs to the package (the
+ * discriminating artifact), `delivered` is how many of them actually took the message.
+ */
+export interface PackageDelivery {
+    /** The panel ids the host addressed — `panelsForPackage`'s answer, verbatim. */
+    readonly addressed: readonly string[];
+    /** How many of those panels' ports accepted the push. 0 is ordinary (no port granted yet). */
+    readonly delivered: number;
+}
+
 /** What PanelHost needs from any content renderer it mounts. */
 interface PanelRenderer extends DockviewContentRenderer {
     readonly suspended: boolean;
@@ -941,23 +955,31 @@ export class PanelHost {
     }
 
     /**
-     * Push one ONE-WAY FACT into EVERY mounted port panel of `packageId` (M9 e13c-2). Returns how many
-     * ports took it.
+     * Push one ONE-WAY FACT into EVERY mounted port panel of `packageId` (M9 e13c-2).
      *
-     * The count is what the caller reports on, and 0 is an ordinary answer: a package whose panel has
-     * not finished its port handshake yet is not an error, and the Shell's buffer — not this host — is
-     * where "was it kept or dropped" is decided. WHO gets addressed is `panelsForPackage`'s answer, for
-     * the discrimination reason stated there.
+     * ⚠ RETURNS THE ADDRESSING, NOT ONLY THE COUNT, AND THAT IS WHAT MAKES IT TESTABLE. `delivered`
+     * alone cannot discriminate: `deliver` answers `false` for any panel whose port is not granted, so
+     * in every tier that cannot load a `context-ext://` document the count is 0 for the RIGHT package
+     * and the WRONG one alike — replacing the loop's source with `this.#panels.keys()` (i.e. fanning a
+     * package's events out to EVERY panel) leaves a count-only assertion green. `addressed` is the
+     * POSITIVE artifact that reddens it, which is the same reason `panelsForPackage` exists.
+     *
+     * A 0 `delivered` is an ordinary answer: a package whose panel has not finished its port handshake
+     * yet is not an error, and the Shell's buffer — not this host — is where "was it kept or dropped"
+     * is decided.
      */
-    deliverToPackage(packageId: string, verb: string, params?: unknown): number {
+    deliverToPackage(packageId: string, verb: string, params?: unknown): PackageDelivery {
+        const addressed = this.panelsForPackage(packageId);
         let delivered = 0;
-        for (const panelId of this.panelsForPackage(packageId)) {
-            const hosted = this.#panels.get(panelId);
-            if (hosted?.renderer instanceof IframePanelRenderer && hosted.renderer.deliver(verb, params)) {
+        for (const panelId of addressed) {
+            // `#portPanel` is the ONE port-panel predicate this class declares (see its comment):
+            // re-spelling `instanceof` here is what lets the fan-out route and the LayoutPersistence
+            // route drift about what a port panel IS.
+            if (this.#portPanel(panelId)?.renderer.deliver(verb, params) === true) {
                 delivered += 1;
             }
         }
-        return delivered;
+        return { addressed, delivered };
     }
 
     get api(): DockviewApi | null {

@@ -23,9 +23,15 @@
 //
 //   * THE DROP DISCIPLINE IS DROP-OLDEST (evict the front), NOT refuse-newest. Chosen because these
 //     are FACTS, not commands: a panel drawing daemon state needs the CURRENT truth, and holding a
-//     stale head while discarding the fresh tail would leave it rendering the past forever. It is
-//     also what the daemon's own event ring already does to a slow subscriber, so the two layers do
-//     not disagree about what "behind" means (client/subscription.h § 3).
+//     stale head while discarding the fresh tail would leave it rendering the past forever.
+//     ⚠ THIS IS THE OPPOSITE OF WHAT THE DAEMON DOES TO A SLOW SUBSCRIBER, deliberately, and a
+//     consumer must not assume the two tails line up. `Subscriber::offer` (bridge/event_stream.cpp)
+//     REFUSES-NEWEST — `if (queue_.size() >= capacity_) { gap_ = true; return; }` — so it keeps the
+//     OLDEST queued events and discards the fresh ones. Both ends then answer the same way, with a
+//     gap flag that means "re-snapshot" (client/subscription.h § 3), which is what makes the two
+//     layers agree about RECOVERY even though they disagree about which events survive. (The
+//     daemon's `ring_` does pop_front, but that is the replay/retention ring for `sinceSeq`
+//     catch-up, not the slow-subscriber path.)
 //
 //   * A DROP IS LOUD, NEVER SILENT (design 10; the e09b-3 precedent). Silence here would be the worst
 //     possible failure: a panel that missed events looks EXACTLY like a panel whose subject did not
@@ -47,14 +53,23 @@
 //     `dropped` is non-zero only for the second, so a diagnosis can still tell which side was behind.
 //     Collapsing them into one counter would make a daemon-side gap look like an editor-side leak.
 //
-// ⚠ NAMED RESIDUAL, NOT CLOSED HERE — THE SUBSCRIPTION COUNT. This file bounds the events a package
-// may have IN FLIGHT; it does not bound how many SUBSCRIPTIONS a package may open. The daemon holds
-// every minted subId until an explicit `unsubscribe` and fans each event out once PER subId
-// (client/subscription.h § unsubscribe_one), so N subscriptions multiply the daemon's own per-client
-// work even though this buffer's ceiling is unchanged. It is bounded in CONSEQUENCE here (a package
-// with 100 subscriptions still holds at most 256 events on this side) and unbounded in the daemon's
-// own bookkeeping. Closing it needs subId ownership tracking across `subscribe`/`unsubscribe`, which
-// belongs with the grant store e13c-4 builds — recorded rather than papered over.
+// THE SUBSCRIPTION COUNT AND ITS OWNERSHIP — CLOSED, in `package_sessions.h` § control 5, NOT here.
+// This file bounds the events a package may have IN FLIGHT; it does not bound how many SUBSCRIPTIONS
+// a package may open, nor decide WHOSE subscription an `unsubscribe` / `ack` may address. Both are
+// the session host's, because both are properties of the package's daemon connection rather than of
+// this buffer: control 5 caps subIds per package at `kMaxSubscriptionsPerPackage` and refuses any
+// `unsubscribe` / `ack` naming an id the package did not mint. Read that control's header before
+// changing anything here — an earlier revision of this paragraph recorded the ownership half as a
+// deferred QUOTA concern, which understated it: unowned `unsubscribe` / `ack` is a cross-client
+// AUTHORIZATION hole, not a budgeting one.
+//
+// ⚠ STILL OPEN, one layer up: `Client::pending_events_` (client/client.h) is an UNBOUNDED std::deque,
+// and `Client::call` parks every arriving event there while it blocks awaiting a response — a window
+// in which `pump()` cannot run, and whose length a package influences by calling a slow method. So
+// the in-flight total is `pending_events_.size() + this buffer`, and only the second term is bounded
+// here. Bounding the first belongs in the client SDK (drop-oldest plus a counter this buffer folds
+// into `gapped`), which is a D10-exported surface with its own boundary gate — recorded rather than
+// papered over.
 //
 // CEF-FREE and D10 BOUNDARY-CLEAN like ui_mirror.h / write_notice.h: pure data movement over
 // `contract::Json`, no browser, no window, no kernel-internal module — so `tests/test_package_events.cpp`

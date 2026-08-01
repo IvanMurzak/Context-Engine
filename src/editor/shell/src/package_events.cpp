@@ -22,10 +22,17 @@ void PackageEventBuffer::push(const std::string& package_id, contract::Json even
     {
         // DROP-OLDEST: these are facts, and the freshest one is the one a panel must render. See the
         // header for why refuse-newest would leave a panel rendering the past forever.
+        // ⚠ THE EPISODE LATCH IS `dropped`, NOT `gapped`. Both an overflow and a DAEMON gap set
+        // `gapped`, so latching the log on it silenced this line entirely whenever an `event.gap`
+        // arrived first — losing the hint in the compound case (daemon behind AND editor behind),
+        // which is the most diagnostic one there is. `dropped` is touched ONLY by eviction and is
+        // reset by every drain (`take` erases the queue), so `dropped == 0` is exactly "first
+        // eviction of this episode" and needs no extra state.
+        const bool first_of_episode = queue.dropped == 0;
         queue.events.pop_front();
         ++queue.dropped;
         ++dropped_total_;
-        if (!queue.gapped)
+        if (first_of_episode)
         {
             // ONE LINE PER EPISODE, not per event: under overflow a per-event line IS the flood this
             // buffer exists to survive. Developer-facing only — the deliverable observable is the
@@ -34,8 +41,8 @@ void PackageEventBuffer::push(const std::string& package_id, contract::Json even
                          "context_editor: package '%s' fell behind its daemon event buffer (cap %zu) "
                          "- dropping oldest events; the panel is told to re-snapshot\n",
                          package_id.c_str(), capacity_);
-            queue.gapped = true;
         }
+        queue.gapped = true;
     }
     queue.events.push_back(std::move(event));
 }

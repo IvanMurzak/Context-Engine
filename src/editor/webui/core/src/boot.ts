@@ -855,7 +855,7 @@ async function startWindowMechanism(
         const packageEvents = new PackageEventPump(bridge, {
             packages: (): readonly string[] => host.packagesWithPorts(),
             deliver: (packageId: string, batch: PackageEventBatch): number =>
-                host.deliverToPackage(packageId, PANEL_EVENTS_DELIVER_VERB, batch),
+                host.deliverToPackage(packageId, PANEL_EVENTS_DELIVER_VERB, batch).delivered,
         });
         const uiMirrorSmoke =
             typeof location !== "undefined" && location.search.includes(UI_MIRROR_SMOKE_FLAG);

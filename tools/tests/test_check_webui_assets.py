@@ -512,6 +512,8 @@ PANEL_BUNDLE = (
     'var WRITE_NOTICE_KIND_ABANDONED = "abandoned";\n'
     # e13c-1 package daemon fan-in method (boot.ts).
     'var PANEL_DAEMON_CALL_METHOD = "panel.daemon.call";\n'
+    # e13c-2 package daemon event fan-OUT drain method (packageevents.ts).
+    'var PANEL_EVENTS_POLL_METHOD = "panel.events.poll";\n'
 )
 
 # MIRRORS THE REAL HEADER'S SHAPE. The real `panel_host.h` declares the enum and the token
@@ -630,6 +632,15 @@ PANEL_CPP_PACKAGE_SESSIONS = (
     'inline constexpr const char* kPackageSessionScope = "read";\n'
 )
 
+# The e13c-2 event fan-OUT drain lives in package_events.h, NOT beside the fan-in above — mirroring
+# the real split (the buffer's header owns the method it is polled through). Its drift symptom is the
+# quietest of the family: editor-core keeps polling on its tick, `PackageEventPump` swallows the
+# refusal by design, and a package's events simply stop arriving with nothing reporting it.
+PANEL_CPP_PACKAGE_EVENTS = (
+    'inline constexpr const char* kPanelEventsPollMethod = "panel.events.poll";\n'
+    'inline constexpr std::size_t kMaxBufferedEventsPerPackage = 256;\n'
+)
+
 PANEL_DOCUMENT = (
     "<!DOCTYPE html>\n"
     '<html lang="en">\n'
@@ -654,6 +665,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
                    window: str = PANEL_CPP_WINDOW,
                    write_notice: str = PANEL_CPP_WRITE_NOTICE,
                    package_sessions: str = PANEL_CPP_PACKAGE_SESSIONS,
+                   package_events: str = PANEL_CPP_PACKAGE_EVENTS,
                    package: dict | None = None,
                    stage_dockview: bool = True) -> tuple[Path, Path, Path, Path, Path]:
     asset_dir = tmp_path / "app"
@@ -675,6 +687,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
     (include_dir / "window_bridge.h").write_text(window, encoding="utf-8")
     (include_dir / "write_notice.h").write_text(write_notice, encoding="utf-8")
     (include_dir / "package_sessions.h").write_text(package_sessions, encoding="utf-8")
+    (include_dir / "package_events.h").write_text(package_events, encoding="utf-8")
 
     contract_dir = tmp_path / "contractinclude"
     contract_dir.mkdir(parents=True, exist_ok=True)
@@ -921,6 +934,39 @@ def test_a_renamed_package_session_cpp_constant_is_a_config_error(tmp_path: Path
     renamed = PANEL_CPP_PACKAGE_SESSIONS.replace("kPanelDaemonCallMethod", "kPanelDaemonInvokeMethod")
     with pytest.raises(check_webui_assets.CheckError):
         _run_panel(tmp_path, package_sessions=renamed)
+
+
+# --- e13c-2: the event fan-OUT drain method ------------------------------------------------------
+#
+# The SAME three cases as the fan-in above, because a new tuple in PACKAGE_SESSION_CONSTANTS that
+# nobody drifts is a gate entry whose own non-vacuity is unproven — the happy path passes just as
+# readily with the entry deleted. Its drift symptom is the quietest in the family: an idle package
+# panel and a permanently broken one are indistinguishable from every observable.
+
+
+def test_package_events_poll_method_drift_fails(tmp_path: Path) -> None:
+    """Drift the TS side: editor-core polls a drain the Shell does not route, `PackageEventPump`
+    swallows the refusal by design, and a package's events stop arriving with NOTHING reporting it."""
+    drifted = re.sub(r'(PANEL_EVENTS_POLL_METHOD = ")[^"]*(")', r"\1panel.events.drifted\2",
+                     PANEL_BUNDLE)
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+def test_bundle_missing_the_package_events_constant_fails(tmp_path: Path) -> None:
+    """An ABSENT constant means editor-core never drains the buffer, so the Shell fills it to its cap
+    and drop-oldests forever while every panel renders the past."""
+    stripped = "\n".join(
+        line for line in PANEL_BUNDLE.splitlines() if "PANEL_EVENTS_POLL_METHOD" not in line)
+    assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+def test_a_renamed_package_events_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
+    """Rot-into-a-no-op guard, and the reason the drain is read from package_events.h rather than
+    package_sessions.h: rename the C++ constant and the gate can verify NOTHING -> exit 2."""
+    renamed = PANEL_CPP_PACKAGE_EVENTS.replace("kPanelEventsPollMethod", "kPanelEventsDrainMethod")
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, package_events=renamed)
 
 
 # --- e09b-3: the LOUD write-notice vocabulary ----------------------------------------------------

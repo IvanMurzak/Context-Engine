@@ -323,9 +323,19 @@ WRITE_NOTICE_CONSTANTS = (
 # `unknown_method`, which editor-core maps to `verb_not_granted`, which is INDISTINGUISHABLE from "this
 # build does not implement bridge.call". Both sides build green and both suites stay green, because the
 # C++ side is pinned to the literal by its own test while every TS reader goes through the constant.
+#
+# The M9 e13c-2 EVENT FAN-OUT drain joins it for the same reason and a worse symptom. editor-core polls
+# `panel.events.poll` on a fixed tick; a drift makes every poll refuse, `PackageEventPump` swallows the
+# `BridgeError` by design (the fan-out is "absent, not broken"), and a package's events simply stop
+# arriving with NOTHING reporting it — an idle package panel and a broken one look identical. Both new
+# files name that hazard in their own headers (`package_events.h` § kPanelEventsPollMethod,
+# `packageevents.ts` § PANEL_EVENTS_POLL_METHOD) and neither could catch it alone: the C++ constant is
+# pinned by its own suite and the TS one by its own, and nothing compared them until this entry.
 PACKAGE_SESSION_CONSTANTS = (
     ("panel.daemon.call fan-in method", "package_sessions.h", "kPanelDaemonCallMethod",
      "PANEL_DAEMON_CALL_METHOD"),
+    ("panel.events.poll fan-out drain method", "package_events.h", "kPanelEventsPollMethod",
+     "PANEL_EVENTS_POLL_METHOD"),
 )
 
 # The closed gesture vocabulary (04 §4), compared SET vs SET between the C++ wire tokens and the

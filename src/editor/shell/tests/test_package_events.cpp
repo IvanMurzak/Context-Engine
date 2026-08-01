@@ -33,6 +33,7 @@
 
 #include "context/editor/shell/package_events.h"
 
+#include "context/editor/contract/handshake.h"
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/package_sessions.h"
 
@@ -250,6 +251,11 @@ void the_subscription_protocol_is_panel_callable_and_the_write_verbs_are_still_n
 struct MintedWires
 {
     std::vector<clientmock::MockChannel*> channels;
+    // Every method that actually REACHED a wire, in order. Control 5's positive artifact: a refusal
+    // that leaves this list unchanged proves the Shell answered BEFORE the daemon was asked, which is
+    // the whole point of checking ownership ahead of the call.
+    std::shared_ptr<std::vector<std::string>> wire_calls =
+        std::make_shared<std::vector<std::string>>();
 };
 
 [[nodiscard]] PackageSessionHost::ClientFactory make_factory(MintedWires& wires)
@@ -261,9 +267,12 @@ struct MintedWires
         raw->on("attach",
                 [](const clientmock::Request&)
                 {
-                    // FLAT in `result`, as Dispatcher::handle really answers it.
+                    // FLAT in `result`, as Dispatcher::handle really answers it. The protocol major
+                    // is the CONSTANT, never a literal: a mock that hardcodes it keeps answering the
+                    // old number after a bump and hides the reader bug the handshake exists to catch.
                     Json result = Json::object();
-                    result.set("protocolMajor", Json(static_cast<std::uint64_t>(1)));
+                    result.set("protocolMajor",
+                               Json(static_cast<std::uint64_t>(contract::kProtocolMajor)));
                     result.set("clientId", Json(static_cast<std::uint64_t>(7)));
                     Json caps = Json::array();
                     caps.push_back(Json(std::string("describe")));
@@ -273,12 +282,35 @@ struct MintedWires
                     result.set("scopes", std::move(scopes));
                     return result;
                 });
+        // ONE COUNTER PER SESSION, so a package that subscribes N times receives N DISTINCT subIds —
+        // which is what control 5's ledger keys on. A fixture answering `sub-1` every time would make
+        // the ownership set a permanent singleton and the sub-cap unreachable, i.e. it would make both
+        // control-5 cases pass without the control existing.
+        auto next_sub = std::make_shared<std::uint64_t>(0);
+        auto calls = wires.wire_calls;
         raw->on("subscribe",
-                [](const clientmock::Request&)
+                [next_sub, calls](const clientmock::Request&)
                 {
+                    calls->push_back("subscribe");
                     Json data = Json::object();
-                    data.set("subId", Json(std::string("sub-1")));
+                    data.set("subId", Json("sub-" + std::to_string(++*next_sub)));
                     data.set("snapshot", clientmock::make_snapshot("inc-1", 0));
+                    return clientmock::MockChannel::ok_envelope(std::move(data));
+                });
+        raw->on("unsubscribe",
+                [calls](const clientmock::Request&)
+                {
+                    calls->push_back("unsubscribe");
+                    Json data = Json::object();
+                    data.set("removed", Json(true));
+                    return clientmock::MockChannel::ok_envelope(std::move(data));
+                });
+        raw->on("ack",
+                [calls](const clientmock::Request&)
+                {
+                    calls->push_back("ack");
+                    Json data = Json::object();
+                    data.set("acked", Json(true));
                     return clientmock::MockChannel::ok_envelope(std::move(data));
                 });
         wires.channels.push_back(raw);
@@ -300,8 +332,16 @@ void the_pump_moves_pushed_daemon_events_into_the_calling_packages_buffer()
 {
     MintedWires wires;
     PackageSessionHost host(make_factory(wires));
+    // ⚠ TWO LIVE SESSIONS, PUMPED TOGETHER — the attribution cannot be tested with one. With a single
+    // session every "landed in the right mailbox" claim is satisfied by an ABSENCE that holds because
+    // the other package was never there: replacing the pump's `events_.push(session.package_id, …)`
+    // with `events_.push(sessions_.front().package_id, …)` — i.e. every package's daemon events
+    // landing in the FIRST package's mailbox, a cross-package disclosure on the control whose stated
+    // purpose is per-package isolation — left this whole suite green. Two sessions with DISJOINT seq
+    // ranges make both drains positive artifacts, so that mutation reddens.
     subscribe_on(host, kPkgA);
-    CHECK(wires.channels.size() == 1);
+    subscribe_on(host, kPkgB);
+    CHECK(wires.channels.size() == 2);
 
     // Nothing pushed yet: the pump is a no-op, and the poll is an ordinary empty drain.
     CHECK(host.pump() == 0);
@@ -309,8 +349,10 @@ void the_pump_moves_pushed_daemon_events_into_the_calling_packages_buffer()
 
     wires.channels[0]->push_event("sub-1", event_with_seq(11));
     wires.channels[0]->push_event("sub-1", event_with_seq(12));
-    CHECK(host.pump() == 2);
-    CHECK(host.events_buffered() == 2);
+    wires.channels[1]->push_event("sub-1", event_with_seq(21));
+    wires.channels[1]->push_event("sub-1", event_with_seq(22));
+    CHECK(host.pump() == 4);
+    CHECK(host.events_buffered() == 4);
 
     const PackageEventDrain drain = host.poll_events(kPkgA);
     CHECK(seqs_of(drain) == std::vector<std::uint64_t>({11, 12}));
@@ -320,8 +362,15 @@ void the_pump_moves_pushed_daemon_events_into_the_calling_packages_buffer()
     // package holding several subscriptions cannot demultiplex without it.
     CHECK(drain.events.at(0).contains("subId"));
     CHECK(drain.events.at(0).at("subId").as_string() == "sub-1");
-    // NOT another package's. Two packages are two sessions and two mailboxes.
-    CHECK(host.poll_events(kPkgB).events.empty());
+    // AND THE OTHER PACKAGE GOT EXACTLY ITS OWN — the positive half. Note both wires carry the same
+    // subId spelling on purpose: the mailbox is keyed by PACKAGE, so a demux that keyed on subId
+    // would collapse these two and is caught here rather than by an absence.
+    const PackageEventDrain other = host.poll_events(kPkgB);
+    CHECK(seqs_of(other) == std::vector<std::uint64_t>({21, 22}));
+    CHECK(!other.gapped);
+    CHECK(other.dropped == 0);
+    // Both mailboxes are now drained, so a package that never subscribed still reads empty.
+    CHECK(host.poll_events("absent-panel").events.empty());
 }
 
 // The daemon's own `event.gap` frame reaches the panel as `gapped`, with `dropped` untouched.
@@ -427,7 +476,10 @@ void panel_events_poll_is_served_over_a_real_router()
     CHECK(shelltest::mentions(drained.response, "\"dropped\":3"));
     CHECK(shelltest::mentions(drained.response, "\"gapped\":true"));
     // The surviving head is seq 4 — the oldest three were the ones evicted.
-    CHECK(shelltest::mentions(drained.response, "\"seq\":4"));
+    // TRAILING COMMA, deliberately: `mentions` is a plain substring find, so a bare `"seq":4` also
+    // matches `"seq":40`, `"seq":45`, … which are present in the same reply — the assertion would
+    // then hold for a head of almost anything. The comma pins the whole value.
+    CHECK(shelltest::mentions(drained.response, "\"seq\":4,"));
     CHECK(!shelltest::mentions(drained.response, "\"seq\":1,"));
 
     // A second install is a WIRING BUG (the router refuses a duplicate name), and the caller checks.
@@ -436,6 +488,84 @@ void panel_events_poll_is_served_over_a_real_router()
 }
 
 } // namespace
+
+// CONTROL 5 (S8) — a package may only address subscriptions it MINTED ITSELF.
+//
+// The hole this closes: `Dispatcher::dispatch` routes `unsubscribe`/`ack` to `serve_subscription`
+// WITHOUT the connection's Session, and `EventStream::unsubscribe`/`::ack` then match on a
+// daemon-global, sequential `sub-N` id that carries no owner. So without a Shell-side check a
+// sandboxed package could walk the namespace and cancel the SHELL's own subscription, or advance a
+// third party's ack cursor and prune ring history it never read.
+void a_package_cannot_address_a_subscription_it_did_not_mint()
+{
+    MintedWires wires;
+    PackageSessionHost host(make_factory(wires));
+    subscribe_on(host, kPkgA);
+    subscribe_on(host, kPkgB);
+    CHECK(host.subscriptions_open(kPkgA) == 1);
+    CHECK(host.subscriptions_open(kPkgB) == 1);
+    const std::size_t reached_the_wire = wires.wire_calls->size();
+
+    // An id this package did not mint — the shape a walk of the sequential namespace produces.
+    Json foreign = Json::object();
+    foreign.set("subId", Json(std::string("sub-99")));
+    CHECK(host.forward(kPkgA, "unsubscribe", foreign).error_code == shell::kErrPackageUnknownSubscription);
+    CHECK(host.forward(kPkgA, "ack", foreign).error_code == shell::kErrPackageUnknownSubscription);
+    CHECK(host.refused_subscriptions() == 2);
+    // THE POSITIVE ARTIFACT, and the reason the check sits ahead of `session_for`: neither call
+    // reached a wire at all, so the daemon was never given the chance to act on someone else's id —
+    // and its "unknown vs live" answer never became an existence oracle.
+    CHECK(wires.wire_calls->size() == reached_the_wire);
+
+    // …while the package's OWN id still travels, so the control refuses the right thing rather than
+    // everything. Note kPkgB's subscription is spelled `sub-1` TOO (its own session, its own counter):
+    // if ownership were keyed on the id alone rather than per package, A's unsubscribe would cancel
+    // B's subscription here.
+    Json own = Json::object();
+    own.set("subId", Json(std::string("sub-1")));
+    CHECK(host.forward(kPkgA, "unsubscribe", own).error_code.empty());
+    CHECK(wires.wire_calls->size() == reached_the_wire + 1);
+    CHECK(host.subscriptions_open(kPkgA) == 0);
+    CHECK(host.subscriptions_open(kPkgB) == 1);
+
+    // A package with no session at all is refused identically, and opens no connection doing it.
+    const std::size_t sessions_before = wires.channels.size();
+    CHECK(host.forward("third-panel", "ack", own).error_code == shell::kErrPackageUnknownSubscription);
+    CHECK(wires.channels.size() == sessions_before);
+}
+
+// The second half of control 5: a package cannot mint subIds without bound. Each one costs the DAEMON
+// a Subscriber with its own queue and one more fan-out of every matching event, in the process that
+// also serves the CLI and every AI client — a cost this editor's 256-event buffer does not bound.
+void the_subscription_sub_cap_bounds_what_one_package_can_mint()
+{
+    MintedWires wires;
+    PackageSessionHost host(make_factory(wires));
+    for (std::size_t i = 0; i < shell::kMaxSubscriptionsPerPackage; ++i)
+    {
+        subscribe_on(host, kPkgA);
+    }
+    CHECK(host.subscriptions_open(kPkgA) == shell::kMaxSubscriptionsPerPackage);
+
+    const std::size_t reached_the_wire = wires.wire_calls->size();
+    CHECK(host.forward(kPkgA, "subscribe", Json::object()).error_code ==
+          shell::kErrPackageSubscriptionCapacity);
+    // Refused BEFORE the daemon minted anything — an over-cap subscribe that reached the wire would
+    // leave a live subscription this Shell has no record of and can therefore never release.
+    CHECK(wires.wire_calls->size() == reached_the_wire);
+
+    // PER PACKAGE, like the buffer's own cap: a different package is entirely unaffected.
+    subscribe_on(host, kPkgB);
+    CHECK(host.subscriptions_open(kPkgB) == 1);
+
+    // And `unsubscribe` is a real release valve rather than a second way to spend the budget.
+    Json own = Json::object();
+    own.set("subId", Json(std::string("sub-1")));
+    CHECK(host.forward(kPkgA, "unsubscribe", own).error_code.empty());
+    CHECK(host.subscriptions_open(kPkgA) == shell::kMaxSubscriptionsPerPackage - 1);
+    CHECK(host.forward(kPkgA, "subscribe", Json::object()).error_code.empty());
+    CHECK(host.subscriptions_open(kPkgA) == shell::kMaxSubscriptionsPerPackage);
+}
 
 int main()
 {
@@ -452,5 +582,7 @@ int main()
     one_pump_is_bounded_so_a_chatty_topic_cannot_hold_the_frame();
     a_reset_drops_the_buffered_events_with_the_sessions();
     panel_events_poll_is_served_over_a_real_router();
+    a_package_cannot_address_a_subscription_it_did_not_mint();
+    the_subscription_sub_cap_bounds_what_one_package_can_mint();
     SHELL_TEST_MAIN_END();
 }

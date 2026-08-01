@@ -364,21 +364,40 @@ export const panelVerbsTests: readonly TestCase[] = [
         // not a route, and this is the assertion that keeps that true.
         name: "panelverbs: filling bridge.events.* did NOT open bridge.ui.subscribe (D7 / C-F18)",
         run: async (): Promise<void> => {
-            const fx = fixture({ declaredCapabilities: [CAPABILITY_UI_EVENTS] });
+            // ⚠ THE GRANT IS SPY-ANSWERED **TRUE**, WHICH IS THE WHOLE POINT OF THIS CASE. Run with
+            // the default deny-all source, `requireCapability` throws before ANY of the handler body
+            // executes, so "no editor.ui subscription reached the daemon" holds because the path was
+            // never taken — and the mutation this case exists to catch (replacing the handler's
+            // terminal throw with `return await forwardDaemon("subscribe", params)`, i.e. wiring
+            // `editor.ui` onto the daemon, the exact D7 violation) stayed GREEN. Passing the gate is
+            // what puts the code under test in the way: past `requireCapability`, the only thing
+            // between `bridge.ui.subscribe` and the daemon is the refusal below.
+            const grants = grantSpy(true);
+            const fx = fixture({ grants, declaredCapabilities: [CAPABILITY_UI_EVENTS] });
             // The events verbs answer…
             await call(fx, PANEL_VERB_EVENTS_SUBSCRIBE, { topics: ["diagnostics"] });
             assertEqual(fx.daemonCalls.length, 1, "the daemon subscription is live");
-            // …while the ui bus verb is still refused, by the capability gate.
+            // …while the ui bus verb is still refused — now by the UNWIRED half, not by the gate.
             const refusal = await refusalFrom(fx, PANEL_VERB_UI_SUBSCRIBE, {
                 topics: ["editor.ui.focus"],
             });
             assertEqual(
-                refusal.code,
-                PANEL_BRIDGE_REFUSALS.capabilityNotGranted,
-                "ui_events still gates the editor.ui surface",
+                grants.asked,
+                [`${PACKAGE_ID}/${CAPABILITY_UI_EVENTS}`],
+                "the ui_events gate really ran and really said yes — the positive control",
             );
-            // AND IT NEVER REACHED THE DAEMON. The positive artifact for D7: a `ui.subscribe` that had
-            // been wired onto the daemon fan-out would show up as a SECOND forward here.
+            assertEqual(
+                refusal.code,
+                PANEL_BRIDGE_REFUSALS.verbNotGranted,
+                "past the gate the editor.ui surface is still not wired for package panels",
+            );
+            assert(
+                refusal.message.includes("not wired"),
+                "…and it says so, rather than answering a daemon fact it has no route to",
+            );
+            // AND IT NEVER REACHED THE DAEMON. The positive artifact for D7, now load-bearing: with
+            // the grant SATISFIED, a `ui.subscribe` wired onto the daemon fan-out would show up as a
+            // SECOND forward here, so this count is what pins `editor.ui` to the LOCAL bus.
             assertEqual(fx.daemonCalls.length, 1, "no editor.ui subscription was forwarded to the daemon");
         },
     },

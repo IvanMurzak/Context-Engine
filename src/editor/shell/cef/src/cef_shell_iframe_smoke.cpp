@@ -110,6 +110,7 @@
 #include "context/editor/shell/ext_scheme.h"
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/keybindings_bridge.h"
+#include "context/editor/shell/package_sessions.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/session_bridge.h"
@@ -136,6 +137,7 @@
 #include <vector>
 
 namespace shell = context::editor::shell;
+namespace client = context::editor::client;
 namespace gc = context::editor::gui::contract;
 namespace smoke = context::editor::shell::smoke;
 namespace render = context::render;
@@ -257,13 +259,23 @@ bool write_fixture_package(const std::filesystem::path& root)
                     "    if (d && d.ctx === \"context.panel-bridge\" && d.v === 1 &&\n"
                     "        d.kind === \"reply\" && d.id === \"smoke-1\" && d.ok === false &&\n"
                     "        d.error && d.error.code === \"bridge.verb_not_granted\" &&\n"
-                    "        d.error.verb === \"bridge.events.subscribe\") {\n"
+                    // THE MESSAGE, NOT ONLY THE CODE, is what makes this a LOOKUP MISS rather than
+                    // any refusal at all. `daemonRefusalCode` collapses a non-allowlisted method,
+                    // capacity, a transport fault AND an absent daemon onto `verb_not_granted`
+                    // (panelverbs.ts), so the code alone would also match a verb that IS in the
+                    // table whose handler merely could not reach a daemon — which is exactly what
+                    // this smoke's daemon-less wiring produces. The transport's own deny-all wording
+                    // is emitted at ONE site, the `#verbs.get(verb) === undefined` branch
+                    // (panelport.ts), so matching it proves NO HANDLER RAN AT ALL.
+                    "        d.error.message ===\n"
+                    "          \"this verb is not granted to package panels in this build\" &&\n"
+                    "        d.error.verb === \"commands.invoke\") {\n"
                     "      void import(\"./port-refused.js\");\n"
                     "    }\n"
                     "  };\n"
                     "  port.start();\n"
                     "  port.postMessage({ ctx: \"context.panel-bridge\", v: 1, kind: \"request\",\n"
-                    "                     id: \"smoke-1\", verb: \"bridge.events.subscribe\" });\n"
+                    "                     id: \"smoke-1\", verb: \"commands.invoke\" });\n"
                     // THE ONE-SHOT, LIVE. A second handshake must win nothing. The child cannot
                     // observe a refusal directly (the host just closes the port it was handed), so it
                     // observes SILENCE on the second channel after the first channel has demonstrably
@@ -277,7 +289,7 @@ bool write_fixture_package(const std::filesystem::path& root)
         shell::kExtPortHandshakeTag +
         "\" }, \"*\", [second.port2]);\n"
         "  second.port1.postMessage({ ctx: \"context.panel-bridge\", v: 1, kind: \"request\",\n"
-        "                             id: \"smoke-2\", verb: \"bridge.events.subscribe\" });\n"
+        "                             id: \"smoke-2\", verb: \"commands.invoke\" });\n"
         "  setTimeout(function () {\n"
         "    if (!secondSaw) { void import(\"./one-shot-held.js\"); }\n"
         "  }, 1500);\n"
@@ -553,6 +565,27 @@ int main(int argc, char** argv)
     shell::WindowMoveStore window_move_store;
     shell::WindowBridge window_move_bridge(shell::kPrimaryWindowId, window_move_store);
     SMOKE_CHECK(window_move_bridge.install(bridge), "the window.* bridge surface installed");
+
+    // M9 e13c-2 — THE DRAIN THE RENDERER POLLS ON A TICK, and the one boot-surface entry that only
+    // THIS smoke needs. `PackageEventPump` (packageevents.ts) calls `panel.events.poll` once per
+    // package that has a live port panel mounted, and this is the only smoke that mounts one — so
+    // without this surface the very first tick is a deny-by-default `unknown_method` and the strict
+    // `bridge.refused() == 0` invariant below trips, on every leg. It is the same rule the block
+    // above states, applied to the verb e13c-2 added to the boot surface.
+    //
+    // THE FACTORY ALWAYS FAILS, and that is the honest wiring rather than a stub: this smoke runs no
+    // daemon, so a package's `bridge.call` is refused `panel.daemon.unavailable` exactly as it is in
+    // a Shell launched with no project (editor_main.cpp says the same of its own install). The DRAIN
+    // needs no session at all — an unknown package is an EMPTY DRAIN by design, not a refusal
+    // (package_sessions.cpp § install) — which is what keeps every idle tick refusal-free here.
+    shell::PackageSessionHost package_sessions(
+        [](std::string& error) -> std::unique_ptr<client::Client>
+        {
+            error = "this smoke runs no daemon";
+            return nullptr;
+        });
+    SMOKE_CHECK(package_sessions.install(bridge),
+                "the panel.daemon.call / panel.events.poll bridge surface installed");
 
     // The five fixture URLs, in the order the chain of inference walks them.
     const std::string url_index = ext_url(kMountedPackage, "index.html");

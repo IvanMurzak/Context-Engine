@@ -945,11 +945,25 @@ export const extPanelTests: readonly TestCase[] = [
                     [],
                     "a package with no mounted panel is addressed by nothing",
                 );
+                // ⚠ AND THE ADDRESSING IS ASSERTED THROUGH `deliverToPackage` ITSELF, not only through
+                // `panelsForPackage`. Asserting the predicate standalone leaves the CLAIM that the
+                // fan-out is written over it resting on a reading of the source: replacing the loop's
+                // source with `this.#panels.keys()` — i.e. delivering one package's daemon events to
+                // EVERY mounted panel, a cross-package leak — kept every assertion above green,
+                // because the count is 0 either way in a tier that can grant no port. Reporting
+                // `addressed` is what makes that mutation red.
+                const fanout = mounted.host.deliverToPackage("pkg.hello", "events.deliver", {});
+                assertEqual(
+                    [...fanout.addressed].sort(),
+                    ["pkg.hello", "pkg.hello.second"],
+                    "the DELIVERY addressed exactly its own package's two panels — pkg.other and the " +
+                        "uitree panel are not reachable from pkg.hello's events",
+                );
                 // The count is still asserted, for what it CAN say: the delivery path runs to
                 // completion without throwing out of a `setInterval` tick in a renderer with no
                 // console, and reports the honest 0 for ports that hold no grant yet.
                 assertEqual(
-                    mounted.host.deliverToPackage("pkg.hello", "events.deliver", {}),
+                    fanout.delivered,
                     0,
                     "a package whose frames hold no granted port yet takes nothing, without throwing",
                 );
