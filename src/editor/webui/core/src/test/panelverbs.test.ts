@@ -47,6 +47,7 @@ import {
     PANEL_VERB_UI_SUBSCRIBE,
     RESERVED_COMMAND_PREFIXES,
     capabilityDenial,
+    readUiTopicsParam,
     daemonRefusalCode,
     makePanelBridgeVerbs,
     sanitizePanelState,
@@ -57,8 +58,10 @@ import type {
     PanelCommandRejection,
     PanelCommandView,
     PanelDaemonOutcome,
+    PanelUiSubscribeOutcome,
 } from "../panelverbs.js";
 import type { ThemeChangedPayload } from "../theme.js";
+import { UI_TOPIC_FOCUS, UI_TOPIC_LAYOUT } from "../uibus.js";
 import type { WhenContext } from "../when.js";
 
 // ------------------------------------------------------------------------------------- the fixture
@@ -112,6 +115,14 @@ interface VerbFixture {
      * absent here has proved the identity is un-forgeable at this layer.
      */
     readonly daemonCalls: { method: string; params: unknown; arity: number }[];
+    /**
+     * Every `bridge.ui.subscribe` the table forwarded to the fan-out seam, in order (M9 e13c-4).
+     *
+     * The witness for the property the granted half exists to establish: an entry here means the
+     * request got PAST `requireCapability` and reached the delivery seam, which is a fact no refusal
+     * assertion can express. `arity` is what pins the no-package-argument shape (see `uiSubscribe`).
+     */
+    readonly uiSubscriptions: { topics: string[]; arity: number }[];
 }
 
 interface FixtureOptions {
@@ -141,6 +152,11 @@ interface FixtureOptions {
      * method echoed back as the result so a case can prove WHICH method landed.
      */
     readonly daemonOutcome?: PanelDaemonOutcome;
+    /**
+     * What the `editor.ui` fan-out seam answers a granted `bridge.ui.subscribe` with (M9 e13c-4).
+     * Default: ACCEPT every requested topic. Supply a `diagnostic` to drive the refusing arm.
+     */
+    readonly uiOutcome?: PanelUiSubscribeOutcome;
 }
 
 /**
@@ -207,6 +223,8 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
     // package — the same signature `makePackageDaemonCall` returns after closing over one — so the
     // fixture cannot accidentally give the table a wider surface than production has.
     const daemonCalls: { method: string; params: unknown; arity: number }[] = [];
+    // The e13c-4 `editor.ui` fan-in, recorded the same way and for the same reason.
+    const uiSubscriptions: { topics: string[]; arity: number }[] = [];
     const table = makePanelBridgeVerbs({
         panelId: PANEL_ID,
         packageId: PACKAGE_ID,
@@ -236,6 +254,16 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
                 options.daemonOutcome ?? { ok: true, result: { echoed: method } },
             );
         },
+        // M9 e13c-4 — the `editor.ui` fan-out seam. RECORDS ITS FULL ARITY for exactly the reason
+        // `daemonCall` above does: the production type promises NO package argument, and a fixture
+        // that declared `(topics)` would silently discard one, making the plant "give
+        // `PanelUiSubscribe` a package argument" vacuous. The default answer ACCEPTS, so the granted
+        // half is measured against a working fan-out; `uiOutcome` supplies the refusing arm.
+        uiSubscribe: (...args: unknown[]): PanelUiSubscribeOutcome => {
+            const topics = args[0] as readonly string[];
+            uiSubscriptions.push({ topics: [...topics], arity: args.length });
+            return options.uiOutcome ?? { topics: [...topics], diagnostic: "" };
+        },
         request: (verb: string, params: unknown): Promise<PanelBridgeReply> => {
             invoked.push(`${verb}:${JSON.stringify(params)}`);
             return Promise.resolve(options.invokeReply ?? { ok: true, result: null });
@@ -246,6 +274,7 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
         invoked,
         writes,
         daemonCalls,
+        uiSubscriptions,
         verbs: table.verbs,
         dispose: table.dispose,
         setContext: (context: WhenContext): void => {
@@ -377,9 +406,15 @@ export const panelVerbsTests: readonly TestCase[] = [
             // The events verbs answer…
             await call(fx, PANEL_VERB_EVENTS_SUBSCRIBE, { topics: ["diagnostics"] });
             assertEqual(fx.daemonCalls.length, 1, "the daemon subscription is live");
-            // …while the ui bus verb is still refused — now by the UNWIRED half, not by the gate.
-            const refusal = await refusalFrom(fx, PANEL_VERB_UI_SUBSCRIBE, {
-                topics: ["editor.ui.focus"],
+            // …while the ui bus verb goes somewhere else entirely.
+            //
+            // ⚠ UPDATED BY M9 e13c-4. Until e13c-4 this asserted a SECOND refusal (`verb_not_granted`,
+            // "not wired"), because the granted half did not exist; now it is ANSWERED — and the D7
+            // claim is STRONGER for it. The old shape could only say "the daemon was not reached by a
+            // verb that reached nothing at all"; this one says the subscription really happened, on
+            // the LOCAL bus seam, and the daemon still never saw it.
+            const answered = await call(fx, PANEL_VERB_UI_SUBSCRIBE, {
+                topics: [UI_TOPIC_FOCUS],
             });
             assertEqual(
                 grants.asked,
@@ -387,17 +422,20 @@ export const panelVerbsTests: readonly TestCase[] = [
                 "the ui_events gate really ran and really said yes — the positive control",
             );
             assertEqual(
-                refusal.code,
-                PANEL_BRIDGE_REFUSALS.verbNotGranted,
-                "past the gate the editor.ui surface is still not wired for package panels",
+                answered,
+                { topics: [UI_TOPIC_FOCUS] },
+                "past the gate the editor.ui subscription is ACCEPTED",
             );
-            assert(
-                refusal.message.includes("not wired"),
-                "…and it says so, rather than answering a daemon fact it has no route to",
+            // IT WENT TO THE LOCAL FAN-OUT SEAM...
+            assertEqual(
+                fx.uiSubscriptions.map((entry) => entry.topics),
+                [[UI_TOPIC_FOCUS]],
+                "the editor.ui subscription landed on the LOCAL bus seam",
             );
-            // AND IT NEVER REACHED THE DAEMON. The positive artifact for D7, now load-bearing: with
-            // the grant SATISFIED, a `ui.subscribe` wired onto the daemon fan-out would show up as a
-            // SECOND forward here, so this count is what pins `editor.ui` to the LOCAL bus.
+            // ...AND NEVER REACHED THE DAEMON. The positive artifact for D7: `bridge.events.subscribe`
+            // above produced exactly one forward, and a `ui.subscribe` wired onto that same daemon
+            // fan-out would show up as a SECOND one. The count is what pins `editor.ui` to the local
+            // bus — and it is only meaningful because the subscribe SUCCEEDED, so the path really ran.
             assertEqual(fx.daemonCalls.length, 1, "no editor.ui subscription was forwarded to the daemon");
         },
     },
@@ -617,27 +655,166 @@ export const panelVerbsTests: readonly TestCase[] = [
             );
 
             // The SAME verb, the SAME build, one different answer from the grant source.
+            //
+            // ⚠ UPDATED BY M9 e13c-4. Until e13c-4 a GRANTED package met a SECOND refusal here
+            // (`verb_not_granted`, "delivery is not wired in this build") and the measurement was that
+            // the CODE moved. The granted half is wired now, so the measurement is stronger: the same
+            // request that is REFUSED without the grant is ANSWERED with it, and the answer names the
+            // accepted topics. A hardcoded denial cannot produce that, and neither can a build whose
+            // gate is bypassed — the denying arm three lines up would then also answer.
             const granting = grantSpy(true);
-            const allowed = await refusalFrom(
-                fixture({ grants: granting, declaredCapabilities: [CAPABILITY_UI_EVENTS] }),
-                PANEL_VERB_UI_SUBSCRIBE,
-            );
+            const grantedFx = fixture({
+                grants: granting,
+                declaredCapabilities: [CAPABILITY_UI_EVENTS],
+            });
+            const answered = await call(grantedFx, PANEL_VERB_UI_SUBSCRIBE, {
+                topics: [UI_TOPIC_FOCUS],
+            });
             assertEqual(
                 granting.asked,
                 [`${PACKAGE_ID}/${CAPABILITY_UI_EVENTS}`],
-                "the same lookup ran",
+                "the same lookup ran, exactly once, about THIS package and THIS capability",
+            );
+            // THE POSITIVE ARTIFACT: the exact accepted topic list came back. An `!== undefined` or a
+            // `topics.length >= 1` here would be satisfied by any object the handler happened to
+            // return, including one produced by a path that never consulted the fan-out.
+            assertEqual(
+                answered,
+                { topics: [UI_TOPIC_FOCUS] },
+                "a GRANTED package's subscribe is ACCEPTED and echoes the topics it now holds",
+            );
+            // ...and it reached the DELIVERY SEAM, which no refusal assertion can express: this is the
+            // half that would stay green if the handler returned a plausible object without ever
+            // subscribing anything.
+            assertEqual(
+                grantedFx.uiSubscriptions.map((entry) => entry.topics),
+                [[UI_TOPIC_FOCUS]],
+                "the fan-out was asked to subscribe exactly those topics",
+            );
+        },
+    },
+    {
+        // ⚠ THE NO-PACKAGE-ARGUMENT PROPERTY, the `bridge.call` fan-in note applied to this seam: the
+        // package identity is a property of the CLOSURE `boot.ts` binds, so there is no member of the
+        // request a panel could set to subscribe another package's panels. Proved by SENDING one and
+        // observing the arity the table actually called with.
+        name: "panelverbs: bridge.ui.subscribe takes no package argument (the closure IS the scope)",
+        run: async (): Promise<void> => {
+            const fx = fixture({
+                grants: grantSpy(true),
+                declaredCapabilities: [CAPABILITY_UI_EVENTS],
+            });
+            await call(fx, PANEL_VERB_UI_SUBSCRIBE, {
+                topics: [UI_TOPIC_LAYOUT],
+                packageId: "ext.victim",
+            });
+            assertEqual(fx.uiSubscriptions.length, 1, "the subscribe reached the fan-out");
+            assertEqual(
+                fx.uiSubscriptions[0]?.arity,
+                1,
+                "the seam was called with the TOPICS alone — a package id in the request cannot " +
+                    "reach it, because there is no parameter for one",
             );
             assertEqual(
-                allowed.code,
-                PANEL_BRIDGE_REFUSALS.verbNotGranted,
-                "a GRANTED package gets past the gate and meets e13c's unbuilt half instead — a " +
-                    "DIFFERENT refusal, which is the whole measurement: the code could not move if " +
-                    "the denial were hardcoded",
+                fx.uiSubscriptions[0]?.topics,
+                [UI_TOPIC_LAYOUT],
+                "and the smuggled `packageId` is not among the topics either",
+            );
+        },
+    },
+    {
+        // The request is UNTRUSTED input, so its parse is fail-closed — and the parse runs AFTER the
+        // gate, deliberately: an un-granted package must not be able to tell a wired verb from an
+        // unwired one by the shape of its own refusal.
+        name: "panelverbs: bridge.ui.subscribe parses its topics fail-closed, and only AFTER the gate",
+        run: async (): Promise<void> => {
+            const granted = (): VerbFixture =>
+                fixture({ grants: grantSpy(true), declaredCapabilities: [CAPABILITY_UI_EVENTS] });
+            for (const bad of [
+                undefined,
+                {},
+                { topics: "editor.ui.focus" },
+                { topics: [7] },
+                { topics: [""] },
+                { topics: ["x".repeat(PANEL_COMMAND_FIELD_MAX_LENGTH + 1)] },
+            ]) {
+                const fx = granted();
+                const refusal = await refusalFrom(fx, PANEL_VERB_UI_SUBSCRIBE, bad);
+                assertEqual(
+                    refusal.code,
+                    PANEL_BRIDGE_REFUSALS.malformedRequest,
+                    `a malformed topics param is a REQUEST fault, not a consent question: ${JSON.stringify(bad)}`,
+                );
+                assertEqual(
+                    fx.uiSubscriptions.length,
+                    0,
+                    "…and nothing was subscribed on the way to that refusal",
+                );
+            }
+            // THE POSITIVE COUNTERPART, same fixture family: a well-formed request IS accepted, so the
+            // six refusals above are a parse decision rather than a verb that refuses everything.
+            const ok = granted();
+            assertEqual(
+                await call(ok, PANEL_VERB_UI_SUBSCRIBE, { topics: [UI_TOPIC_FOCUS] }),
+                { topics: [UI_TOPIC_FOCUS] },
+                "a well-formed request is accepted, so the refusals above are a parse decision",
+            );
+
+            // GATE BEFORE PARSE: an UN-granted package sending the SAME malformed request meets the
+            // CAPABILITY refusal, never the malformed one. If the parse ran first, an un-granted
+            // package could probe whether delivery is wired by watching which code comes back.
+            const ungranted = await refusalFrom(
+                fixture({ declaredCapabilities: [CAPABILITY_UI_EVENTS] }),
+                PANEL_VERB_UI_SUBSCRIBE,
+                { topics: "not-an-array" },
+            );
+            assertEqual(
+                ungranted.code,
+                PANEL_BRIDGE_REFUSALS.capabilityNotGranted,
+                "the gate answers first, so a refusal leaks nothing about the request's own shape",
+            );
+        },
+    },
+    {
+        // The fan-out's own refusal (an unsubscribable topic) is relayed as a REQUEST fault, because
+        // the package holds the grant — sending it to an install prompt it cannot act on would be the
+        // wrong diagnosis, and `capability_not_granted` is exactly that prompt's code.
+        name: "panelverbs: a granted package refused a TOPIC gets malformed_request, not the capability code",
+        run: async (): Promise<void> => {
+            const fx = fixture({
+                grants: grantSpy(true),
+                declaredCapabilities: [CAPABILITY_UI_EVENTS],
+                uiOutcome: { topics: [], diagnostic: '"ext.hello.private" is not subscribable' },
+            });
+            const refusal = await refusalFrom(fx, PANEL_VERB_UI_SUBSCRIBE, {
+                topics: ["ext.hello.private"],
+            });
+            assertEqual(
+                refusal.code,
+                PANEL_BRIDGE_REFUSALS.malformedRequest,
+                "the package HOLDS the grant: the fault is in what it asked for, not in its consent",
             );
             assert(
-                !allowed.message.includes("granted it"),
-                "…and it no longer complains about the grant",
+                refusal.message.includes("ext.hello.private"),
+                `the fan-out's diagnostic is relayed verbatim: ${refusal.message}`,
             );
+        },
+    },
+    {
+        name: "panelverbs: readUiTopicsParam is total and fail-closed",
+        run: () => {
+            assertEqual(readUiTopicsParam({ topics: ["a", "b"] }), ["a", "b"], "a plain list parses");
+            // An EMPTY array parses (it is well-formed); refusing it is the fan-out's call, which is
+            // where the "at least one topic" rule lives. Pinned so the two layers cannot both assume
+            // the other rejects it.
+            assertEqual(readUiTopicsParam({ topics: [] }), [], "an empty list is well-formed here");
+            for (const bad of [undefined, null, 7, "topics", [], { topics: {} }, { topics: [null] }]) {
+                assertEqual(
+                    readUiTopicsParam(bad),
+                    null,
+                    `refused: ${JSON.stringify(bad) ?? "undefined"}`,
+                );
+            }
         },
     },
     {

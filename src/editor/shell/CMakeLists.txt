@@ -55,6 +55,9 @@ add_library(context_editor_shell STATIC
     src/package_sessions.cpp  # e13c-1: per-package BASELINE daemon sessions + panel.daemon.call (04 §5 / 08)
     src/package_events.cpp    # e13c-2: the BOUNDED per-package event fan-out buffer + panel.events.poll
     src/package_store.cpp     # e13c-3: ~/.context/packages - manifest->Contribution + mount PROVENANCE (04 §3/§5 / 08)
+    src/package_grants.cpp    # e13c-4: the PERSISTED per-package grant store + the L-49 install-consent
+                              #         surface - the one producer of a non-default SandboxPolicy, and
+                              #         what the derived AttachOptions::scope is read from (08 §2-§3)
     src/editor_state_bridge.cpp  # e05d2: the editor.state.*/editor.regions.* surface (03 §1 / §6)
     src/keybindings_bridge.cpp   # e07c: the keybindings.get read/watch surface (05 §6 / 03 §6)
     src/user_config.cpp          # e06d: ~/.context/config.json - the SHELL is its single writer (C-F14)
@@ -244,6 +247,11 @@ set(_context_shell_tests
     test_package_store # e13c-3: the store scan + manifest->Contribution + the scan's INHERITANCE of
                        #         the mount provenance check. NOTE the adversarial provenance suite
                        #         itself lives next door in test_ext_scheme, not here.
+    test_package_grants    # e13c-4: the persisted grant store (incl. the RESTART round trip), the
+                       #         deny-by-default load faults, the grant<=declaration clamp AND the
+                       #         registry's independent refusal of a hand-built violation, the
+                       #         consent surface, and the DERIVED attach scope proved against the
+                       #         REAL dispatcher in BOTH directions
     test_editor_state_bridge  # e05d2: layout/panels publish+restore round-trip + region-map emission
     test_keybindings_bridge   # e07c: file read/watch/generation + keybindings.get over the router
     test_themes_bridge        # e06b: directory watch/generation + themes.get over the router

@@ -50,12 +50,15 @@ import { PaletteView } from "./palette_view.js";
 import { PanelClient } from "./panels.js";
 import { PanelHost, type LocalPanelFactory, type PanelVerbBinding } from "./panelhost.js";
 import {
-    DENY_ALL_CAPABILITY_GRANTS,
     PANEL_VERB_COMMAND_INVOKE,
     makePanelBridgeVerbs,
+    type PanelCapabilityGrants,
     type PanelDaemonCall,
     type PanelDaemonOutcome,
+    type PanelUiSubscribeOutcome,
 } from "./panelverbs.js";
+import { ShellPackageGrants } from "./packagegrants.js";
+import { PANEL_UI_DELIVER_VERB, PackageUiFanout } from "./packageui.js";
 import { WindowClient, type WindowSeed } from "./window.js";
 import { DragClient, makeDropZoneHitTest, pumpCrossWindowDrag } from "./drag.js";
 import { EditorUiBus, UI_TOPIC_THEME_CHANGED } from "./uibus.js";
@@ -363,6 +366,21 @@ async function startPanels(
         // `content.type: "local"` and THIS is the build that knows how to draw it. Nothing else about
         // PanelHost changes — an unregistered local panel is reported unavailable like any other.
         const settings = makeSettingsPanel(bridge, theme, config);
+        // M9 e13c-4 — THE REAL GRANT SOURCE, read ONCE, before any panel mounts.
+        //
+        // AWAITED HERE rather than late-bound like the registry, deliberately: a package panel's very
+        // FIRST verb must meet the operator's real answer, and a grant source that were still loading
+        // would have to answer something in the meantime — which could only be "deny", i.e. a
+        // package's first call would be refused for a grant it actually holds. `load` never rejects
+        // (packagegrants.ts): a Shell with no route yields the deny-all floor, so this cannot delay or
+        // fail a boot.
+        const packageGrants: PanelCapabilityGrants = await ShellPackageGrants.load(bridge);
+        // ...and the `editor.ui` fan-out the GRANTED half of `bridge.ui.subscribe` delivers over.
+        // LATE-BOUND through a holder for the same reason the registry is: the bus is constructed
+        // further down (it needs this window's id for the mirror origin), while the verb tables are
+        // built here. `undefined` means this window has no bus — the welcome-screen boot, where
+        // `panel.list` is unavailable — and a subscribe then refuses honestly rather than pretending.
+        let packageUi: PackageUiFanout | undefined;
         // The ONE command registry, LATE-BOUND into the panel verb tables (M9 e13b-2). It is built by
         // `startCommandLayer` further down — after `host.start()` has already created every renderer
         // and every port — so the tables close over this holder rather than over a value. A package
@@ -388,9 +406,25 @@ async function startPanels(
                     manifestCommandIds: binding.manifestCommandIds,
                     registry: () => commandRegistry,
                     whenContext,
-                    // THE deny-all grant source. e13c replaces THIS ARGUMENT with install-consent
-                    // grants; nothing else about the gate moves (panelverbs.ts § the capability gate).
-                    grants: DENY_ALL_CAPABILITY_GRANTS,
+                    // THE GRANT SOURCE — the operator's persisted install consent since M9 e13c-4.
+                    // This ONE ARGUMENT is the whole editor-core-side change the gate ever needed
+                    // (panelverbs.ts § the capability gate); `DENY_ALL_CAPABILITY_GRANTS` is still
+                    // what `ShellPackageGrants.load` falls back to on every failure path.
+                    grants: packageGrants,
+                    // THE e13c-4 `editor.ui` FAN-OUT, with THIS panel's package closed over — the
+                    // same structural property as `daemonCall` below, so `bridge.ui.subscribe` has no
+                    // argument by which one package could subscribe another's panels. Reached ONLY
+                    // after `requireCapability` has passed (panelverbs.ts § the enforcement point).
+                    uiSubscribe: (topics: readonly string[]): PanelUiSubscribeOutcome =>
+                        packageUi === undefined
+                            ? {
+                                  topics: [],
+                                  // HONEST, not silently accepted: a window with no `editor.ui` bus
+                                  // can never deliver a fact, and answering `{topics}` would leave the
+                                  // package waiting forever for events that structurally cannot come.
+                                  diagnostic: "this window has no editor.ui bus to subscribe to",
+                              }
+                            : packageUi.subscribe(binding.packageId, topics),
                     // THE PULL half of theme delivery, read from the SAME field the push replays
                     // from — so `bridge.theme.tokens` cannot answer with a theme the channel is not
                     // pushing (theme.ts § `IframeThemeChannel.last`). LATE-BOUND through the closure
@@ -450,7 +484,24 @@ async function startPanels(
                 // window, the pagehide rehome-to-window-0 ("close a window with panels ⇒ they rehome,
                 // never lost"). Both use the SAME recreate path as the seed-open above (D6). It also
                 // brings up the cross-window `editor.ui` MIRROR on a per-window-origin bus (e10d-drill2).
-                await startWindowMechanism(windowClient, dragClient, host, client, bridge);
+                await startWindowMechanism(
+                    windowClient,
+                    dragClient,
+                    host,
+                    client,
+                    bridge,
+                    // ⚠ IT SHARES THE PUSH PATH WITH e13c-2, deliberately: `deliverToPackage` is the
+                    // same method `PackageEventPump` pushes daemon batches through, so a package's two
+                    // streams arrive over ONE port with one lifetime and one failure mode. Only the
+                    // VERB differs.
+                    (bus: EditorUiBus): void => {
+                        packageUi = new PackageUiFanout(bus, {
+                            deliver: (packageId: string, event): number =>
+                                host.deliverToPackage(packageId, PANEL_UI_DELIVER_VERB, event)
+                                    .delivered,
+                        });
+                    },
+                );
                 // --- the command layer + palette (e07d) ----------------------------------------
                 // The docking root is up and persistence is live; wire the ONE command registry, the
                 // palette over it, and (only under `?ctx-smoke-palette`) drive the T2 command-driven
@@ -795,6 +846,11 @@ async function startWindowMechanism(
     host: PanelHost,
     client: PanelClient,
     bridge: ShellBridge,
+    // M9 e13c-4: called with this window's `editor.ui` bus once it exists, so `startPanels` — which
+    // built the verb tables BEFORE the bus did — can fill the fan-out holder they closed over. A
+    // CALLBACK rather than a returned value, because the bus is created inside a `try` that may never
+    // reach the end, and a fan-out attached only on the happy path is one a caller cannot reason about.
+    attachUiFanout: (bus: EditorUiBus) => void,
 ): Promise<number> {
     let windowId = 0;
     let detail = "single window";
@@ -822,6 +878,15 @@ async function startWindowMechanism(
         if (list !== null) {
             uiBus = new EditorUiBus({ origin: String(windowId) });
             uiMirror = wireUiMirror(bridge, uiBus);
+            // M9 e13c-4 — THE `editor.ui` FAN-OUT TO GRANTED PACKAGE PANELS. Filled into the holder
+            // the verb tables closed over above; until this line every `bridge.ui.subscribe` refuses
+            // with "this window has no editor.ui bus", which is the honest welcome-screen state and
+            // is also why the holder is `undefined` rather than a no-op object.
+            //
+            // ⚠ IT SHARES THE PUSH PATH WITH e13c-2, deliberately: `deliverToPackage` is the same
+            // method `PackageEventPump` pushes daemon batches through, so a package's two streams
+            // arrive over ONE port with one lifetime and one failure mode. Only the VERB differs.
+            attachUiFanout(uiBus);
             // M9 e09b-3 — THE LOUD SURFACE. The editor's ONE notification host, attached to this
             // window's bus. Every refused write the Shell publishes (an L-30 drop, a write-path
             // refusal) arrives over the mirror poll below, lands on the bus, and is rendered here as

@@ -22,6 +22,7 @@
 #include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/user_config.h"
 #include "context/editor/shell/package_sessions.h" // e13c-1: per-package BASELINE daemon sessions
+#include "context/editor/shell/package_grants.h"   // e13c-4: the persisted grants + install consent
 #include "context/editor/shell/package_store.h"    // e13c-3: ~/.context/packages — the mount producer
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
@@ -800,6 +801,85 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // --- the installed packages (M9 e13c-3) -------------------------------------------------------
+    // THE FIRST REAL PRODUCER of `CefShellOptions::ext_packages`. Scanned unconditionally, outside the
+    // CEF guard, so a CEF-free build still REPORTS what it found: the store is a real user-facing
+    // directory, and "my panel did not appear" must have an answer on every build rather than only on
+    // the one that could have shown it.
+    //
+    // Every refusal is printed. A silent skip here is the failure mode a user cannot diagnose and a
+    // reviewer cannot distinguish from an absent check (package_store.h, decision 3) — and it is why
+    // the scan returns refusals rather than logging them itself: the policy about WHERE a diagnostic
+    // goes belongs to the composition root, not to the reader.
+    //
+    // ⚠ SCANNED HERE, AHEAD OF THE PACKAGE SESSION HOST — moved up by M9 e13c-4, which is the task
+    // that gave the scan a SECOND consumer. The session host's attach scope is now derived from the
+    // grant document indexed by this scan (`PackageGrantHost` below), so the scan must exist before
+    // the host is constructed. Nothing about the scan itself changed, and the CEF options below still
+    // read the same object.
+    std::filesystem::path package_store = shell::package_store_root();
+    shell::PackageStoreScan package_scan = shell::scan_package_store(package_store);
+    for (const shell::PackageRefusal& refusal : package_scan.refusals)
+    {
+        // ONE label, and it NAMES THE PATH: three of the refusals (store absent, store unreadable,
+        // manifest missing) carry no path in their message, so without this an operator is told which
+        // package failed but never which directory — and a store-level refusal, whose `id` is empty by
+        // construction, rendered as a bare `package store: : <message>`.
+        const std::string where = refusal.id.empty()
+                                      ? refusal.path.string()
+                                      : "'" + refusal.id + "' (" + refusal.path.string() + ")";
+        std::fprintf(stderr, "context_editor: package store: %s: %s\n", where.c_str(),
+                     refusal.message.c_str());
+    }
+    for (const shell::InstalledPackage& package : package_scan.packages)
+    {
+        // "installed at", NOT "mounted from": no mount has been attempted at this point, and on a
+        // CEF-free build none ever will be. Claiming a mount here would mislead exactly the
+        // "my panel did not appear" investigation this block exists to serve.
+        std::printf("context_editor: package '%s' v%s (%zu contribution(s)) installed at %s\n",
+                    package.id.c_str(), package.version.c_str(), package.contributions.size(),
+                    package.root.string().c_str());
+    }
+    // ⚠ THE CONTRIBUTIONS ARE READ AND REPORTED, NOT REGISTERED — see package_store.h's boundary
+    // note. Appending one to the built-in roster below would red the blocking `gui-a11y-coverage`
+    // gate (which asserts roster == coverage.manifest.jsonl in BOTH directions) and would be wrong
+    // anyway: a package panel is not covered by the first-party a11y scan. e13f owns the
+    // registration; e13c-4 (below) owns the consent that must precede it.
+
+    // --- the install-consent surface + the persisted grants (M9 e13c-4, design 08 §2-§3) ----------
+    //
+    // Constructing the host LOADS the grant document and APPLIES it to the scanned contributions'
+    // `sandbox.granted_scopes`, clamped to each contribution's own manifest declaration
+    // (package_grants.h decisions 3 + 4). Before this line every contribution holds least privilege
+    // by construction (`read_package_manifest` grants nothing); after it, each holds exactly what the
+    // operator consented to and the manifest declared — the intersection, never either alone.
+    //
+    // The pending prompts are PRINTED for the same reason the store refusals above are: this build
+    // has no install verb to ask at, so the editor's own boot is where "this package is asking for
+    // more than the read-only baseline, and nobody has answered" becomes visible to a human.
+    // editor-core reads the SAME requests over `package.grants.list` and can render them properly.
+    shell::PackageGrantHost package_grants(package_scan, shell::package_grants_path());
+    for (const shell::GrantDiagnostic& diagnostic : package_grants.diagnostics())
+    {
+        // NOT on stderr for the first-run `package.grants_absent` case: an editor that has never been
+        // asked a consent question is the ordinary state, and reporting it as an error would train an
+        // operator to ignore this channel.
+        std::FILE* sink =
+            diagnostic.error_code == shell::kErrGrantsAbsent ? stdout : stderr;
+        std::fprintf(sink, "context_editor: package grants: %s\n", diagnostic.message.c_str());
+    }
+    for (const shell::PackageConsentRequest& pending :
+         shell::pending_consent_requests(package_scan, package_grants.grants()))
+    {
+        std::printf("context_editor: consent required: %s\n",
+                    shell::consent_prompt_line(pending).c_str());
+    }
+    if (!package_grants.install(bridge))
+    {
+        std::fprintf(stderr, "context_editor: could not install the package consent surface\n");
+        return 1;
+    }
+
     // --- the per-package BASELINE daemon sessions (e13c-1, design 04 §5 / 08 §2) -------------------
     //
     // The route a package panel's `bridge.call` lands on. Every session it opens holds the
@@ -821,9 +901,20 @@ int main(int argc, char** argv)
     // the same bundle, and an uninstalled method is a deny-by-default `unknown_method` on a channel
     // whose smokes forbid refusals. With no project the factory simply fails and the call is refused
     // `panel.daemon.unavailable`, which is the honest state of a Shell with no daemon.
+    //
+    // ⚠ THE SCOPE IS NO LONGER A CONSTANT (M9 e13c-4). The second argument is the grant-derived
+    // resolver control 1 now names: it reads the OPERATOR's persisted consent for that package,
+    // already clamped to the package's manifest, and turns it into the `AttachOptions::scope` spec.
+    // A package nobody consented to resolves to `kPackageSessionScope` — the same baseline e13c-1
+    // hardcoded — so the deny-all behaviour is the floor rather than a special case.
     shell::PackageSessionHost package_sessions(
         [project = options.project](std::string& error) -> std::unique_ptr<client::Client>
-        { return client::Client::connect_to_project(project, 5000, error); });
+        { return client::Client::connect_to_project(project, 5000, error); },
+        [&package_grants](const std::string& package_id) -> std::string
+        {
+            return shell::attach_scope_spec(
+                shell::granted_scope_set(package_grants.grants().granted_capabilities(package_id)));
+        });
     if (!package_sessions.install(bridge))
     {
         std::fprintf(stderr, "context_editor: could not install the package daemon-session surface\n");
@@ -954,45 +1045,6 @@ int main(int argc, char** argv)
                      "echo it back\n");
         return 1;
     }
-
-    // --- the installed packages (M9 e13c-3) -------------------------------------------------------
-    // THE FIRST REAL PRODUCER of `CefShellOptions::ext_packages`. Scanned unconditionally, outside the
-    // CEF guard, so a CEF-free build still REPORTS what it found: the store is a real user-facing
-    // directory, and "my panel did not appear" must have an answer on every build rather than only on
-    // the one that could have shown it.
-    //
-    // Every refusal is printed. A silent skip here is the failure mode a user cannot diagnose and a
-    // reviewer cannot distinguish from an absent check (package_store.h, decision 3) — and it is why
-    // the scan returns refusals rather than logging them itself: the policy about WHERE a diagnostic
-    // goes belongs to the composition root, not to the reader.
-    const std::filesystem::path package_store = shell::package_store_root();
-    const shell::PackageStoreScan package_scan = shell::scan_package_store(package_store);
-    for (const shell::PackageRefusal& refusal : package_scan.refusals)
-    {
-        // ONE label, and it NAMES THE PATH: three of the refusals (store absent, store unreadable,
-        // manifest missing) carry no path in their message, so without this an operator is told which
-        // package failed but never which directory — and a store-level refusal, whose `id` is empty by
-        // construction, rendered as a bare `package store: : <message>`.
-        const std::string where = refusal.id.empty()
-                                      ? refusal.path.string()
-                                      : "'" + refusal.id + "' (" + refusal.path.string() + ")";
-        std::fprintf(stderr, "context_editor: package store: %s: %s\n", where.c_str(),
-                     refusal.message.c_str());
-    }
-    for (const shell::InstalledPackage& package : package_scan.packages)
-    {
-        // "installed at", NOT "mounted from": no mount has been attempted at this point, and on a
-        // CEF-free build none ever will be. Claiming a mount here would mislead exactly the
-        // "my panel did not appear" investigation this block exists to serve.
-        std::printf("context_editor: package '%s' v%s (%zu contribution(s)) installed at %s\n",
-                    package.id.c_str(), package.version.c_str(), package.contributions.size(),
-                    package.root.string().c_str());
-    }
-    // ⚠ THE CONTRIBUTIONS ARE READ AND REPORTED, NOT REGISTERED — see package_store.h's boundary
-    // note. Appending one to the built-in roster below would red the blocking `gui-a11y-coverage`
-    // gate (which asserts roster == coverage.manifest.jsonl in BOTH directions) and would be wrong
-    // anyway: a package panel is not covered by the first-party a11y scan, and nothing has asked the
-    // user to consent to it yet. e13c-4 owns the consent surface and the registration that follows it.
 
     // --- the browser ------------------------------------------------------------------------------
     std::unique_ptr<shell::IBrowserHost> browser;

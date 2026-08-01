@@ -772,6 +772,12 @@ export const panelPortTests: readonly TestCase[] = [
                 registry: () => registry,
                 whenContext: () => ({ panelFocus: "", textInputFocus: false }),
                 grants: DENY_ALL_CAPABILITY_GRANTS,
+                // M9 e13c-4: the `editor.ui` fan-out seam. UNREACHABLE from these cases by
+                // construction (the deny-all grants above refuse `bridge.ui.subscribe` before the
+                // handler ever reaches it), so it is a refusing stand-in rather than a working one —
+                // a fan-out that answered `{topics}` here would make a gate regression LOOK like a
+                // pass on the one tier that drives a real port.
+                uiSubscribe: () => ({ topics: [], diagnostic: "no editor.ui bus in this harness" }),
                 themeTokens: () => undefined,
                 state: { read: (): unknown => null, write: (): void => {} },
                 // e13c-1: no daemon in this tier, so the fan-in refuses honestly. The port-level
@@ -903,6 +909,12 @@ export const panelPortTests: readonly TestCase[] = [
                 registry: () => undefined,
                 whenContext: () => ({ panelFocus: "", textInputFocus: false }),
                 grants: DENY_ALL_CAPABILITY_GRANTS,
+                // M9 e13c-4: the `editor.ui` fan-out seam. UNREACHABLE from these cases by
+                // construction (the deny-all grants above refuse `bridge.ui.subscribe` before the
+                // handler ever reaches it), so it is a refusing stand-in rather than a working one —
+                // a fan-out that answered `{topics}` here would make a gate regression LOOK like a
+                // pass on the one tier that drives a real port.
+                uiSubscribe: () => ({ topics: [], diagnostic: "no editor.ui bus in this harness" }),
                 themeTokens: () => theme.payload,
                 state: {
                     read: (): unknown => store.value,
