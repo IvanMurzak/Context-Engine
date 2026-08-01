@@ -890,4 +890,72 @@ export const extPanelTests: readonly TestCase[] = [
             mounted.container.remove();
         },
     },
+    {
+        // M9 e13c-2 — THE FAN-OUT ADDRESSING, over a REAL PanelHost and REAL Dockview.
+        //
+        // ⚠ THE DEDUPLICATION IS THE POINT, AND IT IS THE HALF A LIST COULD NOT PROVE. The Shell
+        // buffers per PACKAGE and `panel.events.poll` DRAINS, so polling once per PANEL would hand a
+        // package's first panel every event and its second panel NOTHING — a lost-fact bug invisible
+        // until a user opens a package's second panel. The roster therefore carries TWO panels of ONE
+        // package plus one of another, which is the only shape in which the two answers differ.
+        name: "iframe panel: packagesWithPorts DEDUPES by package (M9 e13c-2 fan-out addressing)",
+        run: async () => {
+            const mounted = await mountHost([
+                manifestJson({ id: "pkg.hello", entry: "context-ext://pkg.hello/index.html" }),
+                manifestJson({ id: "pkg.hello.second", entry: "context-ext://pkg.hello/other.html" }),
+                manifestJson({ id: "pkg.other", entry: "context-ext://pkg.other/index.html" }),
+                // A `uitree` panel is NOT a port panel and must never be polled for: it has no port,
+                // and a package id derived from one would name nothing the Shell buffers.
+                uitreeManifestJson("builtin.problems"),
+            ]);
+            try {
+                const packages = [...mounted.host.packagesWithPorts()].sort();
+                assertEqual(
+                    packages,
+                    ["pkg.hello", "pkg.other"],
+                    "TWO packages, not three panels — the two panels of pkg.hello collapse to one " +
+                        "poll, and the uitree panel contributes nothing",
+                );
+                // THE POSITIVE ARTIFACT for the collapse: BOTH of the package's panels are addressed
+                // by the ONE delivery. Without this the dedup assertion above could hold while the
+                // second panel was silently unreachable — which is the very bug it exists to prevent.
+                const frames = mounted.container.querySelectorAll(
+                    `.${IFRAME_PANEL_CLASS} > iframe`,
+                );
+                assertEqual(frames.length, 3, "all three package frames are really mounted");
+                // ⚠ THE ADDRESSING IS ASSERTED ON THE PANEL IDS, NOT ON THE DELIVERY COUNT — MEASURED.
+                // No document has handshaken in this tier (nothing can load `context-ext://` here), so
+                // every port is ungranted and `deliverToPackage` answers 0 for the RIGHT package and
+                // for the WRONG one alike: a plant that deleted the `packageId` comparison outright
+                // scored GREEN against a count-only assertion. `panelsForPackage` is the positive
+                // artifact that discriminates, and `deliverToPackage` is built over it.
+                assertEqual(
+                    [...mounted.host.panelsForPackage("pkg.hello")].sort(),
+                    ["pkg.hello", "pkg.hello.second"],
+                    "BOTH of the package's panels are addressed by its ONE poll — the half the " +
+                        "deduplication above would otherwise silently starve",
+                );
+                assertEqual(
+                    mounted.host.panelsForPackage("pkg.other"),
+                    ["pkg.other"],
+                    "…and the other package's panel is NOT one of them",
+                );
+                assertEqual(
+                    mounted.host.panelsForPackage("pkg.absent"),
+                    [],
+                    "a package with no mounted panel is addressed by nothing",
+                );
+                // The count is still asserted, for what it CAN say: the delivery path runs to
+                // completion without throwing out of a `setInterval` tick in a renderer with no
+                // console, and reports the honest 0 for ports that hold no grant yet.
+                assertEqual(
+                    mounted.host.deliverToPackage("pkg.hello", "events.deliver", {}),
+                    0,
+                    "a package whose frames hold no granted port yet takes nothing, without throwing",
+                );
+            } finally {
+                mounted.dispose();
+            }
+        },
+    },
 ];

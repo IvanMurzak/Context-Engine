@@ -255,6 +255,8 @@ export interface PanelPortStats {
     readonly repliesSent: number;
     /** Host-issued requests still awaiting a reply. */
     readonly pending: number;
+    /** One-way FACT envelopes posted down the port (M9 e13c-2). */
+    readonly eventsDelivered: number;
 }
 
 interface PendingRequest {
@@ -287,6 +289,7 @@ export class PanelPortBridge {
     #refusedHandshakes = 0;
     #refusedRequests = 0;
     #repliesSent = 0;
+    #eventsDelivered = 0;
     #nextRequestId = 0;
     #handshakeTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -351,6 +354,7 @@ export class PanelPortBridge {
             refusedRequests: this.#refusedRequests,
             repliesSent: this.#repliesSent,
             pending: this.#pending.size,
+            eventsDelivered: this.#eventsDelivered,
         };
     }
 
@@ -437,6 +441,45 @@ export class PanelPortBridge {
                 resolve(refusal(PANEL_BRIDGE_REFUSALS.portRevoked, verb, "the panel port is closed"));
             }
         });
+    }
+
+    /**
+     * Push one ONE-WAY FACT down the port (M9 e13c-2). `true` when it was posted.
+     *
+     * ⚠ A THIRD ENVELOPE `kind`, AND THE REASON IT IS NOT A `request`. `request` is the CORRELATED
+     * direction: it mints an id, occupies one of `PANEL_BRIDGE_MAX_PENDING` slots, and arms a
+     * `PANEL_BRIDGE_REQUEST_TIMEOUT_MS` timer until the panel answers. That is right for
+     * `commands.invoke` — the host wants to know what happened — and WRONG for an event stream, where
+     * the host wants to know nothing: a panel that simply never replied would exhaust the pending
+     * bound after 64 events and then be unable to receive any, and the backpressure would be expressed
+     * as timeouts on facts nobody was waiting for. So a delivery correlates nothing, pins nothing, and
+     * cannot fail late. It mirrors the `editor.ui` bus's own rule — FACTS ONLY, NEVER COMMANDS (05 §5)
+     * — and the daemon stream this fact came from, which also pushes without asking.
+     *
+     * ADDITIVE AT `PANEL_BRIDGE_VERSION` 1: a package built against e13b-1 ignores an envelope whose
+     * `kind` it does not recognise, exactly as `#handleMessage` ignores one from the other side.
+     *
+     * NEVER THROWS: a detached / closed port throws on post, and a fact is not worth taking a renderer
+     * down for. `false` says the panel did not get it, which is all a caller can act on.
+     */
+    deliver(verb: string, params?: unknown): boolean {
+        const port = this.#port;
+        if (port === undefined) {
+            return false;
+        }
+        try {
+            port.postMessage({
+                ctx: PANEL_BRIDGE_TAG,
+                v: PANEL_BRIDGE_VERSION,
+                kind: "event",
+                verb,
+                params,
+            });
+        } catch {
+            return false;
+        }
+        this.#eventsDelivered += 1;
+        return true;
     }
 
     /**

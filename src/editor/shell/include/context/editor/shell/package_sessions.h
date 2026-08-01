@@ -78,8 +78,10 @@
 
 #include "context/editor/client/client.h"
 #include "context/editor/shell/ipc_bridge.h"
+#include "context/editor/shell/package_events.h" // e13c-2: the BOUNDED fan-out buffer
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -143,12 +145,16 @@ inline constexpr std::size_t kMaxPackageSessions = 4;
 //   * `query`              — the ONE authored-data read (R-CLI-012, docs/query-language.md).
 //   * `editor.scene-tree`  — the e05d3 composed scene projection: what a hierarchy panel renders.
 //   * `editor.inspect`     — the e05d3 composed entity projection: what a property panel renders.
+//   * `subscribe` /        — the R-CLI-015 subscription protocol (M9 e13c-2). Baseline-scoped, so
+//     `unsubscribe` /        the dispatcher would always have accepted them; e13c-1 held them out
+//     `ack`                  anyway because "a subscription with no bounded buffer is an unbounded
+//                            allocation driven by untrusted code" — and they are here NOW, and only
+//                            now, because `package_events.h` supplies that bound. The three travel
+//                            together on purpose: `subscribe` with no `ack` pins the daemon's ring
+//                            retention at the slowest cursor (client/subscription.h § 2), and
+//                            `subscribe` with no `unsubscribe` leaks a subId per re-subscribe.
 //
 // WHAT IS DELIBERATELY ABSENT, and why the absences are load-bearing rather than an oversight:
-//   * `subscribe` / `unsubscribe` / `ack` are baseline-scoped and would therefore be ACCEPTED by the
-//     dispatcher — they are held out because the fan-OUT buffer that makes them safe to expose (a
-//     bound, a drop policy, an ack cursor) is e13c-2's, and a subscription with no bounded buffer is
-//     an unbounded allocation driven by untrusted code.
 //   * `set` / `edit` / `build` / `package.add` are not here AND would be refused by the dispatcher
 //     anyway. Both controls, independently — that redundancy is the S4 point: the allowlist must hold
 //     even for a method the scope table would have let through.
@@ -184,8 +190,9 @@ public:
     PackageSessionHost(const PackageSessionHost&) = delete;
     PackageSessionHost& operator=(const PackageSessionHost&) = delete;
 
-    // Bind `panel.daemon.call`. False when the binding was refused (a name collision, or the name
-    // landing on `forbidden_bridge_methods()`), which the caller must treat as a wiring bug.
+    // Bind `panel.daemon.call` AND `panel.events.poll`. False when either binding was refused (a name
+    // collision, or the name landing on `forbidden_bridge_methods()`), which the caller must treat as
+    // a wiring bug.
     [[nodiscard]] bool install(BridgeRouter& router);
 
     // Forward one call onto `package_id`'s baseline session, opening it on first use. The whole
@@ -193,8 +200,32 @@ public:
     [[nodiscard]] BridgeResult forward(const std::string& package_id, const std::string& method,
                                        const contract::Json& params);
 
-    // Drop every session (a daemon that went away, or shutdown). Idempotent.
+    // Drop every session AND everything buffered for it (a daemon that went away, or shutdown).
+    // Idempotent.
+    //
+    // ⚠ THE BUFFER IS CLEARED WITH THE SESSIONS, DELIBERATELY. The events in it were minted by a
+    // subscription on a connection that no longer exists, and their seqs belong to an incarnation
+    // that may not survive (client/subscription.h § 5). Delivering them after a reset would hand a
+    // panel a cursor into a dead lifetime — precisely the corruption `Client::reconnect` clears
+    // `pending_events_` to avoid.
     void reset();
+
+    // Drain every live package session's inbound event frames into the BOUNDED buffer (e13c-2).
+    //
+    // ⚠ THIS MUST RUN ON THE OWNER LOOP, NOT ONLY WHEN editor-core POLLS. Between two polls the frames
+    // otherwise accumulate in `Client::pending_events_` — a plain `std::deque` with NO bound — so a
+    // buffer that filled only on demand would leave the real accumulation point unbounded and the
+    // whole control cosmetic. Pumping every frame is what makes `kMaxBufferedEventsPerPackage` the
+    // actual ceiling.
+    //
+    // NON-BLOCKING (a 0 ms poll per session) and bounded at `kMaxDrainedFramesPerPump` frames per
+    // session per call, so one chatty topic cannot hold the frame. Returns how many events it
+    // buffered — 0 on a quiet pump, which is the common case.
+    std::size_t pump();
+
+    // Read + CLEAR `package_id`'s buffered events, with the LOUD `dropped` / `gapped` pair. The whole
+    // decision path, exposed so the suite drives it without a router in the way.
+    [[nodiscard]] PackageEventDrain poll_events(const std::string& package_id);
 
     // --- what it did ------------------------------------------------------------------------------
     /** Live package sessions. THE lazy-attach observable: 0 until a package actually calls. */
@@ -205,6 +236,15 @@ public:
     [[nodiscard]] std::size_t refused_methods() const { return refused_methods_; }
     /** Calls refused by the sub-cap — control 4(b). */
     [[nodiscard]] std::size_t refused_capacity() const { return refused_capacity_; }
+    /** Daemon events buffered by `pump()` (e13c-2). */
+    [[nodiscard]] std::uint64_t events_buffered() const { return events_buffered_; }
+    /**
+     * Events DISCARDED because a package fell behind its bound (e13c-2). NON-ZERO IS A PANEL FALLING
+     * BEHIND, not a metric — and it is the Shell-side half of "a drop is observable, never silent".
+     */
+    [[nodiscard]] std::uint64_t events_dropped() const { return events_.dropped_total(); }
+    /** The live fan-out buffer, for assertions + the `panel.events.poll` handler. */
+    [[nodiscard]] const PackageEventBuffer& events() const noexcept { return events_; }
     /** Is `package_id` currently holding a session? */
     [[nodiscard]] bool has_session(const std::string& package_id) const;
 
@@ -223,9 +263,13 @@ private:
     ClientFactory factory_;
     std::size_t max_sessions_;
     std::vector<Session> sessions_;
+    // The e13c-2 bound. OWNED here rather than beside this class because its lifetime is exactly the
+    // sessions' — an event only exists while the connection that delivered it does (see reset()).
+    PackageEventBuffer events_;
     std::size_t calls_forwarded_ = 0;
     std::size_t refused_methods_ = 0;
     std::size_t refused_capacity_ = 0;
+    std::uint64_t events_buffered_ = 0;
 };
 
 } // namespace context::editor::shell

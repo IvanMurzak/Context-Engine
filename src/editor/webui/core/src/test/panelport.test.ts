@@ -48,6 +48,7 @@ import { CommandRegistry } from "../commands.js";
 import {
     DENY_ALL_CAPABILITY_GRANTS,
     PANEL_VERB_COMMANDS_LIST,
+    PANEL_VERB_EVENTS_SUBSCRIBE,
     PANEL_VERB_STATE_GET,
     PANEL_VERB_STATE_SET,
     PANEL_VERB_THEME_TOKENS,
@@ -336,15 +337,20 @@ async function waitForReply(harness: PanelHarness, id: string): Promise<Record<s
 }
 
 /**
- * The verbs STILL parked, in e13c. EVERY one of them must get the SAME refusal, which is what "so
+ * Verbs this build grants NOTHING for. EVERY one of them must get the SAME refusal, which is what "so
  * they can fill verbs without renegotiating the shape" means — and naming them explicitly is what
  * makes the promise checkable rather than rhetorical.
  *
- * ⚠ SHORTER AGAIN SINCE M9 e13c-1. `bridge.commands.register` / `.unregister` and
- * `bridge.ui.subscribe` left at e13b-2; `bridge.theme.tokens` / `bridge.state.get` / `bridge.state.set`
- * left at e13d; and `bridge.call` leaves HERE, because e13c-1 FILLED it (panelverbs.ts
- * `PANEL_VERB_CALL`). Each is no longer parked, and keeping one would assert something false about the
- * shipping build. What remains is e13c-2's `bridge.events.subscribe` alone.
+ * ⚠ RENAMED FROM `PARKED_VERBS` IN M9 e13c-2, BECAUSE THE PARKED SET IS NOW EMPTY. `bridge.call` left
+ * at e13c-1; `bridge.events.subscribe` — the last one — leaves HERE, because e13c-2 FILLED it
+ * (panelverbs.ts `PANEL_VERB_EVENTS_SUBSCRIBE`), which completes design 04 §5's whole panel bridge
+ * API. **An empty list would have made this case VACUOUS** — a loop over nothing, and two `length`
+ * assertions comparing 0 to 0 — so the constant was re-pointed at verbs that are genuinely outside the
+ * table rather than deleted, and the case asserts it is non-empty before looping.
+ *
+ * The three chosen are not filler. `commands.invoke` is the HOST → PANEL verb (panelverbs.ts § two
+ * directions): a panel sending it UP must be refused, or the two directions would share one namespace.
+ * The other two are design-plausible siblings this build does not implement.
  *
  * ⚠ AND THIS LIST CANNOT CATCH ITS OWN STALENESS — REMOVE AN ENTRY THE MOMENT ITS VERB IS FILLED.
  * The list is a claim about the PRODUCTION table, but its only consumer builds `createHarness()` with
@@ -354,7 +360,11 @@ async function waitForReply(harness: PanelHarness, id: string): Promise<Record<s
  * filled `bridge.call` and this case did not budge. The sibling case `the PRODUCTION verb table…`
  * below is the one that drives the real table; this case proves only the transport's deny-all.
  */
-const PARKED_VERBS: readonly string[] = ["bridge.events.subscribe"];
+const UNGRANTED_VERBS: readonly string[] = [
+    "commands.invoke",
+    "bridge.ui.unsubscribe",
+    "bridge.fs.read",
+];
 
 // ------------------------------------------------------------------------------------------ cases
 
@@ -634,12 +644,16 @@ export const panelPortTests: readonly TestCase[] = [
         },
     },
     {
-        name: "panelport: EVERY parked verb gets the identical, stable refusal (the deny-all table)",
+        name: "panelport: EVERY ungranted verb gets the identical, stable refusal (the deny-all table)",
         run: async (): Promise<void> => {
+            // THE ANTI-VACUITY GUARD (M9 e13c-2). This case is a LOOP over a constant, so an empty
+            // constant turns every assertion below into a no-op that still reports PASS — which is
+            // exactly what emptying the list would have done when e13c-2 filled the last parked verb.
+            assert(UNGRANTED_VERBS.length > 0, "the ungranted-verb list must never be empty");
             const harness = createHarness();
             try {
                 await waitForGrant(harness);
-                for (const [index, verb] of PARKED_VERBS.entries()) {
+                for (const [index, verb] of UNGRANTED_VERBS.entries()) {
                     const id = `parked-${String(index)}`;
                     harness.command({ cmd: "send", index: 0, envelope: requestEnvelope(id, verb) });
                     const reply = await waitForReply(harness, id);
@@ -665,12 +679,12 @@ export const panelPortTests: readonly TestCase[] = [
                 }
                 assertEqual(
                     harness.bridge.stats.refusedRequests,
-                    PARKED_VERBS.length,
+                    UNGRANTED_VERBS.length,
                     "each one counted exactly once",
                 );
                 assertEqual(
                     harness.bridge.stats.repliesSent,
-                    PARKED_VERBS.length,
+                    UNGRANTED_VERBS.length,
                     "and each was answered — a refusal a panel never receives is a hang, not a refusal",
                 );
             } finally {
@@ -799,25 +813,55 @@ export const panelPortTests: readonly TestCase[] = [
                     "…as a CAPABILITY refusal, not the deny-all — the ui_events grant is the gate",
                 );
 
-                // 3. A STILL-PARKED verb keeps the e13b-1 answer, from the same table.
+                // 3. A verb OUTSIDE the table keeps the e13b-1 deny-all, from the same table.
                 //
-                // ⚠ THE SUBJECT MOVED IN M9 e13c-1, and the move IS the point of keeping this step.
-                // It named `bridge.call`, which e13c-1 has now FILLED — so leaving it would have
-                // asserted the opposite of the truth. `bridge.events.subscribe` is the verb genuinely
-                // still parked (e13c-2's: it needs a BOUNDED fan-out buffer with an ack cursor, and a
-                // subscription with no bound is an unbounded allocation driven by untrusted code).
-                // Re-point this at the next parked verb whenever one is filled; the property under
-                // test — that filling SOME entries did not open the whole table — is what must survive.
+                // ⚠ THE SUBJECT MOVED TWICE, AND THAT IS THE POINT OF KEEPING THIS STEP. It named
+                // `bridge.call` until e13c-1 filled it, then `bridge.events.subscribe` until e13c-2
+                // filled THAT — at which point design 04 §5's panel bridge API is complete and no
+                // designed verb is parked any more. Leaving either would have asserted the opposite of
+                // the truth. `commands.invoke` is the durable subject: it is the HOST → PANEL verb
+                // (panelverbs.ts § two directions), so a panel sending it UP must always be refused,
+                // whatever else gets filled. The property under test — that filling entries did not
+                // open the whole table — is what must survive.
                 harness.command({
                     cmd: "send",
                     index: 0,
-                    envelope: requestEnvelope("parked", "bridge.events.subscribe"),
+                    envelope: requestEnvelope("parked", "commands.invoke"),
                 });
                 const parked = await waitForReply(harness, "parked");
                 assertEqual(
                     (parked["error"] as Record<string, unknown>)["code"],
                     PANEL_BRIDGE_REFUSALS.verbNotGranted,
-                    "e13c-2's verb is still refused by lookup miss — filling a table did not open it",
+                    "the host->panel verb is refused by lookup miss — filling a table did not open it",
+                );
+                assertEqual(
+                    (parked["error"] as Record<string, unknown>)["message"],
+                    "this verb is not granted to package panels in this build",
+                    "…with the TRANSPORT's own deny-all wording, i.e. no handler ran at all",
+                );
+
+                // 4. M9 e13c-2 — `bridge.events.subscribe` IS in the table now, and the discriminator
+                // is the MESSAGE rather than the code.
+                //
+                // ⚠ WHY NOT THE CODE. This tier has no daemon, so the fan-in answers
+                // `panel.daemon.unavailable`, which `daemonRefusalCode` maps onto `verb_not_granted` —
+                // BYTE-IDENTICAL to a lookup miss. Asserting the code alone would therefore pass just
+                // as well with the verb absent, which is the exact vacuity this step exists to avoid.
+                // The originating code travels VERBATIM in the message (`daemonRefusalMessage`), and a
+                // lookup miss can never produce it — so the message is the only field that can tell
+                // "the verb reached the daemon fan-in" from "the verb does not exist".
+                harness.command({
+                    cmd: "send",
+                    index: 0,
+                    envelope: requestEnvelope("events", PANEL_VERB_EVENTS_SUBSCRIBE, {
+                        params: { topics: ["diagnostics"] },
+                    }),
+                });
+                const events = await waitForReply(harness, "events");
+                assertEqual(
+                    (events["error"] as Record<string, unknown>)["message"],
+                    "no daemon (panel.daemon.unavailable)",
+                    "bridge.events.subscribe reached the daemon fan-in and relayed its code verbatim",
                 );
             } finally {
                 harness.dispose();

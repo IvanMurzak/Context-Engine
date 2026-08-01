@@ -60,6 +60,11 @@ import { WindowClient, type WindowSeed } from "./window.js";
 import { DragClient, makeDropZoneHitTest, pumpCrossWindowDrag } from "./drag.js";
 import { EditorUiBus, UI_TOPIC_THEME_CHANGED } from "./uibus.js";
 import { wireUiMirror, type UiMirrorWiring } from "./uimirror.js";
+import {
+    PANEL_EVENTS_DELIVER_VERB,
+    PackageEventPump,
+    type PackageEventBatch,
+} from "./packageevents.js";
 import { createNotificationHost, type NotificationHost } from "./notifications.js";
 import {
     SETTINGS_PANEL_ID,
@@ -842,6 +847,16 @@ async function startWindowMechanism(
                 notifications = createNotificationHost(uiBus, { mount: document.body });
             }
         }
+        // M9 e13c-2 — THE DAEMON EVENT FAN-OUT. Drains each mounted package's BOUNDED Shell-side
+        // buffer and pushes the batch into that package's frames over the e13b-1 ports. Built here
+        // (rather than inside the tick) so its running totals survive across ticks and can be read by
+        // a smoke; the host is asked for its packages EVERY tick, so a panel opened later is picked up
+        // with no re-wiring.
+        const packageEvents = new PackageEventPump(bridge, {
+            packages: (): readonly string[] => host.packagesWithPorts(),
+            deliver: (packageId: string, batch: PackageEventBatch): number =>
+                host.deliverToPackage(packageId, PANEL_EVENTS_DELIVER_VERB, batch),
+        });
         const uiMirrorSmoke =
             typeof location !== "undefined" && location.search.includes(UI_MIRROR_SMOKE_FLAG);
         // The runtime poll: cheap, and started ONLY when the Shell actually serves the surface. It
@@ -866,6 +881,11 @@ async function startWindowMechanism(
                     }
                 });
                 void pumpCrossWindowDrag(dragClient, dropZoneHitTest);
+                // e13c-2: drain each mounted package's daemon-event buffer and push it into its
+                // frames. COSTS NOTHING when no package panel is mounted — the pump returns before
+                // it calls the Shell at all, so the shipping editor's tick is unchanged until a
+                // third-party panel is actually open.
+                void packageEvents.poll();
                 // Under the mirror-smoke flag, WINDOW 0 (the publisher) re-publishes on every tick so
                 // the broadcast reaches the second window once it is up and polling; every window then
                 // drains + applies + reports. Inert without the flag — the shipping editor publishes

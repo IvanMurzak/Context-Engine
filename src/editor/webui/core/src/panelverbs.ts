@@ -18,10 +18,12 @@
 //     session (M9 e13c-1). See the fan-in note below for the two things that makes true and the one
 //     thing it deliberately does not.
 //
-// WHAT IS DELIBERATELY ABSENT. `bridge.events.subscribe` is e13c-2's: it needs a BOUNDED fan-out
-// buffer with an ack cursor, and a subscription with no bound is an unbounded allocation driven by
-// untrusted code. It is still missing from this table, so it still gets the e13b-1 deny-all answer —
-// the property `panelport.test.ts` pins for the verbs that remain parked.
+//   * `bridge.events.subscribe` / `.unsubscribe` / `.ack` — DAEMON facts, forwarded onto the same
+//     baseline session as `bridge.call` (M9 e13c-2). They arrived only once the Shell had a BOUNDED
+//     fan-out buffer with an ack cursor (`package_events.h`), because a subscription with no bound is
+//     an unbounded allocation driven by untrusted code. The events themselves do NOT come back through
+//     this table — they are pushed one-way down the port by `PackageEventPump` (packageevents.ts); see
+//     `PANEL_VERB_EVENTS_SUBSCRIBE` for why a returning verb could not have been bounded.
 //
 // ⚠ THE `bridge.call` FAN-IN (M9 e13c-1, design 04 §5 / 08 §2) — WHERE THE ENFORCEMENT IS, AND WHERE
 // IT IS NOT. Three facts, in the order they decide things:
@@ -154,6 +156,30 @@ export const PANEL_VERB_STATE_SET = "bridge.state.set";
  * is the SHELL's allowlist. See the file header's fan-in note.
  */
 export const PANEL_VERB_CALL = "bridge.call";
+
+/**
+ * Open a subscription to DAEMON facts on this package's own baseline session (04 §5
+ * `bridge.events.subscribe`) — M9 e13c-2. Params `{topics?, pathScope?, sinceSeq?}`; answers the
+ * daemon's own `{subId, snapshot, …}`.
+ *
+ * ⚠ THE DELIVERY IS NOT HERE, AND THAT IS THE SHAPE OF THE WHOLE MECHANISM. Subscribing is a REQUEST;
+ * the events themselves arrive later, one-way, as `events.deliver` envelopes pushed down this panel's
+ * port by `PackageEventPump` (packageevents.ts) out of the Shell's BOUNDED buffer
+ * (`package_events.h`). A verb that RETURNED events would have to hold them somewhere unbounded on
+ * this side, which is the exact allocation the Shell-side bound exists to prevent.
+ */
+export const PANEL_VERB_EVENTS_SUBSCRIBE = "bridge.events.subscribe";
+/** Close one of THIS package's subscriptions (`{subId}`) — M9 e13c-2. */
+export const PANEL_VERB_EVENTS_UNSUBSCRIBE = "bridge.events.unsubscribe";
+/**
+ * Advance a subscription's retention cursor (`{subId, seq}`) — M9 e13c-2.
+ *
+ * ⚠ NOT OPTIONAL BOOKKEEPING. The daemon's ring retention is defined relative to the SLOWEST acked
+ * cursor across every subscription (client/subscription.h § 2), so a package that subscribes and never
+ * acks silently pins the DAEMON's memory — a bound this editor's own buffer cannot supply, which is
+ * precisely why `ack` is on the Shell allowlist alongside `subscribe` rather than after it.
+ */
+export const PANEL_VERB_EVENTS_ACK = "bridge.events.ack";
 
 /**
  * The HOST -> PANEL verb: "run this command of yours".
@@ -734,6 +760,27 @@ export function makePanelBridgeVerbs(context: PanelVerbContext): PanelVerbTable 
         registered.clear();
     };
 
+    /**
+     * Forward ONE daemon method on this panel's package session and turn a refusal into the
+     * panel-facing one (M9 e13c-1's conversion, shared by e13c-2's three event verbs).
+     *
+     * Written once because the three `bridge.events.*` verbs and `bridge.call` must answer a refusal
+     * IDENTICALLY: `scope.denied` has to reach a package as `capability_not_granted` with its
+     * originating code intact whichever verb provoked it, and four hand-written copies of that mapping
+     * would be four chances for one of them to swallow the code the whole e13 DoD line rests on.
+     */
+    const forwardDaemon = async (method: string, params: unknown): Promise<unknown> => {
+        const outcome = await context.daemonCall(method, params);
+        if (!outcome.ok) {
+            const code = outcome.code ?? "";
+            throw new PanelVerbRefusal(
+                daemonRefusalCode(code),
+                daemonRefusalMessage(code, outcome.message ?? ""),
+            );
+        }
+        return outcome.result;
+    };
+
     const verbs = new Map<string, PanelVerbHandler>([
         [
             PANEL_VERB_COMMANDS_LIST,
@@ -928,19 +975,37 @@ export function makePanelBridgeVerbs(context: PanelVerbContext): PanelVerbTable 
                 // FORWARDED VERBATIM. The panel-callable set is the Shell's allowlist (fan-in note
                 // 2) — filtering here as well would be a second copy to drift, and a drift between
                 // the two reads as a grant.
-                const outcome = await context.daemonCall(method, readDaemonParams(params));
-                if (!outcome.ok) {
-                    const code = outcome.code ?? "";
-                    throw new PanelVerbRefusal(
-                        daemonRefusalCode(code),
-                        daemonRefusalMessage(code, outcome.message ?? ""),
-                    );
-                }
+                //
                 // RETURNED WHOLE and UNWRAPPED, like `bridge.theme.tokens`: the daemon's `result` is
                 // the contract's own R-CLI-008 envelope, and re-wrapping or filtering it here would
                 // be a second projection of a surface the contract registry already owns.
-                return outcome.result;
+                return await forwardDaemon(method, readDaemonParams(params));
             },
+        ],
+        // --- the daemon EVENT subscription (M9 e13c-2, design 04 §5 / 05 §1) ----------------------
+        //
+        // ⚠ EACH IS A NAMED VERB RATHER THAN "just use `bridge.call`". `bridge.call("subscribe", …)`
+        // reaches the same allowlist entry and is not being closed off — but design 04 §5 names
+        // `bridge.events.subscribe(topics)` as the panel API, and a package should not have to know
+        // that the editor's event surface happens to be spelled with the daemon's own method names.
+        // The METHOD STRING each maps to is the daemon's, so the Shell's allowlist (the one control)
+        // still sees exactly the same three names and no new surface was opened.
+        //
+        // ⚠ THE REQUEST PARAMS TRAVEL VERBATIM, for `readDaemonParams`'s own stated reason: the shapes
+        // (`{topics, pathScope, sinceSeq}`, `{subId}`, `{subId, seq}`) belong to the contract registry,
+        // and a second copy of them here would be a drifting parser in front of a validator that
+        // already refuses malformed arguments (`serve_subscription`, dispatcher.cpp).
+        [
+            PANEL_VERB_EVENTS_SUBSCRIBE,
+            async (params: unknown): Promise<unknown> => await forwardDaemon("subscribe", params),
+        ],
+        [
+            PANEL_VERB_EVENTS_UNSUBSCRIBE,
+            async (params: unknown): Promise<unknown> => await forwardDaemon("unsubscribe", params),
+        ],
+        [
+            PANEL_VERB_EVENTS_ACK,
+            async (params: unknown): Promise<unknown> => await forwardDaemon("ack", params),
         ],
     ]);
 

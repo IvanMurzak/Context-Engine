@@ -43,6 +43,11 @@ const std::vector<std::string>& panel_callable_daemon_methods()
         "query",              // the ONE authored-data read (R-CLI-012)
         "editor.scene-tree",  // the e05d3 composed scene projection
         "editor.inspect",     // the e05d3 composed entity projection
+        // e13c-2 — the R-CLI-015 subscription protocol, admissible ONLY because package_events.h now
+        // bounds the fan-out. All three or none: see the header's allowlist note.
+        "subscribe",          // open a subscription on this package's baseline session
+        "unsubscribe",        // close one (without it, every re-subscribe leaks a subId)
+        "ack",                // advance the retention cursor (without it, the daemon's ring is pinned)
     };
     return kAllowed;
 }
@@ -76,6 +81,70 @@ bool PackageSessionHost::has_session(const std::string& package_id) const
 void PackageSessionHost::reset()
 {
     sessions_.clear();
+    // WITH the sessions, deliberately — see the header. A buffered event's seq belongs to the
+    // incarnation of the connection that delivered it, so surviving the connection would hand a panel
+    // a cursor into a dead lifetime.
+    events_.clear();
+}
+
+std::size_t PackageSessionHost::pump()
+{
+    std::size_t buffered = 0;
+    for (Session& session : sessions_)
+    {
+        if (session.client == nullptr)
+        {
+            continue;
+        }
+        // BOUNDED PER PUMP: a responsiveness bound, not a memory one (package_events.h
+        // § kMaxDrainedFramesPerPump). Anything still on the wire rides the next frame's pump.
+        for (std::size_t drained = 0; drained < kMaxDrainedFramesPerPump; ++drained)
+        {
+            bool disconnected = false;
+            // 0 ms — this runs on the owner loop, so it must never wait. A quiet session answers
+            // nullopt immediately and costs one non-blocking read.
+            const std::optional<client::InboundFrame> frame =
+                session.client->poll_event(0, disconnected);
+            if (!frame.has_value())
+            {
+                // Nothing queued, or the peer went away. Either way this session has no more to give
+                // THIS frame; a lost daemon is the lifecycle's business, not this pump's.
+                break;
+            }
+            if (frame->kind == client::FrameKind::gap)
+            {
+                // THE DAEMON's ring outran us. Latch the flag WITHOUT touching `dropped`, so the two
+                // causes stay distinguishable (package_events.h § mark_gap).
+                events_.mark_gap(session.package_id);
+                continue;
+            }
+            if (frame->kind != client::FrameKind::event)
+            {
+                // A response to an abandoned call, or a frame this SDK does not model. Ignorable by
+                // construction (wire.h § FrameKind::unknown) — never fatal to a subscription.
+                continue;
+            }
+            // THE WIRE ENVELOPE, CARRIED VERBATIM plus the `subId` it arrived under. The Shell never
+            // interprets a package's events (the same opaque-payload discipline UiMirrorStore keeps),
+            // but a package holding several subscriptions cannot demultiplex without the subId, and
+            // the daemon puts it OUTSIDE the event object — so dropping it here would make multiple
+            // subscriptions per package unusable.
+            contract::Json delivered = frame->event;
+            if (delivered.is_object())
+            {
+                delivered.set("subId", contract::Json(frame->sub_id));
+            }
+            events_.push(session.package_id, std::move(delivered));
+            ++events_buffered_;
+            ++buffered;
+        }
+    }
+    return buffered;
+}
+
+PackageEventDrain PackageSessionHost::poll_events(const std::string& package_id)
+{
+    return events_.take(package_id);
 }
 
 client::Client* PackageSessionHost::session_for(const std::string& package_id,
@@ -196,6 +265,46 @@ BridgeResult PackageSessionHost::forward(const std::string& package_id, const st
 
 bool PackageSessionHost::install(BridgeRouter& router)
 {
+    // e13c-2 — THE DRAIN. Registered first so a failure here is reported before the fan-in binding
+    // succeeds and leaves the surface half-installed.
+    //
+    // ⚠ AN UNKNOWN PACKAGE IS AN EMPTY DRAIN, NOT A REFUSAL. editor-core polls on a fixed tick for
+    // every package it has a panel mounted for, so "this package has not subscribed" is the ordinary
+    // case; refusing it would make every idle tick a refusal on a channel whose live smokes assert
+    // `bridge.refused() == 0`, which is exactly the regression session_bridge.h records for e06d.
+    if (!router.register_method(
+            kPanelEventsPollMethod,
+            [this](const BridgeRequest& request) -> BridgeResult
+            {
+                std::string package_id;
+                if (!read_string(request.params, "packageId", package_id) ||
+                    !is_valid_package_id(package_id))
+                {
+                    // The SAME predicate `forward` validates against, for the same reason: a package
+                    // that is one thing to the scheme and another to the buffer would drain a
+                    // mailbox nothing fills.
+                    return BridgeResult::error(kErrPackageBadParams,
+                                               "panel.events.poll requires a valid 'packageId'");
+                }
+                const PackageEventDrain drain = poll_events(package_id);
+                contract::Json events = contract::Json::array();
+                for (const contract::Json& event : drain.events)
+                {
+                    events.push_back(event);
+                }
+                contract::Json result = contract::Json::object();
+                result.set("events", std::move(events));
+                // THE LOUD HALF, and the reason it rides the reply rather than a counter: this is the
+                // only channel that reaches the PACKAGE, and a panel that missed events looks exactly
+                // like a panel whose subject did not change (package_events.h § a drop is loud).
+                result.set("dropped", contract::Json(drain.dropped));
+                result.set("gapped", contract::Json(drain.gapped));
+                return BridgeResult::ok(std::move(result));
+            }))
+    {
+        return false;
+    }
+
     return router.register_method(kPanelDaemonCallMethod,
                                   [this](const BridgeRequest& request) -> BridgeResult
                                   {
